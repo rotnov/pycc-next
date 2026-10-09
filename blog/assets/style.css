@@ -1,0 +1,38 @@
+:root{--bg:#07080d;--panel:#0f1119;--line:#1d2130;--text:#e8eaf2;--muted:#8b91a7;--a:#7c5cff;--b:#00d4ff;--c:#ff4fd8;--ok:#3ddc97;--err:#ff5c7a}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;color:var(--text);font:17px/1.7 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+.glow{position:fixed;inset:-30% -10% auto;height:80vh;background:radial-gradient(closest-side,rgba(124,92,255,.35),transparent),radial-gradient(closest-side at 80% 30%,rgba(0,212,255,.22),transparent);filter:blur(40px);pointer-events:none;z-index:-1}
+a{color:var(--b);text-decoration:none}
+.nav{max-width:920px;margin:0 auto;padding:22px 20px;display:flex;justify-content:space-between;align-items:center}
+.logo{color:var(--text);font-weight:800;letter-spacing:-.02em;font-size:20px}
+.bolt{filter:drop-shadow(0 0 10px #ffd84d)}
+.nav nav a{color:var(--muted);margin-left:22px;font-weight:500}.nav nav a:hover{color:var(--text)}
+main{max-width:920px;margin:0 auto;padding:0 20px}
+.hero{padding:70px 0 40px;text-align:center}
+.pill{display:inline-block;padding:6px 14px;border:1px solid var(--line);border-radius:99px;color:var(--ok);font-size:13px;background:rgba(61,220,151,.06)}
+h1{font-size:clamp(38px,7vw,72px);line-height:1.04;letter-spacing:-.04em;font-weight:800;margin:22px 0}
+.grad{background:linear-gradient(90deg,var(--a),var(--b) 50%,var(--c));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{color:var(--muted);font-size:19px;max-width:620px;margin:0 auto 36px}
+.term{max-width:620px;margin:0 auto;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 30px 80px -20px rgba(124,92,255,.45)}
+.dots{padding:12px 14px;border-bottom:1px solid var(--line)}.dots i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;background:#ff5f57}.dots i+i{background:#febc2e}.dots i+i+i{background:#28c840}
+.term pre{margin:0;padding:18px;font:14px/1.7 "JetBrains Mono",monospace;white-space:pre-wrap;color:var(--text)}
+.term .p{color:var(--ok)}.term .e{color:var(--err);font-weight:600}.term .m{color:var(--b)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:620px;margin:34px auto 0}
+.stats div{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.stats b{display:block;font-size:28px;letter-spacing:-.03em}.stats span{color:var(--muted);font-size:13px}
+.posts{padding:50px 0 80px}.posts h2{font-size:14px;text-transform:uppercase;letter-spacing:.15em;color:var(--muted)}
+.card{display:block;padding:26px;margin:14px 0;background:linear-gradient(var(--panel),var(--panel)) padding-box,linear-gradient(120deg,var(--line),var(--line)) border-box;border:1px solid transparent;border-radius:16px;color:var(--text);transition:.25s}
+.card:hover{transform:translateY(-3px);background:linear-gradient(var(--panel),var(--panel)) padding-box,linear-gradient(120deg,var(--a),var(--b),var(--c)) border-box}
+.card time,.post time{color:var(--muted);font-size:13px}.card h3{font-size:24px;line-height:1.25;letter-spacing:-.02em;margin:6px 0 8px}.card p{color:var(--muted);margin:0 0 12px}.more{color:var(--b);font-weight:600}
+.post{max-width:720px;margin:0 auto;padding:40px 0 90px}.back{color:var(--muted);font-size:14px}
+.post h1{font-size:clamp(32px,5vw,48px);margin:10px 0 30px}
+.content h2{font-size:26px;letter-spacing:-.02em;margin-top:48px}
+.content strong{color:#fff}
+.content code{font:.88em "JetBrains Mono",monospace;background:#171a26;border:1px solid var(--line);padding:2px 6px;border-radius:6px}
+.content pre{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;overflow-x:auto}
+.content pre code{background:none;border:0;padding:0}
+.content table{border-collapse:collapse;width:100%;display:block;overflow-x:auto}.content td,.content th{border:1px solid var(--line);padding:8px 12px}
+.highlight .k,.highlight .kd{color:var(--c)}.highlight .s,.highlight .s1,.highlight .s2{color:var(--ok)}.highlight .mi,.highlight .m{color:#ffb86b}.highlight .nf{color:var(--b)}.highlight .c,.highlight .c1{color:var(--muted)}
+footer{text-align:center;color:var(--muted);font-size:13px;padding:40px 20px;border-top:1px solid var(--line)}
+@media(max-width:560px){.stats{grid-template-columns:1fr}.nav nav a{margin-left:14px}}

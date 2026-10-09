@@ -1,0 +1,9 @@
+---
+layout: default
+---
+<article class="post">
+  <a class="back" href="{{ '/' | relative_url }}">← all posts</a>
+  <time>{{ page.date | date: "%B %-d, %Y" }}</time>
+  <h1>{{ page.title }}</h1>
+  <div class="content">{{ content }}</div>
+</article>

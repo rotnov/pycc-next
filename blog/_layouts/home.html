@@ -1,0 +1,27 @@
+---
+layout: default
+---
+<section class="hero">
+  <div class="pill">● building in public</div>
+  <h1>Typed Python.<br><span class="grad">Compiled. Checked. Fast.</span></h1>
+  <p class="lead">{{ site.description }}</p>
+  <div class="term"><div class="dots"><i></i><i></i><i></i></div><pre><span class="p">$</span> pycc check fib.py
+<span class="e">error[T0021]</span>: argument 1 of `fib` expects `int`, got `str`
+ <span class="m">--></span> fib.py:1:1</pre></div>
+  <div class="stats">
+    <div><b>8,846</b><span>tests passing</span></div>
+    <div><b>~3x</b><span>fib vs CPython</span></div>
+    <div><b>0</b><span>ADRs this time</span></div>
+  </div>
+</section>
+<section class="posts">
+  <h2>Devlog</h2>
+  {% for post in site.posts %}
+  <a class="card" href="{{ post.url | relative_url }}">
+    <time>{{ post.date | date: "%b %-d, %Y" }}</time>
+    <h3>{{ post.title }}</h3>
+    <p>{{ post.excerpt | strip_html | truncate: 180 }}</p>
+    <span class="more">Read →</span>
+  </a>
+  {% endfor %}
+</section>
