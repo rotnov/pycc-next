@@ -25,7 +25,7 @@ h1{font-size:clamp(38px,7vw,72px);line-height:1.04;letter-spacing:-.04em;font-we
 .card{display:block;padding:26px;margin:14px 0;background:linear-gradient(var(--panel),var(--panel)) padding-box,linear-gradient(120deg,var(--line),var(--line)) border-box;border:1px solid transparent;border-radius:16px;color:var(--text);transition:.25s}
 .card:hover{transform:translateY(-3px);background:linear-gradient(var(--panel),var(--panel)) padding-box,linear-gradient(120deg,var(--a),var(--b),var(--c)) border-box}
 .card time,.post time{color:var(--muted);font-size:13px}.card h3{font-size:24px;line-height:1.25;letter-spacing:-.02em;margin:6px 0 8px}.card p{color:var(--muted);margin:0 0 12px}.more{color:var(--b);font-weight:600}
-.post{max-width:720px;margin:0 auto;padding:40px 0 90px}.back{color:var(--muted);font-size:14px}
+.post{max-width:720px;margin:0 auto;padding:40px 0 90px}.back{display:block;color:var(--muted);font-size:14px;margin-bottom:8px}
 .post h1{font-size:clamp(32px,5vw,48px);margin:10px 0 30px}
 .content h2{font-size:26px;letter-spacing:-.02em;margin-top:48px}
 .content strong{color:#fff}
