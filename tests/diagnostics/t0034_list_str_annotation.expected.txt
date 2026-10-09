@@ -1,0 +1,5 @@
+error[T0034]: list[str] is not compiled yet (D-105) -- only list[int] is
+ --> tests/diagnostics/t0034_list_str_annotation.py:1:11
+  |
+1 | def f(xs: list[str]) -> None:
+  |           ^^^^^^^^^ list[str] is not compiled yet (D-105) -- only list[int] is

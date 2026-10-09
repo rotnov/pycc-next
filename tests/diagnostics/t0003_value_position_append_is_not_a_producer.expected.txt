@@ -1,0 +1,5 @@
+error[T0003]: an empty list literal has no inferable element type for `xs`
+ --> tests/diagnostics/t0003_value_position_append_is_not_a_producer.py:1:1
+  |
+1 | def f() -> int:
+  | ^ an empty list literal has no inferable element type for `xs`

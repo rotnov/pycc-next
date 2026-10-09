@@ -1,0 +1,5 @@
+error[C0001]: statement kind not supported yet: a `class` nested inside a function or block body (only a module-level `class` is supported)
+ --> tests/diagnostics/c0001_nested_class.py:2:5
+  |
+2 |     class Inner:
+  |     ^ statement kind not supported yet: a `class` nested inside a function or block body (only a module-level `class` is supported)

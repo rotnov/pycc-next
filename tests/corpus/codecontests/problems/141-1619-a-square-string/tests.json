@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "input": "10\na\naa\naaa\naaaa\nabab\nabcabc\nabacaba\nxxyy\nxyyx\nxyxy\n",
+      "output": "NO\nYES\nNO\nYES\nYES\nYES\nNO\nNO\nNO\nYES\n"
+    },
+    {
+      "input": "1\nacascnakcn\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "1\nababab\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "1\nzz\n",
+      "output": "YES\n"
+    }
+  ]
+}

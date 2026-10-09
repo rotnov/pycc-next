@@ -1,0 +1,126 @@
+HirModule {
+    items: [
+        Function {
+            name: "fib",
+            params: [
+                (
+                    "n",
+                    Int,
+                ),
+            ],
+            return_ty: Int,
+            body: [
+                If {
+                    test: Compare {
+                        op: Lt,
+                        left: Name(
+                            "n",
+                        ),
+                        right: IntLiteral(
+                            2,
+                        ),
+                    },
+                    body: [
+                        Return(
+                            Some(
+                                Name(
+                                    "n",
+                                ),
+                            ),
+                        ),
+                    ],
+                    orelse: [],
+                },
+                Return(
+                    Some(
+                        BinOp {
+                            op: Add,
+                            left: Call {
+                                callee: "fib",
+                                args: [
+                                    BinOp {
+                                        op: Sub,
+                                        left: Name(
+                                            "n",
+                                        ),
+                                        right: IntLiteral(
+                                            1,
+                                        ),
+                                    },
+                                ],
+                            },
+                            right: Call {
+                                callee: "fib",
+                                args: [
+                                    BinOp {
+                                        op: Sub,
+                                        left: Name(
+                                            "n",
+                                        ),
+                                        right: IntLiteral(
+                                            2,
+                                        ),
+                                    },
+                                ],
+                            },
+                        },
+                    ),
+                ),
+            ],
+        },
+        TopLevelStmt(
+            Assign {
+                target: "i",
+                value: IntLiteral(
+                    0,
+                ),
+            },
+        ),
+        TopLevelStmt(
+            While {
+                test: Compare {
+                    op: Lt,
+                    left: Name(
+                        "i",
+                    ),
+                    right: IntLiteral(
+                        11,
+                    ),
+                },
+                body: [
+                    ExprStmt(
+                        Call {
+                            callee: "print",
+                            args: [
+                                Call {
+                                    callee: "fib",
+                                    args: [
+                                        Name(
+                                            "i",
+                                        ),
+                                    ],
+                                },
+                            ],
+                        },
+                    ),
+                    Assign {
+                        target: "i",
+                        value: BinOp {
+                            op: Add,
+                            left: Name(
+                                "i",
+                            ),
+                            right: IntLiteral(
+                                1,
+                            ),
+                        },
+                    },
+                ],
+            },
+        ),
+    ],
+    type_aliases: [],
+    imports: [],
+    class_defs: [],
+    seeded_builtin_exception_classes: false,
+}

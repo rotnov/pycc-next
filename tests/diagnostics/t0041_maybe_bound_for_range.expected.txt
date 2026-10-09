@@ -1,0 +1,5 @@
+error[T0041]: local name `x` may not be bound on every path reaching this use
+ --> tests/diagnostics/t0041_maybe_bound_for_range.py:1:1
+  |
+1 | def read_value() -> int:
+  | ^ local name `x` may not be bound on every path reaching this use

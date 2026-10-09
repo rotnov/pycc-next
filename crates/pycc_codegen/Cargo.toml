@@ -1,0 +1,17 @@
+[package]
+name = "pycc_codegen"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+pycc_mir = { path = "../pycc_mir" }
+pycc_artifact_layout = { path = "../pycc_artifact_layout" }
+inkwell = { version = "0.9", default-features = false, features = ["llvm22-1"] }
+
+[build-dependencies]
+pycc_artifact_layout = { path = "../pycc_artifact_layout" }
+
+[dev-dependencies]
+pycc_scratch = { path = "../pycc_scratch" }

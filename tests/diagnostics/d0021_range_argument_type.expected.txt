@@ -1,0 +1,5 @@
+error[T0021]: range stop expects `int`, got `str`
+ --> tests/diagnostics/d0021_range_argument_type.py:1:1
+  |
+1 | for item in range("three"):
+  | ^ range stop expects `int`, got `str`

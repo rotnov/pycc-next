@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "input": "5\nAJMP\naB23d\nE\n86AE\nAM\n6\nJPEM\nWaEaETC302Q\nCP\nrTurnAGundam1isdefferentf",
+      "output": "32Bad\nAE86\n7\nEC302QTWaEa\nTurnAGundam0isdefferentfr"
+    }
+  ]
+}

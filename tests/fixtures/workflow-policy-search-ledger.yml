@@ -1,0 +1,199 @@
+name: Workflow policy
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted policy implementation
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download head policy inputs as non-executable data
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const output = "/tmp/pr-policy-input";
+            const workflowOutput = path.join(output, ".github", "workflows");
+            const manifestPath =
+              "tests/fixtures/policy-successor-manifest.json";
+            fs.mkdirSync(workflowOutput, { recursive: true });
+
+            const { data: tree } = await github.rest.git.getTree({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tree_sha: context.payload.pull_request.head.sha,
+              recursive: "true",
+            });
+            if (tree.truncated) {
+              throw new Error("Head tree response was truncated");
+            }
+            const checkoutAttributes = tree.tree.filter((entry) =>
+              entry.path === ".gitattributes" ||
+              entry.path.endsWith("/.gitattributes")
+            );
+            if (checkoutAttributes.length !== 0) {
+              throw new Error(
+                "Head revision contains checkout-affecting .gitattributes"
+              );
+            }
+
+            const workflowDirectory = ".github/workflows/";
+            const isWorkflow = (entryPath) => {
+              if (!entryPath.startsWith(workflowDirectory)) {
+                return false;
+              }
+              const basename = entryPath.slice(workflowDirectory.length);
+              return !basename.includes("/") && /\.ya?ml$/.test(basename);
+            };
+            for (const fixture of [
+              ".github/workflows/name with spaces.yml",
+              ".github/workflows/проверка.yaml",
+            ]) {
+              if (!isWorkflow(fixture)) {
+                throw new Error(`Workflow filename rejected by audit: ${fixture}`);
+              }
+            }
+            const workflows = tree.tree.filter((entry) =>
+              isWorkflow(entry.path)
+            );
+            if (workflows.length === 0) {
+              throw new Error("Head revision contains no workflow files");
+            }
+
+            const writeBlob = async (entry, destination) => {
+              if (entry.type !== "blob" || entry.mode !== "100644") {
+                throw new Error(
+                  `Policy input is not a regular non-executable file: ${entry.path}`
+                );
+              }
+              if (entry.size > 1024 * 1024) {
+                throw new Error(`Policy input is unexpectedly large: ${entry.path}`);
+              }
+              const { data: blob } = await github.rest.git.getBlob({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                file_sha: entry.sha,
+              });
+              const encoded = blob.content.replace(/\n/g, "");
+              const content = Buffer.from(encoded, blob.encoding);
+              fs.mkdirSync(path.dirname(destination), { recursive: true });
+              fs.writeFileSync(
+                destination,
+                content,
+                { flag: "wx" }
+              );
+              return content;
+            };
+
+            for (const entry of workflows) {
+              await writeBlob(
+                entry,
+                path.join(workflowOutput, path.basename(entry.path))
+              );
+            }
+
+            const findEntry = (requiredPath) => {
+              const entry = tree.tree.find((candidate) =>
+                candidate.path === requiredPath
+              );
+              if (!entry) {
+                throw new Error(`Head revision is missing ${requiredPath}`);
+              }
+              return entry;
+            };
+            const manifestContent = await writeBlob(
+              findEntry(manifestPath),
+              path.join(output, manifestPath)
+            );
+            const parseManifestPaths = (content, description) => {
+              let document;
+              try {
+                document = JSON.parse(content.toString("utf8"));
+              } catch (error) {
+                throw new Error(`${description} is not valid JSON: ${error.message}`);
+              }
+              if (!Array.isArray(document.targets) ||
+                  document.targets.length < 1 ||
+                  document.targets.length > 64) {
+                throw new Error(`${description} has an invalid target count`);
+              }
+              const safePath = (value) => {
+                if (typeof value !== "string" || value.length === 0 ||
+                    value.length > 512 || value.startsWith("/") ||
+                    value.includes("\\") || value.includes("\0") ||
+                    /[^A-Za-z0-9._/-]/.test(value)) {
+                  return false;
+                }
+                return value.split("/").every((part) =>
+                  part.length > 0 && part !== "." && part !== ".."
+                );
+              };
+              const result = [];
+              for (const target of document.targets) {
+                for (const key of ["path", "source_path"]) {
+                  if (!target || !safePath(target[key])) {
+                    throw new Error(`${description} has an unsafe ${key}`);
+                  }
+                  result.push(target[key]);
+                }
+              }
+              return result;
+            };
+            const trustedManifest = fs.readFileSync(manifestPath);
+            const protectedPaths = new Set([
+              "docs/ROADMAP.md",
+              "docs/SEARCH_QUERY_REGISTRY.json",
+              "docs/SEARCH_VISIBILITY.md",
+              "docs/SEARCH_VISIBILITY_CHECKPOINTS.json",
+              ...parseManifestPaths(
+                trustedManifest, "Trusted policy successor manifest"
+              ),
+              ...parseManifestPaths(
+                manifestContent, "Candidate policy successor manifest"
+              ),
+            ]);
+            const downloadedPaths = new Set([
+              manifestPath,
+              ...workflows.map((entry) => entry.path),
+            ]);
+            for (const requiredPath of protectedPaths) {
+              if (downloadedPaths.has(requiredPath)) {
+                continue;
+              }
+              await writeBlob(
+                findEntry(requiredPath),
+                path.join(output, requiredPath)
+              );
+              downloadedPaths.add(requiredPath);
+            }
+
+      - name: Test trusted checker
+        run: |
+          ruby scripts/test_check_ci_permissions.rb
+          ruby scripts/test_check_roadmap_evidence.rb
+          python3 -I -B scripts/test_check_search_visibility_audit.py
+
+      - name: Audit head workflow permissions
+        env:
+          POLICY_CANDIDATE_ROOT: /tmp/pr-policy-input
+        run: ruby scripts/check_ci_permissions.rb /tmp/pr-policy-input/.github/workflows
+
+      - name: Audit head roadmap evidence
+        run: ruby scripts/check_roadmap_evidence.rb /tmp/pr-policy-input
+
+      - name: Audit head search evidence against trusted base
+        run: |
+          python3 -I scripts/check_search_visibility_audit.py \
+            --head-root /tmp/pr-policy-input \
+            --base-root "$GITHUB_WORKSPACE"

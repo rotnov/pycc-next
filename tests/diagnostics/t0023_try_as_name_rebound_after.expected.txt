@@ -1,0 +1,5 @@
+error[T0023]: cannot assign `int` to `e`, previously inferred as `ZeroDivisionError`
+ --> tests/diagnostics/t0023_try_as_name_rebound_after.py:1:1
+  |
+1 | def f(c: bool) -> None:
+  | ^ cannot assign `int` to `e`, previously inferred as `ZeroDivisionError`

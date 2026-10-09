@@ -1,0 +1,5 @@
+error[T0043]: cannot call a method on `str`: it is not a class instance
+ --> tests/diagnostics/t0043_boolop_receiver.py:1:1
+  |
+1 | def f(a: str, b: str) -> str:
+  | ^ cannot call a method on `str`: it is not a class instance

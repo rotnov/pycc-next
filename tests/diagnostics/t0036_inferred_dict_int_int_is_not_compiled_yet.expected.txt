@@ -1,0 +1,5 @@
+error[T0036]: dict[int, int] is not compiled yet (D-122) -- only dict[str, int] is
+ --> tests/diagnostics/t0036_inferred_dict_int_int_is_not_compiled_yet.py:1:1
+  |
+1 | def f() -> int:
+  | ^ dict[int, int] is not compiled yet (D-122) -- only dict[str, int] is

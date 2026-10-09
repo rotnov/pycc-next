@@ -1,0 +1,5 @@
+error[T0044]: builtin type `str` is not subscriptable, so `str[...]` is not a valid type annotation
+ --> tests/diagnostics/t0044_subscript_annotation_return.py:1:18
+  |
+1 | def f(x: int) -> str[int]:
+  |                  ^^^^^^^^ builtin type `str` is not subscriptable, so `str[...]` is not a valid type annotation

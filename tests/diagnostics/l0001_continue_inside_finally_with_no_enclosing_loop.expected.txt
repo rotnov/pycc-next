@@ -1,0 +1,5 @@
+error[L0001]: 'continue' not properly in loop
+ --> tests/diagnostics/l0001_continue_inside_finally_with_no_enclosing_loop.py:4:5
+  |
+4 |     continue
+  |     ^^^^^^^^ 'continue' not properly in loop

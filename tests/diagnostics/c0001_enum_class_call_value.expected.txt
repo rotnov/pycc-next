@@ -1,0 +1,5 @@
+error[C0001]: cannot call enum class `Color` -- enum members are accessed by name (`Color.MEMBER`); looking a member up by value (`Color(1)`) is not supported yet, and a zero-argument call (`Color()`) is a `TypeError` in CPython as well
+ --> tests/diagnostics/c0001_enum_class_call_value.py:10:9
+   |
+10 |     c = Color(1)
+   |         ^^^^^^^^ cannot call enum class `Color` -- enum members are accessed by name (`Color.MEMBER`); looking a member up by value (`Color(1)`) is not supported yet, and a zero-argument call (`Color()`) is a `TypeError` in CPython as well

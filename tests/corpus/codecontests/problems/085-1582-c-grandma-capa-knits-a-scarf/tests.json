@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "input": "5\n8\nabcaacab\n6\nxyzxyz\n4\nabba\n8\nrprarlap\n10\nkhyyhhyhky\n",
+      "output": "2\n-1\n0\n3\n2\n"
+    }
+  ]
+}

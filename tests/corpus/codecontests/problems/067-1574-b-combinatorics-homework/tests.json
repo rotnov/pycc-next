@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "input": "3\n2 2 1 0\n1 1 1 1\n1 2 3 2\n",
+      "output": "YES\nNO\nYES\n"
+    },
+    {
+      "input": "1\n1 2 2 114514\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "1\n1 1 1 1919810\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "1\n1 1 1 46\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "1\n114514 1 1 1919810\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "2\n23 1 2 1\n1 1 1 46\n",
+      "output": "NO\nNO\n"
+    }
+  ]
+}

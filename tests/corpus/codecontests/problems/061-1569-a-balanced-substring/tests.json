@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "input": "4\n1\na\n6\nabbaba\n6\nabbaba\n9\nbabbabbaa\n",
+      "output": "-1 -1\n1 2\n1 2\n1 2\n"
+    },
+    {
+      "input": "1\n30\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "output": "-1 -1\n"
+    },
+    {
+      "input": "1\n29\naaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "output": "-1 -1\n"
+    },
+    {
+      "input": "4\n1\na\n6\nabbaba\n6\nabbaba\n9\nbabbabbaa\n",
+      "output": "-1 -1\n1 2\n1 2\n1 2\n"
+    }
+  ]
+}

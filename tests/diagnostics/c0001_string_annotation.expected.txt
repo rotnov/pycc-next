@@ -1,0 +1,5 @@
+error[C0001]: string type annotation `not a type` is not a valid Python expression: Unexpected token at the end of an expression
+ --> tests/diagnostics/c0001_string_annotation.py:1:10
+  |
+1 | def f(x: "not a type") -> int:
+  |          ^^^^^^^^^^^^ string type annotation `not a type` is not a valid Python expression: Unexpected token at the end of an expression

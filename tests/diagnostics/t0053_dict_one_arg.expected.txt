@@ -1,0 +1,5 @@
+error[T0053]: container type annotation `dict[...]` takes exactly 2 type arguments, got 1
+ --> tests/diagnostics/t0053_dict_one_arg.py:1:10
+  |
+1 | def f(d: dict[int]) -> None:
+  |          ^^^^^^^^^ container type annotation `dict[...]` takes exactly 2 type arguments, got 1

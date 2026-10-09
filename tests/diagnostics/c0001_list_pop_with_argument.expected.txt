@@ -1,0 +1,5 @@
+error[C0001]: list.pop() takes no arguments, got 1
+ --> tests/diagnostics/c0001_list_pop_with_argument.py:2:5
+  |
+2 | y = x.pop(0)
+  |     ^^^^^^^^ list.pop() takes no arguments, got 1

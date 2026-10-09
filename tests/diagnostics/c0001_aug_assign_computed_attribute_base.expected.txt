@@ -1,0 +1,5 @@
+error[C0001]: augmented assignment to an attribute of a computed expression is not supported yet; bind the object to a name first
+ --> tests/diagnostics/c0001_aug_assign_computed_attribute_base.py:10:1
+   |
+10 | make().n += 1
+   | ^^^^^^^^^^^^^ augmented assignment to an attribute of a computed expression is not supported yet; bind the object to a name first

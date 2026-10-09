@@ -1,0 +1,5 @@
+error[T0032]: list element type mismatch: expected int (from the first element), found str
+ --> tests/diagnostics/d0032_heterogeneous_list_literal.py:1:1
+  |
+1 | x = [1, "two", 3]
+  | ^ list element type mismatch: expected int (from the first element), found str

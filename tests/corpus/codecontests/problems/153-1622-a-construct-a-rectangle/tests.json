@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "input": "4\n6 1 5\n2 5 2\n2 4 2\n5 5 4\n",
+      "output": "YES\nNO\nYES\nYES\n"
+    },
+    {
+      "input": "2\n1 2 3\n2 2 4\n",
+      "output": "YES\nYES\n"
+    },
+    {
+      "input": "1\n1 98 99\n",
+      "output": "YES\n"
+    },
+    {
+      "input": "3\n1 1 1\n2 1 3\n5 6 7\n",
+      "output": "NO\nYES\nNO\n"
+    },
+    {
+      "input": "6\n2 2 4\n1 1 2\n3 5 6\n1 2 3\n6 7 8\n10 10 20\n",
+      "output": "YES\nYES\nNO\nYES\nNO\nYES\n"
+    },
+    {
+      "input": "4\n6 1 5\n2 5 2\n2 4 2\n7 101 108\n",
+      "output": "YES\nNO\nYES\nYES\n"
+    },
+    {
+      "input": "1\n100000 100000 100000\n",
+      "output": "YES\n"
+    },
+    {
+      "input": "1\n12344 1 1\n",
+      "output": "YES\n"
+    },
+    {
+      "input": "68\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n1 1 2\n",
+      "output": "YES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\n"
+    },
+    {
+      "input": "2\n1 2 3\n4 5 6\n",
+      "output": "YES\nNO\n"
+    }
+  ]
+}

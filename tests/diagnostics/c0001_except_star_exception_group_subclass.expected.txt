@@ -1,0 +1,5 @@
+error[C0001]: catching `G` with `except*` is not supported yet — it derives from `ExceptionGroup`, and CPython rejects catching a group class with `except*` at runtime with a `TypeError` this compiler cannot raise yet; use a plain `except` clause instead
+ --> tests/diagnostics/c0001_except_star_exception_group_subclass.py:1:1
+  |
+1 | class G(ExceptionGroup):
+  | ^ catching `G` with `except*` is not supported yet — it derives from `ExceptionGroup`, and CPython rejects catching a group class with `except*` at runtime with a `TypeError` this compiler cannot raise yet; use a plain `except` clause instead

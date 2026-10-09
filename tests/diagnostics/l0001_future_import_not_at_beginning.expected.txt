@@ -1,0 +1,5 @@
+error[L0001]: from __future__ imports must occur at the beginning of the file
+ --> tests/diagnostics/l0001_future_import_not_at_beginning.py:2:1
+  |
+2 | from __future__ import annotations
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ from __future__ imports must occur at the beginning of the file

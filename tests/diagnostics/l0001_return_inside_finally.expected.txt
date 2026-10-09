@@ -1,0 +1,5 @@
+error[L0001]: 'return' in a 'finally' block
+ --> tests/diagnostics/l0001_return_inside_finally.py:5:9
+  |
+5 |         return 1
+  |         ^^^^^^^^ 'return' in a 'finally' block

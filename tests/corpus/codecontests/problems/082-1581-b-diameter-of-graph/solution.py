@@ -1,0 +1,1 @@
+for _ in range(int(input())):n, m, k = map(int, input().split());print('YES') if (k == 3 and m == (n * (n - 1)) // 2) or (k > 3 and m >= n - 1 and m <= (n * (n - 1)) // 2) or (n == 1 and m == 0 and k > 1) else print('NO')

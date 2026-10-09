@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "input": "7\n5\nacbac\n8\nacabacba\n12\naaaaaaaaaaaa\n10\nabacabadac\n8\ndcbaabcd\n3\ncba\n6\nsparky\n",
+      "output": "9\n17\n12\n29\n14\n3\n9\n"
+    },
+    {
+      "input": "1\n10\ngepardotop\n",
+      "output": "27\n"
+    },
+    {
+      "input": "7\n1\na\n2\naa\n2\nab\n2\nba\n2\nbb\n26\nabcdefghijklmnopqrstuvwxyz\n26\nzyxwvutsrqponmlkjihgfedcba\n",
+      "output": "1\n2\n3\n2\n2\n351\n26\n"
+    }
+  ]
+}

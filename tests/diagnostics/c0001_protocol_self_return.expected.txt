@@ -1,0 +1,5 @@
+error[C0001]: a protocol class (`P`) as a return type annotation is not supported yet -- a protocol type is currently supported in parameter and variable positions only
+ --> tests/diagnostics/c0001_protocol_self_return.py:4:24
+  |
+4 |     def clone(self) -> P: ...
+  |                        ^ a protocol class (`P`) as a return type annotation is not supported yet -- a protocol type is currently supported in parameter and variable positions only

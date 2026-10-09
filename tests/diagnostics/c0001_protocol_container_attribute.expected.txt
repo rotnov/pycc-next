@@ -1,0 +1,5 @@
+error[C0001]: protocol attribute `P.xs` has container type `list[int]`, which is not supported yet as a protocol attribute; a container type in a protocol method's parameter is supported
+ --> tests/diagnostics/c0001_protocol_container_attribute.py:5:5
+  |
+5 |     xs: list[int]
+  |     ^^^^^^^^^^^^^ protocol attribute `P.xs` has container type `list[int]`, which is not supported yet as a protocol attribute; a container type in a protocol method's parameter is supported

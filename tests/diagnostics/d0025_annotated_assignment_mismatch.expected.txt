@@ -1,0 +1,5 @@
+error[T0025]: cannot assign `str` to `x: int`, initializer does not match the declared annotation
+ --> tests/diagnostics/d0025_annotated_assignment_mismatch.py:1:1
+  |
+1 | x: int = "not an int"
+  | ^ cannot assign `str` to `x: int`, initializer does not match the declared annotation

@@ -1,0 +1,5 @@
+error[T0038]: set[str] is not compiled yet (D-122) -- only set[int] and a set of a user-class instance are
+ --> tests/diagnostics/d0038_set_element_type_not_int.py:1:1
+  |
+1 | x = {"a", "b"}
+  | ^ set[str] is not compiled yet (D-122) -- only set[int] and a set of a user-class instance are

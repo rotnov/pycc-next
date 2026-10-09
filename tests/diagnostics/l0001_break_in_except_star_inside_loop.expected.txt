@@ -1,0 +1,5 @@
+error[L0001]: 'break' in an 'except*' block
+ --> tests/diagnostics/l0001_break_in_except_star_inside_loop.py:6:13
+  |
+6 |             break
+  |             ^^^^^ 'break' in an 'except*' block

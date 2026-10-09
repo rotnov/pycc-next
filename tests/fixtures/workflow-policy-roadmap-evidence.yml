@@ -1,0 +1,108 @@
+name: Workflow policy
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted policy implementation
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download head policy inputs as non-executable data
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const output = "/tmp/pr-policy-input";
+            const workflowOutput = path.join(output, ".github", "workflows");
+            fs.mkdirSync(workflowOutput, { recursive: true });
+
+            const { data: tree } = await github.rest.git.getTree({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tree_sha: context.payload.pull_request.head.sha,
+              recursive: "true",
+            });
+            if (tree.truncated) {
+              throw new Error("Head tree response was truncated");
+            }
+
+            const workflowDirectory = ".github/workflows/";
+            const isWorkflow = (entryPath) => {
+              if (!entryPath.startsWith(workflowDirectory)) {
+                return false;
+              }
+              const basename = entryPath.slice(workflowDirectory.length);
+              return !basename.includes("/") && /\.ya?ml$/.test(basename);
+            };
+            for (const fixture of [
+              ".github/workflows/name with spaces.yml",
+              ".github/workflows/проверка.yaml",
+            ]) {
+              if (!isWorkflow(fixture)) {
+                throw new Error(`Workflow filename rejected by audit: ${fixture}`);
+              }
+            }
+            const workflows = tree.tree.filter((entry) =>
+              entry.type === "blob" && isWorkflow(entry.path)
+            );
+            if (workflows.length === 0) {
+              throw new Error("Head revision contains no workflow files");
+            }
+
+            const writeBlob = async (entry, destination) => {
+              if (entry.size > 1024 * 1024) {
+                throw new Error(`Policy input is unexpectedly large: ${entry.path}`);
+              }
+              const { data: blob } = await github.rest.git.getBlob({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                file_sha: entry.sha,
+              });
+              const encoded = blob.content.replace(/\n/g, "");
+              const content = Buffer.from(encoded, blob.encoding);
+              fs.mkdirSync(path.dirname(destination), { recursive: true });
+              fs.writeFileSync(
+                destination,
+                content,
+                { flag: "wx" }
+              );
+            };
+
+            for (const entry of workflows) {
+              await writeBlob(
+                entry,
+                path.join(workflowOutput, path.basename(entry.path))
+              );
+            }
+
+            for (const requiredPath of ["docs/ROADMAP.md"]) {
+              const entry = tree.tree.find((candidate) =>
+                candidate.type === "blob" && candidate.path === requiredPath
+              );
+              if (!entry) {
+                throw new Error(`Head revision is missing ${requiredPath}`);
+              }
+              await writeBlob(entry, path.join(output, requiredPath));
+            }
+
+      - name: Test trusted checker
+        run: |
+          ruby scripts/test_check_ci_permissions.rb
+          ruby scripts/test_check_roadmap_evidence.rb
+
+      - name: Audit head workflow permissions
+        run: ruby scripts/check_ci_permissions.rb /tmp/pr-policy-input/.github/workflows
+
+      - name: Audit head roadmap evidence
+        run: ruby scripts/check_roadmap_evidence.rb /tmp/pr-policy-input

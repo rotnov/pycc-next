@@ -1,0 +1,15 @@
+[package]
+name = "pycc_mir"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pycc_hir = { path = "../pycc_hir" }
+
+[dev-dependencies]
+# `ImportBinding::Foreign` carries a `pycc_diag::Span`, which the fixtures
+# in `src/tests/import.rs` construct; the lowering code itself never reads
+# it, so this stays a dev-dependency.
+pycc_diag = { path = "../pycc_diag" }
+pycc_std = { path = "../pycc_std" }

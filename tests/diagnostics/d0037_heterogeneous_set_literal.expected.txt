@@ -1,0 +1,5 @@
+error[T0037]: set element type mismatch: expected int (from the first element), found str
+ --> tests/diagnostics/d0037_heterogeneous_set_literal.py:1:1
+  |
+1 | x = {1, "oops"}
+  | ^ set element type mismatch: expected int (from the first element), found str

@@ -1,0 +1,5 @@
+error[C0001]: augmented assignment to a subscript of a computed expression is not supported yet; bind the object to a name first
+ --> tests/diagnostics/c0001_aug_assign_computed_subscript_base.py:5:1
+  |
+5 | counts()["a"] += 1
+  | ^^^^^^^^^^^^^^^^^^ augmented assignment to a subscript of a computed expression is not supported yet; bind the object to a name first

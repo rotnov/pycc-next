@@ -1,0 +1,5 @@
+error[C0001]: a walrus assignment (`:=`) in a short-circuited `and`/`or` operand is not supported
+ --> tests/diagnostics/c0001_boolop_walrus_right_operand.py:2:14
+  |
+2 |     if a or (n := b):
+  |              ^^^^^^ a walrus assignment (`:=`) in a short-circuited `and`/`or` operand is not supported

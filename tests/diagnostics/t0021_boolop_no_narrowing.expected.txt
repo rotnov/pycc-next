@@ -1,0 +1,5 @@
+error[T0021]: cannot compare `int | None` and `int`
+ --> tests/diagnostics/t0021_boolop_no_narrowing.py:1:1
+  |
+1 | def f(x: int | None) -> None:
+  | ^ cannot compare `int | None` and `int`

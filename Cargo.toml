@@ -1,0 +1,70 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/pycc_diag",
+    "crates/pycc_ast",
+    "crates/pycc_parser",
+    "crates/pycc_hir",
+    "crates/pycc_std",
+    "crates/pycc_types",
+    "crates/pycc_mir",
+    "crates/pycc_rt",
+    "crates/pycc_artifact_layout",
+    "crates/pycc_codegen",
+    "crates/pycc_scratch",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97.1"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+
+
+
+[package]
+name = "pycc"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Ahead-of-time compiler for typed Python 3.14 that produces standalone native binaries"
+license = "MIT"
+repository = "https://github.com/rotnov/pycc"
+homepage = "https://rotnov.github.io/pycc/"
+readme = "README.md"
+keywords = ["python", "compiler", "aot", "llvm", "static-typing"]
+categories = ["compilers", "command-line-utilities", "development-tools"]
+build = "build.rs"
+
+[[bin]]
+name = "pycc"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+pycc_parser = { path = "crates/pycc_parser" }
+pycc_ast = { path = "crates/pycc_ast" }
+pycc_hir = { path = "crates/pycc_hir" }
+pycc_types = { path = "crates/pycc_types" }
+pycc_mir = { path = "crates/pycc_mir" }
+pycc_codegen = { path = "crates/pycc_codegen" }
+pycc_diag = { path = "crates/pycc_diag" }
+pycc_scratch = { path = "crates/pycc_scratch" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+serde_json = "1"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "check_bench"
+harness = false

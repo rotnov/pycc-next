@@ -1,0 +1,5 @@
+error[T0045]: cannot reassign `Final` name `x`
+ --> tests/diagnostics/t0045_final_reassignment.py:1:1
+  |
+1 | x: Final[int] = 1
+  | ^ cannot reassign `Final` name `x`

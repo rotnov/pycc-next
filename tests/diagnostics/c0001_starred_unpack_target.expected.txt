@@ -1,0 +1,5 @@
+error[C0001]: a starred target (`*rest`) in a tuple-unpacking assignment is not supported yet
+ --> tests/diagnostics/c0001_starred_unpack_target.py:2:8
+  |
+2 |     a, *b = 1, 2
+  |        ^^ a starred target (`*rest`) in a tuple-unpacking assignment is not supported yet

@@ -1,0 +1,5 @@
+error[C0001]: dict-unpacking (`**expr`) inside a dict comprehension is not supported yet
+ --> tests/diagnostics/c0001_dict_comprehension_unpacking.py:2:9
+  |
+2 | ys = {**x for k in range(3)}
+  |         ^ dict-unpacking (`**expr`) inside a dict comprehension is not supported yet

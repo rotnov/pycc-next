@@ -1,0 +1,5 @@
+error[T0036]: dict codegen only supports `dict[str, int]` in v0.2, got a comprehension producing `dict[str, str]`
+ --> tests/diagnostics/d0036_comprehension_dict_str_str.py:1:1
+  |
+1 | ys = {"k": "v" for i in range(3)}
+  | ^ dict codegen only supports `dict[str, int]` in v0.2, got a comprehension producing `dict[str, str]`

@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "input": "4\n7\nab bb ba aa ba\n7\nab ba aa ab ba\n3\naa\n5\nbb ab bb\n",
+      "output": "abbaaba\nabaabaa\naaa\nbbabb\n"
+    },
+    {
+      "input": "4\n7\nab bb ba aa ba\n7\nab ba aa ab ba\n3\naa\n5\nbb ab bb\n",
+      "output": "abbaaba\nabaabaa\naaa\nbbabb\n"
+    }
+  ]
+}

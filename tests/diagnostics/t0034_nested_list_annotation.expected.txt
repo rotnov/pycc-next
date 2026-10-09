@@ -1,0 +1,5 @@
+error[T0034]: list[list[int]] is not compiled yet (D-105) -- only list[int] is
+ --> tests/diagnostics/t0034_nested_list_annotation.py:1:11
+  |
+1 | def f(xs: list[list[int]]) -> None:
+  |           ^^^^^^^^^^^^^^^ list[list[int]] is not compiled yet (D-105) -- only list[int] is

@@ -1,0 +1,5 @@
+error[C0001]: `.get()` is only supported as `dict.get(key, default)` with exactly two arguments so far, got 0
+ --> tests/diagnostics/c0001_get_zero_args_on_non_dict.py:2:12
+  |
+2 |     return v.get()
+  |            ^^^^^^^ `.get()` is only supported as `dict.get(key, default)` with exactly two arguments so far, got 0

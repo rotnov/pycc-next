@@ -1,0 +1,5 @@
+error[T0051]: integer literal `4611686018427387904` is out of range for a list index -- pycc's compiled `int` representation only supports a literal here within D-061's 63-bit tagged smallint range; a bigint value reaching this position through arithmetic still runs (and aborts) exactly as before, only a literal is rejected at compile time
+ --> tests/diagnostics/t0051_int_literal_boundary_list_index.py:2:8
+  |
+2 | y = xs[4611686018427387904]
+  |        ^^^^^^^^^^^^^^^^^^^ integer literal `4611686018427387904` is out of range for a list index -- pycc's compiled `int` representation only supports a literal here within D-061's 63-bit tagged smallint range; a bigint value reaching this position through arithmetic still runs (and aborts) exactly as before, only a literal is rejected at compile time

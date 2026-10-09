@@ -1,0 +1,367 @@
+//! The standard-library roots an embedded executable can import (Part 1 of
+//! #1028).
+//!
+//! One static list drives both the frontend's admission check
+//! (`src/foreign_import.rs`) and the bundle's standard-library copy filter
+//! (`src/embed/layout.rs::skip_in_stdlib_copy`), so a root that is admitted
+//! is always a root that was copied.
+//!
+//! The list is static rather than probed because the frontend gate is pure:
+//! `pycc check` and the frontend never start an interpreter, and D-128 pins
+//! CPython 3.14, so the set is fixed for the pinned version. The `#[ignore]`d
+//! integration test `tests/issue_1223_embedded_executable.rs` compares it
+//! with the oracle interpreter's `sys.stdlib_module_names`.
+
+/// Standard-library roots that need native libraries from outside the
+/// interpreter (Tcl/Tk). They are neither admitted nor copied.
+///
+/// `_tkinter` is itself a `sys.stdlib_module_names` entry and the
+/// `lib-dynload` extension the other four load.
+pub(crate) const EXCLUDED_STDLIB_ROOTS: &[&str] =
+    &["_tkinter", "idlelib", "tkinter", "turtle", "turtledemo"];
+
+/// CPython 3.14.7's `sys.stdlib_module_names` minus [`EXCLUDED_STDLIB_ROOTS`],
+/// sorted bytewise so [`is_embeddable_stdlib_root`] can binary-search it.
+pub(crate) const EMBEDDABLE_STDLIB_ROOTS: &[&str] = &[
+    "__future__",
+    "_abc",
+    "_aix_support",
+    "_android_support",
+    "_apple_support",
+    "_ast",
+    "_ast_unparse",
+    "_asyncio",
+    "_bisect",
+    "_blake2",
+    "_bz2",
+    "_codecs",
+    "_codecs_cn",
+    "_codecs_hk",
+    "_codecs_iso2022",
+    "_codecs_jp",
+    "_codecs_kr",
+    "_codecs_tw",
+    "_collections",
+    "_collections_abc",
+    "_colorize",
+    "_compat_pickle",
+    "_contextvars",
+    "_csv",
+    "_ctypes",
+    "_curses",
+    "_curses_panel",
+    "_datetime",
+    "_dbm",
+    "_decimal",
+    "_elementtree",
+    "_frozen_importlib",
+    "_frozen_importlib_external",
+    "_functools",
+    "_gdbm",
+    "_hashlib",
+    "_heapq",
+    "_hmac",
+    "_imp",
+    "_interpchannels",
+    "_interpqueues",
+    "_interpreters",
+    "_io",
+    "_ios_support",
+    "_json",
+    "_locale",
+    "_lsprof",
+    "_lzma",
+    "_markupbase",
+    "_md5",
+    "_multibytecodec",
+    "_multiprocessing",
+    "_opcode",
+    "_opcode_metadata",
+    "_operator",
+    "_osx_support",
+    "_overlapped",
+    "_pickle",
+    "_posixshmem",
+    "_posixsubprocess",
+    "_py_abc",
+    "_py_warnings",
+    "_pydatetime",
+    "_pydecimal",
+    "_pyio",
+    "_pylong",
+    "_pyrepl",
+    "_queue",
+    "_random",
+    "_remote_debugging",
+    "_scproxy",
+    "_sha1",
+    "_sha2",
+    "_sha3",
+    "_signal",
+    "_sitebuiltins",
+    "_socket",
+    "_sqlite3",
+    "_sre",
+    "_ssl",
+    "_stat",
+    "_statistics",
+    "_string",
+    "_strptime",
+    "_struct",
+    "_suggestions",
+    "_symtable",
+    "_sysconfig",
+    "_thread",
+    "_threading_local",
+    "_tokenize",
+    "_tracemalloc",
+    "_types",
+    "_typing",
+    "_uuid",
+    "_warnings",
+    "_weakref",
+    "_weakrefset",
+    "_winapi",
+    "_wmi",
+    "_zoneinfo",
+    "_zstd",
+    "abc",
+    "annotationlib",
+    "antigravity",
+    "argparse",
+    "array",
+    "ast",
+    "asyncio",
+    "atexit",
+    "base64",
+    "bdb",
+    "binascii",
+    "bisect",
+    "builtins",
+    "bz2",
+    "cProfile",
+    "calendar",
+    "cmath",
+    "cmd",
+    "code",
+    "codecs",
+    "codeop",
+    "collections",
+    "colorsys",
+    "compileall",
+    "compression",
+    "concurrent",
+    "configparser",
+    "contextlib",
+    "contextvars",
+    "copy",
+    "copyreg",
+    "csv",
+    "ctypes",
+    "curses",
+    "dataclasses",
+    "datetime",
+    "dbm",
+    "decimal",
+    "difflib",
+    "dis",
+    "doctest",
+    "email",
+    "encodings",
+    "ensurepip",
+    "enum",
+    "errno",
+    "faulthandler",
+    "fcntl",
+    "filecmp",
+    "fileinput",
+    "fnmatch",
+    "fractions",
+    "ftplib",
+    "functools",
+    "gc",
+    "genericpath",
+    "getopt",
+    "getpass",
+    "gettext",
+    "glob",
+    "graphlib",
+    "grp",
+    "gzip",
+    "hashlib",
+    "heapq",
+    "hmac",
+    "html",
+    "http",
+    "imaplib",
+    "importlib",
+    "inspect",
+    "io",
+    "ipaddress",
+    "itertools",
+    "json",
+    "keyword",
+    "linecache",
+    "locale",
+    "logging",
+    "lzma",
+    "mailbox",
+    "marshal",
+    "math",
+    "mimetypes",
+    "mmap",
+    "modulefinder",
+    "msvcrt",
+    "multiprocessing",
+    "netrc",
+    "nt",
+    "ntpath",
+    "nturl2path",
+    "numbers",
+    "opcode",
+    "operator",
+    "optparse",
+    "os",
+    "pathlib",
+    "pdb",
+    "pickle",
+    "pickletools",
+    "pkgutil",
+    "platform",
+    "plistlib",
+    "poplib",
+    "posix",
+    "posixpath",
+    "pprint",
+    "profile",
+    "pstats",
+    "pty",
+    "pwd",
+    "py_compile",
+    "pyclbr",
+    "pydoc",
+    "pydoc_data",
+    "pyexpat",
+    "queue",
+    "quopri",
+    "random",
+    "re",
+    "readline",
+    "reprlib",
+    "resource",
+    "rlcompleter",
+    "runpy",
+    "sched",
+    "secrets",
+    "select",
+    "selectors",
+    "shelve",
+    "shlex",
+    "shutil",
+    "signal",
+    "site",
+    "smtplib",
+    "socket",
+    "socketserver",
+    "sqlite3",
+    "sre_compile",
+    "sre_constants",
+    "sre_parse",
+    "ssl",
+    "stat",
+    "statistics",
+    "string",
+    "stringprep",
+    "struct",
+    "subprocess",
+    "symtable",
+    "sys",
+    "sysconfig",
+    "syslog",
+    "tabnanny",
+    "tarfile",
+    "tempfile",
+    "termios",
+    "textwrap",
+    "this",
+    "threading",
+    "time",
+    "timeit",
+    "token",
+    "tokenize",
+    "tomllib",
+    "trace",
+    "traceback",
+    "tracemalloc",
+    "tty",
+    "types",
+    "typing",
+    "unicodedata",
+    "unittest",
+    "urllib",
+    "uuid",
+    "venv",
+    "warnings",
+    "wave",
+    "weakref",
+    "webbrowser",
+    "winreg",
+    "winsound",
+    "wsgiref",
+    "xml",
+    "xmlrpc",
+    "zipapp",
+    "zipfile",
+    "zipimport",
+    "zlib",
+    "zoneinfo",
+];
+
+/// Whether `root` (the first dotted component of an import) is a
+/// standard-library root the embedded executable bundles.
+pub(crate) fn is_embeddable_stdlib_root(root: &str) -> bool {
+    EMBEDDABLE_STDLIB_ROOTS.binary_search(&root).is_ok()
+}
+
+/// Whether `root` is one of the [`EXCLUDED_STDLIB_ROOTS`].
+pub(crate) fn is_excluded_stdlib_root(root: &str) -> bool {
+    EXCLUDED_STDLIB_ROOTS.contains(&root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_embeddable_list_is_sorted_and_unique_so_binary_search_is_sound() {
+        assert!(
+            EMBEDDABLE_STDLIB_ROOTS
+                .windows(2)
+                .all(|pair| pair[0] < pair[1]),
+            "EMBEDDABLE_STDLIB_ROOTS must stay strictly sorted"
+        );
+        assert_eq!(
+            EMBEDDABLE_STDLIB_ROOTS.len(),
+            297 - EXCLUDED_STDLIB_ROOTS.len()
+        );
+    }
+
+    #[test]
+    fn no_excluded_root_is_embeddable() {
+        for root in EXCLUDED_STDLIB_ROOTS {
+            assert!(is_excluded_stdlib_root(root));
+            assert!(!is_embeddable_stdlib_root(root), "{root}");
+        }
+    }
+
+    #[test]
+    fn common_roots_are_embeddable_and_third_party_ones_are_not() {
+        for root in ["json", "gc", "sys", "os", "xml", "_json", "textwrap"] {
+            assert!(is_embeddable_stdlib_root(root), "{root}");
+            assert!(!is_excluded_stdlib_root(root), "{root}");
+        }
+        for root in ["numpy", "cgi", "", "json.decoder"] {
+            assert!(!is_embeddable_stdlib_root(root), "{root}");
+        }
+    }
+}

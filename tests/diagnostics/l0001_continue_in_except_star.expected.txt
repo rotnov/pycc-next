@@ -1,0 +1,5 @@
+error[L0001]: 'continue' in an 'except*' block
+ --> tests/diagnostics/l0001_continue_in_except_star.py:5:9
+  |
+5 |         continue
+  |         ^^^^^^^^ 'continue' in an 'except*' block

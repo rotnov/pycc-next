@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "input": "4\n3\nlol\n10\ncodeforces\n5\naaaaa\n4\ndcba\n",
+      "output": "2\n6\n0\n4\n"
+    },
+    {
+      "input": "1\n20\naaaaaaaaaaaaaaaaaqwq\n",
+      "output": "2\n"
+    }
+  ]
+}

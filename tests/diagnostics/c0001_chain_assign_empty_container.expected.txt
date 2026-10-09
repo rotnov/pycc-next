@@ -1,0 +1,5 @@
+error[C0001]: chained assignment of an empty `[]`/`{}` literal is not supported yet; inside a function, annotate one name and assign it (`a: list[int] = []`, then `b = a`)
+ --> tests/diagnostics/c0001_chain_assign_empty_container.py:2:5
+  |
+2 |     a = b = []
+  |     ^^^^^^^^^^ chained assignment of an empty `[]`/`{}` literal is not supported yet; inside a function, annotate one name and assign it (`a: list[int] = []`, then `b = a`)

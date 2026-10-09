@@ -1,0 +1,5 @@
+error[T0003]: an empty dict literal has no inferable key/value types for `xs`
+ --> tests/diagnostics/t0003_annotation_shape_does_not_match_the_literal.py:1:1
+  |
+1 | def f() -> int:
+  | ^ an empty dict literal has no inferable key/value types for `xs`

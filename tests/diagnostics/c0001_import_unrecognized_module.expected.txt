@@ -1,0 +1,5 @@
+error[C0001]: import of module `c0001_import_unrecognized_module.x` is not supported yet
+ --> tests/diagnostics/c0001_import_unrecognized_module.py:1:1
+  |
+1 | import c0001_import_unrecognized_module.x as c
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ import of module `c0001_import_unrecognized_module.x` is not supported yet

@@ -1,0 +1,5 @@
+error[C0001]: only `for x in range(...)` or `for x in <list>` is supported so far, got a list display (`[...]`) as the iterable
+ --> tests/diagnostics/c0001_for_iterable_not_name_or_call.py:2:14
+  |
+2 |     for x in [1, 2, 3]:
+  |              ^^^^^^^^^ only `for x in range(...)` or `for x in <list>` is supported so far, got a list display (`[...]`) as the iterable

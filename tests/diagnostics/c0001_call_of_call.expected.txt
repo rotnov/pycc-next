@@ -1,0 +1,5 @@
+error[C0001]: only calling a bare name is supported so far, got a call whose callee is a call expression
+ --> tests/diagnostics/c0001_call_of_call.py:2:12
+  |
+2 |     return g()()
+  |            ^^^ only calling a bare name is supported so far, got a call whose callee is a call expression

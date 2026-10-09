@@ -1,0 +1,5 @@
+error[C0001]: instance attribute `parent` declared in class `Node` has type `None`, which has no instance-slot representation -- a class-body declaration admits only `int`, `float`, `bool`, `str`, a type parameter, `list[int]`, `dict[str, int]`, a class of this program, or a class a foreign import binds
+ --> tests/diagnostics/c0001_instance_declaration_type.py:2:5
+  |
+2 |     parent: None
+  |     ^^^^^^^^^^^^ instance attribute `parent` declared in class `Node` has type `None`, which has no instance-slot representation -- a class-body declaration admits only `int`, `float`, `bool`, `str`, a type parameter, `list[int]`, `dict[str, int]`, a class of this program, or a class a foreign import binds

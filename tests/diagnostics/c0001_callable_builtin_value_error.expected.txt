@@ -1,0 +1,5 @@
+error[C0001]: call to builtin `ValueError` is valid Python but not implemented yet
+ --> tests/diagnostics/c0001_callable_builtin_value_error.py:1:1
+  |
+1 | ValueError("x")
+  | ^ call to builtin `ValueError` is valid Python but not implemented yet

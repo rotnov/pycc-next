@@ -1,0 +1,5 @@
+error[T0036]: dict[str, str] is not compiled yet (D-122) -- only dict[str, int] is
+ --> tests/diagnostics/d0036_dict_key_value_type_not_str_int.py:1:1
+  |
+1 | x = {"a": "b"}
+  | ^ dict[str, str] is not compiled yet (D-122) -- only dict[str, int] is

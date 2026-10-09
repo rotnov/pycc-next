@@ -1,0 +1,5 @@
+error[T0035]: dict entry type mismatch: expected str: int (from the first pair), found str: str
+ --> tests/diagnostics/d0035_heterogeneous_dict_literal.py:1:1
+  |
+1 | x = {"a": 1, "b": "oops"}
+  | ^ dict entry type mismatch: expected str: int (from the first pair), found str: str

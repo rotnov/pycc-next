@@ -1,0 +1,5 @@
+error[C0001]: statement kind not supported yet: a `def` nested inside a function or block body (only a module-level `def` or a method in a class body is supported)
+ --> tests/diagnostics/c0001_nested_def.py:2:5
+  |
+2 |     def inner() -> int:
+  |     ^ statement kind not supported yet: a `def` nested inside a function or block body (only a module-level `def` or a method in a class body is supported)

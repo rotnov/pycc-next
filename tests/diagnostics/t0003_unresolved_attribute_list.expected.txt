@@ -1,0 +1,5 @@
+error[T0003]: an empty list literal has no inferable element type for `self.xs` in class `Buffer`
+ --> tests/diagnostics/t0003_unresolved_attribute_list.py:1:1
+  |
+1 | class Buffer:
+  | ^ an empty list literal has no inferable element type for `self.xs` in class `Buffer`

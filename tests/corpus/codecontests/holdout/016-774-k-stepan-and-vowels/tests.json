@@ -1,0 +1,92 @@
+{
+  "cases": [
+    {
+      "input": "18\naeiouyaaeeiioouuyy\n",
+      "output": "aeiouyaeeioouy"
+    },
+    {
+      "input": "22\niiiimpleeemeentatiioon\n",
+      "output": "implemeentatioon"
+    },
+    {
+      "input": "13\npobeeeedaaaaa\n",
+      "output": "pobeda"
+    },
+    {
+      "input": "24\naaaoooiiiuuuyyyeeeggghhh\n",
+      "output": "aoiuyeggghhh"
+    },
+    {
+      "input": "3\neoo\n",
+      "output": "eoo"
+    },
+    {
+      "input": "36\naeiouyaaeeiioouuyyaaaeeeiiiooouuuyyy\n",
+      "output": "aeiouyaeeioouyaeiouy"
+    },
+    {
+      "input": "3\nooo\n",
+      "output": "o"
+    },
+    {
+      "input": "1\na\n",
+      "output": "a"
+    },
+    {
+      "input": "4\neeoo\n",
+      "output": "eeoo"
+    },
+    {
+      "input": "5\noooee\n",
+      "output": "oee"
+    },
+    {
+      "input": "5\nooeoo\n",
+      "output": "ooeoo"
+    },
+    {
+      "input": "1\nf\n",
+      "output": "f"
+    },
+    {
+      "input": "200\nmmffggzvuuzzlkafduueqocuybiiaaeeoiioouaaurccuqoouuooooooyjjtyyxxiipneeueyuuoyxxhhkaaooooyaaauuoppzabuuoiiuuggcciissuugejjiirruummsiifaauyypauwoofiemzaeeeeeeiioozzttyyidaaaiggizzerkooooeeepueeauuppthhb\n",
+      "output": "mmffggzvuzzlkafdueqocuybiaeeoioouaurccuqoouoyjjtyxxipneeueyuoyxxhhkaoyauoppzabuoiuggccissugejjirrummsifauypauwoofiemzaeioozzttyidaiggizzerkoepueeauppthhb"
+    },
+    {
+      "input": "75\noiaaaiiioyoeuauieeeeyauioyaiuyueeoaiiyeauyuauuyueoioueieeaaeyiyeyyaiooouyoo\n",
+      "output": "oiaioyoeuauieyauioyaiuyueeoaiyeauyuauyueoioueieeaeyiyeyaiouyoo"
+    },
+    {
+      "input": "10\noaaoooaaoo\n",
+      "output": "oaoaoo"
+    },
+    {
+      "input": "2\noo\n",
+      "output": "oo"
+    },
+    {
+      "input": "8\neeeaaeee\n",
+      "output": "eae"
+    },
+    {
+      "input": "7\nooeeeee\n",
+      "output": "ooe"
+    },
+    {
+      "input": "1\ne\n",
+      "output": "e"
+    },
+    {
+      "input": "2\nee\n",
+      "output": "ee"
+    },
+    {
+      "input": "100\noiyufyyyioueoudosizoryuoedatenougiuaeuouuyoiimaeigeeycewuooyovacoiyuaygfuuaiaeuahuieeafxsciylaebeufi\n",
+      "output": "oiyufyioueoudosizoryuoedatenougiuaeuouyoimaeigeeycewuooyovacoiyuaygfuaiaeuahuieeafxsciylaebeufi"
+    },
+    {
+      "input": "1\no\n",
+      "output": "o"
+    }
+  ]
+}

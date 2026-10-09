@@ -1,0 +1,1 @@
+{"code":"T0053","format_version":1,"help":["write exactly 1 type argument, e.g. `list[int]`"],"message":"container type annotation `list[...]` takes exactly 1 type argument, got 2","severity":"error","spans":[{"col":11,"file":"tests/diagnostics/t0053_list_two_args.py","label":"container type annotation `list[...]` takes exactly 1 type argument, got 2","len":14,"line":1}]}

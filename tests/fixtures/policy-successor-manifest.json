@@ -1,0 +1,195 @@
+{
+  "manifest_version": 1,
+  "targets": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "source_path": ".github/workflows/ci.yml",
+      "sha256": "84cafa5849db0691cbf05261275140b46cb63a27a5a00482f1c05d912b54ad45"
+    },
+    {
+      "path": "scripts/classify_ci_changes.py",
+      "source_path": "scripts/classify_ci_changes.py",
+      "sha256": "285b566245b3490e83e62d93b36262e704575a3218c7965237609374e5eb571f"
+    },
+    {
+      "path": "scripts/check_ci_permissions.rb",
+      "source_path": "scripts/check_ci_permissions.rb",
+      "sha256": "6df471fa3181419f42415525c10eb5a7fcb40247a5201ae9c044c267615a39ea"
+    },
+    {
+      "path": "scripts/check_replicated_paired_perf_regression.rb",
+      "source_path": "scripts/check_replicated_paired_perf_regression.rb",
+      "sha256": "d296e48859b1813685f06244c6d401119de57ec1842fe7c47d8ecbbdb1318c06"
+    },
+    {
+      "path": "scripts/check_roadmap_evidence.rb",
+      "source_path": "scripts/check_roadmap_evidence.rb",
+      "sha256": "ba31980061e547386e02ab8bf78544a50ef41932711e3eccb91b0ec5d967f99b"
+    },
+    {
+      "path": "scripts/check_search_visibility_audit.py",
+      "source_path": "scripts/check_search_visibility_audit.py",
+      "sha256": "3ea740e1997c6667f815bc35a5d29cdff9efd2fd0732c76e0963be8aa11027d3"
+    },
+    {
+      "path": "scripts/check_source_aware_perf_regression.rb",
+      "source_path": "scripts/check_source_aware_perf_regression.rb",
+      "sha256": "55ce7259ff164a43a98187cb7b611794a8417dc3dfddf3f4fb689776ab83adcb"
+    },
+    {
+      "path": "scripts/test_classify_ci_changes.py",
+      "source_path": "scripts/test_classify_ci_changes.py",
+      "sha256": "a2a76fbfcec745de26d5561e04e7248bfcc9905415a4059be00cbe9af68ba1f4"
+    },
+    {
+      "path": "scripts/test_check_ci_permissions.rb",
+      "source_path": "scripts/test_check_ci_permissions.rb",
+      "sha256": "2a13b5d56f52ffe00ad5d60c305f894a8690e1857e7adb631bd682d1e1ea9055"
+    },
+    {
+      "path": "scripts/test_check_replicated_paired_perf_regression.rb",
+      "source_path": "scripts/test_check_replicated_paired_perf_regression.rb",
+      "sha256": "bdda7c21cf96d35ee00af6893493b9f84025b35998e5a4bcba88019604757b10"
+    },
+    {
+      "path": "scripts/test_check_roadmap_evidence.rb",
+      "source_path": "scripts/test_check_roadmap_evidence.rb",
+      "sha256": "56c28d43f55de380e392e0d10cdf7209ffd00a51b6c0ddde6936225c8e5af3ca"
+    },
+    {
+      "path": "scripts/test_check_search_visibility_audit.py",
+      "source_path": "scripts/test_check_search_visibility_audit.py",
+      "sha256": "f493a8c4af08d9e0f84d42546fa76179192f20cf438ebf3efc0aea60ea166856"
+    },
+    {
+      "path": "scripts/test_check_source_aware_perf_regression.rb",
+      "source_path": "scripts/test_check_source_aware_perf_regression.rb",
+      "sha256": "b5ccd35af90dcff6f9fff30ec9075ab9d780694fc9941954913f5bd4407b2b34"
+    },
+    {
+      "path": "tests/fixtures/d100-compose-d91-d99-ci.yml",
+      "source_path": "tests/fixtures/d100-compose-d91-d99-ci.yml",
+      "sha256": "6b502ae3cabe0ab1d5a6d65ceffc0490c1f49f7d4d37090acdb460ce51dc9b47"
+    },
+    {
+      "path": "tests/fixtures/d112-ubuntu-frontend-perf-ci.yml",
+      "source_path": "tests/fixtures/d112-ubuntu-frontend-perf-ci.yml",
+      "sha256": "bd92a9b715f67cd708bbc5b8fdafd57957a1ad5a201bc95902e519b0b2692bfc"
+    },
+    {
+      "path": "tests/fixtures/d114-frontend-perf-threshold-ci.yml",
+      "source_path": "tests/fixtures/d114-frontend-perf-threshold-ci.yml",
+      "sha256": "0176d030004f8be82c5148e86e93df27a1cb287a1b0f34aff1dd10aa36b986f2"
+    },
+    {
+      "path": "tests/fixtures/d51-paired-ci.yml",
+      "source_path": "tests/fixtures/d51-paired-ci.yml",
+      "sha256": "4b1d11afba108745a2bc375e3447d92ecde843376c3bea95ab32f76b3fc53249"
+    },
+    {
+      "path": "tests/fixtures/d56-source-aware-ci.yml",
+      "source_path": "tests/fixtures/d56-source-aware-ci.yml",
+      "sha256": "c696da18f4f8b876d4398c43f94fe574e870579badd84cf579fbe91fbd9d7b4b"
+    },
+    {
+      "path": "tests/fixtures/d62-replicated-paired-ci.yml",
+      "source_path": "tests/fixtures/d62-replicated-paired-ci.yml",
+      "sha256": "a5135f7a8ebe2b0c0924ad026612ef9c90ade105c9a4fd484f803e10cf5b5c8d"
+    },
+    {
+      "path": "tests/fixtures/d80-conformance-oracle-ci.yml",
+      "source_path": "tests/fixtures/d80-conformance-oracle-ci.yml",
+      "sha256": "17611d861d10c34d6ccebbf21bc82d8dfaf006b969bb2fe1e12d57b9e9c81234"
+    },
+    {
+      "path": "tests/fixtures/d84-throughput-floor-ci.yml",
+      "source_path": "tests/fixtures/d84-throughput-floor-ci.yml",
+      "sha256": "d0e01df560e32fcd51b6092a8c75dfe4ac270137838907711b37cf043278b516"
+    },
+    {
+      "path": "tests/fixtures/d91-relax-frontend-perf-manifest-ci.yml",
+      "source_path": "tests/fixtures/d91-relax-frontend-perf-manifest-ci.yml",
+      "sha256": "f28a428d1e54e12e16bc180d8b4656c5acc3cd04333cd413036066d4abfd1747"
+    },
+    {
+      "path": "tests/fixtures/d99-vcpkg-libxml2-cache-ci.yml",
+      "source_path": "tests/fixtures/d99-vcpkg-libxml2-cache-ci.yml",
+      "sha256": "f8656c7a525fe8775f90c5afe0950b4706eb043ef6f78f6b66e1f50146fc5366"
+    },
+    {
+      "path": "tests/fixtures/workflow-policy-search-ledger.yml",
+      "source_path": "tests/fixtures/workflow-policy-search-ledger.yml",
+      "sha256": "f8d60936438c48362d0a5dc11ee709c9dd5354c3f697038bc36b620c266f0688"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/check_roadmap_evidence.rb",
+      "source_path": "tests/fixtures/policy-successors/check_roadmap_evidence.rb",
+      "sha256": "38cedac1ee96d8970a25717faf33a27fa03de23f974889303ec2e6de9d9ea3a0"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/check_roadmap_evidence-d229.rb",
+      "source_path": "tests/fixtures/policy-successors/check_roadmap_evidence-d229.rb",
+      "sha256": "ee210f5a34681345034bc77a3a3c723f14fc1a8a5aec01761996305de3076258"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/check_pages_performance_budget.rb",
+      "source_path": "tests/fixtures/policy-successors/check_pages_performance_budget.rb",
+      "sha256": "ae06513ac85cccc60ab9a78d1b23f6c55c2136c87d83e217e9e31c786384e621"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/test_check_pages_performance_budget.rb",
+      "source_path": "tests/fixtures/policy-successors/test_check_pages_performance_budget.rb",
+      "sha256": "f2ffb51eca2d4b9f5fc3a149d362eca02ee861085648477d1d01f67ee93ca9fd"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/ci.yml",
+      "source_path": "tests/fixtures/policy-successors/ci.yml",
+      "sha256": "42a87e33aebc82ab316b0969a793fd5d4746c4d0bf324201c142e543b69f916f"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/test_check_roadmap_evidence.rb",
+      "source_path": "tests/fixtures/policy-successors/test_check_roadmap_evidence.rb",
+      "sha256": "85fa95c9e8b190c3ed43174f77b5be34e3fd93a559a103156a63f82f61a1b3b8"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/test_check_roadmap_evidence-d229.rb",
+      "source_path": "tests/fixtures/policy-successors/test_check_roadmap_evidence-d229.rb",
+      "sha256": "e5c839bd545a8ad000ccd59e9d08f1926a18e194f2b9a76993f568b8b7bff3d2"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/test_check_search_visibility_audit.py",
+      "source_path": "tests/fixtures/policy-successors/test_check_search_visibility_audit.py",
+      "sha256": "f493a8c4af08d9e0f84d42546fa76179192f20cf438ebf3efc0aea60ea166856"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/ci-d199.yml",
+      "source_path": "tests/fixtures/policy-successors/ci-d199.yml",
+      "sha256": "b96af8b0aa4d3d7ce2509174f071a168dc53f2aac31372b75c0bdda20fc390b8"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/check_roadmap_evidence-d199.rb",
+      "source_path": "tests/fixtures/policy-successors/check_roadmap_evidence-d199.rb",
+      "sha256": "38cedac1ee96d8970a25717faf33a27fa03de23f974889303ec2e6de9d9ea3a0"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/test_check_roadmap_evidence-d199.rb",
+      "source_path": "tests/fixtures/policy-successors/test_check_roadmap_evidence-d199.rb",
+      "sha256": "465549703931f6c43b28367f039b5d36de6138467ee4b303f6c99f7ec844df27"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/pages-performance-manifest.json",
+      "source_path": "tests/fixtures/policy-successors/pages-performance-manifest.json",
+      "sha256": "cd920a756a39d09fbb3f956fbfae9e38be9e14b3abf6294b484c22d527f2e462"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/ci-python-3147.yml",
+      "source_path": "tests/fixtures/policy-successors/ci-python-3147.yml",
+      "sha256": "d1c4ab9a927723c37809c4621afffcc4b15ecde52a9706cc0951376ca1faf725"
+    },
+    {
+      "path": "tests/fixtures/policy-successors/ci-d171.yml",
+      "source_path": "tests/fixtures/policy-successors/ci-d171.yml",
+      "sha256": "785e6415aea979ac67563589fb8295f2d7a9ce991f11d269d2054422a527e33f"
+    }
+  ]
+}

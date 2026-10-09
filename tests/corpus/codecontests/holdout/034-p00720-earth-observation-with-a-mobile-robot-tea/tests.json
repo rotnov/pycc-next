@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "input": "3 5 10\nred\n0 0 0\n5 0 0\ngreen\n0 5 5\n5 6 1\nblue\n0 40 5\n5 0 0\n3 10 5\natom\n0 47 32\n5 -10 -7\n10 1 0\npluto\n0 0 0\n7 0 0\n10 3 3\ngesicht\n0 25 7\n5 -7 -2\n10 -1 10\n4 100 7\nimpulse\n0 -500 0\n100 10 1\nfreedom\n0 -491 0\n100 9 2\ndestiny\n0 -472 0\n100 7 4\nstrike\n0 -482 0\n100 8 3\n0 0 0",
+      "output": "blue\ngreen\nred\natom\ngesicht\npluto\nfreedom\nimpulse\nstrike"
+    }
+  ]
+}

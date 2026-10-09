@@ -1,0 +1,5 @@
+error[C0001]: comparison operator not supported yet: In
+ --> tests/diagnostics/c0001_compare_chain_in_operator.py:2:12
+  |
+2 |     return 0 < a in b
+  |            ^^^^^^^^^^ comparison operator not supported yet: In

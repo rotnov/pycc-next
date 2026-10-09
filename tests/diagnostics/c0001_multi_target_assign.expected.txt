@@ -1,0 +1,5 @@
+error[C0001]: a class-level attribute assignment must have a single target (`X = 1`), not multiple targets
+ --> tests/diagnostics/c0001_multi_target_assign.py:2:5
+  |
+2 |     A = B = 1
+  |     ^^^^^^^^^ a class-level attribute assignment must have a single target (`X = 1`), not multiple targets

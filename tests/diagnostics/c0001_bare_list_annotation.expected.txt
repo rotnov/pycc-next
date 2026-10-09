@@ -1,0 +1,5 @@
+error[C0001]: a bare `list` type annotation is not supported yet -- write the parameterized form, e.g. `list[int]`
+ --> tests/diagnostics/c0001_bare_list_annotation.py:1:11
+  |
+1 | def f(xs: list) -> None:
+  |           ^^^^ a bare `list` type annotation is not supported yet -- write the parameterized form, e.g. `list[int]`

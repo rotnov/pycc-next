@@ -1,0 +1,5 @@
+error[T0022]: function `answer` can exit without returning `int`
+ --> tests/diagnostics/d0022_missing_return.py:1:1
+  |
+1 | def answer() -> int:
+  | ^ function `answer` can exit without returning `int`

@@ -1,0 +1,5 @@
+error[T0021]: `or` operands have no common type: int and str (pycc has no union types)
+ --> tests/diagnostics/t0021_boolop_no_common_type.py:1:1
+  |
+1 | def f(a: int, b: str) -> None:
+  | ^ `or` operands have no common type: int and str (pycc has no union types)

@@ -1,0 +1,5 @@
+error[L0001]: Multiple exception types must be parenthesized when using `as` at byte range 22..43
+ --> tests/diagnostics/l0001_except_multi_type_as_binding_requires_parens.py:3:8
+  |
+3 | except ValueError, TypeError as e:
+  |        ^^^^^^^^^^^^^^^^^^^^^ Multiple exception types must be parenthesized when using `as` at byte range 22..43

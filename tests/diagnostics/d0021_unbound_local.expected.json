@@ -1,0 +1,1 @@
+{"code":"T0021","format_version":1,"help":[],"message":"local name `x` is not bound before this use","severity":"error","spans":[{"col":1,"file":"tests/diagnostics/d0021_unbound_local.py","label":"local name `x` is not bound before this use","len":0,"line":1}]}

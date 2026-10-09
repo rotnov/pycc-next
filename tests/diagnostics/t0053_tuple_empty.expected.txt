@@ -1,0 +1,5 @@
+error[T0053]: container type annotation `tuple[...]` takes at least 1 type argument -- the empty tuple `tuple[()]` is not supported yet
+ --> tests/diagnostics/t0053_tuple_empty.py:1:10
+  |
+1 | def f(t: tuple[()]) -> None:
+  |          ^^^^^^^^^ container type annotation `tuple[...]` takes at least 1 type argument -- the empty tuple `tuple[()]` is not supported yet

@@ -1,0 +1,5 @@
+error[T0003]: an empty list literal has no inferable element type here
+ --> tests/diagnostics/t0003_call_argument_has_no_binding.py:1:1
+  |
+1 | def g(xs: list[int]) -> int:
+  | ^ an empty list literal has no inferable element type here

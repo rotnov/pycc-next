@@ -1,0 +1,5 @@
+error[C0001]: `from ... import x as y` aliasing is not supported yet
+ --> tests/diagnostics/c0001_future_import_alias.py:1:1
+  |
+1 | from __future__ import annotations as ann
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `from ... import x as y` aliasing is not supported yet

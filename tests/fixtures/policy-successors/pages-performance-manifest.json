@@ -1,0 +1,82 @@
+{
+  "manifest_version": 1,
+  "project_path": "/pycc/",
+  "description": "Closed canonical performance manifest for the five production pages plus the 404 error-page cohort. SHA-256 digests are computed from the checked-in site/ tree and must match the served artifact bytes exactly. This manifest is the identity anchor for the non-browser HTTP preflight and the Lighthouse LHR page-identity binding (issue #229).",
+  "canonical_pages": [
+    {
+      "id": "home",
+      "production_route": "https://rotnov.github.io/pycc/",
+      "local_route": "/pycc/",
+      "expected_http_status": 200,
+      "source_artifact": "site/index.html",
+      "source_artifact_sha256": "3d89692bd6a030fb255e6ade1dca85fe2b7fd41d5918605ee392bbec860426ee",
+      "expected_title": "pycc — AOT compiler for typed Python to native binaries",
+      "expected_h1": "Typed Python in. Autonomous artifacts out.",
+      "canonical_url": "https://rotnov.github.io/pycc/",
+      "redirect_policy": "no_redirect"
+    },
+    {
+      "id": "status",
+      "production_route": "https://rotnov.github.io/pycc/status/",
+      "local_route": "/pycc/status/",
+      "expected_http_status": 200,
+      "source_artifact": "site/status/index.html",
+      "source_artifact_sha256": "4563455aa84dfeb5f70c7f178603b70cf6e070cfc7485b368e3f3fc1634a5453",
+      "expected_title": "pycc status — what the Python AOT compiler can do today",
+      "expected_h1": "What pycc can do today.",
+      "canonical_url": "https://rotnov.github.io/pycc/status/",
+      "redirect_policy": "no_redirect"
+    },
+    {
+      "id": "architecture",
+      "production_route": "https://rotnov.github.io/pycc/architecture/",
+      "local_route": "/pycc/architecture/",
+      "expected_http_status": 200,
+      "source_artifact": "site/architecture/index.html",
+      "source_artifact_sha256": "ef34a07b21a64444c64fdd5b95ee68ad61a1ad0e066b44b002770354feca6d51",
+      "expected_title": "pycc architecture — typed Python to LLVM native binaries",
+      "expected_h1": "Python source to native code.",
+      "canonical_url": "https://rotnov.github.io/pycc/architecture/",
+      "redirect_policy": "no_redirect"
+    },
+    {
+      "id": "python-aot-compilers",
+      "production_route": "https://rotnov.github.io/pycc/python-aot-compilers/",
+      "local_route": "/pycc/python-aot-compilers/",
+      "expected_http_status": 200,
+      "source_artifact": "site/python-aot-compilers/index.html",
+      "source_artifact_sha256": "d4277a21ecc6a364d765254d961e1fbcebb3f66740b95b6404f9d3572d3d31b7",
+      "expected_title": "Python AOT compilers compared — where pycc fits",
+      "expected_h1": "Python AOT tools solve different jobs.",
+      "canonical_url": "https://rotnov.github.io/pycc/python-aot-compilers/",
+      "redirect_policy": "no_redirect"
+    },
+    {
+      "id": "ai-native",
+      "production_route": "https://rotnov.github.io/pycc/ai-native/",
+      "local_route": "/pycc/ai-native/",
+      "expected_http_status": 200,
+      "source_artifact": "site/ai-native/index.html",
+      "source_artifact_sha256": "a6aaf3e02d421ef8944828b2f72c02399006453b70d34688a79cf33362aa24e0",
+      "expected_title": "pycc AI-native experiment — software built entirely by AI",
+      "expected_h1": "The project writes itself.",
+      "canonical_url": "https://rotnov.github.io/pycc/ai-native/",
+      "redirect_policy": "no_redirect"
+    }
+  ],
+  "error_pages": [
+    {
+      "id": "404",
+      "cohort": "error-page",
+      "production_route": "https://rotnov.github.io/pycc/nonexistent/",
+      "local_route": "/pycc/nonexistent/",
+      "expected_http_status": 404,
+      "source_artifact": "site/404.html",
+      "source_artifact_sha256": "d0bbd7a58c02ea743a13f10c3bf355dd0dfe0dd4916cf0451c3d51090343b253",
+      "expected_title": "Page not found — pycc",
+      "expected_h1": "Page not found",
+      "canonical_url": "https://rotnov.github.io/pycc/",
+      "redirect_policy": "no_redirect"
+    }
+  ]
+}

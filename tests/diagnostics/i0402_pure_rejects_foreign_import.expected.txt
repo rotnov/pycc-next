@@ -1,0 +1,5 @@
+error[I0402]: `import json` is a CPython-backed import, which the `deny` interop policy (set by `--pure`) rejects: it admits no CPython import
+ --> tests/diagnostics/i0402_pure_rejects_foreign_import.py:1:1
+  |
+1 | import json
+  | ^^^^^^^^^^^ `import json` is a CPython-backed import, which the `deny` interop policy (set by `--pure`) rejects: it admits no CPython import

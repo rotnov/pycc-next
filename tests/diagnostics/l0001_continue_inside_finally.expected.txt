@@ -1,0 +1,5 @@
+error[L0001]: 'continue' in a 'finally' block
+ --> tests/diagnostics/l0001_continue_inside_finally.py:6:13
+  |
+6 |             continue
+  |             ^^^^^^^^ 'continue' in a 'finally' block

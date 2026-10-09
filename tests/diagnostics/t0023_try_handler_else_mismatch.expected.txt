@@ -1,0 +1,5 @@
+error[T0023]: cannot assign `int` to `x`, previously inferred as `str`
+ --> tests/diagnostics/t0023_try_handler_else_mismatch.py:1:1
+  |
+1 | def pick(d: int) -> None:
+  | ^ cannot assign `int` to `x`, previously inferred as `str`

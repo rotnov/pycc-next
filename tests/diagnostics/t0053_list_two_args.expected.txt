@@ -1,0 +1,5 @@
+error[T0053]: container type annotation `list[...]` takes exactly 1 type argument, got 2
+ --> tests/diagnostics/t0053_list_two_args.py:1:11
+  |
+1 | def f(xs: list[int, str]) -> None:
+  |           ^^^^^^^^^^^^^^ container type annotation `list[...]` takes exactly 1 type argument, got 2

@@ -1,0 +1,4 @@
+def read_value(flag: bool) -> int:
+    while flag:
+        x = 1
+    return x

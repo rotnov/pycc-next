@@ -1,0 +1,5 @@
+error[T0003]: an empty list literal has no inferable element type here
+ --> tests/diagnostics/t0003_nested_empty_list.py:1:1
+  |
+1 | def f() -> int:
+  | ^ an empty list literal has no inferable element type here

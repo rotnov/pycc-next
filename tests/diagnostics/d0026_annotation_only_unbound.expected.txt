@@ -1,0 +1,5 @@
+error[T0021]: local name `x` is not bound before this use
+ --> tests/diagnostics/d0026_annotation_only_unbound.py:1:1
+  |
+1 | def f() -> None:
+  | ^ local name `x` is not bound before this use

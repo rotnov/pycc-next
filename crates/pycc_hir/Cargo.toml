@@ -1,0 +1,13 @@
+[package]
+name = "pycc_hir"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pycc_ast = { path = "../pycc_ast" }
+pycc_diag = { path = "../pycc_diag" }
+pycc_std = { path = "../pycc_std" }
+
+[dev-dependencies]
+pycc_parser = { path = "../pycc_parser" }

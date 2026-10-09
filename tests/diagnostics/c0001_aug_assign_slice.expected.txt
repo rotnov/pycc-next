@@ -1,0 +1,5 @@
+error[C0001]: augmented assignment to a slice is not supported yet
+ --> tests/diagnostics/c0001_aug_assign_slice.py:2:1
+  |
+2 | d[0:1] += 1
+  | ^^^^^^^^^^^ augmented assignment to a slice is not supported yet

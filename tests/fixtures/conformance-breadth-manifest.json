@@ -1,0 +1,1435 @@
+{
+  "manifest_version": 2,
+  "purpose": "Per-row conformance breadth contract for docs/PYTHON_STANDARDS.md, introduced by issue #593 (Part 1 of #248). Each entry records the semantic categories a green row's registered evidence actually proves against the pinned CPython oracle, and the categories that are known-unsupported or intentionally deviating. Validated by scripts/check_conformance_breadth.py. Recording a gap here does not change the row's status; correcting statuses is Part 2 (#594).",
+  "rows": [
+    {
+      "pep": "[238](https://peps.python.org/pep-0238/)",
+      "feature": "True division `/` vs `//`",
+      "matrix_line": 264,
+      "fixtures": [
+        "pep_0238_division.py"
+      ],
+      "proven": [
+        {
+          "category": "true division `/` on float operands",
+          "evidence": "pep_0238_division.py"
+        },
+        {
+          "category": "floor division `//` on int operands",
+          "evidence": "pep_0238_division.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`/` on two int operands yielding a float",
+          "kind": "core",
+          "reason": "The fixture divides floats only, so the PEP's headline change -- int/int no longer truncating -- is never exercised by this row's evidence."
+        },
+        {
+          "category": "`__truediv__`/`__floordiv__` operator overloading",
+          "kind": "core",
+          "reason": "Operator dunder dispatch on user-defined classes is outside the scalar numeric surface this fixture covers."
+        }
+      ]
+    },
+    {
+      "pep": "[604](https://peps.python.org/pep-0604/)",
+      "feature": "Union syntax `int | str`",
+      "matrix_line": 357,
+      "fixtures": [
+        "pep_0604_union.py"
+      ],
+      "proven": [
+        {
+          "category": "`Optional[int]` (`T | None`, either operand order) declared, assigned, and read back with an `is`/`is not None` presence test, module-global and function-local",
+          "evidence": "pep_0604_union.py"
+        },
+        {
+          "category": "a function returning `int | None` from both branches (a real value and `None`), with the caller reading the result's presence",
+          "evidence": "pep_0604_union.py"
+        },
+        {
+          "category": "flow-sensitive narrowing of an `Optional[int]` back to plain `int` inside a top-level `if name is not None:`/`if name is None: ... else:` branch, module-global and function-local, including kill-on-reassignment inside the narrowed branch and the early-return continuation shape (`if name is None: ...; return` narrowing every read after the `if`)",
+          "evidence": "pep_0604_union.py"
+        },
+        {
+          "category": "`Optional[float]`/`Optional[bool]` (`T | None`, either operand order) declared, assigned, and read back with an `is`/`is not None` presence test, module-global and function-local, including truthiness and a function returning `float | None`/`bool | None` from both branches",
+          "evidence": "pep_0604_union.py"
+        },
+        {
+          "category": "flow-sensitive narrowing of an `Optional[float]`/`Optional[bool]` back to plain `float`/`bool` inside a top-level `if name is not None:`/`if name is None: ... else:` branch, the same mechanism proven above for `Optional[int]` (never `Ty::Int`-specific in its own implementation, confirmed by #809/D-204)",
+          "evidence": "pep_0604_union.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "a general union with neither side `None`, or any 3+-operand union chain",
+          "kind": "core",
+          "reason": "rejected pre-lowering with T0048; not implemented -- only the exact `T | None`/`None | T` 2-operand shape is recognized (D-197, #763, Part 1 of #747)."
+        },
+        {
+          "category": "`Optional[T]` for any `T` outside `{int, float, bool}`",
+          "kind": "core",
+          "reason": "rejected with T0049; codegen's `{ inner, present }` representation is exercised and tested for `Optional[int]`/`Optional[float]`/`Optional[bool]` only (widened from `Optional[int]`-only by #809, D-204, Part 3 of #747) -- `Optional[str]` and other refcounted/pointer inner types, and general containers, remain out of scope, mirroring the `list[int]`-only (T0034) and `dict[str, int]`-only (T0036) v0.2 scope cuts."
+        },
+        {
+          "category": "narrowing through a compound `and`/`or` test (e.g. `if x is not None and y is not None:`), or through a non-top-level test embedded in a larger boolean expression",
+          "kind": "core",
+          "reason": "only a bare top-level `name is None`/`name is not None` test is recognized (`pycc_hir::optional_none_test`); not implemented (D-204, #769, Part 2 of #747)."
+        },
+        {
+          "category": "narrowing a name to `None` (the mirror of the implemented shape: `if name is not None: ... else: <use name as None>`, or a `return`-terminated `if name is not None:` guard narrowing the continuation to `None`)",
+          "kind": "core",
+          "reason": "deliberately not implemented -- there is no `Ty::None`-typed narrowing target in this design (D-204, #769, Part 2 of #747)."
+        },
+        {
+          "category": "`raise` (instead of `return`) as a branch terminator for the early-return continuation shape",
+          "kind": "core",
+          "reason": "`definitely_terminates` (`pycc_hir::definitely_terminates`) deliberately does not treat `raise` as a terminator; only a bare `return`, or an exhaustive nested `if`/`else` both ending in `return`, count (D-204, #769, Part 2 of #747)."
+        }
+      ]
+    },
+    {
+      "pep": "[3105](https://peps.python.org/pep-3105/)",
+      "feature": "`print()` as function",
+      "matrix_line": 267,
+      "fixtures": [
+        "pep_3105_print.py"
+      ],
+      "proven": [
+        {
+          "category": "`print()` called as a function with multiple positional arguments",
+          "evidence": "pep_3105_print.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`sep=` and `end=` keyword arguments",
+          "kind": "core",
+          "reason": "Keyword call arguments are rejected with C0001 at crates/pycc_hir/src/expr.rs:399: Parts 1 and 2 of #884 bind keywords and fill defaults only for a call to a module-level `def`, and `print` is a builtin, so PEP 3105's function signature -- the substance of turning `print` into a function -- is unreachable.",
+          "issue": 248
+        },
+        {
+          "category": "`file=` and `flush=` keyword arguments",
+          "kind": "core",
+          "reason": "Same C0001 rejection of keyword call arguments at crates/pycc_hir/src/expr.rs:399.",
+          "issue": 248
+        }
+      ]
+    },
+    {
+      "pep": "[3107](https://peps.python.org/pep-3107/)",
+      "feature": "Function annotations",
+      "matrix_line": 268,
+      "fixtures": [
+        "pep_3107_annotations.py"
+      ],
+      "proven": [
+        {
+          "category": "parameter annotations on a function definition",
+          "evidence": "pep_3107_annotations.py"
+        },
+        {
+          "category": "a return annotation on a function definition",
+          "evidence": "pep_3107_annotations.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`__annotations__` introspection at runtime",
+          "kind": "core",
+          "reason": "pycc consumes annotations at compile time and exposes no runtime annotation mapping; PEP 3107's introspection half has no execution path."
+        }
+      ]
+    },
+    {
+      "pep": "[3110](https://peps.python.org/pep-3110/)",
+      "feature": "`try`/`except`/`else`/`finally`, `raise`, bare `raise` (#382)",
+      "matrix_line": 269,
+      "fixtures": [
+        "pep_3110_exceptions.py"
+      ],
+      "proven": [
+        {
+          "category": "`try`/`except` selecting the handler matching the raised exception type, across several handlers on one `try`",
+          "evidence": "pep_3110_exceptions.py"
+        },
+        {
+          "category": "`else` running exactly when the `try` body completes without raising",
+          "evidence": "pep_3110_exceptions.py"
+        },
+        {
+          "category": "`finally` running on both the normal and the exceptional path, in CPython's own ordering relative to the handler body",
+          "evidence": "pep_3110_exceptions.py"
+        },
+        {
+          "category": "bare `raise` re-raising the active exception out of a handler to an enclosing `try`",
+          "evidence": "pep_3110_exceptions.py"
+        },
+        {
+          "category": "an exception propagating across a function-call boundary to a caller's handler",
+          "evidence": "pep_3110_exceptions.py"
+        },
+        {
+          "category": "user-defined exception classes derived from `Exception`: raising them, catching them by their own name, and catching a subclass through a base-class or `Exception` handler",
+          "evidence": "pep_3110_exceptions.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`except ValueError as exc:` binding the caught exception to a name, and reading its payload",
+          "kind": "core",
+          "reason": "pycc does not materialize an exception object a handler can bind yet; handler selection is by type alone. Tracked by #382's remaining cluster."
+        },
+        {
+          "category": "a user-defined exception class that declares its own `__init__`, and the instance state such a constructor would carry",
+          "kind": "core",
+          "reason": "pycc raises and catches by runtime type tag; the message string is the only payload the exception object carries, so a class with its own constructor is rejected with `C0001`. Tracked by #703."
+        },
+        {
+          "category": "`except*` and `ExceptionGroup` (PEP 654)",
+          "kind": "out-of-scope",
+          "reason": "A separate PEP with its own matrix row; tracked by #542, not by this row."
+        },
+        {
+          "category": "traceback rendering for an uncaught exception",
+          "kind": "core",
+          "reason": "#707 gave pycc a single raise-site frame (the enclosing function's name, `\"<module>\"` at top level) rendered as a `Traceback (most recent call last):` block, but it carries no source file name or line number -- HIR drops the source span before `pycc_mir` ever sees a `raise` statement, so there is nothing to render one from. This repository's conformance oracle (`tests/conformance.rs`) also only diffs the *successful*-exit stdout of matching runs, never the stderr of a program that exits 1, so an uncaught exception's text has no automated CPython comparison regardless of format. Neither gap is tracked by #606, which is exclusively about implicit `__context__` chaining (misciting it here predated #707); a source-span/line-number row would need its own new issue if pursued."
+        }
+      ]
+    },
+    {
+      "pep": "[3119](https://peps.python.org/pep-3119/)",
+      "feature": "ABCs, `isinstance` hooks",
+      "matrix_line": 271,
+      "fixtures": [
+        "pep_3119_abc.py"
+      ],
+      "proven": [
+        {
+          "category": "`ABC` base class with an `@abstractmethod`",
+          "evidence": "pep_3119_abc.py"
+        },
+        {
+          "category": "concrete subclasses overriding the abstract method",
+          "evidence": "pep_3119_abc.py"
+        },
+        {
+          "category": "`super().__init__()` delegation from a subclass",
+          "evidence": "pep_3119_abc.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "instantiating an abstract class raising `TypeError`",
+          "kind": "core",
+          "reason": "The fixture instantiates only concrete subclasses, so the PEP's central enforcement behavior is not compared against the oracle."
+        },
+        {
+          "category": "`register()` virtual subclasses and `__subclasshook__`",
+          "kind": "core",
+          "reason": "The isinstance-hook half of PEP 3119 is not exercised by this fixture."
+        }
+      ]
+    },
+    {
+      "pep": "[3129](https://peps.python.org/pep-3129/)",
+      "feature": "Class decorators",
+      "matrix_line": 272,
+      "fixtures": [
+        "pep_3129_class_deco.py"
+      ],
+      "proven": [
+        {
+          "category": "a class decorator applied with `@` syntax (`@dataclass`)",
+          "evidence": "pep_3129_class_deco.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "a user-defined class decorator",
+          "kind": "core",
+          "reason": "The fixture uses only the stdlib `@dataclass`, which pycc recognizes as a known decorator rather than applying an arbitrary callable to a class object."
+        },
+        {
+          "category": "stacked class decorators and decorator ordering",
+          "kind": "core",
+          "reason": "Not exercised by this fixture."
+        }
+      ]
+    },
+    {
+      "pep": "[3131](https://peps.python.org/pep-3131/)",
+      "feature": "Non-ASCII identifiers",
+      "matrix_line": 273,
+      "fixtures": [
+        "pep_3131_unicode_ids.py"
+      ],
+      "proven": [
+        {
+          "category": "non-ASCII identifiers in the Latin-1 accented range (`café`, `naïve`)",
+          "evidence": "pep_3131_unicode_ids.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "identifiers in non-Latin scripts (Greek, Cyrillic, CJK)",
+          "kind": "core",
+          "reason": "The fixture uses only accented Latin letters."
+        },
+        {
+          "category": "NFKC normalization of identifiers",
+          "kind": "core",
+          "reason": "PEP 3131 requires identifiers to be normalized to NFKC; no fixture compares two differently-composed spellings of the same identifier."
+        }
+      ]
+    },
+    {
+      "pep": "[3135](https://peps.python.org/pep-3135/)",
+      "feature": "Zero-argument `super()`",
+      "matrix_line": 275,
+      "fixtures": [
+        "pep_3135_super.py"
+      ],
+      "proven": [
+        {
+          "category": "zero-argument `super().__init__()` in a subclass constructor",
+          "evidence": "pep_3135_super.py"
+        },
+        {
+          "category": "zero-argument `super().method()` calls through a three-level hierarchy",
+          "evidence": "pep_3135_super.py"
+        },
+        {
+          "category": "`super().<property>` calling the base class's getter rather than a subclass override",
+          "evidence": "pep_3135_super.py"
+        },
+        {
+          "category": "`super().<class attribute>` reading the base class's value, including an earlier MRO entry's class attribute outranking a later entry's same-named `@property`",
+          "evidence": "pep_3135_super.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`super().<instance attribute>` raising `AttributeError`",
+          "kind": "out-of-scope",
+          "reason": "pycc rejects `super().<instance attribute>` at compile time with `T0047` (#587), matching CPython's refusal to resolve it, so no fixture can exercise CPython's runtime `AttributeError` against a binary that never builds. The class-level half a `super` object does proxy is proven above."
+        },
+        {
+          "category": "explicit two-argument `super(C, self)`",
+          "kind": "core",
+          "reason": "Only the zero-argument form this row names is exercised."
+        }
+      ]
+    },
+    {
+      "pep": "[409](https://peps.python.org/pep-0409/)",
+      "feature": "`raise ... from ...` cause chaining and `from None` suppression (#382, #540)",
+      "matrix_line": 283,
+      "fixtures": [
+        "pep_0409_raise_from.py"
+      ],
+      "proven": [
+        {
+          "category": "`raise X from Y` inside a handler raising `X` and reaching an enclosing handler for `X`",
+          "evidence": "pep_0409_raise_from.py"
+        },
+        {
+          "category": "`raise X from None` inside a handler behaving identically to a plain `raise X` for control flow",
+          "evidence": "pep_0409_raise_from.py"
+        },
+        {
+          "category": "the whole `from`-clause form compiling and running in both `--debug` and `--release`",
+          "evidence": "pep_0409_raise_from.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`__cause__` being observable on the raised exception",
+          "kind": "core",
+          "reason": "pycc materializes no exception object with attributes, so the cause the `from` clause records cannot be read back. The PEP's whole point is unobservable until then."
+        },
+        {
+          "category": "`__suppress_context__` distinguishing `from None` from a plain `raise`",
+          "kind": "core",
+          "reason": "`from None` currently lowers to the same HIR as a plain `raise`; the distinction has to be reintroduced when implicit `__context__` chaining lands. Tracked by #606."
+        },
+        {
+          "category": "traceback output showing `The above exception was the direct cause of ...` or its suppression",
+          "kind": "core",
+          "reason": "#707 made pycc's `exception_print_and_exit` walk the `.cause` chain and print CPython's exact `The above exception was the direct cause of the following exception:` separator between an uncaught exception's own `Traceback` block and its cause's (unit-tested directly in `pycc_rt::exception`'s `render_exception_chain`). What remains unproven here is CPython-diff evidence, not the rendering itself: this repository's conformance oracle (`tests/conformance.rs`) only diffs the stdout of a *successful* run, and an uncaught `raise ... from ...` always exits 1, so there is no automated byte-for-byte comparison of this stderr text against CPython's own (which also carries file/line info pycc's frames do not -- see the PEP 3110 row's matching not-proven entry). Not #606's scope, which is exclusively about implicit `__context__` (the citation here predated #707)."
+        }
+      ]
+    },
+    {
+      "pep": "[414](https://peps.python.org/pep-0414/)",
+      "feature": "`u''` literals",
+      "matrix_line": 284,
+      "fixtures": [
+        "pep_0414_u_literal.py"
+      ],
+      "proven": [
+        {
+          "category": "the `u''` string-literal prefix accepted and evaluated as `str`",
+          "evidence": "pep_0414_u_literal.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "prefix combinations such as `ur''`",
+          "kind": "out-of-scope",
+          "reason": "PEP 414 restored only the bare `u` prefix. Python 3 rejects every combination of `u` with `r`, `b`, or `f` as a syntax error, so there is no valid combined-prefix category for a fixture to cover."
+        }
+      ]
+    },
+    {
+      "pep": "[435](https://peps.python.org/pep-0435/)",
+      "feature": "`enum`",
+      "matrix_line": 294,
+      "fixtures": [
+        "pep_0435_enum.py"
+      ],
+      "proven": [
+        {
+          "category": "`Enum` subclass with integer members",
+          "evidence": "pep_0435_enum.py"
+        },
+        {
+          "category": "`.value` and `.name` member access",
+          "evidence": "pep_0435_enum.py"
+        },
+        {
+          "category": "iteration over the enum class in definition order",
+          "evidence": "pep_0435_enum.py"
+        },
+        {
+          "category": "`Enum` subclass with string members",
+          "evidence": "pep_0435_enum.py"
+        },
+        {
+          "category": "`StrEnum` subclass",
+          "evidence": "pep_0435_enum.py"
+        },
+        {
+          "category": "`auto()` member values in both `Enum` and `StrEnum`",
+          "evidence": "pep_0435_enum.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`IntEnum`, `Flag`, and `IntFlag`",
+          "kind": "core",
+          "reason": "Only the `Enum` and `StrEnum` bases are exercised."
+        },
+        {
+          "category": "member aliasing, `@unique`, and functional-API construction",
+          "kind": "core",
+          "reason": "Not exercised by this fixture."
+        },
+        {
+          "category": "comparison and `repr()` of enum members",
+          "kind": "core",
+          "reason": "The fixture prints `.value` and `.name` rather than the members themselves."
+        }
+      ]
+    },
+    {
+      "pep": "[484](https://peps.python.org/pep-0484/)",
+      "feature": "**Type hints** — pycc's cornerstone",
+      "matrix_line": 306,
+      "fixtures": [
+        "pep_0484_type_hints.py"
+      ],
+      "proven": [
+        {
+          "category": "`float` parameter annotations and a `float` return annotation",
+          "evidence": "pep_0484_type_hints.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`Optional[T]` and union types",
+          "kind": "core",
+          "reason": "Recorded in #248 as outside pycc's documented typing subset.",
+          "issue": 248
+        },
+        {
+          "category": "`Any` in pure code",
+          "kind": "core",
+          "reason": "Recorded in #248 as a documented boundary.",
+          "issue": 248
+        },
+        {
+          "category": "forward and deferred references in the PEP 484 sense",
+          "kind": "core",
+          "reason": "Recorded in #248 as a documented boundary.",
+          "issue": 248
+        },
+        {
+          "category": "callable and generic type forms beyond the builtin generics rows",
+          "kind": "core",
+          "reason": "Recorded in #248 as a documented boundary.",
+          "issue": 248
+        }
+      ]
+    },
+    {
+      "pep": "[498](https://peps.python.org/pep-0498/)",
+      "feature": "f-strings",
+      "matrix_line": 314,
+      "fixtures": [
+        "pep_0498_fstrings.py"
+      ],
+      "proven": [
+        {
+          "category": "f-string interpolation of `str` and `int` names",
+          "evidence": "pep_0498_fstrings.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "format specifiers (`{value:.1f}`)",
+          "kind": "core",
+          "reason": "Rejected with C0001 at crates/pycc_hir/src/expr.rs:487.",
+          "issue": 248
+        },
+        {
+          "category": "conversion flags (`!r`, `!s`, `!a`)",
+          "kind": "core",
+          "reason": "Rejected with C0001 at crates/pycc_hir/src/expr.rs:481.",
+          "issue": 248
+        },
+        {
+          "category": "nested quotes and arbitrary expressions inside the replacement field",
+          "kind": "core",
+          "reason": "Only bare-name interpolation is exercised."
+        }
+      ]
+    },
+    {
+      "pep": "[515](https://peps.python.org/pep-0515/)",
+      "feature": "Underscores in numeric literals",
+      "matrix_line": 315,
+      "fixtures": [
+        "pep_0515_underscores.py"
+      ],
+      "proven": [
+        {
+          "category": "underscore grouping in a decimal integer literal (`1_000_000`)",
+          "evidence": "pep_0515_underscores.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "underscores in float, hex, octal, and binary literals",
+          "kind": "core",
+          "reason": "Only the decimal integer form is exercised."
+        },
+        {
+          "category": "rejection of malformed groupings (`1__0`, `_1`, `1_`)",
+          "kind": "core",
+          "reason": "The PEP's negative half has no diagnostics fixture bound to this row."
+        }
+      ]
+    },
+    {
+      "pep": "[3151](https://peps.python.org/pep-3151/)",
+      "feature": "`OSError` hierarchy",
+      "matrix_line": 286,
+      "fixtures": [
+        "pep_3151_oserror.py"
+      ],
+      "proven": [
+        {
+          "category": "raising and catching FileNotFoundError and TimeoutError by their own exact type, and raising OSError directly and catching it by its own exact type",
+          "evidence": "pep_3151_oserror.py"
+        },
+        {
+          "category": "raising BrokenPipeError (a ConnectionError grandchild) and catching it via a handler naming ConnectionError, and separately via a handler naming the OSError root, without ever naming BrokenPipeError itself",
+          "evidence": "pep_3151_oserror.py"
+        },
+        {
+          "category": "a sibling handler not catching an unrelated family member, across several except clauses on one try",
+          "evidence": "pep_3151_oserror.py"
+        },
+        {
+          "category": "finally running on the exceptional path through this hierarchy",
+          "evidence": "pep_3151_oserror.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "errno-based construction/dispatch and the errno/filename/strerror/winerror instance attributes",
+          "kind": "core",
+          "reason": "Explicitly out of scope for #739 (Part 2 of #543), blocked on Part 3 of #541 and tracked by https://github.com/rotnov/pycc/issues/703; the fixture's registration comment in tests/conformance.rs records this and the fixture itself does not exercise any of those attributes."
+        },
+        {
+          "category": "9 of the 11 direct OSError subclasses are never individually raised and caught by their own exact type (BlockingIOError, ChildProcessError, ConnectionError, FileExistsError, InterruptedError, IsADirectoryError, NotADirectoryError, PermissionError, ProcessLookupError), and 3 of ConnectionError's 4 further subclasses are entirely untouched (ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError)",
+          "kind": "core",
+          "reason": "pep_3151_oserror.py exercises a representative slice of the 16-class hierarchy -- FileNotFoundError and TimeoutError individually by exact type, BrokenPipeError only as a handler-caught superclass instance, ConnectionError and OSError as handler types -- rather than every class byte-for-byte against the CPython oracle. The remaining classes are defined as HirClassDefs (#739) but not exercised by this fixture at all."
+        }
+      ]
+    },
+    {
+      "pep": "[526](https://peps.python.org/pep-0526/)",
+      "feature": "Variable annotations `x: int = 0`",
+      "matrix_line": 317,
+      "fixtures": [
+        "pep_0526_var_annotations.py"
+      ],
+      "proven": [
+        {
+          "category": "annotated assignment with an initializer (`doubled: int = ...`)",
+          "evidence": "pep_0526_var_annotations.py"
+        },
+        {
+          "category": "a bare annotation without an initializer (`total: int`)",
+          "evidence": "pep_0526_var_annotations.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "parenthesized annotated targets (`(x): int = 1`)",
+          "kind": "core",
+          "reason": "Rejected with C0001 at crates/pycc_hir/src/stmt.rs:195; CPython accepts it with distinct annotation-recording semantics.",
+          "issue": 248
+        },
+        {
+          "category": "module- and class-level `__annotations__` recording",
+          "kind": "core",
+          "reason": "pycc has no runtime annotation mapping.",
+          "issue": 248
+        },
+        {
+          "category": "annotated attribute and subscript targets (`obj.x: int`, `d['k']: int`)",
+          "kind": "core",
+          "reason": "Not exercised by this fixture."
+        }
+      ]
+    },
+    {
+      "pep": "[557](https://peps.python.org/pep-0557/)",
+      "feature": "**dataclasses**",
+      "matrix_line": 325,
+      "fixtures": [
+        "pep_0557_dataclasses.py"
+      ],
+      "proven": [
+        {
+          "category": "`@dataclass` synthesizing `__init__` from annotated fields",
+          "evidence": "pep_0557_dataclasses.py"
+        },
+        {
+          "category": "synthesized `__eq__` across equal and unequal instances",
+          "evidence": "pep_0557_dataclasses.py"
+        },
+        {
+          "category": "synthesized `__repr__`",
+          "evidence": "pep_0557_dataclasses.py"
+        },
+        {
+          "category": "`ClassVar` members excluded from the synthesized `__init__`, `__eq__`, and `__repr__`",
+          "evidence": "pep_0557_dataclasses.py"
+        },
+        {
+          "category": "dataclass inheritance with field concatenation",
+          "evidence": "pep_0557_dataclasses.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "field default values and `field(default_factory=...)`",
+          "kind": "core",
+          "reason": "Field defaults are rejected with C0001 (see crates/pycc_hir/src/class.rs) and deferred to a follow-up issue."
+        },
+        {
+          "category": "`frozen=`, `order=`, `eq=`, and the other `@dataclass` parameters",
+          "kind": "core",
+          "reason": "Keyword arguments to the decorator are not exercised, and a decorator call is not one of the shapes Parts 1 and 2 of #884 bind keywords or defaults for.",
+          "issue": 248
+        },
+        {
+          "category": "`__post_init__` and `InitVar`",
+          "kind": "core",
+          "reason": "Not exercised by this fixture."
+        }
+      ]
+    },
+    {
+      "pep": "[560](https://peps.python.org/pep-0560/)",
+      "feature": "`__class_getitem__` dispatch for value-position subscripts",
+      "matrix_line": 326,
+      "fixtures": [
+        "pep_0560_class_getitem.py"
+      ],
+      "proven": [
+        {
+          "category": "`ClassName[key]` in value position dispatching to a `@staticmethod __class_getitem__`",
+          "evidence": "pep_0560_class_getitem.py"
+        },
+        {
+          "category": "the `@classmethod` spelling of the hook, receiving the class as its first argument",
+          "evidence": "pep_0560_class_getitem.py"
+        },
+        {
+          "category": "a subclass inheriting the hook through its MRO rather than defining its own",
+          "evidence": "pep_0560_class_getitem.py"
+        },
+        {
+          "category": "the same dispatch inside a function body, not only at module scope",
+          "evidence": "pep_0560_class_getitem.py"
+        },
+        {
+          "category": "instance attribute access on a class carrying the hook, which the hook must not disturb",
+          "evidence": "pep_0560_class_getitem.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "annotation-position `ClassName[type_arg]` routed through the hook to compute the annotated type",
+          "kind": "core",
+          "reason": "implemented (issue #693) and exercised by pep_0560_class_getitem.py's extended annotation-position cases (own hook, classmethod spelling, and MRO inheritance), plus pycc_hir's own unit tests -- but this manifest only records a gap closed once its fixture is observed green on a real, already-completed Tier-1 CI run against the pinned CPython 3.14.7 oracle (D-102's evidence rule), which this change has not yet had the chance to accrue. Remove this entry (and flip PYTHON_STANDARDS.md's row) once that run is recorded.",
+          "issue": 693
+        }
+      ]
+    },
+    {
+      "pep": "—",
+      "feature": "`dict` insertion order guaranteed (`dict[str, int]`, D-123)",
+      "matrix_line": 329,
+      "fixtures": [
+        "dict_order.py"
+      ],
+      "proven": [
+        {
+          "category": "`dict` preserving literal insertion order under iteration",
+          "evidence": "dict_order.py"
+        },
+        {
+          "category": "a key inserted after construction appended at the end",
+          "evidence": "dict_order.py"
+        },
+        {
+          "category": "updating an existing key in place without moving it",
+          "evidence": "dict_order.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "order preservation across deletion and reinsertion",
+          "kind": "core",
+          "reason": "`del` on a dict key is not exercised by this fixture."
+        }
+      ]
+    },
+    {
+      "pep": "[544](https://peps.python.org/pep-0544/)",
+      "feature": "`Protocol` — structural typing",
+      "matrix_line": 335,
+      "fixtures": [
+        "pep_0544_protocol.py"
+      ],
+      "proven": [
+        {
+          "category": "a `Protocol` class with a method member",
+          "evidence": "pep_0544_protocol.py"
+        },
+        {
+          "category": "structural assignment of a conforming class to a protocol-annotated name",
+          "evidence": "pep_0544_protocol.py"
+        },
+        {
+          "category": "`@runtime_checkable` applied to the protocol",
+          "evidence": "pep_0544_protocol.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`isinstance()` against a runtime-checkable protocol",
+          "kind": "core",
+          "reason": "The decorator is applied but no `isinstance` call against it appears in the fixture, so the behavior `@runtime_checkable` exists to enable is not compared against the oracle."
+        },
+        {
+          "category": "rejection of a non-conforming class at check time",
+          "kind": "core",
+          "reason": "`NotDrawable` is defined but the diagnostic for assigning it is not bound to this row."
+        },
+        {
+          "category": "protocol attribute members and generic protocols",
+          "kind": "core",
+          "reason": "Only a method member is exercised."
+        }
+      ]
+    },
+    {
+      "pep": "[570](https://peps.python.org/pep-0570/)",
+      "feature": "Positional-only params `/`",
+      "matrix_line": 336,
+      "fixtures": [
+        "pep_0570_pos_only.py",
+        "pep_0570_pos_only_keyword_rejected.py"
+      ],
+      "proven": [
+        {
+          "category": "a positional-only parameter marker `/` in a function signature",
+          "evidence": "pep_0570_pos_only.py"
+        },
+        {
+          "category": "rejection of a positional-only parameter passed by keyword",
+          "evidence": "pep_0570_pos_only_keyword_rejected.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "a positional-only parameter name reused as a `**kwargs` key",
+          "kind": "core",
+          "reason": "PEP 570's motivating case -- `def f(a, /, **kwargs)` letting `kwargs` carry its own `a` -- needs `**kwargs`, which is still rejected with C0001.",
+          "issue": 248
+        }
+      ]
+    },
+    {
+      "pep": "[591](https://peps.python.org/pep-0591/)",
+      "feature": "`Final`",
+      "matrix_line": 340,
+      "fixtures": [
+        "pep_0591_final.py"
+      ],
+      "proven": [
+        {
+          "category": "`Final[int]` and `Final[str]` module-level constants",
+          "evidence": "pep_0591_final.py"
+        },
+        {
+          "category": "reading a `Final` constant from a function body",
+          "evidence": "pep_0591_final.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "rejection of reassignment to a `Final` name",
+          "kind": "core",
+          "reason": "The PEP's entire enforcement purpose is a negative behavior with no diagnostics fixture bound to this row."
+        },
+        {
+          "category": "`@final` on classes and methods",
+          "kind": "core",
+          "reason": "PEP 591's `@final` decorator half is not exercised."
+        },
+        {
+          "category": "bare `Final` without a subscript",
+          "kind": "core",
+          "reason": "Only the subscripted form is exercised."
+        }
+      ]
+    },
+    {
+      "pep": "[585](https://peps.python.org/pep-0585/)",
+      "feature": "Builtin generics: `list[int]` (D-105), `dict[str, int]`/`set[int]` (D-121/D-122, PR-11a), and `tuple[...]` (D-115/D-116, PR-11b) all ship real codegen, and since D-228 (issue #918), widened by issue #925, the parameterized *annotation* forms `list[T]`, `set[T]`, `dict[K, V]` and `tuple[A, B, ...]` are lowered — joined by `frozenset[T]` since #1326 (Part 1 of #1319), with `frozenset()`/`frozenset(x)` construction from a `set[int]`, `frozenset[int]` or `list[int]` — in parameter, return, local- and module-variable and type-alias positions, with explicit arity validation (`T0053`) and the same element-type capability gates the literals run (`T0034`/`T0036`/`T0038`/`T0039`). Passing a container *value* across a function boundary now works from real Python source in both directions — an annotated parameter (#918) and an annotated return type (#925) — measured end to end for all five families against CPython 3.14 (`frozenset[int]`: `tests/issue_1326_frozenset.rs`). Still deferred: a **protocol attribute's** type (not supported yet; a protocol *method's* parameter and return type both lower), a container-typed instance attribute other than a `list[int]`/`dict[str, int]` seeded from an `__init__` parameter (that case shipped in #1262), nested containers (#895), unions inside containers (#747), `type[...]` (no `Ty` variant; the D-109 16-byte ceiling is not the obstacle, as `frozenset[T]`'s measurement showed), the variadic `tuple[int, ...]` and empty `tuple[()]` (both rejected with `T0053`), and inferring an empty literal's element type from its annotation (#927)",
+      "matrix_line": 348,
+      "fixtures": [
+        "pep_0585_builtin_generics.py",
+        "dict_order.py",
+        "pep_0585_set_int.py",
+        "tuple_heterogeneous.py"
+      ],
+      "proven": [
+        {
+          "category": "`list[int]` element access, `append`, `len`, and iteration",
+          "evidence": "pep_0585_builtin_generics.py"
+        },
+        {
+          "category": "`dict[str, int]` construction, subscript, update, and iteration",
+          "evidence": "dict_order.py"
+        },
+        {
+          "category": "`set[int]` literal construction with `len` and duplicate elimination",
+          "evidence": "pep_0585_set_int.py"
+        },
+        {
+          "category": "heterogeneous `tuple[...]` indexing with int, bool, and float elements",
+          "evidence": "tuple_heterogeneous.py"
+        },
+        {
+          "category": "a `list[int]` return type crossing a function boundary and used at the call site",
+          "evidence": "pep_0585_builtin_generics.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "builtin generics as annotations on nested or user-defined generic types",
+          "kind": "core",
+          "reason": "Only the scalar element types recorded in D-105/D-121/D-122/D-124 are supported; a nested `list[list[int]]` annotation lowers but is rejected by the element-type gate (issue #895)."
+        },
+        {
+          "category": "`frozenset[...]`, `type[...]`, and the remaining builtin generic aliases",
+          "kind": "core",
+          "reason": "Not exercised by a conformance fixture. `frozenset[int]` ships (#1326) and is proven against CPython by `tests/issue_1326_frozenset.rs`; `type[...]` has no `Ty` variant."
+        }
+      ]
+    },
+    {
+      "pep": "[593](https://peps.python.org/pep-0593/)",
+      "feature": "`Annotated`",
+      "matrix_line": 349,
+      "fixtures": [
+        "pep_0593_annotated.py"
+      ],
+      "proven": [
+        {
+          "category": "`Annotated[int, ...]` and `Annotated[str, ...]` on module constants",
+          "evidence": "pep_0593_annotated.py"
+        },
+        {
+          "category": "`Annotated[int, ...]` as a parameter annotation",
+          "evidence": "pep_0593_annotated.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "runtime retrieval of the metadata via `get_type_hints(include_extras=True)`",
+          "kind": "core",
+          "reason": "pycc strips the metadata at compile time and exposes no runtime annotation surface, so the PEP's whole reason for existing is unobservable."
+        },
+        {
+          "category": "multiple metadata elements and nested `Annotated`",
+          "kind": "core",
+          "reason": "Only a single string metadata element is exercised."
+        }
+      ]
+    },
+    {
+      "pep": "[613](https://peps.python.org/pep-0613/)",
+      "feature": "`TypeAlias`",
+      "matrix_line": 359,
+      "fixtures": [
+        "pep_0613_typealias.py"
+      ],
+      "proven": [
+        {
+          "category": "`X: TypeAlias = int` declared and used as a parameter and return annotation",
+          "evidence": "pep_0613_typealias.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "aliases of non-scalar or generic types",
+          "kind": "core",
+          "reason": "Only an `int` alias is exercised."
+        },
+        {
+          "category": "string-literal (forward-referencing) alias values",
+          "kind": "core",
+          "reason": "Not exercised by this fixture."
+        }
+      ]
+    },
+    {
+      "pep": "[634](https://peps.python.org/pep-0634/)–636",
+      "feature": "**Structural pattern matching**",
+      "matrix_line": 361,
+      "fixtures": [
+        "pep_0634_match.py"
+      ],
+      "proven": [
+        {
+          "category": "literal patterns over `int` with a wildcard `case _`",
+          "evidence": "pep_0634_match.py"
+        },
+        {
+          "category": "literal patterns over `bool`",
+          "evidence": "pep_0634_match.py"
+        },
+        {
+          "category": "a capture pattern with a `if` guard",
+          "evidence": "pep_0634_match.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "class patterns, sequence patterns, mapping patterns, and `|` or-patterns",
+          "kind": "core",
+          "reason": "PEP 634's structural half -- the reason it is called structural pattern matching -- is not exercised by this fixture at all; only literal, capture, and wildcard patterns are."
+        },
+        {
+          "category": "negative literal patterns (`case -1:`)",
+          "kind": "core",
+          "reason": "Unary operators are not lowered; tracked by #573.",
+          "issue": 573
+        },
+        {
+          "category": "exhaustiveness diagnostics",
+          "kind": "core",
+          "reason": "v0.3's own Accept bullet names exhaustiveness, which no fixture bound to this row exercises."
+        }
+      ]
+    },
+    {
+      "pep": "[673](https://peps.python.org/pep-0673/)",
+      "feature": "`Self` as method return/param annotation (#387 Part 1) — resolves to the class's own instance type at HIR-lowering time",
+      "matrix_line": 373,
+      "fixtures": [
+        "pep_0673_self.py"
+      ],
+      "proven": [
+        {
+          "category": "`Self` as a method return annotation resolving to the class's own type",
+          "evidence": "pep_0673_self.py"
+        },
+        {
+          "category": "chained calls through two `Self`-returning methods",
+          "evidence": "pep_0673_self.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`Self` in a subclass narrowing to the subclass type",
+          "kind": "core",
+          "reason": "Only a single non-inherited class is exercised, so the covariance that makes `Self` differ from naming the class is untested.",
+          "issue": 387
+        },
+        {
+          "category": "`Self` as a parameter annotation and in classmethod position",
+          "kind": "core",
+          "reason": "The row's own text names parameter position; the fixture uses return position only.",
+          "issue": 387
+        }
+      ]
+    },
+    {
+      "pep": "[695](https://peps.python.org/pep-0695/)",
+      "feature": "**`type` statement + generic functions** `def f[T](x: T) -> T` (v0.2 scope per D-088 — no class support exists yet)",
+      "matrix_line": 383,
+      "fixtures": [
+        "pep_0695_generics.py"
+      ],
+      "proven": [
+        {
+          "category": "`def f[T](x: T) -> T` generic function syntax",
+          "evidence": "pep_0695_generics.py"
+        },
+        {
+          "category": "instantiation at both `int` and `str`",
+          "evidence": "pep_0695_generics.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "the `type` statement (`type X[T] = ...`)",
+          "kind": "core",
+          "reason": "The row's Feature cell names the `type` statement, but the fixture exercises only generic functions."
+        },
+        {
+          "category": "bounded and constrained type parameters (`[T: int]`)",
+          "kind": "core",
+          "reason": "Not exercised by this fixture."
+        },
+        {
+          "category": "multiple type parameters and variadic `*Ts`",
+          "kind": "core",
+          "reason": "Only a single type parameter is exercised."
+        }
+      ]
+    },
+    {
+      "pep": "[695](https://peps.python.org/pep-0695/)",
+      "feature": "Generic classes `class C[T]` (#387 Part 3) — single type param, scalar-only instantiation, monomorphized at compile time",
+      "matrix_line": 384,
+      "fixtures": [
+        "pep_0695_generic_classes.py"
+      ],
+      "proven": [
+        {
+          "category": "`class C[T]` with a single type parameter",
+          "evidence": "pep_0695_generic_classes.py"
+        },
+        {
+          "category": "explicit instantiation `C[int]` and `C[str]` with monomorphization",
+          "evidence": "pep_0695_generic_classes.py"
+        },
+        {
+          "category": "generic methods reading and writing the parameterized attribute",
+          "evidence": "pep_0695_generic_classes.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "multiple type parameters on a class",
+          "kind": "core",
+          "reason": "Recorded in the row's own scope note as single-type-param only.",
+          "issue": 387
+        },
+        {
+          "category": "non-scalar instantiation and generic inheritance",
+          "kind": "core",
+          "reason": "Recorded in the row's own scope note as scalar-only.",
+          "issue": 387
+        },
+        {
+          "category": "inferred (non-explicit) instantiation `C(1)`",
+          "kind": "core",
+          "reason": "Only the explicitly subscripted form is exercised."
+        }
+      ]
+    },
+    {
+      "pep": "[698](https://peps.python.org/pep-0698/)",
+      "feature": "`@override`",
+      "matrix_line": 385,
+      "fixtures": [
+        "pep_0698_override.py"
+      ],
+      "proven": [
+        {
+          "category": "`@override` accepted on a method that does override a base method",
+          "evidence": "pep_0698_override.py"
+        },
+        {
+          "category": "dynamic dispatch selecting the overriding implementation",
+          "evidence": "pep_0698_override.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "rejection of `@override` on a method that overrides nothing",
+          "kind": "core",
+          "reason": "PEP 698 exists to make that case an error; it is the whole point of the decorator and no diagnostics fixture is bound to this row."
+        }
+      ]
+    },
+    {
+      "pep": "[701](https://peps.python.org/pep-0701/)",
+      "feature": "Formalized f-string grammar",
+      "matrix_line": 386,
+      "fixtures": [
+        "pep_0701_fstring_grammar.py"
+      ],
+      "proven": [
+        {
+          "category": "nested same-quote interpolations, including deeply nested ones",
+          "evidence": "pep_0701_fstring_grammar.py"
+        },
+        {
+          "category": "single-quoted string literals inside a single-quoted f-string interpolation",
+          "evidence": "pep_0701_fstring_grammar.py"
+        },
+        {
+          "category": "multi-line expressions inside a triple-quoted f-string interpolation",
+          "evidence": "pep_0701_fstring_grammar.py"
+        },
+        {
+          "category": "`#` comments inside a multi-line f-string interpolation",
+          "evidence": "pep_0701_fstring_grammar.py"
+        },
+        {
+          "category": "backslash escapes (`\\N{...}` named escapes) inside an interpolation and in the literal part",
+          "evidence": "pep_0701_fstring_grammar.py"
+        },
+        {
+          "category": "adjacent interpolations with no intervening literal text",
+          "evidence": "pep_0701_fstring_grammar.py"
+        },
+        {
+          "category": "escaped braces `{{`/`}}` in the literal part",
+          "evidence": "pep_0701_fstring_grammar.py"
+        },
+        {
+          "category": "raw f-strings (`rf\"...\"`) and implicit concatenation of adjacent f-string literals",
+          "evidence": "pep_0701_fstring_grammar.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "conversion flags `!r`/`!s`/`!a` on an interpolation",
+          "kind": "core",
+          "reason": "pycc's HIR lowering rejects any interpolation carrying a conversion flag with an unconditional `unsupported(...)` diagnostic (crates/pycc_hir/src/expr.rs), so no fixture can exercise this PEP 701 grammar position against the CPython oracle today."
+        },
+        {
+          "category": "format specifications `{x:...}`, including PEP 701's nested-interpolation-inside-a-format-spec form",
+          "kind": "core",
+          "reason": "pycc's HIR lowering rejects any interpolation carrying a format spec with an unconditional `unsupported(...)` diagnostic (crates/pycc_hir/src/expr.rs); PEP 701 explicitly formalizes arbitrary nesting inside format specs, and none of that surface is reachable."
+        },
+        {
+          "category": "the `=` debug specifier (`f\"{expr=}\"`)",
+          "kind": "core",
+          "reason": "pycc rejects `=` debug interpolations outright with C0001, tracked by https://github.com/rotnov/pycc/issues/720; the fixture deliberately omits the form so this row's evidence stays byte-for-byte against the oracle."
+        },
+        {
+          "category": "non-scalar interpolation operands (`list`/`dict`/`set`/`tuple` values)",
+          "kind": "core",
+          "reason": "pycc's codegen converts an interpolation operand through the shared `to_str` helper (crates/pycc_codegen/src/lib.rs), which handles only `Str`/`Int`/`Float`/`Bool` scalars and panics on `List`/`Dict`/`Tuple` (a `set`/`frozenset` operand is refused earlier as `C0001`) because v0.2 defines no `str(list)`/`str(dict)`/`str(set)` semantics (D-105/D-123/D-124); PEP 701's grammar changes therefore cannot be observed over those operand types."
+        }
+      ]
+    },
+    {
+      "pep": "[709](https://peps.python.org/pep-0709/)",
+      "feature": "Comprehension inlining semantics -- pycc has no bytecode/frame model to \"inline\" the way CPython's own PEP 709 change does; this row instead verifies the one CPython-observable, statically-testable guarantee PEP 709 depends on: a comprehension's own loop variable does not leak into an enclosing same-named binding (D-117/D-120)",
+      "matrix_line": 387,
+      "fixtures": [
+        "pep_0709_comp_inline.py"
+      ],
+      "proven": [
+        {
+          "category": "a list comprehension's iteration variable not leaking into the enclosing scope",
+          "evidence": "pep_0709_comp_inline.py"
+        },
+        {
+          "category": "the comprehension's produced elements",
+          "evidence": "pep_0709_comp_inline.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "the inlining itself",
+          "kind": "out-of-scope",
+          "reason": "PEP 709's observable contract is that comprehension inlining is not detectable from Python semantics; pycc has no bytecode or frame model, so there is no surface on which the inlining itself could be proven or violated. This is a permanent non-goal, not an unimplemented category."
+        },
+        {
+          "category": "dict and set comprehensions, and nested comprehensions",
+          "kind": "core",
+          "reason": "Only a single-clause list comprehension is exercised, and multi-`for`/multi-`if` comprehensions are rejected with C0001."
+        }
+      ]
+    },
+    {
+      "pep": "[594](https://peps.python.org/pep-0594/)",
+      "feature": "\"Dead batteries\" stdlib removals",
+      "matrix_line": 397,
+      "fixtures": [
+        "pep_0594_dead_battery.py",
+        "pep_0594_dead_battery_rejected.py"
+      ],
+      "proven": [
+        {
+          "category": "a surviving stdlib module (`math`) importable with function and constant access",
+          "evidence": "pep_0594_dead_battery.py"
+        },
+        {
+          "category": "a removed stdlib module (`cgi`) rejected at import",
+          "evidence": "pep_0594_dead_battery_rejected.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "the other modules PEP 594 removed",
+          "kind": "out-of-scope",
+          "reason": "PEP 594 removes stdlib modules. pycc_std implements an explicitly allowlisted subset per docs/STDLIB_PLAN.md, so every module outside that allowlist is unavailable by construction rather than by a removal pass. There is no per-module category left to implement."
+        }
+      ]
+    },
+    {
+      "pep": "[649](https://peps.python.org/pep-0649/)/[749](https://peps.python.org/pep-0749/)",
+      "feature": "**Deferred annotations** — pycc reads annotations exactly per 3.14 semantics; self-referential class-name annotations in own methods work (#387 Part 2)",
+      "matrix_line": 409,
+      "fixtures": [
+        "pep_0649_deferred_ann.py"
+      ],
+      "proven": [
+        {
+          "category": "a class name used as an annotation inside its own body before the class is complete",
+          "evidence": "pep_0649_deferred_ann.py"
+        },
+        {
+          "category": "methods typed by the enclosing class and dispatched at runtime",
+          "evidence": "pep_0649_deferred_ann.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`annotationlib` and the lazy-evaluation format selectors PEP 749 defines",
+          "kind": "out-of-scope",
+          "reason": "`annotationlib` is a stdlib surface tracked by docs/STDLIB_PLAN.md, not a language semantics category. PEP 649/749's language-level contract -- that annotations are not evaluated eagerly -- is separate from the library API that inspects them."
+        },
+        {
+          "category": "annotations that are only valid lazily (referencing a later-defined name)",
+          "kind": "core",
+          "reason": "Only self-reference within the class body is exercised."
+        }
+      ]
+    },
+    {
+      "pep": "[758](https://peps.python.org/pep-0758/)",
+      "feature": "`except A, B:` without parentheses",
+      "matrix_line": 412,
+      "fixtures": [
+        "pep_0758_except_noparens.py"
+      ],
+      "proven": [
+        {
+          "category": "bare-comma except A, B: catching each of two named types, alongside the pre-existing parenthesized except (A, B): form",
+          "evidence": "pep_0758_except_noparens.py"
+        },
+        {
+          "category": "an as binding (parenthesized form) whose bound value is re-raised and recaught by an outer handler",
+          "evidence": "pep_0758_except_noparens.py"
+        },
+        {
+          "category": "a 3+-type handler (parenthesized form) and a non-matching raise propagating through an inner handler to an outer one",
+          "evidence": "pep_0758_except_noparens.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "a 3+-type handler written with the bare-comma spelling (only the parenthesized (A, B, C): form is exercised)",
+          "kind": "core",
+          "reason": "pep_0758_except_noparens.py's three_type_handler_catches_key_error test uses the parenthesized form; no fixture exercises except A, B, C: (bare comma, 3+ types) against the CPython oracle."
+        },
+        {
+          "category": "except A, B as e: (bare comma combined with an as binding)",
+          "kind": "out-of-scope",
+          "reason": "CPython's own grammar requires parentheses around a multi-type except handler whenever it also binds a name -- tests/diagnostics_test.rs:96-100 (l0001_except_multi_type_as_binding_requires_parens) records this as existing, already-correct parser behavior verified against the CPython oracle, not a pycc capability gap. Rejecting this shape with L0001 matches CPython; there is no valid CPython program in this category left unexercised. Only the parenthesized except (A, B) as e: form is valid Python and it is exercised."
+        },
+        {
+          "category": "unparenthesized except* A, B: (PEP 758's own title covers both except and except* without parentheses; this row's fixture and D-195's implementation address only plain except)",
+          "kind": "core",
+          "reason": "Part 3 of #382 (#542, PEP 654) has since added except* itself, including the bare-comma multi-type spelling (except* A, B: parses and dispatches the same way except A, B: does, reusing D-195's own per-handler multi-tag machinery) -- but no fixture in this suite exercises that combination against the CPython oracle yet, so it stays an unproven gap on this row rather than the still-unimplemented one recorded here previously."
+        }
+      ]
+    },
+    {
+      "pep": "[572](https://peps.python.org/pep-0572/)",
+      "feature": "Walrus `:=`",
+      "matrix_line": 337,
+      "fixtures": [
+        "pep_0572_walrus.py"
+      ],
+      "proven": [
+        {
+          "category": "a walrus inside an `if` condition, with the bound name read both inside the branch and afterward at module scope",
+          "evidence": "pep_0572_walrus.py"
+        },
+        {
+          "category": "a walrus inside a `while` condition, the classic read-until-sentinel shape",
+          "evidence": "pep_0572_walrus.py"
+        },
+        {
+          "category": "a walrus as a bare expression statement",
+          "evidence": "pep_0572_walrus.py"
+        },
+        {
+          "category": "a walrus nested inside a larger expression -- a function call argument and an arithmetic operand, including two walruses chained inside one expression",
+          "evidence": "pep_0572_walrus.py"
+        },
+        {
+          "category": "a walrus inside a function body, with the bound name visible to later statements in the same function scope",
+          "evidence": "pep_0572_walrus.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "a walrus value of any type other than int/float/bool/None (including Optional of those)",
+          "kind": "core",
+          "reason": "New diagnostic T0050 (added by PR #787) restricts a walrus value to int/float/bool/None because codegen's NamedExpr-yielding read is only worked out for those types' refcount contract; extending it to every reference-counted type was PR #787's own deliberate scope cut, recorded in its PR body and the fixture's own header comment."
+        },
+        {
+          "category": "a walrus target nested inside a comprehension",
+          "kind": "core",
+          "reason": "CPython binds a walrus target to the nearest enclosing function or module scope, skipping comprehension scopes -- #774's own Scope section recorded this as an acceptable scope cut if pycc's comprehension lowering does not yet model nested scopes precisely, and PR #787's body confirms it was taken: comprehension-scope walrus is out of scope, matching CPython's own comprehension-scope-skip semantics, a D-177 core gap."
+        }
+      ]
+    },
+    {
+      "pep": "[654](https://peps.python.org/pep-0654/)",
+      "feature": "`except*` + `ExceptionGroup`",
+      "matrix_line": 370,
+      "fixtures": [
+        "pep_0654_except_star.py"
+      ],
+      "proven": [
+        {
+          "category": "a single `except*` clause catching a raised exception of matching type",
+          "evidence": "pep_0654_except_star.py"
+        },
+        {
+          "category": "multiple `except*` clauses on the same `try`, dispatching to the one matching the raised type",
+          "evidence": "pep_0654_except_star.py"
+        },
+        {
+          "category": "an `ExceptionGroup` constructed from multiple caught exceptions of different types, split across multiple `except*` clauses by member type",
+          "evidence": "pep_0654_except_star.py"
+        },
+        {
+          "category": "`except* ... as` binding capturing the resulting (matched) `ExceptionGroup`",
+          "evidence": "pep_0654_except_star.py"
+        },
+        {
+          "category": "`except*`/`finally` interaction -- the `finally` block still runs",
+          "evidence": "pep_0654_except_star.py"
+        },
+        {
+          "category": "`except*`/`else` interaction -- the `else` block runs when the `try` body raises nothing",
+          "evidence": "pep_0654_except_star.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "`ExceptionGroup.subgroup(condition)` and `ExceptionGroup.split(condition)`",
+          "kind": "core",
+          "reason": "Neither method is implemented yet; tracked by #775 as an independent follow-up to #542, since they are independently testable without further except* matching machinery.",
+          "issue": 775
+        },
+        {
+          "category": "an `except*` clause body containing a direct `return`, `break`, or `continue`",
+          "kind": "out-of-scope",
+          "reason": "Rejected as intended since #795: HIR lowering reports L0001 (\"'return' in an 'except*' block\", and likewise for `break`/`continue`), matching CPython's own `SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block`. A loop entered within the clause body shields `break`/`continue` but not `return`, and a module-level `return` still reports the pre-existing T0024 -- both verified against CPython 3.14.6. Not provable by the conformance fixture, which must be valid Python the pinned oracle can run; the behaviour is pinned by the public-CLI diagnostic fixtures tests/diagnostics/l0001_return_in_except_star.py, l0001_return_in_loop_in_except_star.py, l0001_break_in_except_star.py, l0001_continue_in_except_star.py, l0001_break_in_except_star_inside_loop.py, l0001_break_in_except_star_in_finally.py, and d0024_return_in_except_star_at_module_level.py, so this is out-of-scope rather than a core gap -- the same basis as rule 11's `except A, B as e:` entry."
+        },
+        {
+          "category": "`except* ExceptionGroup:`, `except* BaseExceptionGroup:`, and an `except*` handler naming a user class derived from either group type",
+          "kind": "core",
+          "reason": "CPython accepts both names at compile time and raises TypeError (\"catching ExceptionGroup with except* is not allowed. Use except instead.\") at handler-match time. The same TypeError fires for a user subclass (class G(ExceptionGroup)) as for the group class itself. Since #795, pycc rejects all of them at compile time with C0001 instead -- a deliberate divergence recorded in D-223 (which narrows D-202), because D-173 propagates a raised exception through global runtime state rather than a materialized group instance, so there is no value to type-test at match time and no mechanism for raising a TypeError from generated except* dispatch. Still a core gap: the observable behaviour differs from CPython's. Tracked by #903; the compile-time rejection is pinned by tests/diagnostics/c0001_except_star_exception_group.py, c0001_except_star_base_exception_group_in_tuple.py, and c0001_except_star_exception_group_subclass.py.",
+          "issue": 903
+        },
+        {
+          "category": "D-202's six deliberate simplifications (ExceptionGroup identity through subgroup/split reconstruction, restrictions on dynamic non-literal member lists, and related narrowings)",
+          "kind": "core",
+          "reason": "D-202 itself records each simplification as independently revisitable once a materialized exception instance (#703) and/or a genuinely dynamic group object become available -- not a permanent non-goal, so D-177 does not permit classifying it `out-of-scope`. Each is enforced by its own diagnostic or fixed reconstructed identity today rather than an unimplemented capability, but the underlying infrastructure gap (no dynamic group object, no materialized instance identity) is real, unimplemented core work.",
+          "issue": 542
+        }
+      ]
+    },
+    {
+      "pep": "[563](https://peps.python.org/pep-0563/)",
+      "feature": "`from __future__ import annotations` (superseded by 649)",
+      "matrix_line": 328,
+      "fixtures": [
+        "pep_0563_lazy_annotations.py"
+      ],
+      "proven": [
+        {
+          "category": "`from __future__ import annotations` accepted as the module's first statement after the leading comment block, compiling as a no-op",
+          "evidence": "pep_0563_lazy_annotations.py"
+        },
+        {
+          "category": "the directive accepted alongside a method parameter annotated with its own enclosing class (`other: Node` inside `class Node`) -- the same shape the PEP 649/749 row proves, shown here to be unaffected by the no-op directive",
+          "evidence": "pep_0563_lazy_annotations.py"
+        },
+        {
+          "category": "module-level function parameters and return annotated with an already-defined class and `int`, called and printed byte-identically",
+          "evidence": "pep_0563_lazy_annotations.py"
+        },
+        {
+          "category": "a string annotation naming the enclosing class (`def clone(self) -> \"Node\"`), resolved exactly like its unquoted spelling (Part 1 of #889)",
+          "evidence": "pep_0563_lazy_annotations.py"
+        }
+      ],
+      "not_proven": [
+        {
+          "category": "a forward reference to a name defined *later* in the module, quoted or not (PEP 563's distinguishing case)",
+          "kind": "core",
+          "reason": "Not exercised by the fixture because pycc rejects it today with `C0001: type annotation ... is not supported yet`; the directive is accepted as a no-op (D-229) but annotation resolution is still eager, so the later-defined name is unresolved at the annotation site. Quoting it does not help: a string annotation resolves exactly like its unquoted spelling, and resolving a later-defined class is deferred on #889.",
+          "issue": 889
+        },
+        {
+          "category": "`__annotations__` introspection (the stringified annotation values the directive produces)",
+          "kind": "core",
+          "reason": "Not exercised by the fixture and not implemented: pycc has no runtime `__annotations__` object on functions, classes, or modules, so the directive's observable effect on introspection (stringified values) cannot be compared against the oracle. D-164 rejected runtime introspection only as the mechanism for dataclass field discovery, which reads annotations statically instead; it did not declare a runtime annotation object a permanent non-goal, so under D-177 this stays `core` rather than `out-of-scope`."
+        },
+        {
+          "category": "feature-name binding: reading `annotations` after the import (CPython binds it to a `__future__._Feature` object)",
+          "kind": "out-of-scope",
+          "reason": "Deliberate divergence recorded by D-229: pycc binds nothing, so a later read of `annotations` is `T0021` where CPython prints the feature object. The fixture never reads the name, so the directive is proven only as an accepted no-op for this program, not as a binding-equivalent import."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+error[C0001]: binding the CPython module `os.path` to `os`, the name of its own top-level package, is not supported yet
+ --> tests/diagnostics/c0001_hir_cascade_suppressed.py:1:1
+  |
+1 | import os.path as os
+  | ^^^^^^^^^^^^^^^^^^^^ binding the CPython module `os.path` to `os`, the name of its own top-level package, is not supported yet
+error[C0001]: an async method is not supported yet
+ --> tests/diagnostics/c0001_hir_cascade_suppressed.py:3:5
+  |
+3 |     async def m(self) -> None: pass
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ an async method is not supported yet
+error[C0001]: `*args` is not supported yet
+ --> tests/diagnostics/c0001_hir_cascade_suppressed.py:9:6
+  |
+9 | def h(*args: int) -> int:
+  |      ^^^^^^^^^^^^ `*args` is not supported yet

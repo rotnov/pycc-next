@@ -1,0 +1,5 @@
+error[L0001]: 'yield' outside function
+ --> tests/diagnostics/l0001_yield_outside_function_type_checking.py:4:5
+  |
+4 |     yield 1
+  |     ^^^^^^^ 'yield' outside function

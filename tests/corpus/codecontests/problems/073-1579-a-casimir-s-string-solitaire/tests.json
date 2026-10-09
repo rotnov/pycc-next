@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "input": "6\nABACAB\nABBA\nAC\nABC\nCABCBB\nBCBCBCBCBCBCBCBC\n",
+      "output": "NO\nYES\nNO\nNO\nYES\nYES\n"
+    }
+  ]
+}

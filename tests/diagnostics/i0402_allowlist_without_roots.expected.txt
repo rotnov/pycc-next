@@ -1,0 +1,5 @@
+error[I0402]: `import json` is a CPython-backed import, which the `allowlist` interop policy (set by `--interop-policy allowlist`) rejects: its root `json` is not in `[interop] allow`
+ --> tests/diagnostics/i0402_allowlist_without_roots.py:1:1
+  |
+1 | import json
+  | ^^^^^^^^^^^ `import json` is a CPython-backed import, which the `allowlist` interop policy (set by `--interop-policy allowlist`) rejects: its root `json` is not in `[interop] allow`

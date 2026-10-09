@@ -1,0 +1,5 @@
+error[T0002]: `Any` is not permitted in pycc code outside a declared interop boundary
+ --> tests/diagnostics/t0002_any_after_typing_import.py:1:1
+  |
+1 | from typing import Any
+  | ^ `Any` is not permitted in pycc code outside a declared interop boundary

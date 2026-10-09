@@ -1,0 +1,92 @@
+{
+  "cases": [
+    {
+      "input": "5\nZZZAA\n",
+      "output": "ZZ\n"
+    },
+    {
+      "input": "7\nABACABA\n",
+      "output": "AB\n"
+    },
+    {
+      "input": "15\nMIRZOYANOVECLOX\n",
+      "output": "MI\n"
+    },
+    {
+      "input": "23\nAABBBAAACCCCCAAADDDDDDD\n",
+      "output": "DD\n"
+    },
+    {
+      "input": "2\nQA\n",
+      "output": "QA\n"
+    },
+    {
+      "input": "11\nGGRRAATTZZZ\n",
+      "output": "ZZ\n"
+    },
+    {
+      "input": "6\nAZAZAZ\n",
+      "output": "AZ\n"
+    },
+    {
+      "input": "10\nSQSQSQSQTG\n",
+      "output": "SQ\n"
+    },
+    {
+      "input": "3\nKEK\n",
+      "output": "KE\n"
+    },
+    {
+      "input": "100\nURXCAIZFIBNJTPCZHBQIBCILLPXZCFGMKKZMNPLCYGAVJVIBMCZEBSJWPSCPQDYCTTKPOKIJRSKIZPDGCHVOUTMPNECYORSFZFNC\n",
+      "output": "IB\n"
+    },
+    {
+      "input": "3\nLOL\n",
+      "output": "LO\n"
+    },
+    {
+      "input": "2\nWW\n",
+      "output": "WW\n"
+    },
+    {
+      "input": "8\nPUTINVOR\n",
+      "output": "PU\n"
+    },
+    {
+      "input": "26\nQWERTYUIOPASDFGHJKLZXCVBNM\n",
+      "output": "QW\n"
+    },
+    {
+      "input": "5\nAZAZA\n",
+      "output": "AZ\n"
+    },
+    {
+      "input": "9\nEGORLETOV\n",
+      "output": "EG\n"
+    },
+    {
+      "input": "7\nKADUROV\n",
+      "output": "KA\n"
+    },
+    {
+      "input": "9\nMIKEPIDOR\n",
+      "output": "MI\n"
+    },
+    {
+      "input": "9\nAAAAAAAAA\n",
+      "output": "AA\n"
+    },
+    {
+      "input": "100\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+      "output": "AA\n"
+    },
+    {
+      "input": "5\nFUFEL\n",
+      "output": "FU\n"
+    },
+    {
+      "input": "50\nNYQAHBYYOXLTRYQDMVENEMAQNBAKGLGQOLXNAIFNQTOCLNNQIA\n",
+      "output": "YQ\n"
+    }
+  ]
+}

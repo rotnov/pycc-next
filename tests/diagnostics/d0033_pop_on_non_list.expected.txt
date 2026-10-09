@@ -1,0 +1,5 @@
+error[T0033]: `int` does not support `.pop()`
+ --> tests/diagnostics/d0033_pop_on_non_list.py:1:1
+  |
+1 | x = 5
+  | ^ `int` does not support `.pop()`

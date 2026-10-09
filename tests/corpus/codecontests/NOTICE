@@ -1,0 +1,55 @@
+Attribution for the vendored CodeContests subset
+================================================
+
+Dataset
+-------
+
+DeepMind CodeContests
+https://huggingface.co/datasets/deepmind/code_contests
+Pinned revision: 802411c3010cb00d1b05bad57ca77365a3c699d6
+
+The dataset is distributed by DeepMind under the Creative Commons
+Attribution 4.0 International licence (CC BY 4.0).  The full licence text
+is vendored beside this file as LICENSE.  The files under problems/ and
+holdout/ are derived from that dataset: each solution.py is one PYTHON3
+solution reproduced verbatim apart from line-ending normalisation, and each
+tests.json repacks that problem's public and private test cases.  No problem
+statement or description text is vendored.
+
+Note that CC BY 4.0 covers DeepMind's dataset.  The Apache-2.0 licence that
+appears on DeepMind's code_contests GitHub repository covers that repository's
+loader code, which this corpus does not use or vendor.
+
+Citation
+--------
+
+Yujia Li, David Choi, Junyoung Chung, Nate Kushman, Julian Schrittwieser,
+Remi Leblond, Tom Eccles, James Keeling, Felix Gimeno, Agustin Dal Lago,
+Thomas Hubert, Peter Choy, Cyprien de Masson d'Autume, Igor Babuschkin,
+Xinyun Chen, Po-Sen Huang, Johannes Welbl, Sven Gowal, Alexey Cherepanov,
+James Molloy, Daniel J. Mankowitz, Esme Sutherland Robson, Pushmeet Kohli,
+Nando de Freitas, Koray Kavukcuoglu and Oriol Vinyals.
+"Competition-Level Code Generation with AlphaCode."
+Science 378, 6624 (2022) 1092-1097.  arXiv:2203.07814.
+
+Upstream acknowledgements
+-------------------------
+
+DeepMind's dataset card records that CodeContests aggregates problems and
+solutions from several upstream sources:
+
+  * Codeforces (https://codeforces.com/), the origin of most of the problems
+    in the shards vendored here -- a minority carry the `pNNNNN` naming of the
+    two collections below instead, and the dataset does not record a per-problem
+    source, so the split is not restated here as a count.  Codeforces states no
+    licence for its problem statements or user-submitted solutions; the CC BY 4.0
+    grant above is DeepMind's grant over the dataset as assembled, and is not a
+    statement about the upstream rights in that underlying material.  That
+    reasoning is the same for every upstream source below, so it does not depend
+    on which one a given problem came from.
+  * Description2Code (https://github.com/ethancaballero/description2code),
+    MIT licence.
+  * Project_CodeNet (https://github.com/IBM/Project_CodeNet),
+    Apache-2.0 licence.
+
+The material vendored here is used for compiler conformance measurement only.

@@ -1,0 +1,5 @@
+error[L0001]: 'async for' outside async function
+ --> tests/diagnostics/l0001_async_for_outside_async_function.py:1:1
+  |
+1 | async for i in range(3):
+  | ^ 'async for' outside async function

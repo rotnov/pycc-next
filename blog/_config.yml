@@ -1,0 +1,4 @@
+title: pycc-next devlog
+description: Restarting pycc - a strict AOT compiler for typed Python, built by AI agents.
+theme: minima
+baseurl: /pycc-next

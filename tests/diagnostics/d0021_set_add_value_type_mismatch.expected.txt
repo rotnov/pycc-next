@@ -1,0 +1,5 @@
+error[T0021]: cannot add `str` to a set of `int`
+ --> tests/diagnostics/d0021_set_add_value_type_mismatch.py:1:1
+  |
+1 | x = {1, 2}
+  | ^ cannot add `str` to a set of `int`

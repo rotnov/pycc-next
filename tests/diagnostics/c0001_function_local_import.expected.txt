@@ -1,0 +1,5 @@
+error[C0001]: statement kind not supported yet: an `import` inside a function or block body (only a module-level import, or one inside an `if TYPE_CHECKING:` guard, is supported)
+ --> tests/diagnostics/c0001_function_local_import.py:2:5
+  |
+2 |     import os
+  |     ^^^^^^^^^ statement kind not supported yet: an `import` inside a function or block body (only a module-level import, or one inside an `if TYPE_CHECKING:` guard, is supported)

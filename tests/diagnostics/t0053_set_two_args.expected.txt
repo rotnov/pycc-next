@@ -1,0 +1,5 @@
+error[T0053]: container type annotation `set[...]` takes exactly 1 type argument, got 2
+ --> tests/diagnostics/t0053_set_two_args.py:1:10
+  |
+1 | def f(s: set[int, int]) -> None:
+  |          ^^^^^^^^^^^^^ container type annotation `set[...]` takes exactly 1 type argument, got 2

@@ -1,0 +1,1 @@
+{"code":"T0021","format_version":1,"help":["pass an `int` value"],"message":"range stop expects `int`, got `str`","severity":"error","spans":[{"col":1,"file":"tests/diagnostics/d0021_range_argument_type.py","label":"range stop expects `int`, got `str`","len":0,"line":1}]}

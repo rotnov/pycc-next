@@ -1,0 +1,135 @@
+Function {
+    name: "fib",
+    params: [
+        (
+            "n",
+            Int,
+        ),
+    ],
+    return_ty: Int,
+    body: [
+        If {
+            test: Compare {
+                op: Lt,
+                left: Name {
+                    name: "n",
+                    ty: Int,
+                },
+                right: IntLiteral(
+                    2,
+                ),
+                ty: Bool,
+            },
+            body: [
+                Return(
+                    Some(
+                        Name {
+                            name: "n",
+                            ty: Int,
+                        },
+                    ),
+                ),
+            ],
+            orelse: [],
+        },
+        Return(
+            Some(
+                BinOp {
+                    op: Add,
+                    left: Call {
+                        callee: "fib",
+                        args: [
+                            BinOp {
+                                op: Sub,
+                                left: Name {
+                                    name: "n",
+                                    ty: Int,
+                                },
+                                right: IntLiteral(
+                                    1,
+                                ),
+                                ty: Int,
+                            },
+                        ],
+                        ty: Int,
+                    },
+                    right: Call {
+                        callee: "fib",
+                        args: [
+                            BinOp {
+                                op: Sub,
+                                left: Name {
+                                    name: "n",
+                                    ty: Int,
+                                },
+                                right: IntLiteral(
+                                    2,
+                                ),
+                                ty: Int,
+                            },
+                        ],
+                        ty: Int,
+                    },
+                    ty: Int,
+                },
+            ),
+        ),
+    ],
+}
+TopLevelStmt(
+    Assign {
+        target: "i",
+        value: IntLiteral(
+            0,
+        ),
+    },
+)
+TopLevelStmt(
+    While {
+        test: Compare {
+            op: Lt,
+            left: Name {
+                name: "i",
+                ty: Int,
+            },
+            right: IntLiteral(
+                11,
+            ),
+            ty: Bool,
+        },
+        body: [
+            ExprStmt(
+                Call {
+                    callee: "print",
+                    args: [
+                        Call {
+                            callee: "fib",
+                            args: [
+                                Name {
+                                    name: "i",
+                                    ty: Int,
+                                },
+                            ],
+                            ty: Int,
+                        },
+                    ],
+                    ty: None,
+                },
+            ),
+            Assign {
+                target: "i",
+                value: BinOp {
+                    op: Add,
+                    left: Name {
+                        name: "i",
+                        ty: Int,
+                    },
+                    right: IntLiteral(
+                        1,
+                    ),
+                    ty: Int,
+                },
+            },
+        ],
+    },
+)

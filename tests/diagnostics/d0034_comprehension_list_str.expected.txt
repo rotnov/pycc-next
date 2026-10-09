@@ -1,0 +1,5 @@
+error[T0034]: list codegen only supports `list[int]` in v0.2, got a comprehension producing `list[str]`
+ --> tests/diagnostics/d0034_comprehension_list_str.py:1:1
+  |
+1 | ys = ["hi" for i in range(3)]
+  | ^ list codegen only supports `list[int]` in v0.2, got a comprehension producing `list[str]`

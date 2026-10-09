@@ -1,0 +1,5 @@
+error[C0001]: only a bare name type annotation is supported so far, got an attribute expression (`obj.attr`)
+ --> tests/diagnostics/c0001_attribute_annotation.py:4:10
+  |
+4 | def f(x: typing.Any) -> int:
+  |          ^^^^^^^^^^ only a bare name type annotation is supported so far, got an attribute expression (`obj.attr`)

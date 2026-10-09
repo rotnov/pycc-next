@@ -1,0 +1,1 @@
+{"code":"T0044","format_version":1,"help":[],"message":"type parameter `T` is not subscriptable, so `T[...]` is not a valid type annotation","severity":"error","spans":[{"col":13,"file":"tests/diagnostics/t0044_type_param_subscript_annotation.py","label":"type parameter `T` is not subscriptable, so `T[...]` is not a valid type annotation","len":6,"line":1}]}

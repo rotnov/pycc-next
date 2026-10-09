@@ -1,0 +1,2 @@
+{"code":"C0001","format_version":1,"help":[],"message":"an async method is not supported yet","severity":"error","spans":[{"col":5,"file":"tests/diagnostics/c0001_issue_864_repro.py","label":"an async method is not supported yet","len":31,"line":2}]}
+{"code":"C0001","format_version":1,"help":[],"message":"an async method is not supported yet","severity":"error","spans":[{"col":5,"file":"tests/diagnostics/c0001_issue_864_repro.py","label":"an async method is not supported yet","len":31,"line":4}]}

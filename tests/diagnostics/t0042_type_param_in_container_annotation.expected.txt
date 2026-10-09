@@ -1,0 +1,5 @@
+error[T0042]: type parameter `T` used inside a container position is not supported yet -- v0.2 only instantiates a bare type-parameter position, matching D-105's own fixed-container-element-type restriction
+ --> tests/diagnostics/t0042_type_param_in_container_annotation.py:1:14
+  |
+1 | def f[T](xs: list[T]) -> None:
+  |              ^^^^^^^ type parameter `T` used inside a container position is not supported yet -- v0.2 only instantiates a bare type-parameter position, matching D-105's own fixed-container-element-type restriction

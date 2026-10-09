@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "input": "10\n3\n1 blue\n4 red\n5 orange\n",
+      "output": "328925088\n"
+    },
+    {
+      "input": "3\n2\n5 orange\n2 white\n",
+      "output": "1024\n"
+    },
+    {
+      "input": "2\n2\n1 white\n2 white\n",
+      "output": "0\n"
+    },
+    {
+      "input": "5\n9\n31 yellow\n30 green\n26 yellow\n13 red\n2 red\n22 white\n12 red\n6 orange\n29 blue\n",
+      "output": "0\n"
+    },
+    {
+      "input": "3\n1\n7 yellow\n",
+      "output": "4096\n"
+    },
+    {
+      "input": "2\n2\n1 green\n3 red\n",
+      "output": "4\n"
+    },
+    {
+      "input": "1\n1\n1 yellow\n",
+      "output": "1\n"
+    },
+    {
+      "input": "1\n1\n1 white\n",
+      "output": "1\n"
+    }
+  ]
+}

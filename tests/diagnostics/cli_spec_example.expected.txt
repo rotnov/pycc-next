@@ -1,0 +1,5 @@
+error[T0021]: argument 1 of `fib` expects `int`, got `str`
+ --> tests/diagnostics/cli_spec_example.py:1:1
+  |
+1 | def fib(n: int) -> int:
+  | ^ argument 1 of `fib` expects `int`, got `str`

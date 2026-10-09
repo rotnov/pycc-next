@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "input": "3\nAZAMON APPLE\nAZAMON AAAAAAAAAAALIBABA\nAPPLE BANANA\n",
+      "output": "AAZMON\n---\nAEPLP\n"
+    },
+    {
+      "input": "3\nAZAMON APPLE\nAZAMON AAAAAAAAAAALIBABA\nAPPLE BANANA\n",
+      "output": "AAZMON\n---\nAEPLP\n"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+[package]
+name = "pycc_std"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+# Deliberately dependency-free (D-136): a plain data crate exposing a
+# static registry of stdlib symbols this compiler hand-recognizes. No
+# proc-macro, no build script, no dependency on any other workspace crate --
+# `pycc_types` converts `StdSymbolKind`'s scalar shape into its own `Ty` at
+# the call site instead of this crate depending on `pycc_hir` for `Ty`.

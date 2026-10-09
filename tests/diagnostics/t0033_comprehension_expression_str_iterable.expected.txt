@@ -1,0 +1,5 @@
+error[T0033]: `str` cannot be iterated with `for ... in ...` (only list[T]/dict[K, V]/set[T]/frozenset[T] supports this)
+ --> tests/diagnostics/t0033_comprehension_expression_str_iterable.py:1:1
+  |
+1 | s = "ab"
+  | ^ `str` cannot be iterated with `for ... in ...` (only list[T]/dict[K, V]/set[T]/frozenset[T] supports this)

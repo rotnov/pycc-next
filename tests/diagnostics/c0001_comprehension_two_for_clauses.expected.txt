@@ -1,0 +1,5 @@
+error[C0001]: a comprehension with more than one `for` clause is not supported yet
+ --> tests/diagnostics/c0001_comprehension_two_for_clauses.py:3:8
+  |
+3 | z = [i for i in xs for j in ys]
+  |        ^^^^^^^^^^^ a comprehension with more than one `for` clause is not supported yet

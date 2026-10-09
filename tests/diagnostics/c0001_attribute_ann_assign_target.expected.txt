@@ -1,0 +1,5 @@
+error[C0001]: an annotated attribute target annotated `int` with this value is not supported yet -- only `<obj>.<attr>: list[int] = []` or `<obj>.<attr>: dict[str, int] = {}` inside a function body is supported so far (the general annotated attribute target is issue #891)
+ --> tests/diagnostics/c0001_attribute_ann_assign_target.py:3:9
+  |
+3 |         self.x: int = 1
+  |         ^^^^^^ an annotated attribute target annotated `int` with this value is not supported yet -- only `<obj>.<attr>: list[int] = []` or `<obj>.<attr>: dict[str, int] = {}` inside a function body is supported so far (the general annotated attribute target is issue #891)

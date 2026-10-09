@@ -1,0 +1,8 @@
+[project]
+name = "interop-allowlist"
+entry = "i0402_allowlist_unlisted_root.py"
+python = "3.14"
+
+[interop]
+policy = "allowlist"
+allow = ["json"]

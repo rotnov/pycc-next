@@ -1,0 +1,5 @@
+error[T0021]: `float` expects exactly 1 argument, got 0
+ --> tests/diagnostics/d0021_float_wrong_arity.py:1:1
+  |
+1 | float()
+  | ^ `float` expects exactly 1 argument, got 0

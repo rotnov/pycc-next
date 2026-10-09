@@ -1,0 +1,5 @@
+error[T0036]: dict[int, int] is not compiled yet (D-122) -- only dict[str, int] is
+ --> tests/diagnostics/t0036_dict_int_key_annotation.py:1:10
+  |
+1 | def f(d: dict[int, int]) -> None:
+  |          ^^^^^^^^^^^^^^ dict[int, int] is not compiled yet (D-122) -- only dict[str, int] is

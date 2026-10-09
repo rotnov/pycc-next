@@ -1,0 +1,5 @@
+error[C0001]: the `barry_as_FLUFL` future feature (`<>` in place of `!=`) is not supported yet
+ --> tests/diagnostics/c0001_future_barry_as_flufl.py:1:1
+  |
+1 | from __future__ import barry_as_FLUFL
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the `barry_as_FLUFL` future feature (`<>` in place of `!=`) is not supported yet

@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "input": "1",
+      "output": "a"
+    },
+    {
+      "input": "2",
+      "output": "aa\nab"
+    }
+  ]
+}

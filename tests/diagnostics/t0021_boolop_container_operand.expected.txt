@@ -1,0 +1,5 @@
+error[T0021]: `and` operand of type `list[int]` has no truth value pycc can test
+ --> tests/diagnostics/t0021_boolop_container_operand.py:1:1
+  |
+1 | def f(xs: list[int], b: int) -> None:
+  | ^ `and` operand of type `list[int]` has no truth value pycc can test

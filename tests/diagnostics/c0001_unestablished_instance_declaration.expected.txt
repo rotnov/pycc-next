@@ -1,0 +1,5 @@
+error[C0001]: instance attribute `retries` declared in class `Config` is never assigned at the top level of `Config.__init__` -- assign it there (`self.retries = ...`), or give it a value (`retries: int = 1`) to make it a class constant
+ --> tests/diagnostics/c0001_unestablished_instance_declaration.py:2:5
+  |
+2 |     retries: int
+  |     ^^^^^^^^^^^^ instance attribute `retries` declared in class `Config` is never assigned at the top level of `Config.__init__` -- assign it there (`self.retries = ...`), or give it a value (`retries: int = 1`) to make it a class constant

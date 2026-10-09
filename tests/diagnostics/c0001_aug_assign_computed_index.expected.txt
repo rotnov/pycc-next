@@ -1,0 +1,5 @@
+error[C0001]: augmented assignment with a computed index is not supported yet; bind the index to a name first
+ --> tests/diagnostics/c0001_aug_assign_computed_index.py:3:1
+  |
+3 | d[k + "b"] += 1
+  | ^^^^^^^^^^^^^^^ augmented assignment with a computed index is not supported yet; bind the index to a name first

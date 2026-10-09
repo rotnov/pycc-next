@@ -1,0 +1,5 @@
+error[I0402]: `import pprint` is a CPython-backed import, which the `allowlist` interop policy (set by `tests/diagnostics/interop_allowlist/pycc.toml`) rejects: its root `pprint` is not in `[interop] allow`
+ --> tests/diagnostics/interop_allowlist/i0402_allowlist_unlisted_root.py:1:1
+  |
+1 | import pprint
+  | ^^^^^^^^^^^^^ `import pprint` is a CPython-backed import, which the `allowlist` interop policy (set by `tests/diagnostics/interop_allowlist/pycc.toml`) rejects: its root `pprint` is not in `[interop] allow`

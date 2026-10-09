@@ -1,0 +1,5 @@
+error[T0022]: return type mismatch: expected `int`, found `P`
+ --> tests/diagnostics/t0022_declared_return_protocol_param.py:1:1
+  |
+1 | from typing import Protocol
+  | ^ return type mismatch: expected `int`, found `P`

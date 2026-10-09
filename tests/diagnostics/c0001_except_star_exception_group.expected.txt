@@ -1,0 +1,5 @@
+error[C0001]: catching `ExceptionGroup` with `except*` is not supported yet — CPython rejects it at runtime with a `TypeError`, which this compiler cannot raise yet; use a plain `except` clause instead
+ --> tests/diagnostics/c0001_except_star_exception_group.py:1:1
+  |
+1 | def f() -> int:
+  | ^ catching `ExceptionGroup` with `except*` is not supported yet — CPython rejects it at runtime with a `TypeError`, which this compiler cannot raise yet; use a plain `except` clause instead

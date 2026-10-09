@@ -1,0 +1,5 @@
+error[T0021]: slice start must be `int`, got `str`
+ --> tests/diagnostics/d0021_slice_bound_not_int.py:1:1
+  |
+1 | x = [1, 2, 3]
+  | ^ slice start must be `int`, got `str`

@@ -1,0 +1,5 @@
+error[T0021]: cannot use a `str` default for a dict of `int` values
+ --> tests/diagnostics/d0021_dict_get_default_type_mismatch.py:1:1
+  |
+1 | x = {"a": 1}
+  | ^ cannot use a `str` default for a dict of `int` values

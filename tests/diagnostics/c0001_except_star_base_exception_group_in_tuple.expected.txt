@@ -1,0 +1,5 @@
+error[C0001]: catching `BaseExceptionGroup` with `except*` is not supported yet — CPython rejects it at runtime with a `TypeError`, which this compiler cannot raise yet; use a plain `except` clause instead
+ --> tests/diagnostics/c0001_except_star_base_exception_group_in_tuple.py:1:1
+  |
+1 | def f() -> int:
+  | ^ catching `BaseExceptionGroup` with `except*` is not supported yet — CPython rejects it at runtime with a `TypeError`, which this compiler cannot raise yet; use a plain `except` clause instead

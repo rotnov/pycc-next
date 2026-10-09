@@ -1,0 +1,5 @@
+error[C0001]: type annotation `list` is not supported yet
+ --> tests/diagnostics/c0001_bare_container_inside_container.py:1:15
+  |
+1 | def f(a: list[list]) -> int:
+  |               ^^^^ type annotation `list` is not supported yet

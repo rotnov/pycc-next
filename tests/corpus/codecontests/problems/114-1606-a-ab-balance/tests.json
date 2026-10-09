@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "input": "4\nb\naabbbabaa\nabbb\nabbaab\n",
+      "output": "b\naabbbabaa\nbbbb\nbbbaab\n"
+    },
+    {
+      "input": "1\nabbabababbabababbababbbabbbbabbbabaabaabba\n",
+      "output": "abbabababbabababbababbbabbbbabbbabaabaabba\n"
+    },
+    {
+      "input": "4\nb\naabbbabaa\nabbb\nabbaab\n",
+      "output": "b\naabbbabaa\nbbbb\nbbbaab\n"
+    },
+    {
+      "input": "1\naaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbab\n",
+      "output": "baaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbab\n"
+    }
+  ]
+}

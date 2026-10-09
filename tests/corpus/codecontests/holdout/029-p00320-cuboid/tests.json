@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "input": "2 2\n2 3\n2 3\n2 3\n2 2\n3 2",
+      "output": "yes"
+    },
+    {
+      "input": "2 2\n2 3\n2 3\n2 3\n2 2\n2 2",
+      "output": "no"
+    }
+  ]
+}

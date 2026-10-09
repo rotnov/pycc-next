@@ -1,0 +1,5 @@
+error[C0001]: an `except` handler must name at least one exception type
+ --> tests/diagnostics/c0001_except_empty_tuple_type.py:3:8
+  |
+3 | except ():
+  |        ^^ an `except` handler must name at least one exception type

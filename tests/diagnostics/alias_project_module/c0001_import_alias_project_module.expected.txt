@@ -1,0 +1,5 @@
+error[C0001]: import of module `geometry` is not supported yet
+ --> tests/diagnostics/alias_project_module/c0001_import_alias_project_module.py:1:1
+  |
+1 | import geometry as g
+  | ^^^^^^^^^^^^^^^^^^^^ import of module `geometry` is not supported yet

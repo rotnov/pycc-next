@@ -1,0 +1,5 @@
+error[T0021]: attempted relative import with no known parent package: `tests/diagnostics` has no `__init__.py`
+ --> tests/diagnostics/t0021_relative_import_outside_package.py:1:1
+  |
+1 | from .helper import thing
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^ attempted relative import with no known parent package: `tests/diagnostics` has no `__init__.py`

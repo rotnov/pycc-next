@@ -1,0 +1,5 @@
+error[T0021]: local name `x` is not bound before this use
+ --> tests/diagnostics/d0021_unbound_local.py:1:1
+  |
+1 | x = 1
+  | ^ local name `x` is not bound before this use

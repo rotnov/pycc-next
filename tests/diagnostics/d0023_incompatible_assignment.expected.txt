@@ -1,0 +1,5 @@
+error[T0023]: cannot assign `str` to `value`, previously inferred as `int`
+ --> tests/diagnostics/d0023_incompatible_assignment.py:1:1
+  |
+1 | value = 1
+  | ^ cannot assign `str` to `value`, previously inferred as `int`

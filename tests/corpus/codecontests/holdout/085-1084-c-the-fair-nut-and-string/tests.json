@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "input": "agaa\n",
+      "output": "3\n"
+    },
+    {
+      "input": "baaaa\n",
+      "output": "4\n"
+    },
+    {
+      "input": "abbaa\n",
+      "output": "5\n"
+    },
+    {
+      "input": "aaaaabb\n",
+      "output": "5\n"
+    },
+    {
+      "input": "aabaaaa\n",
+      "output": "14\n"
+    },
+    {
+      "input": "babbabaabbbbabwbvbhbbbaaabbabbbbbbbkabbbbabaaabbbbbbajabbaaabazbbbzbalbabbwbbaabbabacabdbabbbfaaabbb\n",
+      "output": "42467327\n"
+    },
+    {
+      "input": "baaahbbbba\n",
+      "output": "7\n"
+    },
+    {
+      "input": "ababavvvv\n",
+      "output": "7\n"
+    },
+    {
+      "input": "abnxabbaab\n",
+      "output": "11\n"
+    },
+    {
+      "input": "krflnzhter\n",
+      "output": "0\n"
+    },
+    {
+      "input": "amaabbbbxaabbbabaabaabbaaabaaaaabibbabaabaaabaabcaaxabablbbbbmbbbaaaaaabbaabbbaaabaaaababaababbabbbb\n",
+      "output": "98718509\n"
+    },
+    {
+      "input": "babbbaaaaaabbbaabaaaaaoaabababaababaaaaababaaaaaaabbbbbbaaapaabaaabaaababaaaabaaaabaaaaababaaaabaaab\n",
+      "output": "813881762\n"
+    }
+  ]
+}

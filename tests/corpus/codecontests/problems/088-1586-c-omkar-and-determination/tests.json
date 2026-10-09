@@ -1,0 +1,96 @@
+{
+  "cases": [
+    {
+      "input": "4 5\n..XXX\n...X.\n...X.\n...X.\n5\n1 3\n3 3\n4 5\n5 5\n1 5\n",
+      "output": "YES\nYES\nNO\nYES\nNO\n"
+    },
+    {
+      "input": "3 3\n...\nXXX\nXX.\n10\n2 3\n1 2\n2 2\n1 3\n2 3\n1 2\n1 3\n1 3\n2 3\n1 1\n",
+      "output": "NO\nNO\nYES\nNO\nNO\nNO\nNO\nNO\nNO\nYES\n"
+    },
+    {
+      "input": "1 1\n.\n1\n1 1\n",
+      "output": "YES\n"
+    },
+    {
+      "input": "3 3\n.XX\n..X\n.X.\n10\n2 3\n1 3\n2 3\n2 3\n1 3\n1 1\n2 2\n1 2\n3 3\n1 2\n",
+      "output": "NO\nNO\nNO\nNO\nNO\nYES\nYES\nYES\nYES\nYES\n"
+    },
+    {
+      "input": "3 3\nXX.\nXX.\nX..\n10\n2 3\n2 2\n2 3\n1 3\n2 3\n1 1\n2 3\n1 2\n3 3\n2 3\n",
+      "output": "YES\nYES\nYES\nNO\nYES\nYES\nYES\nNO\nYES\nYES\n"
+    },
+    {
+      "input": "3 3\nXXX\nXX.\nXX.\n10\n1 3\n1 2\n1 2\n1 3\n3 3\n2 2\n2 3\n2 3\n2 3\n2 2\n",
+      "output": "NO\nNO\nNO\nNO\nYES\nYES\nNO\nNO\nNO\nYES\n"
+    },
+    {
+      "input": "3 3\n...\nX.X\n..X\n10\n2 3\n3 3\n2 3\n1 2\n3 3\n1 1\n1 2\n2 3\n1 1\n1 2\n",
+      "output": "YES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\n"
+    },
+    {
+      "input": "3 3\n.XX\nX..\nXXX\n10\n2 2\n1 1\n1 2\n1 3\n1 3\n2 3\n1 2\n2 3\n1 3\n1 2\n",
+      "output": "YES\nYES\nNO\nNO\nNO\nYES\nNO\nYES\nNO\nNO\n"
+    },
+    {
+      "input": "3 3\nXXX\nX..\nX..\n10\n2 2\n1 2\n2 2\n2 3\n2 2\n3 3\n1 1\n2 3\n2 2\n1 3\n",
+      "output": "YES\nNO\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nNO\n"
+    },
+    {
+      "input": "3 3\n.XX\nX..\nXXX\n10\n1 2\n1 1\n2 3\n1 2\n2 3\n2 3\n1 3\n2 3\n3 3\n2 3\n",
+      "output": "NO\nYES\nYES\nNO\nYES\nYES\nNO\nYES\nYES\nYES\n"
+    },
+    {
+      "input": "1 1\nX\n1\n1 1\n",
+      "output": "YES\n"
+    },
+    {
+      "input": "3 3\nXX.\nXXX\nXX.\n10\n2 2\n3 3\n3 3\n2 3\n2 3\n1 2\n1 3\n1 1\n1 3\n1 2\n",
+      "output": "YES\nYES\nYES\nNO\nNO\nNO\nNO\nYES\nNO\nNO\n"
+    },
+    {
+      "input": "3 3\nX.X\n..X\nXXX\n10\n3 3\n1 2\n3 3\n1 2\n1 3\n1 2\n1 1\n2 3\n2 3\n1 2\n",
+      "output": "YES\nYES\nYES\nYES\nNO\nYES\nYES\nNO\nNO\nYES\n"
+    },
+    {
+      "input": "3 3\nXX.\nXXX\n..X\n10\n1 2\n1 2\n2 3\n1 3\n1 1\n2 3\n1 3\n1 1\n2 3\n2 2\n",
+      "output": "NO\nNO\nYES\nNO\nYES\nYES\nNO\nYES\nYES\nYES\n"
+    },
+    {
+      "input": "3 3\n.X.\nX..\nX.X\n10\n1 2\n1 1\n2 3\n1 2\n2 2\n1 3\n1 2\n3 3\n2 3\n2 3\n",
+      "output": "NO\nYES\nYES\nNO\nYES\nNO\nNO\nYES\nYES\nYES\n"
+    },
+    {
+      "input": "3 3\nXX.\n...\n.XX\n10\n1 3\n1 3\n1 2\n1 2\n3 3\n1 3\n2 3\n3 3\n2 3\n2 2\n",
+      "output": "YES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\n"
+    },
+    {
+      "input": "3 3\nX.X\n.XX\n...\n10\n1 3\n1 2\n2 3\n2 3\n2 2\n3 3\n3 3\n1 3\n1 2\n1 3\n",
+      "output": "NO\nYES\nNO\nNO\nYES\nYES\nYES\nNO\nYES\nNO\n"
+    },
+    {
+      "input": "3 3\n..X\n.XX\nXXX\n10\n1 2\n1 1\n2 2\n1 2\n1 3\n1 2\n1 3\n2 2\n2 3\n2 2\n",
+      "output": "NO\nYES\nYES\nNO\nNO\nNO\nNO\nYES\nNO\nYES\n"
+    },
+    {
+      "input": "3 3\n..X\nX..\n...\n10\n3 3\n1 3\n1 3\n3 3\n1 3\n2 3\n3 3\n3 3\n2 3\n1 2\n",
+      "output": "YES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\n"
+    },
+    {
+      "input": "3 3\n..X\n.X.\nX..\n10\n1 3\n1 3\n1 3\n2 3\n1 3\n1 2\n1 3\n2 2\n2 3\n2 2\n",
+      "output": "NO\nNO\nNO\nNO\nNO\nNO\nNO\nYES\nNO\nYES\n"
+    },
+    {
+      "input": "3 3\nX.X\nXX.\n..X\n10\n1 3\n1 2\n1 2\n3 3\n1 2\n1 2\n3 3\n1 1\n1 3\n2 3\n",
+      "output": "NO\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nNO\nNO\n"
+    },
+    {
+      "input": "3 3\nX..\n..X\nXX.\n10\n1 3\n2 2\n1 2\n1 2\n2 3\n1 3\n1 1\n2 2\n1 3\n1 1\n",
+      "output": "NO\nYES\nYES\nYES\nNO\nNO\nYES\nYES\nNO\nYES\n"
+    },
+    {
+      "input": "3 3\n..X\nX.X\n..X\n10\n2 3\n2 2\n3 3\n1 3\n1 1\n3 3\n3 3\n1 1\n1 2\n1 1\n",
+      "output": "YES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\nYES\n"
+    }
+  ]
+}

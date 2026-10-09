@@ -1,0 +1,5 @@
+error[C0001]: only a bare name for-target is supported so far, got a tuple
+ --> tests/diagnostics/c0001_tuple_for_target.py:2:9
+  |
+2 |     for a, b in [(1, 2)]:
+  |         ^^^^ only a bare name for-target is supported so far, got a tuple

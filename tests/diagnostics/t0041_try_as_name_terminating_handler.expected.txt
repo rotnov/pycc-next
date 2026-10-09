@@ -1,0 +1,5 @@
+error[T0041]: local name `e` may not be bound on every path reaching this use
+ --> tests/diagnostics/t0041_try_as_name_terminating_handler.py:1:1
+  |
+1 | def f(d: int) -> int:
+  | ^ local name `e` may not be bound on every path reaching this use

@@ -1,0 +1,1 @@
+{"code":"C0001","format_version":1,"help":[],"message":"call to builtin `ValueError` is valid Python but not implemented yet","severity":"error","spans":[{"col":1,"file":"tests/diagnostics/c0001_callable_builtin_value_error.py","label":"call to builtin `ValueError` is valid Python but not implemented yet","len":0,"line":1}]}

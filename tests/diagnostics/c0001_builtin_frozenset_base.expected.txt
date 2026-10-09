@@ -1,0 +1,5 @@
+error[C0001]: class `fzset` inherits from builtin type `frozenset` -- subclassing a builtin type is not supported yet
+ --> tests/diagnostics/c0001_builtin_frozenset_base.py:1:1
+  |
+1 | class fzset(frozenset):
+  | ^ class `fzset` inherits from builtin type `frozenset` -- subclassing a builtin type is not supported yet

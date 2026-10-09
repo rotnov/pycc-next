@@ -1,0 +1,5 @@
+error[C0001]: a comprehension with more than one `if` filter is not supported yet
+ --> tests/diagnostics/c0001_comprehension_two_if_filters.py:2:8
+  |
+2 | z = [i for i in xs if i > 0 if i < 10]
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a comprehension with more than one `if` filter is not supported yet

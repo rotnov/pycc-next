@@ -1,0 +1,5 @@
+error[T0003]: an empty list literal has no inferable element type here
+ --> tests/diagnostics/t0003_module_level_empty_list.py:1:1
+  |
+1 | xs = []
+  | ^ an empty list literal has no inferable element type here

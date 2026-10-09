@@ -1,0 +1,5 @@
+error[C0001]: only `for x in range(...)` is supported so far, got a call whose callee is a subscript expression (`obj[key]`)
+ --> tests/diagnostics/c0001_for_call_not_bare_name.py:5:14
+  |
+5 |     for k in xs[0]():
+  |              ^^^^^ only `for x in range(...)` is supported so far, got a call whose callee is a subscript expression (`obj[key]`)

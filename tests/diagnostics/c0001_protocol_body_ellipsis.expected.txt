@@ -1,0 +1,5 @@
+error[C0001]: a protocol class body must contain only method definitions (`def ...`) and annotated assignments (`x: int`) -- an expression statement (an `...` ellipsis literal) is not supported yet
+ --> tests/diagnostics/c0001_protocol_body_ellipsis.py:4:20
+  |
+4 | class P(Protocol): ...
+  |                    ^^^ a protocol class body must contain only method definitions (`def ...`) and annotated assignments (`x: int`) -- an expression statement (an `...` ellipsis literal) is not supported yet

@@ -1,0 +1,5 @@
+error[T0024]: 'return' outside a function is not allowed
+ --> tests/diagnostics/d0024_return_outside_function.py:1:1
+  |
+1 | return
+  | ^ 'return' outside a function is not allowed

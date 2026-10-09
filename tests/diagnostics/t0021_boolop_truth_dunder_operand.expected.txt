@@ -1,0 +1,5 @@
+error[T0021]: `or` operand of type `Empty` is not supported: class `Empty` defines `__bool__`, and pycc does not call it for a truth test yet
+ --> tests/diagnostics/t0021_boolop_truth_dunder_operand.py:1:1
+  |
+1 | class Empty:
+  | ^ `or` operand of type `Empty` is not supported: class `Empty` defines `__bool__`, and pycc does not call it for a truth test yet

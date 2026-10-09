@@ -1,0 +1,5 @@
+error[T0033]: `int` does not support `.get()`
+ --> tests/diagnostics/d0033_get_on_non_dict.py:1:1
+  |
+1 | x = 5
+  | ^ `int` does not support `.get()`

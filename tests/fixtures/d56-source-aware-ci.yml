@@ -1,0 +1,642 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned per D-014 / TESTING.md "Code coverage" -- never a bare "latest".
+  CARGO_LLVM_COV_VERSION: "0.8.7"
+  # D-015 pin, installed identically (same exact version) on every OS below.
+  LLVM_VERSION: "22.1.1"
+
+jobs:
+  # Coverage gate lives on exactly one target, per D-014 ("at least one
+  # Tier-1 target"). This job also builds/tests/lints -- it's the primary
+  # dev host's own architecture (macOS arm64), unchanged from PR-1/PR-2.
+  build-test-coverage:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Show pinned toolchain
+        run: rustup show
+
+      - name: Install LLVM 22 (D-015)
+        run: brew install llvm@22
+
+      - name: Install llvm-tools-preview
+        run: rustup component add llvm-tools-preview
+
+      # tests/slice0.rs's cross-compilation test needs this target and its
+      # pycc_rt build for the success path to contribute to coverage.
+      - name: Add x86_64-apple-darwin Rust target
+        run: rustup target add x86_64-apple-darwin
+
+      # Hard merge invariant from D-014. These thresholds must never be
+      # lowered or bypassed to make a pull request pass.
+      - name: Hard coverage gate — 100% lines + regions (D-014)
+        run: |
+          set -euo pipefail
+          LLVM_SYS_221_PREFIX_VALUE="$(brew --prefix llvm@22)"
+          TRUSTED_CARGO="$(rustup which cargo)"
+          TRUSTED_RUSTC="$(rustup which rustc)"
+          TRUSTED_RUSTDOC="$(rustup which rustdoc)"
+          TRUSTED_COV="/Users/runner/.cargo/bin/cargo-llvm-cov"
+          TRUSTED_TOOLCHAIN="$(dirname "$(dirname "$TRUSTED_CARGO")")"
+          cd "$RUNNER_TEMP"
+          RUSTC="$TRUSTED_RUSTC" RUSTDOC="$TRUSTED_RUSTDOC" "$TRUSTED_CARGO" install cargo-llvm-cov --locked --version "${CARGO_LLVM_COV_VERSION}"
+          "$TRUSTED_COV" llvm-cov --version
+          sudo chmod o+x /Users/runner /Users/runner/.cargo /Users/runner/.cargo/bin /Users/runner/.rustup /Users/runner/.rustup/toolchains
+          sudo chmod -R o+rX "$TRUSTED_TOOLCHAIN"
+          sudo chmod o+rx "$TRUSTED_COV"
+          ISOLATED_ROOT="$RUNNER_TEMP/pycc-coverage"
+          mkdir -p "$ISOLATED_ROOT/home" "$ISOLATED_ROOT/tmp" "$ISOLATED_ROOT/cargo-home" "$ISOLATED_ROOT/target"
+          sudo chown -R nobody:nobody "$ISOLATED_ROOT"
+          ISOLATED_ENV=(
+            "HOME=$ISOLATED_ROOT/home"
+            "TMPDIR=$ISOLATED_ROOT/tmp/"
+            "CARGO_HOME=$ISOLATED_ROOT/cargo-home"
+            "CARGO_TARGET_DIR=$ISOLATED_ROOT/target"
+            "CARGO=$TRUSTED_CARGO"
+            "RUSTC=$TRUSTED_RUSTC"
+            "RUSTDOC=$TRUSTED_RUSTDOC"
+            "LLVM_SYS_221_PREFIX=$LLVM_SYS_221_PREFIX_VALUE"
+            "PATH=$(dirname "$TRUSTED_CARGO"):/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
+          )
+          run_isolated() {
+            sudo -u nobody env -i "${ISOLATED_ENV[@]}" "$@"
+          }
+          ln -s "$ISOLATED_ROOT/target" "$GITHUB_WORKSPACE/target"
+          cd "$GITHUB_WORKSPACE"
+          run_isolated "$TRUSTED_CARGO" build --target x86_64-apple-darwin -p pycc_rt
+          run_isolated "$TRUSTED_CARGO" build --workspace
+          run_isolated "$TRUSTED_COV" llvm-cov --workspace --fail-under-lines 100 --fail-under-regions 100
+          rm "$GITHUB_WORKSPACE/target"
+          printf 'LLVM_SYS_221_PREFIX=%s\n' "$LLVM_SYS_221_PREFIX_VALUE" >> "$GITHUB_ENV"
+
+      - name: Check agent policy
+        run: |
+          python3 -B -m unittest discover -s scripts -p 'test_*.py'
+          python3 -B scripts/validate_agent_policies.py
+
+      - name: Check workflow permission policy
+        run: |
+          ruby scripts/test_check_ci_permissions.rb
+          ruby scripts/check_ci_permissions.rb
+
+      - name: Check roadmap evidence
+        run: |
+          ruby scripts/test_check_roadmap_evidence.rb
+          ruby scripts/check_roadmap_evidence.rb
+
+      # Rebuild outside the coverage boundary so the regular cargo test below
+      # exercises the same cross-target success path.
+      - name: Build pycc_rt for x86_64-apple-darwin
+        run: cargo build --target x86_64-apple-darwin -p pycc_rt
+
+      - name: cargo build --workspace
+        run: cargo build --workspace
+
+      - name: Run offline alpha skill contract evals
+        run: |
+          python3 scripts/run_alpha_skill_evals.py \
+            --client codex --pycc-bin target/debug/pycc
+          python3 scripts/run_alpha_skill_evals.py \
+            --client claude --pycc-bin target/debug/pycc
+
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+      - name: cargo clippy --workspace
+        run: |
+          rustup component add clippy
+          cargo clippy --workspace --all-targets -- -D warnings
+
+  # PR-3: native build+test+lint on the other 4 Tier-1 targets. No coverage
+  # requirement here -- that's build-test-coverage's job alone, per D-014.
+  native-build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show pinned toolchain
+        run: rustup show
+
+      # rustc/link.exe already discover the MSVC toolset on their own, but
+      # pycc's own linking step (src/main.rs's linker_command(), D-028) shells
+      # out to clang.exe directly -- outside any Developer Command Prompt,
+      # its bundled lld-link.exe can't find libcmt.lib/oldnames.lib (D-028).
+      # This sets up the same environment vcvarsall.bat would.
+      - name: Set up MSVC Developer Command Prompt (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install LLVM 22 (Linux, via apt.llvm.org)
+        if: runner.os == 'Linux'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          # llvm.sh's own packages don't pull in Polly's static lib; llvm-sys
+          # links it explicitly, so it must be installed separately here.
+          sudo apt-get install -y libpolly-22-dev
+          echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> "$GITHUB_ENV"
+
+      # tests/slice0.rs's own-triple --target test (D-031) needs a
+      # target-qualified pycc_rt build to link against, exactly like the
+      # macOS cross-compile tests already need for x86_64-apple-darwin --
+      # `cargo build --target <triple>` always uses target/<triple>/debug/,
+      # even when <triple> is this same runner's own default.
+      - name: Add own-triple Rust target (Linux, D-031)
+        if: runner.os == 'Linux'
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build pycc_rt for own triple (Linux, D-031)
+        if: runner.os == 'Linux'
+        run: cargo build --target ${{ matrix.target }} -p pycc_rt
+
+      - name: Install LLVM 22 (macOS, via Homebrew)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@22
+          echo "LLVM_SYS_221_PREFIX=$(brew --prefix llvm@22)" >> "$GITHUB_ENV"
+
+      # Downloaded directly from LLVM's own GitHub release (not a third-party
+      # mirror or package manager) -- no Windows package manager reliably
+      # carries LLVM 22 yet, checked before choosing this.
+      - name: Install LLVM 22 (Windows, official prebuilt release)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -L --fail -o llvm.tar.xz "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar.xz"
+          # $RUNNER_TEMP is a native Windows path (e.g. D:\a\_temp); passing
+          # it straight into bash's tar/mkdir mangles the backslashes. Use a
+          # plain repo-relative dir for the bash-side extraction, then
+          # cygpath -w it into a real Windows path only for the env var,
+          # since that's what the (native) build.rs consuming it expects.
+          mkdir -p llvm-extract
+          tar -xf llvm.tar.xz -C llvm-extract --strip-components=1
+          echo "LLVM_SYS_221_PREFIX=$(cygpath -w "$(pwd)/llvm-extract")" >> "$GITHUB_ENV"
+
+      # This LLVM release's own llvm-config reports libxml2 as a system lib
+      # (see D-027), so llvm-sys requires a real xml2s.lib to link -- vcpkg
+      # is preinstalled on GitHub's Windows runners (path varies by image,
+      # hence the env var rather than a hardcoded one). static-md matches
+      # Rust's own default dynamic-CRT linkage on this target.
+      - name: Install libxml2 (Windows, via vcpkg, for llvm-sys's system-libs)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libxml2:x64-windows-static-md
+          $libDir = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md\lib"
+          $xml2Lib = Get-ChildItem -Path $libDir -Filter "*xml2*.lib" | Select-Object -First 1
+          if (-not $xml2Lib) {
+            Write-Error "no libxml2 .lib found under $libDir"
+            exit 1
+          }
+          Copy-Item $xml2Lib.FullName "$libDir\xml2s.lib" -Force
+          echo "LIB=$libDir;$env:LIB" >> $env:GITHUB_ENV
+
+      - name: cargo build --workspace
+        run: cargo build --workspace
+
+      - name: cargo test --workspace
+        if: runner.os != 'Windows'
+        run: cargo test --workspace
+
+      # --test-threads=1: tests/slice0.rs spawns pycc.exe as a child process
+      # per test; parallel runs interleave their stderr output at the OS
+      # pipe level (Rust's own per-test output capture doesn't isolate
+      # inherited child-process output the same way), which made an earlier
+      # Windows-crash investigation (D-029) hard to attribute to specific
+      # tests from the CI log alone. Serialized here so that if this ever
+      # needs repeating, the log is unambiguous; not needed on other OSes.
+      - name: cargo test --workspace (single-threaded, see D-029)
+        if: runner.os == 'Windows'
+        run: cargo test --workspace -- --test-threads=1
+
+      # No explicit `shell:` here (unlike this step used to have) -- on
+      # Windows that forced Git Bash, whose own `PATH` startup rewriting
+      # puts its bundled coreutils `link.exe` (the Unix hardlink tool, at
+      # `C:\Program Files\Git\usr\bin\link.exe`) ahead of MSVC's real
+      # linker, breaking any proc-macro dependency's build with a bizarre
+      # "extra operand" error from what is very much not a linker (D-030).
+      # `cargo build`/`cargo test` above already run correctly on Windows
+      # using each OS's own default shell (pwsh here) with no override;
+      # this step's two commands have no bash-specific syntax, so dropping
+      # the override fixes Windows and changes nothing on Linux/macOS
+      # (already bash by default there).
+      - name: cargo clippy --workspace
+        run: |
+          rustup component add clippy
+          cargo clippy --workspace --all-targets -- -D warnings
+
+  # PR-3's cross-compilation proof (D-026): pycc, running natively on the
+  # arm64 runner, cross-compiles for x86_64-apple-darwin using its own
+  # --target flag -- same-OS/cross-arch, not cross-OS (see D-026 for why).
+  cross-compile-build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 22
+        run: |
+          brew install llvm@22
+          echo "LLVM_SYS_221_PREFIX=$(brew --prefix llvm@22)" >> "$GITHUB_ENV"
+
+      - name: Add x86_64-apple-darwin Rust target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Build pycc_rt for x86_64-apple-darwin
+        run: cargo build --target x86_64-apple-darwin -p pycc_rt
+
+      - name: Build pycc (native)
+        run: cargo build -p pycc
+
+      - name: Cross-compile the slice-0 fixture
+        run: |
+          mkdir -p /tmp/cross_fixture
+          printf 'print(42)\n' > /tmp/cross_fixture/hello.py
+          ./target/debug/pycc build /tmp/cross_fixture/hello.py -o /tmp/cross_fixture/hello --target x86_64-apple-darwin
+          file /tmp/cross_fixture/hello
+
+      - name: Upload the cross-compiled binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-compiled-x86_64-apple-darwin
+          path: /tmp/cross_fixture/hello
+
+  # Verifies the cross-compiled binary on its own native hardware -- "built
+  # on one host, executed and verified on its native runner" per
+  # docs/DELIVERY_PLAN.md's PR-3 row, not just "codegen didn't error."
+  cross-compile-verify:
+    needs: cross-compile-build
+    runs-on: macos-15-intel
+    steps:
+      - name: Download the cross-compiled binary
+        uses: actions/download-artifact@v4
+        with:
+          name: cross-compiled-x86_64-apple-darwin
+          path: /tmp/cross_fixture
+
+      - name: Verify it runs natively and prints the right output
+        run: |
+          chmod +x /tmp/cross_fixture/hello
+          file /tmp/cross_fixture/hello
+          output="$(/tmp/cross_fixture/hello)"
+          if [ "$output" != "42" ]; then
+            echo "expected '42', got '${output}'"
+            exit 1
+          fi
+          echo "cross-compiled binary verified on its native x86_64 runner"
+
+  # Single stable required-status-check name fanning in every job in this
+  # workflow (D-032): branch protection previously required only
+  # build-test-coverage + audit, so a failing/pending native-build-test leg
+  # or cross-compile-build/verify could not block a merge -- SPEC.md's own
+  # invariant 5 ("a feature doesn't exist until it's green everywhere") was
+  # unenforced for exactly the jobs that prove it. Naming individual matrix
+  # legs directly in branch protection was rejected: GitHub's required-check
+  # name for a matrix job bakes in the matrix values (e.g. "native-build-test
+  # (ubuntu-latest, x86_64-unknown-linux-gnu)"), so renaming an `os`/`target`
+  # entry -- or adding a new Tier-1/Tier-2 target later -- would silently
+  # leave an old, now-nonexistent name required forever (permanently
+  # unsatisfiable) while the new leg goes unenforced. This job's own name
+  # never changes regardless of matrix edits.
+  # The measurement job eventually executes pull-request code and is
+  # therefore untrusted. It seals the exact predecessor timing in an immutable
+  # artifact before candidate code runs, then measures the candidate on the
+  # same hosted runner. It also proves whether every executable benchmark input
+  # is byte-identical before candidate code runs. The separate gate job never
+  # executes compiler/build code from the PR.
+  frontend-perf-measure:
+    runs-on: macos-14
+    permissions:
+      contents: read
+    outputs:
+      predecessor_sha: ${{ steps.predecessor.outputs.sha }}
+      predecessor_artifact_id: ${{ steps.previous_upload.outputs.artifact-id }}
+      current_artifact_id: ${{ steps.current_upload.outputs.artifact-id }}
+      executable_inputs_equal: ${{ steps.benchmark_contract.outputs.executable_inputs_equal }}
+    steps:
+      - name: Resolve exact predecessor
+        id: predecessor
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              predecessor_sha="$PR_BASE_SHA"
+              ;;
+            push)
+              predecessor_sha="$PUSH_BEFORE_SHA"
+              ;;
+            *)
+              echo "cannot resolve a performance predecessor for event $GITHUB_EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          if [ -z "$predecessor_sha" ] ||
+             [ "$predecessor_sha" = "0000000000000000000000000000000000000000" ]; then
+            echo "cannot resolve the exact performance predecessor SHA" >&2
+            exit 1
+          fi
+          printf 'sha=%s\n' "$predecessor_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact predecessor
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ steps.predecessor.outputs.sha }}
+          path: previous
+
+      - name: Check out candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: current
+
+      - name: Verify exact benchmark revisions
+        env:
+          EXPECTED_PREDECESSOR_SHA: ${{ steps.predecessor.outputs.sha }}
+          EXPECTED_CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C previous rev-parse HEAD)" = "$EXPECTED_PREDECESSOR_SHA"
+          test "$(git -C current rev-parse HEAD)" = "$EXPECTED_CURRENT_SHA"
+          contract_paths=(
+            benches
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+            rust-toolchain
+            .cargo
+          )
+          for contract_path in "${contract_paths[@]}"; do
+            previous_path="previous/$contract_path"
+            current_path="current/$contract_path"
+            if [ ! -e "$previous_path" ] && [ ! -L "$previous_path" ] &&
+               [ ! -e "$current_path" ] && [ ! -L "$current_path" ]; then
+              continue
+            fi
+            git diff --no-index --exit-code -- "$previous_path" "$current_path"
+          done
+          local_contract_digest() {
+            checkout="$1"
+            (
+              cd "$checkout"
+              git ls-files -z -- \
+                ':(glob)crates/**/Cargo.toml' \
+                ':(glob)**/build.rs' |
+                while IFS= read -r -d '' relative_path; do
+                  file_digest="$(/usr/bin/shasum -a 256 "$relative_path" |
+                    /usr/bin/awk '{print $1}')"
+                  printf '%s\0%s\0' "$relative_path" "$file_digest"
+                done
+            ) | /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}'
+          }
+          test "$(local_contract_digest previous)" = \
+            "$(local_contract_digest current)"
+
+      - name: Classify executable benchmark inputs
+        id: benchmark_contract
+        run: |
+          set -euo pipefail
+          executable_inputs_equal=true
+          for executable_path in src crates; do
+            if git diff --no-index --no-ext-diff --no-textconv --quiet -- \
+              "previous/$executable_path" "current/$executable_path"; then
+              continue
+            else
+              diff_status="$?"
+              if [ "$diff_status" -ne 1 ]; then
+                echo "could not compare executable benchmark input $executable_path" >&2
+                exit "$diff_status"
+              fi
+              executable_inputs_equal=false
+            fi
+          done
+          printf 'executable_inputs_equal=%s\n' \
+            "$executable_inputs_equal" >> "$GITHUB_OUTPUT"
+
+      - name: Show pinned toolchain
+        run: rustup show
+
+      - name: Install LLVM 22 (D-015)
+        run: brew install llvm@22
+
+      - name: Export LLVM_SYS_221_PREFIX
+        run: echo "LLVM_SYS_221_PREFIX=$(brew --prefix llvm@22)" >> "$GITHUB_ENV"
+
+      - name: Benchmark exact predecessor
+        id: previous_benchmark
+        run: |
+          set -euo pipefail
+          previous_target="$RUNNER_TEMP/pycc-paired-perf-previous"
+          (
+            cd previous
+            CARGO_TARGET_DIR="$previous_target" \
+              cargo bench --locked --bench check_bench -- --save-baseline paired
+          )
+          previous_timing="$previous_target/criterion/pycc_check_frontend_fixture/paired/estimates.json"
+          timing_dir="$(mktemp -d "$RUNNER_TEMP/pycc-previous-timing.XXXXXX")"
+          cp "$previous_timing" "$timing_dir/estimates.json"
+          printf 'timing_path=%s\n' "$timing_dir/estimates.json" >> "$GITHUB_OUTPUT"
+
+      - name: Upload sealed predecessor frontend timing
+        id: previous_upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-perf-previous
+          path: ${{ steps.previous_benchmark.outputs.timing_path }}
+          if-no-files-found: error
+          retention-days: 90
+
+      # Candidate code cannot mutate the immutable v4 predecessor artifact:
+      # this is deliberately after the sealed upload, not merely after a local
+      # hash check in the same writable runner filesystem.
+      - name: Benchmark exact candidate
+        id: current_benchmark
+        run: |
+          set -euo pipefail
+          current_target="$RUNNER_TEMP/pycc-paired-perf-current"
+          (
+            cd current
+            CARGO_TARGET_DIR="$current_target" \
+              cargo bench --locked --bench check_bench -- --save-baseline paired
+          )
+          current_timing="$current_target/criterion/pycc_check_frontend_fixture/paired/estimates.json"
+          timing_dir="$(mktemp -d "$RUNNER_TEMP/pycc-current-timing.XXXXXX")"
+          cp "$current_timing" "$timing_dir/estimates.json"
+          printf 'timing_path=%s\n' "$timing_dir/estimates.json" >> "$GITHUB_OUTPUT"
+
+      - name: Upload candidate frontend timing
+        id: current_upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-perf-current
+          path: ${{ steps.current_benchmark.outputs.timing_path }}
+          if-no-files-found: error
+          retention-days: 90
+
+  # Required by ci-gate (D-044/D-056). This job consumes the paired
+  # measurement only as JSON data and verifies immutable hashes for the
+  # reviewed comparator and its tests before executing them.
+  frontend-perf-gate:
+    needs: frontend-perf-measure
+    runs-on: macos-14
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out only the reviewed performance checker
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ needs.frontend-perf-measure.outputs.predecessor_sha }}
+          sparse-checkout: |
+            scripts/check_source_aware_perf_regression.rb
+            scripts/test_check_source_aware_perf_regression.rb
+          sparse-checkout-cone-mode: false
+
+      - name: Verify reviewed performance checker
+        run: |
+          printf '%s  %s\n' \
+            55ce7259ff164a43a98187cb7b611794a8417dc3dfddf3f4fb689776ab83adcb \
+            scripts/check_source_aware_perf_regression.rb \
+            b5ccd35af90dcff6f9fff30ec9075ab9d780694fc9941954913f5bd4407b2b34 \
+            scripts/test_check_source_aware_perf_regression.rb |
+            shasum -a 256 --check
+
+      - name: Test reviewed performance checker
+        run: ruby scripts/test_check_source_aware_perf_regression.rb
+
+      - name: Require sealed artifact identities
+        env:
+          PREVIOUS_ARTIFACT_ID: ${{ needs.frontend-perf-measure.outputs.predecessor_artifact_id }}
+          CURRENT_ARTIFACT_ID: ${{ needs.frontend-perf-measure.outputs.current_artifact_id }}
+        run: |
+          set -euo pipefail
+          for artifact_id in "$PREVIOUS_ARTIFACT_ID" "$CURRENT_ARTIFACT_ID"; do
+            case "$artifact_id" in
+              ""|*[!0-9]*)
+                echo "paired frontend timing has an invalid artifact identity" >&2
+                exit 1
+                ;;
+            esac
+          done
+          if [ "$PREVIOUS_ARTIFACT_ID" = "$CURRENT_ARTIFACT_ID" ]; then
+            echo "paired frontend timings must have distinct artifact identities" >&2
+            exit 1
+          fi
+
+      - name: Require executable-input identity
+        env:
+          EXECUTABLE_INPUTS_EQUAL: ${{ needs.frontend-perf-measure.outputs.executable_inputs_equal }}
+        run: |
+          case "$EXECUTABLE_INPUTS_EQUAL" in
+            true|false) ;;
+            *)
+              echo "paired frontend timing has invalid executable-input identity" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Download sealed predecessor frontend timing
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.frontend-perf-measure.outputs.predecessor_artifact_id }}
+          path: target/criterion/pycc_check_frontend_fixture/previous
+          merge-multiple: true
+
+      - name: Download candidate frontend timing
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.frontend-perf-measure.outputs.current_artifact_id }}
+          path: target/criterion/pycc_check_frontend_fixture/current
+          merge-multiple: true
+
+      - name: Require exact predecessor and candidate timing
+        run: |
+          set -euo pipefail
+          timing_root="target/criterion/pycc_check_frontend_fixture"
+          for revision in previous current; do
+            timing="$timing_root/$revision/estimates.json"
+            if [ ! -f "$timing" ] || [ -L "$timing" ]; then
+              echo "paired frontend timing is missing $revision/estimates.json" >&2
+              exit 1
+            fi
+          done
+          file_count="$(find "$timing_root" -type f | wc -l | tr -d '[:space:]')"
+          if [ "$file_count" -ne 2 ] || find "$timing_root" -type l | grep -q .; then
+            echo "paired frontend timing must contain exactly two regular files" >&2
+            exit 1
+          fi
+
+      - name: Compare exact predecessor and candidate
+        env:
+          EXECUTABLE_INPUTS_EQUAL: ${{ needs.frontend-perf-measure.outputs.executable_inputs_equal }}
+        run: |
+          ruby scripts/check_source_aware_perf_regression.rb \
+            target/criterion/pycc_check_frontend_fixture/current/estimates.json \
+            target/criterion/pycc_check_frontend_fixture/previous/estimates.json \
+            "$EXECUTABLE_INPUTS_EQUAL"
+
+  ci-gate:
+    needs:
+      - build-test-coverage
+      - native-build-test
+      - cross-compile-build
+      - cross-compile-verify
+      - frontend-perf-measure
+      - frontend-perf-gate
+    if: always()
+    runs-on: ubuntu-latest
+    # Overrides the workflow-level `contents: read` default: this job only
+    # reads the `needs` context, never checks out or touches the repository,
+    # so it gets none of that access rather than an unused inherited grant.
+    permissions: {}
+    steps:
+      # Checks each named job's result equals 'success' explicitly, rather
+      # than blocklisting contains(needs.*.result, 'failure' | 'cancelled'):
+      # cross-compile-verify has no `if:` of its own, so when its own
+      # dependency (cross-compile-build) fails, GitHub marks
+      # cross-compile-verify itself 'skipped', not 'failure' -- a
+      # failure-only blocklist would miss that cascade and pass the gate.
+      # Requiring literal 'success' per job catches skipped/cancelled/
+      # timed_out/failure alike without having to enumerate every non-
+      # success state by name.
+      - name: Fail unless every required job succeeded
+        if: >-
+          needs.build-test-coverage.result != 'success' ||
+          needs.native-build-test.result != 'success' ||
+          needs.cross-compile-build.result != 'success' ||
+          needs.cross-compile-verify.result != 'success' ||
+          needs.frontend-perf-measure.result != 'success' ||
+          needs.frontend-perf-gate.result != 'success'
+        run: |
+          echo "one or more required jobs did not succeed:"
+          echo '${{ toJSON(needs) }}'
+          exit 1

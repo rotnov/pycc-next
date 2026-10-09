@@ -1,0 +1,5 @@
+error[C0001]: a comprehension with more than one `for` clause is not supported yet
+ --> tests/diagnostics/c0001_comprehension_expression_two_for_clauses.py:1:14
+  |
+1 | print(len([x for x in range(2) for z in range(2)]))
+  |              ^^^^^^^^^^^^^^^^^ a comprehension with more than one `for` clause is not supported yet

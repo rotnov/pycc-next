@@ -1,0 +1,5 @@
+error[T0040]: tuple index must be a non-negative literal integer within range
+ --> tests/diagnostics/d0040_tuple_index_oversized_literal_still_t0040.py:1:1
+  |
+1 | y = (1, 2)[4611686018427387904]
+  | ^ tuple index must be a non-negative literal integer within range

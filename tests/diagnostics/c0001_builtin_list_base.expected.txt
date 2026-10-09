@@ -1,0 +1,5 @@
+error[C0001]: class `L` inherits from builtin type `list` -- subclassing a builtin type is not supported yet
+ --> tests/diagnostics/c0001_builtin_list_base.py:1:1
+  |
+1 | class L(list):
+  | ^ class `L` inherits from builtin type `list` -- subclassing a builtin type is not supported yet

@@ -1,0 +1,5 @@
+error[T0039]: tuple element type `str` is not compiled yet (D-116) -- only int/bool/float elements are
+ --> tests/diagnostics/d0039_tuple_element_type_not_int_bool_float.py:1:1
+  |
+1 | x = (1, "a")
+  | ^ tuple element type `str` is not compiled yet (D-116) -- only int/bool/float elements are

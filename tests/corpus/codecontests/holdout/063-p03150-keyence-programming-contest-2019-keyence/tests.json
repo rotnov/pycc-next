@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "input": "keyence",
+      "output": "YES"
+    },
+    {
+      "input": "ashlfyha",
+      "output": "NO"
+    },
+    {
+      "input": "keyofscience",
+      "output": "YES"
+    },
+    {
+      "input": "mpyszsbznf",
+      "output": "NO"
+    }
+  ]
+}

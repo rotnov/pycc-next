@@ -1,0 +1,6366 @@
+{
+  "data_license": "CC BY 4.0",
+  "dataset": "deepmind/code_contests",
+  "dataset_url": "https://huggingface.co/datasets/deepmind/code_contests",
+  "files": {
+    "LICENSE": {
+      "bytes": 18657,
+      "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411"
+    },
+    "NOTICE": {
+      "bytes": 2599,
+      "sha256": "603e6a76b77a7de8aac3ecf7ea59ab7e21cca2af3e6a2edc501551fb6c54a82d"
+    },
+    "README.md": {
+      "bytes": 2644,
+      "sha256": "e6b5b98c0b6f5aaf33b66af552047ef2e545e66284dbecea71806e4fb9389832"
+    }
+  },
+  "hash_seeds": [
+    0,
+    1,
+    12345
+  ],
+  "holdout_count": 100,
+  "max_bytes": 16777216,
+  "per_case_timeout_seconds": 1.0,
+  "problems": [
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 397,
+          "sha256": "14a93fe86a19d5593a8d71115895e6ba5a3e3e4a102745c3c9cb290b0f786481"
+        },
+        "tests.json": {
+          "bytes": 497,
+          "sha256": "cfee4a5cbbcbde567466fcb2290fa7af5d729279fbce68e8f8f37444d63d8ea2"
+        }
+      },
+      "id": "problems/001-1548-d1-gregor-and-the-odd-cows-easy",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 161,
+      "name": "1548_D1. Gregor and the Odd Cows (Easy)",
+      "set": "steering",
+      "solution_lines": 20,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 252,
+          "sha256": "89734d6394f620e536deb7c3bbc93547c703777be29d30f3606a93c193b99c83"
+        },
+        "tests.json": {
+          "bytes": 334,
+          "sha256": "c705ff0e55d4707c630d0881a7e9524913d539938334985d2d8ead2ed3455fc1"
+        }
+      },
+      "id": "problems/002-1549-a-gregor-and-cryptography",
+      "imports": [],
+      "largest_case_bytes": 15,
+      "name": "1549_A. Gregor and Cryptography",
+      "set": "steering",
+      "solution_lines": 10,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 489,
+          "sha256": "fe3ef99e1f1d21218d32c5dd3d72f68d63ebfee291dd551a5b267789f1bd7bdb"
+        },
+        "tests.json": {
+          "bytes": 249,
+          "sha256": "389f2b688b09e98108108b8d4d6a821c5952d146a79ff91fd9bb1aa3f6abcacf"
+        }
+      },
+      "id": "problems/003-1549-b-gregor-and-the-pawn-game",
+      "imports": [],
+      "largest_case_bytes": 48,
+      "name": "1549_B. Gregor and the Pawn Game",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 548,
+          "sha256": "2df4c541321deeb34ff2cafdf33283d09bf3dccfe1acba33ddbf0258e40957bf"
+        },
+        "tests.json": {
+          "bytes": 1020,
+          "sha256": "90b231bff21e337f649fc11d3813432ae0a82640dca9c937179014421d81acbd"
+        }
+      },
+      "id": "problems/004-1549-c-web-of-lies",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 277,
+      "name": "1549_C. Web of Lies",
+      "set": "steering",
+      "solution_lines": 29,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 606,
+          "sha256": "a2d567b9c5b01fca43c0a002c2b1da78c47636baffc0cc6135c79e891c573bc3"
+        },
+        "tests.json": {
+          "bytes": 1192,
+          "sha256": "c52a22dea27ccabe6005a49162830bb3727220916fd55f156e3db3749b3ebd7c"
+        }
+      },
+      "id": "problems/005-1549-d-integers-have-friends",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 262,
+      "name": "1549_D. Integers Have Friends",
+      "set": "steering",
+      "solution_lines": 22,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 271,
+          "sha256": "1d0adb9919151cde3df1f9b0b8677a99b4cae354268900268b173d5f6fb782c0"
+        },
+        "tests.json": {
+          "bytes": 490,
+          "sha256": "e7215a49351a01fe4e305ad812d1d8aebd3f96806a4068d06e7eeed3a9cd0e5a"
+        }
+      },
+      "id": "problems/006-1551-a-polycarp-and-coins",
+      "imports": [],
+      "largest_case_bytes": 28,
+      "name": "1551_A. Polycarp and Coins",
+      "set": "steering",
+      "solution_lines": 20,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 311,
+          "sha256": "30357aa839c12c739a96ef37a7ed4b01fa15bbd8ec291f4d516b7068807979d8"
+        },
+        "tests.json": {
+          "bytes": 1081,
+          "sha256": "3227a5eade341eebf9b65467069af199bd90f7b4390015f0eaedaca812617cfb"
+        }
+      },
+      "id": "problems/007-1551-b1-wonderful-coloring-1",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 413,
+      "name": "1551_B1. Wonderful Coloring - 1",
+      "set": "steering",
+      "solution_lines": 16,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 868,
+          "sha256": "caeacdc6659afa5970307f9e7a992c041da167bc4378ca188b81be62369da1bd"
+        },
+        "tests.json": {
+          "bytes": 1267,
+          "sha256": "ca82799270fdeecbea54771359b31c01fd09e982db0737cccb6255e9a9fd87f0"
+        }
+      },
+      "id": "problems/008-1551-b2-wonderful-coloring-2",
+      "imports": [
+        "collections",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 281,
+      "name": "1551_B2. Wonderful Coloring - 2",
+      "set": "steering",
+      "solution_lines": 44,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 560,
+          "sha256": "9ba2e5d8513be8941db82e6491b45acd80b0708ff3e4bf53f6a0e33d9dc6587e"
+        },
+        "tests.json": {
+          "bytes": 198,
+          "sha256": "31fa2ae966d10e2788142b2574b188687773bd5b450f1a22dc14679987075f87"
+        }
+      },
+      "id": "problems/009-1551-c-interesting-story",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 82,
+      "name": "1551_C. Interesting Story",
+      "set": "steering",
+      "solution_lines": 22,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 558,
+          "sha256": "c4bd0272197e708014d093509ce6d0d5598403fdc23a3fc16f1619e13e85afea"
+        },
+        "tests.json": {
+          "bytes": 287,
+          "sha256": "901af1c7185dedbcb89f951c390805bffea0ab8cbe9af13bb143ac166f91130e"
+        }
+      },
+      "id": "problems/010-1551-e-fixed-points",
+      "imports": [],
+      "largest_case_bytes": 68,
+      "name": "1551_E. Fixed Points",
+      "set": "steering",
+      "solution_lines": 25,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 1109,
+          "sha256": "ba1c1f883c3e3d41f4913d7a2b78c4b7bf0b6b71723e2f6cb6d79d8f46b75ca7"
+        },
+        "tests.json": {
+          "bytes": 833,
+          "sha256": "1040ba9321eceed4f0deff8abf0f68f8be7e076f5c890c136f807647591b99dc"
+        }
+      },
+      "id": "problems/011-1551-f-equidistant-vertices",
+      "imports": [
+        "collections",
+        "sys"
+      ],
+      "largest_case_bytes": 214,
+      "name": "1551_F. Equidistant Vertices",
+      "set": "steering",
+      "solution_lines": 47,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 248,
+          "sha256": "2dfdaa6098f53c231de6e7f49f2dde459036c40feb4fe291a85d7c28e1d64c1b"
+        },
+        "tests.json": {
+          "bytes": 212,
+          "sha256": "49265c2b982abcc2eb7fb1049621f89469947963ce13fcf3d3e60619b18d9e9f"
+        }
+      },
+      "id": "problems/012-1552-a-subsequence-permutation",
+      "imports": [],
+      "largest_case_bytes": 37,
+      "name": "1552_A. Subsequence Permutation",
+      "set": "steering",
+      "solution_lines": 12,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1248,
+          "sha256": "bb84439bc6835ce9b2f13e7f8adffe3aa04900687fec8bc8e46fe3683d7d5eec"
+        },
+        "tests.json": {
+          "bytes": 273,
+          "sha256": "911b51c44caaf50b4052733eed1276fd4eade192dd5d18a0e3f0fe6c227e3a9e"
+        }
+      },
+      "id": "problems/013-1552-b-running-for-gold",
+      "imports": [],
+      "largest_case_bytes": 171,
+      "name": "1552_B. Running for Gold",
+      "set": "steering",
+      "solution_lines": 60,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 806,
+          "sha256": "6697d61d241d0690666c787c3d0c7d0d3a209c48976daf6d23e0ba99342c3983"
+        },
+        "tests.json": {
+          "bytes": 161,
+          "sha256": "519896e24120a683737969212cc678a383cc4c19a056505a50c41748a66108c8"
+        }
+      },
+      "id": "problems/014-1552-c-maximize-the-intersections",
+      "imports": [],
+      "largest_case_bytes": 63,
+      "name": "1552_C. Maximize the Intersections",
+      "set": "steering",
+      "solution_lines": 36,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 632,
+          "sha256": "62c4bf856361f5b3e2a8e3278f4a84f57df413e922986a1fec7e278c201e59de"
+        },
+        "tests.json": {
+          "bytes": 3081,
+          "sha256": "430434787d7d88b463c14cfd18500d466b3d719f9ed60963b803a99be730ff57"
+        }
+      },
+      "id": "problems/015-1552-d-array-differentiation",
+      "imports": [],
+      "largest_case_bytes": 446,
+      "name": "1552_D. Array Differentiation",
+      "set": "steering",
+      "solution_lines": 29,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 810,
+          "sha256": "28e2f00a90f1f26e7d2dcbb33ad7b9962a9a39e7b433960a764e5278f3058413"
+        },
+        "tests.json": {
+          "bytes": 1848,
+          "sha256": "33dff29d6194c0358cad2ab9bab90354c9278d38b7417b1a878f2c220e71d0a8"
+        }
+      },
+      "id": "problems/016-1552-e-colors-and-intervals",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 410,
+      "name": "1552_E. Colors and Intervals",
+      "set": "steering",
+      "solution_lines": 42,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 6,
+      "files": {
+        "solution.py": {
+          "bytes": 1063,
+          "sha256": "aecbaf47fcadb6fedebb6c8e475ab2f088b9383235ed765bb26316fb005421cf"
+        },
+        "tests.json": {
+          "bytes": 699,
+          "sha256": "09867f9c257b3606bbdb66629a0737ff3575da1092da2056a09d7910b9f19c80"
+        }
+      },
+      "id": "problems/017-1552-f-telepanting",
+      "imports": [],
+      "largest_case_bytes": 113,
+      "name": "1552_F. Telepanting",
+      "set": "steering",
+      "solution_lines": 46,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 70,
+          "sha256": "220a27f0c46914e0305c354131cf494b687d842b834d362e08366c98d1f292a5"
+        },
+        "tests.json": {
+          "bytes": 121,
+          "sha256": "64ec21621ebec7363d9032c4037855936b4838ab68299ddf33faa9633d925193"
+        }
+      },
+      "id": "problems/018-1553-a-digits-sum",
+      "imports": [],
+      "largest_case_bytes": 22,
+      "name": "1553_A. Digits Sum",
+      "set": "steering",
+      "solution_lines": 4,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 529,
+          "sha256": "0a74a6822ac8dfa3e4a5e637c98d5a136ac2291be91b0cdba53427524b1ffbf0"
+        },
+        "tests.json": {
+          "bytes": 739,
+          "sha256": "2b9ea8e10b32b691af94bc04a42cc6d250853da1e20afb59c4013b4b08408596"
+        }
+      },
+      "id": "problems/019-1553-b-reverse-string",
+      "imports": [],
+      "largest_case_bytes": 507,
+      "name": "1553_B. Reverse String",
+      "set": "steering",
+      "solution_lines": 26,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 452,
+          "sha256": "e28ed2e2e25610de065af776cec11a5513fad3e63a8b4679ff31bb8fc96be18d"
+        },
+        "tests.json": {
+          "bytes": 135,
+          "sha256": "6dbe96706e613fcd1a247cf19fcaf0c86e42f478949b5242c13f0cecce239664"
+        }
+      },
+      "id": "problems/020-1553-c-penalty",
+      "imports": [],
+      "largest_case_bytes": 46,
+      "name": "1553_C. Penalty",
+      "set": "steering",
+      "solution_lines": 21,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 1975,
+          "sha256": "3b221c6f08ab400fc2973affad1398b5f0d031131450ee48c0ce751b7acffd2a"
+        },
+        "tests.json": {
+          "bytes": 1260,
+          "sha256": "3e10397024db194d6c74753f4a1e957cbec5b70588c0da96e75f1aa1d0598440"
+        }
+      },
+      "id": "problems/021-1553-g-common-divisor-graph",
+      "imports": [
+        "itertools",
+        "sys"
+      ],
+      "largest_case_bytes": 144,
+      "name": "1553_G. Common Divisor Graph",
+      "set": "steering",
+      "solution_lines": 96,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 206,
+          "sha256": "a97b24b18679e6d5b2ed30f974e52bb72a54b9aae9d413a5e58d4480fa3d0806"
+        },
+        "tests.json": {
+          "bytes": 350,
+          "sha256": "7a5e8599fc7f476f3a62ffdd621ee539a6f72699efb679090c77b817ba84dc44"
+        }
+      },
+      "id": "problems/022-1554-a-cherry",
+      "imports": [],
+      "largest_case_bytes": 72,
+      "name": "1554_A. Cherry",
+      "set": "steering",
+      "solution_lines": 9,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 485,
+          "sha256": "b0e0684a8ca05f7579b6fc52ce1df0e67d6ea4ebf190fe61f214e3b26d906cc7"
+        },
+        "tests.json": {
+          "bytes": 289,
+          "sha256": "50b85f713aeb5228ffb27843d672eebbf15f2773e3d1406e8c0b5949f9083edb"
+        }
+      },
+      "id": "problems/023-1554-b-cobb",
+      "imports": [],
+      "largest_case_bytes": 48,
+      "name": "1554_B. Cobb",
+      "set": "steering",
+      "solution_lines": 17,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 259,
+          "sha256": "2b5db023a176767cc269e8816dee43fe319ee14747ad24388a20f35b69649d42"
+        },
+        "tests.json": {
+          "bytes": 134,
+          "sha256": "6dc021cb943169d7675bac81c41826a996efe1fda4e075e531a96a769e77c540"
+        }
+      },
+      "id": "problems/024-1554-c-mikasa",
+      "imports": [],
+      "largest_case_bytes": 35,
+      "name": "1554_C. Mikasa",
+      "set": "steering",
+      "solution_lines": 15,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 380,
+          "sha256": "2223c100563d35605843cd602f8ee716a91212ffb2ab4e9224b657a4ed4e299b"
+        },
+        "tests.json": {
+          "bytes": 716,
+          "sha256": "e16f843bcc7a2beaefcb943e9289499d472a9544884c0fd82a3835a813c6e856"
+        }
+      },
+      "id": "problems/025-1555-a-pizzaforces",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 33,
+      "name": "1555_A. PizzaForces",
+      "set": "steering",
+      "solution_lines": 20,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 527,
+          "sha256": "331432590381caef5aef8362ebd3cb05a2a9a22bf688e887e4bc8ad92a37fa1c"
+        },
+        "tests.json": {
+          "bytes": 226,
+          "sha256": "64eda2404eaab73cd6353bcc54c4a7605b0b00261b5458ae3a45bb519dc22da7"
+        }
+      },
+      "id": "problems/026-1555-b-two-tables",
+      "imports": [
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 83,
+      "name": "1555_B. Two Tables",
+      "set": "steering",
+      "solution_lines": 29,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 862,
+          "sha256": "f2e2f02d5eb3405908a73915b09514d56a15568ee03a6b12fb32981e1a276a68"
+        },
+        "tests.json": {
+          "bytes": 126,
+          "sha256": "c7dc8d29f9c6de7f7230fd4e8af9271b7ba036ffd389aa66d8bcf8719ba4d1c4"
+        }
+      },
+      "id": "problems/027-1555-c-coin-rows",
+      "imports": [],
+      "largest_case_bytes": 36,
+      "name": "1555_C. Coin Rows",
+      "set": "steering",
+      "solution_lines": 44,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 988,
+          "sha256": "aaa4d064440971273837d51015b0a89e34b462aa725232f16c399b5e723e34d1"
+        },
+        "tests.json": {
+          "bytes": 275,
+          "sha256": "29c59c29e555ba456b3d8a1251fc22d65c6344512717958c3c1ac0daaa821370"
+        }
+      },
+      "id": "problems/028-1555-d-say-no-to-palindromes",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 28,
+      "name": "1555_D. Say No to Palindromes",
+      "set": "steering",
+      "solution_lines": 43,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 213,
+          "sha256": "3c7ba222fa383c9fd54dcff97a4df2cfc5f135f564edc2f9788c8dce432a536a"
+        },
+        "tests.json": {
+          "bytes": 123,
+          "sha256": "78fd03e2074f0a63b313ee24412ac05014431f68575eb6055a12fbc5e4d319a4"
+        }
+      },
+      "id": "problems/029-1556-a-a-variety-of-operations",
+      "imports": [],
+      "largest_case_bytes": 26,
+      "name": "1556_A. A Variety of Operations",
+      "set": "steering",
+      "solution_lines": 12,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 1217,
+          "sha256": "c8914ed505a6ff1815ebc69254d9ccf68f36c2a5083b9f04fa214ebc945c5993"
+        },
+        "tests.json": {
+          "bytes": 431,
+          "sha256": "215ddceb8e3a6a52107a02175f00b5f409c89bc73af6ed591c2be5569e256230"
+        }
+      },
+      "id": "problems/030-1556-b-take-your-places",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 59,
+      "name": "1556_B. Take Your Places!",
+      "set": "steering",
+      "solution_lines": 58,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 398,
+          "sha256": "748bffb90136233796ada249ec95c94c1f4780ffc8f8ec0f2fa52e8219e1a744"
+        },
+        "tests.json": {
+          "bytes": 158,
+          "sha256": "9db1736cbb12cb3f671b23cceb9ba06c7337f71321e1a14d62581464b9dc48cf"
+        }
+      },
+      "id": "problems/031-1557-a-ezzat-and-two-subsequences",
+      "imports": [],
+      "largest_case_bytes": 41,
+      "name": "1557_A. Ezzat and Two Subsequences",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 405,
+          "sha256": "c3dd3c56d5a84ff421320d4f9cee6ce1c16c2eb1f73936e4a4ee10281c62c7af"
+        },
+        "tests.json": {
+          "bytes": 136,
+          "sha256": "f777afe61f1e3a7742bac9da2d726e616d2f8e4f40306248f35ba546b2a5084f"
+        }
+      },
+      "id": "problems/032-1557-b-moamen-and-k-subarrays",
+      "imports": [],
+      "largest_case_bytes": 44,
+      "name": "1557_B. Moamen and k-subarrays",
+      "set": "steering",
+      "solution_lines": 20,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 865,
+          "sha256": "9dad49850d8949021c8bf3ca42dba3f0a972f8a44df225cab337446f135dbfa4"
+        },
+        "tests.json": {
+          "bytes": 369,
+          "sha256": "6806193399ce5bf22d7653eb72e03f996307eac1456a194b7a0cbd724ce0c915"
+        }
+      },
+      "id": "problems/033-1559-b-mocha-and-red-and-blue",
+      "imports": [],
+      "largest_case_bytes": 44,
+      "name": "1559_B. Mocha and Red and Blue",
+      "set": "steering",
+      "solution_lines": 38,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 537,
+          "sha256": "02bb73f892c5599f8c41e1664f4254678c293a86db751b5ea673d9a0f6bf2981"
+        },
+        "tests.json": {
+          "bytes": 598,
+          "sha256": "2c95e62834990cd30e5c9b659f1d30e2dd78e234092c207d6e8ebe377975563b"
+        }
+      },
+      "id": "problems/034-1559-c-mocha-and-hiking",
+      "imports": [],
+      "largest_case_bytes": 25,
+      "name": "1559_C. Mocha and Hiking",
+      "set": "steering",
+      "solution_lines": 29,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 15,
+      "files": {
+        "solution.py": {
+          "bytes": 321,
+          "sha256": "cd28313924aea37c52807499a7a979d878424d7ff8ce54c7c57095432f1d70a2"
+        },
+        "tests.json": {
+          "bytes": 1187,
+          "sha256": "694a2b89270b914f49e45ebdbdc81bde3fa5997934472681128d3a10c09a28af"
+        }
+      },
+      "id": "problems/035-1560-b-who-s-opposite",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 45,
+      "name": "1560_B. Who's Opposite?",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 9,
+      "files": {
+        "solution.py": {
+          "bytes": 189,
+          "sha256": "3e7487eef83c4a1c096012acf7ca9757bb8ef8aa096ef0625e1c09d42f29f309"
+        },
+        "tests.json": {
+          "bytes": 2511,
+          "sha256": "f8617917eba107950b601ad766c70ff3ac0b6a7fa7bd126ce81a0b0628ac6a4e"
+        }
+      },
+      "id": "problems/036-1560-c-infinity-table",
+      "imports": [],
+      "largest_case_bytes": 298,
+      "name": "1560_C. Infinity Table",
+      "set": "steering",
+      "solution_lines": 8,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 655,
+          "sha256": "45d03d73bbe014ca6b9fdc06fd2ef27c6d7c5b859578d08e513e0448f9ca0b2f"
+        },
+        "tests.json": {
+          "bytes": 447,
+          "sha256": "58097934b18be2b7f9d9b1ccbf8c1cf3a8a40d965b89e70890ac5ab5ed2631be"
+        }
+      },
+      "id": "problems/037-1560-d-make-a-power-of-two",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 65,
+      "name": "1560_D. Make a Power of Two",
+      "set": "steering",
+      "solution_lines": 35,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1155,
+          "sha256": "a1155b6943c2b545caf38279d1a6b5114cbcef12d7edd79a2116e460f5427547"
+        },
+        "tests.json": {
+          "bytes": 264,
+          "sha256": "2db29562f87505c31290c29eebe7826fdc0cf2795c70d5486aebb17516c509a6"
+        }
+      },
+      "id": "problems/038-1560-e-polycarp-and-string-transformation",
+      "imports": [],
+      "largest_case_bytes": 116,
+      "name": "1560_E. Polycarp and String Transformation",
+      "set": "steering",
+      "solution_lines": 66,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 1646,
+          "sha256": "06b16e32f233682d7ece3430777e5900698bbf5a1200b04856be16840d3d1dfa"
+        },
+        "tests.json": {
+          "bytes": 286,
+          "sha256": "48870ffa7e357d210b859f6df08ceeb19dc5f8af4bebb668d8b6a215c73fcaa1"
+        }
+      },
+      "id": "problems/039-1560-f1-nearest-beautiful-number-easy-version",
+      "imports": [],
+      "largest_case_bytes": 33,
+      "name": "1560_F1. Nearest Beautiful Number (easy version)",
+      "set": "steering",
+      "solution_lines": 60,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 6,
+      "files": {
+        "solution.py": {
+          "bytes": 152,
+          "sha256": "8fcf9cf11a5c5b45b558eb54d1527e452abb5b680d7c72af555ce3afab894f05"
+        },
+        "tests.json": {
+          "bytes": 557,
+          "sha256": "6e9a4de845d22d326671dd4cce3ff1b17f9f000ed23cba4bde6388ffc6de8489"
+        }
+      },
+      "id": "problems/040-1560-f2-nearest-beautiful-number-hard-version",
+      "imports": [],
+      "largest_case_bytes": 59,
+      "name": "1560_F2. Nearest Beautiful Number (hard version)",
+      "set": "steering",
+      "solution_lines": 6,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 620,
+          "sha256": "b83ea5815de9b9819027eb1b9a582f98554f87b45db48266dd209222c018f5c0"
+        },
+        "tests.json": {
+          "bytes": 125,
+          "sha256": "0f908950e0a9e1327d7fba370feb42310a0a300f6304948b0fc5876eda2911b5"
+        }
+      },
+      "id": "problems/041-1561-a-simply-strange-sort",
+      "imports": [],
+      "largest_case_bytes": 38,
+      "name": "1561_A. Simply Strange Sort",
+      "set": "steering",
+      "solution_lines": 24,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 1329,
+          "sha256": "77744fd3f71d8f7448b363d4e5f38171baab5946d10b68250bb2e85b977c9bdb"
+        },
+        "tests.json": {
+          "bytes": 558,
+          "sha256": "5d6bd4a41587dfd28d5bebc8e3ba3e05a2f013214b4b8f5ab7bce571ebd64630"
+        }
+      },
+      "id": "problems/042-1561-b-charmed-by-the-game",
+      "imports": [],
+      "largest_case_bytes": 20,
+      "name": "1561_B. Charmed by the Game",
+      "set": "steering",
+      "solution_lines": 56,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1658,
+          "sha256": "f7cdcfb681cdd60309ffd7638ca0d6506dc8922c09139fe4e8cad8f811ae31e9"
+        },
+        "tests.json": {
+          "bytes": 114,
+          "sha256": "4f4d5f56aaa8a4710816c14bb2ec7e862f98cce513bd590ad72e44e9d4bc1255"
+        }
+      },
+      "id": "problems/043-1561-c-deep-down-below",
+      "imports": [],
+      "largest_case_bytes": 29,
+      "name": "1561_C. Deep Down Below",
+      "set": "steering",
+      "solution_lines": 68,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 20,
+      "files": {
+        "solution.py": {
+          "bytes": 417,
+          "sha256": "b7dcbed61caf169985e96d855559edc1fc4a013303f76b4a95d7f5a2657cd929"
+        },
+        "tests.json": {
+          "bytes": 1509,
+          "sha256": "ec9332e0651902969f73c5cf7111dc753bdf36774c1340669af86cdfd5202012"
+        }
+      },
+      "id": "problems/044-1561-d1-up-the-strip-simplified-version",
+      "imports": [],
+      "largest_case_bytes": 17,
+      "name": "1561_D1. Up the Strip (simplified version)",
+      "set": "steering",
+      "solution_lines": 41,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 247,
+          "sha256": "635e33c70fb92fbb6ad9a130f25a7465e6189cd8a6db3f6b1142ada6609243ea"
+        },
+        "tests.json": {
+          "bytes": 141,
+          "sha256": "d6964445c9eca8eacb56019e527cdc28c879bd2084792e16ecdc428aec2e90a7"
+        }
+      },
+      "id": "problems/045-1562-a-the-miracle-and-the-sleeper",
+      "imports": [],
+      "largest_case_bytes": 44,
+      "name": "1562_A. The Miracle and the Sleeper",
+      "set": "steering",
+      "solution_lines": 16,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 490,
+          "sha256": "199d0dc477d6fca84a34a3a7314a51665f0b89be17646746f0c7b4c97ace1a83"
+        },
+        "tests.json": {
+          "bytes": 270,
+          "sha256": "d8debd7cc68c3017887dc419a325a28086b9da822f8024a973df07a12d005d3e"
+        }
+      },
+      "id": "problems/046-1562-b-scenes-from-a-memory",
+      "imports": [],
+      "largest_case_bytes": 71,
+      "name": "1562_B. Scenes From a Memory",
+      "set": "steering",
+      "solution_lines": 23,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 204,
+          "sha256": "160f638329fbf5723a237886e8b07c6c697858de31d64b61ed4ca34e14215ea6"
+        },
+        "tests.json": {
+          "bytes": 464,
+          "sha256": "53c36077ebcf5eb508d640646adabddca7a3d6e6a6c7b74fb877c8380ad7d2e1"
+        }
+      },
+      "id": "problems/047-1562-c-rings",
+      "imports": [],
+      "largest_case_bytes": 91,
+      "name": "1562_C. Rings",
+      "set": "steering",
+      "solution_lines": 11,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 599,
+          "sha256": "653ea71dba013e8e88d329d2a03deeadd4c1fc73fb9d2e2b41ce4a42b70f3909"
+        },
+        "tests.json": {
+          "bytes": 246,
+          "sha256": "1063b000a54e409fd8430b53a3ff9f50c2abb00ffc772c45601220cb516b5776"
+        }
+      },
+      "id": "problems/048-1562-d1-two-hundred-twenty-one-easy-version",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 112,
+      "name": "1562_D1. Two Hundred Twenty One (easy version)",
+      "set": "steering",
+      "solution_lines": 27,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1110,
+          "sha256": "61d91076b754bf0ed3ba26431e906bd6d03dbcc5b92c3172bc76c11210861eb6"
+        },
+        "tests.json": {
+          "bytes": 574,
+          "sha256": "01527f39a8ac283b603e565629b68469ce018d03f93e989e551ee30170c4bcb5"
+        }
+      },
+      "id": "problems/049-1562-d2-two-hundred-twenty-one-hard-version",
+      "imports": [
+        "bisect",
+        "collections",
+        "itertools",
+        "sys"
+      ],
+      "largest_case_bytes": 112,
+      "name": "1562_D2. Two Hundred Twenty One (hard version)",
+      "set": "steering",
+      "solution_lines": 41,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 668,
+          "sha256": "b7955d315e85c6a85c26dbeacf08dc6bd3fc45b691035638fd50917d969d45ba"
+        },
+        "tests.json": {
+          "bytes": 438,
+          "sha256": "b8781d768fd5ae08833178047444691057f3c654d2678e8de70ee9360c7dee2f"
+        }
+      },
+      "id": "problems/050-1562-e-rescue-niwen",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 86,
+      "name": "1562_E. Rescue Niwen!",
+      "set": "steering",
+      "solution_lines": 27,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 117,
+          "sha256": "265eb3ec38c0e3ca1df10b6a5551276f1129c050be42bbb187c81bb87a66f627"
+        },
+        "tests.json": {
+          "bytes": 167,
+          "sha256": "66882a82304a01e2f8df5751019e1fdc8f3ccf5e191f3b5a27eb67107b7ca86b"
+        }
+      },
+      "id": "problems/051-1566-a-median-maximization",
+      "imports": [],
+      "largest_case_bytes": 54,
+      "name": "1566_A. Median Maximization",
+      "set": "steering",
+      "solution_lines": 5,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1106,
+          "sha256": "6def547ab3151a2005c0eba04b7599cf35cc96d32abd0ce3d013d256f340aff6"
+        },
+        "tests.json": {
+          "bytes": 127,
+          "sha256": "66b995bc432a80ec5be3160f5e1b2d04aa00335cd2479e38a37e2c879db86a72"
+        }
+      },
+      "id": "problems/052-1566-b-min-mex-cut",
+      "imports": [
+        "bisect",
+        "collections",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 31,
+      "name": "1566_B. MIN-MEX Cut",
+      "set": "steering",
+      "solution_lines": 48,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 758,
+          "sha256": "e79958513ae057f66f6c2434bf1c339434e366f8fea1e39f2db67a4537ecfad2"
+        },
+        "tests.json": {
+          "bytes": 155,
+          "sha256": "d4c5b617da3600af1e5054e91a2ed4d9945d1f8929887a6f4921337fc252e42a"
+        }
+      },
+      "id": "problems/053-1566-c-max-mex-cut",
+      "imports": [],
+      "largest_case_bytes": 58,
+      "name": "1566_C. MAX-MEX Cut",
+      "set": "steering",
+      "solution_lines": 49,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 307,
+          "sha256": "6d686c303ddf39f855e30bfa1f522580e4d9d3140051acd14d7575ea27f6eb56"
+        },
+        "tests.json": {
+          "bytes": 142,
+          "sha256": "a2693f16ba93c97423958dddfd580d2c511bffe69df5134d3bf9055e9ce6c6a4"
+        }
+      },
+      "id": "problems/054-1566-d1-seating-arrangements-easy-version",
+      "imports": [],
+      "largest_case_bytes": 50,
+      "name": "1566_D1. Seating Arrangements (easy version) ",
+      "set": "steering",
+      "solution_lines": 16,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 746,
+          "sha256": "bf8b16c717055ac843b879f3ca46a6bc448e98506e726f7254224909f71ba403"
+        },
+        "tests.json": {
+          "bytes": 254,
+          "sha256": "821dca03fb57a66dd39c47670c4a7d9051370572959b63b765a7b0f3c361523d"
+        }
+      },
+      "id": "problems/055-1566-d2-seating-arrangements-hard-version",
+      "imports": [],
+      "largest_case_bytes": 147,
+      "name": "1566_D2. Seating Arrangements (hard version) ",
+      "set": "steering",
+      "solution_lines": 33,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1000,
+          "sha256": "a15f024b6712edda3186f4a3456eccb1d732eab381284cd392bfc4f7af3587fc"
+        },
+        "tests.json": {
+          "bytes": 219,
+          "sha256": "1508fb1fb1b6ae5b72579e96f0aa0070100e083b893f7282e8cce45ba8f56804"
+        }
+      },
+      "id": "problems/056-1566-e-buds-re-hanging",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 104,
+      "name": "1566_E. Buds Re-hanging",
+      "set": "steering",
+      "solution_lines": 36,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1934,
+          "sha256": "6dabfad925372803c37e7f769b6d6b3cfbf3476a98e896811ae848dd4cdaafc7"
+        },
+        "tests.json": {
+          "bytes": 267,
+          "sha256": "9dc25b5f05491d4b0dd752fb28ac69e8da4b690776056b1205ace250ee5aaad6"
+        }
+      },
+      "id": "problems/057-1566-f-points-movement",
+      "imports": [
+        "itertools"
+      ],
+      "largest_case_bytes": 161,
+      "name": "1566_F. Points Movement",
+      "set": "steering",
+      "solution_lines": 56,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 334,
+          "sha256": "ec4c01c47aac038d4fb05884bc77b2c874d1d6f266bf85bf93350d1aebb42c30"
+        },
+        "tests.json": {
+          "bytes": 199,
+          "sha256": "f8a952f310fa7383edb618cd4b769f3085ab233c2e6f6e6718869d760397f71e"
+        }
+      },
+      "id": "problems/058-1567-b-mexor-mixup",
+      "imports": [],
+      "largest_case_bytes": 30,
+      "name": "1567_B. MEXor Mixup",
+      "set": "steering",
+      "solution_lines": 20,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 321,
+          "sha256": "4a750ceac3fda22b74670875699b85d412b36c9fd5cf70cfa787e9c2a52013d1"
+        },
+        "tests.json": {
+          "bytes": 286,
+          "sha256": "a5d089e9151fec8bc49fe728ba38da741a9d1ccaeca6c47adc46a45bada99220"
+        }
+      },
+      "id": "problems/059-1567-c-carrying-conundrum",
+      "imports": [],
+      "largest_case_bytes": 23,
+      "name": "1567_C. Carrying Conundrum",
+      "set": "steering",
+      "solution_lines": 22,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 339,
+          "sha256": "5979fd43f4de47ce42ae6fb60d6f98eb50a3441a826c0afee263cb15aac96543"
+        },
+        "tests.json": {
+          "bytes": 414,
+          "sha256": "ea83abbb1eeb77daf4b2c21908599ed0de1926aa0c65d128c61299a95deb6237"
+        }
+      },
+      "id": "problems/060-1567-d-expression-evaluation-error",
+      "imports": [],
+      "largest_case_bytes": 38,
+      "name": "1567_D. Expression Evaluation Error",
+      "set": "steering",
+      "solution_lines": 26,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 384,
+          "sha256": "2bf3709bdadfaa620c5dcebbfa7dd88f8af3c7b55811990ee4c236fb58f46581"
+        },
+        "tests.json": {
+          "bytes": 449,
+          "sha256": "860105b4edc2667ac2a791cf526a20f2a084408e1f314e68f2f1a3861bc7a34a"
+        }
+      },
+      "id": "problems/061-1569-a-balanced-substring",
+      "imports": [],
+      "largest_case_bytes": 36,
+      "name": "1569_A. Balanced Substring",
+      "set": "steering",
+      "solution_lines": 26,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 890,
+          "sha256": "1c976a470adc3174e0040d808e382df51a3a748f3057efe8754ffb4f44f5a3d3"
+        },
+        "tests.json": {
+          "bytes": 282,
+          "sha256": "8061e8736c7e75ad4931eff17133dfdd760c8c45a17022dd909127c4eeac4014"
+        }
+      },
+      "id": "problems/062-1569-b-chess-tournament",
+      "imports": [],
+      "largest_case_bytes": 20,
+      "name": "1569_B. Chess Tournament",
+      "set": "steering",
+      "solution_lines": 45,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 522,
+          "sha256": "b78d6f277055d1d9bd36ac54d3b79b93e43d7592e77a1b433aad7d8c0a1f6ebe"
+        },
+        "tests.json": {
+          "bytes": 429,
+          "sha256": "27cde39e5c40b3c27f083508cb603dabcdadff116819ad7ace0f747f6d1c27a6"
+        }
+      },
+      "id": "problems/063-1569-c-jury-meeting",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 159,
+      "name": "1569_C. Jury Meeting",
+      "set": "steering",
+      "solution_lines": 31,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1334,
+          "sha256": "219da0620555124b3f06765395257b041800e9b40ac574f70bbe49150e5e2305"
+        },
+        "tests.json": {
+          "bytes": 347,
+          "sha256": "ff1deb5cdc8ba18e9836c6785cd10867708e5fc555b4a5deb817a32ca6b23073"
+        }
+      },
+      "id": "problems/064-1569-d-inconvenient-pairs",
+      "imports": [
+        "collections",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 144,
+      "name": "1569_D. Inconvenient Pairs",
+      "set": "steering",
+      "solution_lines": 87,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 351,
+          "sha256": "44edad7837456e1f97e40826771c284b145e7683d167c082032699b2064c995e"
+        },
+        "tests.json": {
+          "bytes": 192,
+          "sha256": "f07e185364d5638be3586e8137f6fe3074791120f40fe666dcba05fc344b27ba"
+        }
+      },
+      "id": "problems/065-1573-a-countdown",
+      "imports": [],
+      "largest_case_bytes": 82,
+      "name": "1573_A. Countdown",
+      "set": "steering",
+      "solution_lines": 17,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 935,
+          "sha256": "f208784abd840d5917b9c750883d83c101f2aa45ea2e82bf3270f6e507f29fbf"
+        },
+        "tests.json": {
+          "bytes": 218,
+          "sha256": "357c8efb34d84ec91d1ea377a50583773551eb6b033cc436fc46bc51fc5d3191"
+        }
+      },
+      "id": "problems/066-1573-c-book",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 102,
+      "name": "1573_C. Book",
+      "set": "steering",
+      "solution_lines": 35,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 6,
+      "files": {
+        "solution.py": {
+          "bytes": 755,
+          "sha256": "33d42977cf9c2ef9de5845cdb560031843c0c5f0e10975b97dd0dce73840cd87"
+        },
+        "tests.json": {
+          "bytes": 488,
+          "sha256": "510f76edae4bcbf5babba19ffc6489c7bc75f55e1dfc0db547cdd36ac7b76e95"
+        }
+      },
+      "id": "problems/067-1574-b-combinatorics-homework",
+      "imports": [],
+      "largest_case_bytes": 26,
+      "name": "1574_B. Combinatorics Homework",
+      "set": "steering",
+      "solution_lines": 36,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 671,
+          "sha256": "8075fdb49084afda0d370082d0153f223bc14b2aeaacea560c4863f03e9be986"
+        },
+        "tests.json": {
+          "bytes": 129,
+          "sha256": "3cfdc4fa552a492440a31c804f0c55c1f884df1b9376a988da1ac5212c5feee8"
+        }
+      },
+      "id": "problems/068-1574-c-slay-the-dragon",
+      "imports": [
+        "bisect",
+        "sys"
+      ],
+      "largest_case_bytes": 35,
+      "name": "1574_C. Slay the Dragon",
+      "set": "steering",
+      "solution_lines": 26,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 2014,
+          "sha256": "0731946886b1444eaf408d716421edae5b3fad1fc7206f278bcb302b23328ede"
+        },
+        "tests.json": {
+          "bytes": 236,
+          "sha256": "6a9b00309388408184babd3735231145a469609bca638da43f0eaead980cf39b"
+        }
+      },
+      "id": "problems/069-1574-e-coloring",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 51,
+      "name": "1574_E. Coloring",
+      "set": "steering",
+      "solution_lines": 57,
+      "source_split": "valid"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 742,
+          "sha256": "8ad52ea958634a09cd6cc8c4e1ecc62048edb11236e25fd63b8dfbc6048e83f1"
+        },
+        "tests.json": {
+          "bytes": 108,
+          "sha256": "d02c538419fa56dd0b572e4f85d6153e41c9043bf3ee50e86b7dc5f9790d0e7f"
+        }
+      },
+      "id": "problems/070-1575-a-another-sorting-problem",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 19,
+      "name": "1575_A. Another Sorting Problem",
+      "set": "steering",
+      "solution_lines": 48,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1117,
+          "sha256": "27b26da81ba0ee6947a9691cfc2b92d8138b7a68933559479eb366dd79362a69"
+        },
+        "tests.json": {
+          "bytes": 222,
+          "sha256": "9970f0edc6eba2fabaefa851bb24b8c5278f2b8fe2553c9ebe024decec8c701f"
+        }
+      },
+      "id": "problems/071-1575-j-jeopardy-of-dropped-balls",
+      "imports": [
+        "bisect"
+      ],
+      "largest_case_bytes": 62,
+      "name": "1575_J. Jeopardy of Dropped Balls",
+      "set": "steering",
+      "solution_lines": 41,
+      "source_split": "test"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 371,
+          "sha256": "5839366f42c4956626a060bdb0e17e6454ebcf541a18495240a687d6e66c5ff0"
+        },
+        "tests.json": {
+          "bytes": 283,
+          "sha256": "9ce8ec2575d4adf7cb8489f3e8c325e83db19cfac3910dd4325b2e00cc55133b"
+        }
+      },
+      "id": "problems/072-1575-l-longest-array-deconstruction",
+      "imports": [
+        "bisect"
+      ],
+      "largest_case_bytes": 16,
+      "name": "1575_L. Longest Array Deconstruction",
+      "set": "steering",
+      "solution_lines": 28,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 199,
+          "sha256": "231413d5f9e74eb4176525ecc38c6ce2b0b71bca4de58d1c37e9ab58a7111a76"
+        },
+        "tests.json": {
+          "bytes": 150,
+          "sha256": "c0aeb0718a35b2a62cc49aa6ac3fcbcddb2244fe59ecd97f0cf1f6a169add9c3"
+        }
+      },
+      "id": "problems/073-1579-a-casimir-s-string-solitaire",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 45,
+      "name": "1579_A. Casimir's String Solitaire",
+      "set": "steering",
+      "solution_lines": 11,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 531,
+          "sha256": "9ddb92015f7abe0858d59b2fd982b5fbc213381a0d639dfa2e39df6d121857a3"
+        },
+        "tests.json": {
+          "bytes": 338,
+          "sha256": "375cf1a5fe830e688032ff4c6110b6ed909aa8f93762753a97a430c04c87e979"
+        }
+      },
+      "id": "problems/074-1579-b-shifting-sort",
+      "imports": [],
+      "largest_case_bytes": 38,
+      "name": "1579_B. Shifting Sort",
+      "set": "steering",
+      "solution_lines": 22,
+      "source_split": "test"
+    },
+    {
+      "case_count": 10,
+      "files": {
+        "solution.py": {
+          "bytes": 1240,
+          "sha256": "383084f795e7c21ea17b3d58bffdd995217afb4d30f50f573f089b80d8f22972"
+        },
+        "tests.json": {
+          "bytes": 1169,
+          "sha256": "f7291e5bc57d6d422917742750e7ea81c75b246cffca5189dfb5ff0163807206"
+        }
+      },
+      "id": "problems/075-1579-c-ticks",
+      "imports": [],
+      "largest_case_bytes": 240,
+      "name": "1579_C. Ticks",
+      "set": "steering",
+      "solution_lines": 38,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 785,
+          "sha256": "4120e0c040dbf94a4cfcbbfc861d8d8221eff9c433008682c3cd174cdc0d0cea"
+        },
+        "tests.json": {
+          "bytes": 518,
+          "sha256": "4e3d7825167bac41121f4100147ef8ec1f7c566503285aabac35facbe848a1d4"
+        }
+      },
+      "id": "problems/076-1579-d-productive-meeting",
+      "imports": [
+        "heapq"
+      ],
+      "largest_case_bytes": 72,
+      "name": "1579_D. Productive Meeting",
+      "set": "steering",
+      "solution_lines": 32,
+      "source_split": "test"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 828,
+          "sha256": "5a9c1a0891900ded0de01f2f8079ecbb1d722d66d74bf3633273df4b6b5b42ef"
+        },
+        "tests.json": {
+          "bytes": 349,
+          "sha256": "96f52e17e6ac17bf7e42da45c7b941a71713a4719717eed42e7ee5589cbaf978"
+        }
+      },
+      "id": "problems/077-1579-e2-array-optimization-by-deque",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 62,
+      "name": "1579_E2. Array Optimization by Deque",
+      "set": "steering",
+      "solution_lines": 46,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 637,
+          "sha256": "f0450b253ded4cade7f8014e2249413c82e8778b11a5a35183bc85b4a6c75b68"
+        },
+        "tests.json": {
+          "bytes": 150,
+          "sha256": "6fbd5ee8d1c670b248bb2ffffa4d5e110d5fe4f36cac63c40475c2e4d98686b9"
+        }
+      },
+      "id": "problems/078-1579-f-array-stabilization-and-version",
+      "imports": [
+        "collections",
+        "sys"
+      ],
+      "largest_case_bytes": 52,
+      "name": "1579_F. Array Stabilization (AND version)",
+      "set": "steering",
+      "solution_lines": 26,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 513,
+          "sha256": "4c15439dfe9ed6d1e037590743f0e04ce3102f70e8a1d695f62041c043ff9b8f"
+        },
+        "tests.json": {
+          "bytes": 172,
+          "sha256": "42e5f3c80e8fe46b58d96dd2a4f18bfb3951cd65ca02fdbb622fed3ed457cd81"
+        }
+      },
+      "id": "problems/079-1579-g-minimal-coverage",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 70,
+      "name": "1579_G. Minimal Coverage",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1366,
+          "sha256": "3203623d17af3b0c596bbbd9dfc936b69f4ffcb6ce94055d76f9bc18de887b2a"
+        },
+        "tests.json": {
+          "bytes": 274,
+          "sha256": "3962a184ab531729a01206abf609b67ce296676c8bf178ce7ec6aafdd846fc6e"
+        }
+      },
+      "id": "problems/080-1580-a-portal",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 96,
+      "name": "1580_A. Portal",
+      "set": "steering",
+      "solution_lines": 38,
+      "source_split": "test"
+    },
+    {
+      "case_count": 9,
+      "files": {
+        "solution.py": {
+          "bytes": 552,
+          "sha256": "1ebec9c71fb4067f58107bf401f9d1a52e02668041dec684fee317357917143d"
+        },
+        "tests.json": {
+          "bytes": 1910,
+          "sha256": "3b8f8da40b085176b618a3adf32f4f39a1223e35078d37bb07e950adf2c73e25"
+        }
+      },
+      "id": "problems/081-1581-a-cqxym-count-permutations",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 76,
+      "name": "1581_A. CQXYM Count Permutations",
+      "set": "steering",
+      "solution_lines": 31,
+      "source_split": "test"
+    },
+    {
+      "case_count": 9,
+      "files": {
+        "solution.py": {
+          "bytes": 222,
+          "sha256": "6acedcde23a4dc7bbb42f418dc6911813d80ca648dc407b0c2ed47c0818fd58a"
+        },
+        "tests.json": {
+          "bytes": 746,
+          "sha256": "65e5815e9a76392dda1450267c4d8dabcb0189ec87dae7e8101fbe9723d31c3d"
+        }
+      },
+      "id": "problems/082-1581-b-diameter-of-graph",
+      "imports": [],
+      "largest_case_bytes": 35,
+      "name": "1581_B. Diameter of Graph",
+      "set": "steering",
+      "solution_lines": 1,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 519,
+          "sha256": "cd2baae704a1a6ee8c1d3721b1b1d0952cf666e86dfe32d3800933c837dd4d96"
+        },
+        "tests.json": {
+          "bytes": 114,
+          "sha256": "f48a68dea10cefd469798944dd332384e197d4756f4888b30be3e84b754fd9dc"
+        }
+      },
+      "id": "problems/083-1582-a-luntik-and-concerts",
+      "imports": [],
+      "largest_case_bytes": 26,
+      "name": "1582_A. Luntik and Concerts",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 338,
+          "sha256": "59ae309c934c3027835321b90e5df3e378d406047a881278a9106e0879325eaa"
+        },
+        "tests.json": {
+          "bytes": 153,
+          "sha256": "9a835ccb10ad38e7c3f19f9d38f9ae0fd2a03c4048dc2d63e943de1ea7ea7bbd"
+        }
+      },
+      "id": "problems/084-1582-b-luntik-and-subsequences",
+      "imports": [],
+      "largest_case_bytes": 56,
+      "name": "1582_B. Luntik and Subsequences",
+      "set": "steering",
+      "solution_lines": 17,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1759,
+          "sha256": "b8621207cfb378ae06d3ac9a57fe7cc130013d0c0148d14e0959c250aaea9145"
+        },
+        "tests.json": {
+          "bytes": 152,
+          "sha256": "630bfd95d9425bdd4b3eb980c1ca86762b7f4d3a9115a452b00fafb2559d394f"
+        }
+      },
+      "id": "problems/085-1582-c-grandma-capa-knits-a-scarf",
+      "imports": [
+        "bisect",
+        "collections",
+        "heapq",
+        "itertools",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 54,
+      "name": "1582_C. Grandma Capa Knits a Scarf",
+      "set": "steering",
+      "solution_lines": 61,
+      "source_split": "test"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 722,
+          "sha256": "d28be3c5b9f52c4d5f279d9140fb7f65edd5bfe1c92ffc431efc1f07ac7a0bf2"
+        },
+        "tests.json": {
+          "bytes": 395,
+          "sha256": "670d2becc4e59e284b8d03a1fbf78d46572322e231016e69ee137b25c735dc58"
+        }
+      },
+      "id": "problems/086-1586-a-windblume-ode",
+      "imports": [],
+      "largest_case_bytes": 54,
+      "name": "1586_A. Windblume Ode",
+      "set": "steering",
+      "solution_lines": 32,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 446,
+          "sha256": "a9927989e81703d8a824f859430517e20e81d8e603a10bd8d19fb673d9d418ef"
+        },
+        "tests.json": {
+          "bytes": 183,
+          "sha256": "806f9c1471b316fdcdeb531168ab627dcf4513e436d305e24cc53e41aabbaf35"
+        }
+      },
+      "id": "problems/087-1586-b-omkar-and-heavenly-tree",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 52,
+      "name": "1586_B. Omkar and Heavenly Tree",
+      "set": "steering",
+      "solution_lines": 30,
+      "source_split": "test"
+    },
+    {
+      "case_count": 23,
+      "files": {
+        "solution.py": {
+          "bytes": 808,
+          "sha256": "dc95d789305c561482a44891216072dd2fe7b9f3c23f472b1537c416b3b39ae5"
+        },
+        "tests.json": {
+          "bytes": 3723,
+          "sha256": "6ac22bbb21ec45bd93ae3687fc3e3e43c51bc793b8869bd7d80caa57762b078c"
+        }
+      },
+      "id": "problems/088-1586-c-omkar-and-determination",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 59,
+      "name": "1586_C. Omkar and Determination",
+      "set": "steering",
+      "solution_lines": 24,
+      "source_split": "test"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 1831,
+          "sha256": "bdf8ac6e804ec6e2a51185295f946b137418bb8f8c429c5084904ad6f59515f8"
+        },
+        "tests.json": {
+          "bytes": 365,
+          "sha256": "08dc7c4e5ee77b88941a0bfa4f465f813f33f8d1a468aa5a4ef7f7ce83334b9b"
+        }
+      },
+      "id": "problems/089-1586-e-moment-of-bloom",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 50,
+      "name": "1586_E. Moment of Bloom",
+      "set": "steering",
+      "solution_lines": 90,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 427,
+          "sha256": "16ebcd934098a18d8c835762817fbae74a3a1965051f369c4cf46c2f16dec1f7"
+        },
+        "tests.json": {
+          "bytes": 208,
+          "sha256": "6bd094f92ef51c2da8235d725ad48b4263da562d91d64c071f7bf6229d37e5a3"
+        }
+      },
+      "id": "problems/090-1591-a-life-of-a-flower",
+      "imports": [],
+      "largest_case_bytes": 32,
+      "name": "1591_A. Life of a Flower",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 222,
+          "sha256": "ff9e1b80f2ab5dd853b72c2b5703fab7aec5526dea88032270f4e6eeccf056ae"
+        },
+        "tests.json": {
+          "bytes": 209,
+          "sha256": "a8c85cdffdcb0b0d0b0c34f9fb427d2ffacdc8bacfe19fb0e6cc5e0d1bc814d2"
+        }
+      },
+      "id": "problems/091-1591-b-array-eversion",
+      "imports": [],
+      "largest_case_bytes": 36,
+      "name": "1591_B. Array Eversion",
+      "set": "steering",
+      "solution_lines": 11,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 638,
+          "sha256": "637aa73f92a6588f84308446d2854bc8120b9216851cba67223205131094e933"
+        },
+        "tests.json": {
+          "bytes": 208,
+          "sha256": "bdb4300fbddcd2f1ff46d6e0a21b3d88d9d4676979541af51d3c5fc428379387"
+        }
+      },
+      "id": "problems/092-1591-c-minimize-distance",
+      "imports": [],
+      "largest_case_bytes": 105,
+      "name": "1591_C. Minimize Distance",
+      "set": "steering",
+      "solution_lines": 28,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 529,
+          "sha256": "72138cd3952c0fd11746567ee8b12ddbae568b90e3c4349efe31bca43f128034"
+        },
+        "tests.json": {
+          "bytes": 171,
+          "sha256": "e3b1a56e40a0b61fd4260e566dd8625f6bc3560c081c478ce575879c091fa378"
+        }
+      },
+      "id": "problems/093-1591-d-yet-another-sorting-problem",
+      "imports": [],
+      "largest_case_bytes": 52,
+      "name": "1591_D. Yet Another Sorting Problem",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "test"
+    },
+    {
+      "case_count": 6,
+      "files": {
+        "solution.py": {
+          "bytes": 597,
+          "sha256": "17425e061ddcd353fe8972693aacfbb188dcef04eaa21b258f11c6bc4465165b"
+        },
+        "tests.json": {
+          "bytes": 725,
+          "sha256": "b521f1b3bc6287db26e621ef1ee61e6f545ff4ac012d80de4b40764456a4ab34"
+        }
+      },
+      "id": "problems/094-1591-f-non-equal-neighbours",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 299,
+      "name": "1591_F. Non-equal Neighbours",
+      "set": "steering",
+      "solution_lines": 42,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 91,
+          "sha256": "28a6b9dc52290f40ebe7295f5165799d5ca512e8bb9fe43951373d108ff7857e"
+        },
+        "tests.json": {
+          "bytes": 340,
+          "sha256": "2b80a2e7442fa9bfbd240e68533bdf4abce61b83fb8a6c598aa7ef2108f25ed5"
+        }
+      },
+      "id": "problems/095-1594-a-consecutive-sum-riddle",
+      "imports": [],
+      "largest_case_bytes": 31,
+      "name": "1594_A. Consecutive Sum Riddle",
+      "set": "steering",
+      "solution_lines": 4,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1170,
+          "sha256": "1582d7ce14747352aed8ffdd800c4b7b3a5e3471476e0c6e5513d9749f0d3d5f"
+        },
+        "tests.json": {
+          "bytes": 110,
+          "sha256": "c7887945c91e8430ac776e44d23ad48ad600b72c37f9e9a20d7ede06d1d45bfa"
+        }
+      },
+      "id": "problems/096-1594-b-special-numbers",
+      "imports": [
+        "bisect",
+        "collections",
+        "heapq",
+        "math"
+      ],
+      "largest_case_bytes": 19,
+      "name": "1594_B. Special Numbers",
+      "set": "steering",
+      "solution_lines": 81,
+      "source_split": "test"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 457,
+          "sha256": "361b1d88b331a1e494553ac7978a144c214fa23fde1cd9076d15b2472f7ba592"
+        },
+        "tests.json": {
+          "bytes": 298,
+          "sha256": "6576d182f7766d68027b09923146561b976b5d1938a91ad1ff0e878d807efe9f"
+        }
+      },
+      "id": "problems/097-1594-c-make-them-equal",
+      "imports": [],
+      "largest_case_bytes": 29,
+      "name": "1594_C. Make Them Equal",
+      "set": "steering",
+      "solution_lines": 19,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1351,
+          "sha256": "91c2523914fe1541a7883f8770b4ca0286afcbc60c9db3e5d3d6b320a54a6490"
+        },
+        "tests.json": {
+          "bytes": 297,
+          "sha256": "91f4b5497522eecbcebdad9cf19b29e852813bcfe405b01f313f46bd619029d0"
+        }
+      },
+      "id": "problems/098-1594-d-the-number-of-imposters",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 191,
+      "name": "1594_D. The Number of Imposters",
+      "set": "steering",
+      "solution_lines": 44,
+      "source_split": "test"
+    },
+    {
+      "case_count": 14,
+      "files": {
+        "solution.py": {
+          "bytes": 128,
+          "sha256": "3f7a30de321c6f15780f62d54d191d92ded3bc3fbce08cb3d15ce07ff6597815"
+        },
+        "tests.json": {
+          "bytes": 917,
+          "sha256": "e784569bd296e8cc8c4e05035601ebec58389f13e89f44b02a51c20bec08bc72"
+        }
+      },
+      "id": "problems/099-1594-e1-rubik-s-cube-coloring-easy-version",
+      "imports": [],
+      "largest_case_bytes": 3,
+      "name": "1594_E1. Rubik's Cube Coloring (easy version)",
+      "set": "steering",
+      "solution_lines": 8,
+      "source_split": "test"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 2723,
+          "sha256": "49fc8ada6ec9a1b4a7bdb8bba00702afca8249c4bfa97ee0d84531c190acc19a"
+        },
+        "tests.json": {
+          "bytes": 706,
+          "sha256": "aad492de4b91852af3c437c9b25d506ad59941fc931c642394dd4016bf0c678d"
+        }
+      },
+      "id": "problems/100-1594-e2-rubik-s-cube-coloring-hard-version",
+      "imports": [
+        "collections",
+        "sys"
+      ],
+      "largest_case_bytes": 79,
+      "name": "1594_E2. Rubik's Cube Coloring (hard version)",
+      "set": "steering",
+      "solution_lines": 95,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 223,
+          "sha256": "6999eb474fcab942bb8ba090a98fb220cefccca9486fedb6e453fe94b3323932"
+        },
+        "tests.json": {
+          "bytes": 237,
+          "sha256": "bac54071358b22aec94522767857a635e239bfbc640fa43896c40470fa097078"
+        }
+      },
+      "id": "problems/101-1594-f-ideal-farm",
+      "imports": [],
+      "largest_case_bytes": 43,
+      "name": "1594_F. Ideal Farm",
+      "set": "steering",
+      "solution_lines": 14,
+      "source_split": "test"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 225,
+          "sha256": "18aeca24aaf30b2baf5236520edd6fa6d42ed266ce8034a37d009853882eb072"
+        },
+        "tests.json": {
+          "bytes": 509,
+          "sha256": "105a269dbfedf4f2a64cf9ce32bae29bd9eebb8476ef9354f2f0ac0d0dd6693b"
+        }
+      },
+      "id": "problems/102-1598-a-computer-game",
+      "imports": [],
+      "largest_case_bytes": 127,
+      "name": "1598_A. Computer Game",
+      "set": "steering",
+      "solution_lines": 11,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 773,
+          "sha256": "32008ad1ba423175736152d49ff20ef3b8082a34994d58524f2ab6a6f56bdb45"
+        },
+        "tests.json": {
+          "bytes": 155,
+          "sha256": "f00ce6cea17f640f0adaa93e4328422c1647c901afa000743109d19c0841fecb"
+        }
+      },
+      "id": "problems/103-1598-b-groups",
+      "imports": [
+        "itertools"
+      ],
+      "largest_case_bytes": 66,
+      "name": "1598_B. Groups",
+      "set": "steering",
+      "solution_lines": 27,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 445,
+          "sha256": "5a4c84208aa632ff98bf28f75a8bb5fb778191b768556958c0a1c27bfc2b4fa5"
+        },
+        "tests.json": {
+          "bytes": 217,
+          "sha256": "41516aa525fe87652007f572a82e5505bffa4181189db70426f04952dab58327"
+        }
+      },
+      "id": "problems/104-1598-c-delete-two-elements",
+      "imports": [],
+      "largest_case_bytes": 51,
+      "name": "1598_C. Delete Two Elements",
+      "set": "steering",
+      "solution_lines": 21,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 398,
+          "sha256": "fcf381f6066d518bf16643a5d7a3147b98d9454a7444ea41687ad1c8375ebe47"
+        },
+        "tests.json": {
+          "bytes": 132,
+          "sha256": "46399e67e57a8640962b17ace0e332560484e1571b7a15177bd66361a7982dea"
+        }
+      },
+      "id": "problems/105-1598-d-training-session",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 42,
+      "name": "1598_D. Training Session",
+      "set": "steering",
+      "solution_lines": 15,
+      "source_split": "test"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 1843,
+          "sha256": "c151d37527c7e9e876cc407d6b6aa133642274fb2f4712c34ee2754dff299f5f"
+        },
+        "tests.json": {
+          "bytes": 1041,
+          "sha256": "97f166223cb801a949d454be52fe145294453fc55e755e71ca6debe584f1c594"
+        }
+      },
+      "id": "problems/106-1598-e-staircases",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 131,
+      "name": "1598_E. Staircases",
+      "set": "steering",
+      "solution_lines": 79,
+      "source_split": "test"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 395,
+          "sha256": "0fadf642a33759dec4540089b49bbb35e1d68c097b3b18ad0f9c99692c7c28a3"
+        },
+        "tests.json": {
+          "bytes": 358,
+          "sha256": "0a1da8378a8343875b3dfa81207d0079c2d2083d1dcbdc4374de73de8cb77f50"
+        }
+      },
+      "id": "problems/107-1600-e-array-game",
+      "imports": [],
+      "largest_case_bytes": 15,
+      "name": "1600_E. Array Game",
+      "set": "steering",
+      "solution_lines": 22,
+      "source_split": "test"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 930,
+          "sha256": "605dda44573d2164cb41d325e97c4971cdc51b51a569ad9ba1ce07c01d1183b4"
+        },
+        "tests.json": {
+          "bytes": 999,
+          "sha256": "72e70fd06d59b05bb82b365b0e0961dfbddf266b126d2f2babf41a02192a7266"
+        }
+      },
+      "id": "problems/108-1600-f-party-organization",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 299,
+      "name": "1600_F. Party Organization",
+      "set": "steering",
+      "solution_lines": 48,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1606,
+          "sha256": "f78a5dcc7748d7870ecdea03fc46c325ad6609eaf4de7ef6074460943dcd839c"
+        },
+        "tests.json": {
+          "bytes": 223,
+          "sha256": "7f1cbd2a2f4fcab26b456f7ff9bd2c1f0db6728814b4deac687ff148cf32a66f"
+        }
+      },
+      "id": "problems/109-1600-j-robot-factory",
+      "imports": [],
+      "largest_case_bytes": 54,
+      "name": "1600_J. Robot Factory",
+      "set": "steering",
+      "solution_lines": 65,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 749,
+          "sha256": "d1912c0267ef407bcc6893c0ba7d8d97ce9ee98573b9c6db5486b3a7ad20ae7f"
+        },
+        "tests.json": {
+          "bytes": 171,
+          "sha256": "1efd3a010f10c421d6258912372fcccfda951d49f6783115d8b5b08dcbd2020c"
+        }
+      },
+      "id": "problems/110-1601-a-array-elimination",
+      "imports": [
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 55,
+      "name": "1601_A. Array Elimination",
+      "set": "steering",
+      "solution_lines": 30,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 170,
+          "sha256": "f3281e50b046dbda83ee58a6d524db97b7293d7a928f88fc8415601099e28138"
+        },
+        "tests.json": {
+          "bytes": 595,
+          "sha256": "e5f3706d6c6925bfaad648b69e125f5085405e67d92c9a50c15c3e7143a6efa8"
+        }
+      },
+      "id": "problems/111-1604-a-era",
+      "imports": [],
+      "largest_case_bytes": 390,
+      "name": "1604_A. Era",
+      "set": "steering",
+      "solution_lines": 7,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 324,
+          "sha256": "66483ec973ba771e280aea95bd3843d5b07eca2a5dbbc8c5b450bf974f63249f"
+        },
+        "tests.json": {
+          "bytes": 147,
+          "sha256": "12c1f7834dab0ca3a4980f909131a30b3e3ee72768845c8a815ab40b911a8b71"
+        }
+      },
+      "id": "problems/112-1604-b-xor-specia-lis-t",
+      "imports": [],
+      "largest_case_bytes": 48,
+      "name": "1604_B. XOR Specia-LIS-t",
+      "set": "steering",
+      "solution_lines": 16,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 837,
+          "sha256": "c0a63ebab91eaa8ae5301ee5c994cd2b07d9c2f38b314e61feb29b9699906dd4"
+        },
+        "tests.json": {
+          "bytes": 279,
+          "sha256": "e957805c7a30e9ab520f42f0915b444c3f859c14cbc426a74453f69d71a18b20"
+        }
+      },
+      "id": "problems/113-1604-c-di-visible-confusion",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 174,
+      "name": "1604_C. Di-visible Confusion",
+      "set": "steering",
+      "solution_lines": 37,
+      "source_split": "test"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 275,
+          "sha256": "9cc593af54657e5edd1bb40eeb544950a4e38f9c72b6cf7e5b38ec26d2072e05"
+        },
+        "tests.json": {
+          "bytes": 524,
+          "sha256": "6a85750b6f3005f8450a61b5d46a7c290a0066a159801dd346e33fc50e178df8"
+        }
+      },
+      "id": "problems/114-1606-a-ab-balance",
+      "imports": [],
+      "largest_case_bytes": 45,
+      "name": "1606_A. AB Balance",
+      "set": "steering",
+      "solution_lines": 16,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 622,
+          "sha256": "e0735dd2b74bd1bbca9a80b935de027d94a4ad8ced9e97ada40768ae1545e351"
+        },
+        "tests.json": {
+          "bytes": 186,
+          "sha256": "50f4639bcb2a368161bbd58d841b4808a3f6c29443b8ca16e32fa46197d0e9c9"
+        }
+      },
+      "id": "problems/115-1606-c-banknotes",
+      "imports": [],
+      "largest_case_bytes": 69,
+      "name": "1606_C. Banknotes",
+      "set": "steering",
+      "solution_lines": 25,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 2164,
+          "sha256": "810a1ce685af2bf3b3f24edc05c4019051c6e77711e7288c5cd676dedc115491"
+        },
+        "tests.json": {
+          "bytes": 220,
+          "sha256": "f63e321fb152ce3834847a1fd08b2d00e829043caa0cf4d194b44c0e2dd2c4f9"
+        }
+      },
+      "id": "problems/116-1606-d-red-blue-matrix",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 106,
+      "name": "1606_D. Red-Blue Matrix",
+      "set": "steering",
+      "solution_lines": 85,
+      "source_split": "test"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 453,
+          "sha256": "abc0e3d0f3a6301ae0fb67b493b233f2c72afbd9e060afd024a82bf78246480d"
+        },
+        "tests.json": {
+          "bytes": 518,
+          "sha256": "a1109a4e7c5040aa63a5335729311e8de97231e9af5bdd3a06d5ccd3344e4dfd"
+        }
+      },
+      "id": "problems/117-1607-a-linear-keyboard",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 215,
+      "name": "1607_A. Linear Keyboard",
+      "set": "steering",
+      "solution_lines": 24,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 395,
+          "sha256": "03ea9522b7d3b2b31bb095695401889117229dad2a73eaf071dab88ef6509d12"
+        },
+        "tests.json": {
+          "bytes": 343,
+          "sha256": "c68a9a8b9923f9279b1bbec364e018cbbafeabc646d7320318a17ba451a05db4"
+        }
+      },
+      "id": "problems/118-1607-b-odd-grasshopper",
+      "imports": [],
+      "largest_case_bytes": 83,
+      "name": "1607_B. Odd Grasshopper",
+      "set": "steering",
+      "solution_lines": 23,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 192,
+          "sha256": "119440e74fee287d95a6102a23d06f21db6ebfd5ded02248684fe1975b219d3a"
+        },
+        "tests.json": {
+          "bytes": 179,
+          "sha256": "dd719e9608f45466c3ff29410e57c06bc9d8218071015c733a97096246300359"
+        }
+      },
+      "id": "problems/119-1607-c-minimum-extraction",
+      "imports": [],
+      "largest_case_bytes": 65,
+      "name": "1607_C. Minimum Extraction",
+      "set": "steering",
+      "solution_lines": 13,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1589,
+          "sha256": "1a39dc5afa512f2d9ef22455346b129e06d7dcea38f1d124927a420eae537e24"
+        },
+        "tests.json": {
+          "bytes": 256,
+          "sha256": "b41e449bfc2b83e8ad28bf19d7e3deafec258ba6bc004e627533c73da6d9db02"
+        }
+      },
+      "id": "problems/120-1607-d-blue-red-permutation",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 122,
+      "name": "1607_D. Blue-Red Permutation",
+      "set": "steering",
+      "solution_lines": 57,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 728,
+          "sha256": "ee9c3dcebfbc54a6a482dd97cdf87a5431a3be2c9694361437e4c1361e640466"
+        },
+        "tests.json": {
+          "bytes": 142,
+          "sha256": "56e8412fce664131c3cb5fa7e83f32d793987565c99982f441b0521471501236"
+        }
+      },
+      "id": "problems/121-1607-e-robot-on-the-board-1",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 42,
+      "name": "1607_E. Robot on the Board 1",
+      "set": "steering",
+      "solution_lines": 26,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1670,
+          "sha256": "2068c6623712b89061d57ee91a46b591caee920ba8fb69342e33ccfc35b6cc50"
+        },
+        "tests.json": {
+          "bytes": 257,
+          "sha256": "23c66590f7a1f98795f48ce2f1e94ad355181c3838402f1d65a9513536b62dbe"
+        }
+      },
+      "id": "problems/122-1607-f-robot-on-the-board-2",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 104,
+      "name": "1607_F. Robot on the Board 2",
+      "set": "steering",
+      "solution_lines": 82,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1138,
+          "sha256": "123fe6a6cd34f007bca109fb92b9aec8513b099bec524a8ceac0fe830d33fcf0"
+        },
+        "tests.json": {
+          "bytes": 695,
+          "sha256": "971e34561597d46072df1581cb385d812be94b5b4c1ae23cd7716caf2cf14216"
+        }
+      },
+      "id": "problems/123-1607-h-banquet-preparations-2",
+      "imports": [
+        "collections",
+        "heapq"
+      ],
+      "largest_case_bytes": 200,
+      "name": "1607_H. Banquet Preparations 2",
+      "set": "steering",
+      "solution_lines": 43,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1194,
+          "sha256": "4f83f6fb5fa314045ee2d8e901c075fa3d30862c5ed135f2dd78667ee55ccbcb"
+        },
+        "tests.json": {
+          "bytes": 437,
+          "sha256": "b8de3eb1dcd9054fa05f685ea03c1cf1ab9a231a8fae0a475417d8420ed63475"
+        }
+      },
+      "id": "problems/124-1608-c-game-master",
+      "imports": [
+        "collections",
+        "heapq"
+      ],
+      "largest_case_bytes": 204,
+      "name": "1608_C. Game Master",
+      "set": "steering",
+      "solution_lines": 47,
+      "source_split": "test"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 869,
+          "sha256": "f79abca9d8975b9212a776ce9581a0c890b2feade0066a7b280144246cd6363c"
+        },
+        "tests.json": {
+          "bytes": 1323,
+          "sha256": "6b0c1963557ac1457090ded5cd4a364951d8bae8355f8ee9278fb06d0afeea51"
+        }
+      },
+      "id": "problems/125-1608-d-dominoes",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 304,
+      "name": "1608_D. Dominoes",
+      "set": "steering",
+      "solution_lines": 50,
+      "source_split": "test"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 167,
+          "sha256": "3059ee7a3cb6f496209b87aa1f2b8d01d3317b074faad3ceb2f022f7ff5f5432"
+        },
+        "tests.json": {
+          "bytes": 606,
+          "sha256": "8865791e325f3d3db5205ede900463605b02889795f9fea896213a1c5648b5f3"
+        }
+      },
+      "id": "problems/126-1613-b-absent-remainder",
+      "imports": [],
+      "largest_case_bytes": 44,
+      "name": "1613_B. Absent Remainder",
+      "set": "steering",
+      "solution_lines": 7,
+      "source_split": "test"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 942,
+          "sha256": "b67dc2b5c28d3d912bebc0547bca53a2b90cba8acdae2c0de6b6b38bdb513671"
+        },
+        "tests.json": {
+          "bytes": 595,
+          "sha256": "153e2aa26a8ae2d0c617cb05f29ccb470d5b488c8063407fc47a6c1244e72e6c"
+        }
+      },
+      "id": "problems/127-1613-c-poisoned-dagger",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 56,
+      "name": "1613_C. Poisoned Dagger",
+      "set": "steering",
+      "solution_lines": 50,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1114,
+          "sha256": "69afb7fecd3ca1fb5135f4bc0db9cc5291cb6d19d926c4ab5f92dbead36ca43b"
+        },
+        "tests.json": {
+          "bytes": 261,
+          "sha256": "c569285c50f698014f17853ec381e96ccee6216b9366ff73582676513611790e"
+        }
+      },
+      "id": "problems/128-1613-d-mex-sequences",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 65,
+      "name": "1613_D. MEX Sequences",
+      "set": "steering",
+      "solution_lines": 44,
+      "source_split": "test"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 1135,
+          "sha256": "cc176788a076d0c7d09d020f44a053c338278fa7663602418f4a819ba114c445"
+        },
+        "tests.json": {
+          "bytes": 688,
+          "sha256": "3b8139744622f26456f41bfef41e8ee33667e1c67f730af0b8c9256f94a488a2"
+        }
+      },
+      "id": "problems/129-1613-e-crazy-robot",
+      "imports": [
+        "collections",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 103,
+      "name": "1613_E. Crazy Robot",
+      "set": "steering",
+      "solution_lines": 55,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 387,
+          "sha256": "b8fe94d81175c0392a48b8ec33418cab5c1be48919455686cefb3db3a900cf6b"
+        },
+        "tests.json": {
+          "bytes": 122,
+          "sha256": "48d429d53822cb4da7ca8b7b60bae13123ab7e3419e825cdf5743ff4f3d6efca"
+        }
+      },
+      "id": "problems/130-1615-a-closing-the-gap",
+      "imports": [],
+      "largest_case_bytes": 35,
+      "name": "1615_A. Closing The Gap",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 401,
+          "sha256": "f11f27f6940694b429e3faaac535a6dc3e4f076e852687b610d252eae035a01b"
+        },
+        "tests.json": {
+          "bytes": 128,
+          "sha256": "b0b13202be2eef0e3b26f523c0d761ad7bb207e54da2cab7bcf924a74af6b708"
+        }
+      },
+      "id": "problems/131-1615-b-and-it-s-non-zero",
+      "imports": [],
+      "largest_case_bytes": 32,
+      "name": "1615_B. And It's Non-Zero",
+      "set": "steering",
+      "solution_lines": 15,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 814,
+          "sha256": "40056bed49d2943f860b82f9d8b3f706a4d79ddb552e588d1a765cba4e6b8b89"
+        },
+        "tests.json": {
+          "bytes": 181,
+          "sha256": "a7d6ee7cae2f10eb35af7142657a88032f4bedc7f8faf9136bb918d8a661a588"
+        }
+      },
+      "id": "problems/132-1615-c-menorah",
+      "imports": [],
+      "largest_case_bytes": 78,
+      "name": "1615_C. Menorah",
+      "set": "steering",
+      "solution_lines": 36,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1492,
+          "sha256": "9230900fd3164479dc8e7d5cb8f5a76860c43dd979ba3b98e77fba5ade4ca920"
+        },
+        "tests.json": {
+          "bytes": 350,
+          "sha256": "48749cb5160e285adb92f14981038eb98665c863689562a16f2ec4acbc155808"
+        }
+      },
+      "id": "problems/133-1615-d-x-or-mas-tree",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 169,
+      "name": "1615_D. X(or)-mas Tree",
+      "set": "steering",
+      "solution_lines": 65,
+      "source_split": "test"
+    },
+    {
+      "case_count": 13,
+      "files": {
+        "solution.py": {
+          "bytes": 1583,
+          "sha256": "54ca41f77203802f8601aa3484fbe141e463c5a014587382e6043838f60df248"
+        },
+        "tests.json": {
+          "bytes": 1077,
+          "sha256": "bb96b74573df738bda496f9d8b206d333c3186daa11262c3a842e96ee25109ad"
+        }
+      },
+      "id": "problems/134-1615-e-purple-crayon",
+      "imports": [
+        "heapq",
+        "sys"
+      ],
+      "largest_case_bytes": 107,
+      "name": "1615_E. Purple Crayon",
+      "set": "steering",
+      "solution_lines": 77,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 658,
+          "sha256": "c60d6d7e6a73351af164113b1143416b02529b4acee1f74afae8ac3ae47b2e09"
+        },
+        "tests.json": {
+          "bytes": 227,
+          "sha256": "fdaf9825c9a0ce3924a70477ca23121e25d3080acbe8170cceeaf3893d9aadd9"
+        }
+      },
+      "id": "problems/135-1617-a-forbidden-subsequence",
+      "imports": [],
+      "largest_case_bytes": 82,
+      "name": "1617_A. Forbidden Subsequence",
+      "set": "steering",
+      "solution_lines": 27,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 586,
+          "sha256": "d657e29ce8f84dd386b6faaa5275111667ef332d47a5a7c5b9f69c51cf991621"
+        },
+        "tests.json": {
+          "bytes": 318,
+          "sha256": "d6354bf4e72f7ea4ccda4e3de4903f63cc7f9ab884647cf2ba8d410fb10b45d8"
+        }
+      },
+      "id": "problems/136-1617-c-paprika-and-permutation",
+      "imports": [],
+      "largest_case_bytes": 76,
+      "name": "1617_C. Paprika and Permutation",
+      "set": "steering",
+      "solution_lines": 22,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 409,
+          "sha256": "34d514511e5a4ab74570fac52e3132cfeed88265a69405c302fe376f4ce4a3a3"
+        },
+        "tests.json": {
+          "bytes": 304,
+          "sha256": "c72d985e9449e4ef1978d518561c7c14f51d177651cdee3851d0c592937b0207"
+        }
+      },
+      "id": "problems/137-1618-b-missing-bigram",
+      "imports": [],
+      "largest_case_bytes": 52,
+      "name": "1618_B. Missing Bigram",
+      "set": "steering",
+      "solution_lines": 22,
+      "source_split": "test"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 1167,
+          "sha256": "b65dc4929d42008d97071cd148bbacad3142b4e2ab591570068d7f1d2c658d81"
+        },
+        "tests.json": {
+          "bytes": 310,
+          "sha256": "c9182594fb7c075b39af4c8fbf6413bf3ef68724c06dcd09acb7c23f745d57d9"
+        }
+      },
+      "id": "problems/138-1618-c-paint-the-array",
+      "imports": [
+        "bisect",
+        "collections",
+        "math"
+      ],
+      "largest_case_bytes": 66,
+      "name": "1618_C. Paint the Array",
+      "set": "steering",
+      "solution_lines": 54,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 629,
+          "sha256": "23e7877230e70945312648377d704aa96059c114c4c2e7faa9fd77e03c529ebc"
+        },
+        "tests.json": {
+          "bytes": 170,
+          "sha256": "009be06737c66b5fcd07281a5e44a5541d2730252e69845af299514828cd0626"
+        }
+      },
+      "id": "problems/139-1618-e-singers-tour",
+      "imports": [],
+      "largest_case_bytes": 45,
+      "name": "1618_E. Singers' Tour",
+      "set": "steering",
+      "solution_lines": 30,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1192,
+          "sha256": "9ffd3a4148c8e38f5255873f2e5fba1960f84f80c7a16cb3351f217456266d3f"
+        },
+        "tests.json": {
+          "bytes": 202,
+          "sha256": "d02ae14a0d589df53127ad4d92d333ed636bd4ec0f7ab4b6fd15898cffafa27a"
+        }
+      },
+      "id": "problems/140-1618-g-trader-problem",
+      "imports": [
+        "bisect",
+        "itertools",
+        "sys"
+      ],
+      "largest_case_bytes": 37,
+      "name": "1618_G. Trader Problem",
+      "set": "steering",
+      "solution_lines": 60,
+      "source_split": "test"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 140,
+          "sha256": "1d1a7df71114e87ef656863ffdbb713011753451e555c7ccff89e8ac12ce123f"
+        },
+        "tests.json": {
+          "bytes": 378,
+          "sha256": "ccc74b094480989a7015f3d2fb1cc261dac53133a72bebd1da0db9ef7197be40"
+        }
+      },
+      "id": "problems/141-1619-a-square-string",
+      "imports": [],
+      "largest_case_bytes": 52,
+      "name": "1619_A. Square String?",
+      "set": "steering",
+      "solution_lines": 8,
+      "source_split": "test"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 828,
+          "sha256": "3d694daed9fb33f1d684337488fc1e126cda3f569c4c529ed05cf841bdb9c172"
+        },
+        "tests.json": {
+          "bytes": 296,
+          "sha256": "eeb7ad35213a0f2907e46322b4851dc3fc45d6d276417120edef2573a91ed37d"
+        }
+      },
+      "id": "problems/142-1619-c-wrong-addition",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 52,
+      "name": "1619_C. Wrong Addition",
+      "set": "steering",
+      "solution_lines": 42,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 973,
+          "sha256": "b393f22bcd7bf9c90362f0786ec2f9203f8d5fe94c398a2345137596ce6589d2"
+        },
+        "tests.json": {
+          "bytes": 215,
+          "sha256": "4936679a5694bc597d521a2f608cc71bdfa4f755869b5ee6b33952f927c1e323"
+        }
+      },
+      "id": "problems/143-1619-d-new-year-s-problem",
+      "imports": [
+        "heapq",
+        "sys"
+      ],
+      "largest_case_bytes": 104,
+      "name": "1619_D. New Year's Problem",
+      "set": "steering",
+      "solution_lines": 42,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 477,
+          "sha256": "7e671f68fc985900fc39a9d7714f0ca6b59f41755d249fa122e9d3cdc2a60d16"
+        },
+        "tests.json": {
+          "bytes": 227,
+          "sha256": "85bb82ce0fc1a29dbfbe1c03e828041dfc48942572a7d637139753ab057d85b7"
+        }
+      },
+      "id": "problems/144-1619-e-mex-and-increments",
+      "imports": [],
+      "largest_case_bytes": 64,
+      "name": "1619_E. MEX and Increments",
+      "set": "steering",
+      "solution_lines": 31,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1937,
+          "sha256": "2be3f1ca5f4aa000ab5c7ca30d3aa5d7dc14822fbf54895d80e30707b7a7770f"
+        },
+        "tests.json": {
+          "bytes": 222,
+          "sha256": "c6a6a5ef979f0454481378280fcddf63e1a8e07c78b882a26991ba65b53ebcbc"
+        }
+      },
+      "id": "problems/145-1619-g-unusual-minesweeper",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 119,
+      "name": "1619_G. Unusual Minesweeper",
+      "set": "steering",
+      "solution_lines": 100,
+      "source_split": "test"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 2833,
+          "sha256": "7d629d87e19dc37692be1948cbe5ab9bbeb586f17ea9799ed0fc8b83e690f864"
+        },
+        "tests.json": {
+          "bytes": 967,
+          "sha256": "f33d2de83d5fd1e00a82130ff8ccd66b6f87035d224ec114cdd2a1027bd3d541"
+        }
+      },
+      "id": "problems/146-1619-h-permutation-and-queries",
+      "imports": [
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 377,
+      "name": "1619_H. Permutation and Queries",
+      "set": "steering",
+      "solution_lines": 98,
+      "source_split": "test"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 269,
+          "sha256": "2b3556581fe763fdae667fba2f7db20991ff6ebb3495da60d8641b5cdb55bb47"
+        },
+        "tests.json": {
+          "bytes": 451,
+          "sha256": "91bb3b1178c203cf11a9544488e5914a979f32bcb6e1d3f09463263be79e35ed"
+        }
+      },
+      "id": "problems/147-1620-a-equal-or-not-equal",
+      "imports": [],
+      "largest_case_bytes": 42,
+      "name": "1620_A. Equal or Not Equal",
+      "set": "steering",
+      "solution_lines": 12,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 212,
+          "sha256": "0e03b0a67116e0dfb8e0ba26314105609cc8ea04fd7011b46f31fb136b9a651b"
+        },
+        "tests.json": {
+          "bytes": 294,
+          "sha256": "c707e09212e8b8e4797d6e06d2e69420d5b41120d1576bc2a7947743cf993e00"
+        }
+      },
+      "id": "problems/148-1620-b-triangles-on-a-rectangle",
+      "imports": [],
+      "largest_case_bytes": 102,
+      "name": "1620_B. Triangles on a Rectangle",
+      "set": "steering",
+      "solution_lines": 7,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1023,
+          "sha256": "956847a176fb7ec26f2fa3c75c9cdb17138650ec6aebe2f61361ffbf615a2afa"
+        },
+        "tests.json": {
+          "bytes": 1373,
+          "sha256": "b1ba34f2a1d4a7818f47bbb5daccea2208a6f7d695dcee8609d6b6e419014ebe"
+        }
+      },
+      "id": "problems/149-1620-c-ba-string",
+      "imports": [],
+      "largest_case_bytes": 146,
+      "name": "1620_C. BA-String",
+      "set": "steering",
+      "solution_lines": 44,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 894,
+          "sha256": "78ab199c025616f6a06ab3449aebbf783b8abfd53cba5933dd1136e4d68143fc"
+        },
+        "tests.json": {
+          "bytes": 207,
+          "sha256": "c02d1784de6ccef338b98f333203c7ba026f7576021902dd4d17e18866cec58b"
+        }
+      },
+      "id": "problems/150-1620-d-exact-change",
+      "imports": [],
+      "largest_case_bytes": 42,
+      "name": "1620_D. Exact Change",
+      "set": "steering",
+      "solution_lines": 41,
+      "source_split": "test"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 343,
+          "sha256": "5aa51f91f7a1e46b0fa1eef93928251427a71bd20f27f2470167d6bb7c50f6dc"
+        },
+        "tests.json": {
+          "bytes": 595,
+          "sha256": "285c65a9c82d0121dd2872649739611c3cc5a96b4f37675ac41e464ee18663a6"
+        }
+      },
+      "id": "problems/151-1620-e-replace-the-numbers",
+      "imports": [],
+      "largest_case_bytes": 42,
+      "name": "1620_E. Replace the Numbers",
+      "set": "steering",
+      "solution_lines": 20,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 692,
+          "sha256": "a96360d7e57b2ff32b415802f27b14f44ee0b310868338f303a59d17e97c4391"
+        },
+        "tests.json": {
+          "bytes": 362,
+          "sha256": "4338095729229889d19c8cb2b925b788e1721441c133bdd0fb35b7f7e2268037"
+        }
+      },
+      "id": "problems/152-1620-f-bipartite-array",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 52,
+      "name": "1620_F. Bipartite Array",
+      "set": "steering",
+      "solution_lines": 32,
+      "source_split": "test"
+    },
+    {
+      "case_count": 10,
+      "files": {
+        "solution.py": {
+          "bytes": 327,
+          "sha256": "3bdca98f1a5967ee4b3afe5950897704c3ae3f9d5ab2beb7f97d35c31f81c94e"
+        },
+        "tests.json": {
+          "bytes": 1686,
+          "sha256": "2115084abade78c9612995e71ba6744933418da85647e6aef26b40e42b7fac6e"
+        }
+      },
+      "id": "problems/153-1622-a-construct-a-rectangle",
+      "imports": [],
+      "largest_case_bytes": 411,
+      "name": "1622_A. Construct a Rectangle",
+      "set": "steering",
+      "solution_lines": 12,
+      "source_split": "test"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 227,
+          "sha256": "9a70dc31d48ecf51b0c3d070dde068c44f451cea0b5412df24bde443dc851626"
+        },
+        "tests.json": {
+          "bytes": 810,
+          "sha256": "a786eccf504413ecd8898c3b850eae70cd6e6ac90f0222dc0b11b977e0895be6"
+        }
+      },
+      "id": "problems/154-1622-b-berland-music",
+      "imports": [],
+      "largest_case_bytes": 197,
+      "name": "1622_B. Berland Music",
+      "set": "steering",
+      "solution_lines": 8,
+      "source_split": "test"
+    },
+    {
+      "case_count": 9,
+      "files": {
+        "solution.py": {
+          "bytes": 207,
+          "sha256": "06dc18d814caebd189764cd641555d95e332c805da2796f4430ae4155db460a4"
+        },
+        "tests.json": {
+          "bytes": 3129,
+          "sha256": "182bed6341d59ffc0bd1b11b499ff1b5de458beda13cff44ad5320919faa9e9e"
+        }
+      },
+      "id": "problems/155-1622-c-set-or-decrease",
+      "imports": [],
+      "largest_case_bytes": 387,
+      "name": "1622_C. Set or Decrease",
+      "set": "steering",
+      "solution_lines": 6,
+      "source_split": "test"
+    },
+    {
+      "case_count": 13,
+      "files": {
+        "solution.py": {
+          "bytes": 1367,
+          "sha256": "b90cc29941e4e534fc2e510c7bf8b771d4c7df60a217ca3f0f03f93e45df44bd"
+        },
+        "tests.json": {
+          "bytes": 1940,
+          "sha256": "74abd8e6761f77d8e589deb3ebaf2d7feeeeabc39f83e695eb24ccd618816c2c"
+        }
+      },
+      "id": "problems/156-1622-d-shuffle",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 467,
+      "name": "1622_D. Shuffle",
+      "set": "steering",
+      "solution_lines": 60,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1241,
+          "sha256": "d020a9f760a6e151ef6b8575f433aab4e9916e0dafb9e1e1f1e63b1015e3c3dd"
+        },
+        "tests.json": {
+          "bytes": 159,
+          "sha256": "23a7eb8d3745a62532e4a8994ae4ece24416bd65e5300c88a98eaabfbbd54bd0"
+        }
+      },
+      "id": "problems/157-1623-a-robot-cleaner",
+      "imports": [
+        "collections",
+        "heapq",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 66,
+      "name": "1623_A. Robot Cleaner",
+      "set": "steering",
+      "solution_lines": 53,
+      "source_split": "test"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 709,
+          "sha256": "ec7a45df585a473c10fdea937825882dfa1522f2f7b71eabd3bd18f7963d2823"
+        },
+        "tests.json": {
+          "bytes": 544,
+          "sha256": "bddaa9ecb59931fbb6d7b64c8bf45973e1fd4ff4ee3a53d20d686da488e6d713"
+        }
+      },
+      "id": "problems/158-1623-b-game-on-ranges",
+      "imports": [
+        "bisect",
+        "collections",
+        "functools",
+        "heapq",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 70,
+      "name": "1623_B. Game on Ranges",
+      "set": "steering",
+      "solution_lines": 32,
+      "source_split": "test"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1029,
+          "sha256": "1c61603380a09c60e11aa3c665a1b631884e46c4e881883c168058dd6faa4a69"
+        },
+        "tests.json": {
+          "bytes": 149,
+          "sha256": "b578d9326dfc31322b02b76d3404530d0b06ac3e3713a0318d9cc010149fafb2"
+        }
+      },
+      "id": "problems/159-1623-c-balanced-stone-heaps",
+      "imports": [
+        "bisect",
+        "collections",
+        "functools",
+        "heapq",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 57,
+      "name": "1623_C. Balanced Stone Heaps",
+      "set": "steering",
+      "solution_lines": 46,
+      "source_split": "test"
+    },
+    {
+      "case_count": 17,
+      "files": {
+        "solution.py": {
+          "bytes": 1498,
+          "sha256": "b8ccd9a7f8d930cfc2e1e635ae4f2d0087f73c9f142e585501d48c23fa90cc32"
+        },
+        "tests.json": {
+          "bytes": 2567,
+          "sha256": "dd11d4ca09ec3c6fde932f45eb473df9c0771c4bfa50137438a38cc05c51a38b"
+        }
+      },
+      "id": "problems/160-1623-e-middle-duplication",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 298,
+      "name": "1623_E. Middle Duplication",
+      "set": "steering",
+      "solution_lines": 84,
+      "source_split": "test"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 496,
+          "sha256": "47540da11eba4998c154343457e0fb54308f2758b2cfefc5bc8fc5eec2b15408"
+        },
+        "tests.json": {
+          "bytes": 427,
+          "sha256": "2919b515accdaacf460e7cc8244f5c18400adb99b5495fa2a7b5b685bdc859fc"
+        }
+      },
+      "id": "problems/161-1030-e-vasya-and-good-sequences",
+      "imports": [
+        "bisect"
+      ],
+      "largest_case_bytes": 98,
+      "name": "1030_E. Vasya and Good Sequences",
+      "set": "steering",
+      "solution_lines": 34,
+      "source_split": "train"
+    },
+    {
+      "case_count": 10,
+      "files": {
+        "solution.py": {
+          "bytes": 263,
+          "sha256": "dbaa88b5f0fdacc904af652371deeac81bcaf770b699503e04dedf3d83ce07e0"
+        },
+        "tests.json": {
+          "bytes": 703,
+          "sha256": "248ba60478eae98e5b9ea94073c370c9d2ad15a3306991e3bb0a16426d3a6af5"
+        }
+      },
+      "id": "problems/162-1037-b-reach-median",
+      "imports": [],
+      "largest_case_bytes": 26,
+      "name": "1037_B. Reach Median",
+      "set": "steering",
+      "solution_lines": 15,
+      "source_split": "train"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 1349,
+          "sha256": "0cc7b3a7110b7eeafd7ec4245d57c505f4356cd2bbb242a4aa1ff57d5bcd1cd8"
+        },
+        "tests.json": {
+          "bytes": 659,
+          "sha256": "1926af6b01cba81887bd2d250fc03fe0543c5b825cc44475c6c65218442a1661"
+        }
+      },
+      "id": "problems/163-1037-e-trips",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 106,
+      "name": "1037_E. Trips",
+      "set": "steering",
+      "solution_lines": 58,
+      "source_split": "train"
+    },
+    {
+      "case_count": 23,
+      "files": {
+        "solution.py": {
+          "bytes": 1244,
+          "sha256": "025d61f790f412a773ec264b2078bb6820b32996705d7ab5ef504d4a26b0a6ba"
+        },
+        "tests.json": {
+          "bytes": 1626,
+          "sha256": "195b9e375d5633467ab2320b9f944e06a4a9c32be1c689de94a69a10a23bd2f1"
+        }
+      },
+      "id": "problems/164-1096-e-the-top-scorer",
+      "imports": [],
+      "largest_case_bytes": 14,
+      "name": "1096_E. The Top Scorer",
+      "set": "steering",
+      "solution_lines": 52,
+      "source_split": "train"
+    },
+    {
+      "case_count": 20,
+      "files": {
+        "solution.py": {
+          "bytes": 1239,
+          "sha256": "c0c989580a8b1469c20adc5bb065712abdda36f6f37ae0cd989d8f7b7dd0a4f6"
+        },
+        "tests.json": {
+          "bytes": 1839,
+          "sha256": "85d5722b64523df1deaff7d678cc24ccf1d8004d44e04ea985c70e4e49e65f09"
+        }
+      },
+      "id": "problems/165-1107-d-compression",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 83,
+      "name": "1107_D. Compression",
+      "set": "steering",
+      "solution_lines": 60,
+      "source_split": "train"
+    },
+    {
+      "case_count": 12,
+      "files": {
+        "solution.py": {
+          "bytes": 658,
+          "sha256": "bb78ef33128722b4cfa871ee427519ac828076b7c92326c662d5e5d75adc7ad4"
+        },
+        "tests.json": {
+          "bytes": 1528,
+          "sha256": "6d39849e380f8954ed193e334c488437c2983b95eb4589944a6d2bcaf3e77212"
+        }
+      },
+      "id": "problems/166-1136-d-nastya-is-buying-lunch",
+      "imports": [
+        "bisect",
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 294,
+      "name": "1136_D. Nastya Is Buying Lunch",
+      "set": "steering",
+      "solution_lines": 35,
+      "source_split": "train"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 297,
+          "sha256": "891d2c7a4f10d798afdc41175d9c2d7273a2a8f9b152ffdf54dea809ef474e0f"
+        },
+        "tests.json": {
+          "bytes": 374,
+          "sha256": "817f0f3a0247f03356fe969a60c96628a7b1b8004b506070f9382fb708fed8ba"
+        }
+      },
+      "id": "problems/167-1144-b-parity-alternated-deletions",
+      "imports": [],
+      "largest_case_bytes": 18,
+      "name": "1144_B. Parity Alternated Deletions",
+      "set": "steering",
+      "solution_lines": 26,
+      "source_split": "train"
+    },
+    {
+      "case_count": 6,
+      "files": {
+        "solution.py": {
+          "bytes": 1226,
+          "sha256": "a4359f58c890991b7200c74b6474c89c022adf1f160e1392dc516c9d2e293260"
+        },
+        "tests.json": {
+          "bytes": 831,
+          "sha256": "c1320d9bd6143efe96da798ea1c04047c83152d676de48b9c05f40e1094adaa5"
+        }
+      },
+      "id": "problems/168-1149-b-three-religions",
+      "imports": [],
+      "largest_case_bytes": 70,
+      "name": "1149_B. Three Religions",
+      "set": "steering",
+      "solution_lines": 38,
+      "source_split": "train"
+    },
+    {
+      "case_count": 18,
+      "files": {
+        "solution.py": {
+          "bytes": 397,
+          "sha256": "f216728997e513af874d70298c9b1c2f8f9e69fcaa6d36ffd176127dcf802a4e"
+        },
+        "tests.json": {
+          "bytes": 1289,
+          "sha256": "fca791dc352534c4316e8db4e5552088d9388fb0bcee2ff2b81b0b30604f6781"
+        }
+      },
+      "id": "problems/169-1155-a-reverse-a-substring",
+      "imports": [],
+      "largest_case_bytes": 16,
+      "name": "1155_A. Reverse a Substring",
+      "set": "steering",
+      "solution_lines": 18,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 1974,
+          "sha256": "4942ed6b68d34f90a3b0fb14b0c2e32d892eca37851f94f2f19c052892b5595d"
+        },
+        "tests.json": {
+          "bytes": 390,
+          "sha256": "f9c86a24022a06373588a2edea1c9e59f562103e73c8229eb24b0fb35828d1a0"
+        }
+      },
+      "id": "problems/170-1176-f-destroy-it",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 74,
+      "name": "1176_F. Destroy it!",
+      "set": "steering",
+      "solution_lines": 52,
+      "source_split": "train"
+    },
+    {
+      "case_count": 25,
+      "files": {
+        "solution.py": {
+          "bytes": 169,
+          "sha256": "44d9bc6bcd2f4d2a79be915dc726c6c9d605796502b0c2ee9a3b63cc8a45fbb0"
+        },
+        "tests.json": {
+          "bytes": 3386,
+          "sha256": "c1bfcd04085c2b043a1424009152f91a75b41d40a807fa80eff7f454b9ff8cce"
+        }
+      },
+      "id": "problems/171-1189-d1-add-on-a-tree",
+      "imports": [],
+      "largest_case_bytes": 341,
+      "name": "1189_D1. Add on a Tree",
+      "set": "steering",
+      "solution_lines": 10,
+      "source_split": "train"
+    },
+    {
+      "case_count": 13,
+      "files": {
+        "solution.py": {
+          "bytes": 773,
+          "sha256": "53aa1c79af68be66f8978745b9f40daa3054754ad8962449c5e6c8b61cc4fb75"
+        },
+        "tests.json": {
+          "bytes": 3636,
+          "sha256": "83e41fab82f54f96b6595deb6cc1ad97bbf94a9678e220203a08b00cc321d01b"
+        }
+      },
+      "id": "problems/172-1195-d2-submarine-in-the-rybinsk-sea-hard-editio",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 496,
+      "name": "1195_D2. Submarine in the Rybinsk Sea (hard edition)",
+      "set": "steering",
+      "solution_lines": 32,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1054,
+          "sha256": "9d68091d690e147cdae81ba6a7a5c8fcd49c32e2892a0c1487c3bcc04ec11818"
+        },
+        "tests.json": {
+          "bytes": 99,
+          "sha256": "ed86ba79b3974ac99f8f9fc7cc79a035174d2fc1330e0af94ea93b6798e7cc87"
+        }
+      },
+      "id": "problems/173-1202-c-you-are-given-a-wasd-string",
+      "imports": [],
+      "largest_case_bytes": 15,
+      "name": "1202_C. You Are Given a WASD-string...",
+      "set": "steering",
+      "solution_lines": 41,
+      "source_split": "train"
+    },
+    {
+      "case_count": 6,
+      "files": {
+        "solution.py": {
+          "bytes": 285,
+          "sha256": "a001ed538278e08e5b41b7d49a20d542d2c91d75ee9508c1e0852ec8e99b90d9"
+        },
+        "tests.json": {
+          "bytes": 1121,
+          "sha256": "c7d9bc72dd7e87dc2ea8c9b05e08eabae3109f06c5b024643d2a95cf8ba58c73"
+        }
+      },
+      "id": "problems/174-1208-a-xorinacci",
+      "imports": [],
+      "largest_case_bytes": 298,
+      "name": "1208_A. XORinacci",
+      "set": "steering",
+      "solution_lines": 15,
+      "source_split": "train"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 1136,
+          "sha256": "4b64a497a43d61ddcba684eb429e2912329e48fb98885aeb2cc409677ebc748e"
+        },
+        "tests.json": {
+          "bytes": 1315,
+          "sha256": "f51b907cddb294d1b91a4d831eda2039dd3eaa1bcbee7a9cd94a65a3a2224895"
+        }
+      },
+      "id": "problems/175-1208-d-restore-permutation",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 393,
+      "name": "1208_D. Restore Permutation",
+      "set": "steering",
+      "solution_lines": 45,
+      "source_split": "train"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 302,
+          "sha256": "5093932e10b58f19807713b2f9b1aa6f3da75a1b8dd316da23d28ce60a0b5c9e"
+        },
+        "tests.json": {
+          "bytes": 869,
+          "sha256": "e35e61ac79368e3d3cdc355576dcb681a86cb66debe8e0cf5878450d27aa3f71"
+        }
+      },
+      "id": "problems/176-1227-a-math-problem",
+      "imports": [],
+      "largest_case_bytes": 204,
+      "name": "1227_A. Math Problem",
+      "set": "steering",
+      "solution_lines": 15,
+      "source_split": "train"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 353,
+          "sha256": "060d0fbe1ebd1b017da6c1af0a18a433a7259c30cc9d36bda0e5d801d4e371ae"
+        },
+        "tests.json": {
+          "bytes": 939,
+          "sha256": "61a8d9a1ddd265c7fe3b5c2b168c6a96cc2f3011718d37c25b11c690eed62e27"
+        }
+      },
+      "id": "problems/177-1227-d1-optimal-subsequences-easy-version",
+      "imports": [],
+      "largest_case_bytes": 75,
+      "name": "1227_D1. Optimal Subsequences (Easy Version)",
+      "set": "steering",
+      "solution_lines": 19,
+      "source_split": "train"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 374,
+          "sha256": "012b9ba4fe30a78b148279e877bb484e4def75e288104860bef6dddb25ec9338"
+        },
+        "tests.json": {
+          "bytes": 2272,
+          "sha256": "2ecab1043132e2730d1e69cbb1b57320ba51964856572306a7a683419dabc4a5"
+        }
+      },
+      "id": "problems/178-1236-a-stones",
+      "imports": [],
+      "largest_case_bytes": 387,
+      "name": "1236_A. Stones",
+      "set": "steering",
+      "solution_lines": 26,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 789,
+          "sha256": "c29a944364587d9754a3f597a096cac7966766b0c23d7bef424ac7d553b1b883"
+        },
+        "tests.json": {
+          "bytes": 618,
+          "sha256": "776df27220d86e775a81ce9c52fc9fe4455bd06ca915dec820535ce06e75151a"
+        }
+      },
+      "id": "problems/179-1264-a-beautiful-regional-contest",
+      "imports": [],
+      "largest_case_bytes": 202,
+      "name": "1264_A. Beautiful Regional Contest",
+      "set": "steering",
+      "solution_lines": 50,
+      "source_split": "train"
+    },
+    {
+      "case_count": 20,
+      "files": {
+        "solution.py": {
+          "bytes": 404,
+          "sha256": "54cd7d126afe81abd9af1261d80553f478ac1652f55db6978b3738d2700a2f0e"
+        },
+        "tests.json": {
+          "bytes": 3878,
+          "sha256": "e1a7e953bda9b1caca40617a6e4b06f2f678e6d3be80b8616aacac944df96699"
+        }
+      },
+      "id": "problems/180-1269-b-modulo-equality",
+      "imports": [],
+      "largest_case_bytes": 411,
+      "name": "1269_B. Modulo Equality",
+      "set": "steering",
+      "solution_lines": 25,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1358,
+          "sha256": "0fdd5eb432c19b07c98e3d14969d7b499fad74d4ca25015f8382273924052fb7"
+        },
+        "tests.json": {
+          "bytes": 185,
+          "sha256": "369bd3bf21ab7869f4649634fff0b9ccd3d7e386c09883473ab78634cfd51414"
+        }
+      },
+      "id": "problems/181-1277-e-two-fairs",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 86,
+      "name": "1277_E. Two Fairs",
+      "set": "steering",
+      "solution_lines": 55,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 912,
+          "sha256": "fb8f52b50844ea704e9156fe06f0b72c1df45477b71eb99994a787c5c6bb5e54"
+        },
+        "tests.json": {
+          "bytes": 229,
+          "sha256": "b67a09f3db2e848509500097df34f98277fb910e12bfddfdd2e755454347a3d5"
+        }
+      },
+      "id": "problems/182-1291-b-array-sharpening",
+      "imports": [],
+      "largest_case_bytes": 90,
+      "name": "1291_B. Array Sharpening",
+      "set": "steering",
+      "solution_lines": 39,
+      "source_split": "train"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 2207,
+          "sha256": "bb77548c58da90e89793c56344920ac077addcce547e72cc677eacb81d4bcf26"
+        },
+        "tests.json": {
+          "bytes": 635,
+          "sha256": "7971b5db838718082ca94f40e814e8fa24436de77b05de24c8f36159597e74cf"
+        }
+      },
+      "id": "problems/183-1291-e-prefix-enlightenment",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 65,
+      "name": "1291_E. Prefix Enlightenment",
+      "set": "steering",
+      "solution_lines": 93,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 1522,
+          "sha256": "277c0fc6879853117de443c4ae7344893e87043dcf43f2f63e681fafbb36bbf6"
+        },
+        "tests.json": {
+          "bytes": 902,
+          "sha256": "57d7b34d237e22b60b50f493b67ea85d4f9f781e499401277dadce47a3b58e1d"
+        }
+      },
+      "id": "problems/184-1304-e-1-trees-and-queries",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 293,
+      "name": "1304_E. 1-Trees and Queries",
+      "set": "steering",
+      "solution_lines": 74,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 531,
+          "sha256": "e320c307cd1b4515d75213273a6dc75cc681fdee5282cfb83e14bddcd3095611"
+        },
+        "tests.json": {
+          "bytes": 676,
+          "sha256": "09a15e46bd3702cd309b5cc8da56f5a53e060456d87796b49bdb196aaf4890dc"
+        }
+      },
+      "id": "problems/185-1311-c-perform-the-combo",
+      "imports": [],
+      "largest_case_bytes": 97,
+      "name": "1311_C. Perform the Combo",
+      "set": "steering",
+      "solution_lines": 22,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 685,
+          "sha256": "96e862b8703ea428475bf43349ed47d1befa32468551849aca354f2302c02b55"
+        },
+        "tests.json": {
+          "bytes": 242,
+          "sha256": "8afc8511cf496e46f221181552f3d48933c61532f434364516dd14f3b1b022d4"
+        }
+      },
+      "id": "problems/186-1311-f-moving-points",
+      "imports": [
+        "bisect"
+      ],
+      "largest_case_bytes": 22,
+      "name": "1311_F. Moving Points",
+      "set": "steering",
+      "solution_lines": 35,
+      "source_split": "train"
+    },
+    {
+      "case_count": 10,
+      "files": {
+        "solution.py": {
+          "bytes": 777,
+          "sha256": "2dc40eb83416e5dcc66b82c5af5ef5fe2d5af1d03dcb07922836ee2fe59ff6db"
+        },
+        "tests.json": {
+          "bytes": 1566,
+          "sha256": "3c5d6e592db42b9232e646eca90016b0f2aea5286b5c64b27bb7f1706ebbd2f5"
+        }
+      },
+      "id": "problems/187-1334-d-minimum-euler-cycle",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 63,
+      "name": "1334_D. Minimum Euler Cycle",
+      "set": "steering",
+      "solution_lines": 45,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 2236,
+          "sha256": "a50852cb1e593f6dca9103550b2d7d51cd841944dbc39cb9962ccd696ef6252a"
+        },
+        "tests.json": {
+          "bytes": 255,
+          "sha256": "633ef6edc467df494f0c3f02cc1c4fc4a4a70684c9c592a4fc5f8f2727fb4702"
+        }
+      },
+      "id": "problems/188-1369-d-tediouslee",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 26,
+      "name": "1369_D. TediousLee",
+      "set": "steering",
+      "solution_lines": 80,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 453,
+          "sha256": "7fae8af8dc423a37436928b9fa66f826cc7bca3a8f5abae918f8849ef61da591"
+        },
+        "tests.json": {
+          "bytes": 210,
+          "sha256": "8619356e83c98d669dd62d414c5a54eacc5bb8685f6ec4849cb9d668a6fea621"
+        }
+      },
+      "id": "problems/189-1374-b-multiply-by-2-divide-by-6",
+      "imports": [],
+      "largest_case_bytes": 36,
+      "name": "1374_B. Multiply by 2, divide by 6",
+      "set": "steering",
+      "solution_lines": 21,
+      "source_split": "train"
+    },
+    {
+      "case_count": 18,
+      "files": {
+        "solution.py": {
+          "bytes": 736,
+          "sha256": "d3306c0e71319da3f34828429a6cdd98de71d397ef41593aa9d5dab0d66fb3a5"
+        },
+        "tests.json": {
+          "bytes": 2000,
+          "sha256": "3877ffe828419f8bbcd37ad3c8f1211f9730071993e4f3473a42c39a5dc79699"
+        }
+      },
+      "id": "problems/190-1374-e1-reading-books-easy-version",
+      "imports": [],
+      "largest_case_bytes": 208,
+      "name": "1374_E1. Reading Books (easy version)",
+      "set": "steering",
+      "solution_lines": 33,
+      "source_split": "train"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 365,
+          "sha256": "d4f9f5a111eea84ce60e4b309947371b3790c8cb2cfd945b9018a840216aed76"
+        },
+        "tests.json": {
+          "bytes": 907,
+          "sha256": "ecfcfcad3f9c091d820498a9d38fb722a5e8c7b2fd024d940be6d06b902c71e2"
+        }
+      },
+      "id": "problems/191-1382-a-common-subsequence",
+      "imports": [],
+      "largest_case_bytes": 88,
+      "name": "1382_A. Common Subsequence",
+      "set": "steering",
+      "solution_lines": 16,
+      "source_split": "train"
+    },
+    {
+      "case_count": 12,
+      "files": {
+        "solution.py": {
+          "bytes": 138,
+          "sha256": "0650f5d70eebb1569f1a27eeb58c01b281ba8e513b7880fb723f27c2486ac43d"
+        },
+        "tests.json": {
+          "bytes": 826,
+          "sha256": "e5ab6f561882cda6462821b078800e1bd46540a7e3da71a50802cb7d0bd24dbd"
+        }
+      },
+      "id": "problems/192-1391-c-cyclic-permutations",
+      "imports": [],
+      "largest_case_bytes": 8,
+      "name": "1391_C. Cyclic Permutations ",
+      "set": "steering",
+      "solution_lines": 6,
+      "source_split": "train"
+    },
+    {
+      "case_count": 12,
+      "files": {
+        "solution.py": {
+          "bytes": 396,
+          "sha256": "8fb0433b1e93c28c5c892a487bce56de1a04a02a2d78c1f1770b66cca60a8ca4"
+        },
+        "tests.json": {
+          "bytes": 1147,
+          "sha256": "25617af984e6c4821d5ffc9c1ac807257b7b8b219340a359524d9118c3a1a0c5"
+        }
+      },
+      "id": "problems/193-1398-a-bad-triangle",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 54,
+      "name": "1398_A. Bad Triangle",
+      "set": "steering",
+      "solution_lines": 21,
+      "source_split": "train"
+    },
+    {
+      "case_count": 14,
+      "files": {
+        "solution.py": {
+          "bytes": 2101,
+          "sha256": "a45fce42bf7b5d9573d8a3d217c78a5a5afe5aa7885a246372433b487a737367"
+        },
+        "tests.json": {
+          "bytes": 1693,
+          "sha256": "c841f635897e5a745c842eeed1516c7d29e4ad0fcba32658c93246821d442e06"
+        }
+      },
+      "id": "problems/194-1420-d-rescue-nibel",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 246,
+      "name": "1420_D. Rescue Nibel!",
+      "set": "steering",
+      "solution_lines": 83,
+      "source_split": "train"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 1119,
+          "sha256": "3bbcfd3bed5e9ad022fcb7a2163ad648cd09de76b595994fc411720b94660e7b"
+        },
+        "tests.json": {
+          "bytes": 812,
+          "sha256": "29b3d0f0e7dad8198ddbc59970a76ee15b6f7620da059cde1b16283bf7f4e313"
+        }
+      },
+      "id": "problems/195-1421-b-putting-bricks-in-the-wall",
+      "imports": [],
+      "largest_case_bytes": 115,
+      "name": "1421_B. Putting Bricks in the Wall",
+      "set": "steering",
+      "solution_lines": 40,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 653,
+          "sha256": "b64cf86c480d8b53efe2874b7b1d64233f1bb1520f2a5826c1eaabecb242b507"
+        },
+        "tests.json": {
+          "bytes": 432,
+          "sha256": "436fa7b96bed797fa9ef8ea021fccd120e62c0b4949d7e227f1e9997dd4a4c2d"
+        }
+      },
+      "id": "problems/196-1547-c-pair-programming",
+      "imports": [],
+      "largest_case_bytes": 89,
+      "name": "1547_C. Pair Programming",
+      "set": "steering",
+      "solution_lines": 31,
+      "source_split": "train"
+    },
+    {
+      "case_count": 6,
+      "files": {
+        "solution.py": {
+          "bytes": 342,
+          "sha256": "d685eb70e22469ebf1fb3a22bfbc73d89e75de842be0009ca97743be62788271"
+        },
+        "tests.json": {
+          "bytes": 1512,
+          "sha256": "def803466993c224c920cbda97e41f4e7d61b707ffcb2a83b7fb594da8f1cc63"
+        }
+      },
+      "id": "problems/197-167-c-wizards-and-numbers",
+      "imports": [],
+      "largest_case_bytes": 325,
+      "name": "167_C. Wizards and Numbers",
+      "set": "steering",
+      "solution_lines": 20,
+      "source_split": "train"
+    },
+    {
+      "case_count": 11,
+      "files": {
+        "solution.py": {
+          "bytes": 750,
+          "sha256": "c76a876098477704f8dba048f43a3b9ea6c0c32cc33f7070e6af96603c6a42e8"
+        },
+        "tests.json": {
+          "bytes": 1809,
+          "sha256": "c74e9bd5cfd4d597148aad12e2ee14eecce5d690f83d7cb6f6899f448b7a1ddf"
+        }
+      },
+      "id": "problems/198-242-c-king-s-path",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 288,
+      "name": "242_C. King's Path",
+      "set": "steering",
+      "solution_lines": 29,
+      "source_split": "train"
+    },
+    {
+      "case_count": 11,
+      "files": {
+        "solution.py": {
+          "bytes": 1689,
+          "sha256": "aca4e82eff38cb2a2d1d7d33531cfa9decef674461a11e28538ae4d96fec25a3"
+        },
+        "tests.json": {
+          "bytes": 1720,
+          "sha256": "29ac0b639aba2ea01b1372d9528aab724f8ae62607d74500659d8e4747f1c738"
+        }
+      },
+      "id": "problems/199-25-d-roads-not-only-in-berland",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 335,
+      "name": "25_D. Roads not only in Berland",
+      "set": "steering",
+      "solution_lines": 68,
+      "source_split": "train"
+    },
+    {
+      "case_count": 11,
+      "files": {
+        "solution.py": {
+          "bytes": 550,
+          "sha256": "f1d660056adda9ad64e4d3a76650eb0f6b19d637befa015b070e4e607f1efb75"
+        },
+        "tests.json": {
+          "bytes": 1070,
+          "sha256": "b8d6866e02a21e8658bf350cb8e157f71e64648d9d340925ae622725dcb4c3ce"
+        }
+      },
+      "id": "problems/200-316-b2-ekg",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 46,
+      "name": "316_B2. EKG",
+      "set": "steering",
+      "solution_lines": 21,
+      "source_split": "train"
+    },
+    {
+      "case_count": 21,
+      "files": {
+        "solution.py": {
+          "bytes": 121,
+          "sha256": "6f96b9d36c40493ea4839eb2598a8510b71ec0ac49843d69e2925917971f1af1"
+        },
+        "tests.json": {
+          "bytes": 2149,
+          "sha256": "77180f4b405203accb9c5f9b61340353f49c19ca28db79ff7e1264132de51b59"
+        }
+      },
+      "id": "holdout/001-339-a-helpful-maths",
+      "imports": [],
+      "largest_case_bytes": 100,
+      "name": "339_A. Helpful Maths",
+      "set": "holdout",
+      "solution_lines": 8,
+      "source_split": "train"
+    },
+    {
+      "case_count": 15,
+      "files": {
+        "solution.py": {
+          "bytes": 767,
+          "sha256": "05ddc334c07c82b56700d3284d01b43ce806f403f46a5ed4f6318ac459d83416"
+        },
+        "tests.json": {
+          "bytes": 2491,
+          "sha256": "84445199e81dab224065a7c0b387fd427eb7badd8125fa9f7cb2b8cc7a50a5ca"
+        }
+      },
+      "id": "holdout/002-361-c-levko-and-array-recovery",
+      "imports": [],
+      "largest_case_bytes": 414,
+      "name": "361_C. Levko and Array Recovery",
+      "set": "holdout",
+      "solution_lines": 32,
+      "source_split": "train"
+    },
+    {
+      "case_count": 23,
+      "files": {
+        "solution.py": {
+          "bytes": 439,
+          "sha256": "f877fe26cd7863626a427103bb2f39e6f46d61598d8cfde8a6458da658d1a267"
+        },
+        "tests.json": {
+          "bytes": 4813,
+          "sha256": "70b242c6fad7254d2ba3f1dd028f2a85c5ad9c14fac2e4c1772b3cd6a795b51f"
+        }
+      },
+      "id": "holdout/003-425-a-sereja-and-swaps",
+      "imports": [],
+      "largest_case_bytes": 498,
+      "name": "425_A. Sereja and Swaps",
+      "set": "holdout",
+      "solution_lines": 17,
+      "source_split": "train"
+    },
+    {
+      "case_count": 19,
+      "files": {
+        "solution.py": {
+          "bytes": 103,
+          "sha256": "a07ab4eaaf5b58f9eb7549417046da5cc9b0d5090db4eeff3ffce2e3c741c3f6"
+        },
+        "tests.json": {
+          "bytes": 1328,
+          "sha256": "29446f1692efe56d61fc99c7733716dd2c591160bbe7a59d84786ea11f46c823"
+        }
+      },
+      "id": "holdout/004-478-a-initial-bet",
+      "imports": [],
+      "largest_case_bytes": 20,
+      "name": "478_A. Initial Bet",
+      "set": "holdout",
+      "solution_lines": 6,
+      "source_split": "train"
+    },
+    {
+      "case_count": 24,
+      "files": {
+        "solution.py": {
+          "bytes": 490,
+          "sha256": "eb038339a4434dbe52eb0b6423d86809cd4bfcf43843e89ad60c80b309043aa0"
+        },
+        "tests.json": {
+          "bytes": 2059,
+          "sha256": "7be7099c907dabbe614e063251fbb54e02858af2ee5017f2d14f3474c064b78b"
+        }
+      },
+      "id": "holdout/005-494-a-treasure",
+      "imports": [],
+      "largest_case_bytes": 101,
+      "name": "494_A. Treasure",
+      "set": "holdout",
+      "solution_lines": 26,
+      "source_split": "train"
+    },
+    {
+      "case_count": 11,
+      "files": {
+        "solution.py": {
+          "bytes": 431,
+          "sha256": "c17c81a2cfa31c908c767e37d04c8a131cfd9af9ab5d8bd7493f732566f702c4"
+        },
+        "tests.json": {
+          "bytes": 1487,
+          "sha256": "9420c0b1ca21241015faa3743ee90435069d93b45dc259285a91e3c5c0dd0c0d"
+        }
+      },
+      "id": "holdout/006-500-c-new-year-book-reading",
+      "imports": [],
+      "largest_case_bytes": 318,
+      "name": "500_C. New Year Book Reading",
+      "set": "holdout",
+      "solution_lines": 20,
+      "source_split": "train"
+    },
+    {
+      "case_count": 11,
+      "files": {
+        "solution.py": {
+          "bytes": 180,
+          "sha256": "71181ba1b7c84d8c61ed039dd4c4a070fdb95b2331bcd5f3597b326bbb045685"
+        },
+        "tests.json": {
+          "bytes": 1377,
+          "sha256": "665c600ff7903efddf41133b578573376a1071063a4e777d4954fb30385948da"
+        }
+      },
+      "id": "holdout/007-519-b-a-and-b-and-compilation-errors",
+      "imports": [],
+      "largest_case_bytes": 266,
+      "name": "519_B. A and B and Compilation Errors",
+      "set": "holdout",
+      "solution_lines": 6,
+      "source_split": "train"
+    },
+    {
+      "case_count": 12,
+      "files": {
+        "solution.py": {
+          "bytes": 629,
+          "sha256": "196f787fcac0bbf0f58c4435162af5ce2a7a5d598d2ffdb56995ccb2d9cb228f"
+        },
+        "tests.json": {
+          "bytes": 2067,
+          "sha256": "c10a11fb7f9d07ec39e50ee3463afac4157931fabd1d508c77e438e9c7173f66"
+        }
+      },
+      "id": "holdout/008-545-c-woodcutters",
+      "imports": [],
+      "largest_case_bytes": 345,
+      "name": "545_C. Woodcutters",
+      "set": "holdout",
+      "solution_lines": 30,
+      "source_split": "train"
+    },
+    {
+      "case_count": 13,
+      "files": {
+        "solution.py": {
+          "bytes": 382,
+          "sha256": "5bb733e8dc62b620eb3cd6e3f43c2f208d70e244f9be85836718f48b6a9a8609"
+        },
+        "tests.json": {
+          "bytes": 2166,
+          "sha256": "de5aee688f0a71b0539e459db02ac820fc684fd97e3b165ab189ce8fc0887afe"
+        }
+      },
+      "id": "holdout/009-571-b-minimization",
+      "imports": [],
+      "largest_case_bytes": 430,
+      "name": "571_B. Minimization",
+      "set": "holdout",
+      "solution_lines": 18,
+      "source_split": "train"
+    },
+    {
+      "case_count": 18,
+      "files": {
+        "solution.py": {
+          "bytes": 223,
+          "sha256": "e8c10be5377d002457c4711fa67106f68213ef95af0a1a1a4263b73667c3df94"
+        },
+        "tests.json": {
+          "bytes": 2954,
+          "sha256": "03cd23866ea2ecc26cb29cbdafb684ac014d971ab0939ef320679dd37af248db"
+        }
+      },
+      "id": "holdout/010-5-a-chat-server-s-outgoing-traffic",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 498,
+      "name": "5_A. Chat Server's Outgoing Traffic",
+      "set": "holdout",
+      "solution_lines": 14,
+      "source_split": "train"
+    },
+    {
+      "case_count": 23,
+      "files": {
+        "solution.py": {
+          "bytes": 282,
+          "sha256": "fa3b7dc8d45a593b924d5eabaabf3554116cbe77a3e633d386bc7aa3432a0e15"
+        },
+        "tests.json": {
+          "bytes": 2974,
+          "sha256": "e8e6942fa4400e4020bb69fc17a106d981cba524228a33b6ab17982377293482"
+        }
+      },
+      "id": "holdout/011-615-a-bulbs",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 302,
+      "name": "615_A. Bulbs",
+      "set": "holdout",
+      "solution_lines": 18,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 1963,
+          "sha256": "8eae9ec738ce6ec4367a926f03acc0f9cc729be5fbb609a235af1d5e48896a51"
+        },
+        "tests.json": {
+          "bytes": 318,
+          "sha256": "221ae37550d7ee8195b48508ae7703dfda35e0f1c7498a8f5d9a1f4d4cd06fa5"
+        }
+      },
+      "id": "holdout/012-634-c-factory-repairs",
+      "imports": [
+        "functools",
+        "sys"
+      ],
+      "largest_case_bytes": 52,
+      "name": "634_C. Factory Repairs",
+      "set": "holdout",
+      "solution_lines": 56,
+      "source_split": "train"
+    },
+    {
+      "case_count": 22,
+      "files": {
+        "solution.py": {
+          "bytes": 167,
+          "sha256": "5b1e0cc6e66a1f6a3ecd70ed88637ab449f8e466500dee467f5464ffa38264f1"
+        },
+        "tests.json": {
+          "bytes": 1665,
+          "sha256": "6bf3a0b581f08aba14a223b045c6ff093eb5e996e5d5efd9f5dff9d020d7e835"
+        }
+      },
+      "id": "holdout/013-670-b-game-of-robots",
+      "imports": [],
+      "largest_case_bytes": 31,
+      "name": "670_B. Game of Robots",
+      "set": "holdout",
+      "solution_lines": 12,
+      "source_split": "train"
+    },
+    {
+      "case_count": 12,
+      "files": {
+        "solution.py": {
+          "bytes": 560,
+          "sha256": "fbe53542a89af2c82214d92fa36eede8ac8587e0c3b784df4f3e5d6afeb8a85f"
+        },
+        "tests.json": {
+          "bytes": 2723,
+          "sha256": "ebc6501ea2ec5a6a47421912cb06eaa69bcbd9a353136012e3038e5149cbc35e"
+        }
+      },
+      "id": "holdout/014-730-g-car-repair-shop",
+      "imports": [],
+      "largest_case_bytes": 414,
+      "name": "730_G. Car Repair Shop",
+      "set": "holdout",
+      "solution_lines": 23,
+      "source_split": "train"
+    },
+    {
+      "case_count": 14,
+      "files": {
+        "solution.py": {
+          "bytes": 2314,
+          "sha256": "0a04806279becd24e7bf027179bd12ce912116aaabeed32fcd594c4bd4f74bb9"
+        },
+        "tests.json": {
+          "bytes": 1435,
+          "sha256": "e262034a337e80a0d9dc0709f711472d96b609585f1f206af6fdb2b13e5c6739"
+        }
+      },
+      "id": "holdout/015-737-a-road-to-cinema",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 82,
+      "name": "737_A. Road to Cinema",
+      "set": "holdout",
+      "solution_lines": 91,
+      "source_split": "train"
+    },
+    {
+      "case_count": 22,
+      "files": {
+        "solution.py": {
+          "bytes": 758,
+          "sha256": "3d93b71a947abd5c341d077d7167832882ba7ba2568a9caf228df5acd535d932"
+        },
+        "tests.json": {
+          "bytes": 2218,
+          "sha256": "4f403de878cf2eb996ad10005da2c2a2ec30df5e1679220aed7268a6920a1f8d"
+        }
+      },
+      "id": "holdout/016-774-k-stepan-and-vowels",
+      "imports": [
+        "math",
+        "sys"
+      ],
+      "largest_case_bytes": 205,
+      "name": "774_K. Stepan and Vowels",
+      "set": "holdout",
+      "solution_lines": 36,
+      "source_split": "train"
+    },
+    {
+      "case_count": 12,
+      "files": {
+        "solution.py": {
+          "bytes": 198,
+          "sha256": "70530bb334f905f13388be5bba9298a2c94203bf5cd3b86586d800ea57511839"
+        },
+        "tests.json": {
+          "bytes": 3548,
+          "sha256": "441eaa81bc1c5362377d7ee9e864e640026e48b1a10ba5e89b4a9cd1d9edf285"
+        }
+      },
+      "id": "holdout/017-776-a-a-serial-killer",
+      "imports": [],
+      "largest_case_bytes": 358,
+      "name": "776_A. A Serial Killer",
+      "set": "holdout",
+      "solution_lines": 11,
+      "source_split": "train"
+    },
+    {
+      "case_count": 23,
+      "files": {
+        "solution.py": {
+          "bytes": 1211,
+          "sha256": "2830425c3ef286ed667ea9cc2d10bc46ef4793262388e1357967c8c87a2ea925"
+        },
+        "tests.json": {
+          "bytes": 9704,
+          "sha256": "e867958182550512b497ec777a6085b76a5f667fcaae45be5ee850766f85ef80"
+        }
+      },
+      "id": "holdout/018-7-b-memory-manager",
+      "imports": [],
+      "largest_case_bytes": 460,
+      "name": "7_B. Memory Manager",
+      "set": "holdout",
+      "solution_lines": 43,
+      "source_split": "train"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 907,
+          "sha256": "1c9e6e38baa0a8d159c5acc462dca2e63d4a342371f31d88c015621218ff20db"
+        },
+        "tests.json": {
+          "bytes": 1343,
+          "sha256": "0fdfbc3017c3b146fb440dc1dc778ffb1ddcb3387f3b340bcac4898f7a38c8ec"
+        }
+      },
+      "id": "holdout/019-846-e-chemistry-in-berland",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 267,
+      "name": "846_E. Chemistry in Berland",
+      "set": "holdout",
+      "solution_lines": 38,
+      "source_split": "train"
+    },
+    {
+      "case_count": 22,
+      "files": {
+        "solution.py": {
+          "bytes": 245,
+          "sha256": "57cec5a86ea9103effe3fd537e6e3651756ad21c98f93a959c9f0bd5b51a7ab6"
+        },
+        "tests.json": {
+          "bytes": 1765,
+          "sha256": "81b50a249dc20afc7e36ef07aad463f9867b2eaca26a8b8832d96169c3d84bea"
+        }
+      },
+      "id": "holdout/020-977-b-two-gram",
+      "imports": [],
+      "largest_case_bytes": 105,
+      "name": "977_B. Two-gram",
+      "set": "holdout",
+      "solution_lines": 15,
+      "source_split": "train"
+    },
+    {
+      "case_count": 18,
+      "files": {
+        "solution.py": {
+          "bytes": 190,
+          "sha256": "be513aae416c8579ea99b1e3fcd2620dccdb8f0d8818eef24b326ccb7ec10c3e"
+        },
+        "tests.json": {
+          "bytes": 1394,
+          "sha256": "2f3d34a18a6859c6b0be2c755c88a658ab86bfa96f66338ae16e25a200d538ba"
+        }
+      },
+      "id": "holdout/021-990-b-micro-world",
+      "imports": [],
+      "largest_case_bytes": 38,
+      "name": "990_B. Micro-World",
+      "set": "holdout",
+      "solution_lines": 9,
+      "source_split": "train"
+    },
+    {
+      "case_count": 25,
+      "files": {
+        "solution.py": {
+          "bytes": 653,
+          "sha256": "5faf87ac1199f43e3b0f1c62113cf86035d59460e0db5ef1911ef3dc9b571817"
+        },
+        "tests.json": {
+          "bytes": 2062,
+          "sha256": "62d295e6607b48ab34197b97a89ea47ac69e97c2733ac21592ffaf27bb2fdf6f"
+        }
+      },
+      "id": "holdout/022-990-e-post-lamps",
+      "imports": [
+        "array",
+        "sys"
+      ],
+      "largest_case_bytes": 81,
+      "name": "990_E. Post Lamps",
+      "set": "holdout",
+      "solution_lines": 38,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 254,
+          "sha256": "af1b5d46cb0111903de47498e05f4615862b439a97aaa41965128dc12733a725"
+        },
+        "tests.json": {
+          "bytes": 101,
+          "sha256": "560e675bc84712068c407eb8db84f1145b869690dad3e5c48f36d427b3dfd034"
+        }
+      },
+      "id": "holdout/023-p00032-plastic-board",
+      "imports": [],
+      "largest_case_bytes": 23,
+      "name": "p00032 Plastic Board",
+      "set": "holdout",
+      "solution_lines": 14,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 2007,
+          "sha256": "f37729924aea3cce140a51da5d6930df4c0dbdca0fa2e02c7935a23eb926a483"
+        },
+        "tests.json": {
+          "bytes": 142,
+          "sha256": "c82b1ac560bfb95fa975dbcdcd54eea6a190018071e6e949ce17942fa08d3a51"
+        }
+      },
+      "id": "holdout/024-p00035-is-it-convex",
+      "imports": [],
+      "largest_case_bytes": 63,
+      "name": "p00035 Is it Convex?",
+      "set": "holdout",
+      "solution_lines": 36,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 665,
+          "sha256": "5b6f6bd17e9484a0f666a61ef4174419d6f3dd17755a22c2510a24a56ab36be3"
+        },
+        "tests.json": {
+          "bytes": 105,
+          "sha256": "d895fe8fef62cda2e7f13a4a2f507df5d188e68ea8e0979a588ca3d8c8697b05"
+        }
+      },
+      "id": "holdout/025-p00074-videotape",
+      "imports": [],
+      "largest_case_bytes": 15,
+      "name": "p00074 Videotape",
+      "set": "holdout",
+      "solution_lines": 26,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1158,
+          "sha256": "a930d610f9b801692af651751f86f1f1a0195a0ee65042f2d50a5317a02165f7"
+        },
+        "tests.json": {
+          "bytes": 121,
+          "sha256": "9a6bbcd8ac27b3768544e84a024e402411f383c8b5284cb128ab8a8de2d679f4"
+        }
+      },
+      "id": "holdout/026-p00163-highway-toll",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 33,
+      "name": "p00163 Highway Toll",
+      "set": "holdout",
+      "solution_lines": 43,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 341,
+          "sha256": "21af641b97707d2854f3ffa70e60797fc0a18fe002dc3ca0a7888d661284e00e"
+        },
+        "tests.json": {
+          "bytes": 130,
+          "sha256": "64708ebcdbe0098ca610266113054e48b46de92ee6fd35320de7487c9d29da55"
+        }
+      },
+      "id": "holdout/027-p00167-bubble-sort",
+      "imports": [],
+      "largest_case_bytes": 35,
+      "name": "p00167 Bubble Sort",
+      "set": "holdout",
+      "solution_lines": 14,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 577,
+          "sha256": "10eefab945b1d7fec719a8663b068eecd3b26392a269be9671cfb2eabba0cbf5"
+        },
+        "tests.json": {
+          "bytes": 389,
+          "sha256": "2ecfd9a9fcc635122ac9332cbbde80458f72dd43bb6ad260c08fc8c3a5e5007b"
+        }
+      },
+      "id": "holdout/028-p00206-next-trip",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 287,
+      "name": "p00206 Next Trip",
+      "set": "holdout",
+      "solution_lines": 29,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 652,
+          "sha256": "579e142cf1e3c8d1595876422ff646ad213d3a45167c501b8311a21082be05ac"
+        },
+        "tests.json": {
+          "bytes": 183,
+          "sha256": "5b02c0ad35083ad590e1f8ed808bd3b27380e71e9e2818f4bb94477f9dd0be0f"
+        }
+      },
+      "id": "holdout/029-p00320-cuboid",
+      "imports": [],
+      "largest_case_bytes": 23,
+      "name": "p00320 Cuboid",
+      "set": "holdout",
+      "solution_lines": 28,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 230,
+          "sha256": "eb522d396b093a0e4ab354fd0e68e6b1f396477245bec29d945b6aa7874d6e5d"
+        },
+        "tests.json": {
+          "bytes": 165,
+          "sha256": "321af0290084d6587a5380d98f174c755304912894f7a6597dd40b9cfec89c30"
+        }
+      },
+      "id": "holdout/030-p00323-metal-recycling",
+      "imports": [],
+      "largest_case_bytes": 13,
+      "name": "p00323 Metal Recycling",
+      "set": "holdout",
+      "solution_lines": 11,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 282,
+          "sha256": "69764b1c3a06ac2f8cd025d6324dfd3df4ce653d150e719b9d211d483a6a6160"
+        },
+        "tests.json": {
+          "bytes": 162,
+          "sha256": "98b0ce38f19fee52e512c07b3397b68dd26327348a8d0e7eda68eb916587171a"
+        }
+      },
+      "id": "holdout/031-p00365-age-difference",
+      "imports": [],
+      "largest_case_bytes": 18,
+      "name": "p00365 Age Difference",
+      "set": "holdout",
+      "solution_lines": 10,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 273,
+          "sha256": "89bd27c5eadccfdc535cc3242ea9363823e7f3f46ffc9d556a0a9c7de2af9b5a"
+        },
+        "tests.json": {
+          "bytes": 99,
+          "sha256": "839d04caa302ac88842a4531b550dc096f6d6236b9a23d45c8dce3fb12d3a46c"
+        }
+      },
+      "id": "holdout/032-p00490-best-pizza",
+      "imports": [],
+      "largest_case_bytes": 21,
+      "name": "p00490 Best Pizza",
+      "set": "holdout",
+      "solution_lines": 17,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 182,
+          "sha256": "a2a3053ab58d5a3ecb8db47565486a9b34232bc06c1718074e196f398e50a549"
+        },
+        "tests.json": {
+          "bytes": 152,
+          "sha256": "b210722dabd6eb5bd982ae07506215964f75fd42054225ed27f2cd6413d6bd59"
+        }
+      },
+      "id": "holdout/033-p00676-knd-is-so-sexy",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 23,
+      "name": "p00676 KND is So Sexy",
+      "set": "holdout",
+      "solution_lines": 7,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 2922,
+          "sha256": "22d21fdff4a752acd57fa11d707cb66945c77346e516dafe75358a4a76d01acd"
+        },
+        "tests.json": {
+          "bytes": 436,
+          "sha256": "2ce1e31fe5ce7738ea51a431078ab4cdac4c0a93cdeeef0bebff3ca8becbe1ba"
+        }
+      },
+      "id": "holdout/034-p00720-earth-observation-with-a-mobile-robot-tea",
+      "imports": [
+        "heapq",
+        "sys"
+      ],
+      "largest_case_bytes": 265,
+      "name": "p00720 Earth Observation with a Mobile Robot Team",
+      "set": "holdout",
+      "solution_lines": 97,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1418,
+          "sha256": "2b00db7dfc471c1a4f4029f22b5f344a84c759782047d463bed2c371a66e4352"
+        },
+        "tests.json": {
+          "bytes": 205,
+          "sha256": "c0f32db177abfcb79ca9a75b1d58a59dbe3342ddcc3c2bf418a0f4111d71bf77"
+        }
+      },
+      "id": "holdout/035-p00819-unreliable-message",
+      "imports": [],
+      "largest_case_bytes": 70,
+      "name": "p00819 Unreliable Message",
+      "set": "holdout",
+      "solution_lines": 59,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1384,
+          "sha256": "82f354a5244a1c7de2c4c989396e8f695586189cf59498f423f8db5f8cf4ad8c"
+        },
+        "tests.json": {
+          "bytes": 1085,
+          "sha256": "2a3804b91655320446ddd776bd653251027887420751a6823cc7ec3824050524"
+        }
+      },
+      "id": "holdout/036-p00822-weather-forecast",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 970,
+      "name": "p00822 Weather Forecast",
+      "set": "holdout",
+      "solution_lines": 52,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 2120,
+          "sha256": "c4d11740b063d07fbc998997a4e6cc003b197164b27302b33d05b4e369e86058"
+        },
+        "tests.json": {
+          "bytes": 75,
+          "sha256": "1857071eefac3ad557f246926e6faedafb8f1426e862172441d3ba61197b2143"
+        }
+      },
+      "id": "holdout/037-p00950-infallibly-crack-perplexing-cryptarithm",
+      "imports": [
+        "itertools"
+      ],
+      "largest_case_bytes": 3,
+      "name": "p00950 Infallibly Crack Perplexing Cryptarithm",
+      "set": "holdout",
+      "solution_lines": 100,
+      "source_split": "train"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 574,
+          "sha256": "131bd4361eebf30608f2bd96ba5a557151e68d491b553be5e5d620f5263507dc"
+        },
+        "tests.json": {
+          "bytes": 287,
+          "sha256": "480ff8fa25ada92a87438f5af6536f539fa343ef5f5791dc68dba567346fab7c"
+        }
+      },
+      "id": "holdout/038-p00991-grid",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 19,
+      "name": "p00991 Grid",
+      "set": "holdout",
+      "solution_lines": 27,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 400,
+          "sha256": "da45ff66ff1616280ec5a0704166cee29043341da32fa33c0008aeeb29f49b10"
+        },
+        "tests.json": {
+          "bytes": 312,
+          "sha256": "916d454dc1b553f8885ed8d94678a5d917ea17acbe18a09837a87f09a3103fb5"
+        }
+      },
+      "id": "holdout/039-p01086-short-phrase",
+      "imports": [],
+      "largest_case_bytes": 193,
+      "name": "p01086 Short Phrase",
+      "set": "holdout",
+      "solution_lines": 23,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 713,
+          "sha256": "211cc25ae015945baf49ee29d36a31d0348c8c788ca53eb60440181b32a90457"
+        },
+        "tests.json": {
+          "bytes": 189,
+          "sha256": "644eec258ddcc7fe6f056fe14205833fb7f3ba00b10e68353abc4b817f608f75"
+        }
+      },
+      "id": "holdout/040-p01353-rabbit-plays-games",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 33,
+      "name": "p01353 Rabbit Plays Games!",
+      "set": "holdout",
+      "solution_lines": 31,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 544,
+          "sha256": "1c2e38a54e836f8ed75736658f6d17ba0c870f7c64c7d9464a11bdb8e646eb89"
+        },
+        "tests.json": {
+          "bytes": 148,
+          "sha256": "6b0d6a7ba06b221aae269f2ebe46e8245bb654e321fdb9804496ea4632b84295"
+        }
+      },
+      "id": "holdout/041-p01356-nearest-station",
+      "imports": [],
+      "largest_case_bytes": 13,
+      "name": "p01356 Nearest Station",
+      "set": "holdout",
+      "solution_lines": 24,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 1052,
+          "sha256": "b3e6c1eb70bd52768aa176a7ce6d21652ed38297d5db82dc607dd29fa452582f"
+        },
+        "tests.json": {
+          "bytes": 245,
+          "sha256": "9e2a88f9ec8db627da448e355331f7023ebf89a415f827d3d5ce4c0cc5ff4b99"
+        }
+      },
+      "id": "holdout/042-p01422-beautiful-currency",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 9,
+      "name": "p01422 Beautiful Currency",
+      "set": "holdout",
+      "solution_lines": 43,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 566,
+          "sha256": "074bcd5e6067707f1050221cd57232cb65e5429540ef13621cf2fe0c91cc3bdb"
+        },
+        "tests.json": {
+          "bytes": 165,
+          "sha256": "fd677164853b91f7479819c8c1755769458fcd423082c2fd4ada7c5b2632b5ae"
+        }
+      },
+      "id": "holdout/043-p01538-kakezan",
+      "imports": [],
+      "largest_case_bytes": 16,
+      "name": "p01538 Kakezan",
+      "set": "holdout",
+      "solution_lines": 26,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 440,
+          "sha256": "8dbd7150043c39c1891ef29ee9f5197e3624227ac35e92a22d75f00566e98d42"
+        },
+        "tests.json": {
+          "bytes": 156,
+          "sha256": "f733f51c24d67e2fdd13729cd3a81252348e5f57f894ff3f017d8bba4da36538"
+        }
+      },
+      "id": "holdout/044-p01694-step-aerobics",
+      "imports": [],
+      "largest_case_bytes": 67,
+      "name": "p01694 Step Aerobics",
+      "set": "holdout",
+      "solution_lines": 18,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 1109,
+          "sha256": "329b1760b174cb16467756840cb47cde93bd86b8afc7c6bdd4b3477135db7e16"
+        },
+        "tests.json": {
+          "bytes": 80,
+          "sha256": "268de4cb29d16936c1f483ea317574d4576f5f8be2faac7c9f507c16f5a9c946"
+        }
+      },
+      "id": "holdout/045-p01970-the-diversity-of-prime-factorization",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 7,
+      "name": "p01970 The Diversity of Prime Factorization",
+      "set": "holdout",
+      "solution_lines": 39,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 224,
+          "sha256": "bf9cc075570d976a71bcc3fbdf66d09bf202c876f336bb69ea37a1d4fa456a3f"
+        },
+        "tests.json": {
+          "bytes": 88,
+          "sha256": "cce952924afd67bcfc51e29d88b3c105656700a0798fc18a88d881d68ce31c48"
+        }
+      },
+      "id": "holdout/046-p01974-pigeonhole-principle",
+      "imports": [
+        "itertools"
+      ],
+      "largest_case_bytes": 12,
+      "name": "p01974 Pigeonhole principle",
+      "set": "holdout",
+      "solution_lines": 10,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 257,
+          "sha256": "68f6070d8e654be7460949d149243db36c6829b0bb70583a000844fc9ce9139c"
+        },
+        "tests.json": {
+          "bytes": 183,
+          "sha256": "1c192fefe8b7066ec5053c49445d041203330f5f77f95ed4d3f454e8afeffc41"
+        }
+      },
+      "id": "holdout/047-p02257-prime-numbers",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 32,
+      "name": "p02257 Prime Numbers",
+      "set": "holdout",
+      "solution_lines": 14,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 274,
+          "sha256": "76fdcc812759f3deefd7548279aa70603dc80410ef953343e2ce32d55ae1fdc0"
+        },
+        "tests.json": {
+          "bytes": 178,
+          "sha256": "e2b3f498fa234c7fd2acd1d8da61cc27d1d7901b2bc241352d7da06b02940712"
+        }
+      },
+      "id": "holdout/048-p02260-selection-sort",
+      "imports": [],
+      "largest_case_bytes": 13,
+      "name": "p02260 Selection Sort",
+      "set": "holdout",
+      "solution_lines": 15,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 239,
+          "sha256": "ebffe86151b7f046efa42f9fdf47f19c10b0b656ed9aa25b93f6ef6bfed7b0e6"
+        },
+        "tests.json": {
+          "bytes": 171,
+          "sha256": "4a6686a743df2e1a9d28eb3867bd11b61b52a6b2dee18b39f1171783bfe46944"
+        }
+      },
+      "id": "holdout/049-p02298-is-convex",
+      "imports": [],
+      "largest_case_bytes": 21,
+      "name": "p02298 Is-Convex",
+      "set": "holdout",
+      "solution_lines": 9,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 225,
+          "sha256": "727bcc9f278bab72d9df06f90eefa712710748e0011ea5f1cff8e88934ea1a36"
+        },
+        "tests.json": {
+          "bytes": 189,
+          "sha256": "1b5bc64257fcdfeb774f4eb5e0fd0e5679ae66a34c55020ef2203e80a4b848b1"
+        }
+      },
+      "id": "holdout/050-p02405-print-a-chessboard",
+      "imports": [],
+      "largest_case_bytes": 23,
+      "name": "p02405 Print a Chessboard",
+      "set": "holdout",
+      "solution_lines": 11,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 181,
+          "sha256": "883a715ce5115d8542270794c816d9a5720f5cd8e988049181a125ff2639ad5d"
+        },
+        "tests.json": {
+          "bytes": 347,
+          "sha256": "91a4da518004fa00906e747335fe567911b6d680933e2b26dc3e92009ca2fb23"
+        }
+      },
+      "id": "holdout/051-p02408-finding-missing-cards",
+      "imports": [],
+      "largest_case_bytes": 205,
+      "name": "p02408 Finding Missing Cards",
+      "set": "holdout",
+      "solution_lines": 7,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 243,
+          "sha256": "070cadd4be54f45ac297674a095db0cf02d240a8980d2886e525602eaf12f0b3"
+        },
+        "tests.json": {
+          "bytes": 131,
+          "sha256": "aa4717551eaa867e7647b867609b5f406a509db13b161c8f05e346db03f459d6"
+        }
+      },
+      "id": "holdout/052-p02445-swap",
+      "imports": [],
+      "largest_case_bytes": 34,
+      "name": "p02445 Swap",
+      "set": "holdout",
+      "solution_lines": 10,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 332,
+          "sha256": "e6b520ab584c8a3b7729d2ac7c13ef69f1d9b060a7cb02ab1d31d50996ebdc96"
+        },
+        "tests.json": {
+          "bytes": 319,
+          "sha256": "703e2ac7500827da962a01f07c46704426e8932ebdc1b91dd8e9a481ea70d371"
+        }
+      },
+      "id": "holdout/053-p02610-aising-programming-contest-2020-camel-tra",
+      "imports": [
+        "heapq"
+      ],
+      "largest_case_bytes": 208,
+      "name": "p02610 AIsing Programming Contest 2020 - Camel Train",
+      "set": "holdout",
+      "solution_lines": 13,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 130,
+          "sha256": "ddb573961d43222701eb59e2dc2173f8977bd9d264100527a10c4b9023bfd35f"
+        },
+        "tests.json": {
+          "bytes": 254,
+          "sha256": "9554015c7a244bc93b9b9216c607629c444f55d66562083165d558545d553da5"
+        }
+      },
+      "id": "holdout/054-p02613-atcoder-beginner-contest-173-judge-status",
+      "imports": [],
+      "largest_case_bytes": 32,
+      "name": "p02613 AtCoder Beginner Contest 173 - Judge Status Summary",
+      "set": "holdout",
+      "solution_lines": 6,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 482,
+          "sha256": "2e576acee483482266597166b44699af466f5e9af99284e5e400d96582a12ed6"
+        },
+        "tests.json": {
+          "bytes": 233,
+          "sha256": "d4fbc5780ead11d5074950c95b271fd805f729be6b16e4b14395724d9be93f2a"
+        }
+      },
+      "id": "holdout/055-p02652-atcoder-grand-contest-045-01-unbalanced",
+      "imports": [
+        "itertools"
+      ],
+      "largest_case_bytes": 50,
+      "name": "p02652 AtCoder Grand Contest 045 - 01 Unbalanced",
+      "set": "holdout",
+      "solution_lines": 25,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 135,
+          "sha256": "a29b6ca474c94aeb0641cdb9e620909cb904c4c2a85b6cbff21a81bf095b7576"
+        },
+        "tests.json": {
+          "bytes": 127,
+          "sha256": "76b9e8a5cc8769a0c81e45ce3b1e3ef69a625bf4a49eeb4550730cabed15449c"
+        }
+      },
+      "id": "holdout/056-p02741-panasonic-programming-contest-2020-kth-te",
+      "imports": [],
+      "largest_case_bytes": 2,
+      "name": "p02741 Panasonic Programming Contest 2020 - Kth Term",
+      "set": "holdout",
+      "solution_lines": 3,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 149,
+          "sha256": "96f7a18095cd49eb33f4caf29cb876163630ff675c00951940562fb4854dea28"
+        },
+        "tests.json": {
+          "bytes": 131,
+          "sha256": "471fca83c7f0663ad4e67a8d2af6a5b06e0bc9d42bcb8b2f9deb03ee47746a17"
+        }
+      },
+      "id": "holdout/057-p02744-panasonic-programming-contest-2020-string",
+      "imports": [],
+      "largest_case_bytes": 1,
+      "name": "p02744 Panasonic Programming Contest 2020 - String Equivalence",
+      "set": "holdout",
+      "solution_lines": 8,
+      "source_split": "train"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 313,
+          "sha256": "7cd06751433c44363b9fb7b84859a3f74f8293847443ccc4b2cdb891b6656cdd"
+        },
+        "tests.json": {
+          "bytes": 363,
+          "sha256": "4149ca6821c3fe16e3ce8c60203832990d5bb25af038ce551ed1061a69dd18f1"
+        }
+      },
+      "id": "holdout/058-p02781-atcoder-beginner-contest-154-almost-every",
+      "imports": [
+        "functools",
+        "sys"
+      ],
+      "largest_case_bytes": 102,
+      "name": "p02781 AtCoder Beginner Contest 154 - Almost Everywhere Zero",
+      "set": "holdout",
+      "solution_lines": 14,
+      "source_split": "train"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 825,
+          "sha256": "8efe17ea388b13aa469020eadfb1539e30aecc5700b433c7e103bdf4f7ea46e9"
+        },
+        "tests.json": {
+          "bytes": 511,
+          "sha256": "1eea8adce1e149f077623f88542a4894fecab6ed4e2b2cbde12247e690b54471"
+        }
+      },
+      "id": "holdout/059-p02876-atcoder-grand-contest-040-balance-beam",
+      "imports": [
+        "sys"
+      ],
+      "largest_case_bytes": 200,
+      "name": "p02876 AtCoder Grand Contest 040 - Balance Beam",
+      "set": "holdout",
+      "solution_lines": 44,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 75,
+          "sha256": "2cb5d900a23340dee30ec10ce6c9fd9feddb146bc798ba84674aab3b403ac4a6"
+        },
+        "tests.json": {
+          "bytes": 189,
+          "sha256": "17553cad5d0b0ad764b755afe8d36571f2b263d2ba34452d9e7e21ac424c15c2"
+        }
+      },
+      "id": "holdout/060-p02879-atcoder-beginner-contest-144-9x9",
+      "imports": [],
+      "largest_case_bytes": 4,
+      "name": "p02879 AtCoder Beginner Contest 144 - 9x9",
+      "set": "holdout",
+      "solution_lines": 2,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 198,
+          "sha256": "5182263030fd5d9ac3f7258053427245e185ed7a1e67dd3791b37ed48c4683da"
+        },
+        "tests.json": {
+          "bytes": 247,
+          "sha256": "1f01f8a2e6793c59ce45d0485435563d6909b7a350aca4bdfb73d8cddecc5cbd"
+        }
+      },
+      "id": "holdout/061-p02916-atcoder-beginner-contest-140-buffet",
+      "imports": [],
+      "largest_case_bytes": 27,
+      "name": "p02916 AtCoder Beginner Contest 140 - Buffet",
+      "set": "holdout",
+      "solution_lines": 10,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 222,
+          "sha256": "957674444add8e335a344e57f9ba1376b368d09ccae0eb1142d470071d81911f"
+        },
+        "tests.json": {
+          "bytes": 224,
+          "sha256": "6a11edb97a6b91788aa48cf19c1dc1b4cd4ccd263cd58807c20897fc997b4801"
+        }
+      },
+      "id": "holdout/062-p03013-atcoder-beginner-contest-129-typical-stai",
+      "imports": [],
+      "largest_case_bytes": 19,
+      "name": "p03013 AtCoder Beginner Contest 129 - Typical Stairs",
+      "set": "holdout",
+      "solution_lines": 13,
+      "source_split": "train"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 152,
+          "sha256": "e1beb43377fe6bcdf3895951b259943ebcfbf275a84a4350ca7d67c1e04e609a"
+        },
+        "tests.json": {
+          "bytes": 271,
+          "sha256": "4f6eecffe2c396a12ed867012394cb93e0e165e6c703259f37fa074a86e1d0a1"
+        }
+      },
+      "id": "holdout/063-p03150-keyence-programming-contest-2019-keyence",
+      "imports": [],
+      "largest_case_bytes": 12,
+      "name": "p03150 KEYENCE Programming Contest 2019 - KEYENCE String",
+      "set": "holdout",
+      "solution_lines": 10,
+      "source_split": "train"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 1327,
+          "sha256": "da3e5922f8b8b67f5da0a0e667b15b78ed78b87f412b7d00c896955272cf3412"
+        },
+        "tests.json": {
+          "bytes": 325,
+          "sha256": "a9d7df227ddc60d836967dcfc03cae56fcbaddb3280218321d2c4a42cd480654"
+        }
+      },
+      "id": "holdout/064-p03153-keyence-programming-contest-2019-connecti",
+      "imports": [
+        "collections",
+        "heapq",
+        "sys"
+      ],
+      "largest_case_bytes": 37,
+      "name": "p03153 KEYENCE Programming Contest 2019 - Connecting Cities",
+      "set": "holdout",
+      "solution_lines": 56,
+      "source_split": "train"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 649,
+          "sha256": "d4e17289ab43f35d5a93c9af6678460a3262c98d618ec7d50d9e8af338462c49"
+        },
+        "tests.json": {
+          "bytes": 258,
+          "sha256": "4bcbb3d9ca0710a8879870db38a1be4a9c6cb4adbc07eeb0fdac1a244d27d422"
+        }
+      },
+      "id": "holdout/065-p03194-caddi-2018-for-beginners-product-and-gcd",
+      "imports": [
+        "collections",
+        "math"
+      ],
+      "largest_case_bytes": 14,
+      "name": "p03194 CADDi 2018 for Beginners - Product and GCD",
+      "set": "holdout",
+      "solution_lines": 33,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 67,
+          "sha256": "36a1af9d329341364ecf6bced49bd3fe5269a7bf45c22384172e1a149800709a"
+        },
+        "tests.json": {
+          "bytes": 233,
+          "sha256": "98e8d0dccfd889e846fb6dc83778aee362659a457e698537e887f8860ab2d703"
+        }
+      },
+      "id": "holdout/066-p03294-atcoder-beginner-contest-103-modulo-summa",
+      "imports": [],
+      "largest_case_bytes": 27,
+      "name": "p03294 AtCoder Beginner Contest 103 - Modulo Summation",
+      "set": "holdout",
+      "solution_lines": 3,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 806,
+          "sha256": "cef96e98f7d31f6450bec0dc2d513a4a0af29fd50bbb1908b44288e51762b8fb"
+        },
+        "tests.json": {
+          "bytes": 734,
+          "sha256": "46d44b424948481f29cb711d05099845cb7ec310d1e98dcb7883f7a15f999083"
+        }
+      },
+      "id": "holdout/067-p03297-atcoder-grand-contest-026-rng-10s",
+      "imports": [
+        "math"
+      ],
+      "largest_case_bytes": 217,
+      "name": "p03297 AtCoder Grand Contest 026 - rng_10s",
+      "set": "holdout",
+      "solution_lines": 34,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 501,
+          "sha256": "0c28fefe08ee7283252b92a1e378301a80d98a650e7feb8463aeb9a4a9416033"
+        },
+        "tests.json": {
+          "bytes": 347,
+          "sha256": "ab300886ec5be457e7508b5c3d48744e80f52f2ef595561a11bb4d3762533152"
+        }
+      },
+      "id": "holdout/068-p03343-atcoder-regular-contest-098-range-minimum",
+      "imports": [],
+      "largest_case_bytes": 115,
+      "name": "p03343 AtCoder Regular Contest 098 - Range Minimum Queries",
+      "set": "holdout",
+      "solution_lines": 24,
+      "source_split": "train"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 510,
+          "sha256": "a43be2d58dcd54b7b2215cad619dd4b7a6420731ac5aa29e60c76e04fad54d35"
+        },
+        "tests.json": {
+          "bytes": 396,
+          "sha256": "893e228fbd0eb3603d5a7a41708748935685fe8654e2bac94ac2c736c8b9aa42"
+        }
+      },
+      "id": "holdout/069-p03452-atcoder-regular-contest-090-people-on-a-l",
+      "imports": [],
+      "largest_case_bytes": 28,
+      "name": "p03452 AtCoder Regular Contest 090 - People on a Line",
+      "set": "holdout",
+      "solution_lines": 23,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 74,
+          "sha256": "0a06bac5a6a06918af6db1297b1c1b025d74c5aca12e90b828c3d9c66da4a45f"
+        },
+        "tests.json": {
+          "bytes": 136,
+          "sha256": "e8f84c1350c6e42bb6d2d8509cae69a64f319cab80d15a9342c75790d93274f0"
+        }
+      },
+      "id": "holdout/070-p03455-atcoder-beginner-contest-086-product",
+      "imports": [],
+      "largest_case_bytes": 4,
+      "name": "p03455 AtCoder Beginner Contest 086 - Product",
+      "set": "holdout",
+      "solution_lines": 1,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 367,
+          "sha256": "829190bbaee2deabef6d3600dc9c296a8afd9b4d3ecb60478055ec8108e071a0"
+        },
+        "tests.json": {
+          "bytes": 483,
+          "sha256": "2f8bed43dfc0f7027836905b0fb4d55cd2ffdeeaf9ef9cf97ce1b0069dc768d5"
+        }
+      },
+      "id": "holdout/071-p03503-atcoder-beginner-contest-080-shopping-str",
+      "imports": [],
+      "largest_case_bytes": 142,
+      "name": "p03503 AtCoder Beginner Contest 080 - Shopping Street",
+      "set": "holdout",
+      "solution_lines": 11,
+      "source_split": "train"
+    },
+    {
+      "case_count": 4,
+      "files": {
+        "solution.py": {
+          "bytes": 170,
+          "sha256": "731a83358c5e8984fdf64d38ffe939785a41d4fb3187b8a16249b2bf358c6d6b"
+        },
+        "tests.json": {
+          "bytes": 272,
+          "sha256": "18207197fc3408761e31e6a28768652b4414e1c9e8f9817bd1cdc40e654f56b1"
+        }
+      },
+      "id": "holdout/072-p03612-atcoder-beginner-contest-072-derangement",
+      "imports": [],
+      "largest_case_bytes": 19,
+      "name": "p03612 AtCoder Beginner Contest 072 - Derangement",
+      "set": "holdout",
+      "solution_lines": 9,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 2025,
+          "sha256": "570fd6fb5cfd2610f5f516b22b4b24dbded61f223ee3e17af400e0fe1748617a"
+        },
+        "tests.json": {
+          "bytes": 398,
+          "sha256": "ba9d812c476274e8dff55502e3bf963f336bdb765e611ef03630d55389e50767"
+        }
+      },
+      "id": "holdout/073-p03616-atcoder-regular-contest-082-sandglass",
+      "imports": [],
+      "largest_case_bytes": 72,
+      "name": "p03616 AtCoder Regular Contest 082 - Sandglass",
+      "set": "holdout",
+      "solution_lines": 98,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 245,
+          "sha256": "6a28e165f7139acbb4aa38b155905f3da9c75d81f35c7e1be3ffdd15e61dd383"
+        },
+        "tests.json": {
+          "bytes": 454,
+          "sha256": "6c55fa8b406ca88637b3590ced1f76d1a870705df6e91c459caafc3c52e52dd9"
+        }
+      },
+      "id": "holdout/074-p03774-atcoder-beginner-contest-057-checkpoints",
+      "imports": [],
+      "largest_case_bytes": 179,
+      "name": "p03774 AtCoder Beginner Contest 057 - Checkpoints",
+      "set": "holdout",
+      "solution_lines": 6,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 762,
+          "sha256": "9ec01953a4f9146a90bec7c296de8417bb23b0faaadb930af5b5eafe1c57830c"
+        },
+        "tests.json": {
+          "bytes": 210,
+          "sha256": "f12d149a2afdf0c60d5caa986cab396b419c73f8e9efef2bbd95556b62d49668"
+        }
+      },
+      "id": "holdout/075-p03819-atcoder-regular-contest-068-snuke-line",
+      "imports": [],
+      "largest_case_bytes": 31,
+      "name": "p03819 AtCoder Regular Contest 068 - Snuke Line",
+      "set": "holdout",
+      "solution_lines": 41,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 2401,
+          "sha256": "13651dbb66c3dedb5f0f17230b30bb2fd0532806b76a4b5c920ebf2ad9940e4b"
+        },
+        "tests.json": {
+          "bytes": 247,
+          "sha256": "1e8a8a5de35ce688e3415cb56b4e75fac6095768188c70e88bbe554b8649ffa7"
+        }
+      },
+      "id": "holdout/076-p03940-atcoder-grand-contest-007-shik-and-game",
+      "imports": [
+        "bisect"
+      ],
+      "largest_case_bytes": 35,
+      "name": "p03940 AtCoder Grand Contest 007 - Shik and Game",
+      "set": "holdout",
+      "solution_lines": 68,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 83,
+          "sha256": "33b2e520aa90aa00d0f4bd69093f93fecc0a6a77f82ebf259e4bfc8c5f315fdb"
+        },
+        "tests.json": {
+          "bytes": 206,
+          "sha256": "7974fbabcc50b9cf629f5c90f7ac3d7427a5e9bd807e51f8794f0d9d56d10d0e"
+        }
+      },
+      "id": "holdout/077-p03943-atcoder-beginner-contest-047-fighting-ove",
+      "imports": [],
+      "largest_case_bytes": 9,
+      "name": "p03943 AtCoder Beginner Contest 047 - Fighting over Candies",
+      "set": "holdout",
+      "solution_lines": 2,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 102,
+          "sha256": "aaa139f4f58925e9b2a41b39eff07af0c2e05941917fb834fe9c726e86cf1a9f"
+        },
+        "tests.json": {
+          "bytes": 196,
+          "sha256": "42e3dacc17002ff15018d45cbe76f24f4eae7f7cd0f56821ae5b83102058f356"
+        }
+      },
+      "id": "holdout/078-p03986-atcoder-grand-contest-005-string",
+      "imports": [],
+      "largest_case_bytes": 8,
+      "name": "p03986 AtCoder Grand Contest 005 - STring",
+      "set": "holdout",
+      "solution_lines": 7,
+      "source_split": "train"
+    },
+    {
+      "case_count": 7,
+      "files": {
+        "solution.py": {
+          "bytes": 1644,
+          "sha256": "44b69c769afa92f2d28bf11e63ee7e90f194647ffefc98b918c1af6f525a9109"
+        },
+        "tests.json": {
+          "bytes": 790,
+          "sha256": "486b9ab79f6a8bfb02b0a65bd79354a1e8c248e44f24f545b610ff23d2081e41"
+        }
+      },
+      "id": "holdout/079-1003-d-coins-and-queries",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 28,
+      "name": "1003_D. Coins and Queries",
+      "set": "holdout",
+      "solution_lines": 77,
+      "source_split": "train"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 940,
+          "sha256": "84db62568dc8580bf2ecd149e55e29be7daa694fcde6fbbe143b78e0c4e57f85"
+        },
+        "tests.json": {
+          "bytes": 651,
+          "sha256": "97dd3c43b67e1674b8a17e91cbcb1342dfed9bfddf77d3dfc44d3d3f26990d2f"
+        }
+      },
+      "id": "holdout/080-1016-c-vasya-and-the-mushrooms",
+      "imports": [],
+      "largest_case_bytes": 34,
+      "name": "1016_C. Vasya And The Mushrooms",
+      "set": "holdout",
+      "solution_lines": 40,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 163,
+          "sha256": "a6a7c8008506ab158e95ddd600c862414a631c969aad94e96785271378d0dc55"
+        },
+        "tests.json": {
+          "bytes": 106,
+          "sha256": "b1ce0f456a56a574c34d7e1c59c83eca9fa6b155100cd5ad6fdf0bcb6e2a029c"
+        }
+      },
+      "id": "holdout/081-1036-b-diagonal-walking-v-2",
+      "imports": [],
+      "largest_case_bytes": 21,
+      "name": "1036_B. Diagonal Walking v.2",
+      "set": "holdout",
+      "solution_lines": 7,
+      "source_split": "train"
+    },
+    {
+      "case_count": 13,
+      "files": {
+        "solution.py": {
+          "bytes": 523,
+          "sha256": "c5dbb45d52ef5a1942c654ad35f6d23c1912ca09b89a7d5344747ce30014fed5"
+        },
+        "tests.json": {
+          "bytes": 1217,
+          "sha256": "bbc04ab9d01527b1d898e6a4756e8029db188ee65957a34715b32218d57ec695"
+        }
+      },
+      "id": "holdout/082-103-c-russian-roulette",
+      "imports": [],
+      "largest_case_bytes": 45,
+      "name": "103_C. Russian Roulette",
+      "set": "holdout",
+      "solution_lines": 26,
+      "source_split": "train"
+    },
+    {
+      "case_count": 15,
+      "files": {
+        "solution.py": {
+          "bytes": 274,
+          "sha256": "74ec2d3e7aff0b681649b9f8e006815bb5cfa9c0e4a8bd98e1002426184ab48f"
+        },
+        "tests.json": {
+          "bytes": 1081,
+          "sha256": "c2bce66cf85f21592bf4db0631c97b3cc2aa900712f4d6129eab120d6168f711"
+        }
+      },
+      "id": "holdout/083-1059-a-cashier",
+      "imports": [],
+      "largest_case_bytes": 28,
+      "name": "1059_A. Cashier",
+      "set": "holdout",
+      "solution_lines": 13,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 1294,
+          "sha256": "2e70d1886560bdaaaae1af582b74dd56badb943e53d012eb0a3754782a2de01e"
+        },
+        "tests.json": {
+          "bytes": 331,
+          "sha256": "802e9d83f5da4af096bbcbc935374229d41a6e3c977c70d0564608ee36a17d29"
+        }
+      },
+      "id": "holdout/084-1080-c-masha-and-two-friends",
+      "imports": [],
+      "largest_case_bytes": 102,
+      "name": "1080_C. Masha and two friends",
+      "set": "holdout",
+      "solution_lines": 49,
+      "source_split": "train"
+    },
+    {
+      "case_count": 12,
+      "files": {
+        "solution.py": {
+          "bytes": 305,
+          "sha256": "016d22508b23c7ed1753865c4dfe06ab49a89cc99b1f09ff7b526c246ee7c191"
+        },
+        "tests.json": {
+          "bytes": 1083,
+          "sha256": "998181facb5bf71f79223dd3a42870a088a0857925ac2717bd04470cf60c9a86"
+        }
+      },
+      "id": "holdout/085-1084-c-the-fair-nut-and-string",
+      "imports": [
+        "itertools"
+      ],
+      "largest_case_bytes": 101,
+      "name": "1084_C. The Fair Nut and String",
+      "set": "holdout",
+      "solution_lines": 15,
+      "source_split": "train"
+    },
+    {
+      "case_count": 12,
+      "files": {
+        "solution.py": {
+          "bytes": 334,
+          "sha256": "551ab57c7915daa3ae568387d04c05a7f0bf888c1d5203619dcb086300fcca8f"
+        },
+        "tests.json": {
+          "bytes": 1659,
+          "sha256": "910f5224b2c7db65fc563b6e30a9fa536b22b67725bd11177a206762f488a160"
+        }
+      },
+      "id": "holdout/086-1121-a-technogoblet-of-fire",
+      "imports": [],
+      "largest_case_bytes": 505,
+      "name": "1121_A. Technogoblet of Fire",
+      "set": "holdout",
+      "solution_lines": 16,
+      "source_split": "train"
+    },
+    {
+      "case_count": 16,
+      "files": {
+        "solution.py": {
+          "bytes": 975,
+          "sha256": "bf8c129386f7946418942b5ac370da3af3aefe4b6b136a33ddd84ad8ea49a9b3"
+        },
+        "tests.json": {
+          "bytes": 1703,
+          "sha256": "de9c6edc94585c5ab55eff4984ceadd62cb11a267dd250c6929af6c2b9caab05"
+        }
+      },
+      "id": "holdout/087-1131-e-string-multiplication",
+      "imports": [],
+      "largest_case_bytes": 320,
+      "name": "1131_E. String Multiplication",
+      "set": "holdout",
+      "solution_lines": 40,
+      "source_split": "train"
+    },
+    {
+      "case_count": 5,
+      "files": {
+        "solution.py": {
+          "bytes": 473,
+          "sha256": "4ca51f30380ac78783a7542bd82c2c712b8ecc076b065beaa82c35d66ccfd16c"
+        },
+        "tests.json": {
+          "bytes": 630,
+          "sha256": "1d76c3814996500035aceba8a7f613c74926a1bcdf14d065ce0420e621a0cc90"
+        }
+      },
+      "id": "holdout/088-1140-b-good-string",
+      "imports": [],
+      "largest_case_bytes": 59,
+      "name": "1140_B. Good String",
+      "set": "holdout",
+      "solution_lines": 23,
+      "source_split": "train"
+    },
+    {
+      "case_count": 20,
+      "files": {
+        "solution.py": {
+          "bytes": 362,
+          "sha256": "2bc6123130b6d464d2ee3901200c60053becdd90df9054cb8c381d09392daa18"
+        },
+        "tests.json": {
+          "bytes": 1898,
+          "sha256": "e98125b18b649319fb5205e200c743ef2ba875ca090211a57a93ebd93afa521c"
+        }
+      },
+      "id": "holdout/089-1152-a-neko-finds-grapes",
+      "imports": [],
+      "largest_case_bytes": 205,
+      "name": "1152_A. Neko Finds Grapes",
+      "set": "holdout",
+      "solution_lines": 20,
+      "source_split": "train"
+    },
+    {
+      "case_count": 21,
+      "files": {
+        "solution.py": {
+          "bytes": 424,
+          "sha256": "ce1c38f8a7ad2fab7e155f5677f6c2a96df8e51e8a13f71728a2679731f69a9c"
+        },
+        "tests.json": {
+          "bytes": 2881,
+          "sha256": "1663fe55e0bda0f8db8f05055e78e40ff9fdaa55916a5b35484cc5494197b2f6"
+        }
+      },
+      "id": "holdout/090-1191-c-tokitsukaze-and-discard-items",
+      "imports": [
+        "collections"
+      ],
+      "largest_case_bytes": 406,
+      "name": "1191_C. Tokitsukaze and Discard Items",
+      "set": "holdout",
+      "solution_lines": 21,
+      "source_split": "train"
+    },
+    {
+      "case_count": 9,
+      "files": {
+        "solution.py": {
+          "bytes": 304,
+          "sha256": "b3faff235aacbc7b48979b23ca7f6e64f4aa2d884a384763f30dd8929a31525b"
+        },
+        "tests.json": {
+          "bytes": 845,
+          "sha256": "21a2a094e8a612a594a5742fb34e309dd7823c7765f245ae1dd4deba8398ee8f"
+        }
+      },
+      "id": "holdout/091-1216-d-swords",
+      "imports": [],
+      "largest_case_bytes": 97,
+      "name": "1216_D. Swords",
+      "set": "holdout",
+      "solution_lines": 19,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 530,
+          "sha256": "3add1ba95169073f431860bf82678df21229383b727a67be15dc7f6e9432b1f7"
+        },
+        "tests.json": {
+          "bytes": 173,
+          "sha256": "0a08f15f356b77e237c266e5807a538f960eac93268cdfcd3e4a4fe65eba457a"
+        }
+      },
+      "id": "holdout/092-1251-e1-voting-easy-version",
+      "imports": [
+        "heapq",
+        "sys"
+      ],
+      "largest_case_bytes": 73,
+      "name": "1251_E1. Voting (Easy Version)",
+      "set": "holdout",
+      "solution_lines": 25,
+      "source_split": "train"
+    },
+    {
+      "case_count": 8,
+      "files": {
+        "solution.py": {
+          "bytes": 748,
+          "sha256": "56eaee20cdb25d3cb11d47eeedc71151b36e80cffd5bfe16a9ab3f179cd51a55"
+        },
+        "tests.json": {
+          "bytes": 768,
+          "sha256": "af3b790daded8501ea486308d0fad148cc985032e507a262cb6987f3ed982307"
+        }
+      },
+      "id": "holdout/093-1271-c-shawarma-tent",
+      "imports": [],
+      "largest_case_bytes": 56,
+      "name": "1271_C. Shawarma Tent",
+      "set": "holdout",
+      "solution_lines": 52,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 417,
+          "sha256": "f76e11e2a2e7115290e56451843d7a586ed5510b3f6cd42f34063b41d8c9586a"
+        },
+        "tests.json": {
+          "bytes": 276,
+          "sha256": "27ebf485a86f00e085cc17adf8cfdb41cbedb65d603d00e163f66e4dfd10dc50"
+        }
+      },
+      "id": "holdout/094-1281-b-azamon-web-services",
+      "imports": [],
+      "largest_case_bytes": 53,
+      "name": "1281_B. Azamon Web Services",
+      "set": "holdout",
+      "solution_lines": 20,
+      "source_split": "train"
+    },
+    {
+      "case_count": 1,
+      "files": {
+        "solution.py": {
+          "bytes": 582,
+          "sha256": "4bd7bc70d552d5f3d3a7d27337aad201f15bb05045d4517174712f20483737ad"
+        },
+        "tests.json": {
+          "bytes": 152,
+          "sha256": "4832174f670ba0d3b18ba180e5504b95f919931c23a5cddc1d13d745d7edd475"
+        }
+      },
+      "id": "holdout/095-1290-a-mind-control",
+      "imports": [],
+      "largest_case_bytes": 60,
+      "name": "1290_A. Mind Control",
+      "set": "holdout",
+      "solution_lines": 19,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 281,
+          "sha256": "024f93f256354fbc34dc81611122410f4f565b6ef7289c51f1da5a0569664b42"
+        },
+        "tests.json": {
+          "bytes": 199,
+          "sha256": "687efa6dd3a887416b68ebb3f6ba85bee274862952c4615d87191f7dfd29d1c6"
+        }
+      },
+      "id": "holdout/096-1294-d-mex-maximizing",
+      "imports": [],
+      "largest_case_bytes": 19,
+      "name": "1294_D. MEX maximizing",
+      "set": "holdout",
+      "solution_lines": 17,
+      "source_split": "train"
+    },
+    {
+      "case_count": 2,
+      "files": {
+        "solution.py": {
+          "bytes": 919,
+          "sha256": "d6be3285aa01cc565fc8962350413a8a6145bd3d5cc945f095dcf3421cfdcf19"
+        },
+        "tests.json": {
+          "bytes": 424,
+          "sha256": "f3645785590d38b4fea2aa5de32d69c2c80aee965b94ca8cb94a9aade5eeab8c"
+        }
+      },
+      "id": "holdout/097-1301-b-motarack-s-birthday",
+      "imports": [],
+      "largest_case_bytes": 99,
+      "name": "1301_B. Motarack's Birthday",
+      "set": "holdout",
+      "solution_lines": 39,
+      "source_split": "train"
+    },
+    {
+      "case_count": 9,
+      "files": {
+        "solution.py": {
+          "bytes": 111,
+          "sha256": "4d987dec2f9e53e877308b8159501765b565e4f2ef2ad644d713d6fb8ac4a4d5"
+        },
+        "tests.json": {
+          "bytes": 779,
+          "sha256": "860ab829df168ca13e172cd2cce5ec8129830c7c95165f29c62d4f238d25bcb7"
+        }
+      },
+      "id": "holdout/098-1325-b-copycopycopycopycopy",
+      "imports": [],
+      "largest_case_bytes": 51,
+      "name": "1325_B. CopyCopyCopyCopyCopy",
+      "set": "holdout",
+      "solution_lines": 6,
+      "source_split": "train"
+    },
+    {
+      "case_count": 3,
+      "files": {
+        "solution.py": {
+          "bytes": 463,
+          "sha256": "8392bb5b712c590ab66fcad40e895ddbc1e318905c6f955a5ce2bf3206ed82e3"
+        },
+        "tests.json": {
+          "bytes": 751,
+          "sha256": "c9ea38c32cec94cccf3ad84b21e62e26dbb8b2b437c9728bb8791ef0751925a4"
+        }
+      },
+      "id": "holdout/099-1344-a-hilbert-s-hotel",
+      "imports": [],
+      "largest_case_bytes": 191,
+      "name": "1344_A. Hilbert's Hotel",
+      "set": "holdout",
+      "solution_lines": 24,
+      "source_split": "train"
+    },
+    {
+      "case_count": 6,
+      "files": {
+        "solution.py": {
+          "bytes": 143,
+          "sha256": "63909357a82119077404e21ca50080722a1b9350eb535d19ec1ce3756fe20b1b"
+        },
+        "tests.json": {
+          "bytes": 530,
+          "sha256": "4235dbb8d865f22d6186e3bbb11c9ff4accdbb2adb4765b320000e4722a3f69a"
+        }
+      },
+      "id": "holdout/100-1353-c-board-moves",
+      "imports": [],
+      "largest_case_bytes": 14,
+      "name": "1353_C. Board Moves",
+      "set": "holdout",
+      "solution_lines": 7,
+      "source_split": "train"
+    }
+  ],
+  "revision": "802411c3010cb00d1b05bad57ca77365a3c699d6",
+  "shards": [
+    {
+      "bytes": 51829044,
+      "path": "data/valid-00000-of-00001-5e672c5751f060d3.parquet",
+      "sha256": "02e8c1ccedae716f1e43cc813fcb7823c3db666ea92638820aba80e8cef451ab",
+      "split": "valid"
+    },
+    {
+      "bytes": 63077400,
+      "path": "data/test-00000-of-00001-9c49eeff30aacaa8.parquet",
+      "sha256": "aa426cbdb202bf8703b658bcb31fd1878ca7cfd33ca07d3b703dc94ca6a2b651",
+      "split": "test"
+    },
+    {
+      "bytes": 180227735,
+      "path": "data/train-00000-of-00039-e991a271dbfa9925.parquet",
+      "sha256": "950bfdefde1f274edf93963e7e23c93ab16034de344aa7b7c32d14145e8d5232",
+      "split": "train"
+    },
+    {
+      "bytes": 208507780,
+      "path": "data/train-00001-of-00039-e092fe56fda18715.parquet",
+      "sha256": "7bcc72d98a3d97f07be90ea70bf8db834c8f29ac2c7626d7cfc657bae6f5ddd9",
+      "split": "train"
+    }
+  ],
+  "steering_count": 200,
+  "total_bytes": 455914
+}

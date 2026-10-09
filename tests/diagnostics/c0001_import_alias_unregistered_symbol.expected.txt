@@ -1,0 +1,5 @@
+error[C0001]: module `math` (imported as `m`) has no importable symbol named `tan`
+ --> tests/diagnostics/c0001_import_alias_unregistered_symbol.py:3:7
+  |
+3 | print(m.tan(1.0))
+  |       ^^^^^^^^^^ module `math` (imported as `m`) has no importable symbol named `tan`

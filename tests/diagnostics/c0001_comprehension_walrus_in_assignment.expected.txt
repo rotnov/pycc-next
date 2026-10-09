@@ -1,0 +1,5 @@
+error[C0001]: a walrus assignment (`:=`) inside a comprehension is not supported yet
+ --> tests/diagnostics/c0001_comprehension_walrus_in_assignment.py:1:6
+  |
+1 | ys = [(y := x) for x in range(3)]
+  |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a walrus assignment (`:=`) inside a comprehension is not supported yet

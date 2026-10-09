@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "input": "4\nlu ru ld rd\n4\nlu ld lu ru\n1\nlu\n10\nru lu ld rd ru rd ru lu rd ld\n0",
+      "output": "2\n1\n0\n4"
+    }
+  ]
+}

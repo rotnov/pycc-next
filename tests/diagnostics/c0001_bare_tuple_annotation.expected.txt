@@ -1,0 +1,5 @@
+error[C0001]: a bare `tuple` type annotation is not supported yet -- write the parameterized form, e.g. `tuple[int, int]`
+ --> tests/diagnostics/c0001_bare_tuple_annotation.py:1:10
+  |
+1 | def f(t: tuple) -> None:
+  |          ^^^^^ a bare `tuple` type annotation is not supported yet -- write the parameterized form, e.g. `tuple[int, int]`

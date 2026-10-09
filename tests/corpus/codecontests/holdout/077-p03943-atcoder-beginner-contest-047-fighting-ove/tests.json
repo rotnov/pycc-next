@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "input": "56 25 31",
+      "output": "Yes"
+    },
+    {
+      "input": "10 30 20",
+      "output": "Yes"
+    },
+    {
+      "input": "30 30 100",
+      "output": "No"
+    }
+  ]
+}

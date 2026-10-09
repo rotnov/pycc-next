@@ -1,0 +1,5 @@
+error[T0055]: too many values to unpack (expected 2, got 3)
+ --> tests/diagnostics/t0055_unpack_too_many_values.py:1:1
+  |
+1 | t = (1, 2, 3)
+  | ^ too many values to unpack (expected 2, got 3)

@@ -1,0 +1,10 @@
+error[L0001]: Expected a parameter or the end of the parameter list at byte range 9..10
+ --> tests/diagnostics/l0001_two_syntax_errors.py:1:10
+  |
+1 | def main(:
+  |          ^ Expected a parameter or the end of the parameter list at byte range 9..10
+error[L0001]: unexpected EOF while parsing at byte range 11..11
+ --> tests/diagnostics/l0001_two_syntax_errors.py:2:1
+  |
+2 | 
+  | ^ unexpected EOF while parsing at byte range 11..11

@@ -1,0 +1,5 @@
+error[T0053]: container type annotation `dict[...]` takes exactly 2 type arguments, got 1
+ --> tests/diagnostics/t0053_local_annotation_arity.py:2:8
+  |
+2 |     d: dict[int] = {}
+  |        ^^^^^^^^^ container type annotation `dict[...]` takes exactly 2 type arguments, got 1

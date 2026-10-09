@@ -1,0 +1,5 @@
+error[C0001]: a bare `dict` type annotation is not supported yet -- write the parameterized form, e.g. `dict[str, int]`
+ --> tests/diagnostics/c0001_bare_dict_annotation.py:1:10
+  |
+1 | def f(d: dict) -> None:
+  |          ^^^^ a bare `dict` type annotation is not supported yet -- write the parameterized form, e.g. `dict[str, int]`

@@ -1,0 +1,5 @@
+error[C0002]: module `math` has no importable symbol named `tan`
+ --> tests/diagnostics/c0002_from_import_unregistered_symbol.py:1:1
+  |
+1 | from math import sqrt, tan
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^ module `math` has no importable symbol named `tan`

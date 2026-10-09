@@ -1,0 +1,5 @@
+error[L0001]: 'return' in an 'except*' block
+ --> tests/diagnostics/l0001_return_in_except_star.py:5:9
+  |
+5 |         return 1
+  |         ^^^^^^^^ 'return' in an 'except*' block

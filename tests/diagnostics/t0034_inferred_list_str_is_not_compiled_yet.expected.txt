@@ -1,0 +1,5 @@
+error[T0034]: list[str] is not compiled yet (D-105) -- only list[int] is
+ --> tests/diagnostics/t0034_inferred_list_str_is_not_compiled_yet.py:1:1
+  |
+1 | def f() -> int:
+  | ^ list[str] is not compiled yet (D-105) -- only list[int] is

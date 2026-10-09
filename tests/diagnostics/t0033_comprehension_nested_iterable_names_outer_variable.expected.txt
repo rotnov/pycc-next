@@ -1,0 +1,5 @@
+error[T0033]: `int` cannot be iterated with `for ... in ...` (only list[T]/dict[K, V]/set[T]/frozenset[T] supports this)
+ --> tests/diagnostics/t0033_comprehension_nested_iterable_names_outer_variable.py:1:1
+  |
+1 | # The inner comprehension iterates the outer loop variable, an `int`, not
+  | ^ `int` cannot be iterated with `for ... in ...` (only list[T]/dict[K, V]/set[T]/frozenset[T] supports this)

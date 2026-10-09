@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "input": "2\nbnn\na\n",
+      "output": "1"
+    },
+    {
+      "input": "3\na\nb\na\n",
+      "output": "3"
+    },
+    {
+      "input": "9\nlfpgbnlzyn\nc\ns\nw\nr\nm\nq\ny\nyinfblfcdhidphyfvgkxyuwomahiibbhnigdslsguhjkplibnhhrshtekwgefxeugyyyyy\n",
+      "output": "7"
+    },
+    {
+      "input": "6\nu\np\nm\nz\nv\nvv\n",
+      "output": "5"
+    },
+    {
+      "input": "4\nqe\nnd\niqryhukieskfvaeettersinksrmazelxtgvartuz\nvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n",
+      "output": "541"
+    },
+    {
+      "input": "6\nnf\nysvchtjkfgsbyfzxjaykey\nadvqnf\nwl\npi\nppppfvvmaebvhkoagppppp\n",
+      "output": "10"
+    },
+    {
+      "input": "3\nj\nk\nkkailgwqnxtdsttkkkkkkk\n",
+      "output": "10"
+    },
+    {
+      "input": "4\no\nyhnx\ne\nennn\n",
+      "output": "4"
+    },
+    {
+      "input": "10\nj\ndyfu\nudzj\nwwow\nxtnw\nf\nc\nq\no\ngggg\n",
+      "output": "4"
+    },
+    {
+      "input": "6\nw\ng\nc\nj\ny\nf\n",
+      "output": "1"
+    },
+    {
+      "input": "4\nr\no\nw\nwwwwwwwwww\n",
+      "output": "21"
+    },
+    {
+      "input": "2\nzxwp\nppppctfisvflhtjggg\n",
+      "output": "5"
+    },
+    {
+      "input": "5\nm\ng\nu\nt\ntttt\n",
+      "output": "9"
+    },
+    {
+      "input": "2\nn\nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\n",
+      "output": "93"
+    },
+    {
+      "input": "3\nlt\nen\neeeeeeeeee\n",
+      "output": "21"
+    },
+    {
+      "input": "4\nvr\nhp\nl\nllbn\n",
+      "output": "3"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "input": "7\nabacabaaacaac\nnowyouknowthat\npolycarppoycarppoyarppyarppyrpprppp\nisi\neverywherevrywhrvryhrvrhrvhv\nhaaha\nqweqeewew\n",
+      "output": "abacaba bac\n-1\npolycarp lcoayrp\nis si\neverywhere ewyrhv\n-1\n-1\n"
+    }
+  ]
+}

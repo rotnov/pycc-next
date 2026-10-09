@@ -1,0 +1,5 @@
+error[L0001]: 'break' outside loop
+ --> tests/diagnostics/l0001_break_outside_loop_type_checking.py:6:9
+  |
+6 |         break
+  |         ^^^^^ 'break' outside loop

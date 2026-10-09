@@ -1,0 +1,5 @@
+error[T0003]: an empty list literal has no inferable element type for `x`
+ --> tests/diagnostics/t0003_scalar_annotation_supplies_no_element_type.py:1:1
+  |
+1 | def f() -> int:
+  | ^ an empty list literal has no inferable element type for `x`

@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "input": "TSTTSS",
+      "output": "4"
+    },
+    {
+      "input": "SSTTST",
+      "output": "0"
+    },
+    {
+      "input": "TSSTTTSS",
+      "output": "4"
+    }
+  ]
+}

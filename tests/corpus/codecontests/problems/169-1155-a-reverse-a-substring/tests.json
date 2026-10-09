@@ -1,0 +1,76 @@
+{
+  "cases": [
+    {
+      "input": "7\nabacaba\n",
+      "output": "YES\n2 3\n"
+    },
+    {
+      "input": "6\naabcfg\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "6\nbabcdc\n",
+      "output": "YES\n1 2\n"
+    },
+    {
+      "input": "5\nbadec\n",
+      "output": "YES\n1 2\n"
+    },
+    {
+      "input": "3\naba\n",
+      "output": "YES\n2 3\n"
+    },
+    {
+      "input": "7\nbaaaccb\n",
+      "output": "YES\n1 2\n"
+    },
+    {
+      "input": "3\naaa\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "4\npara\n",
+      "output": "YES\n1 2\n"
+    },
+    {
+      "input": "3\nbac\n",
+      "output": "YES\n1 2\n"
+    },
+    {
+      "input": "7\nbdadccd\n",
+      "output": "YES\n2 3\n"
+    },
+    {
+      "input": "2\nba\n",
+      "output": "YES\n1 2\n"
+    },
+    {
+      "input": "7\nstoopid\n",
+      "output": "YES\n2 3\n"
+    },
+    {
+      "input": "7\nyxyzyyx\n",
+      "output": "YES\n1 2\n"
+    },
+    {
+      "input": "3\nacb\n",
+      "output": "YES\n2 3\n"
+    },
+    {
+      "input": "7\nbcbcbdc\n",
+      "output": "YES\n2 3\n"
+    },
+    {
+      "input": "7\nabacaba\n",
+      "output": "YES\n2 3\n"
+    },
+    {
+      "input": "2\naa\n",
+      "output": "NO\n"
+    },
+    {
+      "input": "12\nparapapapaaa\n",
+      "output": "YES\n1 2\n"
+    }
+  ]
+}

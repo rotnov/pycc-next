@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "input": "3\nDSAWWAW\nD\nWA\n",
+      "output": "8\n2\n4\n"
+    }
+  ]
+}

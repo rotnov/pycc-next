@@ -1,0 +1,5 @@
+error[T0034]: list[int | None] is not compiled yet (D-105) -- only list[int] is
+ --> tests/diagnostics/t0034_list_of_optional.py:1:10
+  |
+1 | def f(a: list[int | None]) -> int:
+  |          ^^^^^^^^^^^^^^^^ list[int | None] is not compiled yet (D-105) -- only list[int] is

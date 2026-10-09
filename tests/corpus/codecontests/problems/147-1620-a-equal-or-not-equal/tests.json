@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "input": "4\nEEE\nEN\nENNEENE\nNENN\n",
+      "output": "YES\nNO\nYES\nYES\n"
+    },
+    {
+      "input": "1\nNEEEEEEEEEEEEEEEEEEEEEEEEEEEEENNNNEENNE\n",
+      "output": "YES\n"
+    },
+    {
+      "input": "2\nEEEEEEN\nEEEEEEEN\n",
+      "output": "NO\nNO\n"
+    },
+    {
+      "input": "2\nEEEEEN\nEEEEEN\n",
+      "output": "NO\nNO\n"
+    },
+    {
+      "input": "2\nEEEEEN\nEE\n",
+      "output": "NO\nYES\n"
+    }
+  ]
+}

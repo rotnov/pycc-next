@@ -1,0 +1,5 @@
+error[T0054]: cannot use 'P' as a set element (unhashable type: 'P')
+ --> tests/diagnostics/t0054_set_element_unhashable.py:1:1
+  |
+1 | class P:
+  | ^ cannot use 'P' as a set element (unhashable type: 'P')

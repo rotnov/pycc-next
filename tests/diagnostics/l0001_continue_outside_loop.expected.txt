@@ -1,0 +1,5 @@
+error[L0001]: 'continue' not properly in loop
+ --> tests/diagnostics/l0001_continue_outside_loop.py:1:1
+  |
+1 | continue
+  | ^^^^^^^^ 'continue' not properly in loop

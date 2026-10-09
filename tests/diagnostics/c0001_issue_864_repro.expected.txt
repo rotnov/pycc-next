@@ -1,0 +1,10 @@
+error[C0001]: an async method is not supported yet
+ --> tests/diagnostics/c0001_issue_864_repro.py:2:5
+  |
+2 |     async def m(self) -> None: pass
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ an async method is not supported yet
+error[C0001]: an async method is not supported yet
+ --> tests/diagnostics/c0001_issue_864_repro.py:4:5
+  |
+4 |     async def n(self) -> None: pass
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ an async method is not supported yet

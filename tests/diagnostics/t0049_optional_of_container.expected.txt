@@ -1,0 +1,5 @@
+error[T0049]: `Optional[list[int]]` is not supported yet -- only `Optional[int]`, `Optional[float]`, and `Optional[bool]` (`int | None`, `float | None`, `bool | None`) are
+ --> tests/diagnostics/t0049_optional_of_container.py:1:10
+  |
+1 | def f(a: list[int] | None) -> int:
+  |          ^^^^^^^^^^^^^^^^ `Optional[list[int]]` is not supported yet -- only `Optional[int]`, `Optional[float]`, and `Optional[bool]` (`int | None`, `float | None`, `bool | None`) are

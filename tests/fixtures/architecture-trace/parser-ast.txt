@@ -1,0 +1,382 @@
+ModModule {
+    node_index: NodeIndex(None),
+    range: 0..143,
+    body: [
+        FunctionDef(
+            StmtFunctionDef {
+                node_index: NodeIndex(None),
+                range: 0..89,
+                is_async: false,
+                decorator_list: [],
+                name: Identifier {
+                    id: Name("fib"),
+                    range: 4..7,
+                    node_index: NodeIndex(None),
+                },
+                type_params: None,
+                parameters: Parameters {
+                    range: 7..15,
+                    node_index: NodeIndex(None),
+                    posonlyargs: [],
+                    args: [
+                        ParameterWithDefault {
+                            range: 8..14,
+                            node_index: NodeIndex(None),
+                            parameter: Parameter {
+                                range: 8..14,
+                                node_index: NodeIndex(None),
+                                name: Identifier {
+                                    id: Name("n"),
+                                    range: 8..9,
+                                    node_index: NodeIndex(None),
+                                },
+                                annotation: Some(
+                                    Name(
+                                        ExprName {
+                                            node_index: NodeIndex(None),
+                                            range: 11..14,
+                                            id: Name("int"),
+                                            ctx: Load,
+                                        },
+                                    ),
+                                ),
+                            },
+                            default: None,
+                        },
+                    ],
+                    vararg: None,
+                    kwonlyargs: [],
+                    kwarg: None,
+                },
+                returns: Some(
+                    Name(
+                        ExprName {
+                            node_index: NodeIndex(None),
+                            range: 19..22,
+                            id: Name("int"),
+                            ctx: Load,
+                        },
+                    ),
+                ),
+                body: [
+                    If(
+                        StmtIf {
+                            node_index: NodeIndex(None),
+                            range: 28..54,
+                            test: Compare(
+                                ExprCompare {
+                                    node_index: NodeIndex(None),
+                                    range: 31..36,
+                                    left: Name(
+                                        ExprName {
+                                            node_index: NodeIndex(None),
+                                            range: 31..32,
+                                            id: Name("n"),
+                                            ctx: Load,
+                                        },
+                                    ),
+                                    ops: [
+                                        Lt,
+                                    ],
+                                    comparators: [
+                                        NumberLiteral(
+                                            ExprNumberLiteral {
+                                                node_index: NodeIndex(None),
+                                                range: 35..36,
+                                                value: Int(
+                                                    2,
+                                                ),
+                                            },
+                                        ),
+                                    ],
+                                },
+                            ),
+                            body: [
+                                Return(
+                                    StmtReturn {
+                                        node_index: NodeIndex(None),
+                                        range: 46..54,
+                                        value: Some(
+                                            Name(
+                                                ExprName {
+                                                    node_index: NodeIndex(None),
+                                                    range: 53..54,
+                                                    id: Name("n"),
+                                                    ctx: Load,
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ],
+                            elif_else_clauses: [],
+                        },
+                    ),
+                    Return(
+                        StmtReturn {
+                            node_index: NodeIndex(None),
+                            range: 59..89,
+                            value: Some(
+                                BinOp(
+                                    ExprBinOp {
+                                        node_index: NodeIndex(None),
+                                        range: 66..89,
+                                        left: Call(
+                                            ExprCall {
+                                                node_index: NodeIndex(None),
+                                                range: 66..76,
+                                                func: Name(
+                                                    ExprName {
+                                                        node_index: NodeIndex(None),
+                                                        range: 66..69,
+                                                        id: Name("fib"),
+                                                        ctx: Load,
+                                                    },
+                                                ),
+                                                arguments: Arguments {
+                                                    range: 69..76,
+                                                    node_index: NodeIndex(None),
+                                                    args: [
+                                                        BinOp(
+                                                            ExprBinOp {
+                                                                node_index: NodeIndex(None),
+                                                                range: 70..75,
+                                                                left: Name(
+                                                                    ExprName {
+                                                                        node_index: NodeIndex(None),
+                                                                        range: 70..71,
+                                                                        id: Name("n"),
+                                                                        ctx: Load,
+                                                                    },
+                                                                ),
+                                                                op: Sub,
+                                                                right: NumberLiteral(
+                                                                    ExprNumberLiteral {
+                                                                        node_index: NodeIndex(None),
+                                                                        range: 74..75,
+                                                                        value: Int(
+                                                                            1,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                            },
+                                                        ),
+                                                    ],
+                                                    keywords: [],
+                                                },
+                                            },
+                                        ),
+                                        op: Add,
+                                        right: Call(
+                                            ExprCall {
+                                                node_index: NodeIndex(None),
+                                                range: 79..89,
+                                                func: Name(
+                                                    ExprName {
+                                                        node_index: NodeIndex(None),
+                                                        range: 79..82,
+                                                        id: Name("fib"),
+                                                        ctx: Load,
+                                                    },
+                                                ),
+                                                arguments: Arguments {
+                                                    range: 82..89,
+                                                    node_index: NodeIndex(None),
+                                                    args: [
+                                                        BinOp(
+                                                            ExprBinOp {
+                                                                node_index: NodeIndex(None),
+                                                                range: 83..88,
+                                                                left: Name(
+                                                                    ExprName {
+                                                                        node_index: NodeIndex(None),
+                                                                        range: 83..84,
+                                                                        id: Name("n"),
+                                                                        ctx: Load,
+                                                                    },
+                                                                ),
+                                                                op: Sub,
+                                                                right: NumberLiteral(
+                                                                    ExprNumberLiteral {
+                                                                        node_index: NodeIndex(None),
+                                                                        range: 87..88,
+                                                                        value: Int(
+                                                                            2,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                            },
+                                                        ),
+                                                    ],
+                                                    keywords: [],
+                                                },
+                                            },
+                                        ),
+                                    },
+                                ),
+                            ),
+                        },
+                    ),
+                ],
+            },
+        ),
+        Assign(
+            StmtAssign {
+                node_index: NodeIndex(None),
+                range: 91..96,
+                targets: [
+                    Name(
+                        ExprName {
+                            node_index: NodeIndex(None),
+                            range: 91..92,
+                            id: Name("i"),
+                            ctx: Store,
+                        },
+                    ),
+                ],
+                value: NumberLiteral(
+                    ExprNumberLiteral {
+                        node_index: NodeIndex(None),
+                        range: 95..96,
+                        value: Int(
+                            0,
+                        ),
+                    },
+                ),
+            },
+        ),
+        While(
+            StmtWhile {
+                node_index: NodeIndex(None),
+                range: 97..142,
+                test: Compare(
+                    ExprCompare {
+                        node_index: NodeIndex(None),
+                        range: 103..109,
+                        left: Name(
+                            ExprName {
+                                node_index: NodeIndex(None),
+                                range: 103..104,
+                                id: Name("i"),
+                                ctx: Load,
+                            },
+                        ),
+                        ops: [
+                            Lt,
+                        ],
+                        comparators: [
+                            NumberLiteral(
+                                ExprNumberLiteral {
+                                    node_index: NodeIndex(None),
+                                    range: 107..109,
+                                    value: Int(
+                                        11,
+                                    ),
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                body: [
+                    Expr(
+                        StmtExpr {
+                            node_index: NodeIndex(None),
+                            range: 115..128,
+                            value: Call(
+                                ExprCall {
+                                    node_index: NodeIndex(None),
+                                    range: 115..128,
+                                    func: Name(
+                                        ExprName {
+                                            node_index: NodeIndex(None),
+                                            range: 115..120,
+                                            id: Name("print"),
+                                            ctx: Load,
+                                        },
+                                    ),
+                                    arguments: Arguments {
+                                        range: 120..128,
+                                        node_index: NodeIndex(None),
+                                        args: [
+                                            Call(
+                                                ExprCall {
+                                                    node_index: NodeIndex(None),
+                                                    range: 121..127,
+                                                    func: Name(
+                                                        ExprName {
+                                                            node_index: NodeIndex(None),
+                                                            range: 121..124,
+                                                            id: Name("fib"),
+                                                            ctx: Load,
+                                                        },
+                                                    ),
+                                                    arguments: Arguments {
+                                                        range: 124..127,
+                                                        node_index: NodeIndex(None),
+                                                        args: [
+                                                            Name(
+                                                                ExprName {
+                                                                    node_index: NodeIndex(None),
+                                                                    range: 125..126,
+                                                                    id: Name("i"),
+                                                                    ctx: Load,
+                                                                },
+                                                            ),
+                                                        ],
+                                                        keywords: [],
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        keywords: [],
+                                    },
+                                },
+                            ),
+                        },
+                    ),
+                    Assign(
+                        StmtAssign {
+                            node_index: NodeIndex(None),
+                            range: 133..142,
+                            targets: [
+                                Name(
+                                    ExprName {
+                                        node_index: NodeIndex(None),
+                                        range: 133..134,
+                                        id: Name("i"),
+                                        ctx: Store,
+                                    },
+                                ),
+                            ],
+                            value: BinOp(
+                                ExprBinOp {
+                                    node_index: NodeIndex(None),
+                                    range: 137..142,
+                                    left: Name(
+                                        ExprName {
+                                            node_index: NodeIndex(None),
+                                            range: 137..138,
+                                            id: Name("i"),
+                                            ctx: Load,
+                                        },
+                                    ),
+                                    op: Add,
+                                    right: NumberLiteral(
+                                        ExprNumberLiteral {
+                                            node_index: NodeIndex(None),
+                                            range: 141..142,
+                                            value: Int(
+                                                1,
+                                            ),
+                                        },
+                                    ),
+                                },
+                            ),
+                        },
+                    ),
+                ],
+                orelse: [],
+            },
+        ),
+    ],
+}

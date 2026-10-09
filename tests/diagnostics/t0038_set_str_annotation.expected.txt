@@ -1,0 +1,5 @@
+error[T0038]: set[str] is not compiled yet (D-122) -- only set[int] and a set of a user-class instance are
+ --> tests/diagnostics/t0038_set_str_annotation.py:1:10
+  |
+1 | def f(s: set[str]) -> None:
+  |          ^^^^^^^^ set[str] is not compiled yet (D-122) -- only set[int] and a set of a user-class instance are

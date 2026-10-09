@@ -1,0 +1,5 @@
+error[C0001]: a protocol class (`P`) as a return type annotation is not supported yet -- a protocol type is currently supported in parameter and variable positions only
+ --> tests/diagnostics/c0001_protocol_return_annotation.py:13:15
+   |
+13 | def make() -> P:
+   |               ^ a protocol class (`P`) as a return type annotation is not supported yet -- a protocol type is currently supported in parameter and variable positions only

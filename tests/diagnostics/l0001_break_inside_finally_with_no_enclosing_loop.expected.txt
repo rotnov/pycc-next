@@ -1,0 +1,5 @@
+error[L0001]: 'break' outside loop
+ --> tests/diagnostics/l0001_break_inside_finally_with_no_enclosing_loop.py:4:5
+  |
+4 |     break
+  |     ^^^^^ 'break' outside loop

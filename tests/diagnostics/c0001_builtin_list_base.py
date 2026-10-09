@@ -1,0 +1,2 @@
+class L(list):
+    pass

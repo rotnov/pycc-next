@@ -1,0 +1,46 @@
+{
+  "compiler_commit": "b606062313e71f915d0a377acb548ce80c787940",
+  "compiler_tree": "bc0b823ac9e06ff4285fb05d39c19da8a4ee0538",
+  "artifacts": {
+    "source": {
+      "path": "tests/fixtures/quick_start.py",
+      "sha256": "09f7f6732d6837a0e7a91298eea549b0bdcba77d4908839ce1878955f4a0f043",
+      "bytes": 143
+    },
+    "parser": {
+      "path": "tests/fixtures/architecture-trace/parser-ast.txt",
+      "sha256": "e3bab36a048cba708813e94e39a0301cc4dc4934bd14d9b8fc7101a5028cf45e",
+      "bytes": 19360
+    },
+    "hir": {
+      "path": "tests/fixtures/architecture-trace/hir-module.txt",
+      "sha256": "8e92d002b5438d4cf8b41d2390ad1f37679a4d43c76bc1e357963ded2594c84c",
+      "bytes": 3977
+    },
+    "type-check": {
+      "path": "tests/fixtures/architecture-trace/hir-module.txt",
+      "sha256": "8e92d002b5438d4cf8b41d2390ad1f37679a4d43c76bc1e357963ded2594c84c",
+      "bytes": 3977
+    },
+    "mir": {
+      "path": "tests/fixtures/architecture-trace/mir-items.txt",
+      "sha256": "dc6b710e2975df6b718f2fb30d48cef4b2738d3544fecdf4b50ba826320f3d7e",
+      "bytes": 3521
+    }
+  },
+  "native": {
+    "argv": [
+      "pycc",
+      "build",
+      "tests/fixtures/quick_start.py",
+      "-o",
+      "<scratch>/quick_start"
+    ],
+    "exit_status": 0
+  },
+  "stdout": {
+    "text": "0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n",
+    "bytes": 26
+  },
+  "excerpt_lines": 18
+}

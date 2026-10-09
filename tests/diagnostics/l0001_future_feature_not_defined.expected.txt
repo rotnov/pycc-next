@@ -1,0 +1,5 @@
+error[L0001]: future feature notafeature is not defined
+ --> tests/diagnostics/l0001_future_feature_not_defined.py:1:1
+  |
+1 | from __future__ import notafeature
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ future feature notafeature is not defined

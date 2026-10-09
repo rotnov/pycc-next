@@ -1,0 +1,5 @@
+error[T0002]: `Any` is not permitted in pycc code outside a declared interop boundary
+ --> tests/diagnostics/d0002_any_forbidden.py:1:1
+  |
+1 | def f(x: Any) -> None:
+  | ^ `Any` is not permitted in pycc code outside a declared interop boundary
