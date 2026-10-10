@@ -308,3 +308,50 @@ fn an_unsupported_builtin_call_goes_through_cpython_builtins() {
     assert!(plan.absorb(Some(&rendered), &[builtin_failure("vars", vars)]));
     assert!(plan.report_lines()[0].contains("m.py:3 "), "{:?}", plan.report_lines());
 }
+
+/// A global fallback code only reads stays native in compiled code, with
+/// every compiled store copied into the namespace; one fallback code binds,
+/// or that a `for` target binds, lives in the namespace; a copy that fails
+/// to compile demotes its global.
+#[test]
+fn a_global_fallback_code_only_reads_stays_native_with_copied_stores() {
+    let source = "n = 1\nk = 0\nfor i in range(3):\n    n += i\n\
+                  def f():\n    global k\n    k = (lambda: n + i)()\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
+    assert_eq!(plan.native_globals(), set(&["n"]));
+    let rendered = plan.render();
+    let text = &rendered.text;
+    assert!(text.contains("n = 1; __pycc_fallback_ns['n'] = n\n"), "{text}");
+    assert!(
+        text.contains("    n += __pycc_fallback_ns['i']; __pycc_fallback_ns['n'] = n\n"),
+        "{text}"
+    );
+    assert!(text.contains("__pycc_fallback_ns['k'] = 0"), "{text}");
+    assert!(text.contains("for __pycc_fallback_ns['i'] in"), "{text}");
+    let copy = text.find("; __pycc_fallback_ns['n'] = n").unwrap() as u32 + 2;
+    let failure = Failure {
+        diagnostic: Diagnostic::error("I0404", "item store", Span::new(copy, copy + 1)),
+        origin: None,
+    };
+    assert!(plan.absorb(Some(&rendered), &[failure]));
+    assert!(plan.native_globals().is_empty());
+    assert!(plan.render().text.contains("__pycc_fallback_ns['n'] = 1"));
+}
+
+/// An unannotated public function fallback code calls is compiled with
+/// object annotations instead of falling back.
+#[test]
+fn an_inferred_function_fallback_code_calls_is_compiled_with_objects() {
+    let source = "def f(a, b: int):\n    return a\n\nx = (lambda: f(2, 1))()\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
+    assert_eq!(plan.report_lines().len(), 1, "{:?}", plan.report_lines());
+    let text = plan.render().text;
+    assert!(text.contains("def f(a: object, b: int) -> object:"), "{text}");
+    // With a parameter default it falls back instead (#1194).
+    let source = "def f(a, b=1):\n    return a\n\nx = (lambda: f(2))()\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
+    assert!(plan.report_lines().join("\n").contains("function `f`"));
+}

@@ -28,6 +28,9 @@
 //! diagnostic in another module of the program is reported as before.
 
 mod names;
+mod render;
+
+pub(crate) use render::Rendered;
 
 use pycc_ast::Stmt;
 use pycc_diag::Diagnostic;
@@ -124,6 +127,11 @@ struct TopStmt {
     /// The module-scope names it binds other than through a plain name
     /// target (an import, `except ... as`, a nested `def`).
     opaque: BTreeSet<String>,
+    /// The names it declares `global` at any depth.
+    declares: BTreeSet<String>,
+    /// A function with a parameter default: the published callable cannot
+    /// apply defaults yet (#1194), so Python code never calls it compiled.
+    defaults: bool,
 }
 
 /// A diagnostic of the compiled rewrite, as the fallback loop sees it.
@@ -148,6 +156,13 @@ pub(crate) struct Plan {
     /// `builtins` module (`min(a, b)` becomes `builtins.min(a, b)`): the
     /// builtin is valid Python pycc does not compile for these arguments.
     object_builtins: BTreeMap<u32, String>,
+    /// Unannotated public functions fallback code calls: compiled with an
+    /// object for every unannotated parameter and return (the signature
+    /// Python callers need), and published, instead of inferred.
+    objectified: BTreeSet<usize>,
+    /// Globals that compiled code could not keep native and mirror into
+    /// the namespace (`native_globals`): a copy failed to compile.
+    demoted: BTreeSet<String>,
     /// Compiled imports that fallback code reads a name of: they stay
     /// compiled and also run in CPython right after, so both sides see the
     /// module (`cascade`).
@@ -160,29 +175,6 @@ pub(crate) struct Plan {
     /// publishes both; an embedded executable with fallback code publishes
     /// its functions).
     publishes: Publishes,
-}
-
-/// The rewrite of a plan, with where each original statement landed.
-#[derive(Debug)]
-pub(crate) struct Rendered {
-    pub(crate) text: String,
-    /// `ranges[i]` is statement `i`'s range in `text`.
-    ranges: Vec<Range<u32>>,
-    preamble: Range<u32>,
-    /// `(offset in text, offset in the source, length)` of every run of
-    /// compiled source copied into `text` unchanged.
-    copied: Vec<(u32, u32, u32)>,
-}
-
-impl Rendered {
-    /// The source offset of `text` offset `at`, when it lies in copied
-    /// compiled source.
-    fn source_offset(&self, at: u32) -> Option<u32> {
-        self.copied
-            .iter()
-            .find(|(start, _, len)| (*start..start + len).contains(&at))
-            .map(|(start, source, _)| source + (at - start))
-    }
 }
 
 impl Plan {
@@ -206,6 +198,9 @@ impl Plan {
                 bound: names::bound_names(std::slice::from_ref(stmt)),
                 mentions: names::module_references(stmt),
                 opaque: names::opaque_bound_names(stmt),
+                declares: names::all_global_declarations(stmt),
+                defaults: matches!(stmt, Stmt::FunctionDef(def)
+                    if def.parameters.iter_non_variadic_params().any(|p| p.default.is_some())),
             })
             .collect::<Vec<_>>();
         Some(Self {
@@ -216,6 +211,8 @@ impl Plan {
             fallback: BTreeMap::new(),
             object_builtins: BTreeMap::new(),
             mirrored: BTreeSet::new(),
+            demoted: BTreeSet::new(),
+            objectified: BTreeSet::new(),
             entry_dir: None,
             publishes,
         })
@@ -240,7 +237,12 @@ impl Plan {
                 return matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)])
                     && matches!(&*assign.value, pycc_ast::Expr::Attribute(attr)
                         if matches!(attr.attr.as_str(), "readline" | "readlines" | "read" | "write" | "flush")
-                            && is_attribute_chain(&attr.value))
+                            && is_attribute_chain(&attr.value)
+                            // Compiled code reads `sys.stdin.buffer` through
+                            // the text stream, whose read-ahead CPython's
+                            // binary reads would skip.
+                            && !matches!(&*attr.value, pycc_ast::Expr::Attribute(inner)
+                                if inner.attr.as_str() == "buffer"))
                     && self.binds_alone(index);
             }
             Stmt::Import(import) => import.names.iter().map(|a| a.name.as_str()).collect(),
@@ -281,17 +283,33 @@ impl Plan {
     /// (a span-less whole-module diagnostic, the preamble) marks every
     /// statement.
     pub(crate) fn absorb(&mut self, rendered: Option<&Rendered>, failures: &[Failure]) -> bool {
-        let before = (self.fallback.len(), self.object_builtins.len());
+        let before = (
+            self.fallback.len(),
+            self.object_builtins.len(),
+            self.demoted.len(),
+        );
         // The docstring and `from __future__` imports stay compiled: the
         // preamble goes after them.
         let first = self.preamble_position();
         for failure in failures {
-            if self.call_through_builtins(rendered, failure) {
+            if self.call_through_builtins(rendered, failure) || self.demote(rendered, failure) {
                 continue;
             }
             let reason = describe(&failure.diagnostic);
             match self.owner_of(rendered, failure) {
                 Some(index) if index >= first => {
+                    // Name the line within a multi-line statement.
+                    let line = self.source_line(rendered, failure);
+                    let stmt = &self.stmts[index].range;
+                    let reason = match line {
+                        Some(line)
+                            if line_of(&self.source, stmt.start)
+                                != line_of(&self.source, stmt.end.saturating_sub(1)) =>
+                        {
+                            format!("{reason} (line {line})")
+                        }
+                        _ => reason,
+                    };
                     self.fallback.entry(index).or_insert(reason);
                 }
                 Some(_) => {}
@@ -317,7 +335,11 @@ impl Plan {
             }
         }
         self.cascade();
-        (self.fallback.len(), self.object_builtins.len()) != before
+        (
+            self.fallback.len(),
+            self.object_builtins.len(),
+            self.demoted.len(),
+        ) != before
     }
 
     /// Records a compiled call of a builtin pycc does not compile for its
@@ -363,6 +385,17 @@ impl Plan {
         }
         self.object_builtins.insert(at, name.to_string());
         true
+    }
+
+    /// The source line a failure's span starts on, when it has one in
+    /// compiled source.
+    fn source_line(&self, rendered: Option<&Rendered>, failure: &Failure) -> Option<usize> {
+        let span = failure.diagnostic.span.filter(|s| (s.start, s.end) != (0, 0))?;
+        let at = match rendered {
+            Some(rendered) => rendered.source_offset(span.start)?,
+            None => span.start,
+        };
+        Some(line_of(&self.source, at))
     }
 
     /// The statement a failure belongs to.
@@ -420,6 +453,21 @@ impl Plan {
                 self.mirrored.extend(mirror);
                 continue;
             }
+            let objectify: Vec<usize> = (0..self.stmts.len())
+                .filter(|index| {
+                    !self.fallback.contains_key(index)
+                        && !self.objectified.contains(index)
+                        && matches!(&self.stmts[*index].kind,
+                            Kind::Def(name, true) if read.contains(name)
+                                && !self.stmts[*index].defaults
+                                && self.publishes.sees(name, false, false)
+                                && self.publishes.infers_unannotated)
+                })
+                .collect();
+            if !objectify.is_empty() {
+                self.objectified.extend(objectify);
+                continue;
+            }
             let forced: Vec<(usize, String)> = self
                 .stmts
                 .iter()
@@ -435,7 +483,11 @@ impl Plan {
                         }
                         Kind::Def(name, unannotated)
                             if read.contains(name)
-                                && !self.publishes.sees(name, false, *unannotated) =>
+                                && (stmt.defaults || !self.publishes.sees(
+                                    name,
+                                    false,
+                                    *unannotated && !self.objectified.contains(&index),
+                                )) =>
                         {
                             name
                         }
@@ -459,6 +511,57 @@ impl Plan {
             }
             self.fallback.extend(forced);
         }
+    }
+
+    /// Demotes the native global whose namespace copy `failure` points at
+    /// (a list cannot be stored into the namespace without a copy that
+    /// would break aliasing), returning whether it did.
+    fn demote(&mut self, rendered: Option<&Rendered>, failure: &Failure) -> bool {
+        let (Some(rendered), Some(span)) = (rendered, failure.diagnostic.span) else {
+            return false;
+        };
+        let Some((_, name)) = rendered
+            .mirror_spans
+            .iter()
+            .find(|(range, _)| range.contains(&span.start))
+        else {
+            return false;
+        };
+        self.demoted.insert(name.clone())
+    }
+
+    /// The dict globals (`dict_globals`) that compiled code keeps native
+    /// instead, copying every compiled store into the namespace: fallback
+    /// code reads them but never binds them, so compiled code is their one
+    /// writer, and every compiled store is a plain `=`/`+=` a copy can
+    /// follow. The copy only compiles for a value the namespace can hold
+    /// without breaking aliasing (a scalar or an object); any other is
+    /// demoted by the fallback loop.
+    pub(super) fn native_globals(&self) -> BTreeSet<String> {
+        let mut fallback_binds = BTreeSet::new();
+        for (index, stmt) in self.stmts.iter().enumerate() {
+            if self.fallback.contains_key(&index) {
+                fallback_binds.extend(stmt.bound.iter().cloned());
+                fallback_binds.extend(stmt.declares.iter().cloned());
+            } else if !matches!(stmt.kind, Kind::Other) {
+                fallback_binds.extend(stmt.opaque.iter().cloned());
+            }
+        }
+        let mut native: BTreeSet<String> = self
+            .dict_globals()
+            .into_iter()
+            .filter(|name| !fallback_binds.contains(name) && !self.demoted.contains(name))
+            .collect();
+        let none = BTreeSet::new();
+        for (index, stmt) in self.ast.iter().enumerate() {
+            if self.fallback.contains_key(&index) {
+                continue;
+            }
+            let mut rewriter = names::Rewriter::new(&none, NS).with_mirrors(native.clone());
+            pycc_ast::visitor::Visitor::visit_stmt(&mut rewriter, stmt);
+            native.retain(|name| !rewriter.unmirrorable.contains(name));
+        }
+        native
     }
 
     /// The module globals that live in the namespace dictionary.
@@ -492,103 +595,6 @@ impl Plan {
             }
         }
         globals
-    }
-
-    /// The rewritten source.
-    pub(crate) fn render(&self) -> Rendered {
-        let globals = self.dict_globals();
-        let src = &self.source;
-        let mut text = String::with_capacity(src.len() * 2);
-        let mut ranges = Vec::with_capacity(self.stmts.len());
-        let mut copied = Vec::new();
-        let mut cursor = 0usize;
-        let preamble_at = self.preamble_position();
-        let mut preamble = 0..0;
-        let mut index = 0;
-        while index < self.stmts.len() {
-            let stmt = &self.stmts[index];
-            let start = stmt.range.start as usize;
-            text.push_str(&src[cursor..start]);
-            if index == preamble_at {
-                let at = text.len() as u32;
-                text.push_str(&format!(
-                    "import sys as {SYS}; import builtins as {BUILTINS}; \
-                     {NS} = {SYS}.modules[__name__].__dict__\n"
-                ));
-                preamble = at..text.len() as u32;
-            }
-            if self.fallback.contains_key(&index) {
-                let mut last = index;
-                while last + 1 < self.stmts.len() && self.fallback.contains_key(&(last + 1)) {
-                    last += 1;
-                }
-                let end = self.stmts[last].range.end as usize;
-                let chunk = &src[start..end];
-                let line = src[..start].matches('\n').count();
-                let padded = format!("{}{}\n", "\n".repeat(line), chunk);
-                let at = text.len() as u32;
-                // The newlines go first, so the call sits on the chunk's last
-                // line: a statement may follow it there after a `;`.
-                text.push_str(&"\n".repeat(chunk.matches('\n').count()));
-                text.push_str(&format!(
-                    "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"), {NS})",
-                    py_str(&padded),
-                    py_str(&self.display)
-                ));
-                let end_at = text.len() as u32;
-                for _ in index..=last {
-                    ranges.push(at..end_at);
-                }
-                cursor = end;
-                index = last + 1;
-                continue;
-            }
-            let mut rewriter = names::Rewriter::new(&globals, NS);
-            pycc_ast::visitor::Visitor::visit_stmt(&mut rewriter, &self.ast[index]);
-            let mut edits = rewriter.edits;
-            edits.extend(
-                self.object_builtins
-                    .range(stmt.range.start..stmt.range.end)
-                    .map(|(at, name)| names::Edit {
-                        range: *at..at + name.len() as u32,
-                        text: format!("{BUILTINS}.{name}"),
-                    }),
-            );
-            edits.sort_by_key(|edit| edit.range.start);
-            let at = text.len() as u32;
-            let mut inner = start;
-            for edit in edits {
-                let (edit_start, edit_end) = (edit.range.start as usize, edit.range.end as usize);
-                if edit_start < inner {
-                    continue;
-                }
-                copied.push((text.len() as u32, inner as u32, (edit_start - inner) as u32));
-                text.push_str(&src[inner..edit_start]);
-                text.push_str(&edit.text);
-                inner = edit_end;
-            }
-            let end = stmt.range.end as usize;
-            copied.push((text.len() as u32, inner as u32, (end - inner) as u32));
-            text.push_str(&src[inner..end]);
-            if self.mirrored.contains(&index) {
-                // Same line, so later line numbers do not move.
-                text.push_str(&format!(
-                    "; {BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"), {NS})",
-                    py_str(&src[start..end]),
-                    py_str(&self.display)
-                ));
-            }
-            ranges.push(at..text.len() as u32);
-            cursor = end;
-            index += 1;
-        }
-        text.push_str(&src[cursor..]);
-        Rendered {
-            text,
-            ranges,
-            preamble,
-            copied,
-        }
     }
 
     /// The statement the preamble goes before: the first one that is not

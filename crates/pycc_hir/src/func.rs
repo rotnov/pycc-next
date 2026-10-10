@@ -26,7 +26,7 @@ mod string_annotation_tests;
 
 use crate::class::ClassAnnotationInfo;
 use crate::expr::keyword_bind::SignatureTable;
-use crate::{HirExpr, HirItem, ImportBinding, Ty, stmt, unsupported};
+use crate::{HirExpr, HirItem, HirStmt, ImportBinding, Ty, stmt, unsupported};
 use bare_container::container_family;
 pub(crate) use bare_container::{with_bare_container_advice, with_bare_list_or_dict_advice};
 use container_annotation::container_annotation_to_ty;
@@ -116,6 +116,15 @@ pub(crate) fn lower_function(
         imports,
         signatures,
     )?;
+    let mut body = body;
+    // Non-strict mode (#3): a function returning an object that can run off
+    // its end returns `None` there, as every Python function does.
+    if return_ty == Ty::Object
+        && is_non_strict(aliases)
+        && !crate::return_coverage::block_always_returns(&body)
+    {
+        body.push(HirStmt::Return(Some(HirExpr::NoneLiteral)));
+    }
     Ok(HirItem::Function {
         name: def.name.to_string(),
         params,

@@ -199,6 +199,9 @@ fn is_module_global_in(scopes: &[Scope], name: &str) -> bool {
 pub(crate) struct Edit {
     pub(crate) range: Range<u32>,
     pub(crate) text: String,
+    /// The native global whose store this inserted text copies into the
+    /// namespace (`Rewriter::mirrors`).
+    pub(crate) mirror: Option<String>,
 }
 
 #[derive(Debug)]
@@ -223,6 +226,16 @@ pub(crate) struct Rewriter<'g> {
     ns: &'g str,
     scopes: Vec<Scope>,
     pub(crate) edits: Vec<Edit>,
+    /// Module globals fallback code reads but never binds that compiled
+    /// code keeps native: every compiled store of one is followed by a copy
+    /// into the namespace (`; ns['n'] = n` after the simple statement).
+    mirrors: BTreeSet<String>,
+    /// The end of the simple statement (`=`, `+=`, annotated `=`) being
+    /// visited, where a mirror copy goes.
+    simple_end: Option<u32>,
+    /// Mirrored names bound somewhere a copy cannot follow (a `for` or
+    /// `with` target, `del`, ...): they must live in the namespace.
+    pub(crate) unmirrorable: BTreeSet<String>,
     /// When set, every module-global reference is recorded here instead of
     /// rewritten (`module_references`).
     record: Option<BTreeSet<String>>,
@@ -239,8 +252,17 @@ impl<'g> Rewriter<'g> {
                 globals: BTreeSet::new(),
             }],
             edits: Vec::new(),
+            mirrors: BTreeSet::new(),
+            simple_end: None,
+            unmirrorable: BTreeSet::new(),
             record: None,
         }
+    }
+
+    /// Mirrors the module globals in `mirrors` (see the field).
+    pub(crate) fn with_mirrors(mut self, mirrors: BTreeSet<String>) -> Self {
+        self.mirrors = mirrors;
+        self
     }
 
     /// Whether `name`, referenced in the innermost scope, is the module's.
@@ -274,6 +296,25 @@ fn parameter_names(parameters: &pycc_ast::Parameters) -> BTreeSet<String> {
 
 impl<'a> Visitor<'a> for Rewriter<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        let simple = matches!(stmt, Stmt::Assign(_) | Stmt::AugAssign(_))
+            || matches!(stmt, Stmt::AnnAssign(a) if a.value.is_some());
+        let outer = std::mem::replace(
+            &mut self.simple_end,
+            simple.then(|| pycc_ast::stmt_range(stmt).end),
+        );
+        self.visit_stmt_inner(stmt);
+        self.simple_end = outer;
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        self.visit_expr_inner(expr);
+    }
+
+    fn visit_annotation(&mut self, _expr: &'a Expr) {}
+}
+
+impl<'a> Rewriter<'_> {
+    fn visit_stmt_inner(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::FunctionDef(def) => {
                 for decorator in &def.decorator_list {
@@ -317,15 +358,42 @@ impl<'a> Visitor<'a> for Rewriter<'_> {
                         format!("global {}", kept.join(", "))
                     };
                     let range = pycc_ast::stmt_range(stmt);
-                    self.edits.push(Edit { range, text });
+                    self.edits.push(Edit {
+                        range,
+                        text,
+                        mirror: None,
+                    });
                 }
             }
             _ => visitor::walk_stmt(self, stmt),
         }
     }
 
-    fn visit_expr(&mut self, expr: &'a Expr) {
+    fn visit_expr_inner(&mut self, expr: &'a Expr) {
         match expr {
+            Expr::Name(name)
+                if self.record.is_none()
+                    && self.mirrors.contains(name.id.as_str())
+                    && self.is_module_global(name.id.as_str()) =>
+            {
+                let id = name.id.as_str();
+                match (name.ctx, self.simple_end) {
+                    (ExprContext::Load, _) => {}
+                    (ExprContext::Store, Some(end)) => {
+                        let text = format!("; {}['{id}'] = {id}", self.ns);
+                        if !self.edits.iter().any(|e| e.range.start == end && e.text == text) {
+                            self.edits.push(Edit {
+                                range: end..end,
+                                text,
+                                mirror: Some(id.to_string()),
+                            });
+                        }
+                    }
+                    _ => {
+                        self.unmirrorable.insert(id.to_string());
+                    }
+                }
+            }
             Expr::Name(name) => {
                 let id = name.id.as_str();
                 if let Some(record) = &mut self.record {
@@ -340,6 +408,7 @@ impl<'a> Visitor<'a> for Rewriter<'_> {
                     self.edits.push(Edit {
                         range: name.range.start().to_u32()..name.range.end().to_u32(),
                         text: self.subscript(id),
+                        mirror: None,
                     });
                 }
             }
@@ -376,8 +445,6 @@ impl<'a> Visitor<'a> for Rewriter<'_> {
             _ => visitor::walk_expr(self, expr),
         }
     }
-
-    fn visit_annotation(&mut self, _expr: &'a Expr) {}
 }
 
 impl Rewriter<'_> {
@@ -426,7 +493,7 @@ pub(crate) fn module_references(stmt: &Stmt) -> BTreeSet<String> {
 }
 
 /// Every name declared `global` anywhere in `stmt`.
-fn all_global_declarations(stmt: &Stmt) -> BTreeSet<String> {
+pub(crate) fn all_global_declarations(stmt: &Stmt) -> BTreeSet<String> {
     #[derive(Default)]
     struct Globals(BTreeSet<String>);
     impl<'a> Visitor<'a> for Globals {

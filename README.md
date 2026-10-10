@@ -69,9 +69,12 @@ Coming next: numpy arrays as native types, published benchmarks against CPython
   `global`, ...) is kept as Python source and run by CPython's own `exec` in the
   module's namespace, at its place in the module. Compiled code calls a fallback
   function as a CPython object; fallback code calls compiled functions as the
-  module's published callables (an inferred, unannotated function that fallback
-  code calls falls back too). A module global that fallback code reads or binds
-  lives in the module dict, so both sides see one value; an import, or an alias
+  module's published callables (an unannotated function that fallback code calls
+  is compiled with object parameters instead of inferred ones; one with a parameter
+  default runs in CPython, as published callables do not apply defaults yet). A
+  module global that fallback code binds lives in the module dict, so both sides
+  see one value; one it only reads stays native, each compiled store copied into
+  the dict (a list or other container still lives in the dict); an import, or an alias
   such as `input = sys.stdin.readline`, that fallback code reads stays compiled
   and also runs in CPython. A builtin call pycc does not compile for its arguments
   (`min` of an object, `set()`, `pow(a, b, m)`, ...) is a call of CPython's own

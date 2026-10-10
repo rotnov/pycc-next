@@ -94,11 +94,23 @@ fn fallback_calls_into_inferred_functions_keep_cpython_semantics() {
     }
     let report = matches_cpython("non_strict_inferred_mixed.py");
     // `show` is called with an `int` and a `str`: fallback code calls it, so
-    // it runs in CPython rather than with an inferred `int` parameter.
-    assert!(report.contains("function `show`"), "{report}");
+    // it is compiled with an object parameter (and published) rather than
+    // an inferred `int` one, and returns `None` off its end.
+    assert!(!report.contains("function `show`"), "{report}");
     // The `sys` import and the `input` alias stay compiled.
     assert!(!report.contains(":1 runs"), "{report}");
     assert!(!report.contains(":3 runs"), "{report}");
+}
+
+#[test]
+fn fallback_calls_omitting_a_default_match_cpython() {
+    if !embed_interpreter_available() {
+        eprintln!("skipped: no CPython to embed (set PYCC_PYTHON)");
+        return;
+    }
+    let report = matches_cpython("non_strict_fallback_defaults.py");
+    assert!(report.contains("function `scale`"), "{report}");
+    assert!(report.contains("function `scale2`"), "{report}");
 }
 
 #[test]
