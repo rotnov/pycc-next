@@ -4,7 +4,8 @@
 
 use crate::exception::{EXCEPTION_TYPE_VALUE_ERROR, raise_builtin};
 use crate::int_arith::{decode_big, encode_big, int_from_float};
-use crate::int_encoding::{inline_int_value, tag_smallint};
+use crate::int_encoding::{fits_smallint, inline_int_value, tag_smallint};
+use num_bigint::BigInt;
 use num_integer::{Integer, Roots};
 use num_traits::{Signed, Zero};
 
@@ -12,8 +13,10 @@ use num_traits::{Signed, Zero};
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_math_gcd(a: i64, b: i64) -> i64 {
     if let (Some(x), Some(y)) = (inline_int_value(a), inline_int_value(b)) {
-        // Inline values are 63-bit, so their magnitudes fit an `i64`.
-        return tag_smallint(x.abs().gcd(&y.abs()));
+        // Inline values are 63-bit, so their magnitudes fit an `i64`, but the
+        // result can still exceed the smallint range: gcd(-2**62, 0) == 2**62.
+        let g = x.abs().gcd(&y.abs());
+        return fits_smallint(g).unwrap_or_else(|| encode_big(BigInt::from(g)));
     }
     encode_big(decode_big(a).gcd(&decode_big(b)))
 }
@@ -72,6 +75,9 @@ mod tests {
     fn gcd_lcm_and_isqrt_of_small_values() {
         assert_eq!(untag_smallint(pycc_rt_math_gcd(tag_smallint(-12), tag_smallint(18))), 6);
         assert_eq!(untag_smallint(pycc_rt_math_gcd(tag_smallint(0), tag_smallint(0))), 0);
+        let min = -(1_i64 << 62);
+        let g = pycc_rt_math_gcd(tag_smallint(min), tag_smallint(0));
+        assert_eq!(decode_big(g), BigInt::from(1_i64 << 62));
         assert_eq!(untag_smallint(pycc_rt_math_lcm(tag_smallint(-4), tag_smallint(6))), 12);
         assert_eq!(untag_smallint(pycc_rt_math_lcm(tag_smallint(0), tag_smallint(6))), 0);
         assert_eq!(untag_smallint(pycc_rt_math_isqrt(tag_smallint(99))), 9);
