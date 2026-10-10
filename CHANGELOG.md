@@ -9,6 +9,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   at the offending expression or statement instead of `1:1`, with a short caret label
   (`expected `int`, found `str``) instead of the headline repeated; `--error-format
   json` carries the same line, column and length (#10).
+- `--non-strict` native builds infer unannotated function signatures from their call
+  sites, and keep imports and `sys` stream aliases compiled when fallback code reads
+  them: 72% of the corpus's top-level statements now compile natively (was 51%) (#11).
 
 ## [0.1.0-rc.1] - 2026-10-10
 

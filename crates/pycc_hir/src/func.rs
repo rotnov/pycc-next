@@ -73,7 +73,14 @@ pub(crate) fn lower_function(
         def.returns.as_deref(),
         Some(pycc_ast::Expr::Name(name)) if name.id.as_str() == pycc_ast::INFER_MARKER
     );
-    let is_public = crate::is_public_name(def.name.as_str()) && !synthesized; // D-038
+    // Non-strict mode (#3) outside an `--ext` module: no Python caller can
+    // reach an unannotated public function except through its own module, so
+    // its signature is inferred from its uses like a private helper's (a
+    // type the solver cannot pin is an object, `constraints::signatures`).
+    // An `--ext` module's function is called from Python with anything, so
+    // there it stays an object.
+    let inferred_public = is_non_strict(aliases) && !is_ext_module(aliases);
+    let is_public = crate::is_public_name(def.name.as_str()) && !synthesized && !inferred_public; // D-038
     let params = lower_params(
         &def.parameters,
         is_public,

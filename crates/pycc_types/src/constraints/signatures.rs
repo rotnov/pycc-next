@@ -532,6 +532,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
                     &concrete,
                     &non_scalar_local_roots,
                 )
+                .or_else(object_when_non_strict)
                 .ok_or_else(|| {
                     Diagnostic::error(
                         "T0021",
@@ -550,6 +551,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             &concrete,
             &non_scalar_local_roots,
         )
+        .or_else(object_when_non_strict)
         .ok_or_else(|| {
             Diagnostic::error(
                 "T0021",
@@ -562,4 +564,10 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         resolved.insert(name.clone(), (param_tys, return_ty));
     }
     Ok(resolved)
+}
+
+/// Non-strict mode (#3): a helper parameter or return the solver cannot
+/// type is a CPython object, as every unannotated Python name is.
+fn object_when_non_strict() -> Option<Ty> {
+    crate::non_strict::is_non_strict().then_some(Ty::Object)
 }

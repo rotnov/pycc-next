@@ -139,6 +139,9 @@ pub(crate) fn object_display_ty<'a>(
         .into_iter()
         .map(|element| infer_expr_in(env, local_names, element).ok())
         .collect::<Option<Vec<Ty>>>()?;
+    if tys.is_empty() && crate::non_strict::empty_display_untyped() {
+        return None;
+    }
     if !pycc_hir::display_is_object(kind, &tys) {
         return None;
     }

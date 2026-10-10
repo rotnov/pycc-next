@@ -58,7 +58,10 @@ Coming next: numpy arrays as native types, published benchmarks against CPython
   (`PyObject*`); operations on it (arithmetic, comparisons, calls, attribute and
   item access and stores, iteration) go through the CPython C API, so results and
   exceptions are CPython's own. Provable types stay native: local inference is
-  unchanged, and a name rebound with a different type becomes an object. A native
+  unchanged, and a name rebound with a different type becomes an object. In a
+  native build an unannotated function's signature is inferred from its call sites
+  (a parameter or return nothing pins is an object); an `--ext` module's stays an
+  object, since Python may call it with anything. A native
   build of such a program embeds CPython (as a foreign import does); `--ext` just
   works. Known gaps are listed in `docs/DEVIATIONS.md`.
 - **Per-function fallback** (non-strict only): a top-level function, class or
@@ -66,8 +69,11 @@ Coming next: numpy arrays as native types, published benchmarks against CPython
   `global`, ...) is kept as Python source and run by CPython's own `exec` in the
   module's namespace, at its place in the module. Compiled code calls a fallback
   function as a CPython object; fallback code calls compiled functions as the
-  module's published callables. A module global that fallback code reads or binds
-  lives in the module dict, so both sides see one value. Exceptions cross the
+  module's published callables (an inferred, unannotated function that fallback
+  code calls falls back too). A module global that fallback code reads or binds
+  lives in the module dict, so both sides see one value; an import, or an alias
+  such as `input = sys.stdin.readline`, that fallback code reads stays compiled
+  and also runs in CPython. Exceptions cross the
   boundary both ways with CPython's type and message, and tracebacks keep their line
   numbers. `--report-fallbacks` prints what fell back and why; strict mode keeps
   refusing with the same diagnostics.

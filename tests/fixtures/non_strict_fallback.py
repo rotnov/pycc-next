@@ -3,7 +3,7 @@
 # boundary. Oracle: CPython runs this file unchanged.
 
 
-def scale(x, k):
+def scale(x: int, k: int) -> int:
     # Compiled; called from fallback code.
     return x * k
 
@@ -14,7 +14,7 @@ def describe(values):
     return ",".join(str(v) for v in sorted(values, key=key))
 
 
-def fails(n):
+def fails(n: int) -> int:
     # Compiled; its exception is caught in fallback code.
     if n > 2:
         raise ValueError("too big: " + str(n))

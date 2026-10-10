@@ -363,6 +363,7 @@ pub(crate) fn check_frontend(path: &Path, interop: InteropCli) -> Result<(), Fro
 const NATIVE_PUBLISHES: crate::fallback::Publishes = crate::fallback::Publishes {
     functions: true,
     classes: false,
+    infers_unannotated: true,
 };
 
 /// Runs `attempt` under the non-strict fallback loop (#12, `crate::fallback`).
@@ -473,6 +474,7 @@ pub(crate) fn resolve_frontend_with(
     let publishes = crate::fallback::Publishes {
         functions: true,
         classes: true,
+        infers_unannotated: false,
     };
     with_fallback(path, publishes, || {
         resolve_linked(path, module_name, relative_imports, true)

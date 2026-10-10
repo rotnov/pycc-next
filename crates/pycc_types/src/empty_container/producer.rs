@@ -159,6 +159,13 @@ fn scan_for_producer<'a>(
             // A dict producer is keyed by a bare name only: a subscript
             // store on an attribute receiver (`self.d[k] = v`) is refused in
             // `pycc_hir` until #891, so no attribute dict producer exists.
+            // An augmented update `d[k] += v` reads the element it stores,
+            // so its value's type is the element type itself: it is a
+            // consumer, and the scan moves on to the next producer (the
+            // `d[k] = 1` of `try: d[k] += 1 except KeyError: d[k] = 1`).
+            HirStmt::DictSet { dict, value, .. }
+                if matches!(target, ProducerTarget::Name(wanted) if dict == wanted)
+                    && reads_own_element(value, dict) => {}
             HirStmt::DictSet { dict, key, value } if matches!(target, ProducerTarget::Name(wanted) if dict == wanted) =>
             {
                 return match (
@@ -183,4 +190,12 @@ fn scan_for_producer<'a>(
         }
     }
     ProducerScan::NotFound
+}
+
+/// Whether `value` is the lowered value of an augmented update of `dict`'s
+/// own element (`d[k] op= v` becomes `d[k] = d[k] op v`).
+fn reads_own_element(value: &HirExpr, dict: &str) -> bool {
+    matches!(value, HirExpr::AugBinOp { left, .. }
+        if matches!(left.as_ref(), HirExpr::Subscript { base, .. }
+            if matches!(base.as_ref(), HirExpr::Name(name) if name == dict)))
 }

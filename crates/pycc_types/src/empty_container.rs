@@ -232,6 +232,10 @@ fn fill_nested_empty_lists(expr: &mut HirExpr, ty: &Ty) {
 /// case, and which keeps this pass from adding a whole-module clone to
 /// `check_all_keyed`, a path that does not otherwise clone.
 pub(crate) fn resolve_empty_containers(hir: &HirModule) -> Option<HirModule> {
+    crate::non_strict::in_empty_container_pass(|| resolve_empty_containers_inner(hir))
+}
+
+fn resolve_empty_containers_inner(hir: &HirModule) -> Option<HirModule> {
     let class_phase = attr_slot::needs_class_phase(hir);
     if !class_phase
         && !hir.items.iter().any(|item| match item {

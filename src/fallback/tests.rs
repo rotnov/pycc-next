@@ -7,6 +7,7 @@ use pycc_diag::Span;
 const NATIVE: Publishes = Publishes {
     functions: true,
     classes: false,
+    infers_unannotated: true,
 };
 
 fn stmts(source: &str) -> Vec<Stmt> {
@@ -120,7 +121,7 @@ fn the_rewriter_skips_comprehension_targets_and_annotations() {
 }
 
 const PROGRAM: &str = "\"\"\"doc\"\"\"\nfrom __future__ import annotations\n\
-def helper(x):\n    return x + 1\n\n\
+def helper(x: int) -> int:\n    return x + 1\n\n\
 def lam(v):\n    return (lambda: helper(v))()\n\n\
 count = 0\n\
 print(lam(count))\n";
@@ -145,7 +146,7 @@ fn a_plan_renders_fallback_code_as_an_exec_in_the_namespace() {
         text.contains("print(__pycc_fallback_ns['lam'](count))"),
         "{text}"
     );
-    assert!(text.contains("def helper(x):"), "{text}");
+    assert!(text.contains("def helper(x: int) -> int:"), "{text}");
     // Every line after the preamble keeps its number.
     assert_eq!(text.lines().count(), PROGRAM.lines().count() + 1);
     let report = plan.report_lines();
@@ -167,6 +168,7 @@ fn a_compiled_definition_fallback_code_cannot_see_falls_back_too() {
     let ext = Publishes {
         functions: true,
         classes: true,
+        infers_unannotated: false,
     };
     let mut plan = Plan::new(source, "m.py", ext).expect("parses");
     plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
@@ -176,14 +178,49 @@ fn a_compiled_definition_fallback_code_cannot_see_falls_back_too() {
 }
 
 #[test]
-fn a_compiled_import_or_handler_binding_a_dict_global_falls_back() {
+fn a_compiled_handler_binding_a_dict_global_falls_back_and_an_import_is_mirrored() {
     let source = "import json\ntry:\n    pass\nexcept E as e:\n    pass\n\
                   def f():\n    return (lambda: (json, e))()\n";
     let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
     plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
     let report = plan.report_lines().join("\n");
-    assert!(report.contains("statement at m.py:1 "), "{report}");
+    assert!(!report.contains("statement at m.py:1 "), "{report}");
     assert!(report.contains("statements at m.py:2-5 "), "{report}");
+    // The import stays compiled and runs in CPython too, on its own line.
+    let text = plan.render().text;
+    assert!(
+        text.contains(
+            "import json; __pycc_fallback_builtins.exec(__pycc_fallback_builtins.compile(\"import json\""
+        ),
+        "{text}"
+    );
+    assert_eq!(text.lines().count(), source.lines().count() + 1, "{text}");
+}
+
+/// An alias of an attribute chain (`input = sys.stdin.readline`) that
+/// fallback code reads is mirrored like the import it reads; an import of
+/// the program's own module, or a name bound twice, is not.
+#[test]
+fn an_alias_and_its_import_are_mirrored_unless_rebound_or_local() {
+    let source = "import sys\ninput = sys.stdin.readline\n\
+                  def f():\n    return (lambda: input())()\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
+    assert_eq!(plan.report_lines().len(), 1, "{:?}", plan.report_lines());
+    assert_eq!(plan.mirrored, BTreeSet::from([0, 1]));
+    let rebound = "import sys\ninput = sys.stdin.readline\ninput = 3\n\
+                   def f():\n    return (lambda: input())()\n";
+    let mut plan = Plan::new(rebound, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(rebound.find("lambda").unwrap() as u32)]);
+    assert!(!plan.mirrored.contains(&1));
+    let dir = pycc_scratch::ScratchDir::new("fallback_local_import").expect("scratch");
+    std::fs::write(dir.join("helper.py"), "X = 1\n").expect("write");
+    let local = "import helper\ndef f():\n    return (lambda: helper.X)()\n";
+    let mut plan = Plan::new(local, "m.py", NATIVE).expect("parses");
+    plan.set_entry_dir(Some(dir.join("")));
+    plan.absorb(None, &[failure_at(local.find("lambda").unwrap() as u32)]);
+    assert!(plan.mirrored.is_empty());
+    assert!(plan.report_lines().join("\n").contains("statement at m.py:1 "));
 }
 
 /// A wildcard import's names are unknown, so fallback code reading a name

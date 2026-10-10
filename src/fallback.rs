@@ -81,13 +81,23 @@ fn set_override(text: Option<String>) {
 pub(crate) struct Publishes {
     pub(crate) functions: bool,
     pub(crate) classes: bool,
+    /// Whether an unannotated public function's signature is inferred from
+    /// its compiled call sites (an embedded executable, `pycc_hir::func`):
+    /// Python code may call it with anything, so fallback code that reads
+    /// one makes it fall back too, like a private helper.
+    pub(crate) infers_unannotated: bool,
 }
 
 impl Publishes {
     /// Whether Python code sees the compiled definition `name`: published,
-    /// and public (a leading underscore is never exported).
-    fn sees(self, name: &str, class: bool) -> bool {
-        let published = if class { self.classes } else { self.functions };
+    /// public (a leading underscore is never exported), and for a function
+    /// whose signature is inferred (`unannotated`), typed for any caller.
+    fn sees(self, name: &str, class: bool, unannotated: bool) -> bool {
+        let published = if class {
+            self.classes
+        } else {
+            self.functions && !(unannotated && self.infers_unannotated)
+        };
         published && !name.starts_with('_')
     }
 }
@@ -95,7 +105,8 @@ impl Publishes {
 /// What one top-level statement is, for the report and the cascade rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Kind {
-    Def(String),
+    /// A function, and whether a parameter or its return is unannotated.
+    Def(String, bool),
     Class(String),
     Import,
     Other,
@@ -133,6 +144,13 @@ pub(crate) struct Plan {
     stmts: Vec<TopStmt>,
     /// Statement index -> reason.
     fallback: BTreeMap<usize, String>,
+    /// Compiled imports that fallback code reads a name of: they stay
+    /// compiled and also run in CPython right after, so both sides see the
+    /// module (`cascade`).
+    mirrored: BTreeSet<usize>,
+    /// The entry file's directory: an import of a module found there is the
+    /// program's own and is never mirrored (CPython would load a second copy).
+    entry_dir: Option<std::path::PathBuf>,
     /// Whether a compiled public function, and a compiled public class, is
     /// visible to Python code in the module namespace (an `--ext` module
     /// publishes both; an embedded executable with fallback code publishes
@@ -160,7 +178,11 @@ impl Plan {
             .map(|stmt| TopStmt {
                 range: pycc_ast::stmt_range(stmt),
                 kind: match stmt {
-                    Stmt::FunctionDef(def) => Kind::Def(def.name.as_str().to_string()),
+                    Stmt::FunctionDef(def) => Kind::Def(
+                        def.name.as_str().to_string(),
+                        def.returns.is_none()
+                            || def.parameters.iter().any(|p| p.annotation().is_none()),
+                    ),
                     Stmt::ClassDef(class) => Kind::Class(class.name.as_str().to_string()),
                     Stmt::Import(_) | Stmt::ImportFrom(_) => Kind::Import,
                     _ => Kind::Other,
@@ -176,8 +198,60 @@ impl Plan {
             ast: module.body.into_iter().collect(),
             stmts,
             fallback: BTreeMap::new(),
+            mirrored: BTreeSet::new(),
+            entry_dir: None,
             publishes,
         })
+    }
+
+    /// Records the entry file's directory (see `entry_dir`).
+    pub(crate) fn set_entry_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.entry_dir = dir;
+    }
+
+    /// Whether the compiled import `index` can run in CPython too: an
+    /// absolute import of no module of the program's own, other than `*`,
+    /// binding names no other top-level statement binds.
+    fn mirrorable(&self, index: usize) -> bool {
+        let modules: Vec<&str> = match &self.ast[index] {
+            // An alias of an attribute chain (`input = sys.stdin.readline`,
+            // `pr = print`): evaluating it again has no effect.
+            Stmt::Assign(assign) => {
+                return matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)])
+                    && is_attribute_chain(&assign.value)
+                    && self.binds_alone(index);
+            }
+            Stmt::Import(import) => import.names.iter().map(|a| a.name.as_str()).collect(),
+            Stmt::ImportFrom(import) if import.level == 0 => match &import.module {
+                Some(module) => vec![module.as_str()],
+                None => return false,
+            },
+            _ => return false,
+        };
+        let stmt = &self.stmts[index];
+        if stmt.opaque.contains("*") {
+            return false;
+        }
+        let local = |module: &str| {
+            let top = module.split('.').next().unwrap_or(module);
+            self.entry_dir.as_ref().is_some_and(|dir| {
+                dir.join(format!("{top}.py")).exists() || dir.join(top).is_dir()
+            })
+        };
+        if modules.iter().any(|m| local(m)) {
+            return false;
+        }
+        self.binds_alone(index)
+    }
+
+    /// Whether no other top-level statement binds a name statement `index`
+    /// binds.
+    fn binds_alone(&self, index: usize) -> bool {
+        let bound = &self.stmts[index].bound;
+        self.stmts
+            .iter()
+            .enumerate()
+            .all(|(other, s)| other == index || s.bound.intersection(bound).next().is_none())
     }
 
     /// Marks the statements `failures` point at as fallback, returning
@@ -254,6 +328,7 @@ impl Plan {
             let read: BTreeSet<&String> = self
                 .fallback
                 .keys()
+                .chain(&self.mirrored)
                 .flat_map(|index| &self.stmts[*index].mentions)
                 .collect();
             // A name fallback code reads that no top-level statement binds
@@ -262,28 +337,44 @@ impl Plan {
             let all_bound: BTreeSet<&String> =
                 self.stmts.iter().flat_map(|stmt| &stmt.bound).collect();
             let unbound_read = read.iter().find(|name| !all_bound.contains(*name)).copied();
+            let mirror: Vec<usize> = (0..self.stmts.len())
+                .filter(|index| {
+                    !self.fallback.contains_key(index)
+                        && !self.mirrored.contains(index)
+                        && matches!(self.stmts[*index].kind, Kind::Import | Kind::Other)
+                        && self.stmts[*index].bound.iter().any(|n| read.contains(n))
+                        && self.mirrorable(*index)
+                })
+                .collect();
+            if !mirror.is_empty() {
+                self.mirrored.extend(mirror);
+                continue;
+            }
             let forced: Vec<(usize, String)> = self
                 .stmts
                 .iter()
                 .enumerate()
-                .filter(|(index, _)| !self.fallback.contains_key(index))
+                .filter(|(index, _)| {
+                    !self.fallback.contains_key(index) && !self.mirrored.contains(index)
+                })
                 .filter_map(|(index, stmt)| {
                     let name = match &stmt.kind {
                         Kind::Import if stmt.opaque.contains("*") => unbound_read?,
                         Kind::Import | Kind::Other => {
                             stmt.opaque.iter().find(|n| globals.contains(*n))?
                         }
-                        Kind::Def(name)
-                            if read.contains(name) && !self.publishes.sees(name, false) =>
+                        Kind::Def(name, unannotated)
+                            if read.contains(name)
+                                && !self.publishes.sees(name, false, *unannotated) =>
                         {
                             name
                         }
                         Kind::Class(name)
-                            if read.contains(name) && !self.publishes.sees(name, true) =>
+                            if read.contains(name) && !self.publishes.sees(name, true, false) =>
                         {
                             name
                         }
-                        Kind::Def(_) | Kind::Class(_) => return None,
+                        Kind::Def(..) | Kind::Class(_) => return None,
                     };
                     Some((
                         index,
@@ -309,7 +400,9 @@ impl Plan {
             if self.fallback.contains_key(&index) {
                 fallback_bound.extend(stmt.bound.iter().cloned());
                 fallback_read.extend(stmt.mentions.iter().cloned());
-            } else if matches!(stmt.kind, Kind::Other | Kind::Import) {
+            } else if matches!(stmt.kind, Kind::Other | Kind::Import)
+                && !self.mirrored.contains(&index)
+            {
                 compiled_bound.extend(stmt.bound.iter().cloned());
             }
         }
@@ -321,7 +414,7 @@ impl Plan {
         // A compiled `def`/`class` name stays native: it is published, or
         // fallback code reading it made it fall back too (`cascade`).
         for (index, stmt) in self.stmts.iter().enumerate() {
-            if let (false, Kind::Def(name) | Kind::Class(name)) =
+            if let (false, Kind::Def(name, _) | Kind::Class(name)) =
                 (self.fallback.contains_key(&index), &stmt.kind)
                 && !compiled_bound.contains(name)
             {
@@ -396,6 +489,14 @@ impl Plan {
             }
             let end = stmt.range.end as usize;
             text.push_str(&src[inner..end]);
+            if self.mirrored.contains(&index) {
+                // Same line, so later line numbers do not move.
+                text.push_str(&format!(
+                    "; {BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"), {NS})",
+                    py_str(&src[start..end]),
+                    py_str(&self.display)
+                ));
+            }
             ranges.push(at..text.len() as u32);
             cursor = end;
             index += 1;
@@ -433,7 +534,7 @@ impl Plan {
                 let first = line_of(&self.source, stmt.range.start);
                 let last = line_of(&self.source, stmt.range.end.saturating_sub(1));
                 let what = match &stmt.kind {
-                    Kind::Def(name) => format!("function `{name}`"),
+                    Kind::Def(name, _) => format!("function `{name}`"),
                     Kind::Class(name) => format!("class `{name}`"),
                     Kind::Import | Kind::Other if first == last => "statement".to_string(),
                     Kind::Import | Kind::Other => "statements".to_string(),
@@ -462,6 +563,15 @@ fn line_of(source: &str, offset: u32) -> usize {
 fn describe(diagnostic: &Diagnostic) -> String {
     let message: String = diagnostic.message.chars().take(160).collect();
     format!("{} {message}", diagnostic.code)
+}
+
+/// Whether `expr` is a name or an attribute chain on one (`sys.stdin.readline`).
+fn is_attribute_chain(expr: &pycc_ast::Expr) -> bool {
+    match expr {
+        pycc_ast::Expr::Name(_) => true,
+        pycc_ast::Expr::Attribute(attr) => is_attribute_chain(&attr.value),
+        _ => false,
+    }
 }
 
 /// A Python string literal for `text`.
@@ -524,6 +634,7 @@ pub(crate) fn with_fallback<T, E>(
     let Some(mut plan) = source.and_then(|s| Plan::new(&s, display, publishes)) else {
         return first;
     };
+    plan.set_entry_dir(path.parent().map(Path::to_path_buf));
     let mut rendered: Option<Rendered> = None;
     let mut failures = failures;
     loop {

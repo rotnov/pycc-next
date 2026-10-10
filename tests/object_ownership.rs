@@ -111,13 +111,13 @@ const EMBEDDED: &str = "\
 import resource
 
 
-def step(acc, x):
+def step(acc: object, x: object) -> object:
     y = acc + x * 2
     z = y - x
     return z
 
 
-def run(n):
+def run(n: object) -> object:
     acc = 10 ** 25
     x = 3
     i = 0

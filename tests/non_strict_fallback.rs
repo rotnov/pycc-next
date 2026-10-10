@@ -164,7 +164,7 @@ fn a_module_level_fallback_block_shares_globals_with_compiled_code() {
     let source = dir.join("m.py");
     std::fs::write(
         &source,
-        "def inc(x):\n    return x + 1\n\n\
+        "def inc(x: int) -> int:\n    return x + 1\n\n\
          pairs = [(k, inc(k)) for k in range(3) if (lambda q: q != 1)(k)]\n\
          n = len(pairs)\n\
          print(n, pairs)\n\

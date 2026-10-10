@@ -41,6 +41,27 @@ pub(crate) fn is_non_strict() -> bool {
     NON_STRICT.with(Cell::get)
 }
 
+thread_local! {
+    static EMPTY_CONTAINER_PASS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Runs `f` as the empty-container pre-pass: an empty display does not
+/// infer as the CPython container there. That rule is for a `[]` the pass
+/// left unresolved; inside the pass it would bind `xs = []` to an object
+/// and make the pass type `xs` from that binding instead of from
+/// `xs.append(v)`.
+pub(crate) fn in_empty_container_pass<T>(f: impl FnOnce() -> T) -> T {
+    let previous = EMPTY_CONTAINER_PASS.with(|cell| cell.replace(true));
+    let result = f();
+    EMPTY_CONTAINER_PASS.with(|cell| cell.set(previous));
+    result
+}
+
+/// Whether the empty-container pre-pass is running ([`in_empty_container_pass`]).
+pub(crate) fn empty_display_untyped() -> bool {
+    EMPTY_CONTAINER_PASS.with(Cell::get)
+}
+
 /// Whether a value of type `from` reaches a parameter or return slot of type
 /// `to` through the run-time conversion: only in non-strict mode, and only
 /// from `object` to one of the four scalars.

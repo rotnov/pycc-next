@@ -4,9 +4,13 @@
 # order. Oracle: CPython runs this file unchanged with the `.stdin` file.
 import sys
 
+calls = 0
 
 def ask(prefix):
-    # Falls back (a lambda); reads a line through CPython's `sys.stdin`.
+    # Falls back (a `global` declaration); reads a line through CPython's
+    # `sys.stdin`.
+    global calls
+    calls += 1
     tidy = lambda s: s.strip().upper()
     line = input()
     print(prefix, tidy(line))
@@ -14,7 +18,9 @@ def ask(prefix):
 
 
 def echo_rest():
-    # Falls back; reads the rest of stdin.
+    # Falls back (a `global` declaration); reads the rest of stdin.
+    global calls
+    calls += 1
     show = lambda s: print("rest:", s.split())
     show(sys.stdin.read())
 
@@ -30,4 +36,4 @@ print(ask("fallback 2"))
 w = input()
 print("native last", w)
 echo_rest()
-print("done")
+print("done", calls)
