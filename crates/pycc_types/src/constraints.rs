@@ -1310,6 +1310,12 @@ pub(crate) fn collect_expr_constraints(
             {
                 return Ok(Some(term));
             }
+            if !signatures.contains_key(callee)
+                && let Some(term) =
+                    builtin_call::pending_builtin_call(callee, &arg_terms, parents, concrete)
+            {
+                return Ok(term);
+            }
             if callee == "print" {
                 return Ok(Some(Ok(Ty::None)));
             }
@@ -2228,7 +2234,9 @@ pub(crate) fn collect_expr_constraints(
             }
             // Part 1 of #1255: a comprehension over a CPython object
             // produces a CPython object, whatever its element.
-            if let CompIter::Iterable(_) = comp.iter {
+            if let CompIter::Iterable(_) = comp.iter
+                && matches!(scoped.bindings.get(&comp.var), Some(Ok(Ty::Object)))
+            {
                 return Ok(Some(Ok(Ty::Object)));
             }
             // A set comprehension's container term is chosen by
@@ -2239,6 +2247,14 @@ pub(crate) fn collect_expr_constraints(
                 return Ok(Some(set_comp::set_comp_container(
                     elt_term, parents, concrete, deferred,
                 )));
+            }
+            // A list comprehension whose element is already concrete is a
+            // list of that element.
+            if let CompElt::List(_) = comp.elt
+                && let Some(elem) = elt_term.and_then(|t| resolved_term(t, parents, concrete))
+                && pycc_hir::is_list_element_ty(&elem)
+            {
+                return Ok(Some(Ok(Ty::List(Box::new(elem)))));
             }
             Ok(Some(Ok(crate::comprehension::comp_container_of(&comp.elt))))
         }
@@ -2497,18 +2513,44 @@ fn bind_comp_loop_var(
                 env.bindings.insert(var.to_string(), Ok(Ty::Int));
             }
         }
-        CompIter::Name(_) => {
-            if !env.bindings.contains_key(var) {
-                let term = fresh_term(parents, concrete);
-                env.bindings.insert(var.to_string(), term);
+        CompIter::Name(name) => {
+            let known = env
+                .bindings
+                .get(name)
+                .cloned()
+                .and_then(|t| resolved_term(t, parents, concrete))
+                .and_then(|ty| match ty {
+                    Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => Some(*elem),
+                    Ty::Dict(kv) => Some(kv.0),
+                    Ty::Str => Some(Ty::Str),
+                    _ => None,
+                });
+            match known {
+                Some(elem) if !env.bindings.contains_key(var) => {
+                    env.bindings.insert(var.to_string(), Ok(elem));
+                }
+                _ => {
+                    if !env.bindings.contains_key(var) {
+                        let term = fresh_term(parents, concrete);
+                        env.bindings.insert(var.to_string(), term);
+                    }
+                }
             }
         }
         // Part 1 of #1255: the iterable's own constraints are collected
         // against the enclosing bindings; its loop variable is a CPython
         // object, which the check phase verifies.
         CompIter::Iterable(iterable) => {
-            collect_expr_constraints(signatures, parents, concrete, deferred, env, iterable)?;
-            env.bindings.insert(var.to_string(), Ok(Ty::Object));
+            let term =
+                collect_expr_constraints(signatures, parents, concrete, deferred, env, iterable)?;
+            let elem = match term.and_then(|t| resolved_term(t, parents, concrete)) {
+                Some(Ty::List(elem)) => Ok(*elem),
+                Some(Ty::Str) => Ok(Ty::Str),
+                Some(Ty::Object) => Ok(Ty::Object),
+                None => fresh_term(parents, concrete),
+                Some(_) => fresh_term(parents, concrete),
+            };
+            env.bindings.insert(var.to_string(), elem);
         }
     }
     Ok(())

@@ -36,6 +36,8 @@ pub(crate) fn infer_unpack(
         Ty::Tuple(elems) if elems.len() == arity => Ok(Ty::Tuple(elems)),
         Ty::Tuple(elems) => Err(arity_mismatch(elems.len(), arity)),
         Ty::Object => Ok(Ty::Object),
+        // A list's length is checked at run time (`pycc_rt_list_unpack`).
+        list @ Ty::List(_) => Ok(list),
         other => Err(Diagnostic::error(
             "C0001",
             format!(

@@ -466,8 +466,6 @@ fn no_other_store_syntax_reaches_a_buffer_element() {
     for source in [
         // An augmented store to a slice.
         "def f(b: memoryview) -> None:\n    b[0:2] += 1.0\n",
-        // A tuple target.
-        "def f(b: memoryview) -> None:\n    b[0], b[1] = 1.0, 2.0\n",
         // A slice target.
         "def f(b: memoryview) -> None:\n    b[0:2] = [1.0, 2.0]\n",
     ] {

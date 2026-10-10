@@ -66,11 +66,6 @@ fn every_augmented_assignment_capability_refusal_is_named_and_located() {
              supported yet; bind the object to a name first",
         ),
         (
-            "def counts() -> dict[str, int]:\n    return {\"a\": 1}\n\ncounts()[\"a\"] += 1\n",
-            "error[C0001]: augmented assignment to a subscript of a computed expression is not \
-             supported yet; bind the object to a name first",
-        ),
-        (
             "d: dict[str, int] = {\"a\": 1}\nd[0:1] += 1\n",
             "error[C0001]: augmented assignment to a slice is not supported yet",
         ),
@@ -80,24 +75,9 @@ fn every_augmented_assignment_capability_refusal_is_named_and_located() {
     }
 }
 
-/// S4: the index purity predicate is `is_unobservable`, so an index that is
-/// neither a name nor a literal is refused rather than evaluated twice.
-#[test]
-fn s4_a_computed_index_is_refused_rather_than_evaluated_twice() {
-    for source in [
-        "d: dict[str, int] = {\"a\": 1}\ndef key() -> str:\n    return \"a\"\n\nd[key()] += 1\n",
-        "def f(d: dict[str, int], k: str) -> None:\n    d[k + \"x\"] += 1\n",
-    ] {
-        let line = source.lines().count();
-        assert_refused(
-            "e2e_1018_s4",
-            source,
-            "error[C0001]: augmented assignment with a computed index is not supported yet; \
-             bind the index to a name first",
-            &format!("{line}:"),
-        );
-    }
-}
+/// S4: a computed index or subscript base is evaluated exactly once:
+/// `pycc_ast::desugar` binds each to a temporary before the augmented
+/// statement (`tests/fixtures/desugar_stmts.py` runs it against CPython).
 
 /// S1: `BinOp` admits only immutable operand types, so a mutable or
 /// user-defined operand is refused, never rebound to a fresh object in place

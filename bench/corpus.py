@@ -81,6 +81,7 @@ def main() -> int:
                 results[futs[f]] = f.result()
             except Exception as e:  # noqa: BLE001 - report harness errors per problem
                 results[futs[f]] = ("error", str(e)[:120])
+    shutil.rmtree(tmp, ignore_errors=True)
     counts = collections.Counter(s for s, _ in results.values())
     n = len(probs)
     print(f"corpus: {n} problems, flags={a.flags!r}")

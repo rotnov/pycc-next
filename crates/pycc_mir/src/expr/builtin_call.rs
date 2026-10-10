@@ -99,3 +99,15 @@ pub(super) fn lower_str_slice(base: MirExpr, bounds: [Option<Box<MirExpr>>; 3]) 
         args,
     )
 }
+
+/// `a, b = xs` on a list: the list itself, after `pycc_rt_list_unpack`
+/// checked its length is `arity` (raising CPython's `ValueError`).
+pub(super) fn lower_list_unpack(list: MirExpr, arity: usize) -> MirExpr {
+    let ty = list.ty();
+    rt(
+        "pycc_rt_list_unpack",
+        vec![ty.clone(), Ty::Int],
+        ty,
+        vec![list, MirExpr::IntLiteral(arity as i64)],
+    )
+}

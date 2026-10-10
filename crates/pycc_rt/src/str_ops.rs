@@ -139,6 +139,11 @@ pub extern "C" fn pycc_rt_stdout_write(s: *mut PyStrObj) -> i64 {
     tag_smallint(char_len(text) as i64)
 }
 
+/// `sys.setrecursionlimit(n)`: compiled code recurses on the native stack,
+/// so there is no limit to set.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_setrecursionlimit(_limit: i64) {}
+
 // ----------------------------------------------------------- conversions
 
 fn digit_value(c: u8) -> Option<u32> {

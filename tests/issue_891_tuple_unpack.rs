@@ -143,30 +143,12 @@ fn the_shapes_outside_part_1_are_refused() {
             "not enough values to unpack (expected 3, got 2)",
         ),
         (
-            "unpack_list_value",
-            "xs = [1, 2]\na, b = xs\n",
-            "C0001",
-            "unpacking a `list[int]` value into names is not supported yet",
-        ),
-        (
             "unpack_int_value",
             "a, b = 5\n",
             "C0001",
             "unpacking a `int` value into names is not supported yet",
         ),
         ("unpack_starred", "a, *b = (1, 2)\n", "C0001", "starred"),
-        (
-            "unpack_nested",
-            "a, (b, c) = (1, (2, 3))\n",
-            "C0001",
-            "a nested target (`a, (b, c) = ...`) in a tuple-unpacking assignment is not supported yet",
-        ),
-        (
-            "unpack_subscript_element",
-            "d = {\"k\": 1}\nd[\"k\"], b = (1, 2)\n",
-            "C0001",
-            "only bare-name targets in a tuple-unpacking assignment are supported so far, got a subscript",
-        ),
     ] {
         assert_one_error(tag, body, code, needle);
     }

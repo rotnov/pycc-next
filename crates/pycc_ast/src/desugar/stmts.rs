@@ -1,0 +1,294 @@
+//! Statement-level rewrites: loops over tuple targets and non-name
+//! iterables, stores through computed subscripts, tuple targets with
+//! non-name elements, and augmented assignment through computed indices.
+
+use super::build::{
+    assign, aug_assign, call_name, for_loop, int, load, store, subscript, tuple,
+};
+use super::{Fresh, is_name, is_simple};
+use ruff_python_ast::{Expr, ExprContext, Operator, Stmt};
+use ruff_text_size::TextRange;
+
+/// Rewrites every statement of `body`, recursing into nested bodies.
+/// `module_level` is true for the module body itself (class bodies are
+/// left as written).
+pub(crate) fn expand_body(body: &mut Vec<Stmt>, fresh: &Fresh, module_level: bool) {
+    let old = std::mem::take(body);
+    for stmt in old {
+        expand_stmt(stmt, fresh, body, module_level);
+    }
+}
+
+fn expand_thin(body: &mut thin_vec::ThinVec<Stmt>, fresh: &Fresh) {
+    let mut v: Vec<Stmt> = std::mem::take(body).into_iter().collect();
+    expand_body(&mut v, fresh, false);
+    *body = v.into();
+}
+
+fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>, module_level: bool) {
+    let stmt = match stmt {
+        Stmt::For(s) if !s.is_async => {
+            expand_for(s, fresh, out);
+            return;
+        }
+        other => other,
+    };
+    let mut stmt = stmt;
+    match &mut stmt {
+        Stmt::FunctionDef(def) => expand_thin(&mut def.body, fresh),
+        Stmt::ClassDef(def) => {
+            for item in def.body.iter_mut() {
+                if let Stmt::FunctionDef(method) = item {
+                    expand_thin(&mut method.body, fresh);
+                }
+            }
+        }
+        Stmt::If(s) => {
+            expand_thin(&mut s.body, fresh);
+            for clause in &mut s.elif_else_clauses {
+                expand_thin(&mut clause.body, fresh);
+            }
+        }
+        Stmt::While(s) => {
+            expand_thin(&mut s.body, fresh);
+            expand_thin(&mut s.orelse, fresh);
+        }
+        Stmt::With(s) => expand_thin(&mut s.body, fresh),
+        Stmt::Try(s) => {
+            expand_thin(&mut s.body, fresh);
+            for handler in &mut s.handlers {
+                let ruff_python_ast::ExceptHandler::ExceptHandler(h) = handler;
+                expand_thin(&mut h.body, fresh);
+            }
+            expand_thin(&mut s.orelse, fresh);
+            expand_thin(&mut s.finalbody, fresh);
+        }
+        Stmt::Match(s) => {
+            for case in &mut s.cases {
+                expand_thin(&mut case.body, fresh);
+            }
+        }
+        Stmt::Assign(s) => {
+            if let Some(stmts) = expand_assign(s, fresh) {
+                for stmt in stmts {
+                    expand_stmt(stmt, fresh, out, module_level);
+                }
+                return;
+            }
+        }
+        Stmt::AugAssign(s) => {
+            if let Some(stmts) = expand_aug_assign(s, fresh) {
+                out.extend(stmts);
+                return;
+            }
+        }
+        _ => {}
+    }
+    out.push(stmt);
+}
+
+/// Hoists `expr` into a fresh temporary unless it is already a name.
+fn hoist(expr: Expr, fresh: &Fresh, out: &mut Vec<Stmt>, range: TextRange) -> Expr {
+    if is_name(&expr) {
+        return expr;
+    }
+    let tmp = fresh.name();
+    out.push(assign(store(&tmp, range), expr, range));
+    load(&tmp, range)
+}
+
+fn is_call_to<'e>(expr: &'e Expr, name: &str) -> Option<&'e [Expr]> {
+    match expr {
+        Expr::Call(call) if call.arguments.keywords.is_empty() => match call.func.as_ref() {
+            Expr::Name(func) if func.id.as_str() == name => Some(&call.arguments.args),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn tuple_elts(expr: &Expr) -> Option<&[Expr]> {
+    match expr {
+        Expr::Tuple(t) => Some(&t.elts),
+        Expr::List(l) => Some(&l.elts),
+        _ => None,
+    }
+}
+
+fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt>) {
+    let range = s.range;
+    let mut body: Vec<Stmt> = std::mem::take(&mut s.body).into_iter().collect();
+    let mut orelse: Vec<Stmt> = std::mem::take(&mut s.orelse).into_iter().collect();
+    expand_body(&mut orelse, fresh, false);
+    let target = *s.target;
+    let iter = *s.iter;
+    let mut pre: Vec<Stmt> = Vec::new();
+    let mut head: Vec<Stmt> = Vec::new();
+    let (target, iter) = if let (Some([i, x]), Some(args)) =
+        (tuple_elts(&target), is_call_to(&iter, "enumerate"))
+        && matches!(args.len(), 1 | 2)
+        && !args.iter().any(|a| matches!(a, Expr::Starred(_)))
+    {
+        // `for i, x in enumerate(xs, start)`: a counter beside a loop over
+        // `xs`, bumped before the body so `continue` keeps it right.
+        let counter = fresh.name();
+        let start = args.get(1).cloned().unwrap_or_else(|| int(0, range));
+        pre.push(assign(store(&counter, range), start, range));
+        head.push(assign(i.clone(), load(&counter, range), range));
+        head.push(aug_assign(store(&counter, range), Operator::Add, int(1, range), range));
+        (x.clone(), args[0].clone())
+    } else if let (Some(targets), Some(args)) = (tuple_elts(&target), is_call_to(&iter, "zip"))
+        && targets.len() == args.len()
+        && args.len() >= 2
+        && !args.iter().any(|a| matches!(a, Expr::Starred(_)))
+    {
+        // `for a, b in zip(xs, ys)`: an index loop over the shortest.
+        let seqs: Vec<Expr> = args
+            .iter()
+            .map(|a| hoist(a.clone(), fresh, &mut pre, range))
+            .collect();
+        let index = fresh.name();
+        let lens = seqs
+            .iter()
+            .map(|s| call_name("len", vec![s.clone()], range))
+            .collect::<Vec<_>>();
+        let bound = if lens.len() == 1 {
+            lens.into_iter().next().expect("one length")
+        } else {
+            call_name("min", lens, range)
+        };
+        for (t, seq) in targets.iter().zip(&seqs) {
+            head.push(assign(
+                t.clone(),
+                subscript(seq.clone(), load(&index, range), ExprContext::Load, range),
+                range,
+            ));
+        }
+        (store(&index, range), call_name("range", vec![bound], range))
+    } else if let (Some([k, v]), Expr::Call(call)) = (tuple_elts(&target), &iter)
+        && let Expr::Attribute(attr) = call.func.as_ref()
+        && attr.attr.as_str() == "items"
+        && call.arguments.args.is_empty()
+        && call.arguments.keywords.is_empty()
+    {
+        // `for k, v in d.items()`: loop over the keys, read each value.
+        let dict = hoist((*attr.value).clone(), fresh, &mut pre, range);
+        let key = if is_name(k) { k.clone() } else { store(&fresh.name(), range) };
+        let key_load = match &key {
+            Expr::Name(n) => load(n.id.as_str(), range),
+            _ => unreachable!(),
+        };
+        if !is_name(k) {
+            head.push(assign(k.clone(), key_load.clone(), range));
+        }
+        head.push(assign(
+            v.clone(),
+            subscript(dict.clone(), key_load, ExprContext::Load, range),
+            range,
+        ));
+        (key, dict)
+    } else if !is_name(&target) {
+        // Any other tuple target: bind a temporary, unpack it first thing.
+        let tmp = fresh.name();
+        head.push(assign(target, load(&tmp, range), range));
+        (store(&tmp, range), iter)
+    } else {
+        (target, iter)
+    };
+    let iter = if is_name(&iter) || is_call_to(&iter, "range").is_some() {
+        iter
+    } else {
+        hoist(iter, fresh, &mut pre, range)
+    };
+    head.append(&mut body);
+    let mut body = head;
+    // The rewritten head and the original body may themselves need
+    // rewriting (an unpacking assignment, a nested loop).
+    let mut loop_stmt = for_loop(target, iter, Vec::new(), orelse, range);
+    expand_body(&mut body, fresh, false);
+    if let Stmt::For(f) = &mut loop_stmt {
+        f.body = body.into();
+    }
+    for stmt in pre {
+        expand_stmt(stmt, fresh, out, false);
+    }
+    out.push(loop_stmt);
+}
+
+/// `a, b[i] = v` -> `a, t = v; b[i] = t`; `x.y[i] = v` -> `t = x.y;
+/// t[i] = v` (with `v` evaluated first, as CPython does).
+fn expand_assign(s: &mut ruff_python_ast::StmtAssign, fresh: &Fresh) -> Option<Vec<Stmt>> {
+    let range = s.range;
+    let [target] = s.targets.as_mut_slice() else {
+        return None;
+    };
+    match target {
+        Expr::Subscript(sub) if !is_name(&sub.value) => {
+            let mut out = Vec::new();
+            let value = if is_simple(&s.value) {
+                (*s.value).clone()
+            } else {
+                hoist((*s.value).clone(), fresh, &mut out, range)
+            };
+            let base = hoist((*sub.value).clone(), fresh, &mut out, range);
+            out.push(assign(
+                subscript(base, (*sub.slice).clone(), ExprContext::Store, range),
+                value,
+                range,
+            ));
+            Some(out)
+        }
+        Expr::Tuple(_) | Expr::List(_) => {
+            let elts = match target {
+                Expr::Tuple(t) => &mut t.elts,
+                Expr::List(l) => &mut l.elts,
+                _ => unreachable!(),
+            };
+            if elts.iter().all(is_name) || elts.iter().any(|e| matches!(e, Expr::Starred(_))) {
+                return None;
+            }
+            let mut after = Vec::new();
+            for elt in elts.iter_mut() {
+                if !is_name(elt) {
+                    let tmp = fresh.name();
+                    let real = std::mem::replace(elt, store(&tmp, range));
+                    after.push(assign(real, load(&tmp, range), range));
+                }
+            }
+            let new_target = tuple(elts.clone(), ExprContext::Store, range);
+            let mut out = vec![assign(new_target, (*s.value).clone(), range)];
+            out.extend(after);
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+/// `x.y[i] += v` / `a[i + 1] += v` -> bind the base and index first.
+fn expand_aug_assign(s: &mut ruff_python_ast::StmtAugAssign, fresh: &Fresh) -> Option<Vec<Stmt>> {
+    let range = s.range;
+    let Expr::Subscript(sub) = s.target.as_ref() else {
+        return None;
+    };
+    let simple_index = is_simple(&sub.slice);
+    if is_name(&sub.value) && simple_index {
+        return None;
+    }
+    if matches!(sub.slice.as_ref(), Expr::Slice(_)) {
+        return None;
+    }
+    let mut out = Vec::new();
+    let base = hoist((*sub.value).clone(), fresh, &mut out, range);
+    let index = if simple_index {
+        (*sub.slice).clone()
+    } else {
+        hoist((*sub.slice).clone(), fresh, &mut out, range)
+    };
+    out.push(aug_assign(
+        subscript(base, index, ExprContext::Store, range),
+        s.op,
+        (*s.value).clone(),
+        range,
+    ));
+    Some(out)
+}

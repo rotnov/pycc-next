@@ -169,15 +169,23 @@ fn a_list_stored_into_a_dict_attribute_is_refused() {
     );
 }
 
-/// Known limit: iterating an attribute directly is still refused; a local
-/// alias (`items = self.xs`) is the supported spelling.
+/// `for x in self.xs` binds the attribute to a temporary
+/// (`pycc_ast::desugar`) and iterates the list it holds.
 #[test]
-fn iterating_a_container_attribute_directly_is_still_refused() {
-    let text = check_fails(
-        "e2e_1262_for",
+fn iterating_a_container_attribute_directly_checks() {
+    let dir = ScratchDir::new("e2e_1262_for").expect("scratch");
+    let path = dir.join("subject.py");
+    std::fs::write(
+        &path,
         "class C:\n    def __init__(self, xs: list[int]) -> None:\n        self.xs = xs\n\n\
          \x20   def total(self) -> int:\n        acc = 0\n        for x in self.xs:\n            \
          acc = acc + x\n        return acc\n",
-    );
-    assert!(text.contains("error[I0404]"), "{text}");
+    )
+    .expect("write the subject");
+    let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("pycc should spawn");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
 }

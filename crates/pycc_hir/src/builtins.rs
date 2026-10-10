@@ -60,6 +60,52 @@ fn list_of(elem: Ty) -> Ty {
     Ty::List(Box::new(elem))
 }
 
+/// Every builtin name [`resolve_call`] claims for some argument types.
+pub const CALL_NAMES: &[&str] = &[
+    "__pycc_print_str",
+    "__pycc_setrecursionlimit",
+    "__pycc_stdin_read",
+    "__pycc_stdin_readline",
+    "__pycc_stdin_readlines",
+    "__pycc_stdout_flush",
+    "__pycc_stdout_write",
+    "all",
+    "any",
+    "bin",
+    "chr",
+    "float",
+    "hex",
+    "input",
+    "int",
+    "len",
+    "list",
+    "max",
+    "min",
+    "oct",
+    "ord",
+    "pow",
+    "reversed",
+    "sorted",
+    "str",
+    "sum",
+];
+
+/// The result type of builtin `name` whatever its (admitted) argument
+/// types are, when it has one.
+#[must_use]
+pub fn fixed_return(name: &str) -> Option<Ty> {
+    Some(match name {
+        "input" | "str" | "chr" | "bin" | "hex" | "oct" | "__pycc_stdin_readline"
+        | "__pycc_stdin_read" => Ty::Str,
+        "int" | "len" | "ord" | "pow" | "__pycc_stdout_write" => Ty::Int,
+        "float" => Ty::Float,
+        "any" | "all" => Ty::Bool,
+        "__pycc_stdin_readlines" => Ty::List(Box::new(Ty::Str)),
+        "__pycc_print_str" | "__pycc_stdout_flush" | "__pycc_setrecursionlimit" => Ty::None,
+        _ => return None,
+    })
+}
+
 /// `min`/`max` with three or more positional arguments fold pairwise.
 #[must_use]
 pub fn is_pairwise_variadic(name: &str) -> bool {
@@ -75,6 +121,20 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
     let (int, float, str_) = (Ty::Int, Ty::Float, Ty::Str);
     let found = match (name, args) {
         ("input", []) => sig("pycc_rt_input", &[], str_),
+        // The `sys` stream operations `pycc_ast::desugar` rewrites to.
+        ("__pycc_stdin_readline", []) => sig("pycc_rt_stdin_readline", &[], str_),
+        ("__pycc_stdin_read", []) => sig("pycc_rt_stdin_read", &[], str_),
+        ("__pycc_stdin_readlines", []) => {
+            sig("pycc_rt_stdin_readlines", &[], list_of(str_))
+        }
+        ("__pycc_stdout_write", [Ty::Str]) => sig("pycc_rt_stdout_write", &[str_], int),
+        ("__pycc_print_str", [Ty::Str]) => {
+            sig("pycc_rt_print_write_str", &[str_.clone()], Ty::None)
+        }
+        ("__pycc_stdout_flush", []) => sig("pycc_rt_print_flush", &[], Ty::None),
+        ("__pycc_setrecursionlimit", [a]) if is_intlike(a) => {
+            sig("pycc_rt_setrecursionlimit", &[int], Ty::None)
+        }
         ("input", [Ty::Str]) => sig("pycc_rt_input_prompt", &[str_.clone()], str_),
         ("int", [Ty::Str]) => sig("pycc_rt_int_from_str", &[str_], int),
         ("int", [Ty::Str, b]) if is_intlike(b) => {

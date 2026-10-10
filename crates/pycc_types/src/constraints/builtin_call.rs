@@ -31,6 +31,24 @@ pub(super) fn builtin_call_term(
     }
 }
 
+/// A table builtin some argument term of which is not concrete yet: its
+/// result when that does not depend on the arguments, else unanswered (the
+/// check phase types the call once the arguments are known) -- never a
+/// refusal.
+pub(super) fn pending_builtin_call(
+    callee: &str,
+    arg_terms: &[Option<TypeTerm>],
+    parents: &mut [usize],
+    concrete: &[Option<Ty>],
+) -> Option<Option<TypeTerm>> {
+    if !pycc_hir::builtins::CALL_NAMES.contains(&callee)
+        || concrete_args(arg_terms, parents, concrete).is_some()
+    {
+        return None;
+    }
+    Some(pycc_hir::builtins::fixed_return(callee).map(Ok))
+}
+
 /// The result term of `base.method(args)` on a builtin receiver type.
 pub(super) fn builtin_method_term(
     base: &Option<TypeTerm>,

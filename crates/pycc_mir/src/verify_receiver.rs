@@ -222,7 +222,7 @@ impl Verifier<'_> {
     fn source(&self, source: &CompSource) {
         match source {
             CompSource::Range { start, stop, step } => self.exprs([start, stop, step]),
-            CompSource::Object(iterable) => self.expr(iterable),
+            CompSource::Object(iterable) | CompSource::ListExpr(iterable) => self.expr(iterable),
             CompSource::List(_) | CompSource::Dict(_) | CompSource::Set(_) => {}
         }
     }

@@ -59,16 +59,16 @@ fn a_comprehension_over_an_object_is_an_object() {
     }
 }
 
-/// An iterable expression that is not a CPython object keeps a `C0001`: a
-/// native container must still be bound to a name first.
+/// An iterable expression that is neither a list, a `str` nor a CPython
+/// object keeps a `C0001`.
 #[test]
 fn a_native_iterable_expression_is_refused() {
     for (source, ty) in [
-        ("xs = [k for k in [1, 2, 3]]\n", "list[int]"),
-        ("xs = {k for k in 'abc'}\n", "str"),
+        ("xs = [k for k in (1, 2, 3)]\n", "tuple[int, int, int]"),
+        ("xs = {k for k in (1, 2)}\n", "tuple[int, int]"),
         (
-            "def f() -> int:\n    return len([k for k in [1]])\n",
-            "list[int]",
+            "def f() -> int:\n    return len([k for k in (1,)])\n",
+            "tuple[int]",
         ),
     ] {
         assert_refused(
@@ -109,19 +109,6 @@ fn an_ill_typed_iterable_reports_its_own_error() {
     let diagnostics = check_foreign("xs = [k for k in numpy.pi + [1]]\n").expect_err("ill-typed");
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_ne!(diagnostics[0].code, "C0001", "{diagnostics:?}");
-}
-
-fn resolve_foreign(source: &str) -> Result<pycc_hir::HirModule, Vec<pycc_diag::Diagnostic>> {
-    let module = pycc_parser::parse(source).expect("test source must parse");
-    let mut hir = pycc_hir::lower_checked(&module).expect("test source must lower");
-    hir.imports.push(ImportBinding::Foreign {
-        local_name: "numpy".to_string(),
-        module_path: "numpy".to_string(),
-        from: None,
-        site: pycc_hir::ForeignImportSite::Item(0),
-        span: Span::new(0, 0),
-    });
-    crate::check_and_resolve_all(&hir)
 }
 
 /// An object comprehension: `[_v0 for _v0 in <iterable>]`.
@@ -190,20 +177,3 @@ fn the_protocol_rewrite_walks_an_object_comprehension() {
     ));
 }
 
-/// A generic call over a native iterable expression keeps the iterable's own
-/// `C0001`: the check phase refuses it before `monomorphize` could type the
-/// loop variable.
-#[test]
-fn a_generic_call_over_a_native_iterable_expression_keeps_its_c0001() {
-    let diagnostics =
-        resolve_foreign("def g[T](x: T) -> T:\n    return x\n\n\nxs = [g(k) for k in [1, 2]]\n")
-            .expect_err("a native iterable expression is refused");
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].code, "C0001", "{diagnostics:?}");
-    assert!(
-        diagnostics[0]
-            .message
-            .contains("got an expression of type `list[int]`"),
-        "{diagnostics:?}"
-    );
-}

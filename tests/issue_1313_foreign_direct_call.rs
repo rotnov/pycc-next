@@ -167,13 +167,14 @@ fn the_argument_shapes_outside_the_scalars_are_refused() {
 
 /// Iterating the call's result is a separate shape and stays refused.
 #[test]
-fn iterating_a_direct_call_is_still_refused() {
-    assert_one_error(
-        "obj_call_for",
+fn iterating_a_direct_call_checks() {
+    // `pycc_ast::desugar` binds the call to a temporary, an `object` name.
+    let dir = ScratchDir::new("obj_call_for").expect("scratch");
+    let output = check_with(
+        &dir,
         "from itertools import product\nfor t in product(\"ab\", \"cd\"):\n    pass\n",
-        "C0001",
-        "only iterating over `range(...)`",
     );
+    assert!(output.status.success(), "{}", stdout_of(&output));
 }
 
 /// A cross-target native build cannot embed the build host's interpreter:

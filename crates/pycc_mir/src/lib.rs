@@ -1913,6 +1913,9 @@ pub enum CompSource {
     /// the expression form carries it: `pycc_hir` lowers the statement form
     /// of such a comprehension to a plain assignment.
     Object(MirExpr),
+    /// A list-valued expression, evaluated once before the loop (a `str`
+    /// iterable arrives here converted by `pycc_rt_str_to_list`).
+    ListExpr(MirExpr),
 }
 
 #[derive(Debug, PartialEq)]
@@ -2605,6 +2608,15 @@ pub(crate) fn resolve_comp_source(
                 kill_narrowing(scopes, var);
                 (CompSource::Set(name.clone()), *elem_ty)
             }
+            Ty::Str => {
+                bind_variable(scopes, var.to_string(), Ty::Str);
+                kill_narrowing(scopes, var);
+                let name = MirExpr::Name {
+                    name: name.clone(),
+                    ty: Ty::Str,
+                };
+                (CompSource::ListExpr(str_to_list(name)), Ty::Str)
+            }
             other => panic!(
                 "pycc_mir: internal error: `{name}` is neither a list, dict, set, nor frozenset (found `{}`) -- pycc_types::check should have rejected this HIR before it reached pycc_mir",
                 other.name()
@@ -2615,11 +2627,26 @@ pub(crate) fn resolve_comp_source(
         // before `var` is bound, so it reads only the enclosing bindings.
         CompIter::Iterable(iterable) => {
             let iterable = lower_expr(iterable, scopes, classes, current_class);
-            bind_variable(scopes, var.to_string(), Ty::Object);
+            let (source, elem) = match iterable.ty() {
+                Ty::List(elem) => (CompSource::ListExpr(iterable), *elem),
+                Ty::Str => (CompSource::ListExpr(str_to_list(iterable)), Ty::Str),
+                _ => (CompSource::Object(iterable), Ty::Object),
+            };
+            bind_variable(scopes, var.to_string(), elem.clone());
             kill_narrowing(scopes, var);
-            (CompSource::Object(iterable), Ty::Object)
+            (source, elem)
         }
     }
+}
+
+/// `list(s)` of a `str`: the iteration source for `for c in s`.
+pub(crate) fn str_to_list(s: MirExpr) -> MirExpr {
+    MirExpr::RtCall(Box::new(RtCallExpr {
+        sig: pycc_hir::builtins::resolve_call("list", &[Ty::Str])
+            .and_then(Result::ok)
+            .expect("`list(str)` is a table builtin"),
+        args: vec![s],
+    }))
 }
 
 #[cfg(test)]

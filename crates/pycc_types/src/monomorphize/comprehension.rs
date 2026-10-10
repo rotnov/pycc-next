@@ -61,10 +61,16 @@ pub(super) fn rewrite_comprehension_expr(
         CompElt::Dict { key, value } => cond.iter_mut().chain([key, value]).collect(),
     };
     let elt_ty = rewrite_comp_parts(env, local_names, var, iter, body, instantiations, seen)?;
+    let over_object = matches!(iter, CompIter::Iterable(_))
+        && matches!(env.lookup_any(var), Some(Ty::Object));
     Ok(match elt {
         // Part 1 of #1255: over a CPython object the container is one too.
-        _ if matches!(iter, CompIter::Iterable(_)) => Ty::Object,
+        _ if over_object => Ty::Object,
         CompElt::Set(_) => set_comp_container(elt_ty),
+        CompElt::List(_) => match elt_ty {
+            Some(elem) if pycc_hir::is_list_element_ty(&elem) => Ty::List(Box::new(elem)),
+            _ => crate::comprehension::comp_container_of(elt),
+        },
         other => crate::comprehension::comp_container_of(other),
     })
 }
@@ -110,6 +116,7 @@ pub(super) fn rewrite_comp_iter(
             Some(Ty::List(elem)) => Ok(*elem),
             Some(Ty::Dict(kv)) => Ok(kv.0),
             Some(Ty::Set(elem) | Ty::FrozenSet(elem)) => Ok(*elem),
+            Some(Ty::Str) => Ok(Ty::Str),
             // Already validated as iterable before `monomorphize` ever
             // runs. Unlike the `ForList` fallback in `monomorphize.rs`, no foreign name
             // reaches this arm: a comprehension over a CPython object is
@@ -122,8 +129,13 @@ pub(super) fn rewrite_comp_iter(
         // `HirStmt::ForObject`'s iterable, so a generic call inside it
         // cannot escape this pass.
         CompIter::Iterable(iterable) => {
-            rewrite_generic_calls_in_expr(env, local_names, iterable, instantiations, seen)?;
-            Ok(Ty::Object)
+            Ok(
+                match rewrite_generic_calls_in_expr(env, local_names, iterable, instantiations, seen)? {
+                    Ty::List(elem) => *elem,
+                    Ty::Str => Ty::Str,
+                    _ => Ty::Object,
+                },
+            )
         }
     }
 }

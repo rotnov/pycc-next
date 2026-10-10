@@ -170,12 +170,6 @@ fn the_shapes_outside_part_8_are_refused() {
             KEYWORD,
         ),
         (
-            "obj_kw_native_callee",
-            "print(1, end=\"\")\n",
-            "C0001",
-            KEYWORD,
-        ),
-        (
             "obj_kw_duplicate",
             "product(repeat=1, repeat=2)\n",
             "L0001",

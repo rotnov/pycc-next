@@ -90,8 +90,8 @@ fn the_neighbouring_subscript_shapes_keep_their_own_refusals() {
         ),
         (
             "import gc\n\ngc.garbage[0] = 1\n",
-            "C0001",
-            "only assigning to a bare-name subscript target",
+            "I0404",
+            "which is bound to a CPython object, in this position is not supported yet",
         ),
         (
             "import gc\n\ndel gc.garbage[0]\n",

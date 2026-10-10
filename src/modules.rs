@@ -276,8 +276,9 @@ impl Loader {
             Some(rewritten) => rewritten,
             None => source,
         };
-        let parsed = pycc_parser::parse_all(&source)
+        let mut parsed = pycc_parser::parse_all(&source)
             .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
+        pycc_ast::desugar(&mut parsed);
         if is_entry && let Some(message) = self.entry_package_collision() {
             let diagnostic = Diagnostic::error("C0001", message, Span::new(0, 0));
             return Err(FrontendFailure::compile(

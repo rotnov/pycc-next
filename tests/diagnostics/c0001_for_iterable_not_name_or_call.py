@@ -1,4 +1,0 @@
-def f() -> int:
-    for x in [1, 2, 3]:
-        return x
-    return 0

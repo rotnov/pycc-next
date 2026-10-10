@@ -79,3 +79,13 @@ fn numeric_and_list_builtins_match_cpython() {
 fn input_reads_stdin_lines_and_raises_eof_error_like_cpython() {
     assert_matches_cpython("builtins_input");
 }
+
+#[test]
+fn desugared_loops_and_stores_match_cpython() {
+    assert_matches_cpython("desugar_stmts");
+}
+
+#[test]
+fn desugared_sys_streams_lambdas_map_and_print_match_cpython() {
+    assert_matches_cpython("desugar_io");
+}

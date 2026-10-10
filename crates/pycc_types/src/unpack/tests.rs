@@ -90,7 +90,6 @@ fn an_object_unpacks_into_object_names() {
 #[test]
 fn a_non_tuple_non_object_value_is_refused() {
     for (source, ty) in [
-        ("xs = [1, 2]\na, b = xs\n", "list[int]"),
         ("a, b = 'ab'\n", "str"),
         ("a, b = 3\n", "int"),
         (

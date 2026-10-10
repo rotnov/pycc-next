@@ -219,7 +219,8 @@ fn the_shapes_outside_part_1_are_refused() {
         "obj_fn_for_call",
         "import json\n\ndef f() -> None:\n    for t in json.loads(\"[1]\"):\n        pass\n",
         "I0404",
-        "is not supported inside a function body yet",
+        // `pycc_ast::desugar` binds the iterable to a temporary first.
+        "using `_pycc_0`, which is bound to a CPython object",
     );
     assert_one_error(
         "obj_fn_comprehension",

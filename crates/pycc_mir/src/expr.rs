@@ -633,6 +633,8 @@ pub(super) fn lower_expr(
                     value: Box::new(value),
                     arity: *arity,
                 }
+            } else if let Ty::List(_) = value.ty() {
+                builtin_call::lower_list_unpack(value, *arity)
             } else {
                 value
             }

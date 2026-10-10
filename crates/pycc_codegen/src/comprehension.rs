@@ -465,17 +465,32 @@ fn open_loop<'ctx>(
                 owned_range_operands,
             }
         }
-        CompSource::List(name) => {
+        CompSource::List(_) | CompSource::ListExpr(_) => {
             // Mirrors `MirStmt::ForList`'s own shape exactly.
-            let list_ptr = emit_list_name_read(
-                context,
-                builder,
-                cx.module,
-                rt,
-                cx.user_functions,
-                cx.locals,
-                name,
-            );
+            let list_ptr = match source {
+                CompSource::List(name) => emit_list_name_read(
+                    context,
+                    builder,
+                    cx.module,
+                    rt,
+                    cx.user_functions,
+                    cx.locals,
+                    name,
+                ),
+                CompSource::ListExpr(iterable) => crate::expect_list_pointer(
+                    emit_expr(
+                        context,
+                        builder,
+                        cx.module,
+                        rt,
+                        cx.user_functions,
+                        cx.locals,
+                        iterable,
+                    ),
+                    "a comprehension's iterable",
+                ),
+                _ => unreachable!("the outer arm matched a list source"),
+            };
             // CPython lets a list grow while it is iterated, so the length is
             // re-read on every trip with no resize guard.
             let (lp, current) = open_indexed_loop(cx, function, prefix, None, |b| {

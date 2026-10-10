@@ -1,5 +1,5 @@
-error[C0001]: only a bare name for-target is supported so far, got a tuple
- --> tests/diagnostics/c0001_tuple_for_target.py:2:9
+error[T0034]: list[tuple[int, int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those
+ --> tests/diagnostics/c0001_tuple_for_target.py:1:1
   |
-2 |     for a, b in [(1, 2)]:
-  |         ^^^^ only a bare name for-target is supported so far, got a tuple
+1 | def f() -> int:
+  | ^ list[tuple[int, int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those

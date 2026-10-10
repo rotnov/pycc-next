@@ -364,3 +364,23 @@ pub unsafe extern "C" fn pycc_rt_list_all(list: *mut PyListObj) -> i8 {
     let list = unsafe { &*list };
     i8::from(list.items().iter().all(|w| word_truthy(list.kind, *w)))
 }
+
+/// `a, b = xs`: checks `xs` has exactly `arity` (an encoded int) elements,
+/// raising CPython's `ValueError` otherwise, and returns `xs`.
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_unpack(list: *mut PyListObj, arity: i64) -> *mut PyListObj {
+    let len = unsafe { &*list }.len;
+    let expected = inline_int_value(arity).unwrap_or(0);
+    if len != expected {
+        let message = if len > expected {
+            format!("too many values to unpack (expected {expected})")
+        } else {
+            format!("not enough values to unpack (expected {expected}, got {len})")
+        };
+        raise_builtin(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", &message);
+    }
+    list
+}

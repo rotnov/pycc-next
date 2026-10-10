@@ -64,6 +64,7 @@ pub(crate) fn resolve_comp_iter(
             let base_ty = lookup_bound_name(env, local_names, name)?;
             match base_ty {
                 Ty::List(elem_ty) => Ok(*elem_ty),
+                Ty::Str => Ok(Ty::Str),
                 Ty::Dict(kv) => Ok(kv.0),
                 Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => Ok(*elem_ty),
                 other => Err(Diagnostic::error(
@@ -78,6 +79,8 @@ pub(crate) fn resolve_comp_iter(
         }
         CompIter::Iterable(iterable) => match infer_expr_in(env, local_names, iterable)? {
             Ty::Object => Ok(Ty::Object),
+            Ty::List(elem_ty) => Ok(*elem_ty),
+            Ty::Str => Ok(Ty::Str),
             other => Err(non_object_iterable(&other)),
         },
     }
@@ -91,7 +94,7 @@ fn non_object_iterable(ty: &Ty) -> Diagnostic {
     Diagnostic::error(
         "C0001",
         format!(
-            "only `range(...)`, a bare name or a CPython object is supported so far as a comprehension's iterable, got an expression of type `{}`",
+            "only `range(...)`, a name, a list or `str` expression or a CPython object is supported so far as a comprehension's iterable, got an expression of type `{}`",
             ty.name()
         ),
         Span::new(0, 0),
@@ -239,6 +242,7 @@ pub(crate) fn infer_comprehension(
     comp: &HirComprehension,
 ) -> Result<Ty, Diagnostic> {
     let var_ty = resolve_comp_iter(env, local_names, &comp.iter)?;
+    let over_object = matches!(comp.iter, CompIter::Iterable(_)) && var_ty == Ty::Object;
     let mut scoped = env.clone();
     scoped.bind(comp.var.clone(), var_ty);
     comp_container_ty(
@@ -246,7 +250,7 @@ pub(crate) fn infer_comprehension(
         local_names,
         comp.cond.as_ref(),
         &CompElts::from(&comp.elt),
-        matches!(comp.iter, CompIter::Iterable(_)),
+        over_object,
     )
 }
 

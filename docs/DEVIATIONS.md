@@ -25,3 +25,5 @@ Each entry: what differs, why, and whether it is planned to go away.
 | `reversed(xs)` | returns a new list | returns a lazy iterator | equal output wherever the result is only iterated, indexed by `list()` or printed via `list(...)` |
 | `str` character classes beyond ASCII (`isdigit`, `isspace`, `split()` whitespace, case mapping) | Rust's Unicode tables | CPython's Unicode database | they agree on ASCII; rare differences beyond it |
 | `sum()` of an empty `list[float]` | `0.0` | `0` (the int start value) | not planned until `sum` gets a start argument |
+| `map(f, xs)` / `filter(f, xs)` | build a list eagerly (`pycc_ast::desugar`) | return lazy iterators | equal output wherever the result is iterated, unpacked or passed to `list`/`sum`/...; printing the map object itself differs |
+| `sys.stdin`/`sys.stdout` stream calls (`readline`, `read`, `readlines`, `write`, `flush`) and `sys.setrecursionlimit` | native (`setrecursionlimit` is a no-op: compiled code recurses on the native stack) | `sys` module objects | same output; other `sys` attributes still go through CPython |

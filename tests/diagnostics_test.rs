@@ -799,10 +799,6 @@ fn c0001_comprehension_expression_two_for_clauses() {
 }
 
 // #1254: the expression form resolves its iterable exactly like `for`.
-#[test]
-fn t0033_comprehension_expression_str_iterable() {
-    assert_diagnostic_matches_fixture("t0033_comprehension_expression_str_iterable");
-}
 
 // #1254: an inner comprehension's iterable naming the outer loop variable
 // resolves to that variable (an `int`), not to the module-level list.
@@ -947,10 +943,6 @@ fn c0001_tuple_for_target() {
     assert_diagnostic_matches_fixture("c0001_tuple_for_target");
 }
 
-#[test]
-fn c0001_for_iterable_not_name_or_call() {
-    assert_diagnostic_matches_fixture("c0001_for_iterable_not_name_or_call");
-}
 
 #[test]
 fn c0001_for_call_not_bare_name() {
@@ -962,10 +954,6 @@ fn c0001_call_of_call() {
     assert_diagnostic_matches_fixture("c0001_call_of_call");
 }
 
-#[test]
-fn c0001_comprehension_iterable_not_name_or_call() {
-    assert_diagnostic_matches_fixture("c0001_comprehension_iterable_not_name_or_call");
-}
 
 #[test]
 fn c0001_protocol_body_assign() {
@@ -1575,20 +1563,12 @@ fn c0001_aug_assign_computed_attribute_base() {
     assert_diagnostic_matches_fixture("c0001_aug_assign_computed_attribute_base");
 }
 
-#[test]
-fn c0001_aug_assign_computed_subscript_base() {
-    assert_diagnostic_matches_fixture("c0001_aug_assign_computed_subscript_base");
-}
 
 #[test]
 fn c0001_aug_assign_slice() {
     assert_diagnostic_matches_fixture("c0001_aug_assign_slice");
 }
 
-#[test]
-fn c0001_aug_assign_computed_index() {
-    assert_diagnostic_matches_fixture("c0001_aug_assign_computed_index");
-}
 
 // #1224 (D-128): `I0402`, the interop policy's rejection of a CPython-backed
 // import. The same source is rejected by `--pure` and by `--interop-policy

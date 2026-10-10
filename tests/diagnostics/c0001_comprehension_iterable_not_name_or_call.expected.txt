@@ -1,5 +1,0 @@
-error[C0001]: only `range(...)`, a bare name or a CPython object is supported so far as a comprehension's iterable, got an expression of type `list[int]`
- --> tests/diagnostics/c0001_comprehension_iterable_not_name_or_call.py:1:1
-  |
-1 | xs = [k for k in [1, 2, 3]]
-  | ^ only `range(...)`, a bare name or a CPython object is supported so far as a comprehension's iterable, got an expression of type `list[int]`

@@ -66,7 +66,14 @@ pub(crate) fn lower_function(
             }
         },
     };
-    let is_public = crate::is_public_name(def.name.as_str()); // D-038
+    // A `def` the desugaring synthesized from a lambda or a `sys` stream
+    // alias carries `pycc_ast::INFER_MARKER` as its return annotation: its
+    // signature is inferred like a private helper's.
+    let synthesized = matches!(
+        def.returns.as_deref(),
+        Some(pycc_ast::Expr::Name(name)) if name.id.as_str() == pycc_ast::INFER_MARKER
+    );
+    let is_public = crate::is_public_name(def.name.as_str()) && !synthesized; // D-038
     let params = lower_params(
         &def.parameters,
         is_public,
@@ -76,7 +83,7 @@ pub(crate) fn lower_function(
         class_defs,
     )?;
     let return_ty = lower_return_annotation(
-        def.returns.as_deref(),
+        if synthesized { None } else { def.returns.as_deref() },
         is_public,
         def.name.as_str(),
         type_param.as_deref(),

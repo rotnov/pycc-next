@@ -1,0 +1,142 @@
+//! Source-level desugaring: rewrites of valid Python into equivalent valid
+//! Python that the rest of the compiler already supports, run once on the
+//! parsed module before HIR lowering.
+//!
+//! Every rewrite preserves CPython's observable behaviour -- evaluation
+//! order, which exception is raised -- except where `docs/DEVIATIONS.md`
+//! says otherwise (`map`/`filter` produce a list instead of a lazy
+//! iterator). The rewrites:
+//!
+//! * `sys.stdin.readline()`, `sys.stdin.read()`, `sys.stdin.readlines()`,
+//!   `sys.stdout.write(s)`, `sys.stdout.flush()` and
+//!   `sys.setrecursionlimit(n)` become calls of native builtins
+//!   (`__pycc_stdin_readline` and so on), so stdin is read through one
+//!   buffer whichever spelling a program uses; an `import sys` with no use
+//!   left is dropped. A module-level `input = sys.stdin.readline` becomes
+//!   a `def` (see [`aliases`]).
+//! * A module-level `name = lambda params: body` becomes `def name(params):
+//!   return body`, its signature inferred (the [`INFER_MARKER`] return
+//!   annotation tells HIR lowering to treat it like a private helper).
+//! * `map(f, xs)` and `filter(f, xs)` become list comprehensions, a lambda
+//!   argument inlined; `[*xs]` becomes `list(xs)`; `print(*xs, sep=s)`
+//!   becomes `print(s.join([str(x) for x in xs]))`.
+//! * `for` loops over a tuple target, `enumerate(...)`, `zip(...)`,
+//!   `d.items()` or any non-name iterable, a subscript store through a
+//!   computed base (`g[i][j] = v`), tuple targets with non-name elements
+//!   (`a[i], a[j] = a[j], a[i]`) and augmented assignment through a
+//!   computed index (`a[i + 1] += x`) are rewritten into statements binding
+//!   fresh temporaries (`_pycc_N`).
+
+mod aliases;
+mod build;
+mod exprs;
+mod stmts;
+
+use ruff_python_ast::{Expr, ModModule, Stmt};
+
+/// The return annotation [`desugar`] gives a synthesized `def` whose
+/// signature is to be inferred rather than declared.
+pub const INFER_MARKER: &str = "__pycc_infer__";
+
+/// Fresh temporary names, `_pycc_0`, `_pycc_1`, ...
+#[derive(Default)]
+pub(crate) struct Fresh {
+    next: std::cell::Cell<usize>,
+}
+
+impl Fresh {
+    pub(crate) fn name(&self) -> String {
+        let n = self.next.get();
+        self.next.set(n + 1);
+        format!("_pycc_{n}")
+    }
+}
+
+/// Rewrites `module` in place (see the module documentation).
+pub fn desugar(module: &mut ModModule) {
+    let fresh = Fresh::default();
+    let sys = aliases::SysNames::collect(&module.body);
+    aliases::module_level_defs(&mut module.body, &sys);
+    exprs::rewrite_exprs(&mut module.body, &sys, &fresh);
+    let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+    stmts::expand_body(&mut body, &fresh, true);
+    aliases::drop_unused_sys_imports(&mut body, &sys);
+    module.body = body.into();
+}
+
+/// Whether `expr` is a bare name.
+pub(crate) fn is_name(expr: &Expr) -> bool {
+    matches!(expr, Expr::Name(_))
+}
+
+/// Whether evaluating `expr` can have no side effect and raise nothing a
+/// reordering could expose: a name or a literal.
+pub(crate) fn is_simple(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Name(_)
+            | Expr::NumberLiteral(_)
+            | Expr::StringLiteral(_)
+            | Expr::BooleanLiteral(_)
+            | Expr::NoneLiteral(_)
+    ) || matches!(expr, Expr::UnaryOp(u) if matches!(*u.operand, Expr::NumberLiteral(_)))
+}
+
+/// Every name stored anywhere in `body` (assignment and loop targets,
+/// `def`/`class` names, parameters, imports).
+pub(crate) fn stored_names(body: &[Stmt]) -> std::collections::HashSet<String> {
+    use ruff_python_ast::visitor::{self, Visitor};
+    struct Collect(std::collections::HashSet<String>);
+    impl<'a> Visitor<'a> for Collect {
+        fn visit_stmt(&mut self, stmt: &'a Stmt) {
+            match stmt {
+                Stmt::FunctionDef(def) => {
+                    self.0.insert(def.name.to_string());
+                    for p in def.parameters.iter() {
+                        self.0.insert(p.name().to_string());
+                    }
+                }
+                Stmt::ClassDef(def) => {
+                    self.0.insert(def.name.to_string());
+                }
+                Stmt::Import(import) => {
+                    for alias in &import.names {
+                        let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                        self.0.insert(bound.split('.').next().unwrap_or("").to_string());
+                    }
+                }
+                Stmt::ImportFrom(import) => {
+                    for alias in &import.names {
+                        let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                        self.0.insert(bound.to_string());
+                    }
+                }
+                Stmt::Global(_) | Stmt::Nonlocal(_) => {}
+                _ => {}
+            }
+            visitor::walk_stmt(self, stmt);
+        }
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            match expr {
+                Expr::Name(name) if name.ctx == ruff_python_ast::ExprContext::Store => {
+                    self.0.insert(name.id.to_string());
+                }
+                Expr::Lambda(lambda) => {
+                    if let Some(params) = &lambda.parameters {
+                        for p in params.iter() {
+                            self.0.insert(p.name().to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let mut c = Collect(Default::default());
+    for stmt in body {
+        c.visit_stmt(stmt);
+    }
+    c.0
+}
+

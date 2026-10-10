@@ -93,26 +93,20 @@ fn both_admitted_iterable_shapes_are_admitted() {
 /// The iterable shapes PR 3c deliberately leaves out, each with the
 /// diagnostic that owns it.
 ///
-/// A subscript iterable (`for x in o[k]:`) and a tuple iterable are both
-/// `pycc_hir`'s pre-existing `C0001`, word for word -- the two new routes
-/// were added as guards *ahead* of the `let ... else` bindings that
-/// produce them, so a regression that moved either diagnostic into the
-/// type checker fails here. A bare foreign name is an `Expr::Name`
-/// iterable; since #1325 it checks clean like any other `object` name, and
-/// CPython's own `TypeError` answers a module object at run time.
+/// A tuple iterable is refused by the type checker. A subscript iterable
+/// (`for x in o[k]:`) is bound to a temporary by `pycc_ast::desugar` and
+/// iterated like any other `object` name. A bare foreign name is an
+/// `Expr::Name` iterable; since #1325 it checks clean like any other
+/// `object` name, and CPython's own `TypeError` answers a module object at
+/// run time.
 #[test]
 fn the_deferred_iterable_shapes_keep_their_own_refusals() {
     let dir = ScratchDir::new("foreign_iteration_refused").expect("scratch");
     for (body, code, phrase) in [
         (
-            "import gc\n\nfor x in gc.garbage[0]:\n    pass\n",
-            "C0001",
-            "got a subscript expression (`obj[key]`) as the iterable",
-        ),
-        (
             "for x in (1, 2):\n    pass\n",
-            "C0001",
-            "got a tuple as the iterable",
+            "T0033",
+            "`tuple[int, int]` cannot be iterated",
         ),
     ] {
         let out = check(&dir, body);
@@ -121,8 +115,13 @@ fn the_deferred_iterable_shapes_keep_their_own_refusals() {
         assert!(text.contains(code), "{body}: {text}");
         assert!(text.contains(phrase), "{body}: {text}");
     }
-    let out = check(&dir, "import gc\n\nfor x in gc:\n    pass\n");
-    assert!(out.status.success(), "{}", stdout_of(&out));
+    for body in [
+        "import gc\n\nfor x in gc:\n    pass\n",
+        "import gc\n\nfor x in gc.garbage[0]:\n    pass\n",
+    ] {
+        let out = check(&dir, body);
+        assert!(out.status.success(), "{body}: {}", stdout_of(&out));
+    }
 }
 
 /// The loop stays module-body only, and the loop variable is only

@@ -268,8 +268,9 @@ fn link_frontend(
             .any(|loaded| !loaded.module.deleted_top_level.is_empty());
     for mut loaded in program.modules {
         if needs_mentions {
-            let parsed = pycc_parser::parse_all(&loaded.source)
+            let mut parsed = pycc_parser::parse_all(&loaded.source)
                 .expect("a module that lowered once parses again");
+            pycc_ast::desugar(&mut parsed);
             loaded.module.mentioned_names = Some(pycc_hir::mentioned_names(&parsed));
         }
         total += loaded.module.hir.items.len();

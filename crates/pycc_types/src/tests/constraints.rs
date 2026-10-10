@@ -3116,32 +3116,6 @@ fn constraint_collection_int_and_str_calls_admit_a_foreign_object_argument() {
 }
 
 #[test]
-fn constraint_collection_str_call_keeps_c0001_for_a_non_object_argument() {
-    // `int(1)` is admitted since `crate::int_builtins`; `str(1)` is not.
-    for callee in ["str"] {
-        let signatures = HashMap::new();
-        let mut parents = Vec::new();
-        let mut concrete = Vec::new();
-        let mut binops = DeferredConstraints::default();
-        let env = ConstraintEnvironment::empty(&[]);
-        let expr = HirExpr::Call {
-            callee: callee.to_string(),
-            args: vec![HirExpr::SetLiteral(vec![HirExpr::IntLiteral(1)])],
-        };
-        let err = collect_expr_constraints(
-            &signatures,
-            &mut parents,
-            &mut concrete,
-            &mut binops,
-            &env,
-            &expr,
-        )
-        .unwrap_err();
-        assert_eq!(err.code, "C0001", "{callee}");
-    }
-}
-
-#[test]
 fn constraint_collection_honors_a_user_defined_int_or_str_signature_over_the_builtin() {
     // The C4 guard, mirrored for PR 4b's two names: a registered signature
     // must resolve through the ordinary lookup rather than through the
