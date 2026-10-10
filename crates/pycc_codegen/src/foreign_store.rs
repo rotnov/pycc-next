@@ -112,7 +112,7 @@ pub(super) fn emit_set_attr<'ctx>(
         .into_int_value();
     held_base.release(builder, rt);
     held_value.release(builder, rt);
-    release_scalar_if_int_temporary(context, builder, rt, value, &value_scalar);
+    release_scalar_if_temporary(context, builder, rt, value, &value_scalar);
     route_negative(
         context,
         builder,

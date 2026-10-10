@@ -90,10 +90,10 @@ fn each_slot_gets_its_kind_in_flat_layout_order() {
     assert_eq!(*copy_of(&carriers, "Q"), kinds("i"));
     // `o: Any` is the opaque object; `t: T` is erased to it too, so lark's
     // `ParseConf` shape is copyable.
-    assert_eq!(*copy_of(&carriers, "Conf"), kinds("isowo"));
-    assert_eq!(*copy_of(&carriers, "P"), kinds("wwws"));
+    assert_eq!(*copy_of(&carriers, "Conf"), kinds("isolo"));
+    assert_eq!(*copy_of(&carriers, "P"), kinds("wwcs"));
     // The base's slots first, then the subclass's own.
-    assert_eq!(*copy_of(&carriers, "Sub"), kinds("wwwsi"));
+    assert_eq!(*copy_of(&carriers, "Sub"), kinds("wwcsi"));
     assert_eq!(*copy_of(&carriers, "DeepOnly"), kinds("i"));
 }
 
@@ -114,7 +114,7 @@ fn a_class_binding_a_copy_protocol_name_is_refused_naming_it() {
     assert!(
         inc.contains(
             "    if (len == 4 && memcmp(cls, \"Conf\", 4) == 0) {\n        \
-             *kinds = \"isowo\";\n        *nkinds = 5;\n        return 1;\n    }\n"
+             *kinds = \"isolo\";\n        *nkinds = 5;\n        return 1;\n    }\n"
         ),
         "{inc}"
     );
@@ -206,9 +206,9 @@ fn copy_kind_maps_each_admitted_slot_type_and_refuses_the_rest() {
         (Ty::Object, Some(b'o')),
         (Ty::Float, Some(b'w')),
         (Ty::Bool, Some(b'w')),
-        (Ty::List(Box::new(Ty::Int)), Some(b'w')),
+        (Ty::List(Box::new(Ty::Int)), Some(b'l')),
         (Ty::Dict(Box::new((Ty::Str, Ty::Int))), Some(b'w')),
-        (instance, Some(b'w')),
+        (instance, Some(b'c')),
         (Ty::Param(Box::new("T".to_string())), None),
         (Ty::Set(Box::new(Ty::Int)), None),
         (Ty::Tuple(Box::new(vec![Ty::Int])), None),

@@ -14,6 +14,8 @@
 //! * `i` -- an `int` slot. The same for a heap bigint word
 //!   ([`crate::pycc_rt_bigint_release`]); an inline int or a `bool` marker
 //!   is a no-op there.
+//! * `l` -- a list and `c` -- a class instance: one reference released
+//!   (`crate::rc`), which frees the object at zero.
 //! * `o` -- an opaque CPython object, and `w` -- any other word. Nothing is
 //!   released: `pycc_rt` keeps no CPython dependency (D-244 rule 2), and
 //!   under the leak-only rule (#1092) the reference a compiled object slot
@@ -24,18 +26,11 @@
 //! owns (a fresh `PyStrObj`, a new CPython reference), or a plain word.
 
 use super::{PyInstanceObj, instance_get_slot_checked, instance_set_slot, read_slot, slot_ref};
-use crate::PyStrObj;
 
 /// Releases the reference a slot of kind `kind` held in `word`, per this
 /// module's doc comment.
 fn release_slot_word(word: i64, kind: u8) {
-    match kind {
-        // SAFETY: an assigned `str` slot holds a live `PyStrObj` pointer the
-        // slot's own reference keeps alive; that reference is retired here.
-        b's' => unsafe { crate::pycc_rt_str_decref(word as *mut PyStrObj) },
-        b'i' => crate::pycc_rt_bigint_release(word),
-        _ => {}
-    }
+    crate::rc::release_word(kind, word);
 }
 
 /// Stores `word` into `slot`, then releases the replaced word, if any.
@@ -122,7 +117,7 @@ mod tests {
         unsafe { pycc_rt_ext_instance_delete_slot(instance, slot, kind) }
     }
 
-    fn str_rc(s: *mut PyStrObj) -> u32 {
+    fn str_rc(s: *mut crate::PyStrObj) -> u32 {
         unsafe { &*s }.rc.get()
     }
 

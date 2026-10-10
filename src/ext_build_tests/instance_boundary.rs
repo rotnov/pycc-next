@@ -87,11 +87,11 @@ fn the_instance_helpers_are_declared_above_the_include_and_defined_below_it() {
     for needle in [
         "int carrier = PyType_GetSlot(Py_TYPE(obj), Py_tp_dealloc) == (void \
          *)pycc_ext_instance_dealloc;\n",
-        "            if (pycc_ext_carrier_class_isinstance(cls, len, class_name)) {\n                \
-         *out = inst;\n                return 0;\n",
+        "            if (pycc_ext_carrier_class_isinstance(cls, len, class_name)) {\n",
+        "                pycc_rt_instance_incref(inst);\n                *out = inst;\n                return 0;\n",
         "is uninitialized (its __init__ never \"\n                     \"ran)\"",
         "\"%s() argument %zd must be %s.%s, not %U\"",
-        "    return pycc_ext_obj_pack_instance(result);\n",
+        "    packed = pycc_ext_obj_pack_instance(result);\n    pycc_rt_instance_decref(result);\n",
     ] {
         assert!(shim.contains(needle), "{needle}");
     }

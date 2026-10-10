@@ -222,6 +222,30 @@ pub fn flat_attr_layout(mro_defs: &[&HirClassDef]) -> Vec<(String, Ty)> {
     result
 }
 
+/// Whether instances of `def` are reference-counted `pycc_rt` instances:
+/// every class except an exception class, whose values are the runtime's
+/// separate, leak-only exception objects.
+pub fn is_refcounted_class(def: &HirClassDef) -> bool {
+    !def.mro
+        .iter()
+        .chain(std::iter::once(&def.name))
+        .any(|name| crate::is_builtin_exception_class(name))
+}
+
+/// The `pycc_rt::rc` kind byte of a slot declared `ty`: what the slot's
+/// word owns, and so what freeing its instance releases. `refcounted`
+/// answers [`is_refcounted_class`] for a class name.
+pub fn slot_rc_kind(ty: &Ty, refcounted: &dyn Fn(&str) -> bool) -> u8 {
+    match ty {
+        Ty::Str => b's',
+        Ty::Int => b'i',
+        Ty::List(_) => b'l',
+        Ty::Instance(class) if refcounted(class) => b'c',
+        Ty::Object => b'o',
+        _ => b'w',
+    }
+}
+
 /// Resolves `class_def`'s MRO to the `HirClassDef`s that carry the slots,
 /// most derived first. The class being lowered is not yet in
 /// `defined_classes`, so its own MRO head resolves to `class_def` itself.

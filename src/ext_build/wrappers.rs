@@ -364,6 +364,12 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
     // that switches the GIL; a wrapper counted out before them would let a
     // suspended exec's rebind release the object this wrapper still has to
     // return.
+    // The compiled receiver parameter owns a reference to the instance,
+    // taken only once every argument has unpacked, so no failure path owes
+    // its release.
+    if export.receiver == ExtReceiver::SelfInstance {
+        out.push_str("    pycc_rt_instance_incref(self_inst);\n");
+    }
     out.push_str("    Py_ssize_t bridge_mark = pycc_ext_bridge_mark();\n");
     if use_thunk {
         out.push_str(&format!("    {assign}{thunk}({call_args});\n"));
@@ -564,6 +570,9 @@ pub(crate) fn unpack_args(
             .filter_map(|(earlier, carrier)| Some((earlier, carrier.cleanup()?)))
             .map(|(earlier, owed)| match owed {
                 SlotCleanup::StrDecref => format!("        pycc_rt_str_decref(a{earlier});\n"),
+                SlotCleanup::InstanceDecref => {
+                    format!("        pycc_rt_instance_decref(a{earlier});\n")
+                }
                 SlotCleanup::BufferRelease => format!("        PyBuffer_Release(&b{earlier});\n"),
             })
             .collect();

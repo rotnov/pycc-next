@@ -91,7 +91,7 @@ pub use instance_hash::{
     resolve_instance_hash,
 };
 mod mro;
-pub use mro::flat_attr_layout;
+pub use mro::{flat_attr_layout, is_refcounted_class, slot_rc_kind};
 mod protocol;
 #[cfg(test)]
 mod protocol_return_tests;

@@ -510,9 +510,8 @@ pub(crate) fn carrier_class_isinstance_c(classes: &[ExtCarrierClass]) -> String 
 /// slots are stored, so the guard is defence in depth, and it refuses with
 /// nothing to release.
 ///
-/// The `pycc_rt_instance_new` allocation is not released when the
-/// constructor raises. That is D-107/D-154's no-free design, the same
-/// reason the instance survives `tp_dealloc`, not an oversight of this path.
+/// The `pycc_rt_instance_new` allocation is released when the constructor
+/// raises, and otherwise owned by the carrier (`pycc_ext_carrier_bind`).
 fn tp_init_c(ctor: &ExtCtor) -> String {
     let class = &ctor.class;
     let arity = ctor.params.len();
@@ -538,6 +537,10 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
         layout.push('\0');
         layout.push_str(name);
     }
+    // The slot kinds (`pycc_rt::rc`), exactly as `MirExpr::Instantiate`'s
+    // descriptor records them: what freeing the instance releases.
+    layout.push('\0');
+    layout.push_str(&ctor.slot_kinds);
     let layout_len = layout.len();
     let layout_literal = layout.replace('\0', "\\000");
     // The method part of #1140, exactly as `wrapper_for` applies it: keyed
@@ -620,8 +623,12 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
         });
     }
     // #1316: the same bridge-table watermark `wrapper_for` takes.
+    // `__init__`'s `self` parameter owns a reference of its own; the one
+    // `pycc_rt_instance_new` returned goes to the carrier, or is released
+    // when the constructor raises.
     out.push_str(&format!(
-        "    Py_ssize_t bridge_mark = pycc_ext_bridge_mark();\n    \
+        "    pycc_rt_instance_incref(inst);\n    \
+         Py_ssize_t bridge_mark = pycc_ext_bridge_mark();\n    \
          ((void (*)({params}))fnptr_{symbol})({call_args});\n",
         call_args = call_args.join(", ")
     ));
@@ -632,6 +639,7 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
     // both arms.
     out.push_str(&format!(
         "    if (pycc_rt_ext_pending_type() >= 0) {{\n{}        \
+         pycc_rt_instance_decref(inst);\n        \
          pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
          return pycc_ext_activation_exit_status(-1);\n    }}\n    \
          pycc_ext_bridge_release_to(bridge_mark);\n{}",

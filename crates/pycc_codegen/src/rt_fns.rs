@@ -329,6 +329,18 @@ pub(super) struct RtFns<'ctx> {
     /// The enclosing loops' `break`/`continue` targets; `loop_control.rs`
     /// owns it.
     pub(super) loops: crate::loop_control::LoopControlState<'ctx>,
+    /// `pycc_rt_list_free`/`pycc_rt_instance_free`: the cold call an inline
+    /// decrement makes when a count reaches zero (`heap_rc`).
+    pub(super) list_free: FunctionValue<'ctx>,
+    pub(super) instance_free: FunctionValue<'ctx>,
+    /// Every reference-counted class of the module (`pycc_hir::
+    /// is_refcounted_class`), keyed by its MIR name, with the slot kind
+    /// string its layout descriptor records (`pycc_hir::slot_rc_kind`). A
+    /// class absent here -- an exception class -- is not counted.
+    pub(super) rc_class_kinds: std::cell::RefCell<HashMap<String, String>>,
+    /// The current function's locals that hold borrowed references
+    /// (`borrowed_locals`).
+    pub(super) borrowed_locals: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 pub(super) fn declare_rt_functions<'ctx>(
@@ -806,5 +818,15 @@ pub(super) fn declare_rt_functions<'ctx>(
         exceptions: ExceptionCodegenState::new(),
         object_slots: crate::object_slot::ModuleObjectSlots::default(),
         loops: crate::loop_control::LoopControlState::default(),
+        list_free: declare(
+            "pycc_rt_list_free",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        instance_free: declare(
+            "pycc_rt_instance_free",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        rc_class_kinds: std::cell::RefCell::new(HashMap::new()),
+        borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
     }
 }

@@ -155,11 +155,13 @@ pub(crate) fn element_word<'ctx>(
             let _ = untag_or_check(context, builder, rt, UntagUse::Element, encoded);
             encoded
         }
-        Ty::Str => {
-            let scalar = incref_if_str_duplicate(builder, rt, source, scalar);
+        // A counted element (`str`, list, instance): the list owns one
+        // reference, so a borrowed one is retained.
+        _ => {
+            let scalar =
+                crate::heap_rc::retain_if_heap_duplicate(context, builder, rt, source, scalar);
             scalar_to_slot_word(context, builder, scalar)
         }
-        _ => scalar_to_slot_word(context, builder, scalar),
     }
 }
 
@@ -205,7 +207,11 @@ pub(crate) fn build_list_len<'ctx>(
             "list_len",
         )
         .expect("build_load should not fail for the list header");
-    tag(context, len.as_instruction_value(), crate::tbaa::list_field_name(0));
+    tag(
+        context,
+        len.as_instruction_value(),
+        crate::tbaa::list_field_name(0),
+    );
     len.into_int_value()
 }
 
@@ -241,7 +247,11 @@ fn element_ptr<'ctx>(
     let data = builder
         .build_load(ptr_type, field_ptr(context, builder, list, 1), "list_data")
         .expect("build_load should not fail for the list header");
-    tag(context, data.as_instruction_value(), crate::tbaa::list_field_name(1));
+    tag(
+        context,
+        data.as_instruction_value(),
+        crate::tbaa::list_field_name(1),
+    );
     let data = data.into_pointer_value();
     unsafe {
         builder
@@ -354,7 +364,9 @@ pub(crate) fn build_list_set<'ctx>(
     index: IntValue<'ctx>,
     word: IntValue<'ctx>,
 ) {
-    if *elem == Ty::Str {
+    // A counted element goes through the runtime, which releases the
+    // element it overwrites.
+    if crate::heap_rc::heap_kind(rt, elem).is_some() {
         builder
             .build_call(rt.list_set, &[list.into(), index.into(), word.into()], "")
             .expect("build_call should not fail for a declared runtime function");
@@ -450,7 +462,13 @@ pub(crate) fn emit_list_contains<'ctx>(
 ) -> Scalar<'ctx> {
     let elem = element_ty(list_ty);
     let list = expect_list_pointer(list, "the membership container");
-    let word = element_word(context, builder, rt, elem, item_expr, item);
+    // The needle is borrowed for the scan; the caller releases a fresh
+    // `str` needle afterwards (`heap_rc::release_scalar_if_temporary`).
+    let word = if *elem == Ty::Str {
+        scalar_to_slot_word(context, builder, item)
+    } else {
+        element_word(context, builder, rt, elem, item_expr, item)
+    };
     let found = builder
         .build_call(
             rt.list_contains,
@@ -461,22 +479,6 @@ pub(crate) fn emit_list_contains<'ctx>(
         .try_as_basic_value()
         .expect_basic("pycc_rt_list_contains returns i8")
         .into_int_value();
-    if *elem == Ty::Str {
-        builder
-            .build_call(
-                rt.str_decref,
-                &[builder
-                    .build_int_to_ptr(
-                        word,
-                        context.ptr_type(inkwell::AddressSpace::default()),
-                        "needle",
-                    )
-                    .expect("build_int_to_ptr should not fail")
-                    .into()],
-                "",
-            )
-            .expect("build_call should not fail for a well-formed decref");
-    }
     let found = if negate {
         builder
             .build_xor(found, context.i8_type().const_int(1, false), "not_in")

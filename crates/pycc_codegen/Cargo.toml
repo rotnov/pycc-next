@@ -7,6 +7,7 @@ build = "build.rs"
 
 [dependencies]
 pycc_mir = { path = "../pycc_mir" }
+pycc_hir = { path = "../pycc_hir" }
 pycc_artifact_layout = { path = "../pycc_artifact_layout" }
 inkwell = { version = "0.9", default-features = false, features = ["llvm22-1"] }
 

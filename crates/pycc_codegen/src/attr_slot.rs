@@ -17,19 +17,26 @@ use inkwell::values::{BasicValue, IntValue, PointerValue};
 /// once per distinct descriptor and returned with its byte length. The
 /// global is keyed on the descriptor itself, never on the constructor: a
 /// subclass that inherits `__init__` shares its base's constructor but not
-/// its class name. `pycc_rt` reads it
-/// only to word the `AttributeError` of a slot read before its assignment,
-/// so it never needs a terminating NUL.
+/// its class name. `pycc_rt` reads it to word the `AttributeError` of a
+/// slot read before its assignment and, from the optional trailing field of
+/// one kind byte per slot, to release the slots when it frees the instance;
+/// it never needs a terminating NUL.
 pub(crate) fn instance_layout_constant<'ctx>(
     context: &'ctx Context,
     module: &inkwell::module::Module<'ctx>,
     class_name: &str,
     slot_names: &[String],
+    slot_kinds: Option<&str>,
 ) -> (PointerValue<'ctx>, IntValue<'ctx>) {
     let mut layout = class_name.to_string();
     for name in slot_names {
         layout.push('\0');
         layout.push_str(name);
+    }
+    // The slot kinds (`pycc_rt::rc`): what freeing an instance releases.
+    if let Some(kinds) = slot_kinds {
+        layout.push('\0');
+        layout.push_str(kinds);
     }
     let len = context.i64_type().const_int(layout.len() as u64, false);
     // A NUL cannot appear in an LLVM global's name, and `/` cannot appear
@@ -200,7 +207,7 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
 }
 
 /// `pycc_rt::instance::INSTANCE_SLOTS_OFFSET`: byte offset of slot 0.
-const SLOTS_OFFSET: u64 = 32;
+const SLOTS_OFFSET: u64 = 40;
 /// `pycc_rt::instance::INSTANCE_SLOT_SIZE`.
 const SLOT_SIZE: u64 = 16;
 /// `pycc_rt::instance::INSTANCE_SLOT_ASSIGNED_OFFSET`.
@@ -331,45 +338,6 @@ pub(crate) fn emit_slot_store<'ctx>(
         .build_store(flag_ptr, i64_type.const_int(1, false))
         .expect("build_store should not fail for an i64 flag");
     tag_access(context, Some(store), slot, true);
-}
-
-/// Mirror of [`crate::decref_str_slot_before_store`] for an instance attribute slot
-/// rather than a local's own alloca (D-154, Part 1 of #375): only
-/// meaningful for a `Ty::Str` attribute -- reads the slot's *current* raw
-/// word inline ([`emit_slot_load`]), reinterprets it as a `str` pointer, and
-/// decrefs it before the new value overwrites the slot. An unassigned slot
-/// holds the `0` word -- a null pointer whose runtime decref is a documented
-/// no-op (`pycc_rt_str_decref`'s own null check) -- exactly like a local's
-/// null-initialized string slot -- so the same code is correct for both
-/// `__init__`'s first assignment and any later reassignment.
-///
-/// Unlike `decref_str_slot_before_store`, this function has no runtime
-/// assertion that the target slot's own declared type is actually
-/// `Ty::Str` -- its one caller (`MirStmt::AttrSet`'s own codegen) only
-/// invokes it when `value`'s type is `Ty::Str`, and `pycc_types::class::
-/// check_attr_set`'s `is_assignable(value_ty, attr_ty)` gate (`T0021`)
-/// already rejects a `str` value targeting a non-`str` attribute before
-/// codegen ever runs -- so this slot's declared type is `Ty::Str` too on
-/// every reachable call, by construction, not merely by convention left
-/// unchecked (D-068 review finding, PR #385).
-pub(crate) fn decref_str_attr_slot_before_store<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    base_ptr: PointerValue<'ctx>,
-    slot: u64,
-) {
-    let raw = emit_slot_load(context, builder, base_ptr, slot);
-    let old = builder
-        .build_int_to_ptr(
-            raw,
-            context.ptr_type(inkwell::AddressSpace::default()),
-            "attr_str_inttoptr_old",
-        )
-        .expect("build_int_to_ptr should not fail reinterpreting an i64 as a pointer");
-    builder
-        .build_call(rt.str_decref, &[old.into()], "str_decref_old_attr")
-        .expect("build_call should not fail for a well-formed decref");
 }
 
 /// [`crate::bigint_rc::release_int_slot_before_store`]'s counterpart for an instance

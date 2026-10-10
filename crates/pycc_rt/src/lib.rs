@@ -65,6 +65,7 @@ mod io;
 mod list;
 /// `print`'s stdout flush (#1340); the other print primitives stay below.
 mod print;
+mod rc;
 /// The `round()` builtin over `float`.
 mod round;
 /// `str` builtins and methods, and `input()`.
@@ -113,6 +114,11 @@ pub use list::{
     pycc_rt_list_repr, pycc_rt_list_set, pycc_rt_list_slice,
 };
 pub use print::pycc_rt_print_flush;
+pub use rc::{
+    RC_OFFSET, pycc_rt_instance_decref, pycc_rt_instance_free, pycc_rt_instance_incref,
+    pycc_rt_instance_live_objects, pycc_rt_list_decref, pycc_rt_list_free, pycc_rt_list_incref,
+    pycc_rt_list_live_objects,
+};
 pub use round::{pycc_rt_float_round, pycc_rt_float_round_to_int};
 
 // --- Implementation note / deviation from the task brief -------------
@@ -1304,7 +1310,12 @@ pub unsafe extern "C" fn pycc_rt_dict_set(dict: *mut PyDictObj, key: *mut PyStrO
         .iter()
         .position(|(k, _)| unsafe { pycc_rt_str_cmp(*k, key) } == 0)
     {
-        Some(i) => entries[i].1 = value,
+        // CPython keeps the key object already stored; the incoming one
+        // (whose reference this call adopted) is dropped.
+        Some(i) => {
+            entries[i].1 = value;
+            unsafe { pycc_rt_str_decref(key) };
+        }
         None => entries.push((key, value)),
     }
     unsafe { &*dict }.entries.set(entries);
@@ -3278,6 +3289,9 @@ mod tests {
             let dict = pycc_rt_dict_new();
             let key = new_pystr(b"a");
             pycc_rt_dict_set(dict, key, tag_smallint(1));
+            // Each set adopts one reference; the second is dropped because
+            // the key is already stored.
+            pycc_rt_str_incref(key);
             pycc_rt_dict_set(dict, key, tag_smallint(2));
             assert_eq!(pycc_rt_dict_get(dict, key), tag_smallint(2));
             assert_eq!(pycc_rt_dict_len(dict), 1);

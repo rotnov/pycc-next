@@ -361,6 +361,16 @@ impl<'ctx> SetEmitter<'_, 'ctx> {
             self.locals,
             element,
         );
+        // Sets are leak-only, but the set must still hold its own reference
+        // to a counted instance, or the instance's other owners could free
+        // it while the set names it.
+        let scalar = crate::heap_rc::retain_if_heap_duplicate(
+            self.context,
+            self.builder,
+            self.rt,
+            element,
+            scalar,
+        );
         expect_instance_pointer(scalar, "a set element")
     }
 

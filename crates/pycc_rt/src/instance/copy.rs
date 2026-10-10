@@ -15,14 +15,16 @@
 //!   ([`crate::pycc_rt_bigint_retain`]); an inline int is a no-op there.
 //! * `o` -- an opaque CPython object. `pycc_rt` keeps no CPython dependency
 //!   (D-244 rule 2), so the shim takes that reference itself.
+//! * `l` -- a list and `c` -- an instance of a class of this program,
+//!   reference counted (`crate::rc`): the copy takes its own reference.
 //! * `w` -- anything else the build admits (`float`, `bool`, a leak-only
-//!   container, another instance): a plain word copy, with no reference
-//!   traffic, because none exists for those words.
+//!   dict): a plain word copy, with no reference traffic, because none
+//!   exists for those words.
 //!
 //! An unassigned slot stays unassigned, so the copy's checked read raises
 //! the same `AttributeError` CPython raises for an attribute its copy lacks.
 //! The copy has no carrier yet: the shim links it to the one it allocates.
-//! Like every instance, the copy is never freed (D-107, D-154).
+//! The copy starts with a count of one, which the shim's carrier owns.
 
 use super::{PyInstanceObj, allocate_instance};
 
@@ -38,12 +40,10 @@ fn instance_copy(instance: &PyInstanceObj, kinds: &[u8]) -> Option<*mut PyInstan
     let copy_slots = unsafe { &*copy }.slots();
     for ((slot, kind), target) in slots.iter().zip(kinds).zip(copy_slots) {
         let value = slot.get();
-        match (value, kind) {
-            // SAFETY: an assigned `str` slot holds a live `PyStrObj` pointer:
-            // the slot's own reference keeps it alive.
-            (Some(word), b's') => unsafe { crate::pycc_rt_str_incref(word as *mut _) },
-            (Some(word), b'i') => crate::pycc_rt_bigint_retain(word),
-            _ => {}
+        // An assigned slot's reference keeps its value alive, so the copy
+        // can take one of its own.
+        if let Some(word) = value {
+            crate::rc::retain_word(*kind, word);
         }
         target.set(value);
     }

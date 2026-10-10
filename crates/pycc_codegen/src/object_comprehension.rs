@@ -40,11 +40,11 @@
 //! test, and the element is released once the packer has taken a reference
 //! of its own.
 
-use super::bigint_rc::release_scalar_if_int_temporary;
 use super::comprehension::{CompCx, CompElts};
 use super::foreign_call;
 use super::foreign_fail::{ForeignFailEdge, route_negative, route_null};
 use super::foreign_pack::{emit_pack, shim_fn};
+use super::release_scalar_if_temporary;
 use super::{EXT_OBJ_COLLECT_SYMBOL, EXT_OBJ_NEW_COLLECTION_SYMBOL, ObjCollectionKind};
 use super::{Scalar, emit_expr, truthy};
 use inkwell::values::PointerValue;
@@ -129,7 +129,7 @@ pub(super) fn emit_object_comprehension<'ctx>(
         let held = crate::object_release::hold(context, module, rt, cond, &scalar);
         let test = truthy(context, builder, module, rt, scalar);
         held.release(builder, rt);
-        release_scalar_if_int_temporary(context, builder, rt, cond, &scalar);
+        release_scalar_if_temporary(context, builder, rt, cond, &scalar);
         let function = edge.function();
         let keep_bb = context.append_basic_block(function, "objcomp_keep");
         builder
@@ -148,7 +148,7 @@ pub(super) fn emit_object_comprehension<'ctx>(
         elt,
     );
     let item = emit_pack(context, builder, module, scalar, "objcomp_item");
-    release_scalar_if_int_temporary(context, builder, rt, elt, &scalar);
+    release_scalar_if_temporary(context, builder, rt, elt, &scalar);
     crate::object_release::release_if_produced(context, builder, module, elt, &scalar);
     let collect = shim_fn(
         module,

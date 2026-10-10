@@ -54,7 +54,9 @@ pub(super) enum PrintArg<'ctx> {
     /// A list, still unconverted for the same reason as `Object`: a later
     /// argument may mutate it (`print(xs, xs.pop())`), and CPython renders
     /// the list as it is after every argument has been evaluated.
-    List(Scalar<'ctx>),
+    /// A list, rendered in phase 2; `true` when it is a fresh reference
+    /// the print releases once rendered.
+    List(Scalar<'ctx>, bool),
 }
 
 /// Phase 1 of the two-phase `print()` argument pipeline (fixes #145):
@@ -129,7 +131,7 @@ pub(super) fn emit_eval_print_arg<'ctx>(
             return PrintArg::Object(scalar);
         }
         if matches!(scalar, Scalar::List(_)) {
-            return PrintArg::List(scalar);
+            return PrintArg::List(scalar, !crate::heap_rc::is_borrowed_read(arg));
         }
         let scalar = incref_if_str_duplicate(builder, rt, arg, scalar);
         let as_str = to_str(builder, rt, scalar);
@@ -186,7 +188,19 @@ pub(super) fn emit_write_print_arg<'ctx>(
                 .expect("build_call should not fail for a well-formed stdout flush");
             foreign_len::emit_to_str_pointer(context, builder, module, rt, object)
         }
-        PrintArg::List(list) => to_str(builder, rt, list),
+        PrintArg::List(list, fresh) => {
+            let text = to_str(builder, rt, list);
+            if let (true, Scalar::List(ptr)) = (fresh, list) {
+                crate::heap_rc::emit_decref(
+                    context,
+                    builder,
+                    rt,
+                    crate::heap_rc::HeapKind::List,
+                    ptr,
+                );
+            }
+            text
+        }
     };
     builder
         .build_call(rt.print_write_str, &[str_ptr.into()], "print_write")
@@ -224,7 +238,7 @@ pub(super) fn emit_print_call<'ctx>(
             PrintArg::Object(scalar) => {
                 Some(object_release::hold(context, module, rt, arg, &scalar))
             }
-            PrintArg::None | PrintArg::Str(_) | PrintArg::List(_) => None,
+            PrintArg::None | PrintArg::Str(_) | PrintArg::List(..) => None,
         };
         evaluated.push((value, held));
     }
@@ -282,6 +296,10 @@ pub(super) fn emit_fstring_interpolation<'ctx>(
         // as `print`'s own argument above, and released
         // after `to_str` for the same reason.
         release_scalar_if_int_temporary(context, builder, rt, inner, &scalar);
+        // A fresh list is dead once rendered.
+        if let Scalar::List(_) = scalar {
+            crate::heap_rc::release_scalar_if_temporary(context, builder, rt, inner, &scalar);
+        }
         as_str
     }
 }

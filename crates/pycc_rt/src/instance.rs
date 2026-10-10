@@ -2,7 +2,7 @@
 //! `PyInstanceObj` and its `extern "C"` accessor functions.
 //!
 //! **Layout (a fixed ABI shared with `pycc_codegen`).** An instance is one
-//! allocation: a `#[repr(C)]` header of four words followed inline by
+//! allocation: a `#[repr(C)]` header of five words followed inline by
 //! `slot_count` [`InstanceSlot`]s of 16 bytes each -- the slot's `i64` word,
 //! then an `i64` "assigned" flag (`0` until the first store, #1388).
 //! Compiled code reads and writes a slot directly, at
@@ -17,8 +17,10 @@
 //! heap-object-typed attribute (`str`, another instance, a container, a
 //! foreign object) its pointer as an `i64`.
 //!
-//! **No reference counting of the instance itself.** Instances are never
-//! freed, the same leak-only status the containers have (D-107).
+//! **Reference counting.** The header's fifth word is the instance's
+//! reference count (`crate::rc`, at `rc::RC_OFFSET`). Freeing an instance
+//! releases each slot by the kind its layout descriptor records (see
+//! [`pycc_rt_instance_new`]).
 
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -26,7 +28,7 @@ use std::ffi::c_void;
 use crate::exception::{EXCEPTION_TYPE_ATTRIBUTE_ERROR, raise_builtin};
 
 /// Byte offset of slot 0 from the start of a `PyInstanceObj`.
-pub const INSTANCE_SLOTS_OFFSET: usize = 32;
+pub const INSTANCE_SLOTS_OFFSET: usize = 40;
 /// Size in bytes of one [`InstanceSlot`].
 pub const INSTANCE_SLOT_SIZE: usize = 16;
 /// Byte offset of a slot's "assigned" flag within the slot.
@@ -71,12 +73,15 @@ pub struct PyInstanceObj {
     layout_len: usize,
     carrier: Cell<*mut c_void>,
     slot_count: usize,
+    /// The reference count (`crate::rc`).
+    rc: i64,
     slots: [InstanceSlot; 0],
 }
 
 // The ABI `pycc_codegen` compiles against, checked at build time.
 const _: () = {
     assert!(std::mem::offset_of!(PyInstanceObj, slots) == INSTANCE_SLOTS_OFFSET);
+    assert!(std::mem::offset_of!(PyInstanceObj, rc) == crate::rc::RC_OFFSET);
     assert!(std::mem::size_of::<InstanceSlot>() == INSTANCE_SLOT_SIZE);
     assert!(std::mem::offset_of!(InstanceSlot, word) == 0);
     assert!(std::mem::offset_of!(InstanceSlot, assigned) == INSTANCE_SLOT_ASSIGNED_OFFSET);
@@ -111,13 +116,47 @@ impl PyInstanceObj {
     }
 }
 
-/// Allocates an instance with `slot_count` unassigned slots and `layout` as
-/// its descriptor. Never freed.
-fn allocate_instance(slot_count: usize, layout: &'static [u8]) -> *mut PyInstanceObj {
+/// The allocation layout of an instance with `slot_count` slots.
+fn instance_alloc_layout(slot_count: usize) -> std::alloc::Layout {
     let size = INSTANCE_SLOTS_OFFSET + INSTANCE_SLOT_SIZE * slot_count;
-    let alloc_layout = std::alloc::Layout::from_size_align(size, 8)
-        .expect("an instance allocation size never overflows isize");
-    // SAFETY: `size` is non-zero (the header alone is 32 bytes). A zeroed
+    std::alloc::Layout::from_size_align(size, 8)
+        .expect("an instance allocation size never overflows isize")
+}
+
+/// The slot kind bytes of `layout` (`crate::rc`), one per slot: the
+/// descriptor field after the last slot name. `None` for a descriptor that
+/// records none (an enum member's, or one written by hand in a test), whose
+/// slots then release nothing.
+fn slot_kinds(layout: &'static [u8], slot_count: usize) -> Option<&'static [u8]> {
+    layout
+        .split(|byte| *byte == 0)
+        .nth(1 + slot_count)
+        .filter(|kinds| kinds.len() == slot_count)
+}
+
+/// Frees `instance` (count zero), pushing every slot value whose count its
+/// release brings to zero onto `dead`.
+pub(crate) fn free_instance(instance: *mut PyInstanceObj, dead: &mut crate::rc::Worklist) {
+    crate::rc::INSTANCE_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    // SAFETY: the count reached zero, so nothing else names the instance.
+    let object = unsafe { &*instance };
+    let slot_count = object.slot_count;
+    if let Some(kinds) = slot_kinds(object.layout(), slot_count) {
+        for (slot, kind) in object.slots().iter().zip(kinds) {
+            if let Some(word) = slot.get() {
+                crate::rc::release_word_into(*kind, word, dead);
+            }
+        }
+    }
+    // SAFETY: allocated by `allocate_instance` with this very layout.
+    unsafe { std::alloc::dealloc(instance.cast::<u8>(), instance_alloc_layout(slot_count)) };
+}
+
+/// Allocates an instance with `slot_count` unassigned slots, `layout` as
+/// its descriptor and a count of one.
+fn allocate_instance(slot_count: usize, layout: &'static [u8]) -> *mut PyInstanceObj {
+    let alloc_layout = instance_alloc_layout(slot_count);
+    // SAFETY: the size is non-zero (the header alone is 40 bytes). A zeroed
     // allocation is a null carrier plus `slot_count` unassigned slots; the
     // remaining header fields are written before the pointer escapes.
     unsafe {
@@ -128,6 +167,8 @@ fn allocate_instance(slot_count: usize, layout: &'static [u8]) -> *mut PyInstanc
         std::ptr::addr_of_mut!((*ptr).layout_ptr).write(layout.as_ptr());
         std::ptr::addr_of_mut!((*ptr).layout_len).write(layout.len());
         std::ptr::addr_of_mut!((*ptr).slot_count).write(slot_count);
+        std::ptr::addr_of_mut!((*ptr).rc).write(1);
+        crate::rc::INSTANCE_LIVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         ptr
     }
 }
@@ -148,7 +189,9 @@ fn checked_slot_count(slot_count: i64) -> usize {
 /// `layout_ptr`/`layout_len` is the class's static layout descriptor
 /// (#1388): the class's source name followed by the name of each slot in
 /// slot order, separated by NUL bytes (`C\0x\0y` for a class `C` whose
-/// slots are `x` then `y`). `pycc_codegen` interns it once per class as a
+/// slots are `x` then `y`), then optionally one more field of one
+/// `crate::rc` kind byte per slot (`C\0x\0y\0si`), which says what freeing
+/// the instance releases. `pycc_codegen` interns it once per class as a
 /// private constant, so it outlives every instance. A null `layout_ptr` is
 /// an empty descriptor.
 ///
@@ -296,8 +339,11 @@ mod tests {
         let base = ptr.cast::<u8>();
         let slot = INSTANCE_SLOTS_OFFSET + 2 * INSTANCE_SLOT_SIZE;
         let word = unsafe { base.add(slot).cast::<i64>().read() };
-        let flag =
-            unsafe { base.add(slot + INSTANCE_SLOT_ASSIGNED_OFFSET).cast::<i64>().read() };
+        let flag = unsafe {
+            base.add(slot + INSTANCE_SLOT_ASSIGNED_OFFSET)
+                .cast::<i64>()
+                .read()
+        };
         assert_eq!((word, flag), (77, 1));
         let unset = INSTANCE_SLOTS_OFFSET + INSTANCE_SLOT_ASSIGNED_OFFSET;
         assert_eq!(unsafe { base.add(unset).cast::<i64>().read() }, 0);

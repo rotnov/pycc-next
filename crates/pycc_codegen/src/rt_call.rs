@@ -1,9 +1,12 @@
 //! Emission of [`MirExpr::RtCall`]: a builtin lowered to a direct call into
 //! `pycc_rt` (`pycc_hir::builtins` states the ABI).
 //!
-//! Arguments are borrowed by the runtime. An argument that is a freshly
-//! built `str` (an owning temporary, see `str_rc`) is released after the
-//! call, so `int(input())` does not leak the line it parsed.
+//! Arguments are borrowed by the runtime. An argument that is a fresh
+//! counted value (an owning temporary, see `heap_rc`) is released after the
+//! call, so `int(input())` does not leak the line it parsed. A returned
+//! counted value is a new reference the caller owns -- except
+//! `pycc_rt_list_unpack`'s, which is its argument handed back, so that
+//! argument's reference becomes the result's.
 
 use super::*;
 use crate::attr_slot::scalar_to_slot_word;
@@ -56,14 +59,17 @@ pub(super) fn emit_rt_call<'ctx>(
     let i64_type = context.i64_type();
     let mut values = Vec::with_capacity(call.args.len());
     let mut param_types: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::with_capacity(call.args.len());
-    let mut owned_strs = Vec::new();
+    let mut temporaries = Vec::new();
+    let passes_through = sig.symbol == "pycc_rt_list_unpack";
     for ((arg, param), is_word) in call.args.iter().zip(&sig.params).zip(&sig.word_args) {
         let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
-        if let Scalar::Str(ptr) = scalar
-            && !str_rc::str_value_is_a_duplicate_reference(arg)
-        {
-            owned_strs.push(ptr);
-        }
+        let scalar = if passes_through {
+            // The result is this very list: it carries the reference.
+            heap_rc::retain_if_heap_duplicate(context, builder, rt, arg, scalar)
+        } else {
+            temporaries.push((arg, scalar));
+            scalar
+        };
         if *is_word {
             let scalar = coerce_scalar_to_type(context, builder, scalar, param.clone());
             values.push(borrowed_word(context, builder, param, scalar).into());
@@ -82,15 +88,19 @@ pub(super) fn emit_rt_call<'ctx>(
         ty_to_basic_type(context, sig.ret.clone()).fn_type(&param_types, false)
     };
     let function = module.get_function(sig.symbol).unwrap_or_else(|| {
-        module.add_function(sig.symbol, fn_type, Some(inkwell::module::Linkage::External))
+        module.add_function(
+            sig.symbol,
+            fn_type,
+            Some(inkwell::module::Linkage::External),
+        )
     });
     let call_site = builder
         .build_call(function, &values, "rt_call")
         .expect("build_call should not fail for a declared runtime builtin");
-    for ptr in owned_strs {
-        builder
-            .build_call(rt.str_decref, &[ptr.into()], "")
-            .expect("build_call should not fail for a well-formed decref");
+    for (arg, scalar) in temporaries {
+        if !matches!(scalar, Scalar::Int(_)) {
+            heap_rc::release_scalar_if_temporary(context, builder, rt, arg, &scalar);
+        }
     }
     if sig.ret_word {
         let word = call_site

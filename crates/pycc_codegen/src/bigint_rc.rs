@@ -317,11 +317,12 @@ fn retain_if_int_duplicate_reporting<'ctx>(
 ) -> (Scalar<'ctx>, Option<IntValue<'ctx>>) {
     let retained_word = if let Scalar::Int(word) = scalar {
         let is_duplicate = match source_expr {
-            MirExpr::Name {
+            MirExpr::AttrGet {
                 ty: pycc_mir::Ty::Int,
+                base,
                 ..
-            }
-            | MirExpr::AttrGet {
+            } => crate::heap_rc::is_borrowed_read(base),
+            MirExpr::Name {
                 ty: pycc_mir::Ty::Int,
                 ..
             }
@@ -455,11 +456,14 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         // #1346: a sequence yields its `value`'s word unchanged, so it owns
         // exactly what `value` owns.
         MirExpr::Sequence { value, .. } => int_value_is_a_duplicate_reference(value),
-        MirExpr::Name {
+        // An attribute of a fresh base (`f().x`) is retained by the read
+        // itself before the base is released (`heap_rc`), so it is owned.
+        MirExpr::AttrGet {
             ty: pycc_mir::Ty::Int,
+            base,
             ..
-        }
-        | MirExpr::AttrGet {
+        } => crate::heap_rc::is_borrowed_read(base),
+        MirExpr::Name {
             ty: pycc_mir::Ty::Int,
             ..
         }

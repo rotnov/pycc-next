@@ -93,7 +93,7 @@ pub(crate) fn emit_boxed<'ctx>(
         value,
     );
     let packed = emit_pack(context, builder, module, scalar, "object_box");
-    release_scalar_if_int_temporary(context, builder, rt, value, &scalar);
+    release_scalar_if_temporary(context, builder, rt, value, &scalar);
     route_null(
         context,
         builder,

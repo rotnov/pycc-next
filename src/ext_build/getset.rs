@@ -364,13 +364,13 @@ fn pack_slot_word(class: &str, name: &str, ty: &Ty) -> String {
         Ty::Str => "    pycc_rt_str_incref((void *)(intptr_t)word);\n    \
                     return pycc_ext_pack_str((void *)(intptr_t)word);\n"
             .to_string(),
-        // #1453: the word is the stored instance's pointer. The instance is
-        // never freed (D-107, D-154) and the packer takes no reference on
-        // it, only a new one on the carrier it returns -- the live one when
+        // #1453: the word is the stored instance's pointer, which the slot
+        // keeps owning. The packer consumes a reference (as for a returned
+        // instance), so one is taken first; it returns the live carrier when
         // the instance has one, so a repeated read is the same object.
-        Ty::Instance(_) => {
-            "    return pycc_ext_pack_instance((void *)(intptr_t)word);\n".to_string()
-        }
+        Ty::Instance(_) => "    pycc_rt_instance_incref((void *)(intptr_t)word);\n    \
+                            return pycc_ext_pack_instance((void *)(intptr_t)word);\n"
+            .to_string(),
         // `collect_getsets` admits exactly the `carried` types, so the
         // remaining one is the opaque object.
         _ => "    return pycc_ext_pack_object((void *)(intptr_t)word);\n".to_string(),

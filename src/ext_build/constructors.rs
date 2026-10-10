@@ -276,6 +276,7 @@ fn ctor_descriptor(module: &HirModule, class: &str) -> Option<ExtCtor> {
             .collect(),
         defaults: defaults::carried_defaults(module, name, true),
         slot_names: instance_slot_names(module, class_def),
+        slot_kinds: instance_slot_kinds(module, class_def),
         keyword_names: None,
     })
 }
@@ -309,6 +310,22 @@ fn instance_slot_names(module: &HirModule, class_def: &HirClassDef) -> Vec<Strin
     flat_attr_layout(&mro_class_defs(module, class_def))
         .into_iter()
         .map(|(name, _)| name)
+        .collect()
+}
+
+/// The `pycc_rt::rc` kind byte of every slot [`instance_slot_names`] names,
+/// as one string: what freeing an instance of `class_def` releases. The same
+/// string `pycc_codegen`'s `MirExpr::Instantiate` descriptor carries.
+pub(crate) fn instance_slot_kinds(module: &HirModule, class_def: &HirClassDef) -> String {
+    let refcounted = |name: &str| {
+        module
+            .class_defs
+            .iter()
+            .any(|(held, def)| held == name && pycc_hir::is_refcounted_class(def))
+    };
+    flat_attr_layout(&mro_class_defs(module, class_def))
+        .iter()
+        .map(|(_, ty)| pycc_hir::slot_rc_kind(ty, &refcounted) as char)
         .collect()
 }
 
@@ -377,6 +394,9 @@ pub(crate) struct ExtCtor {
     /// called with and which, after [`ExtCtor::class`], make up the layout
     /// descriptor it is passed (#1388).
     pub(crate) slot_names: Vec<String>,
+    /// One `pycc_rt::rc` kind byte per slot ([`instance_slot_kinds`]),
+    /// appended to the layout descriptor.
+    pub(crate) slot_kinds: String,
     /// The constructor's carried parameter names when `Py_tp_init` binds
     /// keywords (#1461), meaning exactly what [`ExtExport::keyword_names`]
     /// means; `None` keeps the hand-written keyword refusal.

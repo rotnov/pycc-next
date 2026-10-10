@@ -19,16 +19,18 @@
 //! words or, for `list[bool]`, by bytes, so the layout is an ABI contract
 //! pinned by `list_layout_matches_the_codegen_contract`.
 //!
-//! **Ownership.** A list owns one reference to each `str` element: the
-//! storing operations (`append`, `insert`, `set`) adopt the reference the
-//! caller passes, `set` releases the element it overwrites, `pop` hands its
-//! element's reference back, and the copying operations (`+`, `*`, slicing)
-//! take a new reference per copy. Reads (`xs[i]`, iteration) are borrowed.
-//! Instances and lists are never freed (D-107, D-154), so their words carry
-//! no reference. A list itself is never freed either.
+//! **Ownership.** A list owns one reference to each `str`, list or instance
+//! element: the storing operations (`append`, `insert`, `set`) adopt the
+//! reference the caller passes, `set` releases the element it overwrites,
+//! `pop` hands its element's reference back, and the copying operations
+//! (`+`, `*`, slicing) take a new reference per copy. Reads (`xs[i]`,
+//! iteration) are borrowed. A list is itself reference counted (`crate::rc`):
+//! the count sits at `rc::RC_OFFSET`, and freeing the list releases every
+//! element it owns.
 
 use super::*;
 use crate::instance::PyInstanceObj;
+use crate::rc::{LIST_LIVE, Worklist, release_word_into, retain_word};
 
 /// Element kind of a `list[int]` (D-141 encoded words).
 pub const LIST_KIND_INT: i64 = 0;
@@ -51,7 +53,11 @@ pub struct PyListObj {
     data: *mut u8,
     cap: i64,
     kind: i64,
+    /// The reference count (`crate::rc`).
+    rc: i64,
 }
+
+const _: () = assert!(std::mem::offset_of!(PyListObj, rc) == crate::rc::RC_OFFSET);
 
 /// One stored element: an 8-byte word, or a `list[bool]`'s byte.
 trait Elem: Copy {
@@ -124,11 +130,7 @@ impl PyListObj {
     /// type; [`with_vec!`] picks it.
     fn with_typed_vec<T: Elem, R>(&mut self, f: impl FnOnce(&mut Vec<T>) -> R) -> R {
         let mut vec = unsafe {
-            Vec::from_raw_parts(
-                self.data.cast::<T>(),
-                self.len as usize,
-                self.cap as usize,
-            )
+            Vec::from_raw_parts(self.data.cast::<T>(), self.len as usize, self.cap as usize)
         };
         let result = f(&mut vec);
         let mut vec = std::mem::ManuallyDrop::new(vec);
@@ -138,16 +140,17 @@ impl PyListObj {
         result
     }
 
+    /// The `crate::rc` kind byte of this list's elements.
+    fn element_rc_kind(&self) -> u8 {
+        element_rc_kind(self.kind)
+    }
+
     fn retain(&self, word: i64) {
-        if self.kind == LIST_KIND_STR {
-            unsafe { pycc_rt_str_incref(word as *mut PyStrObj) };
-        }
+        retain_word(self.element_rc_kind(), word);
     }
 
     fn release(&self, word: i64) {
-        if self.kind == LIST_KIND_STR {
-            unsafe { pycc_rt_str_decref(word as *mut PyStrObj) };
-        }
+        crate::rc::release_word(self.element_rc_kind(), word);
     }
 
     /// The type-valid word returned beside a raised exception.
@@ -160,22 +163,52 @@ impl PyListObj {
     }
 }
 
+/// The `crate::rc` kind byte of a list of kind `kind`'s elements.
+fn element_rc_kind(kind: i64) -> u8 {
+    match kind {
+        LIST_KIND_STR => b's',
+        LIST_KIND_LIST => b'l',
+        LIST_KIND_INSTANCE => b'c',
+        _ => b'w',
+    }
+}
+
 /// A list of kind `kind` owning `items`, whose element type must be the
-/// kind's (`u8` exactly for `LIST_KIND_BOOL`).
+/// kind's (`u8` exactly for `LIST_KIND_BOOL`), with a count of one.
 fn new_typed_list<T: Elem>(kind: i64, items: Vec<T>) -> *mut PyListObj {
     let mut items = std::mem::ManuallyDrop::new(items);
+    LIST_LIVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Box::into_raw(Box::new(PyListObj {
         len: items.len() as i64,
         data: items.as_mut_ptr().cast::<u8>(),
         cap: items.capacity() as i64,
         kind,
+        rc: 1,
     }))
+}
+
+/// Frees `list` (count zero), pushing every element whose count its
+/// release brings to zero onto `dead`.
+pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
+    LIST_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    // SAFETY: the count reached zero, so nothing else names the list.
+    let mut list = unsafe { Box::from_raw(list) };
+    let kind = list.element_rc_kind();
+    if kind != b'w' {
+        for word in list.typed::<i64>() {
+            release_word_into(kind, *word, dead);
+        }
+    }
+    with_vec!(list, |items| drop(std::mem::take(items)));
 }
 
 /// A list of kind `kind` holding the elements `items` denote.
 fn new_list(kind: i64, items: Vec<i64>) -> *mut PyListObj {
     if kind == LIST_KIND_BOOL {
-        new_typed_list(kind, items.into_iter().map(u8::from_word).collect::<Vec<u8>>())
+        new_typed_list(
+            kind,
+            items.into_iter().map(u8::from_word).collect::<Vec<u8>>(),
+        )
     } else {
         new_typed_list(kind, items)
     }
@@ -319,7 +352,8 @@ pub unsafe extern "C" fn pycc_rt_list_insert(list: *mut PyListObj, index: i64, w
     } else {
         index.min(len)
     };
-    with_vec!(list, |items| items.insert(at as usize, Elem::from_word(word)));
+    with_vec!(list, |items| items
+        .insert(at as usize, Elem::from_word(word)));
 }
 
 /// Bit of `pycc_rt_list_slice`'s `present` mask: `start` was written.

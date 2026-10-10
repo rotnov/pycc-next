@@ -71,14 +71,14 @@ extern const unsigned char *pycc_rt_ext_str_bytes(void *s, size_t *len);
  * NUL-separated name-then-slot-names descriptor, which words the
  * `AttributeError` of a slot read before its assignment (#1388).
  *
- * There is deliberately no matching free. Compiled code never releases an
- * instance either (D-107's arena model, narrowed by D-154), so a
- * `pycc_rt_instance_free` called from `tp_dealloc` would be the only
- * deallocation in the program and could release storage a compiled
- * function still aliases -- attribute reads hand out interior pointers.
- * The inner object therefore outlives its carrier; see
- * `pycc_ext_instance_dealloc`. */
+ * Instances are reference counted (`pycc_rt::rc`): a carrier owns one
+ * reference to the instance it holds and releases it in its `tp_dealloc`;
+ * an instance handed to a compiled function is a reference the function's
+ * parameter slot owns, and an instance a compiled function returns is one
+ * the caller owns. */
 extern void *pycc_rt_instance_new(long long slot_count, const char *layout, size_t layout_len);
+extern void pycc_rt_instance_incref(void *instance);
+extern void pycc_rt_instance_decref(void *instance);
 /* The read half of the instance boundary (#1442): the generated read-only
  * `Py_tp_getset` getters read a slot word with the same checked accessor a
  * compiled `self.x` read uses, so an unassigned slot raises the same
@@ -3578,8 +3578,8 @@ typedef struct {
  * deallocator, and it is called *before* the type reference is released so
  * `tp` is still live while the object is freed.
  *
- * The inner `PyInstanceObj` is deliberately not freed; the `extern` above
- * carries the reason.
+ * The carrier's reference to its `PyInstanceObj` is released last, which
+ * frees the instance when nothing compiled still holds it.
  */
 static void pycc_ext_instance_dealloc(PyObject *self)
 {
@@ -3595,6 +3595,9 @@ static void pycc_ext_instance_dealloc(PyObject *self)
     freefunc tp_free = (freefunc)PyType_GetSlot(tp, Py_tp_free);
     tp_free(self);
     Py_DECREF(tp);
+    if (inst != NULL) {
+        pycc_rt_instance_decref(inst);
+    }
 }
 
 /*
@@ -3647,6 +3650,11 @@ static void pycc_ext_carrier_bind(PyObject *self, void *inst)
     }
     ((PyccExtInstance *)self)->inst = inst;
     pycc_rt_ext_instance_set_carrier(inst, self);
+    /* The carrier adopted the reference `tp_init` built `inst` with, and
+     * drops the one it held to the instance it replaces. */
+    if (previous != NULL) {
+        pycc_rt_instance_decref(previous);
+    }
 }
 
 /* Generated companion: module name macros, per-export wrappers, method table. */
@@ -4133,6 +4141,8 @@ PyObject *pycc_ext_obj_pack_instance(void *inst)
     }
     ((PyccExtInstance *)carrier)->inst = inst;
     pycc_rt_ext_instance_set_carrier(inst, carrier);
+    /* `inst` is borrowed; the new carrier owns a reference of its own. */
+    pycc_rt_instance_incref(inst);
     return carrier;
 }
 
@@ -4188,10 +4198,10 @@ int pycc_ext_obj_isinstance_compiled(PyObject *o, const char *name)
  * admits it. A carrier no `tp_init` filled (`mod.C.__new__(mod.C)`) holds
  * no instance and is refused with its own message.
  *
- * No reference is taken. The body receives the instance, not the carrier,
- * and the instance is never freed (D-107, D-154), so the carrier dying
- * after the call leaves nothing dangling; the carrier link the instance
- * holds is weak and cleared by the carrier's own `tp_dealloc`.
+ * `*out` is a new reference to the instance, which the compiled
+ * parameter slot receiving it owns, so the carrier dying during the call
+ * leaves nothing dangling; the carrier link the instance holds is weak and
+ * cleared by the carrier's own `tp_dealloc`.
  */
 static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize_t index,
                                     const char *class_name, void **out)
@@ -4207,6 +4217,9 @@ static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
             if (pycc_ext_carrier_class_isinstance(cls, len, class_name)) {
+                /* A reference of its own for the receiver: a parameter
+                 * slot or the narrowed read owns what it is given. */
+                pycc_rt_instance_incref(inst);
                 *out = inst;
                 return 0;
             }
@@ -4253,8 +4266,8 @@ static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize
  * Python subclass cannot reach here: a carrier type is not an acceptable
  * base type, so the dealloc-slot test only rejects it defensively.
  *
- * The instance is borrowed, as at the argument ingress: compiled instances
- * are never freed (D-107, D-154), and the carrier's link to it is weak.
+ * `*out` is a new reference, as at the argument ingress: compiled code
+ * owns the narrowed read (`heap_rc::is_borrowed_read` classifies it fresh).
  */
 int pycc_ext_obj_unbox_instance(PyObject *o, const char *class_name, void **out)
 {
@@ -4273,6 +4286,9 @@ int pycc_ext_obj_unbox_instance(PyObject *o, const char *class_name, void **out)
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
             if (pycc_ext_carrier_class_isinstance(cls, len, class_name)) {
+                /* A reference of its own for the receiver: a parameter
+                 * slot or the narrowed read owns what it is given. */
+                pycc_rt_instance_incref(inst);
                 *out = inst;
                 return 0;
             }
@@ -4338,11 +4354,16 @@ static int pycc_ext_slot_operand_is(PyObject *other, const char *class_name)
  */
 static PyObject *pycc_ext_pack_instance(void *result)
 {
+    PyObject *packed;
     if (result == NULL) {
         PyErr_SetString(PyExc_SystemError, "instance result was NULL");
         return NULL;
     }
-    return pycc_ext_obj_pack_instance(result);
+    /* `result` is a reference the caller owns and hands over: the carrier
+     * holds its own, so this one is released once packed. */
+    packed = pycc_ext_obj_pack_instance(result);
+    pycc_rt_instance_decref(result);
+    return packed;
 }
 
 /*

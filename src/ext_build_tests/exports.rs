@@ -974,6 +974,7 @@ fn a_constructible_class_yields_one_constructor_descriptor_with_the_carried_tail
             params: vec![Ty::Int, Ty::Int],
             param_writable: vec![false; 2],
             slot_names: vec!["w".to_string(), "h".to_string()],
+            slot_kinds: "ii".to_string(),
             keyword_names: None,
         }]
     );
@@ -1168,6 +1169,7 @@ fn an_implicit_object_init_is_still_resolved_when_it_is_the_only_one() {
             params: Vec::new(),
             param_writable: Vec::new(),
             slot_names: vec!["w".to_string(), "h".to_string()],
+            slot_kinds: "ii".to_string(),
             keyword_names: None,
         }]
     );

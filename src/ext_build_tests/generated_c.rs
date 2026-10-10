@@ -1494,6 +1494,7 @@ fn a_constructor_buffer_parameter_its_body_stores_into_is_acquired_writable() {
             params: vec![Ty::MemoryView],
             param_writable: vec![true],
             slot_names: vec!["w".to_string()],
+            slot_kinds: "i".to_string(),
             keyword_names: None,
         }],
         &[],
@@ -2028,6 +2029,7 @@ fn grid_ctor(params: Vec<Ty>, slot_names: &[&str]) -> ExtCtor {
         param_writable: vec![false; params.len()],
         params,
         slot_names: slot_names.iter().map(ToString::to_string).collect(),
+        slot_kinds: "i".repeat(slot_names.len()),
         keyword_names: None,
     }
 }
@@ -2124,7 +2126,8 @@ fn a_constructible_class_gets_a_tp_init_three_slots_and_a_carrier_sized_spec() {
     // instance first -- the same shape `MirExpr::Instantiate` emits.
     assert!(
         inc.contains(
-            "    inst = pycc_rt_instance_new(2, \"Grid\\000w\\000h\", 8);\n    \
+            "    inst = pycc_rt_instance_new(2, \"Grid\\000w\\000h\\000ii\", 11);\n    \
+             pycc_rt_instance_incref(inst);\n    \
              Py_ssize_t bridge_mark = pycc_ext_bridge_mark();\n    \
              ((void (*)(void *, long long, long long))fnptr_0m4_Grid8___init__)\
              (inst, a0, a1);\n"
@@ -2137,6 +2140,7 @@ fn a_constructible_class_gets_a_tp_init_three_slots_and_a_carrier_sized_spec() {
     assert!(
         inc.contains(
             "    if (pycc_rt_ext_pending_type() >= 0) {\n        \
+             pycc_rt_instance_decref(inst);\n        \
              pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
              return pycc_ext_activation_exit_status(-1);\n    }\n    pycc_ext_bridge_release_to(bridge_mark);\n    \
              pycc_ext_carrier_bind(self, inst);\n    return pycc_ext_activation_exit_status(0);\n}\n"
@@ -2192,7 +2196,8 @@ fn a_zero_argument_constructor_declares_a_receiver_only_parameter_list() {
     );
     assert!(
         inc.contains(
-            "    inst = pycc_rt_instance_new(0, \"Grid\", 4);\n    \
+            "    inst = pycc_rt_instance_new(0, \"Grid\\000\", 5);\n    \
+             pycc_rt_instance_incref(inst);\n    \
              Py_ssize_t bridge_mark = pycc_ext_bridge_mark();\n    \
              ((void (*)(void *))fnptr_0m4_Grid8___init__)(inst);\n"
         ),
@@ -2244,6 +2249,7 @@ fn a_memoryview_constructor_releases_its_buffer_on_every_exit_past_the_acquire()
     assert!(
         inc.contains(
             "    if (pycc_rt_ext_pending_type() >= 0) {\n        PyBuffer_Release(&b0);\n        \
+             pycc_rt_instance_decref(inst);\n        \
              pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
              return pycc_ext_activation_exit_status(-1);\n    }\n    pycc_ext_bridge_release_to(bridge_mark);\n    \
              PyBuffer_Release(&b0);\n"

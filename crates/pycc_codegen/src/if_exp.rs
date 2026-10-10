@@ -33,7 +33,7 @@
 //! arm is still leaked on the produced arm (#1499).
 
 use super::boolop::{Emitter, basic_value, owned_value};
-use super::{Scalar, release_scalar_if_int_temporary, ty_to_basic_type};
+use super::{Scalar, release_scalar_if_temporary, ty_to_basic_type};
 use inkwell::values::BasicValueEnum;
 use pycc_mir::{MirExpr, Ty};
 
@@ -49,7 +49,7 @@ pub(super) fn emit_if_exp<'ctx>(
     let held = emitter.hold(test, &test_scalar);
     let truth = emitter.truth(test_scalar);
     held.release(emitter.builder, emitter.rt);
-    release_scalar_if_int_temporary(
+    release_scalar_if_temporary(
         emitter.context,
         emitter.builder,
         emitter.rt,

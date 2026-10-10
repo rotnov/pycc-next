@@ -32,8 +32,7 @@ use super::boolop::Emitter;
 use super::compare::emit_compare_values;
 use super::exception::guard_statement_effects;
 use super::{
-    Scalar, build_call_to_with_leading_args, expect_instance_pointer,
-    release_scalar_if_int_temporary,
+    Scalar, build_call_to_with_leading_args, expect_instance_pointer, release_scalar_if_temporary,
 };
 use inkwell::IntPredicate;
 use inkwell::basic_block::BasicBlock;
@@ -175,5 +174,5 @@ fn link_can_raise(kind: &MirCompareKind) -> bool {
 }
 
 fn release<'ctx>(emitter: &Emitter<'_, 'ctx>, source: &MirExpr, scalar: &Scalar<'ctx>) {
-    release_scalar_if_int_temporary(emitter.context, emitter.builder, emitter.rt, source, scalar);
+    release_scalar_if_temporary(emitter.context, emitter.builder, emitter.rt, source, scalar);
 }

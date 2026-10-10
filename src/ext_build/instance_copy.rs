@@ -90,7 +90,9 @@ pub(crate) fn copy_kind(ty: &Ty) -> Option<u8> {
         Ty::Str => Some(b's'),
         Ty::Int => Some(b'i'),
         Ty::Object => Some(b'o'),
-        Ty::Float | Ty::Bool | Ty::List(_) | Ty::Dict(_) | Ty::Instance(_) => Some(b'w'),
+        Ty::List(_) => Some(b'l'),
+        Ty::Instance(_) => Some(b'c'),
+        Ty::Float | Ty::Bool | Ty::Dict(_) => Some(b'w'),
         _ => None,
     }
 }

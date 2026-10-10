@@ -131,8 +131,8 @@ fn with_two_operands<'ctx, R>(
     let result = emit(a, b);
     held_b.release(builder, rt);
     held_a.release(builder, rt);
-    release_scalar_if_int_temporary(context, builder, rt, first, &a);
-    release_scalar_if_int_temporary(context, builder, rt, second, &b);
+    release_scalar_if_temporary(context, builder, rt, first, &a);
+    release_scalar_if_temporary(context, builder, rt, second, &b);
     result
 }
 
@@ -331,7 +331,7 @@ pub(super) fn emit_set_item<'ctx>(
         },
     );
     held_value.release(builder, rt);
-    release_scalar_if_int_temporary(context, builder, rt, value, &value_scalar);
+    release_scalar_if_temporary(context, builder, rt, value, &value_scalar);
 }
 
 /// Emits `del base[key]` on a CPython object.

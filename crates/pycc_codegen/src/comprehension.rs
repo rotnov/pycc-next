@@ -43,16 +43,17 @@
 
 use super::bigint_rc::{
     BigIntRefcount, emit_bigint_refcount_call, int_temporary_word, release_if_int_temporary,
-    release_scalar_if_int_temporary,
 };
+use super::heap_rc::release_scalar_if_temporary;
 use super::rt_fns::RtFns;
 use super::set_instance::{SetEmitter, set_element_scalar};
 use super::{
-    Scalar, StorageSlot, UntagUse, UserFunction, build_at_entry_block, build_dict_len, build_dict_set,
-    build_int_set_add, build_int_set_check_not_resized, build_int_set_get, build_int_set_len,
-    build_untag_checked, emit_assign, emit_dict_name_read, emit_expr, emit_list_name_read,
-    emit_range_operands_with_exception_safety, emit_set_name_read, guard_statement_effects,
-    incref_if_str_duplicate, list, to_encoded_int, truthy, ty_to_basic_type,
+    Scalar, StorageSlot, UntagUse, UserFunction, build_at_entry_block, build_dict_len,
+    build_dict_set, build_int_set_add, build_int_set_check_not_resized, build_int_set_get,
+    build_int_set_len, build_untag_checked, emit_assign, emit_dict_name_read, emit_expr,
+    emit_list_name_read, emit_range_operands_with_exception_safety, emit_set_name_read,
+    guard_statement_effects, incref_if_str_duplicate, list, to_encoded_int, truthy,
+    ty_to_basic_type,
 };
 use inkwell::IntPredicate;
 use inkwell::basic_block::BasicBlock;
@@ -179,7 +180,7 @@ pub(super) fn emit_comprehension<'ctx>(
             held.release(cx.builder, cx.rt);
             // #146 Part 2 (D-181): released after `truthy`, which reads a
             // bigint operand's limbs.
-            release_scalar_if_int_temporary(cx.context, cx.builder, cx.rt, cond_expr, &cond_scalar);
+            release_scalar_if_temporary(cx.context, cx.builder, cx.rt, cond_expr, &cond_scalar);
             let if_taken_bb = cx
                 .context
                 .append_basic_block(function, &format!("{prefix}_if_taken"));
@@ -498,15 +499,9 @@ fn open_loop<'ctx>(
             });
             let word = list::build_list_get_unchecked(context, builder, var_ty, list_ptr, current);
             let element = list::word_element(context, builder, var_ty, word);
-            // A borrowed `str` element: the loop variable owns its own
-            // reference, as `MirStmt::ForList`'s does.
-            if let Scalar::Str(ptr) = element {
-                builder
-                    .build_call(rt.str_incref, &[ptr.into()], "listcomp_str_incref")
-                    .expect("build_call should not fail for a well-formed incref");
-                super::decref_str_slot_before_store(context, builder, rt, cx.locals, var);
-            }
-            emit_assign(context, builder, rt, cx.locals, var, element);
+            // A borrowed element: the loop variable owns its own reference,
+            // as `MirStmt::ForList`'s does.
+            bind_borrowed(cx, var, var_ty, element);
             lp
         }
         CompSource::Dict(name) => {
@@ -575,17 +570,22 @@ fn open_loop<'ctx>(
                 build_int_set_len(b, rt, set_ptr)
             });
             let encoded_element = build_int_set_get(builder, rt, set_ptr, current);
-            emit_assign(
-                context,
-                builder,
-                rt,
-                cx.locals,
-                var,
-                set_element_scalar(context, builder, var_ty, encoded_element),
-            );
+            let element = set_element_scalar(context, builder, var_ty, encoded_element);
+            bind_borrowed(cx, var, var_ty, element);
             lp
         }
     }
+}
+
+/// Binds `element`, borrowed from the iterated container, to the loop
+/// variable `var`: the slot takes its own reference and releases the one it
+/// held.
+fn bind_borrowed<'ctx>(cx: &CompCx<'_, 'ctx>, var: &str, var_ty: &Ty, element: Scalar<'ctx>) {
+    crate::heap_rc::retain_scalar(cx.context, cx.builder, cx.rt, var_ty, &element);
+    if let Some(slot) = cx.locals.get(var) {
+        crate::heap_rc::release_slot(cx.context, cx.builder, cx.rt, &slot.ty, slot.ptr);
+    }
+    emit_assign(cx.context, cx.builder, cx.rt, cx.locals, var, element);
 }
 
 /// Appends the loop's test, body and after blocks.

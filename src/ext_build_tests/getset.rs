@@ -621,6 +621,7 @@ fn an_instance_slot_getter_packs_through_the_instance_egress() {
                   return NULL;\n    }\n    word = pycc_rt_instance_get_slot_checked(inst, 0);\n    \
                   if (pycc_rt_ext_pending_type() >= 0) {\n        pycc_ext_raise_pending();\n        \
                   return NULL;\n    }\n    \
+                  pycc_rt_instance_incref((void *)(intptr_t)word);\n    \
                   return pycc_ext_pack_instance((void *)(intptr_t)word);\n}\n\n";
     assert!(inc.contains(getter), "missing:\n{getter}\nin:\n{inc}");
     // Part 1 of #1443: the instance slot's setter admits a carrier of the
@@ -628,7 +629,7 @@ fn an_instance_slot_getter_packs_through_the_instance_egress() {
     for expected in [
         "    if (pycc_ext_unpack_instance(value, \"St.parse_conf\", 0, \"Conf\", &v) != 0) {\n",
         "    word = (long long)(intptr_t)v;\n    \
-         pycc_rt_ext_instance_store_slot(inst, 0, 'w', word);\n",
+         pycc_rt_ext_instance_store_slot(inst, 0, 'c', word);\n",
     ] {
         assert!(inc.contains(expected), "missing:\n{expected}\nin:\n{inc}");
     }

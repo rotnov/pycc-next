@@ -83,6 +83,9 @@ pub(crate) enum SlotCleanup {
     /// wrapper must release on every exit after acquisition -- including
     /// the one where the compiled call returned normally.
     BufferRelease,
+    /// The instance reference `pycc_ext_unpack_instance` took for the
+    /// compiled parameter slot (`pycc_rt::rc`).
+    InstanceDecref,
 }
 
 impl BoundaryCarrier {
@@ -125,12 +128,8 @@ impl BoundaryCarrier {
             BoundaryCarrier::Scalar(_, "str") => Some(SlotCleanup::StrDecref),
             // Every numeric scalar is a copied machine word, and a `tuple`'s
             // elements are copied out by value, so neither owes anything.
-            // Part 1 of #1447: an instance is never freed (D-107, D-154) and
-            // the unpack takes no reference to its carrier, so it owes
-            // nothing either.
-            BoundaryCarrier::Scalar(..)
-            | BoundaryCarrier::Tuple(_)
-            | BoundaryCarrier::Instance(_) => None,
+            BoundaryCarrier::Scalar(..) | BoundaryCarrier::Tuple(_) => None,
+            BoundaryCarrier::Instance(_) => Some(SlotCleanup::InstanceDecref),
             BoundaryCarrier::Buffer { .. } => Some(SlotCleanup::BufferRelease),
         }
     }

@@ -60,8 +60,7 @@ use super::foreign_fail::{ForeignFailEdge, route_null};
 use super::foreign_pack::emit_pack;
 use super::{
     RtFns, Scalar, StorageSlot, UserFunction, coerce_scalar_to_type, emit_expr,
-    incref_if_str_duplicate, release_scalar_if_int_temporary, retain_if_int_duplicate, truthy,
-    ty_to_basic_type,
+    release_scalar_if_temporary, retain_if_int_duplicate, truthy, ty_to_basic_type,
 };
 use inkwell::basic_block::BasicBlock;
 use inkwell::context::Context;
@@ -217,7 +216,7 @@ fn operand_truth<'ctx>(emitter: &Emitter<'_, 'ctx>, operand: &MirExpr) -> IntVal
     let held = emitter.hold(operand, &scalar);
     let truth = emitter.truth(scalar);
     held.release(emitter.builder, emitter.rt);
-    release_scalar_if_int_temporary(
+    release_scalar_if_temporary(
         emitter.context,
         emitter.builder,
         emitter.rt,
@@ -260,7 +259,7 @@ fn emit_value<'ctx>(
     emitter.branch_to(join);
 
     emitter.builder.position_at_end(eval_right);
-    release_scalar_if_int_temporary(
+    release_scalar_if_temporary(
         emitter.context,
         emitter.builder,
         emitter.rt,
@@ -362,7 +361,7 @@ fn boxed_value<'ctx>(
         scalar,
         "boolop_boxed",
     );
-    release_scalar_if_int_temporary(
+    release_scalar_if_temporary(
         emitter.context,
         emitter.builder,
         emitter.rt,
@@ -392,7 +391,13 @@ pub(super) fn owned_value<'ctx>(
 ) -> Scalar<'ctx> {
     let scalar =
         retain_if_int_duplicate(emitter.context, emitter.builder, emitter.rt, source, scalar);
-    let scalar = incref_if_str_duplicate(emitter.builder, emitter.rt, source, scalar);
+    let scalar = crate::heap_rc::retain_if_heap_duplicate(
+        emitter.context,
+        emitter.builder,
+        emitter.rt,
+        source,
+        scalar,
+    );
     coerce_scalar_to_type(emitter.context, emitter.builder, scalar, ty.clone())
 }
 

@@ -45,6 +45,6 @@ pub(super) fn emit_sequence<'ctx>(
         locals,
         discard,
     );
-    release_scalar_if_int_temporary(context, builder, rt, discard, &scalar);
+    release_scalar_if_temporary(context, builder, rt, discard, &scalar);
     emit_expr(context, builder, module, rt, user_functions, locals, value)
 }
