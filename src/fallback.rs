@@ -256,6 +256,12 @@ impl Plan {
                 .keys()
                 .flat_map(|index| &self.stmts[*index].mentions)
                 .collect();
+            // A name fallback code reads that no top-level statement binds
+            // may come from a `from m import *`, whose names are not known
+            // here: such an import falls back with the first one.
+            let all_bound: BTreeSet<&String> =
+                self.stmts.iter().flat_map(|stmt| &stmt.bound).collect();
+            let unbound_read = read.iter().find(|name| !all_bound.contains(*name)).copied();
             let forced: Vec<(usize, String)> = self
                 .stmts
                 .iter()
@@ -263,6 +269,7 @@ impl Plan {
                 .filter(|(index, _)| !self.fallback.contains_key(index))
                 .filter_map(|(index, stmt)| {
                     let name = match &stmt.kind {
+                        Kind::Import if stmt.opaque.contains("*") => unbound_read?,
                         Kind::Import | Kind::Other => {
                             stmt.opaque.iter().find(|n| globals.contains(*n))?
                         }

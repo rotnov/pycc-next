@@ -186,6 +186,18 @@ fn a_compiled_import_or_handler_binding_a_dict_global_falls_back() {
     assert!(report.contains("statements at m.py:2-5 "), "{report}");
 }
 
+/// A wildcard import's names are unknown, so fallback code reading a name
+/// no statement binds takes the import with it.
+#[test]
+fn a_wildcard_import_falls_back_with_code_reading_an_unbound_name() {
+    let source = "from itertools import *\nx = 1\ny = list(accumulate([x]))\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(source.find("list").unwrap() as u32)]);
+    let report = plan.report_lines().join("\n");
+    assert!(report.contains("statement at m.py:1 "), "{report}");
+    assert!(!report.contains("m.py:2"), "{report}");
+}
+
 #[test]
 fn a_failure_no_statement_owns_falls_back_everything() {
     let mut plan = Plan::new("x = 1\ny = 2\n", "m.py", NATIVE).expect("parses");
