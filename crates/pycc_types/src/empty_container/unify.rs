@@ -15,6 +15,12 @@
 //!   known type, a returned value against the declared return type, either
 //!   operand of `==`/`!=`/`+`, an element read (`t = xs[i]`, `for t in xs`)
 //!   against the container's element;
+//! * values flow through: an unannotated helper's call returns what its
+//!   `return`s unify to (the solver types helpers only after this pass),
+//!   `sorted(xs)` / `list(xs)` / a comprehension list `xs`'s elements, an
+//!   unpacking target is an element (or tuple item) of its value, and a
+//!   call the checker cannot type yet is typed again from what its
+//!   arguments unified to (`list(map(int, sr().split()))`);
 //! * a container of empty containers (`[[] for _ in range(n)]`, `[[]] * n`,
 //!   `[set(), set()]`) gets its element type from how its elements are used
 //!   (`g[i].append(v)`, which the desugaring reads through a temporary).
@@ -29,6 +35,8 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
+mod settle;
+mod sources;
 mod store;
 mod walk;
 use store::{Shape, Store};
@@ -52,6 +60,9 @@ enum Deferred {
         result: usize,
         iterate: bool,
     },
+    /// `items` are `base` unpacked (`a, b = base`, a `for a, b in xs`
+    /// target): each a list's element, or a tuple's item at its position.
+    Unpack { base: usize, items: Vec<usize> },
     /// `base[key] = value`.
     Store {
         base: usize,
@@ -77,6 +88,11 @@ struct Engine {
     site_kinds: Vec<SiteKind>,
     /// (scope, name) -> variable; scope `0` is the module.
     names: HashMap<(usize, String), usize>,
+    /// Module function name -> the variable its `return`s unify with.
+    returns: HashMap<String, usize>,
+    /// Module function name -> whether every parameter is concretely
+    /// annotated.
+    helpers: HashMap<String, bool>,
     deferred: Vec<Deferred>,
 }
 
@@ -89,6 +105,8 @@ struct Scope<'a> {
     /// function reads is the module's.
     locals: Option<&'a [&'a str]>,
     return_ty: Option<&'a Ty>,
+    /// The module function this scope is the body of.
+    function: Option<&'a str>,
     /// Names bound by more than one syntactic site in this scope: the
     /// environment's flat type for one of them may come from a different,
     /// mutually exclusive site, so it is never trusted (each site's own
@@ -120,6 +138,28 @@ impl Engine {
         }
         let var = self.store.fresh();
         self.names.insert((scope_id, name.to_string()), var);
+        var
+    }
+
+    /// A call of module function `name` whose return type is not inferred
+    /// yet (the solver runs after this pass): what its `return`s unify to,
+    /// when no parameter is left to infer -- a helper generic over one
+    /// would return a different type per call.
+    fn helper_return(&mut self, name: &str) -> Option<usize> {
+        self.helpers
+            .get(name)
+            .copied()
+            .unwrap_or(false)
+            .then(|| self.return_var(name))
+    }
+
+    /// The variable of module function `name`'s returned values.
+    fn return_var(&mut self, name: &str) -> usize {
+        if let Some(var) = self.returns.get(name) {
+            return *var;
+        }
+        let var = self.store.fresh();
+        self.returns.insert(name.to_string(), var);
         var
     }
 
@@ -205,6 +245,15 @@ impl Engine {
                 let base_var = self.term(scope, base);
                 self.term(scope, index);
                 let base_var = base_var?;
+                // A constant index into a tuple (an unpacking temporary's
+                // `t[0]`): that item.
+                if let HirExpr::IntLiteral(i) = index.as_ref()
+                    && let Some(Shape::Tuple(items)) = self.store.open(base_var)
+                {
+                    let len = items.len() as i64;
+                    let at = if *i < 0 { *i + len } else { *i };
+                    return usize::try_from(at).ok().and_then(|at| items.get(at).copied());
+                }
                 let result = self.store.fresh();
                 self.deferred.push(Deferred::Element {
                     base: base_var,
@@ -290,6 +339,48 @@ impl Engine {
                 }
                 Some(result)
             }
+            // `-x`, `+x`, `~x` over a scalar typed later: the type of `0 - x`
+            // (or `0 ^ x`), which is CPython's for every numeric operand
+            // (`-True` is an `int`; `~` of a float has none).
+            HirExpr::UnaryOp {
+                op: op @ (pycc_hir::UnaryOpKind::USub
+                | pycc_hir::UnaryOpKind::UAdd
+                | pycc_hir::UnaryOpKind::Invert),
+                operand,
+            } => {
+                let operand_var = self.term(scope, operand);
+                if let Some(known) = self.inferred(scope, expr) {
+                    return Some(known);
+                }
+                let right = operand_var?;
+                let left = self.store.known(Ty::Int);
+                let result = self.store.fresh();
+                self.deferred.push(Deferred::BinOp {
+                    op: if matches!(op, pycc_hir::UnaryOpKind::Invert) {
+                        pycc_hir::BinOpKind::BitXor
+                    } else {
+                        pycc_hir::BinOpKind::Sub
+                    },
+                    left,
+                    right,
+                    result,
+                });
+                Some(result)
+            }
+            HirExpr::MethodCall { base, method, args } => {
+                self.method_call(scope, expr, base, method, args)
+            }
+            HirExpr::Unpack { value, arity } => {
+                let base = self.term(scope, value);
+                let items: Vec<usize> = (0..*arity).map(|_| self.store.fresh()).collect();
+                if let Some(base) = base {
+                    self.deferred.push(Deferred::Unpack {
+                        base,
+                        items: items.clone(),
+                    });
+                }
+                Some(self.store.with_shape(Shape::Tuple(items)))
+            }
             HirExpr::TupleLiteral(items) if !items.is_empty() => {
                 let vars: Vec<Option<usize>> =
                     items.iter().map(|item| self.term(scope, item)).collect();
@@ -337,15 +428,25 @@ impl Engine {
                     if concrete_ty(&ret) {
                         return Some(self.store.known(ret));
                     }
-                    return None;
+                    return self.helper_return(callee);
                 }
-                self.inferred(scope, expr)
+                if self.helpers.contains_key(callee) {
+                    return self.helper_return(callee);
+                }
+                if let Some(known) = self.inferred(scope, expr) {
+                    return Some(known);
+                }
+                if let Some(known) = self.retyped_call(scope, callee, args, &arg_vars) {
+                    return Some(known);
+                }
+                self.element_preserving_call(callee, &arg_vars)
             }
             HirExpr::Comprehension(comp) => {
-                for sub in comp.sub_exprs() {
-                    self.term(scope, sub);
+                let shaped = self.comprehension(scope, comp);
+                if let Some(known) = self.inferred(scope, expr) {
+                    self.store.unify(shaped, known);
                 }
-                self.inferred(scope, expr)
+                Some(shaped)
             }
             _ => {
                 for sub in direct_children(expr) {
@@ -446,47 +547,53 @@ impl Engine {
                 }
             }
             HirStmt::ListCompAssign {
-                target, elt, cond, ..
+                target,
+                var,
+                iter,
+                cond,
+                elt,
             }
             | HirStmt::SetCompAssign {
-                target, elt, cond, ..
+                target,
+                var,
+                iter,
+                cond,
+                elt,
             } => {
-                if let Some(cond) = cond {
-                    self.term(scope, cond);
-                }
-                let elem = self.term(scope, elt).unwrap_or_else(|| self.store.fresh());
-                let set = matches!(stmt, HirStmt::SetCompAssign { .. });
-                self.produce(scope, target, |_| {
-                    if set {
-                        Shape::Set(elem)
-                    } else {
-                        Shape::List(elem)
-                    }
-                });
+                let elt = if matches!(stmt, HirStmt::SetCompAssign { .. }) {
+                    pycc_hir::CompElt::Set((**elt).clone())
+                } else {
+                    pycc_hir::CompElt::List((**elt).clone())
+                };
+                self.comprehension_assign(scope, target, var, iter, cond, elt);
             }
             HirStmt::DictCompAssign {
                 target,
+                var,
+                iter,
+                cond,
                 key,
                 value,
-                cond,
-                ..
             } => {
-                if let Some(cond) = cond {
-                    self.term(scope, cond);
-                }
-                let k = self.term(scope, key).unwrap_or_else(|| self.store.fresh());
-                let v = self
-                    .term(scope, value)
-                    .unwrap_or_else(|| self.store.fresh());
-                self.produce(scope, target, |_| Shape::Dict(k, v));
+                let elt = pycc_hir::CompElt::Dict {
+                    key: (**key).clone(),
+                    value: (**value).clone(),
+                };
+                self.comprehension_assign(scope, target, var, iter, cond, elt);
             }
             HirStmt::Return(Some(value)) => {
-                if let Some(t) = self.term(scope, value)
-                    && let Some(ret) = scope.return_ty
+                let Some(t) = self.term(scope, value) else {
+                    return;
+                };
+                if let Some(ret) = scope.return_ty
                     && concrete_ty(ret)
                 {
                     let known = self.store.known(ret.clone());
                     self.store.unify(t, known);
+                } else if let Some(function) = scope.function {
+                    // An unannotated helper: its calls read this variable.
+                    let ret = self.return_var(function);
+                    self.store.unify(ret, t);
                 }
             }
             HirStmt::ForList {
@@ -590,86 +697,6 @@ impl Engine {
             }
             other => {
                 self.term(scope, other);
-            }
-        }
-    }
-
-    /// Applies every deferred constraint whose container shape is known,
-    /// until nothing changes.
-    fn settle(&mut self) {
-        loop {
-            let mut progressed = false;
-            let pending = std::mem::take(&mut self.deferred);
-            for constraint in pending {
-                let base = match &constraint {
-                    Deferred::Element { base, .. } | Deferred::Store { base, .. } => *base,
-                    Deferred::BinOp {
-                        op,
-                        left,
-                        right,
-                        result,
-                    } => {
-                        let scalar = |ty: &Option<Ty>| {
-                            matches!(ty, Some(Ty::Int | Ty::Float | Ty::Bool | Ty::Str))
-                        };
-                        let (lt, rt) = (self.store.resolve(*left, 0), self.store.resolve(*right, 0));
-                        if !(scalar(&lt) && scalar(&rt)) {
-                            self.deferred.push(constraint);
-                            continue;
-                        }
-                        if let Ok(ty) =
-                            crate::binop::numeric_result_type(*op, lt.unwrap(), rt.unwrap())
-                        {
-                            let known = self.store.known(ty);
-                            self.store.unify(*result, known);
-                            progressed = true;
-                        }
-                        continue;
-                    }
-                };
-                match (self.store.open(base), constraint) {
-                    (Some(Shape::List(e)), Deferred::Element { result, .. })
-                    | (
-                        Some(Shape::Set(e)),
-                        Deferred::Element {
-                            result,
-                            iterate: true,
-                            ..
-                        },
-                    ) => {
-                        self.store.unify(e, result);
-                        progressed = true;
-                    }
-                    (
-                        Some(Shape::Dict(k, v)),
-                        Deferred::Element {
-                            result, iterate, ..
-                        },
-                    ) => {
-                        self.store.unify(if iterate { k } else { v }, result);
-                        progressed = true;
-                    }
-                    (Some(Shape::List(e)), Deferred::Store { value, .. }) => {
-                        self.store.unify(e, value);
-                        progressed = true;
-                    }
-                    (Some(Shape::Dict(k, v)), Deferred::Store { key, value, .. }) => {
-                        self.store.unify(k, key);
-                        self.store.unify(v, value);
-                        progressed = true;
-                    }
-                    (Some(Shape::Known(Ty::Str)), Deferred::Element { result, .. }) => {
-                        let known = self.store.known(Ty::Str);
-                        self.store.unify(result, known);
-                        progressed = true;
-                    }
-                    (Some(Shape::Known(Ty::Tuple(_)) | Shape::Known(Ty::Str)), _) => {}
-                    (Some(_), _) => {}
-                    (None, constraint) => self.deferred.push(constraint),
-                }
-            }
-            if !progressed {
-                return;
             }
         }
     }
@@ -841,6 +868,18 @@ pub(super) fn infer(
         sites: vec![None; sites.len()],
         site_kinds: sites.iter().map(|(kind, _)| *kind).collect(),
         names: HashMap::new(),
+        returns: HashMap::new(),
+        helpers: hir
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                HirItem::Function { name, params, .. } => Some((
+                    name.clone(),
+                    params.iter().all(|(_, ty)| concrete_ty(ty)),
+                )),
+                HirItem::TopLevelStmt(_) => None,
+            })
+            .collect(),
         deferred: Vec::new(),
     };
     // Two rounds: the second sees, through the environments' bindings, the
@@ -858,6 +897,7 @@ pub(super) fn infer(
         for (index, item) in hir.items.iter().enumerate() {
             match item {
                 HirItem::Function {
+                    name,
                     params,
                     body,
                     return_ty,
@@ -875,6 +915,7 @@ pub(super) fn infer(
                         local_names: names,
                         locals: Some(&locals),
                         return_ty: Some(return_ty),
+                        function: Some(name),
                         multi_site: multi_site_names(&[body]),
                     };
                     for (name, ty) in params {
@@ -893,6 +934,7 @@ pub(super) fn infer(
                         local_names: top_level_names,
                         locals: None,
                         return_ty: None,
+                        function: None,
                         multi_site: module_multi_site.clone(),
                     };
                     engine.stmt(&scope, stmt);

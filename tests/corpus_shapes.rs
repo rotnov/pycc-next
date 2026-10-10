@@ -169,6 +169,15 @@ fn a_function_reading_a_maybe_bound_global_matches_cpython() {
     matches_cpython("corpus_unbound_global.py", &[], "3\n4\n");
 }
 
+/// Empty lists typed through what flows into them: a lambda helper's
+/// return (through a chained helper's method call), unary minus and `~`,
+/// tuple unpacking of an element, `sorted` with and without `key=`, and a
+/// comprehension over a list typed later.
+#[test]
+fn empty_lists_are_typed_through_helpers_unpacking_and_sorted() {
+    matches_cpython("corpus_empty_list_flow.py", &[], "5 1 4 2 3\n");
+}
+
 /// A name whose two types meet at one read stays one variable, refused.
 #[test]
 fn a_name_holding_two_types_at_one_read_is_still_refused() {
