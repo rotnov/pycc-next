@@ -1,3 +1,4 @@
-def f() -> int:
-    a, *b = 1, 2
-    return a
+def f(xs: list[tuple[int, int, int]]) -> int:
+    for a, *b in xs:
+        return a
+    return 0

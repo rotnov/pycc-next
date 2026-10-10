@@ -38,16 +38,6 @@ pub(crate) fn check_attr_set(
     value: &HirExpr,
 ) -> Result<(), Diagnostic> {
     let base_ty = infer_expr_in(env, local_names, base)?;
-    // `self.xs += ys` on a list: see `list_ops::refuse_list_self_rebind`.
-    let target = HirExpr::AttrGet {
-        base: Box::new(base.clone()),
-        attr: attr.to_string(),
-    };
-    if matches!(value, HirExpr::BinOp { left, .. } | HirExpr::AugBinOp { left, .. } if **left == target)
-    {
-        let value_ty = infer_expr_in(env, local_names, value)?;
-        crate::list_ops::refuse_list_self_rebind(&target, value, &value_ty)?;
-    }
     // #1457 (Part 2 of #1443): a CPython object accepts any attribute name
     // and decides at run time; only the value's type is checked here.
     if base_ty == Ty::Object {

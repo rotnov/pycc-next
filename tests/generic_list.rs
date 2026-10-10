@@ -112,15 +112,6 @@ fn check_fails(label: &str, source: &str) -> String {
 fn unsupported_list_shapes_are_refused_not_miscompiled() {
     for (source, message) in [
         (
-            "xs = [1]\nxs += [2]\n",
-            "error[C0001]: rebinding a list to `+`/`*` of itself",
-        ),
-        (
-            // A rebinding in a loop keeps one variable (its webs join).
-            "xs = [1]\nfor _ in range(2):\n    xs = xs * 2\nprint(xs)\n",
-            "error[C0001]: rebinding a list to `+`/`*` of itself",
-        ),
-        (
             "class P:\n    def __init__(self, x: int) -> None:\n        self.x = x\n\n\nprint([P(1)])\n",
             "error[C0001]: rendering `list[P]` (a list of `P` instances) as a string",
         ),

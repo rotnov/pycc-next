@@ -705,6 +705,29 @@ pub fn set_operator(op: &str, in_place: bool, left: &Ty, right: &Ty) -> Option<B
     Some(sig(symbol, &[left.clone(), right.clone()], left.clone()))
 }
 
+/// `list += other` / `list *= n` (an augmented assignment): CPython
+/// mutates the list in place, so the runtime extends or repeats `left`
+/// itself and returns it as the value stored back.
+#[must_use]
+pub fn list_inplace_operator(op: &str, left: &Ty, right: &Ty) -> Option<BuiltinSig> {
+    let Ty::List(_) = left else {
+        return None;
+    };
+    match op {
+        "+" if right == left => Some(sig(
+            "pycc_rt_list_iadd",
+            &[left.clone(), left.clone()],
+            left.clone(),
+        )),
+        "*" if is_intlike(right) => Some(sig(
+            "pycc_rt_list_imul",
+            &[left.clone(), Ty::Int],
+            left.clone(),
+        )),
+        _ => None,
+    }
+}
+
 /// The operator index `pycc_rt_set_inplace` takes for `op`.
 #[must_use]
 pub fn set_inplace_index(op: &str) -> i64 {

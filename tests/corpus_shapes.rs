@@ -139,6 +139,20 @@ fn heapq_and_bisect_match_cpython() {
     matches_cpython("corpus_heap_bisect.py", &[], "");
 }
 
+/// `xs += ys` and `xs *= n` mutate the list in place (every alias sees
+/// it); `xs = xs + ys` builds a new one.
+#[test]
+fn in_place_list_operators_match_cpython() {
+    matches_cpython("corpus_list_inplace.py", &[], "");
+}
+
+/// `a, *rest = v` and `first, *mid, last = v`, with CPython's `ValueError`
+/// when too few values arrive.
+#[test]
+fn starred_unpacking_matches_cpython() {
+    matches_cpython("corpus_starred.py", &[], "3 1 4 1\n");
+}
+
 /// A name whose two types meet at one read stays one variable, refused.
 #[test]
 fn a_name_holding_two_types_at_one_read_is_still_refused() {

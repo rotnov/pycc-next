@@ -148,7 +148,14 @@ fn the_shapes_outside_part_1_are_refused() {
             "C0001",
             "unpacking a `int` value into names is not supported yet",
         ),
-        ("unpack_starred", "a, *b = (1, 2)\n", "C0001", "starred"),
+        // `a, *b = v` compiles (`pycc_ast::desugar::starred`); a starred
+        // target inside a `for` target over struct tuples does not.
+        (
+            "unpack_starred",
+            "def f(xs: list[tuple[int, int]]) -> int:\n    for a, *b in xs:\n        return a\n    return 0\n",
+            "C0001",
+            "not implemented yet",
+        ),
     ] {
         assert_one_error(tag, body, code, needle);
     }

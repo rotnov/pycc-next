@@ -432,6 +432,18 @@ fn operands_outlive_later_siblings_that_drop_their_owner() {
     assert_memcheck_clean(&bin);
 }
 
+/// `xs += ys` / `xs *= n` mutate the list every alias sees, and their
+/// element references balance; so do `heapq`/`bisect` on lists.
+#[test]
+fn in_place_list_operators_and_heaps_are_memcheck_clean() {
+    let dir = ScratchDir::new("memory_fixture_list_inplace").expect("scratch dir");
+    let bin = assert_fixture_matches_cpython(&dir, "corpus_list_inplace");
+    assert_memcheck_clean(&bin);
+    let dir = ScratchDir::new("memory_fixture_heap_bisect").expect("scratch dir");
+    let bin = assert_fixture_matches_cpython(&dir, "corpus_heap_bisect");
+    assert_memcheck_clean(&bin);
+}
+
 /// Dicts and sets are reference counted: aliasing, rebinding, a loop over a
 /// container its body rebinds, instance sets with duplicate inserts.
 #[test]

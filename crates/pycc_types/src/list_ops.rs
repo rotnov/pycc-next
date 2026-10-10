@@ -11,7 +11,7 @@
 
 use crate::{Environment, is_assignable};
 use pycc_diag::{Diagnostic, Span};
-use pycc_hir::{BinOpKind, HirExpr, Ty};
+use pycc_hir::{BinOpKind, Ty};
 
 fn mismatch(message: String) -> Diagnostic {
     Diagnostic::error("T0021", message, Span::new(0, 0))
@@ -147,39 +147,3 @@ pub(crate) fn list_method_ty(elem: &Ty, method: &str, arg_tys: &[Ty]) -> Result<
     }
 }
 
-/// Refuses `target = target + other` and `target = target * n` for a list
-/// `target` (and so `target += other`, which `pycc_hir` rewrites to exactly
-/// that shape before any type exists). CPython's `+=`/`*=` mutate the list
-/// in place, which every other reference to it observes; the rewritten form
-/// would build a new list instead. Both spellings are refused, because the
-/// two are indistinguishable here.
-pub(crate) fn refuse_list_self_rebind(
-    target: &HirExpr,
-    value: &HirExpr,
-    value_ty: &Ty,
-) -> Result<(), Diagnostic> {
-    if let (
-        Ty::List(_),
-        HirExpr::BinOp {
-            op: BinOpKind::Add | BinOpKind::Mul,
-            left,
-            ..
-        }
-        | HirExpr::AugBinOp {
-            op: BinOpKind::Add | BinOpKind::Mul,
-            left,
-            ..
-        },
-    ) = (value_ty, value)
-        && left.as_ref() == target
-    {
-        return Err(Diagnostic::error(
-            "C0001",
-            "rebinding a list to `+`/`*` of itself (or `+=`/`*=` on a list) is not supported yet \
-             -- CPython's `+=` mutates the list in place"
-                .to_string(),
-            Span::new(0, 0),
-        ));
-    }
-    Ok(())
-}

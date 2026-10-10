@@ -157,6 +157,15 @@ pub(crate) fn lower_bin_op_expr(
         }
         return MirExpr::RtCall(Box::new(crate::RtCallExpr { sig, args }));
     }
+    if in_place
+        && let Some(sig) =
+            pycc_hir::builtins::list_inplace_operator(op.as_str(), &left.ty(), &right.ty())
+    {
+        return MirExpr::RtCall(Box::new(crate::RtCallExpr {
+            sig,
+            args: vec![left, right],
+        }));
+    }
     let ty = binop_result_ty(*op, left.ty(), right.ty());
     MirExpr::BinOp {
         op: *op,

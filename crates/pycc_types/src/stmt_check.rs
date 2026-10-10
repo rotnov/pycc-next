@@ -736,12 +736,7 @@ pub(crate) fn check_dict_set(
     if let Ty::List(elem) = &dict_ty {
         let index_ty = infer_expr_in(env, local_names, key)?;
         let value_ty = infer_expr_in(env, local_names, value)?;
-        list_ops::check_list_set(elem, &index_ty, &value_ty)?;
-        let target = HirExpr::Subscript {
-            base: Box::new(HirExpr::Name(dict.to_string())),
-            index: Box::new(key.clone()),
-        };
-        return list_ops::refuse_list_self_rebind(&target, value, &value_ty);
+        return list_ops::check_list_set(elem, &index_ty, &value_ty);
     }
     let Ty::Dict(kv) = &dict_ty else {
         return Err(Diagnostic::error(

@@ -171,6 +171,64 @@ pub unsafe extern "C" fn pycc_rt_list_extend(list: *mut PyListObj, other: *mut P
     edit_words(list, |items| items.extend_from_slice(&added));
 }
 
+/// `xs += ys` on a list: extends `xs` in place and returns it (a new
+/// reference, which the augmented assignment stores back).
+///
+/// # Safety
+/// `list` and `other` must be live `PyListObj` pointers of one kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_iadd(
+    list: *mut PyListObj,
+    other: *mut PyListObj,
+) -> *mut PyListObj {
+    unsafe { pycc_rt_list_extend(list, other) };
+    unsafe { crate::rc::pycc_rt_list_incref(list) };
+    list
+}
+
+/// `xs *= n` on a list: repeats `xs` in place (empties it for `n <= 0`)
+/// and returns it (a new reference). `n` is an encoded `int`.
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_imul(list: *mut PyListObj, n: i64) -> *mut PyListObj {
+    let count = match inline_int_value(n) {
+        Some(v) => v.max(0) as usize,
+        None if crate::int_arith::decode_big(n) <= num_bigint::BigInt::from(0) => 0,
+        None => {
+            raise_builtin(
+                crate::exception::EXCEPTION_TYPE_OVERFLOW_ERROR,
+                "OverflowError",
+                "cannot fit 'int' into an index-sized integer",
+            );
+            unsafe { crate::rc::pycc_rt_list_incref(list) };
+            return list;
+        }
+    };
+    let list_ref = unsafe { &mut *list };
+    let items = list_ref.items().to_vec();
+    if count == 0 {
+        for word in &items {
+            list_ref.release(*word);
+        }
+        edit_words(list_ref, |all| all.clear());
+    } else {
+        for _ in 1..count {
+            for word in &items {
+                list_ref.retain(*word);
+            }
+        }
+        edit_words(list_ref, |all| {
+            for _ in 1..count {
+                all.extend_from_slice(&items);
+            }
+        });
+    }
+    unsafe { crate::rc::pycc_rt_list_incref(list) };
+    list
+}
+
 /// `xs.count(x)`.
 ///
 /// # Safety

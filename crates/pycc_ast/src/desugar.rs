@@ -40,6 +40,7 @@ mod closures;
 mod comps;
 mod exprs;
 mod keys;
+mod starred;
 mod stdlib;
 mod stmts;
 mod webs;

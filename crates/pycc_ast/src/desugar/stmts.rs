@@ -111,6 +111,12 @@ fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>, module_level: boo
             }
         }
         Stmt::Assign(s) => {
+            if let Some(stmts) = super::starred::expand_starred(s, fresh) {
+                for stmt in stmts {
+                    expand_stmt(stmt, fresh, out, module_level);
+                }
+                return;
+            }
             if let Some(stmts) = expand_assign(s, fresh) {
                 for stmt in stmts {
                     expand_stmt(stmt, fresh, out, module_level);

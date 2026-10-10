@@ -79,17 +79,12 @@ fn every_augmented_assignment_capability_refusal_is_named_and_located() {
 /// `pycc_ast::desugar` binds each to a temporary before the augmented
 /// statement (`tests/fixtures/desugar_stmts.py` runs it against CPython).
 
-/// S1: `BinOp` admits only immutable operand types, so a mutable or
-/// user-defined operand is refused, never rebound to a fresh object in place
-/// of CPython's in-place `__iadd__`.
+/// S1: `BinOp` admits only immutable operand types (and a list, extended
+/// in place), so a user-defined operand is refused, never rebound to a fresh
+/// object in place of CPython's in-place `__iadd__`.
 #[test]
 fn s1_a_mutable_or_user_defined_operand_is_refused() {
     for (source, header) in [
-        (
-            "xs: list[int] = [1]\nxs += [1]\n",
-            "error[C0001]: rebinding a list to `+`/`*` of itself (or `+=`/`*=` on a list) is \
-             not supported yet",
-        ),
         (
             "t = (1,)\nt += (2,)\n",
             "error[T0021]: operator Add is not defined for `tuple[int]` and `tuple[int]`",

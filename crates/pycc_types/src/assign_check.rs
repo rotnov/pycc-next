@@ -157,7 +157,6 @@ pub(crate) fn check_assignment_boxing(
     } else {
         ty
     };
-    list_ops::refuse_list_self_rebind(&HirExpr::Name(target.to_string()), value, &ty)?;
     check_assignment_of(env, target, ty, Some(value))
 }
 
