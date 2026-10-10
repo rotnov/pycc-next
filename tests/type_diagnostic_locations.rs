@@ -94,7 +94,7 @@ const CASES: &[Case] = &[
         label: "expected `int`, found `str`",
         ..case(
             "T0023",
-            "def f() -> int:\n    total = 0\n    total = \"x\"\n    return total\n",
+            "def f(c: bool) -> int:\n    total = 0\n    if c:\n        total = \"x\"\n    return total\n",
             "\"x\"",
         )
     },

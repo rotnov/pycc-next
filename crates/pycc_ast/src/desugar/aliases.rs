@@ -70,7 +70,7 @@ impl SysFn {
 }
 
 /// Every name a statement in `body` binds other than by an import.
-fn rebound_names(body: &[Stmt]) -> HashMap<String, usize> {
+pub(crate) fn rebound_names(body: &[Stmt]) -> HashMap<String, usize> {
     struct Collect(HashMap<String, usize>);
     impl Collect {
         fn add(&mut self, name: &str) {

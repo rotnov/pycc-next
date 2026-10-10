@@ -184,6 +184,15 @@ pub fn iterates_str_as_list(name: &str) -> bool {
 
 /// Every builtin name [`resolve_call`] claims for some argument types.
 pub const CALL_NAMES: &[&str] = &[
+    "__pycc_bisect_left",
+    "__pycc_bisect_right",
+    "__pycc_heapify",
+    "__pycc_heappop",
+    "__pycc_heappush",
+    "__pycc_heappushpop",
+    "__pycc_heapreplace",
+    "__pycc_insort_left",
+    "__pycc_insort_right",
     "__pycc_max_keyed",
     "__pycc_min_keyed",
     "__pycc_print_str",
@@ -268,7 +277,12 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
         | "math.ceil"
         | "math.factorial"
         | "math.comb"
-        | "math.perm" => Ty::Int,
+        | "math.perm"
+        | "__pycc_bisect_left"
+        | "__pycc_bisect_right" => Ty::Int,
+        "__pycc_heappush" | "__pycc_heapify" | "__pycc_insort_left" | "__pycc_insort_right" => {
+            Ty::None
+        }
         "float" => Ty::Float,
         name if float_math(name).is_some() || name == "math.log" => Ty::Float,
         "any" | "all" => Ty::Bool,
@@ -591,6 +605,47 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
                 elem.clone(),
                 true,
                 &[elem.clone()],
+            )
+        }
+        // `heapq`/`bisect` over a native list (`pycc_ast::desugar::stdlib`
+        // spells their calls with these names).
+        ("__pycc_heapify", [Ty::List(elem)]) if orderable(elem) => {
+            sig("pycc_rt_heapify", &[args[0].clone()], Ty::None)
+        }
+        ("__pycc_heappop", [Ty::List(elem)]) if orderable(elem) => BuiltinSig {
+            symbol: "pycc_rt_heappop",
+            params: vec![args[0].clone()],
+            ret: (**elem).clone(),
+            ret_word: true,
+            word_args: vec![false],
+            kind_args: Vec::new(),
+        },
+        (
+            "__pycc_heappush"
+            | "__pycc_heapreplace"
+            | "__pycc_heappushpop"
+            | "__pycc_bisect_left"
+            | "__pycc_bisect_right"
+            | "__pycc_insort_left"
+            | "__pycc_insort_right",
+            [Ty::List(elem), item],
+        ) if orderable(elem) && same_elem(item, elem) => {
+            let (symbol, ret, ret_word) = match name {
+                "__pycc_heappush" => ("pycc_rt_heappush", Ty::None, false),
+                "__pycc_heapreplace" => ("pycc_rt_heapreplace", (**elem).clone(), true),
+                "__pycc_heappushpop" => ("pycc_rt_heappushpop", (**elem).clone(), true),
+                "__pycc_bisect_left" => ("pycc_rt_bisect_left", int.clone(), false),
+                "__pycc_bisect_right" => ("pycc_rt_bisect_right", int.clone(), false),
+                "__pycc_insort_left" => ("pycc_rt_insort_left", Ty::None, false),
+                _ => ("pycc_rt_insort_right", Ty::None, false),
+            };
+            word_sig(
+                symbol,
+                &[args[0].clone(), (**elem).clone()],
+                &[false, true],
+                ret,
+                ret_word,
+                &[],
             )
         }
         ("enumerate", [Ty::List(elem)]) => sig(

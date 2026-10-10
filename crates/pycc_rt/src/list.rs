@@ -666,6 +666,7 @@ pub(crate) fn list_words(list: *mut PyListObj) -> Vec<i64> {
     unsafe { &*list }.items().to_vec()
 }
 
+pub(crate) mod heap;
 pub(crate) mod ops;
 
 #[cfg(test)]

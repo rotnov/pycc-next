@@ -40,6 +40,7 @@ mod closures;
 mod comps;
 mod exprs;
 mod keys;
+mod stdlib;
 mod stmts;
 mod webs;
 mod wildcard;
@@ -77,6 +78,7 @@ pub fn desugar(module: &mut ModModule) {
         wildcard::expand_wildcards(&mut body);
         aliases::builtin_aliases(&mut body);
         aliases::drop_object_bases(&mut body);
+        stdlib::native_stdlib_calls(&mut body);
         webs::split_webs(&mut body);
         module.body = body.into();
     }

@@ -571,6 +571,23 @@ impl Engine {
                 }
             }
             HirExpr::ReceiverDispatchedCall { call, .. } => self.effect(scope, call),
+            // `heapq.heappush(h, v)` / `bisect.insort(a, v)` add `v` to the
+            // list (`pycc_ast::desugar::stdlib`'s spelling).
+            HirExpr::Call { callee, args }
+                if matches!(
+                    callee.as_str(),
+                    "__pycc_heappush" | "__pycc_insort_left" | "__pycc_insort_right"
+                ) && args.len() == 2
+                    && matches!(&args[0], HirExpr::Name(_)) =>
+            {
+                let HirExpr::Name(name) = &args[0] else {
+                    unreachable!()
+                };
+                self.term(scope, &args[0]);
+                if let Some(v) = self.term(scope, &args[1]) {
+                    self.produce(scope, name, |_| Shape::List(v));
+                }
+            }
             other => {
                 self.term(scope, other);
             }

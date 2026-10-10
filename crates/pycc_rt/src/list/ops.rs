@@ -11,7 +11,7 @@ use super::*;
 
 /// CPython's `a < b` between two element words of `kind` (`TypeError` for
 /// an unordered kind, which then compares `false`).
-fn word_lt(kind: i64, a: i64, b: i64) -> bool {
+pub(crate) fn word_lt(kind: i64, a: i64, b: i64) -> bool {
     crate::value::lt_or_raise(kind, a, b)
 }
 
@@ -21,7 +21,7 @@ fn word_truthy(kind: i64, word: i64) -> bool {
 
 /// Runs `f` on the list's elements as words, writing them back (a
 /// `list[bool]` stores one byte per element).
-fn edit_words<R>(list: &mut PyListObj, f: impl FnOnce(&mut Vec<i64>) -> R) -> R {
+pub(crate) fn edit_words<R>(list: &mut PyListObj, f: impl FnOnce(&mut Vec<i64>) -> R) -> R {
     if list.kind == LIST_KIND_BOOL {
         let mut words: Vec<i64> = list.items().into_owned();
         let result = f(&mut words);

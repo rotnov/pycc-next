@@ -132,6 +132,13 @@ fn dict_and_set_size_changes_during_iteration_raise() {
     matches_cpython("corpus_dict_mutation.py", &[], "");
 }
 
+/// `heapq` and `bisect` on native lists, through every import spelling,
+/// with CPython's tie order and `IndexError`.
+#[test]
+fn heapq_and_bisect_match_cpython() {
+    matches_cpython("corpus_heap_bisect.py", &[], "");
+}
+
 /// A name whose two types meet at one read stays one variable, refused.
 #[test]
 fn a_name_holding_two_types_at_one_read_is_still_refused() {
