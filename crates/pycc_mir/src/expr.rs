@@ -672,6 +672,16 @@ pub(super) fn lower_expr(
                 left_lowered = super::object_narrow::object_operand(left_lowered);
                 right_lowered = super::object_narrow::object_operand(right_lowered);
             }
+            if matches!(op, CmpOpKind::In | CmpOpKind::NotIn)
+                && left_lowered.ty() == Ty::Str
+                && right_lowered.ty() == Ty::Str
+            {
+                return builtin_call::lower_str_contains(
+                    left_lowered,
+                    right_lowered,
+                    *op == CmpOpKind::NotIn,
+                );
+            }
             // Part 1 of #1371: an object operand takes CPython's own
             // comparison, never the native one below.
             let (left_lowered, right_lowered) =

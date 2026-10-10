@@ -78,7 +78,7 @@ fn an_expression_comprehension_refuses_a_non_container_iterable() {
     let message = message_of("n = 3\nprint(len([i for i in n]))\n");
     assert_eq!(
         message,
-        "`int` cannot be iterated with `for ... in ...` (only list[T]/dict[K, V]/set[T]/frozenset[T] supports this)"
+        "`int` cannot be iterated with `for ... in ...` (only list[T]/str/dict[K, V]/set[T]/frozenset[T] supports this)"
     );
 }
 

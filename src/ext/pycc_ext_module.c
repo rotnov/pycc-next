@@ -1852,6 +1852,100 @@ int pycc_ext_obj_error_bridge(void)
 }
 
 /*
+ * Native standard I/O through CPython's own `sys` streams. Once an
+ * interpreter is present -- this module imported by a host, or a native
+ * build embedding CPython -- `sys.stdin` and `sys.stdout` buffer the same
+ * file descriptors pycc_rt would otherwise read and write directly, and two
+ * buffers over one descriptor reorder output and steal each other's input
+ * lines. `pycc_ext_exec_module` therefore hands these three functions to
+ * `pycc_rt_io_install` before the module body runs, and every native
+ * `print`, `input()`, `sys.stdin.readline()`, ... then uses CPython's
+ * streams (including a stream the program rebinds). A raising stream call
+ * is bridged into pycc's pending exception like any foreign operation.
+ */
+extern void pycc_rt_io_install(int (*write)(const unsigned char *, size_t),
+                               void *(*read)(int), int (*flush)(void));
+
+static int pycc_ext_io_write(const unsigned char *ptr, size_t len)
+{
+    PyObject *stream = PySys_GetObject("stdout"); /* borrowed */
+    PyObject *text;
+    PyObject *result;
+
+    /* `print` to a `None` `sys.stdout` writes nothing, as in CPython. */
+    if (stream == NULL || stream == Py_None) {
+        return 0;
+    }
+    text = PyUnicode_DecodeUTF8((const char *)ptr, (Py_ssize_t)len, "surrogateescape");
+    if (text == NULL) {
+        return pycc_ext_obj_error_bridge();
+    }
+    result = PyObject_CallMethod(stream, "write", "O", text);
+    Py_DECREF(text);
+    if (result == NULL) {
+        return pycc_ext_obj_error_bridge();
+    }
+    Py_DECREF(result);
+    return 0;
+}
+
+static void *pycc_ext_io_read(int all)
+{
+    PyObject *stream = PySys_GetObject("stdin"); /* borrowed */
+    PyObject *result;
+    const char *utf8;
+    Py_ssize_t len;
+    void *text;
+
+    if (stream == NULL || stream == Py_None) {
+        PyErr_SetString(PyExc_RuntimeError, "lost sys.stdin");
+        (void)pycc_ext_obj_error_bridge();
+        return NULL;
+    }
+    result = PyObject_CallMethod(stream, all ? "read" : "readline", NULL);
+    if (result == NULL) {
+        (void)pycc_ext_obj_error_bridge();
+        return NULL;
+    }
+    if (PyBytes_Check(result)) {
+        /* A rebound binary stream: decode its bytes as pycc_rt does. */
+        PyObject *decoded = PyUnicode_DecodeUTF8(PyBytes_AsString(result),
+                                                 PyBytes_Size(result), "replace");
+        Py_DECREF(result);
+        if (decoded == NULL) {
+            (void)pycc_ext_obj_error_bridge();
+            return NULL;
+        }
+        result = decoded;
+    }
+    utf8 = PyUnicode_AsUTF8AndSize(result, &len);
+    if (utf8 == NULL) {
+        Py_DECREF(result);
+        (void)pycc_ext_obj_error_bridge();
+        return NULL;
+    }
+    text = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)len);
+    Py_DECREF(result);
+    return text;
+}
+
+static int pycc_ext_io_flush(void)
+{
+    PyObject *stream = PySys_GetObject("stdout"); /* borrowed */
+    PyObject *result;
+
+    if (stream == NULL || stream == Py_None) {
+        return 0;
+    }
+    result = PyObject_CallMethod(stream, "flush", NULL);
+    if (result == NULL) {
+        return pycc_ext_obj_error_bridge();
+    }
+    Py_DECREF(result);
+    return 0;
+}
+
+/*
  * #1316: a compiled function read a module-level foreign name before the
  * module body bound it -- `f()` called above `import copy`, which D-041's
  * checker cannot rule out. CPython raises `NameError` there, so this does
@@ -4802,6 +4896,9 @@ static int pycc_ext_exec_module(PyObject *module)
     PyObject *classes;
     int status;
     long long exec_status;
+
+    /* Native stdin/stdout share CPython's `sys` streams from here on. */
+    pycc_rt_io_install(pycc_ext_io_write, pycc_ext_io_read, pycc_ext_io_flush);
 
     /*
      * The synthesized user exception classes are created and published as

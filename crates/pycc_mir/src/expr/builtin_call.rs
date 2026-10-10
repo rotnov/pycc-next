@@ -111,3 +111,18 @@ pub(super) fn lower_list_unpack(list: MirExpr, arity: usize) -> MirExpr {
         vec![list, MirExpr::IntLiteral(arity as i64)],
     )
 }
+
+/// `needle in haystack` (or `not in`) on two `str`s.
+pub(super) fn lower_str_contains(needle: MirExpr, haystack: MirExpr, negate: bool) -> MirExpr {
+    let found = rt(
+        "pycc_rt_str_contains",
+        vec![Ty::Str, Ty::Str],
+        Ty::Bool,
+        vec![needle, haystack],
+    );
+    if negate {
+        MirExpr::Not(Box::new(found))
+    } else {
+        found
+    }
+}

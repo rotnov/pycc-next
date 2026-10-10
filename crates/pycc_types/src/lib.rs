@@ -2375,13 +2375,14 @@ fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<(), Diagnosti
             // here too, binding the loop variable as the set's element type.
             let var_ty = match list_ty {
                 Ty::List(elem_ty) => *elem_ty,
+                Ty::Str => Ty::Str,
                 Ty::Dict(kv) => kv.0,
                 Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,
                 other => {
                     return Err(Diagnostic::error(
                         "T0033",
                         format!(
-                            "`{}` cannot be iterated with `for ... in ...` (only list[T]/dict[K, V]/set[T]/frozenset[T] supports this)",
+                            "`{}` cannot be iterated with `for ... in ...` (only list[T]/str/dict[K, V]/set[T]/frozenset[T] supports this)",
                             other.name()
                         ),
                         Span::new(0, 0),
@@ -3255,13 +3256,14 @@ fn check_stmt_arm_in_function(
             // Task 7 (D-123): `for x in s:` iterates a set's elements.
             let var_ty = match list_ty {
                 Ty::List(elem_ty) => *elem_ty,
+                Ty::Str => Ty::Str,
                 Ty::Dict(kv) => kv.0,
                 Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,
                 other => {
                     return Err(Diagnostic::error(
                         "T0033",
                         format!(
-                            "`{}` cannot be iterated with `for ... in ...` (only list[T]/dict[K, V]/set[T]/frozenset[T] supports this)",
+                            "`{}` cannot be iterated with `for ... in ...` (only list[T]/str/dict[K, V]/set[T]/frozenset[T] supports this)",
                             other.name()
                         ),
                         Span::new(0, 0),

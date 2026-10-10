@@ -70,7 +70,7 @@ pub(crate) fn resolve_comp_iter(
                 other => Err(Diagnostic::error(
                     "T0033",
                     format!(
-                        "`{}` cannot be iterated with `for ... in ...` (only list[T]/dict[K, V]/set[T]/frozenset[T] supports this)",
+                        "`{}` cannot be iterated with `for ... in ...` (only list[T]/str/dict[K, V]/set[T]/frozenset[T] supports this)",
                         other.name()
                     ),
                     Span::new(0, 0),

@@ -1062,6 +1062,7 @@ fn rewrite_generic_calls_in_stmt(
             // maybe-bound iterable read.
             let var_ty = match env.lookup_any(list) {
                 Some(Ty::List(elem)) => *elem,
+                Some(Ty::Str) => Ty::Str,
                 Some(Ty::Dict(kv)) => kv.0,
                 Some(Ty::Set(elem) | Ty::FrozenSet(elem)) => *elem,
                 _ => {

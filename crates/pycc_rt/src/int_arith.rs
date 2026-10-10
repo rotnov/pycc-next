@@ -573,13 +573,13 @@ pub(crate) fn format_i64_line(value: i64) -> String {
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_int_print(tagged: i64) {
     if let Some(text) = int_decimal(tagged) {
-        println!("{text}");
+        crate::io::out(format!("{text}\n").as_bytes());
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_print_i64(value: i64) {
-    print!("{}", format_i64_line(value));
+    crate::io::out(format_i64_line(value).as_bytes());
 }
 
 #[cfg(test)]

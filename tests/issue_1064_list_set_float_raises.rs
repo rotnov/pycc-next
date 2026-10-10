@@ -422,11 +422,7 @@ fn the_converted_raises_reach_a_cpython_host_as_catchable_exceptions() {
          \x20   raise AssertionError('expected ValueError')\n\
          except ValueError as e:\n\
          \x20   assert str(e) == 'slice step cannot be zero', str(e)\n\
-         try:\n\
-         \x20   m.big_float()\n\
-         \x20   raise AssertionError('expected RuntimeError')\n\
-         except RuntimeError as e:\n\
-         \x20   assert 'scientific notation' in str(e), str(e)\n\
+         assert m.big_float() == '1e+20', m.big_float()\n\
          try:\n\
          \x20   m.grow_during_iteration()\n\
          \x20   raise AssertionError('expected RuntimeError')\n\

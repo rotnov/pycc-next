@@ -65,6 +65,10 @@ pub(crate) fn compare_link_ty(
     // Part 2b of #1371: membership answers for every pair, so a native
     // pair never falls through to the numeric rule below.
     if matches!(op, CmpOp::In | CmpOp::NotIn) {
+        // Substring membership (`pycc_rt_str_contains`).
+        if (left_ty, right_ty) == (&Ty::Str, &Ty::Str) {
+            return Ok(Ty::Bool);
+        }
         // A CPython object needle keeps the foreign refusal below.
         if let Ty::List(elem) = right_ty
             && *left_ty != Ty::Object

@@ -519,6 +519,31 @@ pub(super) fn lower_stmt(
                         body,
                     }
                 }
+                Ty::Str => {
+                    // `for c in s`: the loop runs over `list(s)`, bound to a
+                    // synthetic name (a digit-led name no source can spell).
+                    let chars = format!("0chars_{var}_{list}");
+                    bind_variable(scopes, chars.clone(), Ty::List(Box::new(Ty::Str)));
+                    bind_variable(scopes, var.clone(), Ty::Str);
+                    super::kill_narrowing(scopes, var);
+                    let body = lower_loop_body(body, scopes, classes, current_class);
+                    let source = MirExpr::Name {
+                        name: list.clone(),
+                        ty: Ty::Str,
+                    };
+                    MirStmt::Seq(vec![
+                        MirStmt::Assign {
+                            target: chars.clone(),
+                            value: crate::str_to_list(source),
+                        },
+                        MirStmt::ForList {
+                            var: var.clone(),
+                            var_ty: Ty::Str,
+                            list: chars,
+                            body,
+                        },
+                    ])
+                }
                 Ty::Dict(kv) => {
                     bind_variable(scopes, var.clone(), kv.0);
                     // D-068 re-review of #780 (sixth round): see the

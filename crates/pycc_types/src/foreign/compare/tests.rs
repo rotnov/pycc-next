@@ -433,8 +433,10 @@ fn membership_between_two_native_values_keeps_its_c0001() {
         "C0001",
         "comparison operator not supported yet: In",
     );
+    // Substring membership between two `str` values is native.
+    check_foreign("x = 's'\ny = 's'\nb = x not in y\n").expect("substring membership");
     assert_refused(
-        "x = 's'\ny = 's'\nb = x not in y\n",
+        "x = 1\ny = 's'\nb = x not in y\n",
         "C0001",
         "comparison operator not supported yet: NotIn",
     );

@@ -719,9 +719,11 @@ fn container_diagnostics_are_unchanged_through_check_and_run() {
         ),
         (
             "non_name",
-            "def f() -> list[int]:\n    return [1]\n\n\nf().append(1)\n",
+            // A call-result receiver statement is hoisted into a temporary
+            // by the desugar pass; a `pycc_std` constant is still refused.
+            "import math\nmath.pi.append(1)\n",
             "error[C0001]: `.append()` is only supported on a name or an instance attribute \
-             so far\n --> main.py:19:1",
+             so far\n --> main.py:16:1",
         ),
         (
             "not_a_list",

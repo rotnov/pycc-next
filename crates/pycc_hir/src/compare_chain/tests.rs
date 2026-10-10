@@ -351,13 +351,12 @@ fn a_single_membership_test_against_a_possible_object_lowers() {
 }
 
 /// A literal, display or comprehension container always builds a native
-/// value, so it keeps the located HIR rejection.
+/// value, so it keeps the located HIR rejection -- except a `str` literal
+/// and a list display, which the type stage checks as native membership.
 #[test]
 fn a_membership_test_against_a_native_display_keeps_its_c0001() {
     for container in [
         "1",
-        "'s'",
-        "[1]",
         "(1,)",
         "{1}",
         "{1: 2}",

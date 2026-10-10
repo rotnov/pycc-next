@@ -68,6 +68,20 @@ fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>, module_level: boo
                 expand_thin(&mut case.body, fresh);
             }
         }
+        Stmt::Expr(s) => {
+            let mut pre = Vec::new();
+            hoist_container_receiver(&mut s.value, fresh, &mut pre, s.range);
+            if !pre.is_empty() {
+                out.extend(pre);
+            }
+        }
+        Stmt::Assign(s) if s.targets.len() == 1 && is_name(&s.targets[0]) => {
+            let mut pre = Vec::new();
+            hoist_container_receiver(&mut s.value, fresh, &mut pre, s.range);
+            if !pre.is_empty() {
+                out.extend(pre);
+            }
+        }
         Stmt::Assign(s) => {
             if let Some(stmts) = expand_assign(s, fresh) {
                 for stmt in stmts {
@@ -291,4 +305,24 @@ fn expand_aug_assign(s: &mut ruff_python_ast::StmtAugAssign, fresh: &Fresh) -> O
         range,
     ));
     Some(out)
+}
+
+/// `g[u].append(v)` -> `t = g[u]; t.append(v)`: the container methods HIR
+/// lowers to dedicated nodes (`append`, `pop`, `get`, `add`) take a name or
+/// an attribute receiver, so any other receiver is bound first (it is
+/// evaluated first in CPython too).
+fn hoist_container_receiver(value: &mut Expr, fresh: &Fresh, out: &mut Vec<Stmt>, range: TextRange) {
+    let Expr::Call(call) = value else {
+        return;
+    };
+    let Expr::Attribute(attr) = call.func.as_mut() else {
+        return;
+    };
+    if !matches!(attr.attr.as_str(), "append" | "pop" | "get" | "add")
+        || matches!(attr.value.as_ref(), Expr::Name(_) | Expr::Attribute(_))
+    {
+        return;
+    }
+    let receiver = std::mem::replace(attr.value.as_mut(), load("_", range));
+    *attr.value = hoist(receiver, fresh, out, range);
 }

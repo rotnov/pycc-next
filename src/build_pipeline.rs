@@ -142,11 +142,16 @@ pub(crate) fn try_build(
     // An embedded build's sidecar is assembled here, before codegen and
     // before the link, so every embedded-only line runs ahead of the shared
     // link site below (§4.6 of the #1028 plan).
+    let mir = pycc_mir::build(&typed_hir);
+    // Non-strict code can hold CPython objects without any foreign import
+    // (an untyped `[]`, a fallback-free module whose values are objects);
+    // such a program needs the interpreter too.
+    let embedded = embedded
+        || (ext.is_none() && crate::mode::non_strict_for(path) && mir_uses_objects(&mir));
     let embed_plan = match embedded {
         true => Some(embed_plan_or_exit(out, path, &typed_hir, embed, obj_path)?),
         false => None,
     };
-    let mir = pycc_mir::build(&typed_hir);
 
     pycc_codegen::compile_to_object_with_options(
         &mir,
@@ -240,6 +245,14 @@ pub(crate) fn try_build(
 
 /// The file the shared link writes: the `--ext` artifact, or on Windows
 /// the embedded build's program DLL in the sidecar (D-253), else `OUT`.
+/// Whether any MIR item works with a CPython object (a `Ty::Object` value
+/// or an `Obj*` operation), which only an embedded interpreter can run.
+fn mir_uses_objects(mir: &pycc_mir::MirModule) -> bool {
+    mir.items
+        .iter()
+        .any(|item| format!("{item:?}").contains("Obj"))
+}
+
 fn link_output<'a>(out: &'a Path, ext: Option<&'a Path>, embed: Option<&'a Path>) -> &'a Path {
     ext.or(embed).unwrap_or(out)
 }

@@ -58,6 +58,9 @@ mod int_bitwise;
 mod int_encoding;
 /// `set[int]`/`frozenset[int]`'s `PyIntSetObj` (D-121, Part 1 of #1319).
 mod int_set;
+/// Standard input and output, shared with CPython's `sys` streams when an
+/// interpreter is present.
+mod io;
 /// `list[T]`'s one generic runtime object, `PyListObj`.
 mod list;
 /// `print`'s stdout flush (#1340); the other print primitives stay below.
@@ -785,21 +788,21 @@ pub extern "C" fn pycc_rt_float_to_str(value: f64) -> *mut PyStrObj {
 /// `pycc_rt_str_incref`/`pycc_rt_str_decref`).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_print_write_str(s: *mut PyStrObj) {
-    print!("{}", String::from_utf8_lossy(unsafe { &*s }.bytes()));
+    io::out(unsafe { &*s }.bytes());
 }
 
 /// Prints a single space with no newline (Task 10) -- `print`'s separator
 /// between arguments, matching CPython's default `sep=" "`.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_print_space() {
-    print!(" ");
+    io::out(b" ");
 }
 
 /// Prints `print`'s single trailing newline (Task 10), matching CPython's
 /// default `end="\n"`.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_print_newline() {
-    println!();
+    io::out(b"\n");
 }
 
 /// Prints the literal `None`, capitalized, with no trailing newline (Task 10)
@@ -811,7 +814,7 @@ pub extern "C" fn pycc_rt_print_newline() {
 /// through `pycc_rt_print_write_str` instead.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_print_none() {
-    print!("None");
+    io::out(b"None");
 }
 
 /// The two words a `pycc build --ext` wrapper is allowed to carry across the

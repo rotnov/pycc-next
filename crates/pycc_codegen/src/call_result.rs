@@ -190,3 +190,8 @@ pub(super) fn call_result_scalar<'ctx>(
         }
     }
 }
+
+/// The canonical unit carrier a `None`-typed value evaluates to.
+pub(super) fn none_scalar<'ctx>(context: &'ctx Context) -> Scalar<'ctx> {
+    Scalar::Bool(context.i8_type().const_int(0, false))
+}

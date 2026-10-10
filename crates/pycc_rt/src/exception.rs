@@ -653,6 +653,8 @@ fn render_exception_chain(exc: &PyExceptionObj) -> String {
 
 #[cfg(not(test))]
 fn exception_print_and_exit(obj: *mut PyExceptionObj) -> ! {
+    // Whatever was printed reaches stdout before the traceback and exit.
+    crate::io::flush();
     if obj.is_null() {
         eprintln!("Exception");
         std::process::exit(1);

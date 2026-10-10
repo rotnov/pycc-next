@@ -78,8 +78,8 @@ pub(crate) fn lower_cmp_op(
         CmpOp::GtE => CmpOpKind::GtE,
         CmpOp::Is if is_none_operand_shape => CmpOpKind::Is,
         CmpOp::IsNot if is_none_operand_shape => CmpOpKind::IsNot,
-        CmpOp::In if general_identity && can_be_object(right) => CmpOpKind::In,
-        CmpOp::NotIn if general_identity && can_be_object(right) => CmpOpKind::NotIn,
+        CmpOp::In if general_identity && membership_container(right) => CmpOpKind::In,
+        CmpOp::NotIn if general_identity && membership_container(right) => CmpOpKind::NotIn,
         other => {
             return Err(unsupported(
                 format!("comparison operator not supported yet: {other:?}"),
@@ -106,6 +106,12 @@ fn is_literal(expr: &Expr) -> bool {
 /// against it is lowered and left to `pycc_types` (Part 2b of #1371). A
 /// literal, and a list, tuple, set or dict display or comprehension, always
 /// builds a native value, so `x in [1, 2]` keeps its located `C0001` here.
+/// A membership test's container the checker may admit: anything that can
+/// be a CPython object, a `str` literal (substring test) or a list display.
+fn membership_container(expr: &Expr) -> bool {
+    can_be_object(expr) || matches!(expr, Expr::StringLiteral(_) | Expr::List(_))
+}
+
 fn can_be_object(expr: &Expr) -> bool {
     !is_literal(expr)
         && !matches!(

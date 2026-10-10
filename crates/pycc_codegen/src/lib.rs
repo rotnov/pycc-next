@@ -2642,10 +2642,19 @@ fn emit_expr_unchecked<'ctx>(
             Scalar::Bool(as_bool)
         }
         MirExpr::Call { callee, args, ty } => {
+            // `print(...)` in a value position (`print(a) if c else
+            // print(b)`): print, then yield its `None` result.
             if callee == "print" {
-                panic!(
-                    "pycc_codegen: using print()'s result as a nested expression is not supported yet"
+                string_render::emit_print_call(
+                    context,
+                    builder,
+                    module,
+                    rt,
+                    user_functions,
+                    locals,
+                    args,
                 );
+                return crate::call_result::none_scalar(context);
             }
             // D-136 Task 4: `math.sqrt(x: float) -> float` is this PR's one
             // lowered stdlib function, calling straight into the platform

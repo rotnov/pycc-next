@@ -21,7 +21,7 @@
 /// nowhere to report one either.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_print_flush() {
-    let _ = std::io::Write::flush(&mut std::io::stdout());
+    crate::io::flush();
 }
 
 #[cfg(test)]

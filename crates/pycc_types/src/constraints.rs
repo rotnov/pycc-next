@@ -3120,7 +3120,7 @@ pub(crate) fn collect_block_constraints(
                     env.maybe_bindings.insert(var.clone());
                 }
             }
-            HirStmt::ForList { var, list: _, body } => {
+            HirStmt::ForList { var, list, body } => {
                 // Unlike `ForRange`, we have no concrete `Ty::Int` fact to
                 // unify the loop variable against -- this solver doesn't
                 // track a `list`-typed name's element type at all (see the
@@ -3156,7 +3156,21 @@ pub(crate) fn collect_block_constraints(
                 // provenance it carried is stale from here on.
                 env.rebind_over_owned_buffer(var);
                 if !env.bindings.contains_key(var) {
-                    let term = fresh_term(parents, concrete);
+                    let known = env
+                        .bindings
+                        .get(list)
+                        .cloned()
+                        .and_then(|t| resolved_term(t, parents, concrete))
+                        .and_then(|ty| match ty {
+                            Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => Some(*elem),
+                            Ty::Dict(kv) => Some(kv.0),
+                            Ty::Str => Some(Ty::Str),
+                            _ => None,
+                        });
+                    let term = match known {
+                        Some(elem) => Ok(elem),
+                        None => fresh_term(parents, concrete),
+                    };
                     env.bindings.insert(var.clone(), term);
                 }
                 let mut body_env = env.clone();

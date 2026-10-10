@@ -10,7 +10,6 @@
 use super::*;
 use crate::exception::EXCEPTION_TYPE_EOF_ERROR;
 use crate::list::{PyListObj, str_list};
-use std::io::{BufRead, Write};
 
 fn bytes_of<'a>(s: *mut PyStrObj) -> &'a [u8] {
     unsafe { &*s }.bytes()
@@ -68,29 +67,28 @@ fn char_index(text: &str, byte: usize) -> i64 {
 }
 
 // ---------------------------------------------------------------- input
-
-fn read_line_from_stdin() -> Option<String> {
-    let _ = std::io::stdout().flush();
-    let mut buf = Vec::new();
-    match std::io::stdin().lock().read_until(b'\n', &mut buf) {
-        Ok(0) | Err(_) => None,
-        Ok(_) => Some(String::from_utf8_lossy(&buf).into_owned()),
-    }
-}
+//
+// Every read and write goes through `crate::io`, which shares CPython's
+// `sys.stdin`/`sys.stdout` when an interpreter is present.
 
 fn input_line() -> *mut PyStrObj {
-    match read_line_from_stdin() {
-        Some(mut line) => {
-            if line.ends_with('\n') {
-                line.pop();
-            }
-            new_str(&line)
-        }
-        None => {
-            raise_builtin(EXCEPTION_TYPE_EOF_ERROR, "EOFError", "EOF when reading a line");
-            new_str("")
-        }
+    // CPython's `input()` flushes stdout before it reads.
+    crate::io::flush();
+    let Some(line) = crate::io::read_line() else {
+        return new_str("");
+    };
+    let text = text_of(line);
+    if text.is_empty() {
+        unsafe { pycc_rt_str_decref(line) };
+        raise_builtin(EXCEPTION_TYPE_EOF_ERROR, "EOFError", "EOF when reading a line");
+        return new_str("");
     }
+    let Some(stripped) = text.strip_suffix('\n') else {
+        return line;
+    };
+    let result = new_str(stripped);
+    unsafe { pycc_rt_str_decref(line) };
+    result
 }
 
 /// `input()`: one line of stdin without its trailing newline.
@@ -102,23 +100,20 @@ pub extern "C" fn pycc_rt_input() -> *mut PyStrObj {
 /// `input(prompt)`: writes `prompt` (no newline) first.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_input_prompt(prompt: *mut PyStrObj) -> *mut PyStrObj {
-    print!("{}", text_of(prompt));
+    crate::io::out(bytes_of(prompt));
     input_line()
 }
 
 /// `sys.stdin.readline()`: one line including its newline, `''` at EOF.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_stdin_readline() -> *mut PyStrObj {
-    new_str(&read_line_from_stdin().unwrap_or_default())
+    crate::io::read_line().unwrap_or_else(|| new_str(""))
 }
 
 /// `sys.stdin.read()`: the rest of stdin.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_stdin_read() -> *mut PyStrObj {
-    let _ = std::io::stdout().flush();
-    let mut buf = Vec::new();
-    let _ = std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut buf);
-    new_str(&String::from_utf8_lossy(&buf))
+    crate::io::read_all().unwrap_or_else(|| new_str(""))
 }
 
 /// `sys.stdin.readlines()`: the remaining lines, each with its newline.
@@ -135,7 +130,7 @@ pub extern "C" fn pycc_rt_stdin_readlines() -> *mut PyListObj {
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_stdout_write(s: *mut PyStrObj) -> i64 {
     let text = text_of(s);
-    print!("{text}");
+    crate::io::out_str(text);
     tag_smallint(char_len(text) as i64)
 }
 
@@ -155,10 +150,25 @@ fn digit_value(c: u8) -> Option<u32> {
     }
 }
 
+/// CPython's default `sys.get_int_max_str_digits()`: a string of more
+/// digits than this in a base that is not a power of two is refused before
+/// the (quadratic) conversion runs.
+const INT_MAX_STR_DIGITS: usize = 4300;
+
+/// Why [`parse_int`] produced no value.
+enum IntParseError {
+    Invalid,
+    TooManyDigits(usize),
+}
+
 /// Parses CPython's `int(text, base)` grammar (surrounding whitespace, a
 /// sign, `_` between digits, a `0x`/`0o`/`0b` prefix matching `base`, or
 /// any of them for base 0) into an encoded int.
-fn parse_int(text: &str, base: i64) -> Option<i64> {
+fn parse_int(text: &str, base: i64) -> Result<i64, IntParseError> {
+    parse_int_checked(text, base).unwrap_or(Err(IntParseError::Invalid))
+}
+
+fn parse_int_checked(text: &str, base: i64) -> Option<Result<i64, IntParseError>> {
     let s = text.trim_matches(is_py_space).as_bytes();
     let (negative, mut s) = match s.first() {
         Some(b'-') => (true, &s[1..]),
@@ -194,6 +204,25 @@ fn parse_int(text: &str, base: i64) -> Option<i64> {
     if s.is_empty() || s[s.len() - 1] == b'_' || (s[0] == b'_' && !prefixed) {
         return None;
     }
+    // Validate and count first, so an over-long string is refused (after
+    // an invalid one, as in CPython) without any quadratic work.
+    let mut digits = 0usize;
+    let mut prev_underscore = false;
+    for &c in s {
+        if c == b'_' {
+            if prev_underscore {
+                return None;
+            }
+            prev_underscore = true;
+            continue;
+        }
+        prev_underscore = false;
+        digit_value(c).filter(|d| *d < base)?;
+        digits += 1;
+    }
+    if !base.is_power_of_two() && digits > INT_MAX_STR_DIGITS {
+        return Some(Err(IntParseError::TooManyDigits(digits)));
+    }
     let mut limbs: Vec<u32> = vec![0];
     let mut small: i128 = 0;
     let mut use_small = true;
@@ -228,12 +257,12 @@ fn parse_int(text: &str, base: i64) -> Option<i64> {
     }
     if use_small {
         let value = if negative { -small } else { small } as i64;
-        return Some(match fits_smallint(value) {
+        return Some(Ok(match fits_smallint(value) {
             Some(tagged) => tagged,
             None => tag_bigint(bigint_from_i128(value as i128)),
-        });
+        }));
     }
-    Some(tag_bigint(BigIntObj::new(negative, trim(&limbs))))
+    Some(Ok(tag_bigint(BigIntObj::new(negative, trim(&limbs)))))
 }
 
 fn int_from_str(s: *mut PyStrObj, base: i64) -> i64 {
@@ -242,13 +271,23 @@ fn int_from_str(s: *mut PyStrObj, base: i64) -> i64 {
         return tag_smallint(0);
     }
     let text = text_of(s);
-    parse_int(text, base).unwrap_or_else(|| {
-        value_error(&format!(
-            "invalid literal for int() with base {base}: {}",
-            repr(text)
-        ));
-        tag_smallint(0)
-    })
+    match parse_int(text, base) {
+        Ok(value) => value,
+        Err(IntParseError::Invalid) => {
+            // CPython formats the literal with `%.200R`: its repr, cut to
+            // 200 characters.
+            let shown: String = repr(text).chars().take(200).collect();
+            value_error(&format!("invalid literal for int() with base {base}: {shown}"));
+            tag_smallint(0)
+        }
+        Err(IntParseError::TooManyDigits(digits)) => {
+            value_error(&format!(
+                "Exceeds the limit ({INT_MAX_STR_DIGITS} digits) for integer string conversion: \
+                 value has {digits} digits; use sys.set_int_max_str_digits() to increase the limit"
+            ));
+            tag_smallint(0)
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -655,6 +694,13 @@ pub extern "C" fn pycc_rt_str_replace(
         return new_str(&out);
     }
     new_str(&text.replace(old, new))
+}
+
+/// `needle in haystack`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_str_contains(needle: *mut PyStrObj, haystack: *mut PyStrObj) -> i8 {
+    let (needle, haystack) = (bytes_of(needle), bytes_of(haystack));
+    i8::from(needle.is_empty() || haystack.windows(needle.len()).any(|w| w == needle))
 }
 
 #[unsafe(no_mangle)]

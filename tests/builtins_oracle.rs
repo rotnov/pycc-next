@@ -89,3 +89,17 @@ fn desugared_loops_and_stores_match_cpython() {
 fn desugared_sys_streams_lambdas_map_and_print_match_cpython() {
     assert_matches_cpython("desugar_io");
 }
+
+#[test]
+fn str_iteration_membership_and_computed_receivers_match_cpython() {
+    assert_matches_cpython("str_loops");
+}
+
+/// `int(str)` refuses more than 4300 decimal digits before converting
+/// (CPython's default `sys.get_int_max_str_digits()`), so a huge input
+/// line cannot drive the quadratic conversion; power-of-two bases are
+/// exempt, as in CPython.
+#[test]
+fn int_of_a_str_enforces_cpythons_digit_limit() {
+    assert_matches_cpython("int_str_digit_limit");
+}
