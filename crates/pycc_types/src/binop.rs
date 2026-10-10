@@ -59,6 +59,9 @@ pub(crate) fn numeric_result_type(op: BinOpKind, left: Ty, right: Ty) -> Result<
     {
         return Ok(Ty::Str);
     }
+    if let Some(result) = crate::list_ops::list_binop_ty(op, &left, &right) {
+        return result;
+    }
     if left == Ty::Str && right == Ty::Str {
         return if op == BinOpKind::Add {
             Ok(Ty::Str)

@@ -1,5 +1,5 @@
-error[T0033]: `dict[str, int]` does not support slicing (only list[int] does)
+error[T0033]: `dict[str, int]` does not support slicing (only a list does)
  --> tests/diagnostics/d0033_slice_on_non_list.py:1:1
   |
 1 | x = {"a": 1}
-  | ^ `dict[str, int]` does not support slicing (only list[int] does)
+  | ^ `dict[str, int]` does not support slicing (only a list does)

@@ -180,7 +180,7 @@ fn the_shapes_outside_part_2b_are_refused() {
         ),
         (
             "obj_member_native_pair",
-            "print(1 in xs)\n",
+            "n = 2\nprint(1 in n)\n",
             "C0001",
             "comparison operator not supported yet: In",
         ),
@@ -227,9 +227,9 @@ fn the_shapes_outside_part_2b_are_refused() {
     // gives type-stage diagnostics their source location. Pinned so the
     // restoration is a visible test change.
     let dir = ScratchDir::new("obj_member_native_pair_span").expect("scratch");
-    let rendered = stdout_of(&check_with(&dir, &format!("{HEAD}print(1 in xs)\n")));
+    let rendered = stdout_of(&check_with(&dir, &format!("{HEAD}n = 2\nprint(1 in n)\n")));
     assert!(rendered.contains(".py:1:1"), "{rendered}");
-    assert!(!rendered.contains(".py:5:"), "{rendered}");
+    assert!(!rendered.contains(".py:6:"), "{rendered}");
 }
 
 fn build_ext(dir: &Path, module: &str, body: &str) {

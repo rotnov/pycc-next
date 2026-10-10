@@ -1,6 +1,6 @@
 def f() -> int:
     xs = []
-    xs.append("a")
+    xs.append({1})
     return len(xs)
 
 

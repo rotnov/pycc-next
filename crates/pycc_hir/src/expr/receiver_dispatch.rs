@@ -152,6 +152,12 @@ pub(super) fn lower_receiver_dispatched_call(
     let Ok(method) = method else {
         return container;
     };
+    // `xs.pop(i)`'s container reading is itself this same method call
+    // (`container_call::lower_list_pop`), which `pycc_types` already types
+    // by its receiver, so there is nothing to keep beside it.
+    if matches!(container, Ok(HirExpr::MethodCall { .. })) {
+        return Ok(method);
+    }
     let container = match container {
         Ok(_) => ContainerFallback::Admitted,
         Err(diagnostic) => ContainerFallback::Refused(Box::new(diagnostic)),

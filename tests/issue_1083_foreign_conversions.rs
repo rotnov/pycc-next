@@ -463,7 +463,6 @@ fn int_and_str_of_a_non_object_keep_their_unchanged_refusal() {
         "print(int(\"3\"))\n",
         "print(str(1))\n",
         "print(str(1.5))\n",
-        "xs = [1]\nprint(str(xs))\n",
     ] {
         let out = check(&dir, body);
         assert!(!out.status.success(), "{body} should still be refused");

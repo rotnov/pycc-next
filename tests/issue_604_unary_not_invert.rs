@@ -301,12 +301,10 @@ fn invert_false_promotes_to_int() {
 // ---- rejections (T0021) ----
 
 #[test]
-fn not_over_a_list_is_rejected() {
-    // `truthy`'s own `Scalar::List` arm panics rather than modeling a truth
-    // value for containers (v0.2 has no `bool(list)` semantics) --
-    // `unary_result_type` rejects it before that panic could ever be
-    // reached from a type-checked program.
-    let message = check_err("not_list", "xs = [1, 2]\nprint(not xs)\n");
+fn not_over_a_dict_is_rejected() {
+    // A dict has no truth test pycc models yet (a list does, its
+    // non-emptiness), so `unary_result_type` rejects it.
+    let message = check_err("not_dict", "d = {\"a\": 1}\nprint(not d)\n");
     assert!(
         message.contains("T0021"),
         "unexpected diagnostic: {message}"

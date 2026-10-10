@@ -92,16 +92,30 @@ pub(super) struct RtFns<'ctx> {
     /// bigint and malformed words in `pycc_rt`, which owns the
     /// representation classifier.
     pub(super) int_untag_checked: FunctionValue<'ctx>,
-    pub(super) int_list_new: FunctionValue<'ctx>,
-    pub(super) int_list_append: FunctionValue<'ctx>,
-    pub(super) int_list_get: FunctionValue<'ctx>,
+    /// `list[T]`'s generic runtime object (`pycc_rt::list`). The hot reads
+    /// and stores are inlined by `crate::list` against the object's
+    /// `#[repr(C)]` layout; these are the out-of-line operations.
+    /// `round(float, ndigits)` and `round(float)` (`pycc_rt::round`).
+    pub(super) float_round: FunctionValue<'ctx>,
+    pub(super) float_round_to_int: FunctionValue<'ctx>,
+    pub(super) list_new: FunctionValue<'ctx>,
+    pub(super) list_append: FunctionValue<'ctx>,
+    pub(super) list_index_error: FunctionValue<'ctx>,
+    pub(super) list_set: FunctionValue<'ctx>,
+    pub(super) list_pop: FunctionValue<'ctx>,
+    pub(super) list_insert: FunctionValue<'ctx>,
+    pub(super) list_slice: FunctionValue<'ctx>,
+    pub(super) list_concat: FunctionValue<'ctx>,
+    pub(super) list_repeat: FunctionValue<'ctx>,
+    pub(super) list_contains: FunctionValue<'ctx>,
+    pub(super) list_repr: FunctionValue<'ctx>,
     /// Part 2 of #1027's bounds-checked buffer element load
     /// (`pycc_rt_buffer_f64_get`): takes the `PyccExtBufferView` pointer a
     /// `pycc build --ext` wrapper passed for a `memoryview` parameter plus an
     /// already-untagged raw `i64` index, and returns the `f64` element.
     ///
     /// The bounds check lives in `pycc_rt`, not in emitted IR -- one call and
-    /// no arithmetic here, exactly as `int_list_get` does it. An index outside
+    /// no arithmetic here, exactly as `list_get` does it. An index outside
     /// `[0, len)` leaves the D-173 pending `IndexError` set and returns a
     /// `0.0` sentinel, which the caller's `exception_exit` block checks for.
     pub(super) buffer_f64_get: FunctionValue<'ctx>,
@@ -116,7 +130,7 @@ pub(super) struct RtFns<'ctx> {
     pub(super) buffer_f64_set: FunctionValue<'ctx>,
     /// #1116's buffer element count (`pycc_rt_buffer_len`): takes the same
     /// `PyccExtBufferView` pointer and returns the `len` word as a **raw,
-    /// untagged** `i64`, exactly as `int_list_len` below does for a list.
+    /// untagged** `i64`, exactly as `list_len` below does for a list.
     ///
     /// Unlike `buffer_f64_get` above it cannot fail, so the emitted call
     /// carries no D-173 exception check.
@@ -149,28 +163,13 @@ pub(super) struct RtFns<'ctx> {
     /// epilogue safe over a buffer slot a path never assigned -- the slot is
     /// null-initialized at entry, exactly as an owned `str` slot is.
     pub(super) buffer_f64_free: FunctionValue<'ctx>,
-    pub(super) int_list_len: FunctionValue<'ctx>,
-    /// PR-12 Task 9's own new `pycc_rt_int_list_slice` declaration
-    /// (`base[start:stop:step]`, D-118) -- takes the `list` pointer plus
-    /// three already-defaulted, already-untagged raw `i64` bounds and
-    /// returns a **new** `PyIntListObj` pointer, exactly the same opaque
-    /// pointer type every other `PyIntListObj`-returning function above
-    /// already declares (`int_list_new`'s own `ptr_type.fn_type(&[], ..)`
-    /// one line below shares that same return type).
-    pub(super) int_list_slice: FunctionValue<'ctx>,
-    /// PR-12 Task 11's own new `pycc_rt_int_list_pop` declaration
-    /// (`list.pop()`, D-119) -- mirrors `int_list_get`'s own shape exactly
-    /// (one `ptr_type` parameter, one encoded-element `i64_type` return),
-    /// the only difference being no `index` parameter, since
-    /// `.pop()` always removes the list's own last element.
-    pub(super) int_list_pop: FunctionValue<'ctx>,
     /// PR-11 Task 5's own new `pycc_rt_dict_*` declarations, mirroring the
-    /// `int_list_*` cluster immediately above one-for-one: `dict_new` (no
-    /// pre-sizing entry point, same reasoning as `int_list_new`),
+    /// `list_*` cluster immediately above one-for-one: `dict_new` (no
+    /// pre-sizing entry point, same reasoning as `list_new`),
     /// `dict_set` (insert-or-update, D-123 -- this crate's one dict
-    /// "growable op", playing `int_list_append`'s role), `dict_get`
+    /// "growable op", playing `list_append`'s role), `dict_get`
     /// (read, panics on a missing key), `dict_len`, and `dict_key_at`
-    /// (`ForDict`'s own per-iteration key read, playing `int_list_get`'s
+    /// (`ForDict`'s own per-iteration key read, playing `list_get`'s
     /// `ForList`-iteration role).
     pub(super) dict_new: FunctionValue<'ctx>,
     pub(super) dict_set: FunctionValue<'ctx>,
@@ -184,13 +183,13 @@ pub(super) struct RtFns<'ctx> {
     pub(super) dict_len: FunctionValue<'ctx>,
     pub(super) dict_key_at: FunctionValue<'ctx>,
     /// PR-11 Task 9's own new `pycc_rt_int_set_*` declarations, mirroring
-    /// the `int_list_*` cluster above one-for-one: `int_set_new` (no
-    /// pre-sizing entry point, same reasoning as `int_list_new`),
+    /// the `list_*` cluster above one-for-one: `int_set_new` (no
+    /// pre-sizing entry point, same reasoning as `list_new`),
     /// `int_set_add` (insert-with-dedup, D-121 -- this crate's one set
-    /// "growable op", playing `int_list_append`'s role; the dedup check
+    /// "growable op", playing `list_append`'s role; the dedup check
     /// itself lives entirely in `pycc_rt_int_set_add`, not here), `int_set_len`,
     /// and `int_set_get` (`ForSet`'s own per-iteration element read, playing
-    /// `int_list_get`'s `ForList`-iteration role). Unlike the `dict_*`
+    /// `list_get`'s `ForList`-iteration role). Unlike the `dict_*`
     /// cluster, there is no `int_set_get`-adjacent key type at all -- a
     /// set's elements are encoded `i64`, so this cluster has no counterpart to
     /// `dict_get`'s "read by key" op.
@@ -200,9 +199,9 @@ pub(super) struct RtFns<'ctx> {
     pub(super) int_set_get: FunctionValue<'ctx>,
     /// Part 1 of #1319: `frozenset(...)`'s two copy constructors --
     /// `int_set_copy` for a `set[int]`/`frozenset[int]` source and
-    /// `int_set_from_int_list` for a `list[int]` source.
+    /// `int_set_from_list` for a `list[int]` source.
     pub(super) int_set_copy: FunctionValue<'ctx>,
-    pub(super) int_set_from_int_list: FunctionValue<'ctx>,
+    pub(super) int_set_from_list: FunctionValue<'ctx>,
     /// `ForSet`'s own loop-test check (Task 11 review fix, P1): panics if
     /// the set's freshly re-read length no longer matches the length
     /// captured once in the loop's preheader -- see
@@ -474,17 +473,68 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_int_untag_checked",
             i64_type.fn_type(&[i64_type.into()], false),
         ),
-        int_list_new: declare("pycc_rt_int_list_new", ptr_type.fn_type(&[], false)),
-        // Returns nothing: `pycc_rt_int_list_append`'s Rust signature is
-        // `-> ()`, so this is the one new `pycc_rt_int_list_*` declaration
-        // whose call site must *not* go through `try_as_basic_value()`.
-        int_list_append: declare(
-            "pycc_rt_int_list_append",
+        float_round: declare(
+            "pycc_rt_float_round",
+            f64_type.fn_type(&[f64_type.into(), i64_type.into()], false),
+        ),
+        float_round_to_int: declare(
+            "pycc_rt_float_round_to_int",
+            i64_type.fn_type(&[f64_type.into()], false),
+        ),
+        list_new: declare(
+            "pycc_rt_list_new",
+            ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+        ),
+        list_append: declare(
+            "pycc_rt_list_append",
             void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
-        int_list_get: declare(
-            "pycc_rt_int_list_get",
-            i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+        list_index_error: declare(
+            "pycc_rt_list_index_error",
+            void_type.fn_type(&[i64_type.into()], false),
+        ),
+        list_set: declare(
+            "pycc_rt_list_set",
+            void_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
+        ),
+        list_pop: declare(
+            "pycc_rt_list_pop",
+            i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
+        ),
+        list_insert: declare(
+            "pycc_rt_list_insert",
+            void_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
+        ),
+        list_slice: declare(
+            "pycc_rt_list_slice",
+            ptr_type.fn_type(
+                &[
+                    ptr_type.into(),
+                    i64_type.into(),
+                    i64_type.into(),
+                    i64_type.into(),
+                    i64_type.into(),
+                ],
+                false,
+            ),
+        ),
+        list_concat: declare(
+            "pycc_rt_list_concat",
+            ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+        ),
+        list_repeat: declare(
+            "pycc_rt_list_repeat",
+            ptr_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+        ),
+        list_contains: declare(
+            "pycc_rt_list_contains",
+            context
+                .i8_type()
+                .fn_type(&[ptr_type.into(), i64_type.into()], false),
+        ),
+        list_repr: declare(
+            "pycc_rt_list_repr",
+            ptr_type.fn_type(&[ptr_type.into()], false),
         ),
         buffer_f64_get: declare(
             "pycc_rt_buffer_f64_get",
@@ -512,42 +562,13 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_buffer_f64_free",
             void_type.fn_type(&[ptr_type.into()], false),
         ),
-        int_list_len: declare(
-            "pycc_rt_int_list_len",
-            i64_type.fn_type(&[ptr_type.into()], false),
-        ),
-        // `list` pointer plus `start`/`stop`/`step`, all raw `i64`,
-        // returning a pointer (the new sliced list) -- matches
-        // `pycc_rt_int_list_slice`'s real Rust signature
-        // (`fn(*mut PyIntListObj, i64, i64, i64) -> *mut PyIntListObj`)
-        // exactly. The task plan's own sketch described this as "4 `i64`
-        // parameters" for the whole call, which undercounts by one: it is
-        // one `ptr_type` plus three `i64_type` parameters, not four
-        // `i64_type` ones -- corrected here to match what `declare` below
-        // actually builds.
-        int_list_slice: declare(
-            "pycc_rt_int_list_slice",
-            ptr_type.fn_type(
-                &[
-                    ptr_type.into(),
-                    i64_type.into(),
-                    i64_type.into(),
-                    i64_type.into(),
-                ],
-                false,
-            ),
-        ),
-        int_list_pop: declare(
-            "pycc_rt_int_list_pop",
-            i64_type.fn_type(&[ptr_type.into()], false),
-        ),
         dict_new: declare("pycc_rt_dict_new", ptr_type.fn_type(&[], false)),
-        // Returns nothing, exactly like `int_list_append` above: this
+        // Returns nothing, exactly like `list_append` above: this
         // signature must match `pycc_rt_dict_set`'s real Rust one
         // (`fn(*mut PyDictObj, *mut PyStrObj, i64) -> ()`) -- key is a
         // second, distinct pointer parameter (a dict's key and its
         // container are two different heap objects), not folded into one
-        // like `int_list_append`'s single `i64` value parameter.
+        // like `list_append`'s single `i64` value parameter.
         dict_set: declare(
             "pycc_rt_dict_set",
             void_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false),
@@ -569,7 +590,7 @@ pub(super) fn declare_rt_functions<'ctx>(
             ptr_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
         int_set_new: declare("pycc_rt_int_set_new", ptr_type.fn_type(&[], false)),
-        // Returns nothing, exactly like `int_list_append` above: this
+        // Returns nothing, exactly like `list_append` above: this
         // signature must match `pycc_rt_int_set_add`'s real Rust one
         // (`fn(*mut PyIntSetObj, i64) -> ()`) -- the dedup check itself
         // lives entirely inside that function (D-121), so codegen's own
@@ -590,8 +611,8 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_int_set_copy",
             ptr_type.fn_type(&[ptr_type.into()], false),
         ),
-        int_set_from_int_list: declare(
-            "pycc_rt_int_set_from_int_list",
+        int_set_from_list: declare(
+            "pycc_rt_int_set_from_list",
             ptr_type.fn_type(&[ptr_type.into()], false),
         ),
         int_set_check_not_resized: declare(

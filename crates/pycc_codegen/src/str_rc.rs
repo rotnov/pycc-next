@@ -13,9 +13,9 @@ use super::*;
 /// reference from its own construction. This doc comment is the canonical
 /// list of borrowed `str` reads; every other description of it
 /// cross-references this function. The classification is purely
-/// syntactic. The borrowed reads are exactly the nodes the `matches!` below
-/// names: a bare `str`-typed `Name`, a `str`-typed `AttrGet`, and
-/// `ExceptionMessage`. Every other str-producing expression
+/// syntactic. The borrowed reads are a `str`-typed list `Subscript` and
+/// exactly the nodes the `matches!` below names: a bare `str`-typed `Name`,
+/// a `str`-typed `AttrGet`, and `ExceptionMessage`. Every other str-producing expression
 /// (`StringLiteral`, string concatenation, an f-string, a `Call`'s return
 /// value, a `BoolOp`, ...) freshly constructs its result and already owns
 /// exactly one reference (D-060, Task 7).
@@ -65,6 +65,11 @@ pub(super) fn str_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
     // duplicate exactly when `value` is.
     if let MirExpr::Sequence { value, .. } = expr {
         return str_value_is_a_duplicate_reference(value);
+    }
+    // `xs[i]` on a `list[str]` reads the list's own element pointer, which
+    // the list keeps owning (`pycc_rt::list`).
+    if let MirExpr::Subscript { .. } = expr {
+        return expr.ty() == pycc_mir::Ty::Str;
     }
     matches!(
         expr,

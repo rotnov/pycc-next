@@ -88,7 +88,14 @@ pub(crate) fn unary_result_type(op: UnaryOpKind, operand: Ty) -> Result<Ty, Diag
 pub(crate) fn is_truth_testable(ty: &Ty) -> bool {
     matches!(
         ty,
-        Ty::Bool | Ty::Int | Ty::Float | Ty::Str | Ty::None | Ty::Optional(_) | Ty::Instance(_)
+        Ty::Bool
+            | Ty::Int
+            | Ty::Float
+            | Ty::Str
+            | Ty::None
+            | Ty::Optional(_)
+            | Ty::Instance(_)
+            | Ty::List(_)
     )
 }
 

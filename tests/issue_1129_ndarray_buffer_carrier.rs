@@ -222,7 +222,7 @@ fn a_container_of_the_carrier_is_refused_by_the_container_gate() {
         let err = format!("{}{}", stdout_of(&out), stderr_of(&out));
         assert!(err.contains("error[T0034]"), "{err}");
         assert!(
-            err.contains("list[memoryview] is not compiled yet (D-105) -- only list[int] is"),
+            err.contains("list[memoryview] is not compiled yet -- a list element must be"),
             "{err}"
         );
     }

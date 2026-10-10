@@ -304,7 +304,7 @@ pub(super) fn lower_expr(
             // with the same shadow reasoning as the `ObjLen` split directly
             // above -- the scalar `len` arm below reaches
             // `expect_list_pointer`, and a `Scalar::MemoryView` is not a
-            // `PyIntListObj`. See `MirExpr::BufferLen`'s own doc comment.
+            // `PyListObj`. See `MirExpr::BufferLen`'s own doc comment.
             if callee == "len" && args.len() == 1 && matches!(args[0].ty(), Ty::MemoryView) {
                 return MirExpr::BufferLen {
                     base: Box::new(args.into_iter().next().expect("checked len() == 1")),
@@ -398,7 +398,14 @@ pub(super) fn lower_expr(
                     base: Box::new(base),
                 };
             }
-            let ty = if callee == "print" {
+            let ty = if callee == "round"
+                && !scopes
+                    .iter()
+                    .any(|scope| scope.contains_key(&format!("$fn:{callee}")))
+            {
+                // Mirrors `pycc_types::round::round_call_ty`.
+                if args.len() == 2 { Ty::Float } else { Ty::Int }
+            } else if callee == "print" {
                 Ty::None
             } else if callee == "math.sqrt" {
                 // D-136: `math.sqrt` is the other hand-recognized stdlib
@@ -900,7 +907,11 @@ pub(super) fn lower_expr(
                     "pycc_mir: internal error: `.pop()` receiver {list:?} is not list-typed -- pycc_types::check should have rejected this HIR before it reached pycc_mir"
                 )
             };
-            MirExpr::ListPop { list, ty: *elem_ty }
+            MirExpr::ListPop {
+                list,
+                index: None,
+                ty: *elem_ty,
+            }
         }
         HirExpr::DictGetOrDefault { dict, key, default } => {
             let (dict, dict_ty) = lower_container_receiver(dict, scopes, classes, current_class);
@@ -1388,6 +1399,33 @@ pub(super) fn lower_expr(
             // a distinct HIR node, and the class-name guard requires a name
             // that is *not* in `scopes`, which a foreign import's local name
             // always is.
+            // `xs.insert(i, v)` / `xs.pop(i)`: the method calls on a list
+            // receiver `pycc_types::list_ops::list_method_ty` admits.
+            if let Ty::List(elem_ty) = base.ty() {
+                let receiver = match base {
+                    MirExpr::Name { name, .. } => MirContainerReceiver::Name(name),
+                    other => MirContainerReceiver::Attr(Box::new(other)),
+                };
+                let mut args = args
+                    .iter()
+                    .map(|a| Box::new(lower_expr(a, scopes, classes, current_class)));
+                return match (method.as_str(), args.next(), args.next()) {
+                    ("insert", Some(index), Some(value)) => MirExpr::ListInsert {
+                        list: receiver,
+                        index,
+                        value,
+                    },
+                    ("pop", Some(index), None) => MirExpr::ListPop {
+                        list: receiver,
+                        index: Some(index),
+                        ty: *elem_ty,
+                    },
+                    _ => panic!(
+                        "pycc_mir: internal error: `list.{method}()` -- pycc_types::list_ops \
+                         should have rejected this HIR before it reached pycc_mir"
+                    ),
+                };
+            }
             if base.ty() == Ty::Object {
                 return MirExpr::ObjMethodCall {
                     base: Box::new(base),

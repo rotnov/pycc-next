@@ -49,7 +49,7 @@ pub(super) fn expect_set_pointer<'ctx>(scalar: Scalar<'ctx>, what: &str) -> Poin
 /// D-119 -- the second call site; `SetLiteral`'s per-element construction
 /// was the first and, until this task, only one). Returns nothing:
 /// `pycc_rt_int_set_add` is declared `void`, exactly like
-/// `build_int_list_append`/`build_dict_set` above. The dedup check that
+/// `list::build_list_append`/`build_dict_set` above. The dedup check that
 /// makes a repeated element collapse to one (D-121) lives entirely inside
 /// `pycc_rt_int_set_add` itself -- both callers just call it per value,
 /// unconditionally, with no dedup logic of their own.
@@ -70,7 +70,7 @@ pub(super) fn build_int_set_add<'ctx>(
 
 /// A `PyIntSetObj`'s current element count, as a raw `i64` counter, shared
 /// by the `len(s)` builtin's `Ty::Set` branch, `MirStmt::ForSet`'s own loop
-/// bound and `frozenset::set_truthy` -- mirrors `build_int_list_len`/
+/// bound and `frozenset::set_truthy` -- mirrors `list::build_list_len`/
 /// `build_dict_len` exactly, for the identical reason.
 pub(super) fn build_int_set_len<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
@@ -108,7 +108,7 @@ pub(super) fn build_int_set_check_not_resized<'ctx>(
 /// Reads one element out of a `PyIntSetObj` by insertion-order index, used
 /// only by `MirStmt::ForSet`'s own per-iteration element read. The index is
 /// a raw counter and the result is an encoded D-141 value, mirroring
-/// `build_int_list_get`.
+/// `list::build_list_get`.
 pub(super) fn build_int_set_get<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,

@@ -124,9 +124,10 @@ fn a_dict_comprehension_over_an_object_is_an_internal_error() {
 
 /// `pycc_hir` lowers the statement form of a comprehension over an object
 /// to a plain assignment, so a `ListCompAssign` carrying an object source is
-/// an internal error rather than a native loop over a pointer.
+/// an internal error rather than a native loop over a pointer (the list of
+/// objects it would build is refused first).
 #[test]
-#[should_panic(expected = "reached the native comprehension loop")]
+#[should_panic(expected = "pycc_codegen: internal error: `list[object]`")]
 fn a_statement_form_over_an_object_is_an_internal_error() {
     compile_ext_items_checking_ir(
         "objcomp_stmt",

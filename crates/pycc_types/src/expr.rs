@@ -566,6 +566,12 @@ pub(crate) fn infer_expr_in(
                 }
                 return Ok(std_scalar_to_ty(ret_ty));
             }
+            if callee == "round"
+                && env.lookup_function(callee).is_none()
+                && env.lookup_class(callee).is_none()
+            {
+                return crate::round::round_call_ty(&arg_tys);
+            }
             if callee == "float" && env.lookup_function(callee).is_none() {
                 // D-086's own remedy for the int-to-float boundary: a hand-recognized
                 // builtin, same as `len` above, not a user-declarable signature --
@@ -696,6 +702,11 @@ pub(crate) fn infer_expr_in(
                 // this change's.)
                 if arg_tys.len() == 1 && matches!(arg_tys[0], Ty::Object) {
                     return Ok(if callee == "int" { Ty::Int } else { Ty::Str });
+                }
+                // `str(xs)` of a list: the runtime's `repr` rendering.
+                if callee == "str" && arg_tys.len() == 1 && matches!(arg_tys[0], Ty::List(_)) {
+                    crate::list_ops::check_list_renderable(&arg_tys[0])?;
+                    return Ok(Ty::Str);
                 }
             }
             // D-154 (Part 1 of #375): `ClassName(args)` (instantiation)
@@ -933,7 +944,7 @@ pub(crate) fn infer_expr_in(
             // `T0021`, and it no longer points at #927: the annotated form
             // is handled now.
             if elements.is_empty() {
-                return Err(crate::empty_container::unresolved_list(env.in_function_body));
+                return Err(crate::empty_container::unresolved_list());
             }
             let mut elem_ty: Option<Ty> = None;
             for element in elements {
@@ -986,7 +997,7 @@ pub(crate) fn infer_expr_in(
             // `HirExpr::EmptyDict`, so reaching here means no evidence
             // exists.
             let Some((first_key, first_value)) = pairs.first() else {
-                return Err(crate::empty_container::unresolved_dict(env.in_function_body));
+                return Err(crate::empty_container::unresolved_dict());
             };
             let key_ty = infer_expr_in(env, local_names, first_key)?;
             let val_ty = infer_expr_in(env, local_names, first_value)?;
@@ -1339,26 +1350,16 @@ pub(crate) fn infer_expr_in(
                     [start.as_deref(), stop.as_deref(), step.as_deref()],
                 );
             }
-            let Ty::List(elem_ty) = &base_ty else {
+            let Ty::List(_) = &base_ty else {
                 return Err(Diagnostic::error(
                     "T0033",
                     format!(
-                        "`{}` does not support slicing (only list[int] does)",
+                        "`{}` does not support slicing (only a list does)",
                         base_ty.name()
                     ),
                     Span::new(0, 0),
                 ));
             };
-            if **elem_ty != Ty::Int {
-                return Err(Diagnostic::error(
-                    "T0034",
-                    format!(
-                        "list codegen only supports `list[int]` in v0.2, cannot slice `list[{}]`",
-                        elem_ty.name()
-                    ),
-                    Span::new(0, 0),
-                ));
-            }
             // Each bound is independently optional (`xs[:]`, `xs[1:]`,
             // `xs[:3]`, `xs[::2]` all parse) and, when present, an
             // arbitrary runtime `int`-typed expression -- not a literal-only
@@ -1758,6 +1759,9 @@ pub(crate) fn infer_expr_in(
                 return class::resolve_static_or_class_method_call(
                     env, class_name, method, args, &arg_tys,
                 );
+            }
+            if let Ty::List(elem) = &base_ty {
+                return crate::list_ops::list_method_ty(elem, method, &arg_tys);
             }
             class::resolve_method_call(env, &base_ty, method, args, &arg_tys)
         }

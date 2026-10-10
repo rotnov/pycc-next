@@ -142,28 +142,14 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
                 collect_stmt_bindings(stmt, bindings);
             }
         }
-        // `Ty::Int` for the same reason `ForRange` above hardcodes it, not
-        // by analogy: a `for` target's type is the iterated element type,
-        // and `pycc_types`' T0034 gate (D-105 scope cut 5) rejects every
-        // `list[T]` but `list[int]` before codegen ever runs, so `list`'s
-        // element type is `int` for every `ForList` that can reach this
-        // crate. Deliberately not derived from `bindings[list]` instead:
-        // that entry can be absent. Before D-228 (issue #918) the reason
-        // given here was that `list` could never be a list-typed function
-        // *parameter* at all; that is no longer true -- `def f(xs:
-        // list[int])` now lowers and reaches codegen. The binding can still
-        // be absent for the original second reason, which is the one that
-        // actually matters: `list` can be a module-scope global iterated from
-        // inside a function body, whose `local_bindings` is built from that
-        // function body alone and so has no entry for it at all --
-        // exactly what `a_module_level_list_binding_lives_in_a_global_slot`
-        // (`tests/slice1_codegen_depth.rs`) exercises. A derived non-`int`
-        // element type would allocate a slot `emit_stmt`'s own
-        // `list[int]`-only `ForList` arm then stores an encoded `int` into. A
-        // future PR widening codegen past `list[int]` owns both halves
-        // together.
-        MirStmt::ForList { var, body, .. } => {
-            bindings.entry(var.clone()).or_insert(pycc_mir::Ty::Int);
+        // A `for` target binds the list's element type, which lowering
+        // carries as `var_ty`.
+        MirStmt::ForList {
+            var, var_ty, body, ..
+        } => {
+            bindings
+                .entry(var.clone())
+                .or_insert_with(|| var_ty.clone());
             for stmt in body {
                 collect_stmt_bindings(stmt, bindings);
             }
@@ -205,7 +191,7 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
         // parameter, or the artifact-owned storage Part 2a of #1142 (#1165)
         // added, whose own `MirStmt::Assign` gives it a slot through the arm
         // above before any store can name it.
-        MirStmt::BufferSet { .. } => {}
+        MirStmt::BufferSet { .. } | MirStmt::ListSet { .. } => {}
         // `base.attr = value` (D-154, Part 1 of #375) reassigns an
         // existing instance's attribute slot, not a name -- same reasoning
         // as `DictSet` immediately above.

@@ -154,17 +154,9 @@ pub(crate) fn comp_container_ty(
     match *elts {
         CompElts::List(elt) => {
             let elt_ty = infer_expr_in(env, local_names, elt)?;
-            if elt_ty != Ty::Int {
-                return Err(Diagnostic::error(
-                    "T0034",
-                    format!(
-                        "list codegen only supports `list[int]` in v0.2, got a comprehension producing `list[{}]`",
-                        elt_ty.name()
-                    ),
-                    Span::new(0, 0),
-                ));
-            }
-            Ok(Ty::List(Box::new(Ty::Int)))
+            let list_ty = Ty::List(Box::new(elt_ty));
+            pycc_hir::check_container_ty(&list_ty, Span::new(0, 0))?;
+            Ok(list_ty)
         }
         CompElts::Set(elt) => {
             let elt_ty = infer_expr_in(env, local_names, elt)?;

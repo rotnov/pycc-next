@@ -2055,10 +2055,8 @@ fn collect_block_constraints_treats_a_list_comp_assign_target_as_a_no_op() {
     // `private_helper_parameter_is_inferred_through_a_comprehension_s_elt`
     // below for that half). An unrelated private helper with an
     // unresolved (`Ty::Infer`) signature elsewhere in the same module
-    // must not let the solver's own leniency swallow a genuine T0034 --
-    // it has to fall through to the real, comprehension-aware check pass
-    // (mirrors
-    // `a_bad_dict_literal_is_still_rejected_when_the_solver_path_runs_first`).
+    // leaves a `list[str]` comprehension to the real, comprehension-aware
+    // check pass, which admits it.
     let hir = HirModule {
         seeded_builtin_exception_classes: false,
         items: vec![
@@ -2084,7 +2082,7 @@ fn collect_block_constraints_treats_a_list_comp_assign_target_as_a_no_op() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    assert_eq!(check(&hir).unwrap_err().code, "T0034");
+    assert!(check(&hir).is_ok());
 }
 #[test]
 fn collect_block_constraints_unifies_a_range_comprehension_s_stop_forwarded_from_an_unannotated_parameter()

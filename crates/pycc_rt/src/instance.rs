@@ -3,7 +3,7 @@
 //! accessor functions.
 //!
 //! Follows the exact opaque-heap-object-with-FFI-accessors shape every
-//! other `pycc_rt` container object (`PyStrObj`, `PyIntListObj`,
+//! other `pycc_rt` container object (`PyStrObj`, `PyListObj`,
 //! `PyDictObj`, `PyIntSetObj`) already uses: `PyInstanceObj` is `pub` only
 //! so it can appear in an `extern "C"` function signature (the
 //! `private_interfaces` lint, a hard error under this workspace's `-D
@@ -19,7 +19,7 @@
 //! fork (opaque-with-accessors, not a cross-crate ABI layout commitment).
 //!
 //! **Slot representation.** Every assigned slot holds a plain `i64` word,
-//! matching this crate's own existing `PyIntListObj` element
+//! matching this crate's own existing `PyListObj` element
 //! representation; since #1388 the slot is an `Option<i64>` whose `None`
 //! marks "not yet assigned" (16 bytes per slot instead of 8, see
 //! [`PyInstanceObj`]). `int`/`bool`
@@ -36,13 +36,13 @@
 //! **No reference counting.** Per the class-instance-layout ADR and this
 //! issue's own explicit scope ("no new garbage-collection/reference-
 //! counting design beyond what `pycc_rt`'s existing heap objects already
-//! do"): `PyIntListObj`/`PyDictObj`/`PyIntSetObj` all define an `incref`/
+//! do"): `PyListObj`/`PyDictObj`/`PyIntSetObj` all define an `incref`/
 //! `decref` pair, but `pycc_codegen` never actually calls any of them (D-107,
 //! confirmed directly in `pycc_codegen`'s own doc comments) -- every
 //! container value already leaks in practice, refcounting exists only as
 //! unused-but-present infrastructure. `PyInstanceObj` does not even define
 //! that unused pair, and deliberately carries no `rc` field the way
-//! `PyIntListObj`/`PyDictObj`/`PyIntSetObj` do: an `rc` field with no
+//! `PyListObj`/`PyDictObj`/`PyIntSetObj` do: an `rc` field with no
 //! `incref`/`decref` pair ever reading or writing it past construction is
 //! dead code (`-D warnings` rejects it outright), not merely unused-but-
 //! harmless infrastructure -- so matching the *effective* (not aspirational)
@@ -152,7 +152,7 @@ pub unsafe extern "C" fn pycc_rt_instance_new(
 /// `pycc_rt_float_to_str`'s own split was: see this module's own tests
 /// below). This private function holds the real, freely-panicking logic.
 /// Takes `slot` as the raw `i64` the FFI boundary receives, exactly like
-/// `int_list_get`'s own `index: i64` -- a negative `slot` and an
+/// `list_get`'s own `index: i64` -- a negative `slot` and an
 /// out-of-range `slot` are both "index out of range" here, matching that
 /// function's own combined bounds check, not two separate failure modes.
 /// Returns `None` for a slot not yet assigned.
@@ -214,7 +214,7 @@ fn layout_field(layout: &[u8], index: usize) -> String {
 /// attribute '<x>'`` -- `<C>` the instance's own class, which for an
 /// instance of a subclass is the subclass, as in CPython -- and returns `0`,
 /// which every slot type tolerates on the path that unwinds to the handler,
-/// exactly as `int_list_get` does for `IndexError`.
+/// exactly as `list_get` does for `IndexError`.
 fn instance_get_slot_checked(instance: &PyInstanceObj, slot: i64) -> i64 {
     if let Some(word) = read_slot(instance, slot) {
         return word;

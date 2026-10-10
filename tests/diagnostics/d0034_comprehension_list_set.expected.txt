@@ -1,0 +1,5 @@
+error[T0034]: list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those
+ --> tests/diagnostics/d0034_comprehension_list_set.py:1:1
+  |
+1 | ys = [{1} for i in range(3)]
+  | ^ list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those

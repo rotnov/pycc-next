@@ -32,6 +32,14 @@ pub(crate) fn binop_result_ty(op: BinOpKind, left: Ty, right: Ty) -> Ty {
     // `bool` accepted as the count, since `bool <: int` -- as `str`, so
     // this function has to say the same. Codegen lowers it natively since
     // #575.
+    // `list * int`, `int * list` and `list + list` keep the list's type
+    // (`pycc_types::list_ops::list_binop_ty` admits nothing else).
+    if let Ty::List(_) = left {
+        return left;
+    }
+    if let Ty::List(_) = right {
+        return right;
+    }
     if op == BinOpKind::Mul
         && ((left == Ty::Str && matches!(right, Ty::Int | Ty::Bool))
             || (right == Ty::Str && matches!(left, Ty::Int | Ty::Bool)))

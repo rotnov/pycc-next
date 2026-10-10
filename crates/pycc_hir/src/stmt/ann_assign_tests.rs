@@ -184,7 +184,7 @@ fn a_bare_set_or_tuple_attribute_annotation_gets_no_parameterized_advice() {
 #[test]
 fn a_mistyped_element_annotation_on_an_attribute_target_is_the_local_error() {
     // `annotation_to_ty` validates it exactly as it would a local's.
-    let source = format!("{CLASS}    def m(self) -> None:\n        self.xs: list[str] = []\n");
+    let source = format!("{CLASS}    def m(self) -> None:\n        self.xs: list[set[int]] = []\n");
     assert_eq!(lower_err(&source).code, "T0034");
 }
 

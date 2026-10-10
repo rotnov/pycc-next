@@ -4,8 +4,9 @@
 //! Part A (#1063) converted the four `**` aborts; this file covers the
 //! remaining six sites, all of which used to abort the process across a plain
 //! `extern "C"` boundary and are now D-173 pending-exception raises:
-//! `int_list_slice`'s three rejected bounds (`ValueError`), `int_list_pop` on
-//! an empty list (`IndexError`), `float_to_str` outside the
+//! a zero slice step (`ValueError`; since the generic `list[T]` a negative
+//! bound is CPython's from-the-end addressing), `.pop()` on an empty list
+//! (`IndexError`), `float_to_str` outside the
 //! `1e-4 <= |x| < 1e16` positional-notation window (`RuntimeError`), and
 //! `check_set_len_unchanged` (`RuntimeError`, CPython's own
 //! `Set changed size during iteration`).
@@ -87,15 +88,6 @@ fn every_converted_abort_path_is_catchable_by_its_cpython_class() {
          \x20   y = xs.pop()\n\
          except IndexError as e:\n\
          \x20   print(e)\n\
-         neg = 0 - 1\n\
-         try:\n\
-         \x20   a = xs[neg:3]\n\
-         except ValueError as e:\n\
-         \x20   print(e)\n\
-         try:\n\
-         \x20   b = xs[0:neg]\n\
-         except ValueError as e:\n\
-         \x20   print(e)\n\
          try:\n\
          \x20   c = xs[0:3:0]\n\
          except ValueError as e:\n\
@@ -117,9 +109,7 @@ fn every_converted_abort_path_is_catchable_by_its_cpython_class() {
     assert_eq!(
         stdout,
         "pop from empty list\n\
-         slice start must be non-negative\n\
-         slice stop must be non-negative\n\
-         slice step must be positive\n\
+         slice step cannot be zero\n\
          formatting a float this large or small (100000000000000000000) needs \
          scientific notation, which is not supported yet\n\
          Set changed size during iteration\n\
@@ -194,18 +184,11 @@ fn the_float_sentinel_is_printed_before_the_exception_is_reported() {
     );
 }
 
-/// The same class of artefact for `list.pop()`, measured rather than assumed:
-/// `.pop()` is not itself a D-173 checkpoint (that classification lives in
-/// `expression_can_set_exception` and is explicitly out of scope here), so the
-/// `tag_smallint(0)` sentinel is printed by the *next* statement before the
-/// enclosing suite's own checkpoint observes the pending `IndexError`.
-///
-/// The sentinel being a valid encoded word is exactly what makes this safe:
-/// raw `0` is not a valid D-141 word and `classify_encoded_int` would panic on
-/// it, which is why every converted int-returning site returns
-/// `tag_smallint(0)` and never a bare `0`.
+/// `.pop()` on an empty list raises where it is evaluated (it is an
+/// `expression_can_set_exception` checkpoint), so the rest of its statement
+/// and suite is skipped exactly as in CPython: no sentinel reaches `print`.
 #[test]
-fn the_pop_sentinel_is_observable_before_its_checkpoint() {
+fn the_pop_raise_skips_the_rest_of_its_suite() {
     let (ok, stdout, stderr) = build_and_run(
         "sentinel_pop",
         "xs = [1]\n\
@@ -217,7 +200,7 @@ fn the_pop_sentinel_is_observable_before_its_checkpoint() {
          \x20   print(e)\n",
     );
     assert!(ok, "program failed: {stderr}");
-    assert_eq!(stdout, "0\npop from empty list\n");
+    assert_eq!(stdout, "pop from empty list\n");
 }
 
 /// Plan section 3(a-bis): the `ForSet` loop-test guard reads the pending flag,
@@ -377,23 +360,11 @@ fn the_statement_after_a_raising_for_set_loop_does_not_run() {
     assert_eq!(stdout, "AFTER\ncaught\nEND\n");
 }
 
-/// Review round 2 of #1064, thread 2: the accepted D-173 sentinel residual in
-/// its *assignment* direction. Neither `MirExpr::Slice` nor `MirExpr::ListPop`
-/// is a `pycc_codegen::exception::expression_can_set_exception` checkpoint, so
-/// each commits its sentinel to the target name before the enclosing suite's
-/// checkpoint observes the pending exception -- a binding CPython would have
-/// left at its previous value. Both arms are pinned together so a future
-/// half-fix that classifies only one of them fails here: the class belongs to
-/// the classifier, not to either expression, and `MirExpr::FString` reaches
-/// `float_to_str` with the same shape.
-///
-/// Widening `expression_can_set_exception` is out of scope for #1064 (plan
-/// section 9) -- it is pinned by
-/// `exception_guard_classification_keeps_the_arithmetic_fast_path_clean`
-/// because `nbody.py` evaluates ten `Pow` nodes per hot-loop iteration under
-/// the D-084/D-095/D-140 speedup floors. The residual closes with #1031.
+/// A slice and a pop never commit a sentinel to their target: a negative
+/// bound is CPython's from-the-end addressing (`xs[-1:1]` is empty), and a
+/// raising `.pop()` leaves the target at its previous value, as in CPython.
 #[test]
-fn a_rejected_slice_and_an_empty_pop_both_commit_their_sentinel_to_the_target() {
+fn a_negative_slice_and_a_raising_pop_bind_what_cpython_binds() {
     let (ok, stdout, stderr) = build_and_run(
         "sentinel_binding",
         "xs = [9, 9, 9]\n\
@@ -413,10 +384,7 @@ fn a_rejected_slice_and_an_empty_pop_both_commit_their_sentinel_to_the_target() 
          print(y)\n",
     );
     assert!(ok, "program failed: {stderr}");
-    assert_eq!(
-        stdout,
-        "slice start must be non-negative\n0\npop from empty list\n0\n"
-    );
+    assert_eq!(stdout, "0\npop from empty list\n7\n");
 }
 
 /// The same six raises seen from a CPython host through an `ext`-mode artifact
@@ -469,16 +437,13 @@ fn the_converted_raises_reach_a_cpython_host_as_catchable_exceptions() {
          \x20   raise AssertionError('expected IndexError')\n\
          except IndexError as e:\n\
          \x20   assert str(e) == 'pop from empty list', str(e)\n\
-         for args, msg in (\n\
-         \x20   ((-1, 3, 1), 'slice start must be non-negative'),\n\
-         \x20   ((0, -1, 1), 'slice stop must be non-negative'),\n\
-         \x20   ((0, 3, 0), 'slice step must be positive'),\n\
-         ):\n\
-         \x20   try:\n\
-         \x20       m.bad_slice(*args)\n\
-         \x20       raise AssertionError('expected ValueError for %r' % (args,))\n\
-         \x20   except ValueError as e:\n\
-         \x20       assert str(e) == msg, str(e)\n\
+         assert m.bad_slice(-1, 3, 1) == 1\n\
+         assert m.bad_slice(0, -1, 1) == 2\n\
+         try:\n\
+         \x20   m.bad_slice(0, 3, 0)\n\
+         \x20   raise AssertionError('expected ValueError')\n\
+         except ValueError as e:\n\
+         \x20   assert str(e) == 'slice step cannot be zero', str(e)\n\
          try:\n\
          \x20   m.big_float()\n\
          \x20   raise AssertionError('expected RuntimeError')\n\

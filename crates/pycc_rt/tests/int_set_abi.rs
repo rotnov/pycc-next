@@ -12,11 +12,11 @@
 //! measured from that binary").
 
 use pycc_rt::{
-    EXCEPTION_TYPE_OVERFLOW_ERROR, EXCEPTION_TYPE_RUNTIME_ERROR, pycc_rt_exception_clear,
-    pycc_rt_ext_pending_type, pycc_rt_int_list_append, pycc_rt_int_list_new, pycc_rt_int_lshift,
-    pycc_rt_int_set_add, pycc_rt_int_set_check_not_resized, pycc_rt_int_set_copy,
-    pycc_rt_int_set_decref, pycc_rt_int_set_from_int_list, pycc_rt_int_set_get,
-    pycc_rt_int_set_incref, pycc_rt_int_set_len, pycc_rt_int_set_new, pycc_rt_obj_set_add_identity,
+    EXCEPTION_TYPE_OVERFLOW_ERROR, EXCEPTION_TYPE_RUNTIME_ERROR, LIST_KIND_INT,
+    pycc_rt_exception_clear, pycc_rt_ext_pending_type, pycc_rt_int_lshift, pycc_rt_int_set_add,
+    pycc_rt_int_set_check_not_resized, pycc_rt_int_set_copy, pycc_rt_int_set_decref,
+    pycc_rt_int_set_from_list, pycc_rt_int_set_get, pycc_rt_int_set_incref, pycc_rt_int_set_len,
+    pycc_rt_int_set_new, pycc_rt_list_append, pycc_rt_list_new, pycc_rt_obj_set_add_identity,
     pycc_rt_obj_set_candidate, pycc_rt_obj_set_push,
 };
 
@@ -128,11 +128,11 @@ fn copy_is_an_independent_set_in_source_order() {
 fn from_int_list_dedups_keeping_the_first_occurrence() {
     pycc_rt_exception_clear();
     unsafe {
-        let list = pycc_rt_int_list_new();
+        let list = pycc_rt_list_new(LIST_KIND_INT, 0);
         for value in [2, 1, 2, 5] {
-            pycc_rt_int_list_append(list, small(value));
+            pycc_rt_list_append(list, small(value));
         }
-        let set = pycc_rt_int_set_from_int_list(list);
+        let set = pycc_rt_int_set_from_list(list);
         assert_eq!(items(set), vec![small(2), small(1), small(5)]);
         assert_eq!(pycc_rt_ext_pending_type(), -1);
         pycc_rt_int_set_decref(set);
@@ -146,11 +146,11 @@ fn from_int_list_raises_on_a_bigint_word_and_stops() {
     pycc_rt_exception_clear();
     let big = bigint_word();
     unsafe {
-        let list = pycc_rt_int_list_new();
-        pycc_rt_int_list_append(list, small(4));
-        pycc_rt_int_list_append(list, big);
-        pycc_rt_int_list_append(list, small(7));
-        let set = pycc_rt_int_set_from_int_list(list);
+        let list = pycc_rt_list_new(LIST_KIND_INT, 0);
+        pycc_rt_list_append(list, small(4));
+        pycc_rt_list_append(list, big);
+        pycc_rt_list_append(list, small(7));
+        let set = pycc_rt_int_set_from_list(list);
         assert_eq!(
             pycc_rt_ext_pending_type(),
             i32::from(EXCEPTION_TYPE_OVERFLOW_ERROR)

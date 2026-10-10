@@ -58,7 +58,7 @@ pub fn check_tuple_element_ty(element: &Ty, span: Span) -> Result<(), Diagnostic
 }
 
 /// Rejects a container `Ty` whose element types this version's codegen
-/// cannot represent: `list[int]` (`T0034`, D-105), `dict[str, int]`
+/// cannot represent: a `list[T]` whose element fails [`is_list_element_ty`] (`T0034`), `dict[str, int]`
 /// (`T0036`, D-122), `set[int]` and `frozenset[int]` (`T0038`, D-122) are
 /// the only admitted shapes, and a `tuple`'s elements are each checked with
 /// [`check_tuple_element_ty`].
@@ -69,12 +69,13 @@ pub fn check_tuple_element_ty(element: &Ty, span: Span) -> Result<(), Diagnostic
 pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
     match ty {
         Ty::List(element) => {
-            if **element != Ty::Int {
+            if !is_list_element_ty(element) {
                 return Err(Diagnostic::error(
                     "T0034",
                     format!(
-                        "list[{}] is not compiled yet (D-105) -- only list[int] is",
-                        element.name()
+                        "{} is not compiled yet -- a list element must be int, float, bool, \
+                         str, a user-class instance or a list of those",
+                        ty.name()
                     ),
                     span,
                 ));
@@ -116,6 +117,18 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
         | Ty::Optional(_)
         | Ty::Object
         | Ty::MemoryView => Ok(()),
+    }
+}
+
+/// Whether `list[element]` is compiled: one generic `list[T]` runtime object
+/// stores any element that fits one native word -- `int`, `float`, `bool`,
+/// `str`, a user-class instance, or (recursively) another such list.
+#[must_use]
+pub fn is_list_element_ty(element: &Ty) -> bool {
+    match element {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Instance(_) => true,
+        Ty::List(inner) => is_list_element_ty(inner),
+        _ => false,
     }
 }
 

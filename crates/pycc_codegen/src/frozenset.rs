@@ -12,7 +12,7 @@ use super::*;
 /// Emits `MirExpr::FrozenSetFrom`: `frozenset()` allocates an empty set,
 /// `frozenset(s)` for a `set[int]`/`frozenset[int]` source copies it with
 /// `pycc_rt_int_set_copy`, and `frozenset(xs)` for a `list[int]` source
-/// builds one with `pycc_rt_int_set_from_int_list`, whose dedup keeps each
+/// builds one with `pycc_rt_int_set_from_list`, whose dedup keeps each
 /// value's first occurrence exactly as a set literal does. `pycc_types`
 /// admits no other source type, so every non-list source is a set.
 pub(super) fn emit_frozenset_from<'ctx>(
@@ -30,7 +30,7 @@ pub(super) fn emit_frozenset_from<'ctx>(
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, source);
             match source.ty() {
                 pycc_mir::Ty::List(_) => (
-                    rt.int_set_from_int_list,
+                    rt.int_set_from_list,
                     vec![expect_list_pointer(scalar, "`frozenset`'s argument").into()],
                 ),
                 _ => (

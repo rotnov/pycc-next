@@ -101,14 +101,15 @@ fn an_ext_module_dispatches_all_four_names_on_their_receiver() {
     for (expr, method) in exprs.iter().zip(["append", "pop", "get", "add"]) {
         assert_eq!(dispatched(expr, method), ContainerFallback::Admitted);
     }
-    // The arities the container fast path refuses keep that refusal beside
+    // The arity the container fast path refuses keeps that refusal beside
     // the method reading, which an object receiver takes instead.
-    for (expr, method) in exprs[4..6].iter().zip(["get", "pop"]) {
-        assert!(matches!(
-            dispatched(expr, method),
-            ContainerFallback::Refused(_)
-        ));
-    }
+    assert!(matches!(
+        dispatched(exprs[4], "get"),
+        ContainerFallback::Refused(_)
+    ));
+    // `pop(i)` is an ordinary method call on every receiver: a list's is
+    // typed by `pycc_types`, an object's is the foreign call.
+    assert!(matches!(exprs[5], HirExpr::MethodCall { method, .. } if method == "pop"));
     // A name the container fast paths never claim is an ordinary call.
     assert!(matches!(exprs[6], HirExpr::MethodCall { method, .. } if method == "extend"));
 }

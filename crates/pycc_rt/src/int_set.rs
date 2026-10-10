@@ -9,11 +9,11 @@
 use super::*;
 
 /// `set[int]`'s runtime representation (D-121/D-141): structurally identical
-/// to `PyIntListObj` (a dense array of encoded int-compatible words), but insertion goes
+/// to `PyListObj` (a dense array of encoded int-compatible words), but insertion goes
 /// through `pycc_rt_int_set_add`'s own dedup check (linear scan, D-121)
-/// instead of `PyIntListObj`'s unconditional append -- this is the one
+/// instead of `PyListObj`'s unconditional append -- this is the one
 /// behavioral difference and the reason this is its own distinct type
-/// rather than a reuse of `PyIntListObj` (mirrors the same reasoning
+/// rather than a reuse of `PyListObj` (mirrors the same reasoning
 /// D-107 gave for `Scalar::List` needing its own variant instead of
 /// reusing `Scalar::Str`: distinct semantics deserve a distinct type so
 /// the compiler enforces every call site acknowledges the difference).
@@ -145,7 +145,7 @@ pub unsafe extern "C" fn pycc_rt_int_set_get(set: *mut PyIntSetObj, index: i64) 
 }
 
 /// D-060-style unconditional refcounting for `set[int]`, matching
-/// `pycc_rt_int_list_incref`'s own convention exactly: increments `set`'s
+/// `pycc_rt_list_incref`'s own convention exactly: increments `set`'s
 /// refcount by one, a no-op on a null pointer.
 ///
 /// # Safety
@@ -160,7 +160,7 @@ pub unsafe extern "C" fn pycc_rt_int_set_incref(set: *mut PyIntSetObj) {
 }
 
 /// D-060-style unconditional refcounting for `set[int]`, matching
-/// `pycc_rt_int_list_decref`'s own convention exactly: decrements `set`'s
+/// `pycc_rt_list_decref`'s own convention exactly: decrements `set`'s
 /// refcount by one, freeing the allocation once it reaches zero (which,
 /// via `Box::from_raw`'s own drop glue, also frees the `Cell<Vec<i64>>`
 /// payload's backing buffer -- no separate manual deallocation call
@@ -220,14 +220,11 @@ pub unsafe extern "C" fn pycc_rt_int_set_copy(src: *mut PyIntSetObj) -> *mut PyI
 /// exception check.
 ///
 /// # Safety
-/// `src` must be a live `PyIntListObj` pointer.
+/// `src` must be a live `list[int]` `PyListObj` pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_int_set_from_int_list(src: *mut PyIntListObj) -> *mut PyIntSetObj {
-    let items = unsafe { &*src }.items.take();
-    let values = items.clone();
-    unsafe { &*src }.items.set(items);
+pub unsafe extern "C" fn pycc_rt_int_set_from_list(src: *mut PyListObj) -> *mut PyIntSetObj {
     let set = pycc_rt_int_set_new();
-    for value in values {
+    for value in crate::list::list_words(src) {
         unsafe { pycc_rt_int_set_add(set, value) };
         if pycc_rt_exception_active() != 0 {
             break;
@@ -306,10 +303,11 @@ mod tests {
     use super::*;
     use crate::tests::{a_bigint_word, assert_overflow_raised, pending_tag_and_message};
 
-    fn int_list_of(values: &[i64]) -> *mut PyIntListObj {
-        let list = pycc_rt_int_list_new();
-        let words: Vec<i64> = values.iter().map(|value| tag_smallint(*value)).collect();
-        unsafe { &*list }.items.set(words);
+    fn list_of(values: &[i64]) -> *mut PyListObj {
+        let list = pycc_rt_list_new(LIST_KIND_INT, 0);
+        for value in values {
+            unsafe { pycc_rt_list_append(list, tag_smallint(*value)) };
+        }
         list
     }
 
@@ -390,7 +388,7 @@ mod tests {
             let set = pycc_rt_int_set_new();
             pycc_rt_int_set_add(set, tag_smallint(4));
             let copy = pycc_rt_int_set_copy(set);
-            let from_list = pycc_rt_int_set_from_int_list(int_list_of(&[1, 2]));
+            let from_list = pycc_rt_int_set_from_list(list_of(&[1, 2]));
             for each in [set, copy, from_list] {
                 assert!(set_hashes(each).is_empty());
                 pycc_rt_int_set_decref(each);
@@ -428,18 +426,18 @@ mod tests {
     #[test]
     fn from_int_list_dedups_keeping_first_occurrence() {
         unsafe {
-            let empty = int_list_of(&[]);
-            let from_empty = pycc_rt_int_set_from_int_list(empty);
+            let empty = list_of(&[]);
+            let from_empty = pycc_rt_int_set_from_list(empty);
             assert_eq!(pycc_rt_int_set_len(from_empty), 0);
 
-            let list = int_list_of(&[2, 1, 2, 1, 5]);
-            let set = pycc_rt_int_set_from_int_list(list);
+            let list = list_of(&[2, 1, 2, 1, 5]);
+            let set = pycc_rt_int_set_from_list(list);
             assert_eq!(
                 set_items(set),
                 vec![tag_smallint(2), tag_smallint(1), tag_smallint(5)]
             );
             // The source list is left intact.
-            assert_eq!(pycc_rt_int_list_len(list), 5);
+            assert_eq!(pycc_rt_list_len(list), 5);
             pycc_rt_int_set_decref(from_empty);
             pycc_rt_int_set_decref(set);
         }
@@ -449,13 +447,11 @@ mod tests {
     fn from_int_list_raises_on_a_bigint_word_and_stops() {
         pycc_rt_exception_clear();
         unsafe {
-            let list = int_list_of(&[4]);
+            let list = list_of(&[4]);
             let big = tag_bigint(bigint_from_i128(1i128 << 100));
-            let mut words = { &*list }.items.take();
-            words.push(big);
-            words.push(tag_smallint(7));
-            { &*list }.items.set(words);
-            let set = pycc_rt_int_set_from_int_list(list);
+            pycc_rt_list_append(list, big);
+            pycc_rt_list_append(list, tag_smallint(7));
+            let set = pycc_rt_int_set_from_list(list);
             assert_ne!(pycc_rt_exception_active(), 0);
             assert_eq!(set_items(set), vec![tag_smallint(4)]);
             pycc_rt_int_set_decref(set);
@@ -583,8 +579,8 @@ mod tests {
         // D-014's 100% line/region coverage gate: without this,
         // `pycc_rt_int_set_incref`/`_decref`'s `if set.is_null()` early
         // return is dead code, since none of the tests above ever pass a
-        // null pointer. Mirrors `PyIntListObj`'s own
-        // `int_list_incref_and_decref_on_a_null_pointer_are_safe_no_ops`
+        // null pointer. Mirrors `PyListObj`'s own
+        // `list_incref_and_decref_on_a_null_pointer_are_safe_no_ops`
         // test in `lib.rs`.
         unsafe {
             pycc_rt_int_set_incref(std::ptr::null_mut());

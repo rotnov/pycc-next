@@ -1480,6 +1480,21 @@ pub(crate) fn collect_expr_constraints(
                 }
                 return Ok(Some(Ok(std_scalar_to_ty(ret_ty))));
             }
+            // The solver-side mirror of `infer_expr_in`'s `round` arm; an
+            // unresolved argument falls through to the builtin's `C0001`,
+            // as `bool`'s does below.
+            if callee == "round" && !signatures.contains_key(callee) {
+                let resolved: Option<Vec<Ty>> = arg_terms
+                    .iter()
+                    .map(|term| match term {
+                        Some(Ok(ty)) => Some(ty.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(arg_tys) = resolved {
+                    return crate::round::round_call_ty(&arg_tys).map(|ty| Some(Ok(ty)));
+                }
+            }
             if callee == "float" && !signatures.contains_key(callee) {
                 // A user-defined `float` takes priority over the builtin -- see
                 // `infer_expr_in`'s own identical guard and its comment for why

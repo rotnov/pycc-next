@@ -621,7 +621,7 @@ fn a_class_in_a_package_init() {
 #[test]
 fn a_sibling_module_keeps_its_gate_off() {
     let dep = "class Cache:\n    def %pop%(self) -> int:\n        return 1\n";
-    let b = "def _p(xs):\n    return xs.pop(0)\n\n\ndef q() -> int:\n    return 1\n";
+    let b = "def _p(xs):\n    return xs.pop(0, 1)\n\n\ndef q() -> int:\n    return 1\n";
     for (order, main) in [
         ("dep_first", "from dep import Cache\nfrom b import q\n"),
         ("b_first", "from b import q\nfrom dep import Cache\n"),
@@ -634,9 +634,9 @@ fn a_sibling_module_keeps_its_gate_off() {
         let outcome = pycc_in(&dir, "check");
         assert_ne!(outcome.code, 0);
         assert!(
-            outcome
-                .both()
-                .contains("error[C0001]: list.pop() takes no arguments, got 1\n --> b.py:2:12"),
+            outcome.both().contains(
+                "error[C0001]: list.pop() takes at most one argument, got 2\n --> b.py:2:12"
+            ),
             "{order}: {}",
             outcome.both()
         );
@@ -960,7 +960,7 @@ fn a_rejected_twin_stays_rejected() {
     );
     twins_rejected(
         "1188_rejected_pop_param",
-        &with_all_four("def _p(xs):\n    return xs.pop(0)\n"),
+        &with_all_four("def _p(xs):\n    return xs.pop(0, 1)\n"),
     );
     twins_rejected(
         "1188_rejected_pop_local",
@@ -989,15 +989,15 @@ fn an_unresolvable_receiver_is_refused_through_check_and_run() {
 fn a_gate_off_module_keeps_the_container_diagnostic() {
     let dir = write_project(
         "1188_gate_off",
-        &single("def _p(xs):\n    return xs.pop(0)\n"),
+        &single("def _p(xs):\n    return xs.pop(0, 1)\n"),
         false,
     );
     let outcome = pycc_in(&dir, "check");
     assert_ne!(outcome.code, 0);
     assert!(
-        outcome
-            .both()
-            .contains("error[C0001]: list.pop() takes no arguments, got 1\n --> main.py:2:12"),
+        outcome.both().contains(
+            "error[C0001]: list.pop() takes at most one argument, got 2\n --> main.py:2:12"
+        ),
         "{}",
         outcome.both()
     );

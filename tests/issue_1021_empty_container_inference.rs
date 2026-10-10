@@ -457,9 +457,9 @@ print(f())
 /// because `find_producer` recurses through the former while documenting that
 /// it returns the *first syntactic* producer. Both a handler and the `else`
 /// suite produce here, with different element types: source order picks the
-/// handler's `str` and the program is `T0034`. An inventory that returned
-/// `orelse` before the handlers would pick `int` and compile this instead, so
-/// the diagnostic is what pins the order.
+/// handler's `str`, so the `else` suite's `int` append is the mismatch. An
+/// inventory that returned `orelse` before the handlers would pick `int` and
+/// report the handler's `str` append instead, so the diagnostic pins the order.
 #[test]
 fn a_try_s_suites_are_scanned_for_producers_in_source_order() {
     let rendered = check_error(
@@ -479,7 +479,7 @@ print(f(1))
 ",
     );
     assert!(
-        rendered.contains("error[T0034]: list[str] is not compiled yet"),
+        rendered.contains("error[T0021]: cannot append `int` to a list of `str`"),
         "{rendered}"
     );
 }
@@ -537,8 +537,8 @@ print(_pick())
 /// arm. `EmptyList` hands its element `Ty` over directly with no element terms
 /// to check, so a nested `list[list[int]]` element -- which reaches the solver
 /// before the D-228 element gate fires -- must keep the historical `Ok(None)`
-/// rather than becoming a carrier this scalar-only solver cannot represent.
-/// The D-228 gate then reports `T0034` for the annotation itself.
+/// rather than becoming a carrier this scalar-only solver cannot represent,
+/// so the helper's return type stays uninferable.
 #[test]
 fn a_nested_empty_list_element_is_not_carried_by_the_private_helper_solver() {
     let rendered = check_error(
@@ -552,7 +552,7 @@ print(_pick())
 ",
     );
     assert!(
-        rendered.contains("error[T0034]: list[list[int]] is not compiled yet"),
+        rendered.contains("error[T0021]: cannot infer return type of private helper `_pick`"),
         "{rendered}"
     );
 }
@@ -636,48 +636,27 @@ print(_pick())
     assert_eq!(output.stdout, b"3\n");
 }
 
-/// The rejection half of the same property. A `str` global resolves the
-/// container to `list[str]`, which D-228's shared element gate rejects with
-/// `T0034` -- byte for byte the diagnostic the equivalent `xs = [VALUE]`
-/// already produces. Seeding the module scope must make the two spellings
-/// agree on rejection, not only on success.
+/// A `str` global resolves the container to `list[str]`, exactly the type
+/// the equivalent `xs = [VALUE]` already produces, and both spellings run.
 #[test]
-fn a_str_global_producer_is_rejected_exactly_as_the_non_empty_spelling_is() {
-    let rendered = check_error(
-        "global_producer_str_element",
-        "\
-VALUE = \"s\"
-
-
-def _pick() -> str:
-    xs = []
-    xs.append(VALUE)
-    return xs.pop()
-
-print(_pick())
-",
-    );
-    assert!(
-        rendered.contains("error[T0034]: list[str] is not compiled yet"),
-        "{rendered}"
-    );
-    let non_empty = check_error(
-        "global_producer_str_element_non_empty",
-        "\
-VALUE = \"s\"
-
-
-def _pick() -> str:
-    xs = [VALUE]
-    return xs.pop()
-
-print(_pick())
-",
-    );
-    assert!(
-        non_empty.contains("error[T0034]: list[str] is not compiled yet"),
-        "{non_empty}"
-    );
+fn a_str_global_producer_resolves_exactly_as_the_non_empty_spelling_does() {
+    for (label, body) in [
+        (
+            "global_producer_str_element",
+            "    xs = []\n    xs.append(VALUE)\n",
+        ),
+        (
+            "global_producer_str_element_non_empty",
+            "    xs = [VALUE]\n",
+        ),
+    ] {
+        let source = format!(
+            "VALUE = \"s\"\n\n\ndef _pick() -> str:\n{body}    return xs.pop()\n\nprint(_pick())\n"
+        );
+        let output = check_build_and_run(label, &source);
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"s\n");
+    }
 }
 
 /// Review round 5, second finding: the pre-pass binder must keep D-040's
@@ -791,75 +770,27 @@ print(f())
 
 /// The #380 protocol carve-out of the same rule: `check_stmt_in_function`'s
 /// `AnnAssign` arm binds the concrete inferred type rather than the protocol
-/// annotation, so the pre-pass binder must too. Both spellings land outside
-/// D-228's admit set, so the property asserted is that they are rejected
-/// identically -- a binder that recorded `Drawable` would name a different
-/// element type in the empty spelling's `T0034`.
+/// annotation, so the pre-pass binder must too. Both spellings resolve a
+/// `list[Circle]` and run; a binder that recorded `Drawable` would resolve a
+/// list of the protocol, which no list admits.
 #[test]
-fn a_protocol_annotated_producer_is_rejected_exactly_as_the_non_empty_spelling_is() {
-    let rendered = check_error(
-        "protocol_annotated_empty_list",
-        "\
-from typing import Protocol
-
-
-class Drawable(Protocol):
-    def draw(self) -> str:
-        ...
-
-
-class Circle:
-    def __init__(self) -> None:
-        self.x = 0
-
-    def draw(self) -> str:
-        return \"circle\"
-
-
-def f() -> str:
-    d: Drawable = Circle()
-    xs = []
-    xs.append(d)
-    return xs.pop().draw()
-
-print(f())
-",
-    );
-    assert!(
-        rendered.contains("error[T0034]: list[Circle] is not compiled yet"),
-        "{rendered}"
-    );
-    let non_empty = check_error(
-        "protocol_annotated_non_empty_list",
-        "\
-from typing import Protocol
-
-
-class Drawable(Protocol):
-    def draw(self) -> str:
-        ...
-
-
-class Circle:
-    def __init__(self) -> None:
-        self.x = 0
-
-    def draw(self) -> str:
-        return \"circle\"
-
-
-def f() -> str:
-    d: Drawable = Circle()
-    xs = [d]
-    return xs.pop().draw()
-
-print(f())
-",
-    );
-    assert!(
-        non_empty.contains("error[T0034]: list[Circle] is not compiled yet"),
-        "{non_empty}"
-    );
+fn a_protocol_annotated_producer_resolves_exactly_as_the_non_empty_spelling_does() {
+    for (label, body) in [
+        (
+            "protocol_annotated_empty_list",
+            "    xs = []\n    xs.append(d)\n",
+        ),
+        ("protocol_annotated_non_empty_list", "    xs = [d]\n"),
+    ] {
+        let source = format!(
+            "from typing import Protocol\n\n\nclass Drawable(Protocol):\n    def draw(self) -> str:\n        ...\n\n\n\
+             class Circle:\n    def __init__(self) -> None:\n        self.x = 0\n\n    def draw(self) -> str:\n        return \"circle\"\n\n\n\
+             def f() -> str:\n    d: Drawable = Circle()\n{body}    return xs.pop().draw()\n\nprint(f())\n"
+        );
+        let output = check_build_and_run(label, &source);
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"circle\n");
+    }
 }
 
 /// The other half of round 6's first finding: an annotated *re*-declaration
@@ -1373,37 +1304,31 @@ print(go(True))
     assert_eq!(output.stdout, b"1\n");
 }
 
-/// #1021 bot review round 14: `T0003`'s help suggested annotating the
-/// assignment target, but D-245 item 8 puts module-level statements outside
-/// this pass's scope entirely -- the suggested `xs: list[int] = []` reports
-/// the *same* `T0003` at module level, so the help sent the reader in a
-/// circle. Both container shapes carry the position-aware wording, and the
-/// in-function wording is unchanged. The help text is only rendered on the
-/// JSON surface, which is why this reads that one.
+/// `T0003`'s help suggests annotating the assignment target, a remedy that
+/// works in every position since the pass also resolves module-level
+/// statements: the suggested `xs: list[int] = []` compiles at module level
+/// as it does in a function body. The help text is only rendered on the JSON
+/// surface, which is why this reads that one.
 #[test]
 fn the_t0003_help_names_a_remedy_that_works_in_the_position_it_is_raised() {
     let list_at_module_level =
         check_error_json("t0003_help_module_list", "xs = []\nprint(len(xs))\n");
     assert!(
-        list_at_module_level.contains("move this binding into a function body"),
-        "module-level list help must not suggest the annotation, got: {list_at_module_level}",
+        list_at_module_level.contains("annotate the assignment target"),
+        "module-level list help must suggest the annotation, got: {list_at_module_level}",
     );
-    // The remedy the old help named really does still fail in this position,
-    // which is what made naming it a circle rather than merely terse.
-    let annotated_at_module_level = check_error(
+    // The remedy the help names really works in this position.
+    let annotated_at_module_level = check_build_and_run(
         "t0003_help_module_annotated",
         "xs: list[int] = []\nprint(len(xs))\n",
     );
-    assert!(
-        annotated_at_module_level.contains("T0003"),
-        "the suggested annotation really does still fail at module level, got: \
-         {annotated_at_module_level}",
-    );
+    assert!(annotated_at_module_level.status.success());
+    assert_eq!(annotated_at_module_level.stdout, b"0\n");
     let dict_at_module_level =
         check_error_json("t0003_help_module_dict", "d = {}\nprint(len(d))\n");
     assert!(
-        dict_at_module_level.contains("move this binding into a function body"),
-        "module-level dict help must not suggest the annotation, got: {dict_at_module_level}",
+        dict_at_module_level.contains("annotate the assignment target"),
+        "module-level dict help must suggest the annotation, got: {dict_at_module_level}",
     );
     let list_in_function = check_error_json(
         "t0003_help_function_list",

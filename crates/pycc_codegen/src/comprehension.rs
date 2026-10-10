@@ -49,11 +49,10 @@ use super::rt_fns::RtFns;
 use super::set_instance::{SetEmitter, set_element_scalar};
 use super::{
     Scalar, StorageSlot, UserFunction, build_at_entry_block, build_dict_len, build_dict_set,
-    build_int_list_append, build_int_list_get, build_int_list_len, build_int_set_add,
-    build_int_set_check_not_resized, build_int_set_get, build_int_set_len, build_untag_checked,
-    emit_assign, emit_dict_name_read, emit_expr, emit_list_name_read,
+    build_int_set_add, build_int_set_check_not_resized, build_int_set_get, build_int_set_len,
+    build_untag_checked, emit_assign, emit_dict_name_read, emit_expr, emit_list_name_read,
     emit_range_operands_with_exception_safety, emit_set_name_read, guard_statement_effects,
-    incref_if_str_duplicate, to_encoded_int, truthy, ty_to_basic_type,
+    incref_if_str_duplicate, list, to_encoded_int, truthy, ty_to_basic_type,
 };
 use inkwell::IntPredicate;
 use inkwell::basic_block::BasicBlock;
@@ -67,7 +66,7 @@ use std::collections::HashMap;
 /// The element expressions of one comprehension, by produced container.
 #[derive(Clone, Copy)]
 pub(super) enum CompElts<'a> {
-    /// `[elt for ...]`, producing `list[int]` (T0034).
+    /// `[elt for ...]`, producing `list[T]` for the element's type `T`.
     List(&'a MirExpr),
     /// `{elt for ...}`, producing `set[int]` (T0038) or, with `Some` ops, a
     /// `set[C]` of user-class instances (#1344, D-255): the ops are the
@@ -139,18 +138,22 @@ pub(super) fn emit_comprehension<'ctx>(
 ) -> Scalar<'ctx> {
     let (prefix, word) = elts.names();
     let function = cx.builder.get_insert_block().unwrap().get_parent().unwrap();
-    let (new_fn, what) = match elts {
-        CompElts::List(_) => (cx.rt.int_list_new, "pycc_rt_int_list_new"),
-        CompElts::Set(..) => (cx.rt.int_set_new, "pycc_rt_int_set_new"),
-        CompElts::Dict(..) => (cx.rt.dict_new, "pycc_rt_dict_new"),
+    let container = match elts {
+        CompElts::List(elt) => list::build_list_new(cx.context, cx.builder, cx.rt, &elt.ty(), 0),
+        CompElts::Set(..) | CompElts::Dict(..) => {
+            let (new_fn, what) = if matches!(elts, CompElts::Set(..)) {
+                (cx.rt.int_set_new, "pycc_rt_int_set_new")
+            } else {
+                (cx.rt.dict_new, "pycc_rt_dict_new")
+            };
+            cx.builder
+                .build_call(new_fn, &[], &format!("comp_{word}_new"))
+                .expect("build_call should not fail for a well-formed container allocation")
+                .try_as_basic_value()
+                .expect_basic(&format!("{what} returns a non-void pointer"))
+                .into_pointer_value()
+        }
     };
-    let container = cx
-        .builder
-        .build_call(new_fn, &[], &format!("comp_{word}_new"))
-        .expect("build_call should not fail for a well-formed container allocation")
-        .try_as_basic_value()
-        .expect_basic(&format!("{what} returns a non-void pointer"))
-        .into_pointer_value();
 
     let lp = open_loop(cx, function, prefix, var, var_ty, source);
 
@@ -332,7 +335,12 @@ fn emit_element<'ctx>(
             };
             emitter.add(container, elt, ops);
         }
-        CompElts::List(elt) | CompElts::Set(elt, None) => {
+        CompElts::List(elt) => {
+            let scalar = emit_one(elt);
+            let word = list::element_word(cx.context, cx.builder, cx.rt, &elt.ty(), elt, scalar);
+            list::build_list_append(cx.builder, cx.rt, container, word);
+        }
+        CompElts::Set(elt, None) => {
             let encoded = to_encoded_int(cx.context, cx.builder, emit_one(elt));
             let _ = build_untag_checked(
                 cx.builder,
@@ -340,11 +348,7 @@ fn emit_element<'ctx>(
                 encoded,
                 &format!("{prefix}_validate_elt"),
             );
-            if matches!(elts, CompElts::List(_)) {
-                build_int_list_append(cx.builder, cx.rt, container, encoded);
-            } else {
-                build_int_set_add(cx.builder, cx.rt, container, encoded);
-            }
+            build_int_set_add(cx.builder, cx.rt, container, encoded);
         }
         CompElts::Dict(key, value) => {
             // `pycc_rt_dict_set` adopts the key pointer as the dict's own
@@ -487,17 +491,19 @@ fn open_loop<'ctx>(
             // CPython lets a list grow while it is iterated, so the length is
             // re-read on every trip with no resize guard.
             let (lp, current) = open_indexed_loop(cx, function, prefix, None, |b| {
-                build_int_list_len(b, rt, list_ptr)
+                list::build_list_len(context, b, list_ptr)
             });
-            let encoded_element = build_int_list_get(builder, rt, list_ptr, current);
-            emit_assign(
-                context,
-                builder,
-                rt,
-                cx.locals,
-                var,
-                Scalar::Int(encoded_element),
-            );
+            let word = list::build_list_get_unchecked(context, builder, list_ptr, current);
+            let element = list::word_element(context, builder, var_ty, word);
+            // A borrowed `str` element: the loop variable owns its own
+            // reference, as `MirStmt::ForList`'s does.
+            if let Scalar::Str(ptr) = element {
+                builder
+                    .build_call(rt.str_incref, &[ptr.into()], "listcomp_str_incref")
+                    .expect("build_call should not fail for a well-formed incref");
+                super::decref_str_slot_before_store(context, builder, rt, cx.locals, var);
+            }
+            emit_assign(context, builder, rt, cx.locals, var, element);
             lp
         }
         CompSource::Dict(name) => {

@@ -115,7 +115,6 @@ fn every_truth_testable_condition_is_admitted() {
 #[test]
 fn a_condition_with_no_testable_truth_is_refused() {
     for (param, name) in [
-        ("xs: list[int]", "list[int]"),
         ("d: dict[str, int]", "dict[str, int]"),
         ("p: tuple[int, int]", "tuple[int, int]"),
     ] {

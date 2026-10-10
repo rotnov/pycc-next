@@ -107,7 +107,8 @@ fn s1_a_mutable_or_user_defined_operand_is_refused() {
     for (source, header) in [
         (
             "xs: list[int] = [1]\nxs += [1]\n",
-            "error[T0021]: operator Add is not defined for `list[int]` and `list[int]`",
+            "error[C0001]: rebinding a list to `+`/`*` of itself (or `+=`/`*=` on a list) is \
+             not supported yet",
         ),
         (
             "t = (1,)\nt += (2,)\n",

@@ -51,6 +51,10 @@ pub(super) enum PrintArg<'ctx> {
     /// CPython's `print` converts each argument only after evaluating all
     /// of them (#1340).
     Object(Scalar<'ctx>),
+    /// A list, still unconverted for the same reason as `Object`: a later
+    /// argument may mutate it (`print(xs, xs.pop())`), and CPython renders
+    /// the list as it is after every argument has been evaluated.
+    List(Scalar<'ctx>),
 }
 
 /// Phase 1 of the two-phase `print()` argument pipeline (fixes #145):
@@ -124,6 +128,9 @@ pub(super) fn emit_eval_print_arg<'ctx>(
             // (not an `int`), and no conversion yet -- phase 2 converts it.
             return PrintArg::Object(scalar);
         }
+        if matches!(scalar, Scalar::List(_)) {
+            return PrintArg::List(scalar);
+        }
         let scalar = incref_if_str_duplicate(builder, rt, arg, scalar);
         let as_str = to_str(builder, rt, scalar);
         // #146 Part 2 (D-181): `print`'s own argument is a pure consumer --
@@ -179,6 +186,7 @@ pub(super) fn emit_write_print_arg<'ctx>(
                 .expect("build_call should not fail for a well-formed stdout flush");
             foreign_len::emit_to_str_pointer(context, builder, module, rt, object)
         }
+        PrintArg::List(list) => to_str(builder, rt, list),
     };
     builder
         .build_call(rt.print_write_str, &[str_ptr.into()], "print_write")
@@ -216,7 +224,7 @@ pub(super) fn emit_print_call<'ctx>(
             PrintArg::Object(scalar) => {
                 Some(object_release::hold(context, module, rt, arg, &scalar))
             }
-            PrintArg::None | PrintArg::Str(_) => None,
+            PrintArg::None | PrintArg::Str(_) | PrintArg::List(_) => None,
         };
         evaluated.push((value, held));
     }

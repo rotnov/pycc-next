@@ -41,6 +41,8 @@ use bigint_rc::{
 };
 use comprehension::{CompCx, CompElts, emit_comprehension, emit_comprehension_expr};
 mod int_const;
+/// `list[T]` emission over the generic `PyListObj` (`pycc_rt::list`).
+mod list;
 use int_const::{emit_int_constant, tag_smallint_const};
 mod exception_isinstance;
 mod exception_render;
@@ -167,26 +169,24 @@ enum Scalar<'ctx> {
     /// Task 7) -- always refcounted, never inspected directly by this
     /// crate (see this enum's own doc comment).
     Str(PointerValue<'ctx>),
-    /// A pointer to a heap-allocated `pycc_rt::PyIntListObj` (D-105,
-    /// Task 10) -- like `Str`, opaque to this crate, which only ever
-    /// stores it, passes it to a `pycc_rt_int_list_*` call, or marshals it
-    /// across a function boundary.
+    /// A pointer to a heap-allocated `pycc_rt::PyListObj`, the one runtime
+    /// object of every `list[T]`. `crate::list` passes it to the
+    /// `pycc_rt_list_*` calls and inlines the hot reads and stores against
+    /// its `#[repr(C)]` `{ len, data }` prefix.
     ///
     /// Its own variant rather than a reuse of `Str`'s (D-107): the two
     /// runtime objects have entirely different layouts, and `truthy`/
     /// `to_str` are exhaustive matches that would otherwise hand a
-    /// `PyIntListObj` pointer straight to a `pycc_rt_str_*` function --
+    /// `PyListObj` pointer straight to a `pycc_rt_str_*` function --
     /// reachable from ordinary type-checked source (`if xs:`, `print(xs)`)
     /// the moment list values become constructible. Keeping them distinct
     /// makes every operation `list[T]` has no v0.2 semantics for a compile
     /// error until it is answered deliberately, instead of silently
     /// misreading memory.
     ///
-    /// Refcounting is deliberately *not* wired for this variant in v0.2
-    /// (D-107): `pycc_rt_int_list_incref`/`_decref` are never called, so a
-    /// list's backing allocation leaks for the process's lifetime. That is
-    /// leak-only -- never a premature free or a double free -- because
-    /// nothing frees a list value early either.
+    /// A list itself is not refcounted (D-107): its allocation leaks for the
+    /// process's lifetime, never a premature free or a double free. The
+    /// list does own one reference to each `str` element (`pycc_rt::list`).
     List(PointerValue<'ctx>),
     /// A pointer to a heap-allocated `pycc_rt::PyDictObj` (PR-11 Task 2/5,
     /// D-121/D-123) -- like `List`, opaque to this crate, which only ever
@@ -195,10 +195,10 @@ enum Scalar<'ctx> {
     ///
     /// Its own variant rather than a reuse of `List`'s or `Str`'s (D-107's
     /// reasoning, extended to this new container by D-124): `PyDictObj` and
-    /// `PyIntListObj` have entirely different layouts, and every exhaustive
+    /// `PyListObj` have entirely different layouts, and every exhaustive
     /// `Scalar` match (`truthy`/`to_str`/`to_numeric_encoded_int`/`to_float`/
     /// `emit_assign`/argument marshalling) would otherwise hand a
-    /// `PyDictObj` pointer straight to a `pycc_rt_int_list_*` or
+    /// `PyDictObj` pointer straight to a `pycc_rt_list_*` or
     /// `pycc_rt_str_*` function -- reachable from ordinary type-checked
     /// source (`if x:`, `print(x)`) the moment dict values become
     /// constructible (this task). Keeping it distinct makes every operation
@@ -220,11 +220,11 @@ enum Scalar<'ctx> {
     /// Its own variant rather than a reuse of `List`'s, `Dict`'s, or
     /// `Str`'s (D-107's reasoning, extended to this new container by
     /// D-124, exactly as `Dict`'s own doc comment already extends it):
-    /// `PyIntSetObj` has its own layout, distinct from `PyIntListObj`,
+    /// `PyIntSetObj` has its own layout, distinct from `PyListObj`,
     /// `PyDictObj`, and `PyStrObj`, and every exhaustive `Scalar` match
     /// (`truthy`/`to_str`/`to_numeric_encoded_int`/`to_float`/`emit_assign`/argument
     /// marshalling) would otherwise hand a `PyIntSetObj` pointer straight to
-    /// a `pycc_rt_int_list_*`, `pycc_rt_dict_*`, or `pycc_rt_str_*`
+    /// a `pycc_rt_list_*`, `pycc_rt_dict_*`, or `pycc_rt_str_*`
     /// function -- reachable from ordinary type-checked source (`if s:`,
     /// `print(s)`) the moment set values become constructible (PR-11 Task
     /// 9). Keeping it distinct makes every operation `set[int]` has no v0.2
@@ -262,7 +262,7 @@ enum Scalar<'ctx> {
     ///
     /// Field values are stored exactly as the corresponding `Scalar`
     /// carries them. D-141 makes that identical to the current
-    /// `PyIntListObj`/`PyDictObj`/`PyIntSetObj` value contract: an int field
+    /// `PyListObj`/`PyDictObj`/`PyIntSetObj` value contract: an int field
     /// or container element is already an int-compatible encoded word,
     /// including a bool-identity marker. A tuple still crosses no runtime
     /// boundary and needs no ingress validation call.
@@ -296,14 +296,14 @@ enum Scalar<'ctx> {
     /// (the class-instance-layout ADR's own opaque-accessor decision):
     /// every attribute read/write goes through
     /// `pycc_rt_instance_get_slot`/`_set_slot` with a compile-time-resolved
-    /// slot index, exactly like `List`'s own `pycc_rt_int_list_*` calls.
+    /// slot index, exactly like `List`'s own `pycc_rt_list_*` calls.
     ///
     /// Its own variant rather than a reuse of `List`'s/`Dict`'s/`Set`'s
     /// (D-107/D-124's exact reasoning, extended identically): `PyInstanceObj`
     /// has its own layout, and every exhaustive `Scalar` match (`truthy`/
     /// `to_str`/`to_numeric_encoded_int`/`to_float`/`emit_assign`/argument
     /// marshalling) would otherwise hand an instance pointer straight to a
-    /// `pycc_rt_int_list_*`/`pycc_rt_dict_*`/`pycc_rt_str_*` function.
+    /// `pycc_rt_list_*`/`pycc_rt_dict_*`/`pycc_rt_str_*` function.
     ///
     /// Refcounting is deliberately not wired for this variant either (see
     /// `pycc_rt::instance`'s own doc comment): leak-only, identically to
@@ -492,13 +492,9 @@ fn ty_to_basic_type(context: &Context, ty: pycc_mir::Ty) -> inkwell::types::Basi
         // assignment-storage boundaries as the canonical `i8 0`; a `None`
         // return is still emitted as LLVM `void` by `compile_to_object`.
         pycc_mir::Ty::None => context.i8_type().into(),
-        // `list[T]`'s runtime object (Task 11) is heap-allocated and always
+        // `list[T]`'s runtime object is heap-allocated and always
         // referenced by pointer -- exactly the same storage/parameter
-        // representation `Str` already gets above. The element type `T`
-        // only affects what Task 11's runtime does with the pointee, never
-        // this decision, so every `List(_)` is a pointer regardless of `T`
-        // (D-105 restricts real *codegen* for non-`int` elements elsewhere,
-        // not this representation choice).
+        // representation `Str` already gets above, whatever `T` is.
         pycc_mir::Ty::List(_) => context.ptr_type(inkwell::AddressSpace::default()).into(),
         // `dict[K, V]`'s runtime object (PR-11 Task 5) is heap-allocated
         // and always referenced by pointer -- exactly the same
@@ -863,7 +859,7 @@ fn raw_i64_to_tagged_int<'ctx>(
         .expect("build_or should not fail for two i64 operands")
 }
 
-/// Extracts a `PyIntListObj` pointer from an already-evaluated operand that
+/// Extracts a `PyListObj` pointer from an already-evaluated operand that
 /// every upstream check says must be a `list[T]`: `len`'s argument,
 /// `MirExpr::Subscript`'s base, and `emit_list_name_read`'s named local.
 /// `what` names the offending operand for the message.
@@ -952,111 +948,6 @@ fn build_buffer_alloc_untag_len<'ctx>(
         .into_int_value()
 }
 
-/// Reads one encoded element out of a `PyIntListObj`. The positional index
-/// is a raw runtime counter; the returned word is already a user-visible
-/// D-141 int-compatible value and is forwarded unchanged.
-fn build_int_list_get<'ctx>(
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    list_ptr: PointerValue<'ctx>,
-    raw_index: IntValue<'ctx>,
-) -> IntValue<'ctx> {
-    builder
-        .build_call(
-            rt.int_list_get,
-            &[list_ptr.into(), raw_index.into()],
-            "list_get",
-        )
-        .expect("build_call should not fail for a well-formed list read")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_int_list_get returns a non-void i64")
-        .into_int_value()
-}
-
-/// Removes and returns the list's own last element (`list.pop()`, PR-12
-/// Task 11, D-119). Mirrors `build_int_list_get`'s own one-`build_call`
-/// shape exactly, minus the `index` parameter -- `.pop()` always targets
-/// the last element, so there is nothing else to pass. The returned value
-/// is already an encoded D-141 int-compatible word, exactly like
-/// `build_int_list_get`'s own return value.
-fn build_int_list_pop<'ctx>(
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    list_ptr: PointerValue<'ctx>,
-) -> IntValue<'ctx> {
-    builder
-        .build_call(rt.int_list_pop, &[list_ptr.into()], "list_pop")
-        .expect("build_call should not fail for a well-formed list pop")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_int_list_pop returns a non-void i64")
-        .into_int_value()
-}
-
-/// A `PyIntListObj`'s current element count, as a raw `i64` counter. The
-/// `len(x)` builtin tags this before handing it back as a
-/// `Ty::Int` expression value; `MirStmt::ForList` uses it directly as its
-/// own loop bound and deliberately does not.
-fn build_int_list_len<'ctx>(
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    list_ptr: PointerValue<'ctx>,
-) -> IntValue<'ctx> {
-    builder
-        .build_call(rt.int_list_len, &[list_ptr.into()], "list_len")
-        .expect("build_call should not fail for a well-formed list length read")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_int_list_len returns a non-void i64")
-        .into_int_value()
-}
-
-/// Returns a **new** `PyIntListObj` holding the clamped, strided sub-range
-/// `[start, stop)` of `list_ptr`'s elements, stepping by `step`
-/// (`base[start:stop:step]`, PR-12 Task 9, D-118). All three bound operands
-/// must already be raw, untagged `i64`s with every default/untag conversion
-/// already applied by the caller (`MirExpr::Slice`'s own `emit_expr` arm
-/// below) -- this helper is a thin one-`build_call` wrapper, exactly like
-/// `build_int_list_get` above, not a place that itself interprets D-141's
-/// encoded elements or D-118's defaulting rules.
-fn build_int_list_slice<'ctx>(
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    list_ptr: PointerValue<'ctx>,
-    start: IntValue<'ctx>,
-    stop: IntValue<'ctx>,
-    step: IntValue<'ctx>,
-) -> PointerValue<'ctx> {
-    builder
-        .build_call(
-            rt.int_list_slice,
-            &[list_ptr.into(), start.into(), stop.into(), step.into()],
-            "list_slice",
-        )
-        .expect("build_call should not fail for a well-formed list slice")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_int_list_slice returns a non-void pointer")
-        .into_pointer_value()
-}
-
-/// Appends one already-validated encoded D-141 value to a `PyIntListObj`, shared by
-/// `MirExpr::ListLiteral`'s per-element construction and
-/// `MirExpr::ListAppend`. Returns nothing: `pycc_rt_int_list_append` is
-/// declared `void`, so unlike every other `pycc_rt_int_list_*` helper above
-/// there is no `try_as_basic_value()` result to extract.
-fn build_int_list_append<'ctx>(
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    list_ptr: PointerValue<'ctx>,
-    encoded_value: IntValue<'ctx>,
-) {
-    builder
-        .build_call(
-            rt.int_list_append,
-            &[list_ptr.into(), encoded_value.into()],
-            "list_append",
-        )
-        .expect("build_call should not fail for a well-formed list append");
-}
-
 /// Extracts a `PyDictObj` pointer from an already-evaluated operand that
 /// every upstream check says must be a `dict[K, V]`: `len`'s argument,
 /// `MirExpr::DictGet`'s `dict` operand, and `emit_dict_name_read`'s named
@@ -1084,7 +975,7 @@ fn expect_dict_pointer<'ctx>(scalar: Scalar<'ctx>, what: &str) -> PointerValue<'
 /// construction and `MirStmt::DictSet`'s own `d[k] = v` (D-123's
 /// insert-or-update operation -- `pycc_rt_dict_set` itself decides which of
 /// the two this is, by whether `key` already compares equal to a stored
-/// key). Returns nothing, exactly like `build_int_list_append` above:
+/// key). Returns nothing, exactly like `list::build_list_append` above:
 /// `pycc_rt_dict_set` is declared `void`.
 fn build_dict_set<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
@@ -1104,7 +995,7 @@ fn build_dict_set<'ctx>(
 
 /// Returns the encoded value stored for `key_ptr`, or `encoded_default` if absent
 /// (`dict.get(key, default)`, PR-12 Task 11, D-119). Mirrors
-/// `build_int_list_pop`'s own one-`build_call` shape exactly, with one
+/// `list::build_list_pop`'s own one-`build_call` shape exactly, with one
 /// extra `i64` operand for the default. Both the default and returned value
 /// are D-141 int-compatible encoded words and retain bool identity.
 fn build_dict_get_or_default<'ctx>(
@@ -1128,7 +1019,7 @@ fn build_dict_get_or_default<'ctx>(
 
 /// A `PyDictObj`'s current entry count, as a raw `i64` counter, shared by
 /// the `len(d)` builtin's `Ty::Dict` branch and
-/// `MirStmt::ForDict`'s own loop bound -- mirrors `build_int_list_len`
+/// `MirStmt::ForDict`'s own loop bound -- mirrors `list::build_list_len`
 /// exactly, for the identical reason.
 fn build_dict_len<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
@@ -1612,20 +1503,8 @@ fn to_str<'ctx>(
         Scalar::Int(v) => (rt.int_to_str, v.into()),
         Scalar::Float(v) => (rt.float_to_str, v.into()),
         Scalar::Bool(v) => (rt.bool_to_str, v.into()),
-        // A real, reachable feature gap rather than a defensive arm
-        // (D-107): `pycc_types` accepts any argument type for `print`, so
-        // `print(xs)` for a `list[int]` local type-checks today and lands
-        // here -- and so does f-string interpolation (`f"{xs}"`, the
-        // interpolation arm in `emit_expr`), a second, independent reachable
-        // route into this same arm (`emit_eval_print_arg` and that interpolation
-        // arm both call into this one shared `to_str` helper). v0.2 has no
-        // `str(list)`/list-printing semantics (D-105), and there is no
-        // `pycc_rt_list_to_str` to call -- so this panics honestly instead
-        // of handing a `PyIntListObj` pointer to a `pycc_rt_*_to_str`
-        // function that would read it as a `PyStrObj`.
-        Scalar::List(_) => {
-            panic!("pycc_codegen: string conversion of a list[T] value is not supported yet")
-        }
+        // `str(xs)`: the runtime renders every element kind.
+        Scalar::List(v) => (rt.list_repr, v.into()),
         // A real, reachable feature gap, identical in kind to the `List`
         // arm directly above: `pycc_types` places no type restriction on
         // `print`'s argument or an f-string interpolation other than the
@@ -2397,6 +2276,12 @@ fn emit_expr_unchecked<'ctx>(
             let pending_l = push_pending_int_release_if_scalar_temporary(rt, left, &l);
             let r = emit_expr(context, builder, module, rt, user_functions, locals, right);
             pop_pending_int_release(rt, pending_l);
+            if let Ty::List(_) = ty {
+                let result = list::emit_list_binop(context, builder, rt, *op, l, r);
+                release_scalar_if_int_temporary(context, builder, rt, left, &l);
+                release_scalar_if_int_temporary(context, builder, rt, right, &r);
+                return result;
+            }
             match ty {
                 Ty::Int => {
                     // `to_numeric_encoded_int` promotes a `bool` operand instead of
@@ -2567,14 +2452,10 @@ fn emit_expr_unchecked<'ctx>(
                         .expect_basic("pycc_rt_str_concat returns a non-void pointer");
                     Scalar::Str(result.into_pointer_value())
                 }
-                // No container type supports any `BinOpKind` in this plan's
-                // own scope -- not even `+` for list concatenation, which
-                // D-105 defers past v0.2. This arm is a pure diagnostic-
-                // message improvement over the generic `other` catch-all
-                // below (naming the specific container type via `.name()`
-                // and calling out that it's the *operator* that's
-                // unsupported, not just the result type), not new
-                // capability.
+                // A list result returned above (`list::emit_list_binop`);
+                // no other container type supports a `BinOpKind`. This arm
+                // names the container type in the message rather than
+                // falling to the generic catch-all below.
                 Ty::List(_) | Ty::Dict(..) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_) => {
                     panic!(
                         "pycc_codegen: binary operators are not supported on {} yet",
@@ -2595,6 +2476,16 @@ fn emit_expr_unchecked<'ctx>(
             let pending_l = push_pending_int_release_if_scalar_temporary(rt, left, &l);
             let r = emit_expr(context, builder, module, rt, user_functions, locals, right);
             pop_pending_int_release(rt, pending_l);
+            let right_ty = right.ty();
+            if matches!(op, pycc_mir::CmpOpKind::In | pycc_mir::CmpOpKind::NotIn)
+                && let Ty::List(_) = right_ty
+            {
+                let negate = *op == pycc_mir::CmpOpKind::NotIn;
+                let found =
+                    list::emit_list_contains(context, builder, rt, &right_ty, left, l, r, negate);
+                release_scalar_if_int_temporary(context, builder, rt, left, &l);
+                return found;
+            }
             let as_bool =
                 compare::emit_compare_values(context, builder, rt, *op, left, l, right, r);
             // #146 Part 2 (D-181): no comparison retains either operand, so
@@ -2798,7 +2689,7 @@ fn emit_expr_unchecked<'ctx>(
                     }
                     _ => {
                         let list_ptr = expect_list_pointer(scalar, "`len`'s argument");
-                        build_int_list_len(builder, rt, list_ptr)
+                        list::build_list_len(context, builder, list_ptr)
                     }
                 };
                 // The raw count becomes a user-visible
@@ -2807,6 +2698,9 @@ fn emit_expr_unchecked<'ctx>(
                 // `MirStmt::ForList`'s own use of the same runtime call,
                 // which keeps it raw as a private loop bound.
                 return Scalar::Int(raw_i64_to_tagged_int(context, builder, raw_len));
+            }
+            if callee == "round" && !user_functions.contains_key(callee.as_str()) {
+                return emit_round(context, builder, module, rt, user_functions, locals, args);
             }
             if callee == "float" && !user_functions.contains_key(callee.as_str()) {
                 // Hand-recognized builtin -- but, unlike `len` above, only when
@@ -2914,6 +2808,10 @@ fn emit_expr_unchecked<'ctx>(
                     )
                 };
                 let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
+                // `str(xs)` of a list (`pycc_types` admits it beside `str(o)`).
+                if callee == "str" && matches!(scalar, Scalar::List(_)) {
+                    return Scalar::Str(to_str(builder, rt, scalar));
+                }
                 if !matches!(scalar, Scalar::Object(_)) {
                     panic!(
                         "pycc_codegen: internal error: `{callee}` takes a CPython object argument \
@@ -3026,34 +2924,17 @@ fn emit_expr_unchecked<'ctx>(
                 panic!("pycc_codegen: internal error: an f-string with zero parts should not be reachable")
             }))
         }
-        // `[e1, e2, ...]` (D-105): an empty `pycc_rt_int_list_new()` object
-        // followed by one `pycc_rt_int_list_append` per element, in source
-        // order. No pre-sizing call: `PyIntListObj`'s payload is a
-        // `Vec<i64>` whose own amortized-doubling `push` already handles
-        // growth (see that struct's doc comment), so a reserve entry point
-        // would be new runtime surface for no behavioral difference.
+        // `[e1, e2, ...]`: a `pycc_rt_list_new` sized for the elements,
+        // then one `pycc_rt_list_append` per element word, in source order
+        // (`list::element_word` owns the per-element-type encoding).
         //
-        // D-141: each element becomes an int-compatible encoded word. The
-        // checked decoder validates bigint exclusion, but storage keeps the
-        // original word so a bool marker survives the round-trip.
-        //
-        // `to_encoded_int` rather than a `let Scalar::Int(..) else` match, for
-        // the same reason `emit_expr`'s own `BinOp`/`Ty::Int` arm uses it:
-        // Python's `bool` is an `int` subtype, so widening is the correct
-        // response to a `Scalar::Bool` element rather than an error -- and
-        // its `Float`/`Str`/`List` arms already panic honestly.
         // #1021: a resolved empty `[]`. Structurally `ListLiteral` with no
-        // elements -- the same `pycc_rt_int_list_new()` object, with no
+        // elements -- the same `pycc_rt_list_new()` object, with no
         // `append` calls after it. It is a separate arm only because the
         // variant carries its element type instead of deriving one.
-        MirExpr::EmptyList(_) => Scalar::List(
-            builder
-                .build_call(rt.int_list_new, &[], "list_new")
-                .expect("build_call should not fail for a well-formed list construction")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_int_list_new returns a non-void pointer")
-                .into_pointer_value(),
-        ),
+        MirExpr::EmptyList(elem) => {
+            Scalar::List(list::build_list_new(context, builder, rt, elem, 0))
+        }
         // #1021: a resolved empty `{}`, the dict counterpart of
         // `EmptyList` immediately above.
         MirExpr::EmptyDict(_) => Scalar::Dict(
@@ -3065,12 +2946,9 @@ fn emit_expr_unchecked<'ctx>(
                 .into_pointer_value(),
         ),
         MirExpr::ListLiteral(elements) => {
-            let list_ptr = builder
-                .build_call(rt.int_list_new, &[], "list_new")
-                .expect("build_call should not fail for a well-formed list construction")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_int_list_new returns a non-void pointer")
-                .into_pointer_value();
+            let elem = expr.ty();
+            let elem = list::element_ty(&elem);
+            let list_ptr = list::build_list_new(context, builder, rt, elem, elements.len() as u64);
             for element in elements {
                 let scalar = emit_expr(
                     context,
@@ -3081,9 +2959,8 @@ fn emit_expr_unchecked<'ctx>(
                     locals,
                     element,
                 );
-                let encoded = to_encoded_int(context, builder, scalar);
-                let _ = build_untag_checked(builder, rt, encoded, "list_validate_element");
-                build_int_list_append(builder, rt, list_ptr, encoded);
+                let word = list::element_word(context, builder, rt, elem, element, scalar);
+                list::build_list_append(builder, rt, list_ptr, word);
             }
             Scalar::List(list_ptr)
         }
@@ -3162,26 +3039,19 @@ fn emit_expr_unchecked<'ctx>(
                         ),
                     }
                 }
-                // `base[index]`, read-only (D-105 scope cut 2). The index is
-                // decoded to a raw positional counter; the D-141 element
-                // word read back out is already user-visible and passes
-                // through unchanged.
-                //
-                // An out-of-range (including any negative) index is
-                // `pycc_rt_int_list_get`'s own honest runtime panic, not
-                // something this crate can check -- the index is only known
-                // at runtime. That is the opposite of the tuple arm above,
-                // where the index is a compile-time literal `pycc_types`
-                // has already bounds-checked.
+                // `base[index]` on a list: the index is decoded to a raw
+                // position, a negative one counts from the end, and an
+                // out-of-range one raises `IndexError` from the inlined
+                // bounds check (`list::build_list_get`) -- the opposite of
+                // the tuple arm above, whose literal index `pycc_types` has
+                // already bounds-checked.
                 (_, base_scalar) => {
                     let base_ptr = expect_list_pointer(base_scalar, "the subscripted value");
                     let index_scalar =
                         emit_expr(context, builder, module, rt, user_functions, locals, index);
-                    let encoded_index = to_numeric_encoded_int(context, builder, index_scalar);
-                    let raw_index =
-                        build_untag_checked(builder, rt, encoded_index, "list_untag_index");
-                    let encoded_element = build_int_list_get(builder, rt, base_ptr, raw_index);
-                    Scalar::Int(encoded_element)
+                    let raw_index = list::raw_index(context, builder, rt, index_scalar);
+                    let word = list::build_list_get(context, builder, rt, base_ptr, raw_index);
+                    list::word_element(context, builder, &expr.ty(), word)
                 }
             }
         }
@@ -3198,10 +3068,22 @@ fn emit_expr_unchecked<'ctx>(
         MirExpr::ListAppend { list, value } => {
             let list_ptr =
                 emit_list_receiver(context, builder, module, rt, user_functions, locals, list);
+            let elem = value_list_element(list, locals);
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
-            let encoded = to_encoded_int(context, builder, scalar);
-            let _ = build_untag_checked(builder, rt, encoded, "list_validate_appended");
-            build_int_list_append(builder, rt, list_ptr, encoded);
+            let word = list::element_word(context, builder, rt, &elem, value, scalar);
+            list::build_list_append(builder, rt, list_ptr, word);
+            Scalar::Bool(context.i8_type().const_int(0, false))
+        }
+        MirExpr::ListInsert { list, index, value } => {
+            let list_ptr =
+                emit_list_receiver(context, builder, module, rt, user_functions, locals, list);
+            let elem = value_list_element(list, locals);
+            let index_scalar =
+                emit_expr(context, builder, module, rt, user_functions, locals, index);
+            let raw = list::raw_index(context, builder, rt, index_scalar);
+            let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
+            let word = list::element_word(context, builder, rt, &elem, value, scalar);
+            list::build_list_insert(builder, rt, list_ptr, raw, word);
             Scalar::Bool(context.i8_type().const_int(0, false))
         }
         // `{k1: v1, k2: v2, ...}` (PR-11 Task 5, D-123): an empty
@@ -3513,7 +3395,7 @@ fn emit_expr_unchecked<'ctx>(
         // length (Task 5a's confirmed regression): the only way this arm's
         // result reaches a name is through `MirStmt::Assign`, which fully
         // evaluates this whole expression to a `Scalar::List` -- a pointer
-        // to a **freshly allocated** result object `pycc_rt_int_list_slice`
+        // to a **freshly allocated** result object `pycc_rt_list_slice`
         // returns, never `base_ptr` itself -- before it ever calls
         // `emit_assign` to rebind `target`'s own slot. This arm never
         // writes to `locals` at all, so there is no premature-rebind window
@@ -3521,7 +3403,7 @@ fn emit_expr_unchecked<'ctx>(
         // comprehensions. The original list is left untouched either way
         // (D-107's leak-only policy: no incref/decref of `base_ptr`, and no
         // special handling for the new result beyond what
-        // `pycc_rt_int_list_slice` itself already does).
+        // `pycc_rt_list_slice` itself already does).
         MirExpr::Slice {
             base,
             start,
@@ -3531,46 +3413,16 @@ fn emit_expr_unchecked<'ctx>(
             let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
             let base_ptr = expect_list_pointer(base_scalar, "the sliced value");
 
-            let start_i64 = match start {
-                Some(e) => {
+            let bound = |e: &Option<Box<MirExpr>>| {
+                e.as_ref().map(|e| {
                     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, e);
-                    let encoded = to_numeric_encoded_int(context, builder, scalar);
-                    build_untag_checked(builder, rt, encoded, "slice_untag_start")
-                }
-                None => context.i64_type().const_int(0, false),
+                    list::raw_index(context, builder, rt, scalar)
+                })
             };
-            let stop_raw = match stop {
-                Some(e) => {
-                    let scalar = emit_expr(context, builder, module, rt, user_functions, locals, e);
-                    let encoded = to_numeric_encoded_int(context, builder, scalar);
-                    Some(build_untag_checked(
-                        builder,
-                        rt,
-                        encoded,
-                        "slice_untag_stop",
-                    ))
-                }
-                None => None,
-            };
-            let step_i64 = match step {
-                Some(e) => {
-                    let scalar = emit_expr(context, builder, module, rt, user_functions, locals, e);
-                    let encoded = to_numeric_encoded_int(context, builder, scalar);
-                    build_untag_checked(builder, rt, encoded, "slice_untag_step")
-                }
-                None => context.i64_type().const_int(1, false),
-            };
-            // Read only now: after `base` and every present bound have
-            // already been evaluated (see this arm's own doc comment
-            // above).
-            let stop_i64 = match stop_raw {
-                Some(v) => v,
-                None => build_int_list_len(builder, rt, base_ptr),
-            };
-
-            let result_ptr =
-                build_int_list_slice(builder, rt, base_ptr, start_i64, stop_i64, step_i64);
-            Scalar::List(result_ptr)
+            let bounds = [bound(start), bound(stop), bound(step)];
+            Scalar::List(list::build_list_slice(
+                context, builder, rt, base_ptr, bounds,
+            ))
         }
         // `list.pop()` (PR-12 Task 11, D-119): removes and returns `list`'s
         // own last element. Mirrors `MirExpr::ListAppend`'s own shape (a
@@ -3589,8 +3441,8 @@ fn emit_expr_unchecked<'ctx>(
         // ever rebinding `xs`'s slot, exactly the ordering `MirExpr::Slice`'s
         // own doc comment above already establishes is what keeps `xs =
         // xs[1:3]` safe from Task 5a's confirmed self-referential-rebind
-        // regression. Each `.pop()` mutates the *pointee* `PyIntListObj`
-        // in place (via `pycc_rt_int_list_pop`'s own `Cell<Vec<i64>>`), not
+        // regression. Each `.pop()` mutates the *pointee* `PyListObj`
+        // in place (via `pycc_rt_list_pop`'s own `Cell<Vec<i64>>`), not
         // `xs`'s own slot, so two `.pop()`s emitted in source order run in
         // that same order at runtime -- ordinary sequential `call`
         // instructions, nothing deferred -- and each observes the
@@ -3599,11 +3451,15 @@ fn emit_expr_unchecked<'ctx>(
         // just by this reasoning: see the crate's `tests` module and its
         // `pop_twice_on_the_same_list_in_one_statement_removes_in_order`
         // end-to-end test.
-        MirExpr::ListPop { list, .. } => {
+        MirExpr::ListPop { list, index, ty } => {
             let list_ptr =
                 emit_list_receiver(context, builder, module, rt, user_functions, locals, list);
-            let encoded = build_int_list_pop(builder, rt, list_ptr);
-            Scalar::Int(encoded)
+            let index = index.as_ref().map(|index| {
+                let scalar = emit_expr(context, builder, module, rt, user_functions, locals, index);
+                list::raw_index(context, builder, rt, scalar)
+            });
+            let word = list::build_list_pop(context, builder, rt, list_ptr, index);
+            list::word_element(context, builder, ty, word)
         }
         // `dict.get(key, default)` (PR-12 Task 11, D-119): returns the
         // stored value, or `default` if `key` is absent -- never panics on
@@ -4120,7 +3976,7 @@ fn emit_expr_unchecked<'ctx>(
                 .into_int_value();
             // D-141: the raw element count becomes a user-visible `Ty::Int`
             // expression value here, so it is tagged exactly as the scalar
-            // `len` arm tags `pycc_rt_int_list_len`'s own raw count.
+            // `len` arm tags `pycc_rt_list_len`'s own raw count.
             Scalar::Int(raw_i64_to_tagged_int(context, builder, raw_len))
         }
         // #1165: `ndarray(n)` / `NDArray(n)`. One call and no arithmetic,
@@ -4366,6 +4222,57 @@ fn emit_list_receiver<'ctx>(
             expect_list_pointer(scalar, "an attribute container receiver")
         }
     }
+}
+
+/// `round(x)` / `round(x, ndigits)` (`pycc_types::round` admits the
+/// shapes): an `int` argument is its own rounding, a `float` one goes to
+/// `pycc_rt_float_round_to_int` / `pycc_rt_float_round`.
+fn emit_round<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    args: &[MirExpr],
+) -> Scalar<'ctx> {
+    let emit = |arg: &MirExpr| emit_expr(context, builder, module, rt, user_functions, locals, arg);
+    let x = emit(&args[0]);
+    let (callee, call_args): (
+        FunctionValue<'ctx>,
+        Vec<inkwell::values::BasicMetadataValueEnum<'ctx>>,
+    ) = match (x, args.get(1)) {
+        (Scalar::Float(x), None) => (rt.float_round_to_int, vec![x.into()]),
+        (Scalar::Float(x), Some(ndigits)) => {
+            let ndigits = emit(ndigits);
+            let ndigits = list::raw_index(context, builder, rt, ndigits);
+            (rt.float_round, vec![x.into(), ndigits.into()])
+        }
+        (int, _) => return Scalar::Int(to_numeric_encoded_int(context, builder, int)),
+    };
+    let result = builder
+        .build_call(callee, &call_args, "round")
+        .expect("build_call should not fail for a declared runtime function")
+        .try_as_basic_value()
+        .expect_basic("the round runtime functions return a value");
+    if args.len() == 2 {
+        Scalar::Float(result.into_float_value())
+    } else {
+        guard_statement_effects(context, builder, rt);
+        Scalar::Int(result.into_int_value())
+    }
+}
+
+/// The element type of the list a container receiver names.
+fn value_list_element(
+    receiver: &pycc_mir::MirContainerReceiver,
+    locals: &HashMap<String, StorageSlot<'_>>,
+) -> pycc_mir::Ty {
+    let list_ty = match receiver {
+        pycc_mir::MirContainerReceiver::Name(name) => locals[name].ty.clone(),
+        pycc_mir::MirContainerReceiver::Attr(read) => read.ty(),
+    };
+    list::element_ty(&list_ty).clone()
 }
 
 /// The `dict` counterpart of [`emit_list_receiver`], for
@@ -4796,18 +4703,8 @@ fn truthy<'ctx>(
             .try_as_basic_value()
             .expect_basic("pycc_rt_str_truthy returns a non-void i8")
             .into_int_value(),
-        // A real, reachable feature gap rather than a defensive arm
-        // (D-107): `pycc_types` places no type restriction on an `if`/
-        // `while` condition, so `if xs:` for a `list[int]` local
-        // type-checks today and lands here. v0.2 has no `bool(list)`
-        // semantics (D-105 ships only `len(x)`/`x[i]`/iteration/
-        // `.append()`), and there is no `pycc_rt_int_list_truthy` to call
-        // -- so this panics honestly instead of calling
-        // `pycc_rt_str_truthy` on a `PyIntListObj` pointer, whose layout
-        // has nothing in common with `PyStrObj`'s.
-        Scalar::List(_) => {
-            panic!("pycc_codegen: truthiness of a list[T] value is not supported yet")
-        }
+        // A list is truthy exactly when it is non-empty.
+        Scalar::List(ptr) => list::list_truthy(context, builder, ptr),
         // A real, reachable feature gap, identical in kind to the `List`
         // arm directly above: `pycc_types` places no type restriction on an
         // `if`/`while` condition, so `if x:` for a `dict[str, int]` local
@@ -5573,7 +5470,7 @@ fn declare_module_globals<'ctx>(
                 ),
                 // Identical storage to `Ty::Str` directly above: an opaque
                 // pointer, null until the first assignment stores a real
-                // `PyIntListObj` into it, with the separate `initialized`
+                // `PyListObj` into it, with the separate `initialized`
                 // flag below (which every module global gets) trapping any
                 // read that reaches it first.
                 //
@@ -7054,7 +6951,7 @@ fn verify_module(module: &inkwell::module::Module<'_>) {
 /// the current block with the evaluated value (or none, for a bare
 /// `return`) -- and `ForList` (v0.2, D-105/Task 11b), reusing `ForRange`'s
 /// own loop/branch-building infrastructure parametrized over a runtime
-/// `pycc_rt_int_list_len` call instead of a static bound. `ForList` is a
+/// `pycc_rt_list_len` call instead of a static bound. `ForList` is a
 /// v0.2 addition, not part of v0.1's own original shape set.
 #[allow(clippy::too_many_arguments)]
 fn emit_stmt<'ctx>(
@@ -7513,18 +7410,23 @@ fn emit_stmt<'ctx>(
         //    runtime functions take *tagged* operands (D-061); calling
         //    either with this raw counter would silently compute on the
         //    wrong values.
-        // 2. The bound is `pycc_rt_int_list_len`, re-read on every
+        // 2. The bound is `pycc_rt_list_len`, re-read on every
         //    iteration inside the test block rather than hoisted into the
         //    preheader. This matches CPython, whose list iterator compares
         //    its cursor against the list's *current* length on every
         //    `__next__` -- so `for v in xs: xs.append(v)` runs forever
         //    there, and would terminate here if the length were hoisted.
-        // 3. Each iteration prepends one `pycc_rt_int_list_get` read.
+        // 3. Each iteration prepends one `pycc_rt_list_get` read.
         //
         // D-141 leaves the induction variable and raw `len` as private LLVM
         // counters. The element read is already encoded and is assigned to
         // the user-visible `Ty::Int` loop target unchanged.
-        MirStmt::ForList { var, list, body } => {
+        MirStmt::ForList {
+            var,
+            var_ty,
+            list,
+            body,
+        } => {
             let function = builder.get_insert_block().unwrap().get_parent().unwrap();
             // Read once, in the preheader, not per iteration: Python binds
             // its iterator to the object the `for` statement evaluated, so
@@ -7556,7 +7458,7 @@ fn emit_stmt<'ctx>(
             let zero = context.i64_type().const_zero();
             induction.add_incoming(&[(&zero, preheader)]);
             let current = induction.as_basic_value().into_int_value();
-            let len = build_int_list_len(builder, rt, list_ptr);
+            let len = list::build_list_len(context, builder, list_ptr);
             let cont = builder
                 .build_int_compare(IntPredicate::SLT, current, len, "for_list_cont")
                 .expect("build_int_compare should not fail comparing two i64 operands");
@@ -7580,9 +7482,17 @@ fn emit_stmt<'ctx>(
             // runs zero iterations (pinned by
             // `iterating_an_inferred_empty_list_runs_zero_iterations` in
             // `tests/issue_1021_empty_container_inference.rs`).
-            let encoded_element = build_int_list_get(builder, rt, list_ptr, current);
-            let element = encoded_element;
-            emit_assign(context, builder, rt, locals, var, Scalar::Int(element));
+            let word = list::build_list_get_unchecked(context, builder, list_ptr, current);
+            let element = list::word_element(context, builder, var_ty, word);
+            // The element is borrowed from the list; a `str` loop variable
+            // owns its value like any other `str` slot.
+            if let Scalar::Str(ptr) = element {
+                builder
+                    .build_call(rt.str_incref, &[ptr.into()], "for_list_str_incref")
+                    .expect("build_call should not fail for a well-formed incref");
+                decref_str_slot_before_store(context, builder, rt, locals, var);
+            }
+            emit_assign(context, builder, rt, locals, var, element);
             // `ForRange`'s latch shape: fall-through and `continue` advance
             // the index here, `break` leaves through `after_bb`.
             let latch_bb = context.append_basic_block(function, "for_list_latch");
@@ -8265,6 +8175,22 @@ fn emit_stmt<'ctx>(
             guard_statement_effects(context, builder, rt);
             Ok(())
         }
+        // `xs[i] = v` on a list: CPython's value, base, index order (see
+        // `BufferSet` above); the list adopts the stored element's
+        // reference and an out-of-range index raises `IndexError`.
+        MirStmt::ListSet { base, index, value } => {
+            let elem = list::element_ty(&base.ty()).clone();
+            let value_scalar =
+                emit_expr(context, builder, module, rt, user_functions, locals, value);
+            let word = list::element_word(context, builder, rt, &elem, value, value_scalar);
+            let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
+            let list_ptr = expect_list_pointer(base_scalar, "the item-assignment target");
+            let index_scalar =
+                emit_expr(context, builder, module, rt, user_functions, locals, index);
+            let raw = list::raw_index(context, builder, rt, index_scalar);
+            list::build_list_set(context, builder, rt, &elem, list_ptr, raw, word);
+            Ok(())
+        }
         // `d[k] = v` (PR-11 Task 5, D-123): insert-or-update --
         // `pycc_rt_dict_set` itself decides which, by whether `key`
         // already compares equal to a stored key. `dict` is read by name
@@ -8439,7 +8365,7 @@ fn emit_stmt<'ctx>(
         //    stop tracking that.
         // 2. Each iteration reads the current *key*, via
         //    `pycc_rt_dict_key_at`, not an element via
-        //    `pycc_rt_int_list_get`.
+        //    `pycc_rt_list_get`.
         // 3. The loop variable is bound `Scalar::Str`, not `Scalar::Int` --
         //    and, unlike every `ForList`/`ForRange` induction target (never
         //    refcounted, D-061), a dict key genuinely is a refcounted
@@ -8588,7 +8514,7 @@ fn emit_stmt<'ctx>(
         //    silently extending the iteration is not safe to accept here:
         //    `for x in s: s.add(x + 1)` would never terminate.
         // 2. Each iteration reads the current element via
-        //    `pycc_rt_int_set_get`, not `pycc_rt_int_list_get`.
+        //    `pycc_rt_int_set_get`, not `pycc_rt_list_get`.
         //
         // D-141 mirrors `ForList`: the induction variable and `len` are raw
         // private counters, while the element is an encoded user value.

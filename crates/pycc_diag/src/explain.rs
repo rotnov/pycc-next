@@ -213,11 +213,10 @@ program that built before #1470 is refused now.",
         // element `tuple` by #1050, which leaves `list` as the nearest
         // remaining gap -- and a durable one, since a `list` is a mutable
         // object with no by-value crossing rather than an unimplemented
-        // spelling. The element type is
-        // `int` because `pycc_hir::container::check_container_ty` rejects
-        // every other `list[T]` with `T0034` before the `--ext` capability
-        // scan ever runs -- `list[str]` would be a `T0034` example wearing
-        // a `C0003` label. Nothing checks this against the implementation
+        // spelling. The element type is any one
+        // `pycc_hir::container::check_container_ty` admits; a refused one
+        // (`list[set[int]]`) would be a `T0034` example wearing a `C0003`
+        // label. Nothing checks this against the implementation
         // (#1056), so a stale example is a user-facing claim that ships
         // wrong in silence.
         example: "\
@@ -566,9 +565,9 @@ class Derived(Base):
         explanation: "\
 T0032 fires when a `list[...]` literal's elements do not all infer to the \
 same element type, e.g. mixing `int` and `str` values in one `[...]` \
-literal. pycc's v0.2 list representation needs one concrete, uniform \
-element type for the whole list (D-105); a genuinely heterogeneous list has \
-no such type to assign it.",
+literal. pycc's list representation needs one concrete, uniform element \
+type for the whole list; a genuinely heterogeneous list has no such type to \
+assign it.",
         example: "\
 def f() -> None:
     xs = [1, \"two\", 3]
@@ -596,17 +595,18 @@ def f() -> int:
     DiagnosticExplanation {
         code: "T0034",
         severity: Severity::Error,
-        summary: "list codegen only supports `list[int]` in v0.2",
+        summary: "a list element type that does not fit one native word",
         explanation: "\
-T0034 fires when a `list[T]` value's element type `T` is anything other \
-than `int` -- pycc's v0.2 list codegen (D-105) implements only \
-`list[int]`'s runtime representation; `list[str]`, `list[bool]`, nested \
-lists, and every other element type are recognized by the type checker \
-(so `T0032`'s uniform-element-type check still applies to them) but not \
-yet compilable, and are rejected here instead of silently miscompiled.",
+T0034 fires when a `list[T]` value's element type `T` is not one pycc's \
+one generic list stores: every element occupies one native word, so `T` \
+must be `int`, `float`, `bool`, `str`, a user-class instance, or (at any \
+depth) a list of those. A `set`, `dict`, `tuple`, `Optional` or other \
+element type is recognized by the type checker (so `T0032`'s \
+uniform-element-type check still applies to it) but not yet compilable, \
+and is rejected here instead of silently miscompiled.",
         example: "\
 def f() -> None:
-    xs: list[str] = [\"a\", \"b\"]
+    xs: list[set[int]] = [{1}]
 ",
     },
     DiagnosticExplanation {
@@ -954,7 +954,7 @@ None` codegen -- the `{ payload, present: i8 }` runtime representation -- \
 is exercised and tested only for `Optional[int]`, `Optional[float]`, and \
 `Optional[bool]`; every other inner type (`str`, `list[...]`, a class \
 instance, or another `Optional[...]`) remains out of scope, mirroring the \
-same versioned scope cuts `list[int]`-only (`T0034`) and `dict[str, \
+same versioned scope cuts the list element gate (`T0034`) and `dict[str, \
 int]`-only (`T0036`) already make. This is a versioned capability gap: a \
 future compiler version extends `Optional`/`T | None` to more inner \
 types.",

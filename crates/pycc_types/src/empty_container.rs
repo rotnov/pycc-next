@@ -193,6 +193,33 @@ fn empty_literal(expr: &HirExpr) -> Option<EmptyLiteral> {
     }
 }
 
+/// Whether `expr` is a non-empty list display holding an empty `[]` at any
+/// depth (`[[]]`, `[[1], []]`), which only an annotation can type.
+fn has_nested_empty_list(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::ListLiteral(elements) => elements
+            .iter()
+            .any(|e| empty_literal(e) == Some(EmptyLiteral::List) || has_nested_empty_list(e)),
+        _ => false,
+    }
+}
+
+/// Types every empty `[]` nested in the list display `expr` from the
+/// annotated list type `ty` (`xs: list[list[int]] = [[]]`).
+fn fill_nested_empty_lists(expr: &mut HirExpr, ty: &Ty) {
+    let (HirExpr::ListLiteral(elements), Ty::List(element_ty)) = (expr, ty) else {
+        return;
+    };
+    for element in elements {
+        match (empty_literal(element), element_ty.as_ref()) {
+            (Some(EmptyLiteral::List), Ty::List(inner)) if !contains_infer(inner) => {
+                *element = HirExpr::EmptyList((**inner).clone());
+            }
+            _ => fill_nested_empty_lists(element, element_ty),
+        }
+    }
+}
+
 /// Rewrites every resolvable empty container in `hir`, and every list
 /// display bound to an object slot (Part 2d of #1371, #1421), returning
 /// `None` when the module contains no empty container literal and no
@@ -206,7 +233,7 @@ pub(crate) fn resolve_empty_containers(hir: &HirModule) -> Option<HirModule> {
     if !class_phase
         && !hir.items.iter().any(|item| match item {
             HirItem::Function { body, .. } => body_has_empty_literal(body),
-            HirItem::TopLevelStmt(_) => false,
+            HirItem::TopLevelStmt(stmt) => body_has_empty_literal(std::slice::from_ref(stmt)),
         })
     {
         return None;
@@ -232,6 +259,28 @@ pub(crate) fn resolve_empty_containers(hir: &HirModule) -> Option<HirModule> {
         let env = function_environment(&module_env, name, params, body, names);
         let producers = body.clone();
         rewrite_body(body, &producers, &env, names);
+    }
+    // The module body: a module-level `xs: list[int] = []` (or a `[]` a
+    // later top-level `.append()` types) resolves against the module scope,
+    // with every top-level statement as a producer.
+    let top_level: Vec<HirStmt> = resolved
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::TopLevelStmt(stmt) => Some(stmt.clone()),
+            HirItem::Function { .. } => None,
+        })
+        .collect();
+    let top_level_names = crate::function_local_names(&[], &top_level);
+    for item in &mut resolved.items {
+        if let HirItem::TopLevelStmt(stmt) = item {
+            rewrite_body(
+                std::slice::from_mut(stmt),
+                &top_level,
+                &module_env,
+                &top_level_names,
+            );
+        }
     }
     Some(resolved)
 }
@@ -575,7 +624,9 @@ fn body_has_empty_literal(body: &[HirStmt]) -> bool {
     any_stmt(body, &|stmt| match stmt {
         HirStmt::Assign { value, .. } => empty_literal(value).is_some(),
         HirStmt::AnnAssign { value, .. } => {
-            value.as_ref().is_some_and(|v| empty_literal(v).is_some())
+            value
+                .as_ref()
+                .is_some_and(|v| empty_literal(v).is_some() || has_nested_empty_list(v))
                 || object_slot::is_annotated_object_display(stmt)
         }
         _ => false,
@@ -724,6 +775,9 @@ fn rewrite_value(
     // CPython `list` (`object_slot`), ahead of the native resolution.
     if object_slot::rewrite_object_slot(value, target, annotation, env) {
         return;
+    }
+    if let Some(annotation) = annotation {
+        fill_nested_empty_lists(value, annotation);
     }
     let Some(literal) = empty_literal(value) else {
         return;
@@ -879,52 +933,29 @@ fn from_container_ty(ty: &Ty) -> Option<Resolution> {
     }
 }
 
-/// `T0003` for an empty list literal no source of evidence could type.
-pub(crate) fn unresolved_list(in_function_body: bool) -> Diagnostic {
+/// `T0003` for an empty list literal no source of evidence could type. Both
+/// remedies are real in every position: the annotation source is purely
+/// syntactic and the producer scan runs over a function body and over the
+/// module body alike.
+pub(crate) fn unresolved_list() -> Diagnostic {
     Diagnostic::error(
         "T0003",
         "an empty list literal has no inferable element type here".to_string(),
         Span::new(0, 0),
     )
-    .with_help(help_for_position(
-        in_function_body,
-        "annotate the assignment target (`xs: list[int] = []`) or append a value to it",
-        "move this binding into a function body, where `xs: list[int] = []` or a later \
-         `xs.append(...)` can type it",
-    ))
+    .with_help("annotate the assignment target (`xs: list[int] = []`) or append a value to it")
 }
 
 /// `T0003` for an empty dict literal no source of evidence could type.
-pub(crate) fn unresolved_dict(in_function_body: bool) -> Diagnostic {
+pub(crate) fn unresolved_dict() -> Diagnostic {
     Diagnostic::error(
         "T0003",
         "an empty dict literal has no inferable key/value types here".to_string(),
         Span::new(0, 0),
     )
-    .with_help(help_for_position(
-        in_function_body,
+    .with_help(
         "annotate the assignment target (`d: dict[str, int] = {}`) or assign an entry into it",
-        "move this binding into a function body, where `d: dict[str, int] = {}` or a later \
-         `d[k] = v` can type it",
-    ))
-}
-
-/// Picks between the two remedies a `T0003` can honestly suggest.
-///
-/// Both of the in-function remedies are real: the annotation source is purely
-/// syntactic and the producer scan runs over every block statement a function
-/// body has. Neither works at module level, because D-245 item 8 puts
-/// module-level statements outside this pass's scope entirely -- `VALUE: list[int] = []`
-/// at module level reports the *same* `T0003` as the bare `VALUE = []` it is
-/// offered as the fix for, so suggesting it there sends the reader in a
-/// circle. The module-level wording names the one thing that does work, and
-/// states the position as the reason rather than leaving it to be discovered.
-fn help_for_position(in_function_body: bool, in_function: &str, at_module_level: &str) -> String {
-    if in_function_body {
-        in_function.to_string()
-    } else {
-        at_module_level.to_string()
-    }
+    )
 }
 
 /// Names the binding in a `T0003` raised while checking `target`'s assigned

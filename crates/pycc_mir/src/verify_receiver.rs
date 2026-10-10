@@ -285,7 +285,9 @@ impl Verifier<'_> {
             | MirStmt::AttrSet {
                 base: key, value, ..
             } => self.exprs([key, value]),
-            MirStmt::BufferSet { base, index, value } => self.exprs([base, index, value]),
+            MirStmt::BufferSet { base, index, value } | MirStmt::ListSet { base, index, value } => {
+                self.exprs([base, index, value])
+            }
             MirStmt::ObjAttrSet { base, value, .. } => self.exprs([base, value]),
             MirStmt::ObjDelAttr { base, .. } => self.expr(base),
             MirStmt::ObjDelSlice {
@@ -506,7 +508,16 @@ impl Verifier<'_> {
                 self.container(list);
                 self.expr(value);
             }
-            MirExpr::ListPop { list, .. } => self.container(list),
+            MirExpr::ListPop { list, index, .. } => {
+                self.container(list);
+                if let Some(index) = index {
+                    self.expr(index);
+                }
+            }
+            MirExpr::ListInsert { list, index, value } => {
+                self.container(list);
+                self.exprs([index.as_ref(), value.as_ref()]);
+            }
             MirExpr::DictGetOrDefault {
                 dict, key, default, ..
             } => {

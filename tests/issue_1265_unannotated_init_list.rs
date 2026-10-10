@@ -250,16 +250,16 @@ const SLOT: &str = "class B:\n    def __init__(self) -> None:\n        self.xs =
 /// A `str` producer resolves the slot to `list[str]`, which D-105's
 /// element gate refuses as `T0034`, not the unresolved-slot `T0003`.
 #[test]
-fn a_str_producer_resolves_the_slot_and_meets_the_element_gate() {
+fn a_set_producer_resolves_the_slot_and_meets_the_element_gate() {
     let text = fails(
         "e2e_1265_str",
         "check",
         &format!(
-            "{SLOT}    def add(self, v: str) -> None:\n        self.xs.append(v)\n\n\n\
+            "{SLOT}    def add(self, v: set[int]) -> None:\n        self.xs.append(v)\n\n\n\
              print(len(B().xs))\n"
         ),
     );
-    assert!(text.contains("error[T0034]: list[str]"), "{text}");
+    assert!(text.contains("error[T0034]: list[set[int]]"), "{text}");
     assert!(!text.contains("T0003"), "{text}");
 }
 

@@ -1044,6 +1044,7 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::Unreachable
         | MirStmt::DictSet { .. }
         | MirStmt::BufferSet { .. }
+        | MirStmt::ListSet { .. }
         | MirStmt::ListCompAssign { .. }
         | MirStmt::DictCompAssign { .. }
         | MirStmt::SetCompAssign { .. }

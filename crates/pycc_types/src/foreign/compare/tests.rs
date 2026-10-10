@@ -414,13 +414,15 @@ fn membership_with_an_object_on_the_wrong_side_is_refused() {
     );
 }
 
-/// No native membership test is lowered, so a native pair -- even two
-/// `int`s, which the numeric comparison rule would otherwise admit --
-/// keeps the HIR's `C0001` message. The type stage has no span for it, so
-/// it is reported at `Span::new(0, 0)` (1:1) until Part 5 of #1371.
+/// A native pair whose container is not a list -- even two `int`s, which
+/// the numeric comparison rule would otherwise admit -- keeps the HIR's
+/// `C0001` message (membership in a list is `list_ops::membership_ty`). The
+/// type stage has no span for it, so it is reported at `Span::new(0, 0)`
+/// (1:1) until Part 5 of #1371.
 #[test]
 fn membership_between_two_native_values_keeps_its_c0001() {
-    let diagnostics = check_foreign("x = [1]\nb = 1 in x\n").expect_err("native pair");
+    check_foreign("x = [1]\nb = 1 in x\n").expect("membership in a list");
+    let diagnostics = check_foreign("x = 1\ny = 2\nb = x in y\n").expect_err("native pair");
     assert_eq!(
         diagnostics[0].span,
         Some(Span::new(0, 0)),

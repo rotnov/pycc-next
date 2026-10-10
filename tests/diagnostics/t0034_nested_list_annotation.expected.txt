@@ -1,5 +1,5 @@
-error[T0034]: list[list[int]] is not compiled yet (D-105) -- only list[int] is
- --> tests/diagnostics/t0034_nested_list_annotation.py:1:11
+error[T0034]: list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those
+ --> tests/diagnostics/t0034_nested_list_annotation.py:1:16
   |
-1 | def f(xs: list[list[int]]) -> None:
-  |           ^^^^^^^^^^^^^^^ list[list[int]] is not compiled yet (D-105) -- only list[int] is
+1 | def f(xs: list[list[set[int]]]) -> None:
+  |                ^^^^^^^^^^^^^^ list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those

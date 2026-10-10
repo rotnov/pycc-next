@@ -65,6 +65,12 @@ pub(crate) fn compare_link_ty(
     // Part 2b of #1371: membership answers for every pair, so a native
     // pair never falls through to the numeric rule below.
     if matches!(op, CmpOp::In | CmpOp::NotIn) {
+        // A CPython object needle keeps the foreign refusal below.
+        if let Ty::List(elem) = right_ty
+            && *left_ty != Ty::Object
+        {
+            return crate::list_ops::membership_ty(env, left_ty, elem);
+        }
         return crate::foreign::compare::membership_ty(op, left_ty, right_ty);
     }
     // Part 1 of #1371: a rich comparison with a CPython object operand is

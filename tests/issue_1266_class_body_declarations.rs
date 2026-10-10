@@ -350,7 +350,11 @@ fn existing_refusals_keep_their_own_diagnostics() {
         text.contains("class attribute `C.x` collides with an instance attribute"),
         "{text}"
     );
-    let text = fails("e2e_1266_list_str", "check", "class C:\n    x: list[str]\n");
+    let text = fails(
+        "e2e_1266_list_set",
+        "check",
+        "class C:\n    x: list[set[int]]\n",
+    );
     assert!(text.contains("error[T0034]"), "{text}");
 }
 

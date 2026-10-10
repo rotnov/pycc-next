@@ -154,16 +154,24 @@ fn lower_list_pop(
         imports,
         signatures,
     )?;
-    let [] = &*call.arguments.args else {
-        return Err(unsupported(
-            format!(
-                "list.pop() takes no arguments, got {}",
-                call.arguments.args.len()
-            ),
+    match &*call.arguments.args {
+        [] => Ok(HirExpr::ListPop { list }),
+        // `xs.pop(i)` is an ordinary method call: `pycc_types` types it on
+        // a `list[T]` receiver (`list_ops::list_method_ty`) and `pycc_mir`
+        // lowers it to the indexed `MirExpr::ListPop`.
+        [_] => super::receiver_dispatch::lower_method_call(
+            call,
+            attr,
+            in_function,
+            class_name,
+            imports,
+            signatures,
+        ),
+        args => Err(unsupported(
+            format!("list.pop() takes at most one argument, got {}", args.len()),
             call.range,
-        ));
-    };
-    Ok(HirExpr::ListPop { list })
+        )),
+    }
 }
 
 fn lower_dict_get(

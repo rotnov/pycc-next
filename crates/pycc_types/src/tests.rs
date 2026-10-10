@@ -1029,7 +1029,7 @@ fn slicing_type_checks_through_the_full_check_pipeline_on_the_fast_path() {
 }
 
 #[test]
-fn slicing_a_list_of_str_is_rejected_through_the_full_check_pipeline() {
+fn slicing_a_list_of_str_type_checks_through_the_full_check_pipeline() {
     let hir = HirModule {
         seeded_builtin_exception_classes: false,
         items: vec![
@@ -1051,7 +1051,7 @@ fn slicing_a_list_of_str_is_rejected_through_the_full_check_pipeline() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    assert_eq!(check(&hir).unwrap_err().code, "T0034");
+    assert!(check(&hir).is_ok());
 }
 
 #[test]
@@ -1097,10 +1097,9 @@ fn slicing_type_checks_correctly_when_an_unrelated_private_helper_forces_the_sol
 }
 
 #[test]
-fn slicing_a_list_of_str_is_still_rejected_when_the_solver_path_runs_first() {
-    // Load-bearing counterpart: the solver's leniency for `Slice` must
-    // not swallow a genuine `T0034` -- it has to fall through to the
-    // real, list-aware check pass that runs after the solver.
+fn slicing_a_list_of_str_still_type_checks_when_the_solver_path_runs_first() {
+    // The solver's leniency for `Slice` leaves a `list[str]` slice to the
+    // real, list-aware check pass that runs after it.
     let hir = HirModule {
         seeded_builtin_exception_classes: false,
         items: vec![
@@ -1128,7 +1127,7 @@ fn slicing_a_list_of_str_is_still_rejected_when_the_solver_path_runs_first() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    assert_eq!(check(&hir).unwrap_err().code, "T0034");
+    assert!(check(&hir).is_ok());
 }
 
 #[test]
@@ -3902,9 +3901,7 @@ fn a_list_comprehension_s_if_filter_of_a_non_bool_type_still_type_checks() {
 }
 
 #[test]
-fn a_list_comprehension_producing_str_is_rejected_as_t0034() {
-    // Mirrors `ListLiteral`'s own existing genericity tests
-    // (`a_homogeneous_non_int_list_literal_is_rejected_as_t0034`).
+fn a_list_comprehension_producing_str_is_a_list_of_str() {
     let mut env = Environment::new();
     let stmt = HirStmt::ListCompAssign {
         target: "y".to_string(),
@@ -3917,13 +3914,12 @@ fn a_list_comprehension_producing_str_is_rejected_as_t0034() {
         cond: None,
         elt: Box::new(HirExpr::StringLiteral("x".to_string())),
     };
-    let err = check_stmt(&mut env, &stmt).unwrap_err();
-    assert_eq!(err.code, "T0034");
-    assert!(err.message.contains("list[str]"));
+    check_stmt(&mut env, &stmt).expect("a list comprehension of any element type");
+    assert_eq!(env.lookup("y"), Some(Ty::List(Box::new(Ty::Str))));
 }
 
 #[test]
-fn a_list_comprehension_producing_float_is_rejected_as_t0034() {
+fn a_list_comprehension_producing_float_is_a_list_of_float() {
     let mut env = Environment::new();
     let stmt = HirStmt::ListCompAssign {
         target: "y".to_string(),
@@ -3936,13 +3932,12 @@ fn a_list_comprehension_producing_float_is_rejected_as_t0034() {
         cond: None,
         elt: Box::new(HirExpr::FloatLiteral(1.5)),
     };
-    let err = check_stmt(&mut env, &stmt).unwrap_err();
-    assert_eq!(err.code, "T0034");
-    assert!(err.message.contains("list[float]"));
+    check_stmt(&mut env, &stmt).expect("a list comprehension of any element type");
+    assert_eq!(env.lookup("y"), Some(Ty::List(Box::new(Ty::Float))));
 }
 
 #[test]
-fn a_list_comprehension_producing_bool_is_rejected_as_t0034() {
+fn a_list_comprehension_producing_bool_is_a_list_of_bool() {
     let mut env = Environment::new();
     let stmt = HirStmt::ListCompAssign {
         target: "y".to_string(),
@@ -3955,9 +3950,8 @@ fn a_list_comprehension_producing_bool_is_rejected_as_t0034() {
         cond: None,
         elt: Box::new(HirExpr::BoolLiteral(true)),
     };
-    let err = check_stmt(&mut env, &stmt).unwrap_err();
-    assert_eq!(err.code, "T0034");
-    assert!(err.message.contains("list[bool]"));
+    check_stmt(&mut env, &stmt).expect("a list comprehension of any element type");
+    assert_eq!(env.lookup("y"), Some(Ty::List(Box::new(Ty::Bool))));
 }
 
 #[test]
@@ -4623,20 +4617,25 @@ fn a_list_literal_of_bool_and_int_is_rejected_since_homogeneity_uses_exact_ty_eq
 }
 
 #[test]
-fn a_homogeneous_non_int_list_literal_is_rejected_as_t0034() {
+fn a_homogeneous_str_list_literal_is_a_list_of_str() {
     let env = Environment::new();
     let expr = HirExpr::ListLiteral(vec![
         HirExpr::StringLiteral("a".to_string()),
         HirExpr::StringLiteral("b".to_string()),
     ]);
+    assert_eq!(infer_expr(&env, &expr), Ok(Ty::List(Box::new(Ty::Str))));
+}
+
+#[test]
+fn a_list_literal_of_an_element_no_word_holds_is_rejected_as_t0034() {
+    let env = Environment::new();
+    let expr = HirExpr::ListLiteral(vec![HirExpr::TupleLiteral(vec![HirExpr::IntLiteral(1)])]);
     let err = infer_expr(&env, &expr).unwrap_err();
     assert_eq!(err.code, "T0034");
-    // Exact match: same wording as
-    // `tests/diagnostics/d0034_list_element_type_not_int.expected.txt`
-    // (currently unrunnable end-to-end -- see the T0032 test above).
     assert_eq!(
         err.message,
-        "list[str] is not compiled yet (D-105) -- only list[int] is"
+        "list[tuple[int]] is not compiled yet -- a list element must be int, float, bool, str, \
+         a user-class instance or a list of those"
     );
 }
 
@@ -4845,7 +4844,7 @@ fn slicing_a_dict_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`dict[str, int]` does not support slicing (only list[int] does)"
+        "`dict[str, int]` does not support slicing (only a list does)"
     );
 }
 
@@ -4864,7 +4863,7 @@ fn slicing_a_set_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`set[int]` does not support slicing (only list[int] does)"
+        "`set[int]` does not support slicing (only a list does)"
     );
 }
 
@@ -4885,7 +4884,7 @@ fn slicing_a_tuple_is_rejected_as_t0033_as_an_explicit_deferral() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`tuple[int, int]` does not support slicing (only list[int] does)"
+        "`tuple[int, int]` does not support slicing (only a list does)"
     );
 }
 
@@ -4903,62 +4902,24 @@ fn slicing_a_scalar_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`int` does not support slicing (only list[int] does)"
+        "`int` does not support slicing (only a list does)"
     );
 }
 
 #[test]
-fn slicing_a_list_of_str_is_rejected_as_t0034() {
-    let mut env = Environment::new();
-    env.bind("xs".to_string(), Ty::List(Box::new(Ty::Str)));
-    let expr = HirExpr::Slice {
-        base: Box::new(HirExpr::Name("xs".to_string())),
-        start: None,
-        stop: None,
-        step: None,
-    };
-    let err = infer_expr(&env, &expr).unwrap_err();
-    assert_eq!(err.code, "T0034");
-    assert_eq!(
-        err.message,
-        "list codegen only supports `list[int]` in v0.2, cannot slice `list[str]`"
-    );
-}
-
-#[test]
-fn slicing_a_list_of_float_is_rejected_as_t0034() {
-    let mut env = Environment::new();
-    env.bind("xs".to_string(), Ty::List(Box::new(Ty::Float)));
-    let expr = HirExpr::Slice {
-        base: Box::new(HirExpr::Name("xs".to_string())),
-        start: None,
-        stop: None,
-        step: None,
-    };
-    let err = infer_expr(&env, &expr).unwrap_err();
-    assert_eq!(err.code, "T0034");
-    assert_eq!(
-        err.message,
-        "list codegen only supports `list[int]` in v0.2, cannot slice `list[float]`"
-    );
-}
-
-#[test]
-fn slicing_a_list_of_bool_is_rejected_as_t0034() {
-    let mut env = Environment::new();
-    env.bind("xs".to_string(), Ty::List(Box::new(Ty::Bool)));
-    let expr = HirExpr::Slice {
-        base: Box::new(HirExpr::Name("xs".to_string())),
-        start: None,
-        stop: None,
-        step: None,
-    };
-    let err = infer_expr(&env, &expr).unwrap_err();
-    assert_eq!(err.code, "T0034");
-    assert_eq!(
-        err.message,
-        "list codegen only supports `list[int]` in v0.2, cannot slice `list[bool]`"
-    );
+fn slicing_a_list_of_any_element_type_keeps_its_type() {
+    for elem in [Ty::Str, Ty::Float, Ty::Bool, Ty::List(Box::new(Ty::Int))] {
+        let mut env = Environment::new();
+        let list_ty = Ty::List(Box::new(elem));
+        env.bind("xs".to_string(), list_ty.clone());
+        let expr = HirExpr::Slice {
+            base: Box::new(HirExpr::Name("xs".to_string())),
+            start: None,
+            stop: None,
+            step: None,
+        };
+        assert_eq!(infer_expr(&env, &expr), Ok(list_ty));
+    }
 }
 
 #[test]
@@ -5036,22 +4997,6 @@ fn slicing_reports_the_base_type_error_before_any_bound_error() {
     };
     let err = infer_expr(&env, &expr).unwrap_err();
     assert_eq!(err.code, "T0033");
-}
-
-#[test]
-fn slicing_reports_the_element_type_error_before_any_bound_error() {
-    // D-118 diagnostic-order pin: the element-type gate (T0034) fires
-    // before a bound's own type is ever inspected.
-    let mut env = Environment::new();
-    env.bind("xs".to_string(), Ty::List(Box::new(Ty::Str)));
-    let expr = HirExpr::Slice {
-        base: Box::new(HirExpr::Name("xs".to_string())),
-        start: Some(Box::new(HirExpr::StringLiteral("bad".to_string()))),
-        stop: None,
-        step: None,
-    };
-    let err = infer_expr(&env, &expr).unwrap_err();
-    assert_eq!(err.code, "T0034");
 }
 
 #[test]
@@ -7036,25 +6981,18 @@ fn a_dict_set_item_on_a_non_dict_value_is_t0033() {
 }
 
 #[test]
-fn a_dict_set_item_on_a_list_value_is_still_t0033() {
-    // D-123 supersedes D-105's "no subscript assignment target anywhere
-    // in this file" HIR-level invariant (see `pycc_hir`'s own
-    // `subscript_assignment_to_a_bare_name_base_lowers_to_dict_set`
-    // test), but `list[int]` itself is still read-only-indexed -- this
-    // is where that invariant is actually enforced now.
+fn a_dict_set_item_on_a_list_value_is_a_list_item_store() {
     let mut env = Environment::new();
     env.bind("x".to_string(), Ty::List(Box::new(Ty::Int)));
-    let err = check_stmt(
-        &mut env,
-        &HirStmt::DictSet {
-            dict: "x".to_string(),
-            key: HirExpr::IntLiteral(0),
-            value: HirExpr::IntLiteral(1),
-        },
-    )
-    .unwrap_err();
-    assert_eq!(err.code, "T0033");
-    assert_eq!(err.message, "`list[int]` does not support item assignment");
+    let store = |value| HirStmt::DictSet {
+        dict: "x".to_string(),
+        key: HirExpr::IntLiteral(0),
+        value,
+    };
+    check_stmt(&mut env, &store(HirExpr::BoolLiteral(true))).expect("bool is an int");
+    let err = check_stmt(&mut env, &store(HirExpr::StringLiteral("a".to_string()))).unwrap_err();
+    assert_eq!(err.code, "T0021");
+    assert_eq!(err.message, "cannot assign `str` to a list of `int`");
 }
 
 #[test]
@@ -10186,7 +10124,7 @@ fn a_list_comprehension_s_if_filter_of_a_non_bool_type_still_type_checks_in_a_fu
 }
 
 #[test]
-fn a_list_comprehension_producing_a_non_int_element_is_rejected_as_t0034_in_a_function_body() {
+fn a_list_comprehension_producing_a_str_element_type_checks_in_a_function_body() {
     let function = HirItem::Function {
         name: "f".to_string(),
         params: vec![],
@@ -10203,9 +10141,7 @@ fn a_list_comprehension_producing_a_non_int_element_is_rejected_as_t0034_in_a_fu
             elt: Box::new(HirExpr::StringLiteral("x".to_string())),
         }],
     };
-    let err = check_function(&function).unwrap_err();
-    assert_eq!(err.code, "T0034");
-    assert!(err.message.contains("list[str]"));
+    check_function(&function).unwrap();
 }
 
 #[test]

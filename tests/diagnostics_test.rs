@@ -527,8 +527,8 @@ fn d0033_subscript_on_non_list() {
 }
 
 #[test]
-fn d0034_list_element_type_not_int() {
-    assert_diagnostic_matches_fixture("d0034_list_element_type_not_int");
+fn d0034_list_element_type_not_compiled() {
+    assert_diagnostic_matches_fixture("d0034_list_element_type_not_compiled");
 }
 
 #[test]
@@ -734,8 +734,8 @@ fn d0033_pop_on_non_list() {
 // generic C0001 capability path, not T0033, exactly like `.append()`'s
 // own pre-existing arity check.
 #[test]
-fn c0001_list_pop_with_argument() {
-    assert_diagnostic_matches_fixture("c0001_list_pop_with_argument");
+fn c0001_list_pop_with_two_arguments() {
+    assert_diagnostic_matches_fixture("c0001_list_pop_with_two_arguments");
 }
 
 #[test]
@@ -812,8 +812,8 @@ fn t0033_comprehension_nested_iterable_names_outer_variable() {
 }
 
 #[test]
-fn d0034_comprehension_list_str() {
-    assert_diagnostic_matches_fixture("d0034_comprehension_list_str");
+fn d0034_comprehension_list_set() {
+    assert_diagnostic_matches_fixture("d0034_comprehension_list_set");
 }
 
 #[test]
@@ -1190,8 +1190,8 @@ fn t0053_tuple_variadic_ellipsis_json_publishes_help() {
 }
 
 #[test]
-fn t0034_list_str_annotation() {
-    assert_diagnostic_matches_fixture("t0034_list_str_annotation");
+fn t0034_list_set_annotation() {
+    assert_diagnostic_matches_fixture("t0034_list_set_annotation");
 }
 
 #[test]
@@ -1526,8 +1526,8 @@ fn t0021_annotated_broken_value_still_reports_the_real_defect() {
 /// `check_container_ty` gate a written annotation does, so an inferred
 /// `list[str]` is `T0034` (D-105), not a silently accepted list.
 #[test]
-fn t0034_inferred_list_str_is_not_compiled_yet() {
-    assert_diagnostic_matches_fixture("t0034_inferred_list_str_is_not_compiled_yet");
+fn t0034_inferred_list_set_is_not_compiled_yet() {
+    assert_diagnostic_matches_fixture("t0034_inferred_list_set_is_not_compiled_yet");
 }
 
 /// The dict half of the same gate: an inferred `dict[int, int]` is `T0036`

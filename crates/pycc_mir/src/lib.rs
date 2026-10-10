@@ -272,7 +272,7 @@ pub enum MirExpr {
     /// returns `Ty::List(element)` without deriving anything from the
     /// (absent) elements -- which is the whole point of the variant:
     /// `ListLiteral`'s own `ty()` arm has nothing to derive from and panics.
-    /// Codegen emits the same `pycc_rt_int_list_new()` object
+    /// Codegen emits the same `pycc_rt_list_new()` object
     /// `ListLiteral(vec![])` would, with no `append` calls after it.
     EmptyList(Ty),
     /// `base[index]`, read-only (mirrors `HirExpr::Subscript`, D-105).
@@ -370,14 +370,20 @@ pub enum MirExpr {
         stop: Option<Box<MirExpr>>,
         step: Option<Box<MirExpr>>,
     },
-    /// `list.pop()` (mirrors `HirExpr::ListPop`, PR-12, D-119). `ty()` below
-    /// returns the list's own element type -- empirically always `Ty::Int`
-    /// (T0034 rejects every other `list[T]` before codegen), derived rather
-    /// than hardcoded for the identical reason `ListLiteral`'s own `ty()`
-    /// derives (D-105's own precedent).
+    /// `list.pop()` (mirrors `HirExpr::ListPop`) and `list.pop(index)` (a
+    /// `HirExpr::MethodCall` on a list receiver). `ty` is the list's element
+    /// type.
     ListPop {
         list: MirContainerReceiver,
+        index: Option<Box<MirExpr>>,
         ty: Ty,
+    },
+    /// `list.insert(index, value)` (a `HirExpr::MethodCall` on a list
+    /// receiver); its value is `None`.
+    ListInsert {
+        list: MirContainerReceiver,
+        index: Box<MirExpr>,
+        value: Box<MirExpr>,
     },
     /// `dict.get(key, default)` (mirrors `HirExpr::DictGetOrDefault`, PR-12,
     /// D-119). `ty()` below returns the dict's own value type, derived from
@@ -1070,7 +1076,7 @@ impl MirExpr {
             // the list's element type -- a true invariant (like `Compare`'s
             // `Bool` and `ForRange`'s `Int` above), not narrowed by any
             // `pycc_types` gate, so this is hardcoded on purpose.
-            MirExpr::ListAppend { .. } => Ty::None,
+            MirExpr::ListAppend { .. } | MirExpr::ListInsert { .. } => Ty::None,
             MirExpr::DictLiteral(pairs) => {
                 let (first_key, first_value) = pairs.first().unwrap_or_else(|| {
                     panic!(
@@ -1222,10 +1228,20 @@ impl MirExpr {
             | MirExpr::NotImplemented
             | MirExpr::Name { .. }
             | MirExpr::NullInstance { .. } => {}
-            MirExpr::ListPop { list, .. } => {
+            MirExpr::ListPop { list, index, .. } => {
                 if let Some(receiver) = list.attr_expr() {
                     receiver.collect_named_expr_bindings(out);
                 }
+                if let Some(index) = index {
+                    index.collect_named_expr_bindings(out);
+                }
+            }
+            MirExpr::ListInsert { list, index, value } => {
+                if let Some(receiver) = list.attr_expr() {
+                    receiver.collect_named_expr_bindings(out);
+                }
+                index.collect_named_expr_bindings(out);
+                value.collect_named_expr_bindings(out);
             }
             MirExpr::IntBoundary(inner) => inner.collect_named_expr_bindings(out),
             MirExpr::OptionalWrap(inner, _) | MirExpr::ObjectBox(inner) => {
@@ -1473,8 +1489,10 @@ pub enum MirStmt {
     /// `for var in list:` (mirrors `HirStmt::ForList`, D-105). `list` is
     /// carried as the plain variable name, exactly like `HirStmt::ForList`
     /// itself; there is no start/stop/step to lower here, only `body`.
+    /// `var_ty` is the list's element type, which the target binds.
     ForList {
         var: String,
+        var_ty: Ty,
         list: String,
         body: Vec<MirStmt>,
     },
@@ -1517,6 +1535,14 @@ pub enum MirStmt {
     /// a [`MirExpr::Name`] -- carrying it as an expression is what keeps
     /// the load and the store on one codegen path.
     BufferSet {
+        base: MirExpr,
+        index: MirExpr,
+        value: MirExpr,
+    },
+    /// `xs[i] = v` on a `list[T]`-typed name, split from `HirStmt::DictSet`
+    /// on the base's type exactly as `BufferSet` is. `base` is always a
+    /// [`MirExpr::Name`]; an out-of-range index raises `IndexError`.
+    ListSet {
         base: MirExpr,
         index: MirExpr,
         value: MirExpr,
@@ -1603,7 +1629,7 @@ pub enum MirStmt {
     /// `MirExpr::Slice::ty()` passes its base's type straight through, so a
     /// buffer base would answer `Ty::MemoryView` and reach
     /// `pycc_codegen`'s list-only `MirExpr::Slice` emit arm, which calls
-    /// `pycc_rt_int_list_slice` -- a buffer compiled as a list. Keeping the
+    /// `pycc_rt_list_slice` -- a buffer compiled as a list. Keeping the
     /// admitted shape out of `MirExpr::Slice` entirely makes that
     /// unreachable by construction instead of by a comment, and leaves
     /// every grouped `MirExpr` catch-all that lists `MirExpr::Slice { .. }`
@@ -2113,6 +2139,7 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::Unreachable
             | MirStmt::DictSet { .. }
             | MirStmt::BufferSet { .. }
+            | MirStmt::ListSet { .. }
             | MirStmt::ListCompAssign { .. }
             | MirStmt::DictCompAssign { .. }
             | MirStmt::SetCompAssign { .. }

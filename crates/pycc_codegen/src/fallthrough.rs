@@ -78,6 +78,7 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
             | MirStmt::ForObject { .. }
             | MirStmt::DictSet { .. }
             | MirStmt::BufferSet { .. }
+            | MirStmt::ListSet { .. }
             | MirStmt::ForDict { .. }
             | MirStmt::ForSet { .. }
             | MirStmt::ListCompAssign { .. }

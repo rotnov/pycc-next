@@ -2802,8 +2802,11 @@ fn popping_from_a_non_bare_name_base_is_unsupported() {
 }
 
 #[test]
-fn pop_with_one_argument_is_unsupported() {
-    assert_capability_error_message("x.pop(0)\n", "list.pop() takes no arguments, got 1");
+fn pop_with_two_arguments_is_unsupported() {
+    assert_capability_error_message(
+        "x.pop(0, 1)\n",
+        "list.pop() takes at most one argument, got 2",
+    );
 }
 
 #[test]
@@ -6890,9 +6893,9 @@ fn a_variadic_ellipsis_type_argument_is_rejected_in_every_family() {
 fn a_container_annotation_runs_the_same_element_gate_as_a_container_literal() {
     for (source, code, message) in [
         (
-            "def f(x: list[str]) -> None:\n    return\n",
+            "def f(x: list[dict[str, int]]) -> None:\n    return\n",
             "T0034",
-            "list[str] is not compiled yet (D-105) -- only list[int] is",
+            "list[dict[str, int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those",
         ),
         (
             "def f(x: dict[int, int]) -> None:\n    return\n",
@@ -6910,9 +6913,9 @@ fn a_container_annotation_runs_the_same_element_gate_as_a_container_literal() {
             "tuple element type `str` is not compiled yet (D-116) -- only int/bool/float elements are",
         ),
         (
-            "def f(x: list[list[int]]) -> None:\n    return\n",
+            "def f(x: list[list[set[int]]]) -> None:\n    return\n",
             "T0034",
-            "list[list[int]] is not compiled yet (D-105) -- only list[int] is",
+            "list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those",
         ),
     ] {
         let diagnostic = container_annotation_err(source);
@@ -7018,14 +7021,17 @@ fn a_container_return_annotation_still_meets_every_element_and_arity_gate() {
     // a user sees, reported against the return annotation's own span.
     //
     // Nested containers are enumerated concretely rather than as a category,
-    // because the two shapes do not share a gate: `list[list[int]]` is the
-    // list element gate (`T0034`, D-105), while `tuple[list[int], int]` is
+    // because the two shapes do not share a gate: `list[list[set[int]]]` is
+    // the list element gate (`T0034`), while `tuple[list[int], int]` is
     // the *tuple* element gate (`T0039`, D-116) -- D-116 rejects a tuple
     // element that is not int/bool/float before D-105 ever sees the inner
     // `list[int]`.
     for (source, code) in [
-        ("def f() -> list[str]:\n    return f()\n", "T0034"),
-        ("def f() -> list[list[int]]:\n    return f()\n", "T0034"),
+        ("def f() -> list[set[int]]:\n    return f()\n", "T0034"),
+        (
+            "def f() -> list[list[set[int]]]:\n    return f()\n",
+            "T0034",
+        ),
         ("def f() -> set[str]:\n    return f()\n", "T0038"),
         ("def f() -> dict[int, int]:\n    return f()\n", "T0036"),
         ("def f() -> tuple[int, str]:\n    return f()\n", "T0039"),

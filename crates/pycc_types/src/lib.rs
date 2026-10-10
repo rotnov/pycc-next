@@ -16,6 +16,7 @@ mod frozenset;
 mod hash;
 mod if_exp;
 mod inherited_copies;
+mod list_ops;
 mod local_binder;
 mod loop_flow;
 mod module;
@@ -25,6 +26,7 @@ mod not_implemented;
 mod object_box;
 mod object_none;
 mod redeclaration;
+mod round;
 mod set_element;
 mod solver;
 mod std_receiver;
@@ -1051,6 +1053,7 @@ fn check_assignment_boxing(
     } else {
         ty
     };
+    list_ops::refuse_list_self_rebind(&HirExpr::Name(target.to_string()), value, &ty)?;
     check_assignment_of(env, target, ty, Some(value))
 }
 
@@ -2542,6 +2545,16 @@ fn check_dict_set(
     let dict_ty = lookup_bound_name_for_store(env, local_names, dict)?;
     if dict_ty == Ty::MemoryView {
         return check_buffer_set(env, local_names, key, value);
+    }
+    if let Ty::List(elem) = &dict_ty {
+        let index_ty = infer_expr_in(env, local_names, key)?;
+        let value_ty = infer_expr_in(env, local_names, value)?;
+        list_ops::check_list_set(elem, &index_ty, &value_ty)?;
+        let target = HirExpr::Subscript {
+            base: Box::new(HirExpr::Name(dict.to_string())),
+            index: Box::new(key.clone()),
+        };
+        return list_ops::refuse_list_self_rebind(&target, value, &value_ty);
     }
     let Ty::Dict(kv) = &dict_ty else {
         return Err(Diagnostic::error(

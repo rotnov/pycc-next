@@ -3771,34 +3771,6 @@ pub(crate) fn list_scalar_panic_fixture(
 }
 
 #[test]
-#[should_panic(expected = "pycc_codegen: truthiness of a list[T] value is not supported yet")]
-fn truthiness_of_a_list_value_panics_honestly() {
-    // D-107 confirmed this path is genuinely reachable, not defensive:
-    // `pycc_types` accepts any type in a boolean context
-    // (`crates/pycc_types/src/lib.rs`'s `if`/`while` handling calls
-    // `infer_expr` with no type restriction at all), so `if xs:` for a
-    // `list[int]` local type-checks today. v0.2 has no `bool(list)`
-    // semantics (D-105 ships only `len(x)`/`x[i]`/iteration/`.append()`),
-    // so an honest panic naming the gap is the correct behavior -- the
-    // alternative this replaces was `pycc_rt_str_truthy` reading a
-    // `PyIntListObj` as a `PyStrObj`.
-    //
-    // Calls `truthy` directly with a hand-built `Scalar::List` rather
-    // than compiling `if xs:` from real MIR: this pins the panic to
-    // `truthy` itself, where a future `bool(list)` implementation would
-    // land, instead of to whichever caller happens to reach it first.
-    // (`docs/ARCHITECTURE.md` records the same gap as user-visible
-    // behavior -- `if xs:` type-checks and then stops codegen here.)
-    let context = Context::create();
-    let (module, rt) = list_scalar_panic_fixture(&context);
-    let builder = context.create_builder();
-    let ptr = context
-        .ptr_type(inkwell::AddressSpace::default())
-        .const_null();
-    truthy(&context, &builder, &module, &rt, Scalar::List(ptr));
-}
-
-#[test]
 #[should_panic(
     expected = "pycc_codegen: internal error: an Optional[_] payload had an unsupported LLVM representation"
 )]
@@ -3843,27 +3815,6 @@ fn truthy_of_an_optional_with_a_pointer_payload_panics_as_an_internal_error() {
         &rt,
         Scalar::Optional(optional_with_pointer_payload),
     );
-}
-
-#[test]
-#[should_panic(
-    expected = "pycc_codegen: string conversion of a list[T] value is not supported yet"
-)]
-fn string_conversion_of_a_list_value_panics_honestly() {
-    // The `to_str` half of the same D-107 pair: `pycc_types` type-checks
-    // `print(xs)` for a `list[int]` local unconditionally (its `print`
-    // arm returns `Ok(Ty::None)` for any argument type), and `to_str` is
-    // what `print` hands its evaluated argument to. Same honest-panic
-    // reasoning as `truthiness_of_a_list_value_panics_honestly` above --
-    // this replaces handing a `PyIntListObj` pointer to a
-    // `pycc_rt_*_to_str` function expecting a `PyStrObj`.
-    let context = Context::create();
-    let (_module, rt) = list_scalar_panic_fixture(&context);
-    let builder = context.create_builder();
-    let ptr = context
-        .ptr_type(inkwell::AddressSpace::default())
-        .const_null();
-    to_str(&builder, &rt, Scalar::List(ptr));
 }
 
 #[test]
@@ -4279,27 +4230,10 @@ fn collect_stmt_bindings_binds_a_for_set_loop_variable_as_int_and_recurses_into_
 }
 
 #[test]
-#[should_panic(expected = "binary operators are not supported on list[int] yet")]
-fn a_list_result_binop_is_not_yet_supported() {
-    // No real Python operator produces a `BinOp` typed `list[int]`
-    // (D-105 defers even `+` list concatenation past v0.2), so
-    // `pycc_types`/`pycc_mir` never produce this shape -- hand-crafted
-    // MIR exercises `emit_expr`'s `BinOp` arm's new explicit container
-    // arm directly, same "hand-construct the otherwise-unreachable
-    // shape" convention as `a_none_result_binop_is_not_yet_supported`
-    // above.
-    //
-    // Deliberately a function-local assignment, not a top-level one:
-    // `collect_stmt_bindings`'s allow-list now includes `Ty::List(_)`
-    // (Task 5, D-089, see the two `collect_stmt_bindings_*` tests
-    // above), so a top-level `list[int]` binding would be collected
-    // and routed to `declare_module_globals` -- which does *not* get a
-    // `List(_)` arm (that catch-all's own test covers it) -- panicking
-    // there first and never reaching this arm at all. A function-local
-    // binding's slot is instead declared via `storage_slot_at_entry`/
-    // `ty_to_basic_type`, which *does* give `List(_)` a real pointer
-    // representation, so codegen gets past slot allocation and
-    // actually reaches this `BinOp` arm.
+#[should_panic(expected = "pycc_codegen: internal error: list operator Add")]
+fn a_list_typed_binop_over_non_list_operands_is_an_internal_error() {
+    // `pycc_types::list_ops` types a list-result `BinOp` only for a list
+    // operand, so this hand-built shape is malformed MIR.
     let mir = MirModule {
         items: vec![MirItem::Function {
             name: "f".to_string(),
@@ -4766,6 +4700,7 @@ fn iterating_a_name_with_no_local_slot_is_an_internal_error() {
     // one branch of it `appending_to_a_non_list_local_is_an_internal_
     // error` above does not reach.
     let mir = list_fixture_module(vec![MirStmt::ForList {
+        var_ty: pycc_mir::Ty::Int,
         var: "v".to_string(),
         list: "never_bound".to_string(),
         body: vec![],
@@ -8135,6 +8070,7 @@ fn a_return_inside_a_for_list_body_returns_immediately_without_looping() {
                 body: vec![
                     assign_list_literal("xs"),
                     MirStmt::ForList {
+                        var_ty: pycc_mir::Ty::Int,
                         var: "v".to_string(),
                         list: "xs".to_string(),
                         body: vec![MirStmt::Return(Some(MirExpr::Name {
@@ -8266,6 +8202,7 @@ fn a_for_list_loop_visits_every_element_in_order() {
     let mir = list_fixture_module(vec![
         assign_list_literal("xs"),
         MirStmt::ForList {
+            var_ty: pycc_mir::Ty::Int,
             var: "v".to_string(),
             list: "xs".to_string(),
             body: vec![MirStmt::ExprStmt(MirExpr::Call {
@@ -8325,6 +8262,7 @@ fn a_for_list_loop_keeps_its_per_iteration_length_read_under_release_optimizatio
             value: MirExpr::ListLiteral(vec![MirExpr::IntLiteral(1)]),
         },
         MirStmt::ForList {
+            var_ty: pycc_mir::Ty::Int,
             var: "v".to_string(),
             list: "xs".to_string(),
             body: vec![
@@ -8463,6 +8401,7 @@ fn an_error_inside_a_for_list_body_propagates_out_of_codegen() {
     let mir = list_fixture_module(vec![
         assign_list_literal("xs"),
         MirStmt::ForList {
+            var_ty: pycc_mir::Ty::Int,
             var: "v".to_string(),
             list: "xs".to_string(),
             body: vec![call_user_fn("missing")],
@@ -10974,6 +10913,7 @@ fn dict_set_item_key_read_from_a_variable_is_increfed_before_storage() {
 /// printed directly and must be walked element-by-element instead.
 fn print_each_int(list: &str) -> MirStmt {
     MirStmt::ForList {
+        var_ty: pycc_mir::Ty::Int,
         var: "v".to_string(),
         list: list.to_string(),
         body: vec![MirStmt::ExprStmt(MirExpr::Call {
@@ -12560,6 +12500,7 @@ fn list_pop_removes_and_returns_the_last_element_and_shrinks_len() {
             MirItem::TopLevelStmt(MirStmt::Assign {
                 target: "y".to_string(),
                 value: MirExpr::ListPop {
+                    index: None,
                     list: pycc_mir::MirContainerReceiver::Name("xs".to_string()),
                     ty: Ty::Int,
                 },
@@ -12610,10 +12551,12 @@ fn pop_twice_on_the_same_list_in_one_statement_removes_in_order() {
                 target: "ys".to_string(),
                 value: MirExpr::ListLiteral(vec![
                     MirExpr::ListPop {
+                        index: None,
                         list: pycc_mir::MirContainerReceiver::Name("xs".to_string()),
                         ty: Ty::Int,
                     },
                     MirExpr::ListPop {
+                        index: None,
                         list: pycc_mir::MirContainerReceiver::Name("xs".to_string()),
                         ty: Ty::Int,
                     },

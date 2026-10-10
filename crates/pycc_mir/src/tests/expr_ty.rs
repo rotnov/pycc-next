@@ -120,6 +120,7 @@ fn mir_expr_ty_covers_every_variant() {
     );
     assert_eq!(
         MirExpr::ListPop {
+            index: None,
             list: crate::MirContainerReceiver::Name("x".to_string()),
             ty: Ty::Int,
         }

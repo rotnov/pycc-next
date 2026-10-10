@@ -213,8 +213,8 @@ fn the_pairings_outside_part_6_are_refused() {
         (
             "obj_boolop_list",
             "print(H.yes or [1])\n",
-            "T0021",
-            "`or` operand of type `list[int]` has no truth value pycc can test",
+            "I0404",
+            "joining a CPython object with a `list[int]` value in an `or`",
         ),
         (
             "obj_boolop_none",

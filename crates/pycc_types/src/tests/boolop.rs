@@ -80,10 +80,12 @@ fn a_value_join_with_no_common_type_is_refused() {
 
 #[test]
 fn a_container_operand_is_refused_in_both_contexts() {
+    // A list is truth-testable (non-empty is true); a dict is not yet.
+    checks("def f(xs: list[int], b: int) -> None:\n    if xs and b:\n        print(1)\n");
     refused(
-        "def f(xs: list[int], b: int) -> None:\n    if xs and b:\n        print(1)\n",
+        "def f(d: dict[str, int], b: int) -> None:\n    if d and b:\n        print(1)\n",
         "T0021",
-        "`and` operand of type `list[int]` has no truth value pycc can test",
+        "`and` operand of type `dict[str, int]` has no truth value pycc can test",
     );
     refused(
         "def f(a: int, xs: dict[str, int]) -> None:\n    print(a or xs)\n",
@@ -272,7 +274,7 @@ fn a_protocol_call_inside_or_is_specialized() {
 }
 
 #[test]
-fn truth_testable_admits_scalars_optionals_and_instances_only() {
+fn truth_testable_admits_scalars_optionals_instances_and_lists_only() {
     for ty in [
         Ty::Bool,
         Ty::Int,
@@ -281,10 +283,11 @@ fn truth_testable_admits_scalars_optionals_and_instances_only() {
         Ty::None,
         Ty::Optional(Box::new(Ty::Int)),
         Ty::Instance(Box::new("C".to_string())),
+        Ty::List(Box::new(Ty::Str)),
     ] {
         assert!(is_truth_testable(&ty), "{ty:?}");
     }
-    for ty in [Ty::List(Box::new(Ty::Int)), Ty::Object] {
+    for ty in [Ty::Dict(Box::new((Ty::Str, Ty::Int))), Ty::Object] {
         assert!(!is_truth_testable(&ty), "{ty:?}");
     }
 }

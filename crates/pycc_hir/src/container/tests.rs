@@ -37,13 +37,28 @@ fn container_gate_accepts_the_one_compiled_shape_of_each_family() {
 }
 
 #[test]
+fn container_gate_accepts_every_one_word_list_element() {
+    for element in [
+        Ty::Int,
+        Ty::Float,
+        Ty::Bool,
+        Ty::Str,
+        Ty::Instance(Box::new("C".to_string())),
+        Ty::List(Box::new(Ty::List(Box::new(Ty::Str)))),
+    ] {
+        let ty = Ty::List(Box::new(element));
+        assert!(check_container_ty(&ty, span()).is_ok(), "{ty:?}");
+    }
+}
+
+#[test]
 fn container_gate_rejects_a_list_element_type_codegen_cannot_represent() {
-    let error = check_container_ty(&Ty::List(Box::new(Ty::Str)), span())
-        .expect_err("list[str] is not compiled");
+    let error = check_container_ty(&Ty::List(Box::new(Ty::Set(Box::new(Ty::Int)))), span())
+        .expect_err("list[set[int]] is not compiled");
     assert_eq!(error.code, "T0034");
     assert_eq!(
         error.message,
-        "list[str] is not compiled yet (D-105) -- only list[int] is"
+        "list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those"
     );
     assert_eq!(error.span, Some(span()));
 }

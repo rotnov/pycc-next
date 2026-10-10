@@ -205,7 +205,12 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
                 | pycc_mir::BinOpKind::LShift
                 | pycc_mir::BinOpKind::RShift
         ),
-        MirExpr::Subscript { base, .. } => matches!(base.ty(), pycc_mir::Ty::List(_)),
+        // A list index's `IndexError` leaves through the inlined bounds
+        // check's own cold branch (`list::build_list_get`), so the read
+        // needs no flag test; a tuple index is checked at compile time.
+        // `xs.pop()` raises on an empty list or a bad index, and a slice on
+        // a zero step.
+        MirExpr::ListPop { .. } | MirExpr::Slice { .. } => true,
         // #1343: an instance set insertion that calls a user `__hash__` or
         // `__eq__` guards each call itself, but the raise can still be
         // pending when the statement ends. An `int` or identity-only
@@ -234,7 +239,7 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // Part 1 of #1319: `frozenset(x)` copies an already-validated
         // container, exactly as a set literal inserts already-validated
         // words -- the runtime's bigint raise is unreachable from a
-        // `list[int]` codegen built, as `pycc_rt_int_set_from_int_list`'s
+        // `list[int]` codegen built, as `pycc_rt_int_set_from_list`'s
         // own doc comment records.
         | MirExpr::FrozenSetFrom { .. }
         // #1335: `hash(instance)`'s own work -- a pointer hash, a
@@ -243,8 +248,8 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // `emit_expr` evaluates it, before this node's work runs.
         | MirExpr::InstanceHash { .. }
         | MirExpr::TupleLiteral(_)
-        | MirExpr::Slice { .. }
-        | MirExpr::ListPop { .. }
+        | MirExpr::Subscript { .. }
+        | MirExpr::ListInsert { .. }
         | MirExpr::DictGetOrDefault { .. }
         | MirExpr::SetAdd { .. }
         | MirExpr::NullInstance { .. }
@@ -1597,7 +1602,9 @@ mod tests {
             )])),
             key: Box::new(MirExpr::StringLiteral("key".to_string())),
         }));
-        assert!(expression_can_set_exception(&MirExpr::Subscript {
+        // A list index raises through its inlined bounds check's own cold
+        // branch, so neither subscript needs the flag test.
+        assert!(!expression_can_set_exception(&MirExpr::Subscript {
             base: Box::new(MirExpr::ListLiteral(vec![MirExpr::IntLiteral(1)])),
             index: Box::new(MirExpr::IntLiteral(0)),
         }));

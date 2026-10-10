@@ -56,8 +56,12 @@ mod int_bitwise;
 mod int_encoding;
 /// `set[int]`/`frozenset[int]`'s `PyIntSetObj` (D-121, Part 1 of #1319).
 mod int_set;
+/// `list[T]`'s one generic runtime object, `PyListObj`.
+mod list;
 /// `print`'s stdout flush (#1340); the other print primitives stay below.
 mod print;
+/// The `round()` builtin over `float`.
+mod round;
 
 #[cfg(not(test))]
 pub use exception::pycc_rt_exception_print_and_exit;
@@ -89,11 +93,19 @@ pub use int_bitwise::{
 use int_encoding::*;
 pub use int_set::{
     PyIntSetObj, pycc_rt_int_set_add, pycc_rt_int_set_check_not_resized, pycc_rt_int_set_copy,
-    pycc_rt_int_set_decref, pycc_rt_int_set_from_int_list, pycc_rt_int_set_get,
-    pycc_rt_int_set_incref, pycc_rt_int_set_len, pycc_rt_int_set_new, pycc_rt_obj_set_add_identity,
+    pycc_rt_int_set_decref, pycc_rt_int_set_from_list, pycc_rt_int_set_get, pycc_rt_int_set_incref,
+    pycc_rt_int_set_len, pycc_rt_int_set_new, pycc_rt_obj_set_add_identity,
     pycc_rt_obj_set_candidate, pycc_rt_obj_set_push,
 };
+pub use list::{
+    LIST_KIND_BOOL, LIST_KIND_FLOAT, LIST_KIND_INSTANCE, LIST_KIND_INT, LIST_KIND_LIST,
+    LIST_KIND_STR, PyListObj, SLICE_HAS_START, SLICE_HAS_STEP, SLICE_HAS_STOP, pycc_rt_list_append,
+    pycc_rt_list_concat, pycc_rt_list_contains, pycc_rt_list_get, pycc_rt_list_index_error,
+    pycc_rt_list_insert, pycc_rt_list_len, pycc_rt_list_new, pycc_rt_list_pop, pycc_rt_list_repeat,
+    pycc_rt_list_repr, pycc_rt_list_set, pycc_rt_list_slice,
+};
 pub use print::pycc_rt_print_flush;
+pub use round::{pycc_rt_float_round, pycc_rt_float_round_to_int};
 
 fn format_i64_line(value: i64) -> String {
     format!("{value}\n")
@@ -725,7 +737,7 @@ pub extern "C" fn pycc_rt_int_untag_checked(tagged: i64) -> i64 {
 ///
 /// Never panics, so, per this file's established convention (see the
 /// implementation note above `pycc_rt_int_add` and the one on
-/// `pycc_rt_int_list_new`), it needs no private-logic/public-wrapper
+/// `pycc_rt_list_new`), it needs no private-logic/public-wrapper
 /// split.
 ///
 /// # Safety
@@ -1351,149 +1363,6 @@ pub extern "C" fn pycc_rt_print_none() {
     print!("None");
 }
 
-/// `list[int]`'s runtime object (D-105: v0.2 codegen only supports
-/// `list[int]`; any other element type stays a `pycc_types` diagnostic,
-/// T0034, never reaching codegen). Header shape follows `PyStrObj`'s real
-/// precedent (`rc: Cell<u32>` plus payload) rather than `docs/RUNTIME.md`'s
-/// former stale 16-byte generic-header spec (corrected by this plan's
-/// Task 12) -- `PyStrObj` is this runtime's only other *refcounted* heap
-/// object, and it never had a `type_id`/`flags` field either. (`BigIntObj`
-/// in `int_encoding` is a third heap-allocated type -- `Box::into_raw`'d by
-/// `tag_bigint` -- and since #146 Part 1 it carries the same `rc: Cell<u32>`
-/// header shape, released at the named-storage and loop-induction sites
-/// that change enumerates.)
-///
-/// No `#[repr(C)]`: exactly like `PyStrObj` (see that struct's own doc
-/// comment), `pycc_codegen` never sees anything but an opaque pointer to
-/// this type and only ever calls the `pycc_rt_int_list_*` functions below
-/// on it -- no struct ever crosses the LLVM/Rust boundary by value, so
-/// there is no ABI layout to pin down.
-///
-/// The growable payload is a safe `Cell<Vec<i64>>`, not a raw pointer with
-/// manual `std::alloc`/`realloc`/`dealloc` calls: `Vec<i64>` already gets
-/// growth, bounds-safe indexing, and (critically) its own `Drop` glue for
-/// free, the same way `PyStrObj`'s `Box<[u8]>` heap payload does. A
-/// `RefCell<Vec<i64>>` was considered and rejected -- its runtime
-/// borrow-checking panics on any overlapping borrow, a new panic mode this
-/// object's callers (future LLVM-generated code with call patterns not
-/// fully under this file's control) could trip with no relation to Python
-/// semantics. `Cell::take`/`Cell::set` avoid that: `take` moves the `Vec`
-/// out (leaving an empty one behind) without holding a borrow, the caller
-/// mutates the owned value, then `set` moves it back in -- no borrow is
-/// ever held across the mutation, so there is nothing for a runtime check
-/// to reject.
-///
-/// `pub`, not private, for the same reason `PyStrObj` is `pub`: every
-/// `pycc_rt_int_list_*` function below is a public FFI entry point
-/// returning or taking `*mut PyIntListObj`, and rustc's
-/// `private_interfaces` lint refuses a private type in a public
-/// signature. Both fields stay private, so the "opaque pointer" contract
-/// still holds for any real Rust caller.
-///
-/// **Element representation (D-141).** Each slot stores the int-compatible
-/// encoded word unchanged: odd ordinary smallint, exact `2`/`6` bool marker,
-/// or (once container bigints are supported) an aligned bigint pointer.
-/// Current generated ingress validates every word with
-/// `pycc_rt_int_untag_checked`, so bigint elements remain an explicit scope
-/// cut, but it stores the original encoded word rather than the decoded
-/// number. Reads, iteration, slicing, and pop therefore preserve `False`/
-/// `True` identity. Lengths and indices remain raw implementation counters.
-pub struct PyIntListObj {
-    rc: Cell<u32>,
-    items: Cell<Vec<i64>>,
-}
-
-/// Allocates a fresh, empty `PyIntListObj` with refcount `1`. Never
-/// panics -- `Vec::new()` performs no allocation -- so, per this file's
-/// established convention (see the implementation note above
-/// `pycc_rt_int_add`), this needs no private-logic/public-wrapper split:
-/// nothing here ever unwinds, so there is no abort-vs-catch distinction
-/// for a caller to trip over.
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_int_list_new() -> *mut PyIntListObj {
-    Box::into_raw(Box::new(PyIntListObj {
-        rc: Cell::new(1),
-        items: Cell::new(Vec::new()),
-    }))
-}
-
-/// Appends `value` to the end of `list` (Python's `list.append`, D-105's
-/// v0.2 `list[int]` slice). Grows `list`'s backing `Vec` via its own
-/// amortized-doubling `push`, so this never needs to reimplement
-/// capacity-doubling by hand.
-///
-/// # Element representation
-/// `value` is an encoded D-141 word and is stored exactly as given. The FFI
-/// caller must first validate it with `pycc_rt_int_untag_checked`; generated
-/// code does so and deliberately ignores the decoded result. This preserves
-/// a bool marker while retaining the current explicit rejection of bigint
-/// container elements.
-///
-/// # Safety
-/// `list` must be a live `PyIntListObj` pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_int_list_append(list: *mut PyIntListObj, value: i64) {
-    let list = unsafe { &*list };
-    let mut items = list.items.take();
-    items.push(value);
-    list.items.set(items);
-}
-
-/// Private half of `pycc_rt_int_list_get` below. Its out-of-range path is
-/// a D-173 pending-exception raise rather than an abort, so the split is
-/// no longer about panic-across-FFI: it exists so this file's unit tests
-/// can drive the raise and inspect the pending state without going through
-/// the public `extern "C"` wrapper's raw pointer.
-fn int_list_get(list: &PyIntListObj, index: i64) -> i64 {
-    let items = list.items.take();
-    let len = items.len();
-    if index < 0 || index as usize >= len {
-        // D-173: set the pending exception flag instead of panicking.
-        // Restore the payload before returning (not required for
-        // correctness in single-shot FFI usage, but cheap insurance).
-        list.items.set(items);
-        raise_builtin(
-            EXCEPTION_TYPE_INDEX_ERROR,
-            "IndexError",
-            "list index out of range",
-        );
-        return tag_smallint(0);
-    }
-    let value = items[index as usize];
-    list.items.set(items);
-    value
-}
-
-/// Reads the element at `index` (Python's `list[index]`, D-105's v0.2
-/// `list[int]` slice). Sets the pending `IndexError` exception flag on an
-/// out-of-range index (D-173) and returns a sentinel `tag_smallint(0)` --
-/// a *valid* D-141 encoded word, never a raw `0`, which
-/// `classify_encoded_int` would reject; the caller's generated code checks
-/// the flag after this call.
-///
-/// Known v0.2 scope cut: negative indices are not supported. Real Python
-/// treats `lst[-1]` as the last element, but `pycc_types` has no way to
-/// reject a negative index at compile time (the index value is only known
-/// at runtime) -- so this raises `IndexError` on *any* negative index, the
-/// same "index out of range" raise as a too-large positive one. This is a
-/// deliberate, documented v0.2 gap (D-108), not a bug: it means a
-/// conformance fixture exercising this function must not use negative
-/// indexing, since that would raise here rather than matching CPython's
-/// last-element behavior.
-///
-/// # Element representation
-/// `index` is a raw container offset; generated code obtains it by decoding
-/// an int-compatible expression with `pycc_rt_int_untag_checked`. The return
-/// value is the stored D-141 encoded word unchanged and needs no conversion
-/// before being used as an ordinary `Ty::Int` expression.
-///
-/// # Safety
-/// `list` must be a live `PyIntListObj` pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_int_list_get(list: *mut PyIntListObj, index: i64) -> i64 {
-    int_list_get(unsafe { &*list }, index)
-}
-
 /// The two words a `pycc build --ext` wrapper is allowed to carry across the
 /// boundary for a `memoryview` parameter (Part 2 of #1027).
 ///
@@ -1516,7 +1385,7 @@ pub struct PyccExtBufferView {
 }
 
 /// Private half of `pycc_rt_buffer_f64_get` below, split for the same reason
-/// `int_list_get` is: so this file's unit tests can drive the out-of-range
+/// `list_get` is: so this file's unit tests can drive the out-of-range
 /// raise and inspect the pending state directly.
 ///
 /// # Safety
@@ -1655,7 +1524,7 @@ pub unsafe extern "C" fn pycc_rt_buffer_f64_set(
 ///
 /// # Element representation
 /// The returned count is a **raw, untagged** `i64`, matching
-/// `pycc_rt_int_list_len`. Generated code re-tags it with D-141's
+/// `pycc_rt_list_len`. Generated code re-tags it with D-141's
 /// `raw_i64_to_tagged_int` before the value becomes a user-visible `Ty::Int`.
 ///
 /// # Safety
@@ -1941,219 +1810,13 @@ pub unsafe extern "C" fn pycc_rt_buffer_f64_free(view: *mut PyccExtBufferView) {
     drop(view);
 }
 
-/// Returns `list`'s current element count (Python's `len(list)`, D-105's
-/// v0.2 `list[int]` slice).
-///
-/// # Element representation
-/// The returned count is a **raw, untagged** `i64`, not a D-061-tagged
-/// one (see `PyIntListObj`'s own doc comment) -- it is a plain `usize`
-/// element count, unrelated to any stored element's own representation.
-/// `len(x)` is itself a `Ty::Int`-typed expression result in ordinary
-/// Python semantics, so a caller that uses this return value as a
-/// `Ty::Int` anywhere else in generated code (e.g. passing it to
-/// `pycc_rt_int_to_str` for `print(len(x))`) must `tag_smallint` it
-/// first. Stored-element reads, unlike this raw count, already return an
-/// encoded word and need no conversion.
-///
-/// # Safety
-/// `list` must be a live `PyIntListObj` pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_int_list_len(list: *mut PyIntListObj) -> i64 {
-    let list = unsafe { &*list };
-    let items = list.items.take();
-    let len = items.len() as i64;
-    list.items.set(items);
-    len
-}
-
-/// D-060-style unconditional refcounting for `list[int]`, matching
-/// `pycc_rt_str_incref`'s own convention exactly: increments `list`'s
-/// refcount by one, a no-op on a null pointer.
-///
-/// # Safety
-/// `list` must be either a null pointer or a live `PyIntListObj` pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_int_list_incref(list: *mut PyIntListObj) {
-    if list.is_null() {
-        return;
-    }
-    let obj = unsafe { &*list };
-    obj.rc.set(obj.rc.get() + 1);
-}
-
-/// D-060-style unconditional refcounting for `list[int]`, matching
-/// `pycc_rt_str_decref`'s own convention exactly: decrements `list`'s
-/// refcount by one, freeing the allocation once it reaches zero (which,
-/// via `Box::from_raw`'s own drop glue, also frees the `Cell<Vec<i64>>`
-/// payload's backing buffer -- no separate manual deallocation call
-/// needed). A no-op on a null pointer, same rationale as
-/// `pycc_rt_int_list_incref` above.
-///
-/// # Safety
-/// Same as `pycc_rt_int_list_incref`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_int_list_decref(list: *mut PyIntListObj) {
-    if list.is_null() {
-        return;
-    }
-    let new_rc = unsafe { &*list }.rc.get() - 1;
-    if new_rc == 0 {
-        drop(unsafe { Box::from_raw(list) });
-    } else {
-        unsafe { &*list }.rc.set(new_rc);
-    }
-}
-
-/// Part B of #1038 (#1064) converted this function's three rejected-bound
-/// aborts into D-173 pending-exception raises, so it no longer panics.
-/// `pycc_rt_int_list_slice` below remains a plain `extern "C" fn`, not
-/// `extern "C-unwind"`; this private function holds the real logic and
-/// unit tests call it directly, exactly like `int_list_get`'s own split.
-fn int_list_slice(list: &PyIntListObj, start: i64, stop: i64, step: i64) -> *mut PyIntListObj {
-    // The three bound checks below run before `list.items.take()`, so unlike
-    // `int_list_get` there is no payload to restore before returning.
-    // The sentinel is a fresh empty list -- a valid `PyIntListObj`, never
-    // null, so a caller may safely touch it before its own flag check.
-    if start < 0 {
-        raise_builtin(
-            EXCEPTION_TYPE_VALUE_ERROR,
-            "ValueError",
-            "slice start must be non-negative",
-        );
-        return pycc_rt_int_list_new();
-    }
-    if stop < 0 {
-        raise_builtin(
-            EXCEPTION_TYPE_VALUE_ERROR,
-            "ValueError",
-            "slice stop must be non-negative",
-        );
-        return pycc_rt_int_list_new();
-    }
-    if step <= 0 {
-        raise_builtin(
-            EXCEPTION_TYPE_VALUE_ERROR,
-            "ValueError",
-            "slice step must be positive",
-        );
-        return pycc_rt_int_list_new();
-    }
-    let items = list.items.take();
-    let len = items.len() as i64;
-    let clamped_start = start.min(len);
-    let clamped_stop = stop.min(len);
-    let result = pycc_rt_int_list_new();
-    // Unlike `int_list_get` (which restores `list`'s payload before
-    // raising on an out-of-range index), this loop's
-    // take-window contains no fallible operation, so there is nothing to
-    // restore: `items[i as usize]` cannot panic, since `i` starts at
-    // `clamped_start` and the loop guard keeps it below `clamped_stop`,
-    // and both clamped bounds are `.min(len)`-derived, so
-    // `clamped_start <= i < clamped_stop <= len == items.len()` holds on
-    // every iteration. `i += step` cannot overflow `i64` either: `i` never
-    // exceeds `len`, and `step` itself already passed
-    // `pycc_rt_int_untag_checked`'s 63-bit smallint range check at every
-    // real `pycc_codegen` call site, so `i + step` stays far below
-    // `i64::MAX`.
-    let mut i = clamped_start;
-    while i < clamped_stop {
-        unsafe { pycc_rt_int_list_append(result, items[i as usize]) };
-        i += step;
-    }
-    list.items.set(items);
-    result
-}
-
-/// Returns a **new** list containing the clamped, strided sub-range
-/// `[start, stop)` of `list`'s elements, stepping by `step` (Python's
-/// `list[start:stop:step]`, D-118's v0.2 `list[int]` slice). Sets the
-/// pending `ValueError` exception flag (D-173, Part B of #1038, #1064) and
-/// returns a new empty list as the sentinel on a negative `start`/`stop` or
-/// a non-positive `step`; the caller's generated code checks the flag after
-/// this call. v0.2 ships no CPython-style negative-index/negative-step
-/// semantics, extending D-108's own uniform "no negative addressing" scope
-/// cut (`pycc_rt_int_list_get`) to slicing; the conformance gap is tracked
-/// as #1070. `start`/`stop` are clamped into `[0, len]` after the sign
-/// check, matching CPython's own out-of-range-slice-bound clamping --
-/// required for the accepted subset (omitted/over-long bounds) to match
-/// CPython byte-for-byte, not merely a nicety. The three sign/positivity
-/// checks run before `list.items.take()`, mirroring `int_list_get`'s own
-/// "leave `list` intact" care -- a rejected call here never touches
-/// `list`'s payload at all, so there is nothing to restore.
-///
-/// # Element representation
-/// `start`/`stop`/`step` are raw, untagged `i64` offsets/strides, not
-/// D-061-tagged `Ty::Int` values -- a caller with a tagged operand must
-/// `pycc_rt_int_untag_checked` each one first, exactly like
-/// `pycc_rt_int_list_get`'s own `index` parameter. The returned list's own
-/// elements are copied through unchanged (already D-141 encoded words per
-/// `PyIntListObj`'s representation) -- no per-element
-/// conversion happens here, exactly like a single-element read.
-///
-/// # Safety
-/// `list` must be a live `PyIntListObj` pointer. Takes `*mut` rather than
-/// the task plan's own sketched `*const`, matching every other
-/// `pycc_rt_int_list_*` function in this file (`_get`/`_len` both take
-/// `*mut PyIntListObj` even though they too only read `list`'s payload) --
-/// a deliberate consistency choice over the plan's literal text, not a
-/// functional difference (LLVM's opaque pointer type distinguishes neither
-/// side at the `pycc_codegen` call site either way).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_int_list_slice(
-    list: *mut PyIntListObj,
-    start: i64,
-    stop: i64,
-    step: i64,
-) -> *mut PyIntListObj {
-    int_list_slice(unsafe { &*list }, start, stop, step)
-}
-
-/// Part B of #1038 (#1064) converted this function's empty-list abort into
-/// a D-173 pending-exception raise, so it no longer panics.
-/// `pycc_rt_int_list_pop` below remains a plain `extern "C" fn`, not
-/// `extern "C-unwind"`; this private function holds the real logic and
-/// unit tests call it directly, exactly like `int_list_get`'s own split.
-fn int_list_pop(list: &PyIntListObj) -> i64 {
-    let mut items = list.items.take();
-    let Some(value) = items.pop() else {
-        // Restore the (empty) payload before raising, same rationale as
-        // `int_list_get`'s own "restore before returning" comment.
-        list.items.set(items);
-        raise_builtin(
-            EXCEPTION_TYPE_INDEX_ERROR,
-            "IndexError",
-            "pop from empty list",
-        );
-        return tag_smallint(0);
-    };
-    list.items.set(items);
-    value
-}
-
-/// Removes and returns the list's **last** element (Python's `list.pop()`,
-/// PR-12, D-119). Sets the pending `IndexError` exception flag (D-173) and
-/// returns a sentinel `tag_smallint(0)` if `list` is empty, matching
-/// CPython's own catchable `IndexError`; the caller's generated code checks
-/// the flag after this call. The message is `"pop from empty list"`.
-///
-/// # Element representation
-/// The returned value is the stored D-141 encoded word unchanged, so a bool
-/// marker keeps its runtime identity and no output-side conversion is needed.
-///
-/// # Safety
-/// `list` must be a live `PyIntListObj` pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_int_list_pop(list: *mut PyIntListObj) -> i64 {
-    int_list_pop(unsafe { &*list })
-}
-
 /// `dict[str, int]`'s runtime representation (D-121): a dense,
 /// insertion-ordered array of `(key, value)` pairs. `Cell<Vec<...>>`
-/// mirrors `PyIntListObj`'s own choice over `RefCell` -- `Cell::take`/
+/// mirrors `PyListObj`'s own choice over `RefCell` -- `Cell::take`/
 /// `_::set` never holds a borrow across a mutation, so there is no new
 /// runtime-panic mode from overlapping borrows. Not `#[repr(C)]` -- never
 /// crosses the LLVM/Rust boundary by value, only as an opaque pointer
-/// (mirrors `PyStrObj`/`PyIntListObj`). Lookup is linear-scan comparison
+/// (mirrors `PyStrObj`/`PyListObj`). Lookup is linear-scan comparison
 /// via `pycc_rt_str_cmp` (D-121), not a hash table. Values are D-141 encoded
 /// words preserved unchanged across set/get/get-or-default; generated ingress
 /// validates them with `pycc_rt_int_untag_checked` before storage.
@@ -2249,7 +1912,7 @@ pub unsafe extern "C" fn pycc_rt_dict_get_or_default(
 }
 
 /// Number of entries. `Cell::take` followed by re-`set`ting it, mirroring
-/// `pycc_rt_int_list_len`'s own exact pattern (never leave the `Cell`
+/// `pycc_rt_list_len`'s own exact pattern (never leave the `Cell`
 /// empty on return).
 ///
 /// # Safety
@@ -2263,13 +1926,13 @@ pub unsafe extern "C" fn pycc_rt_dict_len(dict: *mut PyDictObj) -> i64 {
 }
 
 /// Private half of `pycc_rt_dict_key_at` below, same panic-across-FFI
-/// split as `int_list_get`/`dict_get` above: a plain `extern "C" fn`
+/// split as `list_get`/`dict_get` above: a plain `extern "C" fn`
 /// turns an unwinding panic into a process abort, so the freely-panicking
 /// logic lives here and tests exercising the panic call this directly.
 ///
 /// Uses `Vec::get` (bounds-checked, never panics on its own) rather than
 /// indexing directly, so the payload can be restored into the `Cell`
-/// *before* the panic branch -- mirroring `int_list_get`'s own "restore
+/// *before* the panic branch -- mirroring `list_get`'s own "restore
 /// before panicking" comment and `dict_get`'s own `unwrap_or_else` shape,
 /// instead of `dict.entries.take()` followed by a direct index that would
 /// leave the `Cell` holding an empty `Vec` if it panicked. Not required
@@ -2304,7 +1967,7 @@ pub unsafe extern "C" fn pycc_rt_dict_key_at(dict: *mut PyDictObj, index: i64) -
     dict_key_at(unsafe { &*dict }, index)
 }
 
-/// Unconditional refcounting (D-124), mirroring `pycc_rt_int_list_incref`
+/// Unconditional refcounting (D-124), mirroring `pycc_rt_list_incref`
 /// exactly. No-op on null.
 ///
 /// # Safety
@@ -2318,7 +1981,7 @@ pub unsafe extern "C" fn pycc_rt_dict_incref(dict: *mut PyDictObj) {
     obj.rc.set(obj.rc.get() + 1);
 }
 
-/// Mirrors `pycc_rt_int_list_decref` exactly: frees via `Box::from_raw`
+/// Mirrors `pycc_rt_list_decref` exactly: frees via `Box::from_raw`
 /// once `rc` hits 0. Not called from any `pycc_codegen` site in this PR
 /// (D-124, leak-only).
 ///
@@ -3975,101 +3638,6 @@ mod tests {
         pycc_rt_print_none();
     }
 
-    #[test]
-    fn int_list_new_starts_empty() {
-        // Every `pycc_rt_int_list_*` function taking/dereferencing a
-        // `*mut PyIntListObj` is `unsafe extern "C"` (see their own doc
-        // comments' `# Safety` sections), matching `PyStrObj`'s own
-        // convention -- so, same as `a_short_literal_round_trips_through_
-        // the_inline_representation` above, this wraps the whole body in
-        // one `unsafe { ... }` block rather than the task brief's own
-        // unwrapped calls (a genuine compile-error bug in the brief, not
-        // a change to what the test asserts).
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            assert_eq!(pycc_rt_int_list_len(list), 0);
-            pycc_rt_int_list_decref(list);
-        }
-    }
-
-    #[test]
-    fn int_list_append_then_get_round_trips() {
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            pycc_rt_int_list_append(list, tag_smallint(10));
-            pycc_rt_int_list_append(list, tag_smallint(20));
-            pycc_rt_int_list_append(list, tag_smallint(30));
-            assert_eq!(pycc_rt_int_list_len(list), 3);
-            assert_eq!(pycc_rt_int_list_get(list, 0), tag_smallint(10));
-            assert_eq!(pycc_rt_int_list_get(list, 1), tag_smallint(20));
-            assert_eq!(pycc_rt_int_list_get(list, 2), tag_smallint(30));
-            pycc_rt_int_list_decref(list);
-        }
-    }
-
-    #[test]
-    fn int_list_read_slice_and_pop_preserve_bool_identity_markers() {
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            pycc_rt_int_list_append(list, BOOL_FALSE_MARKER);
-            pycc_rt_int_list_append(list, BOOL_TRUE_MARKER);
-            assert_eq!(pycc_rt_int_list_get(list, 0), BOOL_FALSE_MARKER);
-            assert_eq!(pycc_rt_int_list_get(list, 1), BOOL_TRUE_MARKER);
-
-            let sliced = pycc_rt_int_list_slice(list, 0, 2, 1);
-            assert_eq!(pycc_rt_int_list_get(sliced, 0), BOOL_FALSE_MARKER);
-            assert_eq!(pycc_rt_int_list_get(sliced, 1), BOOL_TRUE_MARKER);
-            assert_eq!(pycc_rt_int_list_pop(list), BOOL_TRUE_MARKER);
-            pycc_rt_int_list_decref(sliced);
-            pycc_rt_int_list_decref(list);
-        }
-    }
-
-    #[test]
-    fn int_list_grows_past_its_initial_capacity() {
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for i in 0..1000 {
-                pycc_rt_int_list_append(list, tag_smallint(i));
-            }
-            assert_eq!(pycc_rt_int_list_len(list), 1000);
-            assert_eq!(pycc_rt_int_list_get(list, 999), tag_smallint(999));
-            pycc_rt_int_list_decref(list);
-        }
-    }
-
-    #[test]
-    fn int_list_get_out_of_range_sets_exception_flag() {
-        // D-173: out-of-range index now sets the pending exception flag
-        // instead of panicking.
-        pycc_rt_exception_clear();
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            pycc_rt_int_list_append(list, tag_smallint(1));
-            let result = int_list_get(&*list, 5);
-            assert_eq!(pycc_rt_exception_active(), 1);
-            assert_eq!(untag_smallint(result), 0); // sentinel value
-            pycc_rt_int_list_decref(list);
-        }
-        pycc_rt_exception_clear();
-    }
-
-    #[test]
-    fn int_list_get_rejects_negative_indices_with_exception_flag() {
-        // D-108's documented v0.2 scope cut: a negative index sets the
-        // IndexError flag exactly like an out-of-range positive one.
-        pycc_rt_exception_clear();
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            pycc_rt_int_list_append(list, tag_smallint(1));
-            let result = int_list_get(&*list, -1);
-            assert_eq!(pycc_rt_exception_active(), 1);
-            assert_eq!(untag_smallint(result), 0); // sentinel value
-            pycc_rt_int_list_decref(list);
-        }
-        pycc_rt_exception_clear();
-    }
-
     /// Part 2 of #1027: the Rust `PyccExtBufferView` is the same two words,
     /// in the same order and at the same offsets, as the C struct in
     /// `src/ext/pycc_ext_module.c` -- `{ void *ptr; long long len; }`. A
@@ -4465,282 +4033,6 @@ mod tests {
     }
 
     #[test]
-    fn int_list_incref_decref_round_trip_does_not_free_early() {
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            pycc_rt_int_list_append(list, tag_smallint(1));
-            pycc_rt_int_list_incref(list);
-            pycc_rt_int_list_decref(list);
-            // still alive after one incref/decref pair -- one decref remains
-            assert_eq!(pycc_rt_int_list_get(list, 0), tag_smallint(1));
-            pycc_rt_int_list_decref(list);
-        }
-    }
-
-    #[test]
-    fn int_list_incref_and_decref_on_a_null_pointer_are_safe_no_ops() {
-        // D-014's 100% line/region coverage gate: without this,
-        // `pycc_rt_int_list_incref`/`_decref`'s `if list.is_null()` early
-        // return is dead code, since none of the tests above ever pass a
-        // null pointer. Mirrors `PyStrObj`'s own
-        // `incref_and_decref_on_a_null_pointer_are_safe_no_ops` test above.
-        unsafe {
-            pycc_rt_int_list_incref(std::ptr::null_mut());
-            pycc_rt_int_list_decref(std::ptr::null_mut());
-        }
-    }
-
-    /// Reads every encoded element of `list` (possibly zero, for an empty
-    /// slice result) into a `Vec<i64>`, for asserting a whole slice result's
-    /// contents in one line rather than one `pycc_rt_int_list_get` call per
-    /// expected element.
-    unsafe fn collect_list(list: *mut PyIntListObj) -> Vec<i64> {
-        unsafe {
-            let len = pycc_rt_int_list_len(list);
-            (0..len).map(|i| pycc_rt_int_list_get(list, i)).collect()
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_returns_the_in_range_sub_range() {
-        // D-118's ordinary path: `[10,20,30,40,50][1:4:1] == [20,30,40]`.
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for v in [10, 20, 30, 40, 50] {
-                pycc_rt_int_list_append(list, tag_smallint(v));
-            }
-            let sliced = pycc_rt_int_list_slice(list, 1, 4, 1);
-            assert_eq!(
-                collect_list(sliced),
-                vec![tag_smallint(20), tag_smallint(30), tag_smallint(40)]
-            );
-            pycc_rt_int_list_decref(list);
-            pycc_rt_int_list_decref(sliced);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_clamps_a_too_high_stop() {
-        // D-118's clamp-stop-high branch: `[1,2,3][0:100:1] == [1,2,3]`,
-        // matching CPython's own out-of-range-slice-bound clamping.
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for v in [1, 2, 3] {
-                pycc_rt_int_list_append(list, tag_smallint(v));
-            }
-            let sliced = pycc_rt_int_list_slice(list, 0, 100, 1);
-            assert_eq!(
-                collect_list(sliced),
-                vec![tag_smallint(1), tag_smallint(2), tag_smallint(3)]
-            );
-            pycc_rt_int_list_decref(list);
-            pycc_rt_int_list_decref(sliced);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_clamps_a_too_high_start() {
-        // D-118's clamp-start-high branch: `[1,2,3][100:200:1]` clamps
-        // *both* bounds to `len` (3), so `clamped_start == clamped_stop`
-        // and the result is empty -- the same outcome as the
-        // start-at-or-past-stop test below, but pinning the clamp
-        // arithmetic itself (both operands clamp to the same value) rather
-        // than an already-in-range `start >= stop` relationship.
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for v in [1, 2, 3] {
-                pycc_rt_int_list_append(list, tag_smallint(v));
-            }
-            let sliced = pycc_rt_int_list_slice(list, 100, 200, 1);
-            assert_eq!(collect_list(sliced), Vec::<i64>::new());
-            pycc_rt_int_list_decref(list);
-            pycc_rt_int_list_decref(sliced);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_with_start_at_or_past_stop_is_empty() {
-        // D-118's empty-result branch: `[1,2,3][2:1:1] == []` -- `start`
-        // and `stop` are both already in range, unlike the clamp-driven
-        // empty result above, so the `while i < clamped_stop` loop body
-        // never runs for a distinct reason (no clamping involved at all).
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for v in [1, 2, 3] {
-                pycc_rt_int_list_append(list, tag_smallint(v));
-            }
-            let sliced = pycc_rt_int_list_slice(list, 2, 1, 1);
-            assert_eq!(collect_list(sliced), Vec::<i64>::new());
-            pycc_rt_int_list_decref(list);
-            pycc_rt_int_list_decref(sliced);
-        }
-    }
-
-    /// Part B of #1038 (#1064): drives one rejected `int_list_slice` bound
-    /// and returns the pending tag/message, asserting the sentinel is a
-    /// valid, empty, non-null list along the way. Shared by the four
-    /// rejected-bound tests below, which differ only in their arguments.
-    fn slice_rejection(start: i64, stop: i64, step: i64) -> (u8, String) {
-        pycc_rt_exception_clear();
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            pycc_rt_int_list_append(list, tag_smallint(1));
-            let result = int_list_slice(&*list, start, stop, step);
-            let pending = pending_tag_and_message();
-            assert!(!result.is_null());
-            assert_eq!(collect_list(result), Vec::<i64>::new()); // sentinel
-            pycc_rt_int_list_decref(result);
-            pycc_rt_int_list_decref(list);
-            pycc_rt_exception_clear();
-            pending
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_raises_on_a_negative_start() {
-        // Part B of #1038 (#1064): was `#[should_panic]`. CPython addresses
-        // `lst[-1:]` from the end rather than rejecting it; pycc's v0.2
-        // slice still does not, but the gap is now a catchable `ValueError`
-        // rather than a process abort. Conformance is tracked as #1070.
-        let (tag, message) = slice_rejection(-1, 1, 1);
-        assert_eq!(tag, EXCEPTION_TYPE_VALUE_ERROR);
-        assert_eq!(message, "slice start must be non-negative");
-        assert!(!message.contains("pycc_rt: "), "{message}");
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_raises_on_a_negative_stop() {
-        let (tag, message) = slice_rejection(0, -1, 1);
-        assert_eq!(tag, EXCEPTION_TYPE_VALUE_ERROR);
-        assert_eq!(message, "slice stop must be non-negative");
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_raises_on_a_zero_step() {
-        let (tag, message) = slice_rejection(0, 1, 0);
-        assert_eq!(tag, EXCEPTION_TYPE_VALUE_ERROR);
-        assert_eq!(message, "slice step must be positive");
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_raises_on_a_negative_step() {
-        let (tag, message) = slice_rejection(0, 1, -1);
-        assert_eq!(tag, EXCEPTION_TYPE_VALUE_ERROR);
-        assert_eq!(message, "slice step must be positive");
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_with_a_step_greater_than_one_skips_elements() {
-        // `[0,1,2,3,4,5][0:6:2] == [0,2,4]`.
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for v in [0, 1, 2, 3, 4, 5] {
-                pycc_rt_int_list_append(list, tag_smallint(v));
-            }
-            let sliced = pycc_rt_int_list_slice(list, 0, 6, 2);
-            assert_eq!(
-                collect_list(sliced),
-                vec![tag_smallint(0), tag_smallint(2), tag_smallint(4)]
-            );
-            pycc_rt_int_list_decref(list);
-            pycc_rt_int_list_decref(sliced);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_slice_returns_a_genuinely_independent_list() {
-        // D-107's leak-only policy still requires the slice result to be a
-        // *new* allocation, not an alias of `list`'s own backing storage --
-        // appending to the original after slicing must not retroactively
-        // change the already-returned slice, and vice versa.
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for v in [1, 2, 3] {
-                pycc_rt_int_list_append(list, tag_smallint(v));
-            }
-            let sliced = pycc_rt_int_list_slice(list, 0, 3, 1);
-            pycc_rt_int_list_append(list, tag_smallint(99));
-            assert_eq!(
-                collect_list(list),
-                vec![
-                    tag_smallint(1),
-                    tag_smallint(2),
-                    tag_smallint(3),
-                    tag_smallint(99)
-                ]
-            );
-            assert_eq!(
-                collect_list(sliced),
-                vec![tag_smallint(1), tag_smallint(2), tag_smallint(3)]
-            );
-            pycc_rt_int_list_decref(list);
-            pycc_rt_int_list_decref(sliced);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_pop_removes_and_returns_the_last_element() {
-        // Python's `list.pop()`: `[1,2,3].pop() == 3`, and the list shrinks
-        // by one, leaving `[1,2]` -- the removed element is always the
-        // *last* one, D-119.
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for v in [1, 2, 3] {
-                pycc_rt_int_list_append(list, tag_smallint(v));
-            }
-            assert_eq!(pycc_rt_int_list_pop(list), tag_smallint(3));
-            assert_eq!(pycc_rt_int_list_len(list), 2);
-            assert_eq!(collect_list(list), vec![tag_smallint(1), tag_smallint(2)]);
-            pycc_rt_int_list_decref(list);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_pop_repeated_calls_keep_removing_the_new_last_element() {
-        // Two `.pop()`s in a row must each observe the *previous* pop's
-        // effect, not some stale snapshot -- exercises the same repeated-
-        // mutation-on-the-same-object concern this task's own brief flags
-        // for `xs = [xs.pop(), xs.pop()]`-shaped codegen, at the `pycc_rt`
-        // layer directly.
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            for v in [1, 2, 3] {
-                pycc_rt_int_list_append(list, tag_smallint(v));
-            }
-            assert_eq!(pycc_rt_int_list_pop(list), tag_smallint(3));
-            assert_eq!(pycc_rt_int_list_pop(list), tag_smallint(2));
-            assert_eq!(pycc_rt_int_list_len(list), 1);
-            assert_eq!(collect_list(list), vec![tag_smallint(1)]);
-            pycc_rt_int_list_decref(list);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_int_list_pop_on_an_empty_list_raises_index_error() {
-        // Part B of #1038 (#1064): was `#[should_panic]`. CPython raises a
-        // catchable `IndexError` here and now so does pycc; the sentinel is
-        // `tag_smallint(0)`, a *valid* D-141 encoded word (raw `0` is not --
-        // `classify_encoded_int` rejects it), so a caller may decode it
-        // before its own pending-exception check.
-        pycc_rt_exception_clear();
-        unsafe {
-            let list = pycc_rt_int_list_new();
-            let result = int_list_pop(&*list);
-            let (tag, message) = pending_tag_and_message();
-            assert_eq!(tag, EXCEPTION_TYPE_INDEX_ERROR);
-            assert_eq!(message, "pop from empty list");
-            assert!(!message.contains("pycc_rt: "), "{message}");
-            assert_eq!(result, tag_smallint(0)); // sentinel value
-            // The (empty) payload is restored before the raise, so the list
-            // is still usable afterwards.
-            pycc_rt_int_list_append(list, tag_smallint(7));
-            assert_eq!(collect_list(list), vec![tag_smallint(7)]);
-            pycc_rt_int_list_decref(list);
-        }
-        pycc_rt_exception_clear();
-    }
-
-    #[test]
     fn pycc_rt_dict_set_then_get_round_trips_the_value() {
         unsafe {
             let dict = pycc_rt_dict_new();
@@ -4813,7 +4105,7 @@ mod tests {
             // `extern "C" fn`, so a panic crossing its boundary aborts the
             // whole test binary (`SIGABRT`) instead of unwinding into
             // `#[should_panic]`'s own catch (same convention as
-            // `int_list_get_out_of_range_panics_honestly`/
+            // `list_get_out_of_range_panics_honestly`/
             // `pycc_rt_dict_get_on_a_missing_key_panics` just below).
             dict_key_at(&*dict, 1);
         }
@@ -4903,8 +4195,8 @@ mod tests {
         // D-014's 100% line/region coverage gate: without this,
         // `pycc_rt_dict_incref`/`_decref`'s `if dict.is_null()` early
         // return is dead code, since none of the tests above ever pass a
-        // null pointer. Mirrors `PyIntListObj`'s own
-        // `int_list_incref_and_decref_on_a_null_pointer_are_safe_no_ops`
+        // null pointer. Mirrors `PyListObj`'s own
+        // `list_incref_and_decref_on_a_null_pointer_are_safe_no_ops`
         // test above.
         unsafe {
             pycc_rt_dict_incref(std::ptr::null_mut());

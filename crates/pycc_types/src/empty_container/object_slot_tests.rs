@@ -175,8 +175,8 @@ fn the_shapes_outside_the_object_slot_keep_their_diagnostics() {
     );
     assert_refused(
         "def f(v: object) -> int:\n    s = numpy.pi[1:]\n    s = v or [1]\n    return len(s)\n",
-        "T0021",
-        "`or` operand of type `list[int]`",
+        "I0404",
+        "joining a CPython object with a `list[int]` value in an `or`",
     );
 }
 

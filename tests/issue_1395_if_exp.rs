@@ -175,10 +175,10 @@ fn branches_with_no_common_type_are_refused() {
 
 #[test]
 fn a_condition_pycc_cannot_test_is_refused() {
-    let text = check_fails("def f(xs: list[int]) -> int:\n    return 1 if xs else 2\n");
+    let text = check_fails("def f(d: dict[str, int]) -> int:\n    return 1 if d else 2\n");
     assert!(
         text.contains(
-            "error[T0021]: conditional expression condition of type `list[int]` has no truth value pycc can test"
+            "error[T0021]: conditional expression condition of type `dict[str, int]` has no truth value pycc can test"
         ),
         "{text}"
     );

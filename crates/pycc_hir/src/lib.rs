@@ -36,7 +36,9 @@ pub use class::{
     slot_behind_foreign_static_meets_property, subclass_divergence,
 };
 pub use compare_chain::{CompareLink, compare_chain_operands};
-pub use container::{check_container_ty, check_tuple_element_ty, set_element_message};
+pub use container::{
+    check_container_ty, check_tuple_element_ty, is_list_element_ty, set_element_message,
+};
 pub use dunder_name::DUNDER_NAME;
 pub use exception::{
     BUILTIN_EXCEPTION_CLASSES, EXCEPTION_GROUP_TYPE_TAG, EXCEPTION_INIT_MANGLED_NAME,
@@ -123,12 +125,9 @@ pub enum Ty {
     /// `Box<str>`; this is a deliberate, measurement-driven deviation --
     /// `Box<str>` does not in fact keep `Ty` at the D-109 ceiling.)
     Param(Box<String>),
-    /// `list[T]`. Type-checking is planned to accept any scalar `T`; only
-    /// `T = Ty::Int` gets real codegen in v0.2 (D-105). Codegen rejecting
-    /// every other element type before it becomes an unhandled codegen
-    /// case is planned via a `pycc_types` diagnostic (`T0034`, per D-105 --
-    /// not yet implemented as of this commit; this variant only defines
-    /// the type representation).
+    /// `list[T]`. One generic runtime representation serves every element
+    /// type [`is_list_element_ty`] admits (`int`, `float`, `bool`, `str`, a
+    /// user-class instance, a nested list); every other `T` is `T0034`.
     List(Box<Ty>),
     /// `dict[K, V]`. No v0.2 code path constructs this yet (PR-11's own
     /// scope per `docs/DELIVERY_PLAN.md`) -- the variant exists now only

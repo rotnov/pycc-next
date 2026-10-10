@@ -130,6 +130,7 @@ pub(crate) fn reject_unrenderable(
         // in the backend. `list`, `dict` and `tuple` are deliberately not
         // added here: #1220 owns rendering them.
         Ty::Set(_) | Ty::FrozenSet(_) => Err(crate::frozenset::unrenderable_set(ty)),
+        Ty::List(_) => crate::list_ops::check_list_renderable(ty),
         // This catch-all also swallows every `Ty` variant added later: a new
         // variant `to_str` cannot render needs its own arm above.
         _ => Ok(()),

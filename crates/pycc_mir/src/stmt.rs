@@ -505,7 +505,7 @@ pub(super) fn lower_stmt(
             // `pycc_types`' own T0033, so there is no set counterpart there).
             match lookup(scopes, list) {
                 Ty::List(elem_ty) => {
-                    bind_variable(scopes, var.clone(), *elem_ty);
+                    bind_variable(scopes, var.clone(), (*elem_ty).clone());
                     // D-068 re-review of #780 (sixth round): see the
                     // `ForRange` arm's identical comment above -- the loop
                     // variable's own rebinding must kill a stale narrowing
@@ -514,6 +514,7 @@ pub(super) fn lower_stmt(
                     let body = lower_loop_body(body, scopes, classes, current_class);
                     MirStmt::ForList {
                         var: var.clone(),
+                        var_ty: *elem_ty,
                         list: list.clone(),
                         body,
                     }
@@ -740,7 +741,16 @@ pub(super) fn lower_stmt(
             let key = lower_expr(key, scopes, classes, current_class);
             let value = lower_expr(value, scopes, classes, current_class);
             let base_ty = lookup(scopes, dict);
-            if base_ty == Ty::MemoryView {
+            if let Ty::List(_) = base_ty {
+                MirStmt::ListSet {
+                    base: MirExpr::Name {
+                        name: dict.clone(),
+                        ty: base_ty,
+                    },
+                    index: key,
+                    value,
+                }
+            } else if base_ty == Ty::MemoryView {
                 MirStmt::BufferSet {
                     base: MirExpr::Name {
                         name: dict.clone(),

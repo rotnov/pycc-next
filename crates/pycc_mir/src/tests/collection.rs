@@ -62,6 +62,7 @@ fn lowers_for_list_to_mir_for_list() {
     assert_eq!(
         mir.items[1],
         MirItem::TopLevelStmt(MirStmt::ForList {
+            var_ty: Ty::Int,
             var: "v".to_string(),
             list: "x".to_string(),
             body: vec![MirStmt::ExprStmt(MirExpr::Call {
@@ -174,6 +175,7 @@ fn lowers_list_pop_to_mir_deriving_its_element_type_from_the_list_binding() {
         MirItem::TopLevelStmt(MirStmt::Assign {
             target: "y".to_string(),
             value: MirExpr::ListPop {
+                index: None,
                 list: crate::MirContainerReceiver::Name("xs".to_string()),
                 ty: Ty::Int,
             },
@@ -364,6 +366,7 @@ fn list_literal_subscript_and_for_list_derive_their_type_from_actual_elements_no
     assert_eq!(
         mir.items[2],
         MirItem::TopLevelStmt(MirStmt::ForList {
+            var_ty: Ty::Str,
             var: "v".to_string(),
             list: "xs".to_string(),
             body: vec![MirStmt::ExprStmt(MirExpr::Name {

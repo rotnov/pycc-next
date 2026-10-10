@@ -57,8 +57,8 @@ fn an_expression_comprehension_loop_variable_is_not_bound_afterwards() {
 fn an_expression_comprehension_applies_the_display_element_gates() {
     for (source, expected) in [
         (
-            "print(len([1.5 for i in range(3)]))\n",
-            "list codegen only supports `list[int]` in v0.2, got a comprehension producing `list[float]`",
+            "print(len([{1} for i in range(3)]))\n",
+            "list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those",
         ),
         (
             "print(len({1.5 for i in range(3)}))\n",

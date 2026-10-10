@@ -1143,53 +1143,17 @@ print(i)
 }
 
 #[test]
-fn converting_a_list_to_str_stops_the_build_with_an_honest_unsupported_message() {
-    // v0.2 has no `str(list)`, and `pycc_types` type-checks both of these
-    // unconditionally (its `print` arm accepts any argument type, and an
-    // f-string interpolation imposes none), so each passes `pycc check` and
-    // then stops in codegen (D-107). Asserts the honest message rather than
-    // only the failure, since the whole point of D-107's `Scalar::List`
-    // split was to replace silently handing a `PyIntListObj` pointer to a
-    // `pycc_rt_*_to_str` function that would read it as a `PyStrObj`.
-    //
-    // Both source forms, not just `print(xs)`: `to_str` has exactly two
-    // call sites in `pycc_codegen` -- `emit_eval_print_arg` and `emit_expr`'s
-    // f-string interpolation arm -- and `docs/ARCHITECTURE.md` names both
-    // as reachable, so both need evidence rather than one standing in for
-    // the other. (An earlier version of this test covered only `print(xs)`
-    // while the doc claimed a count of two operations, missing f-strings
-    // entirely.)
+fn converting_a_list_to_str_renders_it_like_cpython() {
+    // `print(xs)` and an f-string interpolation both render the list's
+    // `repr()` through `pycc_rt_list_repr`.
     for (label, expression) in [
         ("print_list", "print(xs)"),
         ("fstring_list", "print(f\"{xs}\")"),
     ] {
-        let source = format!(
-            "\
-def _run() -> None:
-    xs = [1, 2]
-    {expression}
-
-_run()
-"
-        );
-        let dir =
-            ScratchDir::new(&format!("slice1_{label}")).expect("failed to create scratch dir");
-        let src = write_fixture(&dir, &format!("{label}.py"), &source);
-        let output = Command::new(pycc_bin())
-            .args([
-                "build",
-                src.to_str().unwrap(),
-                "-o",
-                dir.join(label).to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
-        assert!(!output.status.success(), "`{expression}` must not build");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("string conversion of a list[T] value is not supported yet"),
-            "expected the honest unsupported-conversion message for `{expression}`, got: {stderr}"
-        );
+        let source = format!("def _run() -> None:\n    xs = [1, 2]\n    {expression}\n\n_run()\n");
+        let output = build_and_run(label, &source);
+        assert!(output.status.success(), "`{expression}` must run");
+        assert_eq!(output.stdout, b"[1, 2]\n", "`{expression}`");
     }
 }
 
@@ -1238,27 +1202,24 @@ _run()
 
 #[test]
 fn an_out_of_range_index_fails_explicitly() {
-    // `pycc_rt_int_list_get`'s own bounds panic, reached through real
-    // source: the index is only known at runtime, so there is nothing
-    // `pycc_types` could have rejected. Also pins D-108's documented v0.2
-    // scope cut that a *negative* index is out of range too rather than
-    // CPython's last-element behavior.
+    // The inlined bounds check's own `IndexError`, reached through real
+    // source: the index is only known at runtime. A negative index in range
+    // addresses from the end, as in CPython.
     let source = "\
 def _run() -> None:
     xs = [1, 2, 3]
     print(xs[0 - 1])
+    print(xs[0 - 4])
 
 _run()
 ";
     let output = build_and_run("list_index_out_of_range", source);
-    assert!(
-        !output.status.success(),
-        "a negative index is out of range in v0.2, not CPython's last element"
-    );
+    assert!(!output.status.success(), "`xs[-4]` is out of range");
+    assert_eq!(output.stdout, b"3\n");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("list index out of range"),
-        "expected pycc_rt's honest bounds message, got: {stderr}"
+        stderr.contains("IndexError: list index out of range"),
+        "expected CPython's bounds message, got: {stderr}"
     );
 }
 
@@ -1590,31 +1551,15 @@ for v in ys:
 }
 
 #[test]
-fn a_runtime_negative_slice_start_raises_instead_of_cpython_last_element_addressing() {
-    // D-118's own runtime scope cut, extended from D-108's existing index
-    // precedent to slicing: a negative `start` is rejected rather than
-    // addressing from the end the way real CPython's `xs[-1:3]` would. Part
-    // B of #1038 (#1064) made that rejection a catchable `ValueError`
-    // instead of a process abort; the conformance gap itself is unchanged
-    // and tracked as issue #1070.
-    // `neg = 0 - 1` (`BinOp::Sub`) stands in for a negative literal here.
-    // When this test was written no unary operator lowered at all; #602 has
-    // since made the literal form `-1` lower too, but `0 - 1` remains an
-    // equally valid way to produce a negative runtime `int`.
+fn a_runtime_negative_slice_start_addresses_from_the_end_like_cpython() {
+    // `neg = 0 - 1` (`BinOp::Sub`) produces a negative runtime `int`.
     let source = "\
 xs = [1, 2, 3]
 neg = 0 - 1
 ys = xs[neg:3]
-print(len(ys))
+print(len(ys), ys)
 ";
-    let output = build_and_run("slice_negative_start_raises", source);
-    assert!(
-        !output.status.success(),
-        "a negative slice start must raise rather than silently address from the end"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("ValueError: slice start must be non-negative"),
-        "expected a catchable ValueError, got: {stderr}"
-    );
+    let output = build_and_run("slice_negative_start", source);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"1 [3]\n");
 }

@@ -1,0 +1,5 @@
+error[C0001]: list.pop() takes at most one argument, got 2
+ --> tests/diagnostics/c0001_list_pop_with_two_arguments.py:2:5
+  |
+2 | y = x.pop(0, 1)
+  |     ^^^^^^^^^^^ list.pop() takes at most one argument, got 2
