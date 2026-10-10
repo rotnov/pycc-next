@@ -54,7 +54,10 @@ catch type errors at compile time, interoperate with CPython.
 
 ### Real-world corpus (200 competitive-programming solutions)
 - `--non-strict`: 200/200 match CPython (CI-gated, 0 wrong outputs).
-- strict: 69/200 compile and match CPython unchanged.
+- strict: 93/200 compile and match CPython unchanged (most of the rest only lack
+  annotations on public functions, which strict mode requires by design).
+- `--non-strict`: 51% of top-level statements compile natively, the rest fall back
+  to CPython per statement.
 
 ### Known gaps
 - See `docs/DEVIATIONS.md` for every known difference from CPython 3.13.
