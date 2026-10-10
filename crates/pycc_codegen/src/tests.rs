@@ -3870,41 +3870,6 @@ fn to_float_rejects_a_list_operand() {
 }
 
 #[test]
-#[should_panic(expected = "pycc_codegen: truthiness of a dict[K, V] value is not supported yet")]
-fn truthiness_of_a_dict_value_panics_honestly() {
-    // The `dict[K, V]` counterpart of `truthiness_of_a_list_value_
-    // panics_honestly` above (D-107's reasoning, per D-124): `pycc_types`
-    // accepts any type in a boolean context, so `if x:` for a
-    // `dict[str, int]` local type-checks today. v0.2 has no
-    // `bool(dict)` semantics (D-123), so an honest panic naming the gap
-    // is the correct behavior. Calls `truthy` directly with a hand-built
-    // `Scalar::Dict`, for the identical reason that test gives.
-    let context = Context::create();
-    let (module, rt) = list_scalar_panic_fixture(&context);
-    let builder = context.create_builder();
-    let ptr = context
-        .ptr_type(inkwell::AddressSpace::default())
-        .const_null();
-    truthy(&context, &builder, &module, &rt, Scalar::Dict(ptr));
-}
-
-#[test]
-#[should_panic(
-    expected = "pycc_codegen: string conversion of a dict[K, V] value is not supported yet"
-)]
-fn string_conversion_of_a_dict_value_panics_honestly() {
-    // The `dict[K, V]` counterpart of `string_conversion_of_a_list_
-    // value_panics_honestly` above, for the identical reason.
-    let context = Context::create();
-    let (_module, rt) = list_scalar_panic_fixture(&context);
-    let builder = context.create_builder();
-    let ptr = context
-        .ptr_type(inkwell::AddressSpace::default())
-        .const_null();
-    to_str(&builder, &rt, Scalar::Dict(ptr));
-}
-
-#[test]
 #[should_panic(expected = "internal error: expected an int-or-bool operand, got dict")]
 fn to_numeric_encoded_int_rejects_a_dict_operand() {
     // The `dict[K, V]` counterpart of `to_numeric_encoded_int_rejects_a_list_

@@ -1519,19 +1519,8 @@ fn to_str<'ctx>(
         Scalar::Bool(v) => (rt.bool_to_str, v.into()),
         // `str(xs)`: the runtime renders every element kind.
         Scalar::List(v) => (rt.list_repr, v.into()),
-        // A real, reachable feature gap, identical in kind to the `List`
-        // arm directly above: `pycc_types` places no type restriction on
-        // `print`'s argument or an f-string interpolation other than the
-        // instance/protocol gate (#977, D-237), so `print(x)`/
-        // `f"{x}"` for a `dict[str, int]` local type-checks today and
-        // lands here. v0.2 has no `str(dict)`/dict-printing semantics
-        // (D-123), and there is no `pycc_rt_dict_to_str` to call -- so
-        // this panics honestly instead of handing a `PyDictObj` pointer to
-        // a `pycc_rt_*_to_str` function that would read it as a
-        // `PyStrObj`.
-        Scalar::Dict(_) => {
-            panic!("pycc_codegen: string conversion of a dict[K, V] value is not supported yet")
-        }
+        // `str(d)`: `dict[str, int]`, the one compiled dict type.
+        Scalar::Dict(v) => (rt.dict_repr, v.into()),
         // No longer reachable from source: since Part 1 of #1319,
         // `pycc_types` refuses `print(s)`/`f"{s}"` for a `set[int]` or
         // `frozenset[int]` value as `C0001` before codegen. v0.2 has no
@@ -4967,17 +4956,25 @@ fn truthy<'ctx>(
             .into_int_value(),
         // A list is truthy exactly when it is non-empty.
         Scalar::List(ptr) => list::list_truthy(context, builder, ptr),
-        // A real, reachable feature gap, identical in kind to the `List`
-        // arm directly above: `pycc_types` places no type restriction on an
-        // `if`/`while` condition, so `if x:` for a `dict[str, int]` local
-        // type-checks today and lands here. v0.2 has no `bool(dict)`
-        // semantics (D-123 ships only `len(x)`/`x[k]`/`x[k] = v`/
-        // iteration), and there is no `pycc_rt_dict_truthy` to call -- so
-        // this panics honestly instead of calling `pycc_rt_str_truthy` on
-        // a `PyDictObj` pointer, whose layout has nothing in common with
-        // `PyStrObj`'s.
-        Scalar::Dict(_) => {
-            panic!("pycc_codegen: truthiness of a dict[K, V] value is not supported yet")
+        // A dict is truthy exactly when it is non-empty.
+        Scalar::Dict(ptr) => {
+            let len = builder
+                .build_call(rt.dict_len, &[ptr.into()], "dict_len")
+                .expect("build_call should not fail for pycc_rt_dict_len")
+                .try_as_basic_value()
+                .expect_basic("pycc_rt_dict_len returns i64")
+                .into_int_value();
+            let nonzero = builder
+                .build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    len,
+                    context.i64_type().const_zero(),
+                    "dict_truthy",
+                )
+                .expect("build_int_compare should not fail");
+            builder
+                .build_int_z_extend(nonzero, context.i8_type(), "dict_truthy_i8")
+                .expect("build_int_z_extend should not fail")
         }
         // Part 1 of #1319: a `set[int]`/`frozenset[int]` value is truthy
         // exactly when it is non-empty, which its runtime length answers.

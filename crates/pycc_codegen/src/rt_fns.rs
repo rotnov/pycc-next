@@ -134,6 +134,7 @@ pub(super) struct RtFns<'ctx> {
     pub(super) list_repeat: FunctionValue<'ctx>,
     pub(super) list_contains: FunctionValue<'ctx>,
     pub(super) list_repr: FunctionValue<'ctx>,
+    pub(super) dict_repr: FunctionValue<'ctx>,
     /// Part 2 of #1027's bounds-checked buffer element load
     /// (`pycc_rt_buffer_f64_get`): takes the `PyccExtBufferView` pointer a
     /// `pycc build --ext` wrapper passed for a `memoryview` parameter plus an
@@ -617,6 +618,10 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         list_repr: declare(
             "pycc_rt_list_repr",
+            ptr_type.fn_type(&[ptr_type.into()], false),
+        ),
+        dict_repr: declare(
+            "pycc_rt_dict_repr",
             ptr_type.fn_type(&[ptr_type.into()], false),
         ),
         buffer_f64_get: declare(

@@ -122,6 +122,7 @@ fn non_callable_binding(name: &str) -> Diagnostic {
 fn std_scalar_to_ty(kind: pycc_std::ScalarKind) -> Ty {
     match kind {
         pycc_std::ScalarKind::Float => Ty::Float,
+        pycc_std::ScalarKind::Int => Ty::Int,
     }
 }
 

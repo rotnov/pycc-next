@@ -90,6 +90,9 @@ struct Signature {
 #[derive(Default)]
 pub(crate) struct SignatureTable {
     by_name: HashMap<String, Signature>,
+    /// Top-level names bound more than once (`from math import gcd` then
+    /// `def gcd`): which binding a call reaches depends on source order.
+    rebound: HashSet<String>,
     /// Issue #1188: which of `append`, `pop`, `get` and `add` some class
     /// reachable from this module defines as a method -- this module's own
     /// top-level classes, plus every class in its transitive import closure
@@ -176,8 +179,14 @@ impl SignatureTable {
                 _ => {}
             }
         }
+        let rebound = counts
+            .iter()
+            .filter(|(_, count)| **count > 1)
+            .map(|(name, _)| name.to_string())
+            .collect();
         Self {
             by_name,
+            rebound,
             class_like_names,
             object_receivers: false,
             container_method_names: crate::expr::receiver_dispatch::defined_container_method_names(
@@ -199,6 +208,11 @@ impl SignatureTable {
 
     /// Part 8 of #1371: whether `name` is a module `def` this table can bind
     /// keyword arguments against.
+    /// Whether top-level `name` is bound more than once.
+    pub(crate) fn is_rebound(&self, name: &str) -> bool {
+        self.rebound.contains(name)
+    }
+
     pub(crate) fn binds(&self, name: &str) -> bool {
         self.by_name.contains_key(name)
     }

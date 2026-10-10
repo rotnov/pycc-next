@@ -708,8 +708,25 @@ pub(crate) fn lower_expr(
                     std::ops::Range::<u32>::from(call.range),
                 )?
             };
+            // `from math import gcd` then `gcd(a, b)`: the call is the
+            // stdlib function, spelled canonically like `math.gcd(a, b)`.
+            // Only while the import is the name's one top-level binding.
+            let shadowed =
+                signatures.binds(callee.id.as_str()) || signatures.is_rebound(callee.id.as_str());
+            let std_function = imports.iter().filter(|_| !shadowed).find_map(|binding| match binding {
+                ImportBinding::Symbol {
+                    local_name,
+                    module,
+                    symbol,
+                } if local_name == callee.id.as_str()
+                    && matches!(symbol.kind, pycc_std::StdSymbolKind::Function { .. }) =>
+                {
+                    Some(format!("{}.{}", pycc_std::module_name(*module), symbol.name))
+                }
+                _ => None,
+            });
             HirExpr::Call {
-                callee: callee.id.as_str().to_string(),
+                callee: std_function.unwrap_or_else(|| callee.id.as_str().to_string()),
                 args,
             }
         }

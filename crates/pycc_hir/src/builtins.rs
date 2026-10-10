@@ -41,6 +41,16 @@ fn sig(symbol: &'static str, params: &[Ty], ret: Ty) -> BuiltinSig {
     }
 }
 
+/// Whether `pycc_rt_list_repr` renders `ty` itself (a class instance needs
+/// its `__repr__`, which the runtime cannot call).
+fn renders_natively(ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+        Ty::List(elem) => renders_natively(elem),
+        _ => false,
+    }
+}
+
 fn is_intlike(ty: &Ty) -> bool {
     matches!(ty, Ty::Int | Ty::Bool)
 }
@@ -79,6 +89,11 @@ pub const CALL_NAMES: &[&str] = &[
     "int",
     "len",
     "list",
+    "math.ceil",
+    "math.floor",
+    "math.gcd",
+    "math.isqrt",
+    "math.lcm",
     "max",
     "min",
     "oct",
@@ -97,7 +112,8 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
     Some(match name {
         "input" | "str" | "chr" | "bin" | "hex" | "oct" | "__pycc_stdin_readline"
         | "__pycc_stdin_read" => Ty::Str,
-        "int" | "len" | "ord" | "pow" | "__pycc_stdout_write" => Ty::Int,
+        "int" | "len" | "ord" | "pow" | "__pycc_stdout_write" | "math.gcd" | "math.lcm"
+        | "math.isqrt" | "math.floor" | "math.ceil" => Ty::Int,
         "float" => Ty::Float,
         "any" | "all" => Ty::Bool,
         "__pycc_stdin_readlines" => Ty::List(Box::new(Ty::Str)),
@@ -109,7 +125,7 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
 /// `min`/`max` with three or more positional arguments fold pairwise.
 #[must_use]
 pub fn is_pairwise_variadic(name: &str) -> bool {
-    matches!(name, "min" | "max")
+    matches!(name, "min" | "max" | "math.gcd" | "math.lcm")
 }
 
 /// Resolves a call of builtin `name` with positional arguments `args`.
@@ -146,12 +162,30 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("str", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),
         ("str", [Ty::Str]) => sig("pycc_rt_str_copy", &[str_.clone()], str_),
         ("str", []) => sig("pycc_rt_str_empty", &[], str_),
+        ("str", [list @ Ty::List(_)]) if renders_natively(list) => {
+            sig("pycc_rt_list_repr", &[list.clone()], str_)
+        }
+        ("str", [dict @ Ty::Dict(_)]) => sig("pycc_rt_dict_repr", &[dict.clone()], str_),
         ("len", [Ty::Str]) => sig("pycc_rt_str_len", &[str_], int),
         ("ord", [Ty::Str]) => sig("pycc_rt_str_ord", &[str_], int),
         ("chr", [a]) if is_intlike(a) => sig("pycc_rt_str_chr", &[int], str_),
         ("bin", [a]) if is_intlike(a) => sig("pycc_rt_int_bin", &[int], str_),
         ("hex", [a]) if is_intlike(a) => sig("pycc_rt_int_hex", &[int], str_),
         ("oct", [a]) if is_intlike(a) => sig("pycc_rt_int_oct", &[int], str_),
+        // `math`'s integer functions (`pycc_hir` qualifies the callee as
+        // `math.<name>` whichever import spelling bound it).
+        ("math.gcd", [a, b]) if is_intlike(a) && is_intlike(b) => {
+            sig("pycc_rt_math_gcd", &[int.clone(), int.clone()], int)
+        }
+        ("math.lcm", [a, b]) if is_intlike(a) && is_intlike(b) => {
+            sig("pycc_rt_math_lcm", &[int.clone(), int.clone()], int)
+        }
+        ("math.isqrt", [a]) if is_intlike(a) => sig("pycc_rt_math_isqrt", &[int.clone()], int),
+        ("math.floor", [Ty::Float]) => sig("pycc_rt_math_floor", &[float], int),
+        ("math.ceil", [Ty::Float]) => sig("pycc_rt_math_ceil", &[float], int),
+        ("math.floor" | "math.ceil", [a]) if is_intlike(a) => {
+            sig("pycc_rt_math_int_identity", &[int.clone()], int)
+        }
         ("pow", [a, b, c]) if is_intlike(a) && is_intlike(b) && is_intlike(c) => sig(
             "pycc_rt_int_powmod",
             &[int.clone(), int.clone(), int.clone()],

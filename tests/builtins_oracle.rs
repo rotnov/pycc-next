@@ -103,3 +103,16 @@ fn str_iteration_membership_and_computed_receivers_match_cpython() {
 fn int_of_a_str_enforces_cpythons_digit_limit() {
     assert_matches_cpython("int_str_digit_limit");
 }
+
+/// `math.gcd`/`lcm`/`isqrt`/`floor`/`ceil`, through `import math` and
+/// `from math import ...`, with bigints and their exceptions.
+#[test]
+fn math_integer_functions_match_cpython() {
+    assert_matches_cpython("math_int_funcs");
+}
+
+/// `print`/`str`/f-strings of a `dict[str, int]` and `str()` of a list.
+#[test]
+fn dict_and_list_repr_match_cpython() {
+    assert_matches_cpython("dict_print");
+}

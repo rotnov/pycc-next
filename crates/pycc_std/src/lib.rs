@@ -65,6 +65,7 @@ pub enum StdModule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarKind {
     Float,
+    Int,
 }
 
 /// The kind of a registered stdlib symbol: a callable function with a fixed
@@ -201,6 +202,46 @@ const REGISTRY: &[StdSymbol] = &[
         kind: StdSymbolKind::Function {
             arg_tys: &[ScalarKind::Float],
             ret_ty: ScalarKind::Float,
+        },
+    },
+    StdSymbol {
+        module: StdModule::Math,
+        name: "gcd",
+        kind: StdSymbolKind::Function {
+            arg_tys: &[ScalarKind::Int, ScalarKind::Int],
+            ret_ty: ScalarKind::Int,
+        },
+    },
+    StdSymbol {
+        module: StdModule::Math,
+        name: "lcm",
+        kind: StdSymbolKind::Function {
+            arg_tys: &[ScalarKind::Int, ScalarKind::Int],
+            ret_ty: ScalarKind::Int,
+        },
+    },
+    StdSymbol {
+        module: StdModule::Math,
+        name: "isqrt",
+        kind: StdSymbolKind::Function {
+            arg_tys: &[ScalarKind::Int],
+            ret_ty: ScalarKind::Int,
+        },
+    },
+    StdSymbol {
+        module: StdModule::Math,
+        name: "floor",
+        kind: StdSymbolKind::Function {
+            arg_tys: &[ScalarKind::Float],
+            ret_ty: ScalarKind::Int,
+        },
+    },
+    StdSymbol {
+        module: StdModule::Math,
+        name: "ceil",
+        kind: StdSymbolKind::Function {
+            arg_tys: &[ScalarKind::Float],
+            ret_ty: ScalarKind::Int,
         },
     },
     StdSymbol {
@@ -507,7 +548,7 @@ mod tests {
     #[test]
     fn resolve_symbol_rejects_unregistered_symbol_in_registered_module() {
         assert_eq!(resolve_symbol(StdModule::Math, "tan"), None);
-        assert_eq!(resolve_symbol(StdModule::Math, "floor"), None);
+        assert_eq!(resolve_symbol(StdModule::Math, "log"), None);
     }
 
     #[test]

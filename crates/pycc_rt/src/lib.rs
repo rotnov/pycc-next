@@ -63,6 +63,8 @@ mod int_set;
 mod io;
 /// `list[T]`'s one generic runtime object, `PyListObj`.
 mod list;
+/// The integer functions of `math`.
+mod math_ops;
 /// `print`'s stdout flush (#1340); the other print primitives stay below.
 mod print;
 mod rc;
@@ -1319,6 +1321,33 @@ pub unsafe extern "C" fn pycc_rt_dict_set(dict: *mut PyDictObj, key: *mut PyStrO
         None => entries.push((key, value)),
     }
     unsafe { &*dict }.entries.set(entries);
+}
+
+/// `str(d)`/`print(d)` of a `dict[str, int]`: `{'a': 1, 'b': 2}`, in
+/// insertion order, as CPython renders it.
+///
+/// # Safety
+///
+/// `dict` must be a live `PyDictObj`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_dict_repr(dict: *mut PyDictObj) -> *mut PyStrObj {
+    let dict = unsafe { &*dict };
+    let entries = dict.entries.take();
+    let mut out = String::from("{");
+    for (i, (key, value)) in entries.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        let key_text = String::from_utf8_lossy(unsafe { &**key }.bytes()).into_owned();
+        list::str_repr(&key_text, &mut out);
+        out.push_str(": ");
+        let rendered = int_arith::int_to_str(*value);
+        out.push_str(&String::from_utf8_lossy(unsafe { &*rendered }.bytes()));
+        unsafe { pycc_rt_str_decref(rendered) };
+    }
+    dict.entries.set(entries);
+    out.push('}');
+    new_pystr(out.as_bytes())
 }
 
 fn dict_get(dict: &PyDictObj, key: *mut PyStrObj) -> i64 {
