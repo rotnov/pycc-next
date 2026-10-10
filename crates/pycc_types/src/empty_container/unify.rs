@@ -796,6 +796,12 @@ fn restore_sites(hir: &mut HirModule, sites: Vec<(SiteKind, HirExpr)>, types: &[
                     return true;
                 };
                 *node = match (kind, types.get(number).cloned().flatten()) {
+                    // Non-strict mode (#3): a list of objects is a CPython list.
+                    (SiteKind::List, Some(Ty::List(elem)))
+                        if *elem == Ty::Object && crate::non_strict::is_non_strict() =>
+                    {
+                        HirExpr::ObjectList(Vec::new())
+                    }
                     (SiteKind::List, Some(Ty::List(elem))) => HirExpr::EmptyList(*elem),
                     (SiteKind::Dict, Some(Ty::Dict(pair))) => HirExpr::EmptyDict(pair),
                     (SiteKind::Set, Some(Ty::Set(elem))) => HirExpr::EmptySet(*elem),

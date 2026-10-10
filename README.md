@@ -74,7 +74,8 @@ Coming next: numpy arrays as native types, published benchmarks against CPython
   default runs in CPython, as published callables do not apply defaults yet). A
   module global that fallback code binds lives in the module dict, so both sides
   see one value; one it only reads stays native, each compiled store copied into
-  the dict (a list or other container still lives in the dict); an import, or an alias
+  the dict (a list or other container still lives in the dict, built there as a
+  CPython list when it is a fresh display or `[x] * n`); an import, a lambda, or an alias
   such as `input = sys.stdin.readline`, that fallback code reads stays compiled
   and also runs in CPython. A builtin call pycc does not compile for its arguments
   (`min` of an object, `set()`, `pow(a, b, m)`, ...) is a call of CPython's own

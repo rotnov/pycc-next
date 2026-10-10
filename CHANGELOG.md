@@ -12,7 +12,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - `--non-strict` native builds infer unannotated function signatures from their call
   sites, keep imports and `sys` stream aliases compiled when fallback code reads
   them, call CPython's builtin for a builtin call they do not compile, and keep
-  scalar globals that fallback code only reads native: 77% of the corpus's top-level
+  scalar globals that fallback code only reads native: 81% of the corpus's top-level
   statements now compile natively (was 51%) (#11).
 - `--non-strict`: fallback code calling a compiled function with a parameter default
   left out raised `TypeError`; such a function now runs in CPython.

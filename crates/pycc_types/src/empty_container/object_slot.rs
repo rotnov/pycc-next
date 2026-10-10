@@ -106,6 +106,53 @@ pub(super) fn rewrite_value_displays(value: &mut HirExpr) -> bool {
     }
 }
 
+/// Non-strict mode (#3): `o[k] = <value>` on a CPython object `o` (the
+/// module namespace a fallback global lives in, most often). A list
+/// display in a value position of `value`, or an operand of a `+`/`*` there
+/// (`[0] * (n + 1)`), is fresh -- nothing else can hold it -- so it is built
+/// as the CPython list the store needs, and the operator runs on it in
+/// CPython, instead of being a native list the store refuses (`I0404`).
+pub(super) fn rewrite_object_store(value: &mut HirExpr, base: &str, env: &Environment) -> bool {
+    if !crate::non_strict::is_non_strict()
+        || !env
+            .binding_state(base)
+            .is_some_and(|state| *state.ty() == Ty::Object)
+    {
+        return false;
+    }
+    rewrite_fresh_displays(value)
+}
+
+fn rewrite_fresh_displays(value: &mut HirExpr) -> bool {
+    match value {
+        HirExpr::BinOp {
+            op: pycc_hir::BinOpKind::Add | pycc_hir::BinOpKind::Mul,
+            left,
+            right,
+        } => rewrite_fresh_displays(left) | rewrite_fresh_displays(right),
+        HirExpr::ListLiteral(elements) => {
+            // Its elements are fresh too (`[[0] * m] * 2`).
+            for element in elements.iter_mut() {
+                rewrite_fresh_displays(element);
+            }
+            rewrite_value_displays(value)
+        }
+        _ => rewrite_value_displays(value),
+    }
+}
+
+/// Whether [`rewrite_object_store`] may have work in `value`.
+pub(super) fn has_store_display(value: &HirExpr) -> bool {
+    match value {
+        HirExpr::BinOp {
+            op: pycc_hir::BinOpKind::Add | pycc_hir::BinOpKind::Mul,
+            left,
+            right,
+        } => has_store_display(left) || has_store_display(right),
+        _ => has_value_display(value),
+    }
+}
+
 /// Whether [`rewrite_value_displays`] would rewrite anything in `value`.
 /// The fast-path triggers use it to decide whether the pass has work to do.
 pub(super) fn has_value_display(value: &HirExpr) -> bool {

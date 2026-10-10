@@ -49,7 +49,14 @@ fn matches_cpython(name: &str) -> String {
     let dir = ScratchDir::new("non_strict_inferred").expect("scratch");
     let source = dir.join("m.py");
     std::fs::copy(fixture(name), &source).expect("copy the fixture");
-    let stdin = std::fs::read(fixture("non_strict_inferred.stdin")).expect("stdin fixture");
+    // `<name>.stdin` when the fixture has its own.
+    let own = fixture(name).with_extension("stdin");
+    let stdin_file = if own.exists() {
+        own
+    } else {
+        fixture("non_strict_inferred.stdin")
+    };
+    let stdin = std::fs::read(stdin_file).expect("stdin fixture");
     let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
         .args(["build", "--non-strict", "--report-fallbacks"])
         .arg(&source)
@@ -100,6 +107,20 @@ fn fallback_calls_into_inferred_functions_keep_cpython_semantics() {
     // The `sys` import and the `input` alias stay compiled.
     assert!(!report.contains(":1 runs"), "{report}");
     assert!(!report.contains(":3 runs"), "{report}");
+}
+
+#[test]
+fn list_globals_fallback_code_reads_are_cpython_lists_built_in_place() {
+    if !embed_interpreter_available() {
+        eprintln!("skipped: no CPython to embed (set PYCC_PYTHON)");
+        return;
+    }
+    let report = matches_cpython("non_strict_object_lists.py");
+    // Only the generator falls back: the lambda alias, the displays and
+    // `[0] * (n + 1)` stored into the namespace, and the list of mixed
+    // elements all stay compiled.
+    assert_eq!(report.matches("fallback:").count(), 1, "{report}");
+    assert!(report.contains("function `gen`"), "{report}");
 }
 
 #[test]

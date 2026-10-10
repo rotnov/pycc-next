@@ -233,6 +233,15 @@ impl Plan {
             // nothing), so CPython evaluating it too has no other effect. A
             // bare stream (`input = sys.stdin`) is not one: compiled code
             // may read it.
+            // A lambda (`mi = lambda: map(int, input().split())`), which
+            // compiled code desugars into a function too: creating it has
+            // no effect.
+            Stmt::Assign(assign)
+                if matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)])
+                    && matches!(&*assign.value, pycc_ast::Expr::Lambda(_)) =>
+            {
+                return self.binds_alone(index);
+            }
             Stmt::Assign(assign) => {
                 return matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)])
                     && matches!(&*assign.value, pycc_ast::Expr::Attribute(attr)
@@ -674,6 +683,14 @@ pub(crate) fn inferred_functions(source: &str) -> BTreeSet<String> {
         .iter()
         .filter_map(|stmt| match stmt {
             Stmt::FunctionDef(def) if unannotated(def) => Some(def.name.as_str().to_string()),
+            // A lambda alias, which compiled code desugars into an inferred
+            // function (and CPython code sees as its own lambda, mirrored).
+            Stmt::Assign(assign) if matches!(&*assign.value, pycc_ast::Expr::Lambda(_)) => {
+                match assign.targets.as_slice() {
+                    [pycc_ast::Expr::Name(name)] => Some(name.id.as_str().to_string()),
+                    _ => None,
+                }
+            }
             _ => None,
         })
         .collect()

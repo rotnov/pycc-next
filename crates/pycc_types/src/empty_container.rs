@@ -163,6 +163,10 @@ impl Resolution {
     /// The rewritten node this resolution produces.
     fn into_expr(self) -> HirExpr {
         match self {
+            // Non-strict mode (#3): a list of objects is a CPython list.
+            Resolution::List(Ty::Object) if crate::non_strict::is_non_strict() => {
+                HirExpr::ObjectList(Vec::new())
+            }
             Resolution::List(element) => HirExpr::EmptyList(element),
             Resolution::Dict(key, value) => HirExpr::EmptyDict(Box::new((key, value))),
         }
@@ -649,6 +653,9 @@ fn body_has_empty_literal(body: &[HirStmt]) -> bool {
                 .is_some_and(|v| empty_literal(v).is_some() || has_nested_empty_list(v))
                 || object_slot::is_annotated_object_display(stmt)
         }
+        HirStmt::DictSet { value, .. } => {
+            crate::non_strict::is_non_strict() && object_slot::has_store_display(value)
+        }
         _ => false,
     })
 }
@@ -727,6 +734,9 @@ fn rewrite_body(
             ..
         } => {
             rewrite_value(value, target, Some(annotation), producers, env, local_names);
+        }
+        HirStmt::DictSet { dict, value, .. } => {
+            object_slot::rewrite_object_store(value, dict, env);
         }
         _ => {}
     });
