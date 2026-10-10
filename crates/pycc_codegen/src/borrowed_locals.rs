@@ -7,59 +7,48 @@
 //! read, which this module proves conservatively for a function:
 //!
 //! - every binding of the local is `v = p[i]` or `for v in p`, where `p` is a
-//!   parameter (the frame owns it for the whole call) the body never
+//!   `list` parameter (the frame owns it for the whole call) the body never
 //!   rebinds;
-//! - nothing in the body can remove a list element: no item store, `pop`,
-//!   `insert` or mutating list builtin, and no call into user code, a
-//!   constructor or a CPython object (any of which could reach the same list
-//!   through an alias). `len` is the one call admitted.
+//! - every statement and expression in the body is on an **allowlist** of
+//!   shapes that can neither remove a list element nor run code that might:
+//!   reads of names, plain attribute slots and list/tuple elements,
+//!   arithmetic and comparisons whose operands are all `int`/`float`/`bool`/
+//!   `str`, `len` of a list or `str`, assignments, attribute stores, `if`,
+//!   `while`, `for` over a range or a list, `break`, `continue`, `return`.
+//!   A call into user code, a constructor, an instance comparison (which
+//!   dispatches `__eq__`), a property, a list mutation, a CPython object
+//!   operation, `print`, `try`, `raise` -- anything not listed --
+//!   disqualifies the whole function.
+//!
+//! The walk is structural (`MirExpr::children`, `MirStmt::exprs` and
+//! `MirStmt::bodies` give the shape; the matches below name what is
+//! admitted), so a new or unexpected shape costs speed, never safety.
 //!
 //! A borrowed local's value is still a borrowed read when used, so storing
-//! it anywhere else takes a reference as usual. The check reads the MIR's
-//! `Debug` rendering: anything it does not recognize disqualifies, so an
-//! unexpected shape costs speed, never safety.
+//! it anywhere else takes a reference as usual.
 
 use super::*;
+use pycc_mir::Ty;
 use std::collections::HashSet;
-
-/// MIR shapes that can drop a list element, or run code that might.
-const DISQUALIFYING: &[&str] = &[
-    "ListSet",
-    "ListPop",
-    "ListInsert",
-    "ListAppend",
-    "ListCompAssign",
-    "Instantiate",
-    "ObjCall",
-    "ObjMethodCall",
-    "ObjKeywordCall",
-    "ObjAttrSet",
-    "ObjSetItem",
-    "ObjDel",
-    "pycc_rt_list_clear",
-    "pycc_rt_list_remove",
-    "pycc_rt_list_extend",
-    "pycc_rt_list_sort",
-    "pycc_rt_list_reverse",
-    "Raise",
-    "Try",
-];
 
 /// The locals of a function with parameters `params` and body `body` that
 /// may hold borrowed references; `candidates` are its counted locals.
 pub(super) fn borrowed_locals<'a>(
-    params: &[(String, pycc_mir::Ty)],
+    params: &[(String, Ty)],
     body: &[MirStmt],
     candidates: impl Iterator<Item = &'a String>,
 ) -> HashSet<String> {
-    let text = format!("{body:?}");
-    if DISQUALIFYING.iter().any(|shape| text.contains(shape)) || has_call_other_than_len(&text) {
+    if !body.iter().all(stmt_is_admitted) {
         return HashSet::new();
     }
-    let stable_params: Vec<&str> = params
+    let mut bindings: Vec<Binding<'_>> = Vec::new();
+    for stmt in body {
+        collect_bindings(stmt, &mut bindings);
+    }
+    let stable_params: HashSet<&str> = params
         .iter()
         .filter(|(name, ty)| {
-            matches!(ty, pycc_mir::Ty::List(_)) && !text.contains(&format!("target: {name:?}"))
+            matches!(ty, Ty::List(_)) && !bindings.iter().any(|binding| binding.target == name)
         })
         .map(|(name, _)| name.as_str())
         .collect();
@@ -67,48 +56,134 @@ pub(super) fn borrowed_locals<'a>(
         return HashSet::new();
     }
     candidates
-        .filter(|name| every_mention_is_admitted(&text, name, &stable_params))
+        .filter(|name| {
+            bindings
+                .iter()
+                .filter(|binding| binding.target == name.as_str())
+                .all(|binding| {
+                    binding
+                        .source
+                        .is_some_and(|source| stable_params.contains(source))
+                })
+        })
         .cloned()
         .collect()
 }
 
-fn has_call_other_than_len(text: &str) -> bool {
-    text.match_indices("Call {")
-        .any(|(at, _)| !text[at..].starts_with("Call { callee: \"len\""))
+/// One binding of a local: its name and, when the bound value is an
+/// element of a named list (`v = p[i]`, `for v in p`), that list's name.
+/// The allowlist admits no other binding form (no walrus, comprehension
+/// target or `except ... as`).
+struct Binding<'a> {
+    target: &'a str,
+    source: Option<&'a str>,
 }
 
-/// Whether every mention of `name` in `text` is a read (`Name { name: .. }`)
-/// or an admitted binding from a stable parameter.
-fn every_mention_is_admitted(text: &str, name: &str, stable_params: &[&str]) -> bool {
-    let quoted = format!("{name:?}");
-    let from_param = |rest: &str, prefix: &str| {
-        stable_params
-            .iter()
-            .any(|param| rest.starts_with(&format!("{prefix}{param:?}")))
+fn collect_bindings<'a>(stmt: &'a MirStmt, out: &mut Vec<Binding<'a>>) {
+    match stmt {
+        MirStmt::Assign { target, value } => out.push(Binding {
+            target,
+            source: element_source(value),
+        }),
+        MirStmt::ForList { var, list, .. } => out.push(Binding {
+            target: var,
+            source: Some(list),
+        }),
+        MirStmt::ForRange { var, .. } => out.push(Binding {
+            target: var,
+            source: None,
+        }),
+        _ => {}
+    }
+    for body in stmt.bodies() {
+        for inner in body {
+            collect_bindings(inner, out);
+        }
+    }
+}
+
+/// `p` when `value` is `p[i]` for a list-typed name `p`.
+fn element_source(value: &MirExpr) -> Option<&str> {
+    let MirExpr::Subscript { base, .. } = value else {
+        return None;
     };
-    text.match_indices(&quoted).all(|(at, _)| {
-        let before = &text[..at];
-        let rest = &text[at + quoted.len()..];
-        if before.ends_with("Name { name: ") {
-            return true;
+    match base.as_ref() {
+        MirExpr::Name {
+            name,
+            ty: Ty::List(_),
+        } => Some(name),
+        _ => None,
+    }
+}
+
+/// Whether `stmt`, and everything nested in it, is on the allowlist.
+fn stmt_is_admitted(stmt: &MirStmt) -> bool {
+    let shape = matches!(
+        stmt,
+        MirStmt::Assign { .. }
+            | MirStmt::ExprStmt(_)
+            | MirStmt::If { .. }
+            | MirStmt::While { .. }
+            | MirStmt::ForRange { .. }
+            | MirStmt::ForList { .. }
+            | MirStmt::AttrSet { .. }
+            | MirStmt::Return(_)
+            | MirStmt::Seq(_)
+            | MirStmt::LoopElse { .. }
+            | MirStmt::Break
+            | MirStmt::Continue
+            | MirStmt::NoOp
+    );
+    shape
+        && stmt.exprs().into_iter().all(expr_is_admitted)
+        && stmt
+            .bodies()
+            .into_iter()
+            .all(|body| body.iter().all(stmt_is_admitted))
+}
+
+/// A type whose operators run no user code.
+fn is_primitive(ty: &Ty) -> bool {
+    matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
+}
+
+/// Whether `expr`, and everything nested in it, is on the allowlist.
+fn expr_is_admitted(expr: &MirExpr) -> bool {
+    let shape = match expr {
+        MirExpr::IntLiteral(_)
+        | MirExpr::FloatLiteral(_)
+        | MirExpr::BoolLiteral(_)
+        | MirExpr::StringLiteral(_)
+        | MirExpr::NoneLiteral
+        | MirExpr::Name { .. }
+        | MirExpr::IntBoundary(_) => true,
+        // A plain slot read: a property getter lowers to a call instead.
+        MirExpr::AttrGet { .. } => true,
+        MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_) | Ty::Tuple(_)),
+        MirExpr::BinOp { left, right, .. }
+        | MirExpr::Compare { left, right, .. }
+        | MirExpr::BoolOp { left, right, .. } => {
+            is_primitive(&left.ty()) && is_primitive(&right.ty())
         }
-        if before.ends_with("Assign { target: ") {
-            return from_param(rest, ", value: Subscript { base: Name { name: ");
+        MirExpr::Not(operand) => is_primitive(&operand.ty()),
+        MirExpr::IfExp { test, .. } => is_primitive(&test.ty()),
+        MirExpr::Call { callee, args, .. } => {
+            callee == "len"
+                && matches!(args.as_slice(), [arg] if matches!(arg.ty(), Ty::List(_) | Ty::Str))
         }
-        if before.ends_with("ForList { var: ") {
-            // `ForList { var: "v", var_ty: <ty>, list: "p", .. }`
-            return rest
-                .find(", list: ")
-                .is_some_and(|list_at| from_param(&rest[list_at..], ", list: "));
-        }
-        false
-    })
+        _ => false,
+    };
+    shape && expr.children().into_iter().all(expr_is_admitted)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pycc_mir::{MirExpr, MirStmt, Ty};
+    use pycc_mir::{CmpOpKind, MirExpr, MirStmt, Ty};
+
+    fn body_ty() -> Ty {
+        Ty::Instance(Box::new("Body".to_string()))
+    }
 
     fn name(name: &str, ty: Ty) -> MirExpr {
         MirExpr::Name {
@@ -118,30 +193,55 @@ mod tests {
     }
 
     fn element_read(var: &str, list: &str) -> MirStmt {
-        let body_ty = Ty::Instance(Box::new("Body".to_string()));
         MirStmt::Assign {
             target: var.to_string(),
             value: MirExpr::Subscript {
-                base: Box::new(name(list, Ty::List(Box::new(body_ty)))),
+                base: Box::new(name(list, Ty::List(Box::new(body_ty())))),
                 index: Box::new(MirExpr::IntLiteral(0)),
             },
         }
     }
 
     fn params() -> Vec<(String, Ty)> {
-        let body_ty = Ty::Instance(Box::new("Body".to_string()));
-        vec![("bodies".to_string(), Ty::List(Box::new(body_ty)))]
+        vec![("bodies".to_string(), Ty::List(Box::new(body_ty())))]
     }
 
     fn candidates() -> Vec<String> {
         vec!["c".to_string()]
     }
 
+    fn found(body: &[MirStmt]) -> HashSet<String> {
+        borrowed_locals(&params(), body, candidates().iter())
+    }
+
+    /// `c.x` as a float read.
+    fn slot_read(var: &str) -> MirExpr {
+        MirExpr::AttrGet {
+            base: Box::new(name(var, body_ty())),
+            slot: 0,
+            ty: Ty::Float,
+        }
+    }
+
     #[test]
     fn an_element_read_from_a_stable_parameter_is_borrowed() {
-        let body = vec![element_read("c", "bodies")];
-        let found = borrowed_locals(&params(), &body, candidates().iter());
-        assert!(found.contains("c"));
+        assert!(found(&[element_read("c", "bodies")]).contains("c"));
+        let for_list = MirStmt::ForList {
+            var: "c".to_string(),
+            var_ty: body_ty(),
+            list: "bodies".to_string(),
+            body: vec![MirStmt::AttrSet {
+                base: name("c", body_ty()),
+                slot: 0,
+                value: MirExpr::BinOp {
+                    op: pycc_mir::BinOpKind::Add,
+                    left: Box::new(slot_read("c")),
+                    right: Box::new(MirExpr::FloatLiteral(1.0)),
+                    ty: Ty::Float,
+                },
+            }],
+        };
+        assert!(found(&[for_list]).contains("c"));
     }
 
     #[test]
@@ -150,10 +250,10 @@ mod tests {
             element_read("c", "bodies"),
             MirStmt::Assign {
                 target: "bodies".to_string(),
-                value: MirExpr::EmptyList(Ty::Int),
+                value: name("other", Ty::List(Box::new(body_ty()))),
             },
         ];
-        assert!(borrowed_locals(&params(), &rebinding, candidates().iter()).is_empty());
+        assert!(found(&rebinding).is_empty());
         let call = vec![
             element_read("c", "bodies"),
             MirStmt::ExprStmt(MirExpr::Call {
@@ -162,8 +262,42 @@ mod tests {
                 ty: Ty::None,
             }),
         ];
-        assert!(borrowed_locals(&params(), &call, candidates().iter()).is_empty());
+        assert!(found(&call).is_empty());
         let other_source = vec![element_read("c", "local_list")];
-        assert!(borrowed_locals(&params(), &other_source, candidates().iter()).is_empty());
+        assert!(found(&other_source).is_empty());
+    }
+
+    /// An instance comparison dispatches `__eq__`, which may run anything:
+    /// it is not on the allowlist even though it is a plain `Compare`.
+    #[test]
+    fn an_instance_comparison_disqualifies() {
+        let body = vec![
+            element_read("c", "bodies"),
+            MirStmt::ExprStmt(MirExpr::Compare {
+                op: CmpOpKind::Eq,
+                left: Box::new(name("c", body_ty())),
+                right: Box::new(name("c", body_ty())),
+                ty: Ty::Bool,
+            }),
+        ];
+        assert!(found(&body).is_empty());
+    }
+
+    /// Any shape the allowlist does not name -- here a list display nested
+    /// deep inside an admitted statement -- disqualifies.
+    #[test]
+    fn an_unlisted_shape_anywhere_disqualifies() {
+        let body = vec![
+            element_read("c", "bodies"),
+            MirStmt::If {
+                test: MirExpr::BoolLiteral(true),
+                body: vec![MirStmt::Assign {
+                    target: "t".to_string(),
+                    value: MirExpr::ListLiteral(vec![MirExpr::IntLiteral(1)]),
+                }],
+                orelse: vec![],
+            },
+        ];
+        assert!(found(&body).is_empty());
     }
 }

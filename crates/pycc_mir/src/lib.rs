@@ -37,6 +37,8 @@ pub use set_ops::{SetElementOps, SetEqOp, SetHashOp};
 mod stmt;
 #[cfg(debug_assertions)]
 mod verify_receiver;
+mod visit;
+pub use visit::comp_source_exprs;
 use pycc_hir::{CompIter, ForeignImportSite, HirItem, HirModule, HirStmt, ImportBinding};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
