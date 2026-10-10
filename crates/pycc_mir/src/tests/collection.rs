@@ -184,7 +184,7 @@ fn lowers_list_pop_to_mir_deriving_its_element_type_from_the_list_binding() {
 }
 
 #[test]
-#[should_panic(expected = "`.pop()` receiver Name(\"xs\") is not list-typed")]
+#[should_panic(expected = "`.pop()` on a receiver pycc_types rejected")]
 fn list_pop_over_a_non_list_binding_panics_with_an_internal_error() {
     // `pycc_types` already rejects `.pop()` on a non-list base (T0033)
     // before HIR reaches `pycc_mir`, but the defensive panic path in
@@ -647,6 +647,7 @@ fn for_k_in_dict_lowers_to_mir_for_dict() {
         mir.items[1],
         MirItem::TopLevelStmt(MirStmt::ForDict {
             var: "k".to_string(),
+            var_ty: Ty::Str,
             dict: "x".to_string(),
             body: vec![MirStmt::ExprStmt(MirExpr::Call {
                 callee: "print".to_string(),

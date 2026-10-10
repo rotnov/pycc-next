@@ -532,6 +532,7 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         | MirExpr::FString(_)
         | MirExpr::ListLiteral(_)
         | MirExpr::EmptyList(_)
+        | MirExpr::EmptySet(_)
         | MirExpr::ListAppend { .. }
         | MirExpr::ListInsert { .. }
         | MirExpr::DictLiteral(_)

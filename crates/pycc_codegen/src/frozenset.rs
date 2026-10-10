@@ -23,18 +23,34 @@ pub(super) fn emit_frozenset_from<'ctx>(
     user_functions: &HashMap<&str, UserFunction<'ctx>>,
     locals: &HashMap<String, StorageSlot<'ctx>>,
     source: Option<&MirExpr>,
+    elem: &pycc_mir::Ty,
 ) -> Scalar<'ctx> {
+    let instance = matches!(elem, pycc_mir::Ty::Instance(_));
     let (callee, args): (_, Vec<inkwell::values::BasicMetadataValueEnum<'ctx>>) = match source {
-        None => (rt.int_set_new, Vec::new()),
+        None if instance => (rt.int_set_new, Vec::new()),
+        None => {
+            let set_ptr = crate::containers::build_set_new(context, builder, rt, elem);
+            return Scalar::Set(freeze(builder, rt, set_ptr));
+        }
         Some(source) => {
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, source);
             match source.ty() {
                 pycc_mir::Ty::List(_) => (
-                    rt.int_set_from_list,
-                    vec![expect_list_pointer(scalar, "`frozenset`'s argument").into()],
+                    rt.containers.set_from_list,
+                    vec![
+                        expect_list_pointer(scalar, "`frozenset`'s argument").into(),
+                        context
+                            .i64_type()
+                            .const_int(crate::containers::word_kind(rt, elem), false)
+                            .into(),
+                    ],
+                ),
+                _ if instance => (
+                    rt.int_set_copy,
+                    vec![expect_set_pointer(scalar, "`frozenset`'s argument").into()],
                 ),
                 _ => (
-                    rt.int_set_copy,
+                    rt.containers.set_copy,
                     vec![expect_set_pointer(scalar, "`frozenset`'s argument").into()],
                 ),
             }
@@ -46,7 +62,20 @@ pub(super) fn emit_frozenset_from<'ctx>(
         .try_as_basic_value()
         .expect_basic("every frozenset constructor returns a non-void pointer")
         .into_pointer_value();
-    Scalar::Set(set_ptr)
+    Scalar::Set(freeze(builder, rt, set_ptr))
+}
+
+/// Flags a new set as a frozenset (`pycc_rt_set_freeze`), which only its
+/// `repr` reads.
+fn freeze<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    set_ptr: PointerValue<'ctx>,
+) -> PointerValue<'ctx> {
+    builder
+        .build_call(rt.containers.set_freeze, &[set_ptr.into()], "freeze")
+        .expect("build_call should not fail for a well-formed freeze");
+    set_ptr
 }
 
 /// A `set[int]`/`frozenset[int]` value's truthiness, as the `i8` `truthy`

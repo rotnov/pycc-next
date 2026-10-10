@@ -1,0 +1,5 @@
+error[T0036]: dict[str, None] is not compiled yet -- a dict key must be int, float, bool, str or a tuple of those, and a value anything a list can hold
+ --> tests/diagnostics/d0036_dict_value_type_not_compiled.py:1:1
+  |
+1 | x = {"a": None}
+  | ^ dict[str, None] is not compiled yet -- a dict key must be int, float, bool, str or a tuple of those, and a value anything a list can hold

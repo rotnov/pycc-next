@@ -1,0 +1,5 @@
+error[T0038]: set[None] is not compiled yet -- a set element must be int, float, bool, str, a tuple of those or a user-class instance
+ --> tests/diagnostics/t0038_set_none_annotation.py:1:10
+  |
+1 | def f(s: set[None]) -> None:
+  |          ^^^^^^^^^ set[None] is not compiled yet -- a set element must be int, float, bool, str, a tuple of those or a user-class instance

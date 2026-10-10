@@ -289,17 +289,19 @@ fn frozenset_module_bodies_match_cpython_as_extensions() {
 fn an_unsupported_element_type_is_t0038() {
     assert_one_error(
         "e2e_1326_str_annotation",
-        "x: frozenset[str] = frozenset()\n",
+        "x: frozenset[None] = frozenset()\n",
         "T0038",
-        "frozenset[str] is not compiled yet (D-122) -- only frozenset[int] and a frozenset of a user-class instance are",
+        "frozenset[None] is not compiled yet -- a frozenset element must be int, float, bool, str, \
+         a tuple of those or a user-class instance",
     );
     // The set literal's own gate refuses the source before `frozenset`
     // sees it.
     assert_one_error(
         "e2e_1326_str_source",
-        "x = frozenset({\"a\"})\n",
+        "x = frozenset({None})\n",
         "T0038",
-        "set[str] is not compiled yet (D-122) -- only set[int] and a set of a user-class instance are",
+        "set[None] is not compiled yet -- a set element must be int, float, bool, str, a tuple of \
+         those or a user-class instance",
     );
 }
 
@@ -309,15 +311,15 @@ fn a_wrong_argument_to_frozenset_is_t0021() {
         "e2e_1326_int_arg",
         "x = frozenset(1)\n",
         "T0021",
-        "`frozenset()` argument must be a `set[int]`, `frozenset[int]` or `list[int]` \
+        "`frozenset()` argument must be a list, set or frozenset of hashable elements \
          here, got `int`",
     );
     assert_one_error(
         "e2e_1326_str_list_arg",
-        "x = frozenset([\"a\"])\n",
+        "x = frozenset([[1]])\n",
         "T0021",
-        "`frozenset()` argument must be a `set[int]`, `frozenset[int]` or `list[int]` \
-         here, got `list[str]`",
+        "`frozenset()` argument must be a list, set or frozenset of hashable elements \
+         here, got `list[list[int]]`",
     );
     assert_one_error(
         "e2e_1326_two_args",
@@ -362,27 +364,13 @@ fn a_frozenset_is_immutable_and_distinct_from_a_set() {
 }
 
 #[test]
-fn printing_a_set_or_frozenset_is_a_clean_c0001() {
-    for (tag, source, ty) in [
-        (
-            "e2e_1326_print",
-            "fs = frozenset([1])\nprint(fs)\n",
-            "frozenset[int]",
-        ),
-        (
-            "e2e_1326_fstring",
-            "fs = frozenset([1])\nprint(f\"{fs}\")\n",
-            "frozenset[int]",
-        ),
-        ("e2e_1326_print_set", "print({1})\n", "set[int]"),
-    ] {
-        assert_one_error(
-            tag,
-            source,
-            "C0001",
-            &format!("printing or formatting a `{ty}` is not supported yet"),
-        );
-    }
+fn printing_a_set_or_frozenset_matches_cpython() {
+    assert_native_matches_cpython(
+        "e2e_1326_print",
+        "fs = frozenset([1])\nprint(fs)\nprint(f\"{fs}\")\nprint({1})\nprint(frozenset(), set(fs))\n\
+         print(fs | fs, fs - fs, [fs])\n",
+        "frozenset({1})\nfrozenset({1})\n{1}\nfrozenset() {1}\nfrozenset({1}) frozenset() [frozenset({1})]\n",
+    );
 }
 
 #[test]
@@ -395,9 +383,9 @@ fn unsupported_operators_on_a_frozenset_are_t0021() {
     );
     assert_one_error(
         "e2e_1326_or",
-        "fs = frozenset([1])\ny = fs | fs\n",
+        "fs = frozenset([1])\ny = fs | {\"a\"}\n",
         "T0021",
-        "operator `|` on `frozenset[int]` and `frozenset[int]` is not supported yet",
+        "operator `|` on `frozenset[int]` and `set[str]` is not supported yet",
     );
 }
 

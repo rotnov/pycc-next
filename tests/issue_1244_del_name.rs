@@ -301,9 +301,9 @@ fn every_del_refusal_is_named() {
         ),
         // HIR: target kinds, scopes and the module-level rules.
         (
-            "d = {1: 2}\ndel d[1]\n",
-            "error[C0001]: a `del` of a subscript (`del d[k]`, `del xs[i]`) is not supported yet \
-             (#1245 for `dict`, #1246 for `list`)",
+            "s = \"ab\"\ndel s[0]\n",
+            "error[C0001]: a `del` of a subscript (`del d[k]`, `del xs[i]`) is supported only on a \
+             dict, a list or a CPython object, not on `str`",
         ),
         (
             "del __name__\n",

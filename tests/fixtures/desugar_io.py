@@ -22,3 +22,6 @@ sys.stdout.write(" ".join(map(str, xs)) + "\n")
 sys.stdout.flush()
 rest = sys.stdin.read().split()
 print(rest, len(rest))
+# The last line has no newline: the exit flushes it.
+for w in rest:
+    print(w, end=" ")

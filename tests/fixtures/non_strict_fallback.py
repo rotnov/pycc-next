@@ -33,7 +33,8 @@ def guarded(n):
 def boom(n):
     # Falls back; its exception is caught in compiled code.
     pick = lambda: 10 // n
-    return pick()
+    run = pick
+    return run()
 
 
 counter = 0

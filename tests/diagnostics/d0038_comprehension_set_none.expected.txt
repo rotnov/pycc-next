@@ -1,0 +1,5 @@
+error[T0038]: set[None] is not compiled yet -- a set element must be int, float, bool, str, a tuple of those or a user-class instance
+ --> tests/diagnostics/d0038_comprehension_set_none.py:1:1
+  |
+1 | ys = {None for i in range(3)}
+  | ^ set[None] is not compiled yet -- a set element must be int, float, bool, str, a tuple of those or a user-class instance

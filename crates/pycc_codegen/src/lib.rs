@@ -37,6 +37,7 @@ use bigint_rc::{
     retain_if_int_duplicate, retain_if_int_duplicate_and_track_for_exception_edge,
 };
 use comprehension::{CompCx, CompElts, emit_comprehension, emit_comprehension_expr};
+mod containers;
 mod float_fast;
 mod for_range_fast;
 mod int_builtins;
@@ -91,8 +92,8 @@ mod sequence;
 /// user-class instances (#1343, Part 1 of #1336).
 mod set_instance;
 use set_instance::{
-    SetEmitter, build_int_set_add, build_int_set_check_not_resized, build_int_set_get,
-    build_int_set_len, expect_set_pointer, set_element_scalar,
+    SetEmitter, build_int_set_check_not_resized, build_int_set_get, build_int_set_len,
+    expect_set_pointer, set_element_scalar,
 };
 
 /// One Part 4 conversion emitter in `foreign_len.rs` (PR 4b of #1083).
@@ -546,6 +547,11 @@ fn ty_to_basic_type(context: &Context, ty: pycc_mir::Ty) -> inkwell::types::Basi
         // arm is deliberately not narrowed to those three, matching the
         // element-type-agnostic shape `List(_)`/`Dict(_)`/`Set(_)` already
         // use above.
+        // A boxed tuple (any element other than int/bool/float) is a
+        // pointer to its runtime object (`containers.rs`).
+        pycc_mir::Ty::Tuple(elems) if pycc_hir::tuple_is_boxed(&elems) => {
+            context.ptr_type(inkwell::AddressSpace::default()).into()
+        }
         pycc_mir::Ty::Tuple(elems) => {
             let field_types: Vec<inkwell::types::BasicTypeEnum> = elems
                 .iter()
@@ -634,6 +640,10 @@ fn default_value_for_type<'ctx>(
         | pycc_mir::Ty::Protocol(_)
         | pycc_mir::Ty::Object
         | pycc_mir::Ty::MemoryView => context
+            .ptr_type(inkwell::AddressSpace::default())
+            .const_null()
+            .into(),
+        pycc_mir::Ty::Tuple(elems) if pycc_hir::tuple_is_boxed(&elems) => context
             .ptr_type(inkwell::AddressSpace::default())
             .const_null()
             .into(),
@@ -994,13 +1004,13 @@ fn build_dict_set<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
     dict_ptr: PointerValue<'ctx>,
-    key_ptr: PointerValue<'ctx>,
-    encoded_value: IntValue<'ctx>,
+    key_word: IntValue<'ctx>,
+    value_word: IntValue<'ctx>,
 ) {
     builder
         .build_call(
             rt.dict_set,
-            &[dict_ptr.into(), key_ptr.into(), encoded_value.into()],
+            &[dict_ptr.into(), key_word.into(), value_word.into()],
             "dict_set",
         )
         .expect("build_call should not fail for a well-formed dict set");
@@ -1015,13 +1025,13 @@ fn build_dict_get_or_default<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
     dict_ptr: PointerValue<'ctx>,
-    key_ptr: PointerValue<'ctx>,
-    encoded_default: IntValue<'ctx>,
+    key_word: IntValue<'ctx>,
+    default_word: IntValue<'ctx>,
 ) -> IntValue<'ctx> {
     builder
         .build_call(
             rt.dict_get_or_default,
-            &[dict_ptr.into(), key_ptr.into(), encoded_default.into()],
+            &[dict_ptr.into(), key_word.into(), default_word.into()],
             "dict_get_or_default",
         )
         .expect("build_call should not fail for a well-formed dict get-or-default")
@@ -1508,48 +1518,25 @@ fn to_str<'ctx>(
         Scalar::Bool(v) => (rt.bool_to_str, v.into()),
         // `str(xs)`: the runtime renders every element kind.
         Scalar::List(v) => (rt.list_repr, v.into()),
-        // `str(d)`: `dict[str, int]`, the one compiled dict type.
+        // `str(d)`: the runtime renders every key and value kind.
         Scalar::Dict(v) => (rt.dict_repr, v.into()),
-        // No longer reachable from source: since Part 1 of #1319,
-        // `pycc_types` refuses `print(s)`/`f"{s}"` for a `set[int]` or
-        // `frozenset[int]` value as `C0001` before codegen. v0.2 has no
-        // `str(set)`/set-printing semantics (D-124), and there is no
-        // `pycc_rt_int_set_to_str` to call -- so this stays an honest
-        // panic backstop instead of handing a `PyIntSetObj` pointer to a
-        // `pycc_rt_*_to_str` function that would read it as a `PyStrObj`.
-        Scalar::Set(_) => {
-            panic!("pycc_codegen: string conversion of a set[T] value is not supported yet")
+        // `str(s)`: CPython's element order (`pycc_rt::set`); the object
+        // knows whether it is a frozenset.
+        Scalar::Set(v) => {
+            let context = rt.context;
+            return builder
+                .build_call(
+                    rt.containers.set_repr,
+                    &[v.into(), context.i8_type().const_zero().into()],
+                    "set_repr",
+                )
+                .expect("build_call should not fail for a well-formed set repr")
+                .try_as_basic_value()
+                .expect_basic("pycc_rt_set_repr returns a pointer")
+                .into_pointer_value();
         }
-        // A real, reachable feature gap -- but NOT "identical in kind" to
-        // the `List`/`Dict`/`Set` arms directly above in one respect:
-        // `list[T]`'s own `print(xs)`/`f"{xs}"` reachability predates this
-        // whole PR-11 effort entirely (established back in PR-10, D-107);
-        // `dict`/`set`'s own reachability, while more recent (PR-11a's own
-        // HIR literal lowering), was already in place before this PR
-        // (PR-11b) started -- neither is something this PR's own diff
-        // turned from a clean diagnostic into a panic. `tuple[...]`'s
-        // reachability here IS exactly that: it is new as of this PR's own
-        // Task 2 (`HirExpr::TupleLiteral` lowering, `crates/pycc_hir/src/
-        // lib.rs`) -- before that commit, any program containing a tuple
-        // literal failed to lower at all and got a clean `C0001`
-        // ("expression kind not supported yet") diagnostic instead of ever
-        // reaching this function. `pycc_types` places no type restriction
-        // on `print`'s argument or an f-string interpolation other than the
-        // instance/protocol gate (#977, D-237), so
-        // `print(t)`/`f"{t}"` for a `tuple[...]` local type-checks today
-        // and lands here. D-116 ships only construction and literal-index
-        // reads, so v0.2 has no tuple string-conversion semantics -- and
-        // unlike the three container arms above there is not even a
-        // runtime object to hand to a conversion function, since a tuple is
-        // a bare LLVM struct with no `pycc_rt` type at all (D-115). Panics
-        // honestly instead of reinterpreting the struct's first field as a
-        // `PyStrObj` pointer. See the D-116 deferred-capability list in
-        // `docs/decisions/D-116-tuple-v0-2-scope-int-bool-float-elements-only.md`
-        // and `docs/ROADMAP.md`'s matching follow-up for this
-        // new-as-of-PR-11b reachability.
-        Scalar::Tuple(_) => {
-            panic!("pycc_codegen: string conversion of a tuple[...] value is not supported yet")
-        }
+        // A struct tuple: boxed for the runtime's `repr`, then released.
+        Scalar::Tuple(tuple) => return containers::struct_tuple_repr(builder, rt, tuple),
         // #378 (PR-18): a class instance with a `__repr__` method is
         // converted to a string at the MIR level -- `rewrite_instance_to_repr`
         // in `pycc_mir` rewrites instance-typed f-string interpolations and
@@ -2129,6 +2116,18 @@ fn emit_expr_unchecked<'ctx>(
                 // panic on a real, type-checked program, which is why the
                 // module-level and function-local smoke programs for this
                 // task both exercise it.
+                Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => {
+                    let loaded = builder
+                        .build_load(
+                            context.ptr_type(inkwell::AddressSpace::default()),
+                            slot.ptr,
+                            "load",
+                        )
+                        .expect(
+                            "build_load should not fail for a slot this function itself allocated",
+                        );
+                    Scalar::List(loaded.into_pointer_value())
+                }
                 Ty::Tuple(_) => {
                     let loaded = builder
                         .build_load(
@@ -2516,12 +2515,13 @@ fn emit_expr_unchecked<'ctx>(
             pop_pending_int_release(rt, pending_l);
             let right_ty = right.ty();
             if matches!(op, pycc_mir::CmpOpKind::In | pycc_mir::CmpOpKind::NotIn)
-                && let Ty::List(_) = right_ty
+                && containers::has_native_contains(&right_ty)
             {
                 let negate = *op == pycc_mir::CmpOpKind::NotIn;
                 let found =
-                    list::emit_list_contains(context, builder, rt, &right_ty, left, l, r, negate);
+                    containers::emit_contains(context, builder, rt, &right_ty, l, r, negate);
                 release_scalar_if_temporary(context, builder, rt, left, &l);
+                release_scalar_if_temporary(context, builder, rt, right, &r);
                 return found;
             }
             let as_bool =
@@ -3006,16 +3006,14 @@ fn emit_expr_unchecked<'ctx>(
         MirExpr::EmptyList(elem) => {
             Scalar::List(list::build_list_new(context, builder, rt, elem, 0))
         }
+        MirExpr::EmptySet(elem) => {
+            Scalar::Set(containers::build_set_new(context, builder, rt, elem))
+        }
         // #1021: a resolved empty `{}`, the dict counterpart of
         // `EmptyList` immediately above.
-        MirExpr::EmptyDict(_) => Scalar::Dict(
-            builder
-                .build_call(rt.dict_new, &[], "dict_new")
-                .expect("build_call should not fail for a well-formed dict construction")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_dict_new returns a non-void pointer")
-                .into_pointer_value(),
-        ),
+        MirExpr::EmptyDict(pair) => Scalar::Dict(containers::build_dict_new(
+            context, builder, rt, &pair.0, &pair.1,
+        )),
         MirExpr::ListLiteral(elements) => {
             let elem = expr.ty();
             let elem = list::element_ty(&elem);
@@ -3075,6 +3073,36 @@ fn emit_expr_unchecked<'ctx>(
             // "no redundant impossible-to-cover branch" convention
             // `emit_string_literal`'s own doc comment records.
             match (base.ty(), base_scalar) {
+                // A boxed tuple: the literal index's word, read inline and
+                // borrowed like a list element (`containers.rs`).
+                (pycc_mir::Ty::Tuple(elements), Scalar::List(tuple_ptr))
+                    if pycc_hir::tuple_is_boxed(&elements) =>
+                {
+                    let MirExpr::IntLiteral(literal_index) = index.as_ref() else {
+                        panic!(
+                            "pycc_codegen: internal error: a tuple subscript index is not a \
+                             literal int"
+                        )
+                    };
+                    let element = containers::tuple_element(
+                        context,
+                        builder,
+                        &elements,
+                        Scalar::List(tuple_ptr),
+                        *literal_index as u64,
+                    );
+                    if !heap_rc::is_borrowed_read(base) {
+                        heap_rc::retain_scalar(context, builder, rt, &expr.ty(), &element);
+                        release_scalar_if_temporary(
+                            context,
+                            builder,
+                            rt,
+                            base,
+                            &Scalar::List(tuple_ptr),
+                        );
+                    }
+                    element
+                }
                 // D-115: the field is read straight off the loaded
                 // `StructValue` with `extractvalue` -- no pointer, no
                 // `build_struct_gep`, because the aggregate is an SSA
@@ -3213,64 +3241,23 @@ fn emit_expr_unchecked<'ctx>(
         // scheme), while each value is validated against bigint storage and
         // then stored with its original encoded word.
         MirExpr::DictLiteral(pairs) => {
-            let dict_ptr = builder
-                .build_call(rt.dict_new, &[], "dict_new")
-                .expect("build_call should not fail for a well-formed dict construction")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_dict_new returns a non-void pointer")
-                .into_pointer_value();
+            let Ty::Dict(kv) = expr.ty() else {
+                panic!("pycc_codegen: internal error: a dict display without a dict type")
+            };
+            let dict_ptr = containers::build_dict_new(context, builder, rt, &kv.0, &kv.1);
             // The dict under construction is released if a pair raises.
             let mark = heap_rc::pending_mark(rt);
             heap_rc::hold_owned(rt, heap_rc::HeapKind::Dict, dict_ptr);
             for (key, value) in pairs {
+                // CPython evaluates each key before its value.
                 let key_scalar =
                     emit_expr(context, builder, module, rt, user_functions, locals, key);
-                // `PyDictObj` adopts the key pointer it is given as its own
-                // reference, without incref'ing it itself, and releases it
-                // when the dict is freed. A bare-`Name` key (`{k: 1}`) is a
-                // *duplicate* reference to whatever `PyStrObj` `k`'s own
-                // slot already owns, exactly the shape `incref_if_str_
-                // duplicate` exists to protect everywhere else a `str`
-                // value crosses an ownership-taking boundary (`MirStmt::
-                // Assign`, `build_call_to`'s argument marshalling,
-                // `MirStmt::Return`) -- without this call, a later `k = ...`
-                // reassignment would decref (and potentially free) the same
-                // `PyStrObj` this dict still points to, a real premature
-                // free, not this project's accepted list/dict leak-only
-                // policy (D-107/D-124 only ever accept *never freeing*, not
-                // freeing too early). A string-literal key (`{"a": 1}`)
-                // freshly constructs its own owned reference every time, so
-                // `str_value_is_a_duplicate_reference` correctly leaves it
-                // untouched here.
-                let key_scalar = incref_if_str_duplicate(builder, rt, key, key_scalar);
-                // Every `Ty::Dict` value that survives `pycc_types`' own
-                // T0036 gate has key type exactly `Ty::Str` (see that
-                // gate's own comment), so this is a defensive backstop,
-                // not a real feature gap -- the same inline
-                // `let Scalar::Str(..) = .. else { panic!(..) }` shape
-                // `emit_expr`'s own `BinOp`/`Compare` arms already use for
-                // their `Ty::Str` operands, for the identical reason (no
-                // shared helper: see this file's established convention of
-                // not extracting a single-use-per-arm check into its own
-                // function).
-                let Scalar::Str(key_ptr) = key_scalar else {
-                    panic!(
-                        "pycc_codegen: internal error: dict literal key did not evaluate to str \
-                         -- pycc_types::check (T0036) should have rejected this before codegen"
-                    )
-                };
+                let key_word = list::element_word(context, builder, rt, &kv.0, key, key_scalar);
                 let value_scalar =
                     emit_expr(context, builder, module, rt, user_functions, locals, value);
-                let encoded = to_encoded_int(context, builder, value_scalar);
-                let _ = build_untag_checked(
-                    context,
-                    builder,
-                    rt,
-                    UntagUse::Element,
-                    encoded,
-                    "dict_validate_literal_value",
-                );
-                build_dict_set(builder, rt, dict_ptr, key_ptr, encoded);
+                let value_word =
+                    list::element_word(context, builder, rt, &kv.1, value, value_scalar);
+                build_dict_set(builder, rt, dict_ptr, key_word, value_word);
             }
             heap_rc::truncate_pending(rt, mark);
             Scalar::Dict(dict_ptr)
@@ -3286,6 +3273,7 @@ fn emit_expr_unchecked<'ctx>(
         // `emit_expr` wrapper guards this node before that carrier can be
         // consumed.
         MirExpr::DictGet { dict, key } => {
+            let dict_ty = dict.ty();
             let dict_scalar = emit_expr(context, builder, module, rt, user_functions, locals, dict);
             let dict_ptr = expect_dict_pointer(dict_scalar, "the dict subscripted value");
             // A fresh dict is released if the key raises.
@@ -3293,23 +3281,21 @@ fn emit_expr_unchecked<'ctx>(
             heap_rc::hold_temporary(rt, dict, &dict_scalar);
             let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
             heap_rc::truncate_pending(rt, mark);
-            let Scalar::Str(key_ptr) = key_scalar else {
-                panic!(
-                    "pycc_codegen: internal error: dict subscript key did not evaluate to str \
-                     -- pycc_types::check (T0021) should have rejected this before codegen"
-                )
-            };
-            let encoded_value = builder
-                .build_call(rt.dict_get, &[dict_ptr.into(), key_ptr.into()], "dict_get")
+            let (key_ty, value_ty) = containers::dict_kv(&dict_ty);
+            let key_coerced = coerce_scalar_to_type(context, builder, key_scalar, key_ty.clone());
+            let (key_word, boxed) =
+                containers::borrowed_word(context, builder, rt, &key_ty, key_coerced);
+            let value_word = builder
+                .build_call(rt.dict_get, &[dict_ptr.into(), key_word.into()], "dict_get")
                 .expect("build_call should not fail for a well-formed dict read")
                 .try_as_basic_value()
                 .expect_basic("pycc_rt_dict_get returns a non-void i64")
                 .into_int_value();
-            // The lookup borrows the key (a `KeyError` copies its text) and
-            // the dict; the values are inline ints, so a fresh dict can go.
+            containers::release_boxed(context, builder, rt, boxed);
+            // The lookup borrows the key; the value is a new reference.
             release_scalar_if_temporary(context, builder, rt, key, &key_scalar);
-            release_scalar_if_temporary(context, builder, rt, dict, &dict_scalar);
-            Scalar::Int(encoded_value)
+            release_scalar_if_temporary(context, builder, rt, dict, &Scalar::Dict(dict_ptr));
+            containers::owned_word_element(context, builder, rt, &value_ty, value_word)
         }
         // `{e1, e2, ...}` (PR-11 Task 9, D-123/D-121): an empty
         // `pycc_rt_int_set_new()` object followed by one
@@ -3350,7 +3336,13 @@ fn emit_expr_unchecked<'ctx>(
             elements,
             ops: None,
         } => {
+            let Ty::Set(elem) = expr.ty() else {
+                panic!("pycc_codegen: internal error: a set display without a set type")
+            };
             let set_ptr = set_instance::build_set_new(builder, rt, &expr.ty());
+            // The set under construction is released if an element raises.
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_owned(rt, heap_rc::HeapKind::Set, set_ptr);
             for element in elements {
                 let scalar = emit_expr(
                     context,
@@ -3361,17 +3353,10 @@ fn emit_expr_unchecked<'ctx>(
                     locals,
                     element,
                 );
-                let encoded = to_encoded_int(context, builder, scalar);
-                let _ = build_untag_checked(
-                    context,
-                    builder,
-                    rt,
-                    UntagUse::Element,
-                    encoded,
-                    "set_validate_element",
-                );
-                build_int_set_add(builder, rt, set_ptr, encoded);
+                let word = list::element_word(context, builder, rt, &elem, element, scalar);
+                containers::build_set_add(builder, rt, set_ptr, word);
             }
+            heap_rc::truncate_pending(rt, mark);
             Scalar::Set(set_ptr)
         }
         // `(e1, e2, ...)` (PR-11b Task 5, D-115). The one container literal
@@ -3394,6 +3379,28 @@ fn emit_expr_unchecked<'ctx>(
         // smallint, bool marker, or bigint pointer), and `MirExpr::Subscript`'s
         // tuple branch returns that word unchanged, so the two sides never
         // disagree and no conversion happens on either.
+        // A boxed tuple (`containers.rs`): a tuple object whose words are
+        // written in source order, each taking the reference it will own.
+        MirExpr::TupleLiteral(elements)
+            if pycc_hir::tuple_is_boxed(&elements.iter().map(MirExpr::ty).collect::<Vec<_>>()) =>
+        {
+            let elem_tys: Vec<pycc_mir::Ty> = elements.iter().map(MirExpr::ty).collect();
+            let tuple = containers::build_tuple_new(context, builder, rt, &elem_tys);
+            for (index, (element, elem_ty)) in elements.iter().zip(&elem_tys).enumerate() {
+                let scalar = emit_expr(
+                    context,
+                    builder,
+                    module,
+                    rt,
+                    user_functions,
+                    locals,
+                    element,
+                );
+                let word = list::element_word(context, builder, rt, elem_ty, element, scalar);
+                containers::store_tuple_word(context, builder, tuple, index as u64, word);
+            }
+            Scalar::List(tuple)
+        }
         MirExpr::TupleLiteral(elements) => {
             let elem_tys: Vec<pycc_mir::Ty> = elements.iter().map(MirExpr::ty).collect();
             let struct_ty = ty_to_basic_type(context, pycc_mir::Ty::Tuple(Box::new(elem_tys)))
@@ -3603,7 +3610,7 @@ fn emit_expr_unchecked<'ctx>(
             });
             let word = list::build_list_pop(context, builder, rt, list_ptr, index);
             release_list_receiver(context, builder, rt, receiver);
-            list::word_element(context, builder, ty, word)
+            containers::owned_word_element(context, builder, rt, ty, word)
         }
         // `dict.get(key, default)` (PR-12 Task 11, D-119): returns the
         // stored value, or `default` if `key` is absent -- never panics on
@@ -3640,16 +3647,18 @@ fn emit_expr_unchecked<'ctx>(
         MirExpr::DictGetOrDefault {
             dict, key, default, ..
         } => {
+            let dict_ty = match dict {
+                pycc_mir::MirContainerReceiver::Name(name) => locals[name].ty.clone(),
+                pycc_mir::MirContainerReceiver::Attr(read) => read.ty(),
+            };
+            let (key_ty, value_ty) = containers::dict_kv(&dict_ty);
             let receiver =
                 emit_dict_receiver(context, builder, module, rt, user_functions, locals, dict);
             let dict_ptr = receiver.0;
             let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
-            let Scalar::Str(key_ptr) = key_scalar else {
-                panic!(
-                    "pycc_codegen: internal error: dict.get() key did not evaluate to str -- \
-                     pycc_types::check (T0021) should have rejected this before codegen"
-                )
-            };
+            let key_coerced = coerce_scalar_to_type(context, builder, key_scalar, key_ty.clone());
+            let (key_word, boxed) =
+                containers::borrowed_word(context, builder, rt, &key_ty, key_coerced);
             let default_scalar = emit_expr(
                 context,
                 builder,
@@ -3659,20 +3668,17 @@ fn emit_expr_unchecked<'ctx>(
                 locals,
                 default,
             );
-            let encoded_default = to_encoded_int(context, builder, default_scalar);
-            let _ = build_untag_checked(
-                context,
-                builder,
-                rt,
-                UntagUse::Element,
-                encoded_default,
-                "dict_get_validate_default",
-            );
-            let encoded =
-                build_dict_get_or_default(builder, rt, dict_ptr, key_ptr, encoded_default);
+            let default_scalar =
+                coerce_scalar_to_type(context, builder, default_scalar, value_ty.clone());
+            // The runtime adopts the default's reference.
+            let default_word =
+                list::element_word(context, builder, rt, &value_ty, default, default_scalar);
+            let value_word =
+                build_dict_get_or_default(builder, rt, dict_ptr, key_word, default_word);
+            containers::release_boxed(context, builder, rt, boxed);
             release_scalar_if_temporary(context, builder, rt, key, &key_scalar);
             release_dict_receiver(context, builder, rt, receiver);
-            Scalar::Int(encoded)
+            containers::owned_word_element(context, builder, rt, &value_ty, value_word)
         }
         // `set.add(value)` (PR-12 Task 11, D-119): mirrors `MirExpr::
         // ListAppend`'s own shape exactly (a plain-name base read through
@@ -3709,18 +3715,15 @@ fn emit_expr_unchecked<'ctx>(
                 emitter.add(set_ptr, value, ops);
                 return Scalar::Bool(context.i8_type().const_int(0, false));
             }
+            let Ty::Set(elem) = locals[set].ty.clone() else {
+                panic!("pycc_codegen: internal error: `add` on a non-set")
+            };
             let value_scalar =
                 emit_expr(context, builder, module, rt, user_functions, locals, value);
-            let encoded = to_encoded_int(context, builder, value_scalar);
-            let _ = build_untag_checked(
-                context,
-                builder,
-                rt,
-                UntagUse::Element,
-                encoded,
-                "set_validate_added",
-            );
-            build_int_set_add(builder, rt, set_ptr, encoded);
+            let value_scalar =
+                coerce_scalar_to_type(context, builder, value_scalar, (*elem).clone());
+            let word = list::element_word(context, builder, rt, &elem, value, value_scalar);
+            containers::build_set_add(builder, rt, set_ptr, word);
             Scalar::Bool(context.i8_type().const_int(0, false))
         }
         // `ClassName(args)` (D-154, Part 1 of #375): allocate a fresh
@@ -4218,15 +4221,21 @@ fn emit_expr_unchecked<'ctx>(
         // whose free is a documented no-op on null. A second guard is emitted
         // *before* the allocator call, for an exception that was already
         // pending when this arm was reached -- see it in place below.
-        MirExpr::FrozenSetFrom { source } => frozenset::emit_frozenset_from(
-            context,
-            builder,
-            module,
-            rt,
-            user_functions,
-            locals,
-            source.as_deref(),
-        ),
+        MirExpr::FrozenSetFrom { source } => {
+            let Ty::FrozenSet(elem) = expr.ty() else {
+                panic!("pycc_codegen: internal error: frozenset() without a frozenset type")
+            };
+            frozenset::emit_frozenset_from(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                source.as_deref(),
+                &elem,
+            )
+        }
         MirExpr::BufferAlloc { len } => {
             let len_scalar = emit_expr(context, builder, module, rt, user_functions, locals, len);
             let encoded_len = to_numeric_encoded_int(context, builder, len_scalar);
@@ -5498,10 +5507,11 @@ fn storage_slot_at_entry<'ctx>(
             | pycc_mir::Ty::Set(_)
             | pycc_mir::Ty::FrozenSet(_)
             | pycc_mir::Ty::Object
-    ) {
-        // Lists, instances, dicts, sets and CPython objects are counted
-        // (`heap_rc`) and released the same way, so their slots start null
-        // too.
+    ) || matches!(&ty, pycc_mir::Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements))
+    {
+        // Lists, instances, dicts, sets, boxed tuples and CPython objects are
+        // counted (`heap_rc`) and released the same way, so their slots start
+        // null too.
         // Part 2a of #1142 (#1165) joins `Ty::Str` on this arm rather than
         // adding one of its own: both are owning pointer slots released on
         // the way out, and both runtime releases are documented no-ops on
@@ -6066,6 +6076,13 @@ fn declare_module_globals<'ctx>(
                 // No exit-time decref accompanies it (contrast the
                 // `Ty::Str` loop in `compile_to_object`): a tuple owns no
                 // allocation to release.
+                pycc_mir::Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => (
+                    context.ptr_type(inkwell::AddressSpace::default()).into(),
+                    context
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null()
+                        .into(),
+                ),
                 pycc_mir::Ty::Tuple(_) => {
                     let struct_ty = ty_to_basic_type(context, ty.clone()).into_struct_type();
                     (struct_ty.into(), struct_ty.const_zero().into())
@@ -6754,6 +6771,12 @@ fn compile_to_object_with_observer(
     // failure modes and stay real Results the caller must handle:
     // Target::from_triple (a user-supplied --target can legitimately name
     // a triple LLVM doesn't recognize) and write_to_file, at the very end.
+    //
+    // A last line printed without a newline (`print(x, end=" ")`) is still
+    // in the runtime's line buffer, which nothing flushes at process exit.
+    builder
+        .build_call(rt.print_flush, &[], "final_flush")
+        .expect("build_call should not fail for a well-formed flush");
     builder
         .build_return(Some(&i64_type.const_int(0, false)))
         .expect(
@@ -8862,36 +8885,21 @@ fn emit_stmt<'ctx>(
         // `MirExpr::DictGet`'s key, and `value` gets D-141 validation plus
         // identity-preserving encoded storage.
         MirStmt::DictSet { dict, key, value } => {
+            let (key_ty, value_ty) = containers::dict_kv(&locals[dict].ty);
+            // CPython evaluates the value, then the container and the key.
+            let value_scalar =
+                emit_expr(context, builder, module, rt, user_functions, locals, value);
+            let value_scalar =
+                coerce_scalar_to_type(context, builder, value_scalar, value_ty.clone());
+            let value_word =
+                list::element_word(context, builder, rt, &value_ty, value, value_scalar);
             let dict_ptr =
                 emit_dict_name_read(context, builder, module, rt, user_functions, locals, dict);
             let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
-            // Same `incref_if_str_duplicate` requirement as `MirExpr::
-            // DictLiteral`'s own per-pair key above, and for the identical
-            // reason (see that arm's own comment): `pycc_rt_dict_set`
-            // adopts whatever key pointer it is given as `d`'s own
-            // permanent reference without incref'ing it itself (D-124), so
-            // a bare-`Name` key (`d[k] = v`) must be incref'd here first,
-            // or a later reassignment of `k` would decref -- and
-            // potentially free -- the same `PyStrObj` `d` still points to.
-            let key_scalar = incref_if_str_duplicate(builder, rt, key, key_scalar);
-            let Scalar::Str(key_ptr) = key_scalar else {
-                panic!(
-                    "pycc_codegen: internal error: dict item-assignment key did not evaluate to \
-                     str -- pycc_types::check (T0021) should have rejected this before codegen"
-                )
-            };
-            let value_scalar =
-                emit_expr(context, builder, module, rt, user_functions, locals, value);
-            let encoded = to_encoded_int(context, builder, value_scalar);
-            let _ = build_untag_checked(
-                context,
-                builder,
-                rt,
-                UntagUse::Element,
-                encoded,
-                "dict_validate_set_value",
-            );
-            build_dict_set(builder, rt, dict_ptr, key_ptr, encoded);
+            let key_scalar = coerce_scalar_to_type(context, builder, key_scalar, key_ty.clone());
+            let key_word = list::element_word(context, builder, rt, &key_ty, key, key_scalar);
+            build_dict_set(builder, rt, dict_ptr, key_word, value_word);
+            guard_statement_effects(context, builder, rt);
             Ok(())
         }
         // Part 2c of #1371: `del o[a:b:c]`, the statement twin of the
@@ -9059,13 +9067,33 @@ fn emit_stmt<'ctx>(
         // 2. Each iteration reads the current *key*, via
         //    `pycc_rt_dict_key_at`, not an element via
         //    `pycc_rt_list_get`.
-        // 3. The loop variable is bound `Scalar::Str`, not `Scalar::Int`:
-        //    a dict key is a counted `PyStrObj` the dict owns one reference
-        //    to. The loop variable's slot owns a reference of its own (the
-        //    `pycc_rt_str_incref` below), released when the next key
-        //    replaces it, when the body rebinds it, or by the frame's
-        //    epilogue -- so neither can free a key the dict still holds.
-        MirStmt::ForDict { var, dict, body } => {
+        // 3. The loop variable is bound `Scalar::Str`, not `Scalar::Int` --
+        //    and, unlike every `ForList`/`ForRange` induction target (never
+        //    refcounted, D-061), a dict key genuinely is a refcounted
+        //    `PyStrObj` that `d` itself still holds a live, non-incref'd
+        //    pointer to (D-124: "`PyDictObj`'s own keys ... are stored
+        //    without incref on insert"). Without the `pycc_rt_str_incref`
+        //    below, an ordinary body-level reassignment of the loop
+        //    variable (`for k in d:\n    k = "z"\n`) would go through
+        //    `emit_stmt`'s own `Assign` arm, whose
+        //    `decref_str_slot_before_store` call fires unconditionally for
+        //    any `Ty::Str` target -- decref'ing `d`'s *own* only reference
+        //    to that key and freeing it while `d` still holds the
+        //    now-dangling pointer, a real premature free this project's own
+        //    leak-only containers are never supposed to cause (see
+        //    `Scalar::List`'s and `Scalar::Dict`'s own doc comments: "leak-
+        //    only -- never a premature free"). The incref gives the loop
+        //    variable's own slot a reference distinct from `d`'s, so that
+        //    decref (or the next iteration's own overwrite, which bypasses
+        //    it entirely -- see `emit_assign` below) only ever brings the
+        //    *duplicate* back down, never below `d`'s own copy. The
+        //    resulting extra, never-brought-back-down increment on the
+        //    loop's last key is exactly D-124's existing leak-only policy
+        //    playing out one level lower: an unbalanced incref only makes
+        //    an already-permanent leak larger, never a premature free.
+        MirStmt::ForDict {
+            var, dict, body, ..
+        } => {
             let function = builder.get_insert_block().unwrap().get_parent().unwrap();
             // Read once, in the preheader, not per iteration -- identical
             // reasoning to `ForList`'s own preheader read (see that arm's
@@ -9112,7 +9140,7 @@ fn emit_stmt<'ctx>(
                 .expect("build_conditional_branch should not fail for a well-formed i1 condition");
 
             builder.position_at_end(body_bb);
-            let key_ptr = builder
+            let key_word = builder
                 .build_call(
                     rt.dict_key_at,
                     &[dict_ptr.into(), current.into()],
@@ -9120,23 +9148,18 @@ fn emit_stmt<'ctx>(
                 )
                 .expect("build_call should not fail for a well-formed dict key read")
                 .try_as_basic_value()
-                .expect_basic("pycc_rt_dict_key_at returns a non-void pointer")
-                .into_pointer_value();
-            // See this arm's own doc comment, point 3: gives the loop
-            // variable's slot a reference distinct from `d`'s own, so a
-            // body-level reassignment of `var` cannot free a key `d`
-            // itself still points to.
-            builder
-                .build_call(rt.str_incref, &[key_ptr.into()], "for_dict_key_incref")
-                .expect("build_call should not fail for a well-formed incref");
-            // Same Python target-binding semantics `ForList`'s own comment
-            // describes: a separate storage slot written once per
-            // iteration, which owns its key like any `str` slot, so the
-            // key it held is released first.
+                .expect_basic("pycc_rt_dict_key_at returns a non-void i64")
+                .into_int_value();
+            // The key is borrowed from the dict: the loop variable takes
+            // its own reference and releases the one it held, as
+            // `ForList`'s does.
+            let (key_ty, _) = containers::dict_kv(&locals[dict].ty);
+            let key = list::word_element(context, builder, &key_ty, key_word);
+            heap_rc::retain_scalar(context, builder, rt, &key_ty, &key);
             if let Some(slot) = locals.get(var) {
                 heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
             }
-            emit_assign(context, builder, rt, locals, var, Scalar::Str(key_ptr));
+            emit_assign(context, builder, rt, locals, var, key);
             // `ForList`'s latch shape (see that arm).
             let latch_bb = context.append_basic_block(function, "for_dict_latch");
             rt.loops

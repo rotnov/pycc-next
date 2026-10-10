@@ -537,8 +537,8 @@ fn d0035_heterogeneous_dict_literal() {
 }
 
 #[test]
-fn d0036_dict_key_value_type_not_str_int() {
-    assert_diagnostic_matches_fixture("d0036_dict_key_value_type_not_str_int");
+fn d0036_dict_value_type_not_compiled() {
+    assert_diagnostic_matches_fixture("d0036_dict_value_type_not_compiled");
 }
 
 #[test]
@@ -547,13 +547,13 @@ fn d0037_heterogeneous_set_literal() {
 }
 
 #[test]
-fn d0038_set_element_type_not_int() {
-    assert_diagnostic_matches_fixture("d0038_set_element_type_not_int");
+fn d0038_set_element_type_not_compiled() {
+    assert_diagnostic_matches_fixture("d0038_set_element_type_not_compiled");
 }
 
 #[test]
-fn d0039_tuple_element_type_not_int_bool_float() {
-    assert_diagnostic_matches_fixture("d0039_tuple_element_type_not_int_bool_float");
+fn d0039_tuple_element_type_not_compiled() {
+    assert_diagnostic_matches_fixture("d0039_tuple_element_type_not_compiled");
 }
 
 #[test]
@@ -808,18 +808,18 @@ fn t0033_comprehension_nested_iterable_names_outer_variable() {
 }
 
 #[test]
-fn d0034_comprehension_list_set() {
-    assert_diagnostic_matches_fixture("d0034_comprehension_list_set");
+fn d0034_comprehension_list_none() {
+    assert_diagnostic_matches_fixture("d0034_comprehension_list_none");
 }
 
 #[test]
-fn d0036_comprehension_dict_str_str() {
-    assert_diagnostic_matches_fixture("d0036_comprehension_dict_str_str");
+fn d0036_comprehension_dict_str_none() {
+    assert_diagnostic_matches_fixture("d0036_comprehension_dict_str_none");
 }
 
 #[test]
-fn d0038_comprehension_set_str() {
-    assert_diagnostic_matches_fixture("d0038_comprehension_set_str");
+fn d0038_comprehension_set_none() {
+    assert_diagnostic_matches_fixture("d0038_comprehension_set_none");
 }
 
 // Real Python's dict-comprehension grammar has no `**`-unpacking form the
@@ -939,12 +939,6 @@ fn c0001_attribute_ann_assign_target() {
 }
 
 #[test]
-fn c0001_tuple_for_target() {
-    assert_diagnostic_matches_fixture("c0001_tuple_for_target");
-}
-
-
-#[test]
 fn c0001_for_call_not_bare_name() {
     assert_diagnostic_matches_fixture("c0001_for_call_not_bare_name");
 }
@@ -953,7 +947,6 @@ fn c0001_for_call_not_bare_name() {
 fn c0001_call_of_call() {
     assert_diagnostic_matches_fixture("c0001_call_of_call");
 }
-
 
 #[test]
 fn c0001_protocol_body_assign() {
@@ -971,8 +964,8 @@ fn c0001_function_local_import() {
 }
 
 #[test]
-fn c0001_nested_def() {
-    assert_diagnostic_matches_fixture("c0001_nested_def");
+fn c0001_nested_def_used_as_a_value() {
+    assert_diagnostic_matches_fixture("c0001_nested_def_used_as_a_value");
 }
 
 #[test]
@@ -1178,8 +1171,8 @@ fn t0053_tuple_variadic_ellipsis_json_publishes_help() {
 }
 
 #[test]
-fn t0034_list_set_annotation() {
-    assert_diagnostic_matches_fixture("t0034_list_set_annotation");
+fn t0034_list_none_annotation() {
+    assert_diagnostic_matches_fixture("t0034_list_none_annotation");
 }
 
 #[test]
@@ -1188,18 +1181,18 @@ fn t0034_nested_list_annotation() {
 }
 
 #[test]
-fn t0036_dict_int_key_annotation() {
-    assert_diagnostic_matches_fixture("t0036_dict_int_key_annotation");
+fn t0036_dict_none_value_annotation() {
+    assert_diagnostic_matches_fixture("t0036_dict_none_value_annotation");
 }
 
 #[test]
-fn t0038_set_str_annotation() {
-    assert_diagnostic_matches_fixture("t0038_set_str_annotation");
+fn t0038_set_none_annotation() {
+    assert_diagnostic_matches_fixture("t0038_set_none_annotation");
 }
 
 #[test]
-fn t0039_tuple_str_element_annotation() {
-    assert_diagnostic_matches_fixture("t0039_tuple_str_element_annotation");
+fn t0039_tuple_none_element_annotation() {
+    assert_diagnostic_matches_fixture("t0039_tuple_none_element_annotation");
 }
 
 #[test]
@@ -1514,15 +1507,15 @@ fn t0021_annotated_broken_value_still_reports_the_real_defect() {
 /// `check_container_ty` gate a written annotation does, so an inferred
 /// `list[str]` is `T0034` (D-105), not a silently accepted list.
 #[test]
-fn t0034_inferred_list_set_is_not_compiled_yet() {
-    assert_diagnostic_matches_fixture("t0034_inferred_list_set_is_not_compiled_yet");
+fn t0034_inferred_list_none_is_not_compiled_yet() {
+    assert_diagnostic_matches_fixture("t0034_inferred_list_none_is_not_compiled_yet");
 }
 
 /// The dict half of the same gate: an inferred `dict[int, int]` is `T0036`
 /// (D-122).
 #[test]
-fn t0036_inferred_dict_int_int_is_not_compiled_yet() {
-    assert_diagnostic_matches_fixture("t0036_inferred_dict_int_int_is_not_compiled_yet");
+fn t0036_inferred_dict_int_none_is_not_compiled_yet() {
+    assert_diagnostic_matches_fixture("t0036_inferred_dict_int_none_is_not_compiled_yet");
 }
 
 // Part 1 of #1026: a CPython `import` binds the module object and nothing
@@ -1563,12 +1556,10 @@ fn c0001_aug_assign_computed_attribute_base() {
     assert_diagnostic_matches_fixture("c0001_aug_assign_computed_attribute_base");
 }
 
-
 #[test]
 fn c0001_aug_assign_slice() {
     assert_diagnostic_matches_fixture("c0001_aug_assign_slice");
 }
-
 
 // #1224 (D-128): `I0402`, the interop policy's rejection of a CPython-backed
 // import. The same source is rejected by `--pure` and by `--interop-policy

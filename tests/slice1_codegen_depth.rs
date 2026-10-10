@@ -1387,24 +1387,10 @@ print(len(x))
 }
 
 #[test]
-fn for_v_in_a_module_level_set_iterates_in_first_insertion_order() {
-    // `for v in x:` over a module-level `set[int]` (D-123) end to end
-    // through the real `pycc build` CLI, with a duplicate element in the
-    // literal -- mirrors the dict iteration-order coverage above
-    // (`for_k_in_a_module_level_dict_iterates_its_keys_in_insertion_
-    // order`) and pins the same property one layer down that
-    // `pycc_codegen`'s own hand-built-MIR unit test
-    // (`for_x_in_set_iterates_in_first_insertion_order`) already covers:
-    // `PyIntSetObj`'s first-insertion iteration order (D-121) surviving
-    // through the full CLI pipeline, not just direct MIR-to-object
-    // codegen. `2` printing before `1` (with the second `2` deduped away
-    // rather than moving `2`'s position) is pycc's own documented,
-    // internally-consistent behavior -- NOT a claim about CPython: this
-    // is pinning pycc against itself, not against a CPython oracle.
-    // `python3` on this exact source prints `1`/`2` instead (CPython's own
-    // set iteration order for small ints is unspecified by the language
-    // and happens to come out numeric here, not insertion order), so this
-    // is deliberately not a `tests/conformance.rs` fixture.
+fn for_v_in_a_module_level_set_iterates_in_cpython_order() {
+    // `pycc_rt::set` emulates CPython's `setobject.c` table (hashes, probe
+    // sequence, resizes), so iteration follows CPython's own order: `1`
+    // before `2` here, as `python3` prints for this exact source.
     let source = "\
 x = {2, 1, 2}
 for v in x:
@@ -1412,7 +1398,7 @@ for v in x:
 ";
     let output = build_and_run("set_for_iteration_order", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n1\n");
+    assert_eq!(output.stdout, b"1\n2\n");
 }
 
 // -- PR-12 Task 9 (D-118): `list[int]` slicing end to end through the real

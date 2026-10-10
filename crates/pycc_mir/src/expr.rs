@@ -17,7 +17,7 @@ use pycc_hir::{
 };
 use std::collections::HashMap;
 
-mod builtin_call;
+pub(crate) mod builtin_call;
 mod foreign_static;
 mod instance_hash;
 mod receiver_dispatch;
@@ -116,6 +116,7 @@ pub(super) fn lower_expr(
         // straight into MIR, because MIR has nothing to derive it from --
         // see `MirExpr::EmptyList`'s own doc comment.
         HirExpr::EmptyList(element) => MirExpr::EmptyList(element.clone()),
+        HirExpr::EmptySet(element) => MirExpr::EmptySet(element.clone()),
         HirExpr::EmptyDict(pair) => MirExpr::EmptyDict(pair.clone()),
         // D-136: `math.pi` (a `pycc_hir`-qualified stdlib constant name --
         // real Python identifiers never contain `.`, see
@@ -655,6 +656,17 @@ pub(super) fn lower_expr(
                     Ok(object_binop) => return object_binop,
                     Err(operands) => *operands,
                 };
+            if let Some(sig) =
+                pycc_hir::builtins::set_operator(op.as_str(), in_place, &left.ty(), &right.ty())
+            {
+                let mut args = vec![left, right];
+                if sig.params.len() == 3 {
+                    args.push(MirExpr::IntLiteral(pycc_hir::builtins::set_inplace_index(
+                        op.as_str(),
+                    )));
+                }
+                return MirExpr::RtCall(Box::new(crate::RtCallExpr { sig, args }));
+            }
             let ty = binop_result_ty(*op, left.ty(), right.ty());
             MirExpr::BinOp {
                 op: *op,
@@ -985,6 +997,19 @@ pub(super) fn lower_expr(
         // #1263: an attribute receiver's type is its lowered read's own.
         HirExpr::ListPop { list } => {
             let (list, list_ty) = lower_container_receiver(list, scopes, classes, current_class);
+            // `s.pop()` on a set resolves through `pycc_hir::builtins`.
+            if !matches!(list_ty, Ty::List(_)) {
+                let receiver = match list {
+                    MirContainerReceiver::Name(name) => MirExpr::Name { name, ty: list_ty },
+                    MirContainerReceiver::Attr(read) => *read,
+                };
+                return builtin_call::lower_builtin_method(receiver, "pop", Vec::new())
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "pycc_mir: internal error: `.pop()` on a receiver pycc_types rejected"
+                        )
+                    });
+            }
             let Ty::List(elem_ty) = list_ty else {
                 panic!(
                     "pycc_mir: internal error: `.pop()` receiver {list:?} is not list-typed -- pycc_types::check should have rejected this HIR before it reached pycc_mir"
@@ -1810,6 +1835,7 @@ pub(super) fn pre_bind_named_expr_targets(
         | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
+        | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented

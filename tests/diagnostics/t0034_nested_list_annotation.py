@@ -1,2 +1,2 @@
-def f(xs: list[list[set[int]]]) -> None:
+def f(xs: list[list[None]]) -> None:
     return

@@ -603,6 +603,7 @@ pub(crate) fn collect_named_expr_names_in_expr<'a>(expr: &'a HirExpr, names: &mu
         | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
+        | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
@@ -1249,6 +1250,7 @@ fn collect_named_expr_bindings(
         | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
+        | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
@@ -4050,6 +4052,7 @@ fn reject_generic_calls_in_expr(
         | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
+        | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented

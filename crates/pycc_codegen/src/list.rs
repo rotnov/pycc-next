@@ -20,24 +20,9 @@ use crate::exception::jump_to_exception_target;
 use inkwell::values::BasicValue as _;
 use pycc_mir::Ty;
 
-/// `pycc_rt::LIST_KIND_*` for a list whose elements are `elem`. An
-/// instance of an exception class carries no reference count, so its list
-/// kind is the uncounted one (`6`).
+/// `pycc_rt::LIST_KIND_*` for a list whose elements are `elem`.
 pub(crate) fn list_kind(rt: &RtFns<'_>, elem: &Ty) -> u64 {
-    match elem {
-        Ty::Int => 0,
-        Ty::Float => 1,
-        Ty::Bool => 2,
-        Ty::Str => 3,
-        Ty::Instance(_) if crate::heap_rc::heap_kind(rt, elem).is_some() => 4,
-        Ty::Instance(_) => 6,
-        Ty::List(_) => 5,
-        other => panic!(
-            "pycc_codegen: internal error: `list[{}]` -- pycc_hir::is_list_element_ty should \
-             have rejected this element type before codegen",
-            other.name()
-        ),
-    }
+    crate::containers::word_kind(rt, elem)
 }
 
 /// The element type of a `list[T]`-typed MIR value.
@@ -140,10 +125,22 @@ pub(crate) fn raw_index<'ctx>(
     untag_or_check(context, builder, rt, UntagUse::Index, encoded)
 }
 
+/// The bigint-exclusion check every container ingress applies to an
+/// encoded `int` word (`OverflowError` beyond the inline range).
+pub(crate) fn check_element_int<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    encoded: IntValue<'ctx>,
+) {
+    let _ = untag_or_check(context, builder, rt, UntagUse::Element, encoded);
+}
+
 /// Converts an element `scalar` (the value of `source`) into the word a
-/// list of `elem` stores, taking the reference the list will own: a
-/// borrowed `str` is retained. An `int` element keeps its D-141 encoded
-/// word after the bigint-exclusion check every container ingress applies.
+/// container of `elem` stores, taking the reference the container will own:
+/// a borrowed counted value is retained, and a struct tuple is boxed into a
+/// new tuple object. An `int` element keeps its D-141 encoded word after the
+/// bigint-exclusion check every container ingress applies.
 pub(crate) fn element_word<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -152,15 +149,21 @@ pub(crate) fn element_word<'ctx>(
     source: &MirExpr,
     scalar: Scalar<'ctx>,
 ) -> IntValue<'ctx> {
-    match elem {
-        Ty::Int => {
+    match (elem, scalar) {
+        (Ty::Int, scalar) => {
             let encoded = to_encoded_int(context, builder, scalar);
-            let _ = untag_or_check(context, builder, rt, UntagUse::Element, encoded);
+            check_element_int(context, builder, rt, encoded);
             encoded
         }
-        // A counted element (`str`, list, instance): the list owns one
-        // reference, so a borrowed one is retained.
-        _ => {
+        (Ty::Tuple(elements), Scalar::Tuple(tuple)) => {
+            let boxed = crate::containers::box_struct_tuple(context, builder, rt, elements, tuple);
+            builder
+                .build_ptr_to_int(boxed, context.i64_type(), "boxed_tuple_word")
+                .expect("build_ptr_to_int should not fail for a pointer")
+        }
+        // A counted element (`str`, list, tuple object, instance): the
+        // container owns one reference, so a borrowed one is retained.
+        (_, scalar) => {
             let scalar =
                 crate::heap_rc::retain_if_heap_duplicate(context, builder, rt, source, scalar);
             scalar_to_slot_word(context, builder, scalar)
@@ -168,9 +171,9 @@ pub(crate) fn element_word<'ctx>(
     }
 }
 
-/// The element a stored word denotes, by the list's element type. A `str`
-/// element comes back borrowed (`str_rc::str_value_is_a_duplicate_reference`
-/// classifies a list read as such).
+/// The element a stored word denotes, by the container's element type. A
+/// counted element comes back borrowed (`heap_rc::is_borrowed_read` classifies
+/// a container read as such); a struct tuple is unboxed by value.
 pub(crate) fn word_element<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -179,6 +182,22 @@ pub(crate) fn word_element<'ctx>(
 ) -> Scalar<'ctx> {
     match elem {
         Ty::Int => Scalar::Int(word),
+        Ty::Tuple(elements) => {
+            let ptr = builder
+                .build_int_to_ptr(
+                    word,
+                    context.ptr_type(inkwell::AddressSpace::default()),
+                    "tuple_word_ptr",
+                )
+                .expect("build_int_to_ptr should not fail reinterpreting an i64 as a pointer");
+            if pycc_hir::tuple_is_boxed(elements) {
+                Scalar::List(ptr)
+            } else {
+                Scalar::Tuple(crate::containers::unbox_struct_tuple(
+                    context, builder, elements, ptr,
+                ))
+            }
+        }
         other => slot_word_to_scalar(context, builder, word, other),
     }
 }
@@ -449,47 +468,6 @@ pub(crate) fn emit_list_binop<'ctx>(
         ),
     };
     Scalar::List(result)
-}
-
-/// `item in xs` / `item not in xs`. The needle is borrowed by the runtime;
-/// an owned `str` needle is released after the test.
-pub(crate) fn emit_list_contains<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    list_ty: &Ty,
-    item_expr: &MirExpr,
-    item: Scalar<'ctx>,
-    list: Scalar<'ctx>,
-    negate: bool,
-) -> Scalar<'ctx> {
-    let elem = element_ty(list_ty);
-    let list = expect_list_pointer(list, "the membership container");
-    // The needle is borrowed for the scan; the caller releases a fresh
-    // `str` needle afterwards (`heap_rc::release_scalar_if_temporary`).
-    let word = if *elem == Ty::Str {
-        scalar_to_slot_word(context, builder, item)
-    } else {
-        element_word(context, builder, rt, elem, item_expr, item)
-    };
-    let found = builder
-        .build_call(
-            rt.list_contains,
-            &[list.into(), word.into()],
-            "list_contains",
-        )
-        .expect("build_call should not fail for a declared runtime function")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_list_contains returns i8")
-        .into_int_value();
-    let found = if negate {
-        builder
-            .build_xor(found, context.i8_type().const_int(1, false), "not_in")
-            .expect("build_xor should not fail for two i8 operands")
-    } else {
-        found
-    };
-    Scalar::Bool(found)
 }
 
 /// `xs[start:stop:step]` as a new list, CPython's slice semantics in

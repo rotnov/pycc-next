@@ -222,6 +222,11 @@ struct Prepared {
 impl Prepared {
     fn new(hir: &HirModule) -> Result<Self, KeyedDiagnostics> {
         let resolved = empty_container::resolve_empty_containers(hir);
+        // Container parameters of private helpers, from their call sites:
+        // after the empty containers, whose resolved types the arguments
+        // carry (`empty_container::call_site`).
+        let resolved = empty_container::resolve_call_site_params(resolved.as_ref().unwrap_or(hir))
+            .or(resolved);
         let base = resolved.as_ref().unwrap_or(hir);
         empty_container::attr_slot::reject_unresolved_attr_slots(base)?;
         let copied = inherited_copies::add_inherited_copies(base);

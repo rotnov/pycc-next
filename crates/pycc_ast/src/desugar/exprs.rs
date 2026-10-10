@@ -42,33 +42,9 @@ impl Rewriter<'_> {
         !self.shadowed.contains(name)
     }
 
-    /// `f` applied to the comprehension variable `var`: a one-parameter
-    /// lambda is inlined with `var` as its parameter, anything else is
-    /// called.
+    /// `f` applied to a fresh comprehension variable (`keys::apply`).
     fn apply(&self, f: &Expr, range: TextRange) -> Option<(String, Expr)> {
-        match f {
-            Expr::Lambda(lambda) => {
-                let params = lambda.parameters.as_deref()?;
-                let [param] = params.args.as_slice() else {
-                    return None;
-                };
-                if param.default.is_some()
-                    || !params.posonlyargs.is_empty()
-                    || params.vararg.is_some()
-                    || params.kwarg.is_some()
-                    || !params.kwonlyargs.is_empty()
-                {
-                    return None;
-                }
-                Some((param.name().to_string(), (*lambda.body).clone()))
-            }
-            Expr::Name(_) | Expr::Attribute(_) => {
-                let var = self.fresh.name();
-                let applied = call(f.clone(), vec![load(&var, range)], range);
-                Some((var, applied))
-            }
-            _ => None,
-        }
+        super::keys::apply(f, self.fresh, range)
     }
 
     /// `map(f, xs)` -> `[f(v) for v in xs]`; `filter(f, xs)` ->
@@ -87,7 +63,13 @@ impl Rewriter<'_> {
         match func.id.as_str() {
             "map" if self.builtin("map") => {
                 let (var, elt) = self.apply(f, range)?;
-                Some(list_comp(elt, store(&var, range), xs.clone(), Vec::new(), range))
+                Some(list_comp(
+                    elt,
+                    store(&var, range),
+                    xs.clone(),
+                    Vec::new(),
+                    range,
+                ))
             }
             "filter" if self.builtin("filter") => {
                 let (var, test) = if matches!(f, Expr::NoneLiteral(_)) {
@@ -97,7 +79,13 @@ impl Rewriter<'_> {
                 } else {
                     self.apply(f, range)?
                 };
-                Some(list_comp(load(&var, range), store(&var, range), xs.clone(), vec![test], range))
+                Some(list_comp(
+                    load(&var, range),
+                    store(&var, range),
+                    xs.clone(),
+                    vec![test],
+                    range,
+                ))
             }
             _ => None,
         }
@@ -205,7 +193,11 @@ impl Rewriter<'_> {
             || !self.builtin("print")
             || !self.builtin("str")
             || call_expr.arguments.keywords.is_empty()
-            || call_expr.arguments.args.iter().any(|a| matches!(a, Expr::Starred(_)))
+            || call_expr
+                .arguments
+                .args
+                .iter()
+                .any(|a| matches!(a, Expr::Starred(_)))
         {
             return None;
         }
@@ -231,7 +223,90 @@ impl Rewriter<'_> {
             ctx: ExprContext::Load,
         });
         let joined = call(attribute(sep, "join", range), vec![pieces], range);
-        Some(call_name("__pycc_print_str", vec![binop(joined, end, range)], range))
+        Some(call_name(
+            "__pycc_print_str",
+            vec![binop(joined, end, range)],
+            range,
+        ))
+    }
+}
+
+impl Rewriter<'_> {
+    /// A generator expression passed as the only argument of a consumer
+    /// that materializes it (`sum(x for x in xs)`, `", ".join(... for ...)`)
+    /// becomes the equivalent list comprehension (`comps.rs`).
+    fn materialize_generator_argument(&self, call_expr: &mut ExprCall) {
+        if call_expr.arguments.args.len() != 1 || !call_expr.arguments.keywords.is_empty() {
+            return;
+        }
+        let consumer = match call_expr.func.as_ref() {
+            Expr::Name(func)
+                if super::comps::is_materializing_consumer(func.id.as_str())
+                    && self.builtin(func.id.as_str()) =>
+            {
+                func.id.to_string()
+            }
+            Expr::Attribute(attr) if attr.attr.as_str() == "join" => "join".to_string(),
+            _ => return,
+        };
+        if let Some(list) =
+            super::comps::materialize_generator(&consumer, &call_expr.arguments.args[0])
+        {
+            call_expr.arguments.args[0] = list;
+        }
+    }
+}
+
+impl Rewriter<'_> {
+    /// A `range(...)` argument of a builtin that consumes an iterable
+    /// (`list(range(n))`, `set(range(a, b))`, `zip(range(n), xs)`) becomes
+    /// the list comprehension `[v for v in range(...)]`, which the
+    /// compiler iterates natively: `range` itself is not a value it has.
+    fn materialize_range_arguments(&self, call_expr: &mut ExprCall) {
+        let Expr::Name(func) = call_expr.func.as_ref() else {
+            return;
+        };
+        if !matches!(
+            func.id.as_str(),
+            "list"
+                | "set"
+                | "frozenset"
+                | "sorted"
+                | "sum"
+                | "min"
+                | "max"
+                | "zip"
+                | "enumerate"
+                | "tuple"
+                | "any"
+                | "all"
+        ) || !self.builtin(func.id.as_str())
+            || !self.builtin("range")
+        {
+            return;
+        }
+        for arg in call_expr.arguments.args.iter_mut() {
+            let Expr::Call(inner) = arg else { continue };
+            if !matches!(inner.func.as_ref(), Expr::Name(name) if name.id.as_str() == "range")
+                || !inner.arguments.keywords.is_empty()
+                || inner
+                    .arguments
+                    .args
+                    .iter()
+                    .any(|a| matches!(a, Expr::Starred(_)))
+            {
+                continue;
+            }
+            let range = inner.range;
+            let var = self.fresh.name();
+            *arg = list_comp(
+                load(&var, range),
+                store(&var, range),
+                arg.clone(),
+                Vec::new(),
+                range,
+            );
+        }
     }
 }
 
@@ -255,16 +330,25 @@ impl Transformer for Rewriter<'_> {
             return;
         }
         transformer::walk_expr(self, expr);
+        super::comps::flatten_tuple_targets(expr, self.fresh);
+        if let Expr::Call(call_expr) = expr {
+            self.materialize_range_arguments(call_expr);
+            self.materialize_generator_argument(call_expr);
+        }
         let replacement = match expr {
-            Expr::Call(call_expr) => self.map_or_filter(call_expr).or_else(|| {
-                let starred = self.starred_print(call_expr);
-                match &starred {
-                    Some(Expr::Call(rewritten)) => {
-                        self.print_keywords(rewritten).or(starred.clone())
-                    }
-                    _ => self.print_keywords(call_expr),
-                }
-            }),
+            Expr::Call(call_expr) => {
+                super::keys::rewrite_key_call(call_expr, self.fresh, &|name| !self.builtin(name))
+                    .or_else(|| self.map_or_filter(call_expr))
+                    .or_else(|| {
+                        let starred = self.starred_print(call_expr);
+                        match &starred {
+                            Some(Expr::Call(rewritten)) => {
+                                self.print_keywords(rewritten).or(starred.clone())
+                            }
+                            _ => self.print_keywords(call_expr),
+                        }
+                    })
+            }
             Expr::List(list) => self.starred_list(&list.elts, list.range),
             _ => None,
         };

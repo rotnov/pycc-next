@@ -27,6 +27,7 @@ impl MirExpr {
             | MirExpr::StringLiteral(_)
             | MirExpr::EmptyList(_)
             | MirExpr::EmptyDict(_)
+            | MirExpr::EmptySet(_)
             | MirExpr::NoneLiteral
             | MirExpr::NotImplemented
             | MirExpr::Name { .. }

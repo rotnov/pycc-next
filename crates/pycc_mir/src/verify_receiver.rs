@@ -381,6 +381,7 @@ impl Verifier<'_> {
             | MirExpr::NotImplemented
             | MirExpr::Name { .. }
             | MirExpr::EmptyList(_)
+            | MirExpr::EmptySet(_)
             | MirExpr::EmptyDict(_)
             | MirExpr::NullInstance { .. }
             | MirExpr::FrozenSetFrom { source: None } => {}

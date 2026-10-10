@@ -29,6 +29,10 @@ pub struct BuiltinSig {
     pub ret: Ty,
     pub ret_word: bool,
     pub word_args: Vec<bool>,
+    /// Trailing `i64` arguments, after the call's own: the container word
+    /// kind (`pycc_rt::LIST_KIND_*`) of each type, for a runtime function
+    /// that builds or retains words its arguments do not describe.
+    pub kind_args: Vec<Ty>,
 }
 
 fn sig(symbol: &'static str, params: &[Ty], ret: Ty) -> BuiltinSig {
@@ -38,6 +42,37 @@ fn sig(symbol: &'static str, params: &[Ty], ret: Ty) -> BuiltinSig {
         ret,
         ret_word: false,
         word_args: vec![false; params.len()],
+        kind_args: Vec::new(),
+    }
+}
+
+/// [`sig`] whose arguments flagged in `words` pass as container words, whose
+/// result is a word when `ret_word`, and which takes `kinds` as trailing
+/// kind arguments.
+fn word_sig(
+    symbol: &'static str,
+    params: &[Ty],
+    words: &[bool],
+    ret: Ty,
+    ret_word: bool,
+    kinds: &[Ty],
+) -> BuiltinSig {
+    BuiltinSig {
+        symbol,
+        params: params.to_vec(),
+        ret,
+        ret_word,
+        word_args: words.to_vec(),
+        kind_args: kinds.to_vec(),
+    }
+}
+
+/// Whether `ty` is a set or frozenset of hashable (natively hashed)
+/// elements.
+fn hashed_set(ty: &Ty) -> Option<&Ty> {
+    match ty {
+        Ty::Set(elem) | Ty::FrozenSet(elem) if crate::is_hashable_ty(elem) => Some(elem),
+        _ => None,
     }
 }
 
@@ -46,7 +81,9 @@ fn sig(symbol: &'static str, params: &[Ty], ret: Ty) -> BuiltinSig {
 fn renders_natively(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
-        Ty::List(elem) => renders_natively(elem),
+        Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => renders_natively(elem),
+        Ty::Tuple(elements) => elements.iter().all(renders_natively),
+        Ty::Dict(kv) => renders_natively(&kv.0) && renders_natively(&kv.1),
         _ => false,
     }
 }
@@ -55,9 +92,28 @@ fn is_intlike(ty: &Ty) -> bool {
     matches!(ty, Ty::Int | Ty::Bool)
 }
 
-/// Whether a list's elements are ordered by a natively supported `<`.
+/// Whether a list's elements are ordered by a natively supported `<`
+/// (`pycc_rt::value::lt`, lexicographic for lists and tuples).
 fn orderable(elem: &Ty) -> bool {
-    matches!(elem, Ty::Int | Ty::Bool | Ty::Float | Ty::Str)
+    match elem {
+        Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
+        Ty::List(inner) => orderable(inner),
+        Ty::Tuple(elements) => elements.iter().all(orderable),
+        _ => false,
+    }
+}
+
+/// Whether two values of `elem` compare by value in the runtime
+/// (`pycc_rt::value::eq`): everything but a user-class instance, which
+/// compares by identity there.
+fn value_comparable(elem: &Ty) -> bool {
+    match elem {
+        Ty::Instance(_) => false,
+        Ty::List(inner) | Ty::Set(inner) | Ty::FrozenSet(inner) => value_comparable(inner),
+        Ty::Tuple(elements) => elements.iter().all(value_comparable),
+        Ty::Dict(kv) => value_comparable(&kv.1),
+        _ => true,
+    }
 }
 
 /// Whether `item` can be compared for equality against a list of `elem`
@@ -66,14 +122,34 @@ fn same_elem(item: &Ty, elem: &Ty) -> bool {
     item == elem || (is_intlike(item) && is_intlike(elem))
 }
 
+/// The key and element types of a `(key, element)` pair element.
+fn keyed_pair(pair: &Ty) -> Option<(&Ty, &Ty)> {
+    match pair {
+        Ty::Tuple(items) if items.len() == 2 => Some((&items[0], &items[1])),
+        _ => None,
+    }
+}
+
 fn list_of(elem: Ty) -> Ty {
     Ty::List(Box::new(elem))
 }
 
+/// Whether builtin `name` takes a `str` iterable argument as the list of its
+/// characters (`zip`'s every argument, `enumerate`'s first): MIR lowering
+/// converts it with `pycc_rt_str_to_list` before the call.
+#[must_use]
+pub fn iterates_str_as_list(name: &str) -> bool {
+    matches!(name, "zip" | "enumerate")
+}
+
 /// Every builtin name [`resolve_call`] claims for some argument types.
 pub const CALL_NAMES: &[&str] = &[
+    "__pycc_max_keyed",
+    "__pycc_min_keyed",
     "__pycc_print_str",
     "__pycc_setrecursionlimit",
+    "__pycc_sort_keyed",
+    "__pycc_sorted_keyed",
     "__pycc_stdin_read",
     "__pycc_stdin_readline",
     "__pycc_stdin_readlines",
@@ -83,6 +159,8 @@ pub const CALL_NAMES: &[&str] = &[
     "any",
     "bin",
     "chr",
+    "dict",
+    "enumerate",
     "float",
     "hex",
     "input",
@@ -100,9 +178,11 @@ pub const CALL_NAMES: &[&str] = &[
     "ord",
     "pow",
     "reversed",
+    "set",
     "sorted",
     "str",
     "sum",
+    "zip",
 ];
 
 /// The result type of builtin `name` whatever its (admitted) argument
@@ -110,10 +190,24 @@ pub const CALL_NAMES: &[&str] = &[
 #[must_use]
 pub fn fixed_return(name: &str) -> Option<Ty> {
     Some(match name {
-        "input" | "str" | "chr" | "bin" | "hex" | "oct" | "__pycc_stdin_readline"
+        "input"
+        | "str"
+        | "chr"
+        | "bin"
+        | "hex"
+        | "oct"
+        | "__pycc_stdin_readline"
         | "__pycc_stdin_read" => Ty::Str,
-        "int" | "len" | "ord" | "pow" | "__pycc_stdout_write" | "math.gcd" | "math.lcm"
-        | "math.isqrt" | "math.floor" | "math.ceil" => Ty::Int,
+        "int"
+        | "len"
+        | "ord"
+        | "pow"
+        | "__pycc_stdout_write"
+        | "math.gcd"
+        | "math.lcm"
+        | "math.isqrt"
+        | "math.floor"
+        | "math.ceil" => Ty::Int,
         "float" => Ty::Float,
         "any" | "all" => Ty::Bool,
         "__pycc_stdin_readlines" => Ty::List(Box::new(Ty::Str)),
@@ -134,15 +228,24 @@ pub fn is_pairwise_variadic(name: &str) -> bool {
 /// with arguments of the wrong type.
 #[must_use]
 pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String>> {
+    if iterates_str_as_list(name) && args.contains(&Ty::Str) {
+        let as_lists: Vec<Ty> = args
+            .iter()
+            .enumerate()
+            .map(|(i, ty)| match ty {
+                Ty::Str if i == 0 || name == "zip" => list_of(Ty::Str),
+                other => other.clone(),
+            })
+            .collect();
+        return resolve_call(name, &as_lists);
+    }
     let (int, float, str_) = (Ty::Int, Ty::Float, Ty::Str);
     let found = match (name, args) {
         ("input", []) => sig("pycc_rt_input", &[], str_),
         // The `sys` stream operations `pycc_ast::desugar` rewrites to.
         ("__pycc_stdin_readline", []) => sig("pycc_rt_stdin_readline", &[], str_),
         ("__pycc_stdin_read", []) => sig("pycc_rt_stdin_read", &[], str_),
-        ("__pycc_stdin_readlines", []) => {
-            sig("pycc_rt_stdin_readlines", &[], list_of(str_))
-        }
+        ("__pycc_stdin_readlines", []) => sig("pycc_rt_stdin_readlines", &[], list_of(str_)),
         ("__pycc_stdout_write", [Ty::Str]) => sig("pycc_rt_stdout_write", &[str_], int),
         ("__pycc_print_str", [Ty::Str]) => {
             sig("pycc_rt_print_write_str", &[str_.clone()], Ty::None)
@@ -195,15 +298,27 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             let max = name == "max";
             let (symbol, ty) = match a {
                 Ty::Int | Ty::Bool => (
-                    if max { "pycc_rt_int_max2" } else { "pycc_rt_int_min2" },
+                    if max {
+                        "pycc_rt_int_max2"
+                    } else {
+                        "pycc_rt_int_min2"
+                    },
                     int,
                 ),
                 Ty::Float => (
-                    if max { "pycc_rt_float_max2" } else { "pycc_rt_float_min2" },
+                    if max {
+                        "pycc_rt_float_max2"
+                    } else {
+                        "pycc_rt_float_min2"
+                    },
                     float,
                 ),
                 Ty::Str => (
-                    if max { "pycc_rt_str_max2" } else { "pycc_rt_str_min2" },
+                    if max {
+                        "pycc_rt_str_max2"
+                    } else {
+                        "pycc_rt_str_min2"
+                    },
                     str_,
                 ),
                 _ => return None,
@@ -213,7 +328,11 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             if a == b && *a == Ty::Bool {
                 found.ret = Ty::Bool;
                 found.params = vec![Ty::Int, Ty::Int];
-                found.symbol = if max { "pycc_rt_bool_max2" } else { "pycc_rt_bool_min2" };
+                found.symbol = if max {
+                    "pycc_rt_bool_max2"
+                } else {
+                    "pycc_rt_bool_min2"
+                };
             }
             found
         }
@@ -227,6 +346,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             ret: (**elem).clone(),
             ret_word: true,
             word_args: vec![false],
+            kind_args: Vec::new(),
         },
         ("sum", [Ty::List(elem)]) => match **elem {
             Ty::Int | Ty::Bool => sig("pycc_rt_list_sum_int", &[args[0].clone()], int),
@@ -252,9 +372,200 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             &[args[0].clone()],
             Ty::Bool,
         ),
+        // Containers of the generic runtime objects (`pycc_rt::set`,
+        // `pycc_rt::dict`, tuple objects).
+        ("set", [Ty::List(elem)]) if crate::is_hashable_ty(elem) => sig(
+            "pycc_rt_set_of_list",
+            &[args[0].clone()],
+            Ty::Set(elem.clone()),
+        ),
+        ("set", [Ty::Str]) => sig(
+            "pycc_rt_set_from_str",
+            &[str_.clone()],
+            Ty::Set(Box::new(str_)),
+        ),
+        ("set", [set]) if hashed_set(set).is_some() => sig(
+            "pycc_rt_set_copy",
+            &[set.clone()],
+            Ty::Set(Box::new(hashed_set(set)?.clone())),
+        ),
+        ("set", [Ty::Dict(kv)]) if crate::is_hashable_ty(&kv.0) => sig(
+            "pycc_rt_set_from_dict",
+            &[args[0].clone()],
+            Ty::Set(Box::new(kv.0.clone())),
+        ),
+        ("list", [set]) if hashed_set(set).is_some() => sig(
+            "pycc_rt_set_list",
+            &[set.clone()],
+            list_of(hashed_set(set)?.clone()),
+        ),
+        ("list", [Ty::Dict(kv)]) => sig(
+            "pycc_rt_dict_keys",
+            &[args[0].clone()],
+            list_of(kv.0.clone()),
+        ),
+        ("list", [Ty::Tuple(elements)])
+            if !elements.is_empty()
+                && crate::tuple_is_boxed(elements)
+                && elements.iter().all(|e| *e == elements[0]) =>
+        {
+            word_sig(
+                "pycc_rt_tuple_to_list",
+                &[args[0].clone()],
+                &[false],
+                list_of(elements[0].clone()),
+                false,
+                &[elements[0].clone()],
+            )
+        }
+        ("dict", [Ty::List(elem)]) => match elem.as_ref() {
+            Ty::Tuple(pair) if pair.len() == 2 && crate::is_hashable_ty(&pair[0]) => word_sig(
+                "pycc_rt_dict_of_pairs",
+                &[args[0].clone()],
+                &[false],
+                Ty::Dict(Box::new((pair[0].clone(), pair[1].clone()))),
+                false,
+                &[pair[0].clone(), pair[1].clone()],
+            ),
+            _ => return None,
+        },
+        ("dict", [Ty::Dict(_)]) => sig("pycc_rt_dict_copy_of", &[args[0].clone()], args[0].clone()),
+        ("sorted", [set]) if hashed_set(set).is_some_and(orderable) => sig(
+            "pycc_rt_set_sorted",
+            &[set.clone()],
+            list_of(hashed_set(set)?.clone()),
+        ),
+        ("sorted", [Ty::Dict(kv)]) if orderable(&kv.0) => sig(
+            "pycc_rt_dict_sorted",
+            &[args[0].clone()],
+            list_of(kv.0.clone()),
+        ),
+        ("min" | "max", [set]) if hashed_set(set).is_some_and(orderable) => {
+            let elem = hashed_set(set)?.clone();
+            let mut found = word_sig(
+                "pycc_rt_set_extreme",
+                &[set.clone(), int.clone()],
+                &[false, false],
+                elem,
+                true,
+                &[],
+            );
+            found.symbol = if name == "max" {
+                "pycc_rt_set_extreme_max"
+            } else {
+                "pycc_rt_set_extreme_min"
+            };
+            found.params.pop();
+            found.word_args.pop();
+            found
+        }
+        // `key=`/`reverse=` calls, rewritten by `pycc_ast::desugar::keys`
+        // into `(key, element)` pair lists.
+        ("__pycc_sorted_keyed", [Ty::List(pair), Ty::Bool]) => {
+            let (key, elem) = keyed_pair(pair)?;
+            if !orderable(key) {
+                return None;
+            }
+            word_sig(
+                "pycc_rt_list_sorted_keyed",
+                args,
+                &[false, false],
+                list_of(elem.clone()),
+                false,
+                &[elem.clone()],
+            )
+        }
+        ("__pycc_sort_keyed", [Ty::List(target), Ty::List(pair), Ty::Bool]) => {
+            let (key, elem) = keyed_pair(pair)?;
+            if !orderable(key) || elem != target.as_ref() {
+                return None;
+            }
+            sig("pycc_rt_list_sort_keyed", args, Ty::None)
+        }
+        ("__pycc_min_keyed" | "__pycc_max_keyed", [Ty::List(pair)]) => {
+            let (key, elem) = keyed_pair(pair)?;
+            if !orderable(key) {
+                return None;
+            }
+            word_sig(
+                if name == "__pycc_min_keyed" {
+                    "pycc_rt_list_min_keyed"
+                } else {
+                    "pycc_rt_list_max_keyed"
+                },
+                args,
+                &[false],
+                elem.clone(),
+                true,
+                &[elem.clone()],
+            )
+        }
+        ("enumerate", [Ty::List(elem)]) => sig(
+            "pycc_rt_list_enumerate0",
+            &[args[0].clone()],
+            list_of(Ty::Tuple(Box::new(vec![int.clone(), (**elem).clone()]))),
+        ),
+        ("enumerate", [Ty::List(elem), start]) if is_intlike(start) => sig(
+            "pycc_rt_list_enumerate",
+            &[args[0].clone(), int.clone()],
+            list_of(Ty::Tuple(Box::new(vec![int.clone(), (**elem).clone()]))),
+        ),
+        ("zip", [Ty::List(a), Ty::List(b)]) => sig(
+            "pycc_rt_list_zip2",
+            &[args[0].clone(), args[1].clone()],
+            list_of(Ty::Tuple(Box::new(vec![(**a).clone(), (**b).clone()]))),
+        ),
+        ("zip", [Ty::List(a), Ty::List(b), Ty::List(c)]) => sig(
+            "pycc_rt_list_zip3",
+            &[args[0].clone(), args[1].clone(), args[2].clone()],
+            list_of(Ty::Tuple(Box::new(vec![
+                (**a).clone(),
+                (**b).clone(),
+                (**c).clone(),
+            ]))),
+        ),
         _ => return None,
     };
     Some(Ok(found))
+}
+
+/// `left <op> right` between two sets (or frozensets) of one hashable
+/// element type, for `|`, `&`, `-` and `^`: the runtime call, whose result
+/// has the left operand's type as in CPython. `in_place` (`a |= b`) on a
+/// `set` updates `left` itself (`pycc_rt_set_inplace` with the operator's
+/// index as a trailing int).
+#[must_use]
+pub fn set_operator(op: &str, in_place: bool, left: &Ty, right: &Ty) -> Option<BuiltinSig> {
+    if hashed_set(left).is_none() || hashed_set(left) != hashed_set(right) {
+        return None;
+    }
+    let symbol = match op {
+        "|" => "pycc_rt_set_union",
+        "&" => "pycc_rt_set_intersection",
+        "-" => "pycc_rt_set_difference",
+        "^" => "pycc_rt_set_symmetric_difference",
+        _ => return None,
+    };
+    if in_place && matches!(left, Ty::Set(_)) {
+        let found = sig(
+            "pycc_rt_set_inplace",
+            &[left.clone(), right.clone(), Ty::Int],
+            left.clone(),
+        );
+        return Some(found);
+    }
+    Some(sig(symbol, &[left.clone(), right.clone()], left.clone()))
+}
+
+/// The operator index `pycc_rt_set_inplace` takes for `op`.
+#[must_use]
+pub fn set_inplace_index(op: &str) -> i64 {
+    match op {
+        "|" => 0,
+        "&" => 1,
+        "-" => 2,
+        _ => 3,
+    }
 }
 
 /// Resolves `receiver.method(args)` for a builtin receiver type. The
@@ -274,11 +585,9 @@ pub fn resolve_method(
     let found = match (receiver, method, args) {
         (Ty::Str, "split" | "rsplit", []) => s("pycc_rt_str_split_ws", &[], list_of(str_)),
         (Ty::Str, "split", [Ty::Str]) => s("pycc_rt_str_split", &[str_.clone()], list_of(str_)),
-        (Ty::Str, "split", [Ty::Str, m]) if is_intlike(m) => s(
-            "pycc_rt_str_split_max",
-            &[str_.clone(), int],
-            list_of(str_),
-        ),
+        (Ty::Str, "split", [Ty::Str, m]) if is_intlike(m) => {
+            s("pycc_rt_str_split_max", &[str_.clone(), int], list_of(str_))
+        }
         (Ty::Str, "splitlines", []) => s("pycc_rt_str_splitlines", &[], list_of(str_)),
         (Ty::Str, "strip", []) => s("pycc_rt_str_strip", &[], str_),
         (Ty::Str, "lstrip", []) => s("pycc_rt_str_lstrip", &[], str_),
@@ -321,7 +630,7 @@ pub fn resolve_method(
             s("pycc_rt_list_extend", &[receiver.clone()], Ty::None)
         }
         (Ty::List(elem), "count" | "index" | "remove", [item])
-            if same_elem(item, elem) && orderable(elem) =>
+            if same_elem(item, elem) && value_comparable(elem) =>
         {
             let (symbol, ret) = match method {
                 "count" => ("pycc_rt_list_count", int),
@@ -331,6 +640,129 @@ pub fn resolve_method(
             let mut found = s(symbol, &[(**elem).clone()], ret);
             found.word_args = vec![false, true];
             found
+        }
+        // `del d[k]` / `del xs[i]` (`HirStmt::DeleteItem` on a native base).
+        (Ty::Dict(kv), "__pycc_delitem__", [key]) if same_elem(key, &kv.0) => word_sig(
+            "pycc_rt_dict_del",
+            &[receiver.clone(), kv.0.clone()],
+            &[false, true],
+            Ty::None,
+            false,
+            &[],
+        ),
+        (Ty::List(_), "__pycc_delitem__", [index]) if is_intlike(index) => {
+            s("pycc_rt_list_delitem", &[Ty::Int], Ty::None)
+        }
+        (Ty::Dict(kv), "keys", []) => s("pycc_rt_dict_keys", &[], list_of(kv.0.clone())),
+        (Ty::Dict(kv), "values", []) => s("pycc_rt_dict_values", &[], list_of(kv.1.clone())),
+        (Ty::Dict(kv), "items", []) => s(
+            "pycc_rt_dict_items",
+            &[],
+            list_of(Ty::Tuple(Box::new(vec![kv.0.clone(), kv.1.clone()]))),
+        ),
+        (Ty::Dict(_), "copy", []) => s("pycc_rt_dict_copy_of", &[], receiver.clone()),
+        (Ty::Dict(_), "clear", []) => s("pycc_rt_dict_clear", &[], Ty::None),
+        (Ty::Dict(_), "update", [other]) if other == receiver => {
+            s("pycc_rt_dict_update", &[receiver.clone()], Ty::None)
+        }
+        (Ty::Dict(kv), "popitem", []) => s(
+            "pycc_rt_dict_popitem",
+            &[],
+            Ty::Tuple(Box::new(vec![kv.0.clone(), kv.1.clone()])),
+        ),
+        (Ty::Dict(kv), "pop", [key]) if same_elem(key, &kv.0) => word_sig(
+            "pycc_rt_dict_pop_key",
+            &[receiver.clone(), kv.0.clone()],
+            &[false, true],
+            kv.1.clone(),
+            true,
+            &[],
+        ),
+        (Ty::Dict(kv), "pop", [key, default])
+            if same_elem(key, &kv.0) && same_elem(default, &kv.1) =>
+        {
+            word_sig(
+                "pycc_rt_dict_pop_or",
+                &[receiver.clone(), kv.0.clone(), kv.1.clone()],
+                &[false, true, true],
+                kv.1.clone(),
+                true,
+                &[kv.1.clone()],
+            )
+        }
+        (Ty::Dict(kv), "setdefault", [key, default])
+            if same_elem(key, &kv.0) && same_elem(default, &kv.1) =>
+        {
+            word_sig(
+                "pycc_rt_dict_setdefault_of",
+                &[receiver.clone(), kv.0.clone(), kv.1.clone()],
+                &[false, true, true],
+                kv.1.clone(),
+                true,
+                &[kv.0.clone(), kv.1.clone()],
+            )
+        }
+        (set, "discard" | "remove", [item])
+            if matches!(set, Ty::Set(_)) && hashed_set(set).is_some_and(|e| same_elem(item, e)) =>
+        {
+            let elem = hashed_set(set)?.clone();
+            word_sig(
+                if method == "discard" {
+                    "pycc_rt_set_discard"
+                } else {
+                    "pycc_rt_set_remove"
+                },
+                &[receiver.clone(), elem],
+                &[false, true],
+                Ty::None,
+                false,
+                &[],
+            )
+        }
+        (Ty::Set(elem), "pop", []) if crate::is_hashable_ty(elem) => word_sig(
+            "pycc_rt_set_pop",
+            &[receiver.clone()],
+            &[false],
+            (**elem).clone(),
+            true,
+            &[],
+        ),
+        (Ty::Set(elem), "clear", []) if crate::is_hashable_ty(elem) => {
+            s("pycc_rt_set_clear", &[], Ty::None)
+        }
+        (set, "copy", []) if hashed_set(set).is_some() => {
+            s("pycc_rt_set_copy_method", &[], receiver.clone())
+        }
+        (Ty::Set(elem), "update", [Ty::List(other)])
+            if crate::is_hashable_ty(elem) && same_elem(other, elem) =>
+        {
+            s("pycc_rt_set_update_list", &[args[0].clone()], Ty::None)
+        }
+        (Ty::Set(elem), "update", [other])
+            if crate::is_hashable_ty(elem) && hashed_set(other) == Some(elem) =>
+        {
+            s("pycc_rt_set_update", &[other.clone()], Ty::None)
+        }
+        (set, "union" | "intersection" | "difference" | "symmetric_difference", [other])
+            if hashed_set(set).is_some() && hashed_set(other) == hashed_set(set) =>
+        {
+            let symbol = match method {
+                "union" => "pycc_rt_set_union",
+                "intersection" => "pycc_rt_set_intersection",
+                "difference" => "pycc_rt_set_difference",
+                _ => "pycc_rt_set_symmetric_difference",
+            };
+            s(symbol, &[other.clone()], receiver.clone())
+        }
+        (set, "issubset" | "issuperset" | "isdisjoint", [other])
+            if hashed_set(set).is_some() && hashed_set(other) == hashed_set(set) =>
+        {
+            let symbol = match method {
+                "issubset" => "pycc_rt_set_issubset",
+                "issuperset" => "pycc_rt_set_issuperset",
+                _ => "pycc_rt_set_isdisjoint",
+            };
+            s(symbol, &[other.clone()], Ty::Bool)
         }
         _ => return None,
     };

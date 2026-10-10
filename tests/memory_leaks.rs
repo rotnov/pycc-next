@@ -441,6 +441,18 @@ fn dicts_and_sets_match_cpython_and_are_memcheck_clean() {
     assert_memcheck_clean(&bin);
 }
 
+/// Generic dicts, sets and tuple objects (any key, value and element type),
+/// lifted closures, `key=` sorting and a `KeyError` from a dict of tuples:
+/// every container owns and releases what it stores.
+#[test]
+fn generic_containers_match_cpython_and_are_memcheck_clean() {
+    for fixture in ["closures_keys"] {
+        let dir = ScratchDir::new("memory_fixture_generic").expect("scratch dir");
+        let bin = assert_fixture_matches_cpython(&dir, fixture);
+        assert_memcheck_clean(&bin);
+    }
+}
+
 /// A list of exception instances holds them without a count: those objects
 /// have none, and counting them corrupted their fields.
 #[test]

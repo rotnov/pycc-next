@@ -326,6 +326,7 @@ impl<'a> Walker<'a> {
             | HirExpr::NoneLiteral
             | HirExpr::NotImplemented
             | HirExpr::EmptyList(_)
+            | HirExpr::EmptySet(_)
             | HirExpr::EmptyDict(_)
             | HirExpr::Super => {}
             HirExpr::Name(name) => self.name_use(name),

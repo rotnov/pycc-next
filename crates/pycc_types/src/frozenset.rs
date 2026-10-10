@@ -40,9 +40,9 @@ pub(crate) fn frozenset_int() -> Ty {
 fn is_admitted_source(ty: &Ty) -> bool {
     match ty {
         Ty::Set(element) | Ty::FrozenSet(element) => {
-            matches!(**element, Ty::Int | Ty::Instance(_))
+            pycc_hir::is_hashable_ty(element) || matches!(**element, Ty::Instance(_))
         }
-        Ty::List(element) => **element == Ty::Int,
+        Ty::List(element) => pycc_hir::is_hashable_ty(element),
         _ => false,
     }
 }
@@ -52,14 +52,16 @@ fn is_admitted_source(ty: &Ty) -> bool {
 /// `frozenset[int]` otherwise.
 fn frozenset_of(source: &Ty) -> Ty {
     match source {
-        Ty::Set(element) | Ty::FrozenSet(element) => Ty::FrozenSet(element.clone()),
+        Ty::Set(element) | Ty::FrozenSet(element) | Ty::List(element) => {
+            Ty::FrozenSet(element.clone())
+        }
         _ => frozenset_int(),
     }
 }
 
 /// The admitted sources, for both help lines.
-const SOURCES_HELP: &str = "a `set[int]`, `frozenset[int]` or `list[int]` value, or a set or \
-                            frozenset of a hashable user class";
+const SOURCES_HELP: &str = "a list, set or frozenset of int, float, bool, str or tuples of \
+                            those, or a set or frozenset of a hashable user class";
 
 /// `T0021` for a call with more than one argument.
 fn wrong_arity(count: usize) -> Diagnostic {
@@ -76,7 +78,8 @@ fn wrong_source(ty: &Ty) -> Diagnostic {
     Diagnostic::error(
         "T0021",
         format!(
-            "`frozenset()` argument must be a `set[int]`, `frozenset[int]` or `list[int]` here, got `{}`",
+            "`frozenset()` argument must be a list, set or frozenset of hashable elements here, \
+             got `{}`",
             ty.name()
         ),
         Span::new(0, 0),
@@ -149,6 +152,7 @@ mod tests {
     fn every_admitted_source_and_the_empty_call_yield_frozenset_int() {
         assert_eq!(check_call(&[]).unwrap(), frozenset_int());
         for source in [set(), frozenset_int(), Ty::List(Box::new(Ty::Int))] {
+            // Every admitted source keeps its element type.
             assert_eq!(check_call(&[source]).unwrap(), frozenset_int());
         }
     }

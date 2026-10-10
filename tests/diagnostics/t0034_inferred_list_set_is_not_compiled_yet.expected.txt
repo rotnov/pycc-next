@@ -1,5 +1,0 @@
-error[T0034]: list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those
- --> tests/diagnostics/t0034_inferred_list_set_is_not_compiled_yet.py:1:1
-  |
-1 | def f() -> int:
-  | ^ list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those

@@ -132,8 +132,8 @@ fn unsupported_list_shapes_are_refused_not_miscompiled() {
             "error[T0021]: operator Add is not defined for `list[int]` and `list[float]`",
         ),
         (
-            "xs = [{1}]\n",
-            "error[T0034]: list[set[int]] is not compiled yet",
+            "xs = [None]\n",
+            "error[T0034]: list[None] is not compiled yet",
         ),
         (
             "xs = [1]\nprint(round(1, 2))\n",

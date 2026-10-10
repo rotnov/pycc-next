@@ -2802,8 +2802,8 @@ fn popping_from_a_non_bare_name_base_is_unsupported() {
 #[test]
 fn pop_with_two_arguments_is_unsupported() {
     assert_capability_error_message(
-        "x.pop(0, 1)\n",
-        "list.pop() takes at most one argument, got 2",
+        "x.pop(0, 1, 2)\n",
+        "pop() takes at most two arguments, got 3",
     );
 }
 
@@ -6891,29 +6891,29 @@ fn a_variadic_ellipsis_type_argument_is_rejected_in_every_family() {
 fn a_container_annotation_runs_the_same_element_gate_as_a_container_literal() {
     for (source, code, message) in [
         (
-            "def f(x: list[dict[str, int]]) -> None:\n    return\n",
+            "def f(x: list[None]) -> None:\n    return\n",
             "T0034",
-            "list[dict[str, int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those",
+            "list[None] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those",
         ),
         (
-            "def f(x: dict[int, int]) -> None:\n    return\n",
+            "def f(x: dict[list[int], int]) -> None:\n    return\n",
             "T0036",
-            "dict[int, int] is not compiled yet (D-122) -- only dict[str, int] is",
+            "dict[list[int], int] is not compiled yet -- a dict key must be int, float, bool, str or a tuple of those, and a value anything a list can hold",
         ),
         (
-            "def f(x: set[str]) -> None:\n    return\n",
+            "def f(x: set[list[int]]) -> None:\n    return\n",
             "T0038",
-            "set[str] is not compiled yet (D-122) -- only set[int] and a set of a user-class instance are",
+            "set[list[int]] is not compiled yet -- a set element must be int, float, bool, str, a tuple of those or a user-class instance",
         ),
         (
-            "def f(x: tuple[int, str]) -> None:\n    return\n",
+            "def f(x: tuple[int, None]) -> None:\n    return\n",
             "T0039",
-            "tuple element type `str` is not compiled yet (D-116) -- only int/bool/float elements are",
+            "tuple element type `None` is not compiled yet -- a tuple element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those",
         ),
         (
-            "def f(x: list[list[set[int]]]) -> None:\n    return\n",
+            "def f(x: list[list[None]]) -> None:\n    return\n",
             "T0034",
-            "list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those",
+            "list[None] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those",
         ),
     ] {
         let diagnostic = container_annotation_err(source);
@@ -7025,17 +7025,17 @@ fn a_container_return_annotation_still_meets_every_element_and_arity_gate() {
     // element that is not int/bool/float before D-105 ever sees the inner
     // `list[int]`.
     for (source, code) in [
-        ("def f() -> list[set[int]]:\n    return f()\n", "T0034"),
+        ("def f() -> list[None]:\n    return f()\n", "T0034"),
+        ("def f() -> list[list[None]]:\n    return f()\n", "T0034"),
+        ("def f() -> set[list[int]]:\n    return f()\n", "T0038"),
         (
-            "def f() -> list[list[set[int]]]:\n    return f()\n",
-            "T0034",
+            "def f() -> dict[list[int], int]:\n    return f()\n",
+            "T0036",
         ),
-        ("def f() -> set[str]:\n    return f()\n", "T0038"),
-        ("def f() -> dict[int, int]:\n    return f()\n", "T0036"),
-        ("def f() -> tuple[int, str]:\n    return f()\n", "T0039"),
+        ("def f() -> tuple[int, None]:\n    return f()\n", "T0039"),
         (
-            "def f() -> tuple[list[int], int]:\n    return f()\n",
-            "T0039",
+            "def f() -> tuple[list[None], int]:\n    return f()\n",
+            "T0034",
         ),
         ("def f() -> tuple[int, ...]:\n    return f()\n", "T0053"),
         ("def f() -> tuple[()]:\n    return f()\n", "T0053"),

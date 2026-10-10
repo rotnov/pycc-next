@@ -148,13 +148,15 @@ fn an_eq_method_signature_pycc_does_not_compile_is_c0001() {
 }
 
 #[test]
-fn a_non_int_non_instance_element_is_t0038() {
-    let error = check_set_element(&Ty::Str, &Environment::default()).unwrap_err();
+fn an_unhashable_non_instance_element_is_t0038() {
+    assert!(check_set_element(&Ty::Str, &Environment::default()).is_ok());
+    let error =
+        check_set_element(&Ty::List(Box::new(Ty::Int)), &Environment::default()).unwrap_err();
     assert_eq!(error.code, "T0038");
     assert_eq!(
         error.message,
-        "set[str] is not compiled yet (D-122) -- only set[int] and a set of a user-class \
-         instance are"
+        "set[list[int]] is not compiled yet -- a set element must be int, float, bool, str, a \
+         tuple of those or a user-class instance"
     );
 }
 

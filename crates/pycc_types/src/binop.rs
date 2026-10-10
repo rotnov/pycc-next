@@ -52,6 +52,9 @@ pub(crate) fn numeric_result_type(op: BinOpKind, left: Ty, right: Ty) -> Result<
     if let Some(result) = crate::foreign::arith::object_binop_ty(None, &left, &right) {
         return result;
     }
+    if pycc_hir::builtins::set_operator(op.as_str(), false, &left, &right).is_some() {
+        return Ok(left);
+    }
     if is_bitwise(op) {
         return bitwise_result_type(op, &left, &right);
     }
@@ -227,23 +230,41 @@ mod tests {
     }
 
     #[test]
+    fn the_set_operators_of_one_element_type_take_the_left_operand_s_type() {
+        let set = || Ty::Set(Box::new(Ty::Str));
+        let frozen = || Ty::FrozenSet(Box::new(Ty::Str));
+        for op in [
+            BinOpKind::BitOr,
+            BinOpKind::BitAnd,
+            BinOpKind::BitXor,
+            BinOpKind::Sub,
+        ] {
+            assert_eq!(numeric_result_type(op, set(), set()).unwrap(), set());
+            assert_eq!(numeric_result_type(op, frozen(), set()).unwrap(), frozen());
+            assert_eq!(numeric_result_type(op, set(), frozen()).unwrap(), set());
+        }
+    }
+
+    #[test]
     fn the_set_and_dict_operators_cpython_defines_are_not_supported_yet() {
+        // Sets of different element types, and dicts, have no native operator.
         let set = || Ty::Set(Box::new(Ty::Int));
+        let other = || Ty::Set(Box::new(Ty::Str));
         let frozen = || Ty::FrozenSet(Box::new(Ty::Int));
         let dict = || Ty::Dict(Box::new((Ty::Str, Ty::Int)));
         for (op, left, right, reason) in [
-            (BinOpKind::BitOr, set(), set(), "is not supported yet"),
-            (BinOpKind::BitAnd, set(), set(), "is not supported yet"),
-            (BinOpKind::BitXor, set(), set(), "is not supported yet"),
+            (BinOpKind::BitOr, set(), other(), "is not supported yet"),
+            (BinOpKind::BitAnd, set(), other(), "is not supported yet"),
+            (BinOpKind::BitXor, set(), other(), "is not supported yet"),
             (BinOpKind::LShift, set(), set(), "is not defined"),
             (BinOpKind::RShift, set(), set(), "is not defined"),
             (BinOpKind::BitOr, dict(), dict(), "is not supported yet"),
             (BinOpKind::BitAnd, dict(), dict(), "is not defined"),
             (BinOpKind::BitXor, dict(), dict(), "is not defined"),
             (BinOpKind::BitOr, set(), Ty::Int, "is not defined"),
-            (BinOpKind::BitOr, frozen(), frozen(), "is not supported yet"),
-            (BinOpKind::BitAnd, set(), frozen(), "is not supported yet"),
-            (BinOpKind::BitXor, frozen(), set(), "is not supported yet"),
+            (BinOpKind::BitOr, frozen(), other(), "is not supported yet"),
+            (BinOpKind::BitAnd, other(), frozen(), "is not supported yet"),
+            (BinOpKind::BitXor, frozen(), other(), "is not supported yet"),
             (BinOpKind::LShift, frozen(), frozen(), "is not defined"),
             (BinOpKind::BitOr, frozen(), Ty::Int, "is not defined"),
         ] {

@@ -943,6 +943,11 @@ pub(crate) fn infer_expr_in(
             pycc_hir::check_container_ty(&list_ty, Span::new(0, 0))?;
             Ok(list_ty)
         }
+        HirExpr::EmptySet(element) => {
+            let set_ty = Ty::Set(Box::new(element.clone()));
+            pycc_hir::check_container_ty(&set_ty, Span::new(0, 0))?;
+            Ok(set_ty)
+        }
         HirExpr::EmptyDict(pair) => {
             let dict_ty = Ty::Dict(pair.clone());
             pycc_hir::check_container_ty(&dict_ty, Span::new(0, 0))?;
@@ -1483,6 +1488,10 @@ pub(crate) fn infer_expr_in(
         // `.pop()` is meant to be used for its value.
         HirExpr::ListPop { list } => {
             let list_ty = infer_container_receiver(env, local_names, list, ".pop()")?;
+            // `s.pop()` on a set resolves through `pycc_hir::builtins`.
+            if let Some(Ok(sig)) = pycc_hir::builtins::resolve_method(&list_ty, "pop", &[]) {
+                return Ok(sig.ret);
+            }
             let Ty::List(elem_ty) = &list_ty else {
                 return Err(Diagnostic::error(
                     "T0033",

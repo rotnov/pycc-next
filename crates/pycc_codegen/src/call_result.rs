@@ -128,6 +128,12 @@ pub(super) fn call_result_scalar<'ctx>(
                 .expect_basic("this function is declared to return set")
                 .into_pointer_value(),
         ),
+        Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => Scalar::List(
+            call_site
+                .try_as_basic_value()
+                .expect_basic("this function is declared to return tuple")
+                .into_pointer_value(),
+        ),
         Ty::Tuple(_) => Scalar::Tuple(
             call_site
                 .try_as_basic_value()

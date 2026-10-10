@@ -86,8 +86,8 @@ fn the_typing_import_line_of_the_subject_module_lowers() {
 
 #[test]
 fn a_nested_legacy_alias_gets_the_builtin_spellings_diagnostic() {
-    let legacy = lower_err("def f(x: Dict[str, List[int]]) -> None:\n    return\n");
-    let builtin = lower_err("def f(x: dict[str, list[int]]) -> None:\n    return\n");
+    let legacy = lower_err("def f(x: Dict[str, List[None]]) -> None:\n    return\n");
+    let builtin = lower_err("def f(x: dict[str, list[None]]) -> None:\n    return\n");
     assert_eq!(legacy, builtin);
 }
 
@@ -131,11 +131,11 @@ fn the_arity_and_ellipsis_messages_name_the_spelling_as_written() {
 fn the_element_capability_gate_names_the_canonical_ty() {
     // The deliberate split: the gate runs on the lowered `Ty`, shared with
     // container literals, so it prints `dict[...]` for a `Dict[...]`.
-    let diagnostic = lower_err("def f(x: Dict[int, int]) -> None:\n    return\n");
+    let diagnostic = lower_err("def f(x: Dict[List[int], int]) -> None:\n    return\n");
     assert_eq!(diagnostic.code, "T0036");
     assert_eq!(
         diagnostic.message,
-        "dict[int, int] is not compiled yet (D-122) -- only dict[str, int] is"
+        "dict[list[int], int] is not compiled yet -- a dict key must be int, float, bool, str or a tuple of those, and a value anything a list can hold"
     );
 }
 

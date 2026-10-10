@@ -254,9 +254,10 @@ fn a_conditional_expression_in_a_generic_function_without_a_generic_call_checks(
 }
 
 #[test]
-fn an_empty_list_branch_is_refused_with_t0003() {
+fn an_empty_list_branch_takes_the_annotation_and_two_empty_branches_are_refused() {
+    checks("def f(t: bool) -> int:\n    xs: list[int] = [] if t else [1]\n    return len(xs)\n");
     refused(
-        "def f(t: bool) -> int:\n    xs: list[int] = [] if t else [1]\n    return len(xs)\n",
+        "def f(t: bool) -> int:\n    return len([] if t else [])\n",
         "T0003",
         "an empty list literal has no inferable element type",
     );

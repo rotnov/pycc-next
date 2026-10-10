@@ -701,6 +701,28 @@ pub(crate) fn raise_builtin(type_tag: u8, name: &'static str, msg: &str) {
     ));
 }
 
+/// Raises `KeyError(key)` for a missing container key of `kind`: a `str`
+/// key's message is its text (whose `repr` `str(e)` shows); any other
+/// key's `str(e)` is its `repr`, preset here.
+pub(crate) fn raise_key_error(kind: i64, key: i64) {
+    if kind == crate::list::LIST_KIND_STR {
+        let text = String::from_utf8_lossy(unsafe { (*(key as *mut PyStrObj)).bytes() });
+        raise_builtin(EXCEPTION_TYPE_KEY_ERROR, "KeyError", &text);
+        return;
+    }
+    let mut rendered = String::new();
+    crate::value::repr(kind, key, &mut rendered);
+    let name = "KeyError";
+    let obj = pycc_rt_exception_alloc(
+        EXCEPTION_TYPE_KEY_ERROR,
+        name.as_ptr(),
+        name.len(),
+        alloc_exception_message(&rendered),
+    );
+    unsafe { (*obj).str_form.set(alloc_exception_message(&rendered)) };
+    pycc_rt_exception_raise(obj);
+}
+
 mod str_form;
 
 #[cfg(test)]

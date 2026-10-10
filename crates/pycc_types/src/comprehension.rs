@@ -171,33 +171,16 @@ pub(crate) fn comp_container_ty(
                 crate::set_element::check_set_element(&elt_ty, env)?;
                 return Ok(Ty::Set(Box::new(elt_ty)));
             }
-            if elt_ty != Ty::Int {
-                return Err(Diagnostic::error(
-                    "T0038",
-                    format!(
-                        "set comprehension codegen only supports `set[int]` or a set of a user-class instance (D-122, D-255), got a comprehension producing `set[{}]`",
-                        elt_ty.name()
-                    ),
-                    Span::new(0, 0),
-                ));
-            }
-            Ok(Ty::Set(Box::new(Ty::Int)))
+            let set_ty = Ty::Set(Box::new(elt_ty));
+            pycc_hir::check_container_ty(&set_ty, Span::new(0, 0))?;
+            Ok(set_ty)
         }
         CompElts::Dict(key, value) => {
             let key_ty = infer_expr_in(env, local_names, key)?;
             let value_ty = infer_expr_in(env, local_names, value)?;
-            if key_ty != Ty::Str || value_ty != Ty::Int {
-                return Err(Diagnostic::error(
-                    "T0036",
-                    format!(
-                        "dict codegen only supports `dict[str, int]` in v0.2, got a comprehension producing `dict[{}, {}]`",
-                        key_ty.name(),
-                        value_ty.name()
-                    ),
-                    Span::new(0, 0),
-                ));
-            }
-            Ok(Ty::Dict(Box::new((Ty::Str, Ty::Int))))
+            let dict_ty = Ty::Dict(Box::new((key_ty, value_ty)));
+            pycc_hir::check_container_ty(&dict_ty, Span::new(0, 0))?;
+            Ok(dict_ty)
         }
     }
 }

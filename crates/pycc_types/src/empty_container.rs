@@ -144,9 +144,12 @@
 use super::*;
 
 pub(crate) mod attr_slot;
+mod call_site;
 mod object_slot;
 mod producer;
+mod unify;
 
+pub(crate) use call_site::resolve_call_site_params;
 use producer::find_producer;
 
 /// What a resolution produced: the *element* type of a list, or the
@@ -235,6 +238,7 @@ pub(crate) fn resolve_empty_containers(hir: &HirModule) -> Option<HirModule> {
             HirItem::Function { body, .. } => body_has_empty_literal(body),
             HirItem::TopLevelStmt(stmt) => body_has_empty_literal(std::slice::from_ref(stmt)),
         })
+        && !unify::has_sites(hir)
     {
         return None;
     }
@@ -248,17 +252,20 @@ pub(crate) fn resolve_empty_containers(hir: &HirModule) -> Option<HirModule> {
         attr_slot::resolve_class_slots(hir, &mut resolved, &local_names);
     }
     let module_env = module_environment(&resolved);
+    let mut envs: Vec<Option<Environment>> = Vec::with_capacity(resolved.items.len());
     for (index, item) in resolved.items.iter_mut().enumerate() {
         let HirItem::Function {
             name, params, body, ..
         } = item
         else {
+            envs.push(None);
             continue;
         };
         let names = &local_names[index];
         let env = function_environment(&module_env, name, params, body, names);
         let producers = body.clone();
         rewrite_body(body, &producers, &env, names);
+        envs.push(Some(env));
     }
     // The module body: a module-level `xs: list[int] = []` (or a `[]` a
     // later top-level `.append()` types) resolves against the module scope,
@@ -282,6 +289,15 @@ pub(crate) fn resolve_empty_containers(hir: &HirModule) -> Option<HirModule> {
             );
         }
     }
+    // Every empty container the per-name sources left, typed by
+    // unification over the whole module (`unify`).
+    unify::infer(
+        &mut resolved,
+        &module_env,
+        &envs,
+        &local_names,
+        &top_level_names,
+    );
     Some(resolved)
 }
 

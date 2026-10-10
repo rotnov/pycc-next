@@ -1,0 +1,5 @@
+error[T0039]: tuple element type `None` is not compiled yet -- a tuple element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those
+ --> tests/diagnostics/t0039_tuple_none_element_annotation.py:1:10
+  |
+1 | def f(t: tuple[int, None]) -> None:
+  |          ^^^^^^^^^^^^^^^^ tuple element type `None` is not compiled yet -- a tuple element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those

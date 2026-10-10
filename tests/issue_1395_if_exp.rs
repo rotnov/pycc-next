@@ -207,10 +207,17 @@ fn a_walrus_in_a_branch_is_refused_at_its_location() {
 }
 
 #[test]
-fn an_empty_list_branch_is_refused_with_t0003() {
-    let text = check_fails(
-        "def f(t: bool) -> int:\n    xs: list[int] = [] if t else [1]\n    return len(xs)\n",
+fn an_empty_list_branch_takes_the_other_branch_s_type() {
+    assert_prints(
+        "def f(t: bool) -> int:\n    xs: list[int] = [] if t else [1]\n    return len(xs)\n\n\n\
+         print(f(True), f(False))\n",
+        "0 1\n",
     );
+}
+
+#[test]
+fn an_empty_list_in_both_branches_is_refused_with_t0003() {
+    let text = check_fails("def f(t: bool) -> int:\n    return len([] if t else [])\n");
     assert!(
         text.contains("error[T0003]: an empty list literal has no inferable element type"),
         "{text}"

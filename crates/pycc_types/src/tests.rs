@@ -3992,7 +3992,7 @@ fn a_set_comprehension_over_a_bare_set_name_type_checks_and_binds_target_as_set_
 }
 
 #[test]
-fn a_set_comprehension_producing_a_non_int_element_is_rejected_as_t0038() {
+fn a_set_comprehension_producing_an_unhashable_element_is_rejected_as_t0038() {
     let mut env = Environment::new();
     let stmt = HirStmt::SetCompAssign {
         target: "y".to_string(),
@@ -4003,11 +4003,11 @@ fn a_set_comprehension_producing_a_non_int_element_is_rejected_as_t0038() {
             step: HirExpr::IntLiteral(1),
         },
         cond: None,
-        elt: Box::new(HirExpr::StringLiteral("x".to_string())),
+        elt: Box::new(HirExpr::NoneLiteral),
     };
     let err = check_stmt(&mut env, &stmt).unwrap_err();
     assert_eq!(err.code, "T0038");
-    assert!(err.message.contains("set[str]"));
+    assert!(err.message.contains("set[None]"));
 }
 
 #[test]
@@ -4052,7 +4052,7 @@ fn a_dict_comprehension_over_a_bare_dict_name_type_checks_and_binds_target_as_di
 }
 
 #[test]
-fn a_dict_comprehension_producing_a_non_str_int_pair_is_rejected_as_t0036() {
+fn a_dict_comprehension_producing_an_unstorable_value_is_rejected_as_t0036() {
     let mut env = Environment::new();
     let stmt = HirStmt::DictCompAssign {
         target: "y".to_string(),
@@ -4064,11 +4064,11 @@ fn a_dict_comprehension_producing_a_non_str_int_pair_is_rejected_as_t0036() {
         },
         cond: None,
         key: Box::new(HirExpr::IntLiteral(1)),
-        value: Box::new(HirExpr::IntLiteral(1)),
+        value: Box::new(HirExpr::NoneLiteral),
     };
     let err = check_stmt(&mut env, &stmt).unwrap_err();
     assert_eq!(err.code, "T0036");
-    assert!(err.message.contains("dict[int, int]"));
+    assert!(err.message.contains("dict[int, None]"));
 }
 
 #[test]
@@ -4629,13 +4629,12 @@ fn a_homogeneous_str_list_literal_is_a_list_of_str() {
 #[test]
 fn a_list_literal_of_an_element_no_word_holds_is_rejected_as_t0034() {
     let env = Environment::new();
-    let expr = HirExpr::ListLiteral(vec![HirExpr::TupleLiteral(vec![HirExpr::IntLiteral(1)])]);
+    let expr = HirExpr::ListLiteral(vec![HirExpr::NoneLiteral]);
     let err = infer_expr(&env, &expr).unwrap_err();
     assert_eq!(err.code, "T0034");
     assert_eq!(
         err.message,
-        "list[tuple[int]] is not compiled yet -- a list element must be int, float, bool, str, \
-         a user-class instance or a list of those"
+        "list[None] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those"
     );
 }
 
@@ -5335,15 +5334,18 @@ fn adding_a_bool_value_to_a_set_of_int_is_accepted_since_bool_is_an_int_subtype(
 }
 
 #[test]
-fn adding_to_a_set_of_str_is_refused_by_the_set_element_check() {
+fn adding_to_a_set_of_an_unhashable_element_is_refused_by_the_set_element_check() {
     // #1343: `.add` checks its element (`set_element.rs`) because a `set[R]`
-    // parameter reaches it with no literal checked. `set[str]` never gets
+    // parameter reaches it with no literal checked. `set[list[int]]` never gets
     // past the annotation gate, so this pins the defensive arm.
     let mut env = Environment::new();
-    env.bind("s".to_string(), Ty::Set(Box::new(Ty::Str)));
+    env.bind(
+        "s".to_string(),
+        Ty::Set(Box::new(Ty::List(Box::new(Ty::Int)))),
+    );
     let expr = HirExpr::SetAdd {
         set: "s".to_string(),
-        value: Box::new(HirExpr::StringLiteral("a".to_string())),
+        value: Box::new(HirExpr::ListLiteral(vec![HirExpr::IntLiteral(1)])),
     };
     assert_eq!(infer_expr(&env, &expr).unwrap_err().code, "T0038");
 }
@@ -6452,17 +6454,17 @@ fn a_dict_literal_with_mismatched_key_types_is_rejected_as_t0035() {
 }
 
 #[test]
-fn a_homogeneous_non_str_int_dict_literal_is_rejected_as_t0036() {
+fn a_dict_literal_of_an_unstorable_value_is_rejected_as_t0036() {
     let env = Environment::new();
     let expr = HirExpr::DictLiteral(vec![(
         HirExpr::StringLiteral("a".to_string()),
-        HirExpr::StringLiteral("b".to_string()),
+        HirExpr::NoneLiteral,
     )]);
     let err = infer_expr(&env, &expr).unwrap_err();
     assert_eq!(err.code, "T0036");
     assert_eq!(
         err.message,
-        "dict[str, str] is not compiled yet (D-122) -- only dict[str, int] is"
+        "dict[str, None] is not compiled yet -- a dict key must be int, float, bool, str or a tuple of those, and a value anything a list can hold"
     );
 }
 
@@ -6482,7 +6484,7 @@ fn a_bad_dict_literal_is_still_rejected_when_the_solver_path_runs_first() {
                 target: "x".to_string(),
                 value: HirExpr::DictLiteral(vec![(
                     HirExpr::StringLiteral("a".to_string()),
-                    HirExpr::StringLiteral("b".to_string()),
+                    HirExpr::NoneLiteral,
                 )]),
             }),
             HirItem::Function {
@@ -7123,19 +7125,16 @@ fn a_set_literal_with_mismatched_element_types_is_rejected_as_t0037() {
 }
 
 #[test]
-fn a_homogeneous_non_int_set_literal_is_rejected_as_t0038() {
+fn a_set_literal_of_an_unhashable_element_is_rejected_as_t0038() {
     let env = Environment::new();
-    let expr = HirExpr::SetLiteral(vec![
-        HirExpr::StringLiteral("a".to_string()),
-        HirExpr::StringLiteral("b".to_string()),
-    ]);
+    let expr = HirExpr::SetLiteral(vec![HirExpr::NoneLiteral, HirExpr::NoneLiteral]);
     let err = infer_expr(&env, &expr).unwrap_err();
     assert_eq!(err.code, "T0038");
     assert_eq!(
         err.message,
-        "set[str] is not compiled yet (D-122) -- only set[int] and a set of a user-class instance are"
+        "set[None] is not compiled yet -- a set element must be int, float, bool, str, a tuple of those or a user-class instance"
     );
-    assert!(err.message.contains("set[str]"));
+    assert!(err.message.contains("set[None]"));
 }
 
 #[test]
@@ -7153,10 +7152,7 @@ fn a_bad_set_literal_is_still_rejected_when_the_solver_path_runs_first() {
         items: vec![
             HirItem::TopLevelStmt(HirStmt::Assign {
                 target: "x".to_string(),
-                value: HirExpr::SetLiteral(vec![
-                    HirExpr::StringLiteral("a".to_string()),
-                    HirExpr::StringLiteral("b".to_string()),
-                ]),
+                value: HirExpr::SetLiteral(vec![HirExpr::NoneLiteral, HirExpr::NoneLiteral]),
             }),
             HirItem::Function {
                 name: "_constant".to_string(),
@@ -7241,17 +7237,14 @@ fn an_empty_tuple_literal_is_rejected_as_t0021() {
 }
 
 #[test]
-fn a_tuple_literal_with_a_string_element_is_rejected_as_t0039() {
+fn a_tuple_literal_with_a_none_element_is_rejected_as_t0039() {
     let env = Environment::new();
-    let expr = HirExpr::TupleLiteral(vec![
-        HirExpr::IntLiteral(1),
-        HirExpr::StringLiteral("a".to_string()),
-    ]);
+    let expr = HirExpr::TupleLiteral(vec![HirExpr::IntLiteral(1), HirExpr::NoneLiteral]);
     let err = infer_expr(&env, &expr).unwrap_err();
     assert_eq!(err.code, "T0039");
     assert_eq!(
         err.message,
-        "tuple element type `str` is not compiled yet (D-116) -- only int/bool/float elements are"
+        "tuple element type `None` is not compiled yet -- a tuple element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those"
     );
 }
 
@@ -7266,7 +7259,7 @@ fn a_tuple_literal_propagates_an_ill_typed_element_s_error() {
 fn a_tuple_literal_reports_an_earlier_element_s_t0039_before_a_later_undefined_name() {
     // D-228 decision 4: `check_tuple_element_ty` runs per element *inside*
     // this loop rather than as a whole-`Ty` postcheck, so the composed
-    // `(1, "a", undefined_name)` shape pins which diagnostic wins. The gate
+    // `(1, None, undefined_name)` shape pins which diagnostic wins. The gate
     // fires on element 1 before element 2 is ever inferred, so `T0039` is
     // reported and the undefined name is never reached. Folding the
     // per-element gate into a whole-`Ty` postcheck like `T0034`/`T0036`/
@@ -7274,14 +7267,14 @@ fn a_tuple_literal_reports_an_earlier_element_s_t0039_before_a_later_undefined_n
     let env = Environment::new();
     let expr = HirExpr::TupleLiteral(vec![
         HirExpr::IntLiteral(1),
-        HirExpr::StringLiteral("a".to_string()),
+        HirExpr::NoneLiteral,
         HirExpr::Name("undefined".to_string()),
     ]);
     let err = infer_expr(&env, &expr).unwrap_err();
     assert_eq!(err.code, "T0039");
     assert_eq!(
         err.message,
-        "tuple element type `str` is not compiled yet (D-116) -- only int/bool/float elements are"
+        "tuple element type `None` is not compiled yet -- a tuple element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those"
     );
 }
 
@@ -7391,7 +7384,7 @@ fn a_bad_tuple_literal_is_still_rejected_when_the_solver_path_runs_first() {
         items: vec![
             HirItem::TopLevelStmt(HirStmt::Assign {
                 target: "x".to_string(),
-                value: HirExpr::TupleLiteral(vec![HirExpr::StringLiteral("a".to_string())]),
+                value: HirExpr::TupleLiteral(vec![HirExpr::NoneLiteral]),
             }),
             HirItem::Function {
                 name: "_constant".to_string(),
@@ -10164,7 +10157,7 @@ fn a_set_comprehension_over_a_bare_set_parameter_type_checks_in_a_function_body(
 }
 
 #[test]
-fn a_set_comprehension_producing_a_non_int_element_is_rejected_as_t0038_in_a_function_body() {
+fn a_set_comprehension_producing_an_unhashable_element_is_rejected_as_t0038_in_a_function_body() {
     let function = HirItem::Function {
         name: "f".to_string(),
         params: vec![],
@@ -10178,12 +10171,12 @@ fn a_set_comprehension_producing_a_non_int_element_is_rejected_as_t0038_in_a_fun
                 step: HirExpr::IntLiteral(1),
             },
             cond: None,
-            elt: Box::new(HirExpr::StringLiteral("x".to_string())),
+            elt: Box::new(HirExpr::NoneLiteral),
         }],
     };
     let err = check_function(&function).unwrap_err();
     assert_eq!(err.code, "T0038");
-    assert!(err.message.contains("set[str]"));
+    assert!(err.message.contains("set[None]"));
 }
 
 #[test]
@@ -10229,7 +10222,7 @@ fn a_dict_comprehension_over_a_bare_dict_parameter_type_checks_in_a_function_bod
 }
 
 #[test]
-fn a_dict_comprehension_producing_a_non_str_int_pair_is_rejected_as_t0036_in_a_function_body() {
+fn a_dict_comprehension_producing_an_unstorable_value_is_rejected_as_t0036_in_a_function_body() {
     let function = HirItem::Function {
         name: "f".to_string(),
         params: vec![],
@@ -10244,12 +10237,12 @@ fn a_dict_comprehension_producing_a_non_str_int_pair_is_rejected_as_t0036_in_a_f
             },
             cond: None,
             key: Box::new(HirExpr::IntLiteral(1)),
-            value: Box::new(HirExpr::IntLiteral(1)),
+            value: Box::new(HirExpr::NoneLiteral),
         }],
     };
     let err = check_function(&function).unwrap_err();
     assert_eq!(err.code, "T0036");
-    assert!(err.message.contains("dict[int, int]"));
+    assert!(err.message.contains("dict[int, None]"));
 }
 
 #[test]

@@ -1146,7 +1146,7 @@ print(b.go())
 /// fix that answers only the arm the review named leaves the others exactly
 /// as they were.
 #[test]
-fn an_unannotated_private_member_producer_reports_t0003_rather_than_aborting() {
+fn an_unannotated_private_member_producer_resolves_rather_than_aborting() {
     for (label, member, producer) in [
         (
             "method",
@@ -1169,7 +1169,7 @@ fn an_unannotated_private_member_producer_reports_t0003_rather_than_aborting() {
             "A._source()",
         ),
     ] {
-        let rendered = check_error(
+        let output = check_build_and_run(
             &format!("unannotated_private_{label}"),
             &format!(
                 "\
@@ -1187,9 +1187,12 @@ print(a.go())
 "
             ),
         );
-        assert!(
-            rendered.contains("T0003"),
-            "the {label} producer must report T0003, got: {rendered}",
+        assert!(output.status.success(), "{label}");
+        assert_eq!(
+            output.stdout,
+            b"1
+",
+            "{label}"
         );
     }
 }
@@ -1255,8 +1258,8 @@ go(True)
 ",
     );
     assert!(
-        rendered.contains("T0003"),
-        "a maybe-bound producer must miss, got: {rendered}",
+        rendered.contains("T0041"),
+        "a maybe-bound producer reports the possibly-unbound read, got: {rendered}",
     );
     // The same program written with a non-empty literal, which is the
     // spelling whose diagnostic the resolution was masking.
@@ -1362,23 +1365,11 @@ print(f())
     );
 }
 
-/// D-245 item 3 says the producer scan returns the first *syntactic*
-/// producer. Review round 15 on PR #1035 showed the implementation returned
-/// the first *inferring* one: a producer whose value failed to infer fell
-/// through and a later producer chose the element type instead. Inside a
-/// `match` case body the value name is exactly that --
-/// `bind_local_types_in_body` has no `match` arm, so a binding made there is
-/// invisible to the flat whole-function environment -- so `xs.append(v)` was
-/// skipped and `xs.append(True)` resolved `list[bool]`, reported as `T0034`.
-/// (The round-15 reproduction used a `try` suite; #1445 gave the binder a
-/// `try` arm, so that spelling now resolves and runs, pinned by
-/// [`a_try_bound_producer_value_now_resolves_and_runs`].) That is a
-/// resolution the program's own first use contradicts, which the "never
-/// wrong, only missed" invariant forbids. The scan now stops at the match,
-/// and the outcome is the `T0003` a miss is supposed to produce.
+/// A value bound inside a `match` case and a later `bool` producer: the
+/// unification sees both and resolves `list[int]`, printing CPython's `2`.
 #[test]
-fn an_uninferable_producer_ends_the_scan_rather_than_deferring_to_a_later_one() {
-    let diagnostics = check_error(
+fn a_match_bound_producer_value_resolves_with_the_later_producer() {
+    let output = check_build_and_run(
         "uninferable_producer_ends_scan",
         "\
 def go(n: int) -> int:
@@ -1396,14 +1387,8 @@ def go(n: int) -> int:
 print(go(0))
 ",
     );
-    assert!(
-        diagnostics.contains("T0003"),
-        "a matching but uninferable producer must miss, got: {diagnostics}",
-    );
-    assert!(
-        !diagnostics.contains("T0034"),
-        "the later producer must not have selected the element type, got: {diagnostics}",
-    );
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "2\n");
 }
 
 /// The reference spelling of the same program. `xs = [v]` compiles and runs,
@@ -1487,14 +1472,11 @@ print(go())
     }
 }
 
-/// The stop has to propagate out of the recursion, not just out of the
-/// statement list it was found in: a nested body's matching-but-uninferable
-/// producer ends the *whole* scan, so a later producer sitting after the
-/// block at function top level cannot select a different element type
-/// either.
+/// The nested producer's `int` and the later `bool` append join into
+/// `list[int]`, printing CPython's `2`.
 #[test]
-fn an_uninferable_producer_in_a_nested_body_ends_the_enclosing_scan_too() {
-    let diagnostics = check_error(
+fn a_nested_body_producer_and_a_later_top_level_one_agree() {
+    let output = check_build_and_run(
         "uninferable_producer_propagates",
         "\
 def go(n: int) -> int:
@@ -1510,22 +1492,15 @@ def go(n: int) -> int:
 print(go(0))
 ",
     );
-    assert!(
-        diagnostics.contains("T0003"),
-        "the nested miss must end the enclosing scan, got: {diagnostics}",
-    );
-    assert!(
-        !diagnostics.contains("T0034"),
-        "the top-level producer after the block must not resolve it, got: {diagnostics}",
-    );
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "2\n");
 }
 
-/// The dict producer arm needs both halves to infer, and either half failing
-/// is the same match: a `d[k] = v` whose *value* does not infer stops the
-/// scan exactly as the list arm does.
+/// The dict arm of the same rule: `d["k"] = v` (an `int`) and a later
+/// `d["j"] = True` resolve `dict[str, int]`, printing CPython's `2`.
 #[test]
-fn an_uninferable_dict_value_producer_ends_the_scan() {
-    let diagnostics = check_error(
+fn a_nested_dict_value_producer_and_a_later_one_agree() {
+    let output = check_build_and_run(
         "uninferable_dict_value_producer",
         "\
 def go(n: int) -> int:
@@ -1541,14 +1516,8 @@ def go(n: int) -> int:
 print(go(0))
 ",
     );
-    assert!(
-        diagnostics.contains("T0003"),
-        "an uninferable dict value must miss, got: {diagnostics}",
-    );
-    assert!(
-        !diagnostics.contains("T0036"),
-        "the later producer must not have selected the value type, got: {diagnostics}",
-    );
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "2\n");
 }
 
 /// The symmetric half: the *key* is the part that does not infer. Without
@@ -1689,20 +1658,11 @@ print(go(False))
     );
 }
 
-/// The decline counts binding *sites*, not divergent *types*, so a name bound
-/// by two loops over `range(...)` -- both of them unambiguously `int` -- is
-/// declined exactly like a genuinely branch-divergent one, and the container it
-/// would have resolved reports `T0003` instead.
-///
-/// That coarseness is deliberate, not an oversight: counting sites needs no
-/// environment at all, while proving two sites agree needs per-site type
-/// evidence the flat binder does not record. It stays inside D-245's invariant
-/// for this pass -- never wrong, only missed -- and this test pins it so a
-/// later narrowing has to change the assertion on purpose. Issue #1058 tracks
-/// that narrowing for the loop-target case specifically.
+/// Two `for` loops binding `i` to `int` agree, so `xs` resolves to
+/// `list[int]` (whole-module unification checks every binding site).
 #[test]
-fn a_name_bound_by_two_loops_is_declined_even_though_both_sites_are_int() {
-    let diagnostics = check_error(
+fn a_name_bound_by_two_loops_of_one_type_resolves() {
+    let output = check_build_and_run(
         "repeated_same_type_sites",
         "\
 def go() -> int:
@@ -1717,10 +1677,8 @@ def go() -> int:
 print(go())
 ",
     );
-    assert!(
-        diagnostics.contains("T0003"),
-        "two same-type sites are declined like divergent ones, got: {diagnostics}",
-    );
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n1\n3\n");
 }
 
 /// The same program with the second loop deleted: one binding site, so the

@@ -457,8 +457,65 @@ fn resolve_linked(
     ext_module: bool,
 ) -> Result<HirModule, FrontendFailure> {
     let (hir, sources, _manifest) = link_frontend(path, module_name, relative_imports, ext_module)?;
-    pycc_types::check_and_resolve_all_keyed(&hir)
-        .map_err(|keyed| sources.group_owned(attribute(&sources, keyed)))
+    let typed = pycc_types::check_and_resolve_all_keyed(&hir)
+        .map_err(|keyed| sources.group_owned(attribute(&sources, keyed)))?;
+    export_gaps_as_failures(path, &typed, ext_module)?;
+    Ok(typed)
+}
+
+/// In non-strict mode, a compiled function Python code must see (an
+/// `--ext` module's exports, or an embedded build's once it has fallback
+/// code) whose signature the CPython boundary cannot carry is a failure
+/// of the statement defining it, so the fallback loop runs that function in
+/// CPython instead of the build stopping at the `C0003` the artifact
+/// planner would report.
+fn export_gaps_as_failures(
+    path: &Path,
+    typed: &HirModule,
+    ext_module: bool,
+) -> Result<(), FrontendFailure> {
+    if !crate::mode::non_strict_for(path) || !(ext_module || crate::fallback::active()) {
+        return Ok(());
+    }
+    let source = crate::fallback::entry_source(path);
+    let hooks = if ext_module {
+        crate::ext_build::EntryHooks::from_source(&source)
+            .map(|hooks| hooks.defined().clone())
+            .unwrap_or_default()
+    } else {
+        std::collections::BTreeSet::new()
+    };
+    let Err(gaps) = crate::ext_build::collect_exports_naming_gaps(typed, &hooks) else {
+        return Ok(());
+    };
+    let Ok(module) = pycc_parser::parse_all(&source) else {
+        return Ok(());
+    };
+    let origin_of = |name: &str| {
+        // A method's mangled name is `Class.method`: its class statement.
+        let owner = name.split('.').next().unwrap_or(name);
+        module.body.iter().find_map(|stmt| {
+            let defines = match stmt {
+                pycc_ast::Stmt::FunctionDef(def) => def.name.as_str() == owner,
+                pycc_ast::Stmt::ClassDef(class) => class.name.as_str() == owner,
+                pycc_ast::Stmt::Assign(assign) => assign.targets.iter().any(
+                    |target| matches!(target, pycc_ast::Expr::Name(n) if n.id.as_str() == owner),
+                ),
+                _ => false,
+            };
+            defines.then(|| pycc_ast::stmt_range(stmt).start)
+        })
+    };
+    let (diagnostics, origins): (Vec<_>, Vec<_>) =
+        gaps.into_iter().map(|(name, gap)| (gap, origin_of(&name))).unzip();
+    Err(FrontendFailure::Compile {
+        files: vec![FileDiagnostics {
+            path: path.to_string_lossy().into_owned(),
+            source,
+            diagnostics,
+            origins,
+        }],
+    })
 }
 
 /// [`resolve_frontend_with`] plus the native-mode artifact gates, for a
@@ -707,6 +764,7 @@ fn resolve_frontend_native_once(
         needs_interpreter
     };
     if keyed.is_empty() {
+        export_gaps_as_failures(path, &resolved, false)?;
         return Ok((resolved, needs_interpreter));
     }
     Err(sources.group(keyed))

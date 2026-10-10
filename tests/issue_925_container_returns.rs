@@ -271,16 +271,14 @@ fn a_returned_value_that_disagrees_with_the_container_annotation_is_rejected() {
 
 #[test]
 fn a_returned_literal_that_fails_its_own_element_gate_reports_that_gate() {
-    // The returned *literal*'s own D-122 gate fires before any comparison
+    // The returned *literal*'s own element gate fires before any comparison
     // with the annotation, so the user sees the defect they can act on.
     let rendered = check_error(
         "bad_dict_literal",
-        "def f() -> list[int]:\n    return {1: 2}\n\n\nprint(len(f()))\n",
+        "def f() -> list[int]:\n    return {1: None}\n\n\nprint(len(f()))\n",
     );
     assert!(
-        rendered.contains(
-            "error[T0036]: dict[int, int] is not compiled yet (D-122) -- only dict[str, int] is"
-        ),
+        rendered.contains("error[T0036]: dict[int, None] is not compiled yet"),
         "{rendered}"
     );
 }
@@ -298,19 +296,13 @@ fn a_function_that_can_fall_through_a_container_return_is_rejected() {
 }
 
 #[test]
-fn an_empty_list_literal_return_has_no_inferable_element_type() {
-    // `-> list[int]: return []` is *not* something #925 fixes, and #1021's
-    // empty-container pre-pass deliberately does not reach it either: a return
-    // is a non-binding position, and `infer_expr_in` has no expected type to
-    // read the annotation from. It reports T0003 rather than T0021 now, with
-    // no binding name to name, and #927 is no longer the cited gap.
-    let rendered = check_error(
+fn an_empty_list_literal_return_takes_the_return_annotation() {
+    // The empty-container unification reads the return annotation as the
+    // literal's expected type.
+    let output = build_and_run(
         "empty_literal",
-        "def f() -> list[int]:\n    return []\n\n\nprint(len(f()))\n",
+        "def f() -> list[int]:\n    return []\n\n\nprint(len(f()), f())\n",
     );
-    assert!(
-        rendered.contains("error[T0003]: an empty list literal has no inferable element type here"),
-        "{rendered}"
-    );
-    assert!(!rendered.contains("issue #927"), "{rendered}");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0 []\n");
 }

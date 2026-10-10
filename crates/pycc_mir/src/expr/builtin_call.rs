@@ -9,6 +9,20 @@ use pycc_hir::builtins::{BuiltinSig, is_pairwise_variadic, resolve_call, resolve
 /// claim the call. `min`/`max` over three or more arguments fold left,
 /// which keeps CPython's evaluation order and its first-wins tie rule.
 pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirExpr, Vec<MirExpr>> {
+    let args = if pycc_hir::builtins::iterates_str_as_list(name) {
+        args.into_iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                if arg.ty() == Ty::Str && (i == 0 || name == "zip") {
+                    crate::str_to_list(arg)
+                } else {
+                    arg
+                }
+            })
+            .collect()
+    } else {
+        args
+    };
     if is_pairwise_variadic(name) && args.len() > 2 {
         let tys: Vec<_> = args.iter().map(MirExpr::ty).collect();
         if !matches!(resolve_call(name, &tys[..2]), Some(Ok(_))) {
@@ -36,7 +50,7 @@ pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirEx
 }
 
 /// `base.method(args)` as a runtime call with `base` as the first argument.
-pub(super) fn lower_builtin_method(
+pub(crate) fn lower_builtin_method(
     base: MirExpr,
     method: &str,
     args: Vec<MirExpr>,
@@ -62,6 +76,7 @@ fn rt(symbol: &'static str, params: Vec<Ty>, ret: Ty, args: Vec<MirExpr>) -> Mir
             ret,
             ret_word: false,
             word_args,
+            kind_args: Vec::new(),
         },
         args,
     }))

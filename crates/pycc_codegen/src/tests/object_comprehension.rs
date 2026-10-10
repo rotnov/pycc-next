@@ -127,7 +127,7 @@ fn a_dict_comprehension_over_an_object_is_an_internal_error() {
 /// an internal error rather than a native loop over a pointer (the list of
 /// objects it would build is refused first).
 #[test]
-#[should_panic(expected = "pycc_codegen: internal error: `list[object]`")]
+#[should_panic(expected = "pycc_codegen: internal error: `object` is not a container element type")]
 fn a_statement_form_over_an_object_is_an_internal_error() {
     compile_ext_items_checking_ir(
         "objcomp_stmt",

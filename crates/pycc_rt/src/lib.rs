@@ -45,6 +45,8 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+pub mod container_ops;
+pub mod dict;
 mod exception;
 /// D-244 rule 2's `PyObject*` boundary, runtime half (#1025/#1028).
 pub mod ext_bridge;
@@ -70,8 +72,11 @@ mod print;
 mod rc;
 /// The `round()` builtin over `float`.
 mod round;
+pub mod set;
 /// `str` builtins and methods, and `input()`.
 mod str_ops;
+pub mod tuple;
+pub mod value;
 
 #[cfg(not(test))]
 pub use exception::pycc_rt_exception_print_and_exit;
@@ -100,17 +105,18 @@ pub use int_bitwise::{
 // Glob-imported so the operations below -- and their `#[cfg(test)]` tests,
 // which reach them through `use super::*` -- keep referring to these names
 // unqualified, exactly as when they lived in this file.
+pub use dict::{PyDictObj, pycc_rt_dict_decref, pycc_rt_dict_incref};
 pub use int_arith::*;
 use int_encoding::*;
 pub use int_set::{
-    PyIntSetObj, pycc_rt_int_set_add, pycc_rt_int_set_check_not_resized, pycc_rt_int_set_copy,
-    pycc_rt_int_set_decref, pycc_rt_int_set_from_list, pycc_rt_int_set_get, pycc_rt_int_set_incref,
-    pycc_rt_int_set_len, pycc_rt_int_set_new, pycc_rt_obj_set_add_identity,
-    pycc_rt_obj_set_candidate, pycc_rt_obj_set_push,
+    PyIntSetObj, pycc_rt_int_set_copy, pycc_rt_int_set_new, pycc_rt_obj_set_add_identity,
+    pycc_rt_obj_set_candidate, pycc_rt_obj_set_discard_candidate, pycc_rt_obj_set_new,
+    pycc_rt_obj_set_push,
 };
 pub use list::{
-    LIST_KIND_BOOL, LIST_KIND_FLOAT, LIST_KIND_INSTANCE, LIST_KIND_INT, LIST_KIND_LIST,
-    LIST_KIND_STR, PyListObj, SLICE_HAS_START, SLICE_HAS_STEP, SLICE_HAS_STOP, pycc_rt_list_append,
+    LIST_KIND_BOOL, LIST_KIND_DICT, LIST_KIND_FLOAT, LIST_KIND_INSTANCE, LIST_KIND_INT,
+    LIST_KIND_LIST, LIST_KIND_SET, LIST_KIND_STR, LIST_KIND_TUPLE, LIST_KIND_UNCOUNTED_INSTANCE,
+    PyListObj, SLICE_HAS_START, SLICE_HAS_STEP, SLICE_HAS_STOP, pycc_rt_list_append,
     pycc_rt_list_concat, pycc_rt_list_contains, pycc_rt_list_get, pycc_rt_list_index_error,
     pycc_rt_list_insert, pycc_rt_list_len, pycc_rt_list_new, pycc_rt_list_pop, pycc_rt_list_repeat,
     pycc_rt_list_repr, pycc_rt_list_set, pycc_rt_list_slice,
@@ -122,6 +128,7 @@ pub use rc::{
     pycc_rt_list_live_objects,
 };
 pub use round::{pycc_rt_float_round, pycc_rt_float_round_to_int};
+pub use set::{PySetObj, pycc_rt_set_decref, pycc_rt_set_incref};
 
 // --- Implementation note / deviation from the task brief -------------
 //
@@ -1270,237 +1277,6 @@ pub unsafe extern "C" fn pycc_rt_buffer_f64_free(view: *mut PyccExtBufferView) {
     drop(unsafe { Box::from_raw(storage) });
     BUFFER_LIVE.fetch_sub(1, Ordering::Relaxed);
     drop(view);
-}
-
-/// `dict[str, int]`'s runtime representation (D-121): a dense,
-/// insertion-ordered array of `(key, value)` pairs. `Cell<Vec<...>>`
-/// mirrors `PyListObj`'s own choice over `RefCell` -- `Cell::take`/
-/// `_::set` never holds a borrow across a mutation, so there is no new
-/// runtime-panic mode from overlapping borrows. Not `#[repr(C)]` -- never
-/// crosses the LLVM/Rust boundary by value, only as an opaque pointer
-/// (mirrors `PyStrObj`/`PyListObj`). Lookup is linear-scan comparison
-/// via `pycc_rt_str_cmp` (D-121), not a hash table. Values are D-141 encoded
-/// words preserved unchanged across set/get/get-or-default; generated ingress
-/// validates them with `pycc_rt_int_untag_checked` before storage.
-pub struct PyDictObj {
-    rc: Cell<u32>,
-    entries: Cell<Vec<(*mut PyStrObj, i64)>>,
-}
-
-/// Allocates a fresh, empty `PyDictObj` with refcount `1`. Never panics.
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_dict_new() -> *mut PyDictObj {
-    rc::DICT_LIVE.fetch_add(1, Ordering::Relaxed);
-    Box::into_raw(Box::new(PyDictObj {
-        rc: Cell::new(1),
-        entries: Cell::new(Vec::new()),
-    }))
-}
-
-/// Insert-or-update (D-123): if `key` compares equal (`pycc_rt_str_cmp`)
-/// to an already-stored key, that entry's value is overwritten in place,
-/// preserving insertion order; otherwise `(key, value)` is appended.
-/// The call adopts the reference `key` carries: an appended key is owned
-/// by the dict (released when the dict is freed), and on an update the
-/// incoming key is released, as CPython keeps the key already stored.
-///
-/// # Safety
-/// `dict` and `key` must be live pointers from `pycc_rt_dict_new`/
-/// `pycc_rt_str_new`-family functions respectively.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_set(dict: *mut PyDictObj, key: *mut PyStrObj, value: i64) {
-    let mut entries = unsafe { &*dict }.entries.take();
-    match entries
-        .iter()
-        .position(|(k, _)| unsafe { pycc_rt_str_cmp(*k, key) } == 0)
-    {
-        // CPython keeps the key object already stored; the incoming one
-        // (whose reference this call adopted) is dropped.
-        Some(i) => {
-            entries[i].1 = value;
-            unsafe { pycc_rt_str_decref(key) };
-        }
-        None => entries.push((key, value)),
-    }
-    unsafe { &*dict }.entries.set(entries);
-}
-
-/// `str(d)`/`print(d)` of a `dict[str, int]`: `{'a': 1, 'b': 2}`, in
-/// insertion order, as CPython renders it.
-///
-/// # Safety
-///
-/// `dict` must be a live `PyDictObj`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_repr(dict: *mut PyDictObj) -> *mut PyStrObj {
-    let dict = unsafe { &*dict };
-    let entries = dict.entries.take();
-    let mut out = String::from("{");
-    for (i, (key, value)) in entries.iter().enumerate() {
-        if i > 0 {
-            out.push_str(", ");
-        }
-        let key_text = String::from_utf8_lossy(unsafe { &**key }.bytes()).into_owned();
-        list::str_repr(&key_text, &mut out);
-        out.push_str(": ");
-        let rendered = int_arith::int_to_str(*value);
-        out.push_str(&String::from_utf8_lossy(unsafe { &*rendered }.bytes()));
-        unsafe { pycc_rt_str_decref(rendered) };
-    }
-    dict.entries.set(entries);
-    out.push('}');
-    new_pystr(out.as_bytes())
-}
-
-fn dict_get(dict: &PyDictObj, key: *mut PyStrObj) -> i64 {
-    let entries = dict.entries.take();
-    let found = entries
-        .iter()
-        .find(|(k, _)| unsafe { pycc_rt_str_cmp(*k, key) } == 0)
-        .map(|(_, v)| *v);
-    dict.entries.set(entries);
-    found.unwrap_or_else(|| {
-        // D-173: set the pending exception flag instead of panicking.
-        // `KeyError(key)`: its `str()` renders the key's `repr`.
-        let key_text = String::from_utf8_lossy(unsafe { (*key).bytes() }).into_owned();
-        raise_builtin(EXCEPTION_TYPE_KEY_ERROR, "KeyError", &key_text);
-        tag_smallint(0)
-    })
-}
-
-/// Linear-scan lookup (D-121). Sets the pending `KeyError` exception flag
-/// if no stored key compares equal to `key` (D-173) and returns a sentinel
-/// `0`; the caller's generated code checks the flag after this call. The
-/// exception carries the missing key, as CPython's `KeyError(key)` does.
-///
-/// # Safety
-/// Same as `pycc_rt_dict_set`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_get(dict: *mut PyDictObj, key: *mut PyStrObj) -> i64 {
-    dict_get(unsafe { &*dict }, key)
-}
-
-fn dict_get_or_default(dict: &PyDictObj, key: *mut PyStrObj, default: i64) -> i64 {
-    let entries = dict.entries.take();
-    let found = entries
-        .iter()
-        .find(|(k, _)| unsafe { pycc_rt_str_cmp(*k, key) } == 0)
-        .map(|(_, v)| *v);
-    dict.entries.set(entries);
-    found.unwrap_or(default)
-}
-
-/// Returns the value stored for `key`, or `default` if `key` is absent
-/// (Python's `dict.get(key, default)`, PR-12, D-119) -- unlike
-/// `pycc_rt_dict_get`, this **never panics** on a missing key; that is the
-/// entire point of the two-argument form. `default` is passed through
-/// unchanged, so this function itself never panics either -- it is a total
-/// function given the type gate (`pycc_types`' T0021/T0033) already
-/// enforces `key`/`default`'s types.
-///
-/// # Safety
-/// Same as `pycc_rt_dict_get`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_get_or_default(
-    dict: *mut PyDictObj,
-    key: *mut PyStrObj,
-    default: i64,
-) -> i64 {
-    dict_get_or_default(unsafe { &*dict }, key, default)
-}
-
-/// Number of entries. `Cell::take` followed by re-`set`ting it, mirroring
-/// `pycc_rt_list_len`'s own exact pattern (never leave the `Cell`
-/// empty on return).
-///
-/// # Safety
-/// `dict` must be a live `PyDictObj` pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_len(dict: *mut PyDictObj) -> i64 {
-    let entries = unsafe { &*dict }.entries.take();
-    let len = entries.len() as i64;
-    unsafe { &*dict }.entries.set(entries);
-    len
-}
-
-/// Private half of `pycc_rt_dict_key_at` below, same panic-across-FFI
-/// split as `list_get`/`dict_get` above: a plain `extern "C" fn`
-/// turns an unwinding panic into a process abort, so the freely-panicking
-/// logic lives here and tests exercising the panic call this directly.
-///
-/// Uses `Vec::get` (bounds-checked, never panics on its own) rather than
-/// indexing directly, so the payload can be restored into the `Cell`
-/// *before* the panic branch -- mirroring `list_get`'s own "restore
-/// before panicking" comment and `dict_get`'s own `unwrap_or_else` shape,
-/// instead of `dict.entries.take()` followed by a direct index that would
-/// leave the `Cell` holding an empty `Vec` if it panicked. Not required
-/// for this compiler's actual generated code (`ForDict`'s own loop bound
-/// is always `pycc_rt_dict_len`, so no call site this project's own
-/// codegen emits can go out of range), but cheap insurance against
-/// leaving `dict` with a permanently emptied payload for any future
-/// caller that does catch this unwind (e.g. this file's own
-/// `#[should_panic]` test below).
-fn dict_key_at(dict: &PyDictObj, index: i64) -> *mut PyStrObj {
-    let entries = dict.entries.take();
-    let key = entries.get(index as usize).map(|(k, _)| *k);
-    dict.entries.set(entries);
-    key.unwrap_or_else(|| panic!("pycc_rt: dict_key_at index out of range"))
-}
-
-/// Key at a given insertion-order position, used only by `ForDict`'s own
-/// iteration codegen (Task 5) -- never a user-facing indexing operation
-/// (dict has no positional index in Python). Panics (message
-/// `"pycc_rt: dict_key_at index out of range"`) if `index` is out of
-/// range; unreachable in this compiler's own generated code (see `#
-/// Safety` below) but not undefined behavior if ever hit.
-///
-/// # Safety
-/// `dict` must be a live `PyDictObj` pointer; `index` must satisfy
-/// `0 <= index < pycc_rt_dict_len(dict)` (an internal codegen invariant,
-/// not user input -- `ForDict`'s own loop bound is `pycc_rt_dict_len`,
-/// so an out-of-range call here would be a codegen bug, not a possible
-/// user program).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_key_at(dict: *mut PyDictObj, index: i64) -> *mut PyStrObj {
-    dict_key_at(unsafe { &*dict }, index)
-}
-
-/// Unconditional refcounting (D-124), mirroring `pycc_rt_list_incref`
-/// exactly. No-op on null.
-///
-/// # Safety
-/// `dict` must be null or a live `PyDictObj` pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_incref(dict: *mut PyDictObj) {
-    if dict.is_null() {
-        return;
-    }
-    let obj = unsafe { &*dict };
-    obj.rc.set(obj.rc.get() + 1);
-}
-
-/// Drops one reference to `dict`, freeing it at zero: the dict owns one
-/// reference to each key (`pycc_rt_dict_set` adopts the one it is handed),
-/// released here; its values are inline `int` words that own nothing.
-///
-/// # Safety
-/// `dict` must be null or a live `PyDictObj` pointer not used again after
-/// its refcount reaches 0.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_decref(dict: *mut PyDictObj) {
-    if dict.is_null() {
-        return;
-    }
-    let obj = unsafe { &*dict };
-    let rc = obj.rc.get() - 1;
-    obj.rc.set(rc);
-    if rc == 0 {
-        let dict = unsafe { Box::from_raw(dict) };
-        for (key, _) in dict.entries.take() {
-            unsafe { pycc_rt_str_decref(key) };
-        }
-        rc::DICT_LIVE.fetch_sub(1, Ordering::Relaxed);
-    }
 }
 
 /// Runtime NameError for call-before-`def` (issue #22). pycc's type checker
@@ -3284,181 +3060,6 @@ mod tests {
         pycc_rt_exception_clear();
         unsafe { pycc_rt_buffer_f64_free(core::ptr::null_mut()) };
         assert_eq!(pycc_rt_exception_active(), 0);
-    }
-
-    #[test]
-    fn pycc_rt_dict_set_then_get_round_trips_the_value() {
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let key = new_pystr(b"a");
-            pycc_rt_dict_set(dict, key, tag_smallint(42));
-            assert_eq!(pycc_rt_dict_get(dict, key), tag_smallint(42));
-            assert_eq!(pycc_rt_dict_len(dict), 1);
-            pycc_rt_dict_decref(dict);
-        }
-    }
-
-    #[test]
-    fn dict_update_get_and_default_preserve_bool_identity_markers() {
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let present = new_pystr(b"present");
-            let missing = new_pystr(b"missing");
-            pycc_rt_dict_set(dict, present, BOOL_TRUE_MARKER);
-            assert_eq!(pycc_rt_dict_get(dict, present), BOOL_TRUE_MARKER);
-            assert_eq!(
-                pycc_rt_dict_get_or_default(dict, present, BOOL_FALSE_MARKER),
-                BOOL_TRUE_MARKER
-            );
-            assert_eq!(
-                pycc_rt_dict_get_or_default(dict, missing, BOOL_FALSE_MARKER),
-                BOOL_FALSE_MARKER
-            );
-            pycc_rt_dict_decref(dict);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_dict_set_on_an_existing_key_updates_in_place_without_growing_len() {
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let key = new_pystr(b"a");
-            pycc_rt_dict_set(dict, key, tag_smallint(1));
-            // Each set adopts one reference; the second is dropped because
-            // the key is already stored.
-            pycc_rt_str_incref(key);
-            pycc_rt_dict_set(dict, key, tag_smallint(2));
-            assert_eq!(pycc_rt_dict_get(dict, key), tag_smallint(2));
-            assert_eq!(pycc_rt_dict_len(dict), 1);
-            pycc_rt_dict_decref(dict);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_dict_preserves_insertion_order_across_key_at() {
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let a = new_pystr(b"a");
-            let b = new_pystr(b"b");
-            pycc_rt_dict_set(dict, b, tag_smallint(2));
-            pycc_rt_dict_set(dict, a, tag_smallint(1));
-            // "b" was inserted first, so it stays at index 0 even though "a"
-            // sorts first lexicographically.
-            assert_eq!(pycc_rt_str_cmp(pycc_rt_dict_key_at(dict, 0), b), 0);
-            assert_eq!(pycc_rt_str_cmp(pycc_rt_dict_key_at(dict, 1), a), 0);
-            pycc_rt_dict_decref(dict);
-        }
-    }
-
-    #[test]
-    #[should_panic(expected = "pycc_rt: dict_key_at index out of range")]
-    fn pycc_rt_dict_key_at_out_of_range_panics_honestly() {
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let key = new_pystr(b"a");
-            pycc_rt_dict_set(dict, key, tag_smallint(1));
-            // Calls the private `dict_key_at`, not the public
-            // `pycc_rt_dict_key_at` wrapper -- the wrapper is a plain
-            // `extern "C" fn`, so a panic crossing its boundary aborts the
-            // whole test binary (`SIGABRT`) instead of unwinding into
-            // `#[should_panic]`'s own catch (same convention as
-            // `list_get_out_of_range_panics_honestly`/
-            // `pycc_rt_dict_get_on_a_missing_key_panics` just below).
-            dict_key_at(&*dict, 1);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_dict_get_on_a_missing_key_sets_exception_flag() {
-        pycc_rt_exception_clear();
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let key = new_pystr(b"missing");
-            // Calls the private `dict_get` directly, matching the
-            // private-logic/public-wrapper convention used throughout
-            // this file's test module.
-            let result = dict_get(&*dict, key);
-            assert_eq!(pycc_rt_exception_active(), 1);
-            assert_eq!(untag_smallint(result), 0); // sentinel value
-            pycc_rt_dict_decref(dict);
-        }
-        pycc_rt_exception_clear();
-    }
-
-    #[test]
-    fn pycc_rt_dict_get_or_default_on_a_present_key_returns_the_stored_value() {
-        // Python's `dict.get(key, default)` on a present key: the stored
-        // value wins, `default` is ignored -- the two-argument form's
-        // "found" path, D-119.
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let key = new_pystr(b"a");
-            pycc_rt_dict_set(dict, key, tag_smallint(42));
-            assert_eq!(
-                pycc_rt_dict_get_or_default(dict, key, tag_smallint(-1)),
-                tag_smallint(42)
-            );
-            pycc_rt_dict_decref(dict);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_dict_get_or_default_on_a_missing_key_returns_the_default_without_panicking() {
-        // Unlike `pycc_rt_dict_get`, a missing key never panics here -- it
-        // returns `default` instead, the entire point of the two-argument
-        // form, D-119.
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let key = new_pystr(b"a");
-            pycc_rt_dict_set(dict, key, tag_smallint(42));
-            let missing = new_pystr(b"missing");
-            assert_eq!(
-                pycc_rt_dict_get_or_default(dict, missing, tag_smallint(-1)),
-                tag_smallint(-1)
-            );
-            pycc_rt_dict_decref(dict);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_dict_get_or_default_on_an_empty_dict_returns_the_default() {
-        // No entries at all -- the degenerate case of the missing-key path
-        // above, pinned separately since `dict_get_or_default`'s own linear
-        // scan over an empty `Vec` is a distinct code path worth its own
-        // executing test.
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            let key = new_pystr(b"z");
-            assert_eq!(
-                pycc_rt_dict_get_or_default(dict, key, tag_smallint(7)),
-                tag_smallint(7)
-            );
-            pycc_rt_dict_decref(dict);
-        }
-    }
-
-    #[test]
-    fn pycc_rt_dict_incref_then_decref_frees_without_leaking() {
-        unsafe {
-            let dict = pycc_rt_dict_new();
-            pycc_rt_dict_incref(dict);
-            pycc_rt_dict_decref(dict);
-            pycc_rt_dict_decref(dict); // rc reaches 0, frees
-        }
-    }
-
-    #[test]
-    fn pycc_rt_dict_incref_and_decref_on_a_null_pointer_are_safe_no_ops() {
-        // D-014's 100% line/region coverage gate: without this,
-        // `pycc_rt_dict_incref`/`_decref`'s `if dict.is_null()` early
-        // return is dead code, since none of the tests above ever pass a
-        // null pointer. Mirrors `PyListObj`'s own
-        // `list_incref_and_decref_on_a_null_pointer_are_safe_no_ops`
-        // test above.
-        unsafe {
-            pycc_rt_dict_incref(std::ptr::null_mut());
-            pycc_rt_dict_decref(std::ptr::null_mut());
-        }
     }
 
     /// #1054, coverage-bearing companion to

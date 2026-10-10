@@ -102,12 +102,12 @@ fn a_non_integer_operand_is_a_type_error() {
             "error[T0021]: operator `^` on `str` and `int` is not defined",
         ),
         (
-            "x = {1} | {2}\n",
-            "error[T0021]: operator `|` on `set[int]` and `set[int]` is not supported yet",
+            "x = {1} | {\"a\"}\n",
+            "error[T0021]: operator `|` on `set[int]` and `set[str]` is not supported yet",
         ),
         (
-            "s = {1}\ns |= {2}\n",
-            "error[T0021]: operator `|` on `set[int]` and `set[int]` is not supported yet",
+            "s = {1}\ns |= {\"a\"}\n",
+            "error[T0021]: operator `|` on `set[int]` and `set[str]` is not supported yet",
         ),
         (
             "d1 = {\"a\": 1}\nd2 = {\"b\": 2}\nx = d1 | d2\n",

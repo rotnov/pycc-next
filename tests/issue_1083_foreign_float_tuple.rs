@@ -140,7 +140,7 @@ fn every_fixed_arity_all_float_tuple_annotation_is_admitted() {
 /// diagnostic the checker already produced for a foreign object, which is
 /// the point worth pinning here. The variadic form is refused one layer
 /// earlier still, at annotation lowering, so its code differs from the
-/// mixed form's, and a `str` element is refused earlier still by D-116's
+/// mixed form's, and a `None` element is refused earlier still by D-116's
 /// own element-type gate, which is why the table carries the code per row.
 #[test]
 fn a_mixed_or_variadic_tuple_annotation_keeps_its_refusal() {
@@ -148,7 +148,7 @@ fn a_mixed_or_variadic_tuple_annotation_keeps_its_refusal() {
     for (code, annotation) in [
         ("T0025", "tuple[float, int]"),
         ("T0025", "tuple[int, int, int]"),
-        ("T0039", "tuple[float, str]"),
+        ("T0039", "tuple[float, None]"),
         ("T0053", "tuple[float, ...]"),
     ] {
         let body = format!("import gc\n\nv: {annotation} = gc.get_threshold()\n");

@@ -193,8 +193,15 @@ fn a_printed_object_is_converted_after_every_argument_is_evaluated() {
     // CPython runs `__str__` (which may raise or write to its own stdout).
     let flush_at = call_at(&ir, "pycc_rt_print_flush");
     assert!(separator_at < flush_at && flush_at < to_str_at, "{ir}");
-    assert_eq!(ir.matches("@pycc_rt_print_flush(").count(), 1, "{ir}");
+    assert_eq!(print_flushes(&ir), 1, "{ir}");
     assert!(ir.contains("@pycc_rt_print_none("), "{ir}");
+}
+
+/// The flushes a `print` emits: every flush call but the module epilogue's,
+/// which writes out a last line printed without a newline.
+fn print_flushes(ir: &str) -> usize {
+    let flush = "  call void @pycc_rt_print_flush()\n";
+    ir.matches(flush).count() - ir.matches(&format!("{flush}  ret i64 0\n")).count()
 }
 
 /// Only an object argument flushes: a native-only `print` and an
@@ -209,9 +216,9 @@ fn only_a_printed_object_flushes_stdout() {
             MirExpr::IntLiteral(1),
         ])],
     );
-    assert!(!native.contains("@pycc_rt_print_flush("), "{native}");
+    assert_eq!(print_flushes(&native), 0, "{native}");
     let fstring = module_ir("fstring_no_flush", vec![print(vec![interpolate_numpy()])]);
-    assert!(!fstring.contains("@pycc_rt_print_flush("), "{fstring}");
+    assert_eq!(print_flushes(&fstring), 0, "{fstring}");
 }
 
 /// Inside a function body both renderings take the #1316 bridge instead of

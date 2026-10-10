@@ -32,29 +32,48 @@ use crate::Ty;
 use pycc_diag::{Diagnostic, Span};
 
 /// Rejects one `tuple` element type this version's tuple codegen cannot
-/// represent (`T0039`, D-116): a tuple is a fixed SSA struct of scalars, so
-/// only `int`, `bool` and `float` elements are compilable.
+/// represent (`T0039`): every element a list can hold is admitted
+/// ([`is_list_element_ty`]). A tuple of only `int`/`bool`/`float` elements is
+/// an SSA struct; any other tuple is a boxed runtime object
+/// ([`tuple_is_boxed`]).
 ///
-/// This is deliberately *element*-shaped rather than a whole-`Ty` postcheck.
-/// `pycc_types`' tuple-literal inference calls it from inside its own
-/// element loop, immediately after inferring each element, so the elements
-/// are gated in source order: an earlier element's type gate is reported
-/// ahead of a later element's own inference failure (an undefined name,
-/// say). Folding it into a whole-`Ty` check would silently reorder those
-/// diagnostics -- `(1, "a", undefined_name)` would report the undefined
-/// name instead of `T0039`.
+/// This is deliberately *element*-shaped rather than a whole-`Ty` postcheck:
+/// `pycc_types`' tuple-literal inference gates the elements in source order.
 pub fn check_tuple_element_ty(element: &Ty, span: Span) -> Result<(), Diagnostic> {
-    if matches!(element, Ty::Int | Ty::Bool | Ty::Float) {
+    if is_list_element_ty(element) {
         return Ok(());
     }
     Err(Diagnostic::error(
         "T0039",
         format!(
-            "tuple element type `{}` is not compiled yet (D-116) -- only int/bool/float elements are",
+            "tuple element type `{}` is not compiled yet -- a tuple element must be int, float, \
+             bool, str, a user-class instance, or a list, tuple, dict or set of those",
             element.name()
         ),
         span,
     ))
+}
+
+/// Whether a `tuple[elements]` value is a boxed runtime object (a
+/// `pycc_rt` tuple object, held by pointer and reference counted like a
+/// list) rather than an SSA struct: any element other than `int`, `bool`
+/// and `float` makes it boxed.
+#[must_use]
+pub fn tuple_is_boxed(elements: &[Ty]) -> bool {
+    !elements
+        .iter()
+        .all(|element| matches!(element, Ty::Int | Ty::Bool | Ty::Float))
+}
+
+/// Whether `ty` can be a dict key or a set element with a natively computed
+/// hash: `int`, `bool`, `float`, `str`, and tuples of those.
+#[must_use]
+pub fn is_hashable_ty(ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
+        Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_hashable_ty),
+        _ => false,
+    }
 }
 
 /// The kind of display [`display_is_object`] judges.
@@ -113,10 +132,11 @@ pub fn display_is_object(kind: DisplayKind, elements: &[Ty]) -> bool {
 }
 
 /// Rejects a container `Ty` whose element types this version's codegen
-/// cannot represent: a `list[T]` whose element fails [`is_list_element_ty`] (`T0034`), `dict[str, int]`
-/// (`T0036`, D-122), `set[int]` and `frozenset[int]` (`T0038`, D-122) are
-/// the only admitted shapes, and a `tuple`'s elements are each checked with
-/// [`check_tuple_element_ty`].
+/// cannot represent: a `list[T]` whose element fails [`is_list_element_ty`]
+/// (`T0034`), a `dict[K, V]` whose key is not [`is_hashable_ty`] or whose
+/// value is not a list element type (`T0036`), a `set[T]`/`frozenset[T]` of
+/// anything but a hashable type or a user-class instance (`T0038`), and a
+/// `tuple` with an element [`check_tuple_element_ty`] rejects.
 ///
 /// A non-container `Ty` is accepted unchanged, so an annotation-lowering
 /// caller can route every lowered type through one call without first
@@ -129,7 +149,7 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
                     "T0034",
                     format!(
                         "{} is not compiled yet -- a list element must be int, float, bool, \
-                         str, a user-class instance or a list of those",
+                         str, a user-class instance, or a list, tuple, dict or set of those",
                         ty.name()
                     ),
                     span,
@@ -138,11 +158,12 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
             Ok(())
         }
         Ty::Dict(pair) => {
-            if **pair != (Ty::Str, Ty::Int) {
+            if !is_hashable_ty(&pair.0) || !is_list_element_ty(&pair.1) {
                 return Err(Diagnostic::error(
                     "T0036",
                     format!(
-                        "{} is not compiled yet (D-122) -- only dict[str, int] is",
+                        "{} is not compiled yet -- a dict key must be int, float, bool, str or \
+                         a tuple of those, and a value anything a list can hold",
                         ty.name()
                     ),
                     span,
@@ -150,10 +171,8 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
             }
             Ok(())
         }
-        Ty::Set(element) => check_int_set_element(ty, element, "set", span),
-        // Part 1 of #1319: `frozenset[int]` is `set[int]`'s exact sibling,
-        // gated by the same code for the same reason (D-122).
-        Ty::FrozenSet(element) => check_int_set_element(ty, element, "frozenset", span),
+        Ty::Set(element) => check_set_element(ty, element, "set", span),
+        Ty::FrozenSet(element) => check_set_element(ty, element, "frozenset", span),
         Ty::Tuple(elements) => {
             for element in elements.iter() {
                 check_tuple_element_ty(element, span)?;
@@ -175,35 +194,30 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
     }
 }
 
-/// Whether `list[element]` is compiled: one generic `list[T]` runtime object
-/// stores any element that fits one native word -- `int`, `float`, `bool`,
-/// `str`, a user-class instance, or (recursively) another such list.
+/// Whether `element` can be stored as one native container word: `int`,
+/// `float`, `bool`, `str`, a user-class instance, or (recursively) a list,
+/// a non-empty tuple, a dict or a set whose own element types are
+/// compiled.
 #[must_use]
 pub fn is_list_element_ty(element: &Ty) -> bool {
     match element {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Instance(_) => true,
         Ty::List(inner) => is_list_element_ty(inner),
+        Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_list_element_ty),
+        Ty::Dict(pair) => is_hashable_ty(&pair.0) && is_list_element_ty(&pair.1),
+        Ty::Set(inner) | Ty::FrozenSet(inner) => is_hashable_ty(inner),
         _ => false,
     }
 }
 
-/// The `T0038` gate shared by `set[T]` and `frozenset[T]`: an `int` element
-/// and (#1343) a user-class instance element are compiled. Whether that
-/// class is actually hashable is checked where an element is inserted
-/// (`pycc_types::set_element`), which has the class table this gate lacks.
-/// `family` names the admitted forms in the message.
-fn check_int_set_element(
-    ty: &Ty,
-    element: &Ty,
-    family: &str,
-    span: Span,
-) -> Result<(), Diagnostic> {
-    if !matches!(element, Ty::Int | Ty::Instance(_)) {
-        return Err(Diagnostic::error(
-            "T0038",
-            set_element_message(ty, family),
-            span,
-        ));
+/// The `T0038` gate shared by `set[T]` and `frozenset[T]`: a hashable
+/// element ([`is_hashable_ty`]) and (#1343) a user-class instance element
+/// are compiled. Whether that class is actually hashable is checked where an
+/// element is inserted (`pycc_types::set_element`), which has the class
+/// table this gate lacks.
+fn check_set_element(ty: &Ty, element: &Ty, family: &str, span: Span) -> Result<(), Diagnostic> {
+    if !is_hashable_ty(element) && !matches!(element, Ty::Instance(_)) {
+        return Err(Diagnostic::error("T0038", set_element_message(ty, family), span));
     }
     Ok(())
 }
@@ -213,8 +227,8 @@ fn check_int_set_element(
 #[must_use]
 pub fn set_element_message(ty: &Ty, family: &str) -> String {
     format!(
-        "{} is not compiled yet (D-122) -- only {family}[int] and a {family} of a user-class \
-         instance are",
+        "{} is not compiled yet -- a {family} element must be int, float, bool, str, a tuple of \
+         those or a user-class instance",
         ty.name()
     )
 }

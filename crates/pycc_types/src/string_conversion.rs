@@ -129,6 +129,9 @@ pub(crate) fn reject_unrenderable(
         // before this refusal `print({1})` passed `pycc check` and panicked
         // in the backend. `list`, `dict` and `tuple` are deliberately not
         // added here: #1220 owns rendering them.
+        // A set of hashable elements renders in CPython's order
+        // (`pycc_rt::set`); an instance set has no `repr` for its elements.
+        Ty::Set(elem) | Ty::FrozenSet(elem) if pycc_hir::is_hashable_ty(elem) => Ok(()),
         Ty::Set(_) | Ty::FrozenSet(_) => Err(crate::frozenset::unrenderable_set(ty)),
         Ty::List(_) => crate::list_ops::check_list_renderable(ty),
         // This catch-all also swallows every `Ty` variant added later: a new

@@ -277,6 +277,7 @@ fn collect_named_expr_targets_in_expr(expr: &HirExpr, killed: &mut HashSet<Strin
         | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
+        | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented

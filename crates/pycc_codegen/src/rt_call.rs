@@ -9,7 +9,6 @@
 //! argument's reference becomes the result's.
 
 use super::*;
-use crate::attr_slot::scalar_to_slot_word;
 use inkwell::types::BasicMetadataTypeEnum;
 use inkwell::values::BasicMetadataValueEnum;
 use pycc_mir::{RtCallExpr, Ty};
@@ -32,20 +31,6 @@ fn abi_value<'ctx>(scalar: Scalar<'ctx>) -> BasicMetadataValueEnum<'ctx> {
     }
 }
 
-/// The list element word for `scalar` as an element of type `elem`,
-/// borrowed (no retain).
-fn borrowed_word<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    elem: &Ty,
-    scalar: Scalar<'ctx>,
-) -> IntValue<'ctx> {
-    match elem {
-        Ty::Int => to_encoded_int(context, builder, scalar),
-        _ => scalar_to_slot_word(context, builder, scalar),
-    }
-}
-
 pub(super) fn emit_rt_call<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -60,6 +45,7 @@ pub(super) fn emit_rt_call<'ctx>(
     let mut values = Vec::with_capacity(call.args.len());
     let mut param_types: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::with_capacity(call.args.len());
     let mut temporaries = Vec::new();
+    let mut boxes = Vec::new();
     let passes_through = sig.symbol == "pycc_rt_list_unpack";
     // A fresh argument is released if a later argument raises.
     let mark = heap_rc::pending_mark(rt);
@@ -75,7 +61,10 @@ pub(super) fn emit_rt_call<'ctx>(
         };
         if *is_word {
             let scalar = coerce_scalar_to_type(context, builder, scalar, param.clone());
-            values.push(borrowed_word(context, builder, param, scalar).into());
+            let (word, boxed) =
+                crate::containers::borrowed_word(context, builder, rt, param, scalar);
+            boxes.push(boxed);
+            values.push(word.into());
             param_types.push(i64_type.into());
         } else {
             let scalar = coerce_scalar_to_type(context, builder, scalar, param.clone());
@@ -83,7 +72,21 @@ pub(super) fn emit_rt_call<'ctx>(
             param_types.push(ty_to_basic_type(context, param.clone()).into());
         }
     }
-    let fn_type = if sig.ret_word {
+    for kind in &sig.kind_args {
+        values.push(
+            i64_type
+                .const_int(crate::containers::word_kind(rt, kind), false)
+                .into(),
+        );
+        param_types.push(i64_type.into());
+    }
+    // A struct tuple comes back from the runtime boxed.
+    let boxed_ret = matches!(&sig.ret, Ty::Tuple(elements) if !pycc_hir::tuple_is_boxed(elements));
+    let fn_type = if boxed_ret {
+        context
+            .ptr_type(inkwell::AddressSpace::default())
+            .fn_type(&param_types, false)
+    } else if sig.ret_word {
         i64_type.fn_type(&param_types, false)
     } else if sig.ret == Ty::None {
         context.void_type().fn_type(&param_types, false)
@@ -106,12 +109,27 @@ pub(super) fn emit_rt_call<'ctx>(
             heap_rc::release_scalar_if_temporary(context, builder, rt, arg, &scalar);
         }
     }
+    for boxed in boxes {
+        crate::containers::release_boxed(context, builder, rt, boxed);
+    }
+    if boxed_ret {
+        let Ty::Tuple(elements) = &sig.ret else {
+            unreachable!("boxed_ret is a tuple result")
+        };
+        let boxed = call_site
+            .try_as_basic_value()
+            .expect_basic("a tuple-returning builtin returns a pointer")
+            .into_pointer_value();
+        let tuple = crate::containers::unbox_struct_tuple(context, builder, elements, boxed);
+        heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::List, boxed);
+        return Scalar::Tuple(tuple);
+    }
     if sig.ret_word {
         let word = call_site
             .try_as_basic_value()
             .expect_basic("a word-returning builtin returns i64")
             .into_int_value();
-        return list::word_element(context, builder, &sig.ret, word);
+        return crate::containers::owned_word_element(context, builder, rt, &sig.ret, word);
     }
     crate::call_result::call_result_scalar(context, call_site, &sig.ret)
 }

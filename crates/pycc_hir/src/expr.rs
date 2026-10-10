@@ -1006,6 +1006,7 @@ pub(crate) fn contains_named_expr(expr: &HirExpr) -> bool {
         | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
+        | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented

@@ -9,24 +9,14 @@
 
 use super::*;
 
-/// CPython's `a < b` between two element words of `kind` (`int`, `float`,
-/// `bool` or `str`; `pycc_hir::builtins` admits no other ordered kind).
+/// CPython's `a < b` between two element words of `kind` (`TypeError` for
+/// an unordered kind, which then compares `false`).
 fn word_lt(kind: i64, a: i64, b: i64) -> bool {
-    match kind {
-        LIST_KIND_INT => encoded_int_cmp(a, b).is_lt(),
-        LIST_KIND_FLOAT => f64::from_bits(a as u64) < f64::from_bits(b as u64),
-        LIST_KIND_STR => unsafe { pycc_rt_str_cmp(a as *mut PyStrObj, b as *mut PyStrObj) < 0 },
-        _ => a < b,
-    }
+    crate::value::lt_or_raise(kind, a, b)
 }
 
 fn word_truthy(kind: i64, word: i64) -> bool {
-    match kind {
-        LIST_KIND_INT => inline_int_value(word) != Some(0),
-        LIST_KIND_FLOAT => f64::from_bits(word as u64) != 0.0,
-        LIST_KIND_STR => !unsafe { &*(word as *mut PyStrObj) }.bytes().is_empty(),
-        _ => word != 0,
-    }
+    crate::value::truthy(kind, word)
 }
 
 /// Runs `f` on the list's elements as words, writing them back (a
@@ -46,7 +36,7 @@ fn edit_words<R>(list: &mut PyListObj, f: impl FnOnce(&mut Vec<i64>) -> R) -> R 
 }
 
 /// Stable merge sort consulting only `lt`.
-fn merge_sort(items: &mut Vec<i64>, lt: &dyn Fn(i64, i64) -> bool) {
+pub(crate) fn merge_sort(items: &mut Vec<i64>, lt: &dyn Fn(i64, i64) -> bool) {
     let n = items.len();
     if n < 2 {
         return;
@@ -90,7 +80,9 @@ fn sort_words(kind: i64, items: &mut Vec<i64>) {
         }
         LIST_KIND_BOOL => items.sort(),
         LIST_KIND_STR => items.sort_by(|a, b| unsafe {
-            (*(*a as *mut PyStrObj)).bytes().cmp((*(*b as *mut PyStrObj)).bytes())
+            (*(*a as *mut PyStrObj))
+                .bytes()
+                .cmp((*(*b as *mut PyStrObj)).bytes())
         }),
         _ => merge_sort(items, &|a, b| word_lt(kind, a, b)),
     }
@@ -233,7 +225,11 @@ pub unsafe extern "C" fn pycc_rt_list_index(list: *mut PyListObj, word: i64) -> 
 pub unsafe extern "C" fn pycc_rt_list_remove(list: *mut PyListObj, word: i64) {
     let list = unsafe { &mut *list };
     let kind = list.kind;
-    match list.items().iter().position(|item| words_equal(kind, *item, word)) {
+    match list
+        .items()
+        .iter()
+        .position(|item| words_equal(kind, *item, word))
+    {
         Some(i) => {
             let removed = edit_words(list, |items| items.remove(i));
             list.release(removed);
@@ -242,6 +238,35 @@ pub unsafe extern "C" fn pycc_rt_list_remove(list: *mut PyListObj, word: i64) {
             EXCEPTION_TYPE_VALUE_ERROR,
             "ValueError",
             "list.remove(x): x not in list",
+        ),
+    }
+}
+
+/// `del xs[index]` for an encoded int `index`: CPython's `IndexError`s for
+/// an out-of-range or too-large index.
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_delitem(list: *mut PyListObj, index: i64) {
+    let list = unsafe { &mut *list };
+    let Some(index) = crate::int_encoding::inline_int_value(index) else {
+        raise_builtin(
+            EXCEPTION_TYPE_INDEX_ERROR,
+            "IndexError",
+            "cannot fit 'int' into an index-sized integer",
+        );
+        return;
+    };
+    match resolve_index(index, list.len) {
+        Some(i) => {
+            let removed = edit_words(list, |items| items.remove(i));
+            list.release(removed);
+        }
+        None => raise_builtin(
+            EXCEPTION_TYPE_INDEX_ERROR,
+            "IndexError",
+            "list assignment index out of range",
         ),
     }
 }

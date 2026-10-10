@@ -107,10 +107,10 @@ fn module_scope_instances_match_cpython() {
 
 /// The element type is validated exactly as a local annotation's is.
 #[test]
-fn a_list_of_set_annotation_is_refused() {
+fn a_list_of_none_annotation_is_refused() {
     let text = check_fails(
         "e2e_1264_list_str",
-        "class C:\n    def __init__(self) -> None:\n        self.xs: list[set[int]] = []\n",
+        "class C:\n    def __init__(self) -> None:\n        self.xs: list[None] = []\n",
     );
     assert!(text.contains("error[T0034]"), "{text}");
 }

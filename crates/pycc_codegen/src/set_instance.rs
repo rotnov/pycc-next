@@ -43,31 +43,6 @@ pub(super) fn expect_set_pointer<'ctx>(scalar: Scalar<'ctx>, what: &str) -> Poin
     ptr
 }
 
-/// Inserts one already-validated encoded D-141 value into a `PyIntSetObj`,
-/// shared by `MirExpr::SetLiteral`'s per-element construction and
-/// `MirExpr::SetAdd`'s own user-facing `s.add(value)` call (PR-12 Task 11,
-/// D-119 -- the second call site; `SetLiteral`'s per-element construction
-/// was the first and, until this task, only one). Returns nothing:
-/// `pycc_rt_int_set_add` is declared `void`, exactly like
-/// `list::build_list_append`/`build_dict_set` above. The dedup check that
-/// makes a repeated element collapse to one (D-121) lives entirely inside
-/// `pycc_rt_int_set_add` itself -- both callers just call it per value,
-/// unconditionally, with no dedup logic of their own.
-pub(super) fn build_int_set_add<'ctx>(
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    set_ptr: PointerValue<'ctx>,
-    encoded_value: IntValue<'ctx>,
-) {
-    builder
-        .build_call(
-            rt.int_set_add,
-            &[set_ptr.into(), encoded_value.into()],
-            "set_add",
-        )
-        .expect("build_call should not fail for a well-formed set add");
-}
-
 /// A `PyIntSetObj`'s current element count, as a raw `i64` counter, shared
 /// by the `len(s)` builtin's `Ty::Set` branch, `MirStmt::ForSet`'s own loop
 /// bound and `frozenset::set_truthy` -- mirrors `list::build_list_len`/
@@ -428,7 +403,7 @@ pub(super) fn set_element_scalar<'ctx>(
     word: IntValue<'ctx>,
 ) -> Scalar<'ctx> {
     if !matches!(element_ty, pycc_mir::Ty::Instance(..)) {
-        return Scalar::Int(word);
+        return crate::list::word_element(context, builder, element_ty, word);
     }
     Scalar::Instance(
         builder
@@ -449,12 +424,19 @@ pub(super) fn build_set_new<'ctx>(
     rt: &RtFns<'ctx>,
     set_ty: &pycc_mir::Ty,
 ) -> PointerValue<'ctx> {
-    let counted = match set_ty {
-        pycc_mir::Ty::Set(elem) | pycc_mir::Ty::FrozenSet(elem) => {
-            crate::heap_rc::heap_kind(rt, elem).is_some()
-        }
-        _ => false,
+    let elem = match set_ty {
+        pycc_mir::Ty::Set(elem) | pycc_mir::Ty::FrozenSet(elem) => elem.as_ref(),
+        other => panic!(
+            "pycc_codegen: internal error: a set constructor for `{}`",
+            other.name()
+        ),
     };
+    // Only a set of instances is an `int_set.rs` object; every other set
+    // is a generic `set.rs` one.
+    if !matches!(elem, pycc_mir::Ty::Instance(_)) {
+        return crate::containers::build_set_new(rt.context, builder, rt, elem);
+    }
+    let counted = crate::heap_rc::heap_kind(rt, elem).is_some();
     let new_fn = if counted {
         rt.obj_set_new
     } else {

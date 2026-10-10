@@ -138,8 +138,8 @@ pub(crate) fn retain_word(kind: u8, word: i64) {
         b'i' => crate::pycc_rt_bigint_retain(word),
         b'l' => incref(word as *mut PyListObj),
         b'c' => incref(word as *mut PyInstanceObj),
-        b'd' => unsafe { crate::pycc_rt_dict_incref(word as *mut crate::PyDictObj) },
-        b'e' => unsafe { crate::pycc_rt_int_set_incref(word as *mut crate::PyIntSetObj) },
+        b'd' => unsafe { crate::dict::pycc_rt_dict_incref(word as *mut crate::dict::PyDictObj) },
+        b'e' => unsafe { crate::set::pycc_rt_set_incref(word as *mut crate::set::PySetObj) },
         b'o' => object_hook(&OBJECT_RETAIN, word),
         _ => {}
     }
@@ -158,8 +158,8 @@ pub(crate) fn release_word_into(kind: u8, word: i64, dead: &mut Worklist) {
         b'c' if decref_reaches_zero(word as *mut PyInstanceObj) => {
             dead.push(Dead::Instance(word as *mut PyInstanceObj));
         }
-        b'd' => unsafe { crate::pycc_rt_dict_decref(word as *mut crate::PyDictObj) },
-        b'e' => unsafe { crate::pycc_rt_int_set_decref(word as *mut crate::PyIntSetObj) },
+        b'd' => unsafe { crate::dict::pycc_rt_dict_decref(word as *mut crate::dict::PyDictObj) },
+        b'e' => unsafe { crate::set::pycc_rt_set_decref(word as *mut crate::set::PySetObj) },
         b'o' => object_hook(&OBJECT_RELEASE, word),
         _ => {}
     }
@@ -336,35 +336,51 @@ mod tests {
         unsafe { pycc_rt_list_decref(head) };
     }
 
-    /// A freed dict releases the keys it owns, and a freed counted set the
-    /// instances it holds; an uncounted set touches nothing.
+    /// A freed dict releases the keys and values it owns, a freed set its
+    /// elements, and a freed counted instance set the instances it holds.
     #[test]
-    fn freeing_a_dict_or_a_counted_set_releases_what_it_owns() {
+    fn freeing_a_dict_or_a_set_releases_what_it_owns() {
+        use crate::list::{LIST_KIND_INT, LIST_KIND_STR};
         let key = unsafe { pycc_rt_str_from_literal(b"key".as_ptr(), 3) };
+        let value = unsafe { pycc_rt_str_from_literal(b"value".as_ptr(), 5) };
         unsafe { pycc_rt_str_incref(key) };
-        let dict = crate::pycc_rt_dict_new();
-        unsafe { crate::pycc_rt_dict_set(dict, key, 1) };
+        unsafe { pycc_rt_str_incref(value) };
+        let dict = crate::dict::pycc_rt_dict_new(LIST_KIND_STR, LIST_KIND_STR);
+        unsafe { crate::dict::pycc_rt_dict_set(dict, key as i64, value as i64) };
         assert_eq!(str_count(key), 2);
-        unsafe { crate::pycc_rt_dict_decref(dict) };
+        assert_eq!(str_count(value), 2);
+        unsafe { crate::dict::pycc_rt_dict_incref(dict) };
+        unsafe { crate::dict::pycc_rt_dict_decref(dict) };
+        assert_eq!(str_count(key), 2);
+        unsafe { crate::dict::pycc_rt_dict_decref(dict) };
+        assert_eq!(str_count(key), 1);
+        assert_eq!(str_count(value), 1);
+
+        let set = crate::set::pycc_rt_set_new(LIST_KIND_STR);
+        unsafe { pycc_rt_str_incref(key) };
+        unsafe { crate::set::pycc_rt_set_add(set, key as i64) };
+        assert_eq!(str_count(key), 2);
+        unsafe { crate::set::pycc_rt_set_decref(set) };
         assert_eq!(str_count(key), 1);
         unsafe { crate::pycc_rt_str_decref(key) };
+        unsafe { crate::pycc_rt_str_decref(value) };
 
         static ITEM: &[u8] = b"Item\0";
         let item = unsafe { pycc_rt_instance_new(0, ITEM.as_ptr(), ITEM.len()) };
         unsafe { pycc_rt_instance_incref(item) };
-        let set = crate::int_set::pycc_rt_obj_set_new();
-        unsafe { crate::pycc_rt_obj_set_push(set, item as i64, 7) };
+        let objs = crate::int_set::pycc_rt_obj_set_new();
+        unsafe { crate::int_set::pycc_rt_obj_set_push(objs, item as i64, 7) };
         // A duplicate insertion hands its reference back.
         unsafe { pycc_rt_instance_incref(item) };
-        unsafe { crate::pycc_rt_obj_set_add_identity(set, item as i64, 7) };
+        unsafe { crate::int_set::pycc_rt_obj_set_add_identity(objs, item as i64, 7) };
         assert_eq!(count_of(item), 2);
-        unsafe { crate::pycc_rt_int_set_decref(set) };
+        unsafe { crate::set::pycc_rt_set_decref(objs.cast()) };
         assert_eq!(count_of(item), 1);
         unsafe { pycc_rt_instance_decref(item) };
 
-        let ints = crate::pycc_rt_int_set_new();
-        unsafe { crate::pycc_rt_int_set_add(ints, 5) };
-        unsafe { crate::pycc_rt_int_set_decref(ints) };
+        let ints = crate::set::pycc_rt_set_new(LIST_KIND_INT);
+        unsafe { crate::set::pycc_rt_set_add(ints, crate::tag_smallint(5)) };
+        unsafe { crate::set::pycc_rt_set_decref(ints) };
     }
 
     #[test]

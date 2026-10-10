@@ -269,10 +269,10 @@ fn a_declared_type_without_a_slot_representation_is_refused() {
 #[test]
 fn a_container_element_type_keeps_its_annotation_code() {
     for (annotation, code) in [
-        ("list[set[int]]", "T0034"),
-        ("dict[str, float]", "T0036"),
-        ("set[str]", "T0038"),
-        ("tuple[int, str]", "T0039"),
+        ("list[None]", "T0034"),
+        ("dict[str, None]", "T0036"),
+        ("set[list[int]]", "T0038"),
+        ("tuple[int, None]", "T0039"),
     ] {
         assert_eq!(
             error(&format!("class C:\n    x: {annotation}\n")).code,

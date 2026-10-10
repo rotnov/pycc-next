@@ -91,6 +91,9 @@ fn scalar_of<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
         Ty::Float => Scalar::Float(value.into_float_value()),
         Ty::Str => Scalar::Str(value.into_pointer_value()),
         Ty::Optional(_) => Scalar::Optional(value.into_struct_value()),
+        Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => {
+            Scalar::List(value.into_pointer_value())
+        }
         Ty::Tuple(_) => Scalar::Tuple(value.into_struct_value()),
         Ty::List(_) => Scalar::List(value.into_pointer_value()),
         Ty::Dict(_) => Scalar::Dict(value.into_pointer_value()),

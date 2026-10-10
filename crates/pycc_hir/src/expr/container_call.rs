@@ -158,8 +158,9 @@ fn lower_list_pop(
         [] => Ok(HirExpr::ListPop { list }),
         // `xs.pop(i)` is an ordinary method call: `pycc_types` types it on
         // a `list[T]` receiver (`list_ops::list_method_ty`) and `pycc_mir`
-        // lowers it to the indexed `MirExpr::ListPop`.
-        [_] => super::receiver_dispatch::lower_method_call(
+        // lowers it to the indexed `MirExpr::ListPop`; `d.pop(k)` and
+        // `d.pop(k, default)` on a dict resolve through `crate::builtins`.
+        [_] | [_, _] => super::receiver_dispatch::lower_method_call(
             call,
             attr,
             in_function,
@@ -168,7 +169,7 @@ fn lower_list_pop(
             signatures,
         ),
         args => Err(unsupported(
-            format!("list.pop() takes at most one argument, got {}", args.len()),
+            format!("pop() takes at most two arguments, got {}", args.len()),
             call.range,
         )),
     }

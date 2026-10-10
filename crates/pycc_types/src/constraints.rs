@@ -1833,7 +1833,7 @@ pub(crate) fn collect_expr_constraints(
                 Ok(None)
             }
         }
-        HirExpr::EmptyDict(_) => Ok(None),
+        HirExpr::EmptyDict(_) | HirExpr::EmptySet(_) => Ok(None),
         // Part 2d of #1371: a list display built as a CPython `list` is an
         // object whatever its elements are; their packability is
         // `crate::foreign::list_display`'s check, run by the checker walk.
@@ -2329,6 +2329,7 @@ fn bind_named_expr_targets(
         | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
+        | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
@@ -2606,8 +2607,9 @@ pub(crate) fn collect_block_constraints(
                 // so any previous opaque marker for `target` is stale
                 // regardless of what the new initializer's term turns out
                 // to be — it is either replaced by a real term below, or
-                // reinstated as opaque by the `else` arm.
-                env.opaque_bindings.remove(target.as_str());
+                // reinstated as opaque by the `else` arm. It is dropped only
+                // once the initializer is collected, which may still read
+                // the old binding (`a = a | b`).
                 // Part 2a of #1142 (#1165): the solver's one admitting seam
                 // for the buffer producer, mirroring `crate::check_stmt`'s.
                 // The length argument is still collected so its own
@@ -2633,6 +2635,7 @@ pub(crate) fn collect_block_constraints(
                         len_arg,
                     )?;
                     reject_non_int_producer_length(callee, len_term, parents, concrete)?;
+                    env.opaque_bindings.remove(target.as_str());
                     env.bindings
                         .entry(target.clone())
                         .or_insert(Ok(Ty::MemoryView));
@@ -2652,6 +2655,7 @@ pub(crate) fn collect_block_constraints(
                 // because the initializer may still read the buffer the
                 // name is about to stop denoting (`a = a[0]`).
                 env.rebind_over_owned_buffer(target);
+                env.opaque_bindings.remove(target.as_str());
                 // #1476: a first binding from a bare narrowed read keeps the
                 // `object` term (`object_narrow::is_bare_narrowed_read`).
                 let term = if object_narrow::is_bare_narrowed_read(env, value) {

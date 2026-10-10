@@ -118,6 +118,44 @@ fn compiled_and_fallback_code_match_cpython_in_an_ext_module() {
     assert_matches(&run(&compiled), &run(&plain));
 }
 
+/// A public function fallback code calls, whose inferred signature the
+/// CPython boundary cannot carry (`-> list[int]`), falls back itself rather
+/// than stopping the build with the export planner's `C0003`.
+#[test]
+fn a_function_the_boundary_cannot_publish_falls_back() {
+    let dir = ScratchDir::new("fallback_unpublishable").expect("scratch");
+    let source = dir.join("m.py");
+    std::fs::write(
+        &source,
+        "import sys\nI=lambda:[*map(int,sys.stdin.readline().split())]\nP=print\n\
+         for _ in [0]*I()[0]:\n\tn,=I();p=I()\n\tP(n,p)\n",
+    )
+    .expect("write");
+    let input = "1\n2\n3 4\n";
+    let build = pycc()
+        .args(["build", "--non-strict", "--report-fallbacks"])
+        .arg(&source)
+        .arg("-o")
+        .arg(dir.join("app"))
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}{}", text(&build.stdout), text(&build.stderr));
+    let run = |command: &mut Command| {
+        let mut child = command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn");
+        use std::io::Write as _;
+        child.stdin.take().expect("stdin").write_all(input.as_bytes()).expect("feed stdin");
+        child.wait_with_output().expect("wait")
+    };
+    let ours = run(&mut Command::new(dir.join("app")));
+    let oracle = run(python().arg(&source));
+    assert_matches(&ours, &oracle);
+}
+
 /// A module-level fallback block binds globals compiled code reads, and a
 /// compiled function the block calls is the published one.
 #[test]
@@ -158,7 +196,7 @@ fn strict_mode_still_refuses_what_non_strict_runs_in_cpython() {
     let source = dir.join("m.py");
     std::fs::write(
         &source,
-        "def f(x: int) -> int:\n    g = lambda: x\n    return g()\n\nprint(f(2))\n",
+        "def f(x: int) -> int:\n    g = lambda: x\n    h = g\n    return h()\n\nprint(f(2))\n",
     )
     .expect("write");
     let strict = pycc().arg("check").arg(&source).output().expect("spawn");

@@ -35,9 +35,9 @@ use std::collections::{BTreeSet, HashSet};
 /// parser already rejects starred, call and literal targets (`L0001`), so what
 /// reaches here is a name, a tuple/list, a subscript or an attribute.
 ///
-/// `non_strict` (#3) admits an item target (`del o[k]`) as a
-/// [`HirStmt::DeleteItem`], whose base `pycc_types` requires to be a CPython
-/// object; strict mode keeps refusing it here.
+/// An item target (`del o[k]`) becomes a [`HirStmt::DeleteItem`], whose
+/// base `pycc_types` requires to be a `dict`, a `list` or (non-strict, #3)
+/// a CPython object.
 pub(crate) fn lower_delete(
     del: &StmtDelete,
     lower_expr: &dyn Fn(&Expr) -> Result<HirExpr, Diagnostic>,
@@ -80,13 +80,6 @@ fn lower_target(
         }
         Expr::Subscript(subscript) => {
             let Expr::Slice(slice) = subscript.slice.as_ref() else {
-                if !non_strict {
-                    return Err(unsupported(
-                        "a `del` of a subscript (`del d[k]`, `del xs[i]`) is not supported yet \
-                         (#1245 for `dict`, #1246 for `list`)",
-                        subscript.range,
-                    ));
-                }
                 let base = Box::new(lower_expr(&subscript.value)?);
                 let key = Box::new(lower_expr(&subscript.slice)?);
                 if crate::expr::contains_named_expr(&base) || crate::expr::contains_named_expr(&key)

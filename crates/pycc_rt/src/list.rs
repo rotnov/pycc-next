@@ -29,7 +29,6 @@
 //! element it owns.
 
 use super::*;
-use crate::instance::PyInstanceObj;
 use crate::rc::{LIST_LIVE, Worklist, release_word_into, retain_word};
 
 /// Element kind of a `list[int]` (D-141 encoded words).
@@ -48,6 +47,13 @@ pub const LIST_KIND_LIST: i64 = 5;
 /// leak-only exception objects, which carry no reference count, so the
 /// list holds them without one.
 pub const LIST_KIND_UNCOUNTED_INSTANCE: i64 = 6;
+/// Element kind of a list of tuples (tuple-object `PyListObj` pointers,
+/// `tuple.rs`).
+pub const LIST_KIND_TUPLE: i64 = 7;
+/// Element kind of a list of dicts (`PyDictObj` pointers, `dict.rs`).
+pub const LIST_KIND_DICT: i64 = 8;
+/// Element kind of a list of sets (`PySetObj` pointers, `set.rs`).
+pub const LIST_KIND_SET: i64 = 9;
 
 /// See the module doc comment for the layout and ownership contract.
 #[repr(C)]
@@ -59,6 +65,9 @@ pub struct PyListObj {
     kind: i64,
     /// The reference count (`crate::rc`).
     rc: i64,
+    /// A tuple object's per-element kinds (`len` bytes); null for a list,
+    /// whose elements all have `kind`.
+    pub(crate) kinds: *mut u8,
 }
 
 const _: () = assert!(std::mem::offset_of!(PyListObj, rc) == crate::rc::RC_OFFSET);
@@ -103,6 +112,16 @@ macro_rules! with_vec {
 }
 
 impl PyListObj {
+    /// The element count.
+    pub(crate) fn len(&self) -> i64 {
+        self.len
+    }
+
+    /// The element kind (`LIST_KIND_*`, or `value::TUPLE_OBJECT`).
+    pub(crate) fn kind(&self) -> i64 {
+        self.kind
+    }
+
     fn typed<T: Elem>(&self) -> &[T] {
         if self.len == 0 {
             return &[];
@@ -118,6 +137,21 @@ impl PyListObj {
         } else {
             std::borrow::Cow::Borrowed(self.typed::<i64>())
         }
+    }
+
+    /// Every element with its kind: a tuple object's per-element kinds, or
+    /// the list's one element kind.
+    pub(crate) fn kinded_items(&self) -> Vec<(i64, i64)> {
+        if self.kind == crate::value::TUPLE_OBJECT {
+            let kinds = crate::tuple::kinds_of(self);
+            return self
+                .typed::<i64>()
+                .iter()
+                .zip(kinds)
+                .map(|(word, kind)| (i64::from(*kind), *word))
+                .collect();
+        }
+        self.items().iter().map(|word| (self.kind, *word)).collect()
     }
 
     /// The word of element `i`, which must be in range.
@@ -169,12 +203,7 @@ impl PyListObj {
 
 /// The `crate::rc` kind byte of a list of kind `kind`'s elements.
 fn element_rc_kind(kind: i64) -> u8 {
-    match kind {
-        LIST_KIND_STR => b's',
-        LIST_KIND_LIST => b'l',
-        LIST_KIND_INSTANCE => b'c',
-        _ => b'w',
-    }
+    crate::value::rc_kind(kind)
 }
 
 /// A list of kind `kind` owning `items`, whose element type must be the
@@ -188,6 +217,7 @@ fn new_typed_list<T: Elem>(kind: i64, items: Vec<T>) -> *mut PyListObj {
         cap: items.capacity() as i64,
         kind,
         rc: 1,
+        kinds: std::ptr::null_mut(),
     }))
 }
 
@@ -197,13 +227,30 @@ pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
     LIST_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     // SAFETY: the count reached zero, so nothing else names the list.
     let mut list = unsafe { Box::from_raw(list) };
-    let kind = list.element_rc_kind();
-    if kind != b'w' {
-        for word in list.typed::<i64>() {
-            release_word_into(kind, *word, dead);
+    if list.kind == crate::value::TUPLE_OBJECT {
+        for (kind, word) in list.kinded_items() {
+            release_word_into(crate::value::rc_kind(kind), word, dead);
+        }
+        crate::tuple::free_kinds(&mut list);
+    } else {
+        let kind = list.element_rc_kind();
+        if kind != b'w' {
+            for word in list.typed::<i64>() {
+                release_word_into(kind, *word, dead);
+            }
         }
     }
     with_vec!(list, |items| drop(std::mem::take(items)));
+}
+
+/// A new object of kind `kind` (not `LIST_KIND_BOOL`) owning `words`.
+pub(crate) fn new_raw(kind: i64, words: Vec<i64>) -> *mut PyListObj {
+    new_typed_list(kind, words)
+}
+
+/// A new list of kind `kind` owning the elements `words` denote.
+pub(crate) fn new_raw_words(kind: i64, words: Vec<i64>) -> *mut PyListObj {
+    new_list(kind, words)
 }
 
 /// A list of kind `kind` holding the elements `items` denote.
@@ -520,25 +567,8 @@ pub unsafe extern "C" fn pycc_rt_list_repeat(list: *mut PyListObj, count: i64) -
 }
 
 /// Python `==` between two element words of `kind`.
-fn words_equal(kind: i64, a: i64, b: i64) -> bool {
-    match kind {
-        LIST_KIND_INT => encoded_int_cmp(a, b) == std::cmp::Ordering::Equal,
-        LIST_KIND_FLOAT => f64::from_bits(a as u64) == f64::from_bits(b as u64),
-        LIST_KIND_STR => unsafe { pycc_rt_str_cmp(a as *mut PyStrObj, b as *mut PyStrObj) == 0 },
-        LIST_KIND_LIST => a == b || lists_equal(a as *mut PyListObj, b as *mut PyListObj),
-        // `bool` values and instances (identity: `pycc_types` admits `in`
-        // only on a class without `__eq__`).
-        _ => a == b,
-    }
-}
-
-fn lists_equal(a: *mut PyListObj, b: *mut PyListObj) -> bool {
-    let (a, b) = unsafe { (&*a, &*b) };
-    a.len == b.len
-        && a.items()
-            .iter()
-            .zip(b.items().iter())
-            .all(|(x, y)| words_equal(a.kind, *x, *y))
+pub(crate) fn words_equal(kind: i64, a: i64, b: i64) -> bool {
+    crate::value::eq(kind, a, b)
 }
 
 /// `word in xs`: `1` when an element equals `word`, else `0`. `word` is
@@ -591,46 +621,28 @@ pub(crate) fn str_repr(text: &str, out: &mut String) {
 
 /// Appends `repr()` of one element word to `out`; `false` when rendering
 /// raised (a `float` needing scientific notation).
-fn word_repr(kind: i64, word: i64, out: &mut String) -> bool {
-    let rendered = match kind {
-        LIST_KIND_INT => int_to_str(word),
-        LIST_KIND_FLOAT => pycc_rt_float_to_str(f64::from_bits(word as u64)),
-        LIST_KIND_BOOL => pycc_rt_bool_to_str(word as i8),
-        LIST_KIND_STR => {
-            let text = String::from_utf8_lossy(unsafe { &*(word as *mut PyStrObj) }.bytes());
-            str_repr(&text, out);
-            return true;
-        }
-        LIST_KIND_LIST => return list_repr(unsafe { &*(word as *mut PyListObj) }, out),
-        _ => {
-            let instance = word as *mut PyInstanceObj;
-            let mut len = 0usize;
-            let name = unsafe { pycc_rt_ext_instance_class(instance, &mut len) };
-            let name = unsafe { std::slice::from_raw_parts(name, len) };
-            out.push_str(&format!(
-                "<__main__.{} object at {:#x}>",
-                String::from_utf8_lossy(name),
-                word
-            ));
-            return true;
-        }
-    };
-    out.push_str(&String::from_utf8_lossy(unsafe { &*rendered }.bytes()));
-    unsafe { pycc_rt_str_decref(rendered) };
-    pycc_rt_exception_active() == 0
+pub(crate) fn word_repr(kind: i64, word: i64, out: &mut String) -> bool {
+    crate::value::repr(kind, word, out)
 }
 
-fn list_repr(list: &PyListObj, out: &mut String) -> bool {
-    out.push('[');
-    for (i, word) in list.items().iter().enumerate() {
+/// Appends `repr()` of a list (`[a, b]`) or a tuple object (`(a, b)`,
+/// `(a,)`) to `out`.
+pub(crate) fn sequence_repr(list: &PyListObj, out: &mut String) -> bool {
+    let tuple = list.kind == crate::value::TUPLE_OBJECT;
+    out.push(if tuple { '(' } else { '[' });
+    let items = list.kinded_items();
+    for (i, (kind, word)) in items.iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
         }
-        if !word_repr(list.kind, *word, out) {
+        if !word_repr(*kind, *word, out) {
             return false;
         }
     }
-    out.push(']');
+    if tuple && items.len() == 1 {
+        out.push(',');
+    }
+    out.push(if tuple { ')' } else { ']' });
     true
 }
 
@@ -643,7 +655,7 @@ fn list_repr(list: &PyListObj, out: &mut String) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_repr(list: *mut PyListObj) -> *mut PyStrObj {
     let mut out = String::new();
-    if !list_repr(unsafe { &*list }, &mut out) {
+    if !sequence_repr(unsafe { &*list }, &mut out) {
         return new_pystr(b"");
     }
     new_pystr(out.as_bytes())
@@ -654,7 +666,7 @@ pub(crate) fn list_words(list: *mut PyListObj) -> Vec<i64> {
     unsafe { &*list }.items().to_vec()
 }
 
-mod ops;
+pub(crate) mod ops;
 
 #[cfg(test)]
 mod tests;

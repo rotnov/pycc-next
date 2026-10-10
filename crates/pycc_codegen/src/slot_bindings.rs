@@ -223,8 +223,12 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
         // is what lets a nested, ordinary statement (e.g. `for k in d:\n
         // y = 1\n`) still get `y`'s own binding collected, exactly like
         // every other container arm above.
-        MirStmt::ForDict { var, body, .. } => {
-            bindings.entry(var.clone()).or_insert(pycc_mir::Ty::Str);
+        MirStmt::ForDict {
+            var, var_ty, body, ..
+        } => {
+            bindings
+                .entry(var.clone())
+                .or_insert_with(|| var_ty.clone());
             for stmt in body {
                 collect_stmt_bindings(stmt, bindings);
             }

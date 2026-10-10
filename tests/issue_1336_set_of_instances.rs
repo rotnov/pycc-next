@@ -834,19 +834,20 @@ fn a_hash_method_returning_a_non_integer_is_t0021() {
 #[test]
 fn an_uncompiled_set_element_type_is_still_refused() {
     let r = class("R", "", "");
-    let widened = "only set[int] and a set of a user-class instance are";
+    let widened = "a set element must be int, float, bool, str, a tuple of those or a \
+                   user-class instance";
     assert_one_error(
-        "e2e_1343_t0038_str",
-        "def f(s: set[str]) -> None:\n    pass\n",
+        "e2e_1343_t0038_none",
+        "def f(s: set[None]) -> None:\n    pass\n",
         "T0038",
-        "set[str] is not compiled yet (D-122)",
+        "set[None] is not compiled yet",
         "",
     );
     assert_one_error(
         "e2e_1343_t0038_nested",
         &format!("{r}def f(s: set[set[R]]) -> None:\n    pass\n"),
         "T0038",
-        &format!("set[set[R]] is not compiled yet (D-122) -- {widened}"),
+        &format!("set[set[R]] is not compiled yet -- {widened}"),
         "",
     );
     // An optional instance is refused by the `Optional` gate first.

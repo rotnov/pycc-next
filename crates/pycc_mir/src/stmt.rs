@@ -545,13 +545,14 @@ pub(super) fn lower_stmt(
                     ])
                 }
                 Ty::Dict(kv) => {
-                    bind_variable(scopes, var.clone(), kv.0);
+                    bind_variable(scopes, var.clone(), kv.0.clone());
                     // D-068 re-review of #780 (sixth round): see the
                     // `ForRange` arm's identical comment above.
                     super::kill_narrowing(scopes, var);
                     let body = lower_loop_body(body, scopes, classes, current_class);
                     MirStmt::ForDict {
                         var: var.clone(),
+                        var_ty: kv.0,
                         dict: list.clone(),
                         body,
                     }
@@ -974,11 +975,23 @@ pub(super) fn lower_stmt(
             base: lower_expr(base, scopes, classes, current_class),
             attr: attr.clone(),
         },
-        // Non-strict mode (#3): admitted only on a CPython object base.
-        HirStmt::DeleteItem { base, key, .. } => MirStmt::ObjDelItem {
-            base: lower_expr(base, scopes, classes, current_class),
-            key: lower_expr(key, scopes, classes, current_class),
-        },
+        // A `dict`/`list` base deletes through `pycc_hir::builtins`'
+        // `__pycc_delitem__`; anything else is a CPython object (#3).
+        HirStmt::DeleteItem { base, key, .. } => {
+            let base = lower_expr(base, scopes, classes, current_class);
+            let key = lower_expr(key, scopes, classes, current_class);
+            match crate::expr::builtin_call::lower_builtin_method(
+                base,
+                "__pycc_delitem__",
+                vec![key],
+            ) {
+                Ok(call) => MirStmt::ExprStmt(call),
+                Err((base, mut key)) => MirStmt::ObjDelItem {
+                    base,
+                    key: key.pop().expect("one key"),
+                },
+            }
+        }
         HirStmt::ForeignImport { bindings, .. } => MirStmt::ForeignImport {
             bindings: bindings.clone(),
         },

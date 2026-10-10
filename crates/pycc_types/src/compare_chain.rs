@@ -75,6 +75,18 @@ pub(crate) fn compare_link_ty(
         {
             return crate::list_ops::membership_ty(env, left_ty, elem);
         }
+        // A dict key or a hashable set element: the runtime's hash lookup.
+        if let Ty::Dict(kv) = right_ty
+            && *left_ty != Ty::Object
+        {
+            return crate::list_ops::membership_ty(env, left_ty, &kv.0);
+        }
+        if let Ty::Set(elem) | Ty::FrozenSet(elem) = right_ty
+            && *left_ty != Ty::Object
+            && pycc_hir::is_hashable_ty(elem)
+        {
+            return crate::list_ops::membership_ty(env, left_ty, elem);
+        }
         return crate::foreign::compare::membership_ty(op, left_ty, right_ty);
     }
     // Part 1 of #1371: a rich comparison with a CPython object operand is
@@ -101,6 +113,9 @@ pub(crate) fn compare_link_ty(
         && class_def.is_dataclass
     {
         return Ok(Ty::Bool);
+    }
+    if let Some(result) = container_compare_ty(op, left_ty, right_ty) {
+        return result;
     }
     if numeric_or_bool_compatible(left_ty.clone(), right_ty.clone()) {
         Ok(Ty::Bool)
@@ -158,4 +173,46 @@ pub(crate) fn infer_compare_chain(
         compare_link_ty(env, link.op, left, right, left_ty, right_ty)?;
     }
     Ok(Ty::Bool)
+}
+
+/// `==`/`!=` between two containers of one type, and `<`/`<=`/`>`/`>=`
+/// between two lists or tuples of one type whose elements are ordered
+/// (`pycc_rt::value` compares them element by element, as CPython does).
+/// `None` when the operands are not two containers.
+fn container_compare_ty(op: CmpOp, left: &Ty, right: &Ty) -> Option<Result<Ty, Diagnostic>> {
+    let container = |ty: &Ty| {
+        matches!(
+            ty,
+            Ty::List(_) | Ty::Tuple(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_)
+        )
+    };
+    if !container(left) || !container(right) {
+        return None;
+    }
+    let refuse = || {
+        Err(Diagnostic::error(
+            "T0021",
+            format!("cannot compare `{}` and `{}`", left.name(), right.name()),
+            Span::new(0, 0),
+        ))
+    };
+    if left != right {
+        return Some(refuse());
+    }
+    if matches!(op, CmpOp::Eq | CmpOp::NotEq) {
+        return Some(Ok(Ty::Bool));
+    }
+    // Set ordering is inclusion (`a <= b` is `a.issubset(b)`).
+    let inclusion = matches!(left, Ty::Set(e) | Ty::FrozenSet(e) if pycc_hir::is_hashable_ty(e));
+    Some(if ordered(left) || inclusion { Ok(Ty::Bool) } else { refuse() })
+}
+
+/// Whether `<` is defined between two values of `ty`.
+fn ordered(ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
+        Ty::List(elem) => ordered(elem),
+        Ty::Tuple(elements) => elements.iter().all(ordered),
+        _ => false,
+    }
 }

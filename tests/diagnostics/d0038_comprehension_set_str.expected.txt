@@ -1,5 +1,0 @@
-error[T0038]: set comprehension codegen only supports `set[int]` or a set of a user-class instance (D-122, D-255), got a comprehension producing `set[str]`
- --> tests/diagnostics/d0038_comprehension_set_str.py:1:1
-  |
-1 | ys = {"hi" for i in range(3)}
-  | ^ set comprehension codegen only supports `set[int]` or a set of a user-class instance (D-122, D-255), got a comprehension producing `set[str]`

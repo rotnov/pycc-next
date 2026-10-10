@@ -1,5 +1,5 @@
-error[T0034]: list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those
+error[T0034]: list[None] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those
  --> tests/diagnostics/t0034_nested_list_annotation.py:1:16
   |
-1 | def f(xs: list[list[set[int]]]) -> None:
-  |                ^^^^^^^^^^^^^^ list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those
+1 | def f(xs: list[list[None]]) -> None:
+  |                ^^^^^^^^^^ list[None] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those

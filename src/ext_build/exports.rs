@@ -246,6 +246,15 @@ pub(crate) fn collect_exports_with_hooks(
     module: &HirModule,
     hooks: &BTreeSet<String>,
 ) -> Result<Vec<ExtExport>, Vec<Diagnostic>> {
+    collect_exports_naming_gaps(module, hooks).map_err(|gaps| gaps.into_iter().map(|(_, d)| d).collect())
+}
+
+/// [`collect_exports_with_hooks`], each `C0003` gap paired with the name of
+/// the function it refuses, for the non-strict fallback loop to place.
+pub(crate) fn collect_exports_naming_gaps(
+    module: &HirModule,
+    hooks: &BTreeSet<String>,
+) -> Result<Vec<ExtExport>, Vec<(String, Diagnostic)>> {
     let mut exports: Vec<ExtExport> = Vec::new();
     // Every compiled name any definition of which returns a buffer
     // sub-range; see the union pass after the loop for why the fact is
@@ -357,11 +366,14 @@ pub(crate) fn collect_exports_with_hooks(
         };
         if let Some(offender) = unsupported_boundary_ty(carried_params, return_ty, &carrier_classes)
         {
-            gaps.push(if hooks.contains(name) {
-                module_hook_gap(name, &offender)
-            } else {
-                capability_gap(name, &offender)
-            });
+            gaps.push((
+                name.clone(),
+                if hooks.contains(name) {
+                    module_hook_gap(name, &offender)
+                } else {
+                    capability_gap(name, &offender)
+                },
+            ));
             continue;
         }
         let (class, method) = match &spelling {

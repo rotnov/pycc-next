@@ -17,6 +17,13 @@
 //! * A module-level `name = lambda params: body` becomes `def name(params):
 //!   return body`, its signature inferred (the [`INFER_MARKER`] return
 //!   annotation tells HIR lowering to treat it like a private helper).
+//! * A function nested in a function becomes a module-level function
+//!   receiving the enclosing variables it reads (see [`closures`]).
+//! * `key=`/`reverse=` arguments of `sorted`, `min`, `max` and
+//!   `list.sort` become a list of `(key, element)` pairs (see [`keys`]);
+//!   comprehension tuple targets become subscripts of a fresh variable and
+//!   a generator argument of `sum`/`min`/`max`/`any`/`all`/`str.join`
+//!   becomes a list comprehension (see [`comps`]).
 //! * `map(f, xs)` and `filter(f, xs)` become list comprehensions, a lambda
 //!   argument inlined; `[*xs]` becomes `list(xs)`; `print(*xs, sep=s)`
 //!   becomes `print(s.join([str(x) for x in xs]))`.
@@ -29,7 +36,10 @@
 
 mod aliases;
 mod build;
+mod closures;
+mod comps;
 mod exprs;
+mod keys;
 mod stmts;
 
 use ruff_python_ast::{Expr, ModModule, Stmt};
@@ -66,6 +76,7 @@ pub fn desugar(module: &mut ModModule) {
     };
     let sys = aliases::SysNames::collect(&module.body);
     aliases::module_level_defs(&mut module.body, &sys);
+    closures::lift_closures(&mut module.body, &fresh);
     exprs::rewrite_exprs(&mut module.body, &sys, &fresh);
     let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
     stmts::expand_body(&mut body, &fresh, true);

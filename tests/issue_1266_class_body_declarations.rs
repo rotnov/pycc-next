@@ -353,7 +353,7 @@ fn existing_refusals_keep_their_own_diagnostics() {
     let text = fails(
         "e2e_1266_list_set",
         "check",
-        "class C:\n    x: list[set[int]]\n",
+        "class C:\n    x: list[None]\n",
     );
     assert!(text.contains("error[T0034]"), "{text}");
 }

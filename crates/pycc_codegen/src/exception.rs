@@ -289,6 +289,7 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         | MirExpr::Compare { .. }
         | MirExpr::ListLiteral(_)
         | MirExpr::EmptyList(_)
+        | MirExpr::EmptySet(_)
         | MirExpr::ListAppend { .. }
         | MirExpr::DictLiteral(_)
         | MirExpr::EmptyDict(_)

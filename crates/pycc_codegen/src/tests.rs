@@ -3566,33 +3566,21 @@ fn ty_to_basic_type_gives_tuple_a_struct_representation_positionally() {
 }
 
 #[test]
-fn ty_to_basic_type_builds_a_nested_tuple_struct_recursively() {
-    // The `Ty::Tuple` arm is deliberately not narrowed to D-116's
-    // current int/bool/float element gate (matching how `List(_)`/
-    // `Dict(_)`/`Set(_)` ignore their own element types) -- it recurses
-    // through `ty_to_basic_type` for whatever element types it is
-    // handed. `pycc_types`' T0039 means no such type reaches codegen
-    // from real source today; this pins the representation rule itself
-    // so a future widening of T0039 needs no change here.
+fn ty_to_basic_type_boxes_a_tuple_with_a_non_scalar_element() {
+    // A tuple of int/bool/float elements is an SSA struct; any other
+    // element (a nested tuple included) makes it a boxed tuple object,
+    // held by pointer like a list (`pycc_hir::tuple_is_boxed`).
     let context = Context::create();
-    let basic_type = ty_to_basic_type(
+    let flat = ty_to_basic_type(&context, Ty::Tuple(Box::new(vec![Ty::Int, Ty::Float])));
+    assert_eq!(flat.into_struct_type().count_fields(), 2);
+    let nested = ty_to_basic_type(
         &context,
         Ty::Tuple(Box::new(vec![
             Ty::Int,
             Ty::Tuple(Box::new(vec![Ty::Float])),
         ])),
     );
-    let struct_ty = basic_type.into_struct_type();
-    assert_eq!(struct_ty.count_fields(), 2);
-    let inner = struct_ty
-        .get_field_type_at_index(1)
-        .expect("the nested tuple field exists")
-        .into_struct_type();
-    assert_eq!(inner.count_fields(), 1);
-    assert_eq!(
-        inner.get_field_type_at_index(0),
-        Some(context.f64_type().into())
-    );
+    assert!(nested.is_pointer_type());
 }
 
 #[test]
@@ -4155,6 +4143,7 @@ fn collect_stmt_bindings_binds_a_for_dict_loop_variable_as_str_and_recurses_into
     // silently dropped.
     let stmt = MirStmt::ForDict {
         var: "k".to_string(),
+        var_ty: pycc_mir::Ty::Str,
         dict: "d".to_string(),
         body: vec![MirStmt::Assign {
             target: "y".to_string(),
@@ -5163,11 +5152,11 @@ fn a_str_attribute_read_twice_and_then_reassigned_does_not_use_after_free() {
 }
 
 #[test]
-#[should_panic(expected = "an instance attribute of type `set[int]` is not supported yet")]
+#[should_panic(expected = "an instance attribute of type `int | None` is not supported yet")]
 fn slot_word_to_scalar_rejects_an_unsupported_attribute_type() {
     // `pycc_hir::class::init_slot::slot_ty_from_init_rhs` admits only a
-    // scalar or a `list[int]`/`dict[str, int]` slot (D-154, #1262), so a
-    // `set[T]`-typed slot can never reach this function from real,
+    // container or scalar slot, never an `Optional` one, so an
+    // `int | None`-typed slot can never reach this function from real,
     // type-checked source -- hand-built directly, matching this file's
     // own established internal-error-test convention (e.g.
     // `to_numeric_encoded_int_rejects_a_list_operand` above).
@@ -5179,7 +5168,7 @@ fn slot_word_to_scalar_rejects_an_unsupported_attribute_type() {
         &context,
         &builder,
         raw,
-        &pycc_mir::Ty::Set(Box::new(pycc_mir::Ty::Int)),
+        &pycc_mir::Ty::Optional(Box::new(pycc_mir::Ty::Int)),
     );
     let _ = module;
 }
@@ -5188,15 +5177,16 @@ fn slot_word_to_scalar_rejects_an_unsupported_attribute_type() {
 #[should_panic(expected = "cannot store this value into an instance attribute slot")]
 fn scalar_to_slot_word_rejects_an_unsupported_scalar() {
     // Mirror image of `slot_word_to_scalar_rejects_an_unsupported_attribute_type`
-    // above, for the write direction: a `Scalar::Set` can never reach
-    // `scalar_to_slot_word` from real, type-checked source either.
+    // above, for the write direction: a struct `Scalar::Tuple` can never
+    // reach `scalar_to_slot_word` from real, type-checked source either
+    // (a slot stores a tuple boxed).
     let context = Context::create();
     let module = context.create_module("test");
     let builder = context.create_builder();
-    let ptr = context
-        .ptr_type(inkwell::AddressSpace::default())
-        .const_null();
-    scalar_to_slot_word(&context, &builder, Scalar::Set(ptr));
+    let tuple = context
+        .struct_type(&[context.i64_type().into()], false)
+        .const_zero();
+    scalar_to_slot_word(&context, &builder, Scalar::Tuple(tuple));
     let _ = module;
 }
 
@@ -5739,6 +5729,7 @@ fn for_k_in_dict_iterates_keys_in_insertion_order() {
             }),
             MirItem::TopLevelStmt(MirStmt::ForDict {
                 var: "k".to_string(),
+                var_ty: pycc_mir::Ty::Str,
                 dict: "x".to_string(),
                 body: vec![print_expr(MirExpr::Name {
                     name: "k".to_string(),
@@ -5783,6 +5774,7 @@ fn reassigning_the_for_dict_loop_variable_inside_the_body_does_not_corrupt_the_d
             }),
             MirItem::TopLevelStmt(MirStmt::ForDict {
                 var: "k".to_string(),
+                var_ty: pycc_mir::Ty::Str,
                 dict: "x".to_string(),
                 body: vec![
                     MirStmt::Assign {
@@ -5860,22 +5852,11 @@ fn set_literal_construction_dedups_and_reports_correct_len() {
 }
 
 #[test]
-fn for_x_in_set_iterates_in_first_insertion_order() {
+fn for_x_in_set_iterates_in_cpython_order() {
     // `x = {2, 1, 2}\nfor v in x:\n    print(v)\n` end to end -- real
-    // `MirStmt::ForSet` iteration codegen (PR-11 Task 9, D-123). `2`
-    // printing before `1` (first-insertion order, with the second `2`
-    // deduped away rather than moving `2`'s position) is the actual
-    // point of this test: `PyIntSetObj`'s own insertion-order guarantee
-    // (D-121) surviving through `pycc_rt_int_set_get`.
-    //
-    // This is pycc's own internal-consistency check, NOT a conformance
-    // fixture against CPython: `python3` on this exact source prints
-    // `1`/`2` (CPython's own set iteration order for small ints is not
-    // insertion order -- small ints hash to themselves, so CPython's
-    // hash-table iteration order here happens to be numeric order, not
-    // insertion order). Task 10 owns why no conformance fixture makes
-    // this same assertion against CPython; this test only pins pycc's
-    // own behavior against itself.
+    // `MirStmt::ForSet` iteration codegen. `pycc_rt::set` keeps CPython's
+    // own hash table, so the order is CPython's: `1` before `2`, as
+    // `python3` prints for this exact source.
     let mir = MirModule {
         items: vec![
             MirItem::TopLevelStmt(MirStmt::Assign {
@@ -5908,7 +5889,7 @@ fn for_x_in_set_iterates_in_first_insertion_order() {
     let bin_path = dir.join("for_set_iteration");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n1\n");
+    assert_eq!(output.stdout, b"1\n2\n");
 }
 
 #[test]
@@ -6087,21 +6068,7 @@ fn truthiness_of_a_set_value_is_its_non_emptiness() {
     let bit = truthy(&context, &builder, &module, &rt, Scalar::Set(ptr));
     assert_eq!(bit.get_type().get_bit_width(), 1);
     let ir = llvm_string_to_owned(module.print_to_string());
-    assert!(ir.contains("call i64 @pycc_rt_int_set_len"), "{ir}");
-}
-
-#[test]
-#[should_panic(expected = "pycc_codegen: string conversion of a set[T] value is not supported yet")]
-fn string_conversion_of_a_set_value_panics_honestly() {
-    // The `set[T]` counterpart of `string_conversion_of_a_dict_value_
-    // panics_honestly` above, for the identical reason.
-    let context = Context::create();
-    let (_module, rt) = list_scalar_panic_fixture(&context);
-    let builder = context.create_builder();
-    let ptr = context
-        .ptr_type(inkwell::AddressSpace::default())
-        .const_null();
-    to_str(&builder, &rt, Scalar::Set(ptr));
+    assert!(ir.contains("call i64 @pycc_rt_set_len"), "{ir}");
 }
 
 #[test]
@@ -6421,20 +6388,6 @@ fn truthiness_of_a_tuple_value_panics_honestly() {
 }
 
 #[test]
-#[should_panic(
-    expected = "pycc_codegen: string conversion of a tuple[...] value is not supported yet"
-)]
-fn string_conversion_of_a_tuple_value_panics_honestly() {
-    // The `tuple[...]` counterpart of `string_conversion_of_a_set_
-    // value_panics_honestly` above, for the identical reason: `print(t)`
-    // and `f"{t}"` both type-check today and both land in `to_str`.
-    let context = Context::create();
-    let (_module, rt) = list_scalar_panic_fixture(&context);
-    let builder = context.create_builder();
-    to_str(&builder, &rt, tuple_scalar(&context));
-}
-
-#[test]
 #[should_panic(expected = "internal error: expected an int-or-bool operand, got tuple")]
 fn to_numeric_encoded_int_rejects_a_tuple_operand() {
     // The `tuple[...]` counterpart of `to_numeric_encoded_int_rejects_a_set_
@@ -6456,28 +6409,6 @@ fn to_float_rejects_a_tuple_operand() {
     let (_module, rt) = list_scalar_panic_fixture(&context);
     let builder = context.create_builder();
     to_float(&context, &builder, &rt, tuple_scalar(&context));
-}
-
-#[test]
-#[should_panic(expected = "a tuple element evaluated to a non-int/bool/float value")]
-fn a_non_scalar_tuple_element_is_an_internal_error() {
-    // `MirExpr::TupleLiteral`'s own defensive arm: `pycc_types`' T0039
-    // gate (D-116) admits only int/bool/float elements, so a `str`
-    // element cannot come from type-checked source -- only from
-    // hand-built MIR like this. Without the arm, a `PyStrObj` pointer
-    // would be silently inserted into a struct field whose declared
-    // type came from the same `Ty::Str`, storing an unrefcounted
-    // duplicate reference this crate has no policy for.
-    let mir = MirModule {
-        items: vec![MirItem::TopLevelStmt(MirStmt::Assign {
-            target: "t".to_string(),
-            value: MirExpr::TupleLiteral(vec![MirExpr::StringLiteral("a".to_string())]),
-        })],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("tuple_non_scalar_element")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(&mir, &dir.join("tuple_non_scalar_element.o"), None, false);
 }
 
 #[test]
@@ -6514,42 +6445,6 @@ fn a_tuple_subscript_with_a_non_literal_index_is_an_internal_error() {
     let dir = pycc_scratch::ScratchDir::new("tuple_non_literal_index")
         .expect("failed to create scratch dir");
     let _ = compile_to_object(&mir, &dir.join("tuple_non_literal_index.o"), None, false);
-}
-
-#[test]
-#[should_panic(expected = "reading a `str`-typed tuple element is not supported yet")]
-fn reading_a_non_scalar_tuple_element_is_not_supported() {
-    // `MirExpr::Subscript`'s tuple branch mirrors `TupleLiteral`'s own
-    // element gate on the way back out: T0039 keeps every element
-    // int/bool/float, so a `str` element reaches this only from
-    // hand-built MIR. Reachable here (unlike a "base didn't evaluate to
-    // a tuple" check, which is why this arm has one and that one
-    // deliberately does not) because the element *type* is carried by
-    // the base's `Ty`, independently of the extract itself succeeding.
-    let element_ty = Ty::Tuple(Box::new(vec![Ty::Str]));
-    let mir = MirModule {
-        items: vec![MirItem::Function {
-            name: "f".to_string(),
-            params: vec![("t".to_string(), element_ty.clone())],
-            return_ty: Ty::None,
-            body: vec![print_expr(MirExpr::Subscript {
-                base: Box::new(MirExpr::Name {
-                    name: "t".to_string(),
-                    ty: element_ty,
-                }),
-                index: Box::new(MirExpr::IntLiteral(0)),
-            })],
-        }],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("tuple_non_scalar_element_read")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(
-        &mir,
-        &dir.join("tuple_non_scalar_element_read.o"),
-        None,
-        false,
-    );
 }
 
 #[test]
@@ -10523,7 +10418,7 @@ fn compiles_a_loop_whose_accumulator_overflows_into_a_bigint() {
 }
 
 #[test]
-#[should_panic(expected = "`n` did not evaluate to a dict")]
+#[should_panic(expected = "internal error: expected a dict, got `int`")]
 fn dict_set_item_on_a_non_dict_local_is_an_internal_error() {
     // `n = 1` then `n["a"] = 2`: `pycc_types` rejects this with T0033
     // ("does not support item assignment"), so codegen only sees it as
@@ -10564,6 +10459,7 @@ fn for_dict_over_an_unbound_name_is_an_internal_error() {
     // does not reach.
     let mir = list_fixture_module(vec![MirStmt::ForDict {
         var: "k".to_string(),
+        var_ty: pycc_mir::Ty::Str,
         dict: "never_bound".to_string(),
         body: vec![],
     }]);
@@ -10572,90 +10468,6 @@ fn for_dict_over_an_unbound_name_is_an_internal_error() {
     let _ = compile_to_object(
         &mir,
         &dir.join("for_dict_unbound_name_panics.o"),
-        None,
-        false,
-    );
-}
-
-#[test]
-#[should_panic(expected = "dict literal key did not evaluate to str")]
-fn a_dict_literal_with_a_non_str_key_is_an_internal_error() {
-    // `pycc_types`' T0036 gate rejects every dict literal whose key
-    // isn't `Ty::Str` before codegen ever runs, so this is hand-built
-    // malformed MIR, not a real-source repro -- covers `MirExpr::
-    // DictLiteral`'s own inline key-extraction panic.
-    let mir = MirModule {
-        items: vec![MirItem::TopLevelStmt(MirStmt::Assign {
-            target: "x".to_string(),
-            value: MirExpr::DictLiteral(vec![(MirExpr::IntLiteral(1), MirExpr::IntLiteral(2))]),
-        })],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("dict_literal_non_str_key_panics")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(
-        &mir,
-        &dir.join("dict_literal_non_str_key_panics.o"),
-        None,
-        false,
-    );
-}
-
-#[test]
-#[should_panic(expected = "dict subscript key did not evaluate to str")]
-fn a_dict_get_with_a_non_str_key_is_an_internal_error() {
-    // `pycc_types` rejects a mismatched dict-subscript key type with
-    // T0021 before codegen ever runs, so this is hand-built malformed
-    // MIR -- covers `MirExpr::DictGet`'s own inline key-extraction
-    // panic.
-    let mir = MirModule {
-        items: vec![MirItem::TopLevelStmt(MirStmt::ExprStmt(MirExpr::DictGet {
-            dict: Box::new(MirExpr::DictLiteral(vec![(
-                MirExpr::StringLiteral("a".to_string()),
-                MirExpr::IntLiteral(1),
-            )])),
-            key: Box::new(MirExpr::IntLiteral(1)),
-        }))],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("dict_get_non_str_key_panics")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(
-        &mir,
-        &dir.join("dict_get_non_str_key_panics.o"),
-        None,
-        false,
-    );
-}
-
-#[test]
-#[should_panic(expected = "dict item-assignment key did not evaluate to str")]
-fn a_dict_set_with_a_non_str_key_is_an_internal_error() {
-    // `pycc_types` rejects a mismatched `d[k] = v` key type with T0021
-    // before codegen ever runs, so this is hand-built malformed MIR --
-    // covers `MirStmt::DictSet`'s own inline key-extraction panic.
-    let mir = MirModule {
-        items: vec![
-            MirItem::TopLevelStmt(MirStmt::Assign {
-                target: "x".to_string(),
-                value: MirExpr::DictLiteral(vec![(
-                    MirExpr::StringLiteral("a".to_string()),
-                    MirExpr::IntLiteral(1),
-                )]),
-            }),
-            MirItem::TopLevelStmt(MirStmt::DictSet {
-                dict: "x".to_string(),
-                key: MirExpr::IntLiteral(1),
-                value: MirExpr::IntLiteral(2),
-            }),
-        ],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("dict_set_non_str_key_panics")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(
-        &mir,
-        &dir.join("dict_set_non_str_key_panics.o"),
         None,
         false,
     );
@@ -10756,6 +10568,7 @@ fn an_error_inside_a_for_dict_body_propagates_out_of_codegen() {
             }),
             MirItem::TopLevelStmt(MirStmt::ForDict {
                 var: "k".to_string(),
+                var_ty: pycc_mir::Ty::Str,
                 dict: "x".to_string(),
                 body: vec![call_user_fn("missing")],
             }),
@@ -11998,79 +11811,6 @@ fn a_set_sourced_dict_comprehension_with_a_filter_only_keeps_matching_entries() 
 }
 
 #[test]
-#[should_panic(expected = "dict comprehension key did not evaluate to str")]
-fn a_dict_comprehension_with_a_non_str_key_is_an_internal_error() {
-    // `pycc_types` rejects a mismatched dict-comprehension key type with
-    // T0036 before codegen ever runs, so this is hand-built malformed
-    // MIR -- covers `MirStmt::DictCompAssign`'s own inline key-
-    // extraction panic (mirrors `MirStmt::DictSet`'s own identical panic
-    // and its own dedicated `a_dict_set_with_a_non_str_key_is_an_
-    // internal_error` test).
-    let mir = MirModule {
-        items: vec![MirItem::TopLevelStmt(MirStmt::DictCompAssign {
-            target: "zs".to_string(),
-            var: "i".to_string(),
-            var_ty: Ty::Int,
-            source: CompSource::Range {
-                start: MirExpr::IntLiteral(0),
-                stop: MirExpr::IntLiteral(1),
-                step: MirExpr::IntLiteral(1),
-            },
-            cond: None,
-            key: Box::new(MirExpr::IntLiteral(1)),
-            value: Box::new(MirExpr::IntLiteral(2)),
-        })],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("dictcomp_non_str_key_panics")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(
-        &mir,
-        &dir.join("dictcomp_non_str_key_panics.o"),
-        None,
-        false,
-    );
-}
-
-#[test]
-#[should_panic(expected = "dict comprehension key did not evaluate to str")]
-fn a_dict_comprehension_with_a_non_str_key_under_a_filter_is_an_internal_error() {
-    // Same defect as `a_dict_comprehension_with_a_non_str_key_is_an_
-    // internal_error` above, but with `cond: Some(..)` rather than
-    // `cond: None`: this arm's own key-extraction `let-else` panic is
-    // written once inside each of the two `match cond` branches (not
-    // shared, mirroring `ListCompAssign`'s/`SetCompAssign`'s own
-    // `elt`-evaluation-and-append duplication across those same two
-    // branches), so it is two separate coverage regions -- this test
-    // covers the `Some(..)` branch's own copy, which the `cond: None`
-    // test above does not reach.
-    let mir = MirModule {
-        items: vec![MirItem::TopLevelStmt(MirStmt::DictCompAssign {
-            target: "zs".to_string(),
-            var: "i".to_string(),
-            var_ty: Ty::Int,
-            source: CompSource::Range {
-                start: MirExpr::IntLiteral(0),
-                stop: MirExpr::IntLiteral(1),
-                step: MirExpr::IntLiteral(1),
-            },
-            cond: Some(Box::new(MirExpr::BoolLiteral(true))),
-            key: Box::new(MirExpr::IntLiteral(1)),
-            value: Box::new(MirExpr::IntLiteral(2)),
-        })],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("dictcomp_non_str_key_filtered_panics")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(
-        &mir,
-        &dir.join("dictcomp_non_str_key_filtered_panics.o"),
-        None,
-        false,
-    );
-}
-
-#[test]
 fn a_dict_sourced_dict_comprehension_that_rebinds_its_own_source_name_reads_the_pre_existing_value()
 {
     // `d = {"a": 5, "b": 6}` then `d = {k: 9 for k in d}`, reusing the
@@ -12656,42 +12396,6 @@ fn dict_get_or_default_nested_in_its_own_default_argument_resolves_correctly() {
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
     assert_eq!(output.stdout, b"1\n");
-}
-
-#[test]
-#[should_panic(expected = "dict.get() key did not evaluate to str")]
-fn a_dict_get_or_default_with_a_non_str_key_is_an_internal_error() {
-    // `pycc_types` (T0021) rejects a mismatched `dict.get()` key type
-    // before codegen ever runs, so this is hand-built malformed MIR --
-    // covers `MirExpr::DictGetOrDefault`'s own inline key-extraction
-    // panic, mirroring `a_dict_get_with_a_non_str_key_is_an_internal_error`
-    // above for `MirExpr::DictGet`.
-    let mir = MirModule {
-        items: vec![
-            MirItem::TopLevelStmt(MirStmt::Assign {
-                target: "d".to_string(),
-                value: MirExpr::DictLiteral(vec![(
-                    MirExpr::StringLiteral("a".to_string()),
-                    MirExpr::IntLiteral(1),
-                )]),
-            }),
-            MirItem::TopLevelStmt(MirStmt::ExprStmt(MirExpr::DictGetOrDefault {
-                dict: pycc_mir::MirContainerReceiver::Name("d".to_string()),
-                key: Box::new(MirExpr::IntLiteral(1)),
-                default: Box::new(MirExpr::IntLiteral(0)),
-                ty: Ty::Int,
-            })),
-        ],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("dict_get_or_default_non_str_key_panics")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(
-        &mir,
-        &dir.join("dict_get_or_default_non_str_key_panics.o"),
-        None,
-        false,
-    );
 }
 
 #[test]

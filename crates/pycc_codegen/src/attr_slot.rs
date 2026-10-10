@@ -124,6 +124,8 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
         // aliases the stored one with no refcount traffic.
         pycc_mir::Ty::List(_)
         | pycc_mir::Ty::Dict(..)
+        | pycc_mir::Ty::Set(_)
+        | pycc_mir::Ty::FrozenSet(_)
         | pycc_mir::Ty::Object
         | pycc_mir::Ty::Instance(_) => {
             let ptr = builder
@@ -136,10 +138,21 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
             match ty {
                 pycc_mir::Ty::List(_) => Scalar::List(ptr),
                 pycc_mir::Ty::Dict(..) => Scalar::Dict(ptr),
+                pycc_mir::Ty::Set(_) | pycc_mir::Ty::FrozenSet(_) => Scalar::Set(ptr),
                 pycc_mir::Ty::Instance(_) => Scalar::Instance(ptr),
                 _ => Scalar::Object(ptr),
             }
         }
+        // A boxed tuple is a list-shaped object (`containers.rs`).
+        pycc_mir::Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => Scalar::List(
+            builder
+                .build_int_to_ptr(
+                    raw,
+                    context.ptr_type(inkwell::AddressSpace::default()),
+                    "attr_tuple_inttoptr",
+                )
+                .expect("build_int_to_ptr should not fail reinterpreting an i64 as a pointer"),
+        ),
         other => panic!(
             "pycc_codegen: internal error: an instance attribute of type `{}` is not \
              supported yet -- pycc_hir's init-slot and declaration gates should have \
@@ -178,11 +191,14 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
         // same way; the `MirStmt::AttrSet` arm has already made it an owned
         // reference (`heap_rc`).
         // #1389: so is an instance of a class of this program.
-        Scalar::List(v) | Scalar::Dict(v) | Scalar::Object(v) | Scalar::Instance(v) => builder
+        Scalar::List(v)
+        | Scalar::Dict(v)
+        | Scalar::Set(v)
+        | Scalar::Object(v)
+        | Scalar::Instance(v) => builder
             .build_ptr_to_int(v, context.i64_type(), "attr_container_ptrtoint")
             .expect("build_ptr_to_int should not fail reinterpreting a pointer as i64"),
-        Scalar::Set(_)
-        | Scalar::Tuple(_)
+        Scalar::Tuple(_)
         // D-197, #763, Part 1 of #747: an `Optional[int]`-typed instance
         // attribute joins the same defensive arm as every other
         // multi-word/aggregate `Scalar` above -- this raw-`i64`-word slot

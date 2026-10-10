@@ -40,8 +40,8 @@ pub use class::{
 };
 pub use compare_chain::{CompareLink, compare_chain_operands};
 pub use container::{
-    DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object, is_list_element_ty,
-    set_element_message,
+    DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object, is_hashable_ty,
+    is_list_element_ty, set_element_message, tuple_is_boxed,
 };
 pub use dunder_name::DUNDER_NAME;
 pub use exception::{
@@ -552,6 +552,9 @@ pub enum HirExpr {
     /// literal is empty (`MirExpr::ty()`); carrying the resolved type on the
     /// node itself is what lets a resolved `[]` survive into MIR and codegen.
     EmptyList(Ty),
+    /// An empty `set()` (or `{}`-free empty set) whose element type the
+    /// empty-container pre-pass resolved; its type is `Ty::Set(element)`.
+    EmptySet(Ty),
     /// A list display `[e1, e2, ...]`, empty or not, assigned to a name
     /// whose type is the opaque CPython object (Part 2d of #1371, D-258
     /// rule 4): it builds a fresh CPython `list`, each element packed into a

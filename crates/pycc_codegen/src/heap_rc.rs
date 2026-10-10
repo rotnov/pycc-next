@@ -106,6 +106,8 @@ pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
         Ty::Dict(_) => Some(HeapKind::Dict),
         Ty::Set(_) | Ty::FrozenSet(_) => Some(HeapKind::Set),
         Ty::Object => Some(HeapKind::Object),
+        // A boxed tuple is a `PyListObj` (`containers.rs`).
+        Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => Some(HeapKind::List),
         Ty::Instance(class) if rt.rc_class_kinds.borrow().contains_key(class.as_str()) => {
             Some(HeapKind::Instance)
         }

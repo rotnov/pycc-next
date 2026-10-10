@@ -160,7 +160,7 @@ fn check_eq_method(class: &str, mangled: &str, env: &Environment) -> Result<(), 
 /// a set comprehension's element (`crate::comprehension::comp_container_ty`).
 pub(crate) fn check_set_element(element: &Ty, env: &Environment) -> Result<(), Diagnostic> {
     let class = match element {
-        Ty::Int => return Ok(()),
+        hashable if pycc_hir::is_hashable_ty(hashable) => return Ok(()),
         Ty::Instance(class) => class.as_str(),
         // Unreachable from every caller: a literal's type passed
         // `check_container_ty` first, `.add` sees an admitted set, and a

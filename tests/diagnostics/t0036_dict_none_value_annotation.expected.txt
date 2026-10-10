@@ -1,0 +1,5 @@
+error[T0036]: dict[int, None] is not compiled yet -- a dict key must be int, float, bool, str or a tuple of those, and a value anything a list can hold
+ --> tests/diagnostics/t0036_dict_none_value_annotation.py:1:10
+  |
+1 | def f(d: dict[int, None]) -> None:
+  |          ^^^^^^^^^^^^^^^ dict[int, None] is not compiled yet -- a dict key must be int, float, bool, str or a tuple of those, and a value anything a list can hold

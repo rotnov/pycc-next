@@ -103,17 +103,11 @@ fn an_unlowerable_operand_keeps_its_own_refusal() {
     }
 }
 
-/// A non-slice subscript keeps its own located refusal.
+/// A non-slice subscript lowers to an item deletion, whose base type
+/// `pycc_types` judges (a dict, a list or, non-strict, a CPython object).
 #[test]
-fn a_non_slice_subscript_is_still_refused() {
-    let err = lower("o = 1\ndel o[1]\n").expect_err("an item del");
-    assert_eq!(err.code, "C0001");
-    assert!(
-        err.message.contains("a `del` of a subscript"),
-        "{}",
-        err.message
-    );
-    assert_eq!(err.span.expect("located").start, 10);
+fn a_non_slice_subscript_lowers_to_an_item_deletion() {
+    lower("o = 1\ndel o[1]\n").expect("an item del lowers");
 }
 
 /// In a function body the bounds are lowered with the function's context.

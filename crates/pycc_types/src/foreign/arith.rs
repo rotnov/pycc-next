@@ -56,8 +56,10 @@ pub(crate) fn check_object_set_item(
     check_object_call_args(env, [value], std::slice::from_ref(value_ty), "item store")
 }
 
-/// Checks `del base[key]`: only a CPython object base is admitted; any other
-/// base keeps the located `C0001` a subscript deletion always had.
+/// Checks `del base[key]`: a `dict` with a key of its key type, a `list`
+/// with an int index (`pycc_hir::builtins`' `__pycc_delitem__`), or a
+/// CPython object; any other base keeps the located `C0001` a subscript
+/// deletion always had.
 pub(crate) fn check_delete_item(
     env: &Environment,
     local_names: &[&str],
@@ -66,12 +68,38 @@ pub(crate) fn check_delete_item(
     span: Span,
 ) -> Result<(), Diagnostic> {
     let base_ty = infer_expr_in(env, local_names, base)?;
+    if matches!(base_ty, Ty::Dict(_) | Ty::List(_)) {
+        let key_ty = infer_expr_in(env, local_names, key)?;
+        if let Some(Ok(_)) =
+            pycc_hir::builtins::resolve_method(&base_ty, "__pycc_delitem__", &[key_ty.clone()])
+        {
+            return Ok(());
+        }
+        return Err(Diagnostic::error(
+            "T0001",
+            format!(
+                "`del` of a `{}` item with a `{}` key",
+                base_ty.name(),
+                key_ty.name()
+            ),
+            span,
+        ));
+    }
+    // Strict mode admits no CPython-object item deletion (#3 is the
+    // non-strict fallback's).
+    if base_ty == Ty::Object && !crate::non_strict::is_non_strict() {
+        return Err(Diagnostic::error(
+            "C0001",
+            "a `del` of a subscript of a CPython object is not supported yet",
+            span,
+        ));
+    }
     if base_ty != Ty::Object {
         return Err(Diagnostic::error(
             "C0001",
             format!(
                 "a `del` of a subscript (`del d[k]`, `del xs[i]`) is supported only on a \
-                 CPython object, not on `{}`",
+                 dict, a list or a CPython object, not on `{}`",
                 base_ty.name()
             ),
             span,

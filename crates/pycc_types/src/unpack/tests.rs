@@ -117,9 +117,7 @@ fn a_non_tuple_non_object_value_is_refused() {
 /// A tuple display mixing `int` and `str` is not a native tuple at all, so
 /// it is refused before the unpack is typed (`T0039`), deliberately.
 #[test]
-fn a_tuple_display_with_a_str_element_keeps_its_own_refusal() {
+fn a_tuple_display_with_a_str_element_unpacks() {
     let source = "a, b = 1, 'x'\n";
-    let diagnostic = single(check(source), source);
-    assert_ne!(diagnostic.code, "T0055", "{diagnostic:?}");
-    assert_ne!(diagnostic.code, "C0001", "{diagnostic:?}");
+    check(source).expect(source);
 }

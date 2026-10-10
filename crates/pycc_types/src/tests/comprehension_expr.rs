@@ -57,16 +57,16 @@ fn an_expression_comprehension_loop_variable_is_not_bound_afterwards() {
 fn an_expression_comprehension_applies_the_display_element_gates() {
     for (source, expected) in [
         (
-            "print(len([{1} for i in range(3)]))\n",
-            "list[set[int]] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance or a list of those",
+            "print(len([None for i in range(3)]))\n",
+            "list[None] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those",
         ),
         (
-            "print(len({1.5 for i in range(3)}))\n",
-            "set comprehension codegen only supports `set[int]` or a set of a user-class instance (D-122, D-255), got a comprehension producing `set[float]`",
+            "print(len({None for i in range(3)}))\n",
+            "set[None] is not compiled yet -- a set element must be int, float, bool, str, a tuple of those or a user-class instance",
         ),
         (
-            "print(len({i: i for i in range(3)}))\n",
-            "dict codegen only supports `dict[str, int]` in v0.2, got a comprehension producing `dict[int, int]`",
+            "print(len({i: None for i in range(3)}))\n",
+            "dict[int, None] is not compiled yet -- a dict key must be int, float, bool, str or a tuple of those, and a value anything a list can hold",
         ),
     ] {
         assert_eq!(message_of(source), expected, "{source}");

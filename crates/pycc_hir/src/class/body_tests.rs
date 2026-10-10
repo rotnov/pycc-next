@@ -159,8 +159,8 @@ fn a_method_named_append_pop_or_add_also_lowers() {
         ),
         (
             "pop",
-            "c.pop(1, 2)",
-            "list.pop() takes at most one argument, got 2",
+            "c.pop(1, 2, 3)",
+            "pop() takes at most two arguments, got 3",
         ),
         (
             "add",

@@ -278,6 +278,8 @@ pub enum MirExpr {
     /// Codegen emits the same `pycc_rt_list_new()` object
     /// `ListLiteral(vec![])` would, with no `append` calls after it.
     EmptyList(Ty),
+    /// An empty set of a resolved element type (`HirExpr::EmptySet`).
+    EmptySet(Ty),
     /// `base[index]`, read-only (mirrors `HirExpr::Subscript`, D-105).
     /// `ty()` below derives its result from `base.ty()`'s element type
     /// (mirroring `pycc_types::infer_expr_in`'s own `Subscript` arm), for
@@ -1072,6 +1074,7 @@ impl MirExpr {
             | MirExpr::IfExp { ty, .. } => ty.clone(),
             MirExpr::Not(_) | MirExpr::CompareChain { .. } => Ty::Bool,
             MirExpr::EmptyList(element) => Ty::List(Box::new(element.clone())),
+            MirExpr::EmptySet(element) => Ty::Set(Box::new(element.clone())),
             MirExpr::EmptyDict(pair) => Ty::Dict(pair.clone()),
             MirExpr::ListLiteral(elements) => {
                 let elem_ty = elements.first().map(|e| e.ty()).unwrap_or_else(|| {
@@ -1233,7 +1236,9 @@ impl MirExpr {
             // variant's own documentation.
             // #1343: the source's element type; `frozenset()` is `frozenset[int]`.
             MirExpr::FrozenSetFrom { source } => match source.as_deref().map(MirExpr::ty) {
-                Some(Ty::Set(elem) | Ty::FrozenSet(elem)) => Ty::FrozenSet(elem),
+                Some(Ty::Set(elem) | Ty::FrozenSet(elem) | Ty::List(elem)) => {
+                    Ty::FrozenSet(elem)
+                }
                 _ => Ty::FrozenSet(Box::new(Ty::Int)),
             },
             // #1335: `hash()` always yields an `int`.
@@ -1283,6 +1288,7 @@ impl MirExpr {
             | MirExpr::BoolLiteral(_)
             | MirExpr::StringLiteral(_)
             | MirExpr::EmptyList(_)
+            | MirExpr::EmptySet(_)
             | MirExpr::EmptyDict(_)
             | MirExpr::NoneLiteral
             | MirExpr::NotImplemented
@@ -1622,6 +1628,8 @@ pub enum MirStmt {
     /// field.
     ForDict {
         var: String,
+        /// The dict's key type, which codegen binds `var` as.
+        var_ty: Ty,
         dict: String,
         body: Vec<MirStmt>,
     },

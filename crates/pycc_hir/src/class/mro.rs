@@ -240,6 +240,7 @@ pub fn slot_rc_kind(ty: &Ty, refcounted: &dyn Fn(&str) -> bool) -> u8 {
         Ty::Str => b's',
         Ty::Int => b'i',
         Ty::List(_) => b'l',
+        Ty::Tuple(elements) if crate::tuple_is_boxed(elements) => b'l',
         Ty::Instance(class) if refcounted(class) => b'c',
         Ty::Dict(_) => b'd',
         Ty::Set(_) | Ty::FrozenSet(_) => b'e',
