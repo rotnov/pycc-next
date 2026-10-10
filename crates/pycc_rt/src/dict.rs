@@ -337,17 +337,6 @@ pub unsafe extern "C" fn pycc_rt_dict_key_at(d: *mut PyDictObj, index: i64) -> i
     d.table.entries[index as usize].expect("compacted").1
 }
 
-/// The value at position `index` of the iteration order, borrowed.
-///
-/// # Safety
-/// `d` must be a live dict.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_value_at(d: *mut PyDictObj, index: i64) -> i64 {
-    let d = dict(d);
-    d.compact();
-    d.table.entries[index as usize].expect("compacted").2
-}
-
 /// `del d[key]` (`KeyError` when absent; `key` borrowed).
 ///
 /// # Safety
@@ -546,27 +535,6 @@ pub unsafe extern "C" fn pycc_rt_dict_from_pairs(
     d
 }
 
-/// `dict.fromkeys(keys, value)`-style construction: every element of
-/// `keys` mapped to `val` (borrowed).
-///
-/// # Safety
-/// `keys` must be a live list.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_from_keys(
-    keys: *mut PyListObj,
-    val: i64,
-    value_kind: i64,
-) -> *mut PyDictObj {
-    let keys = unsafe { &*keys };
-    let d = pycc_rt_dict_new(keys.kind(), value_kind);
-    for (kind, k) in keys.kinded_items() {
-        value::retain(kind, k);
-        value::retain(value_kind, val);
-        dict(d).insert(k, val);
-    }
-    d
-}
-
 /// `a == b` for two dicts of the same kinds.
 pub(crate) fn dicts_equal(a: *mut PyDictObj, b: *mut PyDictObj) -> bool {
     let (a, b) = (dict(a), dict(b));
@@ -575,15 +543,6 @@ pub(crate) fn dicts_equal(a: *mut PyDictObj, b: *mut PyDictObj) -> bool {
             Ok((Some(ix), _)) => value::eq(a.value_kind, v, b.table.entries[ix].expect("live").2),
             _ => false,
         })
-}
-
-/// `a == b` (`1`/`0`).
-///
-/// # Safety
-/// `a` and `b` must be live dicts of the same kinds.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_eq(a: *mut PyDictObj, b: *mut PyDictObj) -> i8 {
-    i8::from(dicts_equal(a, b))
 }
 
 /// Appends `repr(d)` to `out`.

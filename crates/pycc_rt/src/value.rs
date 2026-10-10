@@ -314,28 +314,6 @@ pub extern "C" fn pycc_rt_value_compare(kind: i64, a: i64, b: i64, op: i64) -> i
     })
 }
 
-/// `hash(word)` for a word of `kind` (`TypeError` for an unhashable one).
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_value_hash(kind: i64, word: i64) -> i64 {
-    hash_or_raise(kind, word).unwrap_or(0)
-}
-
-/// `repr(word)` as a new `str`.
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_value_repr(kind: i64, word: i64) -> *mut PyStrObj {
-    let mut out = String::new();
-    if !repr(kind, word, &mut out) {
-        return crate::new_pystr(b"");
-    }
-    crate::new_pystr(out.as_bytes())
-}
-
-/// Python truth value of a word of `kind`.
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_value_truthy(kind: i64, word: i64) -> i8 {
-    i8::from(truthy(kind, word))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

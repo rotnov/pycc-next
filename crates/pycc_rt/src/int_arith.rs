@@ -565,23 +565,6 @@ pub extern "C" fn pycc_rt_int_to_str(tagged: i64) -> *mut PyStrObj {
     int_to_str(tagged)
 }
 
-pub(crate) fn format_i64_line(value: i64) -> String {
-    format!("{value}\n")
-}
-
-/// `print(n)` of an `int`. Prints nothing when the conversion raises.
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_int_print(tagged: i64) {
-    if let Some(text) = int_decimal(tagged) {
-        crate::io::out(format!("{text}\n").as_bytes());
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_print_i64(value: i64) {
-    crate::io::out(format_i64_line(value).as_bytes());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,8 +864,6 @@ mod tests {
             let s = int_to_str(far_over);
             unsafe { crate::pycc_rt_str_decref(s) };
         });
-        pycc_rt_int_print(tag_smallint(7));
-        pycc_rt_int_print(at_limit);
         assert_eq!(pycc_rt_exception_active(), 0);
     }
 

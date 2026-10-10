@@ -891,15 +891,6 @@ pub(crate) fn sets_equal(a: *mut PySetObj, b: *mut PySetObj) -> bool {
     a.len == b.len && a.active().iter().all(|(k, h)| b.contains_entry(*k, *h))
 }
 
-/// `a == b` (`1`/`0`).
-///
-/// # Safety
-/// `a` and `b` must be live sets of one kind.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_set_eq(a: *mut PySetObj, b: *mut PySetObj) -> i8 {
-    i8::from(sets_equal(a, b))
-}
-
 /// The elements in iteration order as a new list (`list(s)`,
 /// `sorted(s)`'s input).
 ///

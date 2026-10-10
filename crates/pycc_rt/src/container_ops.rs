@@ -9,8 +9,8 @@
 //! arguments (`BuiltinSig::kind_args`).
 
 use crate::dict::{
-    PyDictObj, pycc_rt_dict_copy, pycc_rt_dict_from_pairs, pycc_rt_dict_get_or_default,
-    pycc_rt_dict_keys, pycc_rt_dict_pop, pycc_rt_dict_setdefault,
+    PyDictObj, pycc_rt_dict_copy, pycc_rt_dict_from_pairs, pycc_rt_dict_keys, pycc_rt_dict_pop,
+    pycc_rt_dict_setdefault,
 };
 use crate::list::{LIST_KIND_INT, LIST_KIND_TUPLE, PyListObj, new_raw_words};
 use crate::set::{PySetObj, pycc_rt_set_from_list, pycc_rt_set_to_list};
@@ -182,22 +182,6 @@ pub unsafe extern "C" fn pycc_rt_dict_pop_or(
 ) -> i64 {
     value::retain(value_kind, default);
     unsafe { crate::dict::pycc_rt_dict_pop_default(d, key, default) }
-}
-
-/// `d.get(key, default)`, both borrowed: a new reference to the stored
-/// value or to `default`.
-///
-/// # Safety
-/// `d` must be a live dict whose value kind is `value_kind`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_dict_get_or(
-    d: *mut PyDictObj,
-    key: i64,
-    default: i64,
-    value_kind: i64,
-) -> i64 {
-    value::retain(value_kind, default);
-    unsafe { pycc_rt_dict_get_or_default(d, key, default) }
 }
 
 /// `d.setdefault(key, default)`, both borrowed: a new reference to the

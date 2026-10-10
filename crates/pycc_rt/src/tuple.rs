@@ -52,15 +52,6 @@ pub(crate) fn tuple_from(words: Vec<i64>, kinds: Box<[u8]>) -> *mut PyListObj {
     tuple
 }
 
-/// `repr(t)` as a new `str`.
-///
-/// # Safety
-/// `tuple` must be a live tuple object.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_tuple_repr(tuple: *mut PyListObj) -> *mut crate::PyStrObj {
-    unsafe { crate::pycc_rt_list_repr(tuple) }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
