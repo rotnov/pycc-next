@@ -206,7 +206,7 @@ fn a_comprehension_collecting_a_bigint_loop_variable_still_hits_the_container_bo
     assert_runtime_abort(
         "listcomp_bigint_element",
         &format!("x = [i for i in range({PROMOTED}, 4611686018427387906)]\nprint(len(x))\n"),
-        "pycc_rt: int boundary does not support bigint-valued values yet",
+        "OverflowError: storing a bigint-valued `int` in a container is not supported yet",
     );
 }
 

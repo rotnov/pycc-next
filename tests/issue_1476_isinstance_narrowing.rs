@@ -406,9 +406,8 @@ s = S('b')
 print(type(m.pick(s, True)).__name__, m.pick(s, True) is s, type(m.annotated(s)).__name__)
 "#;
 
-/// The deliberate deviations, each against CPython's own answer:
-/// - an `int` past 64 bits does not fit the native `int` a narrowed read
-///   produces (#1040);
+/// The deliberate deviations, each against CPython's own answer (an `int`
+/// past 64 bits is no longer one: it narrows to a heap bigint, #1040):
 /// - a carrier whose `__init__` never ran has no native instance to hand
 ///   over;
 /// - an object whose `__class__` property answers `int` or a compiled class
@@ -439,8 +438,7 @@ fn the_narrowed_read_deviations_are_the_documented_ones() {
     assert_ok(&compiled);
     assert_eq!(
         stdout_of(&compiled),
-        "OverflowError an int narrowed by isinstance() is outside the inline-integer range \
-         [-2**62, 2**62-1] this pycc version's `ext` boundary supports (see #1040)\n\
+        "1180591620717411303425\n\
          TypeError the narrowed narrowing.Token object is uninitialized (its __init__ never ran)\n\
          TypeError isinstance() held for a 'FakeInt' object, but only an int has the native \
          representation the narrowed read needs\n\

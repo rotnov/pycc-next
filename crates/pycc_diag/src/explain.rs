@@ -1015,8 +1015,8 @@ smallint representation. D-178 (issue #148) made an out-of-range `int` \
 literal materialize as a heap bigint at compile time everywhere else, but \
 each of these 13 positions calls a runtime helper \
 (`pycc_rt_int_untag_checked`) that only accepts a tagged smallint and \
-aborts the whole program at run time (exit 101) if it ever receives a \
-bigint. Before this diagnostic existed, `pycc check` could not see this \
+raises `OverflowError` or `IndexError` at run time if it receives a \
+bigint. Without this diagnostic `pycc check` could not see this \
 coming: the literal type-checked fine, and the program only failed once \
 run. T0051 restores `pycc check` as the catch point for the literal case, \
 with a diagnostic spanning exactly the out-of-range literal. A `range()` \
@@ -1025,8 +1025,7 @@ argument is deliberately NOT one of these positions: D-179 already made \
 induction variable, so an out-of-range literal there is ordinary supported \
 behavior, not a boundary failure. A bigint value \
 reaching one of the 13 positions through *arithmetic* (not a literal) is \
-unaffected and keeps its existing runtime-abort behavior -- narrowing that \
-separate case is out of scope here (see issue #618). The `str`-repeat-count \
+unaffected and raises at run time. The `str`-repeat-count \
 position is narrower still: it is recognized only when the string side of \
 the multiplication is itself a string literal (`\"ab\" * <huge int>`); a \
 `str`-typed *variable* multiplied by an oversized literal is a documented, \

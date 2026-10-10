@@ -352,12 +352,11 @@ fn every_boxing_seam_matches_cpython_in_an_ext_module() {
     assert_eq!(stdout_of(&compiled), EXPECTED);
 }
 
-/// The one deliberate deviation: a native `int` past 64 bits boxes through
-/// the scalar packer, which raises `OverflowError` (#1040) instead of
-/// producing the value CPython returns.
+/// A native `int` past 64 bits boxes through the scalar packer as its true
+/// value (#1040), the value CPython returns.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_bigint_boxed_into_object_raises_overflow_error() {
+fn a_bigint_boxed_into_object_keeps_its_value() {
     let dir = ScratchDir::new("ext_1475_bigint").expect("scratch");
     let (src_dir, out_dir) = build_module(&dir);
     let script = "import boxing as m\ntry:\n    print(m.big())\nexcept OverflowError:\n    \
@@ -367,7 +366,7 @@ fn a_bigint_boxed_into_object_raises_overflow_error() {
     assert_eq!(stdout_of(&oracle), "1180591620717411303424\n");
     let compiled = run(script, &out_dir, &dir);
     assert_ok(&compiled);
-    assert_eq!(stdout_of(&compiled), "OverflowError\n");
+    assert_eq!(stdout_of(&compiled), "1180591620717411303424\n");
 }
 
 /// A foreign-class annotation is `object` (Part 1 of #1367), so a native

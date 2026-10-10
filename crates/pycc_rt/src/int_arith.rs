@@ -463,20 +463,52 @@ pub extern "C" fn pycc_rt_int_from_i64(v: i64) -> i64 {
     encode_i128(i128::from(v))
 }
 
+/// [`int_untag_checked`]'s `use_kind`: the word is stored as a container
+/// element.
+pub const UNTAG_ELEMENT: i32 = 0;
+/// [`int_untag_checked`]'s `use_kind`: the word indexes a sequence.
+pub const UNTAG_INDEX: i32 = 1;
+/// [`int_untag_checked`]'s `use_kind`: the word is a size, count or slice
+/// bound.
+pub const UNTAG_SIZE: i32 = 2;
+
 /// D-141 checked decoder for an int-compatible ABI word used as a machine
-/// word: a container index, slice bound, `str` repeat count or container
-/// element. Smallints decode to their value and the bool markers to `0`/`1`;
-/// a heap bigint is a recorded gap (`docs/DEVIATIONS.md`) and fails closed.
-pub(crate) fn int_untag_checked(tagged: i64) -> i64 {
-    match inline_int_value(tagged) {
-        Some(value) => value,
-        None => panic!("pycc_rt: int boundary does not support bigint-valued values yet"),
+/// word. Smallints decode to their value and the bool markers to `0`/`1`. A
+/// heap bigint raises (D-173) and yields the sentinel `0`, which generated
+/// code never consumes: it checks the pending flag right after this call.
+/// An index raises CPython's own `IndexError`; a size or count CPython's
+/// `OverflowError`; a container element, which CPython would store, the
+/// recorded `OverflowError` gap (`docs/DEVIATIONS.md`). Raising rather than
+/// aborting matters for an `--ext` module, whose callers pass ints of any
+/// size: an abort would kill the host interpreter.
+pub(crate) fn int_untag_checked(tagged: i64, use_kind: i32) -> i64 {
+    if let Some(value) = inline_int_value(tagged) {
+        return value;
     }
+    let (tag, name, message) = match use_kind {
+        UNTAG_INDEX => (
+            crate::EXCEPTION_TYPE_INDEX_ERROR,
+            "IndexError",
+            "cannot fit 'int' into an index-sized integer",
+        ),
+        UNTAG_SIZE => (
+            EXCEPTION_TYPE_OVERFLOW_ERROR,
+            "OverflowError",
+            "cannot fit 'int' into an index-sized integer",
+        ),
+        _ => (
+            EXCEPTION_TYPE_OVERFLOW_ERROR,
+            "OverflowError",
+            "storing a bigint-valued `int` in a container is not supported yet",
+        ),
+    };
+    raise_builtin(tag, name, message);
+    0
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_int_untag_checked(tagged: i64) -> i64 {
-    int_untag_checked(tagged)
+pub extern "C" fn pycc_rt_int_untag_checked(tagged: i64, use_kind: i32) -> i64 {
+    int_untag_checked(tagged, use_kind)
 }
 
 /// `int`'s truthiness: canonical encoding means only a smallint can be zero,
@@ -852,6 +884,27 @@ mod tests {
         pycc_rt_int_print(tag_smallint(7));
         pycc_rt_int_print(at_limit);
         assert_eq!(pycc_rt_exception_active(), 0);
+    }
+
+    #[test]
+    fn untag_checked_raises_by_use_instead_of_aborting() {
+        let p = big("1267650600228229401496703205376");
+        assert_eq!(int_untag_checked(tag_smallint(-9), UNTAG_INDEX), -9);
+        assert_eq!(pycc_rt_int_untag_checked(BOOL_TRUE_MARKER, UNTAG_SIZE), 1);
+        let fit = "cannot fit 'int' into an index-sized integer";
+        assert_raises(crate::EXCEPTION_TYPE_INDEX_ERROR, fit, || {
+            assert_eq!(int_untag_checked(p, UNTAG_INDEX), 0);
+        });
+        assert_raises(EXCEPTION_TYPE_OVERFLOW_ERROR, fit, || {
+            int_untag_checked(p, UNTAG_SIZE);
+        });
+        assert_raises(
+            EXCEPTION_TYPE_OVERFLOW_ERROR,
+            "storing a bigint-valued `int` in a container is not supported yet",
+            || {
+                int_untag_checked(p, UNTAG_ELEMENT);
+            },
+        );
     }
 
     #[test]

@@ -253,8 +253,15 @@ pub(super) struct RtFns<'ctx> {
     /// other runtime error in `pycc_rt`.
     pub(super) name_error: FunctionValue<'ctx>,
     /// The runtime's `pycc_rt_exc_pending` `i8` global, the pending-exception
-    /// flag generated code loads inline (`int_fast::emit_exception_pending`).
+    /// flag a native program loads inline (`int_fast::emit_exception_pending`).
     pub(super) exc_pending: inkwell::values::GlobalValue<'ctx>,
+    /// `pycc_rt_exception_active() -> i8`, the thread-local pending state.
+    /// An `ext` module checks through it instead of `exc_pending`, because
+    /// CPython may call into the module from several threads.
+    pub(super) exception_active: FunctionValue<'ctx>,
+    /// Set for an `ext` build: check the pending state with
+    /// `exception_active` rather than the process-wide `exc_pending` load.
+    pub(super) thread_safe_exception_check: std::cell::Cell<bool>,
     /// `exception_value` returns a pointer to the current exception object.
     pub(super) exception_value: FunctionValue<'ctx>,
     /// `exception_clear` resets the thread-local pending state (void).
@@ -517,7 +524,7 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         int_untag_checked: declare(
             "pycc_rt_int_untag_checked",
-            i64_type.fn_type(&[i64_type.into()], false),
+            i64_type.fn_type(&[i64_type.into(), i32_type.into()], false),
         ),
         float_round: declare(
             "pycc_rt_float_round",
@@ -703,6 +710,11 @@ pub(super) fn declare_rt_functions<'ctx>(
             global.set_linkage(Linkage::External);
             global
         },
+        exception_active: declare(
+            "pycc_rt_exception_active",
+            context.i8_type().fn_type(&[], false),
+        ),
+        thread_safe_exception_check: std::cell::Cell::new(false),
         exception_value: declare("pycc_rt_exception_value", ptr_type.fn_type(&[], false)),
         exception_clear: declare("pycc_rt_exception_clear", void_type.fn_type(&[], false)),
         exception_alloc: declare(

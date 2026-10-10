@@ -546,15 +546,25 @@ pub(super) fn emit_range_continue<'ctx>(
     phi.as_basic_value().into_int_value()
 }
 
-/// Loads the pending-exception flag (`pycc_rt_exc_pending`, an `i8`
-/// mirror of the runtime's thread-local state) inline, instead of calling
-/// `pycc_rt_exception_active`.
+/// Reads the pending-exception flag as an `i8`. A native program (one
+/// thread) loads `pycc_rt_exc_pending`, the runtime's process-wide mirror of
+/// its thread-local state, inline. An `ext` module may run on several
+/// CPython threads at once, so it calls `pycc_rt_exception_active`, which
+/// reads the calling thread's own state.
 pub(super) fn emit_exception_pending<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
     rt: &RtFns<'ctx>,
     name: &str,
 ) -> IntValue<'ctx> {
+    if rt.thread_safe_exception_check.get() {
+        return builder
+            .build_call(rt.exception_active, &[], name)
+            .expect("build_call should not fail for exception_active")
+            .try_as_basic_value()
+            .expect_basic("pycc_rt_exception_active returns i8")
+            .into_int_value();
+    }
     builder
         .build_load(context.i8_type(), rt.exc_pending.as_pointer_value(), name)
         .expect("build_load should not fail for the pending-exception flag")

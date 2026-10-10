@@ -334,23 +334,19 @@ fn a_raising_membership_or_slice_propagates_from_the_module_body() {
     }
 }
 
-/// The documented divergence (`docs/RUNTIME.md`): an `int` bound or item
-/// outside the packer's range raises `OverflowError` in compiled code,
-/// exactly as an `int` subscript key does (#1040), where CPython slices or
-/// tests it normally.
+/// An `int` bound or item outside the inline range is packed as its true
+/// value (#1040), so the slice and the membership test match CPython.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_out_of_range_int_bound_or_item_raises_overflow_error() {
+fn an_out_of_range_int_bound_or_item_matches_cpython() {
     let body = "import builtins\n\
         \n\
         vs = builtins.list(\"abcdef\")\n\
         n = 2\n\
-        try:\n    print(vs[9223372036854775807 * n:])\nexcept OverflowError:\n    \
-        print(\"OverflowError\")\n\
-        try:\n    print(9223372036854775807 * n in vs)\nexcept OverflowError:\n    \
-        print(\"OverflowError\")\n";
-    let (_dir, out) = compiled_report("obj_member_overflow", "pycc_obj_member_overflow", body);
-    assert_eq!(out, "OverflowError\nOverflowError\nno error\n");
+        print(vs[9223372036854775807 * n:])\n\
+        print(9223372036854775807 * n in vs)\n";
+    let out = assert_matches_cpython("obj_member_overflow", "pycc_obj_member_overflow", body);
+    assert_eq!(out, "[]\nFalse\nno error\n");
 }
 
 /// lark `lalr_parser_state.py` lines 88 and 95, each in a function of its

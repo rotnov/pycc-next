@@ -211,10 +211,9 @@ fn a_raising_element_propagates_from_the_display() {
 ///   call adds exactly the two references
 ///   the list holds -- one more would be a packed element leaked twice, one
 ///   fewer a stolen reference released.
-/// - `fail` packs `probe`, then an `int` outside the packer's range, then
-///   `probe` again: the packer raises `OverflowError` (the documented
-///   divergence, `docs/RUNTIME.md`), and the helper releases both packed
-///   `probe` references, so the count is unchanged.
+/// - `big` packs `probe`, an `int` outside the inline range (a heap bigint,
+///   packed as its true value since #1040), then `probe` again: like `keep`,
+///   the bound list holds exactly two `probe` references.
 /// - `zdiv` raises `ZeroDivisionError` before any element is packed, so
 ///   the count is unchanged.
 #[test]
@@ -232,7 +231,7 @@ fn every_packed_element_is_consumed_exactly_once() {
         def keep() -> int:\n    x: object = [probe, probe]\n    return 0\n\
         \n\
         \n\
-        def fail(n: int) -> int:\n    \
+        def big(n: int) -> int:\n    \
         x: object = [probe, 4611686018427387903 + n, probe]\n    return 0\n\
         \n\
         \n\
@@ -240,7 +239,7 @@ fn every_packed_element_is_consumed_exactly_once() {
     let dir = ScratchDir::new("obj_list_refcount").expect("scratch");
     build_ext(&dir, "pycc_obj_list_rc", body);
     let driver = "import pycc_obj_list_rc as m\n\
-        for name, arg in (('keep', None), ('fail', 1), ('zdiv', 0)):\n    \
+        for name, arg in (('keep', None), ('big', 1), ('zdiv', 0)):\n    \
         fn = getattr(m, name)\n    \
         before = m.rc()\n    \
         raised = 'ok'\n    \
@@ -252,7 +251,7 @@ fn every_packed_element_is_consumed_exactly_once() {
     assert_ok(&run);
     assert_eq!(
         stdout_of(&run),
-        "keep ok 200\nfail OverflowError 0\nzdiv ZeroDivisionError 0\n"
+        "keep ok 200\nbig ok 200\nzdiv ZeroDivisionError 0\n"
     );
 }
 

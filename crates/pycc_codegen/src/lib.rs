@@ -909,41 +909,53 @@ fn expect_instance_pointer<'ctx>(scalar: Scalar<'ctx>, what: &str) -> PointerVal
     ptr
 }
 
-/// Calls D-141's runtime-owned classifier/decoder. Container-value ingress
-/// uses the call only to validate bigint exclusion and then stores the
-/// original encoded word; index, slice, and `str`-repeat-count sites consume
-/// its decoded raw result. `range` operands stopped calling it in #147
-/// (D-179). Keeping classification in `pycc_rt` prevents codegen from
-/// duplicating or partially interpreting the ABI.
+/// What a machine-word `int` decoded by [`build_untag_checked`] is for,
+/// which picks the exception a heap bigint raises (the runtime's
+/// `UNTAG_*` constants).
+#[derive(Clone, Copy)]
+enum UntagUse {
+    /// Stored as a container element (`OverflowError`, a recorded gap).
+    Element = 0,
+    /// A sequence index (`IndexError`, as CPython).
+    Index = 1,
+    /// A size, count or slice bound (`OverflowError`).
+    Size = 2,
+}
+
+/// Calls D-141's runtime-owned classifier/decoder, then checks the pending
+/// flag: a heap bigint raises (it does not fit a machine word) and the
+/// sentinel result is never consumed. Container-value ingress uses the call
+/// only to validate bigint exclusion and then stores the original encoded
+/// word; index, slice, and `str`-repeat-count sites consume its decoded raw
+/// result. Raising instead of aborting keeps an `--ext` module's host
+/// interpreter alive when a caller passes a large `int`.
 fn build_untag_checked<'ctx>(
+    context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
+    use_kind: UntagUse,
     tagged: IntValue<'ctx>,
     name: &str,
 ) -> IntValue<'ctx> {
-    builder
-        .build_call(rt.int_untag_checked, &[tagged.into()], name)
+    let kind = context.i32_type().const_int(use_kind as u64, false);
+    let raw = builder
+        .build_call(rt.int_untag_checked, &[tagged.into(), kind.into()], name)
         .expect("build_call should not fail for a well-formed untag")
         .try_as_basic_value()
         .expect_basic("pycc_rt_int_untag_checked returns a non-void i64")
-        .into_int_value()
+        .into_int_value();
+    guard_statement_effects(context, builder, rt);
+    raw
 }
 
 /// Calls #1165's non-aborting length decoder
 /// (`pycc_rt_buffer_alloc_untag_len`) for the `ndarray(n)` producer.
 ///
-/// `build_untag_checked` above cannot serve this one site:
-/// `pycc_rt_int_untag_checked` `panic!`s on a bigint or malformed word, and
-/// that panic is caught at its own `extern "C"` boundary and turned into a
-/// process abort -- which for a D-244 `ext` artifact aborts the *host*
-/// CPython interpreter. This decoder raises `OverflowError` (D-173) and
-/// returns the type-valid sentinel `0`, which the `guard_statement_effects`
-/// the call site emits immediately afterwards branches away on, so the
-/// sentinel never reaches `pycc_rt_buffer_f64_alloc`.
-///
-/// Every *other* `build_untag_checked` site keeps the aborting decoder on
-/// purpose: they consume the decoded word with nothing guarding a sentinel,
-/// so a silent `0` there would be a wrong answer rather than a loud stop.
+/// Unlike `build_untag_checked` above, this decoder also rejects a negative
+/// length. It raises `OverflowError` (D-173) and returns the type-valid
+/// sentinel `0`, which the `guard_statement_effects` the call site emits
+/// immediately afterwards branches away on, so the sentinel never reaches
+/// `pycc_rt_buffer_f64_alloc`.
 fn build_buffer_alloc_untag_len<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
@@ -2433,7 +2445,14 @@ fn emit_expr_unchecked<'ctx>(
                         // rejection in D-141's single runtime-owned
                         // classifier instead of duplicating it here.
                         let encoded = to_numeric_encoded_int(context, builder, count);
-                        let raw = build_untag_checked(builder, rt, encoded, "str_repeat_count");
+                        let raw = build_untag_checked(
+                            context,
+                            builder,
+                            rt,
+                            UntagUse::Size,
+                            encoded,
+                            "str_repeat_count",
+                        );
                         let result = builder
                             .build_call(rt.str_repeat, &[operand.into(), raw.into()], "str_repeat")
                             .expect("build_call should not fail for a well-formed repetition")
@@ -3171,7 +3190,14 @@ fn emit_expr_unchecked<'ctx>(
                 let value_scalar =
                     emit_expr(context, builder, module, rt, user_functions, locals, value);
                 let encoded = to_encoded_int(context, builder, value_scalar);
-                let _ = build_untag_checked(builder, rt, encoded, "dict_validate_literal_value");
+                let _ = build_untag_checked(
+                    context,
+                    builder,
+                    rt,
+                    UntagUse::Element,
+                    encoded,
+                    "dict_validate_literal_value",
+                );
                 build_dict_set(builder, rt, dict_ptr, key_ptr, encoded);
             }
             Scalar::Dict(dict_ptr)
@@ -3260,7 +3286,14 @@ fn emit_expr_unchecked<'ctx>(
                     element,
                 );
                 let encoded = to_encoded_int(context, builder, scalar);
-                let _ = build_untag_checked(builder, rt, encoded, "set_validate_element");
+                let _ = build_untag_checked(
+                    context,
+                    builder,
+                    rt,
+                    UntagUse::Element,
+                    encoded,
+                    "set_validate_element",
+                );
                 build_int_set_add(builder, rt, set_ptr, encoded);
             }
             Scalar::Set(set_ptr)
@@ -3540,7 +3573,14 @@ fn emit_expr_unchecked<'ctx>(
                 default,
             );
             let encoded_default = to_encoded_int(context, builder, default_scalar);
-            let _ = build_untag_checked(builder, rt, encoded_default, "dict_get_validate_default");
+            let _ = build_untag_checked(
+                context,
+                builder,
+                rt,
+                UntagUse::Element,
+                encoded_default,
+                "dict_get_validate_default",
+            );
             let encoded =
                 build_dict_get_or_default(builder, rt, dict_ptr, key_ptr, encoded_default);
             Scalar::Int(encoded)
@@ -3583,7 +3623,14 @@ fn emit_expr_unchecked<'ctx>(
             let value_scalar =
                 emit_expr(context, builder, module, rt, user_functions, locals, value);
             let encoded = to_encoded_int(context, builder, value_scalar);
-            let _ = build_untag_checked(builder, rt, encoded, "set_validate_added");
+            let _ = build_untag_checked(
+                context,
+                builder,
+                rt,
+                UntagUse::Element,
+                encoded,
+                "set_validate_added",
+            );
             build_int_set_add(builder, rt, set_ptr, encoded);
             Scalar::Bool(context.i8_type().const_int(0, false))
         }
@@ -3968,7 +4015,14 @@ fn emit_expr_unchecked<'ctx>(
             let index_scalar =
                 emit_expr(context, builder, module, rt, user_functions, locals, index);
             let encoded_index = to_numeric_encoded_int(context, builder, index_scalar);
-            let raw_index = build_untag_checked(builder, rt, encoded_index, "buffer_untag_index");
+            let raw_index = build_untag_checked(
+                context,
+                builder,
+                rt,
+                UntagUse::Index,
+                encoded_index,
+                "buffer_untag_index",
+            );
             let element = builder
                 .build_call(
                     rt.buffer_f64_get,
@@ -4010,15 +4064,10 @@ fn emit_expr_unchecked<'ctx>(
         //
         // `Ty::Int` (or `bool`, per D-086) arrives D-141 encoded, so the
         // length is decoded before the allocator sees it -- but *not* the
-        // way a buffer index is. `build_untag_checked` calls
-        // `pycc_rt_int_untag_checked`, which `panic!`s on a bigint or
-        // malformed word, and that panic is turned into a process abort at
-        // its own `extern "C"` boundary: for a D-244 `ext` artifact, an
-        // abort of the *host* CPython interpreter, which no host code can
-        // catch. This arm therefore decodes through
-        // `build_buffer_alloc_untag_len` instead, whose runtime function
-        // raises `OverflowError` (D-173) and returns the type-valid
-        // sentinel `0`. The
+        // way a buffer index is: this arm decodes through
+        // `build_buffer_alloc_untag_len`, whose runtime function raises
+        // `OverflowError` (D-173) for a bigint or a negative length and
+        // returns the type-valid sentinel `0`. The
         // D-173 raise a negative length leaves pending is declared by
         // `expression_can_set_exception`, which emits the guard that reads
         // it; the null view the refusal returns is safe for the epilogue,
@@ -5903,6 +5952,7 @@ fn compile_to_object_with_observer(
     let builder = context.create_builder();
     let i64_type = context.i64_type();
     let rt = declare_rt_functions(&context, &module);
+    rt.thread_safe_exception_check.set(options.ext);
 
     // First pass: declare every user-defined function -- with its real
     // parameter types and return type (Task 5), instead of Task 3/4's
@@ -7665,8 +7715,7 @@ fn emit_stmt<'ctx>(
         // An absent `start` is `0` and an absent `stop` is `i64::MAX`, both
         // of which CPython's own `PySlice_New`/`PyObject_GetItem` clamp
         // exactly as Python does; no slice arithmetic exists on this side.
-        // A bigint bound aborts in `build_untag_checked`, the same
-        // pre-existing D-141 boundary `MirStmt::BufferSet`'s index has.
+        // A bigint bound raises `OverflowError` in `build_untag_checked`.
         MirStmt::ReturnBufferSlice { name, start, stop } => {
             let bound_or = |builder: &inkwell::builder::Builder<'ctx>,
                             locals: &mut HashMap<String, StorageSlot<'ctx>>,
@@ -7677,7 +7726,7 @@ fn emit_stmt<'ctx>(
                     let scalar =
                         emit_expr(context, builder, module, rt, user_functions, locals, expr);
                     let encoded = to_numeric_encoded_int(context, builder, scalar);
-                    build_untag_checked(builder, rt, encoded, label)
+                    build_untag_checked(context, builder, rt, UntagUse::Size, encoded, label)
                 }
                 None => context.i64_type().const_int(default, false),
             };
@@ -8190,12 +8239,9 @@ fn emit_stmt<'ctx>(
         // write: `emit_expr` guards any operand for which
         // `expression_can_set_exception` holds -- a `b[0] = b[99]` load
         // among them -- and branches away before this arm reaches
-        // `buffer_f64_set`, so no write lands on a sentinel operand. The
-        // one unguarded case is the bigint index, which
-        // `build_untag_checked` aborts on: that is the pre-existing D-141
-        // boundary `MirExpr::BufferGet` and `MirStmt::DictSet` already sit
-        // on (`docs/RUNTIME.md`'s object-model "still aborts" line), not
-        // something the store introduces.
+        // `buffer_f64_set`, so no write lands on a sentinel operand. A
+        // bigint index raises `IndexError` in `build_untag_checked`, which
+        // guards it the same way.
         MirStmt::BufferSet { base, index, value } => {
             // CPython's assignment order, which is *not* left to right: for
             // `b[i] = v` the interpreter evaluates the right-hand side
@@ -8228,7 +8274,14 @@ fn emit_stmt<'ctx>(
             let index_scalar =
                 emit_expr(context, builder, module, rt, user_functions, locals, index);
             let encoded_index = to_numeric_encoded_int(context, builder, index_scalar);
-            let raw_index = build_untag_checked(builder, rt, encoded_index, "buffer_untag_index");
+            let raw_index = build_untag_checked(
+                context,
+                builder,
+                rt,
+                UntagUse::Index,
+                encoded_index,
+                "buffer_untag_index",
+            );
             builder
                 .build_call(
                     rt.buffer_f64_set,
@@ -8284,7 +8337,14 @@ fn emit_stmt<'ctx>(
             let value_scalar =
                 emit_expr(context, builder, module, rt, user_functions, locals, value);
             let encoded = to_encoded_int(context, builder, value_scalar);
-            let _ = build_untag_checked(builder, rt, encoded, "dict_validate_set_value");
+            let _ = build_untag_checked(
+                context,
+                builder,
+                rt,
+                UntagUse::Element,
+                encoded,
+                "dict_validate_set_value",
+            );
             build_dict_set(builder, rt, dict_ptr, key_ptr, encoded);
             Ok(())
         }

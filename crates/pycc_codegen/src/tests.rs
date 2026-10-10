@@ -15781,11 +15781,12 @@ fn a_buffer_length_read_emits_no_pending_exception_check() {
     // `pycc_rt_buffer_len` cannot raise, so `expression_can_set_exception`
     // answers `false` for this node where it answers `true` for both its
     // siblings. Asserted as a pair so a regression in either direction is
-    // caught: the same function shape emits exactly one D-173 guard when its
-    // body is the fallible element load, and none at all when it is the
+    // caught: the same function shape emits D-173 guards when its body is
+    // the fallible element load (one for the index decode, which raises for
+    // a heap bigint, and one for the load), and none at all when it is the
     // length read. A `true` classification here would emit a never-taken
     // branch after every `len(b)`.
-    let guard = "load i8, ptr @pycc_rt_exc_pending";
+    let guard = "call i8 @pycc_rt_exception_active()";
     compile_ext_items_checking_ir(
         "buffer_length_no_guard",
         buffer_fn_items(vec![MirStmt::Return(Some(buffer_len_b()))], Ty::Int),
@@ -15797,7 +15798,7 @@ fn a_buffer_length_read_emits_no_pending_exception_check() {
         "buffer_load_has_guard",
         buffer_fn_items(vec![MirStmt::Return(Some(buffer_get_b_i()))], Ty::Float),
         |ir| {
-            assert_eq!(ir.matches(guard).count(), 1, "{ir}");
+            assert_eq!(ir.matches(guard).count(), 2, "{ir}");
         },
     );
 }
@@ -15850,12 +15851,12 @@ fn a_buffer_element_store_whose_base_is_not_a_memoryview_is_an_internal_error() 
     );
 }
 
-/// The store emits exactly one D-173 guard, where the length read emits
-/// none and the element load emits one: the void setter's only exception
-/// path is the `IndexError` the runtime helper raises, so dropping the
-/// guard would let an out-of-range store run the rest of the body.
+/// The store emits a D-173 guard after its setter (plus the index decode's
+/// own), where the length read emits none: the void setter's exception path
+/// is the `IndexError` the runtime helper raises, so dropping the guard
+/// would let an out-of-range store run the rest of the body.
 #[test]
-fn a_buffer_element_store_emits_one_pending_exception_guard() {
+fn a_buffer_element_store_emits_its_pending_exception_guards() {
     compile_ext_items_checking_ir(
         "buffer_store_has_guard",
         buffer_fn_items(
@@ -15873,9 +15874,11 @@ fn a_buffer_element_store_emits_one_pending_exception_guard() {
             Ty::None,
         ),
         |ir| {
+            // One guard for the index decode (a heap bigint raises), one for
+            // the store.
             assert_eq!(
-                ir.matches("load i8, ptr @pycc_rt_exc_pending").count(),
-                1,
+                ir.matches("call i8 @pycc_rt_exception_active()").count(),
+                2,
                 "{ir}"
             );
             assert_eq!(ir.matches("@pycc_rt_buffer_f64_set").count(), 2, "{ir}");
@@ -16855,7 +16858,7 @@ fn a_buffer_allocations_length_decoder_can_branch_away_before_it_allocates() {
                 .map(|offset| decode + offset)
                 .unwrap_or_else(|| panic!("the allocator call should follow the decode: {ir}"));
             let between = &ir[decode..alloc];
-            assert!(between.contains("@pycc_rt_exc_pending"), "{ir}");
+            assert!(between.contains("@pycc_rt_exception_active"), "{ir}");
             assert!(between.contains("br i1 "), "{ir}");
             assert!(between.contains("effect_exc_cont"), "{ir}");
         },
@@ -16935,7 +16938,7 @@ fn a_refused_reallocation_never_reaches_the_free_before_its_own_store() {
                 .map(|offset| second + offset)
                 .unwrap_or_else(|| panic!("a free should follow the second allocation: {ir}"));
             let between = &ir[second..free];
-            assert!(between.contains("@pycc_rt_exc_pending"), "{ir}");
+            assert!(between.contains("@pycc_rt_exception_active"), "{ir}");
             assert!(between.contains("br i1 "), "{ir}");
             // Substring, not an exact label: LLVM uniquifies the name once
             // two statements each emit a continuation block.
@@ -17009,7 +17012,7 @@ fn a_buffer_allocations_length_temporary_is_released_before_the_guard() {
                 .find("call i64 @pycc_rt_buffer_alloc_untag_len")
                 .unwrap_or_else(|| panic!("the length decode should be emitted: {ir}"));
             let guard = ir[decode..]
-                .find("@pycc_rt_exc_pending")
+                .find("@pycc_rt_exception_active")
                 .map(|offset| decode + offset)
                 .unwrap_or_else(|| {
                     panic!("the pre-allocator guard should follow the decode: {ir}")
@@ -17079,7 +17082,10 @@ fn a_buffer_allocation_checks_the_pending_state_before_it_allocates() {
                 .find("@pycc_rt_buffer_f64_alloc")
                 .map(|offset| untag + offset)
                 .unwrap_or_else(|| panic!("the allocator call should follow the untag: {ir}"));
-            assert!(ir[untag..alloc].contains("@pycc_rt_exc_pending"), "{ir}");
+            assert!(
+                ir[untag..alloc].contains("@pycc_rt_exception_active"),
+                "{ir}"
+            );
         },
     );
 }
@@ -17129,4 +17135,27 @@ fn freeing_a_non_buffer_slot_before_a_store_is_an_internal_error() {
         },
     )]);
     free_buffer_slot_before_store(&context, &builder, &rt, &locals, "a");
+}
+
+/// A native program checks the pending-exception state with one inline load
+/// of the process-wide flag; an `ext` module, which CPython may enter from
+/// several threads, calls the thread-local accessor instead.
+#[test]
+fn only_a_native_module_loads_the_process_wide_pending_flag() {
+    let raising = || {
+        vec![MirItem::TopLevelStmt(MirStmt::ExprStmt(MirExpr::BinOp {
+            op: pycc_mir::BinOpKind::FloorDiv,
+            left: Box::new(MirExpr::IntLiteral(1)),
+            right: Box::new(MirExpr::IntLiteral(0)),
+            ty: Ty::Int,
+        }))]
+    };
+    compile_items_checking_ir("exc_check_native", raising(), |ir| {
+        assert!(ir.contains("load i8, ptr @pycc_rt_exc_pending"), "{ir}");
+        assert!(!ir.contains("call i8 @pycc_rt_exception_active()"), "{ir}");
+    });
+    compile_ext_items_checking_ir("exc_check_ext", raising(), |ir| {
+        assert!(ir.contains("call i8 @pycc_rt_exception_active()"), "{ir}");
+        assert!(!ir.contains("load i8, ptr @pycc_rt_exc_pending"), "{ir}");
+    });
 }

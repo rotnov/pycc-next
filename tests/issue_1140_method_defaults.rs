@@ -268,13 +268,12 @@ fn a_generic_class_and_a_bool_at_int_default_match_cpython() {
     assert_eq!(stdout, "None 8 [3] 2\nTrue 5\n");
 }
 
-/// An `int` default one past the top of the boundary's inline range
-/// (#1040): omitting the argument raises the same `OverflowError` as
-/// passing that literal explicitly (`docs/RUNTIME.md`). pycc-only, since
-/// CPython has no such bound; an in-range argument still runs.
+/// An `int` default one past the top of the inline range (#1040): omitting
+/// the argument and passing that literal explicitly both return the value,
+/// as in CPython; an in-range argument still runs.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_out_of_range_int_default_raises_overflow_error_when_omitted() {
+fn an_out_of_range_int_default_keeps_its_value_when_omitted() {
     let compiled_dir = ScratchDir::new("1140_hosted_overflow").expect("scratch");
     let source_dir = ScratchDir::new("1140_hosted_overflow_src").expect("scratch");
     let source = write(
@@ -303,8 +302,7 @@ fn an_out_of_range_int_default_raises_overflow_error_when_omitted() {
         &compiled_dir,
         "import m\n\
          for args in [(), (4611686018427387904,)]:\n\
-         \x20   try:\n        m.K.big(*args)\n\
-         \x20   except OverflowError:\n        print('OverflowError')\n\
+         \x20   print(m.K.big(*args))\n\
          print(m.K.big(5))\n",
     );
     assert!(
@@ -313,5 +311,8 @@ fn an_out_of_range_int_default_raises_overflow_error_when_omitted() {
         stdout_of(&run),
         stderr_of(&run)
     );
-    assert_eq!(stdout_of(&run), "OverflowError\nOverflowError\n5\n");
+    assert_eq!(
+        stdout_of(&run),
+        "4611686018427387904\n4611686018427387904\n5\n"
+    );
 }

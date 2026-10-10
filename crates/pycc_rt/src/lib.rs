@@ -1886,8 +1886,8 @@ mod tests {
 
     #[test]
     fn bool_identity_markers_decode_numerically_but_format_as_bools() {
-        assert_eq!(int_untag_checked(BOOL_FALSE_MARKER), 0);
-        assert_eq!(int_untag_checked(BOOL_TRUE_MARKER), 1);
+        assert_eq!(int_untag_checked(BOOL_FALSE_MARKER, UNTAG_INDEX), 0);
+        assert_eq!(int_untag_checked(BOOL_TRUE_MARKER, UNTAG_INDEX), 1);
         assert_eq!(pycc_rt_int_truthy(BOOL_FALSE_MARKER), 0);
         assert_eq!(pycc_rt_int_truthy(BOOL_TRUE_MARKER), 1);
         assert_eq!(pycc_rt_int_to_float(BOOL_FALSE_MARKER), 0.0);
@@ -2188,36 +2188,8 @@ mod tests {
         // implementation note establishes for every panicking
         // `pycc_rt_int_*` symbol.
         for n in [0i64, 1, -1, 42, -42, i64::MAX >> 1, -(i64::MAX >> 1)] {
-            assert_eq!(pycc_rt_int_untag_checked(tag_smallint(n)), n);
+            assert_eq!(pycc_rt_int_untag_checked(tag_smallint(n), UNTAG_SIZE), n);
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "pycc_rt: int boundary does not support bigint-valued values yet")]
-    fn int_untag_checked_rejects_a_bigint_tagged_value() {
-        // A bigint-tagged value has its low bit clear (see TAG_BIT/
-        // is_smallint). `tag_bigint` itself takes a `BigIntObj`, not a bare
-        // i64 -- rather than hand-craft a bigint-tagged bit pattern from
-        // scratch, force a real overflow through the existing arithmetic
-        // path, exactly like this file's own `repeated_addition_exercises_
-        // the_general_bigint_plus_smallint_path` test already does:
-        // `i64::MAX >> 1` is exactly the largest value that still
-        // round-trips through tagging, so adding it to itself overflows and
-        // promotes via `int_add`'s own `tag_bigint` path.
-        //
-        // The setup call uses the public `pycc_rt_int_add` wrapper (that
-        // path does not panic); the assertion below calls the *private*
-        // `int_untag_checked`, because a panic unwinding past a plain
-        // `extern "C" fn`'s boundary aborts the whole test binary instead
-        // of being caught by `#[should_panic]` -- see the implementation
-        // note above `int_add`.
-        let bigint_tagged =
-            pycc_rt_int_add(tag_smallint(i64::MAX >> 1), tag_smallint(i64::MAX >> 1));
-        assert!(
-            !is_smallint(bigint_tagged),
-            "test setup: expected this addition to overflow into a real bigint"
-        );
-        int_untag_checked(bigint_tagged);
     }
 
     #[test]

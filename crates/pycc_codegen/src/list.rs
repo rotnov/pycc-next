@@ -85,11 +85,13 @@ pub(crate) fn build_list_append<'ctx>(
 
 /// Branches on `(word & 1) != 0`: the inline smallint case takes `fast`,
 /// every other encoded word (a bool marker, or a bigint, which
-/// `pycc_rt_int_untag_checked` refuses) takes `pycc_rt_int_untag_checked`.
+/// `pycc_rt_int_untag_checked` raises for, by `use_kind`) takes
+/// `build_untag_checked`.
 fn untag_or_check<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
+    use_kind: UntagUse,
     word: IntValue<'ctx>,
 ) -> IntValue<'ctx> {
     let i64_type = context.i64_type();
@@ -110,7 +112,7 @@ fn untag_or_check<'ctx>(
         .build_conditional_branch(is_small, join, slow)
         .expect("build_conditional_branch should not fail for a well-formed i1 condition");
     builder.position_at_end(slow);
-    let checked = build_untag_checked(builder, rt, word, "untag_slow_value");
+    let checked = build_untag_checked(context, builder, rt, use_kind, word, "untag_slow_value");
     builder
         .build_unconditional_branch(join)
         .expect("build_unconditional_branch should not fail");
@@ -131,7 +133,7 @@ pub(crate) fn raw_index<'ctx>(
     index: Scalar<'ctx>,
 ) -> IntValue<'ctx> {
     let encoded = to_numeric_encoded_int(context, builder, index);
-    untag_or_check(context, builder, rt, encoded)
+    untag_or_check(context, builder, rt, UntagUse::Index, encoded)
 }
 
 /// Converts an element `scalar` (the value of `source`) into the word a
@@ -149,7 +151,7 @@ pub(crate) fn element_word<'ctx>(
     match elem {
         Ty::Int => {
             let encoded = to_encoded_int(context, builder, scalar);
-            let _ = untag_or_check(context, builder, rt, encoded);
+            let _ = untag_or_check(context, builder, rt, UntagUse::Element, encoded);
             encoded
         }
         Ty::Str => {

@@ -178,3 +178,112 @@ fn bigint_values_cross_the_ext_boundary_like_cpython() {
     assert!(compiled.status.success(), "{}", rendered(&compiled));
     assert_eq!(stdout(&compiled), stdout(&oracle));
 }
+
+/// Builds `tests/fixtures/<module>.py` as an extension module in a fresh
+/// scratch dir.
+fn build_ext_fixture(tag: &str, module: &str) -> ScratchDir {
+    let dir = ScratchDir::new(tag).expect("scratch");
+    let build = pycc()
+        .arg("build")
+        .arg(fixture(&format!("{module}.py")))
+        .arg("-o")
+        .arg(dir.join(module))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", rendered(&build));
+    dir
+}
+
+fn run_in(dir: &Path, program: &str) -> Output {
+    python()
+        .arg("-c")
+        .arg(program)
+        .current_dir(dir)
+        .output()
+        .expect("python3 should spawn")
+}
+
+/// A large `int` passed from Python into a position that needs a machine
+/// word (an index, a slice bound, a repeat count, a container element, a
+/// buffer index) raises a Python exception; it never aborts the host
+/// interpreter. Index and repeat count raise CPython's own exceptions; a
+/// container element (`OverflowError`) and a list slice bound (`IndexError`)
+/// raise the recorded gap (`docs/DEVIATIONS.md`).
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_large_int_in_a_machine_word_position_raises_instead_of_aborting_the_host() {
+    let dir = build_ext_fixture("int_bigint_boundary", "int_bigint_boundary");
+    let run = run_in(
+        &dir,
+        "\
+import array, int_bigint_boundary as m
+big = 2**100
+cases = [
+    ('at', lambda: m.at(big)),
+    ('at_negative', lambda: m.at(-big)),
+    ('push', lambda: m.push(big)),
+    ('head', lambda: m.head(big)),
+    ('rep', lambda: m.rep(big)),
+    ('buf_at', lambda: m.buf_at(memoryview(array.array('d', [1.0])), big)),
+]
+for name, call in cases:
+    try:
+        call()
+    except (IndexError, OverflowError) as e:
+        print(name, type(e).__name__, e)
+    else:
+        print(name, 'no exception')
+print(m.at(2), m.push(5), m.head(2), m.rep(2), m.divide(-big, 7) == -big // 7)
+",
+    );
+    assert!(run.status.success(), "{}", rendered(&run));
+    assert_eq!(
+        stdout(&run),
+        "at IndexError cannot fit 'int' into an index-sized integer\n\
+         at_negative IndexError cannot fit 'int' into an index-sized integer\n\
+         push OverflowError storing a bigint-valued `int` in a container is not supported yet\n\
+         head IndexError cannot fit 'int' into an index-sized integer\n\
+         rep OverflowError cannot fit 'int' into an index-sized integer\n\
+         buf_at IndexError cannot fit 'int' into an index-sized integer\n\
+         3 2 2 abab True\n"
+    );
+}
+
+/// An `ext` module's pending-exception check reads the calling thread's own
+/// state: one Python thread raising inside the module never changes the
+/// control flow of another thread's calls.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn ext_exception_state_is_per_thread() {
+    let dir = build_ext_fixture("int_bigint_threads", "int_bigint_ext");
+    let run = run_in(
+        &dir,
+        "\
+import sys, threading, int_bigint_ext as m
+sys.setswitchinterval(1e-6)
+expected = m.fib(200)
+errors = []
+def raiser():
+    for _ in range(20000):
+        try:
+            m.floor_pair(2**100, 0)
+        except ZeroDivisionError:
+            pass
+        else:
+            errors.append('no ZeroDivisionError')
+def worker():
+    for _ in range(20000):
+        if m.fib(200) != expected or m.floor_pair(2**100, 7) != divmod(2**100, 7):
+            errors.append('wrong result')
+threads = [threading.Thread(target=raiser), threading.Thread(target=worker)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+print(errors[:3], len(errors))
+",
+    );
+    assert!(run.status.success(), "{}", rendered(&run));
+    assert_eq!(stdout(&run), "[] 0\n");
+}

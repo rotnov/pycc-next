@@ -235,20 +235,13 @@ fn a_refused_element_names_its_argument_and_its_one_based_position() {
     );
 }
 
-/// The two `int` range failures a tuple adds, and the ownership discipline
-/// each one owes.
-///
-/// Ingress: `pycc_rt`'s inline-integer range is [-2^62, 2^62-1], narrower
-/// than `i64`, so a conforming CPython `int` can still be out of range
-/// (#1040). Egress: each returned element arrives retained (D-180 rule 6)
-/// and it is `pycc_ext_pack_int` that discharges the ownership, so the
-/// wrapper packs *every* element before acting on any failure -- bailing at
-/// the first would leak one `BigIntObj` per call, on exactly the path that
-/// already raises. The loop is that leak's only observable form from Python:
-/// a double free or a use-after-free in the branch faults here.
+/// A tuple element of any magnitude crosses in both directions (#1040), and
+/// the ownership discipline holds: each returned element arrives retained
+/// (D-180 rule 6) and `pycc_ext_pack_int` discharges it after packing. The
+/// loop is a leak's or a double free's only observable form from Python.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_out_of_range_int_element_raises_overflow_in_either_direction() {
+fn a_bigint_element_crosses_in_either_direction() {
     let dir = ScratchDir::new("ext_tuple_overflow").expect("scratch");
     build_ext(
         &dir,
@@ -262,17 +255,11 @@ fn an_out_of_range_int_element_raises_overflow_in_either_direction() {
         "import pycc_tuple_overflow as m\n\
          inline_max = 2 ** 62 - 1\n\
          assert m.take((inline_max, 0)) == inline_max\n\
-         try:\n    m.take((inline_max + 1, 0))\n\
-         except OverflowError as e:\n    assert 'element 1' in str(e), str(e)\n\
-         else:\n    raise AssertionError('an out-of-range element must raise')\n\
-         try:\n    m.take((0, 2 ** 64))\n\
-         except OverflowError as e:\n    assert 'element 2' in str(e), str(e)\n\
-         else:\n    raise AssertionError('an out-of-range element must raise')\n\
+         assert m.take((inline_max + 1, 0)) == inline_max + 1\n\
+         assert m.take((-(2 ** 64), 2 ** 64)) == -(2 ** 64)\n\
          assert m.grow((2, 3)) == (2000000000, 3000000000)\n\
          for _ in range(2000):\n    \
-         try:\n        m.grow((3000000000000, 3000000000000))\n    \
-         except OverflowError:\n        pass\n    \
-         else:\n        raise AssertionError('both elements overflow the egress')\n\
+         assert m.grow((3000000000000, -3000000000000)) == (3 * 10 ** 21, -3 * 10 ** 21)\n\
          assert m.grow((4, 5)) == (4000000000, 5000000000)\n\
          print('ok')\n",
     );
@@ -375,18 +362,16 @@ fn a_tuple_returning_export_raises_rather_than_packing_uninitialized_storage() {
 
 /// #1050 regression: a *stored* tuple's elements are borrowed, so the
 /// `tuple` egress must take its own reference before the packer discharges
-/// one. `pycc_ext_pack_int` releases a heap-bigint word on its
-/// `OverflowError` path; without a matching retain that release decrements a
-/// count the module global still holds, and the *second* call faults inside
-/// the host interpreter (observed before the fix as a non-unwinding panic in
-/// `pycc_rt_bigint_release`, an outright use-after-free in a release build).
+/// one. `pycc_ext_pack_int` releases a heap-bigint word after packing it;
+/// without a matching retain that release decrements a count the module
+/// global still holds, and a later call faults inside the host interpreter.
 ///
 /// So one call proves nothing here -- the loop is the test. The `bool` and
 /// `float` elements are the other half of the contract: only the `int` slots
 /// take a reference, because only the `int` packer discharges one.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_stored_tuple_of_bigints_survives_repeated_refused_returns() {
+fn a_stored_tuple_of_bigints_survives_repeated_returns() {
     let dir = ScratchDir::new("ext_tuple_borrowed_bigint").expect("scratch");
     build_ext(
         &dir,
@@ -399,9 +384,7 @@ fn a_stored_tuple_of_bigints_survives_repeated_refused_returns() {
         &dir,
         "import pycc_tuple_borrowed as m\n\
          for _ in range(2000):\n    \
-         try:\n        m.get()\n    \
-         except OverflowError:\n        pass\n    \
-         else:\n        raise AssertionError('an out-of-range int must be refused')\n\
+         assert m.get() == (2 ** 62, True, 1.5), m.get()\n\
          assert m.small() == (1, 2)\n\
          print('ok')\n",
     );

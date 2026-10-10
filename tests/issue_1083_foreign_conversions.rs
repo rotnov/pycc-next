@@ -594,31 +594,19 @@ fn the_other_two_conversions_reach_the_host() {
     );
 }
 
-/// An `int(o)` whose result is outside pycc's inline-integer range raises
-/// `OverflowError` in the host rather than silently truncating or growing a
-/// bigint path.
-///
-/// `sys.maxsize` is `2**63 - 1` on every 64-bit build, which is outside
-/// `[-2**62, 2**62-1]`, so this is the shim's own encode arm -- the same
-/// refusal `pycc_ext_unpack_int_at` gives at the thunk boundary, citing
-/// #1040. The trailing `print` proves the module body stopped rather than
-/// merely reported.
+/// An `int(o)` whose result is outside pycc's inline-integer range becomes a
+/// heap bigint (#1040) and prints exactly as CPython: `sys.maxsize` is
+/// `2**63 - 1` on every 64-bit build, beyond `[-2**62, 2**62-1]`.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_out_of_range_int_conversion_raises_overflow_error_in_the_host() {
+fn an_out_of_range_int_conversion_keeps_its_value_in_the_host() {
     let dir = ScratchDir::new("foreign_int_overflow_hosted").expect("scratch");
     build_ext(
         &dir,
         "pycc_int_overflow_mod",
-        "import sys\n\nprint(int(sys.maxsize))\nprint(99)\n",
+        "import sys\n\nprint(int(sys.maxsize) * 2)\nprint(99)\n",
     );
-    let run = python(
-        &dir,
-        "try:\n\
-         \x20   import pycc_int_overflow_mod\n\
-         except OverflowError as e:\n\
-         \x20   print(\"OverflowError\", \"#1040\" in str(e))\n",
-    );
+    let run = python(&dir, "import pycc_int_overflow_mod\n");
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -627,7 +615,7 @@ fn an_out_of_range_int_conversion_raises_overflow_error_in_the_host() {
     );
     assert_eq!(
         stdout_of(&run),
-        "OverflowError True\n",
+        "18446744073709551614\n99\n",
         "stderr: {}",
         stderr_of(&run)
     );

@@ -35,7 +35,7 @@ use std::process::Command;
 /// magnitude that does not round-trip through the tagged 63-bit encoding.
 const OVERSIZED: &str = "4611686018427387904";
 
-const BOUNDARY_MESSAGE: &str = "pycc_rt: int boundary does not support bigint-valued values yet";
+const BOUNDARY_MESSAGE: &str = "OverflowError: cannot fit 'int' into an index-sized integer";
 
 fn pycc_bin() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_pycc"))
@@ -185,8 +185,8 @@ fn an_oversized_literal_as_a_str_variable_repeat_count_still_hits_the_runtime_in
     // D-207's deliberately narrowed 13th position: `pycc_hir` has no type
     // information at lowering time, so it cannot tell a `str`-typed
     // *variable* operand from any other operand here. Unlike the string
-    // *literal* case just above, this one still compiles and hits the same
-    // run-time abort D-178 always described -- an accepted, documented gap.
+    // *literal* case just above, this one still compiles and raises CPython's
+    // own `OverflowError` at run time.
     assert_runtime_abort(
         "str_repeat_count_variable",
         &format!("s = \"ab\"\nprint(s * {OVERSIZED})\n"),

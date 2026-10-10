@@ -5,7 +5,7 @@ Each entry: what differs, why, and whether it is planned to go away.
 
 | Behavior | pycc-next | CPython | Status |
 |---|---|---|---|
-| An `int` beyond 63 bits stored in a container (`list[int]`/`set[int]`/`dict` element), or used as an index, slice bound or `str` repeat count | aborts at run time; a literal in those positions is compile error `T0051` | arbitrary precision | not implemented yet; arithmetic, comparison, conversion, printing and the `--ext` boundary are arbitrary precision |
+| An `int` beyond 63 bits stored in a container (`list[int]`/`set[int]`/`dict` element) or used as a slice bound | raises `OverflowError` (element) or `IndexError` (list slice bound) at run time; a literal in those positions is compile error `T0051` | stores it / clamps the bound | not implemented yet; arithmetic, comparison, conversion, printing and the `--ext` boundary are arbitrary precision, and an index or repeat count raises CPython's own `IndexError`/`OverflowError` |
 | `int ** negative int` | raises `RuntimeError` (`**` is typed `int -> int`) | returns a `float` | to be fixed in the type checker |
 | `**` or `<<` producing more than 2**36 bits | raises `OverflowError: too many digits in integer` | raises `MemoryError` (or runs out of memory) | on purpose: pycc has no `MemoryError` |
 | `str()`/`print` of an `int` with more than 4300 digits | always raises `ValueError` (the default limit) | limit adjustable with `sys.set_int_max_str_digits()` | `sys` is not compiled |

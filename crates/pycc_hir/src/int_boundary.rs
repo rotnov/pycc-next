@@ -186,15 +186,16 @@ fn int_literal_boundary_diagnostic(
         format!(
             "integer literal `{n}` is out of range for a {position} -- pycc's compiled `int` \
              representation only supports a literal here within D-061's 63-bit tagged smallint \
-             range; a bigint value reaching this position through arithmetic still runs (and \
-             aborts) exactly as before, only a literal is rejected at compile time"
+             range; a bigint value reaching this position through arithmetic raises at run \
+             time instead, only a literal is rejected at compile time"
         ),
         Span::new(span.start, span.end),
     )
     .with_help(
         "use a literal within the tagged smallint range -- this position has no safe compile-time \
          workaround for a larger value: an out-of-range value reaching it through arithmetic \
-         instead of a literal still compiles, but aborts at run time (exit 101) exactly as before",
+         instead of a literal still compiles, and raises `OverflowError` or `IndexError` at run \
+         time",
     )
 }
 

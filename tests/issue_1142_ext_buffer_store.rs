@@ -418,13 +418,11 @@ def order(b: memoryview) -> None:
     assert_eq!(stdout_of(&run), "value\nindex\n");
 }
 
-/// A bigint index is refused at the `ext` boundary by D-141's own
-/// `OverflowError`, before the store's untag ever runs -- the index
-/// position is an ordinary `int` parameter, so it inherits that rule
-/// rather than restating it.
+/// A bigint index crosses the `ext` boundary (#1040) and the store's index
+/// decode raises CPython's own `IndexError` for it, before any write.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_bigint_store_index_is_the_d141_boundary_overflow() {
+fn a_bigint_store_index_raises_index_error() {
     let dir = fixture("1142_hosted_bigint", SUBJECT);
     let build = build_ext(&dir);
     assert!(build.status.success(), "{}", stderr_of(&build));
@@ -435,8 +433,8 @@ fn a_bigint_store_index_is_the_d141_boundary_overflow() {
          data = array.array('d', [1.0])\n\
          try:\n\
          \x20   store_probe.put(memoryview(data), 1 << 70, 2.0)\n\
-         except OverflowError as error:\n\
-         \x20   assert 'inline-integer range' in str(error), str(error)\n\
+         except IndexError as error:\n\
+         \x20   assert str(error) == \"cannot fit 'int' into an index-sized integer\", str(error)\n\
          else:\n\
          \x20   raise AssertionError('a bigint index was accepted')\n\
          assert list(data) == [1.0], list(data)\n\

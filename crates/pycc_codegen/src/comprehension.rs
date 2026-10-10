@@ -48,7 +48,7 @@ use super::bigint_rc::{
 use super::rt_fns::RtFns;
 use super::set_instance::{SetEmitter, set_element_scalar};
 use super::{
-    Scalar, StorageSlot, UserFunction, build_at_entry_block, build_dict_len, build_dict_set,
+    Scalar, StorageSlot, UntagUse, UserFunction, build_at_entry_block, build_dict_len, build_dict_set,
     build_int_set_add, build_int_set_check_not_resized, build_int_set_get, build_int_set_len,
     build_untag_checked, emit_assign, emit_dict_name_read, emit_expr, emit_list_name_read,
     emit_range_operands_with_exception_safety, emit_set_name_read, guard_statement_effects,
@@ -343,8 +343,10 @@ fn emit_element<'ctx>(
         CompElts::Set(elt, None) => {
             let encoded = to_encoded_int(cx.context, cx.builder, emit_one(elt));
             let _ = build_untag_checked(
+                cx.context,
                 cx.builder,
                 cx.rt,
+                UntagUse::Element,
                 encoded,
                 &format!("{prefix}_validate_elt"),
             );
@@ -366,8 +368,10 @@ fn emit_element<'ctx>(
             };
             let encoded = to_encoded_int(cx.context, cx.builder, emit_one(value));
             let _ = build_untag_checked(
+                cx.context,
                 cx.builder,
                 cx.rt,
+                UntagUse::Element,
                 encoded,
                 &format!("{prefix}_validate_value"),
             );

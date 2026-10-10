@@ -6295,9 +6295,7 @@ fn exception_call_produces_c0001() {
 #[test]
 fn other_callable_builtins_produce_c0001() {
     // A representative sample of other callable builtins from the table.
-    for name in [
-        "round", "str", "bool", "range", "zip", "dict", "list", "sum",
-    ] {
+    for name in ["chr", "str", "bool", "range", "zip", "dict", "list", "sum"] {
         let env = Environment::new();
         let expr = HirExpr::Call {
             callee: name.to_string(),

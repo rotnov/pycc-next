@@ -349,14 +349,12 @@ fn a_raising_truth_test_propagates_from_the_module_body() {
     }
 }
 
-/// The documented divergence (`docs/RUNTIME.md`): a selected `int` operand
-/// outside the packer's range raises `OverflowError` in compiled code where
-/// CPython returns the integer (#1040). A discarded one is never boxed, so
-/// it raises nothing. The function-body case shows the packer failure is
-/// catchable like any other foreign failure.
+/// A selected `int` operand outside the inline range is boxed as its true
+/// value (#1040), exactly as CPython returns it, at module scope and in a
+/// function body.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_selected_out_of_range_int_raises_overflow_error() {
+fn a_selected_out_of_range_int_is_boxed_like_cpython() {
     let body = "import pycc_bo_helper\n\
         \n\
         H = pycc_bo_helper\n\
@@ -367,15 +365,16 @@ fn a_selected_out_of_range_int_raises_overflow_error() {
         \n\
         \n\
         def f(m: int) -> None:\n    \
-        try:\n        print(H.zero or m)\n    except OverflowError:\n        \
-        print(\"OverflowError\")\n\
+        print(H.zero or m)\n\
         \n\
         \n\
         f(big)\n\
-        print(big or H.zero)\n\
-        print(\"unreached\")\n";
-    let (_dir, out) = compiled_report("obj_boolop_overflow", "pycc_obj_boolop_overflow", body);
-    assert_eq!(out, "0\nno\nOverflowError\nOverflowError\n");
+        print(big or H.zero)\n";
+    let out = assert_matches_cpython("obj_boolop_overflow", "pycc_obj_boolop_overflow", body);
+    assert_eq!(
+        out,
+        "0\nno\n9223372036854775809\n9223372036854775809\nno error\n"
+    );
 }
 
 /// lark `lalr_parser_state.py`: lines 43-44 (`self.s = s or default` in

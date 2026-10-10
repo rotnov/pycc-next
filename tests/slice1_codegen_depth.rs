@@ -1176,14 +1176,14 @@ _run()
         !output.status.success(),
         "a bigint-valued element must fail loudly, not be stored as a supported container value"
     );
-    // D-141 retains specifically an *honest panic*, not merely a failure --
-    // asserting the message is what distinguishes it from a segfault or any
-    // other abort that a missing guard could also produce. `pycc_rt`'s panic
-    // handler writes this to stderr before the `extern "C"` boundary turns
-    // the unwind into a process abort.
+    // An honest Python exception, not merely a failure -- asserting the
+    // message is what distinguishes it from a segfault or any other abort
+    // that a missing guard could also produce.
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("int boundary does not support bigint-valued values"),
+        stderr.contains(
+            "OverflowError: storing a bigint-valued `int` in a container is not supported yet"
+        ),
         "expected pycc_rt's honest bigint message, got: {stderr}"
     );
 }
