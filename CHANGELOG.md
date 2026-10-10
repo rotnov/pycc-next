@@ -25,9 +25,28 @@ catch type errors at compile time, interoperate with CPython.
 - Benchmarks against CPython and hand-written Rust (`bench/run.py`) and a
   real-world corpus metric (`bench/corpus.py`).
 
+- Reference counting for `str`, lists, dicts, sets, class instances and CPython
+  objects; no per-iteration leaks; cycles are not collected (see DEVIATIONS).
+- Empty-container inference, closures (`nonlocal` via cells), `lambda`, `key=` /
+  `reverse=` for `sorted`/`min`/`max`, set operators, `math` integer functions.
+- Shared stdin/stdout with CPython when it is embedded or hosting an `--ext` module.
+
+### Security
+- `str` hashing is CPython's keyed SipHash-1-3 (`PYTHONHASHSEED` honoured).
+- `int(str)` enforces CPython's 4300-digit limit.
+- Big ints passed into `--ext` modules raise instead of aborting the host.
+- Fixed use-after-free / double-free classes found by review (operand pinning,
+  set in-place ops, deep frees without recursion).
+
 ### Performance
 - Inline small-int arithmetic, direct calls, inline exception checks, fixed-layout
   class instances, inline float `/` and `**`, one-byte `list[bool]`.
+- vs CPython 3.13 (bench/run.py): mandelbrot ~40x, spectral_norm ~15x, fib ~12x,
+  sieve ~6x, nbody ~5-25x faster; mandelbrot runs at hand-written Rust speed.
+
+### Real-world corpus (200 competitive-programming solutions)
+- `--non-strict`: 200/200 match CPython (CI-gated, 0 wrong outputs).
+- strict: 69/200 compile and match CPython unchanged.
 
 ### Known gaps
 - See `docs/DEVIATIONS.md` for every known difference from CPython 3.13.
