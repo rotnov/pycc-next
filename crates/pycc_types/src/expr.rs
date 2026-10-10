@@ -38,7 +38,7 @@ use crate::{
 
 use pycc_diag::{Diagnostic, Span};
 use pycc_hir::Ty;
-use pycc_hir::{ContainerReceiver, FStringPart, HirExpr};
+use pycc_hir::{BinOpKind, ContainerReceiver, FStringPart, HirExpr};
 
 pub fn infer_expr(env: &Environment, expr: &HirExpr) -> Result<Ty, Diagnostic> {
     infer_expr_in(env, &[], expr)
@@ -212,6 +212,7 @@ fn infer_expr_here(
         HirExpr::BinOp { op, left, right } | HirExpr::AugBinOp { op, left, right } => {
             let left_ty = infer_expr_in(env, local_names, left)?;
             let right_ty = infer_expr_in(env, local_names, right)?;
+            reject_negative_literal_exponent(*op, &left_ty, right)?;
             if let Some(result) =
                 crate::foreign::arith::object_binop_ty(Some(env), &left_ty, &right_ty)
             {
@@ -317,6 +318,32 @@ fn infer_expr_here(
             crate::comprehension::infer_comprehension(env, local_names, comp)
         }
     }
+}
+
+/// `int ** <negative int literal>` is a `float` in CPython, but `**` on two
+/// `int`s is typed `int` (`docs/DEVIATIONS.md`), so the compiled program
+/// would raise `RuntimeError` at run time. A literal exponent is known now:
+/// refuse it at compile time instead, where non-strict mode can fall back.
+fn reject_negative_literal_exponent(
+    op: BinOpKind,
+    left_ty: &Ty,
+    right: &HirExpr,
+) -> Result<(), Diagnostic> {
+    let negative_literal = matches!(right, HirExpr::IntLiteral(exponent) if *exponent < 0);
+    if op == BinOpKind::Pow && negative_literal && matches!(left_ty, Ty::Int | Ty::Bool) {
+        let diagnostic = Diagnostic::error(
+            "C0001",
+            "`int ** <negative int>` is a `float` in CPython, which is not compiled yet",
+            Span::new(0, 0),
+        )
+        .with_help("write the base as a `float` literal, e.g. `10.0 ** -10`");
+        return Err(crate::locate::place_labeled(
+            diagnostic,
+            crate::locate::expr_span(right),
+            "negative exponent",
+        ));
+    }
+    Ok(())
 }
 
 /// PEP 572 (#774): the non-reference-counted scalar types a walrus
