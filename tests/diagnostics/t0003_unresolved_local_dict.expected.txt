@@ -1,5 +1,5 @@
 error[T0003]: an empty dict literal has no inferable key/value types for `d`
- --> tests/diagnostics/t0003_unresolved_local_dict.py:1:1
+ --> tests/diagnostics/t0003_unresolved_local_dict.py:2:9
   |
-1 | def f() -> int:
-  | ^ an empty dict literal has no inferable key/value types for `d`
+2 |     d = {}
+  |         ^^ needs a type annotation

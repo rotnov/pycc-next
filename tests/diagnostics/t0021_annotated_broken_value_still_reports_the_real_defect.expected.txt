@@ -1,5 +1,5 @@
 error[T0021]: name `undefined_name` is not defined
- --> tests/diagnostics/t0021_annotated_broken_value_still_reports_the_real_defect.py:1:1
+ --> tests/diagnostics/t0021_annotated_broken_value_still_reports_the_real_defect.py:3:21
   |
-1 | def f() -> int:
-  | ^ name `undefined_name` is not defined
+3 |     xs: list[int] = undefined_name
+  |                     ^^^^^^^^^^^^^^ not defined

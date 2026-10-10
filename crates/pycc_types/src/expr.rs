@@ -173,6 +173,16 @@ pub(crate) fn infer_expr_in(
     local_names: &[&str],
     expr: &HirExpr,
 ) -> Result<Ty, Diagnostic> {
+    infer_expr_here(env, local_names, expr)
+        .map_err(|diagnostic| crate::locate::place_expr(diagnostic, expr))
+}
+
+/// [`infer_expr_in`] before its diagnostic is placed at `expr`.
+fn infer_expr_here(
+    env: &Environment,
+    local_names: &[&str],
+    expr: &HirExpr,
+) -> Result<Ty, Diagnostic> {
     match expr {
         HirExpr::IntLiteral(_) => Ok(Ty::Int),
         HirExpr::FloatLiteral(_) => Ok(Ty::Float),

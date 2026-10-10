@@ -1,5 +1,5 @@
 error[T0021]: cannot compare `int` and `str`
- --> tests/diagnostics/t0021_compare_chain_link_type.py:1:1
+ --> tests/diagnostics/t0021_compare_chain_link_type.py:2:12
   |
-1 | def f(a: int) -> bool:
-  | ^ cannot compare `int` and `str`
+2 |     return 1 < a < "z"
+  |            ^^^^^^^^^^^ these types cannot be compared

@@ -1,5 +1,5 @@
 error[T0026]: cannot assign `str` to `x`, previously declared as `x: int`
- --> tests/diagnostics/d0041_value_less_annotation_later_assignment_mismatch.py:1:1
+ --> tests/diagnostics/d0041_value_less_annotation_later_assignment_mismatch.py:2:1
   |
-1 | x: int
-  | ^ cannot assign `str` to `x`, previously declared as `x: int`
+2 | x = "hello"
+  | ^^^^^^^^^^^ expected `int`, found `str`

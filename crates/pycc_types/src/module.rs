@@ -44,13 +44,18 @@ pub enum DiagnosticKey {
     /// solver phase, or a post-check phase (`monomorphize`,
     /// `unroll_enum_loops`).
     Module,
+    /// A whole-program failure, as `Module`, found at an expression of item
+    /// `i` (a deferred binary operation the post-body solver phase could
+    /// not type, #10): the driver renders it against the file owning the
+    /// item, where its span points.
+    ModuleAt(usize),
 }
 
 impl DiagnosticKey {
     /// The owning item's index, when there is one.
     pub fn item_index(self) -> Option<usize> {
         match self {
-            Self::Function(index) | Self::TopLevel(index) => Some(index),
+            Self::Function(index) | Self::TopLevel(index) | Self::ModuleAt(index) => Some(index),
             Self::Module => None,
         }
     }
@@ -72,6 +77,21 @@ pub type KeyedDiagnostics = Vec<(DiagnosticKey, Diagnostic)>;
 /// 100%-region gate (D-014).
 pub(crate) fn module_level(diagnostic: Diagnostic) -> KeyedDiagnostics {
     vec![(DiagnosticKey::Module, diagnostic)]
+}
+
+/// [`module_level`] for a diagnostic found at `location`, placed there
+/// and keyed to the item holding it.
+pub(crate) fn module_level_at(
+    diagnostic: Diagnostic,
+    location: Option<crate::locate::Location>,
+) -> KeyedDiagnostics {
+    match location {
+        Some((span, item)) => vec![(
+            DiagnosticKey::ModuleAt(item),
+            crate::locate::place_at(diagnostic, Some(span)),
+        )],
+        None => module_level(diagnostic),
+    }
 }
 
 /// Wraps a failing top-level statement's diagnostic as a one-element keyed
@@ -158,7 +178,11 @@ pub fn check_and_resolve_all_keyed(hir: &HirModule) -> Result<HirModule, KeyedDi
     // (checker, solver, `monomorphize`, MIR lowering, codegen) consumes.
     crate::non_strict::with_widening(hir, |hir| {
         let prepared = Prepared::new(hir)?;
-        resolve_prepared(prepared.module(hir)).map_err(|d| prepared.rekey(d))
+        let module = prepared.module(hir);
+        crate::locate::with_locator(module, |index| prepared.origin(index), || {
+            resolve_prepared(module)
+        })
+        .map_err(|d| prepared.rekey(d))
     })
 }
 
@@ -239,6 +263,12 @@ impl Prepared {
             (None, Some(resolved)) => resolved,
             (None, None) => hir,
         }
+    }
+
+    /// The item whose source a receiver-exact copy at `index` was made
+    /// from (`crate::locate`).
+    fn origin(&self, index: usize) -> Option<usize> {
+        self.copied.as_ref().and_then(|copied| copied.origin(index))
     }
 
     fn rekey(&self, diagnostics: KeyedDiagnostics) -> KeyedDiagnostics {
@@ -377,7 +407,9 @@ pub(super) fn check_with_environment_all(
         crate::foreign::bind_foreign_objects_at(&mut env, &hir.imports, index);
         match item {
             HirItem::TopLevelStmt(stmt) => {
-                check_stmt(&mut env, stmt).map_err(|diagnostic| top_level(index, diagnostic))?;
+                crate::locate::in_item(index, || check_stmt(&mut env, stmt)).map_err(
+                    |diagnostic| top_level(index, crate::locate::place_item(diagnostic, index)),
+                )?;
                 // Issue #769 (Part 2 of #747): applied uniformly with every
                 // other sequential-statement-list call site in this crate
                 // for consistency, even though `HirStmt::Return` (the only
@@ -426,19 +458,22 @@ pub(super) fn check_with_environment_all(
             // env-less variant could not see any sibling function, so a
             // generic body calling an ordinary sibling wrongly reported
             // "call to undefined function").
-            let checked = if is_generic_signature(params, return_ty) {
-                check_generic_function_in(&env, item, local_names)
-            } else {
-                check_function_in(&env, item, local_names)
-            }
-            // #1420: a receiver-exact copy must not infer a return its
-            // callers, typed through the origin, cannot see.
-            .and_then(|()| inherited_copies::check_copy_return(&env, name));
+            let checked = crate::locate::in_item(index, || {
+                if is_generic_signature(params, return_ty) {
+                    check_generic_function_in(&env, item, local_names)
+                } else {
+                    check_function_in(&env, item, local_names)
+                }
+                // #1420: a receiver-exact copy must not infer a return its
+                // callers, typed through the origin, cannot see.
+                .and_then(|()| inherited_copies::check_copy_return(&env, name))
+            });
             if let Err(diagnostic) = checked {
                 // #1418: the check phase's half of the widened comparison
                 // method's `T0022` help (the solver's is in
                 // `constraints::signatures`).
                 let diagnostic = crate::not_implemented::widened_return_help(body, diagnostic);
+                let diagnostic = crate::locate::place_item(diagnostic, index);
                 collected.push((DiagnosticKey::Function(index), diagnostic));
             }
         }
@@ -495,7 +530,11 @@ pub fn check_all_keyed(hir: &HirModule) -> Result<(), KeyedDiagnostics> {
     // module (see [`Prepared`]).
     crate::non_strict::with_widening(hir, |hir| {
         let prepared = Prepared::new(hir)?;
-        check_prepared(prepared.module(hir)).map_err(|d| prepared.rekey(d))
+        let module = prepared.module(hir);
+        crate::locate::with_locator(module, |index| prepared.origin(index), || {
+            check_prepared(module)
+        })
+        .map_err(|d| prepared.rekey(d))
     })
 }
 

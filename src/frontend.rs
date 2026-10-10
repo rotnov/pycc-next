@@ -131,9 +131,37 @@ struct ProgramSources {
     class_bounds: Vec<usize>,
     /// The entry module's `pycc_hir::last_item_origins`.
     entry_origins: Vec<u32>,
+    /// Every file's `LoweredModule::item_origins`, in file order.
+    item_origins: Vec<Vec<u32>>,
 }
 
 impl ProgramSources {
+    /// The source spans of every item of the linked program `hir` (#10),
+    /// recovered from each file's re-parsed, desugared AST
+    /// (`pycc_hir::locate`). Called only once a check has failed, so a
+    /// program that checks pays for no second parse.
+    fn item_spans(&self, hir: &HirModule) -> Vec<Option<pycc_hir::locate::ItemSpans>> {
+        let mut spans = Vec::with_capacity(hir.items.len());
+        let mut start = 0;
+        for ((_, source), (end, origins)) in self
+            .files
+            .iter()
+            .zip(self.bounds.iter().zip(&self.item_origins))
+        {
+            let items = hir.items.get(start..*end).unwrap_or_default();
+            match pycc_parser::parse_all(source) {
+                Ok(mut parsed) => {
+                    pycc_ast::desugar(&mut parsed);
+                    spans.extend(pycc_hir::locate::item_spans(&parsed, source, items, origins));
+                }
+                Err(_) => spans.extend(items.iter().map(|_| None)),
+            }
+            start = *end;
+        }
+        spans.resize_with(hir.items.len(), || None);
+        spans
+    }
+
     fn entry(&self) -> usize {
         self.files.len() - 1
     }
@@ -257,6 +285,7 @@ fn link_frontend(
     let mut total = 0;
     let mut imports_total = 0;
     let mut classes_total = 0;
+    let mut item_origins = Vec::with_capacity(program.modules.len());
     // #1244: `pycc_hir::link` refuses a module-scope `del x` while another
     // module mentions `x`. Lowering leaves each module's mentions unset,
     // since the walk would cost every build; they are computed here, from
@@ -290,6 +319,7 @@ fn link_frontend(
             .filter(|(name, _)| !(seeded && pycc_hir::is_builtin_exception_class(name)))
             .count();
         class_bounds.push(classes_total);
+        item_origins.push(std::mem::take(&mut loaded.module.item_origins));
         files.push((loaded.display_path.clone(), loaded.source));
         inputs.push(LinkInput {
             display_path: loaded.display_path,
@@ -302,6 +332,7 @@ fn link_frontend(
         import_bounds,
         class_bounds,
         entry_origins,
+        item_origins,
     };
     let linked = pycc_hir::link(inputs).map_err(|keyed| sources.group(keyed))?;
     let hir = pycc_hir::finalize(linked).map_err(|diagnostics| {
@@ -376,7 +407,7 @@ fn check_frontend_once(path: &Path, interop: InteropCli) -> Result<(), FrontendF
         false,
     )?;
     let policy = interop_policy::resolve_for_program(&hir, manifest.as_ref(), interop)?;
-    pycc_types::check_all_keyed(&hir)
+    located(&sources, &hir, || pycc_types::check_all_keyed(&hir))
         .map_err(|keyed| sources.group_owned(attribute(&sources, keyed)))?;
     let gaps = interop_policy::policy_gaps(&hir, &policy);
     if gaps.is_empty() {
@@ -457,7 +488,7 @@ fn resolve_linked(
     ext_module: bool,
 ) -> Result<HirModule, FrontendFailure> {
     let (hir, sources, _manifest) = link_frontend(path, module_name, relative_imports, ext_module)?;
-    let typed = pycc_types::check_and_resolve_all_keyed(&hir)
+    let typed = located(&sources, &hir, || pycc_types::check_and_resolve_all_keyed(&hir))
         .map_err(|keyed| sources.group_owned(attribute(&sources, keyed)))?;
     export_gaps_as_failures(path, &typed, ext_module)?;
     Ok(typed)
@@ -709,7 +740,8 @@ fn resolve_frontend_native_once(
     // itself. A surviving gap is reported *beside* the type errors rather
     // than swallowed by them, so a clean allocating function is still named
     // when some other function in the same program fails to check.
-    let resolved = match pycc_types::check_and_resolve_all_keyed(&hir) {
+    let resolved = match located(&sources, &hir, || pycc_types::check_and_resolve_all_keyed(&hir))
+    {
         Ok(resolved) => resolved,
         Err(check_keyed) => {
             // The import gaps collected above are dropped on this path,
@@ -768,6 +800,21 @@ fn resolve_frontend_native_once(
         return Ok((resolved, needs_interpreter));
     }
     Err(sources.group(keyed))
+}
+
+/// Runs `check`; when it fails, runs it again with every item's source
+/// spans (#10), so its diagnostics point at the offending code. The check
+/// is deterministic, so the second run reports the same diagnostics, now
+/// placed; a program that checks is never re-parsed.
+fn located<T>(
+    sources: &ProgramSources,
+    hir: &HirModule,
+    check: impl Fn() -> Result<T, pycc_types::KeyedDiagnostics>,
+) -> Result<T, pycc_types::KeyedDiagnostics> {
+    match check() {
+        Err(_) => pycc_types::with_item_spans(sources.item_spans(hir), check),
+        checked => checked,
+    }
 }
 
 fn attribute(

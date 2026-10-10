@@ -180,6 +180,11 @@ pub(crate) fn check_while_body_in_place(
 }
 
 pub fn check_stmt(env: &mut Environment, stmt: &HirStmt) -> Result<(), Diagnostic> {
+    check_stmt_here(env, stmt).map_err(|diagnostic| crate::locate::place_stmt(diagnostic, stmt))
+}
+
+/// [`check_stmt`] before its diagnostic is placed at `stmt`.
+fn check_stmt_here(env: &mut Environment, stmt: &HirStmt) -> Result<(), Diagnostic> {
     // A loop is checked inside a `loop_flow` frame, which joins its normal
     // exit (through its `else:` clause) with the state at each `break`.
     match stmt {
@@ -279,7 +284,11 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
                     } else {
                         annotation_initializer_mismatch(target, &inferred, annotation)
                     };
-                    return Err(diag);
+                    return Err(crate::locate::place_labeled(
+                        diag,
+                        crate::locate::expr_span(value),
+                        format!("expected `{}`, found `{}`", annotation.name(), inferred.name()),
+                    ));
                 }
                 // Route through `check_assignment` (not a raw `env.bind`) so a
                 // name's first-established representation stays sticky across

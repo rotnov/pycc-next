@@ -16,7 +16,10 @@ print(fib("5"))
 ```
 $ pycc check fib.py
 error[T0021]: argument 1 of `fib` expects `int`, got `str`
- --> fib.py:1:1
+ --> fib.py:6:11
+  |
+6 | print(fib("5"))
+  |           ^^^ expected `int`, found `str`
 ```
 
 Caught **before** it runs. Not in CI logs. Not in production. At compile time.

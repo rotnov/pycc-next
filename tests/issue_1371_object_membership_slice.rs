@@ -222,14 +222,12 @@ fn the_shapes_outside_part_2b_are_refused() {
     }
     // Admitting membership moved the native-pair refusal from HIR lowering
     // (which saw only syntax and had the comparison's span) to the type
-    // stage, whose diagnostics carry no span yet: it is reported at 1:1, the
-    // same trade Part 1 made for general identity, until Part 5 of #1371
-    // gives type-stage diagnostics their source location. Pinned so the
-    // restoration is a visible test change.
+    // stage, which reported it at 1:1 until type diagnostics got their
+    // source location (#10): it points at the comparison again.
     let dir = ScratchDir::new("obj_member_native_pair_span").expect("scratch");
     let rendered = stdout_of(&check_with(&dir, &format!("{HEAD}n = 2\nprint(1 in n)\n")));
-    assert!(rendered.contains(".py:1:1"), "{rendered}");
-    assert!(!rendered.contains(".py:6:"), "{rendered}");
+    assert!(rendered.contains(".py:6:7"), "{rendered}");
+    assert!(!rendered.contains(".py:1:1"), "{rendered}");
 }
 
 fn build_ext(dir: &Path, module: &str, body: &str) {

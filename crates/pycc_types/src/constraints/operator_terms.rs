@@ -154,7 +154,13 @@ pub(crate) fn collect_unary_op_constraints(
             };
             deferred
                 .binops
-                .push((bin_op, Ok(Ty::Int), operand, result.clone()));
+                .push((
+                    bin_op,
+                    Ok(Ty::Int),
+                    operand,
+                    result.clone(),
+                    crate::locate::expr_location(expr),
+                ));
             Ok(Some(result))
         }
         None => Ok(None),
@@ -177,7 +183,13 @@ pub(crate) fn collect_bin_op_constraints(
     match (left, right) {
         (Some(left), Some(right)) => {
             let result = fresh_term(parents, concrete);
-            deferred.binops.push((*op, left, right, result.clone()));
+            deferred.binops.push((
+                *op,
+                left,
+                right,
+                result.clone(),
+                crate::locate::expr_location(expr),
+            ));
             Ok(Some(result))
         }
         _ => Ok(None),

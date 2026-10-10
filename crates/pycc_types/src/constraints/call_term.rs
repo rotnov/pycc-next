@@ -475,7 +475,7 @@ pub(crate) fn collect_call_constraints(
                 let result = fresh_term(parents, concrete);
                 deferred
                     .binops
-                    .push((BinOpKind::Add, Ok(Ty::Int), operand, result.clone()));
+                    .push((BinOpKind::Add, Ok(Ty::Int), operand, result.clone(), None));
                 return Ok(Some(result));
             }
             None if callee == "divmod" && arg_terms.len() == 2 => {

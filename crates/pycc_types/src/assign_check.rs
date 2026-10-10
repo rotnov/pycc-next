@@ -112,12 +112,13 @@ pub(crate) fn check_range_operand_in(
     if is_assignable(actual.clone(), Ty::Int) {
         Ok(())
     } else {
-        Err(Diagnostic::error(
+        let diagnostic = Diagnostic::error(
             "T0021",
             format!("range {position} expects `int`, got `{}`", actual.name()),
             Span::new(0, 0),
         )
-        .with_help("pass an `int` value"))
+        .with_help("pass an `int` value");
+        Err(crate::locate::place_expr(diagnostic, expr))
     }
 }
 
@@ -263,7 +264,11 @@ pub(crate) fn check_assignment_of(
                     Span::new(0, 0),
                 ).with_help(format!("change the value to `{}` (the expected/declared type), or the declaration/annotation to `{}` (the actual type)", previous.name(), ty.name()))
             };
-            return Err(diag);
+            return Err(crate::locate::place_labeled(
+                diag,
+                boxed_value.and_then(crate::locate::expr_span),
+                format!("expected `{}`, found `{}`", previous.name(), ty.name()),
+            ));
         }
         // Issue #118 Part 1: a compatible reassignment on the current path
         // upgrades a `Maybe` binding to `Definitely` (the name is now

@@ -1,5 +1,5 @@
 error[T0055]: not enough values to unpack (expected 2, got 1)
- --> tests/diagnostics/t0055_unpack_not_enough_values.py:1:1
+ --> tests/diagnostics/t0055_unpack_not_enough_values.py:2:5
   |
-1 | def f(t: tuple[int]) -> int:
-  | ^ not enough values to unpack (expected 2, got 1)
+2 |     a, b = t
+  |     ^^^^^^^^ wrong number of values to unpack

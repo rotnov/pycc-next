@@ -992,10 +992,15 @@ pub(crate) fn name_binding(
     value: &HirExpr,
 ) -> Diagnostic {
     if diagnostic.code == "T0003" && empty_literal(value).is_some() {
+        // A placed diagnostic carries its own short label (#10); only the
+        // headline repeated as the label follows the new headline.
+        let repeats_headline = diagnostic.label.as_deref() == Some(diagnostic.message.as_str());
         diagnostic.message = diagnostic
             .message
             .replace(" here", &format!(" for `{target}`"));
-        diagnostic.label = Some(diagnostic.message.clone());
+        if repeats_headline {
+            diagnostic.label = Some(diagnostic.message.clone());
+        }
     }
     diagnostic
 }

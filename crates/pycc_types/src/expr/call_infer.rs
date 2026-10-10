@@ -636,7 +636,7 @@ pub(crate) fn infer_call_expr(
                 )
                 .with_help(format!("pass a `{}` value", param_ty.name()))
             };
-            return Err(diag);
+            return Err(crate::locate::place_at(diag, crate::locate::expr_span(&args[i])));
         }
         // Part 1 of #1333: an `object` argument that got this far
         // met a parameter it is assignable to -- an unannotated

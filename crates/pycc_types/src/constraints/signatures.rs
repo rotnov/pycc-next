@@ -327,16 +327,20 @@ pub(crate) fn infer_function_signatures_with_solver_all(
     for (index, item) in hir.items.iter().enumerate() {
         match item {
             HirItem::TopLevelStmt(stmt) => {
-                collect_block_constraints(
-                    &signatures,
-                    &mut parents,
-                    &mut concrete,
-                    &mut constraints,
-                    &mut globals,
-                    std::slice::from_ref(stmt),
-                    None,
-                )
-                .map_err(|diagnostic| top_level(index, diagnostic))?;
+                crate::locate::in_item(index, || {
+                    collect_block_constraints(
+                        &signatures,
+                        &mut parents,
+                        &mut concrete,
+                        &mut constraints,
+                        &mut globals,
+                        std::slice::from_ref(stmt),
+                        None,
+                    )
+                })
+                .map_err(|diagnostic| {
+                    top_level(index, crate::locate::place_item(diagnostic, index))
+                })?;
             }
             // Mirror of pass 2's source-order `def` rebinding (D-110): the
             // `def` marks the name def-rebound in the accumulated globals
@@ -451,18 +455,21 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         if is_abstract_method {
             continue;
         }
-        if let Err(diagnostic) = collect_block_constraints(
-            &signatures,
-            &mut parents,
-            &mut concrete,
-            &mut constraints,
-            &mut env,
-            body,
-            Some(signature.2.clone()),
-        ) {
+        if let Err(diagnostic) = crate::locate::in_item(index, || {
+            collect_block_constraints(
+                &signatures,
+                &mut parents,
+                &mut concrete,
+                &mut constraints,
+                &mut env,
+                body,
+                Some(signature.2.clone()),
+            )
+        }) {
             // #1418: a widened comparison method's native return explains
             // where its `object` return type came from.
             let diagnostic = crate::not_implemented::widened_return_help(body, diagnostic);
+            let diagnostic = crate::locate::place_item(diagnostic, index);
             collected.push((DiagnosticKey::Function(index), diagnostic));
             continue;
         }
@@ -477,6 +484,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
                 "private helper implicit return",
             )
         {
+            let diagnostic = crate::locate::place_item(diagnostic, index);
             collected.push((DiagnosticKey::Function(index), diagnostic));
         }
     }
@@ -488,8 +496,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
     // every call/operator fact settle first, aggregate all remaining bounds
     // per union-find root, then propagate any selected fallback back through
     // operators. This keeps inference independent of body/declaration order.
-    propagate_binop_constraints(&constraints.deferred.binops, &mut parents, &mut concrete)
-        .map_err(module_level)?;
+    propagate_binop_constraints(&constraints.deferred.binops, &mut parents, &mut concrete)?;
     // #1343: container defaults run before the annotation defaults, so a
     // defaulted `set[int]` root is concrete before a scalar annotation
     // bound could claim it -- the order the hard `set[int]` guess had.
@@ -504,8 +511,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         &mut concrete,
     )
     .map_err(module_level)?;
-    propagate_binop_constraints(&constraints.deferred.binops, &mut parents, &mut concrete)
-        .map_err(module_level)?;
+    propagate_binop_constraints(&constraints.deferred.binops, &mut parents, &mut concrete)?;
 
     let non_scalar_local_roots = constraints
         .non_scalar_local_terms

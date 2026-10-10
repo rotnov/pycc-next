@@ -521,7 +521,9 @@ pub(crate) fn producer_gaps_the_check_admits(
             pycc_types::DiagnosticKey::Function(index) => {
                 failed.insert(*index);
             }
-            pycc_types::DiagnosticKey::TopLevel(_) | pycc_types::DiagnosticKey::Module => {
+            pycc_types::DiagnosticKey::TopLevel(_)
+            | pycc_types::DiagnosticKey::Module
+            | pycc_types::DiagnosticKey::ModuleAt(_) => {
                 return Vec::new();
             }
         }

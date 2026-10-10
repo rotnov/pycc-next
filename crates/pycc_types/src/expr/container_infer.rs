@@ -44,7 +44,7 @@ pub(crate) fn infer_list_literal_expr(
                 // file -- D-105 requires every element to share the
                 // *exact same* `Ty`, so `[1, True]` is T0032 even
                 // though a bare `bool` is assignable to `int`.
-                return Err(Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "T0032",
                     format!(
                         "list element type mismatch: expected {} (from the first element), found {}",
@@ -52,7 +52,12 @@ pub(crate) fn infer_list_literal_expr(
                         this_ty.name()
                     ),
                     Span::new(0, 0),
-                ).with_help(format!("use a `{}` value here", expected.name())));
+                ).with_help(format!("use a `{}` value here", expected.name()));
+                return Err(crate::locate::place_labeled(
+                    diagnostic,
+                    crate::locate::expr_span(element),
+                    format!("expected `{}`, found `{}`", expected.name(), this_ty.name()),
+                ));
             }
         }
     }
@@ -174,7 +179,7 @@ pub(crate) fn infer_set_literal_expr(
         // bool-is-an-int-subtype rule -- same reasoning as
         // `ListLiteral`'s own homogeneity check.
         if this_ty != elem_ty {
-            return Err(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "T0037",
                 format!(
                     "set element type mismatch: expected {} (from the first element), found {}",
@@ -183,7 +188,12 @@ pub(crate) fn infer_set_literal_expr(
                 ),
                 Span::new(0, 0),
             )
-            .with_help(format!("use a `{}` value here", elem_ty.name())));
+            .with_help(format!("use a `{}` value here", elem_ty.name()));
+            return Err(crate::locate::place_labeled(
+                diagnostic,
+                crate::locate::expr_span(element),
+                format!("expected `{}`, found `{}`", elem_ty.name(), this_ty.name()),
+            ));
         }
     }
     let set_ty = Ty::Set(Box::new(elem_ty.clone()));

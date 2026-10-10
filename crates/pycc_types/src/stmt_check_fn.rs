@@ -132,7 +132,7 @@ pub(crate) fn check_function_in(
         )?;
     }
     if !is_abstract_method && resolved_return != Ty::None && !block_always_returns(body) {
-        return Err(Diagnostic::error(
+        let diagnostic = Diagnostic::error(
             "T0022",
             format!(
                 "function `{name}` can exit without returning `{}`",
@@ -140,7 +140,12 @@ pub(crate) fn check_function_in(
             ),
             Span::new(0, 0),
         )
-        .with_help(format!("return a `{}` value", resolved_return.name())));
+        .with_help(format!("return a `{}` value", resolved_return.name()));
+        return Err(crate::locate::place_labeled(
+            diagnostic,
+            crate::locate::returns_span(),
+            format!("expected `{}` because of this return type", resolved_return.name()),
+        ));
     }
     Ok(())
 }
@@ -176,6 +181,17 @@ pub(crate) fn check_while_body_in_place_in_function(
 }
 
 pub(crate) fn check_stmt_in_function(
+    env: &mut Environment,
+    local_names: &[&str],
+    stmt: &HirStmt,
+    return_ty: Ty,
+) -> Result<(), Diagnostic> {
+    check_stmt_in_function_here(env, local_names, stmt, return_ty)
+        .map_err(|diagnostic| crate::locate::place_stmt(diagnostic, stmt))
+}
+
+/// [`check_stmt_in_function`] before its diagnostic is placed at `stmt`.
+fn check_stmt_in_function_here(
     env: &mut Environment,
     local_names: &[&str],
     stmt: &HirStmt,
@@ -781,7 +797,11 @@ pub(crate) fn check_stmt_arm_in_function(
                     } else {
                         annotation_initializer_mismatch(target, &inferred, annotation)
                     };
-                    return Err(diag);
+                    return Err(crate::locate::place_labeled(
+                        diag,
+                        crate::locate::expr_span(value),
+                        format!("expected `{}`, found `{}`", annotation.name(), inferred.name()),
+                    ));
                 }
                 // See the module-scope `check_stmt` arm's comment: route
                 // through `check_assignment` so a name's first-established

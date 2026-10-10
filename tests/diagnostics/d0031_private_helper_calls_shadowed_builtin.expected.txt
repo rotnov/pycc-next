@@ -1,5 +1,5 @@
 error[T0021]: name `print` is bound to a non-callable value
- --> tests/diagnostics/d0031_private_helper_calls_shadowed_builtin.py:1:1
+ --> tests/diagnostics/d0031_private_helper_calls_shadowed_builtin.py:4:12
   |
-1 | print = 1
-  | ^ name `print` is bound to a non-callable value
+4 |     return print()
+  |            ^^^^^^^ not callable

@@ -314,7 +314,7 @@ pub(crate) fn check_call_args(
             crate::object_box::admits_value(env, arg, arg_ty, param_ty)
         })? || crate::non_strict::admits_coercion(arg_ty, param_ty);
         if !assignable {
-            return Err(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "T0021",
                 format!(
                     "argument {} of `{callee}` expects `{}`, got `{}`",
@@ -324,7 +324,9 @@ pub(crate) fn check_call_args(
                 ),
                 Span::new(0, 0),
             )
-            .with_help(format!("pass a `{}` value", param_ty.name())));
+            .with_help(format!("pass a `{}` value", param_ty.name()));
+            let at = args.get(i).and_then(crate::locate::expr_span);
+            return Err(crate::locate::place_at(diagnostic, at));
         }
     }
     Ok(())

@@ -304,9 +304,10 @@ fn a_call_after_an_identical_repeated_import_is_reported_at_the_call() {
 /// D-233 decision 5's documented residual: one enum imported under one
 /// local name through two module paths (`colors.Color` directly and via
 /// a `palette` re-export) is indistinguishable from a rebinding, so the
-/// scan stays silent and the span-less guard reports the call at `1:1`.
+/// scan stays silent and the type checker's guard reports the call, at the
+/// call since type diagnostics carry source locations (#10).
 #[test]
-fn a_call_after_a_two_path_import_of_one_enum_falls_back_to_the_span_less_guard() {
+fn a_call_after_a_two_path_import_of_one_enum_falls_back_to_the_type_checker_guard() {
     let dir = ScratchDir::new("921_two_path_import").expect("failed to create scratch dir");
     write_fixture(
         &dir,
@@ -331,12 +332,13 @@ fn a_call_after_a_two_path_import_of_one_enum_falls_back_to_the_span_less_guard(
     );
     assert_eq!(result.status.code(), Some(1), "got: {combined}");
     assert!(
-        combined.contains("cannot call enum class `Color`") && combined.contains("prog.py:1:1"),
-        "the two-path import is the documented span-less residual, got: {combined}"
+        combined.contains("cannot call enum class `Color`") && combined.contains("prog.py:5:1"),
+        "the two-path import is the documented type-checker residual, got: {combined}"
     );
-    assert!(
-        !combined.contains("prog.py:5:1"),
-        "the scan must not claim the call, got: {combined}"
+    assert_eq!(
+        combined.matches("error[").count(),
+        1,
+        "the scan must not claim the call as well, got: {combined}"
     );
 }
 

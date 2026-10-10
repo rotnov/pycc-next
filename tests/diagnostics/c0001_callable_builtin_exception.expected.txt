@@ -2,4 +2,4 @@ error[C0001]: call to builtin `Exception` is valid Python but not implemented ye
  --> tests/diagnostics/c0001_callable_builtin_exception.py:1:1
   |
 1 | Exception("msg")
-  | ^ call to builtin `Exception` is valid Python but not implemented yet
+  | ^^^^^^^^^^^^^^^^ not supported yet

@@ -502,6 +502,7 @@ pub fn lower_module(
         }
     }
     let loop_end = diagnostics.len();
+    let item_origins = origins.clone();
     LAST_ITEM_ORIGINS.with(|cell| *cell.borrow_mut() = origins);
     // Part 1 of #1026, PR 1c of #1080: the whole item list exists only
     // here, so this is the first point at which both orders of a shadowed
@@ -558,7 +559,10 @@ pub fn lower_module(
     let aliases = strip_imported(aliases, &imported_alias_indices);
     class_defs.rotate_left(synthetic_class_count);
     class_slots.retain(|(name, _)| class_defs.iter().any(|(class, _)| class == name));
+    let mut item_origins = item_origins;
+    item_origins.resize(items.len(), u32::MAX);
     Ok(LoweredModule {
+        item_origins,
         hir: HirModule {
             items,
             type_aliases: aliases,

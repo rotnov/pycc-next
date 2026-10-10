@@ -1,5 +1,5 @@
 error[T0034]: list[None] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those
- --> tests/diagnostics/t0034_inferred_list_none_is_not_compiled_yet.py:1:1
+ --> tests/diagnostics/t0034_inferred_list_none_is_not_compiled_yet.py:2:10
   |
-1 | def f() -> int:
-  | ^ list[None] is not compiled yet -- a list element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those
+2 |     xs = []
+  |          ^^ element type not compiled yet

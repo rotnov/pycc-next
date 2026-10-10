@@ -195,18 +195,16 @@ fn the_shapes_outside_part_1_are_refused() {
         assert_one_error(tag, &format!("{HEAD}{tail}"), code, needle);
     }
     // Admitting an object iterable moved the native-expression refusal from
-    // HIR lowering (which had the iterable's span) to the type stage, whose
-    // diagnostics carry no span yet: it is reported at 1:1, the same trade
-    // Part 2b of #1371 made, until Part 5 of #1371 gives type-stage
-    // diagnostics their source location. Pinned so the restoration is a
-    // visible test change.
+    // HIR lowering (which had the iterable's span) to the type stage, which
+    // reported it at 1:1 until type diagnostics got their source location
+    // (#10): it points at the comprehension again.
     let dir = ScratchDir::new("obj_comp_native_expr_span").expect("scratch");
     let rendered = stdout_of(&check_with(
         &dir,
         &format!("{HEAD}xs = [k for k in (1, 2)]\n"),
     ));
-    assert!(rendered.contains(".py:1:1"), "{rendered}");
-    assert!(!rendered.contains(".py:4:"), "{rendered}");
+    assert!(rendered.contains(".py:4:6"), "{rendered}");
+    assert!(!rendered.contains(".py:1:1"), "{rendered}");
 }
 
 fn build_ext(dir: &Path, module: &str, body: &str) {

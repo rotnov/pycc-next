@@ -101,7 +101,7 @@ mod for_loop;
 mod loop_control;
 mod match_stmt;
 mod type_checking;
-mod unpack;
+pub(crate) mod unpack;
 mod unsupported;
 
 #[cfg(test)]

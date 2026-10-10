@@ -1,5 +1,5 @@
 error[C0001]: calling a subscript expression is not supported yet (only a generic class instantiation `C[type](args)` or a call of a CPython object is)
- --> tests/diagnostics/c0001_for_call_not_bare_name.py:1:1
+ --> tests/diagnostics/c0001_for_call_not_bare_name.py:5:5
   |
-1 | xs = [1, 2]
-  | ^ calling a subscript expression is not supported yet (only a generic class instantiation `C[type](args)` or a call of a CPython object is)
+5 |     for k in xs[0]():
+  |     ^^^^^^^^^^^^^^^^^ not supported yet

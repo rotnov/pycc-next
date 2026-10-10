@@ -31,7 +31,7 @@ const CHAIN_TEMP_PREFIX: &str = "0chain_";
 
 /// The temporary a chain whose statement starts at byte `offset` binds its
 /// value to. The offset makes it unique within one module.
-fn synthesize_chain_temp_name(offset: u32) -> String {
+pub(crate) fn synthesize_chain_temp_name(offset: u32) -> String {
     format!("{CHAIN_TEMP_PREFIX}{offset}")
 }
 

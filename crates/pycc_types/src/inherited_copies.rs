@@ -55,6 +55,11 @@ impl CopiedModule {
     /// copy's index has no file), notes which subclass the body was being
     /// compiled for, and drops a copy diagnostic that repeats one already
     /// reported for the same origin at the same place (D-254 rule 5).
+    /// The origin item of the copy at item `index`, if it is one.
+    pub(crate) fn origin(&self, index: usize) -> Option<usize> {
+        self.origins.get(&index).map(|(origin, _)| *origin)
+    }
+
     pub(crate) fn rekey(&self, diagnostics: KeyedDiagnostics) -> KeyedDiagnostics {
         let mut seen: HashSet<(DiagnosticKey, &'static str, Option<Span>)> = HashSet::new();
         let mut out = Vec::with_capacity(diagnostics.len());

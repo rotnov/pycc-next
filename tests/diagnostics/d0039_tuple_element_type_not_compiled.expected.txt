@@ -1,5 +1,5 @@
 error[T0039]: tuple element type `None` is not compiled yet -- a tuple element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those
- --> tests/diagnostics/d0039_tuple_element_type_not_compiled.py:1:1
+ --> tests/diagnostics/d0039_tuple_element_type_not_compiled.py:1:5
   |
 1 | x = (1, None)
-  | ^ tuple element type `None` is not compiled yet -- a tuple element must be int, float, bool, str, a user-class instance, or a list, tuple, dict or set of those
+  |     ^^^^^^^^^ element type not compiled yet

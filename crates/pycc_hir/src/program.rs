@@ -283,6 +283,8 @@ pub fn link(inputs: Vec<LinkInput>) -> Result<HirModule, Vec<(usize, Diagnostic)
             // Consumed by the driver too (#1425): it feeds each importer's
             // object-receiver admission, and linking has no use for it.
             object_receivers: _,
+            // Consumed by the driver (#10): it places type diagnostics.
+            item_origins: _,
         } = input.module;
         let mut own: HashSet<&str> = HashSet::new();
         for (name, span) in &definition_spans {

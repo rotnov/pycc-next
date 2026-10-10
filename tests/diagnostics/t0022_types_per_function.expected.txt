@@ -1,15 +1,15 @@
 error[T0022]: return type mismatch: expected `int`, found `str`
- --> tests/diagnostics/t0022_types_per_function.py:1:1
+ --> tests/diagnostics/t0022_types_per_function.py:2:5
   |
-1 | def f() -> int:
-  | ^ return type mismatch: expected `int`, found `str`
+2 |     return "a"
+  |     ^^^^^^^^^^ expected `int`, found `str`
 error[T0021]: unary operator USub is not defined for `str`
- --> tests/diagnostics/t0022_types_per_function.py:1:1
-  |
-1 | def f() -> int:
-  | ^ unary operator USub is not defined for `str`
+ --> tests/diagnostics/t0022_types_per_function.py:10:12
+   |
+10 |     return -"s"
+   |            ^^^^ unsupported operand type
 error[T0043]: cannot read an attribute on `int`: it is not a class instance
- --> tests/diagnostics/t0022_types_per_function.py:1:1
+ --> tests/diagnostics/t0022_types_per_function.py:6:12
   |
-1 | def f() -> int:
-  | ^ cannot read an attribute on `int`: it is not a class instance
+6 |     return y.nope
+  |            ^^^^^^ not a class instance

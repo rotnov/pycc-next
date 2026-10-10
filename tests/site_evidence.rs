@@ -144,7 +144,7 @@ fn diagnostics_commands_match_human_and_json_snapshots() {
     );
 
     // Bind the documented meaning as well as serialization. Human output has
-    // no help line; its caret is the 1:1 placeholder, not argument precision.
+    // no help line; its caret underlines the offending argument (#10).
     let diagnostic: serde_json::Value = serde_json::from_slice(&structured.stdout).unwrap();
     let message = "range stop expects `int`, got `str`";
     assert_eq!(
@@ -152,14 +152,14 @@ fn diagnostics_commands_match_human_and_json_snapshots() {
         json!({
             "code": "T0021", "format_version": 1, "severity": "error",
             "message": message, "help": ["pass an `int` value"],
-            "spans": [{"file": DIAGNOSTIC_SOURCE, "line": 1, "col": 1,
-                       "len": 0, "label": message}]
+            "spans": [{"file": DIAGNOSTIC_SOURCE, "line": 1, "col": 19,
+                       "len": 7, "label": "expected `int`, found `str`"}]
         })
     );
     let human_text = std::str::from_utf8(&human.stdout).unwrap();
     assert!(human_text.starts_with(&format!("error[T0021]: {message}\n")));
-    assert!(human_text.contains(&format!(" --> {DIAGNOSTIC_SOURCE}:1:1\n")));
-    assert!(human_text.ends_with(&format!("  | ^ {message}\n")));
+    assert!(human_text.contains(&format!(" --> {DIAGNOSTIC_SOURCE}:1:19\n")));
+    assert!(human_text.ends_with("  |                   ^^^^^^^ expected `int`, found `str`\n"));
     assert!(!human_text.contains("help:"));
 }
 

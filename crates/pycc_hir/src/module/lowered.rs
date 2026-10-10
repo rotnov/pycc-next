@@ -77,6 +77,11 @@ pub struct LoweredModule {
     /// body. The `SignatureTable` itself stays lowering-internal; only this
     /// bit is published.
     pub object_receivers: bool,
+    /// Where each of `hir.items` came from: the source offset of the
+    /// top-level statement that wrote it, `u32::MAX` for an item no
+    /// statement wrote (`last_item_origins`, kept per module so the driver
+    /// can place a type diagnostic in any file of a program, #10).
+    pub item_origins: Vec<u32>,
 }
 
 /// Drops the entries at `imported_indices` (a project import's copied

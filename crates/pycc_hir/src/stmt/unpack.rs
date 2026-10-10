@@ -38,7 +38,7 @@ pub(crate) const UNPACK_TEMP_PREFIX: &str = "0unpack_";
 /// The temporary an unpacking assignment whose statement starts at byte
 /// `offset` binds its unpacked value to. The offset makes it unique within
 /// one module.
-fn synthesize_unpack_temp_name(offset: u32) -> String {
+pub(crate) fn synthesize_unpack_temp_name(offset: u32) -> String {
     format!("{UNPACK_TEMP_PREFIX}{offset}")
 }
 

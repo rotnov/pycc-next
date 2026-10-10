@@ -74,6 +74,7 @@ mod try_stmt;
 mod attr_terms;
 mod bindings;
 mod block;
+mod block_stmt;
 mod call_term;
 mod container_terms;
 mod name_term;
@@ -112,7 +113,16 @@ use pycc_hir::{
 
 type TypeTerm = Result<Ty, usize>;
 type SignatureTerms = (Vec<String>, Vec<TypeTerm>, TypeTerm);
-type BinOpConstraint = (BinOpKind, TypeTerm, TypeTerm, TypeTerm);
+/// A deferred binary operation: operator, operand and result terms, and
+/// where the expression is (`crate::locate::expr_location`), so a
+/// failure found once every body is collected still points at it (#10).
+type BinOpConstraint = (
+    BinOpKind,
+    TypeTerm,
+    TypeTerm,
+    TypeTerm,
+    Option<crate::locate::Location>,
+);
 
 fn is_private_solver_scalar(ty: &Ty) -> bool {
     matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::None)
@@ -407,6 +417,19 @@ fn term_for_type(ty: Ty, parents: &mut Vec<usize>, concrete: &mut Vec<Option<Ty>
 }
 
 pub(crate) fn collect_expr_constraints(
+    signatures: &HashMap<String, SignatureTerms>,
+    parents: &mut Vec<usize>,
+    concrete: &mut Vec<Option<Ty>>,
+    deferred: &mut DeferredConstraints,
+    env: &ConstraintEnvironment<'_, '_>,
+    expr: &HirExpr,
+) -> Result<Option<TypeTerm>, Diagnostic> {
+    collect_expr_constraints_here(signatures, parents, concrete, deferred, env, expr)
+        .map_err(|diagnostic| crate::locate::place_expr(diagnostic, expr))
+}
+
+/// [`collect_expr_constraints`] before its diagnostic is placed at `expr`.
+fn collect_expr_constraints_here(
     signatures: &HashMap<String, SignatureTerms>,
     parents: &mut Vec<usize>,
     concrete: &mut Vec<Option<Ty>>,
@@ -755,14 +778,39 @@ pub(crate) fn collect_expr_constraints(
     }
 }
 
+/// Settles every deferred binary operation. A failure is keyed to the
+/// item holding the failing expression, still as a module-level failure
+/// (`crate::module::module_level_at`).
 fn propagate_binop_constraints(
     binops: &[BinOpConstraint],
     parents: &mut [usize],
     concrete: &mut [Option<Ty>],
-) -> Result<(), Diagnostic> {
+) -> Result<(), crate::KeyedDiagnostics> {
     loop {
         let mut changed = false;
-        for &(op, ref left_term, ref right_term, ref result_term) in binops {
+        for (op, left_term, right_term, result_term, location) in binops {
+            let placed = |diagnostic| crate::module::module_level_at(diagnostic, *location);
+            changed |= propagate_binop(*op, left_term, right_term, result_term, parents, concrete)
+                .map_err(placed)?;
+        }
+        if !changed {
+            return Ok(());
+        }
+    }
+}
+
+/// One step of [`propagate_binop_constraints`]: whether it changed a term.
+fn propagate_binop(
+    op: BinOpKind,
+    left_term: &TypeTerm,
+    right_term: &TypeTerm,
+    result_term: &TypeTerm,
+    parents: &mut [usize],
+    concrete: &mut [Option<Ty>],
+) -> Result<bool, Diagnostic> {
+    let mut changed = false;
+    {
+        {
             let left = resolved_term(left_term.clone(), parents, concrete);
             let right = resolved_term(right_term.clone(), parents, concrete);
             let result = resolved_term(result_term.clone(), parents, concrete);
@@ -776,7 +824,7 @@ fn propagate_binop_constraints(
                     "T0021",
                     "binary expression",
                 )?;
-                continue;
+                return Ok(changed);
             }
 
             // Propagate constraints backward when the result determines a
@@ -806,10 +854,8 @@ fn propagate_binop_constraints(
                 changed |= left_changed || right_changed;
             }
         }
-        if !changed {
-            return Ok(());
-        }
     }
+    Ok(changed)
 }
 
 fn apply_annotation_defaults(

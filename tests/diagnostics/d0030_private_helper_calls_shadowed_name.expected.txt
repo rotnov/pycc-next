@@ -1,5 +1,5 @@
 error[T0021]: name `helper` is bound to a non-callable value
- --> tests/diagnostics/d0030_private_helper_calls_shadowed_name.py:1:1
+ --> tests/diagnostics/d0030_private_helper_calls_shadowed_name.py:7:12
   |
-1 | def helper() -> int:
-  | ^ name `helper` is bound to a non-callable value
+7 |     return helper()
+  |            ^^^^^^^^ not callable

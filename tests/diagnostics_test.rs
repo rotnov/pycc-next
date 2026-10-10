@@ -5,6 +5,18 @@ fn pycc_bin() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_pycc"))
 }
 
+/// With `PYCC_BLESS=1` in the environment, overwrites the fixture at
+/// `expected_path` with `actual` before the comparison fails, so a
+/// deliberate change of diagnostic output regenerates every snapshot in
+/// one run. Review the resulting diff: each changed snapshot must still
+/// point at the right place.
+fn bless(expected_path: &Path, actual: &str) {
+    if std::env::var_os("PYCC_BLESS").is_some() {
+        std::fs::write(expected_path, actual)
+            .unwrap_or_else(|e| panic!("could not bless {}: {e}", expected_path.display()));
+    }
+}
+
 /// `pycc check` embeds whatever `path` string it was invoked with verbatim
 /// into its diagnostic output (`render_human`'s ` --> {file_path}:...`
 /// line, `render_json`'s `"file"` field). If this harness passed an
@@ -36,6 +48,7 @@ fn assert_diagnostic_matches_fixture(fixture_stem: &str) {
         .output()
         .unwrap();
     let actual = String::from_utf8_lossy(&output.stdout);
+    bless(&expected_path, &actual);
     assert_eq!(
         actual, expected,
         "diagnostic output for {fixture_stem} did not match its .expected.txt fixture"
@@ -63,6 +76,7 @@ fn assert_json_diagnostic_matches_fixture(fixture_stem: &str) {
         .output()
         .unwrap();
     let actual = String::from_utf8_lossy(&output.stdout);
+    bless(&expected_path, &actual);
     assert_eq!(
         actual, expected,
         "JSON diagnostic output for {fixture_stem} did not match its .expected.json fixture"
@@ -99,6 +113,7 @@ fn assert_check_snapshots(source: &str, expected_stem: &str, extra_args: &[&str]
         }
         let output = command.output().unwrap();
         let actual = String::from_utf8_lossy(&output.stdout);
+        bless(&expected_path, &actual);
         assert_eq!(
             actual, expected,
             "{extension} output for {source} {extra_args:?} did not match {expected_stem}"

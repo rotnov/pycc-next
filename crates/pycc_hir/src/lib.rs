@@ -14,6 +14,7 @@ mod hir_module;
 mod if_exp;
 mod import;
 mod int_boundary;
+pub mod locate;
 mod isinstance_narrow;
 mod module;
 mod not_implemented;

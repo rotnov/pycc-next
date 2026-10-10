@@ -2,6 +2,14 @@
 
 All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- Type-checker diagnostics (`T0xxx`, and the `C0001`/`I0404` the checker raises) point
+  at the offending expression or statement instead of `1:1`, with a short caret label
+  (`expected `int`, found `str``) instead of the headline repeated; `--error-format
+  json` carries the same line, column and length (#10).
+
 ## [0.1.0-rc.1] - 2026-10-10
 
 First release candidate of the pycc restart: compile typed Python to native code,

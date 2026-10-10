@@ -123,8 +123,8 @@ same gate with that same message ([#948](https://github.com/rotnov/pycc/issues/9
 the protocol's own name (`def clone(self) -> P: ...`, PEP 649/749) and `Self`
 (PEP 673). A self-referential parameter or attribute is not rejected -- a
 protocol type is supported in those positions.
-`pycc_types` also emits `C0001`, at that crate's conventional `1:1` span (it
-carries no expression spans), for a capability gap that depends on a value's
+`pycc_types` also emits `C0001`, at the offending expression like its type
+diagnostics (see "Source locations" below), for a capability gap that depends on a value's
 *type* and so cannot be seen by HIR lowering: string conversion of a class
 instance that is neither a `@dataclass` instance nor a caught builtin
 exception, or of a protocol-typed value, as a `print()` argument or an
@@ -309,9 +309,9 @@ value` -- `raise MyError("boom")` stays the one supported construction
 (Part 3 of issue #541). Calling an enum class (`Color()`, `Color(1)`)
 reports `cannot call enum class \`...\`` at the call expression, from HIR
 lowering's per-item AST scan (`pycc_hir::class::enum_call`, issue #944,
-D-233), with a span-less guard of the same text in `pycc_types`'s
-`resolve_instantiation` ladder behind it (issue #921) -- the guard still
-reports at `1:1` for the residual shapes D-233 enumerates, such as a
+D-233), with a guard of the same text in `pycc_types`'s
+`resolve_instantiation` ladder behind it (issue #921) -- the guard reports
+the call, at the call, for the residual shapes D-233 enumerates, such as a
 module-level rebinding of the class name anywhere in the module
 (`Color(); Color = 1`) or a sibling-comprehension rebinding, where the scan
 stays suppressed: members are
@@ -328,7 +328,7 @@ twice) binds the same class twice, is not a rebinding, and keeps the
 call-expression span, whereas one enum imported under one name through two
 module paths (`from colors import Color` beside `from palette import
 Color`, `palette` re-exporting it) is indistinguishable from a rebinding
-and falls back to the span-less guard at `1:1`. A
+and falls back to the type checker's guard. A
 scope-local rebinding of the class name (`def f(Color: int) -> None:
 Color()`) is not an enum call and keeps its `T0021`. Naming
 an enum class as a base (`class Foo(Color): pass`) is rejected from
@@ -359,10 +359,45 @@ poisoned (a `def frozenset()` whose body is unsupported, a `frozenset =`
 assignment whose value is) is invisible to that check, so the class then
 reports the builtin-type text alongside the rebinding's own diagnostic.
 
+## Source locations
+
+Every diagnostic points at the code it is about (#10). The parser and HIR
+lowering have the AST at hand; the type checker works on HIR, which carries
+no spans, so its diagnostics are placed after the fact:
+
+- When a check fails, the driver re-parses the failing program's files and
+  `pycc_hir::locate` pairs each HIR node with the AST node it was lowered
+  from (by node kind, name and order within its statement; a pairing that is
+  ambiguous is skipped rather than guessed), then checks again with those
+  spans in hand. A program that checks pays for nothing.
+- A diagnostic is placed at the innermost expression whose check raised it,
+  else at its statement (the header line of a compound statement such as
+  `if c:` or `match x:`), else at the function's `name(params) -> ret`
+  header. Sites that know better place their own: a mismatched argument at
+  the argument, an incompatible assignment at its value, a missing return
+  at the return annotation, a list or set element of the wrong type at the
+  element.
+- The caret's label is short and does not repeat the headline: `expected
+  `int`, found `str`` wherever the headline names both types, otherwise a
+  phrase such as `may be unbound here` or `not a class instance`.
+
+```
+error[T0021]: argument 1 of `fib` expects `int`, got `str`
+ --> fib.py:7:11
+  |
+7 | print(fib("5"))
+  |           ^^^ expected `int`, found `str`
+```
+
+Still at `1:1` (or the class line): diagnostics of the whole-program
+pre-checks that run before any function is checked (an incompatible
+redefinition or attribute redeclaration, an attribute slot no assignment
+types) and of the post-check phases (`monomorphize`, enum-loop unrolling).
+
 ## Quality bar
 
 - Every error: primary span, ≥1 label, expected/found where applicable, help with a suggestion when one is safe. Populated for arity/type-mismatch, missing-annotation, and literal-index-constraint families as of D-152 (`docs/decisions/D-152-populate-diagnostic-help-for-arity-type.md`). That is a standing contract on those families, not a snapshot of the tree D-152 measured: a diagnostic added to one of them later joins the populated set at its own introduction (`T0053`, D-228 decision 11, is the first such case). Still `None`/empty for name-resolution, capability-limitation, and ambiguous-conflict diagnostics, and human-format output never renders it.
 - Suggestions marked machine-applicable must be idempotent + tested. Applying them automatically is intended for a planned `pycc check --fix` flag, which is not yet implemented (see `docs/CLI_SPEC.md`).
 - Message text changes are allowed; codes and JSON structure are not (corpus bot fingerprints on code + span shape).
-- Every diagnostic a pass can report for a file is emitted (JSON: one object per line). The *first* diagnostic for any input -- code, message, span, position -- was kept byte-identical across the three #864 parts (D-217 rule 2, discharged once D-219 and D-220 landed) so the existing fixtures could verify that collection and ordering changes perturbed nothing; that was a transition invariant, not a release-to-release promise: message text remains changeable under the bullet above, codes and JSON structure do not. The parser reports in ruff's discovery order, which is not always source order. HIR lowering reports, per top-level item in source order, the item's own lowering diagnostic when it fails (and skips the item) followed by one enum-call `C0001` per call of an enum class inside that item that the scan can attribute (D-233's second collection source, #944; a call whose name is shadowed, rebound, or otherwise outside the scan's enumerated limits is not reported by HIR and falls through to the type checker's span-less guard at `1:1`, see the limits above), so one item can contribute several diagnostics; an item that fails only because it names a class or type alias that itself failed to lower (a bare-name annotation or a base class) is skipped silently, with no lowering diagnostic, so a later lowering gap inside such an item surfaces only once the root cause is fixed (D-219); the enum-call scan still runs over such an item, so a call to another, valid enum class inside it is reported (D-233 decision 6). A buffer-carrier misuse `C0001` ([#1380](https://github.com/rotnov/pycc/issues/1380)) is found only once the whole module is lowered, and is placed after the other diagnostics of the item it sits in, so it keeps that order too. Type checking reports one diagnostic per failing function (#868, D-220): a pre-check failure (an incompatible redefinition or attribute redeclaration) is reported alone. Otherwise, if the private-helper solver's list is module-level (a failure in its top-level walk or in a post-body phase such as `propagate_binop_constraints`, and `monomorphize` after checking), that one diagnostic is reported alone and the annotation checker's list is dropped, because a post-body solver diagnostic cannot be matched by function to the checker's entry for the same error. Otherwise the solver's per-function diagnostics are reported in item order, then every checker entry -- per-function or module-level -- whose function the solver did not flag, in the checker's order; a function both phases flag is reported once, with the solver's text. If the solver passes, the checker's list against the solved signatures is reported on its own. Every type diagnostic still carries an empty span and renders at `:1:1` (D-043), so a per-function report is distinguished by its message, not its location, until spans reach `pycc_types`.
+- Every diagnostic a pass can report for a file is emitted (JSON: one object per line). The *first* diagnostic for any input -- code, message, span, position -- was kept byte-identical across the three #864 parts (D-217 rule 2, discharged once D-219 and D-220 landed) so the existing fixtures could verify that collection and ordering changes perturbed nothing; that was a transition invariant, not a release-to-release promise: message text remains changeable under the bullet above, codes and JSON structure do not. The parser reports in ruff's discovery order, which is not always source order. HIR lowering reports, per top-level item in source order, the item's own lowering diagnostic when it fails (and skips the item) followed by one enum-call `C0001` per call of an enum class inside that item that the scan can attribute (D-233's second collection source, #944; a call whose name is shadowed, rebound, or otherwise outside the scan's enumerated limits is not reported by HIR and falls through to the type checker's guard, see the limits above), so one item can contribute several diagnostics; an item that fails only because it names a class or type alias that itself failed to lower (a bare-name annotation or a base class) is skipped silently, with no lowering diagnostic, so a later lowering gap inside such an item surfaces only once the root cause is fixed (D-219); the enum-call scan still runs over such an item, so a call to another, valid enum class inside it is reported (D-233 decision 6). A buffer-carrier misuse `C0001` ([#1380](https://github.com/rotnov/pycc/issues/1380)) is found only once the whole module is lowered, and is placed after the other diagnostics of the item it sits in, so it keeps that order too. Type checking reports one diagnostic per failing function (#868, D-220): a pre-check failure (an incompatible redefinition or attribute redeclaration) is reported alone. Otherwise, if the private-helper solver's list is module-level (a failure in its top-level walk or in a post-body phase such as `propagate_binop_constraints`, and `monomorphize` after checking), that one diagnostic is reported alone and the annotation checker's list is dropped, because a post-body solver diagnostic cannot be matched by function to the checker's entry for the same error. Otherwise the solver's per-function diagnostics are reported in item order, then every checker entry -- per-function or module-level -- whose function the solver did not flag, in the checker's order; a function both phases flag is reported once, with the solver's text. If the solver passes, the checker's list against the solved signatures is reported on its own. A module-level solver diagnostic found at an expression (a deferred binary operation, `DiagnosticKey::ModuleAt`) is still reported alone, but is rendered against the file of the function holding that expression.
 - Diagnostics on all Tier-1 platforms byte-identical (paths normalized).
