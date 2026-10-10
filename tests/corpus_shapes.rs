@@ -153,6 +153,22 @@ fn starred_unpacking_matches_cpython() {
     matches_cpython("corpus_starred.py", &[], "3 1 4 1\n");
 }
 
+/// `xs *= n` for every count: clearing, negative, one, instances and
+/// strings shared by every alias, CPython's `MemoryError` for a size it
+/// cannot allocate and `OverflowError` for a count beyond `Py_ssize_t`.
+#[test]
+fn in_place_list_repeat_edges_match_cpython() {
+    matches_cpython("corpus_list_imul.py", &[], "");
+}
+
+/// A function reading a module global its module binds only inside a loop
+/// or branch: the read works once bound and raises CPython's `NameError`
+/// (catchable) before.
+#[test]
+fn a_function_reading_a_maybe_bound_global_matches_cpython() {
+    matches_cpython("corpus_unbound_global.py", &[], "3\n4\n");
+}
+
 /// A name whose two types meet at one read stays one variable, refused.
 #[test]
 fn a_name_holding_two_types_at_one_read_is_still_refused() {

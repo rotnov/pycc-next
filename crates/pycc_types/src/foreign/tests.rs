@@ -374,9 +374,12 @@ fn a_non_import_object_global_is_read_in_a_function_body() {
             .expect("a non-import `object` global is admitted");
         assert_eq!(ty, Ty::Object, "{expr:?}");
     }
+    // A module-level `for` loop variable is maybe-bound: a function's read
+    // is checked at run time (`NameError` when unbound); the module body's
+    // own read stays refused.
     assert_refused(
-        "a module-level `for` loop variable",
-        "for x in numpy.pi:\n    pass\ndef f() -> None:\n    len(x)\n",
+        "a module-level `for` loop variable read by the module body",
+        "for x in numpy.pi:\n    pass\nlen(x)\n",
         "T0041",
         "may not be bound",
     );

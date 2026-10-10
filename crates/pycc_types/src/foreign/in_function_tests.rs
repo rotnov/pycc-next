@@ -145,10 +145,19 @@ fn an_inferred_parameter_may_be_an_object() {
     ));
 }
 
+/// A global the module imports on some paths only is admitted in a
+/// function: the read checks it at run time and raises CPython's
+/// `NameError` when unbound.
 #[test]
-fn a_maybe_bound_foreign_global_is_t0041() {
+fn a_maybe_bound_foreign_global_is_admitted_in_a_function() {
+    admitted("flag = True\nif flag:\n    import copy\ndef f() -> None:\n    copy.__name__\n");
+}
+
+/// The module body's own read of a maybe-bound global is still refused.
+#[test]
+fn a_maybe_bound_foreign_global_read_by_the_module_body_is_t0041() {
     refused(
-        "flag = True\nif flag:\n    import copy\ndef f() -> None:\n    copy.__name__\n",
+        "flag = True\nif flag:\n    import copy\ncopy.__name__\n",
         "T0041",
         "may not be bound",
     );

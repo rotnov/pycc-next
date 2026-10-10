@@ -439,6 +439,9 @@ fn in_place_list_operators_and_heaps_are_memcheck_clean() {
     let dir = ScratchDir::new("memory_fixture_list_inplace").expect("scratch dir");
     let bin = assert_fixture_matches_cpython(&dir, "corpus_list_inplace");
     assert_memcheck_clean(&bin);
+    let dir = ScratchDir::new("memory_fixture_list_imul").expect("scratch dir");
+    let bin = assert_fixture_matches_cpython(&dir, "corpus_list_imul");
+    assert_memcheck_clean(&bin);
     let dir = ScratchDir::new("memory_fixture_heap_bisect").expect("scratch dir");
     let bin = assert_fixture_matches_cpython(&dir, "corpus_heap_bisect");
     assert_memcheck_clean(&bin);

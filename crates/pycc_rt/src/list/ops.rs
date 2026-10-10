@@ -186,46 +186,76 @@ pub unsafe extern "C" fn pycc_rt_list_iadd(
     list
 }
 
+/// A repeat count as CPython's `PyNumber_AsSsize_t` reads it: an encoded
+/// `int` outside the `Py_ssize_t` range raises `OverflowError`.
+fn repeat_count(n: i64) -> Option<i64> {
+    if let Some(v) = inline_int_value(n) {
+        return Some(v);
+    }
+    let big = crate::int_arith::decode_big(n);
+    let fits = num_traits::ToPrimitive::to_i64(&big);
+    if fits.is_none() {
+        raise_builtin(
+            crate::exception::EXCEPTION_TYPE_OVERFLOW_ERROR,
+            "OverflowError",
+            "cannot fit 'int' into an index-sized integer",
+        );
+    }
+    fits
+}
+
 /// `xs *= n` on a list: repeats `xs` in place (empties it for `n <= 0`)
-/// and returns it (a new reference). `n` is an encoded `int`.
+/// and returns it (a new reference). `n` is an encoded `int`. A size that
+/// cannot be allocated raises `MemoryError` before any element reference
+/// changes, as CPython's `list_inplace_repeat` does.
 ///
 /// # Safety
 /// `list` must be a live `PyListObj` pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_imul(list: *mut PyListObj, n: i64) -> *mut PyListObj {
-    let count = match inline_int_value(n) {
-        Some(v) => v.max(0) as usize,
-        None if crate::int_arith::decode_big(n) <= num_bigint::BigInt::from(0) => 0,
-        None => {
-            raise_builtin(
-                crate::exception::EXCEPTION_TYPE_OVERFLOW_ERROR,
-                "OverflowError",
-                "cannot fit 'int' into an index-sized integer",
-            );
-            unsafe { crate::rc::pycc_rt_list_incref(list) };
-            return list;
-        }
+    unsafe { crate::rc::pycc_rt_list_incref(list) };
+    let Some(count) = repeat_count(n) else {
+        return list;
     };
     let list_ref = unsafe { &mut *list };
     let items = list_ref.items().to_vec();
-    if count == 0 {
+    if items.is_empty() || count == 1 {
+        return list;
+    }
+    if count <= 0 {
+        // Detach first, then release: a released element may run code.
+        edit_words(list_ref, |all| all.clear());
         for word in &items {
             list_ref.release(*word);
         }
-        edit_words(list_ref, |all| all.clear());
-    } else {
-        for _ in 1..count {
-            for word in &items {
-                list_ref.retain(*word);
-            }
-        }
-        edit_words(list_ref, |all| {
-            for _ in 1..count {
-                all.extend_from_slice(&items);
-            }
-        });
+        return list;
     }
-    unsafe { crate::rc::pycc_rt_list_incref(list) };
+    let count = count as usize;
+    let fits = items
+        .len()
+        .checked_mul(count)
+        .filter(|total| *total <= isize::MAX as usize / std::mem::size_of::<i64>());
+    let reserved = fits.is_some_and(|total| {
+        edit_words(list_ref, |all| all.try_reserve_exact(total - all.len()).is_ok())
+    });
+    if !reserved {
+        raise_builtin(
+            crate::exception::EXCEPTION_TYPE_MEMORY_ERROR,
+            "MemoryError",
+            "",
+        );
+        return list;
+    }
+    for _ in 1..count {
+        for word in &items {
+            list_ref.retain(*word);
+        }
+    }
+    edit_words(list_ref, |all| {
+        for _ in 1..count {
+            all.extend_from_slice(&items);
+        }
+    });
     list
 }
 

@@ -37,6 +37,12 @@ pub const EXCEPTION_TYPE_ATTRIBUTE_ERROR: u8 = 29;
 /// `EOFError`'s tag, raised by `input()` at end of input. Hand-copied and
 /// pinned exactly like [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
 pub const EXCEPTION_TYPE_EOF_ERROR: u8 = 30;
+/// `NameError`'s tag, raised by [`pycc_rt_raise_name_error`]. Hand-copied and
+/// pinned exactly like [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
+pub const EXCEPTION_TYPE_NAME_ERROR: u8 = 31;
+/// `MemoryError`'s tag (an allocation CPython refuses), pinned like
+/// [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
+pub const EXCEPTION_TYPE_MEMORY_ERROR: u8 = 32;
 /// #1316: the reserved tag the `ext` C shim's foreign-operation bridge gives
 /// a CPython exception that is not an `Exception` at all -- `SystemExit`,
 /// `KeyboardInterrupt`, `GeneratorExit`, a non-`Exception`
@@ -689,6 +695,21 @@ fn alloc_exception_message(msg: &str) -> *mut PyStrObj {
         rc: Cell::new(1),
         payload,
     }))
+}
+
+/// Raises `NameError: name '<name>' is not defined` for a read of the
+/// module global `name` (`len` UTF-8 bytes at `name`) before it was bound.
+///
+/// # Safety
+/// `name` must point to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_raise_name_error(name: *const u8, len: usize) {
+    let name = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(name, len) });
+    raise_builtin(
+        EXCEPTION_TYPE_NAME_ERROR,
+        "NameError",
+        &format!("name '{name}' is not defined"),
+    );
 }
 
 pub(crate) fn raise_builtin(type_tag: u8, name: &'static str, msg: &str) {

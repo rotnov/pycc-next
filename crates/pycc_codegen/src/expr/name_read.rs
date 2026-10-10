@@ -47,15 +47,29 @@ pub(crate) fn emit_name_expr<'ctx>(
         builder.position_at_end(unbound);
         // #1316 / Part 1 of #1333: an `object` global read in a
         // function body before its import or assignment ran raises
-        // a catchable `NameError`, as CPython does; every other
-        // unbound read keeps the trap.
+        // a catchable `NameError`, as CPython does. Any other global read before its binding ran (a function called
+        // before the module statement that binds it) raises CPython's
+        // `NameError` natively.
         if !foreign_fail::emit_unbound_object_read(context, builder, module, rt, ty, name) {
+            let ptr = context.ptr_type(inkwell::AddressSpace::default());
+            let name_error = module.get_function("pycc_rt_raise_name_error").unwrap_or_else(|| {
+                module.add_function(
+                    "pycc_rt_raise_name_error",
+                    context
+                        .void_type()
+                        .fn_type(&[ptr.into(), context.i64_type().into()], false),
+                    Some(inkwell::module::Linkage::External),
+                )
+            });
+            let bytes = builder
+                .build_global_string_ptr(name, &format!("pycc_unbound_name_{name}"))
+                .expect("build_global_string_ptr should not fail")
+                .as_pointer_value();
+            let len = context.i64_type().const_int(name.len() as u64, false);
             builder
-                .build_call(rt.trap, &[], "unbound_global")
-                .expect("build_call should not fail for llvm.trap");
-            builder
-                .build_unreachable()
-                .expect("build_unreachable should not fail in a fresh block");
+                .build_call(name_error, &[bytes.into(), len.into()], "")
+                .expect("build_call should not fail for pycc_rt_raise_name_error");
+            crate::exception::jump_to_exception_target(context, builder, rt);
         }
         builder.position_at_end(ready);
     }

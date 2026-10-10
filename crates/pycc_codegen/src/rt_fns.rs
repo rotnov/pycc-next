@@ -243,7 +243,6 @@ pub(super) struct RtFns<'ctx> {
     pub(super) obj_set_candidate: FunctionValue<'ctx>,
     pub(super) obj_set_push: FunctionValue<'ctx>,
     pub(super) obj_set_add_identity: FunctionValue<'ctx>,
-    pub(super) trap: FunctionValue<'ctx>,
     /// D-154 (Part 1 of #375): `pycc_rt::instance`'s own function
     /// cluster -- `instance_new` (allocates a fresh instance with the
     /// class's own declared slot count, every slot unassigned, and -- since
@@ -738,7 +737,6 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_obj_set_add_identity",
             void_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
         ),
-        trap: module.add_function("llvm.trap", void_type.fn_type(&[], false), None),
         instance_new: declare(
             "pycc_rt_instance_new",
             ptr_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),

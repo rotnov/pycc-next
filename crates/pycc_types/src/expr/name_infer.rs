@@ -101,6 +101,13 @@ pub(crate) fn infer_name_expr(
             reject_memoryview_read(name, &ty, env.owned_buffers.contains(name))?;
             Ok(ty)
         }
+        // A function's read of a module global the module binds on some
+        // paths only (inside a loop or a branch): the global is checked at
+        // run time and raises `NameError` when unbound, as in CPython.
+        Some(BindingState::Maybe(ty)) if env.in_function_body && !is_local(local_names, name) => {
+            reject_memoryview_read(name, ty, env.owned_buffers.contains(name))?;
+            Ok(ty.clone())
+        }
         Some(BindingState::Maybe(_)) => Err(possibly_unbound(name)),
         None => {
             if is_local(local_names, name) {

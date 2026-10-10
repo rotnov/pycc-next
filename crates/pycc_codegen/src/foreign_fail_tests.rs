@@ -370,11 +370,11 @@ fn two_unbound_foreign_reads_share_one_name_error_declaration() {
     assert!(!ir.contains(&renamed), "{ir}");
 }
 
-/// Only a foreign `object` read changes: an unbound `int` global read in a
-/// function keeps its `llvm.trap`, and so does a module-body read, which
-/// D-041 proves bound (it emits no flag check at all there).
+/// An unbound `int` global read in a function raises the native
+/// `NameError` (not the foreign bridge's), and a module-body read, which
+/// D-041 proves bound, emits no flag check at all.
 #[test]
-fn a_non_object_unbound_read_keeps_its_trap_and_the_module_body_is_unchanged() {
+fn a_non_object_unbound_read_raises_a_native_name_error_and_the_module_body_is_unchanged() {
     let items = vec![
         import_copy(),
         MirItem::TopLevelStmt(MirStmt::Assign {
@@ -402,7 +402,8 @@ fn a_non_object_unbound_read_keeps_its_trap_and_the_module_body_is_unchanged() {
     );
     let (f, entry) = (&irs[0], &irs[1]);
     let unbound = block(f, "global_unbound");
-    assert!(unbound.contains("llvm.trap"), "{f}");
+    assert!(unbound.contains("@pycc_rt_raise_name_error"), "{f}");
+    assert!(!unbound.contains("llvm.trap"), "{f}");
     assert!(!f.contains(EXT_NAME_ERROR_SYMBOL), "{f}");
     assert!(!entry.contains(EXT_NAME_ERROR_SYMBOL), "{entry}");
     assert!(!entry.contains(EXT_OBJ_ERROR_BRIDGE_SYMBOL), "{entry}");
