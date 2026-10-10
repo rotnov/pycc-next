@@ -480,21 +480,18 @@ pub(super) fn emit_try<'ctx>(
     let saved_is_returning: Option<PointerValue<'ctx>>;
     let saved_ret_slot: Option<PointerValue<'ctx>>;
     if has_finally {
-        let is_returning = builder
-            .build_alloca(context.i8_type(), "try_is_returning")
-            .expect("build_alloca should not fail for is_returning flag");
+        let is_returning = alloca_at_entry(builder, context.i8_type(), "try_is_returning");
         builder
             .build_store(is_returning, context.i8_type().const_zero())
             .expect("build_store should not fail for is_returning init");
         let ret_slot = if expected_return_ty == pycc_mir::Ty::None {
             None
         } else {
-            let slot = builder
-                .build_alloca(
-                    ty_to_basic_type(context, expected_return_ty.clone()),
-                    "try_ret_slot",
-                )
-                .expect("build_alloca should not fail for ret_slot");
+            let slot = alloca_at_entry(
+                builder,
+                ty_to_basic_type(context, expected_return_ty.clone()),
+                "try_ret_slot",
+            );
             Some(slot)
         };
         saved_is_returning = Some(is_returning);
@@ -665,12 +662,11 @@ pub(super) fn emit_try<'ctx>(
                 .try_as_basic_value()
                 .expect_basic("pycc_rt_exception_value returns a pointer")
                 .into_pointer_value();
-            let saved_exc = builder
-                .build_alloca(
-                    context.ptr_type(inkwell::AddressSpace::default()),
-                    "handler_saved_exc",
-                )
-                .expect("build_alloca should not fail for a handler exception slot");
+            let saved_exc = alloca_at_entry(
+                builder,
+                context.ptr_type(inkwell::AddressSpace::default()),
+                "handler_saved_exc",
+            );
             builder
                 .build_store(saved_exc, exc_val)
                 .expect("build_store should not fail for a handler exception slot");
@@ -684,12 +680,11 @@ pub(super) fn emit_try<'ctx>(
             // pointer-typed alloca (all exception objects are
             // pointer-represented, like class instances).
             if let Some(binding_name) = &handler.binding_name {
-                let exc_slot = builder
-                    .build_alloca(
-                        context.ptr_type(inkwell::AddressSpace::default()),
-                        binding_name,
-                    )
-                    .expect("build_alloca should not fail for an exception binding slot");
+                let exc_slot = alloca_at_entry(
+                    builder,
+                    context.ptr_type(inkwell::AddressSpace::default()),
+                    binding_name,
+                );
                 builder
                     .build_store(exc_slot, exc_val)
                     .expect("build_store should not fail for an exception binding");
@@ -1037,21 +1032,18 @@ pub(super) fn emit_try_star<'ctx>(
     let saved_is_returning: Option<PointerValue<'ctx>>;
     let saved_ret_slot: Option<PointerValue<'ctx>>;
     if has_finally {
-        let is_returning = builder
-            .build_alloca(context.i8_type(), "trystar_is_returning")
-            .expect("build_alloca should not fail for is_returning flag");
+        let is_returning = alloca_at_entry(builder, context.i8_type(), "trystar_is_returning");
         builder
             .build_store(is_returning, context.i8_type().const_zero())
             .expect("build_store should not fail for is_returning init");
         let ret_slot = if expected_return_ty == pycc_mir::Ty::None {
             None
         } else {
-            let slot = builder
-                .build_alloca(
-                    ty_to_basic_type(context, expected_return_ty.clone()),
-                    "trystar_ret_slot",
-                )
-                .expect("build_alloca should not fail for ret_slot");
+            let slot = alloca_at_entry(
+                builder,
+                ty_to_basic_type(context, expected_return_ty.clone()),
+                "trystar_ret_slot",
+            );
             Some(slot)
         };
         saved_is_returning = Some(is_returning);
@@ -1119,9 +1111,7 @@ pub(super) fn emit_try_star<'ctx>(
     // exactly that case, there is no reachable empty-`handlers` case to
     // branch on here.
     builder.position_at_end(handler_dispatch_bb);
-    let current_group_slot = builder
-        .build_alloca(ptr_type, "trystar_current_group")
-        .expect("build_alloca should not fail for the trystar current-group slot");
+    let current_group_slot = alloca_at_entry(builder, ptr_type, "trystar_current_group");
     {
         let exc_val = builder
             .build_call(rt.exception_value, &[], "trystar_exc_val")
@@ -1208,9 +1198,7 @@ pub(super) fn emit_try_star<'ctx>(
             .as_deref()
             .expect("an except* handler always carries a resolved tag set");
         let tags_array_ty = context.i8_type().array_type(tags.len() as u32);
-        let tags_alloca = builder
-            .build_alloca(tags_array_ty, &format!("trystar_tags_{i}"))
-            .expect("build_alloca should not fail for a trystar tag array");
+        let tags_alloca = alloca_at_entry(builder, tags_array_ty, &format!("trystar_tags_{i}"));
         for (j, tag) in tags.iter().enumerate() {
             let slot = unsafe {
                 builder
@@ -1228,12 +1216,8 @@ pub(super) fn emit_try_star<'ctx>(
         }
         let tags_len = context.i64_type().const_int(tags.len() as u64, false);
 
-        let matched_slot = builder
-            .build_alloca(ptr_type, &format!("trystar_matched_{i}"))
-            .expect("build_alloca should not fail for a trystar matched-out slot");
-        let rest_slot = builder
-            .build_alloca(ptr_type, &format!("trystar_rest_{i}"))
-            .expect("build_alloca should not fail for a trystar rest-out slot");
+        let matched_slot = alloca_at_entry(builder, ptr_type, &format!("trystar_matched_{i}"));
+        let rest_slot = alloca_at_entry(builder, ptr_type, &format!("trystar_rest_{i}"));
 
         builder
             .build_call(
@@ -1272,9 +1256,7 @@ pub(super) fn emit_try_star<'ctx>(
 
         builder.position_at_end(handler_body_bbs[i]);
         if let Some(binding_name) = &handler.binding_name {
-            let exc_slot = builder
-                .build_alloca(ptr_type, binding_name)
-                .expect("build_alloca should not fail for an except* binding slot");
+            let exc_slot = alloca_at_entry(builder, ptr_type, binding_name);
             builder
                 .build_store(exc_slot, matched_ptr)
                 .expect("build_store should not fail for an except* binding");
@@ -1293,9 +1275,7 @@ pub(super) fn emit_try_star<'ctx>(
         // A bare `raise` inside an `except*` body reraises the exact
         // matched subgroup this clause was handed, mirroring `Try`'s own
         // `reraise_values` mechanism.
-        let saved_exc = builder
-            .build_alloca(ptr_type, &format!("trystar_saved_exc_{i}"))
-            .expect("build_alloca should not fail for a trystar reraise slot");
+        let saved_exc = alloca_at_entry(builder, ptr_type, &format!("trystar_saved_exc_{i}"));
         builder
             .build_store(saved_exc, matched_ptr)
             .expect("build_store should not fail for a trystar reraise slot");

@@ -401,6 +401,10 @@ pub enum HirExpr {
     IntLiteral(i64),
     FloatLiteral(f64),
     BoolLiteral(bool),
+    /// A `bool` whose value no pass may know or fold: the test of
+    /// [`loop_else_as_if`]'s `if`, so the suite it guards always joins
+    /// with the path that skipped it. Never produced from source.
+    OpaqueBool,
     StringLiteral(String),
     /// The bare literal `None` used as a value expression (D-197, #763,
     /// Part 1 of #747), e.g. `x = None`, `return None`, `x is None`. Before
@@ -1309,10 +1313,11 @@ fn stmt_jumps(stmt: &HirStmt, is_jump: &dyn Fn(&HirStmt) -> bool) -> bool {
 /// opaque test that both `pycc_types` and `pycc_mir` treat it as: a suite
 /// that runs at most once and whose bindings and narrowing join with the
 /// path that skipped it, so the two passes cannot disagree on either. The
-/// test is a plain `True` literal, which no narrowing recognizer matches.
+/// test is [`HirExpr::OpaqueBool`], which no narrowing recognizer, constant
+/// folder or always-true check can see through.
 pub fn loop_else_as_if(orelse: &[HirStmt]) -> HirStmt {
     HirStmt::If {
-        test: HirExpr::BoolLiteral(true),
+        test: HirExpr::OpaqueBool,
         body: orelse.to_vec(),
         orelse: Vec::new(),
     }

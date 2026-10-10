@@ -13,9 +13,10 @@
 //! `break` gets a one-byte flag: it is cleared before the loop, set by every
 //! `break` bound to that loop, and read after the loop's exit block to skip
 //! the clause. The flag is handed to the wrapped loop through
-//! [`LoopControlState::set_pending_else_flag`], which the next
-//! [`LoopControlState::enter`] call consumes -- the wrapped loop is the
-//! first loop statement emitted after it.
+//! [`LoopControlState::set_pending_else_flag`], keyed by that loop
+//! statement: only [`LoopControlState::enter`] for the same statement
+//! consumes it, and [`LoopControlState::take_unclaimed_else_flag`] proves it
+//! was consumed once the loop is emitted.
 //!
 //! `pycc_hir` refuses a `break`/`continue` that would leave a `try` with a
 //! `finally` clause, so a jump never has a pending `finally` between it and
@@ -48,7 +49,9 @@ struct LoopTarget<'ctx> {
 #[derive(Default)]
 pub(crate) struct LoopControlState<'ctx> {
     targets: RefCell<Vec<LoopTarget<'ctx>>>,
-    pending_else_flag: RefCell<Option<PointerValue<'ctx>>>,
+    /// The `else:` flag for the loop statement it is keyed by (compared by
+    /// address), waiting for that loop's [`Self::enter`].
+    pending_else_flag: RefCell<Option<(*const MirStmt, PointerValue<'ctx>)>>,
 }
 
 /// Which jump a `break`/`continue` statement makes.
@@ -59,15 +62,26 @@ pub(crate) enum LoopJump {
 }
 
 impl<'ctx> LoopControlState<'ctx> {
-    /// Registers a loop whose `break` leaves through `break_bb` and whose
-    /// `continue` resumes at `continue_bb`.
+    /// Registers the loop statement `stmt`, whose `break` leaves through
+    /// `break_bb` and whose `continue` resumes at `continue_bb`. It takes the
+    /// pending `else:` flag only when that flag was set for `stmt` itself.
     pub(crate) fn enter(
         &self,
+        stmt: &MirStmt,
         break_bb: BasicBlock<'ctx>,
         continue_bb: BasicBlock<'ctx>,
         finally_depth: usize,
     ) {
-        let broke_flag = self.pending_else_flag.borrow_mut().take();
+        let broke_flag = {
+            let mut pending = self.pending_else_flag.borrow_mut();
+            match *pending {
+                Some((owner, flag)) if std::ptr::eq(owner, stmt) => {
+                    *pending = None;
+                    Some(flag)
+                }
+                _ => None,
+            }
+        };
         self.targets.borrow_mut().push(LoopTarget {
             break_bb,
             continue_bb,
@@ -84,9 +98,25 @@ impl<'ctx> LoopControlState<'ctx> {
             .expect("every loop exit is paired with its own enter");
     }
 
-    /// Hands `flag` to the next loop [`Self::enter`] registers.
-    pub(crate) fn set_pending_else_flag(&self, flag: PointerValue<'ctx>) {
-        *self.pending_else_flag.borrow_mut() = Some(flag);
+    /// Hands `flag` to the [`Self::enter`] of the loop statement `stmt`.
+    pub(crate) fn set_pending_else_flag(&self, stmt: &MirStmt, flag: PointerValue<'ctx>) {
+        let previous = self
+            .pending_else_flag
+            .borrow_mut()
+            .replace((stmt as *const MirStmt, flag));
+        assert!(
+            previous.is_none(),
+            "pycc_codegen: internal error: a loop `else:` flag was never claimed by its loop"
+        );
+    }
+
+    /// Clears the pending `else:` flag and returns it when its loop never
+    /// claimed it; `None` once the loop's [`Self::enter`] has taken it.
+    pub(crate) fn take_unclaimed_else_flag(&self) -> Option<PointerValue<'ctx>> {
+        self.pending_else_flag
+            .borrow_mut()
+            .take()
+            .map(|(_, flag)| flag)
     }
 }
 
@@ -125,29 +155,6 @@ pub(crate) fn emit_jump<'ctx>(
         .build_unconditional_branch(dest)
         .expect("build_unconditional_branch should not fail for a loop jump");
     Ok(())
-}
-
-/// An `i8` slot in the current function's entry block, so a loop `else:`
-/// flag inside another loop does not grow the stack on every iteration.
-pub(crate) fn entry_block_flag<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-) -> PointerValue<'ctx> {
-    let function = builder
-        .get_insert_block()
-        .and_then(|block| block.get_parent())
-        .expect("a loop is always emitted inside a function");
-    let entry = function
-        .get_first_basic_block()
-        .expect("a function being emitted has an entry block");
-    let entry_builder = context.create_builder();
-    match entry.get_first_instruction() {
-        Some(first) => entry_builder.position_before(&first),
-        None => entry_builder.position_at_end(entry),
-    }
-    entry_builder
-        .build_alloca(context.i8_type(), "loop_broke")
-        .expect("build_alloca should not fail for a loop-else flag")
 }
 
 /// Finishes a loop latch: when nothing branches to `latch` (the body never
@@ -189,14 +196,16 @@ pub(crate) fn emit_loop_else<'ctx>(
     let breaks =
         crate::fallthrough::loop_body(loop_stmt).is_some_and(crate::fallthrough::body_breaks_loop);
     let flag = breaks.then(|| {
-        let flag = entry_block_flag(context, builder);
+        // In the entry block, so a loop `else:` inside another loop does
+        // not grow the stack on every iteration.
+        let flag = crate::alloca_at_entry(builder, context.i8_type(), "loop_broke");
         builder
             .build_store(flag, context.i8_type().const_zero())
             .expect("build_store should not fail for a loop-else flag");
-        rt.loops.set_pending_else_flag(flag);
+        rt.loops.set_pending_else_flag(loop_stmt, flag);
         flag
     });
-    emit_stmt(
+    let emitted = emit_stmt(
         context,
         builder,
         module,
@@ -206,7 +215,13 @@ pub(crate) fn emit_loop_else<'ctx>(
         loop_stmt,
         expected_return_ty.clone(),
         finally_stack,
-    )?;
+    );
+    let unclaimed = rt.loops.take_unclaimed_else_flag();
+    emitted?;
+    assert!(
+        unclaimed.is_none(),
+        "pycc_codegen: internal error: the loop wrapped by an `else:` clause never claimed its flag"
+    );
     let Some(flag) = flag else {
         return emit_body(
             context,

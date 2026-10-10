@@ -169,7 +169,7 @@ pub(crate) fn infer_expr_in(
     match expr {
         HirExpr::IntLiteral(_) => Ok(Ty::Int),
         HirExpr::FloatLiteral(_) => Ok(Ty::Float),
-        HirExpr::BoolLiteral(_) => Ok(Ty::Bool),
+        HirExpr::BoolLiteral(_) | HirExpr::OpaqueBool => Ok(Ty::Bool),
         HirExpr::StringLiteral(_) => Ok(Ty::Str),
         HirExpr::NoneLiteral => Ok(Ty::None),
         // #1418: CPython's `NotImplemented` singleton is a CPython object.

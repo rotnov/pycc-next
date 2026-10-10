@@ -965,6 +965,7 @@ pub(crate) fn rewrite_generic_calls_in_expr(
         HirExpr::IntLiteral(_)
         | HirExpr::FloatLiteral(_)
         | HirExpr::BoolLiteral(_)
+        | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
         | HirExpr::EmptyDict(_)
@@ -1498,6 +1499,7 @@ pub(crate) fn collect_generic_class_instantiations_from_expr(
         HirExpr::IntLiteral(_)
         | HirExpr::FloatLiteral(_)
         | HirExpr::BoolLiteral(_)
+        | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
         | HirExpr::EmptyDict(_)

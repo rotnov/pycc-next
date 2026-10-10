@@ -208,7 +208,7 @@ fn an_uncaught_builtin_exception_still_prints_its_own_class_name() {
     // #707 added a traceback-frame header naming the enclosing function.
     assert_eq!(
         stderr,
-        "Traceback (most recent call last):\n  File \"<compiled>\", in main\nKeyError: nope\n"
+        "Traceback (most recent call last):\n  File \"<compiled>\", in main\nKeyError: 'nope'\n"
     );
 }
 

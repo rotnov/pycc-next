@@ -1865,7 +1865,9 @@ fn dict_get(dict: &PyDictObj, key: *mut PyStrObj) -> i64 {
     dict.entries.set(entries);
     found.unwrap_or_else(|| {
         // D-173: set the pending exception flag instead of panicking.
-        raise_builtin(EXCEPTION_TYPE_KEY_ERROR, "KeyError", "dict key not found");
+        // `KeyError(key)`: its `str()` renders the key's `repr`.
+        let key_text = String::from_utf8_lossy(unsafe { (*key).bytes() }).into_owned();
+        raise_builtin(EXCEPTION_TYPE_KEY_ERROR, "KeyError", &key_text);
         tag_smallint(0)
     })
 }
@@ -1873,7 +1875,7 @@ fn dict_get(dict: &PyDictObj, key: *mut PyStrObj) -> i64 {
 /// Linear-scan lookup (D-121). Sets the pending `KeyError` exception flag
 /// if no stored key compares equal to `key` (D-173) and returns a sentinel
 /// `0`; the caller's generated code checks the flag after this call. The
-/// exception message is `"dict key not found"`.
+/// exception carries the missing key, as CPython's `KeyError(key)` does.
 ///
 /// # Safety
 /// Same as `pycc_rt_dict_set`.

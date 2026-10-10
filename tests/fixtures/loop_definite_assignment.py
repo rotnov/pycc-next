@@ -105,6 +105,32 @@ def _must_find(xs: list[int], t: int) -> int:
     return i
 
 
+def handler_break(limit: int) -> str:
+    n: int = 0
+    while True:
+        try:
+            checked(-limit)
+        except ValueError as err:
+            print("caught", err)
+            for j in range(3):
+                if j == 1:
+                    print("inner", err, j)
+                    break
+            n += 1
+            if n == limit:
+                break
+    for i in range(-1, 2):
+        try:
+            checked(i)
+        except ValueError as err2:
+            print("skip", err2)
+            continue
+        print("ok", i)
+    else:
+        print("done", n)
+    return "handled"
+
+
 def _none_of() -> list[int]:
     xs: list[int] = []
     return xs
@@ -120,6 +146,7 @@ print(until_big(7), until_big(200), until_big(-1 + 2))
 print(odd_squares(10), odd_squares(0))
 print(pick(True), pick(False), drop_or_keep(True), drop_or_keep(False))
 print(_must_find([5, 6, 7], 7))
+print(handler_break(2))
 try:
     print(_must_find([5, 6, 7], 8))
 except ValueError as e:

@@ -136,7 +136,7 @@ fn a_multi_level_cause_chain_walks_every_level() {
     assert!(!ok, "expected non-zero exit for uncaught exception");
     assert_eq!(
         err,
-        "Traceback (most recent call last):\n  File \"<compiled>\", in inner\nKeyError: root\n\n\
+        "Traceback (most recent call last):\n  File \"<compiled>\", in inner\nKeyError: 'root'\n\n\
 The above exception was the direct cause of the following exception:\n\n\
 Traceback (most recent call last):\n  File \"<compiled>\", in inner\nTypeError: middle\n\n\
 The above exception was the direct cause of the following exception:\n\n\

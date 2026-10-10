@@ -118,7 +118,7 @@ pub(super) fn check_try_stmt(
         }
         // #1485: the `except ImportError` fallback of a foreign import.
         super::foreign::seed_fallback_rebindings(&mut handler_env, body, &handler.body);
-        check_stmt_sequence_shared(&mut handler_env, local_names, &handler.body, return_ty)?;
+        check_handler_body(&mut handler_env, local_names, handler, return_ty)?;
         handler_envs.push(handler_env);
     }
 
@@ -283,7 +283,7 @@ pub(super) fn check_try_star_stmt(
             // Kill it explicitly, the same way a plain reassignment does.
             handler_env.narrowed.remove(name);
         }
-        check_stmt_sequence_shared(&mut handler_env, local_names, &handler.body, return_ty)?;
+        check_handler_body(&mut handler_env, local_names, handler, return_ty)?;
         handler_envs.push(handler_env);
     }
 
@@ -304,6 +304,21 @@ pub(super) fn check_try_star_stmt(
             else_env: &else_env,
         },
     )
+}
+
+/// Checks `handler`'s body with its `as` name registered on the innermost
+/// loop, so a `break` out of the handler records the name unbound
+/// (`loop_flow::LoopExits::record_break`).
+fn check_handler_body(
+    handler_env: &mut Environment,
+    local_names: &[&str],
+    handler: &HirExceptHandler,
+    return_ty: Option<&Ty>,
+) -> Result<(), Diagnostic> {
+    let exits = handler_env.loop_exits.clone();
+    exits.in_handler(handler.name.as_deref(), || {
+        check_stmt_sequence_shared(handler_env, local_names, &handler.body, return_ty)
+    })
 }
 
 pub(super) fn check_raise_stmt(

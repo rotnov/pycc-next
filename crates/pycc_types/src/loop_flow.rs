@@ -40,14 +40,23 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 type Bindings = HashMap<String, BindingState>;
 
-/// The bindings recorded at each `break` of every loop being checked, one
-/// frame per loop, innermost last. Clones share the frames, so a `break`
-/// checked in a branch's cloned environment reaches its loop's frame.
+/// One loop being checked: the bindings recorded at each of its `break`s,
+/// and the `as` names of the `except` handlers entered inside it (and not
+/// inside a nested loop) that are being checked right now.
+#[derive(Debug, Default)]
+struct LoopFrame {
+    breaks: Vec<Bindings>,
+    handler_names: Vec<String>,
+}
+
+/// The [`LoopFrame`] of every loop being checked, innermost last. Clones
+/// share the frames, so a `break` checked in a branch's cloned environment
+/// reaches its loop's frame.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct LoopExits(Arc<Mutex<Vec<Vec<Bindings>>>>);
+pub(crate) struct LoopExits(Arc<Mutex<Vec<LoopFrame>>>);
 
 impl LoopExits {
-    fn frames(&self) -> MutexGuard<'_, Vec<Vec<Bindings>>> {
+    fn frames(&self) -> MutexGuard<'_, Vec<LoopFrame>> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -56,7 +65,7 @@ impl LoopExits {
     /// Opens a frame for a loop and returns its depth for [`Self::exit`].
     fn enter(&self) -> usize {
         let mut frames = self.frames();
-        frames.push(Vec::new());
+        frames.push(LoopFrame::default());
         frames.len() - 1
     }
 
@@ -65,14 +74,47 @@ impl LoopExits {
     fn exit(&self, depth: usize) -> Vec<Bindings> {
         let mut frames = self.frames();
         frames.truncate(depth + 1);
-        frames.pop().unwrap_or_default()
+        frames.pop().map(|frame| frame.breaks).unwrap_or_default()
     }
 
     /// Records `bindings` as the state at a `break` of the innermost loop.
+    ///
+    /// The `as` name of every handler the `break` leaves is dropped from
+    /// the record: CPython's implicit `del` at the handler's exit runs on
+    /// the `break` too, so the name is unbound on that edge. A handler
+    /// entered outside the loop, or a loop nested inside the handler, keeps
+    /// its name bound, because the `break` does not leave that handler.
     pub(crate) fn record_break(&self, bindings: &Bindings) {
         if let Some(frame) = self.frames().last_mut() {
-            frame.push(bindings.clone());
+            let mut record = bindings.clone();
+            for name in &frame.handler_names {
+                record.remove(name);
+            }
+            frame.breaks.push(record);
         }
+    }
+
+    /// Checks an `except` handler body with `check`, with its `as` name
+    /// `name` (if any) registered on the innermost loop for
+    /// [`Self::record_break`].
+    pub(crate) fn in_handler<T>(&self, name: Option<&str>, check: impl FnOnce() -> T) -> T {
+        let Some(name) = name else {
+            return check();
+        };
+        let depth = {
+            let mut frames = self.frames();
+            let Some(frame) = frames.last_mut() else {
+                drop(frames);
+                return check();
+            };
+            frame.handler_names.push(name.to_string());
+            frames.len() - 1
+        };
+        let result = check();
+        if let Some(frame) = self.frames().get_mut(depth) {
+            frame.handler_names.pop();
+        }
+        result
     }
 }
 

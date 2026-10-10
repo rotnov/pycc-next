@@ -174,6 +174,56 @@ fn an_inner_break_does_not_bind_for_the_outer_loop_exit() {
     );
 }
 
+const RAISER: &str = "def g(i: int) -> int:\n    if i == 0:\n        raise ValueError(\"first\")\n    return i\n\n\n";
+
+#[test]
+fn a_handler_as_name_is_unbound_after_a_break_out_of_the_handler() {
+    // CPython deletes `e` when the `break` leaves the handler:
+    // `UnboundLocalError` at `print(e)`.
+    assert_maybe_unbound(
+        "lda_handler_as_break",
+        &format!(
+            "{RAISER}def f() -> str:\n    while True:\n        try:\n            g(0)\n        except ValueError as e:\n            break\n    print(e)\n    return \"x\"\n\n\nprint(f())\n"
+        ),
+        "e",
+    );
+}
+
+#[test]
+fn a_handler_as_name_is_unbound_after_a_break_skipping_a_returning_else() {
+    assert_maybe_unbound(
+        "lda_handler_as_for_else",
+        &format!(
+            "{RAISER}def f() -> str:\n    for i in range(3):\n        try:\n            g(0)\n        except ValueError as e:\n            break\n    else:\n        return \"none\"\n    print(e)\n    return \"x\"\n\n\nprint(f())\n"
+        ),
+        "e",
+    );
+}
+
+#[test]
+fn a_module_scope_handler_as_name_is_unbound_after_a_break() {
+    let dir = ScratchDir::new("lda_handler_as_module").expect("scratch");
+    let src = dir.join("m.py");
+    std::fs::write(
+        &src,
+        format!(
+            "{RAISER}while True:\n    try:\n        g(0)\n    except ValueError as e:\n        break\nprint(e)\n"
+        ),
+    )
+    .expect("write the source");
+    let out = pycc()
+        .arg("check")
+        .arg(&src)
+        .output()
+        .expect("pycc should spawn");
+    let stderr = format!("{}{}", text(&out.stdout), text(&out.stderr));
+    assert!(!out.status.success(), "expected T0041, check passed");
+    assert!(
+        stderr.contains("error[T0041]") && stderr.contains("`e`"),
+        "{stderr}"
+    );
+}
+
 #[test]
 fn a_continue_branch_does_not_bind_after_the_loop() {
     assert_maybe_unbound(

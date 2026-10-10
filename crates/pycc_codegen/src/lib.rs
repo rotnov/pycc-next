@@ -4944,6 +4944,26 @@ fn build_at_entry_block<'ctx, T>(
     value
 }
 
+/// An uninitialized `alloca` of `ty` in the entry block of the function the
+/// builder is emitting into, leaving the builder where it was. Every fixed-size
+/// slot belongs there: an `alloca` in a block a loop re-enters grows the stack
+/// on every iteration (the frame is reclaimed only at return), and a slot
+/// allocated in one branch does not dominate a read in another.
+pub(crate) fn alloca_at_entry<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    ty: impl BasicType<'ctx>,
+    name: &str,
+) -> PointerValue<'ctx> {
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("an alloca is always emitted inside a function");
+    build_at_entry_block(builder, function, |b| {
+        b.build_alloca(ty, name)
+            .expect("build_alloca should not fail for a fixed-size slot")
+    })
+}
+
 /// Allocates a local slot in the current function's entry block, which
 /// dominates every branch, loop, and merge that may read it. String slots are
 /// initialized to null and `int` slots to the word `0` (#146 Part 1), so the
@@ -7170,7 +7190,7 @@ fn emit_stmt<'ctx>(
                 .expect("build_conditional_branch should not fail for a well-formed i1 condition");
 
             builder.position_at_end(body_bb);
-            rt.loops.enter(after_bb, test_bb, finally_stack.len());
+            rt.loops.enter(stmt, after_bb, test_bb, finally_stack.len());
             emit_body_then_branch(
                 context,
                 builder,
@@ -7341,7 +7361,8 @@ fn emit_stmt<'ctx>(
             // `after_bb`, whose release of `current` balances this
             // iteration's owned value exactly as the normal exit's does.
             let latch_bb = context.append_basic_block(function, "for_latch");
-            rt.loops.enter(after_bb, latch_bb, finally_stack.len());
+            rt.loops
+                .enter(stmt, after_bb, latch_bb, finally_stack.len());
             emit_body_then_branch(
                 context,
                 builder,
@@ -7496,7 +7517,8 @@ fn emit_stmt<'ctx>(
             // `ForRange`'s latch shape: fall-through and `continue` advance
             // the index here, `break` leaves through `after_bb`.
             let latch_bb = context.append_basic_block(function, "for_list_latch");
-            rt.loops.enter(after_bb, latch_bb, finally_stack.len());
+            rt.loops
+                .enter(stmt, after_bb, latch_bb, finally_stack.len());
             emit_body_then_branch(
                 context,
                 builder,
@@ -7555,6 +7577,7 @@ fn emit_stmt<'ctx>(
             // leaves through `after_bb`, which releases the iterator below
             // exactly as the normal exit does.
             rt.loops.enter(
+                stmt,
                 loop_blocks.after_bb,
                 loop_blocks.header_bb,
                 finally_stack.len(),
@@ -8453,7 +8476,8 @@ fn emit_stmt<'ctx>(
             emit_assign(context, builder, rt, locals, var, Scalar::Str(key_ptr));
             // `ForList`'s latch shape (see that arm).
             let latch_bb = context.append_basic_block(function, "for_dict_latch");
-            rt.loops.enter(after_bb, latch_bb, finally_stack.len());
+            rt.loops
+                .enter(stmt, after_bb, latch_bb, finally_stack.len());
             emit_body_then_branch(
                 context,
                 builder,
@@ -8636,7 +8660,8 @@ fn emit_stmt<'ctx>(
             );
             // `ForList`'s latch shape (see that arm).
             let latch_bb = context.append_basic_block(function, "for_set_latch");
-            rt.loops.enter(after_bb, latch_bb, finally_stack.len());
+            rt.loops
+                .enter(stmt, after_bb, latch_bb, finally_stack.len());
             emit_body_then_branch(
                 context,
                 builder,

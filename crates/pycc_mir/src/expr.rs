@@ -103,6 +103,10 @@ pub(super) fn lower_expr(
         HirExpr::IntLiteral(n) => MirExpr::IntLiteral(*n),
         HirExpr::FloatLiteral(f) => MirExpr::FloatLiteral(*f),
         HirExpr::BoolLiteral(b) => MirExpr::BoolLiteral(*b),
+        // Only the test of `pycc_hir::loop_else_as_if`, whose `if` is
+        // lowered for its body alone (`HirStmt::LoopElse` discards the
+        // test); no emitted code ever evaluates this value.
+        HirExpr::OpaqueBool => MirExpr::BoolLiteral(true),
         HirExpr::StringLiteral(s) => MirExpr::StringLiteral(s.clone()),
         HirExpr::NoneLiteral => MirExpr::NoneLiteral,
         HirExpr::NotImplemented => MirExpr::NotImplemented,
@@ -1716,6 +1720,7 @@ pub(super) fn pre_bind_named_expr_targets(
         HirExpr::IntLiteral(_)
         | HirExpr::FloatLiteral(_)
         | HirExpr::BoolLiteral(_)
+        | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
         | HirExpr::EmptyDict(_)

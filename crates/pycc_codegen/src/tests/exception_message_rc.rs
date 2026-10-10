@@ -435,7 +435,7 @@ fn a_cause_with_a_local_message_owns_its_own_reference() {
     assert_output(&output, "", 1);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("KeyError: cause\n"),
+        stderr.contains("KeyError: 'cause'\n"),
         "unexpected stderr: {stderr}"
     );
     assert!(

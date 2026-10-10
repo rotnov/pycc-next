@@ -165,12 +165,11 @@ pub(super) fn emit_exception_value<'ctx>(
                 ));
             };
             let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
-            let members_array = builder
-                .build_alloca(
-                    ptr_type.array_type(members.len() as u32),
-                    &format!("{role}_group_members"),
-                )
-                .expect("build_alloca should not fail for a group's member array");
+            let members_array = alloca_at_entry(
+                builder,
+                ptr_type.array_type(members.len() as u32),
+                &format!("{role}_group_members"),
+            );
             for (index, member) in members.iter().enumerate() {
                 let member_scalar =
                     emit_expr(context, builder, module, rt, user_functions, locals, member);

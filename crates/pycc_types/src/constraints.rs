@@ -835,7 +835,7 @@ pub(crate) fn collect_expr_constraints(
     match expr {
         HirExpr::IntLiteral(_) => Ok(Some(Ok(Ty::Int))),
         HirExpr::FloatLiteral(_) => Ok(Some(Ok(Ty::Float))),
-        HirExpr::BoolLiteral(_) => Ok(Some(Ok(Ty::Bool))),
+        HirExpr::BoolLiteral(_) | HirExpr::OpaqueBool => Ok(Some(Ok(Ty::Bool))),
         HirExpr::StringLiteral(_) => Ok(Some(Ok(Ty::Str))),
         HirExpr::NoneLiteral => Ok(Some(Ok(Ty::None))),
         // #1418: `return NotImplemented` in a comparison method of an `ext`
@@ -2251,6 +2251,7 @@ fn bind_named_expr_targets(
         HirExpr::IntLiteral(_)
         | HirExpr::FloatLiteral(_)
         | HirExpr::BoolLiteral(_)
+        | HirExpr::OpaqueBool
         | HirExpr::StringLiteral(_)
         | HirExpr::EmptyList(_)
         | HirExpr::EmptyDict(_)

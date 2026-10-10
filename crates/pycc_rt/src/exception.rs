@@ -96,6 +96,9 @@ pub struct PyExceptionObj {
     /// single member.
     pub(crate) exceptions: *mut *mut PyExceptionObj,
     pub(crate) exceptions_len: usize,
+    /// `str(exc)` when it differs from `message` (a `KeyError`), built on
+    /// first use by [`str_form::exception_str`]; null until then.
+    pub(crate) str_form: Cell<*mut PyStrObj>,
 }
 
 #[derive(Clone, Copy)]
@@ -205,6 +208,7 @@ pub extern "C" fn pycc_rt_exception_alloc(
         _context: std::ptr::null_mut(),
         exceptions: std::ptr::null_mut(),
         exceptions_len: 0,
+        str_form: Cell::new(std::ptr::null_mut()),
     }))
 }
 
@@ -294,6 +298,7 @@ fn build_group_or_null(
         _context: std::ptr::null_mut(),
         exceptions: exceptions_ptr,
         exceptions_len,
+        str_form: Cell::new(std::ptr::null_mut()),
     }))
 }
 
@@ -331,6 +336,7 @@ pub unsafe extern "C" fn pycc_rt_exception_group_alloc(
         _context: std::ptr::null_mut(),
         exceptions: exceptions_ptr,
         exceptions_len,
+        str_form: Cell::new(std::ptr::null_mut()),
     }))
 }
 
@@ -473,7 +479,7 @@ pub unsafe extern "C" fn pycc_rt_exception_type_matches(
 /// no argument -- see `pycc_mir::lower_exception_value`).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_exception_message(obj: *mut PyExceptionObj) -> *mut PyStrObj {
-    unsafe { (*obj).message }
+    str_form::exception_str(unsafe { &*obj })
 }
 
 /// The exception class's name, or `Exception` when the object carries none.
@@ -542,10 +548,11 @@ fn render_single_exception(exc: &PyExceptionObj) -> String {
     // ValueError("")` and a bare `AssertionError` for a failing `assert`
     // with no message (#1369, which lowers that to `AssertionError("")`):
     // the `: ` separator is omitted whenever `str(exc)` is empty.
-    let msg_bytes: &[u8] = if exc.message.is_null() {
+    let shown = str_form::exception_str(exc);
+    let msg_bytes: &[u8] = if shown.is_null() {
         &[]
     } else {
-        unsafe { (*exc.message).bytes() }
+        unsafe { (*shown).bytes() }
     };
     if msg_bytes.is_empty() {
         out.push_str(type_name);
@@ -655,6 +662,8 @@ pub(crate) fn raise_builtin(type_tag: u8, name: &'static str, msg: &str) {
         message,
     ));
 }
+
+mod str_form;
 
 #[cfg(test)]
 mod foreign_base_tests;
