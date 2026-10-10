@@ -154,7 +154,13 @@ pub(crate) fn load(
     entry: &Path,
     entry_module_name: Option<&str>,
 ) -> Result<LoadedProgram, FrontendFailure> {
-    load_with(entry, entry_module_name, RelativeImports::Project, false)
+    load_with(
+        entry,
+        entry_module_name,
+        RelativeImports::Project,
+        false,
+        false,
+    )
 }
 
 /// Loads the whole program reachable from `entry`.
@@ -182,6 +188,7 @@ pub(crate) fn load_with(
     entry_module_name: Option<&str>,
     relative_imports: RelativeImports,
     ext_module: bool,
+    non_strict: bool,
 ) -> Result<LoadedProgram, FrontendFailure> {
     let display = entry.to_string_lossy().into_owned();
     let canonical = canonicalize(entry, &display)?;
@@ -206,6 +213,7 @@ pub(crate) fn load_with(
         },
         relative_imports,
         ext_module,
+        non_strict,
     };
     loader.load_module(&canonical, display, true)?;
     Ok(LoadedProgram {
@@ -240,6 +248,8 @@ struct Loader {
     entry_package: Option<String>,
     /// Whether every module is lowered for an `ext` artifact (D-258, #1397).
     ext_module: bool,
+    /// Whether every module is lowered in non-strict mode (#3).
+    non_strict: bool,
 }
 
 impl Loader {
@@ -286,6 +296,7 @@ impl Loader {
 
         let mut resolved = ResolvedImports::default();
         resolved.set_ext_module(self.ext_module);
+        resolved.set_non_strict(self.non_strict);
         for loaded in &self.modules {
             resolved.add_module(
                 loaded.display_path.clone(),

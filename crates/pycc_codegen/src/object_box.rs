@@ -64,6 +64,19 @@ pub(crate) fn emit_boxed<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     value: &MirExpr,
 ) -> PointerValue<'ctx> {
+    // Non-strict mode (#3): a native display becomes the CPython container.
+    if let Some(display) = as_object_display(value) {
+        let built = emit_expr(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            &display,
+        );
+        return crate::foreign_attr::expect_object_pointer(built);
+    }
     if value.ty() == pycc_mir::Ty::None {
         if !matches!(value, MirExpr::NoneLiteral) {
             emit_expr(context, builder, module, rt, user_functions, locals, value);
@@ -91,4 +104,33 @@ pub(crate) fn emit_boxed<'ctx>(
         "object_box",
     );
     packed
+}
+
+/// `value` rebuilt as the CPython container when it is a native list, tuple,
+/// set or dict display (`pycc_types::object_box::display_boxable` admitted
+/// it), nested displays included; `None` for every other value.
+fn as_object_display(value: &MirExpr) -> Option<MirExpr> {
+    let element = |e: &MirExpr| as_object_display(e).unwrap_or_else(|| e.clone());
+    let display = |kind, elements: Vec<MirExpr>| MirExpr::ObjDisplay { kind, elements };
+    Some(match value {
+        MirExpr::ListLiteral(es) => MirExpr::ObjList {
+            elements: es.iter().map(element).collect(),
+        },
+        MirExpr::TupleLiteral(es) => display(
+            pycc_mir::ObjDisplayKind::Tuple,
+            es.iter().map(element).collect(),
+        ),
+        MirExpr::SetLiteral { elements, .. } => display(
+            pycc_mir::ObjDisplayKind::Set,
+            elements.iter().map(element).collect(),
+        ),
+        MirExpr::DictLiteral(pairs) => display(
+            pycc_mir::ObjDisplayKind::Dict,
+            pairs
+                .iter()
+                .flat_map(|(k, v)| [element(k), element(v)])
+                .collect(),
+        ),
+        _ => return None,
+    })
 }

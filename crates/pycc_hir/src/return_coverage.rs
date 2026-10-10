@@ -63,6 +63,7 @@ fn block_exits(body: &[HirStmt], jumps: bool) -> bool {
             // failure edge, like any object call).
             | HirStmt::DeleteSlice { .. }
             | HirStmt::DeleteAttr { .. }
+            | HirStmt::DeleteItem { .. }
             // #1291: a nested foreign import never returns. Its failure is
             // either a pycc raise (an `ImportError` by #1293, any other
             // exception inside a module-level `try` by Part 1 of #1096) or a

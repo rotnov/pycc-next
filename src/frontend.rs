@@ -226,8 +226,12 @@ fn link_frontend(
     relative_imports: RelativeImports,
     ext_module: bool,
 ) -> Result<(HirModule, ProgramSources, Option<DiscoveredManifest>), FrontendFailure> {
+    let non_strict = crate::mode::non_strict_for(path);
+    // The checker's one mode-dependent rule reads this (#3); set for every
+    // program this thread links, so a previous program's mode never leaks.
+    pycc_types::set_non_strict(non_strict);
     let program: LoadedProgram =
-        modules::load_with(path, module_name, relative_imports, ext_module)?;
+        modules::load_with(path, module_name, relative_imports, ext_module, non_strict)?;
     let manifest = program.manifest;
     let mut files = Vec::with_capacity(program.modules.len());
     let mut bounds = Vec::with_capacity(program.modules.len());
@@ -591,6 +595,35 @@ pub(crate) fn resolve_frontend_native(
             .into_iter()
             .map(|(index, diagnostic)| (sources.owner_of_item(index), diagnostic)),
     );
+    // Non-strict mode (#3): a program that declares an `object` slot runs
+    // its object operations through CPython, so it embeds an interpreter
+    // exactly as a foreign import does -- which a `--target` build cannot.
+    // A foreign import already decided (and gated) the embedding.
+    let needs_interpreter = if !needs_interpreter.0 && pycc_hir::declares_object_slot(&resolved) {
+        let refusal = if host == EmbedHost::CrossTarget {
+            Some("a `--target` build cannot bundle")
+        } else if matches!(policy, interop_policy::EffectivePolicy::Deny { .. }) {
+            Some("the `deny` interop policy (`--pure`) rules out")
+        } else {
+            None
+        };
+        if let Some(refusal) = refusal {
+            keyed.push((
+                0,
+                pycc_diag::Diagnostic::error(
+                    "C0001",
+                    format!(
+                        "this program holds a CPython object (non-strict code), which needs an \
+                         embedded interpreter that {refusal}"
+                    ),
+                    pycc_diag::Span::new(0, 0),
+                ),
+            ));
+        }
+        NeedsInterpreter(true)
+    } else {
+        needs_interpreter
+    };
     if keyed.is_empty() {
         return Ok((resolved, needs_interpreter));
     }

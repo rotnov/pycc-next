@@ -552,6 +552,10 @@ pub(super) fn lower_expr(
         // one `if`/`while` conditions already call).
         HirExpr::UnaryOp { op, operand } => {
             let operand = lower_expr(operand, scopes, classes, current_class);
+            // Non-strict mode (#3): `-o`, `+o`, `~o` run CPython's own operator.
+            if let Some(object_unary) = super::obj_arith::lower_object_unary(*op, &operand) {
+                return object_unary;
+            }
             match op {
                 UnaryOpKind::USub | UnaryOpKind::UAdd => {
                     let (bin_op, left, right) = if operand.ty() == Ty::Float {
@@ -626,9 +630,17 @@ pub(super) fn lower_expr(
             lower_expr(body, scopes, classes, current_class),
             lower_expr(orelse, scopes, classes, current_class),
         ),
-        HirExpr::BinOp { op, left, right } => {
+        HirExpr::BinOp { op, left, right } | HirExpr::AugBinOp { op, left, right } => {
             let left = lower_expr(left, scopes, classes, current_class);
             let right = lower_expr(right, scopes, classes, current_class);
+            // Non-strict mode (#3): an object operand runs CPython's operator,
+            // the in-place one for an augmented assignment.
+            let in_place = matches!(expr, HirExpr::AugBinOp { .. });
+            let (left, right) =
+                match super::obj_arith::lower_object_binop(*op, in_place, left, right) {
+                    Ok(object_binop) => return object_binop,
+                    Err(operands) => *operands,
+                };
             let ty = binop_result_ty(*op, left.ty(), right.ty());
             MirExpr::BinOp {
                 op: *op,
@@ -754,12 +766,22 @@ pub(super) fn lower_expr(
                 .map(|e| lower_expr(e, scopes, classes, current_class))
                 .collect(),
         },
-        HirExpr::ListLiteral(elements) => MirExpr::ListLiteral(
-            elements
+        HirExpr::ListLiteral(elements) => {
+            let elements: Vec<MirExpr> = elements
                 .iter()
                 .map(|e| lower_expr(e, scopes, classes, current_class))
-                .collect(),
-        ),
+                .collect();
+            // Non-strict mode (#3): an object element makes it a CPython list.
+            if super::obj_arith::is_object_display(pycc_hir::DisplayKind::List, &elements) {
+                return MirExpr::ObjList {
+                    elements: elements
+                        .into_iter()
+                        .map(super::object_narrow::object_operand)
+                        .collect(),
+                };
+            }
+            MirExpr::ListLiteral(elements)
+        }
         // `HirExpr::Subscript` is reused unconditionally by `pycc_hir`'s own
         // lowering for both a list read and a dict read (it has no type
         // information to pick a different node) -- `pycc_types::infer_expr_in`
@@ -843,8 +865,8 @@ pub(super) fn lower_expr(
             list: lower_container_receiver(list, scopes, classes, current_class).0,
             value: Box::new(lower_expr(value, scopes, classes, current_class)),
         },
-        HirExpr::DictLiteral(pairs) => MirExpr::DictLiteral(
-            pairs
+        HirExpr::DictLiteral(pairs) => {
+            let pairs: Vec<(MirExpr, MirExpr)> = pairs
                 .iter()
                 .map(|(k, v)| {
                     (
@@ -852,13 +874,25 @@ pub(super) fn lower_expr(
                         lower_expr(v, scopes, classes, current_class),
                     )
                 })
-                .collect(),
-        ),
+                .collect();
+            // Non-strict mode (#3): an object key or value makes it a CPython dict.
+            let tys: Vec<Ty> = pairs.iter().flat_map(|(k, v)| [k.ty(), v.ty()]).collect();
+            if pycc_hir::display_is_object(pycc_hir::DisplayKind::Dict, &tys) {
+                return super::obj_arith::object_display(
+                    crate::ObjDisplayKind::Dict,
+                    pairs.into_iter().flat_map(|(k, v)| [k, v]).collect(),
+                );
+            }
+            MirExpr::DictLiteral(pairs)
+        }
         HirExpr::SetLiteral(elements) => {
             let elements: Vec<MirExpr> = elements
                 .iter()
                 .map(|e| lower_expr(e, scopes, classes, current_class))
                 .collect();
+            if super::obj_arith::is_object_display(pycc_hir::DisplayKind::Set, &elements) {
+                return super::obj_arith::object_display(crate::ObjDisplayKind::Set, elements);
+            }
             // #1343: the first element's type is the literal's, as
             // `MirExpr::ty` derives it.
             let ops = elements
@@ -867,12 +901,16 @@ pub(super) fn lower_expr(
                 .map(Box::new);
             MirExpr::SetLiteral { elements, ops }
         }
-        HirExpr::TupleLiteral(elements) => MirExpr::TupleLiteral(
-            elements
+        HirExpr::TupleLiteral(elements) => {
+            let elements: Vec<MirExpr> = elements
                 .iter()
                 .map(|e| lower_expr(e, scopes, classes, current_class))
-                .collect(),
-        ),
+                .collect();
+            if super::obj_arith::is_object_display(pycc_hir::DisplayKind::Tuple, &elements) {
+                return super::obj_arith::object_display(crate::ObjDisplayKind::Tuple, elements);
+            }
+            MirExpr::TupleLiteral(elements)
+        }
         // PR-12 Task 8 (D-118): purely structural -- recurse into `base` and
         // every present bound, same as every other MIR-lowering site in this
         // function. `pycc_types` already validated the base is
@@ -1754,6 +1792,7 @@ pub(super) fn pre_bind_named_expr_targets(
             }
         }
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             pre_bind_named_expr_targets(left, scopes, classes, current_class);

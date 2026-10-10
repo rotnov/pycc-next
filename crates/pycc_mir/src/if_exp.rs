@@ -9,8 +9,16 @@ use crate::MirExpr;
 use pycc_hir::if_exp_result_ty;
 
 pub(crate) fn lower_if_exp(test: MirExpr, body: MirExpr, orelse: MirExpr) -> MirExpr {
-    let ty = if_exp_result_ty(&body.ty(), &orelse.ty())
-        .expect("pycc_types admitted this conditional expression with the same join rule");
+    // Non-strict mode (#3): `pycc_types` admits branches with no common
+    // native type only there, and only when both box into an object.
+    let Some(ty) = if_exp_result_ty(&body.ty(), &orelse.ty()) else {
+        return MirExpr::IfExp {
+            test: Box::new(test),
+            body: Box::new(crate::object_box::box_into(body, &crate::Ty::Object)),
+            orelse: Box::new(crate::object_box::box_into(orelse, &crate::Ty::Object)),
+            ty: crate::Ty::Object,
+        };
+    };
     MirExpr::IfExp {
         test: Box::new(test),
         body: Box::new(body),
@@ -35,12 +43,16 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "same join rule")]
-    fn branches_the_checker_would_refuse_are_an_internal_error() {
-        lower_if_exp(
+    fn branches_with_no_common_native_type_are_boxed_into_an_object() {
+        let lowered = lower_if_exp(
             MirExpr::BoolLiteral(true),
             MirExpr::IntLiteral(1),
             MirExpr::StringLiteral("s".to_string()),
         );
+        assert_eq!(lowered.ty(), Ty::Object);
+        let MirExpr::IfExp { body, .. } = lowered else {
+            panic!("an IfExp")
+        };
+        assert_eq!(*body, MirExpr::ObjectBox(Box::new(MirExpr::IntLiteral(1))));
     }
 }

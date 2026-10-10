@@ -21,6 +21,7 @@ mod program;
 mod return_coverage;
 mod stmt;
 mod typecheck;
+mod uses_objects;
 
 pub use boolop::{BoolOpKind, bool_op_result_ty};
 pub use buffer_store::{body_returns_inside_finally, body_returns_slice_of, body_stores_into};
@@ -37,7 +38,8 @@ pub use class::{
 };
 pub use compare_chain::{CompareLink, compare_chain_operands};
 pub use container::{
-    check_container_ty, check_tuple_element_ty, is_list_element_ty, set_element_message,
+    DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object, is_list_element_ty,
+    set_element_message,
 };
 pub use dunder_name::DUNDER_NAME;
 pub use exception::{
@@ -77,6 +79,7 @@ pub use typecheck::{
     ExtractClassNamesError, eval_isinstance_single, eval_issubclass_single, extract_class_names,
     is_abc_base_name, is_builtin_type_name, is_enum_base_name, is_protocol_base_name,
 };
+pub use uses_objects::declares_object_slot;
 
 /// D-038's visibility predicate: a name is public unless it begins with an
 /// underscore.
@@ -426,6 +429,17 @@ pub enum HirExpr {
         args: Vec<HirExpr>,
     },
     BinOp {
+        op: BinOpKind,
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+    },
+    /// The binary operation of an augmented assignment `target op= value`,
+    /// which `stmt::aug_assign` lowers to `target = target op value` with
+    /// this node as the value. Typed and lowered exactly as
+    /// [`HirExpr::BinOp`], except that a CPython object operand runs the
+    /// in-place protocol (`PyNumber_InPlaceAdd`, ...), so a mutable object
+    /// is updated in place as CPython's `__iadd__` does (non-strict mode, #3).
+    AugBinOp {
         op: BinOpKind,
         left: Box<HirExpr>,
         right: Box<HirExpr>,
@@ -1218,6 +1232,16 @@ pub enum HirStmt {
     DeleteAttr {
         base: Box<HirExpr>,
         attr: String,
+        span: Span,
+    },
+    /// `del base[key]` with a non-slice key (non-strict mode, #3). Like
+    /// [`HirStmt::DeleteSlice`] it unbinds no name: it reads `base`, then
+    /// `key`, and asks the base to delete the item. `pycc_types` admits only
+    /// a CPython-object base (`PyObject_DelItem`) and refuses every other one
+    /// with this node's `span`, the subscript target's own range.
+    DeleteItem {
+        base: Box<HirExpr>,
+        key: Box<HirExpr>,
         span: Span,
     },
     /// A CPython-backed `import X` or `import X as Y` (Part 1 of #1282,

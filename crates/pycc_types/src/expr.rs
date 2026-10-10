@@ -294,9 +294,14 @@ pub(crate) fn infer_expr_in(
         HirExpr::Unpack { value, arity } => {
             crate::unpack::infer_unpack(env, local_names, value, *arity)
         }
-        HirExpr::BinOp { op, left, right } => {
+        HirExpr::BinOp { op, left, right } | HirExpr::AugBinOp { op, left, right } => {
             let left_ty = infer_expr_in(env, local_names, left)?;
             let right_ty = infer_expr_in(env, local_names, right)?;
+            if let Some(result) =
+                crate::foreign::arith::object_binop_ty(Some(env), &left_ty, &right_ty)
+            {
+                return result;
+            }
             numeric_result_type(*op, left_ty, right_ty)
         }
         HirExpr::Compare { op, left, right } => {
@@ -893,6 +898,7 @@ pub(crate) fn infer_expr_in(
             for (i, (arg_ty, param_ty)) in arg_tys.iter().zip(param_tys.iter()).enumerate() {
                 if !class::is_assignable_env(env, arg_ty, param_ty)
                     && !crate::object_box::admits_value(env, &args[i], arg_ty, param_ty)?
+                    && !crate::non_strict::admits_coercion(arg_ty, param_ty)
                 {
                     // #380 (PR-20): if the mismatch involves a protocol,
                     // produce a detailed T0046 conformance error.
@@ -941,6 +947,11 @@ pub(crate) fn infer_expr_in(
             crate::foreign::list_display::object_list_ty(env, local_names, elements)
         }
         HirExpr::ListLiteral(elements) => {
+            if let Some(result) =
+                crate::foreign::arith::object_display_ty(env, local_names, pycc_hir::DisplayKind::List, elements)
+            {
+                return result;
+            }
             // #1021: reaching this arm with no elements means the
             // empty-container pre-pass (`crate::empty_container`) found no
             // evidence for an element type -- no annotation, no existing
@@ -1001,6 +1012,16 @@ pub(crate) fn infer_expr_in(
         // int]`-only gate mirroring `ListLiteral`'s own `T0034` gate
         // (D-122: "exactly one combination gets real codegen").
         HirExpr::DictLiteral(pairs) => {
+            if let Some(result) =
+                crate::foreign::arith::object_display_ty(
+                env,
+                local_names,
+                pycc_hir::DisplayKind::Dict,
+                pairs.iter().flat_map(|(k, v)| [k, v]),
+            )
+            {
+                return result;
+            }
             // #1021: same reasoning as `ListLiteral`'s own empty arm above --
             // the pre-pass already rewrote every resolvable `{}` into
             // `HirExpr::EmptyDict`, so reaching here means no evidence
@@ -1046,6 +1067,11 @@ pub(crate) fn infer_expr_in(
         // hand-built `HirExpr::SetLiteral(vec![])` (e.g. the crate root's
         // own unit tests, in `tests.rs`).
         HirExpr::SetLiteral(elements) => {
+            if let Some(result) =
+                crate::foreign::arith::object_display_ty(env, local_names, pycc_hir::DisplayKind::Set, elements)
+            {
+                return result;
+            }
             let Some(first) = elements.first() else {
                 return Err(Diagnostic::error(
                     "T0021",
@@ -1084,6 +1110,11 @@ pub(crate) fn infer_expr_in(
         // feature. The gate is per-element type membership (int/bool/float
         // only), not agreement with a first element's type.
         HirExpr::TupleLiteral(elements) => {
+            if let Some(result) =
+                crate::foreign::arith::object_display_ty(env, local_names, pycc_hir::DisplayKind::Tuple, elements)
+            {
+                return result;
+            }
             if elements.is_empty() {
                 return Err(Diagnostic::error(
                     "T0021",

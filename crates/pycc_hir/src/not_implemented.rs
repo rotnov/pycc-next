@@ -241,6 +241,7 @@ fn stmt_returns_not_implemented(stmt: &HirStmt) -> bool {
         | HirStmt::Delete { .. }
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
+        | HirStmt::DeleteItem { .. }
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue

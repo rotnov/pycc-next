@@ -56,6 +56,7 @@ use rt_fns::{RtFns, declare_rt_functions};
 mod ext;
 mod ext_publish;
 mod ext_thunk;
+mod foreign_arith;
 mod foreign_attr;
 mod foreign_call;
 mod foreign_call_emit;
@@ -73,6 +74,7 @@ mod foreign_unpack;
 mod frozenset;
 mod hash;
 mod object_box;
+mod object_coerce;
 mod object_comprehension;
 mod object_release;
 mod object_return;
@@ -3862,6 +3864,34 @@ fn emit_expr_unchecked<'ctx>(
             }
             result
         }
+        // Non-strict mode (#3): CPython's own operators on an object operand.
+        MirExpr::ObjBinOp {
+            op,
+            in_place,
+            left,
+            right,
+        } => foreign_arith::emit_binop(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            *op,
+            *in_place,
+            left,
+            right,
+        ),
+        MirExpr::ObjUnaryOp { op, operand } => foreign_arith::emit_unary(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            *op,
+            operand,
+        ),
         // Part 2b of #1371: `item in container`. Item, then container --
         // CPython's own order -- with the `ObjCompare` arm's #638
         // protection of an `int` temporary item across the container's
@@ -3931,7 +3961,9 @@ fn emit_expr_unchecked<'ctx>(
         // across the evaluations after it and released after the call, the
         // `ObjSlice` arm's discipline. `foreign_call::emit_list` carries the
         // rest.
-        MirExpr::ObjList { elements } => {
+        // Non-strict mode (#3): a tuple, set or dict display with an object
+        // element, under the same discipline.
+        MirExpr::ObjList { elements } | MirExpr::ObjDisplay { elements, .. } => {
             let mut pendings = Vec::with_capacity(elements.len());
             let mut scalars = Vec::with_capacity(elements.len());
             let mut holds = Vec::with_capacity(elements.len());
@@ -3954,7 +3986,12 @@ fn emit_expr_unchecked<'ctx>(
             for pending in pendings.into_iter().rev() {
                 pop_pending_int_release(rt, pending);
             }
-            let result = foreign_call::emit_list(context, builder, module, rt, &scalars);
+            let result = match expr {
+                MirExpr::ObjDisplay { kind, .. } => {
+                    foreign_call::emit_display(context, builder, module, rt, *kind, &scalars)
+                }
+                _ => foreign_call::emit_list(context, builder, module, rt, &scalars),
+            };
             for held in holds.into_iter().rev() {
                 held.release(builder, rt);
             }
@@ -4564,7 +4601,7 @@ fn build_call_to_with_leading_args<'ctx>(
     user_functions: &HashMap<&str, UserFunction<'ctx>>,
     locals: &HashMap<String, StorageSlot<'ctx>>,
     user_function: &UserFunction<'ctx>,
-    _callee_name: &str,
+    callee_name: &str,
     leading_args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
     args: &[MirExpr],
 ) -> inkwell::values::CallSiteValue<'ctx> {
@@ -4585,7 +4622,29 @@ fn build_call_to_with_leading_args<'ctx>(
     let marshalled_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = args
         .iter()
         .zip(&user_function.param_tys[leading_args.len()..])
-        .map(|(a, param_ty)| {
+        .enumerate()
+        .map(|(index, (a, param_ty))| {
+            // Non-strict mode (#3): an object argument to a scalar parameter
+            // is converted with a run-time type check (`object_coerce`).
+            if object_coerce::coerces_into(a, param_ty) {
+                let scalar = object_coerce::emit_coerced(
+                    context,
+                    builder,
+                    module,
+                    rt,
+                    user_functions,
+                    locals,
+                    a,
+                    param_ty,
+                    &format!("{callee_name}() argument {}", index + 1),
+                );
+                return match scalar {
+                    Scalar::Int(v) | Scalar::Bool(v) => v.into(),
+                    Scalar::Float(v) => v.into(),
+                    Scalar::Str(v) => v.into(),
+                    _ => unreachable!("object_coerce yields a scalar"),
+                };
+            }
             // Part 2 of #1387: a native argument to an `object` parameter
             // is boxed (`object_box`). The packer borrows the value and the
             // box is a new `PyObject *` reference, so none of the
@@ -7850,6 +7909,19 @@ fn emit_stmt<'ctx>(
                             locals,
                             expr,
                         ))
+                    } else if object_coerce::coerces_into(expr, &expected_return_ty) {
+                        // Non-strict mode (#3): `object_coerce`.
+                        object_coerce::emit_coerced(
+                            context,
+                            builder,
+                            module,
+                            rt,
+                            user_functions,
+                            locals,
+                            expr,
+                            &expected_return_ty,
+                            "return value",
+                        )
                     } else {
                         emit_expr(context, builder, module, rt, user_functions, locals, expr)
                     };
@@ -8384,6 +8456,34 @@ fn emit_stmt<'ctx>(
                 base,
                 attr,
                 value,
+            );
+            Ok(())
+        }
+        // Non-strict mode (#3): `o[k] = v` and `del o[k]` on a CPython object.
+        MirStmt::ObjSetItem { base, key, value } => {
+            foreign_arith::emit_set_item(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                base,
+                key,
+                value,
+            );
+            Ok(())
+        }
+        MirStmt::ObjDelItem { base, key } => {
+            foreign_arith::emit_del_item(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                base,
+                key,
             );
             Ok(())
         }

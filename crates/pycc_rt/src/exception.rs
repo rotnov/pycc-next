@@ -499,6 +499,22 @@ pub unsafe extern "C" fn pycc_rt_exception_message(obj: *mut PyExceptionObj) -> 
     str_form::exception_str(unsafe { &*obj })
 }
 
+/// Records `text` as `obj`'s `str()` form. The CPython error bridge passes
+/// the bridged exception's own `str(exc)`, which is also its message, so a
+/// bridged `KeyError` shows CPython's text rather than its `repr` again.
+///
+/// # Safety
+///
+/// `obj` must point to a live `PyExceptionObj` and `text` to a live
+/// `PyStrObj` that outlives it (the leak-only message the bridge allocated).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_set_str_form(
+    obj: *mut PyExceptionObj,
+    text: *mut PyStrObj,
+) {
+    unsafe { (*obj).str_form.set(text) };
+}
+
 /// The exception class's name, or `Exception` when the object carries none.
 ///
 /// # Safety

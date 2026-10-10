@@ -156,8 +156,10 @@ pub fn check_and_resolve_all_keyed(hir: &HirModule) -> Result<HirModule, KeyedDi
     // cannot accept a program `pycc build` then panics on in
     // `MirExpr::ty()`. The rewritten module is what everything downstream
     // (checker, solver, `monomorphize`, MIR lowering, codegen) consumes.
-    let prepared = Prepared::new(hir)?;
-    resolve_prepared(prepared.module(hir)).map_err(|d| prepared.rekey(d))
+    crate::non_strict::with_widening(hir, |hir| {
+        let prepared = Prepared::new(hir)?;
+        resolve_prepared(prepared.module(hir)).map_err(|d| prepared.rekey(d))
+    })
 }
 
 /// [`check_and_resolve_all_keyed`] over an already [`Prepared`] module.
@@ -486,8 +488,10 @@ pub fn check_all_keyed(hir: &HirModule) -> Result<(), KeyedDiagnostics> {
     // #1021 (D-245): resolve every empty container literal *before* any
     // checking, so the check path and the build path see the identical
     // module (see [`Prepared`]).
-    let prepared = Prepared::new(hir)?;
-    check_prepared(prepared.module(hir)).map_err(|d| prepared.rekey(d))
+    crate::non_strict::with_widening(hir, |hir| {
+        let prepared = Prepared::new(hir)?;
+        check_prepared(prepared.module(hir)).map_err(|d| prepared.rekey(d))
+    })
 }
 
 /// [`check_all_keyed`] over an already [`Prepared`] module.

@@ -168,6 +168,7 @@ extern void *pycc_rt_exception_alloc(unsigned char type_tag,
                                      size_t name_len,
                                      void *message);
 extern void pycc_rt_exception_raise(void *obj);
+extern void pycc_rt_exception_set_str_form(void *obj, void *text);
 
 /*
  * The two builtin tags the bridge raises, with the class name each one's
@@ -514,6 +515,9 @@ static int pycc_ext_bridge_store(PyObject *exc, unsigned char tag, const char *c
         return 0;
     }
     obj = pycc_rt_exception_alloc(tag, (const unsigned char *)class_name, class_name_len, message);
+    /* The message already is CPython's `str(exc)`: a bridged `KeyError`
+     * must not show the `repr` of it. */
+    pycc_rt_exception_set_str_form(obj, message);
     pycc_rt_exception_raise(obj);
     table->entries[table->len].pycc = obj;
     table->entries[table->len].orig = exc;

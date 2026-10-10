@@ -15,6 +15,7 @@
 use crate::Environment;
 use crate::boolop::class_truth_dunder;
 use crate::expr::infer_expr_in;
+use crate::foreign::is_object_operand;
 use crate::unop::is_truth_testable;
 use pycc_diag::{Diagnostic, Span};
 use pycc_hir::{HirExpr, Ty, if_exp_result_ty};
@@ -31,7 +32,16 @@ pub(crate) fn infer_if_exp(
     admit_condition(env, &test_ty)?;
     let body_ty = infer_expr_in(env, local_names, body)?;
     let orelse_ty = infer_expr_in(env, local_names, orelse)?;
-    if_exp_result_ty(&body_ty, &orelse_ty).ok_or_else(|| no_common_type(&body_ty, &orelse_ty))
+    if let Some(ty) = if_exp_result_ty(&body_ty, &orelse_ty) {
+        return Ok(ty);
+    }
+    // Non-strict mode (#3): branches with no common native type are both
+    // boxed, so the expression is an object.
+    let boxable = |ty: &Ty| matches!(ty, Ty::Object | Ty::None) || is_object_operand(env, ty);
+    if crate::non_strict::is_non_strict() && boxable(&body_ty) && boxable(&orelse_ty) {
+        return Ok(Ty::Object);
+    }
+    Err(no_common_type(&body_ty, &orelse_ty))
 }
 
 /// `Ok(())` when a value of type `ty` may be a conditional expression's

@@ -741,6 +741,18 @@ pub(super) fn lower_stmt(
             let key = lower_expr(key, scopes, classes, current_class);
             let value = lower_expr(value, scopes, classes, current_class);
             let base_ty = lookup(scopes, dict);
+            // Non-strict mode (#3): `pycc_types` admitted an item store on a
+            // CPython object, which is `PyObject_SetItem`.
+            if base_ty == Ty::Object {
+                return MirStmt::ObjSetItem {
+                    base: MirExpr::Name {
+                        name: dict.clone(),
+                        ty: Ty::Object,
+                    },
+                    key,
+                    value,
+                };
+            }
             if let Ty::List(_) = base_ty {
                 MirStmt::ListSet {
                     base: MirExpr::Name {
@@ -936,6 +948,11 @@ pub(super) fn lower_stmt(
         HirStmt::DeleteAttr { base, attr, .. } => MirStmt::ObjDelAttr {
             base: lower_expr(base, scopes, classes, current_class),
             attr: attr.clone(),
+        },
+        // Non-strict mode (#3): admitted only on a CPython object base.
+        HirStmt::DeleteItem { base, key, .. } => MirStmt::ObjDelItem {
+            base: lower_expr(base, scopes, classes, current_class),
+            key: lower_expr(key, scopes, classes, current_class),
         },
         HirStmt::ForeignImport { bindings, .. } => MirStmt::ForeignImport {
             bindings: bindings.clone(),

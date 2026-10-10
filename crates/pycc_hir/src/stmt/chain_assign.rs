@@ -98,9 +98,11 @@ pub(crate) fn lower_stmt_expanded(
             Ok(lowered)
         }
         // #1244: `del a, b` deletes each name in turn, and `del ()` none.
-        Stmt::Delete(del) => super::del::lower_delete(del, &|expr| {
-            crate::expr::lower_expr(expr, in_function, class_name, imports, signatures)
-        }),
+        Stmt::Delete(del) => super::del::lower_delete(
+            del,
+            &|expr| crate::expr::lower_expr(expr, in_function, class_name, imports, signatures),
+            crate::func::is_non_strict(aliases),
+        ),
         _ => expand(stmt),
     }
 }

@@ -234,7 +234,8 @@ pub(crate) fn lower_stmt(
                 class_defs,
                 imports,
                 signatures,
-            );
+            )
+            .map(aug_assign::mark_in_place);
         }
         // #1369: `assert test, msg` is lowered as `if test: pass` / `else:
         // raise AssertionError(msg)` (see `assert_stmt`), through this same
@@ -770,6 +771,7 @@ fn violates_walrus_placement(lowered: &HirStmt) -> bool {
         | HirStmt::Delete { .. }
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
+        | HirStmt::DeleteItem { .. }
         | HirStmt::ForeignImport { .. } => false,
         HirStmt::Raise { exc, cause } => {
             exc.as_ref().is_some_and(contains_named_expr)

@@ -707,6 +707,7 @@ pub(crate) fn rewrite_generic_calls_in_expr(
             infer_expr_in(env, local_names, expr)
         }
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             for sub in [left.as_mut(), right.as_mut()] {
@@ -1199,6 +1200,11 @@ fn rewrite_generic_calls_in_stmt(
             rewrite_generic_calls_in_expr(env, local_names, base, instantiations, seen)?;
             Ok(())
         }
+        HirStmt::DeleteItem { base, key, .. } => {
+            rewrite_generic_calls_in_expr(env, local_names, base, instantiations, seen)?;
+            rewrite_generic_calls_in_expr(env, local_names, key, instantiations, seen)?;
+            Ok(())
+        }
         HirStmt::Match { subject, cases } => {
             rewrite_generic_calls_in_expr(env, local_names, subject, instantiations, seen)?;
             for case in cases.iter_mut() {
@@ -1389,6 +1395,7 @@ pub(crate) fn collect_generic_class_instantiations_from_expr(
             }
         }
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             collect_generic_class_instantiations_from_expr(left, out);
@@ -1642,6 +1649,10 @@ pub(crate) fn collect_generic_class_instantiations_from_stmt(
         }
         HirStmt::DeleteAttr { base, .. } => {
             collect_generic_class_instantiations_from_expr(base, out)
+        }
+        HirStmt::DeleteItem { base, key, .. } => {
+            collect_generic_class_instantiations_from_expr(base, out);
+            collect_generic_class_instantiations_from_expr(key, out);
         }
         HirStmt::Return(Some(expr)) => collect_generic_class_instantiations_from_expr(expr, out),
         HirStmt::AttrSet { base, value, .. } => {
@@ -2736,6 +2747,18 @@ fn rewrite_protocol_calls_in_stmt(
                 seen,
             );
         }
+        HirStmt::DeleteItem { base, key, .. } => {
+            for expr in [base, key] {
+                rewrite_protocol_calls_in_expr(
+                    expr,
+                    protocol_funcs,
+                    env,
+                    local_names,
+                    specializations,
+                    seen,
+                );
+            }
+        }
         // #1254: the loop variable is bound in a scoped clone of `env`
         // before `cond` and the elements are walked, so a protocol call
         // whose argument reads it resolves; before, `infer_expr_in` failed
@@ -2920,7 +2943,9 @@ fn rewrite_protocol_calls_in_expr(
         // #1211: `BoolOp` shares `BinOp`'s arm. Without it the `_ => {}`
         // catch-all below would skip a protocol-typed call inside `and`/`or`
         // and leave it unspecialized.
-        HirExpr::BinOp { left, right, .. } | HirExpr::BoolOp { left, right, .. } => {
+        HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
+        | HirExpr::BoolOp { left, right, .. } => {
             rewrite_protocol_calls_in_expr(
                 left,
                 protocol_funcs,

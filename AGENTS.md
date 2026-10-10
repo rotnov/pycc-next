@@ -2,7 +2,7 @@
 
 Compile typed Python to native code at Rust-like speed; type mismatches are compile errors.
 Primary artifact: CPython extension module (`pycc build m.py -o m --ext`). `strict` mode by
-default; `non-strict` (in progress) will fall back to `PyObject*` for unprovable code.
+default; `--non-strict` falls back to `PyObject*` (CPython C API) for unprovable code.
 
 - Oracle: CPython 3.13 — same stdout and exceptions. Known gaps: `docs/DEVIATIONS.md`.
 - Build: `export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 && cargo build --release`.

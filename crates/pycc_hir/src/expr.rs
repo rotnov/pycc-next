@@ -996,6 +996,7 @@ pub(crate) fn contains_named_expr(expr: &HirExpr) -> bool {
         | HirExpr::Super => false,
         HirExpr::Call { args, .. } => args.iter().any(contains_named_expr),
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             contains_named_expr(left) || contains_named_expr(right)

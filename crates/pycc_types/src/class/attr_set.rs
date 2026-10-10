@@ -43,7 +43,8 @@ pub(crate) fn check_attr_set(
         base: Box::new(base.clone()),
         attr: attr.to_string(),
     };
-    if matches!(value, HirExpr::BinOp { left, .. } if **left == target) {
+    if matches!(value, HirExpr::BinOp { left, .. } | HirExpr::AugBinOp { left, .. } if **left == target)
+    {
         let value_ty = infer_expr_in(env, local_names, value)?;
         crate::list_ops::refuse_list_self_rebind(&target, value, &value_ty)?;
     }

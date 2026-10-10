@@ -164,6 +164,11 @@ pub(crate) fn refuse_list_self_rebind(
             op: BinOpKind::Add | BinOpKind::Mul,
             left,
             ..
+        }
+        | HirExpr::AugBinOp {
+            op: BinOpKind::Add | BinOpKind::Mul,
+            left,
+            ..
         },
     ) = (value_ty, value)
         && left.as_ref() == target

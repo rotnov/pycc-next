@@ -20,11 +20,10 @@
 //! module-exec return inside `pycc_ext_module_exec` when no module-level
 //! `try` encloses the operation, and otherwise the bridge plus an immediate
 //! branch to the innermost exception target (#1316, Part 1 of #1096).
-//! `emit_iter_loop` alone keeps the
-//! `expect_module_exec_entry` assertion, because `pycc_types` still admits
-//! `for x in <object>:` only in a module body (Part 2 of #1333); its two
-//! halves, which a comprehension over an object shares (Part 1 of #1255),
-//! take whichever edge the current function has.
+//! `emit_iter_loop` and its two halves, which a comprehension over an
+//! object shares (Part 1 of #1255), take whichever edge the current function
+//! has: `pycc_types` admits `for x in <object>:` in a module body, and in a
+//! function body in non-strict mode (#3).
 //! What is new here is *argument marshalling*: each already-evaluated pycc
 //! scalar becomes a `PyObject *` through one of the shim's
 //! `pycc_ext_obj_pack_*` helpers, the results go into a stack array, and
@@ -56,7 +55,7 @@
 //! across the call and released after it (`foreign_call_emit.rs`).
 
 use super::*;
-use crate::foreign_attr::{expect_module_exec_entry, expect_object_pointer};
+use crate::foreign_attr::expect_object_pointer;
 use crate::foreign_fail::{ForeignFailEdge, emit_failure, route_null};
 use crate::foreign_pack::{emit_pack, shim_fn};
 use inkwell::builder::Builder;
@@ -179,6 +178,53 @@ pub(super) fn emit_list<'ctx>(
     Scalar::Object(result)
 }
 
+/// Emits a tuple, set or dict display with an object element (non-strict
+/// mode, #3) as the CPython container, exactly as [`emit_list`] emits a list:
+/// `pycc_ext_obj_build_display` consumes every packed element on every path.
+pub(super) fn emit_display<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    kind: pycc_mir::ObjDisplayKind,
+    elements: &[Scalar<'ctx>],
+) -> Scalar<'ctx> {
+    let edge = ForeignFailEdge::for_current(builder);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_type = context.i64_type();
+    let i32_type = context.i32_type();
+    let items = emit_packed_array(context, builder, module, edge.function(), elements);
+    let build = shim_fn(
+        module,
+        crate::foreign_arith::EXT_OBJ_BUILD_DISPLAY_SYMBOL,
+        ptr.fn_type(&[ptr.into(), i64_type.into(), i32_type.into()], false),
+    );
+    let result = builder
+        .build_call(
+            build,
+            &[
+                items.into(),
+                i64_type.const_int(elements.len() as u64, false).into(),
+                i32_type.const_int(kind.shim_code(), false).into(),
+            ],
+            "foreign_display",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_build_display")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_build_display returns PyObject *")
+        .into_pointer_value();
+    route_null(
+        context,
+        builder,
+        module,
+        rt,
+        edge,
+        result,
+        "foreign_display",
+    );
+    Scalar::Object(result)
+}
+
 /// The blocks and per-iteration item of a lowered `for x in <object>:`
 /// loop, handed back to `emit_stmt` so it can emit the body between them.
 pub(super) struct ForeignIterLoop<'ctx> {
@@ -248,7 +294,9 @@ pub(super) fn emit_iter_loop<'ctx>(
     ForeignIterLoop<'ctx>,
     crate::object_release::LoopIterator<'ctx>,
 ) {
-    expect_module_exec_entry(builder);
+    // Non-strict mode (#3) admits the loop in a function body too: every
+    // failure below takes `ForeignFailEdge::for_current`, which is the
+    // function's own failure edge there.
     let iterator = emit_get_iter(context, builder, module, rt, iterable);
     held.release(builder, rt);
     let owned = crate::object_release::enter_loop_iterator(context, builder, module, rt, iterator);

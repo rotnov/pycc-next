@@ -40,7 +40,12 @@ use std::path::{Path, PathBuf};
 /// The fixed, hand-written half of every `ext` artifact, embedded at compile
 /// time. See `src/ext/pycc_ext_module.c`'s own header comment for why it is
 /// C at all and why it is embedded rather than located by path.
-pub(crate) const SHIM_C: &str = include_str!("ext/pycc_ext_module.c");
+/// `ext/pycc_ext_object_ops.c` (non-strict mode's object operators, #3) is
+/// appended so the shim stays one translation unit.
+pub(crate) const SHIM_C: &str = concat!(
+    include_str!("ext/pycc_ext_module.c"),
+    include_str!("ext/pycc_ext_object_ops.c")
+);
 
 /// The shim's file name in the build scratch directory. The generated
 /// companion is [`EXPORTS_INC_NAME`], which the shim `#include`s by this

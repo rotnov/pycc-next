@@ -37,6 +37,18 @@ pub struct InteropFlags {
     pub pure: bool,
 }
 
+/// Non-strict mode (#3), shared by `build`, `run`, `check` and `lock`.
+#[derive(Args, Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ModeFlags {
+    /// Compile untyped or partially typed code: a missing public annotation
+    /// and `Any` become a CPython object run through the C API instead of
+    /// `T0001`/`T0002`. Also selected by `[tool.pycc] strict = false` in a
+    /// `pyproject.toml` (or `[build] strict = false` in a `pycc.toml`) next
+    /// to the entry file. Strict is the default.
+    #[arg(long)]
+    pub non_strict: bool,
+}
+
 impl InteropFlags {
     pub fn into_cli(self) -> InteropCli {
         InteropCli {
@@ -125,6 +137,8 @@ pub enum Command {
         static_libpython: bool,
         #[command(flatten)]
         interop: InteropFlags,
+        #[command(flatten)]
+        mode: ModeFlags,
     },
     Run {
         path: PathBuf,
@@ -160,6 +174,8 @@ pub enum Command {
         args: Vec<OsString>,
         #[command(flatten)]
         interop: InteropFlags,
+        #[command(flatten)]
+        mode: ModeFlags,
     },
     Check {
         paths: Vec<PathBuf>,
@@ -168,6 +184,8 @@ pub enum Command {
         error_format: ErrorFormat,
         #[command(flatten)]
         interop: InteropFlags,
+        #[command(flatten)]
+        mode: ModeFlags,
     },
     /// `pycc lock PATH [--check]`: records the CPython dependency closure
     /// PATH's embedded build will carry into `pycc.lock` (the pycc.lock
@@ -180,6 +198,8 @@ pub enum Command {
         check: bool,
         #[command(flatten)]
         interop: InteropFlags,
+        #[command(flatten)]
+        mode: ModeFlags,
     },
     Test,
     Explain {
@@ -311,6 +331,7 @@ mod tests {
                 error_format: ErrorFormat::Json,
                 paths,
                 interop,
+                ..
             } if paths.len() == 2 && interop == InteropFlags::default()
         ));
     }
@@ -705,11 +726,37 @@ mod tests {
     }
 
     #[test]
+    fn non_strict_is_a_flag_of_build_run_check_and_lock() {
+        for argv in [
+            &["pycc", "check", "--non-strict", "a.py"][..],
+            &["pycc", "build", "--non-strict", "a.py", "-o", "a"][..],
+            &["pycc", "run", "--non-strict", "a.py"][..],
+            &["pycc", "lock", "--non-strict", "a.py"][..],
+        ] {
+            let mode = match Cli::try_parse_from(argv).unwrap().command {
+                Command::Check { mode, .. }
+                | Command::Build { mode, .. }
+                | Command::Run { mode, .. }
+                | Command::Lock { mode, .. } => mode,
+                _ => unreachable!(),
+            };
+            assert!(mode.non_strict, "{argv:?}");
+        }
+        let Command::Check { mode, .. } = Cli::try_parse_from(["pycc", "check", "a.py"])
+            .unwrap()
+            .command
+        else {
+            unreachable!()
+        };
+        assert!(!mode.non_strict);
+    }
+
+    #[test]
     fn lock_parses_its_path_check_flag_and_interop_flags() {
         let cli = Cli::try_parse_from(["pycc", "lock", "app.py"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Lock { path, check: false, interop }
+            Command::Lock { path, check: false, interop, .. }
                 if path == std::path::Path::new("app.py") && interop == InteropFlags::default()
         ));
         let cli = Cli::try_parse_from(["pycc", "lock", "--check", "app.py", "--pure"]).unwrap();

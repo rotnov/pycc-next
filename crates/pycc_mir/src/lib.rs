@@ -26,6 +26,7 @@ mod item_names;
 #[cfg(test)]
 use item_names::resolve_method_owner_class;
 use item_names::{item_anchor_class, source_frame_name};
+mod obj_arith;
 mod obj_compare;
 mod object_box;
 mod object_narrow;
@@ -49,7 +50,7 @@ use stmt::lower_stmt;
 // `pycc_mir::{Ty, BinOpKind, CmpOpKind}` from any downstream crate, exactly
 // like `pycc_types` already re-exports `Ty` (`pycc_types::Ty`, its own line
 // 4) for the same reason.
-pub use pycc_hir::{BinOpKind, BoolOpKind, CmpOpKind, EXCEPTION_GROUP_TYPE_TAG, Ty};
+pub use pycc_hir::{BinOpKind, BoolOpKind, CmpOpKind, EXCEPTION_GROUP_TYPE_TAG, Ty, UnaryOpKind};
 
 /// Monotonic counter for synthesized match-subject temporaries. Each
 /// `match` statement gets a unique `__match_subj_N` name, avoiding
@@ -600,6 +601,23 @@ pub enum MirExpr {
         left: Box<MirExpr>,
         right: Box<MirExpr>,
     },
+    /// `left op right` where at least one operand is a CPython object
+    /// (non-strict mode, #3): CPython's `PyNumber_*` for `op`, so the result
+    /// and every exception are CPython's own. A native operand is boxed;
+    /// the result is a new reference ([`Ty::Object`]). `in_place` (an
+    /// augmented assignment's operator) selects `PyNumber_InPlace*`.
+    ObjBinOp {
+        op: BinOpKind,
+        in_place: bool,
+        left: Box<MirExpr>,
+        right: Box<MirExpr>,
+    },
+    /// `-o`, `+o` or `~o` on a CPython object (non-strict mode, #3):
+    /// `PyNumber_Negative`/`_Positive`/`_Invert`, a new reference.
+    ObjUnaryOp {
+        op: pycc_hir::UnaryOpKind,
+        operand: Box<MirExpr>,
+    },
     /// `item in container` (`negate: false`) or `item not in container`
     /// (`negate: true`) where `container` is a CPython object (Part 2b of
     /// #1371; `pycc_types::foreign::compare::membership_ty` owns the
@@ -655,6 +673,14 @@ pub enum MirExpr {
     /// `pycc_codegen::exception::expression_can_set_exception` answers
     /// `true` for it.
     ObjList {
+        elements: Vec<MirExpr>,
+    },
+    /// A tuple, set or dict display with a CPython object element
+    /// (non-strict mode, #3), built as the CPython container: each element
+    /// boxed and evaluated left to right like [`MirExpr::ObjList`]'s. A dict
+    /// display's `elements` alternate key and value. [`Ty::Object`].
+    ObjDisplay {
+        kind: ObjDisplayKind,
         elements: Vec<MirExpr>,
     },
     /// `isinstance(value, class)` where `value` is a CPython object (Part 1
@@ -904,6 +930,25 @@ pub struct MirComprehension {
     pub elt: MirCompElt,
 }
 
+/// The CPython container a [`MirExpr::ObjDisplay`] builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjDisplayKind {
+    Tuple,
+    Set,
+    Dict,
+}
+
+impl ObjDisplayKind {
+    /// The selector `pycc_ext_obj_build_display` switches on.
+    pub fn shim_code(self) -> u64 {
+        match self {
+            Self::Tuple => 0,
+            Self::Set => 1,
+            Self::Dict => 2,
+        }
+    }
+}
+
 /// A lowered comprehension's element expressions, by kind (#1254).
 #[derive(Debug, Clone, PartialEq)]
 pub enum MirCompElt {
@@ -1148,11 +1193,13 @@ impl MirExpr {
                 }
             }
             MirExpr::ObjIsInstance { .. } | MirExpr::ObjContains { .. } => Ty::Bool,
+            MirExpr::ObjBinOp { .. } | MirExpr::ObjUnaryOp { .. } => Ty::Object,
             // Part 2b of #1371: CPython's own slice result, opaque.
             // Part 11 of #1371: `type(o)` is CPython's own class object.
-            MirExpr::ObjSlice { .. } | MirExpr::ObjList { .. } | MirExpr::ObjType { .. } => {
-                Ty::Object
-            }
+            MirExpr::ObjSlice { .. }
+            | MirExpr::ObjList { .. }
+            | MirExpr::ObjDisplay { .. }
+            | MirExpr::ObjType { .. } => Ty::Object,
             // Hardcoded for `ObjLen`'s reason, not `ObjSubscript`'s: the
             // element type is known, it is just not recoverable from the
             // base. A `memoryview` parameter is one-dimensional and `"d"`-
@@ -1290,6 +1337,7 @@ impl MirExpr {
             }
             MirExpr::ListLiteral(elements)
             | MirExpr::ObjList { elements }
+            | MirExpr::ObjDisplay { elements, .. }
             | MirExpr::SetLiteral { elements, .. }
             | MirExpr::TupleLiteral(elements) => {
                 for element in elements {
@@ -1353,6 +1401,7 @@ impl MirExpr {
             }
             // #1335: the operand is the only child (`hash((r := R()))`).
             MirExpr::InstanceHash { operand, .. } => operand.collect_named_expr_bindings(out),
+            MirExpr::ObjUnaryOp { operand, .. } => operand.collect_named_expr_bindings(out),
             MirExpr::AttrGet { base, .. }
             | MirExpr::ObjAttrGet { base, .. }
             | MirExpr::ObjLen { base }
@@ -1404,6 +1453,7 @@ impl MirExpr {
                 index.collect_named_expr_bindings(out);
             }
             MirExpr::ObjCompare { left, right, .. }
+            | MirExpr::ObjBinOp { left, right, .. }
             | MirExpr::ObjContains {
                 item: left,
                 container: right,
@@ -1693,6 +1743,20 @@ pub enum MirStmt {
     ObjDelAttr {
         base: MirExpr,
         attr: String,
+    },
+    /// `base[key] = value` where `base` is a CPython object (non-strict
+    /// mode, #3): `PyObject_SetItem`. Codegen evaluates `value`, then `base`,
+    /// then `key`, CPython's own order for a subscript assignment.
+    ObjSetItem {
+        base: MirExpr,
+        key: MirExpr,
+        value: MirExpr,
+    },
+    /// `del base[key]` where `base` is a CPython object (non-strict mode,
+    /// #3): `PyObject_DelItem`.
+    ObjDelItem {
+        base: MirExpr,
+        key: MirExpr,
     },
     /// PEP 634-636 (#381, PR-21): A sequence of statements executed in
     /// order — used by `match` lowering to pair the subject-temporary
@@ -2149,6 +2213,8 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::ObjDelSlice { .. }
             | MirStmt::ObjAttrSet { .. }
             | MirStmt::ObjDelAttr { .. }
+            | MirStmt::ObjSetItem { .. }
+            | MirStmt::ObjDelItem { .. }
             | MirStmt::ObjRaise { .. }
             | MirStmt::ForeignImport { .. }
             | MirStmt::Break

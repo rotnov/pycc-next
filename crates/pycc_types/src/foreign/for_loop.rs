@@ -16,6 +16,31 @@ pub(crate) fn check_module_object_loop(
     var: &str,
     body: &[HirStmt],
 ) -> Result<(), Diagnostic> {
+    check_object_loop(env, var, body, |body_env, body| {
+        narrow::check_stmt_sequence(body_env, body)
+    })
+}
+
+/// [`check_module_object_loop`] for a function body (non-strict mode, #3),
+/// whose loop runs on the function's own failure edge.
+pub(crate) fn check_function_object_loop(
+    env: &mut Environment,
+    local_names: &[&str],
+    var: &str,
+    body: &[HirStmt],
+    return_ty: Ty,
+) -> Result<(), Diagnostic> {
+    check_object_loop(env, var, body, |body_env, body| {
+        narrow::check_stmt_sequence_in_function(body_env, local_names, body, return_ty)
+    })
+}
+
+fn check_object_loop(
+    env: &mut Environment,
+    var: &str,
+    body: &[HirStmt],
+    check_body: impl FnOnce(&mut Environment, &[HirStmt]) -> Result<(), Diagnostic>,
+) -> Result<(), Diagnostic> {
     // The loop variable holds each item as another opaque
     // `PyObject *`. It is bound directly rather than through
     // `check_assignment`: that function's K1 guard now refuses an
@@ -90,7 +115,7 @@ pub(crate) fn check_module_object_loop(
     let mut body_env = env.clone();
     narrow::apply_kill_prescan(&mut body_env, body);
     narrow::apply_delete_prescan(&mut body_env, body, Some(var));
-    narrow::check_stmt_sequence(&mut body_env, body)?;
+    check_body(&mut body_env, body)?;
     join_loop_body(env, &body_env);
     // The loop may execute zero times, so a newly introduced loop
     // variable is only maybe-bound afterwards -- exactly as in

@@ -202,6 +202,8 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
         // `o.x = v` and `del o.x` (#1457) bind no name either: the store
         // writes into the object, and `pycc_hir` refuses a walrus in a `del`.
         MirStmt::ObjAttrSet { .. } | MirStmt::ObjDelAttr { .. } => {}
+        // `o[k] = v` and `del o[k]` (non-strict mode, #3): as `DictSet`.
+        MirStmt::ObjSetItem { .. } | MirStmt::ObjDelItem { .. } => {}
         // `MirStmt::ForDict`, produced when a `for k in d:` HIR loop's
         // base resolves to a dict-typed binding (mirrors `MirStmt::ForList`
         // above, which is produced for the list-typed case). `Ty::Str` for

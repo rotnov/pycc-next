@@ -48,6 +48,10 @@ use pycc_hir::{BinOpKind, Ty};
 /// The bitwise and shift operators (#1210) are tested first, before either
 /// string rule, by [`bitwise_result_type`].
 pub(crate) fn numeric_result_type(op: BinOpKind, left: Ty, right: Ty) -> Result<Ty, Diagnostic> {
+    // Non-strict mode (#3): an `object` operand runs CPython's own operator.
+    if let Some(result) = crate::foreign::arith::object_binop_ty(None, &left, &right) {
+        return result;
+    }
     if is_bitwise(op) {
         return bitwise_result_type(op, &left, &right);
     }

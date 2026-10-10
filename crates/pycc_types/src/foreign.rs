@@ -641,6 +641,7 @@ pub(crate) fn seed_fallback_rebindings(
     }
 }
 
+pub(crate) mod arith;
 pub(crate) mod attr_store;
 pub(crate) mod compare;
 pub(crate) mod for_loop;

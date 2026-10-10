@@ -290,6 +290,8 @@ impl Verifier<'_> {
             }
             MirStmt::ObjAttrSet { base, value, .. } => self.exprs([base, value]),
             MirStmt::ObjDelAttr { base, .. } => self.expr(base),
+            MirStmt::ObjSetItem { base, key, value } => self.exprs([value, base, key]),
+            MirStmt::ObjDelItem { base, key } => self.exprs([base, key]),
             MirStmt::ObjDelSlice {
                 base,
                 start,
@@ -404,6 +406,7 @@ impl Verifier<'_> {
             | MirExpr::ObjAttrGet { base: inner, .. }
             | MirExpr::ObjLen { base: inner }
             | MirExpr::ObjType { base: inner }
+            | MirExpr::ObjUnaryOp { operand: inner, .. }
             | MirExpr::BufferLen { base: inner }
             | MirExpr::BufferAlloc { len: inner }
             | MirExpr::FrozenSetFrom {
@@ -441,6 +444,7 @@ impl Verifier<'_> {
                 index: right,
             }
             | MirExpr::ObjCompare { left, right, .. }
+            | MirExpr::ObjBinOp { left, right, .. }
             | MirExpr::ObjContains {
                 item: left,
                 container: right,
@@ -472,6 +476,9 @@ impl Verifier<'_> {
             }
             MirExpr::ListLiteral(items)
             | MirExpr::ObjList { elements: items }
+            | MirExpr::ObjDisplay {
+                elements: items, ..
+            }
             | MirExpr::TupleLiteral(items) => self.exprs(items),
             MirExpr::SetLiteral { elements, ops } => {
                 if let (Some(ops), Some(first)) = (ops, elements.first()) {

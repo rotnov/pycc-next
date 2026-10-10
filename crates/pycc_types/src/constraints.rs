@@ -1162,7 +1162,7 @@ pub(crate) fn collect_expr_constraints(
         HirExpr::Unpack { value, .. } => {
             collect_expr_constraints(signatures, parents, concrete, deferred, env, value)
         }
-        HirExpr::BinOp { op, left, right } => {
+        HirExpr::BinOp { op, left, right } | HirExpr::AugBinOp { op, left, right } => {
             let left =
                 collect_expr_constraints(signatures, parents, concrete, deferred, env, left)?;
             let right =
@@ -2318,6 +2318,7 @@ fn bind_named_expr_targets(
             Ok(())
         }
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             bind_named_expr_targets(signatures, parents, concrete, deferred, env, left)?;
@@ -2798,6 +2799,18 @@ pub(crate) fn collect_block_constraints(
                     env,
                     base,
                 )?;
+            }
+            HirStmt::DeleteItem { base, key, .. } => {
+                for expr in [base, key] {
+                    collect_expr_constraints(
+                        signatures,
+                        parents,
+                        concrete,
+                        &mut constraints.deferred,
+                        env,
+                        expr,
+                    )?;
+                }
             }
             HirStmt::ExprStmt(expr) => {
                 // PEP 572 (#774), deep-review follow-up (round 4): bind
@@ -3290,6 +3303,19 @@ pub(crate) fn collect_block_constraints(
                 {
                     continue;
                 }
+                // Non-strict mode (#3): a still-unresolved value returned into
+                // a declared `object` slot is the same boxing seam (unifying
+                // would pin `return a + 1`'s `int` to `object`), and an object
+                // returned into a scalar slot is the run-time conversion.
+                if matches!((&return_term, &actual), (Ok(Ty::Object), Some(Err(_))))
+                    || matches!(
+                        (&return_term, &actual),
+                        (Ok(declared), Some(Ok(actual_ty)))
+                            if crate::non_strict::admits_coercion(actual_ty, declared)
+                    )
+                {
+                    continue;
+                }
                 if let Some(actual) = actual {
                     // #949: this solver runs over *every* module-level
                     // function, not only D-038 private helpers, so the context
@@ -3770,6 +3796,7 @@ pub(crate) fn contains_return(body: &[HirStmt]) -> bool {
         | HirStmt::Delete { .. }
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
+        | HirStmt::DeleteItem { .. }
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
@@ -3832,6 +3859,7 @@ pub(crate) fn introduces_bindings(body: &[HirStmt]) -> bool {
         | HirStmt::ExprStmt(_)
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
+        | HirStmt::DeleteItem { .. }
         | HirStmt::Break
         | HirStmt::Continue => false,
         HirStmt::Try {

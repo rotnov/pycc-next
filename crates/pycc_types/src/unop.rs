@@ -53,6 +53,13 @@ use pycc_hir::{Ty, UnaryOpKind};
 /// Types a unary expression from its operator and its operand type.
 pub(crate) fn unary_result_type(op: UnaryOpKind, operand: Ty) -> Result<Ty, Diagnostic> {
     match op {
+        // Non-strict mode (#3): `-o`, `+o` and `~o` are CPython's own
+        // `PyNumber_Negative`/`_Positive`/`_Invert`, whose result is an object.
+        UnaryOpKind::USub | UnaryOpKind::UAdd | UnaryOpKind::Invert
+            if operand == Ty::Object && crate::non_strict::is_non_strict() =>
+        {
+            Ok(Ty::Object)
+        }
         UnaryOpKind::USub | UnaryOpKind::UAdd => match operand {
             Ty::Bool | Ty::Int => Ok(Ty::Int),
             Ty::Float => Ok(Ty::Float),

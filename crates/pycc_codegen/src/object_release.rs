@@ -139,7 +139,10 @@ pub(super) fn is_produced(expr: &MirExpr) -> bool {
         | MirExpr::ObjType { .. }
         | MirExpr::ObjSlice { .. }
         | MirExpr::ObjList { .. }
-        | MirExpr::ObjUnpack { .. } => true,
+        | MirExpr::ObjUnpack { .. }
+        | MirExpr::ObjBinOp { .. }
+        | MirExpr::ObjDisplay { .. }
+        | MirExpr::ObjUnaryOp { .. } => true,
         MirExpr::ObjCompare { .. } => expr.ty() == pycc_mir::Ty::Object,
         // Part 3 of #1092: the fresh CPython `list`/`set` the comprehension
         // builds (`object_comprehension.rs`).

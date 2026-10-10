@@ -263,6 +263,10 @@ pub struct ResolvedImports<'a> {
     /// `false` by default, which is every `native` path (`pycc check`,
     /// `pycc build`/`run`, `lower_all`), so their output is unchanged.
     ext_module: bool,
+    /// Non-strict mode (#3): a missing public annotation and `Any`,
+    /// `object` or an object container lower to the opaque `Ty::Object`
+    /// instead of `T0001`/`T0002`. `false` by default (strict).
+    non_strict: bool,
 }
 
 impl<'a> ResolvedImports<'a> {
@@ -276,6 +280,15 @@ impl<'a> ResolvedImports<'a> {
 
     pub(crate) fn ext_module(&self) -> bool {
         self.ext_module
+    }
+
+    /// Selects non-strict lowering for the module (#3).
+    pub fn set_non_strict(&mut self, non_strict: bool) {
+        self.non_strict = non_strict;
+    }
+
+    pub(crate) fn non_strict(&self) -> bool {
+        self.non_strict
     }
 
     /// Adds container method names that one of this module's dependencies

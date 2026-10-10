@@ -94,6 +94,8 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
             | MirStmt::ObjDelSlice { .. }
             | MirStmt::ObjAttrSet { .. }
             | MirStmt::ObjDelAttr { .. }
+            | MirStmt::ObjSetItem { .. }
+            | MirStmt::ObjDelItem { .. }
             | MirStmt::AttrSet { .. } => false,
         };
         if terminates {

@@ -23,6 +23,7 @@ mod loop_flow;
 mod module;
 mod monomorphize;
 mod narrow;
+mod non_strict;
 mod not_implemented;
 mod object_box;
 mod object_none;
@@ -68,6 +69,7 @@ pub use module::{
 #[cfg(test)]
 pub(crate) use module::{check_with_signatures, checked_function_signatures};
 pub use monomorphize::*;
+pub use non_strict::set_non_strict;
 
 use pycc_diag::{Diagnostic, Span};
 #[cfg(test)]
@@ -623,6 +625,7 @@ pub(crate) fn collect_named_expr_names_in_expr<'a>(expr: &'a HirExpr, names: &mu
             }
         }
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             collect_named_expr_names_in_expr(left, names);
@@ -802,6 +805,7 @@ fn collect_local_names<'a>(body: &'a [HirStmt], names: &mut Vec<&'a str>) {
             | HirStmt::AttrSet { .. }
             | HirStmt::DeleteSlice { .. }
             | HirStmt::DeleteAttr { .. }
+            | HirStmt::DeleteItem { .. }
             | HirStmt::Break
             | HirStmt::Continue
             | HirStmt::Raise { .. } => {}
@@ -1144,6 +1148,9 @@ fn check_assignment_of(
             None => false,
         };
         if !class::is_assignable_env(env, &ty, &previous) && !boxed {
+            non_strict::request_widen(target, &previous, &ty, |t| {
+                matches!(t, Ty::Object | Ty::None) || foreign::is_object_operand(env, t)
+            });
             // #380 (PR-20): if the mismatch involves a protocol,
             // produce a detailed T0046 conformance error.
             let diag = if matches!(previous, Ty::Protocol(_)) || matches!(ty, Ty::Protocol(_)) {
@@ -1265,6 +1272,7 @@ fn collect_named_expr_bindings(
             Ok(())
         }
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             collect_named_expr_bindings(env, local_names, left)?;
@@ -1404,6 +1412,9 @@ fn join_if_branches(
             // Both branches bind the name.
             (BindingState::Definitely(bt), Some(BindingState::Definitely(ot))) => {
                 if bt != ot && !is_assignable(bt.clone(), ot.clone()) {
+                    non_strict::request_widen(name, bt, ot, |t| {
+                        matches!(t, Ty::Object | Ty::None) || foreign::is_object_operand(env, t)
+                    });
                     return Err(Diagnostic::error(
                         "T0023",
                         format!(
@@ -2518,6 +2529,9 @@ fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<(), Diagnosti
         HirStmt::DeleteAttr { base, span, .. } => {
             foreign::attr_store::check_delete_attr(env, &[], base, *span)
         }
+        HirStmt::DeleteItem { base, key, span } => {
+            foreign::arith::check_delete_item(env, &[], base, key, *span)
+        }
         HirStmt::ForeignImport { bindings, .. } => {
             foreign::bind_block_import(env, bindings);
             Ok(())
@@ -2545,6 +2559,17 @@ fn check_dict_set(
     // refusal -- and before it, through `lookup_bound_name_for_store`,
     // because `lookup_bound_name`'s own `reject_memoryview_read` would
     // otherwise report `C0001` one line earlier still.
+    //
+    // Non-strict mode (#3): `o[k] = v` on a CPython object is
+    // `PyObject_SetItem`. The base is read through the ordinary `Name`
+    // arm, which admits an object read; any other answer falls through.
+    if non_strict::is_non_strict()
+        && let Ok(Ty::Object) = infer_expr_in(env, local_names, &HirExpr::Name(dict.to_string()))
+    {
+        let key_ty = infer_expr_in(env, local_names, key)?;
+        let value_ty = infer_expr_in(env, local_names, value)?;
+        return crate::foreign::arith::check_object_set_item(env, value, &key_ty, &value_ty);
+    }
     let dict_ty = lookup_bound_name_for_store(env, local_names, dict)?;
     if dict_ty == Ty::MemoryView {
         return check_buffer_set(env, local_names, key, value);
@@ -2996,6 +3021,7 @@ fn check_stmt_arm_in_function(
             let actual = infer_expr_in(env, local_names, expr)?;
             if !class::is_assignable_env(env, &actual, &return_ty)
                 && !object_box::admits_value(env, expr, &actual, &return_ty)?
+                && !non_strict::admits_coercion(&actual, &return_ty)
             {
                 // #1344: an inferred `set[int]` return the solver could not
                 // widen to the `set[C]` the body builds is a compiler limit,
@@ -3209,6 +3235,19 @@ fn check_stmt_arm_in_function(
                     return_ty.clone(),
                 );
             }
+            // Non-strict mode (#3): a local or parameter bound to a CPython
+            // object iterates through CPython, as in a module body.
+            if crate::non_strict::is_non_strict()
+                && let Some(BindingState::Definitely(Ty::Object)) = env.binding_state(list)
+            {
+                return foreign::for_loop::check_function_object_loop(
+                    env,
+                    local_names,
+                    var,
+                    body,
+                    return_ty.clone(),
+                );
+            }
             let list_ty = lookup_bound_name(env, local_names, list)?;
             // See the module-scope `check_stmt` arm's own comment (PR-11
             // Task 3, D-123): `for k in d:` iterates a dict's keys. PR-11
@@ -3266,6 +3305,25 @@ fn check_stmt_arm_in_function(
         // `T0043`). A message promising that a module body implements the
         // construct would send those callers to a scope where their program
         // fails differently.
+        // Non-strict mode (#3) admits it when the iterable is an object.
+        HirStmt::ForObject { var, iter, body } if non_strict::is_non_strict() => {
+            if infer_expr_in(env, local_names, iter)? != Ty::Object {
+                return Err(Diagnostic::error(
+                    "I0404",
+                    "`for ... in <attribute or method call>` is only supported when the \
+                     iterable is a CPython object"
+                        .to_string(),
+                    Span::new(0, 0),
+                ));
+            }
+            foreign::for_loop::check_function_object_loop(
+                env,
+                local_names,
+                var,
+                body,
+                return_ty.clone(),
+            )
+        }
         HirStmt::ForObject { .. } => Err(Diagnostic::error(
             "I0404",
             "`for ... in <attribute or method call>` is not supported inside a function body \
@@ -3489,6 +3547,9 @@ fn check_stmt_arm_in_function(
         ),
         HirStmt::DeleteAttr { base, span, .. } => {
             foreign::attr_store::check_delete_attr(env, local_names, base, *span)
+        }
+        HirStmt::DeleteItem { base, key, span } => {
+            foreign::arith::check_delete_item(env, local_names, base, key, *span)
         }
         // `pycc_hir` never produces this node in a function body; binding
         // it here keeps the two statement checkers in step (#1291).
@@ -3731,6 +3792,10 @@ fn reject_generic_calls_in_stmt(
             exprs.extend([start, stop, step].into_iter().flatten().map(|b| &**b));
         }
         HirStmt::DeleteAttr { base, .. } => exprs.push(base),
+        HirStmt::DeleteItem { base, key, .. } => {
+            exprs.push(base);
+            exprs.push(key);
+        }
         HirStmt::If { test, body, orelse } => {
             exprs.push(test);
             blocks.push(body);
@@ -3862,6 +3927,7 @@ fn reject_generic_calls_in_expr(
             Ok(())
         }
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             reject_generic_calls_in_expr(module_env, own_name, left)?;

@@ -665,7 +665,11 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         | MirExpr::ObjType { .. }
         // Part 2d of #1371: a list display built as a CPython `list` is
         // `Ty::Object`.
-        | MirExpr::ObjList { .. } => false,
+        | MirExpr::ObjList { .. }
+        // Non-strict mode (#3): an object operator's `.ty()` is `Ty::Object`.
+        | MirExpr::ObjBinOp { .. }
+        | MirExpr::ObjDisplay { .. }
+        | MirExpr::ObjUnaryOp { .. } => false,
     }
 }
 

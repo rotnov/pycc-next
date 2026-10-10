@@ -34,13 +34,18 @@ use std::collections::{BTreeSet, HashSet};
 /// type question `pycc_types` answers. Every other target kind is refused: the
 /// parser already rejects starred, call and literal targets (`L0001`), so what
 /// reaches here is a name, a tuple/list, a subscript or an attribute.
+///
+/// `non_strict` (#3) admits an item target (`del o[k]`) as a
+/// [`HirStmt::DeleteItem`], whose base `pycc_types` requires to be a CPython
+/// object; strict mode keeps refusing it here.
 pub(crate) fn lower_delete(
     del: &StmtDelete,
     lower_expr: &dyn Fn(&Expr) -> Result<HirExpr, Diagnostic>,
+    non_strict: bool,
 ) -> Result<Vec<HirStmt>, Diagnostic> {
     let mut lowered = Vec::new();
     for target in &del.targets {
-        lower_target(target, lower_expr, &mut lowered)?;
+        lower_target(target, lower_expr, non_strict, &mut lowered)?;
     }
     Ok(lowered)
 }
@@ -48,6 +53,7 @@ pub(crate) fn lower_delete(
 fn lower_target(
     target: &Expr,
     lower_expr: &dyn Fn(&Expr) -> Result<HirExpr, Diagnostic>,
+    non_strict: bool,
     lowered: &mut Vec<HirStmt>,
 ) -> Result<(), Diagnostic> {
     match target {
@@ -64,21 +70,38 @@ fn lower_target(
         }
         Expr::Tuple(tuple) => {
             for elt in &tuple.elts {
-                lower_target(elt, lower_expr, lowered)?;
+                lower_target(elt, lower_expr, non_strict, lowered)?;
             }
         }
         Expr::List(list) => {
             for elt in &list.elts {
-                lower_target(elt, lower_expr, lowered)?;
+                lower_target(elt, lower_expr, non_strict, lowered)?;
             }
         }
         Expr::Subscript(subscript) => {
             let Expr::Slice(slice) = subscript.slice.as_ref() else {
-                return Err(unsupported(
-                    "a `del` of a subscript (`del d[k]`, `del xs[i]`) is not supported yet \
-                     (#1245 for `dict`, #1246 for `list`)",
-                    subscript.range,
-                ));
+                if !non_strict {
+                    return Err(unsupported(
+                        "a `del` of a subscript (`del d[k]`, `del xs[i]`) is not supported yet \
+                         (#1245 for `dict`, #1246 for `list`)",
+                        subscript.range,
+                    ));
+                }
+                let base = Box::new(lower_expr(&subscript.value)?);
+                let key = Box::new(lower_expr(&subscript.slice)?);
+                if crate::expr::contains_named_expr(&base) || crate::expr::contains_named_expr(&key)
+                {
+                    return Err(unsupported(
+                        super::WALRUS_PLACEMENT_MESSAGE,
+                        subscript.range,
+                    ));
+                }
+                lowered.push(HirStmt::DeleteItem {
+                    base,
+                    key,
+                    span: Span::new(subscript.range.start().into(), subscript.range.end().into()),
+                });
+                return Ok(());
             };
             // CPython's order: the base, then each present bound.
             let base = Box::new(lower_expr(&subscript.value)?);
@@ -200,6 +223,7 @@ fn collect_deleted_names(body: &[HirStmt], deleted: &mut HashSet<String>) {
             | HirStmt::AttrSet { .. }
             | HirStmt::DeleteSlice { .. }
             | HirStmt::DeleteAttr { .. }
+            | HirStmt::DeleteItem { .. }
             | HirStmt::ForeignImport { .. }
             | HirStmt::Break
             | HirStmt::Continue

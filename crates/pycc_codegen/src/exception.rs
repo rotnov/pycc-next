@@ -180,7 +180,12 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // #1476: a narrowed `object` read may fail (an `int` outside the
         // inline range is `OverflowError`), and `object_unbox::emit_unboxed`
         // owns the status check.
-        | MirExpr::ObjectUnbox(_, _) => true,
+        | MirExpr::ObjectUnbox(_, _)
+        // Non-strict mode (#3): CPython's operators raise (`TypeError`,
+        // `ZeroDivisionError`, ...); `foreign_arith` owns the `NULL` check.
+        | MirExpr::ObjBinOp { .. }
+        | MirExpr::ObjDisplay { .. }
+        | MirExpr::ObjUnaryOp { .. } => true,
         // Part 1 of #1371: a rich comparison runs the operands' own
         // `__eq__`/`__lt__`/..., which may raise, and
         // `foreign_compare::emit_compare` owns the `NULL` check; an

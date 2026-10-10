@@ -260,11 +260,13 @@ pub(crate) fn lower_arg_list(
                     && let Some(ty) = param
                         .default
                         .as_deref()
-                        .filter(|_| is_ext_module(aliases))
+                        .filter(|_| is_ext_module(aliases) && !is_non_strict(aliases))
                         .and_then(|default| params::unannotated_default_ty(default, policy)) =>
                 {
                     ty
                 }
+                // Non-strict mode (#3): what is not annotated is an object.
+                None if is_public && is_non_strict(aliases) => Ty::Object,
                 None if is_public => {
                     return Err(Diagnostic::error(
                         "T0001",
@@ -280,7 +282,16 @@ pub(crate) fn lower_arg_list(
             let default = param
                 .default
                 .as_deref()
-                .map(|default| params::check_default(default, name, fn_name, &ty, policy))
+                .map(|default| {
+                    params::check_default(
+                        default,
+                        name,
+                        fn_name,
+                        &ty,
+                        policy,
+                        is_non_strict(aliases),
+                    )
+                })
                 .transpose()?;
             Ok(((name.to_string(), ty), default))
         })
@@ -342,6 +353,8 @@ pub(crate) fn lower_return_annotation(
             }
             Ok(ty)
         }
+        // Non-strict mode (#3): an unannotated public return is an object.
+        None if is_public && is_non_strict(aliases) => Ok(Ty::Object),
         None if is_public => Err(Diagnostic::error(
             "T0001",
             format!("public function `{fn_name}` needs a return type annotation"),
@@ -389,6 +402,21 @@ fn name_resolves_before_class_defs(base: &str) -> bool {
 /// new parameter. The name is not a Python identifier, so no source name
 /// can ever look it up, and it is stripped before the `HirModule` is built.
 pub(crate) const EXT_MODULE_MARKER: &str = "<ext module>";
+
+/// The alias-table entry that marks a module lowered in non-strict mode
+/// (#3), recorded and stripped exactly like [`EXT_MODULE_MARKER`].
+pub(crate) const NON_STRICT_MARKER: &str = "<non-strict module>";
+
+/// Whether `aliases` carries [`NON_STRICT_MARKER`].
+pub(crate) fn is_non_strict(aliases: &[(String, Ty)]) -> bool {
+    aliases.iter().any(|(name, _)| name == NON_STRICT_MARKER)
+}
+
+/// Whether `Any`, `object` and an object container spell `Ty::Object`: in
+/// an `ext` module (D-258) and in non-strict mode (#3).
+pub(crate) fn objects_spellable(aliases: &[(String, Ty)]) -> bool {
+    is_ext_module(aliases) || is_non_strict(aliases)
+}
 
 /// Whether `aliases` carries [`EXT_MODULE_MARKER`], that is, whether the
 /// annotation being lowered belongs to an `ext` module (D-258 rule 1).
@@ -568,7 +596,7 @@ pub(crate) fn annotation_to_ty(
             // D-258 rule 2 (#1397): in an `ext` module `Any` is the opaque
             // CPython object a foreign import binds. Everywhere else it keeps
             // `T0002`, with the same code, message and span.
-            "Any" if is_ext_module(aliases) => Ok(Ty::Object),
+            "Any" if objects_spellable(aliases) => Ok(Ty::Object),
             "Any" => Err(Diagnostic::error(
                 "T0002",
                 "`Any` is not permitted in pycc code outside a declared interop boundary"
@@ -609,7 +637,9 @@ pub(crate) fn annotation_to_ty(
                 // alias table, on the `ndarray` terms above: a module's own
                 // `class list:` or `type object = ...` shadows the builtin, as
                 // it does in Python.
-                if is_ext_module(aliases) && (other == "object" || is_ext_object_container(other)) {
+                if objects_spellable(aliases)
+                    && (other == "object" || is_ext_object_container(other))
+                {
                     return Ok(Ty::Object);
                 }
                 Err({

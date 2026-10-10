@@ -167,7 +167,7 @@ pub(super) fn container_annotation_to_ty(
     // Checked before the D-105/D-122 capability gate, which governs native
     // containers only; a container whose arguments are all native is
     // unaffected and still reaches that gate.
-    if super::is_ext_module(aliases) && elements.contains(&Ty::Object) {
+    if super::objects_spellable(aliases) && elements.contains(&Ty::Object) {
         return Ok(Ty::Object);
     }
     let mut elements = elements.into_iter();

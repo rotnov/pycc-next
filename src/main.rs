@@ -8,6 +8,7 @@ mod frontend;
 mod interop_policy;
 mod lock;
 mod memoryview_mode;
+mod mode;
 mod modules;
 mod project_config;
 mod source;
@@ -47,7 +48,9 @@ fn main() -> ExitCode {
             foreign_relative_imports,
             static_libpython,
             interop,
+            mode,
         } => {
+            mode::set_cli_non_strict(mode.non_strict);
             // Resolved here, not inside `try_build`: this consumption point
             // (a neighboring `pycc.toml`'s `[build] opt = "release"` as a
             // default profile) is scoped to `pycc build` specifically --
@@ -97,7 +100,11 @@ fn main() -> ExitCode {
             path,
             args,
             interop,
-        } => run(&path, &args, interop.into_cli()),
+            mode,
+        } => {
+            mode::set_cli_non_strict(mode.non_strict);
+            run(&path, &args, interop.into_cli())
+        }
         Command::Version { verbose } => {
             // `pycc {version}` comes from the manifest (`CARGO_PKG_VERSION`),
             // so it can't silently rot when the crate bumps. `rustc
@@ -133,12 +140,18 @@ fn main() -> ExitCode {
             paths,
             error_format,
             interop,
-        } => check_paths(&paths, error_format, interop.into_cli()),
+            mode,
+        } => {
+            mode::set_cli_non_strict(mode.non_strict);
+            check_paths(&paths, error_format, interop.into_cli())
+        }
         Command::Lock {
             path,
             check,
             interop,
+            mode,
         } => {
+            mode::set_cli_non_strict(mode.non_strict);
             // Read from the environment here, like `build`'s toolchain: the
             // lock is taken from the interpreter an embedded build bundles.
             let toolchain = embed::EmbedToolchain::from_env();

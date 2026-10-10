@@ -254,6 +254,10 @@ impl<'a> Walker<'a> {
                 }
             }
             HirStmt::DeleteAttr { base, .. } => self.expr(base),
+            HirStmt::DeleteItem { base, key, .. } => {
+                self.expr(base);
+                self.expr(key);
+            }
             HirStmt::ForeignImport { .. } => {}
         }
     }
@@ -327,6 +331,7 @@ impl<'a> Walker<'a> {
             HirExpr::Name(name) => self.name_use(name),
             HirExpr::Call { callee, args } => self.call(callee, args),
             HirExpr::BinOp { left, right, .. }
+            | HirExpr::AugBinOp { left, right, .. }
             | HirExpr::Compare { left, right, .. }
             | HirExpr::BoolOp { left, right, .. } => {
                 self.expr(left);

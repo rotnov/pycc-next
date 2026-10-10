@@ -67,6 +67,22 @@ pub(crate) fn admits_value(
     from: &Ty,
     to: &Ty,
 ) -> Result<bool, Diagnostic> {
+    // Non-strict mode (#3): a display of boxable elements becomes a fresh
+    // CPython container -- no aliasing to break, since nothing else holds it.
+    if *to == Ty::Object && crate::non_strict::is_non_strict() && display_boxable(value, from) {
+        return Ok(true);
+    }
+    // Non-strict mode (#3): a name holding a native container that flows
+    // into an `object` slot becomes an `object` itself (widening), so the
+    // container it builds is the CPython one from the start.
+    if let (Ty::Object, HirExpr::Name(name)) = (to, value)
+        && matches!(
+            from,
+            Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_)
+        )
+    {
+        crate::non_strict::request_widen(name, from, &Ty::Object, |_| true);
+    }
     if !admits(env, from, to) {
         return Ok(false);
     }
@@ -76,6 +92,24 @@ pub(crate) fn admits_value(
         "boxing a class method's `cls` into an `object` slot",
     )?;
     Ok(true)
+}
+
+/// Whether `value` is a list, tuple, set or dict display of type `ty` whose
+/// every element is a packable scalar or object, or itself such a display.
+pub(crate) fn display_boxable(value: &HirExpr, ty: &Ty) -> bool {
+    let element = |e: &HirExpr, t: &Ty| foreign::is_packable_operand(t) || display_boxable(e, t);
+    match (value, ty) {
+        (HirExpr::ListLiteral(es), Ty::List(t)) | (HirExpr::SetLiteral(es), Ty::Set(t)) => {
+            es.iter().all(|e| element(e, t))
+        }
+        (HirExpr::TupleLiteral(es), Ty::Tuple(ts)) => {
+            es.len() == ts.len() && es.iter().zip(ts.iter()).all(|(e, t)| element(e, t))
+        }
+        (HirExpr::DictLiteral(pairs), Ty::Dict(kv)) => pairs
+            .iter()
+            .all(|(k, v)| element(k, &kv.0) && element(v, &kv.1)),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

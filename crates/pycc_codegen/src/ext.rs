@@ -1049,6 +1049,8 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::ObjDelSlice { .. }
         | MirStmt::ObjAttrSet { .. }
         | MirStmt::ObjDelAttr { .. }
+        | MirStmt::ObjSetItem { .. }
+        | MirStmt::ObjDelItem { .. }
         | MirStmt::ObjRaise { .. }
         | MirStmt::Raise { .. }
         | MirStmt::RaiseFrom { .. }

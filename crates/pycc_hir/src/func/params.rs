@@ -241,6 +241,7 @@ pub(crate) fn check_default(
     fn_name: &str,
     ty: &Ty,
     policy: DefaultPolicy,
+    non_strict: bool,
 ) -> Result<HirExpr, Diagnostic> {
     let range = pycc_ast::expr_range(default);
     if matches!(ty, Ty::Param(_)) {
@@ -257,7 +258,11 @@ pub(crate) fn check_default(
     };
     let from = default_ty(&lowered);
     let object_none = policy == DefaultPolicy::AdmitMethod && from == Ty::None && *ty == Ty::Object;
-    if *ty != Ty::Infer && !object_none && !literal_is_assignable(&from, ty) {
+    // Non-strict mode (#3): a scalar literal default is boxed into the object
+    // parameter like any scalar argument.
+    let object_scalar =
+        non_strict && *ty == Ty::Object && matches!(from, Ty::Int | Ty::Float | Ty::Bool | Ty::Str);
+    if *ty != Ty::Infer && !object_none && !object_scalar && !literal_is_assignable(&from, ty) {
         return Err(Diagnostic::error(
             "T0021",
             format!(

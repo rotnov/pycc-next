@@ -832,6 +832,7 @@ fn a_bare_file_name_importer_renders_its_directory_as_a_single_dot() {
         relative_imports: RelativeImports::Project,
         entry_package: None,
         ext_module: false,
+        non_strict: false,
     };
     let request = ProjectImportRequest {
         level: 1,
@@ -855,7 +856,7 @@ fn a_bare_file_name_importer_renders_its_directory_as_a_single_dot() {
 /// Loads `entry` under `pycc build --ext --foreign-relative-imports`'s mode
 /// (#1366).
 fn load_foreign(entry: &Path) -> Result<LoadedProgram, FrontendFailure> {
-    load_with(entry, None, RelativeImports::ForeignFromEntry, true)
+    load_with(entry, None, RelativeImports::ForeignFromEntry, true, false)
 }
 
 /// `(local_name, module_path)` of every plain foreign import of the entry

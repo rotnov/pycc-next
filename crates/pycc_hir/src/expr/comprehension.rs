@@ -89,6 +89,11 @@ pub(crate) fn rename_name_in_expr(expr: HirExpr, from: &str, to: &str) -> HirExp
             right: Box::new(recurse(*right)),
             truth_only,
         },
+        HirExpr::AugBinOp { op, left, right } => HirExpr::AugBinOp {
+            op,
+            left: Box::new(recurse(*left)),
+            right: Box::new(recurse(*right)),
+        },
         HirExpr::BinOp { op, left, right } => HirExpr::BinOp {
             op,
             left: Box::new(recurse(*left)),

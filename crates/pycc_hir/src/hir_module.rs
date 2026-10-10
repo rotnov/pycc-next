@@ -178,6 +178,7 @@ fn collect_killed_names(body: &[HirStmt], killed: &mut HashSet<String>) {
             | HirStmt::Delete { .. }
             | HirStmt::DeleteSlice { .. }
             | HirStmt::DeleteAttr { .. }
+            | HirStmt::DeleteItem { .. }
             | HirStmt::ForeignImport { .. }
             | HirStmt::Break
             | HirStmt::Continue
@@ -298,6 +299,7 @@ fn collect_named_expr_targets_in_expr(expr: &HirExpr, killed: &mut HashSet<Strin
         // `BoolOp` walks both operands even though HIR lowering admits a
         // walrus only in the first: the kill is conservative.
         HirExpr::BinOp { left, right, .. }
+        | HirExpr::AugBinOp { left, right, .. }
         | HirExpr::Compare { left, right, .. }
         | HirExpr::BoolOp { left, right, .. } => {
             collect_named_expr_targets_in_expr(left, killed);

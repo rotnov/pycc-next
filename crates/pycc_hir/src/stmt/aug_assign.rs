@@ -15,7 +15,7 @@
 
 use crate::expr::bin_op_kind;
 use crate::expr::unobservable::is_unobservable;
-use crate::unsupported;
+use crate::{HirExpr, HirStmt, unsupported};
 use pycc_ast::{Expr, ExprBinOp, ExprContext, Stmt, StmtAssign, StmtAugAssign};
 use pycc_diag::Diagnostic;
 
@@ -103,6 +103,28 @@ pub(super) fn desugar_aug_assign(aug: &StmtAugAssign) -> Result<Stmt, Diagnostic
             right: aug.value.clone(),
         })),
     }))
+}
+
+/// Marks the binary operation of a lowered augmented assignment as
+/// [`HirExpr::AugBinOp`], so an object operand runs CPython's in-place
+/// operator. Only the value of the plain store shapes the rewrite produces
+/// is marked; any other lowering (a property setter call) keeps the binary
+/// operator, which is exact for every native operand type it can carry.
+pub(super) fn mark_in_place(mut lowered: HirStmt) -> HirStmt {
+    let value = match &mut lowered {
+        HirStmt::Assign { value, .. }
+        | HirStmt::AttrSet { value, .. }
+        | HirStmt::DictSet { value, .. } => value,
+        _ => return lowered,
+    };
+    if let HirExpr::BinOp { op, left, right } = value {
+        *value = HirExpr::AugBinOp {
+            op: *op,
+            left: std::mem::replace(left, Box::new(HirExpr::NoneLiteral)),
+            right: std::mem::replace(right, Box::new(HirExpr::NoneLiteral)),
+        };
+    }
+    lowered
 }
 
 #[cfg(test)]

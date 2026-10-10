@@ -57,6 +57,61 @@ pub fn check_tuple_element_ty(element: &Ty, span: Span) -> Result<(), Diagnostic
     ))
 }
 
+/// The kind of display [`display_is_object`] judges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayKind {
+    List,
+    Tuple,
+    Set,
+    /// Element types alternate key and value.
+    Dict,
+}
+
+/// Whether a display with element types `elements` is built as the
+/// CPython container (non-strict mode, #3) rather than a native one: some
+/// element is an object, or the elements have no native representation --
+/// they differ (CPython containers are heterogeneous) or the native shape
+/// is not compiled ([`check_container_ty`]). `pycc_types` (which admits it
+/// only in non-strict mode) and `pycc_mir` (which builds it) share this one
+/// rule, so the checked type and the built node always agree.
+pub fn display_is_object(kind: DisplayKind, elements: &[Ty]) -> bool {
+    // An empty display reaches this rule only when the empty-container
+    // pre-pass found no native element type for it (`pycc_types` refuses it
+    // with `T0003` in strict mode).
+    if elements.is_empty() {
+        return true;
+    }
+    if elements.contains(&Ty::Object) {
+        return true;
+    }
+    fn uniform<'a>(mut tys: impl Iterator<Item = &'a Ty>) -> bool {
+        let first = tys.next();
+        tys.all(|ty| Some(ty) == first)
+    }
+    let span = Span::new(0, 0);
+    match kind {
+        // A uniform list keeps its native lowering even where that shape is
+        // not compiled yet: the checker reports the `T0034` then.
+        DisplayKind::List => !uniform(elements.iter()),
+        DisplayKind::Set => {
+            !uniform(elements.iter())
+                || check_container_ty(&Ty::Set(Box::new(elements[0].clone())), span).is_err()
+        }
+        DisplayKind::Dict => {
+            !uniform(elements.iter().step_by(2))
+                || !uniform(elements.iter().skip(1).step_by(2))
+                || check_container_ty(
+                    &Ty::Dict(Box::new((elements[0].clone(), elements[1].clone()))),
+                    span,
+                )
+                .is_err()
+        }
+        DisplayKind::Tuple => elements
+            .iter()
+            .any(|ty| check_tuple_element_ty(ty, span).is_err()),
+    }
+}
+
 /// Rejects a container `Ty` whose element types this version's codegen
 /// cannot represent: a `list[T]` whose element fails [`is_list_element_ty`] (`T0034`), `dict[str, int]`
 /// (`T0036`, D-122), `set[int]` and `frozenset[int]` (`T0038`, D-122) are

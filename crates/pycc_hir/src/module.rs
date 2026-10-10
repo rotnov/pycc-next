@@ -235,11 +235,20 @@ pub fn lower_module(
             .aliases
             .push((crate::func::EXT_MODULE_MARKER.to_string(), Ty::Object));
     }
+    // Non-strict mode (#3): the marker that tells `annotation_to_ty` and the
+    // parameter lowering to produce `Ty::Object` where strict mode refuses.
+    if resolved.non_strict() {
+        state.signatures.admit_object_receivers();
+        state.imported_alias_indices.push(state.aliases.len());
+        state
+            .aliases
+            .push((crate::func::NON_STRICT_MARKER.to_string(), Ty::Object));
+    }
     // Issue #1482: an own foreign import, top-level or in a module-level
     // `if`/`try`, admits for the whole module too, so a `def` written above
     // `import gc` reads `gc` as CPython does when it runs. Skipped when the
     // module is already admitted.
-    if !(resolved.object_receivers() || resolved.ext_module())
+    if !(resolved.object_receivers() || resolved.ext_module() || resolved.non_strict())
         && own_foreign::binds_foreign_import(module, resolved, &state.imports)
     {
         state.signatures.admit_object_receivers();
