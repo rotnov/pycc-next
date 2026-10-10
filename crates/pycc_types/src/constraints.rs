@@ -1596,6 +1596,50 @@ pub(crate) fn collect_expr_constraints(
                     return Ok(Some(Ok(if callee == "int" { Ty::Int } else { Ty::Str })));
                 }
             }
+            // The solver half of `crate::expr`'s `abs`/`divmod`/`int` arm. Only
+            // fully resolved arguments are admitted; anything else falls
+            // through to the same `C0001` as before.
+            if crate::int_builtins::NAMES.contains(&callee.as_str())
+                && !signatures.contains_key(callee)
+            {
+                let resolved: Option<Vec<Ty>> = arg_terms
+                    .iter()
+                    .map(|term| match term {
+                        Some(Ok(ty)) => Some(ty.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                match resolved {
+                    Some(resolved) => {
+                        if let Some(result) = crate::int_builtins::result_ty(callee, &resolved) {
+                            return Ok(Some(Ok(result?)));
+                        }
+                    }
+                    // An argument not resolved yet: `divmod` and `int` have a
+                    // fixed result, and `abs` has `0 + x`'s, so the deferred
+                    // binop rule types it; the check pass validates the
+                    // arguments once they resolve.
+                    None if callee == "abs" && arg_terms.len() == 1 => {
+                        if let Some(operand) = arg_terms[0].clone() {
+                            let result = fresh_term(parents, concrete);
+                            deferred.binops.push((
+                                BinOpKind::Add,
+                                Ok(Ty::Int),
+                                operand,
+                                result.clone(),
+                            ));
+                            return Ok(Some(result));
+                        }
+                    }
+                    None if callee == "divmod" && arg_terms.len() == 2 => {
+                        return Ok(Some(Ok(Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])))));
+                    }
+                    None if callee == "int" && arg_terms.len() == 1 => {
+                        return Ok(Some(Ok(Ty::Int)));
+                    }
+                    None => {}
+                }
+            }
             // Part 2b of #1142 (#1164), the solver half of `crate::expr`'s
             // own buffer-returning-call refusal. The two must not drift: this
             // solver runs first, so without the mirror an intra-artifact call

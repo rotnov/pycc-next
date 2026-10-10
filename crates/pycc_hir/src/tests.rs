@@ -779,11 +779,9 @@ fn print_with_a_float_argument_is_now_supported_at_the_hir_level() {
 }
 
 #[test]
-fn print_with_an_integer_too_large_for_i64_is_unsupported() {
-    assert_capability_error_message(
-        "print(99999999999999999999999999999999)\n",
-        "does not fit in i64",
-    );
+fn print_with_an_integer_too_large_for_i64_lowers() {
+    let module = pycc_parser_test_helper::parse("print(99999999999999999999999999999999)\n");
+    assert!(lower_checked(&module).is_ok());
 }
 
 #[test]

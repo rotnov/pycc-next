@@ -111,34 +111,36 @@ fn a_clean_root_gets_both_pycc_rt_archives_from_a_release_profile_build() {
 }
 
 #[test]
-fn pycc_rt_declares_no_dependencies() {
-    // Three separate arguments rest on this being true, so it is asserted
-    // rather than remembered:
-    //
-    // 1. the nested `cargo build -p pycc_rt` needs no registry access, so
-    //    it never contends for `$CARGO_HOME/.package-cache` with the
-    //    outer build that is already running;
-    // 2. building it twice (both profiles) from a cold nested directory
-    //    stays cheap enough to sit on every build;
-    // 3. `--locked` cannot fail on a dependency the lockfile does not
-    //    describe.
-    //
-    // Adding a dependency to `pycc_rt` invalidates all three and must be a
-    // deliberate decision, not a silent one.
+fn pycc_rt_declares_only_the_bigint_dependencies() {
+    // `pycc_rt` was dependency-free so the nested `cargo build -p pycc_rt`
+    // stayed cheap and needed no registry access. Arbitrary-precision `int`
+    // deliberately added the three pure-Rust `num` crates: `--locked` still
+    // holds because the workspace lockfile describes them, and the nested
+    // build reads them from the same `$CARGO_HOME` cache the outer build
+    // fills. Any further dependency must be just as deliberate.
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates")
         .join("pycc_rt")
         .join("Cargo.toml");
     let text = std::fs::read_to_string(&manifest).expect("cannot read pycc_rt's manifest");
-    let sections: Vec<&str> = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with('[') && line.contains("dependencies"))
-        .collect();
+    let mut in_dependencies = false;
+    let mut names = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            assert!(
+                !line.contains("dependencies") || line == "[dependencies]",
+                "pycc_rt gained a `{line}` section; see the comment in {}",
+                file!()
+            );
+            in_dependencies = line == "[dependencies]";
+        } else if in_dependencies && let Some((name, _)) = line.split_once('=') {
+            names.push(name.trim().to_string());
+        }
+    }
     assert_eq!(
-        sections,
-        Vec::<&str>::new(),
-        "pycc_rt gained a dependency section; see the comment in {}",
+        names,
+        ["num-bigint", "num-integer", "num-traits"],
+        "pycc_rt's dependencies changed; see the comment in {}",
         file!()
     );
 }

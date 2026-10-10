@@ -16,6 +16,7 @@ mod frozenset;
 mod hash;
 mod if_exp;
 mod inherited_copies;
+mod int_builtins;
 mod list_ops;
 mod local_binder;
 mod loop_flow;

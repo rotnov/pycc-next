@@ -131,10 +131,10 @@ fn lower_match_mapping_key_folds_a_negative_literal() {
 
 #[test]
 fn lower_match_mapping_key_expr_error_propagates() {
-    // As above, an out-of-range magnitude keeps the mapping key's own
-    // `?` error path covered now that `-1` folds successfully.
+    // A complex key keeps the mapping key's own `?` error path covered now
+    // that `-1` folds successfully.
     let module = pycc_parser::parse(
-        "x = {1: 2}\nmatch x:\n    case {-99999999999999999999999: v}:\n        pass\n    case _:\n        pass\n",
+        "x = {1: 2}\nmatch x:\n    case {-1j: v}:\n        pass\n    case _:\n        pass\n",
     )
     .expect("test fixture must parse");
     let err = crate::lower_checked(&module).unwrap_err();

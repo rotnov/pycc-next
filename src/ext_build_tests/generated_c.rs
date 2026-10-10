@@ -614,22 +614,23 @@ fn the_exec_slot_only_raises_its_generic_import_error_when_nothing_else_did() {
 }
 
 #[test]
-fn the_shims_bigint_egress_releases_the_reference_before_it_raises() {
-    // D-180 rule 6 hands the wrapper a retained return value, so the arm
-    // the D-244 amendment turns into an `OverflowError` has to drop it --
-    // otherwise every refused bigint result leaks a `BigIntObj`.
+fn the_shims_bigint_egress_packs_the_value_then_releases_the_reference() {
+    // D-180 rule 6 hands the wrapper a retained return value: the bigint arm
+    // builds the CPython `int` from the word, then drops the reference.
     assert!(SHIM_C.contains("extern void pycc_rt_bigint_release(long long word);"));
     let body = &SHIM_C[SHIM_C
         .find("static PyObject *pycc_ext_pack_int(")
         .expect("the pack helper")..];
     let bigint_arm = body.find("case PYCC_EXT_INT_BIGINT:").expect("bigint arm");
+    let pack = body
+        .find("pycc_ext_bigint_pack(encoded);")
+        .expect("the pack");
     let release = body
         .find("pycc_rt_bigint_release(encoded);")
         .expect("the release");
-    let raise = body.find("PyExc_OverflowError").expect("the OverflowError");
     assert!(
-        bigint_arm < release && release < raise,
-        "the reference must be dropped on the bigint arm, before the raise"
+        bigint_arm < pack && pack < release,
+        "the value must be packed before its reference is dropped"
     );
     // The unclassifiable-word arm must not release: it is not a pointer
     // this code knows to be live.
@@ -726,16 +727,15 @@ fn the_shims_unpack_order_puts_bool_before_int_before_the_type_error() {
     let bool_check = body.find("PyBool_Check(obj)").expect("bool arm");
     let long_check = body.find("!PyLong_Check(obj)").expect("int arm");
     let convert = body
-        .find("raw = PyLong_AsLongLongAndOverflow")
+        .find("return pycc_ext_long_encode(obj, out);")
         .expect("conversion");
     assert!(
         bool_check < long_check && long_check < convert,
         "D-141's bool markers must be read before the int conversion flattens them"
     );
-    // The inline-integer range, never `i64`: the gate is the runtime's own
-    // encoder, called after CPython's overflow check (#1040).
-    assert!(SHIM_C.contains("pycc_rt_ext_int_encode(raw, out) != 0"));
-    assert!(SHIM_C.contains("2**62"));
+    // Any magnitude crosses (#1040): a value beyond `long long` travels as
+    // hex text into a heap bigint.
+    assert!(SHIM_C.contains("pycc_rt_ext_int_from_hex(text, (size_t)len)"));
 }
 
 #[test]

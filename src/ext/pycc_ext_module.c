@@ -37,7 +37,10 @@
  * `pycc_rt`'s boundary, declared by hand. `pycc_rt` exposes no C header and
  * needs none: these are plain `extern "C"` symbols with fixed signatures.
  */
-extern int pycc_rt_ext_int_encode(long long value, long long *out);
+extern long long pycc_rt_int_from_i64(long long value);
+extern long long pycc_rt_ext_int_from_hex(const char *text, size_t len);
+extern char *pycc_rt_ext_bigint_hex(long long encoded);
+extern void pycc_rt_ext_cstr_free(char *text);
 extern long long pycc_rt_ext_bool_encode(int value);
 extern int pycc_rt_ext_int_classify(long long encoded);
 extern long long pycc_rt_ext_int_decode(long long encoded);
@@ -797,6 +800,54 @@ static int pycc_ext_unpack_tuple(PyObject *obj, const char *fn_name, Py_ssize_t 
 }
 
 /*
+ * Encodes a CPython `int` (never a `bool`, which callers test first) as a
+ * D-141 word of any size: the inline smallint when it fits, otherwise a
+ * fresh heap bigint carrying one reference (#1040). The bigint travels as
+ * CPython's own hex text, so neither side needs the other's digit layout.
+ * Returns 0, or -1 with a CPython exception set.
+ */
+static int pycc_ext_long_encode(PyObject *obj, long long *out)
+{
+    int overflow = 0;
+    long long raw = PyLong_AsLongLongAndOverflow(obj, &overflow);
+    PyObject *hex;
+    const char *text;
+    Py_ssize_t len;
+
+    if (raw == -1 && PyErr_Occurred()) {
+        return -1;
+    }
+    if (overflow == 0) {
+        *out = pycc_rt_int_from_i64(raw);
+        return 0;
+    }
+    hex = PyNumber_ToBase(obj, 16);
+    if (hex == NULL) {
+        return -1;
+    }
+    text = PyUnicode_AsUTF8AndSize(hex, &len);
+    if (text == NULL) {
+        Py_DECREF(hex);
+        return -1;
+    }
+    *out = pycc_rt_ext_int_from_hex(text, (size_t)len);
+    Py_DECREF(hex);
+    return 0;
+}
+
+/*
+ * Packs a heap-bigint word as a new CPython `int`. Borrows the word: the
+ * caller decides whether its reference dies here.
+ */
+static PyObject *pycc_ext_bigint_pack(long long encoded)
+{
+    char *hex = pycc_rt_ext_bigint_hex(encoded);
+    PyObject *value = PyLong_FromString(hex, NULL, 16);
+    pycc_rt_ext_cstr_free(hex);
+    return value;
+}
+
+/*
  * Unpacks one argument at an `int` parameter into a D-141 encoded word.
  * Returns 0, or -1 with a CPython exception set.
  *
@@ -811,17 +862,12 @@ static int pycc_ext_unpack_tuple(PyObject *obj, const char *fn_name, Py_ssize_t 
  *    `PyLong_AsLongLongAndOverflow` accepts anything implementing
  *    `__index__`. A duck type is not an `int`, and rule 7's type boundary is
  *    closed.
- *  - The inline-range gate *after* CPython's own overflow check, never
- *    against `i64`: `pycc_rt`'s inline-integer range is [-2^62, 2^62-1], so
- *    an `i64`-shaped check would admit 4611686018427387905 -- a fully
- *    conforming call -- and the compiled body would then abort the process
- *    on it. See D-244's dated amendment and #1040.
+ *  - Any magnitude is accepted: a value outside the inline-integer range
+ *    [-2^62, 2^62-1] becomes a heap bigint (`pycc_ext_long_encode`, #1040).
  */
 static int pycc_ext_unpack_int_at(PyObject *obj, const char *fn_name, Py_ssize_t index,
                                   Py_ssize_t element, long long *out)
 {
-    long long raw;
-    int overflow = 0;
     PyObject *type_name;
     char where[PYCC_EXT_ELEMENT_CLAUSE_MAX];
 
@@ -844,20 +890,7 @@ static int pycc_ext_unpack_int_at(PyObject *obj, const char *fn_name, Py_ssize_t
         }
         return -1;
     }
-    raw = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (raw == -1 && PyErr_Occurred()) {
-        return -1;
-    }
-    if (overflow != 0 || pycc_rt_ext_int_encode(raw, out) != 0) {
-        PyErr_Format(PyExc_OverflowError,
-                     "%s() argument %zd%s: int is outside the inline-integer range "
-                     "[-2**62, 2**62-1] this pycc version's `ext` boundary supports "
-                     "(see #1040)",
-                     fn_name, index + 1,
-                     pycc_ext_element_clause(where, sizeof where, element));
-        return -1;
-    }
-    return 0;
+    return pycc_ext_long_encode(obj, out);
 }
 
 /*
@@ -889,17 +922,13 @@ static PyObject *pycc_ext_pack_int(const char *fn_name, long long encoded)
         Py_RETURN_FALSE;
     case PYCC_EXT_INT_TRUE:
         Py_RETURN_TRUE;
-    case PYCC_EXT_INT_BIGINT:
-        /* The caller owns this reference (D-180 rule 6) and it dies here:
-         * dropping it without releasing would leak the `BigIntObj` on every
-         * call the D-244 amendment turns into an `OverflowError`. */
+    case PYCC_EXT_INT_BIGINT: {
+        /* The caller owns this reference (D-180 rule 6) and it dies here,
+         * once CPython holds the value. */
+        PyObject *value = pycc_ext_bigint_pack(encoded);
         pycc_rt_bigint_release(encoded);
-        PyErr_Format(PyExc_OverflowError,
-                     "%s() produced an int outside the inline-integer range "
-                     "[-2**62, 2**62-1] this pycc version's `ext` boundary supports "
-                     "(see #1040)",
-                     fn_name);
-        return NULL;
+        return value;
+    }
     default:
         /* Deliberately no release: an unclassifiable word is not a pointer
          * this code knows to be live, so freeing through it is worse than
@@ -1908,11 +1937,7 @@ PyObject *pycc_ext_obj_pack_int(long long encoded)
     case PYCC_EXT_INT_TRUE:
         Py_RETURN_TRUE;
     case PYCC_EXT_INT_BIGINT:
-        PyErr_SetString(PyExc_OverflowError,
-                        "an int argument to a CPython object's method is outside the "
-                        "inline-integer range [-2**62, 2**62-1] this pycc version's `ext` "
-                        "boundary supports (see #1040)");
-        return NULL;
+        return pycc_ext_bigint_pack(encoded);
     default:
         PyErr_SetString(PyExc_SystemError,
                         "an int argument to a CPython object's method was an "
@@ -2177,10 +2202,7 @@ int pycc_ext_obj_len(PyObject *o, long long *out)
     if (size == -1 && PyErr_Occurred()) {
         return -1;
     }
-    if (pycc_rt_ext_int_encode((long long)size, out) != 0) {
-        PyErr_NoMemory();
-        return -1;
-    }
+    *out = pycc_rt_int_from_i64((long long)size);
     return 0;
 }
 
@@ -2298,8 +2320,8 @@ int pycc_ext_obj_rebind_may_release(void)
  * `PyObject_GetAttrString` does, and the result is the only thing that
  * escapes into compiled code as an `object` value.
  *
- * A NULL `k` means the packer already failed with a CPython exception set
- * (an out-of-range `int`, #1040). Testing for that here rather than in LLVM
+ * A NULL `k` means the packer already failed with a CPython exception set.
+ * Testing for that here rather than in LLVM
  * keeps the emitted code one straight line for the key and leaves the whole
  * operation with one failure edge instead of two, which is the identical
  * argument `pycc_ext_obj_call`'s own NULL scan records. A NULL `o` is
@@ -2477,8 +2499,7 @@ int pycc_ext_obj_contains(PyObject *container, PyObject *item)
  * `present` says which bounds the source spelled (bit 0 start, bit 1 stop,
  * bit 2 step). A present bound is a packed value, consumed here on every
  * path -- a `NULL` one included, which is a failed packer whose exception is
- * already set (an `int` bound outside the packer's range raises
- * `OverflowError` there, #1040) -- and an absent bound's pointer is ignored
+ * already set -- and an absent bound's pointer is ignored
  * and handed to `PySlice_New` as `NULL`, which it reads as `None`, the
  * value CPython's own `o[:b]` builds. A `NULL` base is defence in depth for
  * the reason `pycc_ext_obj_getitem` records. Returns a new reference to the
@@ -2917,11 +2938,8 @@ int pycc_ext_obj_to_float(PyObject *o, double *out)
  * marker word across an int-shaped parameter slot, and an `__index__` duck
  * type is not an `int`. Neither applies to an explicit conversion, where
  * CPython's own answers -- `int(True)` is `1`, `int(x)` honours
- * `__index__` -- are precisely the contract. Only the *overflow tail* is
- * shared, and it is shared verbatim: the inline-range gate runs after
- * CPython's own overflow check and never against `i64`, because pycc's
- * inline-integer range is [-2**62, 2**62-1] (D-244's 2026-09-12 amendment,
- * #1040). There is deliberately no bigint path here.
+ * `__index__` -- are precisely the contract. Only the encoding tail is
+ * shared: `pycc_ext_long_encode` accepts any magnitude (#1040).
  *
  * # Ownership
  *
@@ -2935,8 +2953,7 @@ int pycc_ext_obj_to_float(PyObject *o, double *out)
 int pycc_ext_obj_to_int(PyObject *o, long long *out)
 {
     PyObject *converted;
-    long long raw;
-    int overflow = 0;
+    int status;
 
     if (o == NULL || out == NULL) {
         return -1;
@@ -2945,22 +2962,9 @@ int pycc_ext_obj_to_int(PyObject *o, long long *out)
     if (converted == NULL) {
         return -1;
     }
-    raw = PyLong_AsLongLongAndOverflow(converted, &overflow);
+    status = pycc_ext_long_encode(converted, out);
     Py_DECREF(converted);
-    /* `PyLong_AsLongLongAndOverflow` signals an out-of-range value through
-     * `overflow` *without* setting an exception, so this arm sees only a real
-     * failure -- `pycc_ext_unpack_int_at`'s own ordering, unchanged. */
-    if (raw == -1 && PyErr_Occurred()) {
-        return -1;
-    }
-    if (overflow != 0 || pycc_rt_ext_int_encode(raw, out) != 0) {
-        PyErr_SetString(PyExc_OverflowError,
-                        "int() of a CPython object is outside the inline-integer range "
-                        "[-2**62, 2**62-1] this pycc version's `ext` boundary supports "
-                        "(see #1040)");
-        return -1;
-    }
-    return 0;
+    return status;
 }
 
 /*
@@ -3043,9 +3047,7 @@ int pycc_ext_obj_to_str(PyObject *o, void **out)
  * themselves stay unchanged, because their messages name an argument
  * position this read has none of.
  *
- * `int` has no bigint path: a value outside pycc's inline-integer range
- * `[-2**62, 2**62-1]` raises `OverflowError` citing #1040, as at every other
- * `ext` crossing. A `str` (or `str` subclass) is copied into a fresh pycc
+ * An `int` of any magnitude is accepted (`pycc_ext_long_encode`). A `str` (or `str` subclass) is copied into a fresh pycc
  * `PyStrObj` at refcount 1, the ownership `pycc_ext_obj_to_str` documents;
  * the copy completes while the caller still holds `o`. Nothing here takes a
  * CPython reference, so nothing joins the #1092 leak-only set.
@@ -3067,9 +3069,6 @@ static int pycc_ext_obj_unbox_refuse(PyObject *o, const char *wanted)
 
 int pycc_ext_obj_unbox_int(PyObject *o, long long *out)
 {
-    long long raw;
-    int overflow = 0;
-
     if (o == NULL || out == NULL) {
         return -1;
     }
@@ -3080,18 +3079,7 @@ int pycc_ext_obj_unbox_int(PyObject *o, long long *out)
     if (!PyLong_Check(o)) {
         return pycc_ext_obj_unbox_refuse(o, "an int");
     }
-    raw = PyLong_AsLongLongAndOverflow(o, &overflow);
-    if (raw == -1 && PyErr_Occurred()) {
-        return -1;
-    }
-    if (overflow != 0 || pycc_rt_ext_int_encode(raw, out) != 0) {
-        PyErr_SetString(PyExc_OverflowError,
-                        "an int narrowed by isinstance() is outside the inline-integer range "
-                        "[-2**62, 2**62-1] this pycc version's `ext` boundary supports "
-                        "(see #1040)");
-        return -1;
-    }
-    return 0;
+    return pycc_ext_long_encode(o, out);
 }
 
 int pycc_ext_obj_unbox_float(PyObject *o, double *out)

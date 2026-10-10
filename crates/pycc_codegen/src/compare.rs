@@ -127,6 +127,51 @@ pub(super) fn emit_compare_values<'ctx>(
              pycc_types admits membership only in a CPython object"
         ),
     };
+    let mixed_int_float = (left_ty == Ty::Int && right_ty == Ty::Float)
+        || (left_ty == Ty::Float && right_ty == Ty::Int);
+    if mixed_int_float {
+        // CPython compares an `int` with a `float` exactly; converting the
+        // int first would round past 2**53 and overflow past 1e308.
+        // Normalize to `int op' float`, mirroring the operator when the int
+        // is on the right.
+        let int_left = left_ty == Ty::Int;
+        let (word, float) = if int_left { (l, r) } else { (r, l) };
+        let word = to_numeric_encoded_int(context, builder, word);
+        let float = to_float(context, builder, rt, float);
+        let op = if int_left {
+            op
+        } else {
+            match op {
+                OrderedCmpOp::Lt => OrderedCmpOp::Gt,
+                OrderedCmpOp::LtE => OrderedCmpOp::GtE,
+                OrderedCmpOp::Gt => OrderedCmpOp::Lt,
+                OrderedCmpOp::GtE => OrderedCmpOp::LtE,
+                same => same,
+            }
+        };
+        let (float_predicate, ordering_predicate, ordering_rhs) = match op {
+            OrderedCmpOp::Eq => (FloatPredicate::OEQ, IntPredicate::EQ, 0),
+            OrderedCmpOp::NotEq => (FloatPredicate::UNE, IntPredicate::NE, 0),
+            OrderedCmpOp::Lt => (FloatPredicate::OLT, IntPredicate::EQ, -1),
+            OrderedCmpOp::LtE => (FloatPredicate::OLE, IntPredicate::SLE, 0),
+            OrderedCmpOp::Gt => (FloatPredicate::OGT, IntPredicate::EQ, 1),
+            // The ordering is `0` or `1` (NaN is `2`, less is `-1`).
+            OrderedCmpOp::GtE => (FloatPredicate::OGE, IntPredicate::ULE, 1),
+        };
+        let cond = crate::int_fast::emit_int_float_compare(
+            context,
+            builder,
+            rt,
+            word,
+            float,
+            float_predicate,
+            ordering_predicate,
+            ordering_rhs,
+        );
+        return builder
+            .build_int_z_extend(cond, context.i8_type(), "bool_from_int_float_cmp")
+            .expect("build_int_z_extend should not fail widening i1 to i8");
+    }
     if left_ty == Ty::Float || right_ty == Ty::Float {
         let l = to_float(context, builder, rt, l);
         let r = to_float(context, builder, rt, r);
@@ -183,13 +228,6 @@ pub(super) fn emit_compare_values<'ctx>(
     } else {
         let l = to_numeric_encoded_int(context, builder, l);
         let r = to_numeric_encoded_int(context, builder, r);
-        let ordering = builder
-            .build_call(rt.int_cmp, &[l.into(), r.into()], "int_cmp")
-            .expect("build_call should not fail for a well-formed comparison")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_int_cmp returns a non-void `i32`")
-            .into_int_value();
-        let zero = context.i32_type().const_int(0, false);
         let predicate = match op {
             OrderedCmpOp::Eq => IntPredicate::EQ,
             OrderedCmpOp::NotEq => IntPredicate::NE,
@@ -198,9 +236,7 @@ pub(super) fn emit_compare_values<'ctx>(
             OrderedCmpOp::Gt => IntPredicate::SGT,
             OrderedCmpOp::GtE => IntPredicate::SGE,
         };
-        let cond = builder
-            .build_int_compare(predicate, ordering, zero, "cmp")
-            .expect("build_int_compare should not fail for two i32 operands");
+        let cond = crate::int_fast::emit_int_compare(context, builder, rt, predicate, l, r);
         builder
             .build_int_z_extend(cond, context.i8_type(), "bool_from_cmp")
             .expect("build_int_z_extend should not fail widening i1 to i8")

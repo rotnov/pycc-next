@@ -487,6 +487,19 @@ pub(super) fn lower_expr(
                 // Without this branch `int(o)` falls to the `lookup` below,
                 // finds no `$fn:int`, and panics.
                 if callee == "int" { Ty::Int } else { Ty::Str }
+            } else if (callee == "abs" || callee == "divmod")
+                && !scopes
+                    .iter()
+                    .any(|scope| scope.contains_key(&format!("$fn:{callee}")))
+            {
+                // Mirrors `pycc_types::int_builtins`: `abs` keeps a `float`
+                // argument's type and makes an `int`/`bool` one `int`;
+                // `divmod` of two ints is `tuple[int, int]`.
+                match (callee.as_str(), args.first().map(MirExpr::ty)) {
+                    ("abs", Some(Ty::Float)) => Ty::Float,
+                    ("abs", _) => Ty::Int,
+                    _ => Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])),
+                }
             } else {
                 lookup(scopes, &format!("$fn:{callee}"))
             };

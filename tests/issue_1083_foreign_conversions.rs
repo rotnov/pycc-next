@@ -448,18 +448,13 @@ fn the_other_two_conversions_of_a_cpython_object_are_admitted() {
     }
 }
 
-/// `int`/`str` on anything that is not a CPython object keep `C0001`
-/// verbatim.
-///
-/// `bool_of_a_non_object_keeps_its_unchanged_refusal`'s claim for the two
-/// names PR 4b adds, and the outside pin for fork 1's scope boundary: the
-/// arms are `Ty::Object`-only, so `str(1)` is refused exactly as it was.
+/// `str` on anything that is not a CPython object, and `int` of a `str`,
+/// keep `C0001` verbatim. (`int` of an `int`, `bool` or `float` compiles
+/// since arbitrary-precision `int`; `tests/int_bigint.rs` covers it.)
 #[test]
 fn int_and_str_of_a_non_object_keep_their_unchanged_refusal() {
     let dir = ScratchDir::new("foreign_int_str_non_object").expect("scratch");
     for body in [
-        "print(int(1))\n",
-        "print(int(1.5))\n",
         "print(int(\"3\"))\n",
         "print(str(1))\n",
         "print(str(1.5))\n",

@@ -33,10 +33,10 @@ fn a_cpython_object_argument_is_passed_through_without_refcount_traffic() {
         "object_argument_module",
         with_foreign_numpy(vec![keep(), MirItem::TopLevelStmt(call_keep())]),
         |ir| {
-            // The callee is called through its function-pointer slot, and its one
+            // The callee, defined once, is called directly, and its one
             // argument is the attribute load's `PyObject *` itself.
             assert!(
-                ir.contains("call void %load_fnptr(ptr %foreign_attr)"),
+                ir.contains("call void @pyfn__keep(ptr %foreign_attr)"),
                 "{ir}"
             );
             assert!(
@@ -62,10 +62,10 @@ fn a_function_body_may_pass_a_cpython_object_on() {
             },
         ]),
         |ir| {
-            // The callee is called through its function-pointer slot, and its one
+            // The callee, defined once, is called directly, and its one
             // argument is the attribute load's `PyObject *` itself.
             assert!(
-                ir.contains("call void %load_fnptr(ptr %foreign_attr)"),
+                ir.contains("call void @pyfn__keep(ptr %foreign_attr)"),
                 "{ir}"
             );
             assert!(

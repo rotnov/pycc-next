@@ -118,6 +118,26 @@ std::thread_local! {
     static EXCEPTION_STATE: Cell<ExceptionState> = const { Cell::new(ExceptionState::CLEAR) };
 }
 
+/// A process-wide mirror of the pending state's `active` byte, read by
+/// generated code as one inline `load i8` after every call that may raise,
+/// instead of a call to [`pycc_rt_exception_active`].
+///
+/// The thread-local [`EXCEPTION_STATE`] stays authoritative for the
+/// runtime's own reads. The mirror is exact for compiled code because that
+/// code is single-threaded: a native program has one thread, and an `ext`
+/// module runs only under the GIL, entering with no pending state and
+/// clearing it before returning to CPython, so no two threads ever hold a
+/// pending exception at once. Every write to the state goes through
+/// [`set_state`], which updates both.
+#[unsafe(no_mangle)]
+#[allow(non_upper_case_globals)]
+pub static pycc_rt_exc_pending: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(0);
+
+fn set_state(state: ExceptionState) {
+    EXCEPTION_STATE.with(|cell| cell.set(state));
+    pycc_rt_exc_pending.store(state.active, std::sync::atomic::Ordering::Relaxed);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_exception_active() -> i8 {
     EXCEPTION_STATE.with(|state| state.get().active)
@@ -130,7 +150,7 @@ pub extern "C" fn pycc_rt_exception_value() -> *mut PyExceptionObj {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_exception_clear() {
-    EXCEPTION_STATE.with(|state| state.set(ExceptionState::CLEAR));
+    set_state(ExceptionState::CLEAR);
 }
 
 /// D-244's `ext` boundary, exception half: the pending exception's type tag,
@@ -415,11 +435,9 @@ pub unsafe extern "C" fn pycc_rt_exception_group_partition(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_exception_raise(obj: *mut PyExceptionObj) {
-    EXCEPTION_STATE.with(|state| {
-        state.set(ExceptionState {
-            active: 1,
-            value: obj,
-        });
+    set_state(ExceptionState {
+        active: 1,
+        value: obj,
     });
 }
 
@@ -731,11 +749,9 @@ mod tests {
         assert_eq!(len, 0);
 
         // An `active` flag with a null value is not a pending exception.
-        EXCEPTION_STATE.with(|state| {
-            state.set(ExceptionState {
-                active: 1,
-                value: std::ptr::null_mut(),
-            });
+        set_state(ExceptionState {
+            active: 1,
+            value: std::ptr::null_mut(),
         });
         len = 7;
         assert_eq!(pycc_rt_ext_pending_type(), -1);

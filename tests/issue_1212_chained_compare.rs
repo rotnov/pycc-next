@@ -139,21 +139,22 @@ fn a_raising_operand_propagates_while_an_earlier_bigint_operand_is_pending() {
 }
 
 #[test]
-fn no_later_operand_runs_after_a_raising_link() {
-    // `small() <= big()` raises `OverflowError` and returns the Equal
-    // sentinel; without the link guard `<=` would take its true edge and
-    // evaluate `say("c", 1)` while the exception is pending.
+fn bigint_links_compare_exactly_and_evaluate_operands_in_order() {
+    // A heap bigint operand compares like any other `int` (CPython's
+    // arbitrary precision); each operand is still evaluated once, left to
+    // right, and a false link stops the chain.
     assert_prints(
         &format!(
             "def say(label: str, n: int) -> int:\n    print(\"eval\", label)\n    return n\n\n\
              def small(n: int) -> int:\n    return n\n\n\
              def big(n: int) -> int:\n    return n + 1\n\n\
              def f() -> None:\n    base = {PROMOTED}\n\
-             \x20   try:\n        print(small(1) <= big(base) < say(\"c\", 1))\n    except OverflowError:\n        print(\"caught\")\n\
-             \x20   try:\n        print(say(\"a\", 1) < 2 < base < say(\"d\", 1))\n    except OverflowError:\n        print(\"caught again\")\n\n\
+             \x20   print(small(1) <= big(base) < say(\"c\", 1))\n\
+             \x20   print(say(\"a\", 1) < 2 < base < say(\"d\", 1))\n\
+             \x20   print(base > 2 > say(\"e\", 5))\n\n\
              f()\n"
         ),
-        "caught\neval a\ncaught again\n",
+        "eval c\nFalse\neval a\neval d\nFalse\neval e\nFalse\n",
     );
 }
 
@@ -194,10 +195,10 @@ fn in_and_general_identity_links_keep_their_c0001() {
 }
 
 // ---------------------------------------------------------------------------
-// Peak-RSS gates on the exception edge, the only edge a heap bigint can reach
-// today (comparing one raises). They follow
+// A peak-RSS gate on the exception edge a pending heap bigint operand
+// reaches when the next operand raises. It follows
 // `tests/issue_638_bigint_exception_release.rs`: a caught-exception loop
-// grows by itself on this tree, so each gate compares the leak shape's
+// grows by itself on this tree, so the gate compares the leak shape's
 // *marginal* growth between 250k and 500k trips with a control that raises
 // the same exception at the same rate without the operand under test. The
 // control reads its bigint by name, allocating nothing per trip; a call-
@@ -292,26 +293,6 @@ mod peak_rss {
             "`{leak}`'s marginal RSS growth must track the same-exception-rate \
              control `{control}`, not add a `BigIntObj` per trip: \
              leak_marginal={leak_marginal} control_marginal={control_marginal}"
-        );
-    }
-
-    #[test]
-    fn a_heap_middle_operand_is_released_on_a_raising_links_unwind_edge() {
-        assert_tracks_control(
-            "mid",
-            "small(1) < big(x) < 3",
-            "small(1) < x",
-            "OverflowError",
-        );
-    }
-
-    #[test]
-    fn a_heap_first_operand_is_released_before_its_links_guard() {
-        assert_tracks_control(
-            "first",
-            "big(x) < small(1) < 3",
-            "small(1) < x",
-            "OverflowError",
         );
     }
 

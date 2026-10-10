@@ -440,24 +440,8 @@ fn open_loop<'ctx>(
                 .expect("build_phi should not fail in a fresh loop-test block");
             induction.add_incoming(&[(&start_v, preheader)]);
             let current = induction.as_basic_value().into_int_value();
-            let cont = builder
-                .build_call(
-                    rt.range_continue,
-                    &[current.into(), stop_v.into(), step_v.into()],
-                    "range_continue",
-                )
-                .expect("build_call should not fail for a well-formed range_continue check")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_range_continue returns a non-void i8")
-                .into_int_value();
-            let cont_i1 = builder
-                .build_int_compare(
-                    IntPredicate::NE,
-                    cont,
-                    context.i8_type().const_int(0, false),
-                    &format!("{prefix}_cont"),
-                )
-                .expect("build_int_compare should not fail comparing two i8 operands");
+            let cont_i1 =
+                crate::int_fast::emit_range_continue(context, builder, rt, current, stop_v, step_v);
             builder
                 .build_conditional_branch(cont_i1, body_bb, after_bb)
                 .expect("build_conditional_branch should not fail for a well-formed i1 condition");
@@ -640,12 +624,12 @@ fn open_indexed_loop<'ctx>(
         None => in_range,
         Some(initial_len) => {
             build_int_set_check_not_resized(builder, cx.rt, len, initial_len);
-            let exc_active = builder
-                .build_call(cx.rt.exception_active, &[], &format!("{prefix}_exc_active"))
-                .expect("build_call should not fail for exception_active")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_exception_active returns i8")
-                .into_int_value();
+            let exc_active = crate::int_fast::emit_exception_pending(
+                cx.context,
+                builder,
+                cx.rt,
+                &format!("{prefix}_exc_active"),
+            );
             let no_exception = builder
                 .build_int_compare(
                     IntPredicate::EQ,
@@ -690,16 +674,15 @@ fn close_loop<'ctx>(cx: &CompCx<'_, 'ctx>, prefix: &str, lp: CompLoop<'ctx>) {
             current,
             step_v,
         } => {
-            let next = builder
-                .build_call(
-                    rt.int_add,
-                    &[current.into(), step_v.into()],
-                    &format!("{prefix}_next"),
-                )
-                .expect("build_call should not fail for a well-formed int add")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_int_add returns a non-void i64")
-                .into_int_value();
+            let next = crate::int_fast::emit_int_binop(
+                context,
+                builder,
+                rt,
+                pycc_mir::BinOpKind::Add,
+                current,
+                step_v,
+                &[],
+            );
             // This iteration's `current` is dead once `next` exists.
             emit_bigint_refcount_call(context, builder, rt, current, BigIntRefcount::Release);
             // Re-read after the release: it splits the block.

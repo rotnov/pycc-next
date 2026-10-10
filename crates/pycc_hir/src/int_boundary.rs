@@ -59,8 +59,108 @@
 //! comment). A third small, independently tested mirror of a five-line
 //! invariant is judged cheaper here than adding a dependency edge purely to
 //! share it.
-use crate::HirExpr;
+use crate::{BinOpKind, HirExpr};
+use pycc_ast::Int;
 use pycc_diag::{Diagnostic, Span};
+
+/// Bits per chunk of [`lower_int_literal`]'s expansion. Every chunk, and
+/// the multiplier `2**CHUNK_BITS`, fits the tagged smallint range.
+const CHUNK_BITS: u32 = 30;
+
+/// The magnitude of an integer literal as base-`2**CHUNK_BITS` chunks,
+/// most significant first. `ruff` keeps a value that fits `u64` as a number
+/// and anything larger as its source token (decimal digits with the
+/// underscores already stripped, or a `0x`/`0o`/`0b` token as written).
+fn literal_chunks(value: &Int) -> Vec<u64> {
+    let text = match value.as_u64() {
+        Some(small) => small.to_string(),
+        None => value.to_string(),
+    };
+    let lower = text.to_ascii_lowercase();
+    let (radix, digits) = match lower.get(..2) {
+        Some("0x") => (16, &lower[2..]),
+        Some("0o") => (8, &lower[2..]),
+        Some("0b") => (2, &lower[2..]),
+        _ => (10, lower.as_str()),
+    };
+    // Little-endian chunks, built by multiply-and-add per digit.
+    let mut chunks: Vec<u64> = vec![0];
+    for digit in digits.chars().filter(|c| *c != '_') {
+        let mut carry = u64::from(
+            digit
+                .to_digit(radix)
+                .expect("the lexer validated the literal"),
+        );
+        for chunk in &mut chunks {
+            let wide = *chunk * u64::from(radix) + carry;
+            *chunk = wide & ((1 << CHUNK_BITS) - 1);
+            carry = wide >> CHUNK_BITS;
+        }
+        if carry > 0 {
+            chunks.push(carry);
+        }
+    }
+    chunks.reverse();
+    chunks
+}
+
+/// Lowers an `int` literal of any size, `negate`d for a source-level `-`.
+///
+/// A value that fits `i64` is an ordinary [`HirExpr::IntLiteral`]. A larger
+/// one has no single-word HIR form, so it lowers to the arithmetic that
+/// builds it from `2**30` chunks, `((c0 * 2**30) + c1) * 2**30 + c2 ...`,
+/// every chunk carrying the sign. Every literal in the expansion fits the
+/// tagged range, and the runtime's arbitrary-precision `int` evaluates it
+/// to exactly the literal's value. [`check_boundary_literal`] recognizes the
+/// shape, so a too-large literal in a boundary position is still `T0051`.
+pub(crate) fn lower_int_literal(value: &Int, negate: bool) -> HirExpr {
+    let chunks = literal_chunks(value);
+    if chunks.len() <= 3 {
+        let magnitude = chunks
+            .iter()
+            .fold(0i128, |acc, chunk| (acc << CHUNK_BITS) | i128::from(*chunk));
+        let signed = if negate { -magnitude } else { magnitude };
+        if let Ok(fits) = i64::try_from(signed) {
+            return HirExpr::IntLiteral(fits);
+        }
+    }
+    let sign = if negate { -1 } else { 1 };
+    let mut chunks = chunks
+        .into_iter()
+        .map(|chunk| HirExpr::IntLiteral(sign * chunk as i64));
+    let first = chunks.next().expect("a literal has at least one chunk");
+    chunks.fold(first, |acc, chunk| HirExpr::BinOp {
+        op: BinOpKind::Add,
+        left: Box::new(HirExpr::BinOp {
+            op: BinOpKind::Mul,
+            left: Box::new(acc),
+            right: Box::new(HirExpr::IntLiteral(1 << CHUNK_BITS)),
+        }),
+        right: Box::new(chunk),
+    })
+}
+
+/// The value of a constant `+`/`*` tree of integer literals -- the shape
+/// [`lower_int_literal`] produces -- or `None` when `expr` is anything else
+/// or the value overflows `i128` (which is then certainly out of range).
+fn constant_value(expr: &HirExpr) -> Option<Option<i128>> {
+    match expr {
+        HirExpr::IntLiteral(n) => Some(Some(i128::from(*n))),
+        HirExpr::BinOp {
+            op: op @ (BinOpKind::Add | BinOpKind::Mul),
+            left,
+            right,
+        } => {
+            let (left, right) = (constant_value(left)?, constant_value(right)?);
+            Some(match (left, right) {
+                (Some(l), Some(r)) if *op == BinOpKind::Add => l.checked_add(r),
+                (Some(l), Some(r)) => l.checked_mul(r),
+                _ => None,
+            })
+        }
+        _ => None,
+    }
+}
 
 /// Mirrors `pycc_rt::fits_smallint`/`pycc_codegen::int_const::fits_tagged_smallint`
 /// exactly (D-061): `true` when `n` round-trips through the 63-bit tagged
@@ -77,7 +177,7 @@ pub(crate) fn fits_tagged_smallint(n: i64) -> bool {
 /// value" ``) -- always a `&'static str` literal supplied at the call site,
 /// never derived from user input.
 fn int_literal_boundary_diagnostic(
-    n: i64,
+    n: &str,
     span: std::ops::Range<u32>,
     position: &str,
 ) -> Diagnostic {
@@ -114,7 +214,23 @@ pub(crate) fn check_boundary_literal(
     if let HirExpr::IntLiteral(n) = lowered
         && !fits_tagged_smallint(*n)
     {
-        return Err(int_literal_boundary_diagnostic(*n, span, position));
+        return Err(int_literal_boundary_diagnostic(
+            &n.to_string(),
+            span,
+            position,
+        ));
+    }
+    // A literal beyond `i64` arrives as `lower_int_literal`'s expansion.
+    if matches!(lowered, HirExpr::BinOp { .. })
+        && let Some(value) = constant_value(lowered)
+    {
+        let fits = value
+            .and_then(|v| i64::try_from(v).ok())
+            .is_some_and(fits_tagged_smallint);
+        if !fits {
+            let text = value.map_or_else(|| "beyond 2**127".to_string(), |v| v.to_string());
+            return Err(int_literal_boundary_diagnostic(&text, span, position));
+        }
     }
     Ok(())
 }
@@ -158,6 +274,79 @@ mod tests {
     #[test]
     fn check_boundary_literal_accepts_an_in_range_literal() {
         assert!(check_boundary_literal(&HirExpr::IntLiteral(42), 0..1, "test position").is_ok());
+    }
+
+    fn int_of(text: &str) -> Int {
+        text.parse().unwrap()
+    }
+
+    #[test]
+    fn lower_int_literal_keeps_i64_values_as_plain_literals() {
+        assert_eq!(
+            lower_int_literal(&int_of("42"), true),
+            HirExpr::IntLiteral(-42)
+        );
+        assert_eq!(
+            lower_int_literal(&int_of("9223372036854775808"), true),
+            HirExpr::IntLiteral(i64::MIN)
+        );
+        assert_eq!(
+            lower_int_literal(&int_of("9223372036854775807"), false),
+            HirExpr::IntLiteral(i64::MAX)
+        );
+    }
+
+    #[test]
+    fn lower_int_literal_expands_a_wider_value_into_its_exact_chunks() {
+        for (text, negate, expected) in [
+            ("9223372036854775808", false, Some(1i128 << 63)),
+            ("18446744073709551615", true, Some(-(u64::MAX as i128))),
+            ("0x1_0000_0000_0000_0000", false, Some(1i128 << 64)),
+            ("0o2000000000000000000000", false, Some(1i128 << 64)),
+            (
+                "0B10000000000000000000000000000000000000000000000000000000000000000",
+                false,
+                Some(1i128 << 64),
+            ),
+        ] {
+            let parsed: Int = match text.get(..2) {
+                Some("0x") => Int::from_str_radix(&text[2..].replace('_', ""), 16, text).unwrap(),
+                Some("0o") => Int::from_str_radix(&text[2..], 8, text).unwrap(),
+                Some("0B") => Int::from_str_radix(&text[2..], 2, text).unwrap(),
+                _ => int_of(text),
+            };
+            let lowered = lower_int_literal(&parsed, negate);
+            assert_eq!(constant_value(&lowered), Some(expected), "{text}");
+        }
+        let huge = lower_int_literal(&int_of(&"9".repeat(60)), false);
+        assert_eq!(constant_value(&huge), Some(None));
+    }
+
+    #[test]
+    fn check_boundary_literal_rejects_an_expanded_literal_but_not_an_in_range_tree() {
+        let wide = lower_int_literal(&int_of("9223372036854775808"), false);
+        let err = check_boundary_literal(&wide, 1..2, "list index").unwrap_err();
+        assert_eq!(err.code, "T0051");
+        assert!(
+            err.message.contains("9223372036854775808"),
+            "{}",
+            err.message
+        );
+        let huge = lower_int_literal(&int_of(&"9".repeat(60)), false);
+        let err = check_boundary_literal(&huge, 1..2, "list index").unwrap_err();
+        assert!(err.message.contains("beyond 2**127"), "{}", err.message);
+        let small_tree = HirExpr::BinOp {
+            op: BinOpKind::Add,
+            left: Box::new(HirExpr::IntLiteral(3)),
+            right: Box::new(HirExpr::IntLiteral(4)),
+        };
+        assert!(check_boundary_literal(&small_tree, 1..2, "list index").is_ok());
+        let not_constant = HirExpr::BinOp {
+            op: BinOpKind::Sub,
+            left: Box::new(HirExpr::IntLiteral(3)),
+            right: Box::new(HirExpr::IntLiteral(4)),
+        };
+        assert!(check_boundary_literal(&not_constant, 1..2, "list index").is_ok());
     }
 
     #[test]

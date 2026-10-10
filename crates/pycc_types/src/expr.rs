@@ -709,6 +709,15 @@ pub(crate) fn infer_expr_in(
                     return Ok(Ty::Str);
                 }
             }
+            // `abs`/`divmod`/`int` over native numbers (`crate::int_builtins`),
+            // under `int`'s guards: a user function or class of the name wins.
+            if crate::int_builtins::NAMES.contains(&callee.as_str())
+                && env.lookup_function(callee).is_none()
+                && env.lookup_class(callee).is_none()
+                && let Some(result) = crate::int_builtins::result_ty(callee, arg_tys)
+            {
+                return result;
+            }
             // D-154 (Part 1 of #375): `ClassName(args)` (instantiation)
             // reuses this same generic `HirExpr::Call` node -- there is no
             // dedicated HIR shape for it (`pycc_hir::class`'s own doc

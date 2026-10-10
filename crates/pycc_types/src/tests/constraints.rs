@@ -3116,8 +3116,9 @@ fn constraint_collection_int_and_str_calls_admit_a_foreign_object_argument() {
 }
 
 #[test]
-fn constraint_collection_int_and_str_calls_keep_c0001_for_a_non_object_argument() {
-    for callee in ["int", "str"] {
+fn constraint_collection_str_call_keeps_c0001_for_a_non_object_argument() {
+    // `int(1)` is admitted since `crate::int_builtins`; `str(1)` is not.
+    for callee in ["str"] {
         let signatures = HashMap::new();
         let mut parents = Vec::new();
         let mut concrete = Vec::new();

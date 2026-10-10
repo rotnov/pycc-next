@@ -6295,7 +6295,9 @@ fn exception_call_produces_c0001() {
 #[test]
 fn other_callable_builtins_produce_c0001() {
     // A representative sample of other callable builtins from the table.
-    for name in ["int", "str", "bool", "range", "zip", "dict", "list", "sum"] {
+    for name in [
+        "round", "str", "bool", "range", "zip", "dict", "list", "sum",
+    ] {
         let env = Environment::new();
         let expr = HirExpr::Call {
             callee: name.to_string(),
@@ -22228,11 +22230,11 @@ fn int_and_str_of_a_foreign_object_are_admitted_as_int_and_str() {
 }
 
 #[test]
-fn int_and_str_of_a_non_object_keep_their_c0001_refusal() {
+fn str_of_a_non_object_keeps_its_c0001_refusal() {
     // Fork 1 of the plan, stated openly: PR 4b relaxes exactly the object
-    // case, so `int(1)` and `str(1)` are still the capability-gap refusals
-    // they were.
-    for callee in ["int", "str"] {
+    // case, so `str(1)` is still the capability-gap refusal it was. `int(1)`
+    // is admitted since `crate::int_builtins`.
+    for callee in ["str"] {
         let mut env = Environment::new();
         env.bind("x".to_string(), Ty::Int);
         let expr = HirExpr::Call {

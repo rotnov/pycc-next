@@ -612,11 +612,10 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         // PR 3a of #1082: `ObjLen`'s own `.ty()` *is* `Ty::Int`, so unlike
         // the three nodes above it really can reach this function. It joins
         // the "owning" answer on the scalar `len`'s own argument, restated
-        // in the doc comment above: `pycc_ext_obj_len` writes a word that
-        // `pycc_rt_ext_int_encode` produced, and that encode *fails* outside
-        // D-141's inline range, so the word is always an inline smallint and
-        // the release this classification emits is an unconditional runtime
-        // no-op.
+        // in the doc comment above: `pycc_ext_obj_len` writes
+        // `pycc_rt_int_from_i64` of a `Py_ssize_t` size, which is always below
+        // 2**62 and so an inline smallint, and the release this
+        // classification emits is an unconditional runtime no-op.
         | MirExpr::ObjLen { .. }
         // PR 3b of #1082: `ObjSubscript` joins `ObjMethodCall` rather than
         // `ObjLen` -- its own `.ty()` is always `Ty::Object`, never

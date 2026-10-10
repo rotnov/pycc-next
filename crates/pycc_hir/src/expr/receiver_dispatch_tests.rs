@@ -84,9 +84,9 @@ fn a_boundary_literal_refuses_the_container_reading() {
 
 #[test]
 fn a_literal_neither_reading_lowers_is_rejected_as_before() {
-    // An integer literal outside i64 fails both readings; the gate-on module
-    // reports exactly what the gate-off module reports.
-    let call = "xs = [1]\nxs.append(99999999999999999999999)\n";
+    // A complex literal fails both readings; the gate-on module reports
+    // exactly what the gate-off module reports.
+    let call = "xs = [1]\nxs.append(1j)\n";
     assert_eq!(
         lower_message(&format!("{ALL_FOUR}{call}")),
         lower_message(call)

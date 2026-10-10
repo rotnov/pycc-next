@@ -17,13 +17,11 @@
 //! | operand `k` while operand `k + 1` is emitted | on `pending_int_releases`, so a raising operand `k + 1` still releases it |
 //! | operand `k + 1` across link `k`'s own guard | on `pending_int_releases`, so the unwind edge releases it; operand `k` was released just before the guard |
 //!
-//! The link guard: `pycc_rt_int_cmp` and `pycc_rt_int_to_float` raise a
-//! pending `OverflowError` for a heap bigint and return a sentinel (`0`,
-//! Equal, for `int_cmp`). A single comparison is classified as unable to
-//! raise, but inside a chain the sentinel would pick a branch and run the
-//! next operand's side effects while the exception is pending. So a link
-//! with an `int` operand, and every dataclass `__eq__` call, is followed by
-//! [`guard_statement_effects`].
+//! The link guard: a primitive comparison never raises (`int` comparison is
+//! arbitrary precision, `int`/`float` comparison is exact), but a dataclass
+//! `__eq__` call can, and inside a chain its result would pick a branch and
+//! run the next operand's side effects while the exception is pending. So
+//! every `__eq__` link is followed by [`guard_statement_effects`].
 //!
 //! Each phi incoming block is read with `get_insert_block()` immediately
 //! before that edge's `br join`: releases, guards and the `__eq__` call's
@@ -40,7 +38,7 @@ use super::{
 use inkwell::IntPredicate;
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::IntValue;
-use pycc_mir::{MirCompareKind, MirCompareLink, MirExpr, Ty};
+use pycc_mir::{MirCompareKind, MirCompareLink, MirExpr};
 
 /// Emits one `MirExpr::CompareChain` as an `i8` bool.
 pub(super) fn emit_compare_chain<'ctx>(
@@ -58,7 +56,7 @@ pub(super) fn emit_compare_chain<'ctx>(
         pop_pending_int_release(emitter.rt, pending_l);
         let bit = link_bit(emitter, &link.kind, left, l, &link.right, r);
         release(emitter, left, &l);
-        if link_can_raise(&link.kind, left, &link.right) {
+        if link_can_raise(&link.kind) {
             let pending_r =
                 push_pending_int_release_if_scalar_temporary(emitter.rt, &link.right, &r);
             guard_statement_effects(emitter.context, emitter.builder, emitter.rt);
@@ -170,15 +168,10 @@ fn link_bit<'ctx>(
     }
 }
 
-/// Whether a link can leave a Python exception pending: a primitive
-/// comparison with an `int` operand (a heap bigint raises `OverflowError`
-/// in `pycc_rt_int_cmp`/`pycc_rt_int_to_float`), or any dataclass
+/// Whether a link can leave a Python exception pending: only a dataclass
 /// `__eq__` call, which is guarded like every `MirExpr::Call`.
-fn link_can_raise(kind: &MirCompareKind, left: &MirExpr, right: &MirExpr) -> bool {
-    match kind {
-        MirCompareKind::Plain(_) => left.ty() == Ty::Int || right.ty() == Ty::Int,
-        MirCompareKind::DataclassEq { .. } => true,
-    }
+fn link_can_raise(kind: &MirCompareKind) -> bool {
+    matches!(kind, MirCompareKind::DataclassEq { .. })
 }
 
 fn release<'ctx>(emitter: &Emitter<'_, 'ctx>, source: &MirExpr, scalar: &Scalar<'ctx>) {

@@ -40,9 +40,11 @@ use bigint_rc::{
     retain_if_int_duplicate, retain_if_int_duplicate_and_track_for_exception_edge,
 };
 use comprehension::{CompCx, CompElts, emit_comprehension, emit_comprehension_expr};
+mod int_builtins;
 mod int_const;
 /// `list[T]` emission over the generic `PyListObj` (`pycc_rt::list`).
 mod list;
+mod int_fast;
 use int_const::{emit_int_constant, tag_smallint_const};
 mod exception_isinstance;
 mod exception_render;
@@ -395,6 +397,14 @@ struct UserFunction<'ctx> {
     /// ordinary user-defined functions, which dispatch indirectly through
     /// `fn_ptr_global` to preserve Python execution order.
     direct_value: Option<FunctionValue<'ctx>>,
+    /// The one definition `fn_ptr_global` can ever hold, when the module
+    /// has exactly one `def` of this name and never binds the name as a
+    /// variable: the slot is then either null (the `def` has not run yet)
+    /// or this function. Calls keep the slot's null check, for the
+    /// `NameError`, but call this function directly so LLVM can inline and
+    /// specialize it; a call from inside the function itself skips even the
+    /// check, since the function can only be running once its `def` has.
+    single_def: Option<FunctionValue<'ctx>>,
 }
 
 /// Part 2b of #1142 (#1164): the `locals` key under which a
@@ -1377,12 +1387,7 @@ fn to_float<'ctx>(
 ) -> FloatValue<'ctx> {
     match scalar {
         Scalar::Float(v) => v,
-        Scalar::Int(v) => builder
-            .build_call(rt.int_to_float, &[v.into()], "int_to_float")
-            .expect("build_call should not fail for a well-formed conversion")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_int_to_float returns a non-void f64")
-            .into_float_value(),
+        Scalar::Int(v) => int_fast::emit_int_to_float(context, builder, rt, v),
         Scalar::Bool(v) => builder
             .build_unsigned_int_to_float(v, context.f64_type(), "bool_to_float")
             .expect("build_unsigned_int_to_float should not fail for an i8 0/1 value"),
@@ -2300,38 +2305,44 @@ fn emit_expr_unchecked<'ctx>(
                     // (#1210), which `binop::encode_int_operand` decides.
                     let l = binop::encode_int_operand(context, builder, *op, l);
                     let r = binop::encode_int_operand(context, builder, *op, r);
-                    let rt_fn = match op {
-                        pycc_mir::BinOpKind::Add => rt.int_add,
-                        pycc_mir::BinOpKind::Sub => rt.int_sub,
-                        pycc_mir::BinOpKind::Mul => rt.int_mul,
-                        pycc_mir::BinOpKind::FloorDiv => rt.int_floordiv,
-                        pycc_mir::BinOpKind::Mod => rt.int_floormod,
-                        pycc_mir::BinOpKind::Pow => rt.int_pow,
-                        pycc_mir::BinOpKind::LShift => rt.int_lshift,
-                        pycc_mir::BinOpKind::RShift => rt.int_rshift,
-                        pycc_mir::BinOpKind::BitAnd => rt.int_and,
-                        pycc_mir::BinOpKind::BitOr => rt.int_or,
-                        pycc_mir::BinOpKind::BitXor => rt.int_xor,
-                        pycc_mir::BinOpKind::Div => unreachable!(
-                            "pycc_types/pycc_mir always type true division as Ty::Float"
-                        ),
-                    };
-                    let result = builder
-                        .build_call(rt_fn, &[l.into(), r.into()], "int_binop")
-                        .expect("build_call should not fail for a well-formed int binop")
+                    // Inline smallint fast path, runtime call otherwise
+                    // (`int_fast`).
+                    // #146 Part 2 (D-181): both operands are dead after the
+                    // operation, so their birth references go to
+                    // `emit_int_binop`, which releases them on its runtime
+                    // path (a smallint fast path owns nothing). No runtime
+                    // `int` function returns an operand's own word, so the
+                    // release cannot free the result
+                    // (`an_int_operation_never_returns_an_operand_s_own_word`).
+                    let owned: Vec<_> = [
+                        bigint_rc::int_temporary_word(left, l),
+                        bigint_rc::int_temporary_word(right, r),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                    let result = int_fast::emit_int_binop(context, builder, rt, *op, l, r, &owned);
+                    Scalar::Int(result)
+                }
+                // `int / int` is exact-then-rounded at any magnitude, not
+                // two conversions and a float division (which overflows for
+                // `10**400 / 10**399` and double-rounds past 2**53).
+                Ty::Float
+                    if *op == pycc_mir::BinOpKind::Div
+                        && matches!(left.ty(), Ty::Int | Ty::Bool)
+                        && matches!(right.ty(), Ty::Int | Ty::Bool) =>
+                {
+                    let lw = to_numeric_encoded_int(context, builder, l);
+                    let rw = to_numeric_encoded_int(context, builder, r);
+                    let quotient = builder
+                        .build_call(rt.int_truediv, &[lw.into(), rw.into()], "int_truediv")
+                        .expect("build_call should not fail for int true division")
                         .try_as_basic_value()
-                        .expect_basic("pycc_rt_int_* functions all return a non-void `i64`");
-                    // #146 Part 2 (D-181): both operands are dead now. Every
-                    // `pycc_rt_int_*` above builds a bigint result through
-                    // `tag_bigint(BigIntObj::new(..))`, never by handing an
-                    // operand's own word back, so releasing here cannot free
-                    // the value just computed -- an invariant that arithmetic
-                    // export's own doc comment states and
-                    // `an_int_operation_never_returns_an_operand_s_own_word`
-                    // pins.
-                    release_if_int_temporary(context, builder, rt, left, l);
-                    release_if_int_temporary(context, builder, rt, right, r);
-                    Scalar::Int(result.into_int_value())
+                        .expect_basic("pycc_rt_int_truediv returns f64")
+                        .into_float_value();
+                    release_scalar_if_int_temporary(context, builder, rt, left, &l);
+                    release_scalar_if_int_temporary(context, builder, rt, right, &r);
+                    Scalar::Float(quotient)
                 }
                 Ty::Float => {
                     let l = to_float(context, builder, rt, l);
@@ -2701,6 +2712,20 @@ fn emit_expr_unchecked<'ctx>(
             }
             if callee == "round" && !user_functions.contains_key(callee.as_str()) {
                 return emit_round(context, builder, module, rt, user_functions, locals, args);
+            }
+            // `abs`/`divmod`/`int` over native numbers (`int_builtins`); an
+            // `int(o)` of a CPython object keeps its own arm below.
+            if let Some(scalar) = int_builtins::emit_call(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                callee,
+                args,
+            ) {
+                return scalar;
             }
             if callee == "float" && !user_functions.contains_key(callee.as_str()) {
                 // Hand-recognized builtin -- but, unlike `len` above, only when
@@ -4653,6 +4678,18 @@ fn build_call_to_with_leading_args<'ctx>(
     // #1050's `ext` export thunks, which dispatch through the same slot:
     // see `ext_thunk::emit_fnptr_dispatch_guard`. It returns with the
     // builder positioned on the non-null path.
+    if let Some(target) = user_function.single_def {
+        let caller = builder
+            .get_insert_block()
+            .and_then(|block| block.get_parent())
+            .expect("a call is emitted inside a function");
+        if caller != target {
+            ext_thunk::emit_fnptr_dispatch_guard(context, builder, rt, user_function);
+        }
+        return builder
+            .build_call(target, &arg_values, "call_user_fn")
+            .expect("build_call should not fail for a well-formed direct call");
+    }
     let fn_ptr = ext_thunk::emit_fnptr_dispatch_guard(context, builder, rt, user_function);
     builder
         .build_indirect_call(user_function.fn_type, fn_ptr, &arg_values, "call_user_fn")
@@ -5973,6 +6010,7 @@ fn compile_to_object_with_observer(
                         fn_type,
                         name_global: None,
                         direct_value: Some(f),
+                        single_def: None,
                     }
                 } else {
                     let fn_ptr_type = context.ptr_type(inkwell::AddressSpace::default());
@@ -6021,9 +6059,25 @@ fn compile_to_object_with_observer(
                         fn_type,
                         name_global: Some(name_global),
                         direct_value: None,
+                        single_def: None,
                     }
                 }
             });
+        }
+    }
+
+    // A name defined once and never bound as a variable can only ever hold
+    // that one definition (see `UserFunction::single_def`). The ext
+    // wrappers only read the slot, so CPython rebinding the module attribute
+    // does not reach compiled callers -- the same as for indirect calls.
+    let rebound_names = collect_module_bindings(mir);
+    for &(name, f) in &function_defs_in_order {
+        if def_counts[name] == 1
+            && !rebound_names.contains_key(name)
+            && let Some(uf) = user_functions.get_mut(name)
+            && uf.fn_ptr_global.is_some()
+        {
+            uf.single_def = Some(f);
         }
     }
 
@@ -6105,12 +6159,12 @@ fn compile_to_object_with_observer(
                 // erasing an exception's `unreachable` the current block is
                 // guaranteed to accept this check.
                 erase_unreachable_if_present(&builder);
-                let active = builder
-                    .build_call(rt.exception_active, &[], "top_exc_active")
-                    .expect("build_call should not fail for exception_active")
-                    .try_as_basic_value()
-                    .expect_basic("pycc_rt_exception_active returns i8")
-                    .into_int_value();
+                let active = crate::int_fast::emit_exception_pending(
+                    &context,
+                    &builder,
+                    &rt,
+                    "top_exc_active",
+                );
                 let has_exc = builder
                     .build_int_compare(
                         inkwell::IntPredicate::NE,
@@ -7321,24 +7375,8 @@ fn emit_stmt<'ctx>(
                 .expect("build_phi should not fail in a fresh loop-test block");
             induction.add_incoming(&[(&start_v, preheader)]);
             let current = induction.as_basic_value().into_int_value();
-            let cont = builder
-                .build_call(
-                    rt.range_continue,
-                    &[current.into(), stop_v.into(), step_v.into()],
-                    "range_continue",
-                )
-                .expect("build_call should not fail for a well-formed range_continue check")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_range_continue returns a non-void i8")
-                .into_int_value();
-            let cont_i1 = builder
-                .build_int_compare(
-                    IntPredicate::NE,
-                    cont,
-                    context.i8_type().const_int(0, false),
-                    "for_cont",
-                )
-                .expect("build_int_compare should not fail comparing two i8 operands");
+            let cont_i1 =
+                int_fast::emit_range_continue(context, builder, rt, current, stop_v, step_v);
             builder
                 .build_conditional_branch(cont_i1, body_bb, after_bb)
                 .expect("build_conditional_branch should not fail for a well-formed i1 condition");
@@ -7383,12 +7421,15 @@ fn emit_stmt<'ctx>(
             // latch, so the increment-and-branch-back below is skipped --
             // the latch is deleted rather than left as a dead increment.
             if loop_control::position_at_latch_if_used(builder, latch_bb) {
-                let next = builder
-                    .build_call(rt.int_add, &[current.into(), step_v.into()], "for_next")
-                    .expect("build_call should not fail for a well-formed int add")
-                    .try_as_basic_value()
-                    .expect_basic("pycc_rt_int_add returns a non-void i64")
-                    .into_int_value();
+                let next = int_fast::emit_int_binop(
+                    context,
+                    builder,
+                    rt,
+                    pycc_mir::BinOpKind::Add,
+                    current,
+                    step_v,
+                    &[],
+                );
                 // This iteration's `current` is dead once `next` exists.
                 // A `Return` inside `body` skips this release (and both
                 // `for_after` releases below) and leaks -- an accepted,
@@ -8624,12 +8665,8 @@ fn emit_stmt<'ctx>(
             // straight-line test with no extra basic block, and the two
             // placements are observationally identical: the conjunct below
             // terminates the loop on this same iteration either way.
-            let exc_active = builder
-                .build_call(rt.exception_active, &[], "for_set_exc_active")
-                .expect("build_call should not fail for exception_active")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_exception_active returns i8")
-                .into_int_value();
+            let exc_active =
+                crate::int_fast::emit_exception_pending(context, builder, rt, "for_set_exc_active");
             let no_exception = builder
                 .build_int_compare(
                     IntPredicate::EQ,

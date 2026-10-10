@@ -188,25 +188,6 @@ pub(crate) fn magnitude_sub(a: &[u32], b: &[u32]) -> Vec<u32> {
     result
 }
 
-pub(crate) fn bigint_add_signed(
-    a_neg: bool,
-    a_mag: &[u32],
-    b_neg: bool,
-    b_mag: &[u32],
-) -> BigIntObj {
-    if a_neg == b_neg {
-        BigIntObj::new(a_neg, trim(&magnitude_add(a_mag, b_mag)))
-    } else {
-        match magnitude_cmp(a_mag, b_mag) {
-            std::cmp::Ordering::Equal => BigIntObj::new(false, vec![0]),
-            std::cmp::Ordering::Greater => {
-                BigIntObj::new(a_neg, trim(&magnitude_sub(a_mag, b_mag)))
-            }
-            std::cmp::Ordering::Less => BigIntObj::new(b_neg, trim(&magnitude_sub(b_mag, a_mag))),
-        }
-    }
-}
-
 pub(crate) fn bigint_from_i128(v: i128) -> BigIntObj {
     let negative = v < 0;
     let mut mag = v.unsigned_abs();
@@ -299,11 +280,9 @@ pub(crate) fn to_sign_and_magnitude(tagged: i64) -> (bool, Vec<u32>) {
 
 /// The sign of a sign-magnitude pair as `-1`/`0`/`1`.
 ///
-/// **Zero is decided by the magnitude, never by the `negative` flag.**
-/// `bigint_add_signed` normalizes an equal-magnitude, opposite-sign result
-/// to `BigIntObj::new(false, vec![0])`, so `!negative` does
-/// *not* imply "positive" -- exactly the trap `pycc_rt_int_truthy` already
-/// documents for its own magnitude inspection.
+/// **Zero is decided by the magnitude, never by the `negative` flag**: a
+/// zero magnitude may carry either flag, so `!negative` does *not* imply
+/// "positive".
 pub(crate) fn magnitude_sign(negative: bool, magnitude: &[u32]) -> i8 {
     if trim(magnitude) == [0] {
         0

@@ -552,19 +552,10 @@ print(float(5))
 }
 
 #[test]
-fn a_float_call_on_a_bigint_argument_fails_honestly() {
-    // Post-merge review finding: `float(x)` for a bigint-valued `x` (an
-    // `int` promoted past the tagged smallint range by arithmetic
-    // overflow) reaches `to_float`'s `Scalar::Int` arm, which calls
-    // `pycc_rt_int_to_float` -- the exact same pre-existing "no
-    // bigint-to-float" limitation ordinary arithmetic promotion already has
-    // (confirmed directly: `fib_iter(100) + 1.5` fails identically), not a
-    // new gap `float()` introduces. Mirrors `list_append_bigint_aborts`'s
-    // own "executing test, not just a documented gap" convention (D-106).
-    //
-    // Part C of #1038 (#1065) turned that failure from a process abort into
-    // a D-173 `OverflowError`, so the class name is asserted below; the
-    // limitation itself is unchanged.
+fn a_float_call_on_a_bigint_argument_converts_like_cpython() {
+    // `float(x)` for a bigint-valued `x` (an `int` promoted past the tagged
+    // smallint range by arithmetic) converts with correct rounding, as in
+    // CPython; mixed arithmetic (`fib_iter(100) + 1.5`) takes the same path.
     let source = "\
 def fib_iter(n: int) -> int:
     a = 0
@@ -577,18 +568,15 @@ def fib_iter(n: int) -> int:
         i = i + 1
     return a
 
-print(float(fib_iter(100)))
+print(float(fib_iter(100)) == 354224848179261915075.0, fib_iter(100) + 1.5 > 3.5e20)
 ";
-    let output = build_and_run("float_bigint_aborts", source);
+    let output = build_and_run("float_bigint_converts", source);
     assert!(
-        !output.status.success(),
-        "a bigint-valued argument to float() must fail loudly, not silently produce a wrong value"
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("OverflowError: converting a bigint-valued `int` is not supported yet"),
-        "expected pycc_rt's honest bigint message, got: {stderr}"
-    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "True True\n");
 }
 
 #[test]
@@ -1171,14 +1159,14 @@ fn appending_a_bigint_valued_element_fails_explicitly_instead_of_corrupting_the_
     // rejected an out-of-tagged-range integer *literal* at compile time;
     // since #148/D-178 a literal does reach `.append()` and hits this same
     // boundary (pinned by `tests/issue_148_oversized_int_literal.rs`), so
-    // this case now specifically covers the *promotion* ingress.
-    // `3000000000 * 3000000000` is the same promotion
-    // `multiplication_promotes_and_float_floor_division_matches_cpython`
-    // above already pins as reaching a real bigint.
+    // this case now specifically covers the *promotion* ingress. The factor
+    // is a variable: a constant product of literals out of range is itself
+    // refused at compile time (`T0051`), like a single oversized literal.
     let source = "\
 def _run() -> None:
     xs = [1]
-    xs.append(3000000000 * 3000000000)
+    n = 3000000000
+    xs.append(n * n)
     print(xs[1])
 
 _run()

@@ -122,17 +122,11 @@ fn an_uncaught_overflow_error_reports_its_own_class_name() {
 /// The converted `float_pow` overflow arm, observed end to end: the raise is
 /// seen at the next D-173 checkpoint inside the `try`, so the handler runs.
 ///
-/// `Pow` deliberately stays in `expression_can_set_exception`'s infallible arm
-/// (that classifier is untouched by #1063, and `nbody.py` runs ten `Pow` nodes
-/// per benchmark-gated hot-loop iteration), so the raise is *not* checked
-/// immediately after the `**` itself -- the `print` below is the checkpoint
-/// that observes it. That is why the pre-raise `print` still runs and reports
-/// the `0.0` sentinel, and why this test asserts both lines: the deferral is
-/// the observable behaviour, not an accident. Making the `**` its own
-/// checkpoint is out of scope here and deferred by D-244's 2026-09-13
-/// native-mode amendment.
+/// `Pow` is a checkpoint of its own (`expression_can_set_exception`), now
+/// that the pending-exception test is one inline load: the raise is observed
+/// right after the `**`, so the `print` never runs, as in CPython.
 #[test]
-fn a_float_power_that_overflows_raises_at_the_next_checkpoint() {
+fn a_float_power_that_overflows_raises_before_the_next_statement() {
     let (ok, stdout, stderr) = build_and_run(
         "float_overflow",
         "def main() -> None:\n\
@@ -147,7 +141,7 @@ fn a_float_power_that_overflows_raises_at_the_next_checkpoint() {
     assert!(ok, "program failed: {stderr}");
     assert_eq!(
         stdout,
-        "0.0\nfloat power overflowed (result too large to represent)\n"
+        "float power overflowed (result too large to represent)\n"
     );
 }
 
@@ -169,7 +163,7 @@ fn zero_raised_to_a_negative_power_raises_zero_division_error_not_overflow_error
          main()\n",
     );
     assert!(ok, "program failed: {stderr}");
-    assert_eq!(stdout, "0.0\n0.0 cannot be raised to a negative power\n");
+    assert_eq!(stdout, "0.0 cannot be raised to a negative power\n");
 }
 
 /// The converted `int_pow` negative-exponent arm. `RuntimeError` rather than a
@@ -298,24 +292,13 @@ fn a_built_ext_module_raises_the_right_cpython_class_from_every_converted_pow_pa
     );
 }
 
-/// The residual D-244's 2026-09-13 scope amendment records, pinned through a
-/// real `ext` artifact so the amendment's claims stay measured rather than
-/// asserted. `Pow` is deliberately not a checkpoint (plan section 2a: ten
-/// `Pow` nodes per `tests/fixtures/nbody.py` hot-loop iteration sit under
-/// D-084/D-095/D-140's speedup floors), so an export that handles the
-/// exception itself sees it at the next enclosing checkpoint, not at the
-/// `**`. Two consequences, both strictly better than the process abort they
-/// replace, and both closed by #1031 rather than here:
-///
-/// 1. a statement following the `**` inside the same `try` suite runs first;
-/// 2. a second `**` raise before that checkpoint relabels the first.
-///
-/// A `try` suite's own end *is* a checkpoint, so a `**` written as the last
-/// statement of the suite does reach its handler on time -- that third case
-/// is pinned too, because it is what bounds the residual.
+/// The residual D-244's 2026-09-13 scope amendment recorded -- a `**` raise
+/// observed only at the next enclosing checkpoint -- is closed: `Pow` is a
+/// checkpoint itself, so an export that handles the exception sees it right
+/// at the `**`, as CPython does. Pinned through a real `ext` artifact.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_ext_export_that_handles_a_pow_raise_itself_observes_it_at_the_next_checkpoint() {
+fn an_ext_export_that_handles_a_pow_raise_itself_observes_it_at_the_pow() {
     let dir = ScratchDir::new("1063_ext_residual").expect("scratch");
     let src = write_fixture(
         &dir,
@@ -345,12 +328,11 @@ fn an_ext_export_that_handles_a_pow_raise_itself_observes_it_at_the_next_checkpo
         String::from_utf8_lossy(&build.stderr)
     );
     let script = "import pycc_residual_mod as m\n\
-         # The suite end is a checkpoint, so this handler runs on time.\n\
          assert m.on_time(2.0, 1024.0) == -1.0, m.on_time(2.0, 1024.0)\n\
-         # One statement of the suite runs before the handler: y is already 1.0.\n\
-         assert m.one_late(2.0, 1024.0) == 1.0, m.one_late(2.0, 1024.0)\n\
-         # The later ZeroDivisionError relabels the earlier OverflowError.\n\
-         assert m.relabelled(2.0) == 2.0, m.relabelled(2.0)\n\
+         # No statement after the `**` runs: y is still 0.0.\n\
+         assert m.one_late(2.0, 1024.0) == 0.0, m.one_late(2.0, 1024.0)\n\
+         # The first raise wins; the second `**` never runs.\n\
+         assert m.relabelled(2.0) == 1.0, m.relabelled(2.0)\n\
          # None of the three left pending state behind.\n\
          assert m.on_time(2.0, 3.0) == 99.0\n";
     let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))

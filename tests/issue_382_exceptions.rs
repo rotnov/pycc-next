@@ -1206,7 +1206,7 @@ fn uncaught_failed_left_operand_skips_the_right_operand_at_top_level() {
     // rather than only `contains`, so a regression that starts (incorrectly)
     // attaching a frame to this path is caught here.
     assert_eq!(
-        err, "ZeroDivisionError: integer division by zero\n",
+        err, "ZeroDivisionError: integer division or modulo by zero\n",
         "an uncaught runtime-raised builtin error must render without a Traceback header"
     );
 }

@@ -196,15 +196,29 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         MirExpr::Sequence { .. } => false,
         // #1210: a shift raises `ValueError` for a negative count and
         // `OverflowError` for a result too large to allocate; `&`, `|` and
-        // `^` never raise.
-        MirExpr::BinOp { op, .. } => matches!(
-            op,
-            pycc_mir::BinOpKind::Div
-                | pycc_mir::BinOpKind::FloorDiv
-                | pycc_mir::BinOpKind::Mod
-                | pycc_mir::BinOpKind::LShift
-                | pycc_mir::BinOpKind::RShift
-        ),
+        // `^` never raise. `**` raises for a negative exponent and for a
+        // result too large to allocate. `int` `+`, `-` and `*` never raise
+        // (arbitrary precision), but a `float` operation with an `int`
+        // operand converts it, which raises `OverflowError` past `1e308`.
+        MirExpr::BinOp {
+            op, left, right, ty, ..
+        } => {
+            matches!(
+                op,
+                pycc_mir::BinOpKind::Div
+                    | pycc_mir::BinOpKind::FloorDiv
+                    | pycc_mir::BinOpKind::Mod
+                    | pycc_mir::BinOpKind::Pow
+                    | pycc_mir::BinOpKind::LShift
+                    | pycc_mir::BinOpKind::RShift
+            ) || (*ty == pycc_mir::Ty::Float
+                && (left.ty() == pycc_mir::Ty::Int || right.ty() == pycc_mir::Ty::Int))
+        }
+        // `str()` of an `int` past CPython's 4300-digit limit raises
+        // `ValueError`.
+        MirExpr::FString(parts) => parts.iter().any(|part| {
+            matches!(part, pycc_mir::MirFStringPart::Interpolation(e) if e.ty() == pycc_mir::Ty::Int)
+        }),
         // A list index's `IndexError` leaves through the inlined bounds
         // check's own cold branch (`list::build_list_get`), so the read
         // needs no flag test; a tuple index is checked at compile time.
@@ -229,7 +243,6 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         | MirExpr::NotImplemented
         | MirExpr::Name { .. }
         | MirExpr::Compare { .. }
-        | MirExpr::FString(_)
         | MirExpr::ListLiteral(_)
         | MirExpr::EmptyList(_)
         | MirExpr::ListAppend { .. }
@@ -370,12 +383,7 @@ pub(super) fn guard_statement_effects<'ctx>(
         .last()
         .copied()
         .expect("expression emission always has an installed exception target");
-    let active = builder
-        .build_call(rt.exception_active, &[], "effect_exc_active")
-        .expect("build_call should not fail for exception_active")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_exception_active returns i8")
-        .into_int_value();
+    let active = crate::int_fast::emit_exception_pending(context, builder, rt, "effect_exc_active");
     let has_exc = builder
         .build_int_compare(
             inkwell::IntPredicate::NE,
@@ -536,12 +544,8 @@ pub(super) fn emit_try<'ctx>(
         .get_terminator()
         .is_none();
     if body_falls_through {
-        let active = builder
-            .build_call(rt.exception_active, &[], "try_body_exc_active")
-            .expect("build_call should not fail for exception_active")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_exception_active returns i8")
-            .into_int_value();
+        let active =
+            crate::int_fast::emit_exception_pending(context, builder, rt, "try_body_exc_active");
         let has_exc = builder
             .build_int_compare(
                 inkwell::IntPredicate::NE,
@@ -792,12 +796,8 @@ pub(super) fn emit_try<'ctx>(
         // pending state while the final body runs. Normal
         // completion restores it; a new exception or a return from
         // `finally` deliberately replaces/suppresses it.
-        let active = builder
-            .build_call(rt.exception_active, &[], "finally_pending_active")
-            .expect("build_call should not fail for exception_active")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_exception_active returns i8")
-            .into_int_value();
+        let active =
+            crate::int_fast::emit_exception_pending(context, builder, rt, "finally_pending_active");
         let value = builder
             .build_call(rt.exception_value, &[], "finally_pending_value")
             .expect("build_call should not fail for exception_value")
@@ -1083,12 +1083,12 @@ pub(super) fn emit_try_star<'ctx>(
         .get_terminator()
         .is_none();
     if body_falls_through {
-        let active = builder
-            .build_call(rt.exception_active, &[], "trystar_body_exc_active")
-            .expect("build_call should not fail for exception_active")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_exception_active returns i8")
-            .into_int_value();
+        let active = crate::int_fast::emit_exception_pending(
+            context,
+            builder,
+            rt,
+            "trystar_body_exc_active",
+        );
         let has_exc = builder
             .build_int_compare(
                 inkwell::IntPredicate::NE,
@@ -1386,12 +1386,12 @@ pub(super) fn emit_try_star<'ctx>(
     let pending_exception = if finalbody.is_empty() {
         None
     } else {
-        let active = builder
-            .build_call(rt.exception_active, &[], "trystar_finally_pending_active")
-            .expect("build_call should not fail for exception_active")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_exception_active returns i8")
-            .into_int_value();
+        let active = crate::int_fast::emit_exception_pending(
+            context,
+            builder,
+            rt,
+            "trystar_finally_pending_active",
+        );
         let value = builder
             .build_call(rt.exception_value, &[], "trystar_finally_pending_value")
             .expect("build_call should not fail for exception_value")
@@ -1553,7 +1553,6 @@ mod tests {
             pycc_mir::BinOpKind::Add,
             pycc_mir::BinOpKind::Sub,
             pycc_mir::BinOpKind::Mul,
-            pycc_mir::BinOpKind::Pow,
             pycc_mir::BinOpKind::BitAnd,
             pycc_mir::BinOpKind::BitOr,
             pycc_mir::BinOpKind::BitXor,
@@ -1564,11 +1563,31 @@ mod tests {
             pycc_mir::BinOpKind::Div,
             pycc_mir::BinOpKind::FloorDiv,
             pycc_mir::BinOpKind::Mod,
+            pycc_mir::BinOpKind::Pow,
             pycc_mir::BinOpKind::LShift,
             pycc_mir::BinOpKind::RShift,
         ] {
             assert!(expression_can_set_exception(&int_binop(op)));
         }
+        // A `float` operation converts an `int` operand, which can overflow;
+        // two `float` operands cannot raise on `+`.
+        let mixed = |left: MirExpr| MirExpr::BinOp {
+            op: pycc_mir::BinOpKind::Add,
+            left: Box::new(left),
+            right: Box::new(MirExpr::FloatLiteral(1.5)),
+            ty: pycc_mir::Ty::Float,
+        };
+        assert!(expression_can_set_exception(&mixed(MirExpr::IntLiteral(1))));
+        assert!(!expression_can_set_exception(&mixed(
+            MirExpr::FloatLiteral(1.0)
+        )));
+        // `str()` of an `int` can exceed CPython's digit limit.
+        assert!(expression_can_set_exception(&MirExpr::FString(vec![
+            pycc_mir::MirFStringPart::Interpolation(Box::new(MirExpr::IntLiteral(1))),
+        ])));
+        assert!(!expression_can_set_exception(&MirExpr::FString(vec![
+            pycc_mir::MirFStringPart::Literal("x".to_string()),
+        ])));
 
         assert!(expression_can_set_exception(&MirExpr::Call {
             callee: "f".to_string(),

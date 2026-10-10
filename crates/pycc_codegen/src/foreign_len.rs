@@ -210,10 +210,7 @@ fn out_slot_in_entry_block<'ctx>(
 /// reason this is not a `Ty::Object` arm bolted onto `emit_expr`'s scalar
 /// `len` dispatch: that path produces a *raw* `i64` and re-tags it at the
 /// call site, while `pycc_ext_obj_len` hands back a finished word through an
-/// out-parameter. Fusing `PyObject_Size` and `pycc_rt_ext_int_encode` behind
-/// one `-1` return also means one failure edge is emitted here instead of
-/// two -- see the C side's own comment for why the encode arm is unreachable
-/// for a real container.
+/// out-parameter, so one failure edge is emitted here.
 ///
 /// # Failure edge
 ///
@@ -355,10 +352,9 @@ pub(super) fn emit_to_float<'ctx>(
 /// already-D-141-encoded [`Scalar::Int`].
 ///
 /// [`emit_len`]'s shape exactly, and for its reason: `pycc_ext_obj_to_int`
-/// fuses `PyNumber_Long`, CPython's own overflow check and
-/// `pycc_rt_ext_int_encode` behind one `-1` return, so a finished word
-/// arrives through the out-parameter and one failure edge is emitted here
-/// instead of three. Nothing is re-tagged at this call site -- unlike
+/// fuses `PyNumber_Long` and the encoding behind one `-1` return, so a
+/// finished word arrives through the out-parameter and one failure edge is
+/// emitted here. Nothing is re-tagged at this call site -- unlike
 /// `lib.rs`'s scalar `len`, which receives a *raw* `i64`.
 ///
 /// **This is an explicit conversion, not an implicit boundary crossing** --
@@ -371,10 +367,9 @@ pub(super) fn emit_to_float<'ctx>(
 ///
 /// Failure is `-1` with CPython's error indicator set, taking
 /// [`emit_len`]'s failure edge: `PyNumber_Long` raises
-/// for an operand with no integer conversion and for an unparseable string,
-/// and a result outside pycc's inline-integer range raises `OverflowError`
-/// (#1040) -- none of which pycc can rule out at compile time for an opaque
-/// pointee.
+/// for an operand with no integer conversion and for an unparseable string
+/// -- neither of which pycc can rule out at compile time for an opaque
+/// pointee. A result of any magnitude is accepted (#1040).
 pub(super) fn emit_to_int<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,

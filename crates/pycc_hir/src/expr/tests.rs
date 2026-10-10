@@ -62,17 +62,27 @@ fn unary_minus_accepts_i64_min() {
 }
 
 #[test]
-fn unary_plus_rejects_i64_mins_magnitude() {
-    // The same magnitude without a negative sign is genuinely out of
-    // range: `i64::MAX` is one less.
-    assert_eq!(lower_err_code("x = +9223372036854775808\n"), "C0001");
-}
-
-#[test]
-fn unary_minus_rejects_a_magnitude_past_u64() {
-    // A magnitude too large for `u64` reaches the fold as `Number::Big`,
-    // whose `as_u64()` is `None`.
-    assert_eq!(lower_err_code("x = -99999999999999999999999\n"), "C0001");
+fn literals_beyond_i64_lower_to_their_chunk_expansion() {
+    // `+2**63` (one past `i64::MAX`) and a magnitude past `u64`
+    // (`Number::Big`) both lower to the arithmetic that rebuilds them
+    // (`int_boundary::lower_int_literal`), not to a capability error.
+    for source in [
+        "x = +9223372036854775808\n",
+        "x = -99999999999999999999999\n",
+    ] {
+        let module = pycc_parser::parse(source).expect("test fixture must parse");
+        let hir = crate::lower_checked(&module).expect("a big literal lowers");
+        assert!(
+            matches!(
+                &hir.items[0],
+                crate::HirItem::TopLevelStmt(crate::HirStmt::Assign {
+                    value: HirExpr::BinOp { .. },
+                    ..
+                })
+            ),
+            "{source}: {hir:?}"
+        );
+    }
 }
 
 #[test]

@@ -190,15 +190,7 @@ pub(crate) fn lower_expr(
 ) -> Result<HirExpr, Diagnostic> {
     let lowered = match expr {
         Expr::NumberLiteral(lit) => match &lit.value {
-            Number::Int(i) => {
-                let Some(value) = i.as_i64() else {
-                    return Err(unsupported(
-                        format!("integer literal does not fit in i64: {i:?}"),
-                        lit.range,
-                    ));
-                };
-                HirExpr::IntLiteral(value)
-            }
+            Number::Int(i) => crate::int_boundary::lower_int_literal(i, false),
             Number::Float(f) => HirExpr::FloatLiteral(*f),
             other => {
                 return Err(unsupported(
@@ -222,11 +214,7 @@ pub(crate) fn lower_expr(
             (UnaryOp::USub | UnaryOp::UAdd, Expr::NumberLiteral(lit)) => {
                 let negate = matches!(unary.op, UnaryOp::USub);
                 match &lit.value {
-                    Number::Int(i) => HirExpr::IntLiteral(fold_int_literal_sign(
-                        i,
-                        negate,
-                        pycc_ast::expr_range(expr),
-                    )?),
+                    Number::Int(i) => crate::int_boundary::lower_int_literal(i, negate),
                     Number::Float(f) => HirExpr::FloatLiteral(if negate { -*f } else { *f }),
                     other => {
                         return Err(unsupported(

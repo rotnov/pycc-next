@@ -279,12 +279,9 @@ pub const EXT_OBJ_PACK_INSTANCE_SYMBOL: &str = "pycc_ext_obj_pack_instance";
 /// `PyObject_Size(o)` through it and returns `0`, or returns `-1` with a
 /// CPython exception already set. It does not touch the operand's refcount.
 ///
-/// The `PyObject_Size` call and the `pycc_rt_ext_int_encode` call are fused
-/// inside the shim deliberately: either can fail, and folding both into one
-/// `-1` return lets codegen emit exactly *one* foreign failure edge for
-/// `len` instead of two. (The encode failure is unreachable for a real
-/// container -- a length never leaves D-141's inline range -- so the second
-/// branch exists only as defence in depth.) Spelled once here for exactly
+/// The `PyObject_Size` call and its encoding (`pycc_rt_int_from_i64`) are
+/// fused inside the shim, so codegen emits exactly *one* foreign failure
+/// edge for `len`. Spelled once here for exactly
 /// the reason [`EXT_OBJ_IMPORT_SYMBOL`] is: the `--ext` link resolves an
 /// undefined symbol lazily, so a misspelling is a crash at first call rather
 /// than a link error.
@@ -592,12 +589,11 @@ pub const EXT_OBJ_TO_FLOAT_SYMBOL: &str = "pycc_ext_obj_to_float";
 ///
 /// **Overflow.** The encode is fused into the helper, exactly as
 /// [`EXT_OBJ_LEN_SYMBOL`]'s is and for its reason (one failure edge rather
-/// than two). A value outside pycc's inline-integer range
-/// `[-2**62, 2**62-1]` raises `OverflowError` citing #1040 -- there is no
-/// bigint path across this boundary.
+/// than two). A value of any magnitude crosses: one outside pycc's
+/// inline-integer range becomes a heap bigint (#1040).
 ///
 /// **Ownership.** The helper releases the `PyNumber_Long` temporary on
-/// *every* exit, including the `OverflowError` path that still holds it, so
+/// *every* exit, so
 /// this operation adds nothing to the #1092 leak-only set.
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].

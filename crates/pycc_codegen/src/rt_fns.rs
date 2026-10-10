@@ -36,6 +36,24 @@ pub(super) struct RtFns<'ctx> {
     pub(super) int_or: FunctionValue<'ctx>,
     pub(super) int_xor: FunctionValue<'ctx>,
     pub(super) int_cmp: FunctionValue<'ctx>,
+    /// `pycc_rt_int_truediv(a, b) -> f64`: `int / int`, correctly rounded at
+    /// any magnitude.
+    pub(super) int_truediv: FunctionValue<'ctx>,
+    /// `pycc_rt_int_float_cmp(a, f) -> i32`: exact `int`-vs-`float`
+    /// ordering, `2` when `f` is NaN.
+    pub(super) int_float_cmp: FunctionValue<'ctx>,
+    /// `pycc_rt_int_from_float(f) -> i64`: `int(f)`.
+    pub(super) int_from_float: FunctionValue<'ctx>,
+    /// `pycc_rt_int_mod_noraise(a, b) -> i64`: `divmod`'s remainder, which
+    /// leaves the zero-divisor raise to the quotient.
+    pub(super) int_mod_noraise: FunctionValue<'ctx>,
+    /// `pycc_rt_int_abs(a) -> i64`: `abs(a)`.
+    pub(super) int_abs: FunctionValue<'ctx>,
+    /// `llvm.{sadd,ssub,smul}.with.overflow.i64`, the `int` fast paths'
+    /// overflow detectors (`int_fast`).
+    pub(super) sadd_overflow: FunctionValue<'ctx>,
+    pub(super) ssub_overflow: FunctionValue<'ctx>,
+    pub(super) smul_overflow: FunctionValue<'ctx>,
     pub(super) int_truthy: FunctionValue<'ctx>,
     pub(super) range_continue: FunctionValue<'ctx>,
     /// #147 (D-179): `pycc_rt_range_normalize_operand`, the encoded-word-in,
@@ -234,9 +252,9 @@ pub(super) struct RtFns<'ctx> {
     /// becomes a process abort at the `extern "C"` boundary, matching every
     /// other runtime error in `pycc_rt`.
     pub(super) name_error: FunctionValue<'ctx>,
-    /// #382 (PR-22 Part 1): Exception runtime functions.
-    /// `exception_active` returns i8 (non-zero if an exception is pending).
-    pub(super) exception_active: FunctionValue<'ctx>,
+    /// The runtime's `pycc_rt_exc_pending` `i8` global, the pending-exception
+    /// flag generated code loads inline (`int_fast::emit_exception_pending`).
+    pub(super) exc_pending: inkwell::values::GlobalValue<'ctx>,
     /// `exception_value` returns a pointer to the current exception object.
     pub(super) exception_value: FunctionValue<'ctx>,
     /// `exception_clear` resets the thread-local pending state (void).
@@ -310,7 +328,35 @@ pub(super) fn declare_rt_functions<'ctx>(
     let declare = |name: &str, fn_type: inkwell::types::FunctionType<'ctx>| {
         module.add_function(name, fn_type, Some(Linkage::External))
     };
+    let overflow_intrinsic = |name: &str| {
+        inkwell::intrinsics::Intrinsic::find(name)
+            .and_then(|intrinsic| intrinsic.get_declaration(module, &[i64_type.into()]))
+            .expect("LLVM provides the integer overflow intrinsics")
+    };
     RtFns {
+        int_truediv: declare(
+            "pycc_rt_int_truediv",
+            f64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+        ),
+        int_float_cmp: declare(
+            "pycc_rt_int_float_cmp",
+            i32_type.fn_type(&[i64_type.into(), f64_type.into()], false),
+        ),
+        int_from_float: declare(
+            "pycc_rt_int_from_float",
+            i64_type.fn_type(&[f64_type.into()], false),
+        ),
+        int_abs: declare(
+            "pycc_rt_int_abs",
+            i64_type.fn_type(&[i64_type.into()], false),
+        ),
+        int_mod_noraise: declare(
+            "pycc_rt_int_mod_noraise",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+        ),
+        sadd_overflow: overflow_intrinsic("llvm.sadd.with.overflow"),
+        ssub_overflow: overflow_intrinsic("llvm.ssub.with.overflow"),
+        smul_overflow: overflow_intrinsic("llvm.smul.with.overflow"),
         int_add: declare(
             "pycc_rt_int_add",
             i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
@@ -652,11 +698,11 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_name_error",
             void_type.fn_type(&[ptr_type.into()], false),
         ),
-        // #382 (PR-22 Part 1): Exception runtime function declarations.
-        exception_active: declare(
-            "pycc_rt_exception_active",
-            context.i8_type().fn_type(&[], false),
-        ),
+        exc_pending: {
+            let global = module.add_global(context.i8_type(), None, "pycc_rt_exc_pending");
+            global.set_linkage(Linkage::External);
+            global
+        },
         exception_value: declare("pycc_rt_exception_value", ptr_type.fn_type(&[], false)),
         exception_clear: declare("pycc_rt_exception_clear", void_type.fn_type(&[], false)),
         exception_alloc: declare(

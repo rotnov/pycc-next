@@ -22,16 +22,10 @@
 //!   failure at all, the `range` operand, left the inventory in #147
 //!   (D-179) and was never a `T0051` candidate; see
 //!   `tests/issue_147_bigint_range.rs` for its own success-path coverage.
-//! * **Still-open bigint operations.** `*`, `//`, `%`, `**`, `/`, `int`->`float`
-//!   conversion, and comparison remain accepted failure boundaries; before
-//!   #148 they were unreachable from a literal, so their current behavior is
-//!   pinned here too. None of these are D-141 boundary *positions* (they are
-//!   ordinary arithmetic/comparison operators), so #618 does not touch them.
-//!   Part C of #1038
-//!   ([#1065](https://github.com/rotnov/pycc/issues/1065)) changed *how* they
-//!   fail, not *that* they fail: each now raises a catchable `OverflowError`
-//!   (D-173) instead of aborting the process, so the seven cases below moved
-//!   from `assert_runtime_abort` to `assert_uncaught_overflow_error`.
+//! * **Arithmetic on an oversized literal.** `*`, `//`, `%`, `**`, `/`,
+//!   `int`->`float` conversion and comparison are arbitrary precision now,
+//!   so they are pinned against CPython's own output at the end of this file,
+//!   as is a literal beyond `i64`.
 
 use pycc_scratch::ScratchDir;
 use std::io::Write;
@@ -54,9 +48,8 @@ fn pycc_bin() -> std::path::PathBuf {
 /// `pycc_rt`'s panic unwinds across an `extern "C"` boundary and becomes a
 /// non-unwinding process abort, so the raw child is killed by a signal and
 /// reports no exit code at all. The `101` in `docs/CLI_SPEC.md`'s boundary
-/// list is the driver's own mapping of that abort -- and, as
-/// `assert_uncaught_overflow_error` below relies on, of any other non-zero
-/// child exit.
+/// list is the driver's own mapping of that abort (and of any other
+/// non-zero child exit).
 fn assert_runtime_abort(case: &str, source: &str, message: &str) {
     let dir = ScratchDir::new(&format!("issue148_{case}")).expect("failed to create scratch dir");
     let src = dir.join("case.py");
@@ -92,18 +85,6 @@ fn assert_runtime_abort(case: &str, source: &str, message: &str) {
         stderr.contains(message),
         "{case} should report {message:?}, got: {stderr}"
     );
-}
-
-/// Part C of #1038 (#1065): the same `pycc run` exit `101`, but reached by an
-/// uncaught D-173 `OverflowError` rather than by a process abort. The class
-/// name is asserted alongside the message precisely because the exit code no
-/// longer distinguishes the two -- `pycc run` reports `101` for *any*
-/// non-zero child exit, and an uncaught raise exits `1`.
-///
-/// The message must not carry the retired `pycc_rt: ` panic prefix: a raised
-/// exception's message is user-facing Python text.
-fn assert_uncaught_overflow_error(case: &str, source: &str, message: &str) {
-    assert_runtime_abort(case, source, &format!("OverflowError: {message}"));
 }
 
 // ---------------------------------------------------------------------------
@@ -253,82 +234,48 @@ fn an_oversized_literal_as_a_range_argument_no_longer_hits_the_runtime_int_bound
 }
 
 // ---------------------------------------------------------------------------
-// Still-open bigint operations (out of scope for #148, pinned here).
+// Operations on an oversized literal, and literals beyond `i64`, now run with
+// CPython's arbitrary-precision results.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn bigint_operations_unreachable_before_issue_148_keep_their_accepted_boundaries() {
-    for (case, expr, message) in [
-        (
-            "compare",
-            format!("{OVERSIZED} > 0"),
-            "comparing a bigint-valued `int` is not supported yet",
-        ),
-        (
-            "multiply",
-            format!("{OVERSIZED} * 2"),
-            "multiplying a bigint-valued `int` is not supported yet",
-        ),
-        (
-            "floordiv",
-            format!("{OVERSIZED} // 2"),
-            "dividing a bigint-valued `int` is not supported yet",
-        ),
-        (
-            "modulo",
-            format!("{OVERSIZED} % 2"),
-            "computing the modulo of a bigint-valued `int` is not supported yet",
-        ),
-        (
-            "power",
-            format!("{OVERSIZED} ** 2"),
-            "exponentiating a bigint-valued `int` is not supported yet",
-        ),
-        (
-            "truediv",
-            format!("{OVERSIZED} / 2"),
-            "converting a bigint-valued `int` is not supported yet",
-        ),
-        (
-            "mixed_float",
-            format!("{OVERSIZED} + 1.5"),
-            "converting a bigint-valued `int` is not supported yet",
-        ),
-    ] {
-        assert_uncaught_overflow_error(case, &format!("print({expr})\n"), message);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Completion criterion 3: a literal outside `i64` range stays a compile-time
-// capability diagnostic, not a runtime abort.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn a_literal_outside_i64_range_is_still_a_spanned_capability_diagnostic() {
-    let dir = ScratchDir::new("issue148_beyond_i64").expect("failed to create scratch dir");
-    let src = dir.join("beyond.py");
-    std::fs::File::create(&src)
-        .unwrap()
-        .write_all(b"x: int = 99999999999999999999999999\nprint(x)\n")
-        .unwrap();
-
-    let check = Command::new(pycc_bin())
-        .args(["check", src.to_str().unwrap()])
+/// Runs `source` through `pycc run` and `python3`, asserting equal stdout.
+fn assert_matches_cpython(case: &str, source: &str) {
+    let dir = ScratchDir::new(&format!("issue148_{case}")).expect("failed to create scratch dir");
+    let src = dir.join(format!("{case}.py"));
+    std::fs::write(&src, source).unwrap();
+    let run = Command::new(pycc_bin())
+        .args(["run", src.to_str().unwrap()])
         .output()
         .unwrap();
+    let oracle = Command::new("python3").arg(&src).output().unwrap();
     assert_eq!(
-        check.status.code(),
-        Some(1),
-        "a literal beyond i64 range should still be rejected at check time"
+        run.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
     );
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&check.stdout),
-        String::from_utf8_lossy(&check.stderr)
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&oracle.stdout),
+        "{case}"
     );
-    assert!(
-        text.contains("error[C0001]") && text.contains("integer literal does not fit in i64"),
-        "expected the spanned C0001 capability diagnostic, got: {text}"
+}
+
+#[test]
+fn bigint_operations_on_an_oversized_literal_match_cpython() {
+    assert_matches_cpython(
+        "operations",
+        &format!(
+            "print({OVERSIZED} > 0, {OVERSIZED} * 2, {OVERSIZED} // 3, {OVERSIZED} % 7)\n\
+             print({OVERSIZED} ** 2, {OVERSIZED} / 2 > 2.3e18, {OVERSIZED} + 1.5 > 4.6e18)\n"
+        ),
+    );
+}
+
+#[test]
+fn a_literal_outside_i64_range_matches_cpython() {
+    assert_matches_cpython(
+        "beyond_i64",
+        "x: int = 99999999999999999999999999\nprint(x, -x, x + 1, -0x1_0000_0000_0000_0000)\n",
     );
 }
