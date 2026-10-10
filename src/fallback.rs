@@ -27,6 +27,7 @@
 //! Strict mode never falls back. Only the entry module falls back; a
 //! diagnostic in another module of the program is reported as before.
 
+mod builtins;
 mod names;
 mod render;
 
@@ -144,7 +145,7 @@ pub(crate) struct Failure {
 }
 
 /// Which statements fall back, and why.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Plan {
     source: String,
     display: String,
@@ -155,7 +156,7 @@ pub(crate) struct Plan {
     /// Source offsets of builtin calls compiled code makes through CPython's
     /// `builtins` module (`min(a, b)` becomes `builtins.min(a, b)`): the
     /// builtin is valid Python pycc does not compile for these arguments.
-    object_builtins: BTreeMap<u32, String>,
+    object_builtins: BTreeMap<u32, (u32, String)>,
     /// Unannotated public functions fallback code calls: compiled with an
     /// object for every unannotated parameter and return (the signature
     /// Python callers need), and published, instead of inferred.
@@ -301,7 +302,7 @@ impl Plan {
         // preamble goes after them.
         let first = self.preamble_position();
         for failure in failures {
-            if self.call_through_builtins(rendered, failure) || self.demote(rendered, failure) {
+            if self.rewrite_builtin_use(rendered, failure) || self.demote(rendered, failure) {
                 continue;
             }
             let reason = describe(&failure.diagnostic);
@@ -349,51 +350,6 @@ impl Plan {
             self.object_builtins.len(),
             self.demoted.len(),
         ) != before
-    }
-
-    /// Records a compiled call of a builtin pycc does not compile for its
-    /// arguments (`C0001` "call to builtin") as a call through CPython's
-    /// `builtins` module, returning whether it did. A builtin that reads
-    /// its caller's frame, an exception class, or a call already made
-    /// through `builtins` is left to fall back.
-    fn call_through_builtins(&mut self, rendered: Option<&Rendered>, failure: &Failure) -> bool {
-        let message = &failure.diagnostic.message;
-        let Some(name) = message
-            .strip_prefix("call to builtin `")
-            .and_then(|rest| rest.strip_suffix("` is valid Python but not implemented yet"))
-        else {
-            return false;
-        };
-        if !name.starts_with(|c: char| c.is_ascii_lowercase())
-            || matches!(
-                name,
-                "super" | "locals" | "globals" | "vars" | "eval" | "exec" | "dir" | "breakpoint"
-            )
-        {
-            return false;
-        }
-        let Some(span) = failure.diagnostic.span.filter(|s| (s.start, s.end) != (0, 0)) else {
-            return false;
-        };
-        let at = match rendered {
-            Some(rendered) => rendered.source_offset(span.start),
-            None => Some(span.start),
-        };
-        let Some(at) = at else {
-            return false;
-        };
-        let rest = &self.source[at as usize..];
-        let is_call = rest
-            .strip_prefix(name)
-            .is_some_and(|after| after.trim_start().starts_with('('));
-        let starts_name = at == 0
-            || !self.source[..at as usize]
-                .ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == '.');
-        if !is_call || !starts_name || self.object_builtins.contains_key(&at) {
-            return false;
-        }
-        self.object_builtins.insert(at, name.to_string());
-        true
     }
 
     /// The source line a failure's span starts on, when it has one in
@@ -502,6 +458,15 @@ impl Plan {
                         }
                         Kind::Class(name)
                             if read.contains(name) && !self.publishes.sees(name, true, false) =>
+                        {
+                            name
+                        }
+                        // An instance of a compiled class may reach fallback
+                        // code through any value without its name being
+                        // read, and an unpublished class's instances have no
+                        // attributes Python code can see.
+                        Kind::Class(name)
+                            if !self.publishes.classes && !self.fallback.is_empty() =>
                         {
                             name
                         }
@@ -761,12 +726,63 @@ pub(crate) fn with_fallback<T, E>(
         return first;
     };
     plan.set_entry_dir(path.parent().map(Path::to_path_buf));
-    let mut rendered: Option<Rendered> = None;
-    let mut failures = failures;
+    let Some(mut value) = converge(&mut plan, None, failures, &attempt, &split) else {
+        set_override(None);
+        return first;
+    };
+    // A statement that fell back for a type error early on may compile now
+    // that later rounds changed what it sees (a global kept native, a
+    // function compiled with objects, a builtin called through CPython):
+    // run the loop once more from a plan without those, and keep whichever
+    // result falls back less.
+    let mut retry = plan.clone();
+    retry.fallback.retain(|_, reason| !retryable(reason));
+    // What fallback code that stays forces is forced again.
+    retry.cascade();
+    if retry.fallback.len() < plan.fallback.len() {
+        let kept = entry_override();
+        let rendered = retry.render();
+        set_override(Some(rendered.text.clone()));
+        let retried = match attempt() {
+            Ok(value) => Some(value),
+            Err(failure) => split(&failure)
+                .and_then(|failures| converge(&mut retry, Some(rendered), failures, &attempt, &split)),
+        };
+        match retried {
+            Some(better) if retry.fallback.len() < plan.fallback.len() => {
+                plan = retry;
+                value = better;
+            }
+            _ => set_override(kept),
+        }
+    }
+    if REPORT.load(Ordering::Relaxed) {
+        for line in plan.report_lines() {
+            eprintln!("{line}");
+        }
+    }
+    Ok(value)
+}
+
+/// Whether a statement that fell back for `reason` may compile in a later
+/// plan: a type error may, an unsupported construct (`C0001`) never does.
+fn retryable(reason: &str) -> bool {
+    !reason.starts_with("C0001")
+}
+
+/// The fallback loop: absorbs `failures` into `plan`, renders and compiles
+/// until an attempt succeeds (its value, with the rewrite as the entry
+/// override) or no failure marks anything new (`None`).
+fn converge<T, E>(
+    plan: &mut Plan,
+    mut rendered: Option<Rendered>,
+    mut failures: Vec<Failure>,
+    attempt: &impl Fn() -> Result<T, E>,
+    split: &impl Fn(&E) -> Option<Vec<Failure>>,
+) -> Option<T> {
     loop {
         if !plan.absorb(rendered.as_ref(), &failures) {
-            set_override(None);
-            return first;
+            return None;
         }
         let next = plan.render();
         if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
@@ -775,21 +791,8 @@ pub(crate) fn with_fallback<T, E>(
         set_override(Some(next.text.clone()));
         rendered = Some(next);
         match attempt() {
-            Ok(value) => {
-                if REPORT.load(Ordering::Relaxed) {
-                    for line in plan.report_lines() {
-                        eprintln!("{line}");
-                    }
-                }
-                return Ok(value);
-            }
-            Err(failure) => match split(&failure) {
-                Some(next_failures) => failures = next_failures,
-                None => {
-                    set_override(None);
-                    return first;
-                }
-            },
+            Ok(value) => return Some(value),
+            Err(failure) => failures = split(&failure)?,
         }
     }
 }

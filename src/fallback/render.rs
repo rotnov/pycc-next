@@ -86,9 +86,9 @@ impl Plan {
             edits.extend(
                 self.object_builtins
                     .range(stmt.range.start..stmt.range.end)
-                    .map(|(at, name)| names::Edit {
-                        range: *at..at + name.len() as u32,
-                        text: format!("{BUILTINS}.{name}"),
+                    .map(|(at, (end, text))| names::Edit {
+                        range: *at..*end,
+                        text: text.clone(),
                         mirror: None,
                     }),
             );
@@ -97,7 +97,8 @@ impl Plan {
             {
                 edits.extend(object_annotations(def));
             }
-            edits.sort_by_key(|edit| edit.range.start);
+            // An insertion goes before a replacement starting where it does.
+            edits.sort_by_key(|edit| (edit.range.start, edit.range.end));
             let at = text.len() as u32;
             let mut inner = start;
             for edit in edits {

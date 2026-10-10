@@ -124,6 +124,21 @@ fn list_globals_fallback_code_reads_are_cpython_lists_built_in_place() {
 }
 
 #[test]
+fn builtin_values_exit_and_scalar_methods_go_through_cpython() {
+    if !embed_interpreter_available() {
+        eprintln!("skipped: no CPython to embed (set PYCC_PYTHON)");
+        return;
+    }
+    // Exits with status 3, as CPython does.
+    let report = matches_cpython("non_strict_builtin_values.py");
+    // The lambda statements fall back, and the class whose instances they
+    // receive; `defaultdict(int)`, `l = len`, `"\n".join(objects)`,
+    // `.format`, `.bit_length()` and `exit` stay compiled.
+    assert!(report.contains("class `P`"), "{report}");
+    assert_eq!(report.matches("fallback:").count(), 3, "{report}");
+}
+
+#[test]
 fn fallback_calls_omitting_a_default_match_cpython() {
     if !embed_interpreter_available() {
         eprintln!("skipped: no CPython to embed (set PYCC_PYTHON)");
