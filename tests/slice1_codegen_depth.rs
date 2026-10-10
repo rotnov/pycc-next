@@ -1334,23 +1334,10 @@ print(len(d))
 }
 
 #[test]
-fn growing_a_dict_from_inside_for_k_in_d_iterates_the_newly_added_key_too() {
-    // A final whole-branch review flagged a genuinely new, deliberate v0.2
-    // CPython divergence introduced by `ForDict`'s own codegen (D-123): the
-    // loop bound is `pycc_rt_dict_len`, re-read on every iteration rather
-    // than hoisted, so `d[k] = v` inside a `for k in d:` loop body that
-    // grows the dict causes the loop to keep going and also visit the
-    // newly-added key. Real CPython raises `RuntimeError: dictionary
-    // changed size during iteration` for this exact program instead. This
-    // test pins the actual, verified behavior (empirically confirmed by
-    // running this exact source through the real `pycc build`/execute
-    // pipeline before writing the assertion below) so the D-123 Consequences
-    // note in
-    // `docs/decisions/D-123-dict-str-int-ships-a-d-k-v-insert-or-update.md`
-    // and `docs/RUNTIME.md`'s dict line describe enforced behavior, not an
-    // inference from a codegen comment. NOT a conformance fixture against
-    // CPython (this is the one documented point where pycc and CPython
-    // deliberately disagree).
+fn growing_a_dict_from_inside_for_k_in_d_raises_like_cpython() {
+    // `for k in d:` checks the size it started with at every step, as
+    // CPython's dict iterator does: the next step after `d["z"] = 9`
+    // raises `RuntimeError: dictionary changed size during iteration`.
     let source = "\
 d = {\"a\": 1}
 for k in d:
@@ -1359,8 +1346,12 @@ for k in d:
 print(len(d))
 ";
     let output = build_and_run("dict_grows_during_for_k_in_d_iteration", source);
-    assert!(output.status.success());
-    assert_eq!(output.stdout, b"a\nz\n2\n");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, b"a\n");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("RuntimeError: dictionary changed size during iteration")
+    );
 }
 
 #[test]

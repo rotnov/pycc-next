@@ -450,6 +450,19 @@ fn list_of(kind: i64, words: Vec<i64>) -> *mut PyListObj {
     crate::list::new_raw_words(kind, words)
 }
 
+/// Raises `RuntimeError: dictionary changed size during iteration` when
+/// `len` differs from `initial` (and nothing is pending yet).
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_dict_check_not_resized(len: i64, initial: i64) {
+    if len != initial && crate::pycc_rt_exception_active() == 0 {
+        crate::raise_builtin(
+            crate::exception::EXCEPTION_TYPE_RUNTIME_ERROR,
+            "RuntimeError",
+            "dictionary changed size during iteration",
+        );
+    }
+}
+
 /// `list(d)` / `list(d.keys())` as a new list.
 ///
 /// # Safety

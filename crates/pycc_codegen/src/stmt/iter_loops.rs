@@ -316,6 +316,10 @@ pub(crate) fn emit_for_dict_stmt<'ctx>(
         heap_rc::HeapKind::Dict,
         dict_ptr,
     );
+    // CPython's dict iterator checks the size it started with at every
+    // step: a body that inserts or deletes raises `RuntimeError` at the
+    // next step (`ForSet`'s check).
+    let initial_len = build_dict_len(builder, rt, dict_ptr);
     let preheader = builder.get_insert_block().unwrap();
 
     let test_bb = context.append_basic_block(function, "for_dict_test");
@@ -333,9 +337,31 @@ pub(crate) fn emit_for_dict_stmt<'ctx>(
     induction.add_incoming(&[(&zero, preheader)]);
     let current = induction.as_basic_value().into_int_value();
     let len = build_dict_len(builder, rt, dict_ptr);
-    let cont = builder
-        .build_int_compare(IntPredicate::SLT, current, len, "for_dict_cont")
+    builder
+        .build_call(
+            rt.dict_check_not_resized,
+            &[len.into(), initial_len.into()],
+            "dict_check_not_resized",
+        )
+        .expect("build_call should not fail for a well-formed dict resize check");
+    let in_range = builder
+        .build_int_compare(IntPredicate::SLT, current, len, "for_dict_in_range")
         .expect("build_int_compare should not fail comparing two i64 operands");
+    // `ForSet`'s pending-exception conjunct: the check (or the body)
+    // raised, so the loop ends here.
+    let exc_active =
+        crate::int_fast::emit_exception_pending(context, builder, rt, "for_dict_exc_active");
+    let no_exception = builder
+        .build_int_compare(
+            IntPredicate::EQ,
+            exc_active,
+            exc_active.get_type().const_zero(),
+            "for_dict_no_exc",
+        )
+        .expect("build_int_compare should not fail comparing an i8 against zero");
+    let cont = builder
+        .build_and(in_range, no_exception, "for_dict_cont")
+        .expect("build_and should not fail for two i1 operands");
     builder
         .build_conditional_branch(cont, body_bb, after_bb)
         .expect("build_conditional_branch should not fail for a well-formed i1 condition");
@@ -418,9 +444,8 @@ pub(crate) fn emit_for_dict_stmt<'ctx>(
 //    iteration inside the test block rather than hoisted into the
 //    preheader, for the identical CPython-mutation-during-iteration
 //    reason `ForList`'s own comment gives -- kept identical to
-//    `ForList`/`ForDict`'s own shape. Unlike `ForDict` (D-123
-//    accepts silently visiting newly-inserted keys as a bounded
-//    divergence), a mid-loop `set.add()` (D-119, this same PR) is
+//    `ForList`/`ForDict`'s own shape. Like `ForDict`'s, a mid-loop
+//    `set.add()` (D-119) is
 //    checked against the length captured once in the preheader and
 //    raises `RuntimeError` (D-173) on any change -- see
 //    `pycc_rt_int_set_check_not_resized`'s own doc comment for why

@@ -1,2 +1,4 @@
 value = 1
-value = "changed"
+if value:
+    value = "changed"
+print(value)

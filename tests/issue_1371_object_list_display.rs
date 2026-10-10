@@ -288,8 +288,8 @@ fn the_shapes_outside_part_2d_are_refused() {
         ),
         (
             "obj_list_non_empty_binding",
-            "def f() -> int:\n    s = builtins.list(\"ab\")[1:]\n    s = [1]\n    \
-             return len(s)\n",
+            "def f() -> int:\n    s = builtins.list(\"ab\")[1:]\n    if len(s) > 0:\n        \
+             s = [1]\n    return len(s)\n",
             "T0023",
             "cannot assign",
         ),

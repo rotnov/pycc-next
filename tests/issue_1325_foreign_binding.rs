@@ -105,7 +105,7 @@ fn check_accepts_a_module_level_object_binding_and_loop() {
 fn the_shapes_outside_the_admitted_binding_are_refused() {
     assert_one_error(
         "obj_bind_retype",
-        "from itertools import product\nx = 1\nx = product(\"ab\")\n",
+        "from itertools import product\nx = 1\nif x:\n    x = product(\"ab\")\nprint(x)\n",
         "T0023",
         "cannot assign `object` to `x`, previously inferred as `int`",
     );

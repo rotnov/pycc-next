@@ -110,6 +110,44 @@ fn aliased_and_wildcard_imports_match_cpython() {
     matches_cpython("corpus_imports.py", &[], "16\n");
 }
 
+/// A name rebound to an unrelated value (`n = int(n)`, a loop variable
+/// reused over another type) is one variable per live range.
+#[test]
+fn a_name_rebound_to_another_type_is_split_per_live_range() {
+    matches_cpython("corpus_rebinding.py", &[], "21\n1 2 3\n2\nhello\n");
+}
+
+/// `P = print`-style builtin aliases, `a() if c else b()` as a statement,
+/// and an explicit `object` base.
+#[test]
+fn script_idioms_match_cpython() {
+    matches_cpython("corpus_idioms.py", &[], "4\n");
+}
+
+/// Inserting into or deleting from a dict (or set) while a `for` loop
+/// iterates it raises CPython's `RuntimeError` at the next step; a value
+/// update or a `break` right after the change does not.
+#[test]
+fn dict_and_set_size_changes_during_iteration_raise() {
+    matches_cpython("corpus_dict_mutation.py", &[], "");
+}
+
+/// A name whose two types meet at one read stays one variable, refused.
+#[test]
+fn a_name_holding_two_types_at_one_read_is_still_refused() {
+    let dir = ScratchDir::new("corpus_shapes_union").expect("scratch");
+    let source = dir.join("m.py");
+    std::fs::write(
+        &source,
+        "n = int(input())\ny = \"keep\"\nif n > 100:\n    y = 5\nprint(y)\n",
+    )
+    .unwrap();
+    let output = pycc().arg("check").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let text = text(&output.stdout);
+    assert!(text.contains("T0023"), "{text}");
+}
+
 /// A local named like a stdlib module still shadows it for a function the
 /// builtin table types, as for every other stdlib symbol.
 #[test]

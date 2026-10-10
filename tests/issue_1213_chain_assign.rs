@@ -156,7 +156,8 @@ fn every_chained_assignment_refusal_is_named_and_located() {
 fn a_chain_is_typed_as_its_single_target_assignments() {
     let text = check_fails(
         "e2e_1213_typing",
-        "def f() -> None:\n    x = 1.5\n    y = 2\n    x = y = 3\n",
+        // `x`'s two bindings meet at one read, so they are one variable.
+        "def f(c: bool) -> None:\n    x = 1.5\n    y = 2\n    if c:\n        x = y = 3\n    print(x, y)\n",
     );
     assert!(text.contains("error[T0023]"), "{text}");
 }

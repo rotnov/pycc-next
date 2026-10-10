@@ -41,6 +41,7 @@ mod comps;
 mod exprs;
 mod keys;
 mod stmts;
+mod webs;
 mod wildcard;
 
 use ruff_python_ast::{Expr, ModModule, Stmt};
@@ -74,6 +75,9 @@ pub fn desugar(module: &mut ModModule) {
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
         wildcard::expand_wildcards(&mut body);
+        aliases::builtin_aliases(&mut body);
+        aliases::drop_object_bases(&mut body);
+        webs::split_webs(&mut body);
         module.body = body.into();
     }
     let fresh = Fresh {

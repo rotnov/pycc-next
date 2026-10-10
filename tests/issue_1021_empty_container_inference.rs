@@ -1577,18 +1577,14 @@ print(go())
         "the first producer must still select the element type, got: {diagnostics}",
     );
 }
-/// #1021 bot review round 16: the per-body promotion that lets a producer
-/// read a name its own branch binds restored the *flat* whole-function type,
-/// which a mutually exclusive branch may have contributed. With `v` bound to
-/// `True` in the `if` arm and to `1` in the `else`, the flat pass retains
-/// `bool`, so promoting it inside the `else` resolved `EmptyList(Bool)` and
-/// reported `T0034` -- while the `xs = [v]` spelling of the same program sees
-/// the branch-local `int` and is accepted. A name bound by more than one
-/// syntactic site is now declined instead of promoted, so the empty spelling
-/// misses with `T0003` rather than resolving wrongly.
+/// #1021 bot review round 16: with `v` bound to `True` in the `if` arm and
+/// to `1` in the `else`, a flat whole-function type would have promoted
+/// `bool` into the `else` and resolved `EmptyList(Bool)`. The two bindings
+/// are separate live ranges (`pycc_ast::desugar::webs`), so the `else`
+/// sees only its own `int` and the program runs as CPython does.
 #[test]
-fn a_name_bound_in_two_branches_is_not_promoted_from_the_flat_type() {
-    let diagnostics = check_error(
+fn a_name_bound_in_two_branches_types_each_branch_on_its_own() {
+    let output = check_build_and_run(
         "cross_branch_promotion",
         "\
 def go(flag: bool) -> int:
@@ -1606,14 +1602,8 @@ def go(flag: bool) -> int:
 print(go(False))
 ",
     );
-    assert!(
-        diagnostics.contains("T0003"),
-        "the cross-branch type must not resolve the container, got: {diagnostics}",
-    );
-    assert!(
-        !diagnostics.contains("T0034"),
-        "the flat `bool` must not have been promoted into the `else`, got: {diagnostics}",
-    );
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"1\n");
 }
 
 /// The reference spelling of the program above: `xs = [v]` carries no empty

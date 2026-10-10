@@ -764,7 +764,7 @@ fn conflicting_types_across_two_try_star_handlers_are_rejected() {
     let (ok, combined) = check_only(
         &dir,
         "join_conflict.py",
-        "y = 1\ntry:\n    raise ValueError(\"v\")\nexcept* ValueError:\n    y = 2\nexcept* TypeError:\n    y = \"s\"\n",
+        "y = 1\ntry:\n    raise ValueError(\"v\")\nexcept* ValueError:\n    y = 2\nexcept* TypeError:\n    y = \"s\"\nprint(y)\n",
     );
     assert!(
         !ok,

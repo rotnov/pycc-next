@@ -4,3 +4,5 @@ def pick(d: int) -> None:
     except ZeroDivisionError:
         x = "s"
         raise
+    finally:
+        print(x)

@@ -116,7 +116,8 @@ fn unsupported_list_shapes_are_refused_not_miscompiled() {
             "error[C0001]: rebinding a list to `+`/`*` of itself",
         ),
         (
-            "xs = [1]\nxs = xs * 2\n",
+            // A rebinding in a loop keeps one variable (its webs join).
+            "xs = [1]\nfor _ in range(2):\n    xs = xs * 2\nprint(xs)\n",
             "error[C0001]: rebinding a list to `+`/`*` of itself",
         ),
         (

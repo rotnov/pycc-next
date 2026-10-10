@@ -358,3 +358,77 @@ pub(crate) fn drop_unused_sys_imports(body: &mut Vec<Stmt>, sys: &SysNames) {
 pub(crate) fn stdin_lines(range: TextRange) -> Expr {
     call(load(SysFn::Readlines.builtin(), range), Vec::new(), range)
 }
+
+/// The builtin functions a module may bind a short name to (`P = print`,
+/// `rg = range`).
+const ALIASABLE_BUILTINS: &[&str] = &[
+    "abs", "all", "any", "bin", "chr", "dict", "divmod", "enumerate", "filter", "float", "hex",
+    "input", "int", "len", "list", "map", "max", "min", "oct", "ord", "pow", "print", "range",
+    "reversed", "round", "set", "sorted", "str", "sum", "tuple", "zip",
+];
+
+/// Replaces a top-level `X = <builtin>` (both names bound nowhere else)
+/// by the builtin itself at every read of `X`.
+pub(crate) fn builtin_aliases(body: &mut Vec<Stmt>) {
+    use ruff_python_ast::visitor::transformer::{self, Transformer};
+    let rebound = rebound_names(body);
+    let mut aliases: HashMap<String, String> = HashMap::new();
+    body.retain(|stmt| {
+        let Stmt::Assign(assign) = stmt else {
+            return true;
+        };
+        let ([Expr::Name(target)], Expr::Name(value)) =
+            (assign.targets.as_slice(), assign.value.as_ref())
+        else {
+            return true;
+        };
+        let (alias, builtin) = (target.id.as_str(), value.id.as_str());
+        if !ALIASABLE_BUILTINS.contains(&builtin)
+            || rebound.get(alias).copied().unwrap_or(0) != 1
+            || rebound.contains_key(builtin)
+            || alias.starts_with("__")
+        {
+            return true;
+        }
+        aliases.insert(alias.to_string(), builtin.to_string());
+        false
+    });
+    if aliases.is_empty() {
+        return;
+    }
+    struct Substitute(HashMap<String, String>);
+    impl Transformer for Substitute {
+        fn visit_expr(&self, expr: &mut Expr) {
+            if let Expr::Name(name) = expr
+                && let Some(builtin) = self.0.get(name.id.as_str())
+            {
+                name.id = builtin.as_str().into();
+            }
+            transformer::walk_expr(self, expr);
+        }
+    }
+    let substitute = Substitute(aliases);
+    for stmt in body.iter_mut() {
+        substitute.visit_stmt(stmt);
+    }
+}
+
+/// `class C(object):` is `class C:` (every class derives from `object`),
+/// unless the module binds `object` itself.
+pub(crate) fn drop_object_bases(body: &mut [Stmt]) {
+    if rebound_names(body).contains_key("object") {
+        return;
+    }
+    for stmt in body.iter_mut() {
+        if let Stmt::ClassDef(class) = stmt
+            && let Some(arguments) = class.arguments.as_mut()
+            && arguments.keywords.is_empty()
+        {
+            let mut args: Vec<Expr> = arguments.args.to_vec();
+            args.retain(|base| !matches!(base, Expr::Name(n) if n.id.as_str() == "object"));
+            if args.len() != arguments.args.len() {
+                arguments.args = args.into();
+            }
+        }
+    }
+}

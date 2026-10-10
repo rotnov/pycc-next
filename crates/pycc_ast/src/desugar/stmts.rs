@@ -31,6 +31,34 @@ fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>, module_level: boo
             expand_for(s, fresh, out);
             return;
         }
+        // `a() if c else b()` as a statement is `if c: a()` / `else: b()`:
+        // the branches need no common type.
+        Stmt::Expr(s) if matches!(*s.value, Expr::If(_)) => {
+            let Expr::If(if_exp) = *s.value else {
+                unreachable!()
+            };
+            let expr_stmt = |value: Expr| {
+                Stmt::Expr(ruff_python_ast::StmtExpr {
+                    node_index: Default::default(),
+                    range: s.range,
+                    value: Box::new(value),
+                })
+            };
+            let rewritten = Stmt::If(ruff_python_ast::StmtIf {
+                node_index: Default::default(),
+                range: s.range,
+                test: if_exp.test,
+                body: vec![expr_stmt(*if_exp.body)].into(),
+                elif_else_clauses: vec![ruff_python_ast::ElifElseClause {
+                    node_index: Default::default(),
+                    range: s.range,
+                    test: None,
+                    body: vec![expr_stmt(*if_exp.orelse)].into(),
+                }],
+            });
+            expand_stmt(rewritten, fresh, out, module_level);
+            return;
+        }
         other => other,
     };
     let mut stmt = stmt;

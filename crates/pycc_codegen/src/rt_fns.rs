@@ -218,6 +218,9 @@ pub(super) struct RtFns<'ctx> {
     pub(super) dict_get_or_default: FunctionValue<'ctx>,
     pub(super) dict_len: FunctionValue<'ctx>,
     pub(super) dict_key_at: FunctionValue<'ctx>,
+    /// `pycc_rt_dict_check_not_resized(len, initial)`: `for k in d`'s
+    /// per-step size check.
+    pub(super) dict_check_not_resized: FunctionValue<'ctx>,
     /// The instance-set constructor (`int_set_new`, uncounted elements),
     /// and the length and element read every set shares (`int_set_len`,
     /// `int_set_get`: `pycc_rt_set_len`/`pycc_rt_set_get` serve both
@@ -701,6 +704,10 @@ pub(super) fn declare_rt_functions<'ctx>(
         dict_key_at: declare(
             "pycc_rt_dict_key_at",
             i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+        ),
+        dict_check_not_resized: declare(
+            "pycc_rt_dict_check_not_resized",
+            void_type.fn_type(&[i64_type.into(), i64_type.into()], false),
         ),
         int_set_new: declare("pycc_rt_int_set_new", ptr_type.fn_type(&[], false)),
         int_set_len: declare(
