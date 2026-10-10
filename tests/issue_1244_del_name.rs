@@ -193,7 +193,7 @@ fn every_del_refusal_is_named() {
             "error[T0041]: local name `x` may not be bound",
         ),
         (
-            "def f(c: bool) -> None:\n    x = 1\n    if c:\n        del x\n        return\n    print(x)\n\nf(False)\n",
+            "def f(c: bool) -> None:\n    x = 1\n    if c:\n        del x\n    else:\n        return\n    print(x)\n\nf(False)\n",
             "error[T0041]: local name `x` may not be bound",
         ),
         (

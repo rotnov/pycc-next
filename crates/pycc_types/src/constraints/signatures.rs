@@ -168,6 +168,7 @@ pub(crate) fn annotated_function_environment(hir: &HirModule) -> Environment {
         std_module_aliases: Vec::new(),
         // Seeded at the same sink for the same reason (#1316).
         foreign_globals: HashSet::new(),
+        loop_exits: Default::default(),
     };
     // Part 1 of #541: register the class table through `bind_class` (via
     // `bind_classes`) rather than by populating `classes` directly, so this

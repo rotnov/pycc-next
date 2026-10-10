@@ -6,6 +6,7 @@
 //! delete prescan moved with it because the join is its only caller.
 
 use super::*;
+use pycc_hir::block_never_completes;
 use std::collections::HashSet;
 
 /// A checked `try`/`try*` statement's parts together with the environment
@@ -108,9 +109,14 @@ pub(super) fn join_try_outcome(
         *slot = ty;
     }
 
+    // `exits` decides narrowing exactly as `pycc_mir`'s `try` lowering
+    // does; `completes` marks the exits that also reach the next statement
+    // for definiteness, dropping a path that ends in `break`/`continue`.
     let mut exits: Vec<Environment> = Vec::new();
+    let mut completes: Vec<bool> = Vec::new();
     if !block_always_returns(paths.body) && !block_always_returns(paths.orelse) {
         exits.push(paths.else_env.clone());
+        completes.push(!block_never_completes(paths.body) && !block_never_completes(paths.orelse));
     }
     for (handler, handler_env) in paths.handlers.iter().zip(paths.handler_envs) {
         if block_always_returns(&handler.body) {
@@ -121,7 +127,17 @@ pub(super) fn join_try_outcome(
             exit.narrowed.remove(name);
         }
         exits.push(exit);
+        completes.push(!block_never_completes(&handler.body));
     }
+    // When every exit jumps, the next statement is unreachable; keep the
+    // join over all of them rather than call everything bound.
+    let any_completes = completes.contains(&true);
+    let definite_exits: Vec<&Environment> = exits
+        .iter()
+        .zip(&completes)
+        .filter(|(_, completes)| **completes || !any_completes)
+        .map(|(exit, _)| exit)
+        .collect();
     let fallthrough = exits.split_first().map(|(first, rest)| {
         let mut joined = env.clone();
         joined.bindings = conservative
@@ -132,7 +148,7 @@ pub(super) fn join_try_outcome(
                     return (name.clone(), state.clone());
                 }
                 let ty = state.ty().clone();
-                let definite = exits.iter().all(|exit| {
+                let definite = definite_exits.iter().all(|exit| {
                     matches!(exit.bindings.get(name), Some(BindingState::Definitely(_)))
                 });
                 let state = if definite {

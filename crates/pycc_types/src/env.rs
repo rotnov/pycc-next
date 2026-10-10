@@ -287,6 +287,11 @@ pub struct Environment {
     /// that runs before the import at run time raises `NameError` from
     /// codegen's unbound-global branch (`pycc_codegen`'s `foreign_fail.rs`).
     pub(crate) foreign_globals: HashSet<String>,
+    /// The bindings in effect at each `break` of every loop being checked,
+    /// innermost loop last (see `crate::loop_flow`). Shared, not copied, by
+    /// the branch clones an `if`/`try`/`match` check makes, so a `break`
+    /// inside any branch reaches its loop's exit join.
+    pub(crate) loop_exits: crate::loop_flow::LoopExits,
 }
 
 impl Environment {
@@ -476,6 +481,8 @@ impl Environment {
 
     pub(crate) fn child_for_function(&self, local_names: &[&str]) -> Self {
         let mut child = self.clone();
+        // A function body starts outside every loop.
+        child.loop_exits = crate::loop_flow::LoopExits::default();
         // #974: everything below this point is a function body, where a
         // `binding_state` answer is the *final* module environment rather
         // than a point-in-time one -- see the field's own doc comment.

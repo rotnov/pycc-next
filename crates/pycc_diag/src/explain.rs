@@ -712,8 +712,13 @@ paths that can reach a later read of it -- e.g. inside an `if` with no \
 than on every path (issue #118 Part 1). After a `try`, a name is bound \
 when every path that completes the statement binds it (#1289): the `else` \
 path after a completed body, plus every handler whose body does not always \
-return or raise. A handler that binds nothing (`except E: pass`), a read \
-inside `finally`, or a read after the statement of any name some handler \
+return, raise, `break` or `continue`. After a loop, a name is bound when \
+the loop's normal exit (through its `else:` clause, unless that clause \
+never completes or the loop is `while True:`) and every `break` bound to \
+the loop bind it; a `for` target is bound at each `break` in its body. An \
+`if` branch that never completes (it returns, raises, `break`s or \
+`continue`s) does not reach the statement after the `if`. A handler that \
+binds nothing (`except E: pass`), a read inside `finally`, or a read after the statement of any name some handler \
 binds with `except ... as` is still T0041. This is pycc's strict AOT \
 equivalent of CPython's `UnboundLocalError`, but caught at compile time via \
 a three-state binding model (definitely bound / maybe bound / unbound) \

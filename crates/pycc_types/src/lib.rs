@@ -17,6 +17,7 @@ mod hash;
 mod if_exp;
 mod inherited_copies;
 mod local_binder;
+mod loop_flow;
 mod module;
 mod monomorphize;
 mod narrow;
@@ -34,7 +35,7 @@ mod unop;
 mod unpack;
 
 pub(crate) use local_binder::{bind_local_types_in_body, bind_local_types_in_stmt};
-use pycc_hir::{block_always_returns, loop_body, loop_else_as_if};
+use pycc_hir::{block_always_returns, loop_body};
 
 pub use buffer::{
     function_local_producer_spellings, imported_producer_spellings, is_buffer_producer_spelling,
@@ -2013,6 +2014,30 @@ fn check_while_body_in_place(env: &mut Environment, body: &[HirStmt]) -> Result<
 }
 
 pub fn check_stmt(env: &mut Environment, stmt: &HirStmt) -> Result<(), Diagnostic> {
+    // A loop is checked inside a `loop_flow` frame, which joins its normal
+    // exit (through its `else:` clause) with the state at each `break`.
+    match stmt {
+        HirStmt::LoopElse { loop_stmt, orelse } => loop_flow::check_loop(
+            env,
+            loop_stmt,
+            orelse,
+            |env| check_stmt_arm(env, loop_stmt),
+            narrow::check_stmt_sequence,
+        ),
+        _ if loop_body(stmt).is_some() => loop_flow::check_loop(
+            env,
+            stmt,
+            &[],
+            |env| check_stmt_arm(env, stmt),
+            |_, _| Ok(()),
+        ),
+        _ => check_stmt_arm(env, stmt),
+    }
+}
+
+/// [`check_stmt`] for one statement, with a loop checked without its
+/// `loop_flow` frame.
+fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<(), Diagnostic> {
     match stmt {
         HirStmt::Assign { target, value } => {
             // Part 2a of #1142 (#1165): this is `check_stmt`, the
@@ -2209,24 +2234,21 @@ pub fn check_stmt(env: &mut Environment, stmt: &HirStmt) -> Result<(), Diagnosti
                         orelse,
                     );
                 }
-                join_if_branches(env, &body_env, &orelse_env)
+                join_if_branches(env, &body_env, &orelse_env)?;
+                loop_flow::refine_if_join(env, body, orelse, &body_env, &orelse_env);
+                Ok(())
             }
         }
-        // A `break`/`continue` binds nothing and checks nothing: lowering
-        // already proved it has an enclosing loop.
-        HirStmt::Break | HirStmt::Continue => Ok(()),
-        HirStmt::LoopElse { loop_stmt, orelse } => {
-            check_stmt(env, loop_stmt)?;
-            if loop_body(loop_stmt).is_some_and(pycc_hir::body_breaks_loop) {
-                // A `break` skips the clause, so it runs at most once: check
-                // it as the body of an `if` whose test is unknown, which is
-                // exactly how `pycc_mir` lowers it.
-                check_stmt(env, &loop_else_as_if(orelse))
-            } else {
-                // Without a `break` the clause always runs after the loop.
-                narrow::check_stmt_sequence(env, orelse)
-            }
+        // A `break` binds nothing and checks nothing (lowering already
+        // proved it has an enclosing loop); its loop's exit join needs the
+        // bindings in effect here. A `continue` returns to the loop head,
+        // which needs no record (see `loop_flow`).
+        HirStmt::Break => {
+            env.loop_exits.record_break(&env.bindings);
+            Ok(())
         }
+        HirStmt::Continue => Ok(()),
+        HirStmt::LoopElse { .. } => unreachable!("`check_stmt` checks a loop `else:` clause"),
         HirStmt::While { test, body } => {
             // Issue #769 follow-up (D-068 re-review round 3): a `while`
             // body can be re-entered, and `test` itself re-executes on
@@ -2788,6 +2810,36 @@ fn check_stmt_in_function(
     stmt: &HirStmt,
     return_ty: Ty,
 ) -> Result<(), Diagnostic> {
+    // See the module-scope `check_stmt`.
+    match stmt {
+        HirStmt::LoopElse { loop_stmt, orelse } => loop_flow::check_loop(
+            env,
+            loop_stmt,
+            orelse,
+            |env| check_stmt_arm_in_function(env, local_names, loop_stmt, return_ty.clone()),
+            |env, suite| {
+                narrow::check_stmt_sequence_in_function(env, local_names, suite, return_ty.clone())
+            },
+        ),
+        _ if loop_body(stmt).is_some() => loop_flow::check_loop(
+            env,
+            stmt,
+            &[],
+            |env| check_stmt_arm_in_function(env, local_names, stmt, return_ty.clone()),
+            |_, _| Ok(()),
+        ),
+        _ => check_stmt_arm_in_function(env, local_names, stmt, return_ty),
+    }
+}
+
+/// [`check_stmt_in_function`] for one statement, with a loop checked
+/// without its `loop_flow` frame.
+fn check_stmt_arm_in_function(
+    env: &mut Environment,
+    local_names: &[&str],
+    stmt: &HirStmt,
+    return_ty: Ty,
+) -> Result<(), Diagnostic> {
     match stmt {
         HirStmt::Return(None) => {
             if return_ty != Ty::None && !object_none::admits_none_return(&return_ty, None) {
@@ -3049,18 +3101,19 @@ fn check_stmt_in_function(
                         orelse,
                     );
                 }
-                join_if_branches(env, &body_env, &orelse_env)
+                join_if_branches(env, &body_env, &orelse_env)?;
+                loop_flow::refine_if_join(env, body, orelse, &body_env, &orelse_env);
+                Ok(())
             }
         }
-        HirStmt::Break | HirStmt::Continue => Ok(()),
-        // See the module-scope `LoopElse` arm.
-        HirStmt::LoopElse { loop_stmt, orelse } => {
-            check_stmt_in_function(env, local_names, loop_stmt, return_ty.clone())?;
-            if loop_body(loop_stmt).is_some_and(pycc_hir::body_breaks_loop) {
-                check_stmt_in_function(env, local_names, &loop_else_as_if(orelse), return_ty)
-            } else {
-                narrow::check_stmt_sequence_in_function(env, local_names, orelse, return_ty)
-            }
+        // See the module-scope `Break` arm.
+        HirStmt::Break => {
+            env.loop_exits.record_break(&env.bindings);
+            Ok(())
+        }
+        HirStmt::Continue => Ok(()),
+        HirStmt::LoopElse { .. } => {
+            unreachable!("`check_stmt_in_function` checks a loop `else:` clause")
         }
         HirStmt::While { test, body } => {
             // Issue #769 follow-up (D-068 re-review round 3): see the

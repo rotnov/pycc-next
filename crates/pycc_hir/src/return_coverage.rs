@@ -14,6 +14,34 @@ use crate::{HirExpr, HirStmt, body_breaks_loop, loop_body};
 /// Whether every path through `body` leaves it by `return`, `raise`, or a
 /// loop that never completes, so no statement after `body` runs.
 pub fn block_always_returns(body: &[HirStmt]) -> bool {
+    block_exits(body, false)
+}
+
+/// Whether no path through `body` reaches its end: every path leaves by
+/// `return`, `raise`, a loop that never completes, or a `break`/`continue`
+/// bound to a loop enclosing `body`. [`block_always_returns`] plus jumps.
+///
+/// `pycc_types`' definite-assignment joins use it to drop a path that jumps
+/// away (`else: continue`, `except E: continue`) from the paths reaching the
+/// statement after `body`. A jump's own state is not lost: a `break` joins
+/// at the loop's exit and a `continue` flows back to the loop head, whose
+/// state the loop join already treats conservatively.
+pub fn block_never_completes(body: &[HirStmt]) -> bool {
+    block_exits(body, true)
+}
+
+/// Whether `stmt` is a loop that can only be left through a `break`,
+/// `return` or raise: a `while` whose test is constant true.
+pub fn loop_never_ends_normally(stmt: &HirStmt) -> bool {
+    matches!(stmt, HirStmt::While { test, .. } if is_constant_true(test))
+}
+
+/// [`block_always_returns`] when `jumps` is false, [`block_never_completes`]
+/// when it is true. A loop nested in `body` is never recursed into with
+/// `jumps`, so a `break` in its body (bound to it, not to the loop around
+/// `body`) is never mistaken for one leaving `body`.
+fn block_exits(body: &[HirStmt], jumps: bool) -> bool {
+    let block_always_returns = |body: &[HirStmt]| block_exits(body, jumps);
     for stmt in body {
         let returns = match stmt {
             HirStmt::Return(_) => true,
@@ -73,10 +101,12 @@ pub fn block_always_returns(body: &[HirStmt]) -> bool {
             }
             // A `break`/`continue` leaves the rest of its suite unreached,
             // but control continues after (or at the head of) the loop, so
-            // it is not a return. Answering `false` is the conservative
-            // direction for every caller: a `try` join keeps the path, and
-            // a constant-true loop is classified by its own arm above.
-            HirStmt::Break | HirStmt::Continue => false,
+            // it is not a return. Without `jumps`, answering `false` is the
+            // conservative direction for every caller: a `try` join keeps
+            // the path, and a constant-true loop is classified by its own
+            // arm above. With `jumps` the caller asks exactly whether the
+            // end of `body` is reached, which a jump never does.
+            HirStmt::Break | HirStmt::Continue => jumps,
             // A raise transfers control to an exception handler/caller and
             // cannot fall through to the function's implicit return point.
             HirStmt::Raise { .. } => true,
