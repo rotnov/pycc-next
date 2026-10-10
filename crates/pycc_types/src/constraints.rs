@@ -2838,6 +2838,27 @@ pub(crate) fn collect_block_constraints(
                 )?;
                 solver::join_if_branches_solver(env, &body_env, &orelse_env, &pre_existing);
             }
+            HirStmt::Break | HirStmt::Continue => {}
+            // The loop, then its `else:` clause in the shape the check
+            // phase gives it (`pycc_hir::loop_else_as_if` when a `break`
+            // can skip it, the plain statements otherwise).
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                let mut sequence = vec![loop_stmt.as_ref().clone()];
+                if pycc_hir::loop_body(loop_stmt).is_some_and(pycc_hir::body_breaks_loop) {
+                    sequence.push(pycc_hir::loop_else_as_if(orelse));
+                } else {
+                    sequence.extend(orelse.iter().cloned());
+                }
+                collect_block_constraints(
+                    signatures,
+                    parents,
+                    concrete,
+                    constraints,
+                    env,
+                    &sequence,
+                    return_term.clone(),
+                )?;
+            }
             HirStmt::While { test, body } => {
                 // PEP 572 (#774), deep-review follow-up (round 4): bind
                 // before unifying -- see the `If` arm's own doc comment
@@ -3674,6 +3695,9 @@ pub(crate) fn contains_return(body: &[HirStmt]) -> bool {
         | HirStmt::ForRange { body, .. }
         | HirStmt::ForList { body, .. }
         | HirStmt::ForObject { body, .. } => contains_return(body),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            contains_return(std::slice::from_ref(loop_stmt.as_ref())) || contains_return(orelse)
+        }
         HirStmt::Match { cases, .. } => cases.iter().any(|case| contains_return(&case.body)),
         HirStmt::ExprStmt(_)
         | HirStmt::Assign { .. }
@@ -3687,6 +3711,8 @@ pub(crate) fn contains_return(body: &[HirStmt]) -> bool {
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::ForeignImport { .. }
+        | HirStmt::Break
+        | HirStmt::Continue
         | HirStmt::Raise { .. } => false,
         HirStmt::Try {
             body,
@@ -3735,13 +3761,19 @@ pub(crate) fn introduces_bindings(body: &[HirStmt]) -> bool {
         HirStmt::ForList { body, .. } | HirStmt::ForObject { body, .. } => {
             introduces_bindings(body)
         }
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            introduces_bindings(std::slice::from_ref(loop_stmt.as_ref()))
+                || introduces_bindings(orelse)
+        }
         HirStmt::Match { cases, .. } => cases.iter().any(|case| introduces_bindings(&case.body)),
         // A slice or attribute `del` (Part 2c of #1371, #1457) changes no
         // binding.
         HirStmt::Return(_)
         | HirStmt::ExprStmt(_)
         | HirStmt::DeleteSlice { .. }
-        | HirStmt::DeleteAttr { .. } => false,
+        | HirStmt::DeleteAttr { .. }
+        | HirStmt::Break
+        | HirStmt::Continue => false,
         HirStmt::Try {
             body,
             handlers,

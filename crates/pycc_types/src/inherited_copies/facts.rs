@@ -116,6 +116,11 @@ impl<'a> Walker<'a> {
                 self.expr(test);
                 self.stmts(body);
             }
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                self.stmt(loop_stmt);
+                self.stmts(orelse);
+            }
+            HirStmt::Break | HirStmt::Continue => {}
             HirStmt::ForRange {
                 var,
                 start,

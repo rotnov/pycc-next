@@ -385,6 +385,30 @@ pub(super) fn lower_stmt(
                 orelse,
             }
         }
+        HirStmt::Break => MirStmt::Break,
+        HirStmt::Continue => MirStmt::Continue,
+        // The loop, then its `else:` clause in exactly the shape the
+        // checker gives it: the plain statement sequence when no `break`
+        // can skip it, otherwise the body of `pycc_hir::loop_else_as_if`'s
+        // opaque `if`, so both passes join bindings and narrowing alike.
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            let lowered_loop = lower_stmt(loop_stmt, scopes, classes, current_class);
+            let orelse = if pycc_hir::loop_body(loop_stmt).is_some_and(pycc_hir::body_breaks_loop) {
+                let as_if = pycc_hir::loop_else_as_if(orelse);
+                match lower_stmt(&as_if, scopes, classes, current_class) {
+                    MirStmt::If { body, .. } => body,
+                    other => panic!(
+                        "pycc_mir: internal error: an `if` lowered to {other:?}, not `MirStmt::If`"
+                    ),
+                }
+            } else {
+                super::lower_stmt_sequence(orelse, scopes, classes, current_class)
+            };
+            MirStmt::LoopElse {
+                loop_stmt: Box::new(lowered_loop),
+                orelse,
+            }
+        }
         HirStmt::While { test, body } => {
             // Issue #769 follow-up (D-068 re-review round 3): `test`
             // re-executes on every iteration too, so it needs the same

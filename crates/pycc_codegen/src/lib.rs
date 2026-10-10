@@ -12,6 +12,7 @@ use std::path::Path;
 
 mod exception;
 mod fallthrough;
+mod loop_control;
 use exception::{ExceptionCodegenState, expression_can_set_exception, guard_statement_effects};
 mod exception_value;
 use exception_value::{emit_exception_set_frame, emit_exception_value};
@@ -7272,6 +7273,7 @@ fn emit_stmt<'ctx>(
                 .expect("build_conditional_branch should not fail for a well-formed i1 condition");
 
             builder.position_at_end(body_bb);
+            rt.loops.enter(after_bb, test_bb, finally_stack.len());
             emit_body_then_branch(
                 context,
                 builder,
@@ -7284,10 +7286,38 @@ fn emit_stmt<'ctx>(
                 expected_return_ty,
                 finally_stack,
             )?;
+            rt.loops.exit();
 
             builder.position_at_end(after_bb);
             Ok(())
         }
+        MirStmt::Break => loop_control::emit_jump(
+            context,
+            builder,
+            &rt.loops,
+            finally_stack,
+            loop_control::LoopJump::Break,
+        ),
+        MirStmt::Continue => loop_control::emit_jump(
+            context,
+            builder,
+            &rt.loops,
+            finally_stack,
+            loop_control::LoopJump::Continue,
+        ),
+        // See `loop_control::emit_loop_else`.
+        MirStmt::LoopElse { loop_stmt, orelse } => loop_control::emit_loop_else(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            loop_stmt,
+            orelse,
+            expected_return_ty,
+            finally_stack,
+        ),
         MirStmt::ForRange {
             var,
             start,
@@ -7409,7 +7439,13 @@ fn emit_stmt<'ctx>(
             // first would free the word this bind is about to store.
             emit_bigint_refcount_call(context, builder, rt, current, BigIntRefcount::Retain);
             emit_assign(context, builder, rt, locals, var, Scalar::Int(current));
-            emit_body(
+            // The body falls through, and every `continue` jumps, to this
+            // latch, which advances `current`. A `break` leaves through
+            // `after_bb`, whose release of `current` balances this
+            // iteration's owned value exactly as the normal exit's does.
+            let latch_bb = context.append_basic_block(function, "for_latch");
+            rt.loops.enter(after_bb, latch_bb, finally_stack.len());
+            emit_body_then_branch(
                 context,
                 builder,
                 module,
@@ -7417,22 +7453,18 @@ fn emit_stmt<'ctx>(
                 user_functions,
                 locals,
                 body,
+                latch_bb,
                 expected_return_ty,
                 finally_stack,
             )?;
+            rt.loops.exit();
             // `ForRange`'s own inline copy of `emit_body_then_branch`'s
             // terminator-safety guard (see that function's own doc comment
             // for why): a `Return` reached inside `body` already terminates
-            // `body_bb`, so the increment-and-branch-back below must be
-            // skipped in that case -- building it anyway would try to add a
-            // second terminator onto an already-terminated block, which is
-            // invalid LLVM IR.
-            if builder
-                .get_insert_block()
-                .unwrap()
-                .get_terminator()
-                .is_none()
-            {
+            // `body_bb`, and with no `continue` either nothing reaches the
+            // latch, so the increment-and-branch-back below is skipped --
+            // the latch is deleted rather than left as a dead increment.
+            if loop_control::position_at_latch_if_used(builder, latch_bb) {
                 let next = builder
                     .build_call(rt.int_add, &[current.into(), step_v.into()], "for_next")
                     .expect("build_call should not fail for a well-formed int add")
@@ -7551,7 +7583,11 @@ fn emit_stmt<'ctx>(
             let encoded_element = build_int_list_get(builder, rt, list_ptr, current);
             let element = encoded_element;
             emit_assign(context, builder, rt, locals, var, Scalar::Int(element));
-            emit_body(
+            // `ForRange`'s latch shape: fall-through and `continue` advance
+            // the index here, `break` leaves through `after_bb`.
+            let latch_bb = context.append_basic_block(function, "for_list_latch");
+            rt.loops.enter(after_bb, latch_bb, finally_stack.len());
+            emit_body_then_branch(
                 context,
                 builder,
                 module,
@@ -7559,19 +7595,14 @@ fn emit_stmt<'ctx>(
                 user_functions,
                 locals,
                 body,
+                latch_bb,
                 expected_return_ty,
                 finally_stack,
             )?;
+            rt.loops.exit();
             // `ForRange`'s own terminator-safety guard, for the identical
-            // reason (see that arm's comment): a `Return` inside `body`
-            // already terminated `body_bb`, and adding the increment and
-            // back-edge anyway would build a second terminator on it.
-            if builder
-                .get_insert_block()
-                .unwrap()
-                .get_terminator()
-                .is_none()
-            {
+            // reason (see that arm's comment).
+            if loop_control::position_at_latch_if_used(builder, latch_bb) {
                 let next = builder
                     .build_int_add(
                         current,
@@ -7610,7 +7641,19 @@ fn emit_stmt<'ctx>(
                 .get(var)
                 .expect("every for-target must have a predeclared storage slot");
             object_slot::store_new_reference(context, builder, module, rt, slot, loop_blocks.item);
-            emit_body(
+            // A `continue` asks the iterator for the next item; a `break`
+            // leaves through `after_bb`, which releases the iterator below
+            // exactly as the normal exit does.
+            rt.loops.enter(
+                loop_blocks.after_bb,
+                loop_blocks.header_bb,
+                finally_stack.len(),
+            );
+            // `emit_body_then_branch` carries `ForList`'s own
+            // terminator-safety guard: a `Return` inside `body` already
+            // terminated the block and a second terminator would be
+            // invalid IR.
+            emit_body_then_branch(
                 context,
                 builder,
                 module,
@@ -7618,22 +7661,11 @@ fn emit_stmt<'ctx>(
                 user_functions,
                 locals,
                 body,
+                loop_blocks.header_bb,
                 expected_return_ty,
                 finally_stack,
             )?;
-            // `ForList`'s own terminator-safety guard, for the identical
-            // reason: a `Return` inside `body` already terminated the block
-            // and a second terminator would be invalid IR.
-            if builder
-                .get_insert_block()
-                .unwrap()
-                .get_terminator()
-                .is_none()
-            {
-                builder.build_unconditional_branch(loop_blocks.header_bb).expect(
-                    "build_unconditional_branch should not fail on a block with no terminator yet",
-                );
-            }
+            rt.loops.exit();
             builder.position_at_end(loop_blocks.after_bb);
             // Part 3 of #1092: the normal exit releases the iterator; every
             // exception edge already did through its cleanup target.
@@ -8493,7 +8525,10 @@ fn emit_stmt<'ctx>(
             // per-iteration bind, this specific write never itself calls
             // `decref_str_slot_before_store`).
             emit_assign(context, builder, rt, locals, var, Scalar::Str(key_ptr));
-            emit_body(
+            // `ForList`'s latch shape (see that arm).
+            let latch_bb = context.append_basic_block(function, "for_dict_latch");
+            rt.loops.enter(after_bb, latch_bb, finally_stack.len());
+            emit_body_then_branch(
                 context,
                 builder,
                 module,
@@ -8501,19 +8536,14 @@ fn emit_stmt<'ctx>(
                 user_functions,
                 locals,
                 body,
+                latch_bb,
                 expected_return_ty,
                 finally_stack,
             )?;
+            rt.loops.exit();
             // `ForList`'s own terminator-safety guard, for the identical
-            // reason (see that arm's comment): a `Return` inside `body`
-            // already terminated `body_bb`, and adding the increment and
-            // back-edge anyway would build a second terminator on it.
-            if builder
-                .get_insert_block()
-                .unwrap()
-                .get_terminator()
-                .is_none()
-            {
+            // reason (see that arm's comment).
+            if loop_control::position_at_latch_if_used(builder, latch_bb) {
                 let next = builder
                     .build_int_add(
                         current,
@@ -8678,7 +8708,10 @@ fn emit_stmt<'ctx>(
                 var,
                 set_element_scalar(context, builder, var_ty, encoded_element),
             );
-            emit_body(
+            // `ForList`'s latch shape (see that arm).
+            let latch_bb = context.append_basic_block(function, "for_set_latch");
+            rt.loops.enter(after_bb, latch_bb, finally_stack.len());
+            emit_body_then_branch(
                 context,
                 builder,
                 module,
@@ -8686,19 +8719,14 @@ fn emit_stmt<'ctx>(
                 user_functions,
                 locals,
                 body,
+                latch_bb,
                 expected_return_ty,
                 finally_stack,
             )?;
+            rt.loops.exit();
             // `ForList`'s own terminator-safety guard, for the identical
-            // reason (see that arm's comment): a `Return` inside `body`
-            // already terminated `body_bb`, and adding the increment and
-            // back-edge anyway would build a second terminator on it.
-            if builder
-                .get_insert_block()
-                .unwrap()
-                .get_terminator()
-                .is_none()
-            {
+            // reason (see that arm's comment).
+            if loop_control::position_at_latch_if_used(builder, latch_bb) {
                 let next = builder
                     .build_int_add(
                         current,

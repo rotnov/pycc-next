@@ -79,6 +79,7 @@ pub(crate) fn check_enum_loop_body_module(
     list: &str,
     body: &[HirStmt],
 ) -> Result<(), Diagnostic> {
+    refuse_enum_loop_jump(list, body)?;
     let var_ty = Ty::Instance(Box::new(list.to_string()));
     let was_definite = matches!(env.binding_state(var), Some(BindingState::Definitely(_)));
     check_assignment(env, var, var_ty)?;
@@ -96,6 +97,23 @@ pub(crate) fn check_enum_loop_body_module(
     Ok(())
 }
 
+/// An enum loop is unrolled into one copy of its body per member (see
+/// `unroll_enum_loops`), which leaves no loop for a `break` or `continue` to
+/// leave, so one bound to it is refused with `C0001` rather than lowered.
+fn refuse_enum_loop_jump(list: &str, body: &[HirStmt]) -> Result<(), Diagnostic> {
+    if pycc_hir::body_jumps_in_loop(body) {
+        return Err(Diagnostic::error(
+            "C0001",
+            format!(
+                "statement kind not supported yet: `break` or `continue` in a loop over \
+                 the enum class `{list}`"
+            ),
+            pycc_diag::Span::new(0, 0),
+        ));
+    }
+    Ok(())
+}
+
 /// #379 (PR-19): Function-scope variant of `check_enum_loop_body_module`.
 /// Checks each body statement via `check_stmt_in_function` with the
 /// enclosing function's `local_names` and `return_ty`.
@@ -107,6 +125,7 @@ pub(crate) fn check_enum_loop_body_function(
     local_names: &[&str],
     return_ty: Ty,
 ) -> Result<(), Diagnostic> {
+    refuse_enum_loop_jump(list, body)?;
     let var_ty = Ty::Instance(Box::new(list.to_string()));
     let was_definite = matches!(env.binding_state(var), Some(BindingState::Definitely(_)));
     check_assignment(env, var, var_ty)?;
@@ -147,9 +166,10 @@ fn build_enum_member_table(
 /// body, the enclosing `Vec<HirStmt>` is spliced in place: the unrolled
 /// statements replace the original `ForList` statement at its position.
 ///
-/// Limitations (matching the plan's risk-1): no `break`/`continue`/`else`
-/// in an enum-loop body (already unimplemented for all v0.3 loops, so no
-/// real loss); code size is linear in member-count × body-size (acceptable
+/// Limitations (matching the plan's risk-1): no `break`/`continue` bound to
+/// an enum loop (the checker refuses one with `C0001`, since the unrolled
+/// copies leave no loop to jump out of; an `else:` clause simply follows
+/// the copies); code size is linear in member-count × body-size (acceptable
 /// for v0.3 fixtures). A module with no enum classes is returned unchanged.
 pub(crate) fn unroll_enum_loops(mut hir: HirModule) -> Result<HirModule, Diagnostic> {
     // Fast path: if no class is an enum class, there is nothing to unroll.
@@ -301,6 +321,29 @@ fn unroll_enum_loops_in_stmts(
                     test: test.clone(),
                     body: unroll_enum_loops_in_stmts(body, enum_members),
                 });
+            }
+            // A loop with `else:`: unroll the wrapped loop (an enum loop is
+            // refused a `break`/`continue` by the checker, so its `else:`
+            // clause always runs and simply follows the unrolled copies).
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                let mut unrolled = unroll_enum_loops_in_stmts(
+                    std::slice::from_ref(loop_stmt.as_ref()),
+                    enum_members,
+                );
+                let orelse = unroll_enum_loops_in_stmts(orelse, enum_members);
+                match (unrolled.len(), unrolled.pop()) {
+                    (1, Some(single)) if pycc_hir::loop_body(&single).is_some() => {
+                        result.push(HirStmt::LoopElse {
+                            loop_stmt: Box::new(single),
+                            orelse,
+                        });
+                    }
+                    (_, last) => {
+                        result.extend(unrolled);
+                        result.extend(last);
+                        result.extend(orelse);
+                    }
+                }
             }
             HirStmt::ForRange {
                 var,

@@ -1,5 +1,0 @@
-error[C0001]: statement kind not supported yet: `break` inside a loop
- --> tests/diagnostics/c0001_break_inside_loop.py:2:5
-  |
-2 |     break
-  |     ^^^^^ statement kind not supported yet: `break` inside a loop

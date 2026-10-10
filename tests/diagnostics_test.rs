@@ -120,7 +120,7 @@ fn c0001_unsupported_valid_python() {
 // as `C0001` ("valid Python, not implemented yet") when CPython actually
 // rejects all three as a `SyntaxError` -- a context-invalidity failure, not
 // a capability gap -- unless a real enclosing loop makes break/continue
-// genuinely valid-but-unimplemented. These are not byte-for-byte
+// valid. These are not byte-for-byte
 // CPython-oracle-diffed (per D-138's own precedent): CPython raises
 // `SyntaxError`, pycc emits a structured diagnostic -- different failure
 // kinds, not meaningfully comparable byte-for-byte. Each asserts pycc's own
@@ -205,18 +205,18 @@ fn l0001_async_for_outside_async_function() {
     assert_diagnostic_matches_fixture("l0001_async_for_outside_async_function");
 }
 
-/// Paired with the `l0001_*` fixtures above: a real enclosing loop keeps
-/// break/continue on the existing valid-but-unimplemented `C0001` path --
-/// this issue is scoped to classification, not to implementing loop control
-/// flow.
+/// Paired with the `l0001_*` fixtures above: a `break`/`continue` with a
+/// real enclosing loop lowers, except when it would leave a `try` whose
+/// `finally` clause must run first -- that jump is still a `C0001`
+/// capability gap rather than code that skips the `finally` block.
 #[test]
-fn c0001_break_inside_loop() {
-    assert_diagnostic_matches_fixture("c0001_break_inside_loop");
+fn c0001_break_across_finally() {
+    assert_diagnostic_matches_fixture("c0001_break_across_finally");
 }
 
 #[test]
-fn c0001_continue_inside_loop() {
-    assert_diagnostic_matches_fixture("c0001_continue_inside_loop");
+fn c0001_continue_across_finally() {
+    assert_diagnostic_matches_fixture("c0001_continue_across_finally");
 }
 
 // Issue #361 / D-149, the expression-lowering sequel to #141/D-148:

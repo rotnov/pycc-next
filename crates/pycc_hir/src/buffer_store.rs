@@ -58,6 +58,9 @@ fn stmt_stores_into(stmt: &HirStmt, name: &str) -> bool {
         | HirStmt::ForRange { body, .. }
         | HirStmt::ForList { body, .. }
         | HirStmt::ForObject { body, .. } => body_stores_into(body, name),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            stmt_stores_into(loop_stmt, name) || body_stores_into(orelse, name)
+        }
         HirStmt::Match { cases, .. } => cases.iter().any(|case| body_stores_into(&case.body, name)),
         HirStmt::Try {
             body,
@@ -93,6 +96,8 @@ fn stmt_stores_into(stmt: &HirStmt, name: &str) -> bool {
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::ForeignImport { .. }
+        | HirStmt::Break
+        | HirStmt::Continue
         | HirStmt::Raise { .. } => false,
     }
 }
@@ -130,6 +135,9 @@ fn stmt_returns_slice_of(stmt: &HirStmt, name: &str) -> bool {
         | HirStmt::ForRange { body, .. }
         | HirStmt::ForList { body, .. }
         | HirStmt::ForObject { body, .. } => body_returns_slice_of(body, name),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            stmt_returns_slice_of(loop_stmt, name) || body_returns_slice_of(orelse, name)
+        }
         HirStmt::Match { cases, .. } => cases
             .iter()
             .any(|case| body_returns_slice_of(&case.body, name)),
@@ -169,6 +177,8 @@ fn stmt_returns_slice_of(stmt: &HirStmt, name: &str) -> bool {
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::ForeignImport { .. }
+        | HirStmt::Break
+        | HirStmt::Continue
         | HirStmt::Raise { .. } => false,
     }
 }
@@ -243,6 +253,9 @@ fn stmt_returns_inside_finally(stmt: &HirStmt) -> bool {
         | HirStmt::ForRange { body, .. }
         | HirStmt::ForList { body, .. }
         | HirStmt::ForObject { body, .. } => body_returns_inside_finally(body),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            stmt_returns_inside_finally(loop_stmt) || body_returns_inside_finally(orelse)
+        }
         HirStmt::Match { cases, .. } => cases
             .iter()
             .any(|case| body_returns_inside_finally(&case.body)),
@@ -260,6 +273,8 @@ fn stmt_returns_inside_finally(stmt: &HirStmt) -> bool {
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::ForeignImport { .. }
+        | HirStmt::Break
+        | HirStmt::Continue
         | HirStmt::Raise { .. } => false,
     }
 }
@@ -284,6 +299,9 @@ fn stmt_contains_return(stmt: &HirStmt) -> bool {
         | HirStmt::ForRange { body, .. }
         | HirStmt::ForList { body, .. }
         | HirStmt::ForObject { body, .. } => body_contains_return(body),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            stmt_contains_return(loop_stmt) || body_contains_return(orelse)
+        }
         HirStmt::Match { cases, .. } => cases.iter().any(|case| body_contains_return(&case.body)),
         HirStmt::Try {
             body,
@@ -316,6 +334,8 @@ fn stmt_contains_return(stmt: &HirStmt) -> bool {
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::ForeignImport { .. }
+        | HirStmt::Break
+        | HirStmt::Continue
         | HirStmt::Raise { .. } => false,
     }
 }

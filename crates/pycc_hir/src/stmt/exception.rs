@@ -653,6 +653,12 @@ mod except_star_context_tests {
         lower(source).expect_err("source must be rejected during lowering")
     }
 
+    fn expect_ok(source: &str) {
+        if let Err(diagnostic) = lower(source) {
+            panic!("source must lower, got {}", diagnostic.message);
+        }
+    }
+
     #[test]
     fn a_return_directly_in_an_except_star_clause_is_rejected() {
         let diagnostic = expect_error(
@@ -713,37 +719,23 @@ mod except_star_context_tests {
     #[test]
     fn a_break_behind_a_for_range_loop_in_an_except_star_clause_is_shielded() {
         // The demotion's whole point: CPython *accepts* this program, so
-        // pycc must fall through to its pre-existing "not implemented yet"
-        // `C0001` for loop control flow rather than reporting `L0001`.
-        let diagnostic = expect_error(
+        // pycc lowers it rather than reporting `L0001`.
+        expect_ok(
             "def f() -> None:\n    try:\n        pass\n    except* ValueError:\n        for i in range(3):\n            break\n",
-        );
-        assert_eq!(diagnostic.code, "C0001");
-        assert!(
-            diagnostic.message.contains("`break` inside a loop"),
-            "unexpected message: {}",
-            diagnostic.message
         );
     }
 
     #[test]
     fn a_break_behind_a_for_list_loop_in_an_except_star_clause_is_shielded() {
-        let diagnostic = expect_error(
+        expect_ok(
             "def f(xs: list[int]) -> None:\n    try:\n        pass\n    except* ValueError:\n        for x in xs:\n            break\n",
         );
-        assert_eq!(diagnostic.code, "C0001");
     }
 
     #[test]
     fn a_continue_behind_a_loop_in_an_except_star_clause_is_shielded() {
-        let diagnostic = expect_error(
+        expect_ok(
             "def f() -> None:\n    try:\n        pass\n    except* ValueError:\n        for i in range(3):\n            continue\n",
-        );
-        assert_eq!(diagnostic.code, "C0001");
-        assert!(
-            diagnostic.message.contains("`continue` inside a loop"),
-            "unexpected message: {}",
-            diagnostic.message
         );
     }
 

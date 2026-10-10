@@ -1,5 +1,0 @@
-error[C0001]: statement kind not supported yet: `continue` inside a loop
- --> tests/diagnostics/c0001_continue_inside_loop.py:2:5
-  |
-2 |     continue
-  |     ^^^^^^^^ statement kind not supported yet: `continue` inside a loop

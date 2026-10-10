@@ -224,6 +224,9 @@ fn stmt_returns_not_implemented(stmt: &HirStmt) -> bool {
         | HirStmt::ForRange { body, .. }
         | HirStmt::ForList { body, .. }
         | HirStmt::ForObject { body, .. } => body_returns_not_implemented(body),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            stmt_returns_not_implemented(loop_stmt) || body_returns_not_implemented(orelse)
+        }
         HirStmt::Match { cases, .. } => cases
             .iter()
             .any(|case| body_returns_not_implemented(&case.body)),
@@ -239,6 +242,8 @@ fn stmt_returns_not_implemented(stmt: &HirStmt) -> bool {
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::ForeignImport { .. }
+        | HirStmt::Break
+        | HirStmt::Continue
         | HirStmt::Raise { .. } => false,
     }
 }

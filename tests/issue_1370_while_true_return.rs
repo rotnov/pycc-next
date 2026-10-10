@@ -151,14 +151,11 @@ fn a_loop_that_may_not_run_still_reports_t0022() {
     );
 }
 
-/// The constant-true rule is sound only while `break` cannot be lowered:
-/// today a `break` inside a loop is a `C0001` capability gap, so no loop
-/// body can leave the loop normally. When `break` lowering lands, this test
-/// fails; the loop arms of `pycc_hir::return_coverage` and
-/// `pycc_codegen::fallthrough` must then require that the body holds no
-/// `break` bound to that loop, and this test becomes the `T0022` case.
+/// A `break` bound to a constant-true loop makes it fall through, so a
+/// function ending in such a loop reports `T0022` again, while a `break`
+/// bound only to a nested loop leaves the outer loop's rule intact.
 #[test]
-fn a_while_true_with_break_is_still_rejected() {
+fn a_while_true_with_break_reports_t0022() {
     let dir = ScratchDir::new("1370_break").expect("scratch");
     let out = check(
         &dir,
@@ -166,11 +163,15 @@ fn a_while_true_with_break_is_still_rejected() {
     );
     assert!(!out.status.success());
     assert!(
-        stdout_of(&out)
-            .contains("error[C0001]: statement kind not supported yet: `break` inside a loop"),
+        stdout_of(&out).contains("error[T0022]: function `f` can exit without returning `int`"),
         "{}",
         stdout_of(&out)
     );
+    let nested = check(
+        &dir,
+        "def f(x: int) -> int:\n    while True:\n        for i in range(3):\n            break\n        if x > 0:\n            return x\n        x += 1\n",
+    );
+    assert!(nested.status.success(), "{}", stdout_of(&nested));
 }
 
 /// The same functions built as an extension module and called from the

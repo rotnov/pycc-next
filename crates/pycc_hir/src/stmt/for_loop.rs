@@ -15,7 +15,8 @@ use pycc_diag::Diagnostic;
 /// producer shapes `for x in o.attr:` / `for x in o.method(...):` to
 /// `HirStmt::ForObject` (PR 3c of #1082); every other iterable shape is a
 /// `C0001`. `async for` is context-invalid (D-148) because no `async def`
-/// body is ever lowered today.
+/// body is ever lowered today. The loop's `else:` clause is lowered by the
+/// caller, which wraps the result in `HirStmt::LoopElse`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn lower_for(
     for_stmt: &StmtFor,
@@ -46,9 +47,6 @@ pub(super) fn lower_for(
             "'async for' outside async function",
             for_stmt.range,
         ));
-    }
-    if !for_stmt.orelse.is_empty() {
-        return Err(unsupported("for/else is not supported yet", for_stmt.range));
     }
     let Expr::Name(var) = for_stmt.target.as_ref() else {
         return Err(unsupported(

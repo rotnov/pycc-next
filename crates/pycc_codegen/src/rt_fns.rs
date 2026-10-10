@@ -294,6 +294,9 @@ pub(super) struct RtFns<'ctx> {
     /// The owned bit of every module-global `object` slot (Part 1 of
     /// #1499); `object_slot.rs` owns it.
     pub(super) object_slots: crate::object_slot::ModuleObjectSlots<'ctx>,
+    /// The enclosing loops' `break`/`continue` targets; `loop_control.rs`
+    /// owns it.
+    pub(super) loops: crate::loop_control::LoopControlState<'ctx>,
 }
 
 pub(super) fn declare_rt_functions<'ctx>(
@@ -708,5 +711,6 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         exceptions: ExceptionCodegenState::new(),
         object_slots: crate::object_slot::ModuleObjectSlots::default(),
+        loops: crate::loop_control::LoopControlState::default(),
     }
 }

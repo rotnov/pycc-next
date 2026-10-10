@@ -19,9 +19,10 @@
 //! value through unchanged (a conditional does not introduce or reset loop
 //! nesting). It exists so `Stmt::Break`/`Stmt::Continue` can distinguish a
 //! context-invalid occurrence (no enclosing loop -- CPython raises
-//! `SyntaxError`, so this now reuses `L0001`) from a valid-but-unimplemented
-//! occurrence (a real enclosing loop -- still `C0001`, loop control-flow
-//! codegen remains out of scope).
+//! `SyntaxError`, so this now reuses `L0001`) from a valid occurrence (a
+//! real enclosing loop), which lowers to `HirStmt::Break`/`HirStmt::Continue`
+//! unless it would leave a `try` with a `finally` clause first (`C0001`, see
+//! `loop_control`).
 //!
 //! `in_function: bool` (D-149, issue #361's own follow-up) is this module's
 //! second piece of threaded context, but purely as a pass-through: none of
@@ -78,9 +79,9 @@
 //! escapes the `finally` regardless of loop nesting) -- CPython's compiler
 //! does not implement it that way, so a two-flag design mirroring that naive
 //! reading would silently diverge from upstream's own diagnostic surface.
-//! `while`/`for`'s own `else:` clause is untested here because both are
-//! unsupported syntax in this compiler today (`while/else`/`for/else` reject
-//! with `C0001` before either loop kind's body is lowered).
+//! A `while`/`for` loop's own `else:` clause is lowered with the loop
+//! statement's own incoming context, not the body's: it runs outside the
+//! loop, so a `break` there targets an enclosing loop, as in CPython.
 //!
 //! `except_star: ExceptStarCtx` (#795, PEP 654) is this module's fourth
 //! piece of threaded context, and the first that is not a `bool`. The type,
@@ -97,6 +98,7 @@ pub(crate) mod del;
 pub(crate) use chain_assign::lower_stmt_expanded;
 mod exception;
 mod for_loop;
+mod loop_control;
 mod match_stmt;
 mod type_checking;
 mod unpack;
@@ -345,13 +347,7 @@ pub(crate) fn lower_stmt(
             )?,
         },
         Stmt::While(while_stmt) => {
-            if !while_stmt.orelse.is_empty() {
-                return Err(unsupported(
-                    "while/else is not supported yet",
-                    while_stmt.range,
-                ));
-            }
-            HirStmt::While {
+            let loop_stmt = HirStmt::While {
                 test: lower_condition(
                     &while_stmt.test,
                     in_function,
@@ -380,19 +376,53 @@ pub(crate) fn lower_stmt(
                     imports,
                     signatures,
                 )?,
-            }
+            };
+            // The `else:` clause runs outside the loop, so it keeps the
+            // enclosing context (a `break` there targets an outer loop).
+            let orelse = lower_body(
+                &while_stmt.orelse,
+                aliases,
+                in_loop,
+                in_function,
+                in_finally,
+                except_star,
+                class_name,
+                type_param,
+                class_defs,
+                imports,
+                signatures,
+            )?;
+            loop_control::with_else(loop_stmt, orelse)
         }
-        Stmt::For(for_stmt) => for_loop::lower_for(
-            for_stmt,
-            aliases,
-            in_function,
-            except_star,
-            class_name,
-            type_param,
-            class_defs,
-            imports,
-            signatures,
-        )?,
+        Stmt::For(for_stmt) => {
+            let loop_stmt = for_loop::lower_for(
+                for_stmt,
+                aliases,
+                in_function,
+                except_star,
+                class_name,
+                type_param,
+                class_defs,
+                imports,
+                signatures,
+            )?;
+            // See the `Stmt::While` arm: the `else:` clause keeps the
+            // enclosing loop context.
+            let orelse = lower_body(
+                &for_stmt.orelse,
+                aliases,
+                in_loop,
+                in_function,
+                in_finally,
+                except_star,
+                class_name,
+                type_param,
+                class_defs,
+                imports,
+                signatures,
+            )?;
+            loop_control::with_else(loop_stmt, orelse)
+        }
         Stmt::Return(ret) => {
             // #795 (PEP 654) and PEP 765 (#738, Part 1 of #543): both
             // rules, their `in_function` conjuncts and their relative
@@ -437,31 +467,21 @@ pub(crate) fn lower_stmt(
             // defined *inside* the `finally` has already reset `in_finally`
             // to `false` by the time this arm runs.
             //
-            // `None` means valid Python that this compiler simply does not
-            // implement yet -- a `break` with a real enclosing loop -- which
-            // is a `C0001` capability gap, not a context violation.
-            return Err(
-                match break_context_violation(in_loop, in_finally, except_star) {
-                    Some(message) => context_invalid(message, pycc_ast::stmt_range(stmt)),
-                    None => unsupported(
-                        "statement kind not supported yet: `break` inside a loop",
-                        pycc_ast::stmt_range(stmt),
-                    ),
-                },
-            );
+            // `None` means a `break` with a real enclosing loop, which
+            // lowers. A `break` that would leave a `try` with a `finally`
+            // clause first is refused by the `Stmt::Try` arm.
+            if let Some(message) = break_context_violation(in_loop, in_finally, except_star) {
+                return Err(context_invalid(message, pycc_ast::stmt_range(stmt)));
+            }
+            HirStmt::Break
         }
         Stmt::Continue(_) => {
             // See the `Stmt::Break` arm above -- identical rationale,
             // identical CPython precedence, identical shared predicate.
-            return Err(
-                match continue_context_violation(in_loop, in_finally, except_star) {
-                    Some(message) => context_invalid(message, pycc_ast::stmt_range(stmt)),
-                    None => unsupported(
-                        "statement kind not supported yet: `continue` inside a loop",
-                        pycc_ast::stmt_range(stmt),
-                    ),
-                },
-            );
+            if let Some(message) = continue_context_violation(in_loop, in_finally, except_star) {
+                return Err(context_invalid(message, pycc_ast::stmt_range(stmt)));
+            }
+            HirStmt::Continue
         }
         Stmt::Match(match_stmt) => lower_match(
             match_stmt,
@@ -568,6 +588,18 @@ pub(crate) fn lower_stmt(
                 imports,
                 signatures,
             )?;
+            // A `break`/`continue` leaving this `try` would have to run the
+            // `finally` block first; refuse it rather than skip that block.
+            // Checked after every clause lowered, so a context violation
+            // (`L0001`) anywhere in the statement still wins.
+            if !finalbody.is_empty() {
+                loop_control::refuse_jump_across_finally(&try_stmt.body)?;
+                for handler in &try_stmt.handlers {
+                    let pycc_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    loop_control::refuse_jump_across_finally(&handler.body)?;
+                }
+                loop_control::refuse_jump_across_finally(&try_stmt.orelse)?;
+            }
             if try_stmt.is_star {
                 HirStmt::TryStar {
                     body,
@@ -670,7 +702,19 @@ pub(crate) fn lower_stmt(
     // narrowing. Refusing the placement here keeps the iterable exactly
     // where `ForRange`'s `range(...)` arguments already are, so no shape
     // reaches the prescan with a kill it cannot report.
-    let violates_walrus_placement = match &lowered {
+    if violates_walrus_placement(&lowered) {
+        return Err(unsupported(
+            WALRUS_PLACEMENT_MESSAGE,
+            pycc_ast::stmt_range(stmt),
+        ));
+    }
+    Ok(lowered)
+}
+
+/// PEP 572 (#774): whether `lowered`'s own immediate expression fields hold a
+/// walrus outside the permitted placements; see `lower_stmt`'s comment above.
+fn violates_walrus_placement(lowered: &HirStmt) -> bool {
+    match lowered {
         HirStmt::If { .. }
         | HirStmt::While { .. }
         | HirStmt::ExprStmt(_)
@@ -731,14 +775,11 @@ pub(crate) fn lower_stmt(
             exc.as_ref().is_some_and(contains_named_expr)
                 || cause.as_ref().is_some_and(contains_named_expr)
         }
-    };
-    if violates_walrus_placement {
-        return Err(unsupported(
-            WALRUS_PLACEMENT_MESSAGE,
-            pycc_ast::stmt_range(stmt),
-        ));
+        HirStmt::Break | HirStmt::Continue => false,
+        // The `else:` clause's statements were checked by their own
+        // `lower_stmt` calls; only the wrapped loop's header remains.
+        HirStmt::LoopElse { loop_stmt, .. } => violates_walrus_placement(loop_stmt),
     }
-    Ok(lowered)
 }
 
 /// PEP 572 (#774): the one wording of the walrus-placement refusal, shared

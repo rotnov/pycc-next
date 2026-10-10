@@ -34,7 +34,7 @@ mod unop;
 mod unpack;
 
 pub(crate) use local_binder::{bind_local_types_in_body, bind_local_types_in_stmt};
-use pycc_hir::block_always_returns;
+use pycc_hir::{block_always_returns, loop_body, loop_else_as_if};
 
 pub use buffer::{
     function_local_producer_spellings, imported_producer_spellings, is_buffer_producer_spelling,
@@ -750,6 +750,10 @@ fn collect_local_names<'a>(body: &'a [HirStmt], names: &mut Vec<&'a str>) {
                 collect_named_expr_names_in_expr(test, names);
                 collect_local_names(body, names);
             }
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                collect_local_names(std::slice::from_ref(loop_stmt.as_ref()), names);
+                collect_local_names(orelse, names);
+            }
             HirStmt::ForRange { var, body, .. } => {
                 if !is_local(names, var) {
                     names.push(var);
@@ -793,6 +797,8 @@ fn collect_local_names<'a>(body: &'a [HirStmt], names: &mut Vec<&'a str>) {
             | HirStmt::AttrSet { .. }
             | HirStmt::DeleteSlice { .. }
             | HirStmt::DeleteAttr { .. }
+            | HirStmt::Break
+            | HirStmt::Continue
             | HirStmt::Raise { .. } => {}
             HirStmt::Match { cases, .. } => {
                 for case in cases {
@@ -2206,6 +2212,21 @@ pub fn check_stmt(env: &mut Environment, stmt: &HirStmt) -> Result<(), Diagnosti
                 join_if_branches(env, &body_env, &orelse_env)
             }
         }
+        // A `break`/`continue` binds nothing and checks nothing: lowering
+        // already proved it has an enclosing loop.
+        HirStmt::Break | HirStmt::Continue => Ok(()),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            check_stmt(env, loop_stmt)?;
+            if loop_body(loop_stmt).is_some_and(pycc_hir::body_breaks_loop) {
+                // A `break` skips the clause, so it runs at most once: check
+                // it as the body of an `if` whose test is unknown, which is
+                // exactly how `pycc_mir` lowers it.
+                check_stmt(env, &loop_else_as_if(orelse))
+            } else {
+                // Without a `break` the clause always runs after the loop.
+                narrow::check_stmt_sequence(env, orelse)
+            }
+        }
         HirStmt::While { test, body } => {
             // Issue #769 follow-up (D-068 re-review round 3): a `while`
             // body can be re-entered, and `test` itself re-executes on
@@ -3031,6 +3052,16 @@ fn check_stmt_in_function(
                 join_if_branches(env, &body_env, &orelse_env)
             }
         }
+        HirStmt::Break | HirStmt::Continue => Ok(()),
+        // See the module-scope `LoopElse` arm.
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            check_stmt_in_function(env, local_names, loop_stmt, return_ty.clone())?;
+            if loop_body(loop_stmt).is_some_and(pycc_hir::body_breaks_loop) {
+                check_stmt_in_function(env, local_names, &loop_else_as_if(orelse), return_ty)
+            } else {
+                narrow::check_stmt_sequence_in_function(env, local_names, orelse, return_ty)
+            }
+        }
         HirStmt::While { test, body } => {
             // Issue #769 follow-up (D-068 re-review round 3): see the
             // module-scope `While` arm's identical comment and
@@ -3640,6 +3671,11 @@ fn reject_generic_calls_in_stmt(
             exprs.push(test);
             blocks.push(body);
         }
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            blocks.push(std::slice::from_ref(loop_stmt.as_ref()));
+            blocks.push(orelse);
+        }
+        HirStmt::Break | HirStmt::Continue => {}
         HirStmt::ForRange {
             start,
             stop,

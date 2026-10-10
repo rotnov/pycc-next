@@ -32,7 +32,7 @@
 //! 2. **The recursion gate.** A nested body is walked only after the real
 //!    lowering helpers accept the *non-body* parts of the statement that
 //!    encloses it -- a `while`/`if` test through `lower_expr`, a `for`'s
-//!    `else`/target/iterable through the same shape checks `lower_for`
+//!    target/iterable through the same shape checks `lower_for`
 //!    applies, an `except` handler's type through the same shape check
 //!    `lower_except_handler` applies. Where real lowering would abort with a
 //!    `C0001` before reaching the body, this walker stops too, so it can
@@ -79,8 +79,8 @@ pub(super) fn return_context_violation(
 }
 
 /// The `L0001` message a `break` earns in this context, or `None` when the
-/// `break` is valid Python that `lower_stmt` rejects only as a `C0001`
-/// capability gap. Shared with `lower_stmt`'s `Stmt::Break` arm.
+/// `break` has a valid enclosing loop. Shared with `lower_stmt`'s
+/// `Stmt::Break` arm.
 pub(super) fn break_context_violation(
     in_loop: bool,
     in_finally: bool,
@@ -99,8 +99,8 @@ pub(super) fn break_context_violation(
 }
 
 /// The `L0001` message a `continue` earns in this context, or `None` when
-/// the `continue` is valid Python that `lower_stmt` rejects only as a
-/// `C0001` capability gap. Shared with `lower_stmt`'s `Stmt::Continue` arm.
+/// the `continue` has a valid enclosing loop. Shared with `lower_stmt`'s
+/// `Stmt::Continue` arm.
 pub(super) fn continue_context_violation(
     in_loop: bool,
     in_finally: bool,
@@ -220,9 +220,6 @@ fn check_stmt(stmt: &Stmt, ctx: Ctx<'_>) -> Result<(), Diagnostic> {
         }
         Stmt::If(if_stmt) => return check_if(if_stmt, ctx),
         Stmt::While(while_stmt) => {
-            if !while_stmt.orelse.is_empty() {
-                return Ok(());
-            }
             if lower_expr(
                 &while_stmt.test,
                 ctx.in_function,
@@ -234,7 +231,9 @@ fn check_stmt(stmt: &Stmt, ctx: Ctx<'_>) -> Result<(), Diagnostic> {
             {
                 return Ok(());
             }
-            return check_body(&while_stmt.body, loop_ctx(ctx));
+            check_body(&while_stmt.body, loop_ctx(ctx))?;
+            // The `else:` clause runs outside the loop: the enclosing context.
+            return check_body(&while_stmt.orelse, ctx);
         }
         Stmt::For(for_stmt) => {
             // `lower_for` checks `is_async` *first*, before the `else`,
@@ -245,9 +244,6 @@ fn check_stmt(stmt: &Stmt, ctx: Ctx<'_>) -> Result<(), Diagnostic> {
                     "'async for' outside async function",
                     for_stmt.range,
                 ));
-            }
-            if !for_stmt.orelse.is_empty() {
-                return Ok(());
             }
             if !matches!(for_stmt.target.as_ref(), Expr::Name(_)) {
                 return Ok(());
@@ -261,7 +257,8 @@ fn check_stmt(stmt: &Stmt, ctx: Ctx<'_>) -> Result<(), Diagnostic> {
             ) {
                 return Ok(());
             }
-            return check_body(&for_stmt.body, loop_ctx(ctx));
+            check_body(&for_stmt.body, loop_ctx(ctx))?;
+            return check_body(&for_stmt.orelse, ctx);
         }
         Stmt::Try(try_stmt) => {
             check_body(&try_stmt.body, ctx)?;
@@ -653,8 +650,7 @@ mod tests {
 
     #[test]
     fn a_guarded_break_with_a_real_enclosing_loop_stays_silent() {
-        // Valid Python that pycc does not implement yet -- a `C0001`, which
-        // the guard exists to permit.
+        // Valid Python with a real loop target: no context violation.
         assert_guarded_body_accepted("while True:\n    if TYPE_CHECKING:\n        break\n");
     }
 
@@ -669,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn a_guarded_while_else_body_is_not_walked() {
+    fn a_guarded_while_else_with_a_legal_break_is_accepted() {
         assert_guarded_body_accepted(
             "if TYPE_CHECKING:\n    while True:\n        break\n    else:\n        pass\n",
         );

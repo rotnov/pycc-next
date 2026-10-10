@@ -1672,6 +1672,20 @@ pub enum MirStmt {
     /// order — used by `match` lowering to pair the subject-temporary
     /// assignment with the nested `if` chain.
     Seq(Vec<MirStmt>),
+    /// `break` (from `HirStmt::Break`): leaves the innermost enclosing
+    /// loop statement, skipping its `else:` clause.
+    Break,
+    /// `continue` (from `HirStmt::Continue`): starts the innermost
+    /// enclosing loop statement's next iteration.
+    Continue,
+    /// A loop with an `else:` clause (from `HirStmt::LoopElse`).
+    /// `loop_stmt` is one of the loop statements (`While`, `ForRange`,
+    /// `ForList`, `ForObject`, `ForDict`, `ForSet`); `orelse` runs after it
+    /// only when it finished without a `break` bound to it.
+    LoopElse {
+        loop_stmt: Box<MirStmt>,
+        orelse: Vec<MirStmt>,
+    },
     /// `try`/`except`/`else`/`finally` (PEP 3110, #382, PR-22 Part 1).
     /// Each handler's `exc_type_tag` is the sorted set of runtime exception
     /// type tags it accepts — the named class's own tag (matching `pycc_rt`'s
@@ -2070,6 +2084,10 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::ForDict { body, .. }
             | MirStmt::ForSet { body, .. } => set_frame_function(body, frame_name),
             MirStmt::Seq(stmts) => set_frame_function(stmts, frame_name),
+            MirStmt::LoopElse { loop_stmt, orelse } => {
+                set_frame_function(std::slice::from_mut(loop_stmt.as_mut()), frame_name);
+                set_frame_function(orelse, frame_name);
+            }
             MirStmt::Try {
                 body,
                 handlers,
@@ -2106,6 +2124,8 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::ObjDelAttr { .. }
             | MirStmt::ObjRaise { .. }
             | MirStmt::ForeignImport { .. }
+            | MirStmt::Break
+            | MirStmt::Continue
             | MirStmt::Reraise => {}
         }
     }

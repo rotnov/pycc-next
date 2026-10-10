@@ -161,6 +161,10 @@ fn collect_deleted_names(body: &[HirStmt], deleted: &mut HashSet<String>) {
             | HirStmt::ForRange { body, .. }
             | HirStmt::ForList { body, .. }
             | HirStmt::ForObject { body, .. } => collect_deleted_names(body, deleted),
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                collect_deleted_names(std::slice::from_ref(loop_stmt.as_ref()), deleted);
+                collect_deleted_names(orelse, deleted);
+            }
             HirStmt::Match { cases, .. } => {
                 for case in cases {
                     collect_deleted_names(&case.body, deleted);
@@ -197,6 +201,8 @@ fn collect_deleted_names(body: &[HirStmt], deleted: &mut HashSet<String>) {
             | HirStmt::DeleteSlice { .. }
             | HirStmt::DeleteAttr { .. }
             | HirStmt::ForeignImport { .. }
+            | HirStmt::Break
+            | HirStmt::Continue
             | HirStmt::Raise { .. } => {}
         }
     }

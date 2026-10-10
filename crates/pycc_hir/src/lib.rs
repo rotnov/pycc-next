@@ -1237,6 +1237,98 @@ pub enum HirStmt {
         bindings: Vec<(String, String, Option<FromImport>)>,
         span: Span,
     },
+    /// `break`: leaves the innermost enclosing loop (`While`, `ForRange`,
+    /// `ForList`, `ForObject`), skipping that loop's `else:` clause when it
+    /// has one ([`HirStmt::LoopElse`]). Lowering admits it only with a real
+    /// enclosing loop and never across a `finally` clause that sits between
+    /// the statement and that loop (a `C0001`: the `finally` would have to
+    /// run first, which codegen does not route yet).
+    Break,
+    /// `continue`: starts the innermost enclosing loop's next iteration.
+    /// Admitted under exactly the rules [`HirStmt::Break`] states.
+    Continue,
+    /// A loop with an `else:` clause (`while ...: ... else: ...` or
+    /// `for ...: ... else: ...`). `loop_stmt` is always one of the loop
+    /// variants (`While`, `ForRange`, `ForList`, `ForObject`); `orelse` runs
+    /// after it only when the loop finished without a `break` bound to it,
+    /// as in CPython. A wrapper rather than an `orelse` field on every loop
+    /// variant so that a loop without `else:` keeps its exact shape.
+    LoopElse {
+        loop_stmt: Box<HirStmt>,
+        orelse: Vec<HirStmt>,
+    },
+}
+
+/// Whether `body` contains a `break` bound to the loop whose body it is:
+/// one not nested inside an inner loop's own body. An inner loop's `else:`
+/// clause is outside that inner loop, so a `break` there does count.
+pub fn body_breaks_loop(body: &[HirStmt]) -> bool {
+    body_jumps(body, &|stmt| matches!(stmt, HirStmt::Break))
+}
+
+/// Whether `body` contains a `break` or a `continue` bound to the loop whose
+/// body it is, under [`body_breaks_loop`]'s binding rule.
+pub fn body_jumps_in_loop(body: &[HirStmt]) -> bool {
+    body_jumps(body, &|stmt| {
+        matches!(stmt, HirStmt::Break | HirStmt::Continue)
+    })
+}
+
+fn body_jumps(body: &[HirStmt], is_jump: &dyn Fn(&HirStmt) -> bool) -> bool {
+    body.iter().any(|stmt| stmt_jumps(stmt, is_jump))
+}
+
+fn stmt_jumps(stmt: &HirStmt, is_jump: &dyn Fn(&HirStmt) -> bool) -> bool {
+    let recurse = |body: &[HirStmt]| body_jumps(body, is_jump);
+    match stmt {
+        HirStmt::Break | HirStmt::Continue => is_jump(stmt),
+        HirStmt::If { body, orelse, .. } => recurse(body) || recurse(orelse),
+        HirStmt::Match { cases, .. } => cases.iter().any(|case| recurse(&case.body)),
+        HirStmt::Try {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        }
+        | HirStmt::TryStar {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        } => {
+            recurse(body)
+                || handlers.iter().any(|h| recurse(&h.body))
+                || recurse(orelse)
+                || recurse(finalbody)
+        }
+        HirStmt::LoopElse { orelse, .. } => recurse(orelse),
+        _ => false,
+    }
+}
+
+/// A loop's `else:` clause whose loop holds a `break`, as the `if` with an
+/// opaque test that both `pycc_types` and `pycc_mir` treat it as: a suite
+/// that runs at most once and whose bindings and narrowing join with the
+/// path that skipped it, so the two passes cannot disagree on either. The
+/// test is a plain `True` literal, which no narrowing recognizer matches.
+pub fn loop_else_as_if(orelse: &[HirStmt]) -> HirStmt {
+    HirStmt::If {
+        test: HirExpr::BoolLiteral(true),
+        body: orelse.to_vec(),
+        orelse: Vec::new(),
+    }
+}
+
+/// The body of a loop statement (`While`, `ForRange`, `ForList`,
+/// `ForObject`), or `None` for any other statement.
+pub fn loop_body(stmt: &HirStmt) -> Option<&[HirStmt]> {
+    match stmt {
+        HirStmt::While { body, .. }
+        | HirStmt::ForRange { body, .. }
+        | HirStmt::ForList { body, .. }
+        | HirStmt::ForObject { body, .. } => Some(body),
+        _ => None,
+    }
 }
 
 /// Issue #769 (Part 2 of #747): the polarity of an `if`'s `name is [not]

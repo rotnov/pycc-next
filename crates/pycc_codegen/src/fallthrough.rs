@@ -30,10 +30,19 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
             }
             MirStmt::Seq(stmts) => block_always_terminates(stmts),
             // #1370: mirrors `pycc_hir::return_coverage`'s `While` arm. A
-            // constant-true loop leaves only through a `return` or a raise
-            // in its body (MIR has no `break`), so the block after it is
-            // unreachable and gets an `unreachable` terminator.
-            MirStmt::While { test, .. } => is_constant_true(test),
+            // constant-true loop with no `break` bound to it leaves only
+            // through a `return` or a raise in its body, so the block after
+            // it is unreachable and gets an `unreachable` terminator.
+            MirStmt::While { test, body } => is_constant_true(test) & !body_breaks_loop(body),
+            // Mirrors `pycc_hir::return_coverage`'s `LoopElse` arm.
+            MirStmt::LoopElse { loop_stmt, orelse } => {
+                let breaks = loop_body(loop_stmt).is_some_and(body_breaks_loop);
+                !breaks
+                    & (block_always_terminates(std::slice::from_ref(loop_stmt.as_ref()))
+                        | block_always_terminates(orelse))
+            }
+            // Control continues after (or at the head of) the loop.
+            MirStmt::Break | MirStmt::Continue => false,
             MirStmt::Try {
                 body,
                 handlers,
@@ -91,6 +100,49 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
         }
     }
     false
+}
+
+/// The MIR form of `pycc_hir::body_breaks_loop`: whether `body` holds a
+/// `break` bound to the loop whose body it is (not one inside a nested
+/// loop's body; a nested loop's `else:` clause does count).
+pub(crate) fn body_breaks_loop(body: &[MirStmt]) -> bool {
+    body.iter().any(|stmt| match stmt {
+        MirStmt::Break => true,
+        MirStmt::If { body, orelse, .. } => body_breaks_loop(body) || body_breaks_loop(orelse),
+        MirStmt::Seq(stmts) => body_breaks_loop(stmts),
+        MirStmt::Try {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        }
+        | MirStmt::TryStar {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        } => {
+            body_breaks_loop(body)
+                || handlers.iter().any(|h| body_breaks_loop(&h.body))
+                || body_breaks_loop(orelse)
+                || body_breaks_loop(finalbody)
+        }
+        MirStmt::LoopElse { orelse, .. } => body_breaks_loop(orelse),
+        _ => false,
+    })
+}
+
+/// The body of a MIR loop statement, or `None` for any other statement.
+pub(crate) fn loop_body(stmt: &MirStmt) -> Option<&[MirStmt]> {
+    match stmt {
+        MirStmt::While { body, .. }
+        | MirStmt::ForRange { body, .. }
+        | MirStmt::ForList { body, .. }
+        | MirStmt::ForObject { body, .. }
+        | MirStmt::ForDict { body, .. }
+        | MirStmt::ForSet { body, .. } => Some(body),
+        _ => None,
+    }
 }
 
 /// The MIR form of `pycc_hir::return_coverage`'s constant-true test: the

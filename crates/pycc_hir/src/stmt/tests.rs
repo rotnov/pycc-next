@@ -51,7 +51,7 @@ fn lower_pattern_as_with_no_name_produces_empty_name() {
 #[test]
 fn lower_match_with_unsupported_body_emits_c0001() {
     let module = pycc_parser::parse(
-        "x = 1\nmatch x:\n    case 1:\n        while True:\n            pass\n        else:\n            pass\n    case _:\n        pass\n",
+        "x = 1\nmatch x:\n    case 1:\n        for a, b in range(3):\n            pass\n    case _:\n        pass\n",
     ).expect("test fixture must parse");
     let err = crate::lower_checked(&module).unwrap_err();
     assert_eq!(err.code, "C0001");

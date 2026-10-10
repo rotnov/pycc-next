@@ -607,6 +607,11 @@ fn nested_bodies(stmt: &HirStmt) -> Vec<&[HirStmt]> {
         HirStmt::While { body, .. } => vec![body],
         HirStmt::ForRange { body, .. } => vec![body],
         HirStmt::ForList { body, .. } => vec![body],
+        // The wrapped loop is one more nested statement, so the loop's own
+        // target and body are reached through it.
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            vec![std::slice::from_ref(loop_stmt.as_ref()), orelse]
+        }
         HirStmt::Match { cases, .. } => cases.iter().map(|case| case.body.as_slice()).collect(),
         HirStmt::Try {
             body,
@@ -674,6 +679,10 @@ fn for_each_stmt_mut(body: &mut [HirStmt], visit: &mut dyn FnMut(&mut HirStmt)) 
             HirStmt::While { body, .. } => for_each_stmt_mut(body, visit),
             HirStmt::ForRange { body, .. } => for_each_stmt_mut(body, visit),
             HirStmt::ForList { body, .. } => for_each_stmt_mut(body, visit),
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                for_each_stmt_mut(std::slice::from_mut(loop_stmt.as_mut()), visit);
+                for_each_stmt_mut(orelse, visit);
+            }
             HirStmt::Match { cases, .. } => {
                 for case in cases.iter_mut() {
                     for_each_stmt_mut(&mut case.body, visit);

@@ -133,6 +133,10 @@ pub(crate) fn bind_local_types_in_stmt(
             bind_named_expr_types_in_expr(env, local_names, test);
             bind_local_types_in_body(env, local_names, body);
         }
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            bind_local_types_in_body(env, local_names, std::slice::from_ref(loop_stmt.as_ref()));
+            bind_local_types_in_body(env, local_names, orelse);
+        }
         HirStmt::ForRange { var, body, .. } => {
             env.bind(var.clone(), Ty::Int);
             bind_local_types_in_body(env, local_names, body);

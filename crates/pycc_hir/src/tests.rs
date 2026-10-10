@@ -1293,11 +1293,74 @@ fn lowers_a_while_loop() {
 }
 
 #[test]
-fn a_while_else_is_not_supported_yet() {
-    assert_capability_error_message(
-        "while True:\n    print(1)\nelse:\n    print(2)\n",
-        "while/else is not supported yet",
+fn a_while_else_lowers_to_a_loop_else_wrapper() {
+    let module = pycc_parser_test_helper::parse("while True:\n    break\nelse:\n    print(2)\n");
+    let hir = lower_checked(&module).unwrap();
+    assert_eq!(
+        hir.items,
+        vec![HirItem::TopLevelStmt(HirStmt::LoopElse {
+            loop_stmt: Box::new(HirStmt::While {
+                test: HirExpr::BoolLiteral(true),
+                body: vec![HirStmt::Break],
+            }),
+            orelse: vec![HirStmt::ExprStmt(HirExpr::Call {
+                callee: "print".to_string(),
+                args: vec![HirExpr::IntLiteral(2)],
+            })],
+        })]
     );
+}
+
+#[test]
+fn an_else_pass_clause_leaves_the_loop_unwrapped() {
+    let module = pycc_parser_test_helper::parse("while True:\n    continue\nelse:\n    pass\n");
+    let hir = lower_checked(&module).unwrap();
+    assert_eq!(
+        hir.items,
+        vec![HirItem::TopLevelStmt(HirStmt::While {
+            test: HirExpr::BoolLiteral(true),
+            body: vec![HirStmt::Continue],
+        })]
+    );
+}
+
+#[test]
+fn a_break_in_a_loop_else_clause_targets_the_enclosing_loop() {
+    // The `else:` clause is outside its own loop: with no enclosing loop
+    // its `break` is CPython's `'break' outside loop`.
+    assert_context_invalid_error_message(
+        "while True:\n    pass\nelse:\n    break\n",
+        "'break' outside loop",
+    );
+    let module = pycc_parser_test_helper::parse(
+        "for i in range(2):\n    for j in range(2):\n        pass\n    else:\n        break\n",
+    );
+    lower_checked(&module).expect("a break in an inner loop's else clause targets the outer loop");
+}
+
+#[test]
+fn a_break_out_of_a_try_with_a_finally_clause_is_not_supported_yet() {
+    for source in [
+        "for i in range(3):\n    try:\n        break\n    finally:\n        print(i)\n",
+        "for i in range(3):\n    try:\n        pass\n    except ValueError:\n        if i:\n            continue\n    finally:\n        print(i)\n",
+        "for i in range(3):\n    try:\n        pass\n    except ValueError:\n        pass\n    else:\n        break\n    finally:\n        print(i)\n",
+        "while True:\n    try:\n        for i in range(3):\n            pass\n        else:\n            break\n    finally:\n        print(1)\n",
+        "while True:\n    try:\n        match 1:\n            case 1:\n                break\n    finally:\n        print(1)\n",
+        "while True:\n    try:\n        try:\n            pass\n        finally:\n            pass\n        continue\n    finally:\n        print(1)\n",
+    ] {
+        assert_capability_error_message(source, "out of a `try` block that has a `finally` clause");
+    }
+}
+
+#[test]
+fn a_jump_inside_a_loop_nested_in_a_try_with_finally_lowers() {
+    for source in [
+        "try:\n    for i in range(3):\n        break\nfinally:\n    print(1)\n",
+        "for i in range(3):\n    try:\n        break\n    except ValueError:\n        continue\n",
+    ] {
+        let module = pycc_parser_test_helper::parse(source);
+        lower_checked(&module).expect("the jump stays inside the loop or crosses no finally");
+    }
 }
 
 #[test]
@@ -1447,11 +1510,19 @@ fn a_tuple_for_target_is_not_supported_yet() {
 }
 
 #[test]
-fn a_for_else_is_not_supported_yet() {
-    assert_capability_error_message(
-        "for i in range(3):\n    print(i)\nelse:\n    print(0)\n",
-        "for/else is not supported yet",
-    );
+fn a_for_else_lowers_to_a_loop_else_wrapper() {
+    let module =
+        pycc_parser_test_helper::parse("for i in range(3):\n    continue\nelse:\n    print(0)\n");
+    let hir = lower_checked(&module).unwrap();
+    let [HirItem::TopLevelStmt(HirStmt::LoopElse { loop_stmt, orelse })] = hir.items.as_slice()
+    else {
+        panic!("expected one loop-else statement, got {:?}", hir.items);
+    };
+    assert!(matches!(
+        loop_stmt.as_ref(),
+        HirStmt::ForRange { body, .. } if body == &vec![HirStmt::Continue]
+    ));
+    assert_eq!(orelse.len(), 1);
 }
 
 #[test]
@@ -1518,33 +1589,18 @@ fn a_break_inside_a_synchronous_function_with_no_loop_is_context_invalid() {
 }
 
 #[test]
-fn a_break_inside_a_for_loop_is_still_unsupported() {
-    // Regression guard: a real enclosing loop keeps break/continue on
-    // the existing valid-but-unimplemented `C0001` path -- this issue is
-    // scoped to classification, not to implementing loop control flow.
-    assert_capability_error_message(
+fn a_break_or_continue_with_an_enclosing_loop_lowers() {
+    // A real enclosing loop makes the jump valid, including through an
+    // `if`: the `If` arm and `lower_elif_else_clauses` pass the caller's
+    // `in_loop` value through rather than resetting it.
+    for source in [
         "for i in range(3):\n    break\n",
-        "statement kind not supported yet",
-    );
-}
-
-#[test]
-fn a_continue_inside_a_while_loop_is_still_unsupported() {
-    assert_capability_error_message(
         "while True:\n    continue\n",
-        "statement kind not supported yet",
-    );
-}
-
-#[test]
-fn a_break_inside_an_if_inside_a_for_loop_is_still_unsupported() {
-    // Guards the `If` arm's and `lower_elif_else_clauses`' pass-through
-    // of the caller's `in_loop` value: an `if` nested inside a loop body
-    // must not reset loop context to `false`.
-    assert_capability_error_message(
-        "for i in range(3):\n    if i:\n        break\n",
-        "statement kind not supported yet",
-    );
+        "for i in range(3):\n    if i:\n        break\n    elif i > 1:\n        continue\n",
+    ] {
+        let module = pycc_parser_test_helper::parse(source);
+        lower_checked(&module).expect("a loop jump with an enclosing loop must lower");
+    }
 }
 
 // -- PEP 765 (#738, Part 1 of #543): `return`/`break`/`continue` inside a
@@ -1650,10 +1706,8 @@ fn a_return_in_a_loop_defined_inside_a_finally_block_lowers_successfully() {
     // assumed: despite a naive PEP-text-only reading predicting this
     // *should* still be rejected (a `return` inside the inner loop still
     // exits the function, same as it would without the loop), CPython's
-    // actual compiler does not flag it. `Stmt::Return` has no capability
-    // gap of its own (unlike `break`/`continue`, whose control-flow
-    // codegen is unimplemented for any real loop), so this lowers all the
-    // way through successfully rather than landing on `C0001`.
+    // actual compiler does not flag it, so this lowers all the way
+    // through successfully.
     let module = pycc_parser_test_helper::parse(
         "def f() -> int:\n    try:\n        pass\n    finally:\n        for i in range(3):\n            return i\n",
     );
@@ -1661,24 +1715,22 @@ fn a_return_in_a_loop_defined_inside_a_finally_block_lowers_successfully() {
 }
 
 #[test]
-fn a_break_targeting_a_loop_defined_inside_a_finally_block_is_still_unsupported() {
+fn a_break_targeting_a_loop_defined_inside_a_finally_block_lowers() {
     // A `break` that targets a loop defined *inside* the `finally` itself
-    // does not escape the finally -- it falls through to the ordinary
-    // valid-but-unimplemented `C0001` path (break/continue codegen isn't
-    // implemented at all yet, independent of this PEP 765 check), not the
-    // new `L0001` finally violation.
-    assert_capability_error_message(
+    // does not escape the finally, so it is not the `L0001` finally
+    // violation, and it lowers like any other loop jump.
+    let module = pycc_parser_test_helper::parse(
         "def f() -> None:\n    try:\n        pass\n    finally:\n        for i in range(3):\n            break\n",
-        "statement kind not supported yet",
     );
+    lower_checked(&module).expect("a break shielded by an inner loop must lower");
 }
 
 #[test]
-fn a_continue_targeting_a_loop_defined_inside_a_finally_block_is_still_unsupported() {
-    assert_capability_error_message(
+fn a_continue_targeting_a_loop_defined_inside_a_finally_block_lowers() {
+    let module = pycc_parser_test_helper::parse(
         "def f() -> None:\n    try:\n        pass\n    finally:\n        for i in range(3):\n            continue\n",
-        "statement kind not supported yet",
     );
+    lower_checked(&module).expect("a continue shielded by an inner loop must lower");
 }
 
 #[test]
@@ -6490,19 +6542,16 @@ fn a_function_local_from_import_is_qualified_by_its_position() {
 }
 
 #[test]
-fn break_inside_a_loop_names_the_construct() {
-    assert_capability_error_message(
-        "for i in range(3):\n    break\n",
-        "statement kind not supported yet: `break` inside a loop",
+fn break_and_continue_inside_a_loop_lower() {
+    let module = pycc_parser_test_helper::parse(
+        "for i in range(3):\n    if i:\n        break\n    continue\n",
     );
-}
-
-#[test]
-fn continue_inside_a_loop_names_the_construct() {
-    assert_capability_error_message(
-        "for i in range(3):\n    continue\n",
-        "statement kind not supported yet: `continue` inside a loop",
-    );
+    let hir = lower_checked(&module).unwrap();
+    let [HirItem::TopLevelStmt(HirStmt::ForRange { body, .. })] = hir.items.as_slice() else {
+        panic!("expected one range loop, got {:?}", hir.items);
+    };
+    assert!(matches!(&body[0], HirStmt::If { body, .. } if body == &vec![HirStmt::Break]));
+    assert_eq!(body[1], HirStmt::Continue);
 }
 
 #[test]

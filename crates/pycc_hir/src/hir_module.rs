@@ -87,6 +87,10 @@ fn collect_killed_names(body: &[HirStmt], killed: &mut HashSet<String>) {
                 collect_named_expr_targets_in_expr(test, killed);
                 collect_killed_names(body, killed);
             }
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                collect_killed_names(std::slice::from_ref(loop_stmt.as_ref()), killed);
+                collect_killed_names(orelse, killed);
+            }
             HirStmt::Match { cases, .. } => {
                 for case in cases {
                     // D-068 re-review of #780 (fourth round): a case's
@@ -175,6 +179,8 @@ fn collect_killed_names(body: &[HirStmt], killed: &mut HashSet<String>) {
             | HirStmt::DeleteSlice { .. }
             | HirStmt::DeleteAttr { .. }
             | HirStmt::ForeignImport { .. }
+            | HirStmt::Break
+            | HirStmt::Continue
             | HirStmt::Raise { .. } => {}
         }
     }

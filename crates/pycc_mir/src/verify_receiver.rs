@@ -248,7 +248,13 @@ impl Verifier<'_> {
             MirStmt::NoOp
             | MirStmt::Unreachable
             | MirStmt::Reraise
+            | MirStmt::Break
+            | MirStmt::Continue
             | MirStmt::ForeignImport { .. } => {}
+            MirStmt::LoopElse { loop_stmt, orelse } => {
+                self.stmt(loop_stmt);
+                self.stmts(orelse);
+            }
             MirStmt::If { test, body, orelse } => {
                 self.expr(test);
                 self.stmts(body);

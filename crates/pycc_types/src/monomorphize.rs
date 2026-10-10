@@ -214,6 +214,10 @@ fn substitute_stmt_protocols(stmt: &HirStmt, substitutions: &[(String, Ty)]) -> 
             list: list.clone(),
             body: substitute_body_protocols(body, substitutions),
         },
+        HirStmt::LoopElse { loop_stmt, orelse } => HirStmt::LoopElse {
+            loop_stmt: Box::new(substitute_stmt_protocols(loop_stmt, substitutions)),
+            orelse: substitute_body_protocols(orelse, substitutions),
+        },
         other => other.clone(),
     }
 }
@@ -294,6 +298,10 @@ fn substitute_stmt(stmt: &HirStmt, param_name: &str, concrete: &Ty) -> HirStmt {
             list: list.clone(),
             body: substitute_body(body, param_name, concrete),
         },
+        HirStmt::LoopElse { loop_stmt, orelse } => HirStmt::LoopElse {
+            loop_stmt: Box::new(substitute_stmt(loop_stmt, param_name, concrete)),
+            orelse: substitute_body(orelse, param_name, concrete),
+        },
         other => other.clone(),
     }
 }
@@ -371,6 +379,22 @@ pub(crate) fn substitute_stmt_with_class(
             var: var.clone(),
             list: list.clone(),
             body: substitute_body_with_class(body, param_name, concrete, class_name, mangled_class),
+        },
+        HirStmt::LoopElse { loop_stmt, orelse } => HirStmt::LoopElse {
+            loop_stmt: Box::new(substitute_stmt_with_class(
+                loop_stmt,
+                param_name,
+                concrete,
+                class_name,
+                mangled_class,
+            )),
+            orelse: substitute_body_with_class(
+                orelse,
+                param_name,
+                concrete,
+                class_name,
+                mangled_class,
+            ),
         },
         other => other.clone(),
     }
@@ -1005,6 +1029,14 @@ fn rewrite_generic_calls_in_stmt(
             }
             Ok(())
         }
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            rewrite_generic_calls_in_stmt(env, local_names, loop_stmt, instantiations, seen)?;
+            for s in orelse.iter_mut() {
+                rewrite_generic_calls_in_stmt(env, local_names, s, instantiations, seen)?;
+            }
+            Ok(())
+        }
+        HirStmt::Break | HirStmt::Continue => Ok(()),
         HirStmt::ForRange {
             var,
             start,
@@ -1556,6 +1588,13 @@ pub(crate) fn collect_generic_class_instantiations_from_stmt(
                 collect_generic_class_instantiations_from_stmt(s, out);
             }
         }
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            collect_generic_class_instantiations_from_stmt(loop_stmt, out);
+            for s in orelse {
+                collect_generic_class_instantiations_from_stmt(s, out);
+            }
+        }
+        HirStmt::Break | HirStmt::Continue => {}
         HirStmt::DictSet { key, value, .. } => {
             collect_generic_class_instantiations_from_expr(key, out);
             collect_generic_class_instantiations_from_expr(value, out);
@@ -2543,6 +2582,26 @@ fn rewrite_protocol_calls_in_stmt(
                 seen,
             );
             for s in body.iter_mut() {
+                rewrite_protocol_calls_in_stmt(
+                    s,
+                    protocol_funcs,
+                    env,
+                    local_names,
+                    specializations,
+                    seen,
+                );
+            }
+        }
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            rewrite_protocol_calls_in_stmt(
+                loop_stmt,
+                protocol_funcs,
+                env,
+                local_names,
+                specializations,
+                seen,
+            );
+            for s in orelse.iter_mut() {
                 rewrite_protocol_calls_in_stmt(
                     s,
                     protocol_funcs,

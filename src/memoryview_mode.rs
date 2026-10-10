@@ -615,6 +615,10 @@ fn producer_bound_in<'a>(body: &'a [HirStmt], shadowed: &HashSet<&str>) -> Optio
         | HirStmt::ForRange { body, .. }
         | HirStmt::ForList { body, .. }
         | HirStmt::ForObject { body, .. } => producer_bound_in(body, shadowed),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            producer_bound_in(std::slice::from_ref(loop_stmt.as_ref()), shadowed)
+                .or_else(|| producer_bound_in(orelse, shadowed))
+        }
         HirStmt::Match { cases, .. } => cases
             .iter()
             .find_map(|case| producer_bound_in(&case.body, shadowed)),
@@ -651,6 +655,8 @@ fn producer_bound_in<'a>(body: &'a [HirStmt], shadowed: &HashSet<&str>) -> Optio
         | HirStmt::DeleteSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::ForeignImport { .. }
+        | HirStmt::Break
+        | HirStmt::Continue
         | HirStmt::Raise { .. } => None,
     })
 }

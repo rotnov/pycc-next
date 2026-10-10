@@ -71,8 +71,8 @@
 //! (`foreign_fail::emit_failure`) looks through those blocks with
 //! [`loop_iterators_above_handler`] and releases their iterators itself,
 //! so a failure in the loop still fails the import with CPython's own
-//! exception set. `break` is not admitted yet (C0001), so the loop has no
-//! third exit.
+//! exception set. A `break` leaves through the loop's normal exit block, so
+//! it releases the iterator exactly as the normal exit does.
 //!
 //! The operand of `print`, of an f-string interpolation and of
 //! `raise <object>` is a consumer like any other, and so is the condition

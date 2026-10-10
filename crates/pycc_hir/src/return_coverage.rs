@@ -9,7 +9,7 @@
 //! paths fall through (moved from `pycc_types::return_coverage` by #1476,
 //! the D-205 shared-predicate precedent).
 
-use crate::{HirExpr, HirStmt};
+use crate::{HirExpr, HirStmt, body_breaks_loop, loop_body};
 
 /// Whether every path through `body` leaves it by `return`, `raise`, or a
 /// loop that never completes, so no statement after `body` runs.
@@ -50,24 +50,33 @@ pub fn block_always_returns(body: &[HirStmt]) -> bool {
             | HirStmt::DictCompAssign { .. } => false,
             // #1370: a loop whose test is a constant true value never
             // completes normally -- control leaves it only through a
-            // `return` or a raise inside its body, both terminal here.
-            // Any other test may be false on entry or later, so the loop
-            // falls through.
-            //
-            // Sound only because HIR has no `break`: lowering rejects a
-            // `break` inside a loop with `C0001` (`pycc_hir::stmt`'s
-            // `Stmt::Break` arm), so no body statement can leave the loop
-            // normally. When `break` lowering lands, this arm must also
-            // require that the body holds no `break` bound to this loop;
-            // `a_while_true_with_break_is_still_rejected` in
-            // `tests/issue_1370_while_true_return.rs` pins the current
-            // rejection and flips when that happens.
+            // `return`, a raise, or a `break` bound to it. Without such a
+            // `break` the statement after it is unreachable. Any other
+            // test may be false on entry or later, so the loop falls
+            // through.
             //
             // `pycc_hir::definitely_terminates` (guard-clause narrowing)
             // is not a mirror of this predicate and stays unchanged: it
             // deliberately recognizes only `return` and a two-armed `if`
             // (not even `raise`), which is sound by omission.
-            HirStmt::While { test, .. } => is_constant_true(test),
+            HirStmt::While { test, body } => is_constant_true(test) & !body_breaks_loop(body),
+            // A loop with `else:` reaches the statement after it through a
+            // `break` bound to the loop, or through the `else:` clause once
+            // the loop ends normally. Without a `break` it never falls
+            // through when the loop itself never ends or the clause never
+            // falls through.
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                let breaks = loop_body(loop_stmt).is_some_and(body_breaks_loop);
+                !breaks
+                    & (block_always_returns(std::slice::from_ref(loop_stmt.as_ref()))
+                        | block_always_returns(orelse))
+            }
+            // A `break`/`continue` leaves the rest of its suite unreached,
+            // but control continues after (or at the head of) the loop, so
+            // it is not a return. Answering `false` is the conservative
+            // direction for every caller: a `try` join keeps the path, and
+            // a constant-true loop is classified by its own arm above.
+            HirStmt::Break | HirStmt::Continue => false,
             // A raise transfers control to an exception handler/caller and
             // cannot fall through to the function's implicit return point.
             HirStmt::Raise { .. } => true,
