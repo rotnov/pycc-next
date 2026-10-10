@@ -46,10 +46,11 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     assert_eq!(result_fail.len(), 1, "{ir}");
     assert_eq!(releases(result_fail[0]), 1, "{ir}");
     assert_eq!(releases_of(result_fail[0], ITERATOR), 1, "{ir}");
-    // The source's own attribute load precedes `iter()` and holds nothing.
+    // The source's own attribute load precedes `iter()` and holds only the
+    // module global `copy` it pins (`operand_pin`).
     let mut later = blocks(&ir, "foreign_attr_fail");
     assert_eq!(later.len(), 3, "{ir}");
-    assert_eq!(releases(later.remove(0)), 0, "{ir}");
+    assert_eq!(releases(later.remove(0)), 1, "{ir}");
     // The filter's and the element's attribute loads and their effect
     // checks, the filter's truth test, `next()` and the insertion: each
     // releases both.
@@ -131,7 +132,7 @@ fn a_bound_comprehension_result_is_not_released() {
 /// through that target, and at the loop's normal exit. The only other
 /// releases are of each module global's replaced value (`heap_rc`): the
 /// fixture's `copy` import, and the loop target's previous item on every
-/// trip.
+/// trip -- and of `copy`, pinned across the load ([`PINNED_LOAD`]).
 #[test]
 fn a_for_loop_releases_its_produced_iterable_and_its_iterator() {
     let ir = entry_ir(
@@ -144,7 +145,7 @@ fn a_for_loop_releases_its_produced_iterable_and_its_iterator() {
     );
     assert_eq!(releases_of(&ir, "old_heap"), 1, "{ir}");
     assert_eq!(releases_of(&ir, "old_heap1"), 1, "{ir}");
-    assert_eq!(releases(&ir), 7, "{ir}");
+    assert_eq!(releases(&ir), 7 + PINNED_LOAD, "{ir}");
     let get_iter_fail = blocks(&ir, "foreign_iter_get_fail");
     assert_eq!(get_iter_fail.len(), 1, "{ir}");
     assert_eq!(releases(get_iter_fail[0]), 1, "{ir}");
@@ -243,7 +244,7 @@ fn a_for_loop_body_failure_unwinds_through_its_cleanup_blocks() {
         inner_label.starts_with("foreign_iter_cleanup") && inner_label != "foreign_iter_cleanup",
         "the inner loop's body unwinds through the inner cleanup\n{ir}"
     );
-    assert_eq!(releases(attr_fails[1]), 0, "{ir}");
+    assert_eq!(releases(attr_fails[1]), 1, "only the pinned `copy`: {ir}");
     assert!(
         target(attr_fails[1]).starts_with("try_handler_dispatch"),
         "the body's own `try` catches before any cleanup\n{ir}"
@@ -315,7 +316,7 @@ fn a_native_comprehension_releases_its_produced_object_filter() {
         }),
     }));
     let ir = discard_ir("release_native_comprehension_filter", comprehension);
-    assert_eq!(releases(&ir), 2, "{ir}");
+    assert_eq!(releases(&ir), 2 + PINNED_LOAD, "{ir}");
     let truthy_fail = blocks(&ir, "foreign_truthy_fail");
     assert_eq!(truthy_fail.len(), 1, "{ir}");
     assert_eq!(releases(truthy_fail[0]), 1, "{ir}");

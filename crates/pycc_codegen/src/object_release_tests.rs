@@ -226,13 +226,14 @@ fn an_unboxed_operand_is_classified_by_the_object_it_unboxes() {
 
 /// `copy.a.b`, discarded in a function: the inner load is released after
 /// the outer one and on the outer one's failure edge before the branch; the
-/// outer result is released by the discarding statement.
+/// outer result is released by the discarding statement. The module global
+/// `copy` is pinned across the inner load only (`operand_pin`).
 #[test]
 fn a_nested_attribute_load_releases_its_base_on_both_paths() {
     let ir = discard_ir("release_nested_attr", attr_of(attr("a"), "b"));
     let fails = blocks(&ir, "foreign_attr_fail");
     assert_eq!(fails.len(), 2, "{ir}");
-    assert_eq!(releases(fails[0]), 0, "nothing is held yet: {ir}");
+    assert_eq!(releases(fails[0]), 1, "only the pinned `copy`: {ir}");
     let outer = fails[1];
     let bridge = outer
         .find(&format!("call i32 @{EXT_OBJ_ERROR_BRIDGE_SYMBOL}()"))
@@ -243,8 +244,9 @@ fn a_nested_attribute_load_releases_its_base_on_both_paths() {
         .unwrap_or_else(|| panic!("{ir}"));
     assert!(bridge < release && release < branch, "{ir}");
     assert_eq!(releases(outer), 1, "{ir}");
-    // The fallthrough: the base after the outer load, then the result.
-    assert!(releases(&ir) >= 3, "{ir}");
+    // The fallthrough: `copy` after the inner load, the base after the
+    // outer load, then the result.
+    assert!(releases(&ir) >= 4, "{ir}");
 }
 
 /// At module level outside every `try`, the foreign failure returns the
@@ -261,7 +263,7 @@ fn the_module_exec_failure_return_releases_held_operands() {
     let release = outer.find(RELEASE).unwrap_or_else(|| panic!("{ir}"));
     let ret = outer.find("ret ").unwrap_or_else(|| panic!("{ir}"));
     assert!(release < ret, "release before the failure return: {ir}");
-    assert_eq!(releases(fails[0]), 0, "{ir}");
+    assert_eq!(releases(fails[0]), 1, "the pinned `copy`: {ir}");
 }
 
 /// Inside a module-level `try`, the failure is bridged to the handler, and
@@ -298,7 +300,8 @@ fn a_failure_inside_a_module_level_try_releases_before_the_handler() {
 /// done or fails; the bound method is held across the argument (so the
 /// argument's failure releases it) and then consumed by the call (so the
 /// call's failure does not release it); the produced argument is held
-/// across the call and released after it.
+/// across the call and released after it. The argument's own load pins
+/// `copy` too.
 #[test]
 fn a_method_call_holds_its_bound_method_and_its_produced_argument() {
     let ir = discard_ir(
@@ -314,7 +317,11 @@ fn a_method_call_holds_its_bound_method_and_its_produced_argument() {
     assert_eq!(releases(lookup[0]), 1, "the pinned receiver: {ir}");
     let arg = blocks(&ir, "foreign_attr_fail");
     assert_eq!(arg.len(), 1, "{ir}");
-    assert_eq!(releases(arg[0]), 1, "the bound method: {ir}");
+    assert_eq!(
+        releases(arg[0]),
+        2,
+        "the bound method and the argument load's pinned `copy`: {ir}"
+    );
     let call = blocks(&ir, "foreign_call_fail");
     assert_eq!(call.len(), 1, "{ir}");
     assert_eq!(
@@ -342,12 +349,14 @@ fn a_method_call_releases_a_produced_receiver_after_the_lookup() {
     assert_eq!(releases(call[0]), 0, "the receiver is gone already: {ir}");
 }
 
-/// Borrowed operands only: a borrowed name is never released, and the
+/// Module-global operands only: the receiver is pinned across the lookup
+/// (`operand_pin`; released after it and on its failure edge), the
+/// argument stays borrowed (the call packs a reference of its own), and the
 /// consumed bound method is released only where the call never runs -- the
 /// argument read's own `NameError` exit (`global_unbound`). The one other
 /// release is the discarded result's.
 #[test]
-fn borrowed_operands_and_a_consumed_bound_method_are_never_released() {
+fn borrowed_arguments_and_a_consumed_bound_method_are_never_released() {
     let ir = discard_ir(
         "release_borrowed_only",
         MirExpr::ObjMethodCall {
@@ -356,19 +365,26 @@ fn borrowed_operands_and_a_consumed_bound_method_are_never_released() {
             args: vec![copy_name(), MirExpr::IntLiteral(1)],
         },
     );
+    assert_eq!(
+        releases(blocks(&ir, "foreign_call_lookup_fail")[0]),
+        1,
+        "{ir}"
+    );
     assert_eq!(releases(blocks(&ir, "foreign_call_fail")[0]), 0, "{ir}");
     let unbound: usize = blocks(&ir, "global_unbound")
         .iter()
         .map(|block| releases(block))
         .sum();
     assert_eq!(unbound, 1, "the bound method, on the argument's exit: {ir}");
-    assert_eq!(releases(&ir), 2, "{ir}");
+    assert_eq!(releases(&ir), 4, "{ir}");
 }
 
 /// A produced value that is bound or returned is not a temporary: it is
 /// never released as one. A module global owns its value, so the only
 /// releases left are each global's *previous* value (`heap_rc`) -- the
-/// fixture's `copy` import and `x` -- never the value just bound.
+/// fixture's `copy` import and `x` -- never the value just bound -- plus
+/// the module global `copy` the load pins (`operand_pin`), after the load
+/// and on its failure edge.
 #[test]
 fn a_bound_or_returned_produced_value_is_not_released() {
     let ir = entry_ir(
@@ -378,7 +394,7 @@ fn a_bound_or_returned_produced_value_is_not_released() {
             value: attr("a"),
         }],
     );
-    assert_eq!(releases(&ir), 2, "{ir}");
+    assert_eq!(releases(&ir), 4, "{ir}");
     assert_eq!(
         ir.matches(&format!("{RELEASE}ptr %old_heap")).count(),
         2,
@@ -390,7 +406,7 @@ fn a_bound_or_returned_produced_value_is_not_released() {
         &["pyfn_f"],
     )
     .remove(0);
-    assert_eq!(releases(&ir), 0, "{ir}");
+    assert_eq!(releases(&ir), 2, "only the pinned `copy`: {ir}");
 }
 
 /// A function without an object operation declares no release and keeps
@@ -419,6 +435,9 @@ fn a_function_without_object_operations_emits_no_release() {
 /// `a` (4); the discarded result is released last (1). Each path from entry
 /// to a return releases each produced value at most once; the hosted
 /// `tests/issue_1092_object_temp_release.rs` measures that balance.
+///
+/// On top of `expected`, each `copy.<attr>` load releases its pinned
+/// `copy` ([`PINNED_LOAD`]).
 #[test]
 fn every_consumer_releases_its_produced_operands() {
     let call = |callee: &str, ty: Ty| MirExpr::Call {
@@ -602,6 +621,7 @@ fn every_consumer_releases_its_produced_operands() {
     ];
     let mut wrong = Vec::new();
     for (label, stmt, expected) in cases {
+        let expected = expected + PINNED_LOAD * copy_loads(&stmt.exprs());
         let ir = f_ir(&format!("release_consumer_{label}"), vec![stmt]);
         let found = releases(&ir);
         if found != expected {
@@ -609,6 +629,22 @@ fn every_consumer_releases_its_produced_operands() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The releases of `copy` each `copy.<attr>` load adds: the load pins the
+/// module global (`operand_pin`) and releases it after the load and on the
+/// load's failure edge.
+const PINNED_LOAD: usize = 2;
+
+/// The number of `copy.<attr>` loads under `exprs`.
+fn copy_loads(exprs: &[&MirExpr]) -> usize {
+    exprs
+        .iter()
+        .map(|expr| {
+            let own = matches!(expr, MirExpr::ObjAttrGet { base, .. } if **base == copy_name());
+            usize::from(own) + copy_loads(&expr.children())
+        })
+        .sum()
 }
 
 /// The module-level-only `a, b = o.pair` float-tuple unpack releases its

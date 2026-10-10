@@ -5,6 +5,9 @@
 //! consumer must release) with its borrowed control (`copy`, a module
 //! global the consumer must never release), so a test that passes because
 //! nothing is ever released, or because everything is, fails one side.
+//! Each `copy.a` load also pins `copy` ([`PINNED_LOAD`]), and so does a
+//! consumer that runs code on a bare `copy` (`print`, an f-string), which
+//! then releases it like a produced operand (`operand_pin`).
 
 use super::*;
 use pycc_mir::{BoolOpKind, MirFStringPart};
@@ -45,8 +48,9 @@ fn bool_op(op: BoolOpKind, left: MirExpr, right: MirExpr, ty: Ty, truth_only: bo
 
 /// `print(copy.a, 1, copy.b)`: each produced argument is held until its
 /// own write, so the second argument's failure releases the first, and each
-/// is released once its text is written. `print(copy, 1, copy)` releases
-/// nothing.
+/// is released once its text is written. In `print(copy, 1, copy)` each
+/// module global is pinned (a `__repr__` could rebind it) and released the
+/// same way.
 #[test]
 fn print_releases_each_produced_argument_after_writing_it() {
     let ir = f_ir(
@@ -55,8 +59,8 @@ fn print_releases_each_produced_argument_after_writing_it() {
     );
     let fails = blocks(&ir, "foreign_attr_fail");
     assert_eq!(fails.len(), 2, "{ir}");
-    assert_eq!(releases(fails[0]), 0, "{ir}");
-    assert_eq!(releases(fails[1]), 1, "the first argument: {ir}");
+    assert_eq!(releases(fails[0]), 1, "the pinned `copy`: {ir}");
+    assert_eq!(releases(fails[1]), 2, "the first argument and `copy`: {ir}");
     // The first argument's conversion fails holding both; the second's
     // holds only itself, the first being written and released already.
     let to_str = blocks(&ir, "foreign_to_str_fail");
@@ -65,7 +69,7 @@ fn print_releases_each_produced_argument_after_writing_it() {
     assert_eq!(releases(to_str[1]), 1, "{ir}");
     // Plus the second argument's `NameError` exit and effect check (one
     // each) and each argument's release after its write.
-    assert_eq!(releases(&ir), 8, "{ir}");
+    assert_eq!(releases(&ir), 8 + 2 * PINNED_LOAD, "{ir}");
     let borrowed = f_ir(
         "release_print_borrowed",
         vec![print(vec![
@@ -74,17 +78,24 @@ fn print_releases_each_produced_argument_after_writing_it() {
             copy_name(),
         ])],
     );
-    assert_eq!(releases(&borrowed), 0, "{borrowed}");
+    // Each `copy` is pinned across `print` and held like a produced
+    // argument: the conversions' failure edges (two, one), the second
+    // read's `NameError` exit, and each write.
+    assert_eq!(releases(&borrowed), 6, "{borrowed}");
 }
 
 /// `f"v={copy.a}"` releases the interpolated object once it is formatted;
-/// `f"v={copy}"` does not.
+/// `f"v={copy}"` releases only `copy`, pinned across the formatting.
 #[test]
 fn an_fstring_releases_a_produced_interpolation() {
     let ir = discard_ir("release_fstring", fstring(attr("a")));
-    assert_eq!(releases(&ir), 2, "{ir}");
+    assert_eq!(releases(&ir), 2 + PINNED_LOAD, "{ir}");
     let borrowed = discard_ir("release_fstring_borrowed", fstring(copy_name()));
-    assert_eq!(releases(&borrowed), 0, "{borrowed}");
+    assert_eq!(
+        releases(&borrowed),
+        PINNED_LOAD,
+        "only the pinned `copy`: {borrowed}"
+    );
 }
 
 /// `raise copy.a` releases its produced operand after the raise has taken
@@ -93,7 +104,7 @@ fn an_fstring_releases_a_produced_interpolation() {
 fn a_raise_releases_its_produced_operand() {
     let raise = |value| MirStmt::ObjRaise { value };
     let ir = f_ir("release_raise", vec![raise(attr("a"))]);
-    assert_eq!(releases(&ir), 1, "{ir}");
+    assert_eq!(releases(&ir), 1 + PINNED_LOAD, "{ir}");
     let raised = ir
         .find("@pycc_ext_obj_raise(")
         .unwrap_or_else(|| panic!("{ir}"));
@@ -112,7 +123,7 @@ fn a_conditional_expression_releases_its_produced_test() {
         "release_if_exp_test",
         if_exp(attr("a"), int(1), int(2), Ty::Int),
     );
-    assert_eq!(releases(&ir), 2, "{ir}");
+    assert_eq!(releases(&ir), 2 + PINNED_LOAD, "{ir}");
     let borrowed = discard_ir(
         "release_if_exp_test_borrowed",
         if_exp(copy_name(), int(1), int(2), Ty::Int),
@@ -129,12 +140,12 @@ fn a_conditional_object_result_is_always_owned() {
         "release_if_exp_result",
         if_exp(copy_name(), attr("a"), attr("b"), Ty::Object),
     );
-    assert_eq!(releases(&ir), 1, "{ir}");
+    assert_eq!(releases(&ir), 1 + 2 * PINNED_LOAD, "{ir}");
     let mixed = discard_ir(
         "release_if_exp_mixed",
         if_exp(copy_name(), attr("a"), copy_name(), Ty::Object),
     );
-    assert_eq!(releases(&mixed), 1, "{mixed}");
+    assert_eq!(releases(&mixed), 1 + PINNED_LOAD, "{mixed}");
 }
 
 /// `if copy.a and copy.b:` tests each operand's truth and releases each
@@ -147,7 +158,7 @@ fn a_truth_only_boolean_operator_releases_each_produced_operand() {
         orelse: Vec::new(),
     };
     let ir = f_ir("release_boolop_truth", vec![stmt(attr("a"), attr("b"))]);
-    assert_eq!(releases(&ir), 4, "{ir}");
+    assert_eq!(releases(&ir), 4 + 2 * PINNED_LOAD, "{ir}");
     let borrowed = f_ir(
         "release_boolop_truth_borrowed",
         vec![stmt(copy_name(), copy_name())],
@@ -165,12 +176,12 @@ fn a_value_boolean_operator_releases_an_unselected_left_operand() {
         "release_boolop_value",
         bool_op(BoolOpKind::Or, attr("a"), attr("b"), Ty::Object, false),
     );
-    assert_eq!(releases(&ir), 3, "{ir}");
+    assert_eq!(releases(&ir), 3 + 2 * PINNED_LOAD, "{ir}");
     let mixed = discard_ir(
         "release_boolop_value_mixed",
         bool_op(BoolOpKind::Or, attr("a"), copy_name(), Ty::Object, false),
     );
-    assert_eq!(releases(&mixed), 3, "{mixed}");
+    assert_eq!(releases(&mixed), 3 + PINNED_LOAD, "{mixed}");
     let borrowed = discard_ir(
         "release_boolop_value_borrowed",
         bool_op(BoolOpKind::Or, copy_name(), copy_name(), Ty::Object, false),
