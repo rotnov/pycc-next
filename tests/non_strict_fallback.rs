@@ -106,9 +106,11 @@ fn compiled_and_fallback_code_match_cpython_in_an_ext_module() {
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new("fallback_ext_src").expect("scratch");
     fixture(&plain, "fbm.py");
+    // Unbuffered: compiled `print` writes straight to fd 1, while a piped
+    // host's `sys.stdout` is block-buffered (`docs/DEVIATIONS.md`).
     let run = |dir: &Path| {
         python()
-            .args(["-c", "import fbm"])
+            .args(["-u", "-c", "import fbm"])
             .current_dir(dir)
             .output()
             .expect("python should spawn")
