@@ -17,7 +17,6 @@ jobs:
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo 'deb https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -q && sudo apt-get install -y -q llvm-22-dev libpolly-22-dev clang-22 libzstd-dev
-      - uses: Swatinem/rust-cache@v2
       - run: cargo test --release --workspace
       - name: Package
         run: |
