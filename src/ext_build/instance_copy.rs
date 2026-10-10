@@ -85,14 +85,18 @@ impl CopyRefusal {
 
 /// The kind byte of a slot declared as `ty`, or `None` for a type the
 /// clone does not know how to own (the class is then refused).
-pub(crate) fn copy_kind(ty: &Ty) -> Option<u8> {
+/// `refcounted` answers `pycc_hir::is_refcounted_class` for a class name:
+/// an instance of an exception class carries no count, so its slot is a
+/// plain word (`w`), never a counted instance (`c`).
+pub(crate) fn copy_kind(ty: &Ty, refcounted: &dyn Fn(&str) -> bool) -> Option<u8> {
     match ty {
         Ty::Str => Some(b's'),
         Ty::Int => Some(b'i'),
         Ty::Object => Some(b'o'),
         Ty::List(_) => Some(b'l'),
-        Ty::Instance(_) => Some(b'c'),
-        Ty::Float | Ty::Bool | Ty::Dict(_) => Some(b'w'),
+        Ty::Dict(_) => Some(b'd'),
+        Ty::Instance(class) if refcounted(class) => Some(b'c'),
+        Ty::Instance(_) | Ty::Float | Ty::Bool => Some(b'w'),
         _ => None,
     }
 }
@@ -122,9 +126,16 @@ pub(crate) fn carrier_copy(module: &HirModule, def: &HirClassDef) -> CarrierCopy
             return CarrierCopy::Refused(CopyRefusal::Dunder(dunder));
         }
     }
+    let refcounted = |name: &str| {
+        module
+            .class_defs
+            .iter()
+            .find(|(held, _)| held == name)
+            .is_some_and(|(_, held)| pycc_hir::is_refcounted_class(held))
+    };
     let kinds: Option<Vec<u8>> = flat_attr_layout(&mro_defs)
         .iter()
-        .map(|(_, ty)| copy_kind(ty))
+        .map(|(_, ty)| copy_kind(ty, &refcounted))
         .collect();
     match kinds {
         Some(kinds) => CarrierCopy::Kinds(String::from_utf8(kinds).expect("kind bytes are ASCII")),

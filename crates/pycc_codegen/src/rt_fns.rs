@@ -334,6 +334,17 @@ pub(super) struct RtFns<'ctx> {
     /// decrement makes when a count reaches zero (`heap_rc`).
     pub(super) list_free: FunctionValue<'ctx>,
     pub(super) instance_free: FunctionValue<'ctx>,
+    /// The out-of-line counts of a dict and a set (`heap_rc`): their
+    /// decrements free the object and release its keys or instances.
+    pub(super) dict_incref: FunctionValue<'ctx>,
+    pub(super) dict_decref: FunctionValue<'ctx>,
+    pub(super) set_incref: FunctionValue<'ctx>,
+    pub(super) set_decref: FunctionValue<'ctx>,
+    /// `pycc_rt_obj_set_new`: an empty set owning its instance elements.
+    pub(super) obj_set_new: FunctionValue<'ctx>,
+    /// `pycc_rt_obj_set_discard_candidate`: releases an element an
+    /// instance-set insertion did not keep.
+    pub(super) obj_set_discard_candidate: FunctionValue<'ctx>,
     /// Every reference-counted class of the module (`pycc_hir::
     /// is_refcounted_class`), keyed by its MIR name, with the slot kind
     /// string its layout descriptor records (`pycc_hir::slot_rc_kind`). A
@@ -835,6 +846,27 @@ pub(super) fn declare_rt_functions<'ctx>(
         instance_free: declare(
             "pycc_rt_instance_free",
             void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        dict_incref: declare(
+            "pycc_rt_dict_incref",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        dict_decref: declare(
+            "pycc_rt_dict_decref",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        set_incref: declare(
+            "pycc_rt_int_set_incref",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        set_decref: declare(
+            "pycc_rt_int_set_decref",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        obj_set_new: declare("pycc_rt_obj_set_new", ptr_type.fn_type(&[], false)),
+        obj_set_discard_candidate: declare(
+            "pycc_rt_obj_set_discard_candidate",
+            void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
         rc_class_kinds: std::cell::RefCell::new(HashMap::new()),
         borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),

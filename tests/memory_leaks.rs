@@ -91,6 +91,32 @@ def take(s: str) -> int:
     return 1
 
 
+class H:
+    def __init__(self, v: int) -> None:
+        self.v = v
+
+    def __hash__(self) -> int:
+        return self.v
+
+    def __eq__(self, other: "H") -> bool:
+        return self.v == other.v
+
+
+class Tally:
+    counts: dict[str, int]
+
+    def __init__(self) -> None:
+        self.counts = {}
+
+    def add(self, k: str) -> "Tally":
+        self.counts[k] = self.counts.get(k, 0) + 1
+        return self
+
+
+def mkd(i: int) -> dict[str, int]:
+    return {mk(i): i, "z": 0}
+
+
 D = {"a": 1}
 NAMES = ["a", "b"]
 "#;
@@ -307,6 +333,32 @@ probe!(
     for_loop_hold_released_on_return,
     "total += find(mklist(i + 1))"
 );
+// Dicts and sets: built per iteration, as locals, temporaries, attributes.
+probe!(
+    dict_local_rebound,
+    "d: dict[str, int] = {mk(i): i, \"b\": 2}\nd[mk(i + 1)] = 3\ntotal += d[\"b\"]"
+);
+probe!(
+    dict_temporary,
+    "total += mkd(i)[\"z\"] + len(mkd(i))"
+);
+probe!(
+    dict_comprehension,
+    "d: dict[str, int] = {mk(j): j for j in range(3)}\ntotal += len(d)"
+);
+probe!(
+    dict_loop_rebinding_its_dict,
+    "d: dict[str, int] = mkd(i)\nfor k in d:\n    d = mkd(1)\n    total += len(k)"
+);
+probe!(
+    dict_attribute,
+    "t: Tally = Tally().add(mk(i)).add(\"x\").add(mk(i))\ntotal += len(t.counts)"
+);
+probe!(set_of_ints, "si: set[int] = {i, i + 1, 2}\ntotal += len(si)");
+probe!(
+    set_of_instances,
+    "hs: set[H] = {H(i), H(i), H(2)}\nhs.add(H(2))\nhs.add(H(i + 7))\ntotal += len(hs)"
+);
 // A fresh target of a store dies once stored into.
 probe!(fresh_attribute_target, "mkp(i).name = mk(i)");
 probe!(fresh_list_target, "mklist(i)[0] = i");
@@ -377,6 +429,15 @@ fn aliasing_and_release_order_match_cpython_and_are_memcheck_clean() {
 fn operands_outlive_later_siblings_that_drop_their_owner() {
     let dir = ScratchDir::new("memory_fixture_operands").expect("scratch dir");
     let bin = assert_fixture_matches_cpython(&dir, "refcount_operand_lifetime");
+    assert_memcheck_clean(&bin);
+}
+
+/// Dicts and sets are reference counted: aliasing, rebinding, a loop over a
+/// container its body rebinds, instance sets with duplicate inserts.
+#[test]
+fn dicts_and_sets_match_cpython_and_are_memcheck_clean() {
+    let dir = ScratchDir::new("memory_fixture_dict_set").expect("scratch dir");
+    let bin = assert_fixture_matches_cpython(&dir, "refcount_dict_set");
     assert_memcheck_clean(&bin);
 }
 

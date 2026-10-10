@@ -207,14 +207,15 @@ fn copy_kind_maps_each_admitted_slot_type_and_refuses_the_rest() {
         (Ty::Float, Some(b'w')),
         (Ty::Bool, Some(b'w')),
         (Ty::List(Box::new(Ty::Int)), Some(b'l')),
-        (Ty::Dict(Box::new((Ty::Str, Ty::Int))), Some(b'w')),
+        (Ty::Dict(Box::new((Ty::Str, Ty::Int))), Some(b'd')),
         (instance, Some(b'c')),
+        (Ty::Instance(Box::new("ValueError".to_string())), Some(b'w')),
         (Ty::Param(Box::new("T".to_string())), None),
         (Ty::Set(Box::new(Ty::Int)), None),
         (Ty::Tuple(Box::new(vec![Ty::Int])), None),
     ];
     for (ty, expected) in cases {
-        assert_eq!(copy_kind(&ty), expected, "{ty:?}");
+        assert_eq!(copy_kind(&ty, &|name| name != "ValueError"), expected, "{ty:?}");
     }
 }
 

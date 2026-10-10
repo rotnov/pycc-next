@@ -22,22 +22,38 @@ use super::*;
 /// `items` word is then an instance pointer and `hashes[i]` its reduced
 /// `__hash__`, computed once at insertion as CPython does. `hashes` stays
 /// empty for every `int` set, and no `pycc_rt_int_set_*` insert touches it.
-/// Instances are never freed (`instance.rs`), so a stored pointer holds no
-/// reference.
+/// A set of reference-counted instances ([`pycc_rt_obj_set_new`]) owns one
+/// reference to each stored instance, released when the set is freed; a
+/// set of exception instances (which carry no count) owns none.
 pub struct PyIntSetObj {
     rc: Cell<u32>,
     items: Cell<Vec<i64>>,
     hashes: Cell<Vec<i64>>,
+    counted: bool,
+}
+
+fn new_set(counted: bool, items: Vec<i64>, hashes: Vec<i64>) -> *mut PyIntSetObj {
+    crate::rc::SET_LIVE.fetch_add(1, Ordering::Relaxed);
+    Box::into_raw(Box::new(PyIntSetObj {
+        rc: Cell::new(1),
+        items: Cell::new(items),
+        hashes: Cell::new(hashes),
+        counted,
+    }))
 }
 
 /// Allocates a fresh, empty `PyIntSetObj` with refcount `1`. Never panics.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_int_set_new() -> *mut PyIntSetObj {
-    Box::into_raw(Box::new(PyIntSetObj {
-        rc: Cell::new(1),
-        items: Cell::new(Vec::new()),
-        hashes: Cell::new(Vec::new()),
-    }))
+    new_set(false, Vec::new(), Vec::new())
+}
+
+/// Allocates a fresh, empty set of reference-counted instances: it owns a
+/// reference to every element it stores ([`pycc_rt_obj_set_push`] adopts
+/// the one it is handed).
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_obj_set_new() -> *mut PyIntSetObj {
+    new_set(true, Vec::new(), Vec::new())
 }
 
 /// Dedup-checked insert (D-121/D-141): linear-scan by decoded Python numeric
@@ -178,7 +194,13 @@ pub unsafe extern "C" fn pycc_rt_int_set_decref(set: *mut PyIntSetObj) {
     let rc = obj.rc.get() - 1;
     obj.rc.set(rc);
     if rc == 0 {
-        drop(unsafe { Box::from_raw(set) });
+        let set = unsafe { Box::from_raw(set) };
+        if set.counted {
+            for word in set.items.take() {
+                crate::rc::release_word(b'c', word);
+            }
+        }
+        crate::rc::SET_LIVE.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -202,11 +224,13 @@ pub unsafe extern "C" fn pycc_rt_int_set_copy(src: *mut PyIntSetObj) -> *mut PyI
     let hashes = unsafe { &*src }.hashes.take();
     let hashes_copy = hashes.clone();
     unsafe { &*src }.hashes.set(hashes);
-    Box::into_raw(Box::new(PyIntSetObj {
-        rc: Cell::new(1),
-        items: Cell::new(copy),
-        hashes: Cell::new(hashes_copy),
-    }))
+    let counted = unsafe { &*src }.counted;
+    if counted {
+        for word in &copy {
+            crate::rc::retain_word(b'c', *word);
+        }
+    }
+    new_set(counted, copy, hashes_copy)
 }
 
 /// Builds a new `PyIntSetObj` from `src`'s elements with refcount `1`
@@ -262,7 +286,8 @@ pub unsafe extern "C" fn pycc_rt_obj_set_candidate(
 }
 
 /// #1343: appends an instance-set entry, `word` with its reduced `hash`,
-/// once codegen's probe found no equal element.
+/// once codegen's probe found no equal element. A counted set adopts the
+/// reference the caller hands over with `word`.
 ///
 /// # Safety
 /// `set` must be a live `PyIntSetObj` pointer holding instances.
@@ -295,6 +320,21 @@ pub unsafe extern "C" fn pycc_rt_obj_set_add_identity(set: *mut PyIntSetObj, wor
     unsafe { &*set }.hashes.set(hashes);
     if !present {
         unsafe { pycc_rt_obj_set_push(set, word, hash) };
+    } else {
+        unsafe { pycc_rt_obj_set_discard_candidate(set, word) };
+    }
+}
+
+/// Releases the reference a counted set was handed with `word` when the
+/// insertion found an equal element already stored and so does not keep
+/// it (a set of uncounted instances owns nothing to release).
+///
+/// # Safety
+/// `set` must be a live `PyIntSetObj` pointer holding instances.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_obj_set_discard_candidate(set: *mut PyIntSetObj, word: i64) {
+    if unsafe { &*set }.counted {
+        crate::rc::release_word(b'c', word);
     }
 }
 

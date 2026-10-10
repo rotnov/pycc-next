@@ -1290,6 +1290,7 @@ pub struct PyDictObj {
 /// Allocates a fresh, empty `PyDictObj` with refcount `1`. Never panics.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_dict_new() -> *mut PyDictObj {
+    rc::DICT_LIVE.fetch_add(1, Ordering::Relaxed);
     Box::into_raw(Box::new(PyDictObj {
         rc: Cell::new(1),
         entries: Cell::new(Vec::new()),
@@ -1299,8 +1300,9 @@ pub extern "C" fn pycc_rt_dict_new() -> *mut PyDictObj {
 /// Insert-or-update (D-123): if `key` compares equal (`pycc_rt_str_cmp`)
 /// to an already-stored key, that entry's value is overwritten in place,
 /// preserving insertion order; otherwise `(key, value)` is appended.
-/// Leak-only (D-124): the stored key pointer is neither increfed on
-/// insert nor decrefed on update-in-place or ever.
+/// The call adopts the reference `key` carries: an appended key is owned
+/// by the dict (released when the dict is freed), and on an update the
+/// incoming key is released, as CPython keeps the key already stored.
 ///
 /// # Safety
 /// `dict` and `key` must be live pointers from `pycc_rt_dict_new`/
@@ -1477,9 +1479,9 @@ pub unsafe extern "C" fn pycc_rt_dict_incref(dict: *mut PyDictObj) {
     obj.rc.set(obj.rc.get() + 1);
 }
 
-/// Mirrors `pycc_rt_list_decref` exactly: frees via `Box::from_raw`
-/// once `rc` hits 0. Not called from any `pycc_codegen` site in this PR
-/// (D-124, leak-only).
+/// Drops one reference to `dict`, freeing it at zero: the dict owns one
+/// reference to each key (`pycc_rt_dict_set` adopts the one it is handed),
+/// released here; its values are inline `int` words that own nothing.
 ///
 /// # Safety
 /// `dict` must be null or a live `PyDictObj` pointer not used again after
@@ -1493,7 +1495,11 @@ pub unsafe extern "C" fn pycc_rt_dict_decref(dict: *mut PyDictObj) {
     let rc = obj.rc.get() - 1;
     obj.rc.set(rc);
     if rc == 0 {
-        drop(unsafe { Box::from_raw(dict) });
+        let dict = unsafe { Box::from_raw(dict) };
+        for (key, _) in dict.entries.take() {
+            unsafe { pycc_rt_str_decref(key) };
+        }
+        rc::DICT_LIVE.fetch_sub(1, Ordering::Relaxed);
     }
 }
 

@@ -68,7 +68,11 @@ fn unpack_value(fn_name: &str, ty: &Ty) -> (&'static str, String, &'static str) 
 /// `ty`, of class `class`.
 pub(super) fn slot_setter_c(class: &str, name: &str, index: usize, ty: &Ty) -> String {
     let symbol = setter_symbol(class, name);
-    let kind = char::from(copy_kind(ty).expect("every carried slot type has a copy kind"));
+    // A carried instance slot is of a carrier class, never an (uncounted)
+    // exception class.
+    let kind = char::from(
+        copy_kind(ty, &|_: &str| true).expect("every carried slot type has a copy kind"),
+    );
     let (local, unpack, to_word) = unpack_value(&format!("{class}.{name}"), ty);
     // A carrier `tp_init` never filled has no instance. Its `del` answers the
     // getter's `AttributeError`, which is CPython's for `del` of an unset

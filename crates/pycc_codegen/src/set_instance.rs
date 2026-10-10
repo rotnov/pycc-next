@@ -287,13 +287,16 @@ impl<'ctx> SetEmitter<'_, 'ctx> {
             .build_conditional_branch(exhausted, push_bb, probe_bb)
             .expect("build_conditional_branch should not fail");
 
+        // An equal element already stored: the set does not keep the
+        // reference `element` carries.
+        let found_bb = context.append_basic_block(function, "set_probe_found");
         builder.position_at_end(probe_bb);
         let stored = build_int_set_get(builder, rt, set, index);
         let same = builder
             .build_int_compare(IntPredicate::EQ, stored, word, "set_probe_same")
             .expect("build_int_compare should not fail");
         builder
-            .build_conditional_branch(same, done_bb, call_bb)
+            .build_conditional_branch(same, found_bb, call_bb)
             .expect("build_conditional_branch should not fail");
 
         builder.position_at_end(call_bb);
@@ -316,8 +319,16 @@ impl<'ctx> SetEmitter<'_, 'ctx> {
             )
             .expect("build_int_compare should not fail");
         builder
-            .build_conditional_branch(is_equal, done_bb, next_bb)
+            .build_conditional_branch(is_equal, found_bb, next_bb)
             .expect("build_conditional_branch should not fail");
+
+        builder.position_at_end(found_bb);
+        builder
+            .build_call(rt.obj_set_discard_candidate, &[set.into(), word.into()], "")
+            .expect("build_call should not fail for pycc_rt_obj_set_discard_candidate");
+        builder
+            .build_unconditional_branch(done_bb)
+            .expect("build_unconditional_branch should not fail");
 
         builder.position_at_end(next_bb);
         let from = builder
@@ -340,14 +351,9 @@ impl<'ctx> SetEmitter<'_, 'ctx> {
         builder.position_at_end(done_bb);
     }
 
-    /// A fresh, empty set.
-    pub(super) fn new_set(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_call(self.rt.int_set_new, &[], "set_new")
-            .expect("build_call should not fail for a well-formed set construction")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_int_set_new returns a non-void pointer")
-            .into_pointer_value()
+    /// A fresh, empty set of type `set_ty`.
+    pub(super) fn new_set(&self, set_ty: &pycc_mir::Ty) -> PointerValue<'ctx> {
+        build_set_new(self.builder, self.rt, set_ty)
     }
 
     /// Evaluates one element expression to its instance pointer.
@@ -379,10 +385,11 @@ impl<'ctx> SetEmitter<'_, 'ctx> {
     /// is hashed; a longer display evaluates and inserts one at a time.
     pub(super) fn literal(
         &self,
+        set_ty: &pycc_mir::Ty,
         elements: &[MirExpr],
         ops: &pycc_mir::SetElementOps,
     ) -> PointerValue<'ctx> {
-        let set = self.new_set();
+        let set = self.new_set(set_ty);
         if elements.len() <= CPYTHON_BUILD_SET_MAX {
             let pointers: Vec<PointerValue<'ctx>> = elements
                 .iter()
@@ -432,4 +439,31 @@ pub(super) fn set_element_scalar<'ctx>(
             )
             .expect("build_int_to_ptr should not fail for a stored instance word"),
     )
+}
+
+/// A fresh, empty set of type `set_ty`: one that owns its elements when
+/// they are reference-counted instances (`pycc_rt_obj_set_new`), a plain
+/// `pycc_rt_int_set_new` set otherwise.
+pub(super) fn build_set_new<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    set_ty: &pycc_mir::Ty,
+) -> PointerValue<'ctx> {
+    let counted = match set_ty {
+        pycc_mir::Ty::Set(elem) | pycc_mir::Ty::FrozenSet(elem) => {
+            crate::heap_rc::heap_kind(rt, elem).is_some()
+        }
+        _ => false,
+    };
+    let new_fn = if counted {
+        rt.obj_set_new
+    } else {
+        rt.int_set_new
+    };
+    builder
+        .build_call(new_fn, &[], "set_new")
+        .expect("build_call should not fail for a well-formed set construction")
+        .try_as_basic_value()
+        .expect_basic("a set constructor returns a non-void pointer")
+        .into_pointer_value()
 }

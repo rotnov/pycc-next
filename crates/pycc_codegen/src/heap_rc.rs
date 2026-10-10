@@ -1,7 +1,7 @@
-//! Reference counting of heap values: `str`, `list[T]` and instances of
-//! the module's classes.
+//! Reference counting of heap values: `str`, `list[T]`, `dict[str, int]`,
+//! `set[T]`/`frozenset[T]` and instances of the module's classes.
 //!
-//! **The ownership model** (the same for all three, and the one `str` has
+//! **The ownership model** (the same for all of them, and the one `str` has
 //! had since D-060): every value `emit_expr` produces is either a
 //! *borrowed* read of storage that keeps owning it ([`is_borrowed_read`]:
 //! a name, an attribute or list element of a borrowed base) or a *fresh*
@@ -19,13 +19,20 @@
 //!   ([`release_scalar_if_temporary`]): a comparison operand, a condition, a
 //!   discarded statement result, an operand a runtime call only borrows.
 //!
-//! A `str` counts through `pycc_rt_str_incref`/`_decref`. A list or an
-//! instance keeps its count at `pycc_rt::RC_OFFSET` in both objects, so the
-//! increment and the decrement are inlined here; only a decrement that
-//! reaches zero calls the runtime, on a cold path, to free the object and
-//! release what it holds. Instances of an exception class are not counted
-//! (they are the runtime's leak-only exception objects), nor are dicts and
-//! sets (still leak-only).
+//! A `str`, a dict and a set count through their runtime `_incref`/
+//! `_decref` (a freed dict releases its keys, a freed set of counted
+//! instances its elements). A list or an instance keeps its count at
+//! `pycc_rt::RC_OFFSET` in both objects, so the increment and the decrement
+//! are inlined here; only a decrement that reaches zero calls the runtime,
+//! on a cold path, to free the object and release what it holds. Instances
+//! of an exception class are not counted (they are the runtime's leak-only
+//! exception objects).
+//!
+//! Two refinements keep borrowed reads safe and temporaries balanced:
+//! an operand a later sibling could free is *pinned* (`operand_pin`), and
+//! a fresh temporary live while something can raise is held on the
+//! pending-release stack ([`hold_temporary`]) that every exception edge
+//! releases.
 
 use super::*;
 use inkwell::basic_block::BasicBlock;
@@ -43,6 +50,8 @@ pub(crate) enum HeapKind {
     Str,
     List,
     Instance,
+    Dict,
+    Set,
 }
 
 /// Every reference-counted class of `class_defs` with its slot kind string
@@ -82,6 +91,8 @@ pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
     match ty {
         Ty::Str => Some(HeapKind::Str),
         Ty::List(_) => Some(HeapKind::List),
+        Ty::Dict(_) => Some(HeapKind::Dict),
+        Ty::Set(_) | Ty::FrozenSet(_) => Some(HeapKind::Set),
         Ty::Instance(class) if rt.rc_class_kinds.borrow().contains_key(class.as_str()) => {
             Some(HeapKind::Instance)
         }
@@ -142,6 +153,8 @@ fn counted<'ctx>(
         (HeapKind::Str, Scalar::Str(ptr)) => Some((HeapKind::Str, *ptr)),
         (HeapKind::List, Scalar::List(ptr)) => Some((HeapKind::List, *ptr)),
         (HeapKind::Instance, Scalar::Instance(ptr)) => Some((HeapKind::Instance, *ptr)),
+        (HeapKind::Dict, Scalar::Dict(ptr)) => Some((HeapKind::Dict, *ptr)),
+        (HeapKind::Set, Scalar::Set(ptr)) => Some((HeapKind::Set, *ptr)),
         _ => None,
     }
 }
@@ -228,9 +241,15 @@ pub(crate) fn emit_incref<'ctx>(
     kind: HeapKind,
     ptr: PointerValue<'ctx>,
 ) {
-    if kind == HeapKind::Str {
+    let out_of_line = match kind {
+        HeapKind::Str => Some(rt.str_incref),
+        HeapKind::Dict => Some(rt.dict_incref),
+        HeapKind::Set => Some(rt.set_incref),
+        HeapKind::List | HeapKind::Instance => None,
+    };
+    if let Some(incref) = out_of_line {
         builder
-            .build_call(rt.str_incref, &[ptr.into()], "str_incref")
+            .build_call(incref, &[ptr.into()], "rc_incref")
             .expect("build_call should not fail for a well-formed incref");
         return;
     }
@@ -264,16 +283,20 @@ pub(crate) fn emit_decref<'ctx>(
     kind: HeapKind,
     ptr: PointerValue<'ctx>,
 ) {
-    let free = match kind {
-        HeapKind::Str => {
-            builder
-                .build_call(rt.str_decref, &[ptr.into()], "str_decref")
-                .expect("build_call should not fail for a well-formed decref");
-            return;
-        }
+    let out_of_line = match kind {
+        HeapKind::Str => rt.str_decref,
+        HeapKind::Dict => rt.dict_decref,
+        HeapKind::Set => rt.set_decref,
         HeapKind::List => rt.list_free,
         HeapKind::Instance => rt.instance_free,
     };
+    if !matches!(kind, HeapKind::List | HeapKind::Instance) {
+        builder
+            .build_call(out_of_line, &[ptr.into()], "rc_decref")
+            .expect("build_call should not fail for a well-formed decref");
+        return;
+    }
+    let free = out_of_line;
     let (_, done) = non_null(context, builder, ptr, "rc_dec");
     let cell = count_ptr(context, builder, ptr);
     let count = tagged_load(context, builder, cell);

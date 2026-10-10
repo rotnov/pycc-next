@@ -214,12 +214,8 @@ enum Scalar<'ctx> {
     /// `dict[K, V]` has no v0.2 semantics for a compile error until it is
     /// answered deliberately, instead of silently misreading memory.
     ///
-    /// Refcounting is deliberately *not* wired for this variant in v0.2
-    /// (D-124, extending D-107's exact reasoning): `pycc_rt_dict_incref`/
-    /// `_decref` are never called on a dict value itself, so a dict's
-    /// backing allocation leaks for the process's lifetime, identically to
-    /// `List`. That is leak-only -- never a premature free or a double free
-    /// -- because nothing frees a dict value early either.
+    /// Reference counted like every other heap value (`heap_rc`): a freed
+    /// dict releases the keys it owns.
     Dict(PointerValue<'ctx>),
     /// A pointer to a heap-allocated `pycc_rt::PyIntSetObj` (PR-11 Task 6,
     /// D-121/D-124) -- like `List`/`Dict`, opaque to this crate, which only
@@ -240,12 +236,8 @@ enum Scalar<'ctx> {
     /// semantics for a compile error until it is answered deliberately,
     /// instead of silently misreading memory.
     ///
-    /// Refcounting is deliberately *not* wired for this variant in v0.2
-    /// (D-124, extending D-107's exact reasoning, identically to `List`/
-    /// `Dict`): `pycc_rt_int_set_incref`/`_decref` are never called on a set
-    /// value itself, so a set's backing allocation leaks for the process's
-    /// lifetime. That is leak-only -- never a premature free or a double
-    /// free -- because nothing frees a set value early either.
+    /// Reference counted like every other heap value (`heap_rc`): a freed
+    /// set of counted instances releases its elements.
     Set(PointerValue<'ctx>),
     /// An LLVM `struct` held **by value** -- an SSA aggregate register, not
     /// a `PointerValue` to a heap or stack allocation, unlike every other
@@ -3233,13 +3225,15 @@ fn emit_expr_unchecked<'ctx>(
                 .try_as_basic_value()
                 .expect_basic("pycc_rt_dict_new returns a non-void pointer")
                 .into_pointer_value();
+            // The dict under construction is released if a pair raises.
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_owned(rt, heap_rc::HeapKind::Dict, dict_ptr);
             for (key, value) in pairs {
                 let key_scalar =
                     emit_expr(context, builder, module, rt, user_functions, locals, key);
                 // `PyDictObj` adopts the key pointer it is given as its own
-                // permanent reference, without incref'ing it itself (D-124:
-                // "the stored key pointer is neither increfed on insert nor
-                // decrefed ... ever"). A bare-`Name` key (`{k: 1}`) is a
+                // reference, without incref'ing it itself, and releases it
+                // when the dict is freed. A bare-`Name` key (`{k: 1}`) is a
                 // *duplicate* reference to whatever `PyStrObj` `k`'s own
                 // slot already owns, exactly the shape `incref_if_str_
                 // duplicate` exists to protect everywhere else a `str`
@@ -3284,6 +3278,7 @@ fn emit_expr_unchecked<'ctx>(
                 );
                 build_dict_set(builder, rt, dict_ptr, key_ptr, encoded);
             }
+            heap_rc::truncate_pending(rt, mark);
             Scalar::Dict(dict_ptr)
         }
         // `dict[key]`, read-only (PR-11 Task 5, D-123 -- `d[k] = v` is a
@@ -3299,7 +3294,11 @@ fn emit_expr_unchecked<'ctx>(
         MirExpr::DictGet { dict, key } => {
             let dict_scalar = emit_expr(context, builder, module, rt, user_functions, locals, dict);
             let dict_ptr = expect_dict_pointer(dict_scalar, "the dict subscripted value");
+            // A fresh dict is released if the key raises.
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_temporary(rt, dict, &dict_scalar);
             let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
+            heap_rc::truncate_pending(rt, mark);
             let Scalar::Str(key_ptr) = key_scalar else {
                 panic!(
                     "pycc_codegen: internal error: dict subscript key did not evaluate to str \
@@ -3312,8 +3311,10 @@ fn emit_expr_unchecked<'ctx>(
                 .try_as_basic_value()
                 .expect_basic("pycc_rt_dict_get returns a non-void i64")
                 .into_int_value();
-            // The lookup borrows the key (a `KeyError` copies its text).
+            // The lookup borrows the key (a `KeyError` copies its text) and
+            // the dict; the values are inline ints, so a fresh dict can go.
             release_scalar_if_temporary(context, builder, rt, key, &key_scalar);
+            release_scalar_if_temporary(context, builder, rt, dict, &dict_scalar);
             Scalar::Int(encoded_value)
         }
         // `{e1, e2, ...}` (PR-11 Task 9, D-123/D-121): an empty
@@ -3349,18 +3350,13 @@ fn emit_expr_unchecked<'ctx>(
                 user_functions,
                 locals,
             };
-            Scalar::Set(emitter.literal(elements, ops))
+            Scalar::Set(emitter.literal(&expr.ty(), elements, ops))
         }
         MirExpr::SetLiteral {
             elements,
             ops: None,
         } => {
-            let set_ptr = builder
-                .build_call(rt.int_set_new, &[], "set_new")
-                .expect("build_call should not fail for a well-formed set construction")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_int_set_new returns a non-void pointer")
-                .into_pointer_value();
+            let set_ptr = set_instance::build_set_new(builder, rt, &expr.ty());
             for element in elements {
                 let scalar = emit_expr(
                     context,
@@ -3650,8 +3646,9 @@ fn emit_expr_unchecked<'ctx>(
         MirExpr::DictGetOrDefault {
             dict, key, default, ..
         } => {
-            let dict_ptr =
+            let receiver =
                 emit_dict_receiver(context, builder, module, rt, user_functions, locals, dict);
+            let dict_ptr = receiver.0;
             let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
             let Scalar::Str(key_ptr) = key_scalar else {
                 panic!(
@@ -3680,6 +3677,7 @@ fn emit_expr_unchecked<'ctx>(
             let encoded =
                 build_dict_get_or_default(builder, rt, dict_ptr, key_ptr, encoded_default);
             release_scalar_if_temporary(context, builder, rt, key, &key_scalar);
+            release_dict_receiver(context, builder, rt, receiver);
             Scalar::Int(encoded)
         }
         // `set.add(value)` (PR-12 Task 11, D-119): mirrors `MirExpr::
@@ -4434,19 +4432,125 @@ fn emit_expr_unchecked<'ctx>(
     }
 }
 
-/// Every `for x in <list name>` statement in `body`, at any depth, with the
-/// name it iterates.
-fn for_list_loops(body: &[MirStmt]) -> Vec<(&MirStmt, &str)> {
+/// Binds `target` to a freshly built container (a comprehension's result),
+/// releasing the counted value the slot held before.
+fn store_fresh_container<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    target: &str,
+    container: Scalar<'ctx>,
+) {
+    if !rt.borrowed_locals.borrow().contains(target)
+        && let Some(slot) = locals.get(target)
+    {
+        heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
+    }
+    emit_assign(context, builder, rt, locals, target, container);
+}
+
+/// Every `for x in <name>` statement over a counted container in `body`, at
+/// any depth: the statement, the name it iterates, its loop body and the
+/// container's kind.
+fn container_loops(body: &[MirStmt]) -> Vec<(&MirStmt, &str, &[MirStmt], heap_rc::HeapKind)> {
     let mut out = Vec::new();
     for stmt in body {
-        if let MirStmt::ForList { list, .. } = stmt {
-            out.push((stmt, list.as_str()));
+        match stmt {
+            MirStmt::ForList { list, body, .. } => {
+                out.push((stmt, list.as_str(), body.as_slice(), heap_rc::HeapKind::List));
+            }
+            MirStmt::ForDict { dict, body, .. } => {
+                out.push((stmt, dict.as_str(), body.as_slice(), heap_rc::HeapKind::Dict));
+            }
+            MirStmt::ForSet { set, body, .. } => {
+                out.push((stmt, set.as_str(), body.as_slice(), heap_rc::HeapKind::Set));
+            }
+            _ => {}
         }
         for inner in stmt.bodies() {
-            out.extend(for_list_loops(inner));
+            out.extend(container_loops(inner));
         }
     }
     out
+}
+
+/// A `for` loop's own reference to the container it iterates, taken when
+/// the body could drop the container's other owner ([`list_may_be_rebound`]).
+/// In a function it lives in a hidden owned frame slot (`loop_list_slots`),
+/// so a `return` or an exception out of the loop releases it through the
+/// owned-slot epilogue; the loop's normal exit releases it and clears the
+/// slot.
+struct LoopHold<'ctx> {
+    held: Option<(
+        heap_rc::HeapKind,
+        PointerValue<'ctx>,
+        Option<PointerValue<'ctx>>,
+    )>,
+}
+
+impl<'ctx> LoopHold<'ctx> {
+    #[allow(clippy::too_many_arguments)]
+    fn enter(
+        context: &'ctx Context,
+        builder: &inkwell::builder::Builder<'ctx>,
+        rt: &RtFns<'ctx>,
+        locals: &HashMap<String, StorageSlot<'ctx>>,
+        stmt: &MirStmt,
+        body: &[MirStmt],
+        name: &str,
+        kind: heap_rc::HeapKind,
+        ptr: PointerValue<'ctx>,
+    ) -> Self {
+        if !list_may_be_rebound(locals, body, name) {
+            return Self { held: None };
+        }
+        heap_rc::emit_incref(context, builder, rt, kind, ptr);
+        let slot = rt
+            .loop_list_slots
+            .borrow()
+            .get(&(std::ptr::from_ref(stmt) as usize))
+            .copied();
+        if let Some(slot) = slot {
+            // A hold left by an exception caught in this frame is released
+            // before the new one replaces it.
+            let old = builder
+                .build_load(
+                    context.ptr_type(inkwell::AddressSpace::default()),
+                    slot,
+                    "old_hold",
+                )
+                .expect("build_load should not fail for a loop hold slot")
+                .into_pointer_value();
+            heap_rc::emit_decref(context, builder, rt, kind, old);
+            builder
+                .build_store(slot, ptr)
+                .expect("build_store should not fail for a loop hold slot");
+        }
+        Self {
+            held: Some((kind, ptr, slot)),
+        }
+    }
+
+    fn exit(
+        self,
+        context: &'ctx Context,
+        builder: &inkwell::builder::Builder<'ctx>,
+        rt: &RtFns<'ctx>,
+    ) {
+        let Some((kind, ptr, slot)) = self.held else {
+            return;
+        };
+        heap_rc::emit_decref(context, builder, rt, kind, ptr);
+        if let Some(slot) = slot {
+            builder
+                .build_store(
+                    slot,
+                    context.ptr_type(inkwell::AddressSpace::default()).const_null(),
+                )
+                .expect("build_store should not fail for a loop hold slot");
+        }
+    }
 }
 
 /// Whether the list a `for` loop iterates, read from `name`, can lose its
@@ -4589,15 +4693,40 @@ fn emit_dict_receiver<'ctx>(
     user_functions: &HashMap<&str, UserFunction<'ctx>>,
     locals: &HashMap<String, StorageSlot<'ctx>>,
     receiver: &pycc_mir::MirContainerReceiver,
-) -> PointerValue<'ctx> {
+) -> (PointerValue<'ctx>, bool) {
+    // As for a list receiver: an attribute (or module-global) receiver
+    // holds its own reference while the arguments run, which the caller
+    // releases with [`release_dict_receiver`].
     match receiver {
         pycc_mir::MirContainerReceiver::Name(name) => {
-            emit_dict_name_read(context, builder, module, rt, user_functions, locals, name)
+            let ptr =
+                emit_dict_name_read(context, builder, module, rt, user_functions, locals, name);
+            let global = locals.get(name).is_none_or(|slot| slot.ptr.is_const());
+            if global {
+                heap_rc::emit_incref(context, builder, rt, heap_rc::HeapKind::Dict, ptr);
+            }
+            (ptr, global)
         }
         pycc_mir::MirContainerReceiver::Attr(read) => {
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, read);
-            expect_dict_pointer(scalar, "an attribute container receiver")
+            let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, read, scalar);
+            (
+                expect_dict_pointer(scalar, "an attribute container receiver"),
+                true,
+            )
         }
+    }
+}
+
+/// Releases the reference [`emit_dict_receiver`] took, if it took one.
+fn release_dict_receiver<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    (ptr, held): (PointerValue<'ctx>, bool),
+) {
+    if held {
+        heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::Dict, ptr);
     }
 }
 
@@ -5360,9 +5489,12 @@ fn storage_slot_at_entry<'ctx>(
             | pycc_mir::Ty::MemoryView
             | pycc_mir::Ty::List(_)
             | pycc_mir::Ty::Instance(_)
+            | pycc_mir::Ty::Dict(_)
+            | pycc_mir::Ty::Set(_)
+            | pycc_mir::Ty::FrozenSet(_)
     ) {
-        // Lists and instances are counted (`heap_rc`) and released the same
-        // way, so their slots start null too.
+        // Lists, instances, dicts and sets are counted (`heap_rc`) and
+        // released the same way, so their slots start null too.
         // Part 2a of #1142 (#1165) joins `Ty::Str` on this arm rather than
         // adding one of its own: both are owning pointer slots released on
         // the way out, and both runtime releases are documented no-ops on
@@ -6843,12 +6975,8 @@ fn compile_to_object_with_observer(
             {
                 let mut slots = rt.loop_list_slots.borrow_mut();
                 slots.clear();
-                for (stmt, loop_list) in for_list_loops(body) {
-                    if let MirStmt::ForList {
-                        body: loop_body, ..
-                    } = stmt
-                        && list_may_be_rebound(&fn_locals, loop_body, loop_list)
-                    {
+                for (stmt, name, loop_body, kind) in container_loops(body) {
+                    if list_may_be_rebound(&fn_locals, loop_body, name) {
                         let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
                         let slot = builder
                             .build_alloca(ptr_type, "for_list_hold")
@@ -6856,7 +6984,7 @@ fn compile_to_object_with_observer(
                         builder
                             .build_store(slot, ptr_type.const_null())
                             .expect("build_store should not fail for a loop hold slot");
-                        owned_heap_slots.push((slot, heap_rc::HeapKind::List));
+                        owned_heap_slots.push((slot, kind));
                         slots.insert(std::ptr::from_ref(stmt) as usize, slot);
                     }
                 }
@@ -7946,29 +8074,17 @@ fn emit_stmt<'ctx>(
             // out of the loop releases it through the frame's epilogue.
             let list_ptr =
                 emit_list_name_read(context, builder, module, rt, user_functions, locals, list);
-            let hold_list = list_may_be_rebound(locals, body, list);
-            let hold_slot = rt
-                .loop_list_slots
-                .borrow()
-                .get(&(std::ptr::from_ref(stmt) as usize))
-                .copied();
-            if hold_list {
-                heap_rc::emit_incref(context, builder, rt, heap_rc::HeapKind::List, list_ptr);
-                if let Some(slot) = hold_slot {
-                    // A previous entry left by an exception caught in this
-                    // frame is released before the new hold replaces it.
-                    heap_rc::release_slot(
-                        context,
-                        builder,
-                        rt,
-                        &pycc_mir::Ty::List(Box::new(pycc_mir::Ty::Int)),
-                        slot,
-                    );
-                    builder
-                        .build_store(slot, list_ptr)
-                        .expect("build_store should not fail for a loop hold slot");
-                }
-            }
+            let hold = LoopHold::enter(
+                context,
+                builder,
+                rt,
+                locals,
+                stmt,
+                body,
+                list,
+                heap_rc::HeapKind::List,
+                list_ptr,
+            );
             let preheader = builder.get_insert_block().unwrap();
 
             let test_bb = context.append_basic_block(function, "for_list_test");
@@ -8056,19 +8172,7 @@ fn emit_stmt<'ctx>(
             }
 
             builder.position_at_end(after_bb);
-            if hold_list {
-                heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::List, list_ptr);
-                if let Some(slot) = hold_slot {
-                    builder
-                        .build_store(
-                            slot,
-                            context
-                                .ptr_type(inkwell::AddressSpace::default())
-                                .const_null(),
-                        )
-                        .expect("build_store should not fail for a loop hold slot");
-                }
-            }
+            hold.exit(context, builder, rt);
             Ok(())
         }
         // PR 3c of #1082: `for x in o.attr:` / `for x in o.method(...):`.
@@ -8974,42 +9078,34 @@ fn emit_stmt<'ctx>(
         // 2. Each iteration reads the current *key*, via
         //    `pycc_rt_dict_key_at`, not an element via
         //    `pycc_rt_list_get`.
-        // 3. The loop variable is bound `Scalar::Str`, not `Scalar::Int` --
-        //    and, unlike every `ForList`/`ForRange` induction target (never
-        //    refcounted, D-061), a dict key genuinely is a refcounted
-        //    `PyStrObj` that `d` itself still holds a live, non-incref'd
-        //    pointer to (D-124: "`PyDictObj`'s own keys ... are stored
-        //    without incref on insert"). Without the `pycc_rt_str_incref`
-        //    below, an ordinary body-level reassignment of the loop
-        //    variable (`for k in d:\n    k = "z"\n`) would go through
-        //    `emit_stmt`'s own `Assign` arm, whose
-        //    `decref_str_slot_before_store` call fires unconditionally for
-        //    any `Ty::Str` target -- decref'ing `d`'s *own* only reference
-        //    to that key and freeing it while `d` still holds the
-        //    now-dangling pointer, a real premature free this project's own
-        //    leak-only containers are never supposed to cause (see
-        //    `Scalar::List`'s and `Scalar::Dict`'s own doc comments: "leak-
-        //    only -- never a premature free"). The incref gives the loop
-        //    variable's own slot a reference distinct from `d`'s, so that
-        //    decref (or the next iteration's own overwrite, which bypasses
-        //    it entirely -- see `emit_assign` below) only ever brings the
-        //    *duplicate* back down, never below `d`'s own copy. The
-        //    resulting extra, never-brought-back-down increment on the
-        //    loop's last key is exactly D-124's existing leak-only policy
-        //    playing out one level lower: an unbalanced incref only makes
-        //    an already-permanent leak larger, never a premature free.
+        // 3. The loop variable is bound `Scalar::Str`, not `Scalar::Int`:
+        //    a dict key is a counted `PyStrObj` the dict owns one reference
+        //    to. The loop variable's slot owns a reference of its own (the
+        //    `pycc_rt_str_incref` below), released when the next key
+        //    replaces it, when the body rebinds it, or by the frame's
+        //    epilogue -- so neither can free a key the dict still holds.
         MirStmt::ForDict { var, dict, body } => {
             let function = builder.get_insert_block().unwrap().get_parent().unwrap();
             // Read once, in the preheader, not per iteration -- identical
             // reasoning to `ForList`'s own preheader read (see that arm's
             // comment): Python binds its iterator to the object the `for`
             // statement evaluated, so a body-level rebinding of `dict`'s
-            // own name must not retarget the loop. Sound leak-only for the
-            // same reason `ForList`'s is: nothing ever frees a dict value,
-            // so a borrowed reference held across the body without its own
-            // incref cannot go stale.
+            // own name must not retarget the loop, and a body that could
+            // drop the dict's other owner makes the loop hold its own
+            // reference (`LoopHold`), as `ForList` does.
             let dict_ptr =
                 emit_dict_name_read(context, builder, module, rt, user_functions, locals, dict);
+            let hold = LoopHold::enter(
+                context,
+                builder,
+                rt,
+                locals,
+                stmt,
+                body,
+                dict,
+                heap_rc::HeapKind::Dict,
+                dict_ptr,
+            );
             let preheader = builder.get_insert_block().unwrap();
 
             let test_bb = context.append_basic_block(function, "for_dict_test");
@@ -9054,10 +9150,11 @@ fn emit_stmt<'ctx>(
                 .expect("build_call should not fail for a well-formed incref");
             // Same Python target-binding semantics `ForList`'s own comment
             // describes: a separate storage slot written once per
-            // iteration (via `emit_assign` directly, not through
-            // `emit_stmt`'s `Assign` arm -- so, like `ForList`'s own
-            // per-iteration bind, this specific write never itself calls
-            // `decref_str_slot_before_store`).
+            // iteration, which owns its key like any `str` slot, so the
+            // key it held is released first.
+            if let Some(slot) = locals.get(var) {
+                heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
+            }
             emit_assign(context, builder, rt, locals, var, Scalar::Str(key_ptr));
             // `ForList`'s latch shape (see that arm).
             let latch_bb = context.append_basic_block(function, "for_dict_latch");
@@ -9094,6 +9191,7 @@ fn emit_stmt<'ctx>(
             }
 
             builder.position_at_end(after_bb);
+            hold.exit(context, builder, rt);
             Ok(())
         }
         // `for x in s:` (PR-11 Task 9, D-123): an intentional inline
@@ -9138,12 +9236,22 @@ fn emit_stmt<'ctx>(
             // reasoning to `ForList`'s own preheader read (see that arm's
             // comment): Python binds its iterator to the object the `for`
             // statement evaluated, so a body-level rebinding of `set`'s own
-            // name must not retarget the loop. Sound leak-only for the same
-            // reason `ForList`'s is: nothing ever frees a set value, so a
-            // borrowed reference held across the body without its own
-            // incref cannot go stale.
+            // name must not retarget the loop, and a body that could drop
+            // the set's other owner makes the loop hold its own reference
+            // (`LoopHold`), as `ForList` does.
             let set_ptr =
                 emit_set_name_read(context, builder, module, rt, user_functions, locals, set);
+            let hold = LoopHold::enter(
+                context,
+                builder,
+                rt,
+                locals,
+                stmt,
+                body,
+                set,
+                heap_rc::HeapKind::Set,
+                set_ptr,
+            );
             // Captured once, in the preheader -- P1 review fix (PR-12,
             // `pycc_rt_int_set_check_not_resized`'s own doc comment):
             // `set.add()` existing in this same commit made it possible for
@@ -9274,6 +9382,7 @@ fn emit_stmt<'ctx>(
             }
 
             builder.position_at_end(after_bb);
+            hold.exit(context, builder, rt);
             // Review round 3 of #1064. `after_bb` is reached by two edges
             // now: the ordinary "the loop ran out of elements" one, and the
             // exception conjunct's own early exit above. Falling through
@@ -9321,7 +9430,7 @@ fn emit_stmt<'ctx>(
                 cond.as_deref(),
                 CompElts::List(elt),
             );
-            emit_assign(context, builder, rt, locals, target, container);
+            store_fresh_container(context, builder, rt, locals, target, container);
             Ok(())
         }
         MirStmt::SetCompAssign {
@@ -9348,7 +9457,7 @@ fn emit_stmt<'ctx>(
                 cond.as_deref(),
                 CompElts::Set(elt, ops.as_deref()),
             );
-            emit_assign(context, builder, rt, locals, target, container);
+            store_fresh_container(context, builder, rt, locals, target, container);
             Ok(())
         }
         MirStmt::DictCompAssign {
@@ -9375,7 +9484,7 @@ fn emit_stmt<'ctx>(
                 cond.as_deref(),
                 CompElts::Dict(key, value),
             );
-            emit_assign(context, builder, rt, locals, target, container);
+            store_fresh_container(context, builder, rt, locals, target, container);
             Ok(())
         }
         MirStmt::Seq(stmts) => emit_body(

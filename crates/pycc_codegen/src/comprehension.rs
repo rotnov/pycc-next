@@ -141,12 +141,13 @@ pub(super) fn emit_comprehension<'ctx>(
     let function = cx.builder.get_insert_block().unwrap().get_parent().unwrap();
     let container = match elts {
         CompElts::List(elt) => list::build_list_new(cx.context, cx.builder, cx.rt, &elt.ty(), 0),
-        CompElts::Set(..) | CompElts::Dict(..) => {
-            let (new_fn, what) = if matches!(elts, CompElts::Set(..)) {
-                (cx.rt.int_set_new, "pycc_rt_int_set_new")
-            } else {
-                (cx.rt.dict_new, "pycc_rt_dict_new")
-            };
+        CompElts::Set(elt, _) => crate::set_instance::build_set_new(
+            cx.builder,
+            cx.rt,
+            &Ty::Set(Box::new(elt.ty())),
+        ),
+        CompElts::Dict(..) => {
+            let (new_fn, what) = (cx.rt.dict_new, "pycc_rt_dict_new");
             cx.builder
                 .build_call(new_fn, &[], &format!("comp_{word}_new"))
                 .expect("build_call should not fail for a well-formed container allocation")

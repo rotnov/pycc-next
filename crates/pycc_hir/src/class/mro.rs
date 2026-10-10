@@ -241,6 +241,8 @@ pub fn slot_rc_kind(ty: &Ty, refcounted: &dyn Fn(&str) -> bool) -> u8 {
         Ty::Int => b'i',
         Ty::List(_) => b'l',
         Ty::Instance(class) if refcounted(class) => b'c',
+        Ty::Dict(_) => b'd',
+        Ty::Set(_) | Ty::FrozenSet(_) => b'e',
         Ty::Object => b'o',
         _ => b'w',
     }

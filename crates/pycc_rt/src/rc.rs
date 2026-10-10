@@ -18,8 +18,11 @@
 //! * `i` -- an `int` word (a heap bigint reference, nothing for an inline
 //!   int);
 //! * `l` -- a list; `c` -- a class instance (counted here);
-//! * anything else -- no reference released here (`float`, `bool`, a dict
-//!   or set, which are still leak-only, and an opaque CPython object `o`).
+//! * `d` -- a dict; `e` -- a set or frozenset (counted by their own
+//!   runtime functions, which release their keys and instance elements);
+//! * anything else -- no reference released here (`float`, `bool`, an
+//!   exception instance, which is leak-only, and an opaque CPython object
+//!   `o`).
 //!   An `o` slot's object is deliberately leaked when the instance is
 //!   freed: a function local read from the slot (`y = h.o`) holds the same
 //!   pointer without a reference of its own, so releasing the slot's
@@ -44,6 +47,20 @@ pub const RC_OFFSET: usize = 32;
 /// `pycc_rt_str_live_objects` counterpart).
 pub(crate) static LIST_LIVE: AtomicI64 = AtomicI64::new(0);
 pub(crate) static INSTANCE_LIVE: AtomicI64 = AtomicI64::new(0);
+pub(crate) static DICT_LIVE: AtomicI64 = AtomicI64::new(0);
+pub(crate) static SET_LIVE: AtomicI64 = AtomicI64::new(0);
+
+/// The number of dicts allocated and not yet freed.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_dict_live_objects() -> i64 {
+    DICT_LIVE.load(Ordering::Relaxed)
+}
+
+/// The number of sets and frozensets allocated and not yet freed.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_set_live_objects() -> i64 {
+    SET_LIVE.load(Ordering::Relaxed)
+}
 
 /// The number of lists allocated and not yet freed.
 #[unsafe(no_mangle)]
@@ -98,6 +115,8 @@ pub(crate) fn retain_word(kind: u8, word: i64) {
         b'i' => crate::pycc_rt_bigint_retain(word),
         b'l' => incref(word as *mut PyListObj),
         b'c' => incref(word as *mut PyInstanceObj),
+        b'd' => unsafe { crate::pycc_rt_dict_incref(word as *mut crate::PyDictObj) },
+        b'e' => unsafe { crate::pycc_rt_int_set_incref(word as *mut crate::PyIntSetObj) },
         _ => {}
     }
 }
@@ -115,6 +134,8 @@ pub(crate) fn release_word_into(kind: u8, word: i64, dead: &mut Worklist) {
         b'c' if decref_reaches_zero(word as *mut PyInstanceObj) => {
             dead.push(Dead::Instance(word as *mut PyInstanceObj));
         }
+        b'd' => unsafe { crate::pycc_rt_dict_decref(word as *mut crate::PyDictObj) },
+        b'e' => unsafe { crate::pycc_rt_int_set_decref(word as *mut crate::PyIntSetObj) },
         _ => {}
     }
 }
@@ -255,6 +276,37 @@ mod tests {
             head = next;
         }
         unsafe { pycc_rt_list_decref(head) };
+    }
+
+    /// A freed dict releases the keys it owns, and a freed counted set the
+    /// instances it holds; an uncounted set touches nothing.
+    #[test]
+    fn freeing_a_dict_or_a_counted_set_releases_what_it_owns() {
+        let key = unsafe { pycc_rt_str_from_literal(b"key".as_ptr(), 3) };
+        unsafe { pycc_rt_str_incref(key) };
+        let dict = crate::pycc_rt_dict_new();
+        unsafe { crate::pycc_rt_dict_set(dict, key, 1) };
+        assert_eq!(str_count(key), 2);
+        unsafe { crate::pycc_rt_dict_decref(dict) };
+        assert_eq!(str_count(key), 1);
+        unsafe { crate::pycc_rt_str_decref(key) };
+
+        static ITEM: &[u8] = b"Item\0";
+        let item = unsafe { pycc_rt_instance_new(0, ITEM.as_ptr(), ITEM.len()) };
+        unsafe { pycc_rt_instance_incref(item) };
+        let set = crate::int_set::pycc_rt_obj_set_new();
+        unsafe { crate::pycc_rt_obj_set_push(set, item as i64, 7) };
+        // A duplicate insertion hands its reference back.
+        unsafe { pycc_rt_instance_incref(item) };
+        unsafe { crate::pycc_rt_obj_set_add_identity(set, item as i64, 7) };
+        assert_eq!(count_of(item), 2);
+        unsafe { crate::pycc_rt_int_set_decref(set) };
+        assert_eq!(count_of(item), 1);
+        unsafe { pycc_rt_instance_decref(item) };
+
+        let ints = crate::pycc_rt_int_set_new();
+        unsafe { crate::pycc_rt_int_set_add(ints, 5) };
+        unsafe { crate::pycc_rt_int_set_decref(ints) };
     }
 
     #[test]

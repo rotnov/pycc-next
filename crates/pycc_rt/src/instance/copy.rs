@@ -15,11 +15,11 @@
 //!   ([`crate::pycc_rt_bigint_retain`]); an inline int is a no-op there.
 //! * `o` -- an opaque CPython object. `pycc_rt` keeps no CPython dependency
 //!   (D-244 rule 2), so the shim takes that reference itself.
-//! * `l` -- a list and `c` -- an instance of a class of this program,
-//!   reference counted (`crate::rc`): the copy takes its own reference.
-//! * `w` -- anything else the build admits (`float`, `bool`, a leak-only
-//!   dict): a plain word copy, with no reference traffic, because none
-//!   exists for those words.
+//! * `l` -- a list, `d` -- a dict and `c` -- an instance of a counted
+//!   class of this program (`crate::rc`): the copy takes its own reference.
+//! * `w` -- anything else the build admits (`float`, `bool`, an exception
+//!   instance, which carries no count): a plain word copy, with no
+//!   reference traffic, because none exists for those words.
 //!
 //! An unassigned slot stays unassigned, so the copy's checked read raises
 //! the same `AttributeError` CPython raises for an attribute its copy lacks.
