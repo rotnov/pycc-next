@@ -590,15 +590,13 @@ const PROBE: &str = "import pycc_1333_stub\n\
     def global_read(n: int) -> int:\n    t = 0\n    i = 0\n    while i < n:\n        \
     w = G\n        t = t + len(w)\n        i = i + 1\n    return t\n";
 
-/// The #1092 leak-only rule extends to function locals unchanged: only the
-/// attribute load that produces the object leaks one reference. Binding,
-/// aliasing, returning, passing and reading a module-level global add
-/// nothing. Pinned at two trip counts so the slope is the claim, not a
-/// constant. **When #1092 lands, these numbers become `0` and the pull
-/// request that closes it is expected to edit this test.**
+/// Function-local `object` slots own their references: binding, aliasing,
+/// returning, passing and reading a module-level global leave the object's
+/// count unchanged, as in CPython. Pinned at two trip counts so a
+/// per-iteration leak would show as a slope.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn function_local_objects_leak_only_their_producing_load() {
+fn function_local_objects_keep_exact_counts() {
     let dir = ScratchDir::new("obj_fn_refcount").expect("scratch");
     std::fs::write(dir.join("pycc_1333_stub.py"), STUB).expect("write the stub");
     std::fs::create_dir_all(dir.join("src")).expect("create the entry directory");
@@ -627,9 +625,9 @@ fn function_local_objects_leak_only_their_producing_load() {
     assert_ok(&run);
     assert_eq!(
         stdout_of(&run),
-        "bind_alias 1000 1000 3000\nbind_alias 2000 2000 6000\n\
-         returned 1000 1000 3000\nreturned 2000 2000 6000\n\
-         passed 1000 1 3000\npassed 2000 1 6000\n\
+        "bind_alias 1000 0 3000\nbind_alias 2000 0 6000\n\
+         returned 1000 0 3000\nreturned 2000 0 6000\n\
+         passed 1000 0 3000\npassed 2000 0 6000\n\
          global_read 1000 0 3000\nglobal_read 2000 0 6000\n"
     );
 }

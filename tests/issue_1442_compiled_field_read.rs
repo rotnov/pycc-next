@@ -14,14 +14,11 @@
 //! documented differences from CPython: a slot holding an int outside the
 //! inline range raises `OverflowError` (the D-244 `int` boundary, #1040), a
 //! host-side store of a value the slot's parameter row refuses raises
-//! `TypeError` (Part 1 of #1443), and the `self.items[-1]` subscript inside
-//! the `top` getter keeps one reference per call, an object-operation
-//! temporary #1092 tracks, not the descriptor: the host read of a slot or of
-//! the `whole` property, which creates no such temporary, is
-//! reference-neutral in [`DRIVER`]. The compiled `other.state_stack` read in
-//! `ParserState.__eq__` kept one reference per call too until #1476: the
-//! `isinstance(other, ParserState)` guard before it now narrows `other`, so
-//! the read is a native field read and the pinned delta is `0`.
+//! `TypeError` (Part 1 of #1443). The pinned reference deltas are `0`, as
+//! in CPython: the `self.items[-1]` subscript the `top` getter returns is an
+//! owned reference the host receives, and the compiled
+//! `other.state_stack` read in `ParserState.__eq__` is a native field read
+//! once the `isinstance(other, ParserState)` guard narrows `other`.
 //!
 //! The hosted tests are `#[ignore]`d and contribute no line coverage; the
 //! Tier-1 `native-build-test` leg runs them with
@@ -268,7 +265,7 @@ print(sys.getrefcount(top) - before)
 const EXT_ONLY_OUT: &str = "TypeError Fields.n() argument 1: 'str' object cannot be interpreted as an integer\n\
     7\n\
     0\n\
-    100\n";
+    0\n";
 
 fn run(script: &str, path_entry: &Path, cwd: &Path) -> Output {
     host_python()

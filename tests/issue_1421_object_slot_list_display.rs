@@ -213,14 +213,14 @@ fn inherited_established_and_renamed_slots_match_cpython() {
     assert_eq!(out, "[4, 5]\n0\n[9]\n");
 }
 
-/// The object-slot display leaks on the terms `docs/RUNTIME.md` records
-/// for every object producer: the list and the one reference it holds per
-/// element. Over 100 calls a mortal module-global `probe` gains `+200` for
-/// `[probe, probe]`, `+100` for `self.s or [probe]` with an empty slot (the
-/// display is built), and nothing when the slot is truthy (it is not).
+/// The object-slot display keeps CPython's counts: each store releases the
+/// list the slot held, so over 100 calls a mortal module-global `probe`
+/// ends up referenced only by the last list -- `+2` for `[probe, probe]`,
+/// `+1` for `self.s or [probe]` with an empty slot (the display is built),
+/// and nothing when the slot is truthy (it is not).
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn the_slot_display_leaks_only_what_every_producer_leaks() {
+fn the_slot_display_keeps_cpython_counts() {
     let body = "import builtins\n\
         import sys\n\
         from typing import Any\n\
@@ -262,10 +262,7 @@ fn the_slot_display_leaks_only_what_every_producer_leaks() {
         print('either-kept', m.rc() - before)\n";
     let run = python(&dir, driver);
     assert_ok(&run);
-    assert_eq!(
-        stdout_of(&run),
-        "keep 200\neither-empty 100\neither-kept 0\n"
-    );
+    assert_eq!(stdout_of(&run), "keep 2\neither-empty 1\neither-kept 0\n");
 }
 
 /// What stays outside the object slot keeps one diagnostic, never a panic:

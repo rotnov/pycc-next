@@ -26,11 +26,9 @@
 //! Ownership follows `boolop`'s boxing (Part 6 of #1371): the packer
 //! borrows the native value, so an `int` temporary is released right after
 //! it and nothing is retained. The packer's new reference belongs to
-//! whatever slot receives it: a module-global `object` slot owns it and
-//! releases it on rebind (Part 1 of #1499, `object_slot.rs`, which treats a
-//! boxed `None` -- CPython's borrowed `Py_None` -- as borrowed and retains
-//! it), and every other destination still never releases it (#1092's
-//! leak-only rule, `docs/RUNTIME.md`). A packer `NULL` --
+//! whatever slot or parameter receives it (`heap_rc`). A boxed `None` is
+//! CPython's immortal `Py_None`, whose count does not matter. A packer
+//! `NULL` --
 //! `OverflowError` for a bigint outside D-141's inline range (#1040) --
 //! takes the foreign failure edge at once ([`foreign_fail::route_null`]).
 

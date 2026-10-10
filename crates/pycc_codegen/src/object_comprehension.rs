@@ -29,10 +29,9 @@
 //! releases both; the normal exit releases the iterator and hands the
 //! result on as the node's value, which `object_release::is_produced`
 //! lists as a producer, so an unbound result is released by its consumer.
-//! Each item is a new reference this boundary still leaks (#1499,
-//! `docs/RUNTIME.md`): the loop variable's slot holds it without refcount
-//! traffic, exactly as `MirStmt::ForObject`'s target, and the element or
-//! condition can hand it to a user function that stores it.
+//! Each item is a new reference the loop variable's slot owns, exactly as
+//! `MirStmt::ForObject`'s target: the next trip releases it, and the loop's
+//! exit releases the last one.
 //! A pycc `int` temporary built by the condition or the element is released
 //! once it has been tested or packed, since the packers borrow their operand,
 //! and so is a produced CPython object condition or element (`if x.ok()`,
@@ -120,9 +119,13 @@ pub(super) fn emit_object_comprehension<'ctx>(
         crate::object_release::hold_new_reference(context, module, rt, collection);
 
     let lp = foreign_call::emit_iter_header(context, builder, module, rt, iterator);
+    // The loop variable's slot owns the item and releases the previous one
+    // (`heap_rc`).
+    let old = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
     builder
         .build_store(var_ptr, lp.item)
         .expect("build_store should not fail for the loop variable's own slot");
+    crate::heap_rc::release_old(context, builder, rt, old);
 
     if let Some(cond) = cond {
         let scalar = emit(cond);
@@ -181,6 +184,15 @@ pub(super) fn emit_object_comprehension<'ctx>(
         .expect("build_unconditional_branch should not fail closing the loop body");
 
     builder.position_at_end(lp.after_bb);
+    // The last item is released and the slot cleared, so the next run of
+    // this comprehension starts from a null slot. An exception out of the
+    // loop leaves the item in the slot, which the next run's first store
+    // releases.
+    let last = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
+    builder
+        .build_store(var_ptr, ptr.const_null())
+        .expect("build_store should not fail for the loop variable's own slot");
+    crate::heap_rc::release_old(context, builder, rt, last);
     held_iterator.release(builder, rt);
     // The result is the comprehension's value: a producer
     // (`object_release::is_produced`), which its consumer releases or

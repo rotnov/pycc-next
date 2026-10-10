@@ -2,9 +2,9 @@
 //! (`object_box.rs`), pinned on the LLVM IR of an `ext` object.
 //!
 //! Each seam calls exactly one packer for the value's own type, checks the
-//! packer's result for `NULL` (the #1040 bigint `OverflowError`) and never
-//! releases the new reference (#1092's leak-only rule). A `None` value is
-//! CPython's own borrowed `Py_None`, packed by nothing.
+//! packer's result for `NULL` (the #1040 bigint `OverflowError`) and hands
+//! the new reference to the slot or parameter that owns it. A `None` value
+//! is CPython's own immortal `Py_None`, packed by nothing.
 
 use super::*;
 

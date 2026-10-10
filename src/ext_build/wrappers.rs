@@ -354,16 +354,6 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
     // code runs. Anything the call bridges above it is released on both
     // exits below, so a host calling this export in a loop never grows the
     // table. See the C shim's `pycc_ext_bridge_release_to`.
-    //
-    // The mark also counts this wrapper as a live activation (Part 1 of
-    // #1499), and every exit below returns through
-    // `pycc_ext_activation_exit`, which counts it out only once its
-    // argument -- the pack that gives the return value its own host
-    // reference -- has been evaluated, and after the watermark release and
-    // every `PyBuffer_Release` above it. Each of those can run a finalizer
-    // that switches the GIL; a wrapper counted out before them would let a
-    // suspended exec's rebind release the object this wrapper still has to
-    // return.
     // The compiled receiver parameter owns a reference to the instance,
     // taken only once every argument has unpacked, so no failure path owes
     // its release.
@@ -414,7 +404,7 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
     out.push_str(&format!(
         "    if (pycc_rt_ext_pending_type() >= 0) {{\n{}        pycc_ext_raise_pending();\n        \
          pycc_ext_bridge_release_to(bridge_mark);\n        \
-         return pycc_ext_activation_exit(NULL);\n    }}\n    \
+         return NULL;\n    }}\n    \
          pycc_ext_bridge_release_to(bridge_mark);\n",
         buffer_releases(&slots, "        ")
     ));
@@ -426,7 +416,7 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
     ));
     out.push_str(&release);
     match &export.return_ty {
-        Ty::None => out.push_str("    return pycc_ext_activation_exit(Py_NewRef(Py_None));\n}\n\n"),
+        Ty::None => out.push_str("    return Py_NewRef(Py_None);\n}\n\n"),
         Ty::Tuple(_) => out.push_str(&pack_tuple_return(source_name, &out_slots)),
         // `pack_int` is the one packer whose failure is a property of the
         // *value*, and the only one whose message therefore names the
@@ -436,7 +426,7 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
         // the three take a name. Arity is uniform across them, so every
         // packer but `int` shares the generic arm below.
         Ty::Int => out.push_str(&format!(
-            "    return pycc_ext_activation_exit(pycc_ext_pack_int(\"{source_name}\", result));\n}}\n\n"
+            "    return pycc_ext_pack_int(\"{source_name}\", result);\n}}\n\n"
         )),
         // Part 2b of #1142 (#1164): its own arm rather than the generic one
         // below, because that arm resolves its packer through
@@ -469,11 +459,9 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
         // `return` and every release owes its position before one.
         Ty::MemoryView => {
             if !caller_owned_buffer_slots(&export.return_ty, &slots).is_empty() {
-                out.push_str(
-                    "    if (caller_owned) {\n        return pycc_ext_activation_exit(borrowed);\n    }\n",
-                );
+                out.push_str("    if (caller_owned) {\n        return borrowed;\n    }\n");
             }
-            out.push_str("    return pycc_ext_activation_exit(pycc_ext_pack_memoryview(result));\n}\n\n");
+            out.push_str("    return pycc_ext_pack_memoryview(result);\n}\n\n");
         }
         // Part 1 of #1447 (#1449): its own arm for the reason the buffer
         // arm above gives -- `into_scalar` answers `None` for an instance so
@@ -482,14 +470,14 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
         // instance with a live carrier (`self`, or an argument the host
         // still holds) is that very object.
         Ty::Instance(_) => {
-            out.push_str("    return pycc_ext_activation_exit(pycc_ext_pack_instance(result));\n}\n\n");
+            out.push_str("    return pycc_ext_pack_instance(result);\n}\n\n");
         }
         ty => {
             let (_, helper) = boundary_carrier(ty)
                 .and_then(BoundaryCarrier::into_scalar)
                 .expect("a carriable scalar return type");
             out.push_str(&format!(
-                "    return pycc_ext_activation_exit(pycc_ext_pack_{helper}(result));\n}}\n\n"
+                "    return pycc_ext_pack_{helper}(result);\n}}\n\n"
             ));
         }
     }
@@ -574,6 +562,9 @@ pub(crate) fn unpack_args(
                     format!("        pycc_rt_instance_decref(a{earlier});\n")
                 }
                 SlotCleanup::BufferRelease => format!("        PyBuffer_Release(&b{earlier});\n"),
+                SlotCleanup::ObjectDecref => {
+                    format!("        Py_DECREF((PyObject *)a{earlier});\n")
+                }
             })
             .collect();
         let arg = arg_expr(index);
@@ -840,11 +831,6 @@ pub(crate) fn c_param_list(
 ///
 /// `PyTuple_New` is reached only once every element is packed, so its own
 /// failure path has a fixed, fully-owned set to release.
-///
-/// Every exit returns through `pycc_ext_activation_exit` (Part 1 of #1499):
-/// emitted only into `wrapper_for`, after its watermark mark, so the
-/// wrapper stays a live activation until the tuple -- or the failure's
-/// element releases, which can run finalizers -- is done.
 pub(crate) fn pack_tuple_return(name: &str, out_slots: &[(&'static str, &'static str)]) -> String {
     let mut out = String::new();
     for (index, (_, helper)) in out_slots.iter().enumerate() {
@@ -867,14 +853,14 @@ pub(crate) fn pack_tuple_return(name: &str, out_slots: &[(&'static str, &'static
         .map(|index| format!("        Py_XDECREF(e{index});\n"))
         .collect();
     out.push_str(&format!(
-        "    if ({any_null}) {{\n{x_release}        return pycc_ext_activation_exit(NULL);\n    }}\n"
+        "    if ({any_null}) {{\n{x_release}        return NULL;\n    }}\n"
     ));
     let release: String = (0..arity)
         .map(|index| format!("        Py_DECREF(e{index});\n"))
         .collect();
     out.push_str(&format!(
         "    packed = PyTuple_New({arity});\n    if (packed == NULL) {{\n{release}        \
-         return pycc_ext_activation_exit(NULL);\n    }}\n"
+         return NULL;\n    }}\n"
     ));
     out.push_str(
         "    /* Every index is in range and `packed` is a fresh tuple, so each\n       \
@@ -885,7 +871,7 @@ pub(crate) fn pack_tuple_return(name: &str, out_slots: &[(&'static str, &'static
             "    PyTuple_SetItem(packed, {index}, e{index});\n"
         ));
     }
-    out.push_str("    return pycc_ext_activation_exit(packed);\n}\n\n");
+    out.push_str("    return packed;\n}\n\n");
     out
 }
 

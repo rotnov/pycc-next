@@ -304,32 +304,21 @@ pub const EXT_OBJ_TRUTHY_SYMBOL: &str = "pycc_ext_obj_truthy";
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_TYPE_SYMBOL: &str = "pycc_ext_obj_type";
 
-/// The fixed C shim's object-temporary release (Part 1 of #1092): `void
-/// pycc_ext_obj_release(PyObject *o)` is `Py_XDECREF`. Generated code calls
-/// it for a shim producer's new reference once the borrowing operation that
-/// consumed it is done, or on the failure edge that leaves that operation
-/// (`object_release.rs`).
+/// The fixed C shim's object release: `void pycc_ext_obj_release(PyObject
+/// *o)` is `Py_XDECREF`. Generated code calls it wherever `heap_rc` drops an
+/// `object` reference: a consumed temporary (`object_release.rs`), a slot's
+/// replaced value, a frame's slots on exit.
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_RELEASE_SYMBOL: &str = "pycc_ext_obj_release";
 
-/// The fixed C shim's object retain (Part 1 of #1499): `void
-/// pycc_ext_obj_retain(PyObject *o)` is `Py_XINCREF`. Generated code calls
-/// it before a borrowed object moves into a slot that owns its reference --
-/// a module-global `object` slot, or a compiled instance's `object`
-/// attribute (`object_slot.rs`).
+/// The fixed C shim's object retain: `void pycc_ext_obj_retain(PyObject
+/// *o)` is `Py_XINCREF`. Generated code calls it wherever `heap_rc` takes an
+/// `object` reference: a borrowed value stored into a slot that owns it, a
+/// borrowed argument, a returned borrowed value, a pinned operand.
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_RETAIN_SYMBOL: &str = "pycc_ext_obj_retain";
-
-/// The fixed C shim's rebind gate (Part 1 of #1499, #1501): `int
-/// pycc_ext_obj_rebind_may_release(void)` answers non-zero only when the
-/// module-exec body calling it is the artifact's only live compiled
-/// activation. A module-global rebind releases the replaced value only
-/// then, and otherwise leaks it (`object_slot.rs`).
-///
-/// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
-pub const EXT_OBJ_REBIND_MAY_RELEASE_SYMBOL: &str = "pycc_ext_obj_rebind_may_release";
 
 /// The fixed C shim's subscript-load helper (Part 3 of #1026, PR 3b of
 /// #1082): it takes a borrowed `PyObject *` and an *owned* key reference
@@ -497,10 +486,8 @@ pub const EXT_OBJ_GET_ITER_SYMBOL: &str = "pycc_ext_obj_get_iter";
 /// what keeps exhaustion off the module-exec failure edge: a `for` loop
 /// that simply ends is not a failure.
 ///
-/// Each item written through `*out` is a new reference. A module-global
-/// `for` target owns it and releases it on the next trip (Part 1 of #1499);
-/// a comprehension's loop variable does not own it, so the comprehension
-/// leaks one item per trip (#1499, `docs/RUNTIME.md`).
+/// Each item written through `*out` is a new reference, which the `for`
+/// target or comprehension variable owns and releases on the next trip.
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_ITER_NEXT_SYMBOL: &str = "pycc_ext_obj_iter_next";
@@ -510,8 +497,8 @@ pub const EXT_OBJ_ITER_NEXT_SYMBOL: &str = "pycc_ext_obj_iter_next";
 /// CPython `list` (`0`) or `set` (`1`), or `NULL` with the CPython
 /// exception already set. A list or set comprehension over a CPython object
 /// builds its result in it; the reference is the comprehension's value,
-/// released by its consumer when unbound (Part 3 of #1092), owned by a
-/// module global that binds it (Part 1 of #1499), and leaked otherwise.
+/// released by its consumer when unbound (Part 3 of #1092), and owned by a
+/// slot that binds it.
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_NEW_COLLECTION_SYMBOL: &str = "pycc_ext_obj_new_collection";
@@ -701,9 +688,8 @@ pub const EXT_OBJ_UNPACK_FLOAT_TUPLE_SYMBOL: &str = "pycc_ext_obj_unpack_float_t
 /// reference to a `tuple` of exactly `n` items taken from the object by
 /// CPython's own unpack protocol, or `NULL` with CPython's own exception
 /// set -- `TypeError` for a non-iterable, `ValueError` for too many or too
-/// few values. The tuple is bound to the unpacking temporary: leaked on the
-/// #1092 rule for a bound value in a function body, owned and released on
-/// rebind by a module-global temporary (Part 1 of #1499).
+/// few values. The tuple is bound to the unpacking temporary, a slot that
+/// owns it and releases it on rebind or when the frame exits.
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_UNPACK_SYMBOL: &str = "pycc_ext_obj_unpack";

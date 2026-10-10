@@ -137,29 +137,10 @@ fn the_try_bound_lark_shape_behaves_like_cpython_in_the_host() {
 
 /// Reference counts, measured on a mortal `object()` held three times in a
 /// fresh stack list and on the `states` mapping, across 100 calls of each
-/// branch with the result dropped by the host each time. CPython's own run
-/// prints `0` everywhere.
-///
-/// The extension's deltas are the #1092 leak-only rule and nothing else
-/// (`docs/RUNTIME.md`, "A function body adds no reference traffic of its
-/// own": the only reference that leaks is the one each producer returns,
-/// plus the export wrapper's one reference per object argument from the
-/// `object` parameter row). Per call:
-///
-/// - `states` column, both branches: `100`, the argument reference
-///   `pycc_ext_unpack_object` takes and never releases.
-/// - probe column, state 0 (`size == 2`): `300`. The leaked stack argument
-///   keeps the one probe the `del value_stack[-2:]` leaves (`100`), and the
-///   slice `value_stack[-2:]` is a producer whose new list is leaked with
-///   its two probes (`200`). Measured apart on the same build: a function
-///   that only slices leaks `500` (the stack's three probes plus the
-///   slice's two), one that only deletes leaks `100`.
-/// - probe column, state 1 (`size == 0`): `300`, the leaked stack argument
-///   keeping all three probes; the fresh list of `s = []` is leaked too but
-///   holds no probe.
-///
-/// A doubly-leaked slice or an unbalanced packer would move one of the
-/// columns.
+/// branch with the result dropped by the host each time: `0` everywhere,
+/// as CPython prints. Every `object` slot owns its reference -- the
+/// arguments, the slice, the rebound `s` -- and the frame releases them, so
+/// a doubly-released or leaked value would move one of the columns.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn the_try_bound_lark_shape_keeps_reference_counts_like_cpython() {
@@ -188,11 +169,7 @@ fn the_try_bound_lark_shape_keeps_reference_counts_like_cpython() {
     );
     assert_ok(&oracle);
     assert_eq!(stdout_of(&oracle), "0 0 0\n1 0 0\n");
-    let compiled = stdout_of(&compiled);
-    let lines: Vec<&str> = compiled.lines().collect();
-    assert_eq!(lines[0], "0 300 100", "state 0: 100 stack + 200 slice");
-    assert_eq!(lines[1], "1 300 100", "state 1: 300 stack, empty list");
-    assert_eq!(lines.len(), 2, "{compiled}");
+    assert_eq!(stdout_of(&compiled), stdout_of(&oracle));
 }
 
 /// The native face of the same binder change: a list bound inside a `try`

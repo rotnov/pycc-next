@@ -12,11 +12,10 @@
 //! [`object_return_value`] folds the bare form into the literal one, and
 //! since Part 2 of #1387 the `return` path boxes every native returned value
 //! -- the `None` literal included -- through `object_box`, which turns the
-//! literal into [`crate::foreign_pack::none_pointer`]'s borrowed `Py_None`.
-//! Borrowed is the leak-only ownership model's convention for a compiled
-//! body (`docs/RUNTIME.md`): the export wrapper's `pycc_ext_pack_object`
-//! takes the new reference the host receives, exactly as it does for a
-//! borrowed object parameter returned by name.
+//! literal into [`crate::foreign_pack::none_pointer`]'s `Py_None`. CPython's
+//! `None` is immortal (3.12+), so whether that reference is counted makes no
+//! difference; the export wrapper's `pycc_ext_pack_object` hands the host
+//! the returned reference.
 
 use super::*;
 

@@ -113,9 +113,9 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
         // Part 1 of #1367: a foreign object (`Ty::Object`) shares the same
         // `inttoptr` -- D-154 already stores `str`/instance pointers
         // reinterpreted as `i64`, and a `PyObject*` is one more pointer.
-        // Every `object` producer hands back a reference that is never
-        // released and `pycc_rt::instance` never releases a slot word, so
-        // the read needs no refcount traffic. A slot read before its
+        // The slot owns its reference, so the read is a borrow
+        // (`heap_rc::is_borrowed_read`); its consumer retains it when it
+        // keeps it. A slot read before its
         // `__init__` assignment never reaches here: the checked read raises
         // `AttributeError` first (#1388).
         //
@@ -175,10 +175,8 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
         // D-124), and `MirStmt::AttrSet`'s release calls are gated on a
         // `str`/`int` value type.
         // Part 1 of #1367: a foreign object's `PyObject*` is stored the
-        // same way, with no refcount traffic here (see
-        // `slot_word_to_scalar`). Since Part 1 of #1499 the
-        // `MirStmt::AttrSet` arm retains a borrowed object before this
-        // conversion (`object_slot::retain_if_borrowed`).
+        // same way; the `MirStmt::AttrSet` arm has already made it an owned
+        // reference (`heap_rc`).
         // #1389: so is an instance of a class of this program.
         Scalar::List(v) | Scalar::Dict(v) | Scalar::Object(v) | Scalar::Instance(v) => builder
             .build_ptr_to_int(v, context.i64_type(), "attr_container_ptrtoint")

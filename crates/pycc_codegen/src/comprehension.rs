@@ -141,11 +141,9 @@ pub(super) fn emit_comprehension<'ctx>(
     let function = cx.builder.get_insert_block().unwrap().get_parent().unwrap();
     let container = match elts {
         CompElts::List(elt) => list::build_list_new(cx.context, cx.builder, cx.rt, &elt.ty(), 0),
-        CompElts::Set(elt, _) => crate::set_instance::build_set_new(
-            cx.builder,
-            cx.rt,
-            &Ty::Set(Box::new(elt.ty())),
-        ),
+        CompElts::Set(elt, _) => {
+            crate::set_instance::build_set_new(cx.builder, cx.rt, &Ty::Set(Box::new(elt.ty())))
+        }
         CompElts::Dict(..) => {
             let (new_fn, what) = (cx.rt.dict_new, "pycc_rt_dict_new");
             cx.builder
@@ -272,8 +270,8 @@ pub(super) fn emit_comprehension_expr<'ctx>(
         MirCompElt::Set(elt, ops) => CompElts::Set(elt, ops.as_deref()),
         MirCompElt::Dict { key, value } => CompElts::Dict(key, value),
     };
-    // Part 1 of #1255: a CPython iterable builds a CPython list or set, and
-    // its loop variable is a borrowed object pointer with nothing to release.
+    // Part 1 of #1255: a CPython iterable builds a CPython list or set; its
+    // loop variable's slot owns each item (`object_comprehension`).
     if let CompSource::Object(iterable) = &comp.source {
         return super::object_comprehension::emit_object_comprehension(
             &inner,

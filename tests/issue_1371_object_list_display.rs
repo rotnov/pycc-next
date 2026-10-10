@@ -206,14 +206,13 @@ fn a_raising_element_propagates_from_the_display() {
 /// *mortal* `object()` held by the module across 100 calls of each
 /// function:
 ///
-/// - `keep` binds `[probe, probe]` and drops it: a bound list is still
-///   leaked under #1092 (Part 1 releases only unbound temporaries), so each
-///   call adds exactly the two references
-///   the list holds -- one more would be a packed element leaked twice, one
-///   fewer a stolen reference released.
+/// - `keep` binds `[probe, probe]` and drops it: the local owns the list
+///   and releases it when the frame exits, so the count is unchanged -- a
+///   packed element leaked would add one per call, one released twice
+///   would remove one.
 /// - `big` packs `probe`, an `int` outside the inline range (a heap bigint,
 ///   packed as its true value since #1040), then `probe` again: like `keep`,
-///   the bound list holds exactly two `probe` references.
+///   the count is unchanged.
 /// - `zdiv` raises `ZeroDivisionError` before any element is packed, so
 ///   the count is unchanged.
 #[test]
@@ -251,7 +250,7 @@ fn every_packed_element_is_consumed_exactly_once() {
     assert_ok(&run);
     assert_eq!(
         stdout_of(&run),
-        "keep ok 200\nbig ok 200\nzdiv ZeroDivisionError 0\n"
+        "keep ok 0\nbig ok 0\nzdiv ZeroDivisionError 0\n"
     );
 }
 

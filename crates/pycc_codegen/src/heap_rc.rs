@@ -1,5 +1,6 @@
 //! Reference counting of heap values: `str`, `list[T]`, `dict[str, int]`,
-//! `set[T]`/`frozenset[T]` and instances of the module's classes.
+//! `set[T]`/`frozenset[T]`, instances of the module's classes, and CPython
+//! `object` values (`PyObject *`).
 //!
 //! **The ownership model** (the same for all of them, and the one `str` has
 //! had since D-060): every value `emit_expr` produces is either a
@@ -26,7 +27,17 @@
 //! are inlined here; only a decrement that reaches zero calls the runtime,
 //! on a cold path, to free the object and release what it holds. Instances
 //! of an exception class are not counted (they are the runtime's leak-only
-//! exception objects).
+//! exception objects). An `object` counts through the shim's `Py_XINCREF`/
+//! `Py_XDECREF` (`pycc_ext_obj_retain`/`pycc_ext_obj_release`); the GIL is
+//! held wherever compiled code runs with CPython present.
+//!
+//! **`object` temporaries** are the one split: their *storage* follows this
+//! module exactly (slots, parameters, returns, attributes, arguments,
+//! pins), but a consumer that does not keep an `object` operand releases it
+//! through `object_release` (whose `is_produced` is this module's "not a
+//! borrowed read"), not through [`release_scalar_if_temporary`] or
+//! [`hold_temporary`], which skip `object` values so that no operand is
+//! released twice.
 //!
 //! Two refinements keep borrowed reads safe and temporaries balanced:
 //! an operand a later sibling could free is *pinned* (`operand_pin`), and
@@ -52,6 +63,7 @@ pub(crate) enum HeapKind {
     Instance,
     Dict,
     Set,
+    Object,
 }
 
 /// Every reference-counted class of `class_defs` with its slot kind string
@@ -93,6 +105,7 @@ pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
         Ty::List(_) => Some(HeapKind::List),
         Ty::Dict(_) => Some(HeapKind::Dict),
         Ty::Set(_) | Ty::FrozenSet(_) => Some(HeapKind::Set),
+        Ty::Object => Some(HeapKind::Object),
         Ty::Instance(class) if rt.rc_class_kinds.borrow().contains_key(class.as_str()) => {
             Some(HeapKind::Instance)
         }
@@ -155,8 +168,19 @@ fn counted<'ctx>(
         (HeapKind::Instance, Scalar::Instance(ptr)) => Some((HeapKind::Instance, *ptr)),
         (HeapKind::Dict, Scalar::Dict(ptr)) => Some((HeapKind::Dict, *ptr)),
         (HeapKind::Set, Scalar::Set(ptr)) => Some((HeapKind::Set, *ptr)),
+        (HeapKind::Object, Scalar::Object(ptr)) => Some((HeapKind::Object, *ptr)),
         _ => None,
     }
+}
+
+/// [`counted`] for a consumer's temporary: an `object` operand is released
+/// by `object_release` instead (see the module doc).
+fn counted_temporary<'ctx>(
+    rt: &RtFns<'ctx>,
+    ty: &Ty,
+    scalar: &Scalar<'ctx>,
+) -> Option<(HeapKind, PointerValue<'ctx>)> {
+    counted(rt, ty, scalar).filter(|(kind, _)| *kind != HeapKind::Object)
 }
 
 fn current_function<'ctx>(builder: &inkwell::builder::Builder<'ctx>) -> FunctionValue<'ctx> {
@@ -245,6 +269,7 @@ pub(crate) fn emit_incref<'ctx>(
         HeapKind::Str => Some(rt.str_incref),
         HeapKind::Dict => Some(rt.dict_incref),
         HeapKind::Set => Some(rt.set_incref),
+        HeapKind::Object => Some(rt.obj_retain),
         HeapKind::List | HeapKind::Instance => None,
     };
     if let Some(incref) = out_of_line {
@@ -289,6 +314,7 @@ pub(crate) fn emit_decref<'ctx>(
         HeapKind::Set => rt.set_decref,
         HeapKind::List => rt.list_free,
         HeapKind::Instance => rt.instance_free,
+        HeapKind::Object => rt.obj_release,
     };
     if !matches!(kind, HeapKind::List | HeapKind::Instance) {
         builder
@@ -382,7 +408,7 @@ pub(super) fn release_scalar_if_temporary<'ctx>(
     if let Scalar::Int(_) = scalar {
         release_scalar_if_int_temporary(context, builder, rt, source, scalar);
     } else if !is_borrowed_read(source)
-        && let Some((kind, ptr)) = counted(rt, &source.ty(), scalar)
+        && let Some((kind, ptr)) = counted_temporary(rt, &source.ty(), scalar)
     {
         emit_decref(context, builder, rt, kind, ptr);
     }
@@ -411,20 +437,42 @@ pub(crate) fn release_slot<'ctx>(
     emit_decref(context, builder, rt, kind, old);
 }
 
-/// Releases the value an instance slot of the counted kind of `ty` holds
-/// before a store overwrites it. An unassigned slot holds the `0` word,
-/// which releases nothing.
-pub(crate) fn release_attr_slot<'ctx>(
+/// The counted value a slot of type `ty` at `slot_ptr` holds, loaded
+/// before a store overwrites it, for [`release_old`] once the new value is
+/// in place. Storing first and releasing after (CPython's `Py_XSETREF`
+/// order) matters for an `object`: its release can run a finalizer that
+/// reads the slot, which must see the new value, never a freed one.
+pub(crate) fn take_slot_old<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    ty: &Ty,
+    slot_ptr: PointerValue<'ctx>,
+) -> Option<(HeapKind, PointerValue<'ctx>)> {
+    let kind = heap_kind(rt, ty)?;
+    let old = builder
+        .build_load(
+            context.ptr_type(inkwell::AddressSpace::default()),
+            slot_ptr,
+            "old_heap",
+        )
+        .expect("build_load should not fail for a slot this function allocated")
+        .into_pointer_value();
+    Some((kind, old))
+}
+
+/// The counted value an instance slot holds, loaded before a store
+/// overwrites it (see [`take_slot_old`]). An unassigned slot holds the `0`
+/// word, which releases nothing.
+pub(crate) fn take_attr_slot_old<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
     ty: &Ty,
     base: PointerValue<'ctx>,
     slot: u64,
-) {
-    let Some(kind) = heap_kind(rt, ty) else {
-        return;
-    };
+) -> Option<(HeapKind, PointerValue<'ctx>)> {
+    let kind = heap_kind(rt, ty)?;
     let raw = attr_slot::emit_slot_load(context, builder, base, slot);
     let old = builder
         .build_int_to_ptr(
@@ -433,7 +481,19 @@ pub(crate) fn release_attr_slot<'ctx>(
             "old_attr",
         )
         .expect("build_int_to_ptr should not fail reinterpreting an i64 as a pointer");
-    emit_decref(context, builder, rt, kind, old);
+    Some((kind, old))
+}
+
+/// Releases a value [`take_slot_old`] or [`take_attr_slot_old`] loaded.
+pub(crate) fn release_old<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    old: Option<(HeapKind, PointerValue<'ctx>)>,
+) {
+    if let Some((kind, ptr)) = old {
+        emit_decref(context, builder, rt, kind, ptr);
+    }
 }
 
 /// The depth of the pending-release stack, for a later
@@ -459,7 +519,7 @@ pub(crate) fn truncate_pending(rt: &RtFns<'_>, mark: usize) {
 /// matching [`truncate_pending`] releases it instead of leaking it.
 pub(crate) fn hold_temporary<'ctx>(rt: &RtFns<'ctx>, source: &MirExpr, scalar: &Scalar<'ctx>) {
     if !is_borrowed_read(source)
-        && let Some(entry) = counted(rt, &source.ty(), scalar)
+        && let Some(entry) = counted_temporary(rt, &source.ty(), scalar)
     {
         rt.exceptions.pending_heap_releases.borrow_mut().push(entry);
     }

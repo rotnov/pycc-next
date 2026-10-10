@@ -329,15 +329,11 @@ enum Scalar<'ctx> {
     /// each later operation turned its own arm into a real one (the store
     /// in `emit_assign` is #1325's, for a module-level binding).
     ///
-    /// Ownership: a producer such as `pycc_ext_obj_getattr` returns a new
-    /// reference. An unbound temporary is released by its consumer
-    /// (`object_release.rs`, #1092), and a module global owns the value
-    /// bound to it and releases it on rebind (`object_slot.rs`, Part 1 of
-    /// #1499). A value bound to a frame slot or an instance slot, passed to
-    /// a user function, or returned is still never released (the later
-    /// parts of #1499), so such a leak inside a loop is trip-count-linear;
-    /// see `docs/RUNTIME.md`'s "Foreign imports in the module body"
-    /// ownership subsection.
+    /// Ownership is `heap_rc`'s (`HeapKind::Object`): every slot -- a local,
+    /// a parameter, a module global, an instance attribute -- owns one
+    /// reference, a producer such as `pycc_ext_obj_getattr` returns a new
+    /// one, and an unbound temporary is released by its consumer
+    /// (`object_release.rs`).
     Object(PointerValue<'ctx>),
     /// A pointer to the `PyccExtBufferView` -- `pycc_rt`'s `{ ptr, len }`
     /// pair -- that a `pycc build --ext` wrapper passed for a `memoryview`
@@ -2204,12 +2200,10 @@ fn emit_expr_unchecked<'ctx>(
                 // before reaching `foreign_attr::emit`.
                 //
                 // No reference-count traffic accompanies the read: the
-                // global owns the reference the import created
-                // (`docs/RUNTIME.md`), so a read is a borrow with nothing to
-                // balance. A `x = <object>` global owns its reference the
-                // same way (#1325). Since Part 1 of #1499 a rebind or
-                // re-import releases the previous value
-                // (`object_slot.rs`).
+                // slot owns its reference, so a read is a borrow
+                // (`heap_rc::is_borrowed_read`); a consumer that keeps it
+                // retains it, and an operand pinned across a sibling that
+                // may rebind it is retained by `emit_expr`.
                 Ty::Object => {
                     let loaded = builder
                         .build_load(
@@ -4458,10 +4452,20 @@ fn container_loops(body: &[MirStmt]) -> Vec<(&MirStmt, &str, &[MirStmt], heap_rc
     for stmt in body {
         match stmt {
             MirStmt::ForList { list, body, .. } => {
-                out.push((stmt, list.as_str(), body.as_slice(), heap_rc::HeapKind::List));
+                out.push((
+                    stmt,
+                    list.as_str(),
+                    body.as_slice(),
+                    heap_rc::HeapKind::List,
+                ));
             }
             MirStmt::ForDict { dict, body, .. } => {
-                out.push((stmt, dict.as_str(), body.as_slice(), heap_rc::HeapKind::Dict));
+                out.push((
+                    stmt,
+                    dict.as_str(),
+                    body.as_slice(),
+                    heap_rc::HeapKind::Dict,
+                ));
             }
             MirStmt::ForSet { set, body, .. } => {
                 out.push((stmt, set.as_str(), body.as_slice(), heap_rc::HeapKind::Set));
@@ -4546,7 +4550,9 @@ impl<'ctx> LoopHold<'ctx> {
             builder
                 .build_store(
                     slot,
-                    context.ptr_type(inkwell::AddressSpace::default()).const_null(),
+                    context
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null(),
                 )
                 .expect("build_store should not fail for a loop hold slot");
         }
@@ -5070,9 +5076,8 @@ fn build_call_to_with_leading_args<'ctx>(
                 // way the callee is another pycc function taking the same
                 // `ptr` (a public one called from the host gets the object
                 // through its `--ext` thunk instead, #1397/#1386). The
-                // borrowed pointer is passed through with no refcount
-                // change: the callee never releases it (#1092's leak-only
-                // rule, `docs/RUNTIME.md`).
+                // callee's parameter slot owns the reference: a borrowed
+                // argument was retained above.
                 Scalar::Object(v) => v.into(),
                 // Defensive (Part 2 of #1027): passing `b` to another
                 // function is a bare read of the name, which
@@ -5492,9 +5497,11 @@ fn storage_slot_at_entry<'ctx>(
             | pycc_mir::Ty::Dict(_)
             | pycc_mir::Ty::Set(_)
             | pycc_mir::Ty::FrozenSet(_)
+            | pycc_mir::Ty::Object
     ) {
-        // Lists, instances, dicts and sets are counted (`heap_rc`) and
-        // released the same way, so their slots start null too.
+        // Lists, instances, dicts, sets and CPython objects are counted
+        // (`heap_rc`) and released the same way, so their slots start null
+        // too.
         // Part 2a of #1142 (#1165) joins `Ty::Str` on this arm rather than
         // adding one of its own: both are owning pointer slots released on
         // the way out, and both runtime releases are documented no-ops on
@@ -5654,18 +5661,9 @@ fn emit_assign<'ctx>(
         // accompanies it either, for the identical D-182-acknowledged
         // reason `Tuple`'s own comment already gives.
         Scalar::Optional(v) => v.into(),
-        // A pass-through since #1325: storing one `PyObject *` into a slot
-        // `ty_to_basic_type` already allocated as a pointer, with no
-        // refcount traffic. Since Part 1 of #1499 only a *frame* slot -- a
-        // function local, reached since Part 1 of #1333 (#1362) -- stores
-        // here: `MirStmt::Assign` routes a module-global `object` target
-        // through `object_slot::assign`, which owns its reference. A frame
-        // slot keeps #1092's leak-only rule, where a rebinding overwrites
-        // and leaks the previous reference. A release here would be a
-        // use-after-free, not a fix: a parameter or a local alias holds a
-        // borrowed pointer without an incref, so freeing the old value
-        // could free an object the caller still names. Part 2 (#1502)
-        // gives frame slots the ownership model.
+        // Storing one `PyObject *` into a slot `ty_to_basic_type` already
+        // allocated as a pointer. The value is already an owned reference
+        // and the caller releases the replaced one (`heap_rc`).
         Scalar::Object(v) => v.into(),
         // A pass-through since Part 2a of #1142 (#1165), where it was a
         // panic (as `Object`'s arm above was until #1325): storing one
@@ -6100,9 +6098,9 @@ fn declare_module_globals<'ctx>(
                 // store (a module-level `x = <object>`, #1325) or a
                 // module-level `for` target's own store in the
                 // `MirStmt::ForObject` emission -- with the separate `initialized`
-                // flag below trapping any read that reaches it first. Since
-                // Part 1 of #1499 the slot owns its one reference and a
-                // rebind releases the old value (`object_slot.rs`). No
+                // flag below trapping any read that reaches it first. The
+                // slot owns its one reference and a rebind releases the old
+                // value (`heap_rc`). No
                 // exit-time release accompanies it: the last value is
                 // owned for the artifact's lifetime (see
                 // `foreign_import.rs` and `docs/RUNTIME.md`).
@@ -6566,9 +6564,6 @@ fn compile_to_object_with_observer(
     let entry_block = context.append_basic_block(entry_fn, "entry");
     let top_exception_exit = context.append_basic_block(entry_fn, "top_exception_exit");
     builder.position_at_end(entry_block);
-    // Part 1 of #1499: every module-global `object` slot's owned bit,
-    // cleared before the first statement (`object_slot.rs`).
-    object_slot::declare_owned_bits(&context, &builder, &module, &rt, &module_globals);
     // Top-level statements share one `locals` map across the synthetic
     // `main` entry block (module-level Python names are one shared
     // scope); each user function gets its own, fresh map below, since
@@ -7632,15 +7627,9 @@ fn emit_stmt<'ctx>(
         MirStmt::Assign { target, value } => {
             let ty = value.ty();
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
-            // Part 1 of #1499: a module-global `object` slot owns its
-            // reference (`object_slot.rs`); every other slot keeps
-            // `emit_assign`'s store below.
-            if object_slot::assign(context, builder, module, rt, locals, target, value, scalar) {
-                return Ok(());
-            }
             // The slot owns one reference to a counted value: take it, and
-            // release the one it holds (null before the first store) before
-            // overwriting -- unless the local only ever borrows.
+            // release the one it holds (null before the first store) once
+            // the new one is stored -- unless the local only ever borrows.
             if ty == pycc_mir::Ty::Str
                 && locals
                     .get(target)
@@ -7658,9 +7647,10 @@ fn emit_stmt<'ctx>(
                 scalar
             };
             let scalar = retain_if_int_duplicate(context, builder, rt, value, scalar);
-            if owning && let Some(slot) = locals.get(target) {
-                heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
-            }
+            let old = locals
+                .get(target)
+                .filter(|_| owning)
+                .and_then(|slot| heap_rc::take_slot_old(context, builder, rt, &slot.ty, slot.ptr));
             // Part 2a of #1142 (#1165): D-074's free-before-overwrite, for
             // the second owning slot type. Keyed on `ty` exactly like the
             // `str` arm above; unlike `int`, a buffer slot's declared type
@@ -7675,6 +7665,7 @@ fn emit_stmt<'ctx>(
             // reaches this arm with `ty == Ty::Bool` and would otherwise
             // skip the release of the bigint the slot still holds.
             emit_assign(context, builder, rt, locals, target, scalar);
+            heap_rc::release_old(context, builder, rt, old);
             Ok(())
         }
         MirStmt::NoOp => Ok(()),
@@ -8187,15 +8178,14 @@ fn emit_stmt<'ctx>(
             let held = object_release::hold(context, module, rt, iter, &iterable);
             let (loop_blocks, iterator) =
                 foreign_call::emit_iter_loop(context, builder, module, rt, iterable, held);
-            // The item is `pycc_ext_obj_iter_next`'s new reference. Part 1
-            // of #1499: a module-global target owns it, so each trip
-            // releases the previous item (or the value bound before the
-            // loop) and the slot keeps the last one, as in CPython. A frame
-            // slot keeps the plain, leak-only store until Part 2 (#1502).
+            // The item is `pycc_ext_obj_iter_next`'s new reference. The
+            // target owns it, so each trip releases the previous item (or
+            // the value bound before the loop) and the slot keeps the last
+            // one, as in CPython.
             let slot = locals
                 .get(var)
                 .expect("every for-target must have a predeclared storage slot");
-            object_slot::store_new_reference(context, builder, module, rt, slot, loop_blocks.item);
+            object_slot::store_new_reference(context, builder, rt, slot, loop_blocks.item);
             // A `continue` asks the iterator for the next item; a `break`
             // leaves through `after_bb`, which releases the iterator below
             // exactly as the normal exit does.
@@ -8653,9 +8643,8 @@ fn emit_stmt<'ctx>(
                         // helper whose body is `return numpy.pi` infers a
                         // `Ty::Object` return type, which is the second
                         // producer shape Part 2's refusal migration admits.
-                        // No refcount traffic accompanies it: a returned
-                        // object is still leak-only (Part 2 of #1499), see
-                        // `Scalar`'s own `Object` doc comment.
+                        // The caller owns the returned reference: a
+                        // borrowed value was retained above.
                         Scalar::Object(v) => v.into(),
                         // Part 2b of #1142 (#1164): pass-through by
                         // pointer, identical in kind to `List`'s and
@@ -9012,19 +9001,10 @@ fn emit_stmt<'ctx>(
             let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
             heap_rc::truncate_pending(rt, mark);
             let base_ptr = expect_instance_pointer(base_scalar, "attribute assignment base");
-            // Part 1 of #1499: a borrowed object takes its own reference
-            // before the slot word keeps it, because a module global it was
-            // read from now releases its old value on rebind. The replaced
-            // word is still never released (Part 4, #1504).
-            let value_scalar = match value_scalar {
-                Scalar::Object(pointer) => Scalar::Object(object_slot::retain_if_borrowed(
-                    context, builder, module, value, pointer,
-                )),
-                other => other,
-            };
             let slot = *slot as u64;
-            // The slot owns a counted value: release the one it holds.
-            heap_rc::release_attr_slot(context, builder, rt, &value_ty, base_ptr, slot);
+            // The slot owns a counted value: the one it holds is released
+            // once the new one is stored (`heap_rc::take_slot_old`).
+            let old = heap_rc::take_attr_slot_old(context, builder, rt, &value_ty, base_ptr, slot);
             // Unlike a local's storage slot, an instance attribute's
             // declared `Ty` is not reachable from `MirStmt::AttrSet` (it
             // carries only a slot *index*), so this release is gated on
@@ -9055,6 +9035,7 @@ fn emit_stmt<'ctx>(
             }
             let word = scalar_to_slot_word(context, builder, value_scalar);
             attr_slot::emit_slot_store(context, builder, base_ptr, slot, word);
+            heap_rc::release_old(context, builder, rt, old);
             // A fresh target (`f().x = v`, or a base `operand_pin` pinned
             // across the value) is dead once stored into.
             release_scalar_if_temporary(context, builder, rt, base, &base_scalar);

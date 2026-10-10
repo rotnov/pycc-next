@@ -45,10 +45,9 @@
 //! held across its truth test when it is a produced object. A truth-only
 //! operand is released right after its test; a discarded left operand is
 //! released in `eval_right` beside its `int` release. The node's own value
-//! is a producer (`object_release::is_produced`) only when every arm it
-//! can select is owned -- a produced object or a boxed native value -- and
-//! its consumer then releases it. When the arms mix a produced and a
-//! borrowed object, the selected produced arm is still leaked (#1499).
+//! is always owned -- a produced arm is moved into it, a borrowed one
+//! retained, a native one boxed -- so its consumer releases it
+//! (`object_release::is_produced`).
 //!
 //! The discarded left operand is released in `eval_right` *before* `right`
 //! is emitted, so the node never holds an arm-local word while `right` can
@@ -346,9 +345,8 @@ fn needs_boxing(operand: &MirExpr, ty: &Ty) -> bool {
 /// from the packer -- `OverflowError` for a bigint outside D-141's inline
 /// range (#1040) -- takes the foreign failure edge at once, since no
 /// consuming shim helper follows to tolerate it. The new reference is the
-/// node's value: released by the node's consumer when every arm is owned
-/// (Part 3 of #1092, `object_release::is_produced`), owned by a module
-/// global that binds it (Part 1 of #1499), and leaked otherwise.
+/// node's value: released by the node's consumer when unbound
+/// (`object_release::is_produced`), owned by a slot that binds it.
 fn boxed_value<'ctx>(
     emitter: &Emitter<'_, 'ctx>,
     source: &MirExpr,

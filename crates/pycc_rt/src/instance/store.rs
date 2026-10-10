@@ -16,11 +16,10 @@
 //!   is a no-op there.
 //! * `l` -- a list and `c` -- a class instance: one reference released
 //!   (`crate::rc`), which frees the object at zero.
-//! * `o` -- an opaque CPython object, and `w` -- any other word. Nothing is
-//!   released: `pycc_rt` keeps no CPython dependency (D-244 rule 2), and
-//!   under the leak-only rule (#1092) the reference a compiled object slot
-//!   holds may be the very one compiled code still uses, so the compiled
-//!   store does not release it either.
+//! * `o` -- an opaque CPython object: one reference released through the
+//!   hook the C shim installed (`crate::rc`), as a compiled `self.o = v`
+//!   does after it stores.
+//! * `w` -- any other word. Nothing is released.
 //!
 //! The new word is stored as given: the setter hands over a reference it
 //! owns (a fresh `PyStrObj`, a new CPython reference), or a plain word.
@@ -171,14 +170,14 @@ mod tests {
     }
 
     #[test]
-    fn an_object_or_word_store_releases_nothing() {
+    fn a_word_store_releases_nothing() {
         let instance = new_instance();
         // A `PyStrObj` stands in for a referenced word: a kind other than
         // `s` must leave its count alone.
         let held = crate::new_pystr(b"held");
         unsafe { pycc_rt_instance_set_slot(instance, 0, held as i64) };
         unsafe { pycc_rt_instance_set_slot(instance, 1, held as i64) };
-        store(instance, 0, b'o', 0x10);
+        store(instance, 0, b'w', 0x10);
         store(instance, 1, b'w', 0x20);
         assert_eq!(str_rc(held), 1);
         assert_eq!(unsafe { pycc_rt_instance_get_slot(instance, 0) }, 0x10);

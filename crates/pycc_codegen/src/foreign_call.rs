@@ -143,8 +143,7 @@ fn emit_packed_array<'ctx>(
 /// `PyList_New` included -- so the display keeps exactly one failure edge,
 /// on a `NULL` result. The list is a new reference, owned like every other
 /// object this boundary produces: released by its consumer when it is an
-/// unbound temporary (Part 1 of #1092), owned by a module global that binds
-/// it (Part 1 of #1499), leaked otherwise.
+/// unbound temporary (Part 1 of #1092), owned by a slot that binds it.
 pub(super) fn emit_list<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -233,14 +232,10 @@ pub(super) struct ForeignIterLoop<'ctx> {
     pub header_bb: inkwell::basic_block::BasicBlock<'ctx>,
     /// Where control resumes after clean exhaustion.
     pub after_bb: inkwell::basic_block::BasicBlock<'ctx>,
-    /// A *new* reference to this iteration's item. A module-global loop
-    /// target owns it and releases it on the next trip (Part 1 of #1499,
-    /// `object_slot::store_new_reference`). `pycc_types` admits an object
-    /// `for` statement only in a module body, so its target is always a
-    /// module global; `store_new_reference`'s frame-slot arm is defensive.
-    /// A comprehension shares this struct and stores `item` into a scoped
-    /// slot that does not own it, so it still leaks one item per trip
-    /// (#1499).
+    /// A *new* reference to this iteration's item. The loop target's slot
+    /// owns it and releases it on the next trip
+    /// (`object_slot::store_new_reference`), as does a comprehension's
+    /// loop variable.
     pub item: PointerValue<'ctx>,
 }
 

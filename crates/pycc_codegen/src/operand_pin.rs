@@ -22,6 +22,9 @@
 //! A bare name is never pinned: a frame slot cannot be rebound by a call
 //! (functions have no `global`/`nonlocal` rebinding, and a walrus binds only
 //! uncounted scalars, T0050), and it owns its value for the whole frame.
+//! The exception is an `object` name, which may be a module global that
+//! CPython code run by a sibling rebinds through a nested exec of the same
+//! module body.
 //! An operand followed only by side-effect-free siblings -- reads,
 //! primitive arithmetic and comparisons -- is not pinned either, so hot
 //! numeric code pays nothing.
@@ -141,6 +144,11 @@ fn is_pinnable_read(rt: &RtFns<'_>, expr: &MirExpr) -> bool {
             return is_pinnable_read(rt, value);
         }
         MirExpr::AttrGet { .. } => true,
+        // An `object` name may be a module global, which a sibling running
+        // CPython code can rebind: a nested exec of the same module body
+        // (it re-imports itself, or is imported under a second name) shares
+        // the global's slot.
+        MirExpr::Name { ty: Ty::Object, .. } => true,
         // A tuple element is never counted (and `ty()` of a malformed
         // tuple subscript is codegen's error to report, not this pass's).
         MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_)),

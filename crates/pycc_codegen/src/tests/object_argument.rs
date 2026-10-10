@@ -1,10 +1,9 @@
 //! Part 1 of #1333: passing a CPython object to a pycc-compiled function.
 //!
 //! `build_call_to_with_leading_args`' `Scalar::Object` argument arm hands
-//! the `PyObject *` to the callee as-is: the callee borrows the caller's
-//! reference, so the call emits no increment and no release (#1092's
-//! leak-only rule). These tests pin the call through real MIR, for a
-//! module-level caller and for a function-body caller.
+//! the `PyObject *` to the callee, whose parameter slot owns it: a borrowed
+//! argument is retained first. These tests pin the call through real MIR,
+//! for a module-level caller and for a function-body caller.
 
 use super::*;
 

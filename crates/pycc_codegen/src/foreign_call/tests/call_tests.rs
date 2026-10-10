@@ -201,15 +201,11 @@ fn an_instance_argument_is_packed_with_the_instance_packer() {
     );
 }
 
-/// The routing allowlist: exactly the shim's own new-reference producers
-/// are consumed; a name read, a scalar and every other node are borrowed.
-///
-/// The pycc-side calls matter most among the borrowed ones: a pycc
-/// `__class_getitem__` (`Reg["x"]`), and any pycc function or method
-/// returning `object`, lowers to `MirExpr::Call` and hands back a borrowed
-/// pointer (`docs/RUNTIME.md`), so consuming it would underflow the
-/// refcount. A pycc instance's `object` slot read (`MirExpr::AttrGet`) is
-/// borrowed the same way.
+/// The routing: every `object` value that is not a borrowed read is
+/// consumed -- a shim producer, and a pycc function or method returning
+/// `object` (`Reg["x"]` lowers to a `__class_getitem__` call), whose return
+/// is owned by the caller. A name read, a pycc instance's `object` slot read
+/// of a borrowed base (`MirExpr::AttrGet`) and a scalar are borrowed.
 #[test]
 fn only_shim_producers_are_consumed_callees() {
     let produced = [
@@ -231,6 +227,12 @@ fn only_shim_producers_are_consumed_callees() {
             callee: Box::new(product()),
             args: Vec::new(),
         },
+        // A user function returns an owned reference.
+        MirExpr::Call {
+            callee: "Reg.__class_getitem__.static".to_string(),
+            args: vec![MirExpr::StringLiteral("x".to_string())],
+            ty: Ty::Object,
+        },
     ];
     for callee in &produced {
         assert!(callee_is_produced(callee), "{callee:?}");
@@ -238,11 +240,6 @@ fn only_shim_producers_are_consumed_callees() {
     let borrowed = [
         product(),
         MirExpr::IntLiteral(1),
-        MirExpr::Call {
-            callee: "Reg.__class_getitem__.static".to_string(),
-            args: vec![MirExpr::StringLiteral("x".to_string())],
-            ty: Ty::Object,
-        },
         MirExpr::AttrGet {
             base: Box::new(MirExpr::Name {
                 name: "self".to_string(),

@@ -20,21 +20,18 @@
 //! * `l` -- a list; `c` -- a class instance (counted here);
 //! * `d` -- a dict; `e` -- a set or frozenset (counted by their own
 //!   runtime functions, which release their keys and instance elements);
+//! * `o` -- an opaque CPython object (`PyObject *`), counted through the
+//!   hooks the C shim installs ([`pycc_rt_object_install`]) when its module
+//!   is executed: `pycc_rt` itself keeps no CPython dependency. A program
+//!   without CPython has no `o` word, so the hooks are never needed there.
 //! * anything else -- no reference released here (`float`, `bool`, an
-//!   exception instance, which is leak-only, and an opaque CPython object
-//!   `o`).
-//!   An `o` slot's object is deliberately leaked when the instance is
-//!   freed: a function local read from the slot (`y = h.o`) holds the same
-//!   pointer without a reference of its own, so releasing the slot's
-//!   reference could free an object the frame still uses. It can be
-//!   released once object locals own their values (#1499's frame-slot
-//!   part).
+//!   exception instance, which is leak-only).
 //!
 //! **Cycles are not collected.** CPython's cycle GC frees an unreachable
 //! cycle (`a.other = b; b.other = a`); here its objects keep each other's
 //! counts above zero and stay allocated (`docs/DEVIATIONS.md`).
 
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicPtr, Ordering};
 
 use crate::instance::PyInstanceObj;
 use crate::list::PyListObj;
@@ -108,6 +105,32 @@ pub(crate) enum Dead {
 /// The objects a free found dead and has not freed yet.
 pub(crate) type Worklist = Vec<Dead>;
 
+/// `Py_XINCREF`/`Py_XDECREF` of a `PyObject *`.
+type ObjectHook = unsafe extern "C" fn(*mut std::ffi::c_void);
+
+static OBJECT_RETAIN: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+static OBJECT_RELEASE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Installs how an `o` word is counted (called by the C shim when its
+/// module is executed, before any compiled code runs).
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_object_install(retain: ObjectHook, release: ObjectHook) {
+    OBJECT_RETAIN.store(retain as *mut (), Ordering::Relaxed);
+    OBJECT_RELEASE.store(release as *mut (), Ordering::Relaxed);
+}
+
+/// Calls the installed object hook in `cell` on `word`. Without a hook
+/// there is no CPython, hence no `o` word to count.
+fn object_hook(cell: &AtomicPtr<()>, word: i64) {
+    let hook = cell.load(Ordering::Relaxed);
+    if !hook.is_null() {
+        // SAFETY: only `pycc_rt_object_install` stores here, and it stores
+        // an `ObjectHook`.
+        let hook = unsafe { std::mem::transmute::<*mut (), ObjectHook>(hook) };
+        unsafe { hook(word as *mut std::ffi::c_void) };
+    }
+}
+
 /// Takes one more reference to the word `word` of kind `kind`.
 pub(crate) fn retain_word(kind: u8, word: i64) {
     match kind {
@@ -117,6 +140,7 @@ pub(crate) fn retain_word(kind: u8, word: i64) {
         b'c' => incref(word as *mut PyInstanceObj),
         b'd' => unsafe { crate::pycc_rt_dict_incref(word as *mut crate::PyDictObj) },
         b'e' => unsafe { crate::pycc_rt_int_set_incref(word as *mut crate::PyIntSetObj) },
+        b'o' => object_hook(&OBJECT_RETAIN, word),
         _ => {}
     }
 }
@@ -136,6 +160,7 @@ pub(crate) fn release_word_into(kind: u8, word: i64, dead: &mut Worklist) {
         }
         b'd' => unsafe { crate::pycc_rt_dict_decref(word as *mut crate::PyDictObj) },
         b'e' => unsafe { crate::pycc_rt_int_set_decref(word as *mut crate::PyIntSetObj) },
+        b'o' => object_hook(&OBJECT_RELEASE, word),
         _ => {}
     }
 }
@@ -230,6 +255,39 @@ mod tests {
 
     fn str_count(s: *mut crate::PyStrObj) -> u32 {
         unsafe { &*s }.rc.get()
+    }
+
+    static HOOKED: std::sync::Mutex<Vec<(char, i64)>> = std::sync::Mutex::new(Vec::new());
+
+    unsafe extern "C" fn record_retain(o: *mut std::ffi::c_void) {
+        HOOKED.lock().unwrap().push(('+', o as i64));
+    }
+
+    unsafe extern "C" fn record_release(o: *mut std::ffi::c_void) {
+        HOOKED.lock().unwrap().push(('-', o as i64));
+    }
+
+    /// An `o` word is counted through the installed hooks: retained by a
+    /// copy, released when its instance is freed.
+    #[test]
+    fn an_object_word_is_counted_through_the_installed_hooks() {
+        pycc_rt_object_install(record_retain, record_release);
+        let mine = |events: &[(char, i64)]| -> Vec<(char, i64)> {
+            events
+                .iter()
+                .copied()
+                .filter(|(_, word)| *word == 0x7710)
+                .collect()
+        };
+        retain_word(b'o', 0x7710);
+        release_word(b'o', 0x7710);
+        // A one-slot `o` layout: freeing the instance releases the word.
+        static HOLDER: &[u8] = b"Holder\0o\0o";
+        let instance = unsafe { pycc_rt_instance_new(1, HOLDER.as_ptr(), HOLDER.len()) };
+        unsafe { pycc_rt_instance_set_slot(instance, 0, 0x7710) };
+        unsafe { pycc_rt_instance_decref(instance) };
+        let events = mine(&HOOKED.lock().unwrap());
+        assert_eq!(events, vec![('+', 0x7710), ('-', 0x7710), ('-', 0x7710)]);
     }
 
     /// Freeing a list releases each element it owns, and an element another

@@ -128,7 +128,8 @@ fn each_slot_getter_packs_its_word_and_the_table_is_installed() {
         getter(
             "o",
             5,
-            "    return pycc_ext_pack_object((void *)(intptr_t)word);\n",
+            "    Py_XINCREF((PyObject *)(intptr_t)word);\n    \
+             return pycc_ext_pack_object((void *)(intptr_t)word);\n",
         ),
     ] {
         assert!(inc.contains(&expected), "missing:\n{expected}\nin:\n{inc}");
@@ -634,7 +635,7 @@ fn an_instance_slot_getter_packs_through_the_instance_egress() {
         assert!(inc.contains(expected), "missing:\n{expected}\nin:\n{inc}");
     }
     assert!(
-        inc.contains("return pycc_ext_activation_exit(pycc_ext_pack_instance(result));"),
+        inc.contains("return pycc_ext_pack_instance(result);"),
         "{inc}"
     );
     for absent in ["_St_5_color", "_St_3_err", "_St_4_tint"] {

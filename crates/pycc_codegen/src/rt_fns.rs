@@ -92,6 +92,12 @@ pub(super) struct RtFns<'ctx> {
     pub(super) str_truthy: FunctionValue<'ctx>,
     pub(super) str_incref: FunctionValue<'ctx>,
     pub(super) str_decref: FunctionValue<'ctx>,
+    /// The shim's `Py_XINCREF`/`Py_XDECREF` (`pycc_ext_obj_retain`/
+    /// `pycc_ext_obj_release`): how `heap_rc` counts an `object` value.
+    /// Only referenced by code that handles a `Ty::Object`, which exists
+    /// only in a build that links the CPython shim.
+    pub(super) obj_retain: FunctionValue<'ctx>,
+    pub(super) obj_release: FunctionValue<'ctx>,
     /// #146 Part 1: `str`'s D-060 refcounting pair, generalized to D-141's
     /// encoded `int` word. Both take the raw `i64` word rather than a
     /// pointer, and both are only ever called under the inline
@@ -324,9 +330,6 @@ pub(super) struct RtFns<'ctx> {
     /// nested handler must not overwrite the exception saved by its outer
     /// handler.
     pub(super) exceptions: ExceptionCodegenState<'ctx>,
-    /// The owned bit of every module-global `object` slot (Part 1 of
-    /// #1499); `object_slot.rs` owns it.
-    pub(super) object_slots: crate::object_slot::ModuleObjectSlots<'ctx>,
     /// The enclosing loops' `break`/`continue` targets; `loop_control.rs`
     /// owns it.
     pub(super) loops: crate::loop_control::LoopControlState<'ctx>,
@@ -519,6 +522,14 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         str_decref: declare(
             "pycc_rt_str_decref",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        obj_retain: declare(
+            crate::ext::EXT_OBJ_RETAIN_SYMBOL,
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        obj_release: declare(
+            crate::ext::EXT_OBJ_RELEASE_SYMBOL,
             void_type.fn_type(&[ptr_type.into()], false),
         ),
         bigint_retain: declare(
@@ -837,7 +848,6 @@ pub(super) fn declare_rt_functions<'ctx>(
             ),
         ),
         exceptions: ExceptionCodegenState::new(),
-        object_slots: crate::object_slot::ModuleObjectSlots::default(),
         loops: crate::loop_control::LoopControlState::default(),
         list_free: declare(
             "pycc_rt_list_free",

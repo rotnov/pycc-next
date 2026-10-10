@@ -7,8 +7,7 @@
 //! **Ownership** (`docs/RUNTIME.md`). The result is a new reference to the
 //! operand's class, owned exactly as an attribute load's result is: its
 //! consumer releases it when it is an unbound temporary (Part 1 of #1092,
-//! `object_release.rs`), a module global that binds it owns it
-//! (`object_slot.rs`, Part 1 of #1499), and it is otherwise leaked.
+//! `object_release.rs`), and a slot that binds it owns it (`heap_rc`).
 //!
 //! **Failure.** `PyObject_Type` cannot fail for a live object. The helper
 //! answers `NULL` only for a `NULL` operand, as the defence in depth

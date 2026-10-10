@@ -1,16 +1,11 @@
 //! #1325: binding a CPython object value to a name.
 //!
 //! `emit_assign`'s `Scalar::Object` arm stores the `PyObject *` into the
-//! name's pointer slot with no refcount traffic in either direction. Since
-//! Part 1 of #1499 that pass-through is the frame-slot rule only: a
-//! module-global object store goes through `object_slot::assign` first,
-//! which retains a borrowed value and releases the rebound one
-//! (`object_slot_tests.rs` pins that). The fixtures below call
-//! `emit_assign` directly with an empty `rt.object_slots` table, so they
-//! pin the pass-through every non-module-global slot still takes: the store
-//! happens and no release is emitted (#1092's leak-only rule, until Part 2,
-//! #1502). The last test compiles the whole module-level shape through real
-//! MIR.
+//! name's pointer slot with no refcount traffic of its own: its caller
+//! (`MirStmt::Assign`) retains a borrowed value and releases the replaced
+//! one (`heap_rc`). The fixtures below call `emit_assign` directly, so they
+//! pin the bare store. The last test compiles the whole module-level shape
+//! through real MIR.
 
 use super::*;
 

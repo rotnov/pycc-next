@@ -23,7 +23,7 @@ fn releases_of(text: &str, name: &str) -> usize {
 /// every failure edge after `iter()` releases the iterator, every one
 /// after the result exists releases the result too, the normal exit
 /// releases the iterator, and the discarded result is released by its
-/// statement. Each per-trip item stays unreleased (#1499).
+/// statement. The loop variable's slot owns each item.
 #[test]
 fn a_comprehension_releases_its_produced_filter_and_element() {
     let var = || MirExpr::Name {
@@ -80,7 +80,11 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
     assert_eq!(releases(&ir[packed..collected]), 1, "{ir}");
     let after = blocks(&ir, "foreign_iter_after");
     assert_eq!(after.len(), 1, "{ir}");
-    assert_eq!(releases(after[0]), 1, "{ir}");
+    assert_eq!(
+        releases(after[0]),
+        2,
+        "the last item and the iterator: {ir}"
+    );
     assert_eq!(releases_of(after[0], ITERATOR), 1, "{ir}");
     // The comprehension hands its result to the statement, which releases
     // it once more on the normal path: nothing else is released.
@@ -89,8 +93,8 @@ fn a_comprehension_releases_its_produced_filter_and_element() {
 }
 
 /// A comprehension's result bound to a name is the binding's, not a
-/// temporary: only the iterator is released at the exit (#1499 owns the
-/// binding).
+/// temporary: only the last item and the iterator are released at the exit
+/// (the binding's slot owns the result).
 #[test]
 fn a_bound_comprehension_result_is_not_released() {
     let comprehension = MirExpr::Comprehension(Box::new(pycc_mir::MirComprehension {
@@ -112,7 +116,11 @@ fn a_bound_comprehension_result_is_not_released() {
     );
     let after = blocks(&ir, "foreign_iter_after");
     assert_eq!(after.len(), 1, "{ir}");
-    assert_eq!(releases(after[0]), 1, "{ir}");
+    assert_eq!(
+        releases(after[0]),
+        2,
+        "the last item and the iterator: {ir}"
+    );
     assert_eq!(releases_of(after[0], ITERATOR), 1, "{ir}");
 }
 
@@ -120,10 +128,10 @@ fn a_bound_comprehension_result_is_not_released() {
 /// returned -- on `iter()`'s failure edge and right after it, before the
 /// loop header. Its iterator (Part 3 of #1092) is released by the loop's
 /// cleanup target, on `next()`'s direct module-exec return, which looks
-/// through that target, and at the loop's normal exit. Since Part 1 of
-/// #1499 the only other releases are on each module global's rebind branch
-/// (`object_slot.rs`): the fixture's `copy` import, and the loop target's
-/// previous item on every trip.
+/// through that target, and at the loop's normal exit. The only other
+/// releases are of each module global's replaced value (`heap_rc`): the
+/// fixture's `copy` import, and the loop target's previous item on every
+/// trip.
 #[test]
 fn a_for_loop_releases_its_produced_iterable_and_its_iterator() {
     let ir = entry_ir(
@@ -134,10 +142,9 @@ fn a_for_loop_releases_its_produced_iterable_and_its_iterator() {
             body: Vec::new(),
         }],
     );
-    let rebinds = blocks(&ir, "global_release_old");
-    assert_eq!(rebinds.len(), 2, "{ir}");
-    assert_eq!(releases_of(rebinds[1], "global_old1"), 1, "{ir}");
-    assert_eq!(releases(&ir), 5 + rebinds.len(), "{ir}");
+    assert_eq!(releases_of(&ir, "old_heap"), 1, "{ir}");
+    assert_eq!(releases_of(&ir, "old_heap1"), 1, "{ir}");
+    assert_eq!(releases(&ir), 7, "{ir}");
     let get_iter_fail = blocks(&ir, "foreign_iter_get_fail");
     assert_eq!(get_iter_fail.len(), 1, "{ir}");
     assert_eq!(releases(get_iter_fail[0]), 1, "{ir}");

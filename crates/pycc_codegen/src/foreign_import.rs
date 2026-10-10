@@ -32,7 +32,7 @@
 //!
 //! **Ownership** (`docs/RUNTIME.md`). The import yields a new reference,
 //! stored during `pycc_ext_module_exec` into a module-level global that
-//! owns it (Part 1 of #1499, `object_slot.rs`): importing the same name a
+//! owns it (`object_slot.rs`): importing the same name a
 //! second time, or rebinding it, releases the previous value. The last
 //! value bound is never released: a CPython module object lives in
 //! `sys.modules` for the interpreter's lifetime anyway, and the generated
@@ -411,12 +411,12 @@ pub(super) fn emit<'ctx>(
     }
     builder.position_at_end(cont_bb);
     // `imported` is a new reference (`PyImport_ImportModule`,
-    // `PyImport_GetModule`, `PyObject_GetOptionalAttr`). Part 1 of #1499:
-    // the module global owns it, so importing the same name twice -- or
+    // `PyImport_GetModule`, `PyObject_GetOptionalAttr`). The module
+    // global owns it, so importing the same name twice -- or
     // rebinding it later -- releases the previous value, and the store
     // raises the definite-assignment flag exactly as an ordinary
     // top-level `Assign` does (`object_slot::store_new_reference`).
-    crate::object_slot::store_new_reference(context, builder, module, rt, slot, imported);
+    crate::object_slot::store_new_reference(context, builder, rt, slot, imported);
 }
 
 /// Emits a [`pycc_mir::MirStmt::ForeignImport`]: one import per binding,

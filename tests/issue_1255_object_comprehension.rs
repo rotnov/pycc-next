@@ -331,18 +331,15 @@ fn a_raising_comprehension_propagates_from_the_module_body() {
 }
 
 /// Reference-count pins on a *mortal* item and on the iterated source, at
-/// two trip counts. Under the #1092 leak-only rule (`docs/RUNTIME.md`) a
-/// list comprehension of `n` items leaves each item `+2` (the leaked loop
-/// item plus the leaked list's own reference), and a set comprehension of
-/// `n` identical items `n + 1` (each leaked loop item plus the one the set
-/// holds); the source list itself is unchanged, since the only thing that
-/// referenced it is the list iterator, released since Part 3 of #1092 (and
-/// CPython makes an exhausted one drop its sequence regardless). The deltas scale exactly with `n`, so a helper that
-/// consumed a packed element twice, or not at all, moves them. CPython
-/// frees everything (`n 1 0` per line), so this report is compiled-only.
+/// two trip counts: a list comprehension of `n` items leaves each item
+/// `+n` (the list's references), a set comprehension of `n` identical items
+/// `+1`, and the source is unchanged -- exactly CPython's counts, because
+/// the loop variable's slot owns each item and releases it on the next
+/// trip and at the loop's exit. The deltas scale with `n`, so a helper that
+/// consumed a packed element twice, or not at all, moves them.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn the_leak_only_reference_counts_are_pinned() {
+fn the_reference_counts_match_cpython() {
     let body = "import builtins\n\
         import sys\n\
         \n\
@@ -362,5 +359,5 @@ fn the_leak_only_reference_counts_are_pinned() {
         pin(100)\n\
         pin(200)\n";
     let (_dir, out) = compiled_report("obj_comp_pin", "pycc_obj_comp_pin", body);
-    assert_eq!(out, "200 101 0\n400 201 0\nno error\n");
+    assert_eq!(out, "100 1 0\n200 1 0\nno error\n");
 }

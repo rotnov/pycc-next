@@ -24,9 +24,8 @@
 //! with that row's `TypeError` or `OverflowError` (a `float` slot refuses an
 //! `int`, as a `float` parameter does); a name with no
 //! descriptor has nowhere to go; a carrier whose `__init__` never ran
-//! cannot be stored into; and the object
-//! a store replaces or a `del` removes keeps the reference the slot held
-//! (the compiled object store's own #1092 leak).
+//! cannot be stored into. The object a store replaces or a `del` removes
+//! loses the reference the slot held, as in CPython.
 //!
 //! The hosted test is `#[ignore]`d and contributes no line coverage; the
 //! Tier-1 `native-build-test` leg runs it with
@@ -252,8 +251,8 @@ const EXT_ONLY_OUT: &str = "TypeError Conf.n() argument 1: 'str' object cannot b
     AttributeError 'pycc_field_set_mod.Conf' object has no attribute 'zzz' and no __dict__ for setting new attributes\n\
     1180591620717411303424 1.5 True ab 1\n\
     AttributeError cannot set 'n' on a 'Conf' object whose __init__ never ran\n\
-    0\n\
-    0\n";
+    -1\n\
+    -1\n";
 
 /// What CPython answers for the lines [`EXT_ONLY_DRIVER`] pins, so the
 /// divergence is stated, not inferred: a dynamically typed attribute takes

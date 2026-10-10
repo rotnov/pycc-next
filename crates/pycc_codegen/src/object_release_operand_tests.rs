@@ -120,11 +120,11 @@ fn a_conditional_expression_releases_its_produced_test() {
     assert_eq!(releases(&borrowed), 0, "{borrowed}");
 }
 
-/// A conditional expression whose arms are both produced objects is itself
-/// produced, so its discarded result is released; with one borrowed arm it
-/// is not, and nothing else is incremented to make it so (#1499).
+/// A conditional expression's object result is always owned: a produced arm
+/// is moved into it and a borrowed arm retained, so its discarded result is
+/// released either way.
 #[test]
-fn a_conditional_object_result_is_produced_only_when_every_arm_is() {
+fn a_conditional_object_result_is_always_owned() {
     let ir = discard_ir(
         "release_if_exp_result",
         if_exp(copy_name(), attr("a"), attr("b"), Ty::Object),
@@ -134,7 +134,7 @@ fn a_conditional_object_result_is_produced_only_when_every_arm_is() {
         "release_if_exp_mixed",
         if_exp(copy_name(), attr("a"), copy_name(), Ty::Object),
     );
-    assert_eq!(releases(&mixed), 0, "{mixed}");
+    assert_eq!(releases(&mixed), 1, "{mixed}");
 }
 
 /// `if copy.a and copy.b:` tests each operand's truth and releases each
@@ -157,7 +157,8 @@ fn a_truth_only_boolean_operator_releases_each_produced_operand() {
 
 /// `copy.a or copy.b` (an object result): the left operand is held across
 /// its truth test, released when the right is evaluated instead, and
-/// otherwise becomes the result, which the discarding statement releases.
+/// otherwise becomes the result, which the discarding statement releases. A
+/// borrowed arm is retained into the result, which is always owned.
 #[test]
 fn a_value_boolean_operator_releases_an_unselected_left_operand() {
     let ir = discard_ir(
@@ -169,17 +170,17 @@ fn a_value_boolean_operator_releases_an_unselected_left_operand() {
         "release_boolop_value_mixed",
         bool_op(BoolOpKind::Or, attr("a"), copy_name(), Ty::Object, false),
     );
-    assert_eq!(releases(&mixed), 2, "{mixed}");
+    assert_eq!(releases(&mixed), 3, "{mixed}");
     let borrowed = discard_ir(
         "release_boolop_value_borrowed",
         bool_op(BoolOpKind::Or, copy_name(), copy_name(), Ty::Object, false),
     );
-    assert_eq!(releases(&borrowed), 0, "{borrowed}");
+    assert_eq!(releases(&borrowed), 1, "{borrowed}");
 }
 
-/// The classifier's Part 3 arms: a comprehension over an object, and an
-/// object-typed `BoolOp`/`IfExp` whose every arm is owned -- a produced
-/// object or a converted scalar.
+/// The classifier: a comprehension over an object, and every object-typed
+/// `BoolOp`/`IfExp` (whose arms are moved or retained into the result) are
+/// produced; a truth-only `BoolOp` is a `bool`.
 #[test]
 fn the_part_3_producers_are_classified() {
     let comprehension = |source| {
@@ -197,7 +198,7 @@ fn the_part_3_producers_are_classified() {
     let value = |left, right| bool_op(BoolOpKind::Or, left, right, Ty::Object, false);
     assert!(is_produced(&value(attr("a"), attr("b"))));
     assert!(is_produced(&value(attr("a"), MirExpr::IntLiteral(1))));
-    assert!(!is_produced(&value(attr("a"), copy_name())));
+    assert!(is_produced(&value(attr("a"), copy_name())));
     assert!(!is_produced(&bool_op(
         BoolOpKind::Or,
         attr("a"),
@@ -207,5 +208,5 @@ fn the_part_3_producers_are_classified() {
     )));
     let choose = |body, orelse| if_exp(copy_name(), body, orelse, Ty::Object);
     assert!(is_produced(&choose(attr("a"), attr("b"))));
-    assert!(!is_produced(&choose(copy_name(), attr("b"))));
+    assert!(is_produced(&choose(copy_name(), attr("b"))));
 }

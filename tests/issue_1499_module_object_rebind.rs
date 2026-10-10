@@ -12,17 +12,13 @@
 //! counts, so a leak that grows with the trip count cannot hide behind a
 //! constant.
 //!
-//! **What stays leaked, pinned as such.** A function-local binding keeps
-//! #1092's leak-only rule until Part 2 (#1502); the positive control
-//! `local_fresh` leaks one object per call, which also shows the probe sees
-//! a leak. A value an *earlier* module exec stored is never released (a
-//! failed import retried, a re-import after `del sys.modules[name]`), so
-//! each such exec leaks at most the one value it left in each slot.
+//! A function-local binding owns its reference too (`local_fresh` keeps the
+//! count flat), and a re-exec of the body shares the module's slots: the
+//! slots keep only the last exec's values alive.
 //!
 //! The hosted tests are `#[ignore]`d and contribute no line coverage; the
 //! Tier-1 `native-build-test` leg runs them with `cargo test --workspace --
-//! --include-ignored`. The changed lines are covered by the unit tests in
-//! `crates/pycc_codegen/src/object_slot_tests.rs`.
+//! --include-ignored`.
 
 use pycc_scratch::ScratchDir;
 use std::path::Path;
@@ -313,8 +309,8 @@ fn expected_bindings(trips: usize) -> String {
 }
 
 /// The module-level bindings release every rebound value exactly once, at
-/// two trip counts, exactly as CPython does; a function-local binding
-/// still leaks one object per call (Part 2, #1502).
+/// two trip counts, exactly as CPython does, and so does a function-local
+/// binding.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn a_module_global_rebind_releases_the_previous_value_as_cpython_does() {
@@ -348,7 +344,7 @@ fn a_module_global_rebind_releases_the_previous_value_as_cpython_does() {
          report('local', s.LIVE - live)\n"
     );
     let module = &modules[0].0;
-    assert_eq!(python(&dir, &[], &[], module, &leak), "local 50\n");
+    assert_eq!(python(&dir, &[], &[], module, &leak), "local 0\n");
     assert_eq!(
         python(&dir, &[], &[], &format!("{module}_py"), &leak),
         "local 0\n"
@@ -428,26 +424,16 @@ x = s.fresh()
 x = s.fresh()
 ";
 
-/// #1501: a rebind releases the replaced value only while the rebinding
-/// exec is the artifact's only live compiled activation. The nested exec
-/// runs beneath the outer one, so each of its rebinds leaks the value it
-/// replaces instead of releasing it, and both `hold` calls read a live
-/// object -- as under CPython, whose report the compiled one matches
-/// except for the counts. The outer exec, alone again after the nested
-/// one returns, still releases what it rebinds: the positive control.
-///
-/// Compiled, the outer body makes `a1`, `a2` (releasing `a1`), then the
-/// nested body `b1`..`b4`: the bits it clears at its entry leave `a2`
-/// unreleased, and the gate leaves `b1` and `b2` unreleased too, where
-/// releasing them would have been sound (no frame holds them). Its own
-/// `hold` reads `b2`, still live. Back in the outer body, `hold` reads
-/// `a2`, and its rebinds to `a3` and `a4` release `b4` and `a3`. Alive:
-/// `a2`, `b1`, `b2`, `b3`, `a4`; dead: `a1`, `b4`, `a3`. CPython gives each
-/// module its own `x`, and the nested module, dropped once `nest` restores
-/// the outer one, is collected with its `b4`: alive `a4`, dead the rest.
+/// A nested exec of the same body shares the module's global slots, and
+/// every rebind releases the value it replaces -- yet the outer body's `x`,
+/// passed to `hold` across `s.nest()`, stays alive: an `object` operand
+/// followed by a sibling that may run code holds its own reference
+/// (`operand_pin`). Both `hold` calls read a live object, under the debug
+/// allocator, and only the last value `a4` survives, exactly as under
+/// CPython (whose nested module is collected with its own `x`).
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_rebind_beneath_another_live_exec_leaks_instead_of_releasing() {
+fn a_rebind_beneath_another_live_exec_keeps_held_operands_alive() {
     let dir = build("t1499_nested", &[("pycc_t1499_nested_exec", NESTED_MODULE)]);
     let script = format!(
         "{PRELUDE}\
@@ -463,7 +449,7 @@ fn a_rebind_beneath_another_live_exec_leaks_instead_of_releasing() {
     let env = &[("PYTHONMALLOC", "debug")];
     let compiled = python(&dir, flags, env, "pycc_t1499_nested_exec", &script);
     let oracle = python(&dir, flags, env, "pycc_t1499_nested_exec_py", &script);
-    assert_eq!(compiled, "held Thing Thing\nx Thing\nlive 5 dead 3\n");
+    assert_eq!(compiled, oracle);
     assert_eq!(oracle, "held Thing Thing\nx Thing\nlive 1 dead 7\n");
 }
 
@@ -488,22 +474,14 @@ x = s.fresh()
 x = s.fresh()
 ";
 
-/// #1501: a compiled call a host entered through a wrapper is a live
-/// activation too. The outer exec has returned, so `probe`'s wrapper is the
-/// only other activation while the nested exec rebinds; the nested rebinds
-/// leak, and `hold` reads a live object. The outer exec, which ran alone,
-/// released what it rebound: the positive control.
-///
-/// Compiled, the outer body makes `a1`..`a3`, releasing `a1` and `a2`.
-/// `probe` holds `a3` across the nested body, which makes `b1`..`b3`: the
-/// bit it clears at its entry leaves `a3` unreleased, and the gate leaves
-/// `b1` and `b2` unreleased. Alive: `a3`, `b1`, `b2`, `b3`; dead: `a1`,
-/// `a2`. Were the wrapper frame not counted, the nested exec would see
-/// itself alone and release `b1` and `b2` (`live 2 dead 4`). CPython's
-/// nested module is collected with its `b3`: alive `a3`, dead the rest.
+/// A compiled call a host entered through a wrapper keeps `x`, passed to
+/// `hold` across a nested exec of the same body, alive with a reference of
+/// its own (`operand_pin`), while the nested exec's rebinds release what
+/// they replace: `hold` reads a live object and only the last value
+/// survives, exactly as under CPython.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_rebind_beneath_a_live_wrapper_call_leaks_instead_of_releasing() {
+fn a_rebind_beneath_a_live_wrapper_call_keeps_held_operands_alive() {
     let dir = build(
         "t1499_wrapped",
         &[("pycc_t1499_wrapped_exec", WRAPPED_MODULE)],
@@ -525,10 +503,7 @@ fn a_rebind_beneath_a_live_wrapper_call_leaks_instead_of_releasing() {
     let env = &[("PYTHONMALLOC", "debug")];
     let compiled = python(&dir, flags, env, "pycc_t1499_wrapped_exec", &script);
     let oracle = python(&dir, flags, env, "pycc_t1499_wrapped_exec_py", &script);
-    assert_eq!(
-        compiled,
-        "after import 1 dead 2\nheld Thing\nx Thing\nlive 4 dead 2\n"
-    );
+    assert_eq!(compiled, oracle);
     assert_eq!(
         oracle,
         "after import 1 dead 2\nheld Thing\nx Thing\nlive 1 dead 5\n"
@@ -536,13 +511,13 @@ fn a_rebind_beneath_a_live_wrapper_call_leaks_instead_of_releasing() {
 }
 
 /// A module exec that ran before -- a failed import retried, a re-import
-/// after `del sys.modules[name]` -- leaves its last value in each slot
-/// unreleased, so each such exec leaks at most one object per slot; the
-/// values one exec rebinds are still released. `importlib.reload` does not
-/// run the exec again, and an earlier module's function stays usable.
+/// after `del sys.modules[name]` -- leaves its last value in each slot until
+/// the next exec rebinds it, so the slots keep only the last exec's value
+/// alive; every other value is released. `importlib.reload` does not run
+/// the exec again, and an earlier module's function stays usable.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_earlier_exec_leaks_at_most_its_last_value() {
+fn an_earlier_exec_keeps_only_its_last_value() {
     let dir = build(
         "t1499_reexec",
         &[
@@ -573,7 +548,7 @@ fn an_earlier_exec_leaks_at_most_its_last_value() {
     );
     assert_eq!(
         python(&dir, &[], &[], "pycc_t1499_fail", &retried),
-        "retried 50 50 50\n"
+        "retried 50 1 99\n"
     );
     assert_eq!(
         python(&dir, &[], &[], "pycc_t1499_fail_py", &retried),
@@ -595,7 +570,7 @@ fn an_earlier_exec_leaks_at_most_its_last_value() {
     );
     assert_eq!(
         python(&dir, &[], &[], "pycc_t1499_again", &again),
-        "reload 1 Thing\nagain 4 Thing\n"
+        "reload 1 Thing\nagain 1 Thing\n"
     );
 }
 
@@ -616,24 +591,17 @@ s.pause()
 x = s.fresh()
 ";
 
-/// The second Codex P1 on #1505: a wrapper stays a live activation until
-/// its return value holds its own host reference. A thread imports the
-/// module, whose body pauses after binding `x` (`a2`); the host calls
-/// `get_x` with an `Exporter`, whose `__release_buffer__` -- run by the
-/// wrapper's `PyBuffer_Release`, after the compiled call returned `a2`
-/// borrowed and before the pack -- lets the body go and waits until it has
-/// rebound `x` to `a3` and returned. Were the wrapper counted out before
-/// that cleanup, the paused exec would see itself alone, release `a2`, and
-/// the pack would take a reference to freed memory, which the debug
-/// allocator catches. Counted, the rebind leaks `a2` (one reference more
-/// than under CPython) and the host gets a live `a2`.
-///
-/// CPython calls no buffer hook for a pure function's argument, so the
-/// host lets the body go itself after the call; there `got` is `a2` too,
-/// read before the rebind. Alive in both: `a2` and `a3`; dead: `a1`.
+/// A wrapper suspended in its own cleanup: a thread imports the module,
+/// whose body pauses after binding `x` (`a2`); the host calls `get_x` with
+/// an `Exporter`, whose `__release_buffer__` -- run by the wrapper's
+/// `PyBuffer_Release`, after the compiled call returned and before the pack
+/// -- lets the body go and waits until it has rebound `x` to `a3`. The
+/// compiled return owns its reference to `a2`, so the rebind's release
+/// cannot free it under the pack: the host gets a live `a2` with CPython's
+/// own count, under the debug allocator. Alive: `a2` and `a3`; dead: `a1`.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_wrapper_suspended_in_its_cleanup_still_counts_as_a_live_activation() {
+fn a_wrapper_suspended_in_its_cleanup_returns_a_live_object() {
     let dir = build(
         "t1499_suspended",
         &[("pycc_t1499_suspended", SUSPENDED_MODULE)],
@@ -661,6 +629,6 @@ fn a_wrapper_suspended_in_its_cleanup_still_counts_as_a_live_activation() {
     let env = &[("PYTHONMALLOC", "debug")];
     let compiled = python(&dir, flags, env, "pycc_t1499_suspended", &script);
     let oracle = python(&dir, flags, env, "pycc_t1499_suspended_py", &script);
-    assert_eq!(compiled, "got Thing False\nrefs 3\nlive 2 dead 1\n");
+    assert_eq!(compiled, oracle);
     assert_eq!(oracle, "got Thing False\nrefs 2\nlive 2 dead 1\n");
 }

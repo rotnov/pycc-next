@@ -299,13 +299,14 @@ fn a_failing_module_body_unpack_propagates_like_cpython() {
     }
 }
 
-/// The documented reference-count behaviour (`docs/RUNTIME.md`), pinned on
-/// two distinct mortal objects so an improvement is a visible test change.
-/// Each element read leaks one reference (the #1092 leak-only rule for
-/// object subscripts). The exact-tuple fast path also keeps one reference
-/// to the source tuple per unpack; any other iterable is first collected
-/// into a fresh tuple, which leaks and keeps one more reference to each
-/// element. CPython's own deltas after the loops are `1 1 0` for both.
+/// The reference-count behaviour, pinned on two distinct mortal objects:
+/// every target owns its element, as in CPython, so 100 unpacks leave one
+/// reference per target. The one difference is the hidden unpacking
+/// temporary, a frame slot that owns the tuple the last unpack produced
+/// until the frame exits or the next unpack rebinds it: the exact-tuple fast
+/// path's temporary is the source tuple itself (`+1` on `pr`), and any other
+/// iterable's is a fresh tuple holding one more reference to each element.
+/// CPython's own deltas after the loops are `1 1 0` for both.
 /// The third loop pins the failing path: a three-item list (`p1, p2, p1`) unpacked into
 /// two names raises `ValueError` every time, and the shim releases the
 /// iterator, the partial tuple and the extra item, so nothing leaks.
@@ -351,7 +352,7 @@ const REFCOUNT: &str = "import builtins\n\
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn object_unpack_reference_counts_are_pinned() {
     let (dir, compiled) = compiled_report("unpack_refcount", "pycc_unpack_rc", REFCOUNT);
-    assert_eq!(compiled, "100 100 100\n200 200 0\n0 0 0\nno error\n");
+    assert_eq!(compiled, "1 1 1\n2 2 0\n0 0 0\nno error\n");
     let oracle = python(&dir, &raised_report("runpy.run_path('m.py')"));
     assert_ok(&oracle);
     assert_eq!(stdout_of(&oracle), "1 1 0\n1 1 0\n0 0 0\nno error\n");

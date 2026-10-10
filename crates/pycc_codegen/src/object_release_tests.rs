@@ -293,7 +293,9 @@ fn a_failure_inside_a_module_level_try_releases_before_the_handler() {
     assert!(!outer.contains("ret "), "{ir}");
 }
 
-/// `copy.m(copy.a)`: the bound method is held across the argument (so the
+/// `copy.m(copy.a)`: the receiver, a module global followed by an argument
+/// that runs code, is pinned (`operand_pin`) and released once the lookup is
+/// done or fails; the bound method is held across the argument (so the
 /// argument's failure releases it) and then consumed by the call (so the
 /// call's failure does not release it); the produced argument is held
 /// across the call and released after it.
@@ -309,7 +311,7 @@ fn a_method_call_holds_its_bound_method_and_its_produced_argument() {
     );
     let lookup = blocks(&ir, "foreign_call_lookup_fail");
     assert_eq!(lookup.len(), 1, "{ir}");
-    assert_eq!(releases(lookup[0]), 0, "a borrowed receiver: {ir}");
+    assert_eq!(releases(lookup[0]), 1, "the pinned receiver: {ir}");
     let arg = blocks(&ir, "foreign_attr_fail");
     assert_eq!(arg.len(), 1, "{ir}");
     assert_eq!(releases(arg[0]), 1, "the bound method: {ir}");
@@ -364,10 +366,9 @@ fn borrowed_operands_and_a_consumed_bound_method_are_never_released() {
 }
 
 /// A produced value that is bound or returned is not a temporary: it is
-/// never released as one. Since Part 1 of #1499 a module global owns its
-/// value, so the only releases left are each global's *previous* value on
-/// its rebind branch (`object_slot.rs`) -- the fixture's `copy` import and
-/// `x` -- never the value just bound.
+/// never released as one. A module global owns its value, so the only
+/// releases left are each global's *previous* value (`heap_rc`) -- the
+/// fixture's `copy` import and `x` -- never the value just bound.
 #[test]
 fn a_bound_or_returned_produced_value_is_not_released() {
     let ir = entry_ir(
@@ -377,16 +378,12 @@ fn a_bound_or_returned_produced_value_is_not_released() {
             value: attr("a"),
         }],
     );
-    let rebinds = blocks(&ir, "global_release_old");
-    assert_eq!(rebinds.len(), 2, "{ir}");
-    for rebind in &rebinds {
-        assert_eq!(releases(rebind), 1, "{ir}");
-        assert!(
-            rebind.contains(&format!("{RELEASE}ptr %global_old")),
-            "{ir}"
-        );
-    }
-    assert_eq!(releases(&ir), rebinds.len(), "{ir}");
+    assert_eq!(releases(&ir), 2, "{ir}");
+    assert_eq!(
+        ir.matches(&format!("{RELEASE}ptr %old_heap")).count(),
+        2,
+        "{ir}"
+    );
     let ir = functions_ir(
         "release_returned",
         vec![function(Ty::Object, vec![MirStmt::Return(Some(attr("a")))])],
@@ -794,3 +791,6 @@ mod iteration;
 
 #[path = "object_release_operand_tests.rs"]
 mod operand;
+
+#[path = "object_release_frame_tests.rs"]
+mod frame;

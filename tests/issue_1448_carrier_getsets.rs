@@ -14,12 +14,10 @@
 //! very same script against the source imported as plain Python, so CPython
 //! is the oracle for every line of [`DRIVER`], including the
 //! reference-count deltas of the host reads. [`EXT_ONLY_DRIVER`] pins the
-//! documented differences, none of them new: the compiled reads through an
-//! `Any` operand keep one reference per call -- the `object`-parameter and
-//! attribute-read temporaries #1092 tracks, which #1442's and #1453's
-//! compiled reads keep too -- and a host store of a value the slot's type
-//! does not admit is refused with the parameter row's `TypeError` (Part 1
-//! of #1443). It also pins the residual #1448 leaves: a class with nothing
+//! documented differences, none of them new: a host store of a value the
+//! slot's type does not admit is refused with the parameter row's
+//! `TypeError` (Part 1 of #1443). The compiled reads through an `Any`
+//! operand are reference-neutral, as in CPython. It also pins the residual #1448 leaves: a class with nothing
 //! to describe still crosses on the on-demand type, whose field read raises
 //! `AttributeError`.
 //!
@@ -295,16 +293,16 @@ except AttributeError as e:
     print("bare AttributeError", e)
 "#;
 
-const EXT_ONLY_OUT: &str = "base 1000\n\
-    base 1000\n\
+const EXT_ONLY_OUT: &str = "base 0\n\
+    base 0\n\
     base TypeError Base.x() argument 1: 'str' object cannot be interpreted as an integer\n\
     base 4\n\
-    hidden 1000\n\
-    hidden 1000\n\
+    hidden 0\n\
+    hidden 0\n\
     hidden TypeError Hidden.x() argument 1: 'str' object cannot be interpreted as an integer\n\
     hidden 5\n\
-    private 1000\n\
-    private 1000\n\
+    private 0\n\
+    private 0\n\
     private TypeError _P.x() argument 1: 'str' object cannot be interpreted as an integer\n\
     private 7\n\
     bare Bare False\n\

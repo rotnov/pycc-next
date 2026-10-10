@@ -48,7 +48,7 @@ fn an_instance_argument_and_result_are_one_void_pointer_slot_each() {
         "{inc}"
     );
     assert!(
-        inc.contains("    return pycc_ext_activation_exit(pycc_ext_pack_instance(result));\n}\n\n"),
+        inc.contains("    return pycc_ext_pack_instance(result);\n}\n\n"),
         "{inc}"
     );
     assert!(!inc.contains("pycc_ext_pack_object(result)"), "{inc}");

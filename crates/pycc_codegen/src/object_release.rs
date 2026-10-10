@@ -1,11 +1,10 @@
 //! The release protocol for CPython object temporaries (Part 1 of #1092).
 //!
-//! Every shim producer -- an attribute load, a call, a subscript, a rich
-//! comparison, `type(o)`, a slice, a list display, a tuple unpack -- hands
-//! compiled code a *new* `PyObject *` reference. Before this module every
-//! one of them was leaked on purpose (the leak-only rule `docs/RUNTIME.md`
-//! recorded), which made a foreign operation inside a loop leak one
-//! reference per trip.
+//! Every `object` value compiled code holds is either a borrowed read of a
+//! slot that owns it or a reference of its own (`heap_rc`): a shim
+//! producer's result -- an attribute load, a call, a subscript, a rich
+//! comparison, `type(o)`, a slice, a list display, a tuple unpack -- a user
+//! function's result, a boxed native value, a pinned read.
 //!
 //! This module releases the references that are **temporaries**: a
 //! produced value that a borrowing operation consumes and that is bound
@@ -17,18 +16,13 @@
 //! operation, and then calls [`Held::release`], which emits one call to the
 //! shim's `pycc_ext_obj_release` (`Py_XDECREF`).
 //!
-//! **Ownership is decided by MIR shape, never by type.** [`is_produced`] is
-//! an allowlist of the shim's new-reference producers, the one
-//! classification `foreign_call::callee_is_produced` also answers through.
-//! Everything else that evaluates to a `Scalar::Object` is a *borrow* --
-//! a `Name` read of a module global or a slot, a function parameter, a
-//! `for` target, a boxed value, a user function's `object` result -- and is
-//! never released here: a function local carries a borrowed or moved
-//! pointer with no reference-count traffic of its own, and a module
-//! global's reference belongs to the global (`object_slot.rs`), so
-//! releasing one would underflow a reference the slot still uses. An
-//! unlisted node therefore defaults to the old leak, never to a
-//! use-after-free.
+//! **Ownership is decided by MIR shape.** [`is_produced`] is `heap_rc`'s
+//! "not a borrowed read" for an `object`, the one classification
+//! `foreign_call::callee_is_produced` also answers through. A borrow -- a
+//! `Name` read of a slot, an attribute of a borrowed instance -- is never
+//! released here: the slot keeps owning it. `heap_rc`'s own consumer
+//! releases (`release_scalar_if_temporary`) skip `object` values, so every
+//! temporary is released by exactly one of the two.
 //!
 //! **The exception edge.** An operand that is held while a later sibling
 //! or the consuming operation itself can fail sits on
@@ -78,25 +72,13 @@
 //! `raise <object>` is a consumer like any other, and so is the condition
 //! of a conditional expression and every operand of a truth-only `and`/`or`.
 //! A value `and`/`or` holds its left operand across that operand's truth
-//! test and releases it on the arm that discards it; the node is a
-//! producer itself only when every arm it can select is owned (a produced
-//! object or a boxed native value), and a conditional expression only when
-//! both of its arms are produced objects.
+//! test and releases it on the arm that discards it; the node's result is
+//! always owned, since a borrowed arm is retained into it (`boolop`,
+//! `if_exp`).
 //!
-//! **Bound values** are not temporaries and are never released here. Since
-//! Part 1 of #1499 a module-global `object` slot owns the reference it holds
-//! and releases its previous value on rebind -- including a module-level
-//! `for x in <object>:` target's per-trip item -- in `object_slot.rs`, not
-//! through this stack. **Not yet released** (the later parts of #1499): a
-//! produced value bound to a function local or a compiled-instance
-//! attribute, passed to a user function, returned, or boxed; the per-trip
-//! item of a comprehension over an object (an object `for` is admitted only
-//! in a module body, whose target owns its item), which the loop variable's
-//! frame slot holds without a reference
-//! of its own -- a body can hand it to a user function that stores it, so
-//! releasing it at the trip's end needs the frame-slot model (Part 2,
-//! #1502); and the result of an `and`/`or` or a conditional expression
-//! whose arms mix produced and borrowed objects.
+//! **Bound values** are not temporaries and are never released here: a
+//! slot owns what it holds and releases the replaced value on a store
+//! (`heap_rc`, `object_slot`).
 //! `hash(<object>)` is not admitted yet (C0001), so it has no site. The
 //! read of a narrowed `object` name (`MirExpr::ObjectUnbox`) needs no
 //! release: its operand is always a borrowed slot.
@@ -124,60 +106,17 @@ pub(super) struct PendingObject<'ctx> {
 #[must_use = "a held operand must be released or consumed, or the pending stack drifts"]
 pub(super) struct Held<'ctx>(Option<PendingObject<'ctx>>);
 
-/// Whether `expr` evaluates to a new reference that nothing else holds.
-///
-/// An allowlist of the shim's own producers; see the module doc for why an
-/// unlisted node is treated as a borrow. A comparison is a producer only
-/// when it is a rich comparison: `is`/`is not` answers a native `bool`.
+/// Whether `expr`, an `object`-typed operand, evaluates to a reference the
+/// consumer owns: anything that is not a borrowed read of storage
+/// (`heap_rc::is_borrowed_read`). Every `object` producer hands back an
+/// owned reference -- a shim producer, a user function's result (returns
+/// are owned by the caller), a boxed native value, a pinned read, an
+/// `and`/`or` or conditional expression (whose arms are retained into the
+/// result) -- so this is exactly `heap_rc`'s "fresh" classification, and
+/// the two cannot disagree. A non-`object` expression (an identity test's
+/// `bool`) is never produced.
 pub(super) fn is_produced(expr: &MirExpr) -> bool {
-    match expr {
-        MirExpr::ObjAttrGet { .. }
-        | MirExpr::ObjMethodCall { .. }
-        | MirExpr::ObjCall { .. }
-        | MirExpr::ObjKeywordCall(_)
-        | MirExpr::ObjSubscript { .. }
-        | MirExpr::ObjType { .. }
-        | MirExpr::ObjSlice { .. }
-        | MirExpr::ObjList { .. }
-        | MirExpr::ObjUnpack { .. }
-        | MirExpr::ObjBinOp { .. }
-        | MirExpr::ObjDisplay { .. }
-        | MirExpr::ObjUnaryOp { .. } => true,
-        MirExpr::ObjCompare { .. } => expr.ty() == pycc_mir::Ty::Object,
-        // Part 3 of #1092: the fresh CPython `list`/`set` the comprehension
-        // builds (`object_comprehension.rs`).
-        MirExpr::Comprehension(comp) => matches!(comp.source, pycc_mir::CompSource::Object(_)),
-        MirExpr::BoolOp {
-            left,
-            right,
-            ty: pycc_mir::Ty::Object,
-            truth_only: false,
-            ..
-        } => owned_arm(left) && owned_arm(right),
-        MirExpr::IfExp {
-            body,
-            orelse,
-            ty: pycc_mir::Ty::Object,
-            ..
-        } => is_produced_object(body) && is_produced_object(orelse),
-        _ => false,
-    }
-}
-
-/// Whether `operand`, an arm an `object`-valued `and`/`or` can select, is
-/// a reference the node owns: a produced object, or a native value
-/// `boolop.rs` boxes into a new reference (`boolop::needs_boxing`). An
-/// arm of any other type is never treated as owned.
-fn owned_arm(operand: &MirExpr) -> bool {
-    match operand.ty() {
-        pycc_mir::Ty::Bool | pycc_mir::Ty::Int | pycc_mir::Ty::Float | pycc_mir::Ty::Str => true,
-        _ => is_produced_object(operand),
-    }
-}
-
-/// Whether `operand` is an `object` arm evaluated to a produced reference.
-fn is_produced_object(operand: &MirExpr) -> bool {
-    operand.ty() == pycc_mir::Ty::Object && is_produced(operand_source(operand))
+    expr.ty() == pycc_mir::Ty::Object && !crate::heap_rc::is_borrowed_read(expr)
 }
 
 /// The node an operand's value really comes from:

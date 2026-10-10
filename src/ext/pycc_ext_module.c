@@ -336,44 +336,13 @@ static pycc_ext_bridge_table *pycc_ext_bridge_reserve(void)
 }
 
 /*
- * Part 1 of #1499 (#1501): the number of this artifact's compiled
- * activations that are live right now, on any thread -- every
- * `pycc_ext_exec_module` body and every generated wrapper (an export, a
- * method, a slot, `Py_tp_init`) between entering compiled code and
- * returning to CPython. The bridge watermark below is already the one
- * bracket every such frame takes before compiled code runs, so
- * `pycc_ext_bridge_mark` counts a frame in. The frame is counted out
- * separately, by `pycc_ext_activation_exit` (or `_status`) wrapped around
- * each of its returns -- not by `pycc_ext_bridge_release_to`, which runs
- * earlier (`src/ext_build_tests/bridge_watermark.rs` pins both pairings).
- * A wrapper stays counted until its return value holds its own host
- * reference and every cleanup that can run a finalizer (the watermark
- * release, a `PyBuffer_Release`) has finished: a finalizer may switch the
- * GIL, and a suspended activation counted out early would let another
- * thread's rebind release the very object this wrapper is about to return.
- *
- * A file static, so it is per artifact: each artifact compiles its own copy
- * of this shim, exactly as it owns its own module-global slots, and every
- * module object created from one shared object (the same artifact imported
- * under a second name) shares both. Read and written only with the GIL
- * held: a free-threaded build is refused at compile time, because
- * CPython's `Python.h` rejects `Py_LIMITED_API` under `Py_GIL_DISABLED`,
- * and a free-threaded interpreter loading this abi3 artifact is refused at
- * import, by the `Py_GetVersion()` guard in `PyInit_`.
- * A frame that released the GIL inside a foreign call is still counted.
- */
-static Py_ssize_t pycc_ext_live_activations = 0;
-
-/*
  * The watermark: this thread's current entry count, 0 when it has no
- * table. Taken before a frame runs compiled code, which also counts the
- * frame as a live activation (see `pycc_ext_live_activations`).
+ * table. Taken before a frame runs compiled code.
  */
 static Py_ssize_t pycc_ext_bridge_mark(void)
 {
     pycc_ext_bridge_table *table = pycc_ext_bridge_current();
 
-    pycc_ext_live_activations++;
     return table == NULL ? 0 : table->len;
 }
 
@@ -385,9 +354,7 @@ static Py_ssize_t pycc_ext_bridge_mark(void)
  * must not clobber, so it is set aside across the releases and restored
  * afterwards (a NULL round-trips). Each entry leaves the table before its
  * release, so a finalizer that bridges again (and may grow the buffer)
- * never sees a released entry. It only truncates the table: the frame is
- * still a live activation while these releases run their finalizers, and
- * is counted out later, by `pycc_ext_activation_exit`. Every entry it drops
+ * never sees a released entry. Every entry it drops
  * is an original the escaping-exception lookup has already passed over, so
  * nothing after this call -- the pack included -- needs one.
  */
@@ -407,28 +374,6 @@ static void pycc_ext_bridge_release_to(Py_ssize_t mark)
         Py_XDECREF(orig);
     }
     PyErr_SetRaisedException(saved);
-}
-
-/*
- * Counts a frame out of `pycc_ext_live_activations` and hands back its
- * return value unchanged. A generated wrapper returns through it on every
- * exit after its watermark mark, so C evaluates the argument -- the pack
- * that gives the return value its own host reference -- before the count
- * drops, and every cleanup before the `return` already ran while counted.
- * Exactly one call per `pycc_ext_bridge_mark`.
- */
-static PyObject *pycc_ext_activation_exit(PyObject *result)
-{
-    pycc_ext_live_activations--;
-    return result;
-}
-
-/* The same for a frame whose exit is a status (`Py_tp_init`, the module
- * exec slot). */
-static int pycc_ext_activation_exit_status(int status)
-{
-    pycc_ext_live_activations--;
-    return status;
 }
 
 /*
@@ -1159,13 +1104,11 @@ static PyObject *pycc_ext_pack_str(void *result)
  * object -- which is also why `fn_name` and `index` are unused, kept only so
  * every scalar unpack helper shares one call shape.
  *
- * The compiled body receives a *strong* reference it never releases:
- * RUNTIME.md's #1092 rule has a function body add no reference-count
- * traffic, and a body may store the parameter somewhere that outlives this
- * call (`self.x = x`), so a borrowed pointer would dangle once the host
- * dropped its own reference. The reference is deliberately leaked, exactly
- * as every other object the body produces is, until the object lifetime
- * model lands; nothing is owed on a later argument's bail path either.
+ * The compiled body receives a *strong* reference: its parameter slot owns
+ * it and the body releases it when the frame exits (`heap_rc` in
+ * `crates/pycc_codegen`), exactly as a `str` parameter owns the string
+ * `pycc_ext_unpack_str` builds. Nothing is owed on a later argument's bail
+ * path: the generated wrapper releases the unpacked arguments itself.
  */
 static int pycc_ext_unpack_object(PyObject *obj, const char *fn_name, Py_ssize_t index,
                                   void **out)
@@ -1179,9 +1122,11 @@ static int pycc_ext_unpack_object(PyObject *obj, const char *fn_name, Py_ssize_t
 /*
  * Packs an object-typed result (D-258 rule 5, #1397): the very `PyObject *`
  * the compiled body returned, so identity survives the round trip
- * (`f(x) is x`). Under #1092 a compiled return hands the pointer through
- * unchanged with no reference of its own, so the boundary takes the new
- * reference the CPython calling convention requires of a return value.
+ * (`f(x) is x`). A compiled return hands its caller an owned reference
+ * (`heap_rc`), which becomes the reference the CPython calling convention
+ * requires of a return value -- the packer consumes it, as
+ * `pycc_ext_pack_str` consumes its string. A caller holding a borrowed word
+ * (an attribute getter) takes a reference first.
  *
  * `result` is never NULL on this path -- the generated wrapper checks for a
  * pending pycc exception first -- but the guard, as in `pycc_ext_pack_str`,
@@ -1193,7 +1138,7 @@ static PyObject *pycc_ext_pack_object(void *result)
         PyErr_SetString(PyExc_SystemError, "object result was NULL");
         return NULL;
     }
-    return Py_NewRef((PyObject *)result);
+    return (PyObject *)result;
 }
 
 /*
@@ -1373,8 +1318,8 @@ static int pycc_ext_unpack_memoryview(PyObject *obj, const char *fn_name, Py_ssi
  * `crates/pycc_codegen/src/ext.rs`).
  *
  * The generated module body stores the returned reference in a
- * module-level global, which owns it: since Part 1 of #1499 a re-import or
- * rebind of that global releases the previous value, and the last value is
+ * module-level global, which owns it: a re-import or rebind of that
+ * global releases the previous value, and the last value is
  * never released, because the artifact has no teardown hook to release it
  * from; the module object is in the interpreter's `sys.modules` for that
  * whole lifetime anyway. `docs/RUNTIME.md` records the rule.
@@ -1533,8 +1478,7 @@ done:
  * the artifact owns; `index` is always inside `[0, nfrom)` because the
  * compiler emits both. The returned reference is owned by the module
  * global that binds it, on the same rule as `pycc_ext_obj_import`: a
- * re-import or rebind releases it (Part 1 of #1499), and the last value is
- * never released.
+ * re-import or rebind releases it, and the last value is never released.
  */
 PyObject *pycc_ext_obj_import_from(const char *module_name, const char *const *fromlist,
                                    long long nfrom, long long index, long long level)
@@ -1629,8 +1573,7 @@ done:
  * `name` is a NUL-terminated UTF-8 constant the artifact owns, always
  * holding at least one dot. The returned reference is owned by the module
  * global that binds it, on the same rule as `pycc_ext_obj_import`: a
- * re-import or rebind releases it (Part 1 of #1499), and the last value is
- * never released.
+ * re-import or rebind releases it, and the last value is never released.
  */
 PyObject *pycc_ext_obj_import_dotted(const char *name, long long bind_root)
 {
@@ -1863,6 +1806,7 @@ int pycc_ext_obj_error_bridge(void)
  * streams (including a stream the program rebinds). A raising stream call
  * is bridged into pycc's pending exception like any foreign operation.
  */
+extern void pycc_rt_object_install(void (*retain)(void *), void (*release)(void *));
 extern void pycc_rt_io_install(int (*write)(const unsigned char *, size_t),
                                void *(*read)(int), int (*flush)(void));
 
@@ -1979,9 +1923,8 @@ void pycc_ext_name_error(const unsigned char *name, long long len)
  * duration of this call: a module global or slot, or a produced temporary
  * the caller releases only after this call (Part 1 of #1092). The returned
  * reference is released by compiled code through `pycc_ext_obj_release`
- * when it is consumed unbound, is owned by a module global that binds it
- * (Part 1 of #1499), and is otherwise leaked until a later part of #1499;
- * `docs/RUNTIME.md` records all three.
+ * when it is consumed unbound, and is owned by any slot that binds it
+ * (`crates/pycc_codegen/src/heap_rc.rs`).
  *
  * Deliberately *not* translated into `pycc_rt`'s pending-exception state
  * here. The two failure protocols are kept apart; the caller's own contract
@@ -2139,9 +2082,7 @@ PyObject *pycc_ext_obj_pack_object(PyObject *value)
  * the generated code never has to. The returned reference is the only
  * thing that escapes into compiled code as an `object` value; compiled code
  * releases it through `pycc_ext_obj_release` when it is an unbound
- * temporary (Part 1 of #1092), a module global that binds it owns it
- * (Part 1 of #1499), and otherwise compiled code leaks it, on the rule
- * `docs/RUNTIME.md` records for this boundary.
+ * temporary (Part 1 of #1092), and a slot that binds it owns it.
  *
  * A packer that failed stored NULL in its slot with a CPython exception
  * already set. Scanning for that here rather than testing each packer's
@@ -2335,8 +2276,7 @@ int pycc_ext_obj_truthy(PyObject *o)
  *
  * Returns a new reference to `o`'s class (`PyObject_Type`), owned like every
  * other producer's: released when consumed unbound (Part 1 of #1092),
- * owned by a module global that binds it (Part 1 of #1499), leaked
- * otherwise.
+ * owned by a slot that binds it.
  * `o` is borrowed. `PyObject_Type` cannot fail for a live object; a NULL
  * `o` is the defence in depth `pycc_ext_obj_getattr` and `pycc_ext_obj_len`
  * document: a NULL operand comes only from a producer whose own NULL check
@@ -2352,19 +2292,17 @@ PyObject *pycc_ext_obj_type(PyObject *o)
 }
 
 /*
- * Part 1 of #1092: release one CPython object temporary
- * (`EXT_OBJ_RELEASE_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
+ * Drop one reference to a CPython object (`EXT_OBJ_RELEASE_SYMBOL` in
+ * `crates/pycc_codegen/src/ext.rs`).
  *
- * Generated code calls this exactly once for every new reference a shim
- * producer handed it that is consumed by a borrowing operation and bound
- * nowhere -- the operand of an attribute load, a call argument, a
- * discarded statement value, a condition -- after that operation, or on
- * the failure edge that leaves it (`crates/pycc_codegen/src/object_release.rs`
- * owns the classification). Since Part 1 of #1499 it also releases the
- * value a module-global `object` slot held when that slot is rebound
- * (`crates/pycc_codegen/src/object_slot.rs`). `Py_XDECREF` rather than
- * `Py_DECREF` because a producer that failed left NULL in the value the
- * failure edge releases.
+ * Every `object` slot of compiled code -- a local, a parameter, a module
+ * global, an instance attribute -- owns one reference, and every value an
+ * expression produces is either a borrowed read of such a slot or a
+ * reference of its own (`crates/pycc_codegen/src/heap_rc.rs`). Generated
+ * code calls this for a consumed temporary (`object_release.rs`), a slot's
+ * replaced value, and a frame's slots on every exit. `Py_XDECREF` rather
+ * than `Py_DECREF` because a slot never assigned, or a producer that failed,
+ * holds NULL.
  */
 void pycc_ext_obj_release(PyObject *o)
 {
@@ -2372,16 +2310,11 @@ void pycc_ext_obj_release(PyObject *o)
 }
 
 /*
- * Part 1 of #1499: take a new reference to a borrowed CPython object
- * (`EXT_OBJ_RETAIN_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
- *
- * A module-global `object` slot owns the reference it holds, so a store of
- * a *borrowed* value -- another global's (`y = x`), a parameter, `None` --
- * retains it first, and the slot's later rebind releases it without
- * freeing an object something else still names. A compiled-instance
- * attribute store of a borrowed object retains it the same way, since the
- * module global it was read from may now release it. `Py_XINCREF` mirrors
- * `pycc_ext_obj_release`'s NULL tolerance.
+ * Take a new reference to a borrowed CPython object
+ * (`EXT_OBJ_RETAIN_SYMBOL` in `crates/pycc_codegen/src/ext.rs`): before a
+ * borrowed value moves into a slot that owns it, is passed to a parameter,
+ * is returned, or is pinned across a sibling that may run code.
+ * `Py_XINCREF` mirrors `pycc_ext_obj_release`'s NULL tolerance.
  */
 void pycc_ext_obj_retain(PyObject *o)
 {
@@ -2389,21 +2322,18 @@ void pycc_ext_obj_retain(PyObject *o)
 }
 
 /*
- * Part 1 of #1499 (#1501): whether a module-global `object` rebind may
- * release the value it replaced (`EXT_OBJ_REBIND_MAY_RELEASE_SYMBOL` in
- * `crates/pycc_codegen/src/ext.rs`). Only the module-exec body rebinds a
- * global, so the rebinding exec is always one of the live activations; the
- * answer is 1 only when it is the *only* one. Any other live activation of
- * this artifact -- a nested exec (the shared object imported under a
- * second name, or re-imported from its own body), an exec on another
- * thread, or a compiled function a host entered through a wrapper, on this
- * thread or on one that released the GIL mid-call -- may hold the old value
- * borrowed, so the rebind leaks it instead, the direction that can never
- * free an object still in use.
+ * The same pair as `pycc_rt`'s object hooks (`pycc_rt_object_install`,
+ * installed by `pycc_ext_exec_module`), which free a compiled instance's
+ * `o` slots and store into them from a host setter.
  */
-int pycc_ext_obj_rebind_may_release(void)
+static void pycc_ext_obj_retain_hook(void *o)
 {
-    return pycc_ext_live_activations == 1;
+    Py_XINCREF((PyObject *)o);
+}
+
+static void pycc_ext_obj_release_hook(void *o)
+{
+    Py_XDECREF((PyObject *)o);
 }
 
 /*
@@ -2876,10 +2806,8 @@ PyObject *pycc_ext_obj_get_iter(PyObject *o)
  * a foreign failure, and fusing the two would have made every `for` loop
  * over a foreign object terminate the module body.
  *
- * Each item written through `*out` is a new reference. A module-global
- * `for` target owns it and releases it on the next trip (Part 1 of #1499);
- * a target that does not own it leaks it, which makes the leak
- * trip-count-linear rather than a fixed cost per statement (#1092).
+ * Each item written through `*out` is a new reference, which the `for`
+ * target or comprehension variable owns and releases on the next trip.
  *
  * `it` and `out` are NULL-guarded as defence in depth, exactly like
  * `pycc_ext_obj_len`'s own operand: returning -1 without setting an
@@ -2913,8 +2841,7 @@ long long pycc_ext_obj_iter_next(PyObject *it, PyObject **out)
  *
  * The result is a *new* reference -- the comprehension's value -- released
  * by its consumer when unbound and on the comprehension's failure edges
- * (Part 3 of #1092), owned by a module global that binds it (Part 1 of
- * #1499) and still leaked when bound anywhere else, or `NULL` with the
+ * (Part 3 of #1092), owned by a slot that binds it, or `NULL` with the
  * exception set.
  */
 PyObject *pycc_ext_obj_new_collection(long long kind)
@@ -3459,9 +3386,8 @@ static PyObject *pycc_ext_obj_unpack_type_name(PyTypeObject *type)
  * fetched so far are released on each failing exit; on success the
  * iterator is released and the items are owned by the returned tuple. The
  * extra item fetched to detect "too many" is released at once. The
- * returned reference is bound to the unpacking temporary: leaked in a
- * function body on the #1092 rule for a bound object value, owned and
- * released on rebind by a module-global temporary (Part 1 of #1499). `PyTuple_New` plus `PyTuple_SetItem` (which steals) build the
+ * returned reference is bound to the unpacking temporary, a slot that owns
+ * it. `PyTuple_New` plus `PyTuple_SetItem` (which steals) build the
  * fresh tuple, both in the Limited API.
  *
  * The NULL guard is the same defence in depth `pycc_ext_obj_len` documents;
@@ -3925,8 +3851,8 @@ static void pycc_ext_unhashable_slots(PyType_Slot *slots)
  * accepted copy is another never-initialized carrier.
  *
  * The original is not touched: its reference count is unchanged, as in
- * CPython. The clone is never freed (D-107, D-154), so the references it
- * holds, including the `o` slot references taken here, outlive the copy.
+ * CPython. The clone takes its own reference to every slot value, by the
+ * slot's kind (`pycc_rt_ext_instance_copy`), `o` slots included.
  */
 static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
 {
@@ -3942,7 +3868,6 @@ static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
     allocfunc tp_alloc;
     PyObject *carrier;
     int found;
-    size_t i;
 
     (void)unused;
     if (inst == NULL) {
@@ -3981,11 +3906,6 @@ static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
             PyErr_SetString(PyExc_SystemError,
                             "pycc: copy kind table does not match the instance layout");
             return NULL;
-        }
-        for (i = 0; i < nkinds; i++) {
-            if (kinds[i] == 'o') {
-                Py_XINCREF((PyObject *)(intptr_t)pycc_rt_instance_get_slot(clone, (long long)i));
-            }
         }
     }
     tp_alloc = (allocfunc)PyType_GetSlot(tp, Py_tp_alloc);
@@ -4920,6 +4840,8 @@ static int pycc_ext_exec_module(PyObject *module)
 
     /* Native stdin/stdout share CPython's `sys` streams from here on. */
     pycc_rt_io_install(pycc_ext_io_write, pycc_ext_io_read, pycc_ext_io_flush);
+    /* An instance's `o` slots are counted with CPython's own counts. */
+    pycc_rt_object_install(pycc_ext_obj_retain_hook, pycc_ext_obj_release_hook);
 
     /*
      * The synthesized user exception classes are created and published as
@@ -5048,9 +4970,7 @@ static int pycc_ext_exec_module(PyObject *module)
      * re-imports the module), that wrapper's entries survive it. When exec
      * is the outermost frame the mark is 0, which empties the table. Taken
      * immediately before the body, after every early return above, so each
-     * mark is released exactly once and this exec is counted as a live
-     * activation (`pycc_ext_live_activations`) from the body through its
-     * watermark release, whose finalizers run while it is still counted.
+     * mark is released exactly once.
      */
     mark = pycc_ext_bridge_mark();
     exec_status = pycc_ext_module_exec();
@@ -5082,10 +5002,9 @@ static int pycc_ext_exec_module(PyObject *module)
         /* Only after the lookup above: any entry still here belongs to a
          * bridged exception that was caught, or replaced by another. */
         pycc_ext_bridge_release_to(mark);
-        return pycc_ext_activation_exit_status(-1);
+        return -1;
     }
     pycc_ext_bridge_release_to(mark);
-    (void)pycc_ext_activation_exit_status(0);
     status = pycc_ext_publish_unbound_classes(module, classes);
     Py_DECREF(classes);
     if (status != 0) {

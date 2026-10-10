@@ -641,17 +641,13 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
         "    if (pycc_rt_ext_pending_type() >= 0) {{\n{}        \
          pycc_rt_instance_decref(inst);\n        \
          pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
-         return pycc_ext_activation_exit_status(-1);\n    }}\n    \
+         return -1;\n    }}\n    \
          pycc_ext_bridge_release_to(bridge_mark);\n{}",
         buffer_releases(&slots, "        "),
         buffer_releases(&slots, "    ")
     ));
     // #1435: storing the instance also links it to `self`, so `self`
     // handed out by one of its methods is this very object.
-    // Counted out last (Part 1 of #1499), after the releases above, any of
-    // which can run a finalizer: see `wrapper_for`.
-    out.push_str(
-        "    pycc_ext_carrier_bind(self, inst);\n    return pycc_ext_activation_exit_status(0);\n}\n\n",
-    );
+    out.push_str("    pycc_ext_carrier_bind(self, inst);\n    return 0;\n}\n\n");
     out
 }

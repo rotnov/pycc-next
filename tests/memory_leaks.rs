@@ -338,10 +338,7 @@ probe!(
     dict_local_rebound,
     "d: dict[str, int] = {mk(i): i, \"b\": 2}\nd[mk(i + 1)] = 3\ntotal += d[\"b\"]"
 );
-probe!(
-    dict_temporary,
-    "total += mkd(i)[\"z\"] + len(mkd(i))"
-);
+probe!(dict_temporary, "total += mkd(i)[\"z\"] + len(mkd(i))");
 probe!(
     dict_comprehension,
     "d: dict[str, int] = {mk(j): j for j in range(3)}\ntotal += len(d)"
@@ -354,7 +351,10 @@ probe!(
     dict_attribute,
     "t: Tally = Tally().add(mk(i)).add(\"x\").add(mk(i))\ntotal += len(t.counts)"
 );
-probe!(set_of_ints, "si: set[int] = {i, i + 1, 2}\ntotal += len(si)");
+probe!(
+    set_of_ints,
+    "si: set[int] = {i, i + 1, 2}\ntotal += len(si)"
+);
 probe!(
     set_of_instances,
     "hs: set[H] = {H(i), H(i), H(2)}\nhs.add(H(2))\nhs.add(H(i + 7))\ntotal += len(hs)"
@@ -494,11 +494,9 @@ fn a_hosted_loop_calling_compiled_functions_runs_in_constant_memory() {
     );
 }
 
-/// Freeing an instance leaves the CPython object of its `object` slot
-/// alive: a function local read from the slot holds the same pointer
-/// without a reference of its own, so the slot's reference is what keeps
-/// it alive once the instance is gone (the slot leaks it until object
-/// locals own their values, `docs/DEVIATIONS.md`).
+/// Freeing an instance releases the CPython object of its `object` slot,
+/// and a function local read from the slot (`y = h.o`) owns a reference of
+/// its own, so the object outlives the instance it was read from.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn a_local_read_from_an_object_slot_outlives_the_instance() {

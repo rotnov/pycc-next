@@ -13,8 +13,8 @@
 //! #1455 amendment): a class whose namespace takes part in the copy
 //! protocol, and a PEP 695 template, are refused rather than copied
 //! slot-wise; `deepcopy` and pickle stay refused; every carrier answers
-//! `hasattr(x, '__copy__')`; and a copy's object-slot reference outlives
-//! the copy, because the compiled clone is never freed (D-107, D-154).
+//! `hasattr(x, '__copy__')`. A copy's object-slot reference dies with the
+//! copy, as in CPython.
 //!
 //! The hosted test is `#[ignore]`d and contributes no line coverage; the
 //! Tier-1 `native-build-test` leg runs it with
@@ -271,7 +271,7 @@ const EXT_ONLY_OUT: &str = "TypeError cannot copy 'pycc_copy_mod.WithCopy' objec
     TypeError cannot pickle 'pycc_copy_mod.Conf' object\n\
     TypeError cannot pickle 'pycc_copy_mod.Conf' object\n\
     True False\n\
-    1\n";
+    0\n";
 
 /// What CPython answers for the lines [`EXT_ONLY_DRIVER`] pins, so the
 /// divergence is stated, not inferred: the user's `__copy__` runs (and,

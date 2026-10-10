@@ -152,7 +152,7 @@ fn a_unary_export_uses_the_singular_arity_message_and_unpacks_one_argument() {
         "{inc}"
     );
     assert!(
-        inc.contains("return pycc_ext_activation_exit(pycc_ext_pack_int(\"square\", result));"),
+        inc.contains("return pycc_ext_pack_int(\"square\", result);"),
         "{inc}"
     );
 }
@@ -256,10 +256,7 @@ fn a_float_export_carries_a_double_through_every_slot_of_the_wrapper() {
         "{inc}"
     );
     // The float packer cannot fail on a value, so it takes no function name.
-    assert!(
-        inc.contains("return pycc_ext_activation_exit(pycc_ext_pack_float(result));"),
-        "{inc}"
-    );
+    assert!(inc.contains("return pycc_ext_pack_float(result);"), "{inc}");
 }
 
 #[test]
@@ -289,10 +286,7 @@ fn a_bool_export_uses_a_one_byte_c_type_to_match_the_compiled_i8_slot() {
         inc.contains("result = ((char (*)(char))fnptr_negate)(a0);"),
         "{inc}"
     );
-    assert!(
-        inc.contains("return pycc_ext_activation_exit(pycc_ext_pack_bool(result));"),
-        "{inc}"
-    );
+    assert!(inc.contains("return pycc_ext_pack_bool(result);"), "{inc}");
     // `_Bool` is not `i1`-shaped here and `int` is four bytes: either would
     // disagree with the callee across an unchecked `void *` cast.
     assert!(!inc.contains("_Bool"), "{inc}");
@@ -323,10 +317,7 @@ fn a_none_returning_export_casts_to_void_and_declares_no_result_at_all() {
         inc.contains("((void (*)(long long))fnptr_sink)(a0);"),
         "{inc}"
     );
-    assert!(
-        inc.contains("    return pycc_ext_activation_exit(Py_NewRef(Py_None));"),
-        "{inc}"
-    );
+    assert!(inc.contains("    return Py_NewRef(Py_None);"), "{inc}");
     assert!(!inc.contains("pycc_ext_pack"), "{inc}");
 }
 
@@ -393,7 +384,7 @@ fn a_none_returning_wrapper_checks_the_exception_flag_before_returning_none() {
         .find("pycc_rt_ext_pending_type() >= 0")
         .expect("the wrapper checks the pending flag");
     let egress = inc
-        .find("return pycc_ext_activation_exit(Py_NewRef(Py_None));")
+        .find("return Py_NewRef(Py_None);")
         .expect("the wrapper returns None");
     assert!(
         check < egress,
@@ -435,10 +426,7 @@ fn a_str_export_carries_an_opaque_pointer_in_both_positions() {
     );
     // `pack_str` takes no function name: unlike `pack_int` it refuses no
     // value, so there is no message for a name to appear in.
-    assert!(
-        inc.contains("return pycc_ext_activation_exit(pycc_ext_pack_str(result));"),
-        "{inc}"
-    );
+    assert!(inc.contains("return pycc_ext_pack_str(result);"), "{inc}");
 }
 
 #[test]
@@ -486,7 +474,7 @@ fn a_str_unpack_failure_releases_every_str_argument_already_taken() {
     // search would land at offset 0 and invert the comparison.
     let call = inc.find("))fnptr_join)").expect("the indirect call");
     let egress = inc
-        .find("return pycc_ext_activation_exit(pycc_ext_pack_str(result));")
+        .find("return pycc_ext_pack_str(result);")
         .expect("the egress");
     assert!(call < egress, "{inc}");
     for (offset, _) in inc.match_indices("pycc_rt_str_decref") {
@@ -858,7 +846,7 @@ fn a_tuple_return_arrives_through_out_pointers_and_is_packed_afterwards() {
     assert!(
         inc.contains(
             "    PyTuple_SetItem(packed, 0, e0);\n    PyTuple_SetItem(packed, 1, e1);\n    \
-             return pycc_ext_activation_exit(packed);\n"
+             return packed;\n"
         ),
         "{inc}"
     );
@@ -1158,10 +1146,7 @@ fn a_tuple_carrying_export_returning_none_assigns_nothing_and_fabricates_none() 
         "{inc}"
     );
     assert!(!inc.contains("result"), "{inc}");
-    assert!(
-        inc.contains("    return pycc_ext_activation_exit(Py_NewRef(Py_None));\n"),
-        "{inc}"
-    );
+    assert!(inc.contains("    return Py_NewRef(Py_None);\n"), "{inc}");
 }
 
 #[test]
@@ -1548,7 +1533,7 @@ fn a_memoryview_parameter_is_released_on_the_success_path_and_on_the_pending_bai
     assert!(
         inc.contains(
             "    pycc_ext_bridge_release_to(bridge_mark);\n    PyBuffer_Release(&b0);\n    \
-             return pycc_ext_activation_exit(pycc_ext_pack_float(result));\n}\n\n"
+             return pycc_ext_pack_float(result);\n}\n\n"
         ),
         "{inc}"
     );
@@ -1559,7 +1544,7 @@ fn a_memoryview_parameter_is_released_on_the_success_path_and_on_the_pending_bai
         inc.contains(
             "    if (pycc_rt_ext_pending_type() >= 0) {\n        PyBuffer_Release(&b0);\n        \
              pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
-             return pycc_ext_activation_exit(NULL);\n    }\n"
+             return NULL;\n    }\n"
         ),
         "{inc}"
     );
@@ -1574,7 +1559,7 @@ fn a_none_returning_memoryview_export_releases_before_returning_none() {
     // release has to precede it rather than sit anywhere after the pack.
     let inc = memoryview_inc("consume", 1, Ty::None);
     assert!(
-        inc.contains("    PyBuffer_Release(&b0);\n    return pycc_ext_activation_exit(Py_NewRef(Py_None));\n}\n\n"),
+        inc.contains("    PyBuffer_Release(&b0);\n    return Py_NewRef(Py_None);\n}\n\n"),
         "{inc}"
     );
 }
@@ -1648,9 +1633,7 @@ fn a_mixed_str_and_memoryview_signature_owes_each_slot_its_own_cleanup() {
     // own parameter slot consumed it -- so only the buffer is released
     // there.
     assert!(
-        inc.contains(
-            "    PyBuffer_Release(&b1);\n    return pycc_ext_activation_exit(pycc_ext_pack_int("
-        ),
+        inc.contains("    PyBuffer_Release(&b1);\n    return pycc_ext_pack_int("),
         "{inc}"
     );
     assert_eq!(inc.matches("pycc_rt_str_decref(a0);").count(), 2, "{inc}");
@@ -1679,8 +1662,8 @@ fn an_export_with_no_memoryview_parameter_emits_no_release_at_all() {
     assert!(
         inc.contains(
             "    if (pycc_rt_ext_pending_type() >= 0) {\n        pycc_ext_raise_pending();\n        \
-             pycc_ext_bridge_release_to(bridge_mark);\n        return pycc_ext_activation_exit(NULL);\n    }\n    \
-             pycc_ext_bridge_release_to(bridge_mark);\n    return pycc_ext_activation_exit(pycc_ext_pack_str(result));\n"
+             pycc_ext_bridge_release_to(bridge_mark);\n        return NULL;\n    }\n    \
+             pycc_ext_bridge_release_to(bridge_mark);\n    return pycc_ext_pack_str(result);\n"
         ),
         "{inc}"
     );
@@ -2142,12 +2125,11 @@ fn a_constructible_class_gets_a_tp_init_three_slots_and_a_carrier_sized_spec() {
             "    if (pycc_rt_ext_pending_type() >= 0) {\n        \
              pycc_rt_instance_decref(inst);\n        \
              pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
-             return pycc_ext_activation_exit_status(-1);\n    }\n    pycc_ext_bridge_release_to(bridge_mark);\n    \
-             pycc_ext_carrier_bind(self, inst);\n    return pycc_ext_activation_exit_status(0);\n}\n"
+             return -1;\n    }\n    pycc_ext_bridge_release_to(bridge_mark);\n    \
+             pycc_ext_carrier_bind(self, inst);\n    return 0;\n}\n"
         ),
         "{inc}"
     );
-    super::bridge_watermark::assert_every_exit_after_the_mark_counts_out(&inc);
     assert!(
         inc.contains(
             "static PyType_Slot pycc_ext_type_slots_Grid[] = {\n    \
@@ -2251,7 +2233,7 @@ fn a_memoryview_constructor_releases_its_buffer_on_every_exit_past_the_acquire()
             "    if (pycc_rt_ext_pending_type() >= 0) {\n        PyBuffer_Release(&b0);\n        \
              pycc_rt_instance_decref(inst);\n        \
              pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
-             return pycc_ext_activation_exit_status(-1);\n    }\n    pycc_ext_bridge_release_to(bridge_mark);\n    \
+             return -1;\n    }\n    pycc_ext_bridge_release_to(bridge_mark);\n    \
              PyBuffer_Release(&b0);\n"
         ),
         "{inc}"
@@ -2417,9 +2399,7 @@ fn a_buffer_returning_export_declares_the_carrier_pointer_and_packs_it() {
     let inc = memoryview_inc("make", 0, Ty::MemoryView);
     assert!(inc.contains("    PyccExtBufferView * result;\n"), "{inc}");
     assert!(
-        inc.contains(
-            "    return pycc_ext_activation_exit(pycc_ext_pack_memoryview(result));\n}\n\n"
-        ),
+        inc.contains("    return pycc_ext_pack_memoryview(result);\n}\n\n"),
         "{inc}"
     );
     // The compiled callee's own C signature returns the carrier pointer, so
@@ -2449,14 +2429,13 @@ fn a_buffer_returning_export_releases_its_parameters_before_packing() {
     let inc = memoryview_inc("make", 1, Ty::MemoryView);
     assert!(
         inc.contains(
-            "    PyBuffer_Release(&b0);\n    if (caller_owned) {\n        return pycc_ext_activation_exit(borrowed);\n    \
-             }\n    return pycc_ext_activation_exit(pycc_ext_pack_memoryview(result));\n}\n\n"
+            "    PyBuffer_Release(&b0);\n    if (caller_owned) {\n        return borrowed;\n    \
+             }\n    return pycc_ext_pack_memoryview(result);\n}\n\n"
         ),
         "{inc}"
     );
     // Exactly two releases: the two exits reachable with the buffer held.
     assert_eq!(inc.matches("PyBuffer_Release(&b0);").count(), 2, "{inc}");
-    super::bridge_watermark::assert_every_exit_after_the_mark_counts_out(&inc);
 }
 
 /// Part 1 of #1175's substantive ordering property, and the renderer-level
@@ -2536,7 +2515,7 @@ fn a_buffer_parameter_on_a_scalar_returning_export_emits_no_caller_owned_test() 
     assert!(!inc.contains("caller_owned"), "{inc}");
     assert!(!inc.contains("borrowed"), "{inc}");
     assert!(
-        inc.contains("    PyBuffer_Release(&b0);\n    return pycc_ext_activation_exit(pycc_ext_pack_float(result));\n"),
+        inc.contains("    PyBuffer_Release(&b0);\n    return pycc_ext_pack_float(result);\n"),
         "{inc}"
     );
 }
@@ -2554,9 +2533,9 @@ fn a_buffer_returning_export_with_no_buffer_parameter_packs_as_it_always_did() {
         inc.contains(concat!(
             "    if (pycc_rt_ext_pending_type() >= 0) {\n",
             "        pycc_ext_raise_pending();\n",
-            "        pycc_ext_bridge_release_to(bridge_mark);\n        return pycc_ext_activation_exit(NULL);\n    }\n",
+            "        pycc_ext_bridge_release_to(bridge_mark);\n        return NULL;\n    }\n",
             "    pycc_ext_bridge_release_to(bridge_mark);\n",
-            "    return pycc_ext_activation_exit(pycc_ext_pack_memoryview(result));\n",
+            "    return pycc_ext_pack_memoryview(result);\n",
         )),
         "{inc}"
     );
@@ -2625,7 +2604,7 @@ fn a_buffer_returning_method_packs_through_the_same_arm() {
         }],
     );
     assert!(
-        inc.contains("    return pycc_ext_activation_exit(pycc_ext_pack_memoryview(result));\n"),
+        inc.contains("    return pycc_ext_pack_memoryview(result);\n"),
         "{inc}"
     );
 }
@@ -2803,8 +2782,9 @@ fn a_source_level_default_does_not_reach_the_generated_wrapper() {
 /// D-258 rule 5 (#1397): an `Any`/`object`/container-of-objects signature
 /// lowered from real source by the `--ext` frontend crosses as the
 /// `PyObject *` itself -- one `void *` slot, unpacked by
-/// `pycc_ext_unpack_object` and packed by `pycc_ext_pack_object` -- and the
-/// shim's two helpers take a new reference in both directions. Not
+/// `pycc_ext_unpack_object` and packed by `pycc_ext_pack_object`: the
+/// unpacked argument is a new reference the parameter slot owns, and the
+/// packer hands the host the reference the compiled return owns. Not
 /// `#[ignore]`d, so the lines reached only through the hosted tests in
 /// `tests/issue_1397_ext_any_object.rs` are also executed here.
 #[test]
@@ -2833,7 +2813,8 @@ fn an_object_signature_crosses_the_boundary_as_the_pyobject_itself() {
         "pycc_ext_unpack_object(args[0], \"ident\", 0, &a0)",
         "pycc_ext_unpack_object(args[1], \"ident\", 1, &a1)",
         "pycc_ext_unpack_object(args[0], \"keep\", 0, &a0)",
-        "return pycc_ext_activation_exit(pycc_ext_pack_object(result));",
+        "Py_DECREF((PyObject *)a0);",
+        "return pycc_ext_pack_object(result);",
     ] {
         assert!(inc.contains(needle), "{needle}\n{inc}");
     }
@@ -2845,7 +2826,7 @@ fn an_object_signature_crosses_the_boundary_as_the_pyobject_itself() {
         ),
         (
             "static PyObject *pycc_ext_pack_object(void *result)",
-            "return Py_NewRef((PyObject *)result);",
+            "return (PyObject *)result;",
         ),
     ] {
         let body = &shim[shim.find(signature).expect(signature)..];

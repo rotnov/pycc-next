@@ -373,7 +373,11 @@ fn pack_slot_word(class: &str, name: &str, ty: &Ty) -> String {
             .to_string(),
         // `collect_getsets` admits exactly the `carried` types, so the
         // remaining one is the opaque object.
-        _ => "    return pycc_ext_pack_object((void *)(intptr_t)word);\n".to_string(),
+        // The packer consumes a reference, and the slot keeps owning its
+        // own, so one is taken first.
+        _ => "    Py_XINCREF((PyObject *)(intptr_t)word);\n    \
+              return pycc_ext_pack_object((void *)(intptr_t)word);\n"
+            .to_string(),
     }
 }
 
