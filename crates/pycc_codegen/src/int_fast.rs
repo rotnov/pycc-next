@@ -24,7 +24,7 @@ use super::RtFns;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::values::{FloatValue, FunctionValue, InstructionValue, IntValue};
+use inkwell::values::{BasicValue as _, FloatValue, FunctionValue, InstructionValue, IntValue};
 use inkwell::{FloatPredicate, IntPredicate};
 use pycc_mir::BinOpKind;
 
@@ -184,6 +184,12 @@ fn emit_guarded<'ctx>(
     builder.position_at_end(slow_bb);
     let slow_value = call_i64(builder, slow_fn, &[l, r], "int_slow_call");
     release_owned(context, builder, rt, owned);
+    if slow_fn_raises(rt, slow_fn) {
+        // Only the runtime path can raise (a zero divisor, a negative shift
+        // count), so the pending-exception guard lives here and `emit_expr`
+        // adds none after the node (`expression_can_set_exception`).
+        crate::exception::guard_statement_effects(context, builder, rt);
+    }
     let slow_end = builder.get_insert_block().expect("positioned");
     builder
         .build_unconditional_branch(join_bb)
@@ -195,6 +201,13 @@ fn emit_guarded<'ctx>(
         .expect("build_phi in a fresh block");
     phi.add_incoming(&[(&fast_value, fast_end), (&slow_value, slow_end)]);
     phi.as_basic_value().into_int_value()
+}
+
+/// Whether `slow_fn` is one of the runtime `int` operations that can raise:
+/// `//` and `%` (zero divisor) and `<<`/`>>` (negative count, or a result
+/// too large). These guard on their own cold path.
+fn slow_fn_raises<'ctx>(rt: &RtFns<'ctx>, slow_fn: FunctionValue<'ctx>) -> bool {
+    [rt.int_floordiv, rt.int_floormod, rt.int_lshift, rt.int_rshift].contains(&slow_fn)
 }
 
 fn release_owned<'ctx>(
@@ -618,10 +631,15 @@ pub(super) fn emit_exception_pending<'ctx>(
             .expect_basic("pycc_rt_exception_active returns i8")
             .into_int_value();
     }
-    builder
+    let flag = builder
         .build_load(context.i8_type(), rt.exc_pending.as_pointer_value(), name)
-        .expect("build_load should not fail for the pending-exception flag")
-        .into_int_value()
+        .expect("build_load should not fail for the pending-exception flag");
+    crate::tbaa::tag(
+        context,
+        flag.as_instruction_value().expect("a load is an instruction"),
+        crate::tbaa::EXC_PENDING,
+    );
+    flag.into_int_value()
 }
 
 /// `int op float`, exactly (CPython does not round the int). A smallint

@@ -17,6 +17,7 @@
 use super::*;
 use crate::attr_slot::{scalar_to_slot_word, slot_word_to_scalar};
 use crate::exception::jump_to_exception_target;
+use inkwell::values::BasicValue as _;
 use pycc_mir::Ty;
 
 /// `pycc_rt::LIST_KIND_*` for a list whose elements are `elem`.
@@ -197,14 +198,25 @@ pub(crate) fn build_list_len<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
     list: PointerValue<'ctx>,
 ) -> IntValue<'ctx> {
-    builder
+    let len = builder
         .build_load(
             context.i64_type(),
             field_ptr(context, builder, list, 0),
             "list_len",
         )
-        .expect("build_load should not fail for the list header")
-        .into_int_value()
+        .expect("build_load should not fail for the list header");
+    tag(context, len.as_instruction_value(), crate::tbaa::list_field_name(0));
+    len.into_int_value()
+}
+
+/// Tags a list access for `tbaa` (see `crate::tbaa`).
+fn tag<'ctx>(
+    context: &'ctx Context,
+    instruction: Option<inkwell::values::InstructionValue<'ctx>>,
+    name: &str,
+) {
+    let instruction = instruction.expect("a load or store is an instruction");
+    crate::tbaa::tag(context, instruction, name);
 }
 
 /// The in-memory element type of a list of `elem`: a byte for `list[bool]`
@@ -228,8 +240,9 @@ fn element_ptr<'ctx>(
     let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
     let data = builder
         .build_load(ptr_type, field_ptr(context, builder, list, 1), "list_data")
-        .expect("build_load should not fail for the list header")
-        .into_pointer_value();
+        .expect("build_load should not fail for the list header");
+    tag(context, data.as_instruction_value(), crate::tbaa::list_field_name(1));
+    let data = data.into_pointer_value();
     unsafe {
         builder
             .build_in_bounds_gep(storage_type(context, elem), data, &[position], "list_slot")
@@ -246,14 +259,20 @@ pub(crate) fn build_list_get_unchecked<'ctx>(
     list: PointerValue<'ctx>,
     position: IntValue<'ctx>,
 ) -> IntValue<'ctx> {
+    let storage = storage_type(context, elem);
     let stored = builder
         .build_load(
-            storage_type(context, elem),
+            storage,
             element_ptr(context, builder, elem, list, position),
             "list_word",
         )
-        .expect("build_load should not fail for a list element")
-        .into_int_value();
+        .expect("build_load should not fail for a list element");
+    tag(
+        context,
+        stored.as_instruction_value(),
+        crate::tbaa::list_element_name(storage.get_bit_width()),
+    );
+    let stored = stored.into_int_value();
     builder
         .build_int_z_extend_or_bit_cast(stored, context.i64_type(), "list_word_ext")
         .expect("zext of a stored element")
@@ -343,12 +362,18 @@ pub(crate) fn build_list_set<'ctx>(
         return;
     }
     let position = resolve_index(context, builder, rt, list, index, true);
+    let storage = storage_type(context, elem);
     let stored = builder
-        .build_int_truncate_or_bit_cast(word, storage_type(context, elem), "list_store")
+        .build_int_truncate_or_bit_cast(word, storage, "list_store")
         .expect("trunc of an element word");
-    builder
+    let store = builder
         .build_store(element_ptr(context, builder, elem, list, position), stored)
         .expect("build_store should not fail for a list element");
+    tag(
+        context,
+        Some(store),
+        crate::tbaa::list_element_name(storage.get_bit_width()),
+    );
 }
 
 /// `if xs:` -- a list is truthy exactly when it is non-empty.

@@ -268,6 +268,47 @@ def bool_lists() -> None:
     print(empty, [True] * 0, [False] * -2)
 
 
+def floor_mix(a: int, b: int) -> int:
+    return (a + b) * (a + b + 1) // b + a % b
+
+
+def inverse(x: float) -> float:
+    return 1.0 / x
+
+
+def shifted(a: int, n: int) -> int:
+    return (a << n) >> 1
+
+
+def leaves() -> None:
+    total = 0.0
+    for i in range(1, 30):
+        for j in range(1, 30):
+            total += inverse(float(floor_mix(i, j)))
+    print(total * 1000.0)
+    print(floor_mix(-7, 3), floor_mix(2**70, 3), shifted(3, 70), shifted(-5, 2))
+    for b in range(-1, 2):
+        try:
+            print(floor_mix(5, b))
+        except ZeroDivisionError as e:
+            print("ZeroDivisionError", e)
+    try:
+        print(inverse(0.0))
+    except ZeroDivisionError as e:
+        print("ZeroDivisionError", e)
+    try:
+        print(shifted(1, -1))
+    except ValueError as e:
+        print("ValueError", e)
+    n = 0
+    for k in range(5):
+        try:
+            n += 10 // (k - 2)
+        except ZeroDivisionError:
+            n += 1000
+    print(n)
+
+
 def first_over(limit: int, n: int) -> int:
     for i in range(n):
         if i * i > limit:
@@ -280,3 +321,4 @@ divisions()
 powers()
 ranges()
 bool_lists()
+leaves()

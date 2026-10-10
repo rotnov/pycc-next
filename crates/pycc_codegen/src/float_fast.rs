@@ -113,9 +113,19 @@ pub(super) fn emit_div<'ctx>(
     let nonzero = builder
         .build_float_compare(FloatPredicate::UNE, r, zero, "divisor_nonzero")
         .expect("fcmp");
-    emit_guarded(context, builder, rt, rt.float_div, l, r, nonzero, |b| {
-        (b.build_float_div(l, r, "fdiv").expect("fdiv"), None)
-    })
+    let function = current_function(builder);
+    let fast_bb = context.append_basic_block(function, "fdiv_fast");
+    let zero_bb = context.append_basic_block(function, "fdiv_by_zero");
+    likely_branch(context, builder, nonzero, fast_bb, zero_bb);
+    // A zero divisor always raises `ZeroDivisionError`, so this cold path
+    // leaves for the exception target and never rejoins the hot path.
+    builder.position_at_end(zero_bb);
+    builder
+        .build_call(rt.float_div, &[l.into(), r.into()], "float_div_raise")
+        .expect("build_call should not fail for pycc_rt_float_div");
+    crate::exception::jump_to_exception_target(context, builder, rt);
+    builder.position_at_end(fast_bb);
+    builder.build_float_div(l, r, "fdiv").expect("fdiv")
 }
 
 /// Whether the target's libm is glibc (`None` is the host): the only libm
@@ -229,7 +239,9 @@ fn emit_pow_half<'ctx>(
 }
 
 /// A direct call of libm `pow`, marked `nobuiltin` so LLVM keeps it a call
-/// (see this module's doc comment).
+/// (see this module's doc comment), and `memory(none)`: the only memory it
+/// writes is `errno`, which compiled code never reads, so loads stay
+/// reusable across it.
 fn emit_libm_pow<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -240,9 +252,10 @@ fn emit_libm_pow<'ctx>(
     let call = builder
         .build_call(rt.libm_pow, &[l.into(), r.into()], "pow")
         .expect("build_call should not fail for libm pow");
-    let nobuiltin =
-        context.create_enum_attribute(Attribute::get_named_enum_kind_id("nobuiltin"), 0);
-    call.add_attribute(AttributeLoc::Function, nobuiltin);
+    for (name, value) in [("nobuiltin", 0), ("memory", 0), ("nounwind", 0), ("willreturn", 0)] {
+        let attribute = context.create_enum_attribute(Attribute::get_named_enum_kind_id(name), value);
+        call.add_attribute(AttributeLoc::Function, attribute);
+    }
     call.try_as_basic_value()
         .expect_basic("pow returns f64")
         .into_float_value()
@@ -264,27 +277,37 @@ pub(super) fn emit_pow<'ctx>(
 ) -> FloatValue<'ctx> {
     if exponent_literal == Some(0.5) && rt.glibc_libm.get() {
         let f64_type = context.f64_type();
-        // Outside `2^-900..2^1000` the runtime computes the same `pow`.
-        let low = builder
-            .build_float_compare(
-                FloatPredicate::OGT,
-                l,
-                f64_type.const_float(2f64.powi(-900)),
-                "base_low",
-            )
-            .expect("fcmp");
-        let high = builder
-            .build_float_compare(
-                FloatPredicate::OLT,
-                l,
-                f64_type.const_float(2f64.powi(1000)),
-                "base_high",
-            )
-            .expect("fcmp");
-        let fast_ok = builder.build_and(low, high, "pow_half_ok").expect("and");
-        // The square root of such a base never overflows.
+        let cmp = |pred, bound: f64, name| {
+            builder
+                .build_float_compare(pred, l, f64_type.const_float(bound), name)
+                .expect("fcmp")
+        };
+        // A positive finite base raises nothing, and its square root never
+        // overflows; `2^-900..2^1000` is where `emit_pow_half`'s residual
+        // computation is exact, libm `pow` is called directly elsewhere.
+        let positive = cmp(FloatPredicate::OGT, 0.0, "base_pos");
+        let finite = cmp(FloatPredicate::OLT, f64::INFINITY, "base_fin");
+        let fast_ok = builder.build_and(positive, finite, "pow_half_ok").expect("and");
+        let low = cmp(FloatPredicate::OGT, 2f64.powi(-900), "base_low");
+        let high = cmp(FloatPredicate::OLT, 2f64.powi(1000), "base_high");
+        let in_range = builder.build_and(low, high, "pow_half_range").expect("and");
         return emit_guarded(context, builder, rt, rt.float_pow, l, r, fast_ok, |b| {
-            (emit_pow_half(context, b, rt, l, r), None)
+            let function = current_function(b);
+            let proof_bb = context.append_basic_block(function, "pow_half_proof");
+            let libm_bb = context.append_basic_block(function, "pow_half_far");
+            let done_bb = context.append_basic_block(function, "pow_half_join");
+            likely_branch(context, b, in_range, proof_bb, libm_bb);
+            b.position_at_end(proof_bb);
+            let proven = emit_pow_half(context, b, rt, l, r);
+            let proof_end = b.get_insert_block().expect("positioned");
+            b.build_unconditional_branch(done_bb).expect("branch");
+            b.position_at_end(libm_bb);
+            let far = emit_libm_pow(context, b, rt, l, r);
+            b.build_unconditional_branch(done_bb).expect("branch");
+            b.position_at_end(done_bb);
+            let phi = b.build_phi(f64_type, "pow_half_value").expect("phi");
+            phi.add_incoming(&[(&proven, proof_end), (&far, libm_bb)]);
+            (phi.as_basic_value().into_float_value(), None)
         });
     }
     let f64_type = context.f64_type();

@@ -225,6 +225,14 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         {
             false
         }
+        // An `int` `//`, `%`, `<<` or `>>` raises only on its runtime path,
+        // which guards itself (`int_fast::emit_guarded`); `int ** int` is
+        // always a runtime call and is guarded here.
+        MirExpr::BinOp {
+            op,
+            ty: pycc_mir::Ty::Int,
+            ..
+        } => *op == pycc_mir::BinOpKind::Pow,
         MirExpr::BinOp {
             op, left, right, ty, ..
         } => {
@@ -1583,19 +1591,18 @@ mod tests {
             pycc_mir::BinOpKind::BitAnd,
             pycc_mir::BinOpKind::BitOr,
             pycc_mir::BinOpKind::BitXor,
-        ] {
-            assert!(!expression_can_set_exception(&int_binop(op)));
-        }
-        for op in [
-            pycc_mir::BinOpKind::Div,
+            // These raise, but only on the runtime path, which guards
+            // itself (`int_fast::emit_guarded`).
             pycc_mir::BinOpKind::FloorDiv,
             pycc_mir::BinOpKind::Mod,
-            pycc_mir::BinOpKind::Pow,
             pycc_mir::BinOpKind::LShift,
             pycc_mir::BinOpKind::RShift,
         ] {
-            assert!(expression_can_set_exception(&int_binop(op)));
+            assert!(!expression_can_set_exception(&int_binop(op)));
         }
+        assert!(expression_can_set_exception(&int_binop(
+            pycc_mir::BinOpKind::Pow
+        )));
         // A `float` `+ - * / **` guards itself (`float_fast`): an `int`
         // operand's overflowing conversion, a zero divisor and `pow`'s
         // errors are all handled on cold paths it emits. `//` and `%` are

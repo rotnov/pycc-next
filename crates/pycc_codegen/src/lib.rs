@@ -47,6 +47,8 @@ mod list;
 mod int_fast;
 mod float_fast;
 mod for_range_fast;
+mod leaf_inline;
+mod tbaa;
 use int_const::{emit_int_constant, tag_smallint_const};
 mod exception_isinstance;
 mod exception_render;
@@ -6057,7 +6059,7 @@ fn compile_to_object_with_observer(
             name,
             params,
             return_ty,
-            ..
+            body,
         } = item
         {
             let mut param_types: Vec<inkwell::types::BasicMetadataTypeEnum> = params
@@ -6096,6 +6098,9 @@ fn compile_to_object_with_observer(
             };
             *count += 1;
             let f = module.add_function(&mangled, fn_type, None);
+            if leaf_inline::is_tiny_leaf(body) {
+                leaf_inline::mark(&context, f);
+            }
             function_defs_in_order.push((name.as_str(), f));
             // Only insert into user_functions on the first definition;
             // subsequent definitions update fn_ptr_global at their source

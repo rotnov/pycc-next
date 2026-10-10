@@ -10,7 +10,7 @@ use crate::Scalar;
 use crate::bigint_rc::{BigIntRefcount, emit_bigint_refcount_call};
 use crate::rt_fns::RtFns;
 use inkwell::context::Context;
-use inkwell::values::{IntValue, PointerValue};
+use inkwell::values::{BasicValue, IntValue, PointerValue};
 
 /// The layout descriptor `pycc_rt_instance_new` takes (#1388): `class_name`
 /// then each of `slot_names`, NUL-separated, as a private constant interned
@@ -240,17 +240,29 @@ pub(crate) fn emit_slot_load<'ctx>(
     slot: u64,
 ) -> IntValue<'ctx> {
     let ptr = slot_field_ptr(context, builder, base, slot, 0);
-    builder
+    let word = builder
         .build_load(context.i64_type(), ptr, "slot_word")
         .expect("build_load should not fail for an i64 slot word")
-        .into_int_value()
+        .into_int_value();
+    tag_access(context, word.as_instruction_value(), slot, false);
+    word
+}
+
+/// Tags a slot access for `tbaa` (slot `k` never aliases slot `m != k`).
+fn tag_access<'ctx>(
+    context: &'ctx Context,
+    instruction: Option<inkwell::values::InstructionValue<'ctx>>,
+    slot: u64,
+    flag: bool,
+) {
+    let instruction = instruction.expect("a load or store is an instruction");
+    crate::tbaa::tag(context, instruction, &crate::tbaa::slot_name(slot, flag));
 }
 
 /// `base.attr`'s read: the slot's word when its assigned flag is set,
 /// otherwise the cold call to `pycc_rt_instance_get_slot_checked`, which
-/// raises CPython's `AttributeError` (#1388), followed by the
-/// pending-exception guard. The guard lives on that cold path only, so the
-/// common read is two loads and a predictable branch;
+/// raises CPython's `AttributeError` (#1388), and a jump to the exception
+/// target. The common read is two loads and a predictable branch;
 /// `exception::expression_can_set_exception` therefore leaves `AttrGet`
 /// out of the nodes `emit_expr` guards after the fact.
 pub(crate) fn emit_slot_load_checked<'ctx>(
@@ -267,12 +279,12 @@ pub(crate) fn emit_slot_load_checked<'ctx>(
         .expect("an attribute read is emitted inside a function body");
     let fast_bb = context.append_basic_block(function, "attr_assigned");
     let slow_bb = context.append_basic_block(function, "attr_unassigned");
-    let join_bb = context.append_basic_block(function, "attr_join");
     let flag_ptr = slot_field_ptr(context, builder, base, slot, SLOT_ASSIGNED_OFFSET);
     let flag = builder
         .build_load(i64_type, flag_ptr, "slot_assigned")
         .expect("build_load should not fail for an i64 flag")
         .into_int_value();
+    tag_access(context, flag.as_instruction_value(), slot, true);
     let assigned = builder
         .build_int_compare(
             inkwell::IntPredicate::NE,
@@ -283,31 +295,21 @@ pub(crate) fn emit_slot_load_checked<'ctx>(
         .expect("icmp of two i64");
     crate::int_fast::likely_branch(context, builder, assigned, fast_bb, slow_bb);
 
-    builder.position_at_end(fast_bb);
-    let fast_value = emit_slot_load(context, builder, base, slot);
-    builder.build_unconditional_branch(join_bb).expect("branch");
-
+    // An unassigned slot always raises, so the cold path leaves for the
+    // exception target and never rejoins: the hot path after the read sees
+    // no opaque call, which keeps LLVM free to reuse earlier loads.
     builder.position_at_end(slow_bb);
-    let slow_value = builder
+    builder
         .build_call(
             rt.instance_get_slot_checked,
             &[base.into(), i64_type.const_int(slot, false).into()],
             "instance_get_slot",
         )
-        .expect("build_call should not fail for a well-formed attribute read")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_instance_get_slot_checked returns a non-void i64")
-        .into_int_value();
-    crate::exception::guard_statement_effects(context, builder, rt);
-    let slow_end = builder.get_insert_block().expect("positioned");
-    builder.build_unconditional_branch(join_bb).expect("branch");
+        .expect("build_call should not fail for a well-formed attribute read");
+    crate::exception::jump_to_exception_target(context, builder, rt);
 
-    builder.position_at_end(join_bb);
-    let phi = builder
-        .build_phi(i64_type, "attr_word")
-        .expect("build_phi in a fresh block");
-    phi.add_incoming(&[(&fast_value, fast_bb), (&slow_value, slow_end)]);
-    phi.as_basic_value().into_int_value()
+    builder.position_at_end(fast_bb);
+    emit_slot_load(context, builder, base, slot)
 }
 
 /// `base.attr = word`'s store: the word, then the assigned flag.
@@ -320,13 +322,15 @@ pub(crate) fn emit_slot_store<'ctx>(
 ) {
     let i64_type = context.i64_type();
     let word_ptr = slot_field_ptr(context, builder, base, slot, 0);
-    builder
+    let store = builder
         .build_store(word_ptr, word)
         .expect("build_store should not fail for an i64 slot word");
+    tag_access(context, Some(store), slot, false);
     let flag_ptr = slot_field_ptr(context, builder, base, slot, SLOT_ASSIGNED_OFFSET);
-    builder
+    let store = builder
         .build_store(flag_ptr, i64_type.const_int(1, false))
         .expect("build_store should not fail for an i64 flag");
+    tag_access(context, Some(store), slot, true);
 }
 
 /// Mirror of [`crate::decref_str_slot_before_store`] for an instance attribute slot
@@ -486,6 +490,21 @@ mod tests {
             .find(|function| function.contains("attr_container_ptrtoint"))
             .expect("the container slot store should be emitted")
             .to_string()
+    }
+
+    /// Slot loads and stores are inline and carry their per-slot `!tbaa`
+    /// tag (`crate::tbaa`), with no runtime accessor call on the fast path.
+    #[test]
+    fn slot_accesses_are_inline_and_tbaa_tagged() {
+        let ir = container_slot_function_ir();
+        assert!(!ir.contains("@pycc_rt_instance_set_slot("), "{ir}");
+        assert!(ir.contains("store i64 1, ptr"), "{ir}");
+        assert!(
+            ir.lines()
+                .filter(|line| line.contains("load i64") || line.contains("store i64"))
+                .all(|line| line.contains("!tbaa")),
+            "{ir}"
+        );
     }
 
     #[test]
