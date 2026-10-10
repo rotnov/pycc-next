@@ -209,7 +209,10 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
     } else {
         (target, iter)
     };
-    let iter = if is_name(&iter) || is_call_to(&iter, "range").is_some() {
+    let iter = if is_name(&iter)
+        || is_call_to(&iter, "range").is_some()
+        || reaches_through_import(&iter, fresh)
+    {
         iter
     } else {
         hoist(iter, fresh, &mut pre, range)
@@ -227,6 +230,27 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
         expand_stmt(stmt, fresh, out, false);
     }
     out.push(loop_stmt);
+}
+
+/// `m.attr` / `m.f(...)` (or deeper) rooted at an imported name: the
+/// shapes `HirStmt::ForObject` iterates as a CPython object.
+fn reaches_through_import(expr: &Expr, fresh: &Fresh) -> bool {
+    let attr = match expr {
+        Expr::Attribute(attr) => attr,
+        Expr::Call(call) => match call.func.as_ref() {
+            Expr::Attribute(attr) => attr,
+            _ => return false,
+        },
+        _ => return false,
+    };
+    let mut root = attr.value.as_ref();
+    loop {
+        match root {
+            Expr::Attribute(inner) => root = inner.value.as_ref(),
+            Expr::Name(name) => return fresh.import_roots.contains(name.id.as_str()),
+            _ => return false,
+        }
+    }
 }
 
 /// `a, b[i] = v` -> `a, t = v; b[i] = t`; `x.y[i] = v` -> `t = x.y;

@@ -8846,17 +8846,10 @@ fn a_bool_dict_value_round_trips_with_identity_preserved() {
 }
 
 #[test]
-#[should_panic(expected = "using print()'s result as a nested expression is not supported yet")]
-fn nesting_a_print_call_inside_another_expression_is_not_yet_supported() {
-    // `x = print(1)` remains D-072's explicit exception: ordinary
-    // materializable `None` results now support assignment storage,
-    // but `print()`'s own result is still rejected as a nested
-    // expression. `emit_stmt`'s own `print`-call arm builds a
-    // `pycc_rt_int_print` call directly and never routes the outer
-    // `print(...)` itself through `emit_expr` -- so the only way a
-    // `print` call can reach `emit_expr`'s `Call` arm at all is nested
-    // one level deeper than that, inside another expression, exercised
-    // here via `Assign`.
+fn a_print_call_used_as_a_value_prints_and_yields_none() {
+    // `x = print(1)`: the call prints, and its value is `None`, as in
+    // CPython. (A `print` statement goes through `emit_stmt`'s own arm;
+    // only a `print` nested in another expression reaches `emit_expr`.)
     let mir = MirModule {
         items: vec![MirItem::TopLevelStmt(MirStmt::Assign {
             target: "x".to_string(),
@@ -8868,10 +8861,14 @@ fn nesting_a_print_call_inside_another_expression_is_not_yet_supported() {
         })],
         class_defs: Vec::new(),
     };
-    let dir = pycc_scratch::ScratchDir::new("print_result_nested_panics")
+    let dir = pycc_scratch::ScratchDir::new("print_result_nested")
         .expect("failed to create scratch dir");
-    let obj_path = dir.join("print_result_nested_panics.o");
-    let _ = compile_to_object(&mir, &obj_path, None, false);
+    let obj_path = dir.join("print_result_nested.o");
+    compile_to_object(&mir, &obj_path, None, false).expect("codegen should succeed");
+    let bin_path = dir.join("print_result_nested");
+    link_object_with_runtime(&obj_path, &bin_path);
+    let output = Command::new(&bin_path).output().expect("binary should run");
+    assert_eq!(output.stdout, b"1\n");
 }
 
 #[test]

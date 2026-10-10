@@ -42,6 +42,12 @@ pub const INFER_MARKER: &str = "__pycc_infer__";
 #[derive(Default)]
 pub(crate) struct Fresh {
     next: std::cell::Cell<usize>,
+    /// Names bound by an `import` other than `sys`: a value reached
+    /// through one (`m.attr`, `m.f()`) may be a CPython object, so a loop
+    /// over it is left to `for x in o.attr` / `o.method()` object iteration
+    /// (`HirStmt::ForObject`), which releases the iterable as CPython does,
+    /// instead of being bound to a module-lifetime temporary.
+    pub(crate) import_roots: std::collections::HashSet<String>,
 }
 
 impl Fresh {
@@ -54,7 +60,10 @@ impl Fresh {
 
 /// Rewrites `module` in place (see the module documentation).
 pub fn desugar(module: &mut ModModule) {
-    let fresh = Fresh::default();
+    let fresh = Fresh {
+        import_roots: import_roots(&module.body),
+        ..Fresh::default()
+    };
     let sys = aliases::SysNames::collect(&module.body);
     aliases::module_level_defs(&mut module.body, &sys);
     exprs::rewrite_exprs(&mut module.body, &sys, &fresh);
@@ -62,6 +71,29 @@ pub fn desugar(module: &mut ModModule) {
     stmts::expand_body(&mut body, &fresh, true);
     aliases::drop_unused_sys_imports(&mut body, &sys);
     module.body = body.into();
+}
+
+/// Every top-level name an `import` binds, `sys` excepted.
+fn import_roots(body: &[Stmt]) -> std::collections::HashSet<String> {
+    let mut roots = std::collections::HashSet::new();
+    for stmt in body {
+        match stmt {
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                    roots.insert(bound.split('.').next().unwrap_or("").to_string());
+                }
+            }
+            Stmt::ImportFrom(import) if import.module.as_deref() != Some("sys") => {
+                for alias in &import.names {
+                    roots.insert(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    roots.remove("sys");
+    roots
 }
 
 /// Whether `expr` is a bare name.
