@@ -48,7 +48,7 @@ impl ObjBuiltinClass {
     }
 
     /// The selector `pycc_ext_obj_isinstance` reads to pick the builtin
-    /// type object (`src/ext/pycc_ext_module.c`).
+    /// type object (`src/ext/module/`).
     pub fn shim_code(self) -> u64 {
         match self {
             Self::Int => 0,

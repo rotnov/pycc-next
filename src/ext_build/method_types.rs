@@ -55,7 +55,7 @@ pub(crate) const PUBLISH_CLASS_SLOT_DECL: &str =
 pub(crate) const PUBLISH_CLASS_NAMES: &str = "pycc_ext_publish_class_names";
 
 /// The shim's own answer for a class name no published type descends from
-/// (`src/ext/pycc_ext_module.c`): it consults the object's `__class__` as
+/// (`src/ext/module/`): it consults the object's `__class__` as
 /// CPython's `isinstance` does before answering False, so a raising
 /// `__class__` raises here too. Defined in the shim above the point the
 /// companion is included at, so it needs no forward declaration; the shim

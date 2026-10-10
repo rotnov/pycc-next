@@ -104,7 +104,7 @@ pub(super) fn expect_object_pointer(scalar: Scalar<'_>) -> PointerValue<'_> {
 /// The nested case (`a.b.c` nests this node inside itself) is answered
 /// twice over: this check stops the outer load from ever seeing the inner
 /// `NULL`, and the shim's own NULL-`obj` guard in
-/// `src/ext/pycc_ext_module.c` still holds the line for any caller that
+/// `src/ext/module/` still holds the line for any caller that
 /// reaches it another way.
 pub(super) fn emit<'ctx>(
     context: &'ctx Context,
@@ -228,7 +228,7 @@ mod tests {
     ///
     /// The symbol is asserted through [`EXT_OBJ_GETATTR_SYMBOL`] rather
     /// than against a literal on purpose: the C definition in
-    /// `src/ext/pycc_ext_module.c` and this declaration are resolved
+    /// `src/ext/module/` and this declaration are resolved
     /// lazily at load time, so a literal spelled twice would be a crash at
     /// first call rather than a link error, and a test that spelled it a
     /// third time would agree with neither.

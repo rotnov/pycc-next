@@ -23,7 +23,7 @@ pub(crate) fn assert_overflow_raised(context: &str) {
 
 /// Part 2 of #1027: the Rust `PyccExtBufferView` is the same two words,
 /// in the same order and at the same offsets, as the C struct in
-/// `src/ext/pycc_ext_module.c` -- `{ void *ptr; long long len; }`. A
+/// `src/ext/module/` -- `{ void *ptr; long long len; }`. A
 /// silent disagreement here would misread every element, so it is pinned
 /// rather than assumed.
 #[test]

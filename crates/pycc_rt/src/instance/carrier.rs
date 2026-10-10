@@ -2,7 +2,7 @@
 //! which host-side carrier object currently stands for it.
 //!
 //! An instance passed to a call on a CPython object crosses into the host
-//! as a `PyccExtInstance` carrier (`src/ext/pycc_ext_module.c`). The shim
+//! as a `PyccExtInstance` carrier (`src/ext/module/`). The shim
 //! needs two facts that only this crate holds:
 //!
 //! * **The class.** Field 0 of the layout descriptor (#1388) is the class

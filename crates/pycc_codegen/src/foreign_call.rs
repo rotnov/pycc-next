@@ -38,7 +38,7 @@
 //! is a second NULL check and a second failure edge. The bound method still
 //! never becomes a pycc value -- it is an LLVM temporary that
 //! `pycc_ext_obj_call` releases -- so it does not join the boundary's
-//! leaked set. `src/ext/pycc_ext_module.c`'s own comment on
+//! leaked set. `src/ext/module/`'s own comment on
 //! `pycc_ext_obj_call` carries the full rationale.
 //!
 //! **Ownership** (`docs/RUNTIME.md`). The packers *borrow* their pycc-side

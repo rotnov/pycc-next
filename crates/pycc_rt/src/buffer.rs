@@ -6,7 +6,7 @@ use super::*;
 /// The two words a `pycc build --ext` wrapper is allowed to carry across the
 /// boundary for a `memoryview` parameter (Part 2 of #1027).
 ///
-/// This is the Rust view of `PyccExtBufferView` in `src/ext/pycc_ext_module.c`
+/// This is the Rust view of `PyccExtBufferView` in `src/ext/module/`
 /// -- `{ void *ptr; long long len; }` -- and the layout must agree field for
 /// field, which `ext_buffer_view_layout_matches_the_c_struct` below pins.
 /// `len` is a *copy* of the exporter's `shape[0]`, taken while the buffer is

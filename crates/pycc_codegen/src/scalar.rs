@@ -170,7 +170,7 @@ pub(crate) enum Scalar<'ctx> {
     /// `pycc_ext_obj_getattr`. Entirely opaque to this crate: it is never
     /// `GEP`'d into, never inspected, and never handed to any `pycc_rt_*`
     /// function -- the only operations on it are the `pycc_ext_obj_*`
-    /// shims in `src/ext/pycc_ext_module.c`, which are the sole place a
+    /// shims in `src/ext/module/`, which are the sole place a
     /// CPython C-API call may appear.
     ///
     /// Its own variant rather than a reuse of `Instance`'s or any other

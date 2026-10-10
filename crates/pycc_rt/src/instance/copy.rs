@@ -1,7 +1,7 @@
 //! The `--ext` host's `copy.copy` of an instance (#1455): a new
 //! `PyInstanceObj` holding the same slot words as the original.
 //!
-//! The C shim's `pycc_ext_instance_copy` (`src/ext/pycc_ext_module.c`), the
+//! The C shim's `pycc_ext_instance_copy` (`src/ext/module/`), the
 //! `__copy__` every carrier type carries, calls this. The slot words carry
 //! no kind at run time, so the shim passes a per-class kind string the build
 //! computed from the class's flat slot layout (`src/ext_build/instance_copy.rs`),

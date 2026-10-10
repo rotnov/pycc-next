@@ -124,7 +124,7 @@ pub const EXT_THUNK_PREFIX: &str = "pycc_ext_thunk_";
 /// module, or `NULL` with the CPython exception already set.
 ///
 /// Kept here for exactly the reason [`EXT_THUNK_PREFIX`] is: the symbol is
-/// defined in `src/ext/pycc_ext_module.c` and declared by LLVM in
+/// defined in `src/ext/module/` and declared by LLVM in
 /// `foreign_import.rs`, and the `--ext` link resolves an undefined symbol
 /// lazily (`-undefined dynamic_lookup` on Mach-O, `-Bsymbolic` on ELF), so
 /// a misspelling on either side is a crash at first call rather than a link
@@ -190,7 +190,7 @@ pub const EXT_NAME_ERROR_SYMBOL: &str = "pycc_ext_name_error";
 /// exception already set.
 ///
 /// Spelled once here for exactly the reason [`EXT_OBJ_IMPORT_SYMBOL`]
-/// directly above is: the symbol is defined in `src/ext/pycc_ext_module.c`
+/// directly above is: the symbol is defined in `src/ext/module/`
 /// and declared by LLVM in `lib.rs`'s `MirExpr::ObjAttrGet` arm, and the
 /// `--ext` link resolves an undefined symbol lazily, so a misspelling on
 /// either side is a crash at first call rather than a link error.

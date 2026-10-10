@@ -5,7 +5,7 @@
  * bundled in the sidecar directory beside the executable, then runs the
  * pycc-compiled program as that interpreter's `__main__` module. It holds
  * interpreter *lifecycle* code only. Every PyObject* that crosses between
- * pycc code and CPython still goes through `src/ext/pycc_ext_module.c`,
+ * pycc code and CPython still goes through `src/ext/module/`,
  * compiled unchanged into the same link under the module name `__main__`
  * (the #1045 bridge split, recorded in the embedded-executable decision
  * entry under `docs/decisions/`).

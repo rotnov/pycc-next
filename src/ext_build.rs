@@ -38,12 +38,22 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 /// The fixed, hand-written half of every `ext` artifact, embedded at compile
-/// time. See `src/ext/pycc_ext_module.c`'s own header comment for why it is
-/// C at all and why it is embedded rather than located by path.
-/// `ext/pycc_ext_object_ops.c` (non-strict mode's object operators, #3) is
-/// appended so the shim stays one translation unit.
+/// time. See `src/ext/module/bridge.c`'s own header comment for why it is C
+/// at all and why it is embedded rather than located by path. The shim is
+/// kept as cohesive fragments under `src/ext/module/` (in this order, which
+/// is the translation unit's order -- `instances.c` holds the
+/// `#include "pycc_ext_exports.inc"`); `ext/pycc_ext_object_ops.c`
+/// (non-strict mode's object operators, #3) is appended so the shim stays
+/// one translation unit.
 pub(crate) const SHIM_C: &str = concat!(
-    include_str!("ext/pycc_ext_module.c"),
+    include_str!("ext/module/bridge.c"),
+    include_str!("ext/module/boundary.c"),
+    include_str!("ext/module/import_io.c"),
+    include_str!("ext/module/object_ops.c"),
+    include_str!("ext/module/object_convert.c"),
+    include_str!("ext/module/instances.c"),
+    include_str!("ext/module/buffers.c"),
+    include_str!("ext/module/module_init.c"),
     include_str!("ext/pycc_ext_object_ops.c")
 );
 

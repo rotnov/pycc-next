@@ -13,7 +13,7 @@
 //! convenience: every rule the boundary has (the inline-integer range, D-141's
 //! bool markers, the four-way classification of an encoded word, the pending
 //! exception's type and message) is decided here, in ordinary Rust with no
-//! foreign symbols, and the fixed C shim (`src/ext/pycc_ext_module.c`) does
+//! foreign symbols, and the fixed C shim (`src/ext/module/`) does
 //! nothing but move `PyObject*`s according to the answers.
 //!
 //! That split is also what makes this boundary testable at all: everything in
@@ -213,7 +213,7 @@ mod tests {
     /// The fixed C shim maps a pending exception's type tag to a `PyExc_*`
     /// object with a `switch` over these literal values, because it cannot
     /// see this crate's Rust constants. This test is that mapping's drift
-    /// guard: renumbering a tag without updating `src/ext/pycc_ext_module.c`
+    /// guard: renumbering a tag without updating `src/ext/module/`
     /// would otherwise raise the wrong CPython exception class silently.
     #[test]
     fn exception_type_tags_match_the_c_shims_hardcoded_switch() {

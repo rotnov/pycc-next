@@ -111,7 +111,7 @@ fn obj_error_bridge_fn<'ctx>(
 /// [`ForeignFailEdge::Function`] always does (Part 1 of #1096).
 ///
 /// The bridge's `int` result is deliberately unread: the bridge is total
-/// (`src/ext/pycc_ext_module.c`), so a pycc exception is pending on every
+/// (`src/ext/module/`), so a pycc exception is pending on every
 /// return and there is no unbridged fallback to branch to -- unlike the
 /// import bridge's `foreign_import_unbridged` block, which itself ends here.
 pub(super) fn emit_failure<'ctx>(

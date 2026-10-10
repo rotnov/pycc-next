@@ -366,7 +366,7 @@ fn every_exception_tag_the_c_shim_switches_on_still_names_that_class() {
                 assert_eq!(
                     pycc_hir::BUILTIN_EXCEPTION_CLASSES.get(tag).copied(),
                     Some(class),
-                    "src/ext/pycc_ext_module.c raises {class} for tag {tag}"
+                    "src/ext/module/ raises {class} for tag {tag}"
                 );
                 seen.push(tag);
             }
@@ -398,7 +398,7 @@ fn the_c_shims_import_error_bridge_tags_still_name_their_classes() {
         SHIM_C
             .lines()
             .find_map(|line| line.trim().strip_prefix(prefix.as_str()))
-            .expect("src/ext/pycc_ext_module.c defines every bridge constant")
+            .expect("src/ext/module/ defines every bridge constant")
             .trim()
     };
     for (tag, name, class) in [
