@@ -64,6 +64,8 @@ mod list;
 mod print;
 /// The `round()` builtin over `float`.
 mod round;
+/// `str` builtins and methods, and `input()`.
+mod str_ops;
 
 #[cfg(not(test))]
 pub use exception::pycc_rt_exception_print_and_exit;
@@ -710,12 +712,8 @@ pub extern "C" fn pycc_rt_bool_to_str(value: i8) -> *mut PyStrObj {
 /// `< 1e-4`; within that range it always shows at least one digit after
 /// the decimal point (`3.0`, never bare `3`, unlike Rust's own `{}`
 /// `Display` for `f64`), and `inf`/`-inf`/`nan` are lowercase (Rust's
-/// own `Display` capitalizes `NaN`). Reproducing CPython's scientific
-/// notation formatting exactly is out of scope for this task -- Part B of
-/// #1038 (#1064) raises a catchable `RuntimeError` for that narrow range
-/// rather than returning a silently wrong digit string (a documented,
-/// named gap, same convention as D-026/D-043; the remaining conformance
-/// work is tracked as #1071).
+/// own `Display` capitalizes `NaN`). Outside that range it prints
+/// CPython's scientific form (`1e+16`, `1.5e-05`).
 fn float_to_str(value: f64) -> *mut PyStrObj {
     if value.is_nan() {
         return new_pystr(b"nan");
@@ -729,20 +727,17 @@ fn float_to_str(value: f64) -> *mut PyStrObj {
     // start-inclusive, end-exclusive) -- the same condition as the task
     // brief's own `magnitude >= 1e16 || magnitude < 1e-4`, just reordered.
     if magnitude != 0.0 && !(1e-4..1e16).contains(&magnitude) {
-        // Part B of #1038 (#1064): a D-173 raise, not an abort. The sentinel
-        // is an empty `str` -- a *valid* `PyStrObj`, never null, so a caller
-        // that touches it before its own pending-exception check is safe.
-        // `raise_builtin` copies `msg` immediately, so a borrowed `format!`
-        // temporary is fine here.
-        raise_builtin(
-            EXCEPTION_TYPE_RUNTIME_ERROR,
-            "RuntimeError",
-            &format!(
-                "formatting a float this large or small ({value}) needs \
-                 scientific notation, which is not supported yet"
-            ),
-        );
-        return new_pystr(b"");
+        // CPython's `repr`: the shortest round-tripping digits in
+        // scientific notation, with a signed exponent of at least two
+        // digits (`1e+16`, `1.5e-05`). Rust's `{:e}` prints the same
+        // shortest digits as `1e16` / `1.5e-5`.
+        let text = format!("{value:e}");
+        let (mantissa, exponent) = text.split_once('e').expect("`{:e}` always has an exponent");
+        let (sign, digits) = match exponent.strip_prefix('-') {
+            Some(digits) => ('-', digits),
+            None => ('+', exponent),
+        };
+        return new_pystr(format!("{mantissa}e{sign}{digits:0>2}").as_bytes());
     }
     let text = format!("{value}");
     let text = if text.contains('.') {
@@ -753,9 +748,7 @@ fn float_to_str(value: f64) -> *mut PyStrObj {
     new_pystr(text.as_bytes())
 }
 
-/// Sets the pending `RuntimeError` exception flag (D-173) and returns an
-/// empty `str` when `value` needs scientific notation; the caller's
-/// generated code checks the flag after this call.
+/// `str(value)` as a new `str` (see `float_to_str`).
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_float_to_str(value: f64) -> *mut PyStrObj {
     float_to_str(value)
@@ -2588,50 +2581,21 @@ mod tests {
     }
 
     #[test]
-    fn pycc_rt_float_to_str_raises_on_magnitudes_needing_scientific_notation() {
-        // Part B of #1038 (#1064): was `#[should_panic]`. CPython's
-        // `repr(float)` switches to scientific notation outside a specific
-        // decimal-exponent range (verified against `python3.13`:
-        // `repr(1e17)` is `'1e+17'`, not the full 18-digit expansion) --
-        // reproducing that exact algorithm is still out of scope, but the
-        // gap is now a catchable `RuntimeError` instead of a process abort
-        // (never a silently wrong digit string). The sentinel is an empty
-        // `str`, a valid object the caller may touch before its own check.
-        pycc_rt_exception_clear();
-        let result = pycc_rt_float_to_str(1e17);
-        let (tag, message) = pending_tag_and_message();
-        assert_eq!(tag, EXCEPTION_TYPE_RUNTIME_ERROR);
-        assert!(message.contains("not supported yet"), "{message}");
-        assert!(!message.contains("pycc_rt: "), "{message}");
-        assert!(!result.is_null());
-        assert_eq!(unsafe { &*result }.bytes(), b""); // sentinel value
-        unsafe { pycc_rt_str_decref(result) };
-        pycc_rt_exception_clear();
-    }
-
-    #[test]
-    fn pycc_rt_float_to_str_raises_on_small_magnitudes_needing_scientific_notation() {
-        // Same rationale as the large-magnitude case above, for the *low*
-        // end of the supported range: verified against `python3.13`,
-        // `repr(1e-5)` is `'1e-05'` (scientific), unlike `repr(1e-4)` which
-        // is `'0.0001'` (still positional). Neither the given tests above
-        // nor `pycc_rt_float_to_str_always_shows_a_decimal_point`/
-        // `_accepts_the_boundary_just_inside_the_supported_range` ever drive
-        // `magnitude < 1e-4` to `true` -- every value they use is either
-        // `>= 1e-4` in magnitude or exactly `0.0`, so without this test the
-        // small-magnitude half of that `||` would never actually fire.
-        pycc_rt_exception_clear();
-        let result = pycc_rt_float_to_str(1e-5);
-        let (tag, message) = pending_tag_and_message();
-        assert_eq!(tag, EXCEPTION_TYPE_RUNTIME_ERROR);
-        // The message is the only non-static one of Part B's six: it
-        // interpolates the offending value, so pin that too.
-        assert!(message.contains("(0.00001)"), "{message}");
-        assert!(message.contains("scientific notation"), "{message}");
-        assert!(!result.is_null());
-        assert_eq!(unsafe { &*result }.bytes(), b""); // sentinel value
-        unsafe { pycc_rt_str_decref(result) };
-        pycc_rt_exception_clear();
+    fn pycc_rt_float_to_str_uses_cpython_scientific_notation_outside_its_range() {
+        // CPython's `repr(float)` is scientific at magnitudes `>= 1e16` or
+        // nonzero `< 1e-4`, with a signed exponent of at least two digits.
+        for (value, expected) in [
+            (1e17, "1e+17"),
+            (1e-5, "1e-05"),
+            (-2.5e-10, "-2.5e-10"),
+            (123456789012345678.0, "1.2345678901234568e+17"),
+            (1e300, "1e+300"),
+        ] {
+            let result = pycc_rt_float_to_str(value);
+            assert_eq!(unsafe { &*result }.bytes(), expected.as_bytes());
+            unsafe { pycc_rt_str_decref(result) };
+        }
+        assert_eq!(pycc_rt_exception_active(), 0);
     }
 
     #[test]

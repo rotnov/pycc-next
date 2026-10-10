@@ -2,6 +2,7 @@ use pycc_diag::{Diagnostic, Span};
 
 mod boolop;
 mod buffer_store;
+pub mod builtins;
 mod class;
 mod compare_chain;
 mod container;

@@ -97,6 +97,8 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // classification stays correct should a future emitter defer its
         // branch to that guard instead.
         MirExpr::Call { .. }
+        // A runtime builtin can raise (`int("x")`, `input()` at EOF, ...).
+        | MirExpr::RtCall(_)
         | MirExpr::DictGet { .. }
         | MirExpr::Instantiate(_)
         | MirExpr::ObjAttrGet { .. }

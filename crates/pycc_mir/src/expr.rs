@@ -17,6 +17,7 @@ use pycc_hir::{
 };
 use std::collections::HashMap;
 
+mod builtin_call;
 mod foreign_static;
 mod instance_hash;
 mod receiver_dispatch;
@@ -322,6 +323,17 @@ pub(super) fn lower_expr(
             // registered). See `MirExpr::Instantiate`'s own doc comment for
             // why this needs a dedicated MIR node rather than folding into
             // `MirExpr::Call` the way `MethodCall` below does.
+            let is_user_defined = scopes
+                .iter()
+                .any(|s| s.contains_key(&format!("$fn:{callee}")));
+            let args = if !is_user_defined && !classes.contains_key(callee.as_str()) {
+                match builtin_call::lower_builtin_call(callee, args) {
+                    Ok(call) => return call,
+                    Err(args) => args,
+                }
+            } else {
+                args
+            };
             if let Some(class_def) = classes.get(callee.as_str()) {
                 return lower_instantiation(callee, class_def, args, scopes, classes);
             }
@@ -826,6 +838,7 @@ pub(super) fn lower_expr(
             let base = lower_expr(base, scopes, classes, current_class);
             let index = lower_expr(index, scopes, classes, current_class);
             match base.ty() {
+                Ty::Str => builtin_call::lower_str_getitem(base, index),
                 // Part 3 of #1026 (PR 3b of #1082): a foreign CPython
                 // object base routes to its own node, in exactly the
                 // position `Ty::Dict` occupies and for exactly the same
@@ -935,6 +948,9 @@ pub(super) fn lower_expr(
                     .map(|e| Box::new(lower_expr(e, scopes, classes, current_class)))
             };
             let (start, stop, step) = (lower_bound(start), lower_bound(stop), lower_bound(step));
+            if base.ty() == Ty::Str {
+                return builtin_call::lower_str_slice(*base, [start, stop, step]);
+            }
             if base.ty() == Ty::Object {
                 MirExpr::ObjSlice {
                     base,
@@ -1454,6 +1470,14 @@ pub(super) fn lower_expr(
             // a distinct HIR node, and the class-name guard requires a name
             // that is *not* in `scopes`, which a foreign import's local name
             // always is.
+            let lowered_args: Vec<MirExpr> = args
+                .iter()
+                .map(|a| lower_expr(a, scopes, classes, current_class))
+                .collect();
+            let base = match builtin_call::lower_builtin_method(base, method, lowered_args) {
+                Ok(call) => return call,
+                Err((base, _)) => base,
+            };
             // `xs.insert(i, v)` / `xs.pop(i)`: the method calls on a list
             // receiver `pycc_types::list_ops::list_method_ty` admits.
             if let Ty::List(elem_ty) = base.ty() {

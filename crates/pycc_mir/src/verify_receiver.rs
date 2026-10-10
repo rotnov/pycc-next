@@ -558,6 +558,7 @@ impl Verifier<'_> {
                 }
             }
             MirExpr::Sequence { discard, value } => self.exprs([discard.as_ref(), value.as_ref()]),
+            MirExpr::RtCall(call) => self.exprs(&call.args),
         }
     }
 }

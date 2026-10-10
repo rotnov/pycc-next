@@ -1,0 +1,101 @@
+//! Lowering of the builtin calls `pycc_hir::builtins` claims into
+//! [`MirExpr::RtCall`].
+
+use crate::{MirExpr, RtCallExpr};
+use pycc_hir::Ty;
+use pycc_hir::builtins::{BuiltinSig, is_pairwise_variadic, resolve_call, resolve_method};
+
+/// `name(args)` as a runtime call, or `args` back when the table does not
+/// claim the call. `min`/`max` over three or more arguments fold left,
+/// which keeps CPython's evaluation order and its first-wins tie rule.
+pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirExpr, Vec<MirExpr>> {
+    if is_pairwise_variadic(name) && args.len() > 2 {
+        let tys: Vec<_> = args.iter().map(MirExpr::ty).collect();
+        if !matches!(resolve_call(name, &tys[..2]), Some(Ok(_))) {
+            return Err(args);
+        }
+        let mut iter = args.into_iter();
+        let mut acc = iter.next().expect("more than two arguments");
+        for next in iter {
+            let pair = vec![acc, next];
+            acc = match lower_builtin_call(name, pair) {
+                Ok(call) => call,
+                Err(_) => panic!(
+                    "pycc_mir: internal error: `{name}` folds pairwise only over arguments \
+                     pycc_types admitted"
+                ),
+            };
+        }
+        return Ok(acc);
+    }
+    let tys: Vec<_> = args.iter().map(MirExpr::ty).collect();
+    match resolve_call(name, &tys) {
+        Some(Ok(sig)) => Ok(MirExpr::RtCall(Box::new(RtCallExpr { sig, args }))),
+        _ => Err(args),
+    }
+}
+
+/// `base.method(args)` as a runtime call with `base` as the first argument.
+pub(super) fn lower_builtin_method(
+    base: MirExpr,
+    method: &str,
+    args: Vec<MirExpr>,
+) -> Result<MirExpr, (MirExpr, Vec<MirExpr>)> {
+    let tys: Vec<_> = args.iter().map(MirExpr::ty).collect();
+    match resolve_method(&base.ty(), method, &tys) {
+        Some(Ok(sig)) => {
+            let mut all = Vec::with_capacity(args.len() + 1);
+            all.push(base);
+            all.extend(args);
+            Ok(MirExpr::RtCall(Box::new(RtCallExpr { sig, args: all })))
+        }
+        _ => Err((base, args)),
+    }
+}
+
+fn rt(symbol: &'static str, params: Vec<Ty>, ret: Ty, args: Vec<MirExpr>) -> MirExpr {
+    let word_args = vec![false; params.len()];
+    MirExpr::RtCall(Box::new(RtCallExpr {
+        sig: BuiltinSig {
+            symbol,
+            params,
+            ret,
+            ret_word: false,
+            word_args,
+        },
+        args,
+    }))
+}
+
+/// `s[i]` on a `str`.
+pub(super) fn lower_str_getitem(base: MirExpr, index: MirExpr) -> MirExpr {
+    rt(
+        "pycc_rt_str_getitem",
+        vec![Ty::Str, Ty::Int],
+        Ty::Str,
+        vec![base, index],
+    )
+}
+
+/// `s[start:stop:step]` on a `str`: absent bounds pass `0` and the
+/// `pycc_rt::SLICE_HAS_*` mask says which were written.
+pub(super) fn lower_str_slice(base: MirExpr, bounds: [Option<Box<MirExpr>>; 3]) -> MirExpr {
+    let mut present = 0;
+    let mut args = vec![base];
+    for (bit, bound) in bounds.into_iter().enumerate() {
+        match bound {
+            Some(bound) => {
+                present |= 1 << bit;
+                args.push(*bound);
+            }
+            None => args.push(MirExpr::IntLiteral(0)),
+        }
+    }
+    args.push(MirExpr::IntLiteral(present));
+    rt(
+        "pycc_rt_str_slice",
+        vec![Ty::Str, Ty::Int, Ty::Int, Ty::Int, Ty::Int],
+        Ty::Str,
+        args,
+    )
+}

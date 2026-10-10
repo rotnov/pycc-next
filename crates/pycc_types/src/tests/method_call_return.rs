@@ -126,10 +126,10 @@ fn an_unknown_method_answers_nothing_and_keeps_the_prior_refusal() {
 
 #[test]
 fn a_method_call_on_a_builtin_receiver_is_not_answered_here() {
-    // `str.upper()` is typed by the check phase, never by the user-class
-    // lookup; the helper still needs an annotation as before.
+    // A `str` method outside `pycc_hir::builtins` is not answered by the
+    // user-class lookup; the helper still needs an annotation as before.
     refused(
-        "def _u(s: str):\n    return s.upper()\n",
+        "def _u(s: str):\n    return s.casefold()\n",
         "T0021",
         "cannot infer return type of private helper `_u`",
     );

@@ -406,6 +406,40 @@ pub unsafe extern "C" fn pycc_rt_list_slice(
     new_list(list.kind, picked)
 }
 
+/// The positions `seq[start:stop:step]` selects from a sequence of `len`
+/// (`pycc_rt_list_slice`'s arguments), or `None` after raising
+/// `ValueError` for a zero step.
+pub(crate) fn slice_indices(
+    len: i64,
+    start: i64,
+    stop: i64,
+    step: i64,
+    present: i64,
+) -> Option<impl Iterator<Item = usize>> {
+    let step = if present & SLICE_HAS_STEP != 0 {
+        step
+    } else {
+        1
+    };
+    if step == 0 {
+        raise_builtin(
+            EXCEPTION_TYPE_VALUE_ERROR,
+            "ValueError",
+            "slice step cannot be zero",
+        );
+        return None;
+    }
+    let start = (present & SLICE_HAS_START != 0).then_some(start);
+    let stop = (present & SLICE_HAS_STOP != 0).then_some(stop);
+    let (first, count) = adjust_slice(len, start, stop, step);
+    Some((0..count).map(move |k| (first + k * step) as usize))
+}
+
+/// A new `list[str]` adopting one reference to each `str` word.
+pub(crate) fn str_list(words: Vec<i64>) -> *mut PyListObj {
+    new_list(LIST_KIND_STR, words)
+}
+
 /// `a + b` as a new list.
 ///
 /// # Safety
@@ -487,7 +521,7 @@ pub unsafe extern "C" fn pycc_rt_list_contains(list: *mut PyListObj, word: i64) 
 
 /// Python's `repr()` of a `str`: single quotes unless the text contains a
 /// single quote and no double quote, with CPython's escapes.
-fn str_repr(text: &str, out: &mut String) {
+pub(crate) fn str_repr(text: &str, out: &mut String) {
     let quote = if text.contains('\'') && !text.contains('"') {
         '"'
     } else {
@@ -581,6 +615,8 @@ pub unsafe extern "C" fn pycc_rt_list_repr(list: *mut PyListObj) -> *mut PyStrOb
 pub(crate) fn list_words(list: *mut PyListObj) -> Vec<i64> {
     unsafe { &*list }.items().to_vec()
 }
+
+mod ops;
 
 #[cfg(test)]
 mod tests;

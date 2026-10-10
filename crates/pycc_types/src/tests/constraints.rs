@@ -1383,7 +1383,7 @@ fn constraint_collection_float_call_rejects_a_concretely_known_non_numeric_argum
     let env = ConstraintEnvironment::empty(&[]);
     let expr = HirExpr::Call {
         callee: "float".to_string(),
-        args: vec![HirExpr::StringLiteral("hello".to_string())],
+        args: vec![HirExpr::ListLiteral(vec![HirExpr::IntLiteral(1)])],
     };
 
     let err = collect_expr_constraints(
@@ -1399,7 +1399,7 @@ fn constraint_collection_float_call_rejects_a_concretely_known_non_numeric_argum
     assert_eq!(err.code, "T0021");
     assert_eq!(
         err.message,
-        "`float` expects an `int`, `float`, or `bool` argument, got `str`"
+        "`float` expects an `int`, `float`, or `bool` argument, got `list[int]`"
     );
 }
 #[test]
@@ -3126,7 +3126,7 @@ fn constraint_collection_str_call_keeps_c0001_for_a_non_object_argument() {
         let env = ConstraintEnvironment::empty(&[]);
         let expr = HirExpr::Call {
             callee: callee.to_string(),
-            args: vec![HirExpr::IntLiteral(1)],
+            args: vec![HirExpr::SetLiteral(vec![HirExpr::IntLiteral(1)])],
         };
         let err = collect_expr_constraints(
             &signatures,

@@ -92,11 +92,6 @@ fn every_converted_abort_path_is_catchable_by_its_cpython_class() {
          \x20   c = xs[0:3:0]\n\
          except ValueError as e:\n\
          \x20   print(e)\n\
-         try:\n\
-         \x20   d = 1e20 + 0.0\n\
-         \x20   t = f\"{d}\"\n\
-         except RuntimeError as e:\n\
-         \x20   print(e)\n\
          s = {1}\n\
          try:\n\
          \x20   for x in s:\n\
@@ -110,8 +105,6 @@ fn every_converted_abort_path_is_catchable_by_its_cpython_class() {
         stdout,
         "pop from empty list\n\
          slice step cannot be zero\n\
-         formatting a float this large or small (100000000000000000000) needs \
-         scientific notation, which is not supported yet\n\
          Set changed size during iteration\n\
          END\n",
         "stderr: {stderr}"
@@ -160,28 +153,13 @@ fn an_uncaught_converted_raise_names_its_class_and_exits_non_zero() {
     );
 }
 
-/// Plan section C4, pinned as an *observed* result rather than a caveat: the
-/// float sentinel is an empty `str`, and `print` writes it before the
-/// exception reaches its checkpoint, so `print(1e20)` emits a bare newline on
-/// stdout before the `RuntimeError` surfaces on stderr.
-///
-/// This is accepted, not unavoidable, and deliberately not guarded: a
-/// `print`-side guard would be a half guard, because an f-string reaches
-/// `pycc_rt_float_to_str` through the interpolation path instead. It is not a
-/// new deviation either -- D-244's 2026-09-13 Part A amendment already accepts
-/// exactly this "sentinel observable before the exception is reported" class,
-/// and the pre-change behavior (a `SIGABRT` mid-`print`) was strictly worse.
+/// A float needing scientific notation prints CPython's `repr` (it raised
+/// `RuntimeError` before that formatting existed).
 #[test]
-fn the_float_sentinel_is_printed_before_the_exception_is_reported() {
+fn a_large_float_prints_in_scientific_notation() {
     let (ok, stdout, stderr) = build_and_run("sentinel_stdout", "print(1e20)\nprint(\"END\")\n");
-    assert!(!ok, "the program should have exited non-zero");
-    // The empty-string sentinel, then `print`'s own newline -- and nothing
-    // else: `END` is never reached, because the raise propagates out.
-    assert_eq!(stdout, "\n", "unexpected stdout: {stdout:?}");
-    assert!(
-        stderr.contains("RuntimeError: formatting a float this large or small"),
-        "unexpected stderr: {stderr}"
-    );
+    assert!(ok, "program failed: {stderr}");
+    assert_eq!(stdout, "1e+20\nEND\n");
 }
 
 /// `.pop()` on an empty list raises where it is evaluated (it is an

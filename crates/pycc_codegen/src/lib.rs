@@ -55,6 +55,7 @@ mod exception_render;
 use exception_render::emit_exception_message;
 mod str_rc;
 use str_rc::{decref_str_slot_before_store, incref_if_str_duplicate};
+mod rt_call;
 mod rt_fns;
 use rt_fns::{RtFns, declare_rt_functions};
 mod ext;
@@ -1755,6 +1756,15 @@ fn emit_expr_unchecked<'ctx>(
                 locals,
             },
             comp,
+        ),
+        MirExpr::RtCall(call) => rt_call::emit_rt_call(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            call,
         ),
         MirExpr::FloatLiteral(f) => Scalar::Float(context.f64_type().const_float(*f)),
         MirExpr::IntBoundary(value) => {

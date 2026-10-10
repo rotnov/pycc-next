@@ -170,13 +170,13 @@ fn bool_of_a_non_object_keeps_its_unchanged_refusal() {
 /// `pycc_types::tests::float_of_a_str_is_rejected_as_t0021` is the inside
 /// one.
 #[test]
-fn float_of_a_str_keeps_its_unchanged_message() {
-    let dir = ScratchDir::new("foreign_float_str").expect("scratch");
-    let out = check(&dir, "x = \"s\"\nprint(float(x))\n");
+fn float_of_a_list_keeps_its_unchanged_message() {
+    let dir = ScratchDir::new("foreign_float_list").expect("scratch");
+    let out = check(&dir, "x = [1]\nprint(float(x))\n");
     assert!(!out.status.success());
     let text = format!("{}{}", stdout_of(&out), stderr_of(&out));
     assert!(
-        text.contains("`float` expects an `int`, `float`, or `bool` argument, got `str`"),
+        text.contains("`float` expects an `int`, `float`, or `bool` argument, got `list[int]`"),
         "{text}"
     );
 }
@@ -455,9 +455,9 @@ fn the_other_two_conversions_of_a_cpython_object_are_admitted() {
 fn int_and_str_of_a_non_object_keep_their_unchanged_refusal() {
     let dir = ScratchDir::new("foreign_int_str_non_object").expect("scratch");
     for body in [
-        "print(int(\"3\"))\n",
-        "print(str(1))\n",
-        "print(str(1.5))\n",
+        "print(int({1}))\n",
+        "print(int([1.5]))\n",
+        "print(str({1}))\n",
     ] {
         let out = check(&dir, body);
         assert!(!out.status.success(), "{body} should still be refused");

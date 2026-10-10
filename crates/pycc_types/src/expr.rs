@@ -447,6 +447,13 @@ pub(crate) fn infer_expr_in(
                     .collect::<Result<Vec<_>, _>>()?;
                 &heap_arg_tys
             };
+            if env.lookup_function(callee).is_none()
+                && env.lookup_class(callee).is_none()
+                && env.lookup_generic(callee).is_none()
+                && let Some(resolved) = crate::builtin_call::resolve_builtin_call(callee, arg_tys)
+            {
+                return resolved;
+            }
             if callee == "print" {
                 // print's own signature isn't user-declarable in v0.1.
                 // #977 (D-237): both arg-inference branches above funnel
@@ -1351,6 +1358,16 @@ pub(crate) fn infer_expr_in(
                 // raises `TypeError` in CPython too), so this is not a v0.2
                 // scope cut needing its own arm, it is the semantically
                 // correct behavior for every other base type as well.
+                Ty::Str => {
+                    if !is_assignable(index_ty.clone(), Ty::Int) {
+                        return Err(Diagnostic::error(
+                            "T0021",
+                            format!("string index must be `int`, found `{}`", index_ty.name()),
+                            Span::new(0, 0),
+                        ));
+                    }
+                    Ok(Ty::Str)
+                }
                 other => Err(Diagnostic::error(
                     "T0033",
                     format!("`{}` does not support indexing", other.name()),
@@ -1390,11 +1407,11 @@ pub(crate) fn infer_expr_in(
                     [start.as_deref(), stop.as_deref(), step.as_deref()],
                 );
             }
-            let Ty::List(_) = &base_ty else {
+            let (Ty::List(_) | Ty::Str) = &base_ty else {
                 return Err(Diagnostic::error(
                     "T0033",
                     format!(
-                        "`{}` does not support slicing (only a list does)",
+                        "`{}` does not support slicing (only a list or a str does)",
                         base_ty.name()
                     ),
                     Span::new(0, 0),
@@ -1800,6 +1817,11 @@ pub(crate) fn infer_expr_in(
                     env, class_name, method, args, &arg_tys,
                 );
             }
+            if let Some(resolved) = pycc_hir::builtins::resolve_method(&base_ty, method, &arg_tys) {
+                return resolved
+                    .map(|sig| sig.ret)
+                    .map_err(|message| Diagnostic::error("T0021", message, Span::new(0, 0)));
+            }
             if let Ty::List(elem) = &base_ty {
                 return crate::list_ops::list_method_ty(elem, method, &arg_tys);
             }
@@ -2052,3 +2074,4 @@ pub(crate) fn reject_memoryview_declaration(
     }
     Ok(())
 }
+

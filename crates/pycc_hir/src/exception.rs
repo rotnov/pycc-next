@@ -5,7 +5,7 @@ use crate::ImportBinding;
 use pycc_ast::visitor::{self, Visitor};
 use pycc_ast::{Expr, ExprStringLiteral, ModModule, Stmt};
 
-pub const BUILTIN_EXCEPTION_CLASSES: [&str; 30] = [
+pub const BUILTIN_EXCEPTION_CLASSES: [&str; 31] = [
     "Exception",
     "ValueError",
     "TypeError",
@@ -64,6 +64,7 @@ pub const BUILTIN_EXCEPTION_CLASSES: [&str; 30] = [
     // its value -- the class a read of a not-yet-assigned instance slot
     // raises. Parented under `Exception`, CPython's real parentage.
     "AttributeError",
+    "EOFError",
 ];
 
 /// Part 2 of #541 (D-189): the number of names in [`BUILTIN_EXCEPTION_CLASSES`]
@@ -214,7 +215,7 @@ pub fn builtin_exception_parent(name: &str) -> Option<&'static str> {
         // so does #1388's `AttributeError`.
         "OSError" | "ValueError" | "TypeError" | "KeyError" | "IndexError"
         | "ZeroDivisionError" | "RuntimeError" | "BaseExceptionGroup" | "OverflowError"
-        | "ImportError" | "AssertionError" | "AttributeError" => Some("Exception"),
+        | "ImportError" | "AssertionError" | "AttributeError" | "EOFError" => Some("Exception"),
         "ExceptionGroup" => Some("BaseExceptionGroup"),
         "ModuleNotFoundError" => Some("ImportError"),
         "BlockingIOError" | "ChildProcessError" | "ConnectionError" | "FileExistsError"
@@ -906,6 +907,7 @@ mod tests {
             ("ModuleNotFoundError", 27),
             ("AssertionError", 28),
             ("AttributeError", 29),
+            ("EOFError", 30),
         ] {
             assert_eq!(tag_of(name), Some(tag), "`{name}` must carry tag {tag}");
         }

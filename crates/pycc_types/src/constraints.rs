@@ -59,6 +59,7 @@
 //!
 //! [D-185]: https://github.com/rotnov/pycc/blob/main/docs/decisions/D-185-permit-a-dedicated-tracking-issue-per-oversized.md
 
+mod builtin_call;
 mod constructor_call;
 mod method_return;
 mod object_lift;
@@ -1303,6 +1304,12 @@ pub(crate) fn collect_expr_constraints(
                     signatures, parents, concrete, deferred, env, arg,
                 )?);
             }
+            if !signatures.contains_key(callee)
+                && let Some(term) =
+                    builtin_call::builtin_call_term(callee, &arg_terms, parents, concrete)
+            {
+                return Ok(Some(term));
+            }
             if callee == "print" {
                 return Ok(Some(Ok(Ty::None)));
             }
@@ -2059,8 +2066,16 @@ pub(crate) fn collect_expr_constraints(
         HirExpr::MethodCall { base, method, args } => {
             let base_term =
                 collect_expr_constraints(signatures, parents, concrete, deferred, env, base)?;
+            let mut arg_terms = Vec::with_capacity(args.len());
             for arg in args {
-                collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+                arg_terms.push(collect_expr_constraints(
+                    signatures, parents, concrete, deferred, env, arg,
+                )?);
+            }
+            if let Some(term) = builtin_call::builtin_method_term(
+                &base_term, method, &arg_terms, parents, concrete,
+            ) {
+                return Ok(Some(term));
             }
             // Part 1 of #1333: `o.method(...)` on a concrete `object`
             // receiver answers `object`, on the `AttrGet` and `Subscript`

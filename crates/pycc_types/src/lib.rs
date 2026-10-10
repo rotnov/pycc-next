@@ -1,6 +1,7 @@
 mod binop;
 mod boolop;
 mod buffer;
+mod builtin_call;
 mod class;
 mod compare_chain;
 mod comprehension;

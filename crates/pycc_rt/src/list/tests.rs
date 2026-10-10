@@ -157,9 +157,8 @@ fn repr_covers_every_scalar_kind_and_nesting() {
     assert_eq!(repr(nested), "[[1], []]");
     let huge = pycc_rt_list_new(LIST_KIND_FLOAT, 0);
     unsafe { pycc_rt_list_append(huge, 1e300f64.to_bits() as i64) };
-    assert_eq!(repr(huge), "");
-    assert_ne!(pycc_rt_exception_active(), 0);
-    pycc_rt_exception_clear();
+    assert_eq!(repr(huge), "[1e+300]");
+    assert_eq!(pycc_rt_exception_active(), 0);
 }
 
 #[test]

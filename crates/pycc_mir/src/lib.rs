@@ -914,6 +914,16 @@ pub enum MirExpr {
         discard: Box<MirExpr>,
         value: Box<MirExpr>,
     },
+    /// A builtin function or builtin-type method lowered to a direct call
+    /// into `pycc_rt` (`pycc_hir::builtins`, whose module doc states the ABI).
+    RtCall(Box<RtCallExpr>),
+}
+
+/// See [`MirExpr::RtCall`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct RtCallExpr {
+    pub sig: pycc_hir::builtins::BuiltinSig,
+    pub args: Vec<MirExpr>,
 }
 
 /// [`MirExpr::Comprehension`]'s payload (#1254, D-250). The fields mirror
@@ -1240,6 +1250,7 @@ impl MirExpr {
             MirExpr::NamedExpr { ty, .. } => ty.clone(),
             MirExpr::Comprehension(comp) => comp.ty(),
             MirExpr::Sequence { value, .. } => value.ty(),
+            MirExpr::RtCall(call) => call.sig.ret.clone(),
         }
     }
 
@@ -1497,6 +1508,11 @@ impl MirExpr {
             MirExpr::Sequence { discard, value } => {
                 discard.collect_named_expr_bindings(out);
                 value.collect_named_expr_bindings(out);
+            }
+            MirExpr::RtCall(call) => {
+                for arg in &call.args {
+                    arg.collect_named_expr_bindings(out);
+                }
             }
         }
     }

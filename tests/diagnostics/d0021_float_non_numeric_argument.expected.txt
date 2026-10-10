@@ -1,5 +1,5 @@
-error[T0021]: `float` expects an `int`, `float`, or `bool` argument, got `str`
+error[T0021]: `float` expects an `int`, `float`, or `bool` argument, got `list[int]`
  --> tests/diagnostics/d0021_float_non_numeric_argument.py:1:1
   |
-1 | float("hello")
-  | ^ `float` expects an `int`, `float`, or `bool` argument, got `str`
+1 | float([1])
+  | ^ `float` expects an `int`, `float`, or `bool` argument, got `list[int]`

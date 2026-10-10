@@ -4844,7 +4844,7 @@ fn slicing_a_dict_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`dict[str, int]` does not support slicing (only a list does)"
+        "`dict[str, int]` does not support slicing (only a list or a str does)"
     );
 }
 
@@ -4863,7 +4863,7 @@ fn slicing_a_set_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`set[int]` does not support slicing (only a list does)"
+        "`set[int]` does not support slicing (only a list or a str does)"
     );
 }
 
@@ -4884,7 +4884,7 @@ fn slicing_a_tuple_is_rejected_as_t0033_as_an_explicit_deferral() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`tuple[int, int]` does not support slicing (only a list does)"
+        "`tuple[int, int]` does not support slicing (only a list or a str does)"
     );
 }
 
@@ -4902,7 +4902,7 @@ fn slicing_a_scalar_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`int` does not support slicing (only a list does)"
+        "`int` does not support slicing (only a list or a str does)"
     );
 }
 
@@ -5752,9 +5752,9 @@ fn float_with_two_arguments_is_rejected_as_t0021() {
 /// annotation (`docs/TYPE_SYSTEM.md`'s `object` row; D-258 admits it only in
 /// an `--ext` module) and "pass an `object`" is advice nobody can act on.
 #[test]
-fn float_of_a_str_is_rejected_as_t0021() {
+fn float_of_a_list_is_rejected_as_t0021() {
     let mut env = Environment::new();
-    env.bind("x".to_string(), Ty::Str);
+    env.bind("x".to_string(), Ty::List(Box::new(Ty::Int)));
     let expr = HirExpr::Call {
         callee: "float".to_string(),
         args: vec![HirExpr::Name("x".to_string())],
@@ -5763,7 +5763,7 @@ fn float_of_a_str_is_rejected_as_t0021() {
     assert_eq!(err.code, "T0021");
     assert_eq!(
         err.message,
-        "`float` expects an `int`, `float`, or `bool` argument, got `str`"
+        "`float` expects an `int`, `float`, or `bool` argument, got `list[int]`"
     );
 }
 
@@ -6295,7 +6295,7 @@ fn exception_call_produces_c0001() {
 #[test]
 fn other_callable_builtins_produce_c0001() {
     // A representative sample of other callable builtins from the table.
-    for name in ["chr", "str", "bool", "range", "zip", "dict", "list", "sum"] {
+    for name in ["bool", "range", "zip", "dict", "list", "sum"] {
         let env = Environment::new();
         let expr = HirExpr::Call {
             callee: name.to_string(),
@@ -22229,12 +22229,11 @@ fn int_and_str_of_a_foreign_object_are_admitted_as_int_and_str() {
 
 #[test]
 fn str_of_a_non_object_keeps_its_c0001_refusal() {
-    // Fork 1 of the plan, stated openly: PR 4b relaxes exactly the object
-    // case, so `str(1)` is still the capability-gap refusal it was. `int(1)`
-    // is admitted since `crate::int_builtins`.
+    // `str(x)` of a scalar is a runtime builtin (`pycc_hir::builtins`); a
+    // set argument is still a capability gap.
     for callee in ["str"] {
         let mut env = Environment::new();
-        env.bind("x".to_string(), Ty::Int);
+        env.bind("x".to_string(), Ty::Set(Box::new(Ty::Int)));
         let expr = HirExpr::Call {
             callee: callee.to_string(),
             args: vec![HirExpr::Name("x".to_string())],

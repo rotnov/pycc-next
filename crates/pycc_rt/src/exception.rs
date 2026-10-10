@@ -34,6 +34,9 @@ pub const EXCEPTION_TYPE_OVERFLOW_ERROR: u8 = 25;
 /// its first assignment. Hand-copied and pinned exactly like
 /// [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
 pub const EXCEPTION_TYPE_ATTRIBUTE_ERROR: u8 = 29;
+/// `EOFError`'s tag, raised by `input()` at end of input. Hand-copied and
+/// pinned exactly like [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
+pub const EXCEPTION_TYPE_EOF_ERROR: u8 = 30;
 /// #1316: the reserved tag the `ext` C shim's foreign-operation bridge gives
 /// a CPython exception that is not an `Exception` at all -- `SystemExit`,
 /// `KeyboardInterrupt`, `GeneratorExit`, a non-`Exception`

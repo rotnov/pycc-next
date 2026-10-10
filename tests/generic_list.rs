@@ -128,10 +128,6 @@ fn unsupported_list_shapes_are_refused_not_miscompiled() {
             "error[C0001]: `in` over a list of `P`, which defines `__eq__`",
         ),
         (
-            "xs = [1]\nxs.extend([2])\n",
-            "error[C0001]: `list.extend()`",
-        ),
-        (
             "xs = [1]\nys = xs + [1.5]\n",
             "error[T0021]: operator Add is not defined for `list[int]` and `list[float]`",
         ),
