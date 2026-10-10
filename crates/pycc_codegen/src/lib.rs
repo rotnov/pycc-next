@@ -52,6 +52,7 @@ mod exception_render;
 use exception_render::emit_exception_message;
 mod borrowed_locals;
 mod heap_rc;
+mod operand_pin;
 mod str_rc;
 use heap_rc::release_scalar_if_temporary;
 use str_rc::incref_if_str_duplicate;
@@ -1698,6 +1699,9 @@ fn emit_expr<'ctx>(
     if expression_can_set_exception(expr) {
         guard_statement_effects(context, builder, rt);
     }
+    // An operand a later sibling could free takes its own reference
+    // (`operand_pin`), after the guard: only a successfully read value.
+    heap_rc::retain_if_pinned(context, builder, rt, expr, &value);
     value
 }
 
@@ -3148,7 +3152,7 @@ fn emit_expr_unchecked<'ctx>(
         // arm's own `Ty::None` case).
         MirExpr::ListAppend { list, value } => {
             let receiver =
-                emit_list_receiver(context, builder, module, rt, user_functions, locals, list);
+                emit_list_receiver(context, builder, module, rt, user_functions, locals, list, expr);
             let list_ptr = receiver.0;
             let elem = value_list_element(list, locals);
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
@@ -3159,7 +3163,7 @@ fn emit_expr_unchecked<'ctx>(
         }
         MirExpr::ListInsert { list, index, value } => {
             let receiver =
-                emit_list_receiver(context, builder, module, rt, user_functions, locals, list);
+                emit_list_receiver(context, builder, module, rt, user_functions, locals, list, expr);
             let list_ptr = receiver.0;
             let elem = value_list_element(list, locals);
             let index_scalar =
@@ -3554,7 +3558,7 @@ fn emit_expr_unchecked<'ctx>(
         // end-to-end test.
         MirExpr::ListPop { list, index, ty } => {
             let receiver =
-                emit_list_receiver(context, builder, module, rt, user_functions, locals, list);
+                emit_list_receiver(context, builder, module, rt, user_functions, locals, list, expr);
             let list_ptr = receiver.0;
             let index = index.as_ref().map(|index| {
                 let scalar = emit_expr(context, builder, module, rt, user_functions, locals, index);
@@ -4340,6 +4344,17 @@ fn emit_expr_unchecked<'ctx>(
         MirExpr::NamedExpr { name, value, ty } => {
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
             let scalar = retain_if_int_duplicate(context, builder, rt, value, scalar);
+            // A counted value (refused by T0050 today, admitted by MIR)
+            // follows `MirStmt::Assign`'s slot ownership exactly.
+            let owning = !rt.borrowed_locals.borrow().contains(name);
+            let scalar = if owning {
+                heap_rc::retain_if_heap_duplicate(context, builder, rt, value, scalar)
+            } else {
+                scalar
+            };
+            if owning && let Some(slot) = locals.get(name) {
+                heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
+            }
             emit_assign(context, builder, rt, locals, name, scalar);
             emit_expr_unchecked(
                 context,
@@ -4391,21 +4406,26 @@ fn emit_list_receiver<'ctx>(
     user_functions: &HashMap<&str, UserFunction<'ctx>>,
     locals: &HashMap<String, StorageSlot<'ctx>>,
     receiver: &pycc_mir::MirContainerReceiver,
+    node: &MirExpr,
 ) -> (PointerValue<'ctx>, bool) {
     // The second value says whether the receiver holds a reference the
     // caller releases after the call: CPython keeps the bound method's
     // receiver alive while the arguments run, and an argument may rebind
     // the attribute or module global it was read from (`s.xs.append(
-    // s.swap())`). A frame-local name cannot be rebound by an argument.
+    // s.swap())`). A frame-local name is rebound by an argument only
+    // through a walrus naming it inside `node`.
     match receiver {
         pycc_mir::MirContainerReceiver::Name(name) => {
             let ptr =
                 emit_list_name_read(context, builder, module, rt, user_functions, locals, name);
             let global = locals.get(name).is_none_or(|slot| slot.ptr.is_const());
-            if global {
+            let mut walrus_targets = Vec::new();
+            node.collect_named_expr_bindings(&mut walrus_targets);
+            let held = global || walrus_targets.iter().any(|(target, _)| target == name);
+            if held {
                 heap_rc::emit_incref(context, builder, rt, heap_rc::HeapKind::List, ptr);
             }
-            (ptr, global)
+            (ptr, held)
         }
         pycc_mir::MirContainerReceiver::Attr(read) => {
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, read);
@@ -6129,6 +6149,7 @@ fn compile_to_object_with_observer(
     rt.glibc_libm
         .set(float_fast::target_libm_is_glibc(target_triple));
     *rt.rc_class_kinds.borrow_mut() = heap_rc::rc_class_kinds(&mir.class_defs);
+    let _pins = operand_pin::plan_module(&rt, mir);
 
     // First pass: declare every user-defined function -- with its real
     // parameter types and return type (Task 5), instead of Task 3/4's
@@ -8590,6 +8611,8 @@ fn emit_stmt<'ctx>(
                 emit_expr(context, builder, module, rt, user_functions, locals, index);
             let raw = list::raw_index(context, builder, rt, index_scalar);
             list::build_list_set(context, builder, rt, &elem, list_ptr, raw, word);
+            // A fresh target list is dead once stored into.
+            release_scalar_if_temporary(context, builder, rt, base, &base_scalar);
             Ok(())
         }
         // `d[k] = v` (PR-11 Task 5, D-123): insert-or-update --
@@ -8725,14 +8748,16 @@ fn emit_stmt<'ctx>(
         // null-initialized string slot). Without both, a `str` attribute
         // read twice, or reassigned, use-after-frees the first `PyStrObj`.
         MirStmt::AttrSet { base, slot, value } => {
-            let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
-            let base_ptr = expect_instance_pointer(base_scalar, "attribute assignment base");
+            // CPython's order: the value, then the target's base
+            // (`b.p.name = f(b)` stores into the `b.p` that `f` left).
             let value_ty = value.ty();
             let value_scalar =
                 emit_expr(context, builder, module, rt, user_functions, locals, value);
             let value_scalar =
                 heap_rc::retain_if_heap_duplicate(context, builder, rt, value, value_scalar);
             let value_scalar = retain_if_int_duplicate(context, builder, rt, value, value_scalar);
+            let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
+            let base_ptr = expect_instance_pointer(base_scalar, "attribute assignment base");
             // Part 1 of #1499: a borrowed object takes its own reference
             // before the slot word keeps it, because a module global it was
             // read from now releases its old value on rebind. The replaced
@@ -8776,6 +8801,9 @@ fn emit_stmt<'ctx>(
             }
             let word = scalar_to_slot_word(context, builder, value_scalar);
             attr_slot::emit_slot_store(context, builder, base_ptr, slot, word);
+            // A fresh target (`f().x = v`, or a base `operand_pin` pinned
+            // across the value) is dead once stored into.
+            release_scalar_if_temporary(context, builder, rt, base, &base_scalar);
             Ok(())
         }
         // `for k in d:` (PR-11 Task 5, D-123): an intentional inline

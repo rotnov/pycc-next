@@ -44,6 +44,21 @@ class Bag:
         return self
 
 
+def ren(p: P) -> str:
+    p.name = mk(1)
+    return "x"
+
+
+def ow(xs: list[str]) -> str:
+    xs[0] = mk(2)
+    return "y"
+
+
+def swap_items(b: Bag) -> int:
+    b.items = [mkp(5)]
+    return 0
+
+
 def mkp(i: int) -> P:
     return P(i, mk(i))
 
@@ -265,6 +280,24 @@ probe!(
     "b: Bag = Bag().add(P(i, \"a\")).add(mkp(i))\ntotal += len(b.items)"
 );
 
+// Operands pinned across a later sibling that runs code (`operand_pin`):
+// the reference they take is released once per evaluation.
+probe!(
+    pinned_attribute_operand,
+    "p: P = P(i, mk(i))\nif p.name == ren(p):\n    total += 1"
+);
+probe!(
+    pinned_element_operand,
+    "xs: list[str] = [mk(i)]\nif xs[0] + ow(xs) == \"q\":\n    total += 1"
+);
+probe!(
+    pinned_subscript_base,
+    "b: Bag = Bag().add(mkp(i))\ntotal += b.items[swap_items(b)].x"
+);
+// A fresh target of a store dies once stored into.
+probe!(fresh_attribute_target, "mkp(i).name = mk(i)");
+probe!(fresh_list_target, "mklist(i)[0] = i");
+
 /// Builds and runs a fixture under `tests/fixtures/` in both profiles and
 /// compares its output with CPython's, returning the release binary's path
 /// inside `dir`.
@@ -322,6 +355,15 @@ fn assert_memcheck_clean(bin: &Path) {
 fn aliasing_and_release_order_match_cpython_and_are_memcheck_clean() {
     let dir = ScratchDir::new("memory_fixture_semantics").expect("scratch dir");
     let bin = assert_fixture_matches_cpython(&dir, "refcount_semantics");
+    assert_memcheck_clean(&bin);
+}
+
+/// An operand read out of an attribute or element stays alive while a
+/// later operand of the same operation runs code that drops its owner.
+#[test]
+fn operands_outlive_later_siblings_that_drop_their_owner() {
+    let dir = ScratchDir::new("memory_fixture_operands").expect("scratch dir");
+    let bin = assert_fixture_matches_cpython(&dir, "refcount_operand_lifetime");
     assert_memcheck_clean(&bin);
 }
 

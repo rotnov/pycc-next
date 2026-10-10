@@ -4433,7 +4433,7 @@ fn assigning_a_list_value_stores_the_raw_pointer() {
 /// than a module global) when its assignment lives inside a function
 /// body. Kept as a helper because each of these tests differs only in
 /// the statements it puts inside.
-fn list_fixture_module(body: Vec<MirStmt>) -> MirModule {
+pub(crate) fn list_fixture_module(body: Vec<MirStmt>) -> MirModule {
     MirModule {
         items: vec![
             MirItem::Function {
@@ -12822,7 +12822,7 @@ fn set_add_grows_the_set_and_a_repeated_value_still_dedups_codegens_and_runs() {
 /// `undefined reference to 'pow'` failure on both Linux architectures
 /// wasn't covered by that fix either, since it's a separate linker
 /// invocation from `main.rs`'s.
-fn link_object_with_runtime(obj_path: &std::path::Path, bin_path: &std::path::Path) {
+pub(crate) fn link_object_with_runtime(obj_path: &std::path::Path, bin_path: &std::path::Path) {
     // `CARGO_MANIFEST_DIR` is this *crate*'s directory, so the
     // workspace root is two levels up; `parent()` twice rather than a
     // `..` join keeps the rendered path readable in linker errors.

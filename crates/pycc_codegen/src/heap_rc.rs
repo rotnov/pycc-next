@@ -94,12 +94,40 @@ pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
 /// attribute of a call's result, an element of a new list) is not
 /// borrowed: the base is released once the read is made, so the read takes
 /// its own reference first (`emit_expr`'s `AttrGet`/`Subscript` arms).
+///
+/// A *pinned* operand (`operand_pin`) is not borrowed: `emit_expr` took a
+/// reference to it right after reading it.
 pub(crate) fn is_borrowed_read(expr: &MirExpr) -> bool {
+    !crate::operand_pin::is_pinned(expr) && reads_storage(expr)
+}
+
+/// [`is_borrowed_read`] before `expr`'s own pin: whether evaluating it
+/// yields a value its storage keeps owning.
+fn reads_storage(expr: &MirExpr) -> bool {
     match expr {
         MirExpr::Sequence { value, .. } => is_borrowed_read(value),
         MirExpr::Name { .. } | MirExpr::NamedExpr { .. } | MirExpr::ExceptionMessage(_) => true,
         MirExpr::AttrGet { base, .. } | MirExpr::Subscript { base, .. } => is_borrowed_read(base),
         _ => false,
+    }
+}
+
+/// Takes the reference a pinned operand holds (`operand_pin`): called by
+/// `emit_expr` once `expr` is evaluated and its exception guard passed.
+/// A pinned read whose base was itself pinned is already fresh (the read
+/// took its own reference before releasing the base), so it takes none.
+pub(crate) fn retain_if_pinned<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    expr: &MirExpr,
+    scalar: &Scalar<'ctx>,
+) {
+    if crate::operand_pin::is_pinned(expr)
+        && reads_storage(expr)
+        && let Some((kind, ptr)) = counted(rt, &expr.ty(), scalar)
+    {
+        emit_incref(context, builder, rt, kind, ptr);
     }
 }
 
@@ -214,22 +242,6 @@ pub(crate) fn emit_incref<'ctx>(
     builder.position_at_end(done);
 }
 
-/// [`emit_incref`] for a pointer known to be non-null: a value just read
-/// out of a list element or an assigned instance slot.
-fn emit_incref_non_null<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    kind: HeapKind,
-    ptr: PointerValue<'ctx>,
-) {
-    if kind == HeapKind::Str {
-        emit_incref(context, builder, rt, kind, ptr);
-    } else {
-        bump(context, builder, ptr);
-    }
-}
-
 fn bump<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -241,16 +253,6 @@ fn bump<'ctx>(
         .build_int_add(count, context.i64_type().const_int(1, false), "rc_inc")
         .expect("build_int_add should not fail for two i64 operands");
     tagged_store(context, builder, cell, bumped);
-}
-
-/// Whether `expr`'s value can never be a null pointer: an element of a
-/// list or an assigned instance slot holds a live object.
-fn never_null(expr: &MirExpr) -> bool {
-    match expr {
-        MirExpr::Sequence { value, .. } => never_null(value),
-        MirExpr::Subscript { .. } | MirExpr::AttrGet { .. } => true,
-        _ => false,
-    }
 }
 
 /// Drops one reference to the `kind` value at `ptr`, freeing it at zero
@@ -313,18 +315,16 @@ pub(crate) fn retain_if_heap_duplicate<'ctx>(
     if is_borrowed_read(source)
         && let Some((kind, ptr)) = counted(rt, &source.ty(), &scalar)
     {
-        if never_null(source) {
-            emit_incref_non_null(context, builder, rt, kind, ptr);
-        } else {
-            emit_incref(context, builder, rt, kind, ptr);
-        }
+        // Null-checked even for an element or slot read: a value that
+        // reached here through a raising path must never be dereferenced.
+        emit_incref(context, builder, rt, kind, ptr);
     }
     scalar
 }
 
 /// Takes a reference to `scalar`, a value of type `ty` read out of a list
-/// element or an assigned instance slot (so never null), unconditionally:
-/// a counted value is incremented and a heap bigint retained.
+/// element or an instance slot, unconditionally: a counted value is
+/// incremented (null-checked) and a heap bigint retained.
 pub(crate) fn retain_scalar<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -333,7 +333,7 @@ pub(crate) fn retain_scalar<'ctx>(
     scalar: &Scalar<'ctx>,
 ) {
     if let Some((kind, ptr)) = counted(rt, ty, scalar) {
-        emit_incref_non_null(context, builder, rt, kind, ptr);
+        emit_incref(context, builder, rt, kind, ptr);
     } else if let (Ty::Int, Scalar::Int(word)) = (ty, scalar) {
         crate::bigint_rc::emit_bigint_refcount_call(
             context,
@@ -412,3 +412,7 @@ pub(crate) fn release_attr_slot<'ctx>(
         .expect("build_int_to_ptr should not fail reinterpreting an i64 as a pointer");
     emit_decref(context, builder, rt, kind, old);
 }
+
+#[cfg(test)]
+#[path = "heap_rc_tests.rs"]
+mod tests;

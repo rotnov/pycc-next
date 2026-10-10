@@ -225,7 +225,7 @@ impl MirStmt {
             MirStmt::BufferSet { base, index, value } | MirStmt::ListSet { base, index, value } => {
                 vec![value, base, index]
             }
-            MirStmt::AttrSet { base, value, .. } => vec![base, value],
+            MirStmt::AttrSet { base, value, .. } => vec![value, base],
             MirStmt::ObjAttrSet { base, value, .. } => vec![base, value],
             MirStmt::ObjSetItem { base, key, value } => vec![base, key, value],
             MirStmt::ObjDelItem { base, key } => vec![base, key],
