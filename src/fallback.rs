@@ -144,6 +144,10 @@ pub(crate) struct Plan {
     stmts: Vec<TopStmt>,
     /// Statement index -> reason.
     fallback: BTreeMap<usize, String>,
+    /// Source offsets of builtin calls compiled code makes through CPython's
+    /// `builtins` module (`min(a, b)` becomes `builtins.min(a, b)`): the
+    /// builtin is valid Python pycc does not compile for these arguments.
+    object_builtins: BTreeMap<u32, String>,
     /// Compiled imports that fallback code reads a name of: they stay
     /// compiled and also run in CPython right after, so both sides see the
     /// module (`cascade`).
@@ -165,6 +169,20 @@ pub(crate) struct Rendered {
     /// `ranges[i]` is statement `i`'s range in `text`.
     ranges: Vec<Range<u32>>,
     preamble: Range<u32>,
+    /// `(offset in text, offset in the source, length)` of every run of
+    /// compiled source copied into `text` unchanged.
+    copied: Vec<(u32, u32, u32)>,
+}
+
+impl Rendered {
+    /// The source offset of `text` offset `at`, when it lies in copied
+    /// compiled source.
+    fn source_offset(&self, at: u32) -> Option<u32> {
+        self.copied
+            .iter()
+            .find(|(start, _, len)| (*start..start + len).contains(&at))
+            .map(|(start, source, _)| source + (at - start))
+    }
 }
 
 impl Plan {
@@ -178,11 +196,9 @@ impl Plan {
             .map(|stmt| TopStmt {
                 range: pycc_ast::stmt_range(stmt),
                 kind: match stmt {
-                    Stmt::FunctionDef(def) => Kind::Def(
-                        def.name.as_str().to_string(),
-                        def.returns.is_none()
-                            || def.parameters.iter().any(|p| p.annotation().is_none()),
-                    ),
+                    Stmt::FunctionDef(def) => {
+                        Kind::Def(def.name.as_str().to_string(), unannotated(def))
+                    }
                     Stmt::ClassDef(class) => Kind::Class(class.name.as_str().to_string()),
                     Stmt::Import(_) | Stmt::ImportFrom(_) => Kind::Import,
                     _ => Kind::Other,
@@ -198,6 +214,7 @@ impl Plan {
             ast: module.body.into_iter().collect(),
             stmts,
             fallback: BTreeMap::new(),
+            object_builtins: BTreeMap::new(),
             mirrored: BTreeSet::new(),
             entry_dir: None,
             publishes,
@@ -214,11 +231,16 @@ impl Plan {
     /// binding names no other top-level statement binds.
     fn mirrorable(&self, index: usize) -> bool {
         let modules: Vec<&str> = match &self.ast[index] {
-            // An alias of an attribute chain (`input = sys.stdin.readline`,
-            // `pr = print`): evaluating it again has no effect.
+            // An alias of a stream method (`input = sys.stdin.readline`),
+            // which compiled code desugars into a function (evaluating
+            // nothing), so CPython evaluating it too has no other effect. A
+            // bare stream (`input = sys.stdin`) is not one: compiled code
+            // may read it.
             Stmt::Assign(assign) => {
                 return matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)])
-                    && is_attribute_chain(&assign.value)
+                    && matches!(&*assign.value, pycc_ast::Expr::Attribute(attr)
+                        if matches!(attr.attr.as_str(), "readline" | "readlines" | "read" | "write" | "flush")
+                            && is_attribute_chain(&attr.value))
                     && self.binds_alone(index);
             }
             Stmt::Import(import) => import.names.iter().map(|a| a.name.as_str()).collect(),
@@ -259,11 +281,14 @@ impl Plan {
     /// (a span-less whole-module diagnostic, the preamble) marks every
     /// statement.
     pub(crate) fn absorb(&mut self, rendered: Option<&Rendered>, failures: &[Failure]) -> bool {
-        let before = self.fallback.len();
+        let before = (self.fallback.len(), self.object_builtins.len());
         // The docstring and `from __future__` imports stay compiled: the
         // preamble goes after them.
         let first = self.preamble_position();
         for failure in failures {
+            if self.call_through_builtins(rendered, failure) {
+                continue;
+            }
             let reason = describe(&failure.diagnostic);
             match self.owner_of(rendered, failure) {
                 Some(index) if index >= first => {
@@ -292,7 +317,52 @@ impl Plan {
             }
         }
         self.cascade();
-        self.fallback.len() > before
+        (self.fallback.len(), self.object_builtins.len()) != before
+    }
+
+    /// Records a compiled call of a builtin pycc does not compile for its
+    /// arguments (`C0001` "call to builtin") as a call through CPython's
+    /// `builtins` module, returning whether it did. A builtin that reads
+    /// its caller's frame, an exception class, or a call already made
+    /// through `builtins` is left to fall back.
+    fn call_through_builtins(&mut self, rendered: Option<&Rendered>, failure: &Failure) -> bool {
+        let message = &failure.diagnostic.message;
+        let Some(name) = message
+            .strip_prefix("call to builtin `")
+            .and_then(|rest| rest.strip_suffix("` is valid Python but not implemented yet"))
+        else {
+            return false;
+        };
+        if !name.starts_with(|c: char| c.is_ascii_lowercase())
+            || matches!(
+                name,
+                "super" | "locals" | "globals" | "vars" | "eval" | "exec" | "dir" | "breakpoint"
+            )
+        {
+            return false;
+        }
+        let Some(span) = failure.diagnostic.span.filter(|s| (s.start, s.end) != (0, 0)) else {
+            return false;
+        };
+        let at = match rendered {
+            Some(rendered) => rendered.source_offset(span.start),
+            None => Some(span.start),
+        };
+        let Some(at) = at else {
+            return false;
+        };
+        let rest = &self.source[at as usize..];
+        let is_call = rest
+            .strip_prefix(name)
+            .is_some_and(|after| after.trim_start().starts_with('('));
+        let starts_name = at == 0
+            || !self.source[..at as usize]
+                .ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == '.');
+        if !is_call || !starts_name || self.object_builtins.contains_key(&at) {
+            return false;
+        }
+        self.object_builtins.insert(at, name.to_string());
+        true
     }
 
     /// The statement a failure belongs to.
@@ -430,6 +500,7 @@ impl Plan {
         let src = &self.source;
         let mut text = String::with_capacity(src.len() * 2);
         let mut ranges = Vec::with_capacity(self.stmts.len());
+        let mut copied = Vec::new();
         let mut cursor = 0usize;
         let preamble_at = self.preamble_position();
         let mut preamble = 0..0;
@@ -475,6 +546,14 @@ impl Plan {
             let mut rewriter = names::Rewriter::new(&globals, NS);
             pycc_ast::visitor::Visitor::visit_stmt(&mut rewriter, &self.ast[index]);
             let mut edits = rewriter.edits;
+            edits.extend(
+                self.object_builtins
+                    .range(stmt.range.start..stmt.range.end)
+                    .map(|(at, name)| names::Edit {
+                        range: *at..at + name.len() as u32,
+                        text: format!("{BUILTINS}.{name}"),
+                    }),
+            );
             edits.sort_by_key(|edit| edit.range.start);
             let at = text.len() as u32;
             let mut inner = start;
@@ -483,11 +562,13 @@ impl Plan {
                 if edit_start < inner {
                     continue;
                 }
+                copied.push((text.len() as u32, inner as u32, (edit_start - inner) as u32));
                 text.push_str(&src[inner..edit_start]);
                 text.push_str(&edit.text);
                 inner = edit_end;
             }
             let end = stmt.range.end as usize;
+            copied.push((text.len() as u32, inner as u32, (end - inner) as u32));
             text.push_str(&src[inner..end]);
             if self.mirrored.contains(&index) {
                 // Same line, so later line numbers do not move.
@@ -506,6 +587,7 @@ impl Plan {
             text,
             ranges,
             preamble,
+            copied,
         }
     }
 
@@ -572,6 +654,27 @@ fn is_attribute_chain(expr: &pycc_ast::Expr) -> bool {
         pycc_ast::Expr::Attribute(attr) => is_attribute_chain(&attr.value),
         _ => false,
     }
+}
+
+/// The module-level functions of `source` with an unannotated parameter
+/// or return, whose signature a native non-strict build infers
+/// (`pycc_hir::func`): an embedded build publishes none of them.
+pub(crate) fn inferred_functions(source: &str) -> BTreeSet<String> {
+    let Ok(module) = pycc_parser::parse_all(source) else {
+        return BTreeSet::new();
+    };
+    module
+        .body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::FunctionDef(def) if unannotated(def) => Some(def.name.as_str().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn unannotated(def: &pycc_ast::StmtFunctionDef) -> bool {
+    def.returns.is_none() || def.parameters.iter().any(|p| p.annotation().is_none())
 }
 
 /// A Python string literal for `text`.

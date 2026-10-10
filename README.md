@@ -73,7 +73,9 @@ Coming next: numpy arrays as native types, published benchmarks against CPython
   code calls falls back too). A module global that fallback code reads or binds
   lives in the module dict, so both sides see one value; an import, or an alias
   such as `input = sys.stdin.readline`, that fallback code reads stays compiled
-  and also runs in CPython. Exceptions cross the
+  and also runs in CPython. A builtin call pycc does not compile for its arguments
+  (`min` of an object, `set()`, `pow(a, b, m)`, ...) is a call of CPython's own
+  builtin from compiled code rather than a fallback. Exceptions cross the
   boundary both ways with CPython's type and message, and tracebacks keep their line
   numbers. `--report-fallbacks` prints what fell back and why; strict mode keeps
   refusing with the same diagnostics.

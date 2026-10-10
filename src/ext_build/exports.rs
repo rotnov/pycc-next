@@ -255,6 +255,18 @@ pub(crate) fn collect_exports_naming_gaps(
     module: &HirModule,
     hooks: &BTreeSet<String>,
 ) -> Result<Vec<ExtExport>, Vec<(String, Diagnostic)>> {
+    collect_exports_excluding(module, hooks, &BTreeSet::new())
+}
+
+/// [`collect_exports_naming_gaps`] without the module-level functions named
+/// in `excluded` (an embedded build's inferred functions,
+/// `crate::fallback::inferred_functions`), which are neither exported nor
+/// a gap.
+pub(crate) fn collect_exports_excluding(
+    module: &HirModule,
+    hooks: &BTreeSet<String>,
+    excluded: &BTreeSet<String>,
+) -> Result<Vec<ExtExport>, Vec<(String, Diagnostic)>> {
     let mut exports: Vec<ExtExport> = Vec::new();
     // Every compiled name any definition of which returns a buffer
     // sub-range; see the union pass after the loop for why the fact is
@@ -278,6 +290,9 @@ pub(crate) fn collect_exports_naming_gaps(
         else {
             continue;
         };
+        if excluded.contains(name) {
+            continue;
+        }
         let Some(spelling) = classify_export_name(name)
             .or_else(|| hooks.contains(name).then_some(ExportName::ModuleLevel))
         else {

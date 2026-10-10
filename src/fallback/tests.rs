@@ -274,3 +274,37 @@ fn only_syntax_and_artifact_refusals_cannot_fall_back() {
     }
     assert!(Plan::new("def f(:\n", "m.py", NATIVE).is_none());
 }
+
+fn builtin_failure(name: &str, start: u32) -> Failure {
+    Failure {
+        diagnostic: Diagnostic::error(
+            "C0001",
+            format!("call to builtin `{name}` is valid Python but not implemented yet"),
+            Span::new(start, start + 1),
+        ),
+        origin: None,
+    }
+}
+
+/// A builtin call pycc does not compile becomes a call through CPython's
+/// `builtins` module; one that reads its caller's frame falls back.
+#[test]
+fn an_unsupported_builtin_call_goes_through_cpython_builtins() {
+    let source = "a = 1\nb = min(a, 2)\nc = vars()\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    let min = source.find("min").unwrap() as u32;
+    assert!(plan.absorb(None, &[builtin_failure("min", min)]));
+    assert!(plan.report_lines().is_empty());
+    let rendered = plan.render();
+    assert!(
+        rendered.text.contains("b = __pycc_fallback_builtins.min(a, 2)"),
+        "{}",
+        rendered.text
+    );
+    // The same call failing again (in the rewritten text) is not new.
+    let again = rendered.text.find("__pycc_fallback_builtins.min").unwrap() as u32;
+    assert!(!plan.object_builtins.contains_key(&again));
+    let vars = rendered.text.find("vars").unwrap() as u32;
+    assert!(plan.absorb(Some(&rendered), &[builtin_failure("vars", vars)]));
+    assert!(plan.report_lines()[0].contains("m.py:3 "), "{:?}", plan.report_lines());
+}

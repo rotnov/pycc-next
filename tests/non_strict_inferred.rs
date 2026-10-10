@@ -43,8 +43,8 @@ fn run_with_stdin(mut command: Command, stdin: &[u8]) -> Output {
     child.wait_with_output().expect("wait")
 }
 
-/// Builds `name` non-strict, runs it and CPython on the shared stdin, and
-/// returns the fallback report.
+/// Builds `name` non-strict, runs it and CPython on the shared stdin (a
+/// program that reads none ignores it), and returns the fallback report.
 fn matches_cpython(name: &str) -> String {
     let dir = ScratchDir::new("non_strict_inferred").expect("scratch");
     let source = dir.join("m.py");
@@ -99,4 +99,19 @@ fn fallback_calls_into_inferred_functions_keep_cpython_semantics() {
     // The `sys` import and the `input` alias stay compiled.
     assert!(!report.contains(":1 runs"), "{report}");
     assert!(!report.contains(":3 runs"), "{report}");
+}
+
+#[test]
+fn builtin_calls_pycc_does_not_compile_run_through_cpython_builtins() {
+    if !embed_interpreter_available() {
+        eprintln!("skipped: no CPython to embed (set PYCC_PYTHON)");
+        return;
+    }
+    // Ends in CPython's `TypeError` from `min(1, "a")`, raised in compiled
+    // code through `builtins.min`.
+    let report = matches_cpython("non_strict_builtins.py");
+    // Only the keyword call falls back; `min`, `chr`, `set()`, `divmod`,
+    // three-argument `pow`, `bin`, `hex` and a mixed `max` stay compiled.
+    assert_eq!(report.matches("fallback:").count(), 1, "{report}");
+    assert!(report.contains(":18 runs"), "{report}");
 }

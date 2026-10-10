@@ -518,7 +518,14 @@ fn export_gaps_as_failures(
     } else {
         std::collections::BTreeSet::new()
     };
-    let Err(gaps) = crate::ext_build::collect_exports_naming_gaps(typed, &hooks) else {
+    // An embedded build publishes no inferred function: fallback code that
+    // calls one makes it fall back instead (`crate::fallback`).
+    let inferred = if ext_module {
+        std::collections::BTreeSet::new()
+    } else {
+        crate::fallback::inferred_functions(&source)
+    };
+    let Err(gaps) = crate::ext_build::collect_exports_excluding(typed, &hooks, &inferred) else {
         return Ok(());
     };
     let Ok(module) = pycc_parser::parse_all(&source) else {

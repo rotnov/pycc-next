@@ -308,11 +308,16 @@ fn embed_plan_or_exit(
     // module-level functions in `__main__`, so the fallback code can call
     // them, as an `--ext` module's code can.
     let exports = if crate::fallback::active() {
-        let mut exports =
-            ext_build::collect_exports_with_hooks(typed_hir, &std::collections::BTreeSet::new())
-                .map_err(|gaps| ExitCode::from(report(gaps)))?;
-        exports.retain(|export| export.class.is_none());
         let source = crate::fallback::entry_source(entry);
+        // Inferred functions are not published (`crate::fallback`).
+        let inferred = crate::fallback::inferred_functions(&source);
+        let mut exports = ext_build::collect_exports_excluding(
+            typed_hir,
+            &std::collections::BTreeSet::new(),
+            &inferred,
+        )
+        .map_err(|gaps| ExitCode::from(report(gaps.into_iter().map(|(_, d)| d).collect())))?;
+        exports.retain(|export| export.class.is_none());
         let signatures = ext_build::SourceSignatures::from_source(&source);
         ext_build::bind_keyword_names(typed_hir, &signatures, &mut exports);
         exports
