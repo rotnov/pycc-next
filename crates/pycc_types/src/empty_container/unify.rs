@@ -29,150 +29,11 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
-/// A type with unification variables in it.
-#[derive(Clone, Debug)]
-enum Shape {
-    Known(Ty),
-    List(usize),
-    Set(usize),
-    FrozenSet(usize),
-    Dict(usize, usize),
-}
-
-#[derive(Default)]
-struct Store {
-    parent: Vec<usize>,
-    shape: Vec<Option<Shape>>,
-    conflicted: Vec<bool>,
-}
-
-impl Store {
-    fn fresh(&mut self) -> usize {
-        self.parent.push(self.parent.len());
-        self.shape.push(None);
-        self.conflicted.push(false);
-        self.parent.len() - 1
-    }
-
-    fn with_shape(&mut self, shape: Shape) -> usize {
-        let var = self.fresh();
-        self.shape[var] = Some(shape);
-        var
-    }
-
-    fn known(&mut self, ty: Ty) -> usize {
-        self.with_shape(Shape::Known(ty))
-    }
-
-    fn find(&mut self, var: usize) -> usize {
-        let mut root = var;
-        while self.parent[root] != root {
-            root = self.parent[root];
-        }
-        let mut walk = var;
-        while self.parent[walk] != root {
-            let next = self.parent[walk];
-            self.parent[walk] = root;
-            walk = next;
-        }
-        root
-    }
-
-    /// The shape of `var`'s class, with a `Known` container opened into
-    /// variables so it unifies structurally.
-    fn open(&mut self, var: usize) -> Option<Shape> {
-        let root = self.find(var);
-        let shape = self.shape[root].clone()?;
-        let opened = match shape {
-            Shape::Known(Ty::List(elem)) => {
-                let e = self.known(*elem);
-                Shape::List(e)
-            }
-            Shape::Known(Ty::Set(elem)) => {
-                let e = self.known(*elem);
-                Shape::Set(e)
-            }
-            Shape::Known(Ty::FrozenSet(elem)) => {
-                let e = self.known(*elem);
-                Shape::FrozenSet(e)
-            }
-            Shape::Known(Ty::Dict(pair)) => {
-                let (k, v) = *pair;
-                let k = self.known(k);
-                let v = self.known(v);
-                Shape::Dict(k, v)
-            }
-            other => other,
-        };
-        self.shape[root] = Some(opened.clone());
-        Some(opened)
-    }
-
-    fn conflict(&mut self, var: usize) {
-        let root = self.find(var);
-        self.conflicted[root] = true;
-    }
-
-    /// Unifies `a` and `b`; a mismatch marks the class conflicted.
-    fn unify(&mut self, a: usize, b: usize) {
-        let (ra, rb) = (self.find(a), self.find(b));
-        if ra == rb {
-            return;
-        }
-        let (sa, sb) = (self.open(ra), self.open(rb));
-        let conflicted = self.conflicted[ra] || self.conflicted[rb];
-        self.parent[rb] = ra;
-        self.conflicted[ra] = conflicted;
-        match (sa, sb) {
-            (None, None) => {}
-            (Some(shape), None) | (None, Some(shape)) => self.shape[ra] = Some(shape),
-            (Some(Shape::List(x)), Some(Shape::List(y)))
-            | (Some(Shape::Set(x)), Some(Shape::Set(y)))
-            | (Some(Shape::FrozenSet(x)), Some(Shape::FrozenSet(y))) => self.unify(x, y),
-            (Some(Shape::Dict(k1, v1)), Some(Shape::Dict(k2, v2))) => {
-                self.unify(k1, k2);
-                self.unify(v1, v2);
-            }
-            (Some(Shape::Known(x)), Some(Shape::Known(y))) => {
-                if x != y {
-                    // `bool` flows into an `int` slot (`xs.append(True)` on a
-                    // `list[int]`); any other pair is a conflict.
-                    let joined = match (&x, &y) {
-                        (Ty::Int, Ty::Bool) | (Ty::Bool, Ty::Int) => Some(Ty::Int),
-                        _ => None,
-                    };
-                    match joined {
-                        Some(ty) => self.shape[ra] = Some(Shape::Known(ty)),
-                        None => self.conflicted[ra] = true,
-                    }
-                }
-            }
-            _ => self.conflicted[ra] = true,
-        }
-    }
-
-    /// The concrete type of `var`, when every variable in it is resolved and
-    /// none is conflicted.
-    fn resolve(&mut self, var: usize, depth: usize) -> Option<Ty> {
-        if depth > 16 {
-            return None;
-        }
-        let root = self.find(var);
-        if self.conflicted[root] {
-            return None;
-        }
-        match self.shape[root].clone()? {
-            Shape::Known(ty) => Some(ty),
-            Shape::List(e) => Some(Ty::List(Box::new(self.resolve(e, depth + 1)?))),
-            Shape::Set(e) => Some(Ty::Set(Box::new(self.resolve(e, depth + 1)?))),
-            Shape::FrozenSet(e) => Some(Ty::FrozenSet(Box::new(self.resolve(e, depth + 1)?))),
-            Shape::Dict(k, v) => Some(Ty::Dict(Box::new((
-                self.resolve(k, depth + 1)?,
-                self.resolve(v, depth + 1)?,
-            )))),
-        }
-    }
-}
+mod store;
+mod walk;
+use store::{Shape, Store};
+pub(super) use walk::{stmt_exprs_mut, walk_expr_mut};
+use walk::all_stmts_mut;
 
 /// Which empty container a site is.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -196,6 +57,14 @@ enum Deferred {
         base: usize,
         key: usize,
         value: usize,
+    },
+    /// `result = left <op> right` over scalars not known when visited (an
+    /// element read of a container typed later).
+    BinOp {
+        op: pycc_hir::BinOpKind,
+        left: usize,
+        right: usize,
+        result: usize,
     },
 }
 
@@ -382,7 +251,18 @@ impl Engine {
                 {
                     return Some(self.store.known(ty));
                 }
-                self.inferred(scope, expr)
+                if let Some(known) = self.inferred(scope, expr) {
+                    return Some(known);
+                }
+                let (left, right) = (l?, r?);
+                let result = self.store.fresh();
+                self.deferred.push(Deferred::BinOp {
+                    op: *op,
+                    left,
+                    right,
+                    result,
+                });
+                Some(result)
             }
             HirExpr::DictGetOrDefault {
                 dict: pycc_hir::ContainerReceiver::Name(name),
@@ -409,6 +289,15 @@ impl Engine {
                     self.store.unify(result, d);
                 }
                 Some(result)
+            }
+            HirExpr::TupleLiteral(items) if !items.is_empty() => {
+                let vars: Vec<Option<usize>> =
+                    items.iter().map(|item| self.term(scope, item)).collect();
+                let vars = vars
+                    .into_iter()
+                    .map(|var| var.unwrap_or_else(|| self.store.fresh()))
+                    .collect();
+                Some(self.store.with_shape(Shape::Tuple(vars)))
             }
             HirExpr::Compare { op, left, right } => {
                 let l = self.term(scope, left);
@@ -697,6 +586,29 @@ impl Engine {
             for constraint in pending {
                 let base = match &constraint {
                     Deferred::Element { base, .. } | Deferred::Store { base, .. } => *base,
+                    Deferred::BinOp {
+                        op,
+                        left,
+                        right,
+                        result,
+                    } => {
+                        let scalar = |ty: &Option<Ty>| {
+                            matches!(ty, Some(Ty::Int | Ty::Float | Ty::Bool | Ty::Str))
+                        };
+                        let (lt, rt) = (self.store.resolve(*left, 0), self.store.resolve(*right, 0));
+                        if !(scalar(&lt) && scalar(&rt)) {
+                            self.deferred.push(constraint);
+                            continue;
+                        }
+                        if let Ok(ty) =
+                            crate::binop::numeric_result_type(*op, lt.unwrap(), rt.unwrap())
+                        {
+                            let known = self.store.known(ty);
+                            self.store.unify(*result, known);
+                            progressed = true;
+                        }
+                        continue;
+                    }
                 };
                 match (self.store.open(base), constraint) {
                     (Some(Shape::List(e)), Deferred::Element { result, .. })
@@ -791,170 +703,6 @@ const SITE_PREFIX: &str = "0site";
 /// The site number a placeholder name carries.
 fn site_number(name: &str) -> Option<usize> {
     name.strip_prefix(SITE_PREFIX)?.parse().ok()
-}
-
-/// Calls `visit` on every expression of `stmt` (not recursing into an
-/// expression's children, nor into nested statement bodies).
-pub(super) fn stmt_exprs_mut(stmt: &mut HirStmt, visit: &mut dyn FnMut(&mut HirExpr)) {
-    match stmt {
-        HirStmt::Assign { value, .. } => visit(value),
-        HirStmt::AnnAssign {
-            value: Some(value), ..
-        } => visit(value),
-        HirStmt::ExprStmt(expr) => visit(expr),
-        HirStmt::If { test, .. } | HirStmt::While { test, .. } => visit(test),
-        HirStmt::DictSet { key, value, .. } => {
-            visit(key);
-            visit(value);
-        }
-        HirStmt::ListCompAssign {
-            iter, cond, elt, ..
-        }
-        | HirStmt::SetCompAssign {
-            iter, cond, elt, ..
-        } => {
-            comp_iter_mut(iter, visit);
-            if let Some(cond) = cond {
-                visit(cond);
-            }
-            visit(elt);
-        }
-        HirStmt::DictCompAssign {
-            iter,
-            cond,
-            key,
-            value,
-            ..
-        } => {
-            comp_iter_mut(iter, visit);
-            if let Some(cond) = cond {
-                visit(cond);
-            }
-            visit(key);
-            visit(value);
-        }
-        HirStmt::Return(Some(value)) => visit(value),
-        HirStmt::AttrSet { value, .. } => visit(value),
-        HirStmt::ForObject { iter, .. } => visit(iter),
-        _ => {}
-    }
-}
-
-fn comp_iter_mut(iter: &mut pycc_hir::CompIter, visit: &mut dyn FnMut(&mut HirExpr)) {
-    match iter {
-        pycc_hir::CompIter::Range { start, stop, step } => {
-            visit(start);
-            visit(stop);
-            visit(step);
-        }
-        pycc_hir::CompIter::Iterable(iterable) => visit(iterable),
-        pycc_hir::CompIter::Name(_) => {}
-    }
-}
-
-/// Calls `visit` on `expr` and then on every sub-expression, depth first.
-/// `visit` returning `true` stops the descent below that node.
-pub(super) fn walk_expr_mut(expr: &mut HirExpr, visit: &mut dyn FnMut(&mut HirExpr) -> bool) {
-    if visit(expr) {
-        return;
-    }
-    let mut each = |child: &mut HirExpr| walk_expr_mut(child, visit);
-    match expr {
-        HirExpr::Call { args, .. }
-        | HirExpr::ListLiteral(args)
-        | HirExpr::SetLiteral(args)
-        | HirExpr::TupleLiteral(args)
-        | HirExpr::ObjectList(args)
-        | HirExpr::ReceiverClassCall { args }
-        | HirExpr::GenericClassInstantiate { args, .. } => args.iter_mut().for_each(&mut each),
-        HirExpr::BinOp { left, right, .. }
-        | HirExpr::AugBinOp { left, right, .. }
-        | HirExpr::Compare { left, right, .. }
-        | HirExpr::BoolOp { left, right, .. } => {
-            each(left);
-            each(right);
-        }
-        HirExpr::CompareChain { first, links } => {
-            each(first);
-            for link in links {
-                each(&mut link.right);
-            }
-        }
-        HirExpr::UnaryOp { operand, .. } => each(operand),
-        HirExpr::IfExp { test, body, orelse } => {
-            each(test);
-            each(body);
-            each(orelse);
-        }
-        HirExpr::Unpack { value, .. } | HirExpr::NamedExpr { value, .. } => each(value),
-        HirExpr::FString(parts) => {
-            for part in parts {
-                if let FStringPart::Interpolation(inner) = part {
-                    each(inner);
-                }
-            }
-        }
-        HirExpr::Subscript { base, index } => {
-            each(base);
-            each(index);
-        }
-        HirExpr::Slice {
-            base,
-            start,
-            stop,
-            step,
-        } => {
-            each(base);
-            for bound in [start, stop, step].into_iter().flatten() {
-                each(bound);
-            }
-        }
-        HirExpr::ListAppend { list, value } => {
-            if let Some(attr) = list.attr_expr_mut() {
-                each(attr);
-            }
-            each(value);
-        }
-        HirExpr::DictLiteral(pairs) => {
-            for (key, value) in pairs {
-                each(key);
-                each(value);
-            }
-        }
-        HirExpr::DictGetOrDefault { key, default, .. } => {
-            each(key);
-            each(default);
-        }
-        HirExpr::SetAdd { value, .. } => each(value),
-        HirExpr::AttrGet { base, .. } => each(base),
-        HirExpr::MethodCall { base, args, .. } => {
-            each(base);
-            args.iter_mut().for_each(&mut each);
-        }
-        HirExpr::ReceiverDispatchedCall { call, .. } => each(call),
-        HirExpr::ExprCall { callee, args } => {
-            each(callee);
-            args.iter_mut().for_each(&mut each);
-        }
-        HirExpr::KeywordCall { call, keywords, .. } => {
-            each(call);
-            for (_, value) in keywords {
-                each(value);
-            }
-        }
-        HirExpr::Comprehension(comp) => {
-            comp_iter_mut(&mut comp.iter, &mut each);
-            for body_expr in comp.body_exprs_mut() {
-                each(body_expr);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Every statement of `body` and of its nested bodies, mutably.
-fn all_stmts_mut(body: &mut [HirStmt], visit: &mut dyn FnMut(&mut HirStmt)) {
-    for_each_stmt_mut(body, visit);
 }
 
 /// Replaces every empty container of `hir` with a numbered placeholder

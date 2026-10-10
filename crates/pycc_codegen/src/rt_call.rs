@@ -67,7 +67,14 @@ pub(super) fn emit_rt_call<'ctx>(
             values.push(word.into());
             param_types.push(i64_type.into());
         } else {
-            let scalar = coerce_scalar_to_type(context, builder, scalar, param.clone());
+            // An `int` passed to a `float` parameter (`math.sqrt(4)`) is
+            // converted as `float(n)` would (`OverflowError` beyond range).
+            let scalar = match (param, scalar) {
+                (Ty::Float, scalar @ (Scalar::Int(_) | Scalar::Bool(_))) => {
+                    Scalar::Float(crate::coerce::to_float(context, builder, rt, scalar))
+                }
+                (_, scalar) => coerce_scalar_to_type(context, builder, scalar, param.clone()),
+            };
             values.push(abi_value(scalar));
             param_types.push(ty_to_basic_type(context, param.clone()).into());
         }

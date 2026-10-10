@@ -162,10 +162,14 @@ pub(crate) fn collect_comprehension_constraints(
         &comp.var,
         &comp.iter,
     )?;
-    let mut elt_term = None;
+    let mut terms = Vec::new();
     for sub in comp.body_exprs() {
-        elt_term = collect_expr_constraints(signatures, parents, concrete, deferred, &scoped, sub)?;
+        terms.push(collect_expr_constraints(signatures, parents, concrete, deferred, &scoped, sub)?);
     }
+    // `body_exprs` puts the condition first and a dict's key before its
+    // value.
+    let elt_term = terms.pop().flatten();
+    let key_term = terms.pop().flatten();
     // Part 1 of #1255: a comprehension over a CPython object
     // produces a CPython object, whatever its element.
     if let CompIter::Iterable(_) = comp.iter
@@ -182,13 +186,15 @@ pub(crate) fn collect_comprehension_constraints(
             elt_term, parents, concrete, deferred,
         )));
     }
-    // A list comprehension whose element is already concrete is a
-    // list of that element.
-    if let CompElt::List(_) = comp.elt
-        && let Some(elem) = elt_term.and_then(|t| resolved_term(t, parents, concrete))
-        && pycc_hir::is_list_element_ty(&elem)
-    {
-        return Ok(Some(Ok(Ty::List(Box::new(elem)))));
+    match &comp.elt {
+        CompElt::List(_) => Ok(Some(set_comp::list_comp_container(
+            elt_term, parents, concrete, deferred,
+        ))),
+        CompElt::Dict { .. } => {
+            Ok(Some(set_comp::dict_comp_container(
+                key_term, elt_term, parents, concrete, deferred,
+            )))
+        }
+        CompElt::Set(_) => unreachable!("handled above"),
     }
-    Ok(Some(Ok(crate::comprehension::comp_container_of(&comp.elt))))
 }

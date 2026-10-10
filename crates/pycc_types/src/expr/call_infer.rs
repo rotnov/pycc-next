@@ -144,6 +144,16 @@ pub(crate) fn infer_call_expr(
             .collect::<Result<Vec<_>, _>>()?;
         &heap_arg_tys
     };
+    // A stdlib function the builtin table types (`math.log`) is still
+    // refused when a local shadows its module's spelling.
+    if let Some(symbol) = std_qualified_symbol(callee)
+        && let Some(shadowed) =
+            shadowed_std_receiver(symbol.module, &env.std_module_aliases, |receiver| {
+                is_std_receiver_bound(env, local_names, receiver)
+            })
+    {
+        return Err(std_receiver_shadowed(shadowed, symbol.module));
+    }
     if env.lookup_function(callee).is_none()
         && env.lookup_class(callee).is_none()
         && env.lookup_generic(callee).is_none()

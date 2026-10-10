@@ -839,6 +839,7 @@ dependencies = [
  "pycc_hir",
  "pycc_mir",
  "pycc_scratch",
+ "pycc_std",
 ]
 
 [[package]]

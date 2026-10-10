@@ -65,6 +65,8 @@ mod int_set;
 mod io;
 /// `list[T]`'s one generic runtime object, `PyListObj`.
 mod list;
+/// The float functions of `math`.
+mod math_float;
 /// The integer functions of `math`.
 mod math_ops;
 /// `print`'s stdout flush (#1340); the other print primitives stay below.

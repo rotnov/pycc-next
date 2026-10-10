@@ -195,6 +195,45 @@ pub struct StdSymbol {
 /// entries at most, so no `HashMap`/`OnceCell`/macro-generated dispatch table
 /// is warranted, and a linear scan keeps every branch trivially unit-tested
 /// (D-014's 100% line/region coverage gate applies to this crate too).
+/// A `math` function whose calls `pycc_hir::builtins` types and lowers; the
+/// registered signature is its strictest form, used when the table does not
+/// claim a call.
+const fn math_fn(
+    name: &'static str,
+    arg_tys: &'static [ScalarKind],
+    ret_ty: ScalarKind,
+) -> StdSymbol {
+    StdSymbol {
+        module: StdModule::Math,
+        name,
+        kind: StdSymbolKind::Function { arg_tys, ret_ty },
+    }
+}
+
+/// A `float` constant of `math`.
+const fn math_const(name: &'static str) -> StdSymbol {
+    StdSymbol {
+        module: StdModule::Math,
+        name,
+        kind: StdSymbolKind::Constant {
+            ty: ScalarKind::Float,
+        },
+    }
+}
+
+/// The value of the `math` float constant `name` (`"math.pi"` spelled
+/// qualified), for the backend.
+pub fn math_constant(qualified: &str) -> Option<f64> {
+    Some(match qualified {
+        "math.pi" => std::f64::consts::PI,
+        "math.e" => std::f64::consts::E,
+        "math.tau" => std::f64::consts::TAU,
+        "math.inf" => f64::INFINITY,
+        "math.nan" => f64::NAN,
+        _ => return None,
+    })
+}
+
 const REGISTRY: &[StdSymbol] = &[
     StdSymbol {
         module: StdModule::Math,
@@ -251,6 +290,27 @@ const REGISTRY: &[StdSymbol] = &[
             ty: ScalarKind::Float,
         },
     },
+    math_const("e"),
+    math_const("tau"),
+    math_const("inf"),
+    math_const("nan"),
+    math_fn("log", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("log2", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("log10", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("exp", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("sin", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("cos", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("tan", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("asin", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("acos", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("atan", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("fabs", &[ScalarKind::Float], ScalarKind::Float),
+    math_fn("atan2", &[ScalarKind::Float, ScalarKind::Float], ScalarKind::Float),
+    math_fn("hypot", &[ScalarKind::Float, ScalarKind::Float], ScalarKind::Float),
+    math_fn("copysign", &[ScalarKind::Float, ScalarKind::Float], ScalarKind::Float),
+    math_fn("factorial", &[ScalarKind::Int], ScalarKind::Int),
+    math_fn("comb", &[ScalarKind::Int, ScalarKind::Int], ScalarKind::Int),
+    math_fn("perm", &[ScalarKind::Int, ScalarKind::Int], ScalarKind::Int),
     StdSymbol {
         module: StdModule::Enum,
         name: "Enum",
@@ -547,8 +607,8 @@ mod tests {
 
     #[test]
     fn resolve_symbol_rejects_unregistered_symbol_in_registered_module() {
-        assert_eq!(resolve_symbol(StdModule::Math, "tan"), None);
-        assert_eq!(resolve_symbol(StdModule::Math, "log"), None);
+        assert_eq!(resolve_symbol(StdModule::Math, "erf"), None);
+        assert_eq!(resolve_symbol(StdModule::Math, "lgamma"), None);
     }
 
     #[test]

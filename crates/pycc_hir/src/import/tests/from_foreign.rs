@@ -114,14 +114,30 @@ fn a_spelling_later_in_the_list_refuses_the_whole_statement() {
 }
 
 #[test]
-fn an_aliased_foreign_from_import_keeps_its_c0001() {
+fn an_aliased_foreign_from_import_binds_the_object_to_its_alias() {
+    let source = "from itertools import product as p\n";
+    let lowered = lower_foreign(source, &["itertools"]).expect("must lower");
+    let expected = vec![ImportBinding::Foreign {
+        local_name: "p".to_string(),
+        module_path: "itertools".to_string(),
+        from: Some(from_import("product", &["product"], 0)),
+        site: crate::ForeignImportSite::Item(0),
+        span: Span::new(0, source.trim_end().len() as u32),
+    }];
+    assert_eq!(lowered.hir.imports, expected);
+}
+
+#[test]
+fn an_alias_pycc_resolves_by_its_spelling_is_refused() {
     let diagnostic = only_error(lower_foreign(
-        "from itertools import product as p\n",
+        "from itertools import product as range\n",
         &["itertools"],
     ));
     assert_eq!(
         diagnostic.message,
-        "`from ... import x as y` aliasing is not supported yet"
+        "binding the CPython object `itertools.product` to `range`, a name pycc resolves by \
+         its spelling (a Python builtin, a stdlib module, or a typing, decorator or base-class \
+         marker), is not supported yet"
     );
 }
 
@@ -324,12 +340,12 @@ fn a_relative_name_pycc_resolves_by_its_spelling_is_refused_with_its_dots() {
 }
 
 #[test]
-fn a_relative_aliased_or_wildcard_foreign_from_import_keeps_its_c0001() {
-    let diagnostic = only_error(lower_relative("from .sib import x as y\n", &[]));
-    assert_eq!(
-        diagnostic.message,
-        "`from ... import x as y` aliasing is not supported yet"
-    );
+fn a_relative_wildcard_foreign_from_import_keeps_its_c0001() {
+    let lowered = lower_relative("from .sib import x as y\n", &[]).expect("must lower");
+    assert!(matches!(
+        &lowered.hir.imports[..],
+        [ImportBinding::Foreign { local_name, .. }] if local_name == "y"
+    ));
     let diagnostic = only_error(lower_relative("from .sib import *\n", &[]));
     assert_eq!(
         diagnostic.message,

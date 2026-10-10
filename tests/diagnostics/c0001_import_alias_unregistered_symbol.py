@@ -1,3 +1,3 @@
 import math as m
 
-print(m.tan(1.0))
+print(m.erf(1.0))

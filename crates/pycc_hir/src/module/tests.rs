@@ -652,9 +652,10 @@ fn a_rejected_stdlib_from_import_poisons_the_names_it_would_have_bound() {
 
 #[test]
 fn an_aliased_stdlib_from_import_poisons_its_asname_only() {
-    // `from math import sqrt as s` binds `s`, so a later `s` is the
+    // `from math import sqrt as range` would bind `range` (a spelling
+    // pycc resolves, so the alias is refused): a later `range` is the
     // cascade and a later `sqrt` is a genuine unknown name.
-    let source = format!("from math import sqrt as s\nclass Foo(s):\n{CLASS_BODY}");
+    let source = format!("from math import sqrt as range\nclass Foo(range):\n{CLASS_BODY}");
     let diagnostics = lower_all_err(&source);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
     assert_eq!(
@@ -662,7 +663,7 @@ fn an_aliased_stdlib_from_import_poisons_its_asname_only() {
         "`from ... import x as y` aliasing is not supported yet"
     );
 
-    let source = format!("from math import sqrt as s\nclass Bar(sqrt):\n{CLASS_BODY}");
+    let source = format!("from math import sqrt as range\nclass Bar(sqrt):\n{CLASS_BODY}");
     let diagnostics = lower_all_err(&source);
     assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
     assert!(
@@ -749,7 +750,9 @@ const IMPORT_SHAPES: &[&str] = &[
     "from math import sqrt, pi\n",
     "from math import bogus\n",       // not a registered symbol
     "from math import sqrt, bogus\n", // one of several is not
-    "from math import sqrt as s\n",   // `asname`
+    "from math import sqrt as s\n",   // `asname` of a function
+    "from math import sqrt as range\n", // `asname` pycc resolves by spelling
+    "from typing import Dict as D\n", // `asname` of a marker
     "from math import *\n",           // wildcard
     "from os import path\n",          // module `pycc_std` does not resolve
     // The `__future__` directive (D-229): accepted, then its rejection

@@ -8,11 +8,8 @@ use pycc_hir::{BinOpKind, HirExpr, HirItem, HirModule, HirStmt, Ty};
 
 #[test]
 fn lowers_math_sqrt_call_to_mir_with_float_type_without_panicking() {
-    // D-136: without the dedicated `callee == "math.sqrt"` branch, this
-    // would panic via `lookup`'s own "has no recorded type" message,
-    // exactly like `len` above -- there is no `$fn:math.sqrt` signature
-    // to find, even though `pycc_types` already accepts `math.sqrt(x)`
-    // as valid, `Ty::Float`-typed.
+    // `math.sqrt` is a `pycc_hir::builtins` table entry: a runtime call
+    // that raises CPython's domain error for a negative argument.
     let hir = HirModule {
         seeded_builtin_exception_classes: false,
         items: vec![HirItem::TopLevelStmt(HirStmt::Assign {
@@ -31,11 +28,12 @@ fn lowers_math_sqrt_call_to_mir_with_float_type_without_panicking() {
         mir.items[0],
         MirItem::TopLevelStmt(MirStmt::Assign {
             target: "n".to_string(),
-            value: MirExpr::Call {
-                callee: "math.sqrt".to_string(),
+            value: MirExpr::RtCall(Box::new(RtCallExpr {
+                sig: pycc_hir::builtins::resolve_call("math.sqrt", &[Ty::Float])
+                    .expect("claimed")
+                    .expect("admitted"),
                 args: vec![MirExpr::FloatLiteral(2.0)],
-                ty: Ty::Float,
-            },
+            })),
         })
     );
 }

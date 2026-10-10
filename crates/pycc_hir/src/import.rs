@@ -516,7 +516,6 @@ pub(crate) fn lower_import_stmt(
             check_from_import_shape(import)?;
             let mut bound = Vec::with_capacity(import.names.len());
             for alias in &import.names {
-                check_alias_shape(import, alias)?;
                 let symbol_name = alias.name.as_str();
                 let Some(symbol) = pycc_std::resolve_symbol(module, symbol_name) else {
                     return Err(unresolved_symbol(
@@ -526,8 +525,15 @@ pub(crate) fn lower_import_stmt(
                         import.range,
                     ));
                 };
+                // `from math import log as ln` binds the alias to the
+                // same function or constant; a marker is resolved by its
+                // spelling, so it keeps the aliasing `C0001`.
+                if !std_alias_admitted(&symbol, alias) {
+                    check_alias_shape(import, alias)?;
+                }
+                let local_name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
                 bound.push(ImportBinding::Symbol {
-                    local_name: symbol_name.to_string(),
+                    local_name: local_name.to_string(),
                     module,
                     symbol,
                 });
@@ -678,13 +684,16 @@ fn lower_foreign_from_import(
         .map(|alias| alias.name.to_string())
         .collect();
     for (index, alias) in import.names.iter().enumerate() {
-        check_alias_shape(import, alias)?;
-        let name = alias.name.as_str();
-        if spelling::shadows_a_resolved_spelling(name)
-            && !spelling::carrier_from_import(&module_path, name, import.level)
-        {
+        // `from X import a as b` binds `X.a` to `b`; a buffer carrier keeps
+        // its spelling, so it is never aliased.
+        let carrier = spelling::carrier_from_import(&module_path, &alias.name, import.level);
+        if carrier {
+            check_alias_shape(import, alias)?;
+        }
+        let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+        if spelling::shadows_a_resolved_spelling(name) && !carrier {
             let object = FromImport {
-                name: name.to_string(),
+                name: alias.name.to_string(),
                 fromlist: fromlist.clone(),
                 index,
                 level: import.level,
@@ -703,12 +712,13 @@ fn lower_foreign_from_import(
     let span = statement_span(import.range);
     let bindings = fromlist
         .iter()
+        .zip(&import.names)
         .enumerate()
-        .map(|(index, name)| ImportBinding::Foreign {
+        .map(|(index, (name, alias))| ImportBinding::Foreign {
             local_name: if spelling::carrier_from_import(&module_path, name, import.level) {
                 spelling::carrier_local_name(name)
             } else {
-                name.clone()
+                alias.asname.as_ref().map_or_else(|| name.clone(), |n| n.to_string())
             },
             module_path: module_path.clone(),
             from: Some(FromImport {
@@ -737,6 +747,22 @@ fn check_from_import_shape(import: &StmtImportFrom) -> Result<(), Diagnostic> {
         ));
     }
     Ok(())
+}
+
+/// Whether `from <stdlib> import <symbol> as <alias>` lowers: no alias, or
+/// an alias of a function or constant to a name pycc does not resolve by
+/// its spelling.
+pub(crate) fn std_alias_admitted(symbol: &pycc_std::StdSymbol, alias: &pycc_ast::Alias) -> bool {
+    match &alias.asname {
+        None => true,
+        Some(asname) => {
+            matches!(
+                symbol.kind,
+                pycc_std::StdSymbolKind::Function { .. } | pycc_std::StdSymbolKind::Constant { .. }
+            ) && (asname.as_str() == alias.name.as_str()
+                || !spelling::shadows_a_resolved_spelling(asname.as_str()))
+        }
+    }
 }
 
 /// `C0001` for `from ... import x as y` -- shared like

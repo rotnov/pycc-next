@@ -696,62 +696,11 @@ fn pep_0594_dead_battery_matches_cpython_byte_for_byte() {
     );
 }
 
-// D-138: the second half of the PEP-594 pair -- `cgi` (a real,
-// removed-in-3.13 stdlib module, absent from pycc_std's registry) must be
-// cleanly rejected with C0001, not silently accepted or a panic.
-//
-// The fixture first spelled it `import cgi as c` rather than D-138's original
-// plain `import cgi`. Part 1 of #1026 gave the plain, unaliased,
-// undotted form a meaning: it binds an opaque CPython module object
-// (`Ty::Object`) for `pycc build --ext`, so it no longer reaches
-// `C0001` at all -- what it reaches instead is `ModuleNotFoundError` in
-// the host at module-exec time, which is exactly what CPython 3.14 does
-// with the same line, and which
-// `tests/issue_1080_foreign_object.rs` pins directly. The aliased form
-// `import cgi as c` then carried the fixture until #1291 admitted an
-// undotted alias on the same terms as the plain form, and
-// `from cgi import escape` carried it until #1278 admitted an unaliased
-// from-import of an undotted foreign module.
-//
-// The fixture is now `from cgi import escape as esc`. Stated honestly, it
-// no longer pins a dead-battery property: every non-`pycc_std` root
-// reaches the host's `ModuleNotFoundError` when it is missing, as in
-// CPython. What it pins is narrower -- an aliased `from` import of a
-// module outside `pycc_std` is refused with `C0001`, so `cgi` is never
-// silently treated as a *pycc_std* module. See the dated amendments on
-// D-137 and D-138.
-//
-// No
-// CPython oracle involved (per D-138's own Context: CPython 3.14 raises
-// `ModuleNotFoundError` for this exact source, a fundamentally different
-// failure shape than pycc's static C0001 -- the two compilers are
-// asserting different things about the same removed module, so
-// byte-for-byte comparison would be misleading here, unlike every other
-// test in this file). Does not need the `python3.14` oracle on PATH, so
-// unlike every other fixture test in this file it runs by default (no
-// `#[ignore]`).
-#[test]
-fn pep_0594_dead_battery_rejected_produces_c0001() {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/pep_0594_dead_battery_rejected.py");
-    let output = Command::new(pycc_bin())
-        .args(["check", fixture.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(
-        !output.status.success(),
-        "`pycc check` should reject tests/fixtures/pep_0594_dead_battery_rejected.py"
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("C0001"),
-        "expected a C0001 diagnostic, got: {stdout}"
-    );
-    assert!(
-        stdout.contains("cgi"),
-        "expected the diagnostic to mention `cgi`, got: {stdout}"
-    );
-}
+// D-138's second PEP-594 fixture (`from cgi import escape as esc`) was
+// retired with the last `C0001` it pinned: an aliased from-import of a
+// foreign module binds like the plain form, so a removed module reaches
+// the host's `ModuleNotFoundError` exactly as in CPython (or, for a native
+// build, `pycc lock`'s missing-closure error).
 
 // PEP 698 (#579, Part 3 of #572): `@override` -- its fixture test
 // (`pep_0698_override_matches_cpython_byte_for_byte`) lives in

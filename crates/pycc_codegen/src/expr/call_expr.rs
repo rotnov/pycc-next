@@ -21,58 +21,6 @@ pub(crate) fn emit_call_expr<'ctx>(
         string_render::emit_print_call(context, builder, module, rt, user_functions, locals, args);
         return crate::call_result::none_scalar(context);
     }
-    // D-136 Task 4: `math.sqrt(x: float) -> float` is this PR's one
-    // lowered stdlib function, calling straight into the platform
-    // libm `sqrt` symbol -- the same C ABI this crate's existing
-    // float codegen already links against for `**`'s `pow` call
-    // (see `main.rs`'s `add_linux_system_libs` doc comment: macOS
-    // folds libm into libSystem and Windows's UCRT bundles it, so
-    // only Linux needs an explicit `-lm`, already added there).
-    // Declared once per module and reused on every call site
-    // (`get_function` first, matching `declare_rt_functions`'s own
-    // idempotent-declare precedent) rather than redeclaring per
-    // call -- LLVM rejects a duplicate `declare` with a different
-    // linkage/signature, and there is no reason to risk that for a
-    // fixed, known-once signature.
-    if callee == "math.sqrt" {
-        let [arg] = args.as_slice() else {
-            panic!(
-                "pycc_codegen: internal error: `math.sqrt` takes exactly 1 argument, got {} \
-                 -- pycc_types::check (T0021) should have rejected this before codegen",
-                args.len()
-            )
-        };
-        let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
-        let f64_type = context.f64_type();
-        let sqrt_fn = module.get_function("sqrt").unwrap_or_else(|| {
-            module.add_function(
-                "sqrt",
-                f64_type.fn_type(&[f64_type.into()], false),
-                Some(inkwell::module::Linkage::External),
-            )
-        });
-        // `pycc_types::std_qualified_symbol`'s call-site check
-        // already rejects any argument whose static type isn't
-        // `Ty::Float` (T0021) before codegen runs -- this match
-        // is a defensive backstop against malformed MIR, mirroring
-        // `len`'s/`float`'s own internal-error convention above,
-        // not a real dispatch over legitimate source.
-        let Scalar::Float(arg_value) = scalar else {
-            panic!(
-                "pycc_codegen: internal error: `math.sqrt`'s argument was not a float \
-                 -- pycc_types::check (T0021) should have rejected this before codegen"
-            )
-        };
-        let call_site = builder
-            .build_call(sqrt_fn, &[arg_value.into()], "math_sqrt")
-            .expect("build_call should not fail for the libm `sqrt` declaration");
-        return Scalar::Float(
-            call_site
-                .try_as_basic_value()
-                .expect_basic("libm `sqrt` is declared to return a double")
-                .into_float_value(),
-        );
-    }
     // `len` is the second hand-recognized builtin (D-105 point 3),
     // dispatched here for the same reason `print` is: it has no
     // `user_functions` entry, so it must be claimed before the

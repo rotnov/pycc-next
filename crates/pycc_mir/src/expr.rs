@@ -131,10 +131,17 @@ pub(super) fn lower_expr(
         // same invariant) is never bound in `scopes` the way an ordinary
         // assigned variable is, so it needs its own arm here rather than
         // falling into the ordinary `lookup` below, which would panic.
-        HirExpr::Name(name) if name == "math.pi" => MirExpr::Name {
-            name: name.clone(),
-            ty: Ty::Float,
-        },
+        HirExpr::Name(name)
+            if matches!(
+                name.as_str(),
+                "math.pi" | "math.e" | "math.tau" | "math.inf" | "math.nan"
+            ) =>
+        {
+            MirExpr::Name {
+                name: name.clone(),
+                ty: Ty::Float,
+            }
+        }
         // Issue #769 (Part 2 of #747): a name read inside a narrowing-
         // eligible branch (`super::narrowed_ty`'s `$narrowed:{name}`
         // sentinel, pushed by `stmt::lower_stmt`'s `HirStmt::If` arm) is

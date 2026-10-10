@@ -986,7 +986,12 @@ pub(crate) fn collect_block_constraints(
                         concrete,
                         &mut constraints.deferred,
                     ),
-                    _ => Ok(Ty::List(Box::new(Ty::Int))),
+                    _ => set_comp::list_comp_container(
+                        elt_term,
+                        parents,
+                        concrete,
+                        &mut constraints.deferred,
+                    ),
                 };
                 bind_comp_target(env, target, container);
             }
@@ -1017,7 +1022,7 @@ pub(crate) fn collect_block_constraints(
                         cond,
                     )?;
                 }
-                collect_expr_constraints(
+                let key_term = collect_expr_constraints(
                     signatures,
                     parents,
                     concrete,
@@ -1025,7 +1030,7 @@ pub(crate) fn collect_block_constraints(
                     env,
                     key,
                 )?;
-                collect_expr_constraints(
+                let value_term = collect_expr_constraints(
                     signatures,
                     parents,
                     concrete,
@@ -1033,8 +1038,15 @@ pub(crate) fn collect_block_constraints(
                     env,
                     value,
                 )?;
+                let container = set_comp::dict_comp_container(
+                    key_term,
+                    value_term,
+                    parents,
+                    concrete,
+                    &mut constraints.deferred,
+                );
                 // Round-11 review finding 2: see the list/set arm above.
-                bind_comp_target(env, target, Ok(Ty::Dict(Box::new((Ty::Str, Ty::Int)))));
+                bind_comp_target(env, target, container);
             }
             HirStmt::Match { subject, cases } => {
                 collect_expr_constraints(

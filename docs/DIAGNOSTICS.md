@@ -65,7 +65,7 @@ Every code: stable forever, documented via `pycc explain`, covered by at least o
 | `E0101` | error | monkey-patching foreign class/module |
 | `E0102` | error | dynamic attribute injection |
 | `E0103` | error | dynamic `type()` class creation |
-| `E0104` | error | wildcard import *(reserved; not currently emitted — a wildcard `from x import *` is rejected today by the same versioned `C0001` "not implemented yet" capability code every other unsupported import shape uses, not this by-design-rejection code; see D-137)* |
+| `E0104` | error | wildcard import *(reserved; not currently emitted — a wildcard `from x import *` of a module whose exports pycc does not know is rejected today by the same versioned `C0001` "not implemented yet" capability code every other unsupported import shape uses, not this by-design-rejection code; see D-137)* |
 | `E0105` | error | metaclass with non-static side effects |
 | `E0106` | warning→error | `__del__` relies on refcount timing |
 | `E0107` | error | `sys.getrefcount` unavailable |
@@ -145,8 +145,11 @@ import ...` is a compiler directive, not a module (#919, D-229): its nine no-op
 features lower to nothing, a name CPython rejects is `L0001`, and the one
 CPython-valid feature that changes the grammar, `barry_as_FLUFL`, is `C0001`
 (``the `barry_as_FLUFL` future feature (`<>` in place of `!=`) is not
-supported yet``), as is `from __future__ import x as y` under the
-`from ... import x as y` aliasing gap ([#963](https://github.com/rotnov/pycc/issues/963)).
+supported yet``), as is `from __future__ import x as y`. A `from ... import
+x as y` binds `y` to what the unaliased form binds `x` to -- for `pycc_std`
+a function or constant only (a typing or decorator marker is resolved by its
+spelling, so its alias stays `C0001`), and never to a name pycc resolves by
+its spelling (`from math import sqrt as range` is `C0001`).
 A stdlib module behind `import X as Y` is *not* a gap since
 [#962](https://github.com/rotnov/pycc/issues/962) ([D-231](./decisions/D-231-lower-stdlib-import-x-as-y-to-canonical-names-with-an.md)):
 `import math as m` binds `m`, `m.sqrt(x)` lowers to the same canonical
@@ -238,9 +241,11 @@ not scanned, so `from other import ndarray` reports only its own spelling
 refusal, and a module-scope `del ndarray` reports only the imported-name
 `del` refusal. A project `numpy.py` or `numpy/typing.py` makes the import
 an ordinary project import, which declares no carrier.
-Every other from-import shape of such a module keeps its C0001: an aliased
-name (`from X import a as b`, [#963](https://github.com/rotnov/pycc/issues/963)),
-the wildcard, and a from-import inside a function, class, loop, `with` or
+Every other from-import shape of such a module keeps its C0001: the
+wildcard of a module whose export list `pycc_ast::desugar` does not know
+(`math`, `sys`, `itertools`, `bisect`, `heapq`, `collections` and
+`functools` expand to the names the module reads and does not bind
+itself), and a from-import inside a function, class, loop, `with` or
 `match` body. Since
 [#1383](https://github.com/rotnov/pycc/issues/1383) one nested in a
 module-level `if`/`try` body is a foreign import under the top-level form's

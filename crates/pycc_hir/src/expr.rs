@@ -325,7 +325,26 @@ pub(crate) fn lower_expr(
                 orelse: Box::new(orelse),
             }
         }
-        Expr::Name(name) => HirExpr::Name(name.id.as_str().to_string()),
+        Expr::Name(name) => {
+            // `from math import pi` then `pi`: the stdlib constant, spelled
+            // canonically like `math.pi`, while the import is the name's
+            // one top-level binding.
+            let id = name.id.as_str();
+            let shadowed = signatures.binds(id) || signatures.is_rebound(id);
+            let constant = imports.iter().filter(|_| !shadowed).find_map(|binding| match binding {
+                ImportBinding::Symbol {
+                    local_name,
+                    module,
+                    symbol,
+                } if local_name == id
+                    && matches!(symbol.kind, pycc_std::StdSymbolKind::Constant { .. }) =>
+                {
+                    Some(format!("{}.{}", pycc_std::module_name(*module), symbol.name))
+                }
+                _ => None,
+            });
+            HirExpr::Name(constant.unwrap_or_else(|| id.to_string()))
+        }
         Expr::List(list) => HirExpr::ListLiteral(
             list.elts
                 .iter()

@@ -92,6 +92,45 @@ fn is_intlike(ty: &Ty) -> bool {
     matches!(ty, Ty::Int | Ty::Bool)
 }
 
+fn is_numeric(ty: &Ty) -> bool {
+    matches!(ty, Ty::Int | Ty::Bool | Ty::Float)
+}
+
+/// The runtime symbol of a `math` function of `float` arguments (an `int`
+/// argument is converted to `float` at the call) and its arity.
+fn float_math(name: &str) -> Option<(&'static str, usize)> {
+    Some(match name {
+        "math.sqrt" => ("pycc_rt_math_sqrt", 1),
+        "math.exp" => ("pycc_rt_math_exp", 1),
+        "math.sin" => ("pycc_rt_math_sin", 1),
+        "math.cos" => ("pycc_rt_math_cos", 1),
+        "math.tan" => ("pycc_rt_math_tan", 1),
+        "math.asin" => ("pycc_rt_math_asin", 1),
+        "math.acos" => ("pycc_rt_math_acos", 1),
+        "math.atan" => ("pycc_rt_math_atan", 1),
+        "math.fabs" => ("pycc_rt_math_fabs", 1),
+        "math.atan2" => ("pycc_rt_math_atan2", 2),
+        "math.hypot" => ("pycc_rt_math_hypot", 2),
+        "math.copysign" => ("pycc_rt_math_copysign", 2),
+        _ => return None,
+    })
+}
+
+/// `math.log`/`log2`/`log10` of one argument: an `int` is taken exactly.
+fn math_log(name: &str, arg: &Ty) -> Option<BuiltinSig> {
+    let (float_symbol, int_symbol) = match name {
+        "math.log" => ("pycc_rt_math_log", "pycc_rt_math_log_int"),
+        "math.log2" => ("pycc_rt_math_log2", "pycc_rt_math_log2_int"),
+        "math.log10" => ("pycc_rt_math_log10", "pycc_rt_math_log10_int"),
+        _ => return None,
+    };
+    Some(match arg {
+        Ty::Float => sig(float_symbol, &[Ty::Float], Ty::Float),
+        a if is_intlike(a) => sig(int_symbol, &[Ty::Int], Ty::Float),
+        _ => return None,
+    })
+}
+
 /// Whether a list's elements are ordered by a natively supported `<`
 /// (`pycc_rt::value::lt`, lexicographic for lists and tuples).
 fn orderable(elem: &Ty) -> bool {
@@ -168,11 +207,29 @@ pub const CALL_NAMES: &[&str] = &[
     "int",
     "len",
     "list",
+    "math.acos",
+    "math.asin",
+    "math.atan",
+    "math.atan2",
     "math.ceil",
+    "math.comb",
+    "math.copysign",
+    "math.cos",
+    "math.exp",
+    "math.fabs",
+    "math.factorial",
     "math.floor",
     "math.gcd",
+    "math.hypot",
     "math.isqrt",
     "math.lcm",
+    "math.log",
+    "math.log10",
+    "math.log2",
+    "math.perm",
+    "math.sin",
+    "math.sqrt",
+    "math.tan",
     "max",
     "min",
     "oct",
@@ -208,8 +265,12 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
         | "math.lcm"
         | "math.isqrt"
         | "math.floor"
-        | "math.ceil" => Ty::Int,
+        | "math.ceil"
+        | "math.factorial"
+        | "math.comb"
+        | "math.perm" => Ty::Int,
         "float" => Ty::Float,
+        name if float_math(name).is_some() || name == "math.log" => Ty::Float,
         "any" | "all" => Ty::Bool,
         "__pycc_stdin_readlines" => Ty::List(Box::new(Ty::Str)),
         "__pycc_print_str" | "__pycc_stdout_flush" | "__pycc_setrecursionlimit" => Ty::None,
@@ -290,6 +351,37 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("math.floor" | "math.ceil", [a]) if is_intlike(a) => {
             sig("pycc_rt_math_int_identity", &[int.clone()], int)
         }
+        (_, [a]) if math_log(name, a).is_some() => math_log(name, a)?,
+        ("math.log", [x, base]) if is_numeric(x) && is_numeric(base) => {
+            let float = |ty: &Ty| *ty == Ty::Float;
+            let symbol = match (float(x), float(base)) {
+                (true, true) => "pycc_rt_math_log_base_ff",
+                (true, false) => "pycc_rt_math_log_base_fi",
+                (false, true) => "pycc_rt_math_log_base_if",
+                (false, false) => "pycc_rt_math_log_base_ii",
+            };
+            let param = |f: bool| if f { Ty::Float } else { Ty::Int };
+            sig(symbol, &[param(float(x)), param(float(base))], Ty::Float)
+        }
+        (_, args)
+            if float_math(name).is_some_and(|(_, arity)| arity == args.len())
+                && args.iter().all(is_numeric) =>
+        {
+            let (symbol, arity) = float_math(name)?;
+            sig(symbol, &vec![Ty::Float; arity], Ty::Float)
+        }
+        ("math.factorial", [a]) if is_intlike(a) => {
+            sig("pycc_rt_math_factorial", &[int.clone()], int)
+        }
+        ("math.comb" | "math.perm", [a, b]) if is_intlike(a) && is_intlike(b) => sig(
+            if name == "math.comb" {
+                "pycc_rt_math_comb"
+            } else {
+                "pycc_rt_math_perm"
+            },
+            &[int.clone(), int.clone()],
+            int,
+        ),
         ("pow", [a, b, c]) if is_intlike(a) && is_intlike(b) && is_intlike(c) => sig(
             "pycc_rt_int_powmod",
             &[int.clone(), int.clone(), int.clone()],

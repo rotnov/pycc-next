@@ -46,6 +46,77 @@ pub extern "C" fn pycc_rt_math_isqrt(n: i64) -> i64 {
     encode_big(n.sqrt())
 }
 
+fn value_error(message: &str) -> i64 {
+    raise_builtin(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", message);
+    tag_smallint(0)
+}
+
+/// The product `lo * (lo + 1) * ... * hi` (1 when empty).
+fn product(lo: &BigInt, hi: &BigInt) -> BigInt {
+    let mut acc = BigInt::from(1);
+    let mut i = lo.clone();
+    while &i <= hi {
+        acc *= &i;
+        i += 1;
+    }
+    acc
+}
+
+/// `math.factorial(n)`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_math_factorial(n: i64) -> i64 {
+    let n = decode_big(n);
+    if n.is_negative() {
+        return value_error("factorial() not defined for negative values");
+    }
+    encode_big(product(&BigInt::from(2), &n))
+}
+
+/// `n` and `k` of `math.comb`/`math.perm`, or the `ValueError` they raise.
+fn comb_args(n: i64, k: i64) -> Option<(BigInt, BigInt)> {
+    let (n, k) = (decode_big(n), decode_big(k));
+    if n.is_negative() {
+        value_error("n must be a non-negative integer");
+        return None;
+    }
+    if k.is_negative() {
+        value_error("k must be a non-negative integer");
+        return None;
+    }
+    Some((n, k))
+}
+
+/// `math.perm(n, k)`: `n! / (n - k)!`, 0 when `k > n`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_math_perm(n: i64, k: i64) -> i64 {
+    let Some((n, k)) = comb_args(n, k) else {
+        return tag_smallint(0);
+    };
+    if k > n {
+        return tag_smallint(0);
+    }
+    encode_big(product(&(&n - &k + 1), &n))
+}
+
+/// `math.comb(n, k)`: `n! / (k! (n - k)!)`, 0 when `k > n`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_math_comb(n: i64, k: i64) -> i64 {
+    let Some((n, k)) = comb_args(n, k) else {
+        return tag_smallint(0);
+    };
+    if k > n {
+        return tag_smallint(0);
+    }
+    let k = std::cmp::min(k.clone(), &n - &k);
+    let mut acc = BigInt::from(1);
+    let mut i = BigInt::from(0);
+    while i < k {
+        acc = acc * (&n - &i) / (&i + 1);
+        i += 1;
+    }
+    encode_big(acc)
+}
+
 /// `math.floor(x)` of a `float` (`ValueError`/`OverflowError` for NaN and
 /// infinities, with `int()`'s messages, as CPython).
 #[unsafe(no_mangle)]

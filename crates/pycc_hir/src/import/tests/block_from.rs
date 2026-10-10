@@ -296,9 +296,12 @@ fn a_nested_from_import_reports_its_top_level_refusal_at_its_own_span() {
             "`from ... import *` (wildcard import) is not supported yet".to_string(),
         ),
         (
-            "if c:\n    from itertools import product as p\n",
+            "if c:\n    from itertools import product as range\n",
             "from itertools",
-            "`from ... import x as y` aliasing is not supported yet".to_string(),
+            "binding the CPython object `itertools.product` to `range`, a name pycc resolves by \
+             its spelling (a Python builtin, a stdlib module, or a typing, decorator or \
+             base-class marker), is not supported yet"
+                .to_string(),
         ),
         (
             "if c:\n    from itertools import range\n",

@@ -190,8 +190,9 @@ pub(crate) fn poisonable_names(stmt: &Stmt) -> Vec<&str> {
             {
                 // Mirror that arm's success condition exactly, as the
                 // `Stmt::Import` arm above mirrors its own: the statement
-                // lowers when no name is the wildcard, none carries an
-                // `asname`, and every name is a symbol of `module`. Anything
+                // lowers when no name is the wildcard and every name is a
+                // symbol of `module`, aliased only as `std_alias_admitted`
+                // allows. Anything
                 // else fails, and a failed stdlib import poisons what it
                 // would have bound just like a failed project one -- a
                 // wildcard binds the module's whole export list, every other
@@ -200,8 +201,8 @@ pub(crate) fn poisonable_names(stmt: &Stmt) -> Vec<&str> {
                     return pycc_std::module_symbol_names(module).collect();
                 }
                 if import.names.iter().all(|alias| {
-                    alias.asname.is_none()
-                        && pycc_std::resolve_symbol(module, alias.name.as_str()).is_some()
+                    pycc_std::resolve_symbol(module, alias.name.as_str())
+                        .is_some_and(|symbol| crate::import::std_alias_admitted(&symbol, alias))
                 }) {
                     return Vec::new();
                 }

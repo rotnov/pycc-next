@@ -135,6 +135,14 @@ pub(crate) fn collect_call_constraints(
             signatures, parents, concrete, deferred, env, arg,
         )?);
     }
+    if let Some(symbol) = std_qualified_symbol(callee)
+        && let Some(shadowed) =
+            shadowed_std_receiver(symbol.module, &env.std_module_aliases, |receiver| {
+                env.is_std_receiver_bound(receiver)
+            })
+    {
+        return Err(std_receiver_shadowed(shadowed, symbol.module));
+    }
     if !signatures.contains_key(callee)
         && let Some(term) = builtin_call::builtin_call_term(callee, &arg_terms, parents, concrete)
     {
@@ -458,13 +466,17 @@ pub(crate) fn collect_call_constraints(
             // binop rule types it; the check pass validates the
             // arguments once they resolve.
             None if callee == "abs" && arg_terms.len() == 1 => {
-                if let Some(operand) = arg_terms[0].clone() {
-                    let result = fresh_term(parents, concrete);
-                    deferred
-                        .binops
-                        .push((BinOpKind::Add, Ok(Ty::Int), operand, result.clone()));
-                    return Ok(Some(result));
-                }
+                let Some(operand) = arg_terms[0].clone() else {
+                    // No term for the operand (an element of a container
+                    // the empty-container pass types): the check pass
+                    // types the call.
+                    return Ok(None);
+                };
+                let result = fresh_term(parents, concrete);
+                deferred
+                    .binops
+                    .push((BinOpKind::Add, Ok(Ty::Int), operand, result.clone()));
+                return Ok(Some(result));
             }
             None if callee == "divmod" && arg_terms.len() == 2 => {
                 return Ok(Some(Ok(Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])))));

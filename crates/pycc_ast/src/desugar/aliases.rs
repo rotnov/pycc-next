@@ -2,7 +2,7 @@
 //! lambdas turned into `def`s.
 
 use super::INFER_MARKER;
-use super::build::{call, load};
+use super::build::{call, load, subscript};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{
     AtomicNodeIndex, Expr, ExprContext, Identifier, Parameter, ParameterWithDefault, Parameters,
@@ -44,10 +44,27 @@ impl SysFn {
         }
     }
 
-    fn arity(self) -> usize {
+    /// The annotation of the alias `def`'s one parameter, if it takes one.
+    fn param_annotation(self) -> Option<&'static str> {
         match self {
-            SysFn::Write | SysFn::SetRecursionLimit => 1,
-            _ => 0,
+            SysFn::Write => Some("str"),
+            SysFn::SetRecursionLimit => Some("int"),
+            _ => None,
+        }
+    }
+
+    /// The alias `def`'s return annotation: the operation's own result.
+    fn returns(self, range: TextRange) -> Expr {
+        match self {
+            SysFn::Readline | SysFn::Read => load("str", range),
+            SysFn::Readlines => subscript(
+                load("list", range),
+                load("str", range),
+                ExprContext::Load,
+                range,
+            ),
+            SysFn::Write => load("int", range),
+            SysFn::Flush | SysFn::SetRecursionLimit => load("None", range),
         }
     }
 }
@@ -177,7 +194,7 @@ impl SysNames {
     }
 }
 
-fn parameter(name: &str, range: TextRange) -> ParameterWithDefault {
+fn parameter(name: &str, annotation: Option<&str>, range: TextRange) -> ParameterWithDefault {
     ParameterWithDefault {
         range,
         node_index: AtomicNodeIndex::default(),
@@ -185,7 +202,7 @@ fn parameter(name: &str, range: TextRange) -> ParameterWithDefault {
             range,
             node_index: AtomicNodeIndex::default(),
             name: Identifier::new(name, range),
-            annotation: None,
+            annotation: annotation.map(|a| Box::new(load(a, range))),
         },
         default: None,
     }
@@ -204,6 +221,10 @@ fn parameters(args: Vec<ParameterWithDefault>, range: TextRange) -> Parameters {
 }
 
 fn inferred_def(name: &str, params: Parameters, body: Expr, range: TextRange) -> Stmt {
+    annotated_def(name, params, body, load(INFER_MARKER, range), range)
+}
+
+fn annotated_def(name: &str, params: Parameters, body: Expr, returns: Expr, range: TextRange) -> Stmt {
     Stmt::FunctionDef(StmtFunctionDef {
         node_index: AtomicNodeIndex::default(),
         range,
@@ -212,7 +233,7 @@ fn inferred_def(name: &str, params: Parameters, body: Expr, range: TextRange) ->
         name: Identifier::new(name, range),
         type_params: None,
         parameters: Box::new(params),
-        returns: Some(Box::new(load(INFER_MARKER, range))),
+        returns: Some(Box::new(returns)),
         body: vec![Stmt::Return(StmtReturn {
             node_index: AtomicNodeIndex::default(),
             range,
@@ -256,14 +277,18 @@ pub(crate) fn module_level_defs(body: &mut [Stmt], sys: &SysNames) {
                 let Some(op) = sys.classify(callee) else {
                     continue;
                 };
-                let args: Vec<_> = (0..op.arity()).map(|i| format!("_pycc_arg{i}")).collect();
+                let annotation = op.param_annotation();
+                let args: Vec<_> = annotation.iter().map(|_| "_pycc_arg0").collect();
                 let call_expr = call(
                     callee.clone(),
                     args.iter().map(|a| load(a, range)).collect(),
                     range,
                 );
-                let params = parameters(args.iter().map(|a| parameter(a, range)).collect(), range);
-                inferred_def(&name, params, call_expr, range)
+                let params = parameters(
+                    args.iter().map(|a| parameter(a, annotation, range)).collect(),
+                    range,
+                );
+                annotated_def(&name, params, call_expr, op.returns(range), range)
             }
         };
         *stmt = replacement;

@@ -106,13 +106,10 @@ fn a_builtin_or_marker_spelling_is_refused() {
 fn the_shapes_outside_this_channel_keep_their_c0001() {
     for (tag, body, needle) in [
         (
-            "from_foreign_alias",
-            "from itertools import product as p\n",
-            "`from ... import x as y` aliasing is not supported yet",
-        ),
-        (
+            // `pycc_ast::desugar` expands a wildcard of a module whose
+            // exports it knows (`itertools`) to the names the module reads.
             "from_foreign_wildcard",
-            "from itertools import *\n",
+            "from json import *\n",
             "`from ... import *` (wildcard import) is not supported yet",
         ),
         (

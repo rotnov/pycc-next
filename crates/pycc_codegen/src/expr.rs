@@ -193,9 +193,11 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
         MirExpr::Name {
             name,
             ty: Ty::Float,
-        } if name == "math.pi" => {
-            Scalar::Float(context.f64_type().const_float(std::f64::consts::PI))
-        }
+        } if pycc_std::math_constant(name).is_some() => Scalar::Float(
+            context
+                .f64_type()
+                .const_float(pycc_std::math_constant(name).expect("checked")),
+        ),
         // PEP 634-636 (#381, PR-21): `None` singleton in a match pattern
         // comparison. `None` is not a bound variable — it is a constant
         // `i8 0` carrier (D-075), emitted inline exactly like `math.pi`

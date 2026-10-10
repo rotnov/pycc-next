@@ -296,16 +296,6 @@ pub(crate) fn lower_call_expr(
         if args.len() == 2 { Ty::Float } else { Ty::Int }
     } else if callee == "print" {
         Ty::None
-    } else if callee == "math.sqrt" {
-        // D-136: `math.sqrt` is the other hand-recognized stdlib
-        // intrinsic this PR lowers to real codegen -- mirrors
-        // `pycc_types`'s own `std_qualified_symbol` dispatch
-        // (always `Ty::Float`, this registry's only lowered
-        // function's fixed return type; not a general per-registry
-        // lookup since `pycc_mir` has no dependency on `pycc_std`
-        // and does not need one for this PR's exactly-one-function
-        // registry).
-        Ty::Float
     } else if callee == "len" {
         // `len` is a hand-recognized builtin, same as `print` above,
         // not a user-declarable `$fn:` signature -- mirrors

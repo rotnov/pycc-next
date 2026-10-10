@@ -43,6 +43,76 @@ pub(crate) enum ContainerDefault {
         source: Option<usize>,
         result: usize,
     },
+    /// A list comprehension's container: `list[e]` once the element term
+    /// `elt` resolves to a list element type `e`, else `list[int]`.
+    ListComp { var: usize, elt: Option<usize> },
+    /// A dict comprehension's container: `dict[k, v]` once the key and value
+    /// terms resolve to a dict key and value type, else `dict[str, int]`.
+    DictComp {
+        var: usize,
+        key: Option<usize>,
+        value: Option<usize>,
+    },
+}
+
+fn term_var(term: &Option<TypeTerm>) -> Option<usize> {
+    match term {
+        Some(Err(var)) => Some(*var),
+        _ => None,
+    }
+}
+
+/// The container term of a list comprehension whose element term is `elt`:
+/// `list[e]` for an element already resolved to a list element type, else a
+/// fresh term [`apply_container_defaults`] fixes once the element settles.
+pub(crate) fn list_comp_container(
+    elt: Option<TypeTerm>,
+    parents: &mut Vec<usize>,
+    concrete: &mut Vec<Option<Ty>>,
+    deferred: &mut DeferredConstraints,
+) -> TypeTerm {
+    let elt_var = term_var(&elt);
+    if let Some(elem) = elt.and_then(|term| resolved_term(term, parents, concrete))
+        && pycc_hir::is_list_element_ty(&elem)
+    {
+        return Ok(Ty::List(Box::new(elem)));
+    }
+    let var = fresh_variable(parents, concrete);
+    deferred
+        .container_defaults
+        .push(ContainerDefault::ListComp { var, elt: elt_var });
+    Err(var)
+}
+
+/// [`list_comp_container`] for a dict comprehension with key term `key` and
+/// value term `value`.
+pub(crate) fn dict_comp_container(
+    key: Option<TypeTerm>,
+    value: Option<TypeTerm>,
+    parents: &mut Vec<usize>,
+    concrete: &mut Vec<Option<Ty>>,
+    deferred: &mut DeferredConstraints,
+) -> TypeTerm {
+    let (key_var, value_var) = (term_var(&key), term_var(&value));
+    let k = key.and_then(|term| resolved_term(term, parents, concrete));
+    let v = value.and_then(|term| resolved_term(term, parents, concrete));
+    if let (Some(k), Some(v)) = (k, v)
+        && let Some(ty) = dict_of(k, v)
+    {
+        return Ok(ty);
+    }
+    let var = fresh_variable(parents, concrete);
+    deferred.container_defaults.push(ContainerDefault::DictComp {
+        var,
+        key: key_var,
+        value: value_var,
+    });
+    Err(var)
+}
+
+fn dict_of(key: Ty, value: Ty) -> Option<Ty> {
+    (pycc_hir::is_hashable_ty(&key) && pycc_hir::is_list_element_ty(&value))
+        .then(|| Ty::Dict(Box::new((key, value))))
 }
 
 /// The container term of a set comprehension whose element term is `elt`:
@@ -102,6 +172,32 @@ pub(super) fn apply_container_defaults(
     parents: &mut [usize],
     concrete: &mut [Option<Ty>],
 ) {
+    // List and dict comprehensions in source order, so one whose element is
+    // an earlier comprehension's container (`[[0] * n for ...]` nested in
+    // another) sees that container already fixed.
+    for default in defaults {
+        let settled = |parents: &mut [usize], concrete: &[Option<Ty>], var: Option<usize>| {
+            var.and_then(|v| concrete[root(parents, v)].clone())
+        };
+        match default {
+            ContainerDefault::ListComp { var, elt } => {
+                let element = settled(parents, concrete, *elt)
+                    .filter(pycc_hir::is_list_element_ty)
+                    .unwrap_or(Ty::Int);
+                let root = root(parents, *var);
+                concrete[root].get_or_insert_with(|| Ty::List(Box::new(element)));
+            }
+            ContainerDefault::DictComp { var, key, value } => {
+                let dict = settled(parents, concrete, *key)
+                    .zip(settled(parents, concrete, *value))
+                    .and_then(|(k, v)| dict_of(k, v))
+                    .unwrap_or_else(|| Ty::Dict(Box::new((Ty::Str, Ty::Int))));
+                let root = root(parents, *var);
+                concrete[root].get_or_insert_with(|| dict);
+            }
+            _ => {}
+        }
+    }
     for default in defaults {
         if let ContainerDefault::SetComp { var, elt } = default {
             let element = match elt.map(|elt| &concrete[root(parents, elt)]) {

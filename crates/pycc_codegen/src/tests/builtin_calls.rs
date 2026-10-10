@@ -343,52 +343,6 @@ fn a_str_call_on_a_non_object_argument_is_an_internal_error() {
 }
 
 #[test]
-#[should_panic(expected = "`math.sqrt` takes exactly 1 argument, got 0")]
-fn a_math_sqrt_call_with_the_wrong_argument_count_is_an_internal_error() {
-    // `pycc_types` already rejects a mis-arity `math.sqrt` call with
-    // T0021, so this is hand-built malformed MIR exercising codegen's
-    // own defensive backstop, mirroring
-    // `a_float_call_with_the_wrong_argument_count_is_an_internal_error`
-    // immediately above.
-    let mir = MirModule {
-        items: vec![MirItem::TopLevelStmt(MirStmt::ExprStmt(MirExpr::Call {
-            callee: "math.sqrt".to_string(),
-            args: vec![],
-            ty: Ty::Float,
-        }))],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("math_sqrt_wrong_arity_panics")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(
-        &mir,
-        &dir.join("math_sqrt_wrong_arity_panics.o"),
-        None,
-        false,
-    );
-}
-
-#[test]
-#[should_panic(expected = "`math.sqrt`'s argument was not a float")]
-fn a_math_sqrt_call_on_a_non_float_argument_is_an_internal_error() {
-    // The other half of `pycc_types`' own T0021 `math.sqrt` check (a
-    // non-`float` argument) -- hand-built malformed MIR, since
-    // `pycc_types::std_qualified_symbol`'s call-site check already
-    // rejects this before codegen runs for any legitimate source.
-    let mir = MirModule {
-        items: vec![MirItem::TopLevelStmt(MirStmt::ExprStmt(MirExpr::Call {
-            callee: "math.sqrt".to_string(),
-            args: vec![MirExpr::IntLiteral(1)],
-            ty: Ty::Float,
-        }))],
-        class_defs: Vec::new(),
-    };
-    let dir = pycc_scratch::ScratchDir::new("math_sqrt_non_float_panics")
-        .expect("failed to create scratch dir");
-    let _ = compile_to_object(&mir, &dir.join("math_sqrt_non_float_panics.o"), None, false);
-}
-
-#[test]
 #[should_panic(expected = "`len`'s argument did not evaluate to a list")]
 fn a_len_call_on_a_non_list_argument_is_an_internal_error() {
     // The other half of `pycc_types`' own T0033 `len` check (a
@@ -456,16 +410,19 @@ fn iterating_a_name_with_no_local_slot_is_an_internal_error() {
 
 #[test]
 fn math_sqrt_call_codegens_and_runs() {
-    // `print(math.sqrt(2.0))` end to end through `compile_to_object` --
-    // D-136 Task 4's one lowered stdlib function, calling the real
-    // libm `sqrt` symbol. Expected output verified against `python3`
-    // on this exact source (`math.sqrt(2.0)` -> `1.4142135623730951`).
+    // `print(math.sqrt(2))` end to end through `compile_to_object`: the
+    // runtime call, its `int` argument converted to `float`. Expected
+    // output verified against `python3` (`math.sqrt(2)` ->
+    // `1.4142135623730951`).
     let mir = MirModule {
-        items: vec![MirItem::TopLevelStmt(print_expr(MirExpr::Call {
-            callee: "math.sqrt".to_string(),
-            args: vec![MirExpr::FloatLiteral(2.0)],
-            ty: Ty::Float,
-        }))],
+        items: vec![MirItem::TopLevelStmt(print_expr(MirExpr::RtCall(Box::new(
+            pycc_mir::RtCallExpr {
+                sig: pycc_hir::builtins::resolve_call("math.sqrt", &[Ty::Int])
+                    .expect("claimed")
+                    .expect("admitted"),
+                args: vec![MirExpr::IntLiteral(2)],
+            },
+        ))))],
         class_defs: Vec::new(),
     };
     let dir =

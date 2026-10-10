@@ -41,6 +41,7 @@ mod comps;
 mod exprs;
 mod keys;
 mod stmts;
+mod wildcard;
 
 use ruff_python_ast::{Expr, ModModule, Stmt};
 
@@ -70,6 +71,11 @@ impl Fresh {
 
 /// Rewrites `module` in place (see the module documentation).
 pub fn desugar(module: &mut ModModule) {
+    {
+        let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+        wildcard::expand_wildcards(&mut body);
+        module.body = body.into();
+    }
     let fresh = Fresh {
         import_roots: import_roots(&module.body),
         ..Fresh::default()

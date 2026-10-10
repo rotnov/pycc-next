@@ -82,7 +82,7 @@ fn check_accepts_a_dotted_foreign_from_import() {
 
 /// The shapes outside Part 1 keep a `C0001`: the spelling refusal for a
 /// spelling that is not one of #1380's exact carrier pairs (Part 2), and
-/// the aliased and wildcard from forms, whose refusal is now the from form's own message
+/// the wildcard from form, whose refusal is now the from form's own message
 /// rather than the module's, exactly as for an undotted module.
 #[test]
 fn the_shapes_outside_part_1_keep_their_c0001() {
@@ -93,11 +93,6 @@ fn the_shapes_outside_part_1_keep_their_c0001() {
             "dotted_from_spelling",
             "from numpy.typing import ndarray\n",
             "binding the CPython object `numpy.typing.ndarray` to `ndarray`",
-        ),
-        (
-            "dotted_from_alias",
-            "from json.decoder import JSONDecoder as J\n",
-            "`from ... import x as y` aliasing is not supported yet",
         ),
         (
             "dotted_from_wildcard",

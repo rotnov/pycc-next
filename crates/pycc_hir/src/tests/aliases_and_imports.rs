@@ -178,7 +178,7 @@ fn from_math_import_sqrt_and_pi_binds_both_names() {
 
 #[test]
 fn from_math_import_sqrt_and_unregistered_tan_is_c0002_not_a_partial_bind() {
-    let module = pycc_parser_test_helper::parse("from math import sqrt, tan\n");
+    let module = pycc_parser_test_helper::parse("from math import sqrt, cosh\n");
     let diagnostic = lower_checked(&module).unwrap_err();
 
     // Whole statement fails closed -- `sqrt` is not partially bound
@@ -254,25 +254,25 @@ fn aliased_math_pi_reference_lowers_to_the_canonical_name() {
 
 #[test]
 fn aliased_unregistered_call_names_the_alias_in_its_diagnostic() {
-    let module = pycc_parser_test_helper::parse("import math as m\nm.tan(1.0)\n");
+    let module = pycc_parser_test_helper::parse("import math as m\nm.cosh(1.0)\n");
     let diagnostic = lower_checked(&module).unwrap_err();
 
     assert_eq!(diagnostic.code, "C0001");
     assert_eq!(
         diagnostic.message,
-        "module `math` (imported as `m`) has no importable symbol named `tan`"
+        "module `math` (imported as `m`) has no importable symbol named `cosh`"
     );
 }
 
 #[test]
 fn aliased_unregistered_attribute_names_the_alias_in_its_diagnostic() {
-    let module = pycc_parser_test_helper::parse("import math as m\nprint(m.tau)\n");
+    let module = pycc_parser_test_helper::parse("import math as m\nprint(m.ulp)\n");
     let diagnostic = lower_checked(&module).unwrap_err();
 
     assert_eq!(diagnostic.code, "C0001");
     assert_eq!(
         diagnostic.message,
-        "module `math` (imported as `m`) has no attribute `tau`"
+        "module `math` (imported as `m`) has no attribute `ulp`"
     );
 }
 
@@ -281,16 +281,16 @@ fn canonical_receiver_diagnostics_are_byte_stable() {
     // The "(imported as ...)" suffix is appended only when the spelling the
     // user wrote differs from the canonical one, so the pre-#962 wording
     // (and every `.expected.txt` fixture pinning it) is unchanged.
-    let module = pycc_parser_test_helper::parse("import math\nmath.tan(1.0)\n");
+    let module = pycc_parser_test_helper::parse("import math\nmath.cosh(1.0)\n");
     let diagnostic = lower_checked(&module).unwrap_err();
     assert_eq!(
         diagnostic.message,
-        "module `math` has no importable symbol named `tan`"
+        "module `math` has no importable symbol named `cosh`"
     );
 
-    let module = pycc_parser_test_helper::parse("import math\nprint(math.tau)\n");
+    let module = pycc_parser_test_helper::parse("import math\nprint(math.ulp)\n");
     let diagnostic = lower_checked(&module).unwrap_err();
-    assert_eq!(diagnostic.message, "module `math` has no attribute `tau`");
+    assert_eq!(diagnostic.message, "module `math` has no attribute `ulp`");
 }
 
 #[test]
@@ -518,8 +518,20 @@ fn a_class_named_like_an_import_alias_collides_with_it() {
 }
 
 #[test]
-fn from_math_import_sqrt_as_s_is_c0001() {
-    let module = pycc_parser_test_helper::parse("from math import sqrt as s\n");
+fn from_math_import_sqrt_as_s_binds_the_alias() {
+    let module = pycc_parser_test_helper::parse("from math import sqrt as s\nprint(s(4.0))\n");
+    let hir = lower_checked(&module).expect("an aliased stdlib function lowers");
+    assert!(matches!(
+        &hir.imports[..],
+        [ImportBinding::Symbol { local_name, symbol, .. }]
+            if local_name == "s" && symbol.name == "sqrt"
+    ));
+    assert!(format!("{:?}", hir.items).contains("callee: \"math.sqrt\""));
+}
+
+#[test]
+fn from_math_import_sqrt_as_a_builtin_spelling_is_c0001() {
+    let module = pycc_parser_test_helper::parse("from math import sqrt as range\n");
     let diagnostic = lower_checked(&module).unwrap_err();
 
     assert_eq!(diagnostic.code, "C0001");
@@ -590,7 +602,7 @@ fn math_pi_bare_reference_lowers_to_a_qualified_name() {
 
 #[test]
 fn math_tan_call_is_unsupported_since_it_is_not_registered() {
-    let module = pycc_parser_test_helper::parse("import math\nmath.tan(1.0)\n");
+    let module = pycc_parser_test_helper::parse("import math\nmath.cosh(1.0)\n");
     let diagnostic = lower_checked(&module).unwrap_err();
 
     assert_eq!(diagnostic.code, "C0001");
@@ -598,7 +610,7 @@ fn math_tan_call_is_unsupported_since_it_is_not_registered() {
 
 #[test]
 fn math_tan_bare_reference_is_unsupported_since_it_is_not_registered() {
-    let module = pycc_parser_test_helper::parse("import math\nprint(math.tan)\n");
+    let module = pycc_parser_test_helper::parse("import math\nprint(math.cosh)\n");
     let diagnostic = lower_checked(&module).unwrap_err();
 
     assert_eq!(diagnostic.code, "C0001");
