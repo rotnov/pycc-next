@@ -1,0 +1,5 @@
+error[C0001]: statement kind not supported yet: `break` out of a `try` block that has a `finally` clause
+ --> tests/diagnostics/c0001_break_across_finally.py:3:9
+  |
+3 |         break
+  |         ^^^^^ statement kind not supported yet: `break` out of a `try` block that has a `finally` clause

@@ -1,0 +1,5 @@
+error[C0001]: statement kind not supported yet: `continue` out of a `try` block that has a `finally` clause
+ --> tests/diagnostics/c0001_continue_across_finally.py:5:9
+  |
+5 |         continue
+  |         ^^^^^^^^ statement kind not supported yet: `continue` out of a `try` block that has a `finally` clause
