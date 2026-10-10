@@ -483,7 +483,7 @@ fn a_bigint_int_argument_reaches_the_host_as_its_true_value() {
 /// runs on the Windows leg too (a stub `m` plus `m.pycc\`, D-253); the
 /// comparison applies D-082's `\r\n` normalization so either writer passes.
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
 fn a_standard_library_method_call_builds_embedded_and_runs() {
     let dir = ScratchDir::new("foreign_call_embedded").expect("scratch");
     let output = pycc()

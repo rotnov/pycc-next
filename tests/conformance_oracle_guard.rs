@@ -10,7 +10,7 @@
 //! oracle's stdout as its second, and each per-PEP test compares those two.
 //! Nothing in the repository bound that sentence. A helper returning
 //! `(pycc_output.stdout.clone(), pycc_output.stdout)` still builds pycc, still
-//! launches the pinned `python3.14`, still asserts both processes exited zero --
+//! launches the CPython oracle, still asserts both processes exited zero --
 //! and turns all 40 differential tests into `assert_eq!(x, x)` while every gate
 //! stays green.
 //!
@@ -40,8 +40,8 @@ use std::path::PathBuf;
 #[path = "harness_support/conformance_sources.rs"]
 mod conformance_sources;
 
-/// Differential tests are named `<subject>_matches_cpython_3_14_7_byte_for_byte`.
-const DIFFERENTIAL_SUFFIX: &str = "_matches_cpython_3_14_7_byte_for_byte";
+/// Differential tests are named `<subject>_matches_cpython_byte_for_byte`.
+const DIFFERENTIAL_SUFFIX: &str = "_matches_cpython_byte_for_byte";
 /// The dual-profile helper every PEP-matrix fixture must go through.
 const PROFILE_HELPER: &str = "run_conformance_fixture_with_profile";
 /// The `--debug`-only convenience wrapper, which must delegate to the above.
@@ -52,8 +52,8 @@ const PLAIN_HELPER: &str = "run_conformance_fixture";
 /// is a PEP-matrix row, as `run_conformance_fixture_with_profile`'s own doc
 /// comment records. A new test cannot join this list without editing it here.
 const DEBUG_ONLY_TESTS: [&str; 2] = [
-    "fib_matches_cpython_3_14_7_byte_for_byte",
-    "mandelbrot_ascii_matches_cpython_3_14_7_byte_for_byte",
+    "fib_matches_cpython_byte_for_byte",
+    "mandelbrot_ascii_matches_cpython_byte_for_byte",
 ];
 
 fn repo_root() -> PathBuf {
@@ -615,20 +615,20 @@ fn run_conformance_fixture_with_profile(
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_9999_demo_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_9999_demo_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_9999_demo.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_9999_demo_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree (a message with (parens) and a ; inside)"
+        "pycc (--debug) and CPython disagree (a message with (parens) and a ; inside)"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_9999_demo_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree"
+        "pycc (--release) and CPython disagree"
     );
 }
 "####;
@@ -759,10 +759,10 @@ fn a_plain_helper_that_stops_delegating_is_rejected() {
 fn a_harness_without_any_differential_test_is_rejected() {
     rejects(
         &mutate(
-            "fn pep_9999_demo_matches_cpython_3_14_7_byte_for_byte()",
+            "fn pep_9999_demo_matches_cpython_byte_for_byte()",
             "fn pep_9999_demo_smoke()",
         ),
-        "declares no `*_matches_cpython_3_14_7_byte_for_byte` test",
+        "declares no `*_matches_cpython_byte_for_byte` test",
     );
 }
 
@@ -770,7 +770,7 @@ fn a_harness_without_any_differential_test_is_rejected() {
 fn a_deleted_assertion_is_rejected() {
     rejects(
         &mutate(
-            "    assert_eq!(\n        release_pycc, release_cpython,\n        \"pycc (--release) and CPython 3.14.7 disagree\"\n    );\n",
+            "    assert_eq!(\n        release_pycc, release_cpython,\n        \"pycc (--release) and CPython disagree\"\n    );\n",
             "",
         ),
         "never compares (`release_pycc`, `release_cpython`)",
@@ -877,7 +877,7 @@ fn a_differential_test_without_the_test_attribute_is_rejected() {
 fn a_differential_test_without_the_ignore_attribute_is_rejected() {
     rejects(
         &mutate(
-            "#[ignore = \"requires a pinned python3.14 (CPython 3.14.7) oracle on PATH\"]\n",
+            "#[ignore = \"requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)\"]\n",
             "",
         ),
         "is missing `#[ignore`",

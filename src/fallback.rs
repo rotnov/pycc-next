@@ -1,0 +1,561 @@
+//! Per-function fallback in non-strict mode (#12).
+//!
+//! A top-level statement of the entry module that pycc cannot compile yet
+//! (a `def` using a lambda, a generator, a nested function, ...) is kept as
+//! Python source: the compiled module runs it with CPython's own `exec` in
+//! the module's namespace dictionary, at the position it had, and binds
+//! whatever it defines there. Compiled code calls a fallback function
+//! through the object-call path; fallback code calls a compiled function
+//! as the Python callable the module publishes.
+//!
+//! The mechanism is a source rewrite of the entry module, re-run through
+//! the unchanged frontend until it compiles:
+//!
+//! 1. compile the module; on failure, map each diagnostic to the
+//!    top-level statement it belongs to and mark that statement fallback;
+//! 2. render the rewrite: a preamble binds the namespace
+//!    (`sys.modules[__name__].__dict__`) and `builtins`; each run of
+//!    consecutive fallback statements becomes one
+//!    `builtins.exec(builtins.compile(<source>, <file>, "exec"), ns)`,
+//!    the source padded with newlines so tracebacks keep their line
+//!    numbers; and every compiled reference to a module global that
+//!    fallback code reads or binds becomes `ns['name']`, so both sides see
+//!    one value (a *dict global*);
+//! 3. repeat until the rewrite compiles, or no diagnostic names a statement
+//!    that is still compiled (then the original diagnostics are reported).
+//!
+//! Strict mode never falls back. Only the entry module falls back; a
+//! diagnostic in another module of the program is reported as before.
+
+mod names;
+
+use pycc_ast::Stmt;
+use pycc_diag::Diagnostic;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// The namespace dictionary's name in rewritten code.
+const NS: &str = "__pycc_fallback_ns";
+/// The `builtins` module's name in rewritten code.
+const BUILTINS: &str = "__pycc_fallback_builtins";
+/// The `sys` module's name in rewritten code.
+const SYS: &str = "__pycc_fallback_sys";
+
+static REPORT: AtomicBool = AtomicBool::new(false);
+
+thread_local! {
+    /// The rewritten entry source the loader reads instead of the file.
+    static ENTRY_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Records `--report-fallbacks`.
+pub(crate) fn set_report(report: bool) {
+    REPORT.store(report, Ordering::Relaxed);
+}
+
+/// Whether the program being built has fallback code.
+pub(crate) fn active() -> bool {
+    ENTRY_OVERRIDE.with(|cell| cell.borrow().is_some())
+}
+
+/// The rewritten entry source, when a fallback plan is active.
+pub(crate) fn entry_override() -> Option<String> {
+    ENTRY_OVERRIDE.with(|cell| cell.borrow().clone())
+}
+
+/// The entry module's source as the frontend compiles it: the fallback
+/// rewrite when one is active, else the file itself.
+pub(crate) fn entry_source(path: &Path) -> String {
+    entry_override().unwrap_or_else(|| std::fs::read_to_string(path).unwrap_or_default())
+}
+
+fn set_override(text: Option<String>) {
+    ENTRY_OVERRIDE.with(|cell| *cell.borrow_mut() = text);
+}
+
+/// Which compiled definitions an artifact publishes to Python code.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Publishes {
+    pub(crate) functions: bool,
+    pub(crate) classes: bool,
+}
+
+impl Publishes {
+    /// Whether Python code sees the compiled definition `name`: published,
+    /// and public (a leading underscore is never exported).
+    fn sees(self, name: &str, class: bool) -> bool {
+        let published = if class { self.classes } else { self.functions };
+        published && !name.starts_with('_')
+    }
+}
+
+/// What one top-level statement is, for the report and the cascade rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Kind {
+    Def(String),
+    Class(String),
+    Import,
+    Other,
+}
+
+#[derive(Debug, Clone)]
+struct TopStmt {
+    range: Range<u32>,
+    kind: Kind,
+    /// The names it binds at module scope.
+    bound: BTreeSet<String>,
+    /// The module globals it reads, binds or declares `global`, at any
+    /// depth.
+    mentions: BTreeSet<String>,
+    /// The module-scope names it binds other than through a plain name
+    /// target (an import, `except ... as`, a nested `def`).
+    opaque: BTreeSet<String>,
+}
+
+/// A diagnostic of the compiled rewrite, as the fallback loop sees it.
+#[derive(Debug, Clone)]
+pub(crate) struct Failure {
+    pub(crate) diagnostic: Diagnostic,
+    /// The source offset of the top-level statement the type checker keyed
+    /// the diagnostic to, for a diagnostic with no span of its own.
+    pub(crate) origin: Option<u32>,
+}
+
+/// Which statements fall back, and why.
+#[derive(Debug)]
+pub(crate) struct Plan {
+    source: String,
+    display: String,
+    ast: Vec<Stmt>,
+    stmts: Vec<TopStmt>,
+    /// Statement index -> reason.
+    fallback: BTreeMap<usize, String>,
+    /// Whether a compiled public function, and a compiled public class, is
+    /// visible to Python code in the module namespace (an `--ext` module
+    /// publishes both; an embedded executable with fallback code publishes
+    /// its functions).
+    publishes: Publishes,
+}
+
+/// The rewrite of a plan, with where each original statement landed.
+#[derive(Debug)]
+pub(crate) struct Rendered {
+    pub(crate) text: String,
+    /// `ranges[i]` is statement `i`'s range in `text`.
+    ranges: Vec<Range<u32>>,
+    preamble: Range<u32>,
+}
+
+impl Plan {
+    /// A plan with nothing falling back, or `None` when `source` does not
+    /// parse (the syntax error is then reported as usual).
+    pub(crate) fn new(source: &str, display: &str, publishes: Publishes) -> Option<Self> {
+        let module = pycc_parser::parse_all(source).ok()?;
+        let stmts = module
+            .body
+            .iter()
+            .map(|stmt| TopStmt {
+                range: pycc_ast::stmt_range(stmt),
+                kind: match stmt {
+                    Stmt::FunctionDef(def) => Kind::Def(def.name.as_str().to_string()),
+                    Stmt::ClassDef(class) => Kind::Class(class.name.as_str().to_string()),
+                    Stmt::Import(_) | Stmt::ImportFrom(_) => Kind::Import,
+                    _ => Kind::Other,
+                },
+                bound: names::bound_names(std::slice::from_ref(stmt)),
+                mentions: names::module_references(stmt),
+                opaque: names::opaque_bound_names(stmt),
+            })
+            .collect::<Vec<_>>();
+        Some(Self {
+            source: source.to_string(),
+            display: display.to_string(),
+            ast: module.body.into_iter().collect(),
+            stmts,
+            fallback: BTreeMap::new(),
+            publishes,
+        })
+    }
+
+    /// Marks the statements `failures` point at as fallback, returning
+    /// whether any statement was newly marked. A failure no statement owns
+    /// (a span-less whole-module diagnostic, the preamble) marks every
+    /// statement.
+    pub(crate) fn absorb(&mut self, rendered: Option<&Rendered>, failures: &[Failure]) -> bool {
+        let before = self.fallback.len();
+        // The docstring and `from __future__` imports stay compiled: the
+        // preamble goes after them.
+        let first = self.preamble_position();
+        for failure in failures {
+            let reason = describe(&failure.diagnostic);
+            match self.owner_of(rendered, failure) {
+                Some(index) if index >= first => {
+                    self.fallback.entry(index).or_insert(reason);
+                }
+                Some(_) => {}
+                None => {
+                    // A diagnostic no statement owns is usually the
+                    // module-level solver's: the module-level statements
+                    // fall back first, every statement only once they have.
+                    let module_level: Vec<usize> = (first..self.stmts.len())
+                        .filter(|index| {
+                            matches!(self.stmts[*index].kind, Kind::Other | Kind::Import)
+                                && !self.fallback.contains_key(index)
+                        })
+                        .collect();
+                    let marked: Vec<usize> = if module_level.is_empty() {
+                        (first..self.stmts.len()).collect()
+                    } else {
+                        module_level
+                    };
+                    for index in marked {
+                        self.fallback.entry(index).or_insert_with(|| reason.clone());
+                    }
+                }
+            }
+        }
+        self.cascade();
+        self.fallback.len() > before
+    }
+
+    /// The statement a failure belongs to.
+    fn owner_of(&self, rendered: Option<&Rendered>, failure: &Failure) -> Option<usize> {
+        let span = failure
+            .diagnostic
+            .span
+            .filter(|s| (s.start, s.end) != (0, 0));
+        let at = span.map(|s| s.start).or(failure.origin);
+        if let Some(start) = at {
+            let ranges: Vec<Range<u32>> = match rendered {
+                Some(rendered) => {
+                    if rendered.preamble.contains(&start) {
+                        return None;
+                    }
+                    rendered.ranges.clone()
+                }
+                None => self.stmts.iter().map(|s| s.range.clone()).collect(),
+            };
+            return ranges
+                .iter()
+                .position(|r| r.contains(&start) || r.start == start);
+        }
+        None
+    }
+
+    /// Adds the statements whose compiled form Python code could not see:
+    /// a compiled import, function or class that fallback code reads
+    /// (unless the module publishes the function or class).
+    fn cascade(&mut self) {
+        loop {
+            let globals = self.dict_globals();
+            let read: BTreeSet<&String> = self
+                .fallback
+                .keys()
+                .flat_map(|index| &self.stmts[*index].mentions)
+                .collect();
+            let forced: Vec<(usize, String)> = self
+                .stmts
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !self.fallback.contains_key(index))
+                .filter_map(|(index, stmt)| {
+                    let name = match &stmt.kind {
+                        Kind::Import | Kind::Other => {
+                            stmt.opaque.iter().find(|n| globals.contains(*n))?
+                        }
+                        Kind::Def(name)
+                            if read.contains(name) && !self.publishes.sees(name, false) =>
+                        {
+                            name
+                        }
+                        Kind::Class(name)
+                            if read.contains(name) && !self.publishes.sees(name, true) =>
+                        {
+                            name
+                        }
+                        Kind::Def(_) | Kind::Class(_) => return None,
+                    };
+                    Some((
+                        index,
+                        format!(
+                            "fallback code uses `{name}`, which Python code cannot see compiled"
+                        ),
+                    ))
+                })
+                .collect();
+            if forced.is_empty() {
+                return;
+            }
+            self.fallback.extend(forced);
+        }
+    }
+
+    /// The module globals that live in the namespace dictionary.
+    fn dict_globals(&self) -> BTreeSet<String> {
+        let mut fallback_bound = BTreeSet::new();
+        let mut fallback_read = BTreeSet::new();
+        let mut compiled_bound = BTreeSet::new();
+        for (index, stmt) in self.stmts.iter().enumerate() {
+            if self.fallback.contains_key(&index) {
+                fallback_bound.extend(stmt.bound.iter().cloned());
+                fallback_read.extend(stmt.mentions.iter().cloned());
+            } else if matches!(stmt.kind, Kind::Other | Kind::Import) {
+                compiled_bound.extend(stmt.bound.iter().cloned());
+            }
+        }
+        let mut globals: BTreeSet<String> = fallback_read
+            .intersection(&compiled_bound)
+            .cloned()
+            .collect();
+        globals.extend(fallback_bound);
+        // A compiled `def`/`class` name stays native: it is published, or
+        // fallback code reading it made it fall back too (`cascade`).
+        for (index, stmt) in self.stmts.iter().enumerate() {
+            if let (false, Kind::Def(name) | Kind::Class(name)) =
+                (self.fallback.contains_key(&index), &stmt.kind)
+                && !compiled_bound.contains(name)
+            {
+                globals.remove(name);
+            }
+        }
+        globals
+    }
+
+    /// The rewritten source.
+    pub(crate) fn render(&self) -> Rendered {
+        let globals = self.dict_globals();
+        let src = &self.source;
+        let mut text = String::with_capacity(src.len() * 2);
+        let mut ranges = Vec::with_capacity(self.stmts.len());
+        let mut cursor = 0usize;
+        let preamble_at = self.preamble_position();
+        let mut preamble = 0..0;
+        let mut index = 0;
+        while index < self.stmts.len() {
+            let stmt = &self.stmts[index];
+            let start = stmt.range.start as usize;
+            text.push_str(&src[cursor..start]);
+            if index == preamble_at {
+                let at = text.len() as u32;
+                text.push_str(&format!(
+                    "import sys as {SYS}; import builtins as {BUILTINS}; \
+                     {NS} = {SYS}.modules[__name__].__dict__\n"
+                ));
+                preamble = at..text.len() as u32;
+            }
+            if self.fallback.contains_key(&index) {
+                let mut last = index;
+                while last + 1 < self.stmts.len() && self.fallback.contains_key(&(last + 1)) {
+                    last += 1;
+                }
+                let end = self.stmts[last].range.end as usize;
+                let chunk = &src[start..end];
+                let line = src[..start].matches('\n').count();
+                let padded = format!("{}{}\n", "\n".repeat(line), chunk);
+                let at = text.len() as u32;
+                // The newlines go first, so the call sits on the chunk's last
+                // line: a statement may follow it there after a `;`.
+                text.push_str(&"\n".repeat(chunk.matches('\n').count()));
+                text.push_str(&format!(
+                    "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"), {NS})",
+                    py_str(&padded),
+                    py_str(&self.display)
+                ));
+                let end_at = text.len() as u32;
+                for _ in index..=last {
+                    ranges.push(at..end_at);
+                }
+                cursor = end;
+                index = last + 1;
+                continue;
+            }
+            let mut rewriter = names::Rewriter::new(&globals, NS);
+            pycc_ast::visitor::Visitor::visit_stmt(&mut rewriter, &self.ast[index]);
+            let mut edits = rewriter.edits;
+            edits.sort_by_key(|edit| edit.range.start);
+            let at = text.len() as u32;
+            let mut inner = start;
+            for edit in edits {
+                let (edit_start, edit_end) = (edit.range.start as usize, edit.range.end as usize);
+                if edit_start < inner {
+                    continue;
+                }
+                text.push_str(&src[inner..edit_start]);
+                text.push_str(&edit.text);
+                inner = edit_end;
+            }
+            let end = stmt.range.end as usize;
+            text.push_str(&src[inner..end]);
+            ranges.push(at..text.len() as u32);
+            cursor = end;
+            index += 1;
+        }
+        text.push_str(&src[cursor..]);
+        Rendered {
+            text,
+            ranges,
+            preamble,
+        }
+    }
+
+    /// The statement the preamble goes before: the first one that is not
+    /// the module docstring or a `from __future__` import.
+    fn preamble_position(&self) -> usize {
+        let body = &self.ast;
+        let mut index = 0;
+        if matches!(body.first(), Some(Stmt::Expr(e)) if e.value.is_string_literal_expr()) {
+            index = 1;
+        }
+        while matches!(body.get(index), Some(Stmt::ImportFrom(import))
+            if import.module.as_ref().map(|m| m.as_str()) == Some("__future__"))
+        {
+            index += 1;
+        }
+        index
+    }
+
+    /// One line per fallback statement, for `--report-fallbacks`.
+    pub(crate) fn report_lines(&self) -> Vec<String> {
+        self.fallback
+            .iter()
+            .map(|(index, reason)| {
+                let stmt = &self.stmts[*index];
+                let first = line_of(&self.source, stmt.range.start);
+                let last = line_of(&self.source, stmt.range.end.saturating_sub(1));
+                let what = match &stmt.kind {
+                    Kind::Def(name) => format!("function `{name}`"),
+                    Kind::Class(name) => format!("class `{name}`"),
+                    Kind::Import | Kind::Other if first == last => "statement".to_string(),
+                    Kind::Import | Kind::Other => "statements".to_string(),
+                };
+                let lines = if first == last {
+                    format!("{first}")
+                } else {
+                    format!("{first}-{last}")
+                };
+                format!(
+                    "fallback: {what} at {}:{lines} runs in CPython: {reason}",
+                    self.display
+                )
+            })
+            .collect()
+    }
+}
+
+fn line_of(source: &str, offset: u32) -> usize {
+    source[..(offset as usize).min(source.len())]
+        .matches('\n')
+        .count()
+        + 1
+}
+
+fn describe(diagnostic: &Diagnostic) -> String {
+    let message: String = diagnostic.message.chars().take(160).collect();
+    format!("{} {message}", diagnostic.code)
+}
+
+/// A Python string literal for `text`.
+fn py_str(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+                out.push_str(&format!("\\x{:02x}", c as u32))
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Whether a diagnostic is one a fallback can resolve: anything but a
+/// syntax error, an interop-policy or embedding refusal.
+pub(crate) fn can_fall_back(diagnostic: &Diagnostic) -> bool {
+    !matches!(
+        diagnostic.code,
+        "L0001" | "L0002" | "I0402" | "I0403" | "I0405"
+    )
+}
+
+/// Runs `attempt` (one frontend pass) with the fallback loop around it,
+/// in non-strict mode. `split` turns a failure into the entry file's
+/// fallback-resolvable diagnostics, or `None` when the failure cannot be
+/// resolved by falling back (another file, a syntax error, an input
+/// error).
+pub(crate) fn with_fallback<T, E>(
+    path: &Path,
+    display: &str,
+    publishes: Publishes,
+    attempt: impl Fn() -> Result<T, E>,
+    split: impl Fn(&E) -> Option<Vec<Failure>>,
+) -> Result<T, E> {
+    set_override(None);
+    let first = attempt();
+    let failures = match &first {
+        Ok(_) => return first,
+        Err(failure) => match split(failure) {
+            Some(failures)
+                if crate::mode::non_strict_for(path)
+                    && std::env::var_os("PYCC_NO_FALLBACK").is_none() =>
+            {
+                failures
+            }
+            _ => return first,
+        },
+    };
+    let source = crate::fallback::read_entry(path);
+    let Some(mut plan) = source.and_then(|s| Plan::new(&s, display, publishes)) else {
+        return first;
+    };
+    let mut rendered: Option<Rendered> = None;
+    let mut failures = failures;
+    loop {
+        if !plan.absorb(rendered.as_ref(), &failures) {
+            set_override(None);
+            return first;
+        }
+        let next = plan.render();
+        if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
+            eprintln!("--- fallback rewrite ---\n{}", next.text);
+        }
+        set_override(Some(next.text.clone()));
+        rendered = Some(next);
+        match attempt() {
+            Ok(value) => {
+                if REPORT.load(Ordering::Relaxed) {
+                    for line in plan.report_lines() {
+                        eprintln!("{line}");
+                    }
+                }
+                return Ok(value);
+            }
+            Err(failure) => match split(&failure) {
+                Some(next_failures) => failures = next_failures,
+                None => {
+                    set_override(None);
+                    return first;
+                }
+            },
+        }
+    }
+}
+
+/// The entry file's decoded source.
+fn read_entry(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    crate::source::decode_python_source(&bytes).ok()
+}
+
+#[cfg(test)]
+#[path = "fallback/tests.rs"]
+mod tests;

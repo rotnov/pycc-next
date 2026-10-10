@@ -146,7 +146,12 @@ fn build_embedded(dir: &Path, source: &str) -> PathBuf {
         .expect("an embedded build writes its marker");
     let mut lines = marker.lines();
     assert_eq!(lines.next(), Some("pycc-bundle 1"));
-    assert_eq!(lines.next(), Some("python 3.14.7"), "{marker}");
+    assert!(
+        lines
+            .next()
+            .is_some_and(|line| line.starts_with("python 3.")),
+        "{marker}"
+    );
     let executable = lines
         .next()
         .and_then(|line| line.strip_prefix("executable "))
@@ -156,8 +161,8 @@ fn build_embedded(dir: &Path, source: &str) -> PathBuf {
 
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn calls_above_the_import_match_cpython_3_14_7_in_an_embedded_executable() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn calls_above_the_import_match_cpython_in_an_embedded_executable() {
     let (embedded, oracle) = run_both("embed_1482_own_import", EMBEDDED);
     assert_eq!(embedded.status.code(), Some(0), "{}", stderr_of(&embedded));
     assert_eq!(stdout_of(&oracle), "1\n1\n2\n");
@@ -198,8 +203,8 @@ fn last_stderr_line(output: &Output) -> Option<String> {
 /// status and the same last traceback line.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn the_issue_s_programs_match_cpython_3_14_7_in_an_embedded_executable() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn the_issue_s_programs_match_cpython_in_an_embedded_executable() {
     let (embedded, oracle) = run_both("embed_1482_issue_attr", ISSUE_ATTR);
     assert_eq!(embedded.status.code(), Some(0), "{}", stderr_of(&embedded));
     assert_eq!(oracle.status.code(), Some(0), "{}", stderr_of(&oracle));

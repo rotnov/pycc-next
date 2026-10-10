@@ -69,15 +69,16 @@ fn a_truncated_or_malformed_probe_output_does_not_parse() {
 }
 
 #[test]
-fn only_the_3_14_line_is_accepted() {
-    assert_eq!(check_embed_version((3, 14, 0)), Ok(()));
+fn every_release_from_3_13_on_is_accepted() {
+    assert_eq!(check_embed_version((3, 13, 0)), Ok(()));
     assert_eq!(check_embed_version((3, 14, 7)), Ok(()));
-    let older = check_embed_version((3, 13, 5)).expect_err("3.13 is refused");
+    assert_eq!(check_embed_version((3, 15, 0)), Ok(()));
+    let older = check_embed_version((3, 12, 5)).expect_err("3.12 is refused");
     assert!(
-        older.contains("CPython 3.13.5") && older.contains("PYCC_PYTHON"),
+        older.contains("CPython 3.12.5") && older.contains("PYCC_PYTHON"),
         "{older}"
     );
-    assert!(check_embed_version((3, 15, 0)).is_err());
+    assert!(check_embed_version((4, 0, 0)).is_err());
 }
 
 #[test]
@@ -112,7 +113,7 @@ fn each_probe_refusal_names_its_reason() {
             .probe(EmbedPlatform::MacOs)
             .expect_err("the defect is refused")
     };
-    assert!(refusal(&|p| p.version = (3, 13, 1)).contains("CPython 3.13.1"));
+    assert!(refusal(&|p| p.version = (3, 12, 1)).contains("CPython 3.12.1"));
     let free_threaded = refusal(&|p| p.gil_disabled = true);
     assert!(free_threaded.contains("free-threaded") && free_threaded.contains("Py_GIL_DISABLED=1"));
     let static_only = refusal(&|p| p.enable_shared = false);
@@ -202,6 +203,7 @@ fn an_unmarked_sidecar_is_refused_before_the_probe_and_left_intact() {
         &dir.join("app"),
         &dir.join("m.py"),
         &typed(&dir),
+        &[],
         &toolchain,
         EmbedPlatform::Linux,
         HOST,
@@ -267,6 +269,7 @@ fn a_sidecar_name_the_loader_cannot_carry_is_refused_first() {
         &dir.join("a$b"),
         &dir.join("m.py"),
         &typed(&dir),
+        &[],
         &toolchain,
         EmbedPlatform::Linux,
         HOST,
@@ -307,6 +310,7 @@ fn a_linux_bundle_copies_the_filtered_stdlib_and_the_soname_library() {
         &out,
         &dir.join("m.py"),
         &typed(&dir),
+        &[],
         &toolchain,
         EmbedPlatform::Linux,
         HOST,
@@ -372,6 +376,7 @@ fn a_linux_bundle_copies_the_filtered_stdlib_and_the_soname_library() {
         &out,
         &dir.join("m.py"),
         &typed(&dir),
+        &[],
         &toolchain,
         EmbedPlatform::Linux,
         HOST,

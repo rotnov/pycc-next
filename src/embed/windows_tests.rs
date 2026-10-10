@@ -51,13 +51,10 @@ fn strings(args: &[OsString]) -> Vec<String> {
 }
 
 #[test]
-fn the_default_interpreter_is_python3_14_exe_on_windows_only() {
-    assert_eq!(
-        default_interpreter(EmbedPlatform::Windows),
-        "python3.14.exe"
-    );
-    assert_eq!(default_interpreter(EmbedPlatform::MacOs), "python3.14");
-    assert_eq!(default_interpreter(EmbedPlatform::Linux), "python3.14");
+fn the_default_interpreter_is_python_exe_on_windows_and_python3_elsewhere() {
+    assert_eq!(default_interpreter(EmbedPlatform::Windows), "python.exe");
+    assert_eq!(default_interpreter(EmbedPlatform::MacOs), "python3");
+    assert_eq!(default_interpreter(EmbedPlatform::Linux), "python3");
 }
 
 /// A Windows interpreter reports no shared libpython and keeps its DLL
@@ -212,6 +209,7 @@ fn a_static_windows_build_is_refused_with_no_interpreter() {
         &dir.join("app"),
         &dir.join("m.py"),
         &typed(&dir),
+        &[],
         &toolchain,
         EmbedPlatform::Windows,
         HOST,
@@ -238,6 +236,7 @@ fn a_windows_plan_bundles_the_dlls_and_links_a_program_dll_and_a_stub() {
         &out,
         &root.join("m.py"),
         &typed(&root),
+        &[],
         &toolchain(&layout),
         EmbedPlatform::Windows,
         HOST,
@@ -310,6 +309,7 @@ fn a_windows_plan_refuses_an_unrelocatable_interpreter_image_before_staging() {
         &root.join("app"),
         &root.join("m.py"),
         &typed(&root),
+        &[],
         &toolchain(&layout),
         EmbedPlatform::Windows,
         HOST,
@@ -372,6 +372,7 @@ fn a_windows_build_under_a_plain_file_fails_at_staging() {
         &out,
         &root.join("m.py"),
         &typed(&root),
+        &[],
         &toolchain(&layout),
         EmbedPlatform::Windows,
         HOST,

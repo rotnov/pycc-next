@@ -59,7 +59,7 @@ fn an_enum_member_attribute_store_fails_pycc_check_with_t0044() {
 /// The oracle half: the pinned CPython raises `AttributeError` for the same
 /// stores, so the refusal replaces a divergence rather than a working program.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn cpython_raises_attribute_error_for_every_refused_store() {
     let dir = ScratchDir::new("e2e_issue_1219_oracle").expect("scratch");
     for (index, (store, attr)) in STORES.iter().enumerate() {

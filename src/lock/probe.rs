@@ -81,7 +81,7 @@ pub(crate) fn run_lock_probe(interpreter: &OsStr) -> Result<LockProbe, String> {
         .env_remove("_PYTHON_HOST_PLATFORM")
         .env_remove("_PYTHON_SYSCONFIGDATA_NAME")
         .output()
-        .map_err(|e| format!("could not run the lock interpreter `{name}`: {e}; set PYCC_PYTHON to name one (default `python3.14`)"))?;
+        .map_err(|e| format!("could not run the lock interpreter `{name}`: {e}; set PYCC_PYTHON to name one (default `python3`)"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed = output.status.success().then(|| parse_lock_probe(&stdout));
     parsed.flatten().ok_or_else(|| {

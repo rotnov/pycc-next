@@ -1,6 +1,6 @@
 //! The embedded-executable artifact mode (Part 1 of #1028): a plain
 //! `pycc build` of a program with a standard-library CPython import links
-//! a launcher that starts a bundled CPython 3.14 and runs the program as
+//! a launcher that starts a bundled CPython (3.13 or newer) and runs the program as
 //! its `__main__` module. The layout, the marker, the relocation rules and
 //! the bridge split are recorded in the embedded-executable decision entry
 //! under `docs/decisions/`; `docs/RUNTIME.md` describes the behavior.
@@ -49,8 +49,10 @@ pub(crate) const LAUNCHER_C_NAME: &str = "pycc_embed_launcher.c";
 /// The generated header the launcher includes for its sidecar name.
 pub(crate) const EMBED_CONFIG_INC_NAME: &str = "pycc_embed_config.inc";
 
-/// The CPython minor line an embedded build bundles (D-128 pins 3.14).
-pub(crate) const EMBED_PYTHON: (u32, u32) = (3, 14);
+/// The oldest CPython an embedded build bundles. Any newer release is
+/// accepted: the build bundles whatever `PYCC_PYTHON` (default `python3`)
+/// names, so the embedded interpreter is the same one the oracle runs.
+pub(crate) const EMBED_PYTHON_MIN: (u32, u32) = ext_build::MIN_PYTHON;
 
 /// What the embed probe reports about an interpreter, one field per line
 /// of [`EMBED_PROBE_SCRIPT`].
@@ -133,9 +135,8 @@ impl EmbedToolchain {
     }
 
     /// The production constructor: `PYCC_PYTHON` names the interpreter to
-    /// bundle, default [`default_interpreter`] for the build host (not
-    /// `--ext`'s `python3`, because an embedded build pins the 3.14 line).
-    /// Reads the variable only.
+    /// bundle, default [`default_interpreter`] for the build host -- the
+    /// same interpreter `--ext` builds against. Reads the variable only.
     pub(crate) fn from_env() -> Self {
         let default = default_interpreter(EmbedPlatform::HOST);
         Self::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| OsString::from(default)))
@@ -250,7 +251,7 @@ impl EmbedToolchain {
         if probe.gil_disabled {
             return Err(format!(
                 "the embed interpreter `{name}` is a free-threaded build ({}); an embedded \
-                 executable bundles a GIL-enabled CPython 3.14",
+                 executable bundles a GIL-enabled CPython",
                 probe.describe()
             ));
         }
@@ -259,7 +260,7 @@ impl EmbedToolchain {
         if shared && !check_shared(probe.enable_shared, &probe.framework) {
             return Err(format!(
                 "the embed interpreter `{name}` has no shared libpython ({}); an embedded \
-                 executable links against one -- set PYCC_PYTHON to a CPython 3.14 built \
+                 executable links against one -- set PYCC_PYTHON to a CPython built \
                  with --enable-shared or as a framework",
                 probe.describe()
             ));
@@ -352,9 +353,9 @@ impl EmbedToolchain {
             .output()
             .map_err(|e| {
                 format!(
-                    "could not run the embed interpreter `{name}`: {e}; a build that imports \
-                     a CPython standard-library module bundles CPython 3.14 -- set \
-                     PYCC_PYTHON to name one (default `{}`)",
+                    "could not run the embed interpreter `{name}`: {e}; a build that needs \
+                     CPython bundles CPython 3.13 or newer -- set PYCC_PYTHON to name one \
+                     (default `{}`)",
                     default_interpreter(EmbedPlatform::HOST)
                 )
             })?;
@@ -407,25 +408,26 @@ pub(crate) fn parse_embed_probe(stdout: &str) -> Option<EmbedProbe> {
     })
 }
 
-/// Accepts any `3.14.x`.
+/// Accepts any CPython 3 release from [`EMBED_PYTHON_MIN`] on.
 pub(crate) fn check_embed_version(version: (u32, u32, u32)) -> Result<(), String> {
     let (major, minor, micro) = version;
-    if (major, minor) == EMBED_PYTHON {
+    if major == EMBED_PYTHON_MIN.0 && minor >= EMBED_PYTHON_MIN.1 {
         return Ok(());
     }
     Err(format!(
         "the embed interpreter is CPython {major}.{minor}.{micro}; an embedded executable \
-         bundles CPython {}.{} -- set PYCC_PYTHON to a {}.{} interpreter",
-        EMBED_PYTHON.0, EMBED_PYTHON.1, EMBED_PYTHON.0, EMBED_PYTHON.1
+         bundles CPython {}.{} or newer -- set PYCC_PYTHON to such an interpreter",
+        EMBED_PYTHON_MIN.0, EMBED_PYTHON_MIN.1
     ))
 }
 
 /// The interpreter an embedded build bundles when `PYCC_PYTHON` is unset:
-/// `python3.14.exe` on Windows (D-253), `python3.14` elsewhere.
+/// `python.exe` on Windows, `python3` elsewhere -- the same default as
+/// `--ext` and the oracle tests.
 pub(crate) fn default_interpreter(platform: EmbedPlatform) -> &'static str {
     match platform {
-        EmbedPlatform::Windows => "python3.14.exe",
-        EmbedPlatform::MacOs | EmbedPlatform::Linux => "python3.14",
+        EmbedPlatform::Windows => "python.exe",
+        EmbedPlatform::MacOs | EmbedPlatform::Linux => "python3",
     }
 }
 
@@ -500,6 +502,7 @@ pub(crate) fn plan_embed(
     out: &Path,
     entry: &Path,
     typed_hir: &pycc_hir::HirModule,
+    exports: &[ext_build::ExtExport],
     toolchain: &EmbedToolchain,
     platform: EmbedPlatform,
     host: (&str, &str),
@@ -550,7 +553,7 @@ pub(crate) fn plan_embed(
     let slots = embed_slot_dunders(typed_hir).expect("try_build refuses an uninstallable slot");
     let exports_inc = ext_build::generate_exports_inc_with_slots(
         "__main__",
-        &[],
+        exports,
         &classes,
         &[],
         &[],

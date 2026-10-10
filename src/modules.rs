@@ -271,6 +271,11 @@ impl Loader {
             .map_err(|error| FrontendFailure::input(display.clone(), error.to_string()))?;
         let source = source::decode_python_source(&bytes)
             .map_err(|message| FrontendFailure::input(display.clone(), message))?;
+        // The non-strict fallback rewrite of the entry module (#12).
+        let source = match is_entry.then(crate::fallback::entry_override).flatten() {
+            Some(rewritten) => rewritten,
+            None => source,
+        };
         let parsed = pycc_parser::parse_all(&source)
             .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
         if is_entry && let Some(message) = self.entry_package_collision() {

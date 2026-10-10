@@ -6,7 +6,7 @@
 //! `pycc_rt_str_repeat`, so the observable contract is now the compiled
 //! program's stdout. Every expectation here is CPython 3.14's own output for
 //! the same source (checked against the pinned oracle by
-//! `tests/conformance.rs`'s `str_repetition_matches_cpython_3_14_7_byte_for_byte`
+//! `tests/conformance.rs`'s `str_repetition_matches_cpython_byte_for_byte`
 //! over `tests/fixtures/str_repetition.py`); these tests restate it without
 //! the oracle so the behavior is gated on every CI run, not only on the
 //! oracle-bearing job.

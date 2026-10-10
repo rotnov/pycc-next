@@ -3,6 +3,7 @@ mod cli;
 mod embed;
 mod ext_build;
 mod ext_output;
+mod fallback;
 mod foreign_import;
 mod frontend;
 mod interop_policy;
@@ -51,6 +52,7 @@ fn main() -> ExitCode {
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
+            fallback::set_report(mode.report_fallbacks);
             // Resolved here, not inside `try_build`: this consumption point
             // (a neighboring `pycc.toml`'s `[build] opt = "release"` as a
             // default profile) is scoped to `pycc build` specifically --
@@ -103,6 +105,7 @@ fn main() -> ExitCode {
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
+            fallback::set_report(mode.report_fallbacks);
             run(&path, &args, interop.into_cli())
         }
         Command::Version { verbose } => {
@@ -143,6 +146,7 @@ fn main() -> ExitCode {
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
+            fallback::set_report(mode.report_fallbacks);
             check_paths(&paths, error_format, interop.into_cli())
         }
         Command::Lock {
@@ -152,6 +156,7 @@ fn main() -> ExitCode {
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
+            fallback::set_report(mode.report_fallbacks);
             // Read from the environment here, like `build`'s toolchain: the
             // lock is taken from the interpreter an embedded build bundles.
             let toolchain = embed::EmbedToolchain::from_env();

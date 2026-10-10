@@ -255,13 +255,13 @@ attempt(store(m.Box.__new__(m.Box), 'n', 1))
 "#;
 
 const EXT_ONLY_OUT: &str = "TypeError Box.n() argument 1: 'str' object cannot be interpreted as an integer\n\
-    OverflowError Box.n() argument 1: int is outside the inline-integer range [-2**62, 2**62-1] this pycc version's `ext` boundary supports (see #1040)\n\
+    ok\n\
     TypeError Box.f() argument 1: 'int' object cannot be interpreted as a float\n\
     TypeError Box.b() argument 1: 'int' object cannot be interpreted as a bool\n\
     TypeError Box.s() argument 1: 'int' object cannot be interpreted as a str\n\
     TypeError Box.leaf() argument 1 must be pycc_prop_set_mod.Leaf, not object\n\
     AttributeError attribute 'count' of 'pycc_prop_set_mod.Box' objects is not writable\n\
-    3 0.5 False a Leaf 0\n\
+    2361183241434822606848 0.5 False a Leaf 0\n\
     AttributeError cannot set 'n' on a 'Box' object whose __init__ never ran\n";
 
 /// What CPython answers for the lines [`EXT_ONLY_DRIVER`] pins, so the

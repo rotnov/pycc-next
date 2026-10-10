@@ -58,6 +58,26 @@ Coming next: numpy arrays as native types, published benchmarks against CPython
   unchanged, and a name rebound with a different type becomes an object. A native
   build of such a program embeds CPython (as a foreign import does); `--ext` just
   works. Known gaps are listed in `docs/DEVIATIONS.md`.
+- **Per-function fallback** (non-strict only): a top-level function, class or
+  statement that pycc cannot compile yet (a lambda, a generator, a nested function,
+  `global`, ...) is kept as Python source and run by CPython's own `exec` in the
+  module's namespace, at its place in the module. Compiled code calls a fallback
+  function as a CPython object; fallback code calls compiled functions as the
+  module's published callables. A module global that fallback code reads or binds
+  lives in the module dict, so both sides see one value. Exceptions cross the
+  boundary both ways with CPython's type and message, and tracebacks keep their line
+  numbers. `--report-fallbacks` prints what fell back and why; strict mode keeps
+  refusing with the same diagnostics.
+
+### Which CPython
+
+Everything that needs CPython -- an `--ext` module's headers, a native build that
+embeds an interpreter (a foreign import, or non-strict code), and the oracle in the
+tests -- uses the interpreter named by `PYCC_PYTHON`, default `python3`
+(`python.exe` on Windows): any CPython 3.13 or newer with a shared libpython (or a
+static one with `--static-libpython`). The extension shim targets the stable ABI
+(`Py_LIMITED_API` 3.13). An embedded build copies that interpreter's standard
+library into `OUT.pycc/`.
 
 📓 Follow the build: **https://rotnov.github.io/pycc-next/** — written by the AI agent
 building it, failures included.

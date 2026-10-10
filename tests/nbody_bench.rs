@@ -125,40 +125,25 @@ fn time_command(mut command: Command) -> Timings {
     Timings { wall, cpu }
 }
 
-/// The pinned CPython 3.14.7 oracle (D-001's "python3.14" pin). Duplicated
-/// from `tests/conformance.rs` rather than shared through a common module --
-/// this repository's existing integration-test convention (e.g.
-/// `tests/pycc_toml_release_default.rs`'s own private `pycc_bin()`) is each
-/// `tests/*.rs` file carrying its own small self-contained helpers, since
-/// Rust integration-test binaries don't share code across files without a
-/// `tests/common/mod.rs`-style module none of these files currently use.
-///
-/// Windows needs its own file name here: `std::process::Command::new` on
-/// Windows resolves a bare program name by searching `PATH` for that exact
-/// file name and does not append `.exe` when the name already contains a
-/// `.` (the version dot in "python3.14" reads as an extension to that
-/// resolver). A CI-side `python3.14.exe` alias on `PATH` is therefore
-/// invisible to this lookup even though shells like bash find it fine.
-/// Passing the extension explicitly on Windows sidesteps the mismatch,
-/// exactly like `tests/conformance.rs::oracle_binary_name` (D-080 addendum).
-fn oracle_binary_name(is_windows: bool) -> &'static str {
-    if is_windows {
-        "python3.14.exe"
-    } else {
-        "python3.14"
-    }
-}
-
+/// The CPython oracle: `PYCC_PYTHON`, default `python3` (`python.exe` on
+/// Windows), CPython 3.13 or newer. Duplicated from `tests/conformance.rs`:
+/// each `tests/*.rs` file carries its own small helpers.
 fn oracle_python_bin() -> PathBuf {
-    let bin = PathBuf::from(oracle_binary_name(cfg!(windows)));
+    let default = if cfg!(windows) {
+        "python.exe"
+    } else {
+        "python3"
+    };
+    let bin = PathBuf::from(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| default.into()));
     let output = Command::new(&bin)
-        .arg("--version")
+        .args(["-c", "import sys; print(sys.version_info >= (3, 13))"])
         .output()
-        .unwrap_or_else(|e| panic!("nbody benchmark oracle `python3.14` not found on PATH: {e}"));
-    let version = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        version.trim() == "Python 3.14.7",
-        "nbody benchmark oracle must be exactly Python 3.14.7, found {version:?}"
+        .unwrap_or_else(|e| panic!("nbody benchmark oracle `{}` not found: {e}", bin.display()));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "True",
+        "the nbody benchmark oracle `{}` must be CPython 3.13 or newer",
+        bin.display()
     );
     bin
 }
@@ -223,7 +208,7 @@ fn assert_relative_eq(pycc: [f64; 3], cpython: [f64; 3]) {
         let relative_diff = (p - c).abs() / c.abs().max(f64::MIN_POSITIVE);
         assert!(
             relative_diff <= RELATIVE_TOLERANCE,
-            "pycc and CPython 3.14.7 disagree on tests/fixtures/nbody.py's output value #{index} \
+            "pycc and CPython disagree on tests/fixtures/nbody.py's output value #{index} \
              beyond the {RELATIVE_TOLERANCE:e} relative tolerance -- a fast but wrong binary must \
              not pass this speedup gate (pycc={p}, cpython={c}, relative difference={relative_diff:e})"
         );
@@ -339,16 +324,10 @@ fn strip_windows_newline_translation_removes_cr_before_lf_only() {
     assert_eq!(strip_windows_newline_translation(lone_cr.clone()), lone_cr);
 }
 
-#[test]
-fn oracle_binary_name_appends_the_exe_extension_only_for_windows() {
-    assert_eq!(oracle_binary_name(true), "python3.14.exe");
-    assert_eq!(oracle_binary_name(false), "python3.14");
-}
-
 /// D-094's nbody measurement contract (design doc's own §1): same-machine
 /// paired comparison, `K = 7` runs each (raised from the design doc's
 /// original `K = 5` by D-140), ratio of medians, `--release` pycc
-/// vs. the pinned CPython 3.14.7 oracle, gate at ratio >= 20 -- preceded by
+/// vs. the CPython oracle, gate at ratio >= 20 -- preceded by
 /// one untimed correctness check (D-097) that verifies both sides compute
 /// matching output, within a small relative tolerance (D-098, superseding
 /// D-097's original exact-byte comparison), before any ratio is trusted.

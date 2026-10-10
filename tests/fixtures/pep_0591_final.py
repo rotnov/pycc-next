@@ -1,3 +1,6 @@
+# The CPython 3.13 oracle evaluates annotations eagerly; this future import gives it
+# the deferred (PEP 649) semantics pycc follows.
+from __future__ import annotations
 # Deliberately omits `from typing import Final`: pycc has no
 # `Stmt::Import` support (any `import` is rejected with C0001), and CPython
 # 3.14 defers annotation evaluation by default (PEP 649/749), so the bare

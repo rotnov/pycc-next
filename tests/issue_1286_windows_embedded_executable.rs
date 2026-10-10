@@ -63,10 +63,10 @@ fn windows_required() -> bool {
 
 /// The embed interpreter a default Windows build probes.
 fn interpreter() -> OsString {
-    std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3.14.exe".into())
+    std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python.exe".into())
 }
 
-/// The hosted tests' precondition: the embed interpreter is CPython 3.14.7.
+/// The hosted tests' precondition: the embed interpreter is CPython 3.13+.
 fn precondition() -> Result<(), String> {
     let python = interpreter();
     let output = Command::new(&python)
@@ -74,11 +74,16 @@ fn precondition() -> Result<(), String> {
         .output()
         .map_err(|e| format!("the embed interpreter {python:?} does not run: {e}"))?;
     let version = stdout_of(&output);
-    if version.trim() == "Python 3.14.7" {
+    let minor = version
+        .trim()
+        .strip_prefix("Python 3.")
+        .and_then(|rest| rest.split('.').next())
+        .and_then(|minor| minor.parse::<u32>().ok());
+    if minor.is_some_and(|minor| minor >= 13) {
         Ok(())
     } else {
         Err(format!(
-            "the embed interpreter {python:?} is `{}`, not Python 3.14.7",
+            "the embed interpreter {python:?} is `{}`, not CPython 3.13+",
             version.trim()
         ))
     }
@@ -204,7 +209,7 @@ print(str(sys.version_info[1]))
 ";
 
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn a_windows_embedded_executable_matches_cpython() {
     if !hosted() {
         return;
@@ -218,7 +223,7 @@ fn a_windows_embedded_executable_matches_cpython() {
 }
 
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn a_relocated_windows_embedded_executable_runs_with_a_scrubbed_path() {
     if !hosted() {
         return;
@@ -262,7 +267,7 @@ fn a_relocated_windows_embedded_executable_runs_with_a_scrubbed_path() {
 }
 
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn a_windows_embedded_executable_loads_extension_dlls() {
     if !hosted() {
         return;
@@ -287,7 +292,7 @@ fn a_windows_embedded_executable_loads_extension_dlls() {
 }
 
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn pycc_run_of_a_windows_embedded_program_matches_cpython() {
     if !hosted() {
         return;
@@ -303,7 +308,7 @@ fn pycc_run_of_a_windows_embedded_program_matches_cpython() {
 }
 
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn sys_exit_from_a_windows_embedded_executable_propagates() {
     if !hosted() {
         return;
@@ -318,7 +323,7 @@ fn sys_exit_from_a_windows_embedded_executable_propagates() {
 }
 
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn a_windows_embedded_executable_without_its_interpreter_dll_fails_loudly() {
     if !hosted() {
         return;
@@ -338,7 +343,7 @@ fn a_windows_embedded_executable_without_its_interpreter_dll_fails_loudly() {
 }
 
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn a_windows_embedded_build_bundles_the_interpreter_dlls() {
     if !hosted() {
         return;
@@ -439,7 +444,7 @@ fn image_named(path: &Path) -> bool {
 }
 
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn the_windows_stub_imports_only_system_dlls() {
     if !hosted() {
         return;
@@ -478,7 +483,7 @@ fn the_windows_stub_imports_only_system_dlls() {
 /// directory size, the reader by its terminator). `Lib\` holds no image by
 /// name, the real counterpart of the scan's `Lib\` refusal.
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn the_pe_scanner_reads_the_bundled_images_as_llvm_readobj_does() {
     if !hosted() {
         return;

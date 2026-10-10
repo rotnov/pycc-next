@@ -755,7 +755,7 @@ fn mandelbrot_ascii_produces_a_grid_of_the_expected_dimensions_and_palette() {
     // recursion-free numeric function. This test only proves the shape
     // (dimensions + palette characters used); the exact-value CPython
     // differential lives in `tests/conformance.rs`'s
-    // `mandelbrot_ascii_matches_cpython_3_14_7_byte_for_byte` (PR-6).
+    // `mandelbrot_ascii_matches_cpython_byte_for_byte` (PR-6).
     //
     // Deviation from the plan brief: the brief's fixture wrote the
     // plane offsets as unary-minus literals (`-2.0`, `-1.0`). At the time no

@@ -260,11 +260,11 @@ fn a_stale_lock_is_refused_and_a_current_multi_module_lock_is_accepted() {
 /// away.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 with a shared libpython (PYCC_PYTHON, default python3.14)"]
-fn a_locked_closure_runs_from_the_sidecar_and_matches_cpython_3_14_7() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn a_locked_closure_runs_from_the_sidecar_and_matches_cpython() {
     let dir = ScratchDir::new("closure_oracle").expect("scratch");
     let dir = std::fs::canonicalize(&*dir).expect("canonicalize");
-    let base = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3.14".into());
+    let base = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     let venv = dir.join("venv");
     let status = Command::new(&base)
         .args(["-m", "venv", "--without-pip"])
@@ -384,11 +384,11 @@ fn an_optional_root_is_locked_and_accepted_whether_installed_or_absent() {
 /// exactly as CPython 3.14.7 does in the same environment.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 with a shared libpython (PYCC_PYTHON, default python3.14)"]
-fn an_optional_import_matches_cpython_3_14_7_absent_and_installed() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn an_optional_import_matches_cpython_absent_and_installed() {
     let dir = ScratchDir::new("closure_optional_oracle").expect("scratch");
     let dir = std::fs::canonicalize(&*dir).expect("canonicalize");
-    let base = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3.14".into());
+    let base = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     let venv = dir.join("venv");
     let status = Command::new(&base)
         .args(["-m", "venv", "--without-pip"])

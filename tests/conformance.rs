@@ -80,46 +80,39 @@ fn pycc_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_pycc"))
 }
 
-/// The pinned CPython 3.14.7 oracle (D-001's "python3.14" pin, advanced from
-/// 3.14.6 in the 2026-08-15 oracle refresh). A missing or wrong-version oracle is a
-/// clean, actionable panic, not a silently-skipped or falsely-passing check.
-///
-/// Windows needs its own file name here: `std::process::Command::new` on
-/// Windows resolves a bare program name by searching `PATH` for that exact
-/// file name and does not append `.exe` when the name already contains a
-/// `.` (the version dot in "python3.14" reads as an extension to that
-/// resolver). A CI-side `python3.14.exe` alias on `PATH` is therefore
-/// invisible to this lookup even though shells like bash find it fine
-/// (bash's own exec resolution does try appending `.exe`). Passing the
-/// extension explicitly on Windows sidesteps the mismatch (D-080 addendum).
-///
-/// Testable core of `oracle_python_bin`: takes the "is this a Windows
-/// target" check as a parameter instead of calling `cfg!(windows)` directly,
-/// so one test can assert both filenames regardless of the host OS actually
-/// running the test (matching `pycc_rt_lib_filename` in
-/// `pycc_codegen::artifact_layout`,
-/// which parameterizes an analogous host-vs-target naming choice the same
-/// way after an earlier host-`cfg!`-keyed version was caught in review).
-fn oracle_binary_name(is_windows: bool) -> &'static str {
-    if is_windows {
-        "python3.14.exe"
-    } else {
-        "python3.14"
-    }
-}
-
+/// The CPython oracle: `PYCC_PYTHON`, default `python3` (`python.exe` on
+/// Windows), which must be CPython 3.13 or newer. A missing or too-old
+/// oracle is a clean, actionable panic, not a silently-skipped or
+/// falsely-passing check.
 fn oracle_python_bin() -> PathBuf {
-    let bin = PathBuf::from(oracle_binary_name(cfg!(windows)));
+    let default = if cfg!(windows) {
+        "python.exe"
+    } else {
+        "python3"
+    };
+    let bin = PathBuf::from(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| default.into()));
     let output = Command::new(&bin)
-        .arg("--version")
+        .args(["-c", "import sys; print(sys.version_info >= (3, 13))"])
         .output()
-        .unwrap_or_else(|e| panic!("conformance oracle `python3.14` not found on PATH: {e}"));
-    let version = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        version.trim() == "Python 3.14.7",
-        "conformance oracle must be exactly Python 3.14.7, found {version:?}"
+        .unwrap_or_else(|e| panic!("conformance oracle `{}` not found: {e}", bin.display()));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "True",
+        "the conformance oracle `{}` must be CPython 3.13 or newer",
+        bin.display()
     );
     bin
+}
+
+/// Whether the oracle accepts CPython 3.14-only syntax (PEP 758's
+/// unparenthesized `except A, B:`). A fixture using it skips on a 3.13
+/// oracle with a note.
+fn oracle_is_3_14() -> bool {
+    let output = Command::new(oracle_python_bin())
+        .args(["-c", "import sys; print(sys.version_info >= (3, 14))"])
+        .output()
+        .expect("the oracle runs");
+    String::from_utf8_lossy(&output.stdout).trim() == "True"
 }
 
 /// CPython's own stdio layer translates `\n` to `\r\n` on Windows even when
@@ -205,12 +198,6 @@ fn run_conformance_fixture_with_profile(
 }
 
 #[test]
-fn oracle_binary_name_appends_the_exe_extension_only_for_windows() {
-    assert_eq!(oracle_binary_name(true), "python3.14.exe");
-    assert_eq!(oracle_binary_name(false), "python3.14");
-}
-
-#[test]
 fn strip_windows_newline_translation_removes_cr_before_lf_only() {
     let input = b"line one\r\nline two\nline three\r\n".to_vec();
     let expected = b"line one\nline two\nline three\n".to_vec();
@@ -222,37 +209,37 @@ fn strip_windows_newline_translation_removes_cr_before_lf_only() {
     assert_eq!(strip_windows_newline_translation(lone_cr.clone()), lone_cr);
 }
 
-// Ignored by default: this test shells out to a real "python3.14" oracle,
+// Ignored by default: this test shells out to a real CPython oracle,
 // which the D-014 coverage gate's isolated `nobody` sandbox deliberately does
 // not provision (installing a network-fetched interpreter inside that
 // trust boundary would expand it far beyond what the gate is reviewed for).
 // CI runs these explicitly with `-- --include-ignored` in a step placed
 // after that sandboxed gate, on every Tier-1 target (D-085/D-080).
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn fib_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn fib_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/conformance_fib.py");
     let (pycc_stdout, cpython_stdout) = run_conformance_fixture("conformance_fib", &fixture);
     assert_eq!(
         pycc_stdout, cpython_stdout,
-        "pycc and CPython 3.14.7 disagree on tests/fixtures/conformance_fib.py"
+        "pycc and CPython disagree on tests/fixtures/conformance_fib.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn mandelbrot_ascii_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn mandelbrot_ascii_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/conformance_mandelbrot.py");
     let (pycc_stdout, cpython_stdout) = run_conformance_fixture("conformance_mandelbrot", &fixture);
     assert_eq!(
         pycc_stdout, cpython_stdout,
-        "pycc and CPython 3.14.7 disagree on tests/fixtures/conformance_mandelbrot.py"
+        "pycc and CPython disagree on tests/fixtures/conformance_mandelbrot.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn run_conformance_fixture_with_profile_builds_both_debug_and_release() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/conformance_fib.py");
     let (debug_pycc, debug_cpython) =
@@ -274,206 +261,206 @@ fn run_conformance_fixture_with_profile_builds_both_debug_and_release() {
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0526_var_annotations_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0526_var_annotations_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0526_var_annotations.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0526_var_annotations_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0526_var_annotations.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0526_var_annotations.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0526_var_annotations_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0526_var_annotations.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0526_var_annotations.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_3105_print_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_3105_print_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_3105_print.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_3105_print_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_3105_print.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_3105_print.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_3105_print_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_3105_print.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_3105_print.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_3107_annotations_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_3107_annotations_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_3107_annotations.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_3107_annotations_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_3107_annotations.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_3107_annotations.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_3107_annotations_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_3107_annotations.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_3107_annotations.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_3131_unicode_ids_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_3131_unicode_ids_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_3131_unicode_ids.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_3131_unicode_ids_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_3131_unicode_ids.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_3131_unicode_ids.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_3131_unicode_ids_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_3131_unicode_ids.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_3131_unicode_ids.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0414_u_literal_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0414_u_literal_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0414_u_literal.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0414_u_literal_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0414_u_literal.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0414_u_literal.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0414_u_literal_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0414_u_literal.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0414_u_literal.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0484_type_hints_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0484_type_hints_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0484_type_hints.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0484_type_hints_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0484_type_hints.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0484_type_hints.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0484_type_hints_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0484_type_hints.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0484_type_hints.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0498_fstrings_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0498_fstrings_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0498_fstrings.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0498_fstrings_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0498_fstrings.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0498_fstrings.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0498_fstrings_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0498_fstrings.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0498_fstrings.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0585_builtin_generics_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0585_builtin_generics_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0585_builtin_generics.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0585_builtin_generics_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0585_builtin_generics.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0585_builtin_generics.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0585_builtin_generics_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0585_builtin_generics.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0585_builtin_generics.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0604_union_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0604_union_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0604_union.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0604_union_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0604_union.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0604_union.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0604_union_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0604_union.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0604_union.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0572_walrus_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0572_walrus_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0572_walrus.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0572_walrus_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0572_walrus.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0572_walrus.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0572_walrus_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0572_walrus.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0572_walrus.py"
     );
 }
 
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn dict_order_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn dict_order_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dict_order.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("dict_order_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/dict_order.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/dict_order.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("dict_order_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/dict_order.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/dict_order.py"
     );
 }
 
@@ -486,20 +473,20 @@ fn dict_order_matches_cpython_3_14_7_byte_for_byte() {
 // evidence for `set[int]`'s own half of that row, since `dict_order.py`
 // above only exercises `dict[str, int]`.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0585_set_int_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0585_set_int_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0585_set_int.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0585_set_int_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0585_set_int.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0585_set_int.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0585_set_int_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0585_set_int.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0585_set_int.py"
     );
 }
 
@@ -523,21 +510,21 @@ fn pep_0585_set_int_matches_cpython_3_14_7_byte_for_byte() {
 // byte-for-byte agreement like every other fixture in this file, not just
 // `len()`.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn tuple_heterogeneous_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn tuple_heterogeneous_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tuple_heterogeneous.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("tuple_heterogeneous_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/tuple_heterogeneous.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/tuple_heterogeneous.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("tuple_heterogeneous_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/tuple_heterogeneous.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/tuple_heterogeneous.py"
     );
 }
 
@@ -552,21 +539,21 @@ fn tuple_heterogeneous_matches_cpython_3_14_7_byte_for_byte() {
 // for the full account of why this fixture's exact shape was chosen and
 // what CPython actually prints for it.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0709_comp_inline_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0709_comp_inline_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0709_comp_inline.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0709_comp_inline_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0709_comp_inline.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0709_comp_inline.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0709_comp_inline_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0709_comp_inline.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0709_comp_inline.py"
     );
 }
 
@@ -574,20 +561,20 @@ fn pep_0709_comp_inline_matches_cpython_3_14_7_byte_for_byte() {
 // parameter, called at 3 sites across two scalar types (`int` and `str`),
 // each result printed -- exercises call-site monomorphization end to end.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0695_generics_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0695_generics_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0695_generics.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0695_generics_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0695_generics.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0695_generics.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0695_generics_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0695_generics.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0695_generics.py"
     );
 }
 
@@ -601,21 +588,21 @@ fn pep_0695_generics_matches_cpython_3_14_7_byte_for_byte() {
 // TypeAlias = int` is never evaluated by the pinned 3.14.7 oracle either --
 // both sides produce identical output with or without the import.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0613_typealias_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0613_typealias_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0613_typealias.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0613_typealias_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0613_typealias.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0613_typealias.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0613_typealias_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0613_typealias.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0613_typealias.py"
     );
 }
 
@@ -627,21 +614,21 @@ fn pep_0613_typealias_matches_cpython_3_14_7_byte_for_byte() {
 // printed element-wise or via `len()`, never a container value directly
 // (`print(xs)` panics today, D-107/D-124/D-116).
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn container_methods_slicing_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn container_methods_slicing_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/container_methods_slicing.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("container_methods_slicing_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/container_methods_slicing.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/container_methods_slicing.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("container_methods_slicing_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/container_methods_slicing.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/container_methods_slicing.py"
     );
 }
 
@@ -657,12 +644,12 @@ fn container_methods_slicing_matches_cpython_3_14_7_byte_for_byte() {
 // these already-shipped v0.2 features compose in a single program, not
 // re-testing any single feature in isolation. Every value is printed
 // element-wise/via indexing/`len()`, never a container value directly
-// (matching `container_methods_slicing_matches_cpython_3_14_7_byte_for_byte`'s
+// (matching `container_methods_slicing_matches_cpython_byte_for_byte`'s
 // own established precedent immediately above: `print(xs)` panics today,
 // D-107/D-124/D-116).
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn v0_2_container_generics_corpus_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn v0_2_container_generics_corpus_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/v0_2_container_generics_corpus.py");
     let (debug_pycc, debug_cpython) = run_conformance_fixture_with_profile(
@@ -672,7 +659,7 @@ fn v0_2_container_generics_corpus_matches_cpython_3_14_7_byte_for_byte() {
     );
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/v0_2_container_generics_corpus.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/v0_2_container_generics_corpus.py"
     );
     let (release_pycc, release_cpython) = run_conformance_fixture_with_profile(
         "v0_2_container_generics_corpus_release",
@@ -681,7 +668,7 @@ fn v0_2_container_generics_corpus_matches_cpython_3_14_7_byte_for_byte() {
     );
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/v0_2_container_generics_corpus.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/v0_2_container_generics_corpus.py"
     );
 }
 
@@ -689,23 +676,23 @@ fn v0_2_container_generics_corpus_matches_cpython_3_14_7_byte_for_byte() {
 // pair. `pep_0594_dead_battery.py` proves import resolution genuinely
 // works now (a passing `import math` fixture using both registered
 // symbols), oracle-diffed dual-profile like every other
-// `*_matches_cpython_3_14_7_byte_for_byte` test above.
+// `*_matches_cpython_byte_for_byte` test above.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0594_dead_battery_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0594_dead_battery_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0594_dead_battery.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0594_dead_battery_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0594_dead_battery.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0594_dead_battery.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0594_dead_battery_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0594_dead_battery.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0594_dead_battery.py"
     );
 }
 
@@ -767,45 +754,45 @@ fn pep_0594_dead_battery_rejected_produces_c0001() {
 }
 
 // PEP 698 (#579, Part 3 of #572): `@override` -- its fixture test
-// (`pep_0698_override_matches_cpython_3_14_7_byte_for_byte`) lives in
+// (`pep_0698_override_matches_cpython_byte_for_byte`) lives in
 // tests/conformance/classes.rs.
 
 // PEP 593 (#383): `Annotated[X, ...]` — unwraps to `X`, metadata discarded.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0593_annotated_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0593_annotated_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0593_annotated.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0593_annotated_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0593_annotated.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0593_annotated.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0593_annotated_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0593_annotated.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0593_annotated.py"
     );
 }
 
 // PEP 570 (#383): positional-only parameters (`/` marker).
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0570_pos_only_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0570_pos_only_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0570_pos_only.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0570_pos_only_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0570_pos_only.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0570_pos_only.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0570_pos_only_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0570_pos_only.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0570_pos_only.py"
     );
 }
 
@@ -842,40 +829,40 @@ fn pep_0570_pos_only_keyword_rejected_produces_t0021() {
 
 // PEP 591 (#383): `Final[X]` — unwraps to `X`, non-reassignable.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0591_final_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0591_final_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0591_final.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0591_final_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0591_final.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0591_final.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0591_final_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0591_final.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0591_final.py"
     );
 }
 
 // PEP 634-636 (#381, PR-21): structural pattern matching (`match`/`case`).
 // Literal, singleton, capture, wildcard, guard, and or-pattern forms.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0634_match_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0634_match_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0634_match.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0634_match_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0634_match.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0634_match.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0634_match_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0634_match.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0634_match.py"
     );
 }
 
@@ -887,20 +874,20 @@ fn pep_0634_match_matches_cpython_3_14_7_byte_for_byte() {
 // predates #602's literal-sign fold, and the `BinOp::Sub` form remains a
 // valid, equally reachable way to produce a negative `int`.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn str_repetition_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn str_repetition_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/str_repetition.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("str_repetition_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/str_repetition.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/str_repetition.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("str_repetition_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/str_repetition.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/str_repetition.py"
     );
 }
 
@@ -914,21 +901,21 @@ fn str_repetition_matches_cpython_3_14_7_byte_for_byte() {
 // specifier (#720) are deliberately absent -- they are recorded core gaps in
 // pycc's f-string lowering rather than PEP 701 grammar points.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0701_fstring_grammar_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0701_fstring_grammar_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0701_fstring_grammar.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0701_fstring_grammar_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0701_fstring_grammar.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0701_fstring_grammar.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0701_fstring_grammar_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0701_fstring_grammar.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0701_fstring_grammar.py"
     );
 }
 
@@ -937,8 +924,8 @@ fn pep_0701_fstring_grammar_matches_cpython_3_14_7_byte_for_byte() {
 // level and inside a function body, oracle-diffed dual-profile like the
 // `pep_0594_dead_battery` positive fixture.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn import_alias_math_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn import_alias_math_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/conformance_import_alias_math.py");
     let (debug_pycc, debug_cpython) = run_conformance_fixture_with_profile(
@@ -948,7 +935,7 @@ fn import_alias_math_matches_cpython_3_14_7_byte_for_byte() {
     );
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/conformance_import_alias_math.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/conformance_import_alias_math.py"
     );
     let (release_pycc, release_cpython) = run_conformance_fixture_with_profile(
         "conformance_import_alias_math_release",
@@ -957,6 +944,6 @@ fn import_alias_math_matches_cpython_3_14_7_byte_for_byte() {
     );
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/conformance_import_alias_math.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/conformance_import_alias_math.py"
     );
 }

@@ -18,4 +18,10 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -y -q llvm-22-dev libpolly-22-dev clang-22 libzstd-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
-      - run: cargo test --release --workspace
+      # Includes the hosted tests that build against and compare with the
+      # CPython found as `python3` (the oracle). Skipped: the static-libpython
+      # tests (need a relocatable CPython with a PIC `libpython3.X.a`) and the
+      # nbody speed gate (timing on a shared runner).
+      - run: >-
+          cargo test --release --workspace -- --include-ignored
+          --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup

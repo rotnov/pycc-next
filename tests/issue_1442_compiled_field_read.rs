@@ -265,9 +265,7 @@ for _ in range(100):
 print(sys.getrefcount(top) - before)
 "#;
 
-const EXT_ONLY_OUT: &str = "OverflowError\n\
-    OverflowError\n\
-    TypeError Fields.n() argument 1: 'str' object cannot be interpreted as an integer\n\
+const EXT_ONLY_OUT: &str = "TypeError Fields.n() argument 1: 'str' object cannot be interpreted as an integer\n\
     7\n\
     0\n\
     100\n";

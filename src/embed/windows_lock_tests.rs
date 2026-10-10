@@ -89,6 +89,7 @@ impl Env {
             &self.out(),
             &self.entry,
             &hir,
+            &[],
             &self.toolchain(),
             EmbedPlatform::Windows,
             WINDOWS,

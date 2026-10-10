@@ -159,7 +159,7 @@ pub(crate) fn try_build(
             // export thunks: nothing checked its functions against the
             // `--ext` boundary (`collect_exports` does not run here).
             ext: ext.is_some() || embedded,
-            suppress_export_thunks: embedded,
+            suppress_export_thunks: embedded && !crate::fallback::active(),
         },
     )
     .map_err(|e| {
@@ -291,9 +291,26 @@ fn embed_plan_or_exit(
         ))
     };
     embed::embed_slot_dunders(typed_hir).map_err(|gaps| ExitCode::from(report(gaps)))?;
+    // A program with non-strict fallback code (#12) publishes its compiled
+    // module-level functions in `__main__`, so the fallback code can call
+    // them, as an `--ext` module's code can.
+    let exports = if crate::fallback::active() {
+        let mut exports =
+            ext_build::collect_exports_with_hooks(typed_hir, &std::collections::BTreeSet::new())
+                .map_err(|gaps| ExitCode::from(report(gaps)))?;
+        exports.retain(|export| export.class.is_none());
+        let source = crate::fallback::entry_source(entry);
+        let signatures = ext_build::SourceSignatures::from_source(&source);
+        ext_build::bind_keyword_names(typed_hir, &signatures, &mut exports);
+        exports
+    } else {
+        Vec::new()
+    };
     let host = (std::env::consts::ARCH, std::env::consts::OS);
     let platform = EmbedPlatform::HOST;
-    let plan = embed::plan_embed(out, entry, typed_hir, toolchain, platform, host, obj_path);
+    let plan = embed::plan_embed(
+        out, entry, typed_hir, &exports, toolchain, platform, host, obj_path,
+    );
     plan.map_err(|e| {
         eprintln!("error: {e}");
         ExitCode::from(2)
@@ -359,7 +376,7 @@ fn plan_ext(
     // #1461 and #1467 both read the entry module's own source: keyword
     // binding needs the `def`s HIR no longer spells, and the PEP 562 hooks
     // to publish are the entry module's own (see `ext_build::module_hooks`).
-    let entry_source = std::fs::read_to_string(source_path).unwrap_or_default();
+    let entry_source = crate::fallback::entry_source(source_path);
     // A located `C0001`, so it is rendered against the real source text.
     let hooks = ext_build::EntryHooks::from_source(&entry_source).map_err(|refusals| {
         ExitCode::from(report_build_failure(frontend::FrontendFailure::compile(

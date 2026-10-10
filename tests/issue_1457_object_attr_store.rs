@@ -471,8 +471,7 @@ const EXT_ONLY_OUT: &str = "\
 TypeError 3\n\
 400\n\
 0\n\
-OverflowError an int argument to a CPython object's method is outside the inline-integer range [-2**62, 2**62-1] this pycc version's `ext` boundary supports (see #1040)\n\
-1\n";
+1208925819614629174706176\n";
 
 /// What CPython answers for [`EXT_ONLY_DRIVER`]: a plain attribute takes
 /// any value, and the replaced or deleted object's reference is dropped.

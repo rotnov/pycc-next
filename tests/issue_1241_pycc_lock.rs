@@ -13,8 +13,8 @@
 //! Windows host is `tests/issue_1296_windows_locked_closure.rs` (#1296).
 //!
 //! The `#[ignore]`d test locks a real `python3.14 -m venv --without-pip`
-//! environment (`PYCC_PYTHON`, default `python3.14`, must be CPython
-//! 3.14.7 with a shared libpython); `venv --without-pip` is offline.
+//! environment (`PYCC_PYTHON`, default `python3`, must be CPython
+//! 3.13+ with a shared libpython); `venv --without-pip` is offline.
 
 #![cfg_attr(windows, allow(dead_code, unused_imports))]
 
@@ -602,14 +602,14 @@ fn the_lock_sits_beside_the_nearest_pycc_toml() {
     assert!(!src.join("pycc.lock").exists());
 }
 
-/// A real `venv --without-pip` of the build host's CPython 3.14.7 passes
+/// A real `venv --without-pip` of the build host's CPython passes
 /// the embed checks and locks a closure written into its site-packages.
 #[cfg(unix)]
 #[test]
-#[ignore = "needs CPython 3.14.7 with a shared libpython (PYCC_PYTHON, default python3.14)"]
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
 fn a_real_venv_is_locked_and_checked() {
     let dir = ScratchDir::new("lock_real_venv").expect("scratch");
-    let base = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3.14".into());
+    let base = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     let venv = dir.join("venv");
     let status = Command::new(&base)
         .args(["-m", "venv", "--without-pip"])
@@ -635,8 +635,24 @@ fn a_real_venv_is_locked_and_checked() {
     let output = lock(&python, &dir, &["m.py"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
     let text = read_lock(&dir);
-    assert!(text.contains("python = \"3.14.7\"\n"), "{text}");
-    assert!(text.contains("cache-tag = \"cpython-314\"\n"), "{text}");
+    let tags = Command::new(&base)
+        .args([
+            "-c",
+            "import sys; print('%d.%d.%d' % sys.version_info[:3]); print(sys.implementation.cache_tag)",
+        ])
+        .output()
+        .expect("spawn the base interpreter");
+    let tags = String::from_utf8_lossy(&tags.stdout).into_owned();
+    let mut tags = tags.lines();
+    let (version, cache_tag) = (tags.next().unwrap(), tags.next().unwrap());
+    assert!(
+        text.contains(&format!("python = \"{version}\"\n")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("cache-tag = \"{cache_tag}\"\n")),
+        "{text}"
+    );
     assert!(text.contains("roots = [\"tinypkg\"]\n"), "{text}");
     assert!(text.contains("name = \"tinydep\""), "{text}");
     let output = lock(&python, &dir, &["--check", "m.py"]);

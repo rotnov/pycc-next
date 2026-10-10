@@ -124,11 +124,11 @@ fn compile(out: &Path, source: &str, extra: &[&str], libs: &[&Path]) {
 /// `tinynat._nat.value()` returns what `libnat1` does.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 with a shared libpython (PYCC_PYTHON, default python3.14) and cc"]
-fn a_closure_needing_outside_natives_runs_from_the_sidecar_and_matches_cpython_3_14_7() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3) and cc"]
+fn a_closure_needing_outside_natives_runs_from_the_sidecar_and_matches_cpython() {
     let dir = ScratchDir::new("native_oracle").expect("scratch");
     let dir = std::fs::canonicalize(&*dir).expect("canonicalize");
-    let base = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3.14".into());
+    let base = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     let venv = dir.join("venv");
     let status = Command::new(&base)
         .args(["-m", "venv", "--without-pip"])

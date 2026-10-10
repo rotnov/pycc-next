@@ -1,3 +1,6 @@
+# The CPython 3.13 oracle evaluates annotations eagerly; this future import gives it
+# the deferred (PEP 649) semantics pycc follows.
+from __future__ import annotations
 # #1337 (D-254): an inherited method runs the body its receiver's class
 # resolves to. Oracle fixture: pycc must match CPython 3.14.7 byte for byte.
 from abc import ABC, abstractmethod

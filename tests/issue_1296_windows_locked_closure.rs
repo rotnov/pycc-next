@@ -54,11 +54,11 @@ fn windows_required() -> bool {
 
 /// The interpreter the venv is created from.
 fn interpreter() -> OsString {
-    std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3.14.exe".into())
+    std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python.exe".into())
 }
 
 /// Whether the tests run here: only when the interpreter is CPython
-/// 3.14.7, and a CI leg panics when it is not.
+/// 3.13+, and a CI leg panics when it is not.
 fn hosted() -> bool {
     let python = interpreter();
     let version = Command::new(&python)
@@ -66,9 +66,9 @@ fn hosted() -> bool {
         .output()
         .map(|output| stdout_of(&output).trim().to_string());
     match version {
-        Ok(version) if version == "Python 3.14.7" => true,
+        Ok(version) if version.starts_with("Python 3.") => true,
         other if windows_required() => {
-            panic!("the embed interpreter {python:?} is not CPython 3.14.7: {other:?}")
+            panic!("the embed interpreter {python:?} is not CPython 3.13+: {other:?}")
         }
         _ => false,
     }
@@ -343,7 +343,7 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 /// build bundles the closure and matches the venv's CPython; (c) the
 /// relocated executable still runs it with a scrubbed `PATH`.
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn a_windows_locked_closure_runs_from_the_sidecar_and_matches_cpython() {
     if !hosted() {
         return;
@@ -397,7 +397,7 @@ fn a_windows_locked_closure_runs_from_the_sidecar_and_matches_cpython() {
 /// nothing for a fresh output and leaving the earlier sidecar
 /// byte-identical.
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON and LLVM clang on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) and LLVM clang on Windows; run with --include-ignored"]
 fn a_windows_native_with_an_unresolvable_import_is_refused_by_lock_and_build() {
     if !hosted() {
         return;
@@ -467,7 +467,7 @@ fn a_windows_native_with_an_unresolvable_import_is_refused_by_lock_and_build() {
 /// `AddDllDirectory(<sidecar>\natives)`. Without the native the import
 /// fails.
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON and LLVM clang on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) and LLVM clang on Windows; run with --include-ignored"]
 fn a_windows_closure_pyd_with_a_native_runs_relocated_and_matches_cpython() {
     if !hosted() {
         return;
@@ -555,7 +555,7 @@ fn a_windows_closure_pyd_with_a_native_runs_relocated_and_matches_cpython() {
 /// (f) the forwarder reader over the base interpreter's real `python3.dll`,
 /// whose exports all forward to `python314.dll`.
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14.exe or PYCC_PYTHON on Windows; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ (PYCC_PYTHON, default python.exe) on Windows; run with --include-ignored"]
 fn the_forwarder_reader_reads_the_real_python3_dll() {
     if !hosted() {
         return;

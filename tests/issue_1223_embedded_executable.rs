@@ -1,22 +1,21 @@
 //! Part 1 of #1028 (#1223): a plain `pycc build` of a program whose only
 //! CPython imports are standard-library modules produces an embedded
 //! executable -- the native binary plus an `OUT.pycc/` sidecar holding the
-//! build host's CPython 3.14 shared library and filtered standard library.
+//! build host's CPython shared library and filtered standard library.
 //!
 //! The non-ignored tests pin every refusal (`I0403` with its reason, the
 //! unmarked-sidecar and missing-interpreter environment failures) and that
 //! a program with no CPython import stays fully native (#1045). They need
 //! no interpreter, so they run on every leg and on the coverage host.
 //!
-//! The `#[ignore]`d `*_matches_cpython_3_14_7_byte_for_byte` tests build and
+//! The `#[ignore]`d `*_matches_cpython_byte_for_byte` tests build and
 //! run a real embedded executable. They run on every non-Windows Tier-1 leg
-//! (they read the POSIX sidecar layout, such as `lib/python3.14`; the
+//! (they read the POSIX sidecar layout, such as `lib/python3.X`; the
 //! Windows counterpart is `tests/issue_1286_windows_embedded_executable.rs`)
-//! under `cargo test --workspace -- --include-ignored`, where `python3.14`
-//! on `PATH` is CPython 3.14.7 (the build's default embed interpreter;
-//! `PYCC_PYTHON` overrides it). Each takes its CPython oracle from the
-//! bundle's own `PYCC-BUNDLE` marker, so the oracle is exactly the
-//! interpreter that was embedded, and asserts it is 3.14.7.
+//! under `cargo test --workspace -- --include-ignored`, with the build's
+//! embed interpreter (`PYCC_PYTHON`, default `python3`, CPython 3.13+).
+//! Each takes its CPython oracle from the bundle's own `PYCC-BUNDLE`
+//! marker, so the oracle is exactly the interpreter that was embedded.
 //!
 //! Every spawn uses `Command::output()`, whose stdin is null: an embedded
 //! launcher that blocked on its interpreter would read EOF, not hang.
@@ -163,7 +162,7 @@ fn a_program_without_a_cpython_import_stays_native_with_no_sidecar() {
 }
 
 // ---------------------------------------------------------------------
-// Hosted end-to-end tests (need CPython 3.14.7 as the embed interpreter).
+// Hosted end-to-end tests (need CPython 3.13+ as the embed interpreter).
 // ---------------------------------------------------------------------
 
 /// The synthetic oracle program: it interleaves Python-side writes
@@ -187,8 +186,8 @@ print(\"end\")
 ";
 
 /// Builds `body` as an embedded executable at `dir/app` and returns the
-/// interpreter its marker records, after checking that interpreter is the
-/// pinned CPython 3.14.7.
+/// interpreter its marker records, after checking that interpreter reports
+/// the version the marker records.
 #[cfg(not(windows))]
 fn build_embedded(dir: &Path, body: &str) -> PathBuf {
     let output = build(dir, body, &[]);
@@ -197,7 +196,10 @@ fn build_embedded(dir: &Path, body: &str) -> PathBuf {
         .expect("an embedded build writes its marker");
     let mut lines = marker.lines();
     assert_eq!(lines.next(), Some("pycc-bundle 1"));
-    assert_eq!(lines.next(), Some("python 3.14.7"), "{marker}");
+    let recorded = lines
+        .next()
+        .and_then(|line| line.strip_prefix("python "))
+        .expect("the marker records its interpreter's version");
     let executable = lines
         .next()
         .and_then(|line| line.strip_prefix("executable "))
@@ -209,7 +211,7 @@ fn build_embedded(dir: &Path, body: &str) -> PathBuf {
         .expect("the oracle runs");
     assert_eq!(
         String::from_utf8_lossy(&version.stdout).trim(),
-        "Python 3.14.7"
+        format!("Python {recorded}")
     );
     executable
 }
@@ -238,8 +240,8 @@ fn assert_same(pycc_run: &Output, cpython_run: &Output) {
 
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn the_oracle_program_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn the_oracle_program_matches_cpython_byte_for_byte() {
     let dir = ScratchDir::new("embed_oracle").expect("scratch");
     let python = build_embedded(&dir, ORACLE);
     let embedded = Command::new(dir.join("app"))
@@ -260,17 +262,25 @@ const DYNLOAD_CANDIDATES: [&str; 6] = ["_json", "_bisect", "_heapq", "_random", 
 /// isolated interpreter found it nowhere else.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn a_lib_dynload_extension_loads_from_the_sidecar_and_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn a_lib_dynload_extension_loads_from_the_sidecar_and_matches_cpython_byte_for_byte() {
     let dir = ScratchDir::new("embed_dynload").expect("scratch");
-    let dynload = dir
-        .join("app.pycc")
-        .join("lib")
-        .join("python3.14")
-        .join("lib-dynload");
     // A first build populates the sidecar so the test can see which
     // candidate this interpreter ships as a separate file.
     build_embedded(&dir, "import json\n\nprint(\"probe\")\n");
+    let lib = dir.join("app.pycc").join("lib");
+    let stdlib = std::fs::read_dir(&lib)
+        .expect("the sidecar has a lib directory")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .find(|name| name.starts_with("python3."))
+        .expect("the sidecar has a python3.X standard library");
+    let dynload = lib.join(stdlib).join("lib-dynload");
     let files: Vec<String> = std::fs::read_dir(&dynload)
         .expect("the sidecar has a lib-dynload directory")
         .map(|entry| {
@@ -313,8 +323,8 @@ fn a_lib_dynload_extension_loads_from_the_sidecar_and_matches_cpython_3_14_7_byt
 /// the build directory or the build host's interpreter.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn a_relocated_embedded_executable_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn a_relocated_embedded_executable_matches_cpython_byte_for_byte() {
     let dir = ScratchDir::new("embed_relocate").expect("scratch");
     let python = build_embedded(&dir, ORACLE);
     let moved = dir.join("moved");
@@ -331,8 +341,8 @@ fn a_relocated_embedded_executable_matches_cpython_3_14_7_byte_for_byte() {
 /// a shadowing `json.py` is ignored.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn an_embedded_executable_ignoring_pythonpath_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn an_embedded_executable_ignoring_pythonpath_matches_cpython_byte_for_byte() {
     let dir = ScratchDir::new("embed_pythonpath").expect("scratch");
     let python = build_embedded(&dir, ORACLE);
     let shadow = dir.join("shadow");
@@ -349,8 +359,8 @@ fn an_embedded_executable_ignoring_pythonpath_matches_cpython_3_14_7_byte_for_by
 /// directory and prints the same bytes.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn pycc_run_of_the_oracle_program_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn pycc_run_of_the_oracle_program_matches_cpython_byte_for_byte() {
     let dir = ScratchDir::new("embed_run").expect("scratch");
     let python = build_embedded(&dir, ORACLE);
     let run = pycc()
@@ -364,8 +374,8 @@ fn pycc_run_of_the_oracle_program_matches_cpython_3_14_7_byte_for_byte() {
 /// `sys.exit(3)` from pycc code reaches the process exit status.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn sys_exit_from_an_embedded_executable_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn sys_exit_from_an_embedded_executable_matches_cpython_byte_for_byte() {
     let dir = ScratchDir::new("embed_exit").expect("scratch");
     let python = build_embedded(&dir, "import sys\n\nprint(\"before\")\nsys.exit(3)\n");
     let embedded = Command::new(dir.join("app"))
@@ -375,12 +385,12 @@ fn sys_exit_from_an_embedded_executable_matches_cpython_3_14_7_byte_for_byte() {
     assert_same(&embedded, &cpython(&python, &dir.join("m.py"), &[]));
 }
 
-/// `src/embed/stdlib_roots.rs`' two static lists, together, are exactly
-/// the pinned interpreter's `sys.stdlib_module_names`.
+/// `src/embed/stdlib_roots.rs`' two static lists, together, cover the
+/// embedded interpreter's `sys.stdlib_module_names`.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn the_embeddable_root_list_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn the_embeddable_root_list_matches_cpython_byte_for_byte() {
     let dir = ScratchDir::new("embed_roots").expect("scratch");
     let python = build_embedded(&dir, "import json\n");
     let listed = Command::new(&python)
@@ -400,7 +410,7 @@ fn the_embeddable_root_list_matches_cpython_3_14_7_byte_for_byte() {
         .split("#[cfg(test)]")
         .next()
         .expect("the list precedes the tests");
-    let mut actual: Vec<String> = code
+    let actual: Vec<String> = code
         .lines()
         .filter(|line| !line.trim_start().starts_with("//"))
         .flat_map(|line| {
@@ -411,6 +421,9 @@ fn the_embeddable_root_list_matches_cpython_3_14_7_byte_for_byte() {
                 .collect::<Vec<_>>()
         })
         .collect();
-    actual.sort();
-    assert_eq!(actual, expected);
+    let missing: Vec<&String> = expected.iter().filter(|n| !actual.contains(n)).collect();
+    assert!(
+        missing.is_empty(),
+        "roots missing from the list: {missing:?}"
+    );
 }

@@ -39,6 +39,10 @@ pub(crate) struct FileDiagnostics {
     pub(crate) path: String,
     pub(crate) source: String,
     pub(crate) diagnostics: Vec<Diagnostic>,
+    /// `origins[i]` is the source offset of the top-level statement the
+    /// type checker keyed `diagnostics[i]` to, when it did (the fallback
+    /// loop, #12, places a span-less diagnostic by it).
+    pub(crate) origins: Vec<Option<u32>>,
 }
 
 /// Why a frontend pass could not produce a typed program.
@@ -92,6 +96,7 @@ impl FrontendFailure {
             files: vec![FileDiagnostics {
                 path: path.to_string(),
                 source: source.to_string(),
+                origins: vec![None; diagnostics.len()],
                 diagnostics,
             }],
         }
@@ -124,6 +129,8 @@ struct ProgramSources {
     /// trailing program-wide block is past the last bound and falls to the
     /// entry file, exactly as `bounds` treats `finalize`'s appended items.
     class_bounds: Vec<usize>,
+    /// The entry module's `pycc_hir::last_item_origins`.
+    entry_origins: Vec<u32>,
 }
 
 impl ProgramSources {
@@ -182,6 +189,11 @@ impl ProgramSources {
 
     /// Groups keyed diagnostics into per-file payloads, in program order.
     fn group(&self, keyed: Vec<(usize, Diagnostic)>) -> FrontendFailure {
+        self.group_owned(keyed.into_iter().map(|(i, d)| (i, d, None)).collect())
+    }
+
+    /// [`Self::group`] for diagnostics that may name their owning function.
+    fn group_owned(&self, keyed: Vec<(usize, Diagnostic, Option<u32>)>) -> FrontendFailure {
         let mut files: Vec<FileDiagnostics> = self
             .files
             .iter()
@@ -189,10 +201,12 @@ impl ProgramSources {
                 path: path.clone(),
                 source: source.clone(),
                 diagnostics: Vec::new(),
+                origins: Vec::new(),
             })
             .collect();
-        for (index, diagnostic) in keyed {
+        for (index, diagnostic, origin) in keyed {
             files[index].diagnostics.push(diagnostic);
+            files[index].origins.push(origin);
         }
         files.retain(|file| !file.diagnostics.is_empty());
         FrontendFailure::Compile { files }
@@ -232,6 +246,8 @@ fn link_frontend(
     pycc_types::set_non_strict(non_strict);
     let program: LoadedProgram =
         modules::load_with(path, module_name, relative_imports, ext_module, non_strict)?;
+    // The entry module is lowered last, after its dependencies.
+    let entry_origins = pycc_hir::last_item_origins();
     let manifest = program.manifest;
     let mut files = Vec::with_capacity(program.modules.len());
     let mut bounds = Vec::with_capacity(program.modules.len());
@@ -284,6 +300,7 @@ fn link_frontend(
         bounds,
         import_bounds,
         class_bounds,
+        entry_origins,
     };
     let linked = pycc_hir::link(inputs).map_err(|keyed| sources.group(keyed))?;
     let hir = pycc_hir::finalize(linked).map_err(|diagnostics| {
@@ -304,6 +321,53 @@ fn link_frontend(
 /// so it never emits `I0403`: only whether the policy admits each
 /// CPython-backed import is checked here.
 pub(crate) fn check_frontend(path: &Path, interop: InteropCli) -> Result<(), FrontendFailure> {
+    with_fallback(path, NATIVE_PUBLISHES, || {
+        check_frontend_once(path, interop)
+    })
+}
+
+/// What a native build (an embedded executable) publishes to its fallback
+/// code: its module-level functions, not its classes.
+const NATIVE_PUBLISHES: crate::fallback::Publishes = crate::fallback::Publishes {
+    functions: true,
+    classes: false,
+};
+
+/// Runs `attempt` under the non-strict fallback loop (#12, `crate::fallback`).
+/// `publishes` is what the artifact publishes to Python code.
+fn with_fallback<T>(
+    path: &Path,
+    publishes: crate::fallback::Publishes,
+    attempt: impl Fn() -> Result<T, FrontendFailure>,
+) -> Result<T, FrontendFailure> {
+    let display = path.to_string_lossy().into_owned();
+    crate::fallback::with_fallback(path, &display, publishes, attempt, |failure| {
+        let FrontendFailure::Compile { files } = failure else {
+            return None;
+        };
+        let mut failures = Vec::new();
+        for file in files {
+            if file.path != display {
+                return None;
+            }
+            for (diagnostic, origin) in file.diagnostics.iter().zip(&file.origins) {
+                if diagnostic.severity != pycc_diag::Severity::Error {
+                    continue;
+                }
+                if !crate::fallback::can_fall_back(diagnostic) {
+                    return None;
+                }
+                failures.push(crate::fallback::Failure {
+                    diagnostic: diagnostic.clone(),
+                    origin: *origin,
+                });
+            }
+        }
+        Some(failures)
+    })
+}
+
+fn check_frontend_once(path: &Path, interop: InteropCli) -> Result<(), FrontendFailure> {
     let (hir, sources, manifest) = link_frontend(
         path,
         Some(NATIVE_MODULE_NAME),
@@ -311,7 +375,8 @@ pub(crate) fn check_frontend(path: &Path, interop: InteropCli) -> Result<(), Fro
         false,
     )?;
     let policy = interop_policy::resolve_for_program(&hir, manifest.as_ref(), interop)?;
-    pycc_types::check_all_keyed(&hir).map_err(|keyed| sources.group(attribute(&sources, keyed)))?;
+    pycc_types::check_all_keyed(&hir)
+        .map_err(|keyed| sources.group_owned(attribute(&sources, keyed)))?;
     let gaps = interop_policy::policy_gaps(&hir, &policy);
     if gaps.is_empty() {
         return Ok(());
@@ -373,7 +438,13 @@ pub(crate) fn resolve_frontend_with(
     module_name: Option<&str>,
     relative_imports: RelativeImports,
 ) -> Result<HirModule, FrontendFailure> {
-    resolve_linked(path, module_name, relative_imports, true)
+    let publishes = crate::fallback::Publishes {
+        functions: true,
+        classes: true,
+    };
+    with_fallback(path, publishes, || {
+        resolve_linked(path, module_name, relative_imports, true)
+    })
 }
 
 /// Links and type-checks the entry file's program; `ext_module` is
@@ -386,7 +457,7 @@ fn resolve_linked(
 ) -> Result<HirModule, FrontendFailure> {
     let (hir, sources, _manifest) = link_frontend(path, module_name, relative_imports, ext_module)?;
     pycc_types::check_and_resolve_all_keyed(&hir)
-        .map_err(|keyed| sources.group(attribute(&sources, keyed)))
+        .map_err(|keyed| sources.group_owned(attribute(&sources, keyed)))
 }
 
 /// [`resolve_frontend_with`] plus the native-mode artifact gates, for a
@@ -466,6 +537,16 @@ fn resolve_linked(
 /// `import_gaps` vector carries both codes through the three report paths
 /// below unchanged.
 pub(crate) fn resolve_frontend_native(
+    path: &Path,
+    host: EmbedHost,
+    interop: InteropCli,
+) -> Result<(HirModule, NeedsInterpreter), FrontendFailure> {
+    with_fallback(path, NATIVE_PUBLISHES, || {
+        resolve_frontend_native_once(path, host, interop)
+    })
+}
+
+fn resolve_frontend_native_once(
     path: &Path,
     host: EmbedHost,
     interop: InteropCli,
@@ -584,10 +665,10 @@ pub(crate) fn resolve_frontend_native(
             let mut refused =
                 crate::memoryview_mode::producer_gaps_the_check_admits(producer_gaps, &check_keyed)
                     .into_iter()
-                    .map(|(index, diagnostic)| (sources.owner_of_item(index), diagnostic))
+                    .map(|(index, diagnostic)| (sources.owner_of_item(index), diagnostic, None))
                     .collect::<Vec<_>>();
             refused.extend(attribute(&sources, check_keyed));
-            return Err(sources.group(refused));
+            return Err(sources.group_owned(refused));
         }
     };
     keyed.extend(
@@ -633,10 +714,24 @@ pub(crate) fn resolve_frontend_native(
 fn attribute(
     sources: &ProgramSources,
     keyed: pycc_types::KeyedDiagnostics,
-) -> Vec<(usize, Diagnostic)> {
+) -> Vec<(usize, Diagnostic, Option<u32>)> {
     keyed
         .into_iter()
-        .map(|(key, diagnostic)| (sources.owner(key), diagnostic))
+        .map(|(key, diagnostic)| {
+            let file = sources.owner(key);
+            let origin = key
+                .item_index()
+                .filter(|_| file == sources.entry())
+                .and_then(|index| {
+                    let base = match file {
+                        0 => 0,
+                        file => sources.bounds[file - 1],
+                    };
+                    sources.entry_origins.get(index.checked_sub(base)?).copied()
+                })
+                .filter(|origin| *origin != u32::MAX);
+            (file, diagnostic, origin)
+        })
         .collect()
 }
 

@@ -42,6 +42,7 @@ fn embed(
         &dir.join("app"),
         &dir.join("m.py"),
         &typed(dir),
+        &[],
         toolchain,
         platform,
         HOST,

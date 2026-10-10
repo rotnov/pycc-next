@@ -47,6 +47,11 @@ pub struct ModeFlags {
     /// to the entry file. Strict is the default.
     #[arg(long)]
     pub non_strict: bool,
+    /// In non-strict mode, print to stderr each top-level function or
+    /// statement block that runs as Python source in CPython instead of
+    /// compiled code, and why (the diagnostic that made it fall back).
+    #[arg(long)]
+    pub report_fallbacks: bool,
 }
 
 impl InteropFlags {

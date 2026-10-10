@@ -240,7 +240,7 @@ print(sys.getrefcount(o) - before)
 "#;
 
 const EXT_ONLY_OUT: &str = "TypeError Conf.n() argument 1: 'str' object cannot be interpreted as an integer\n\
-    OverflowError Conf.n() argument 1: int is outside the inline-integer range [-2**62, 2**62-1] this pycc version's `ext` boundary supports (see #1040)\n\
+    ok\n\
     TypeError Conf.f() argument 1: 'str' object cannot be interpreted as a float\n\
     TypeError Conf.f() argument 1: 'int' object cannot be interpreted as a float\n\
     TypeError Conf.b() argument 1: 'int' object cannot be interpreted as a bool\n\
@@ -250,7 +250,7 @@ const EXT_ONLY_OUT: &str = "TypeError Conf.n() argument 1: 'str' object cannot b
     TypeError Conf.leaf() argument 1 must be pycc_field_set_mod.Leaf, not pycc_field_set_mod.Other\n\
     AttributeError 'pycc_field_set_mod.Conf' object has no attribute 'xs' and no __dict__ for setting new attributes\n\
     AttributeError 'pycc_field_set_mod.Conf' object has no attribute 'zzz' and no __dict__ for setting new attributes\n\
-    3 1.5 True ab 1\n\
+    1180591620717411303424 1.5 True ab 1\n\
     AttributeError cannot set 'n' on a 'Conf' object whose __init__ never ran\n\
     0\n\
     0\n";

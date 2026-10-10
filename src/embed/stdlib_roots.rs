@@ -7,10 +7,11 @@
 //! is always a root that was copied.
 //!
 //! The list is static rather than probed because the frontend gate is pure:
-//! `pycc check` and the frontend never start an interpreter, and D-128 pins
-//! CPython 3.14, so the set is fixed for the pinned version. The `#[ignore]`d
-//! integration test `tests/issue_1223_embedded_executable.rs` compares it
-//! with the oracle interpreter's `sys.stdlib_module_names`.
+//! `pycc check` and the frontend never start an interpreter, so the set
+//! covers every supported CPython (3.13 and 3.14); a root the bundled
+//! interpreter lacks fails to import at run time, as in CPython. The
+//! `#[ignore]`d integration test `tests/issue_1223_embedded_executable.rs`
+//! checks the bundled interpreter's `sys.stdlib_module_names` is covered.
 
 /// Standard-library roots that need native libraries from outside the
 /// interpreter (Tcl/Tk). They are neither admitted nor copied.
@@ -20,7 +21,8 @@
 pub(crate) const EXCLUDED_STDLIB_ROOTS: &[&str] =
     &["_tkinter", "idlelib", "tkinter", "turtle", "turtledemo"];
 
-/// CPython 3.14.7's `sys.stdlib_module_names` minus [`EXCLUDED_STDLIB_ROOTS`],
+/// The union of CPython 3.13's and 3.14's `sys.stdlib_module_names` minus
+/// [`EXCLUDED_STDLIB_ROOTS`] (3.13 adds only `_compression`),
 /// sorted bytewise so [`is_embeddable_stdlib_root`] can binary-search it.
 pub(crate) const EMBEDDABLE_STDLIB_ROOTS: &[&str] = &[
     "__future__",
@@ -45,6 +47,7 @@ pub(crate) const EMBEDDABLE_STDLIB_ROOTS: &[&str] = &[
     "_collections_abc",
     "_colorize",
     "_compat_pickle",
+    "_compression",
     "_contextvars",
     "_csv",
     "_ctypes",
@@ -342,7 +345,7 @@ mod tests {
         );
         assert_eq!(
             EMBEDDABLE_STDLIB_ROOTS.len(),
-            297 - EXCLUDED_STDLIB_ROOTS.len()
+            298 - EXCLUDED_STDLIB_ROOTS.len()
         );
     }
 

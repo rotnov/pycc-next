@@ -52,7 +52,7 @@ fn write(path: &Path, bytes: &[u8]) {
 
 /// The embed interpreter a default build probes.
 fn base_interpreter() -> OsString {
-    std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3.14".into())
+    std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into())
 }
 
 /// Whether this run is a Linux GitHub Actions leg, where the archive must
@@ -112,7 +112,10 @@ const STATIC_BUILD: [&str; 5] = ["build", "m.py", "-o", "app", "--static-libpyth
 /// a Linux GitHub Actions leg without one.
 fn archive_or_refusal(dir: &Path, python: &Path) -> Option<PathBuf> {
     let (version, archive) = probe(python);
-    assert_eq!(version, "3.14.7", "the embed interpreter must be 3.14.7");
+    assert!(
+        version.starts_with("3."),
+        "the embed interpreter reports {version}"
+    );
     if let Some(resolved) = genuine(&archive) {
         return Some(resolved);
     }
@@ -238,8 +241,8 @@ print(\"end\")
 /// extension is removed, so that is the file `random` loaded.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn a_real_static_libpython_runs_lib_dynload_extensions_and_matches_cpython_3_14_7() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn a_real_static_libpython_runs_lib_dynload_extensions_and_matches_cpython() {
     let dir = ScratchDir::new("real_static").expect("scratch");
     let dir = std::fs::canonicalize(&*dir).expect("canonicalize");
     std::fs::write(dir.join("m.py"), STDLIB_PROGRAM).expect("write");
@@ -289,8 +292,8 @@ fn a_real_static_libpython_runs_lib_dynload_extensions_and_matches_cpython_3_14_
 /// a separate test, so a failure there is not read as the archive's.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn a_real_static_libpython_loads_ssl_and_matches_cpython_3_14_7() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn a_real_static_libpython_loads_ssl_and_matches_cpython() {
     let dir = ScratchDir::new("real_static_ssl").expect("scratch");
     let dir = std::fs::canonicalize(&*dir).expect("canonicalize");
     std::fs::write(
@@ -364,8 +367,8 @@ fn write_dist(site: &Path, name: &str, version: &str, files: &[(&str, &[u8])], r
 /// design and is checked to lie in the closure.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
-fn a_real_static_libpython_bundles_a_locked_closure_and_matches_cpython_3_14_7() {
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn a_real_static_libpython_bundles_a_locked_closure_and_matches_cpython() {
     let dir = ScratchDir::new("real_static_lock").expect("scratch");
     let dir = std::fs::canonicalize(&*dir).expect("canonicalize");
     let venv = dir.join("venv");

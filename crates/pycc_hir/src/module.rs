@@ -149,6 +149,19 @@ pub fn lower_all(module: &ModModule) -> Result<HirModule, Vec<Diagnostic>> {
     program::finalize(lowered.hir)
 }
 
+thread_local! {
+    static LAST_ITEM_ORIGINS: std::cell::RefCell<Vec<u32>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// For the module this thread lowered last, the source offset of the
+/// top-level statement each `HirItem` came from (`u32::MAX` for an item no
+/// statement wrote, such as a seeded `__name__`). The non-strict fallback
+/// (#12) places a span-less type-checker diagnostic by its item with it.
+pub fn last_item_origins() -> Vec<u32> {
+    LAST_ITEM_ORIGINS.with(|cell| cell.borrow().clone())
+}
+
 /// The per-module walk (#898): lowers every top-level item against the
 /// driver's answers for the module's project imports, collecting one
 /// diagnostic per failing item (in source order) and skipping that item,
@@ -387,6 +400,8 @@ pub fn lower_module(
     // #1380: where each item's diagnostics begin, so the carrier scan's
     // diagnostics can be spliced back into per-item source order.
     let mut item_starts: Vec<usize> = Vec::with_capacity(module.body.len());
+    // Where each item came from (`last_item_origins`).
+    let mut origins: Vec<u32> = vec![u32::MAX; state.items.len()];
     for (index, stmt) in module.body.iter().enumerate() {
         item_starts.push(diagnostics.len());
         let position = if index < prologue_len {
@@ -436,6 +451,7 @@ pub fn lower_module(
                 }
             }
         }
+        origins.resize(state.items.len(), pycc_ast::stmt_range(stmt).start);
         // #944 (D-233): the second per-item collection source. Scanned after
         // the item's own outcome (Ok or Err alike) so the item's diagnostic
         // precedes its enum-call diagnostics and the whole list stays in
@@ -486,6 +502,7 @@ pub fn lower_module(
         }
     }
     let loop_end = diagnostics.len();
+    LAST_ITEM_ORIGINS.with(|cell| *cell.borrow_mut() = origins);
     // Part 1 of #1026, PR 1c of #1080: the whole item list exists only
     // here, so this is the first point at which both orders of a shadowed
     // foreign import -- a `def`/assignment above it and one below it -- are

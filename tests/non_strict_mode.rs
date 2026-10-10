@@ -3,8 +3,8 @@
 //! C API, so it matches CPython exactly. Strict stays the default.
 //!
 //! The native arm builds an embedded executable (an object needs an
-//! interpreter), which bundles CPython 3.14: it runs when `python3.14` (or
-//! `PYCC_PYTHON`) is available and is skipped with a note otherwise. The
+//! interpreter), which bundles the CPython `PYCC_PYTHON` names (default
+//! `python3`); it is skipped with a note when there is none. The
 //! `--ext` arm imports the module into `python3`, the oracle.
 
 use pycc_scratch::ScratchDir;
@@ -29,9 +29,9 @@ fn last_line(bytes: &[u8]) -> String {
     text(bytes).lines().last().unwrap_or_default().to_string()
 }
 
-/// Whether an embedded build can find its CPython 3.14.
+/// Whether an embedded build can find its CPython.
 fn embed_interpreter_available() -> bool {
-    let interpreter = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3.14".into());
+    let interpreter = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     Command::new(interpreter)
         .arg("--version")
         .output()
@@ -47,7 +47,7 @@ fn copy_into(dir: &Path, fixture_name: &str, as_name: &str) -> PathBuf {
 #[test]
 fn untyped_program_matches_cpython_in_a_native_build() {
     if !embed_interpreter_available() {
-        eprintln!("skipped: no CPython 3.14 to embed (set PYCC_PYTHON)");
+        eprintln!("skipped: no CPython to embed (set PYCC_PYTHON)");
         return;
     }
     let dir = ScratchDir::new("non_strict_native").expect("scratch");
@@ -175,16 +175,18 @@ fn untyped_ext_module_matches_its_source() {
     assert_eq!(text(&ours.stdout), text(&oracle.stdout));
 }
 
-/// What non-strict mode still cannot express is a located refusal, never a
-/// miscompilation.
+/// What non-strict mode cannot compile yet falls back to CPython (#12,
+/// `tests/non_strict_fallback.rs`) with `PYCC_NO_FALLBACK` unset; with it
+/// set, it stays a located refusal, never a miscompilation.
 #[test]
-fn an_unsupported_construct_stays_a_c0001_in_non_strict_mode() {
+fn an_unsupported_construct_is_a_c0001_without_the_fallback() {
     let dir = ScratchDir::new("non_strict_c0001").expect("scratch");
     let source = dir.join("m.py");
     std::fs::write(&source, "def f(x):\n    return lambda: x\n").expect("write");
     let output = pycc()
         .args(["check", "--non-strict"])
         .arg(&source)
+        .env("PYCC_NO_FALLBACK", "1")
         .output()
         .expect("pycc should spawn");
     assert_eq!(output.status.code(), Some(1));
@@ -193,4 +195,10 @@ fn an_unsupported_construct_stays_a_c0001_in_non_strict_mode() {
         "{}",
         text(&output.stdout)
     );
+    let fallback = pycc()
+        .args(["check", "--non-strict"])
+        .arg(&source)
+        .output()
+        .expect("pycc should spawn");
+    assert!(fallback.status.success(), "{}", text(&fallback.stdout));
 }

@@ -165,7 +165,7 @@ fn a_native_program_checks_a_none_return_into_a_foreign_class() {
 /// and the embedded runtime's `pycc_ext_obj_none` are exercised too.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs a relocatable CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
+#[ignore = "needs a relocatable CPython 3.13+ (PYCC_PYTHON, default python3)"]
 fn a_native_executable_returns_none_into_a_foreign_class_return() {
     let dir = ScratchDir::new("1387_native_foreign_run").expect("scratch");
     let source = write(

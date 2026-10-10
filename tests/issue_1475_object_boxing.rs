@@ -423,7 +423,12 @@ fn build_embedded(dir: &Path, body: &str) -> PathBuf {
         .expect("an embedded build writes its marker");
     let mut lines = marker.lines();
     assert_eq!(lines.next(), Some("pycc-bundle 1"));
-    assert_eq!(lines.next(), Some("python 3.14.7"), "{marker}");
+    assert!(
+        lines
+            .next()
+            .is_some_and(|line| line.starts_with("python 3.")),
+        "{marker}"
+    );
     let executable = lines
         .next()
         .and_then(|line| line.strip_prefix("executable "))
@@ -433,7 +438,7 @@ fn build_embedded(dir: &Path, body: &str) -> PathBuf {
 
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
 fn a_native_value_boxes_into_a_foreign_annotation_in_an_embedded_executable() {
     let dir = ScratchDir::new("embed_1475_boxing").expect("scratch");
     let python = build_embedded(&dir, EMBEDDED);

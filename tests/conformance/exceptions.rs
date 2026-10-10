@@ -12,21 +12,21 @@ use super::*;
 // exception out to an outer handler, and `finally` running on both the normal
 // and the propagating path.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_3110_exceptions_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_3110_exceptions_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_3110_exceptions.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_3110_exceptions_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_3110_exceptions.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_3110_exceptions.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_3110_exceptions_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_3110_exceptions.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_3110_exceptions.py"
     );
 }
 
@@ -35,21 +35,21 @@ fn pep_3110_exceptions_matches_cpython_3_14_7_byte_for_byte() {
 // handler catches the raised exception, because pycc emits no traceback and
 // does not populate `__context__` yet (#606).
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0409_raise_from_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0409_raise_from_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0409_raise_from.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0409_raise_from_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0409_raise_from.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0409_raise_from.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0409_raise_from_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0409_raise_from.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0409_raise_from.py"
     );
 }
 
@@ -68,20 +68,20 @@ fn pep_0409_raise_from_matches_cpython_3_14_7_byte_for_byte() {
 // scope for this issue (blocked on Part 3 of #541, #703) and are not
 // exercised here.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_3151_oserror_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_3151_oserror_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_3151_oserror.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_3151_oserror_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_3151_oserror.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_3151_oserror.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_3151_oserror_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_3151_oserror.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_3151_oserror.py"
     );
 }
 
@@ -95,21 +95,25 @@ fn pep_3151_oserror_matches_cpython_3_14_7_byte_for_byte() {
 // was observed passing on a completed green Tier-1 run per D-102 (see
 // PYTHON_STANDARDS.md's policy rule 11).
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0758_except_noparens_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0758_except_noparens_matches_cpython_byte_for_byte() {
+    if !oracle_is_3_14() {
+        eprintln!("skipped: PEP 758 syntax needs a CPython 3.14 oracle");
+        return;
+    }
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0758_except_noparens.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0758_except_noparens_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0758_except_noparens.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0758_except_noparens.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0758_except_noparens_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0758_except_noparens.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0758_except_noparens.py"
     );
 }
 
@@ -130,21 +134,21 @@ fn pep_0758_except_noparens_matches_cpython_3_14_7_byte_for_byte() {
 // compile-time rejections and the last has no accepted fixture anywhere in
 // this suite.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn pep_0654_except_star_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn pep_0654_except_star_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pep_0654_except_star.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("pep_0654_except_star_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/pep_0654_except_star.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/pep_0654_except_star.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("pep_0654_except_star_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/pep_0654_except_star.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/pep_0654_except_star.py"
     );
 }
 
@@ -158,21 +162,21 @@ fn pep_0654_except_star_matches_cpython_3_14_7_byte_for_byte() {
 // twice: #1298 fixed the bound exception's message refcount that once
 // limited this fixture to a single print per exception.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn builtin_import_error_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn builtin_import_error_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/builtin_import_error.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("builtin_import_error_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/builtin_import_error.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/builtin_import_error.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("builtin_import_error_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/builtin_import_error.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/builtin_import_error.py"
     );
 }
 
@@ -183,20 +187,20 @@ fn builtin_import_error_matches_cpython_3_14_7_byte_for_byte() {
 // a user `AssertionError` subclass is caught by `except AssertionError:`;
 // and a passing module-level `assert` falls through.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn assert_statement_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn assert_statement_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/assert_statement.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("assert_statement_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/assert_statement.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/assert_statement.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("assert_statement_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/assert_statement.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/assert_statement.py"
     );
 }
 
@@ -210,21 +214,21 @@ fn assert_statement_matches_cpython_3_14_7_byte_for_byte() {
 // exception classes; a runtime-raised builtin; a bare re-raise; and
 // rebinding the handler name. Not a PEP-matrix row.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn exception_message_reuse_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn exception_message_reuse_matches_cpython_byte_for_byte() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/exception_message_reuse.py");
     let (debug_pycc, debug_cpython) =
         run_conformance_fixture_with_profile("exception_message_reuse_debug", &fixture, false);
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/exception_message_reuse.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/exception_message_reuse.py"
     );
     let (release_pycc, release_cpython) =
         run_conformance_fixture_with_profile("exception_message_reuse_release", &fixture, true);
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/exception_message_reuse.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/exception_message_reuse.py"
     );
 }
 
@@ -233,8 +237,8 @@ fn exception_message_reuse_matches_cpython_3_14_7_byte_for_byte() {
 // longer raises `T0041`; covers `else`, `finally`, `as` handlers, `except*`,
 // terminating handlers, and the unannotated-helper (solver) path.
 #[test]
-#[ignore = "requires a pinned python3.14 (CPython 3.14.7) oracle on PATH"]
-fn try_except_definite_assign_matches_cpython_3_14_7_byte_for_byte() {
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn try_except_definite_assign_matches_cpython_byte_for_byte() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/try_except_definite_assign.py");
     let (debug_pycc, debug_cpython) = run_conformance_fixture_with_profile(
@@ -244,7 +248,7 @@ fn try_except_definite_assign_matches_cpython_3_14_7_byte_for_byte() {
     );
     assert_eq!(
         debug_pycc, debug_cpython,
-        "pycc (--debug) and CPython 3.14.7 disagree on tests/fixtures/try_except_definite_assign.py"
+        "pycc (--debug) and CPython disagree on tests/fixtures/try_except_definite_assign.py"
     );
     let (release_pycc, release_cpython) = run_conformance_fixture_with_profile(
         "try_except_definite_assign_release",
@@ -253,6 +257,6 @@ fn try_except_definite_assign_matches_cpython_3_14_7_byte_for_byte() {
     );
     assert_eq!(
         release_pycc, release_cpython,
-        "pycc (--release) and CPython 3.14.7 disagree on tests/fixtures/try_except_definite_assign.py"
+        "pycc (--release) and CPython disagree on tests/fixtures/try_except_definite_assign.py"
     );
 }

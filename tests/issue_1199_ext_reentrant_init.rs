@@ -429,7 +429,7 @@ except NameError as e:
 /// pins it.
 #[cfg(not(windows))]
 #[test]
-#[ignore = "needs CPython 3.14.7 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
 fn an_embedded_program_with_definitions_runs_like_cpython() {
     let dir = ScratchDir::new("1199_embedded").expect("scratch");
     let source = write(
@@ -473,7 +473,12 @@ print(json.dumps(f()), C().get(), E().get())
         .expect("an embedded build writes its marker");
     let mut lines = marker.lines();
     assert_eq!(lines.next(), Some("pycc-bundle 1"));
-    assert_eq!(lines.next(), Some("python 3.14.7"), "{marker}");
+    assert!(
+        lines
+            .next()
+            .is_some_and(|line| line.starts_with("python 3.")),
+        "{marker}"
+    );
     let python = lines
         .next()
         .and_then(|line| line.strip_prefix("executable "))

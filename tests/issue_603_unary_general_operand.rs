@@ -8,7 +8,7 @@
 //!
 //! Every expectation is CPython 3.14's own output for the same source (checked
 //! against the pinned oracle by `tests/conformance/numeric.rs`'s
-//! `unary_general_operand_matches_cpython_3_14_7_byte_for_byte` over
+//! `unary_general_operand_matches_cpython_byte_for_byte` over
 //! `tests/fixtures/unary_general_operand.py`); these tests restate it without
 //! the oracle so the behavior is gated on every CI run, not only on the
 //! oracle-bearing job.

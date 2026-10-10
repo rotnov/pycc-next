@@ -315,7 +315,7 @@ const EMBEDDED: &str = "import builtins\n\n\n\
     print(isinstance(r, Q))\n";
 
 #[test]
-#[ignore = "needs a relocatable CPython 3.14 as python3.14 or PYCC_PYTHON; run with --include-ignored"]
+#[ignore = "needs a relocatable CPython 3.13+ (PYCC_PYTHON, default python3)"]
 fn an_embedded_executable_passes_an_instance_like_cpython() {
     let dir = ScratchDir::new("inst_arg_embedded").expect("scratch");
     let source = write(&dir, "m.py", EMBEDDED);
