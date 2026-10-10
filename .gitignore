@@ -48,3 +48,4 @@ Thumbs.db
 
 # Built GitHub Pages output (scripts/build_site.py)
 /_site/
+/.claude/worktrees/
