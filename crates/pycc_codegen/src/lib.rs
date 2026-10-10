@@ -3104,7 +3104,8 @@ fn emit_expr_unchecked<'ctx>(
                     let index_scalar =
                         emit_expr(context, builder, module, rt, user_functions, locals, index);
                     let raw_index = list::raw_index(context, builder, rt, index_scalar);
-                    let word = list::build_list_get(context, builder, rt, base_ptr, raw_index);
+                    let word =
+                        list::build_list_get(context, builder, rt, &expr.ty(), base_ptr, raw_index);
                     list::word_element(context, builder, &expr.ty(), word)
                 }
             }
@@ -7686,7 +7687,7 @@ fn emit_stmt<'ctx>(
             // runs zero iterations (pinned by
             // `iterating_an_inferred_empty_list_runs_zero_iterations` in
             // `tests/issue_1021_empty_container_inference.rs`).
-            let word = list::build_list_get_unchecked(context, builder, list_ptr, current);
+            let word = list::build_list_get_unchecked(context, builder, var_ty, list_ptr, current);
             let element = list::word_element(context, builder, var_ty, word);
             // The element is borrowed from the list; a `str` loop variable
             // owns its value like any other `str` slot.

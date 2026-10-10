@@ -170,3 +170,31 @@ fn instance_repr_names_the_class() {
     unsafe { pycc_rt_list_append(list, instance as i64) };
     assert!(repr(list).starts_with("[<__main__.Point object at 0x"));
 }
+
+/// A `list[bool]` stores one byte per element; every operation reads and
+/// writes the same `0`/`1` words through it.
+#[test]
+fn a_bool_list_stores_bytes_and_round_trips_every_operation() {
+    pycc_rt_exception_clear();
+    let one = pycc_rt_list_new(LIST_KIND_BOOL, 0);
+    unsafe {
+        pycc_rt_list_append(one, 1);
+        let list = pycc_rt_list_repeat(one, 3);
+        assert_eq!(&*(*list).items(), &[1, 1, 1]);
+        assert_eq!((*list).typed::<u8>(), &[1, 1, 1]);
+        pycc_rt_list_set(list, 1, 0);
+        pycc_rt_list_append(list, 0);
+        pycc_rt_list_insert(list, 0, 0);
+        assert_eq!(repr(list), "[False, True, False, True, False]");
+        assert_eq!(pycc_rt_list_get(list, -2), 1);
+        assert_eq!(pycc_rt_list_pop(list, 1, 0), 0);
+        assert_eq!(pycc_rt_list_pop(list, 0, 0), 0);
+        assert_eq!(pycc_rt_list_contains(list, 0), 1);
+        let both = pycc_rt_list_concat(list, one);
+        assert_eq!(repr(both), "[True, False, True, True]");
+        let picked = pycc_rt_list_slice(both, 0, 0, 2, SLICE_HAS_STEP);
+        assert_eq!((*picked).typed::<u8>(), &[1, 1]);
+        assert_eq!(pycc_rt_list_len(pycc_rt_list_repeat(one, -1)), 0);
+    }
+    assert_eq!(pycc_rt_exception_active(), 0);
+}

@@ -225,6 +225,49 @@ def ranges() -> None:
         print("ValueError", e)
 
 
+def bool_lists() -> None:
+    flags = [True] * 5
+    flags[1] = False
+    flags[-1] = 3 > 4
+    flags.append(True)
+    flags.insert(0, False)
+    print(flags, len(flags), flags[2], flags[-2])
+    print(flags.pop(), flags.pop(0), flags)
+    print(True in flags, flags[1:4], flags[::2], flags + [False])
+    print([f for f in flags if f], [not f for f in flags])
+    count = 0
+    for f in flags:
+        if f:
+            count += 1
+    print(count)
+    grid = [[False] * 3, [True, False]]
+    row = grid[0]
+    row[2] = True
+    print(grid, grid[0][2])
+    sieve = [True] * 50
+    sieve[0] = False
+    sieve[1] = False
+    i = 2
+    while i * i < 50:
+        if sieve[i]:
+            j = i * i
+            while j < 50:
+                sieve[j] = False
+                j += i
+        i += 1
+    print([k for k in range(50) if sieve[k]])
+    try:
+        print(flags[10])
+    except IndexError as e:
+        print("IndexError", e)
+    try:
+        flags[-10] = True
+    except IndexError as e:
+        print("IndexError", e)
+    empty: list[bool] = []
+    print(empty, [True] * 0, [False] * -2)
+
+
 def first_over(limit: int, n: int) -> int:
     for i in range(n):
         if i * i > limit:
@@ -236,3 +279,4 @@ slots()
 divisions()
 powers()
 ranges()
+bool_lists()

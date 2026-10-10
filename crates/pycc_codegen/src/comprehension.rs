@@ -481,7 +481,7 @@ fn open_loop<'ctx>(
             let (lp, current) = open_indexed_loop(cx, function, prefix, None, |b| {
                 list::build_list_len(context, b, list_ptr)
             });
-            let word = list::build_list_get_unchecked(context, builder, list_ptr, current);
+            let word = list::build_list_get_unchecked(context, builder, var_ty, list_ptr, current);
             let element = list::word_element(context, builder, var_ty, word);
             // A borrowed `str` element: the loop variable owns its own
             // reference, as `MirStmt::ForList`'s does.

@@ -2,18 +2,22 @@
 //! compiler admits (`int`, `float`, `bool`, `str`, a user-class instance and
 //! a nested `list`).
 //!
-//! **Storage.** Each element occupies one 8-byte word holding the element's
-//! own native representation, the same word an instance slot holds
+//! **Storage.** Every element crosses the API as one 8-byte word holding the
+//! element's own native representation, the same word an instance slot holds
 //! (`instance.rs`): an `int` is its D-141 encoded word (bool markers kept), a
 //! `float` its `f64` bit pattern, a `bool` `0`/`1`, and a `str`, instance or
-//! nested list its pointer. The element kind (`LIST_KIND_*`) is recorded in
-//! the object, so the generic operations here -- equality, `repr`, release
-//! -- know how to treat a word without the compiler passing a type.
+//! nested list its pointer. In memory each element is that word, except in a
+//! `list[bool]`, which stores one byte (`0`/`1`) per element -- an eighth of
+//! the memory traffic for a sieve-style flag array. The element kind
+//! (`LIST_KIND_*`) is recorded in the object, so the generic operations here
+//! -- equality, `repr`, release -- know how to treat a word without the
+//! compiler passing a type.
 //!
 //! **Layout.** `#[repr(C)]` with `len` at field 0 and `data` at field 1:
 //! `pycc_codegen` inlines the hot paths (`len(xs)`, `xs[i]`, `xs[i] = v`,
-//! `for x in xs`) as loads from those two fields, so the layout is an ABI
-//! contract pinned by `list_layout_matches_the_codegen_contract`.
+//! `for x in xs`) as loads from those two fields, indexing `data` by 8-byte
+//! words or, for `list[bool]`, by bytes, so the layout is an ABI contract
+//! pinned by `list_layout_matches_the_codegen_contract`.
 //!
 //! **Ownership.** A list owns one reference to each `str` element: the
 //! storing operations (`append`, `insert`, `set`) adopt the reference the
@@ -43,27 +47,92 @@ pub const LIST_KIND_LIST: i64 = 5;
 #[repr(C)]
 pub struct PyListObj {
     len: i64,
-    data: *mut i64,
+    /// `len` elements of `i64`, or of `u8` for `LIST_KIND_BOOL`.
+    data: *mut u8,
     cap: i64,
     kind: i64,
 }
 
+/// One stored element: an 8-byte word, or a `list[bool]`'s byte.
+trait Elem: Copy {
+    fn from_word(word: i64) -> Self;
+    fn word(self) -> i64;
+}
+
+impl Elem for i64 {
+    fn from_word(word: i64) -> Self {
+        word
+    }
+
+    fn word(self) -> i64 {
+        self
+    }
+}
+
+impl Elem for u8 {
+    fn from_word(word: i64) -> Self {
+        u8::from(word != 0)
+    }
+
+    fn word(self) -> i64 {
+        i64::from(self)
+    }
+}
+
+/// Runs `$body` with `$vec` bound to `$list`'s storage as a `&mut Vec` of
+/// its element type (`u8` or `i64`); `Elem::from_word`/`Elem::word` in the
+/// body convert by inference.
+macro_rules! with_vec {
+    ($list:expr, |$vec:ident| $body:expr) => {
+        if $list.kind == LIST_KIND_BOOL {
+            $list.with_typed_vec::<u8, _>(|$vec| $body)
+        } else {
+            $list.with_typed_vec::<i64, _>(|$vec| $body)
+        }
+    };
+}
+
 impl PyListObj {
-    fn items(&self) -> &[i64] {
+    fn typed<T: Elem>(&self) -> &[T] {
         if self.len == 0 {
             return &[];
         }
-        unsafe { std::slice::from_raw_parts(self.data, self.len as usize) }
+        unsafe { std::slice::from_raw_parts(self.data.cast::<T>(), self.len as usize) }
     }
 
-    /// Runs `f` on the backing storage as a `Vec`, writing its (possibly
-    /// reallocated) parts back afterwards.
-    fn with_vec<R>(&mut self, f: impl FnOnce(&mut Vec<i64>) -> R) -> R {
-        let mut vec =
-            unsafe { Vec::from_raw_parts(self.data, self.len as usize, self.cap as usize) };
+    /// The elements as words: borrowed, or widened from a `list[bool]`'s
+    /// bytes.
+    fn items(&self) -> std::borrow::Cow<'_, [i64]> {
+        if self.kind == LIST_KIND_BOOL {
+            std::borrow::Cow::Owned(self.typed::<u8>().iter().map(|b| b.word()).collect())
+        } else {
+            std::borrow::Cow::Borrowed(self.typed::<i64>())
+        }
+    }
+
+    /// The word of element `i`, which must be in range.
+    fn word_at(&self, i: usize) -> i64 {
+        if self.kind == LIST_KIND_BOOL {
+            self.typed::<u8>()[i].word()
+        } else {
+            self.typed::<i64>()[i]
+        }
+    }
+
+    /// Runs `f` on the backing storage as a `Vec<T>`, writing its (possibly
+    /// reallocated) parts back afterwards. `T` must be the kind's element
+    /// type; [`with_vec!`] picks it.
+    fn with_typed_vec<T: Elem, R>(&mut self, f: impl FnOnce(&mut Vec<T>) -> R) -> R {
+        let mut vec = unsafe {
+            Vec::from_raw_parts(
+                self.data.cast::<T>(),
+                self.len as usize,
+                self.cap as usize,
+            )
+        };
         let result = f(&mut vec);
         let mut vec = std::mem::ManuallyDrop::new(vec);
-        self.data = vec.as_mut_ptr();
+        self.data = vec.as_mut_ptr().cast::<u8>();
         self.len = vec.len() as i64;
         self.cap = vec.capacity() as i64;
         result
@@ -91,20 +160,36 @@ impl PyListObj {
     }
 }
 
-fn new_list(kind: i64, items: Vec<i64>) -> *mut PyListObj {
+/// A list of kind `kind` owning `items`, whose element type must be the
+/// kind's (`u8` exactly for `LIST_KIND_BOOL`).
+fn new_typed_list<T: Elem>(kind: i64, items: Vec<T>) -> *mut PyListObj {
     let mut items = std::mem::ManuallyDrop::new(items);
     Box::into_raw(Box::new(PyListObj {
         len: items.len() as i64,
-        data: items.as_mut_ptr(),
+        data: items.as_mut_ptr().cast::<u8>(),
         cap: items.capacity() as i64,
         kind,
     }))
 }
 
+/// A list of kind `kind` holding the elements `items` denote.
+fn new_list(kind: i64, items: Vec<i64>) -> *mut PyListObj {
+    if kind == LIST_KIND_BOOL {
+        new_typed_list(kind, items.into_iter().map(u8::from_word).collect::<Vec<u8>>())
+    } else {
+        new_typed_list(kind, items)
+    }
+}
+
 /// A fresh list of element kind `kind` with room for `capacity` elements.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_list_new(kind: i64, capacity: i64) -> *mut PyListObj {
-    new_list(kind, Vec::with_capacity(capacity.max(0) as usize))
+    let capacity = capacity.max(0) as usize;
+    if kind == LIST_KIND_BOOL {
+        new_typed_list(kind, Vec::<u8>::with_capacity(capacity))
+    } else {
+        new_typed_list(kind, Vec::<i64>::with_capacity(capacity))
+    }
 }
 
 /// `xs.append(word)`, adopting the caller's reference to a `str` word.
@@ -113,7 +198,8 @@ pub extern "C" fn pycc_rt_list_new(kind: i64, capacity: i64) -> *mut PyListObj {
 /// `list` must be a live `PyListObj` pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_append(list: *mut PyListObj, word: i64) {
-    unsafe { &mut *list }.with_vec(|items| items.push(word));
+    let list = unsafe { &mut *list };
+    with_vec!(list, |items| items.push(Elem::from_word(word)));
 }
 
 /// Resolves a Python index (negative counts from the end) against `len`.
@@ -133,7 +219,7 @@ fn resolve_index(index: i64, len: i64) -> Option<usize> {
 pub unsafe extern "C" fn pycc_rt_list_get(list: *mut PyListObj, index: i64) -> i64 {
     let list = unsafe { &*list };
     match resolve_index(index, list.len) {
-        Some(i) => list.items()[i],
+        Some(i) => list.word_at(i),
         None => {
             pycc_rt_list_index_error(0);
             list.sentinel()
@@ -166,8 +252,9 @@ pub unsafe extern "C" fn pycc_rt_list_set(list: *mut PyListObj, index: i64, word
     let list = unsafe { &mut *list };
     match resolve_index(index, list.len) {
         Some(i) => {
-            let slot = unsafe { &mut *list.data.add(i) };
-            let old = std::mem::replace(slot, word);
+            let old = with_vec!(list, |items| {
+                Elem::word(std::mem::replace(&mut items[i], Elem::from_word(word)))
+            });
             list.release(old);
         }
         None => {
@@ -205,7 +292,7 @@ pub unsafe extern "C" fn pycc_rt_list_pop(list: *mut PyListObj, has_index: i64, 
     }
     let index = if has_index == 0 { -1 } else { index };
     match resolve_index(index, list.len) {
-        Some(i) => list.with_vec(|items| items.remove(i)),
+        Some(i) => with_vec!(list, |items| Elem::word(items.remove(i))),
         None => {
             raise_builtin(
                 EXCEPTION_TYPE_INDEX_ERROR,
@@ -232,7 +319,7 @@ pub unsafe extern "C" fn pycc_rt_list_insert(list: *mut PyListObj, index: i64, w
     } else {
         index.min(len)
     };
-    list.with_vec(|items| items.insert(at as usize, word));
+    with_vec!(list, |items| items.insert(at as usize, Elem::from_word(word)));
 }
 
 /// Bit of `pycc_rt_list_slice`'s `present` mask: `start` was written.
@@ -329,9 +416,10 @@ pub unsafe extern "C" fn pycc_rt_list_concat(
     b: *mut PyListObj,
 ) -> *mut PyListObj {
     let (a, b) = unsafe { (&*a, &*b) };
-    let mut items = Vec::with_capacity(a.items().len() + b.items().len());
-    items.extend_from_slice(a.items());
-    items.extend_from_slice(b.items());
+    let (a_items, b_items) = (a.items(), b.items());
+    let mut items = Vec::with_capacity(a_items.len() + b_items.len());
+    items.extend_from_slice(&a_items);
+    items.extend_from_slice(&b_items);
     for word in &items {
         a.retain(*word);
     }
@@ -347,11 +435,12 @@ pub unsafe extern "C" fn pycc_rt_list_concat(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_repeat(list: *mut PyListObj, count: i64) -> *mut PyListObj {
     let list = unsafe { &*list };
-    let items = if count <= 0 {
-        Vec::new()
-    } else {
-        list.items().repeat(count as usize)
-    };
+    let count = count.max(0) as usize;
+    if list.kind == LIST_KIND_BOOL {
+        // Bytes repeat directly: `[True] * n` is the flag-array idiom.
+        return new_typed_list(list.kind, list.typed::<u8>().repeat(count));
+    }
+    let items = list.items().repeat(count);
     for word in &items {
         list.retain(*word);
     }
@@ -376,7 +465,7 @@ fn lists_equal(a: *mut PyListObj, b: *mut PyListObj) -> bool {
     a.len == b.len
         && a.items()
             .iter()
-            .zip(b.items())
+            .zip(b.items().iter())
             .all(|(x, y)| words_equal(a.kind, *x, *y))
 }
 

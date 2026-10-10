@@ -207,10 +207,21 @@ pub(crate) fn build_list_len<'ctx>(
         .into_int_value()
 }
 
+/// The in-memory element type of a list of `elem`: a byte for `list[bool]`
+/// (`pycc_rt::list`'s storage contract), an `i64` word otherwise.
+fn storage_type<'ctx>(context: &'ctx Context, elem: &Ty) -> inkwell::types::IntType<'ctx> {
+    if *elem == Ty::Bool {
+        context.i8_type()
+    } else {
+        context.i64_type()
+    }
+}
+
 /// A pointer to element `position` (already known in range).
 fn element_ptr<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
+    elem: &Ty,
     list: PointerValue<'ctx>,
     position: IntValue<'ctx>,
 ) -> PointerValue<'ctx> {
@@ -221,8 +232,8 @@ fn element_ptr<'ctx>(
         .into_pointer_value();
     unsafe {
         builder
-            .build_in_bounds_gep(context.i64_type(), data, &[position], "list_slot")
-            .expect("build_in_bounds_gep should not fail for an i64 element")
+            .build_in_bounds_gep(storage_type(context, elem), data, &[position], "list_slot")
+            .expect("build_in_bounds_gep should not fail for a list element")
     }
 }
 
@@ -231,17 +242,21 @@ fn element_ptr<'ctx>(
 pub(crate) fn build_list_get_unchecked<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
+    elem: &Ty,
     list: PointerValue<'ctx>,
     position: IntValue<'ctx>,
 ) -> IntValue<'ctx> {
-    builder
+    let stored = builder
         .build_load(
-            context.i64_type(),
-            element_ptr(context, builder, list, position),
+            storage_type(context, elem),
+            element_ptr(context, builder, elem, list, position),
             "list_word",
         )
         .expect("build_load should not fail for a list element")
-        .into_int_value()
+        .into_int_value();
+    builder
+        .build_int_z_extend_or_bit_cast(stored, context.i64_type(), "list_word_ext")
+        .expect("zext of a stored element")
 }
 
 /// Resolves a Python index against the list's length (a negative index
@@ -300,11 +315,12 @@ pub(crate) fn build_list_get<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
+    elem: &Ty,
     list: PointerValue<'ctx>,
     index: IntValue<'ctx>,
 ) -> IntValue<'ctx> {
     let position = resolve_index(context, builder, rt, list, index, false);
-    build_list_get_unchecked(context, builder, list, position)
+    build_list_get_unchecked(context, builder, elem, list, position)
 }
 
 /// `xs[index] = word`. A `str` list goes through `pycc_rt_list_set`, which
@@ -327,8 +343,11 @@ pub(crate) fn build_list_set<'ctx>(
         return;
     }
     let position = resolve_index(context, builder, rt, list, index, true);
+    let stored = builder
+        .build_int_truncate_or_bit_cast(word, storage_type(context, elem), "list_store")
+        .expect("trunc of an element word");
     builder
-        .build_store(element_ptr(context, builder, list, position), word)
+        .build_store(element_ptr(context, builder, elem, list, position), stored)
         .expect("build_store should not fail for a list element");
 }
 
