@@ -342,6 +342,11 @@ pub(super) struct RtFns<'ctx> {
     /// The current function's locals that hold borrowed references
     /// (`borrowed_locals`).
     pub(super) borrowed_locals: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The current function's hidden frame slots holding a `for` loop's
+    /// own reference to the list it iterates, keyed by the `ForList`
+    /// statement's address: the owned-slot epilogue releases one a
+    /// `return` or an exception left set.
+    pub(super) loop_list_slots: std::cell::RefCell<HashMap<usize, PointerValue<'ctx>>>,
 }
 
 pub(super) fn declare_rt_functions<'ctx>(
@@ -833,5 +838,6 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         rc_class_kinds: std::cell::RefCell::new(HashMap::new()),
         borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
+        loop_list_slots: std::cell::RefCell::new(HashMap::new()),
     }
 }

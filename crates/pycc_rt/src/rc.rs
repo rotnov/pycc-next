@@ -18,9 +18,14 @@
 //! * `i` -- an `int` word (a heap bigint reference, nothing for an inline
 //!   int);
 //! * `l` -- a list; `c` -- a class instance (counted here);
-//! * anything else -- no reference (`float`, `bool`, a dict or set, which
-//!   are still leak-only, and an opaque CPython object, which `pycc_rt` has
-//!   no way to release: it keeps no CPython dependency, D-244 rule 2).
+//! * anything else -- no reference released here (`float`, `bool`, a dict
+//!   or set, which are still leak-only, and an opaque CPython object `o`).
+//!   An `o` slot's object is deliberately leaked when the instance is
+//!   freed: a function local read from the slot (`y = h.o`) holds the same
+//!   pointer without a reference of its own, so releasing the slot's
+//!   reference could free an object the frame still uses. It can be
+//!   released once object locals own their values (#1499's frame-slot
+//!   part).
 //!
 //! **Cycles are not collected.** CPython's cycle GC frees an unreachable
 //! cycle (`a.other = b; b.other = a`); here its objects keep each other's

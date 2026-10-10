@@ -2284,7 +2284,11 @@ fn emit_expr_unchecked<'ctx>(
             // one of {exception-edge release, fallthrough release} ever
             // executes for this word.
             let pending_l = push_pending_int_release_if_scalar_temporary(rt, left, &l);
+            // A fresh counted left operand is released if `right` raises.
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_temporary(rt, left, &l);
             let r = emit_expr(context, builder, module, rt, user_functions, locals, right);
+            heap_rc::truncate_pending(rt, mark);
             pop_pending_int_release(rt, pending_l);
             if let Ty::List(_) = ty {
                 let result = list::emit_list_binop(context, builder, rt, *op, l, r);
@@ -2519,7 +2523,10 @@ fn emit_expr_unchecked<'ctx>(
             // below is guaranteed to see it, even when `right`'s evaluation
             // branches away on an exception.
             let pending_l = push_pending_int_release_if_scalar_temporary(rt, left, &l);
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_temporary(rt, left, &l);
             let r = emit_expr(context, builder, module, rt, user_functions, locals, right);
+            heap_rc::truncate_pending(rt, mark);
             pop_pending_int_release(rt, pending_l);
             let right_ty = right.ty();
             if matches!(op, pycc_mir::CmpOpKind::In | pycc_mir::CmpOpKind::NotIn)
@@ -2944,7 +2951,13 @@ fn emit_expr_unchecked<'ctx>(
             //    round-trip and so no impossible arm to cover -- see that
             //    helper's own doc comment.
             let mut acc: Option<PointerValue<'ctx>> = None;
+            // The text so far is released if a later part raises.
+            let mark = heap_rc::pending_mark(rt);
             for part in parts {
+                heap_rc::truncate_pending(rt, mark);
+                if let Some(prev) = acc {
+                    heap_rc::hold_owned(rt, heap_rc::HeapKind::Str, prev);
+                }
                 let part_str = match part {
                     pycc_mir::MirFStringPart::Literal(s) => {
                         emit_string_literal(context, builder, module, rt, s)
@@ -2984,6 +2997,7 @@ fn emit_expr_unchecked<'ctx>(
                     }
                 });
             }
+            heap_rc::truncate_pending(rt, mark);
             Scalar::Str(acc.unwrap_or_else(|| {
                 // An empty `FString(vec![])` never actually reaches this arm --
                 // `pycc_hir`'s own f-string lowering always produces at least
@@ -3020,6 +3034,9 @@ fn emit_expr_unchecked<'ctx>(
             let elem = expr.ty();
             let elem = list::element_ty(&elem);
             let list_ptr = list::build_list_new(context, builder, rt, elem, elements.len() as u64);
+            // The list under construction is released if an element raises.
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_owned(rt, heap_rc::HeapKind::List, list_ptr);
             for element in elements {
                 let scalar = emit_expr(
                     context,
@@ -3033,6 +3050,7 @@ fn emit_expr_unchecked<'ctx>(
                 let word = list::element_word(context, builder, rt, elem, element, scalar);
                 list::build_list_append(builder, rt, list_ptr, word);
             }
+            heap_rc::truncate_pending(rt, mark);
             Scalar::List(list_ptr)
         }
         // `base[index]`, read-only, over two structurally different bases
@@ -3118,11 +3136,16 @@ fn emit_expr_unchecked<'ctx>(
                 // already bounds-checked.
                 (_, base_scalar) => {
                     let base_ptr = expect_list_pointer(base_scalar, "the subscripted value");
+                    // A fresh base is released if the index or the bounds
+                    // check raises.
+                    let mark = heap_rc::pending_mark(rt);
+                    heap_rc::hold_temporary(rt, base, &Scalar::List(base_ptr));
                     let index_scalar =
                         emit_expr(context, builder, module, rt, user_functions, locals, index);
                     let raw_index = list::raw_index(context, builder, rt, index_scalar);
                     let word =
                         list::build_list_get(context, builder, rt, &expr.ty(), base_ptr, raw_index);
+                    heap_rc::truncate_pending(rt, mark);
                     let element = list::word_element(context, builder, &expr.ty(), word);
                     // As for `AttrGet`: an element of a fresh list is
                     // retained before the list is released.
@@ -3151,8 +3174,16 @@ fn emit_expr_unchecked<'ctx>(
         // expression is what comes back (identical to `emit_expr`'s `Call`
         // arm's own `Ty::None` case).
         MirExpr::ListAppend { list, value } => {
-            let receiver =
-                emit_list_receiver(context, builder, module, rt, user_functions, locals, list, expr);
+            let receiver = emit_list_receiver(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                list,
+                expr,
+            );
             let list_ptr = receiver.0;
             let elem = value_list_element(list, locals);
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
@@ -3162,8 +3193,16 @@ fn emit_expr_unchecked<'ctx>(
             Scalar::Bool(context.i8_type().const_int(0, false))
         }
         MirExpr::ListInsert { list, index, value } => {
-            let receiver =
-                emit_list_receiver(context, builder, module, rt, user_functions, locals, list, expr);
+            let receiver = emit_list_receiver(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                list,
+                expr,
+            );
             let list_ptr = receiver.0;
             let elem = value_list_element(list, locals);
             let index_scalar =
@@ -3557,8 +3596,16 @@ fn emit_expr_unchecked<'ctx>(
         // `pop_twice_on_the_same_list_in_one_statement_removes_in_order`
         // end-to-end test.
         MirExpr::ListPop { list, index, ty } => {
-            let receiver =
-                emit_list_receiver(context, builder, module, rt, user_functions, locals, list, expr);
+            let receiver = emit_list_receiver(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                list,
+                expr,
+            );
             let list_ptr = receiver.0;
             let index = index.as_ref().map(|index| {
                 let scalar = emit_expr(context, builder, module, rt, user_functions, locals, index);
@@ -3730,6 +3777,13 @@ fn emit_expr_unchecked<'ctx>(
                      mangles every method, including `__init__`, into HirModule::items"
                 )
             });
+            // The new instance is released if an argument or `__init__`
+            // raises: the guard runs while it is still held.
+            let mark = heap_rc::pending_mark(rt);
+            let counted = heap_rc::heap_kind(rt, &inst.ty).is_some();
+            if counted {
+                heap_rc::hold_owned(rt, heap_rc::HeapKind::Instance, instance_ptr);
+            }
             build_call_to_with_leading_args(
                 context,
                 builder,
@@ -3742,6 +3796,10 @@ fn emit_expr_unchecked<'ctx>(
                 &[instance_ptr.into()],
                 args,
             );
+            if counted {
+                guard_statement_effects(context, builder, rt);
+            }
+            heap_rc::truncate_pending(rt, mark);
             Scalar::Instance(instance_ptr)
         }
         // `base.attr` (D-154): an inline read of the slot word, raising
@@ -3752,8 +3810,12 @@ fn emit_expr_unchecked<'ctx>(
         MirExpr::AttrGet { base, slot, ty } => {
             let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
             let base_ptr = expect_instance_pointer(base_scalar, "attribute access base");
+            // A fresh base is released if the slot is unassigned.
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_temporary(rt, base, &base_scalar);
             let raw =
                 attr_slot::emit_slot_load_checked(context, builder, rt, base_ptr, *slot as u64);
+            heap_rc::truncate_pending(rt, mark);
             let value = slot_word_to_scalar(context, builder, raw, ty);
             // A fresh base (`f().x`) dies right after the read, so the read
             // takes its own reference first (`heap_rc::is_borrowed_read`).
@@ -4372,6 +4434,21 @@ fn emit_expr_unchecked<'ctx>(
     }
 }
 
+/// Every `for x in <list name>` statement in `body`, at any depth, with the
+/// name it iterates.
+fn for_list_loops(body: &[MirStmt]) -> Vec<(&MirStmt, &str)> {
+    let mut out = Vec::new();
+    for stmt in body {
+        if let MirStmt::ForList { list, .. } = stmt {
+            out.push((stmt, list.as_str()));
+        }
+        for inner in stmt.bodies() {
+            out.extend(for_list_loops(inner));
+        }
+    }
+    out
+}
+
 /// Whether the list a `for` loop iterates, read from `name`, can lose its
 /// last other reference while the loop runs: `name` is a module global
 /// (which any call may rebind) or a local the loop body itself rebinds.
@@ -4744,6 +4821,7 @@ fn build_call_to_with_leading_args<'ctx>(
     // evaluating this loop's own argument, and this loop's earlier
     // pending entries must stay untouched by that nested truncation.
     let mark = rt.exceptions.pending_int_releases.borrow().len();
+    let heap_mark = heap_rc::pending_mark(rt);
     let marshalled_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = args
         .iter()
         .zip(&user_function.param_tys[leading_args.len()..])
@@ -4787,8 +4865,10 @@ fn build_call_to_with_leading_args<'ctx>(
                 .into();
             }
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, a);
-            // The callee's parameter slot owns its argument.
+            // The callee's parameter slot owns its argument; until the call
+            // takes it, a later argument's exception releases it.
             let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, a, scalar);
+            heap_rc::hold_owned_value(rt, &a.ty(), &scalar);
             let scalar = retain_if_int_duplicate_and_track_for_exception_edge(
                 context, builder, rt, a, scalar,
             );
@@ -4895,6 +4975,7 @@ fn build_call_to_with_leading_args<'ctx>(
         .pending_int_releases
         .borrow_mut()
         .truncate(mark);
+    heap_rc::truncate_pending(rt, heap_mark);
     arg_values.extend(marshalled_args);
     // Issue #22: dispatch indirectly through the function-pointer slot.
     // Load the current binding; if null, the function hasn't been defined
@@ -6756,6 +6837,30 @@ fn compile_to_object_with_observer(
                 // replaces any global slot seeded above.
                 fn_locals.insert(local_name, slot);
             }
+            // A `for` loop that must hold its list keeps that reference in
+            // a hidden owned slot, so a `return` or an exception out of the
+            // loop releases it through the epilogue.
+            {
+                let mut slots = rt.loop_list_slots.borrow_mut();
+                slots.clear();
+                for (stmt, loop_list) in for_list_loops(body) {
+                    if let MirStmt::ForList {
+                        body: loop_body, ..
+                    } = stmt
+                        && list_may_be_rebound(&fn_locals, loop_body, loop_list)
+                    {
+                        let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
+                        let slot = builder
+                            .build_alloca(ptr_type, "for_list_hold")
+                            .expect("build_alloca should not fail for a loop hold slot");
+                        builder
+                            .build_store(slot, ptr_type.const_null())
+                            .expect("build_store should not fail for a loop hold slot");
+                        owned_heap_slots.push((slot, heap_rc::HeapKind::List));
+                        slots.insert(std::ptr::from_ref(stmt) as usize, slot);
+                    }
+                }
+            }
             // Part 2b of #1142 (#1164): the pending-return record, seeded
             // only for a frame that can actually hand a buffer back and owns
             // at least one buffer slot to hand. Both allocas belong to the
@@ -7409,7 +7514,9 @@ fn emit_stmt<'ctx>(
             // release the one it holds (null before the first store) before
             // overwriting -- unless the local only ever borrows.
             if ty == pycc_mir::Ty::Str
-                && locals.get(target).is_some_and(|slot| slot.ty != pycc_mir::Ty::Str)
+                && locals
+                    .get(target)
+                    .is_some_and(|slot| slot.ty != pycc_mir::Ty::Str)
             {
                 panic!(
                     "pycc_codegen: internal error: string assignment target `{target}` has a \
@@ -7834,13 +7941,33 @@ fn emit_stmt<'ctx>(
             // the body never rebinds keeps the list alive itself; otherwise
             // (`xs = [9]` in the body, or a module global any call may
             // rebind) the loop takes its own reference, released when the
-            // loop ends. A `return` or an exception out of such a loop
-            // leaks that one reference.
+            // loop ends. In a function that reference lives in a hidden
+            // owned slot (`loop_list_slots`), so a `return` or an exception
+            // out of the loop releases it through the frame's epilogue.
             let list_ptr =
                 emit_list_name_read(context, builder, module, rt, user_functions, locals, list);
             let hold_list = list_may_be_rebound(locals, body, list);
+            let hold_slot = rt
+                .loop_list_slots
+                .borrow()
+                .get(&(std::ptr::from_ref(stmt) as usize))
+                .copied();
             if hold_list {
                 heap_rc::emit_incref(context, builder, rt, heap_rc::HeapKind::List, list_ptr);
+                if let Some(slot) = hold_slot {
+                    // A previous entry left by an exception caught in this
+                    // frame is released before the new hold replaces it.
+                    heap_rc::release_slot(
+                        context,
+                        builder,
+                        rt,
+                        &pycc_mir::Ty::List(Box::new(pycc_mir::Ty::Int)),
+                        slot,
+                    );
+                    builder
+                        .build_store(slot, list_ptr)
+                        .expect("build_store should not fail for a loop hold slot");
+                }
             }
             let preheader = builder.get_insert_block().unwrap();
 
@@ -7931,6 +8058,16 @@ fn emit_stmt<'ctx>(
             builder.position_at_end(after_bb);
             if hold_list {
                 heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::List, list_ptr);
+                if let Some(slot) = hold_slot {
+                    builder
+                        .build_store(
+                            slot,
+                            context
+                                .ptr_type(inkwell::AddressSpace::default())
+                                .const_null(),
+                        )
+                        .expect("build_store should not fail for a loop hold slot");
+                }
             }
             Ok(())
         }
@@ -8605,12 +8742,21 @@ fn emit_stmt<'ctx>(
             let value_scalar =
                 emit_expr(context, builder, module, rt, user_functions, locals, value);
             let word = list::element_word(context, builder, rt, &elem, value, value_scalar);
+            // The element (owned once `element_word` took it) and a fresh
+            // target are released if the target or index raises; the store
+            // itself releases the element on its own failure.
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_owned_value(rt, &elem, &value_scalar);
             let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
             let list_ptr = expect_list_pointer(base_scalar, "the item-assignment target");
+            heap_rc::hold_temporary(rt, base, &base_scalar);
             let index_scalar =
                 emit_expr(context, builder, module, rt, user_functions, locals, index);
             let raw = list::raw_index(context, builder, rt, index_scalar);
+            heap_rc::truncate_pending(rt, mark);
+            heap_rc::hold_temporary(rt, base, &base_scalar);
             list::build_list_set(context, builder, rt, &elem, list_ptr, raw, word);
+            heap_rc::truncate_pending(rt, mark);
             // A fresh target list is dead once stored into.
             release_scalar_if_temporary(context, builder, rt, base, &base_scalar);
             Ok(())
@@ -8756,7 +8902,11 @@ fn emit_stmt<'ctx>(
             let value_scalar =
                 heap_rc::retain_if_heap_duplicate(context, builder, rt, value, value_scalar);
             let value_scalar = retain_if_int_duplicate(context, builder, rt, value, value_scalar);
+            // The value is released if evaluating the base raises.
+            let mark = heap_rc::pending_mark(rt);
+            heap_rc::hold_owned_value(rt, &value_ty, &value_scalar);
             let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
+            heap_rc::truncate_pending(rt, mark);
             let base_ptr = expect_instance_pointer(base_scalar, "attribute assignment base");
             // Part 1 of #1499: a borrowed object takes its own reference
             // before the slot word keeps it, because a module global it was

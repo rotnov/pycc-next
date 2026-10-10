@@ -61,12 +61,15 @@ pub(super) fn emit_rt_call<'ctx>(
     let mut param_types: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::with_capacity(call.args.len());
     let mut temporaries = Vec::new();
     let passes_through = sig.symbol == "pycc_rt_list_unpack";
+    // A fresh argument is released if a later argument raises.
+    let mark = heap_rc::pending_mark(rt);
     for ((arg, param), is_word) in call.args.iter().zip(&sig.params).zip(&sig.word_args) {
         let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
         let scalar = if passes_through {
             // The result is this very list: it carries the reference.
             heap_rc::retain_if_heap_duplicate(context, builder, rt, arg, scalar)
         } else {
+            heap_rc::hold_temporary(rt, arg, &scalar);
             temporaries.push((arg, scalar));
             scalar
         };
@@ -97,6 +100,7 @@ pub(super) fn emit_rt_call<'ctx>(
     let call_site = builder
         .build_call(function, &values, "rt_call")
         .expect("build_call should not fail for a declared runtime builtin");
+    heap_rc::truncate_pending(rt, mark);
     for (arg, scalar) in temporaries {
         if !matches!(scalar, Scalar::Int(_)) {
             heap_rc::release_scalar_if_temporary(context, builder, rt, arg, &scalar);

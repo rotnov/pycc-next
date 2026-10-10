@@ -232,16 +232,28 @@ pub(super) fn emit_print_call<'ctx>(
     // argument's failure, or an earlier argument's conversion failure,
     // releases it; it is released right after its conversion.
     let mut evaluated: Vec<(PrintArg<'ctx>, Option<Held<'ctx>>)> = Vec::with_capacity(args.len());
+    // Every converted `str` and fresh list phase 1 produced is released if
+    // a later argument raises; phase 2 releases each once it is written.
+    let mark = crate::heap_rc::pending_mark(rt);
     for arg in args.iter() {
         let value = emit_eval_print_arg(context, builder, module, rt, user_functions, locals, arg);
         let held = match value {
             PrintArg::Object(scalar) => {
                 Some(object_release::hold(context, module, rt, arg, &scalar))
             }
-            PrintArg::None | PrintArg::Str(_) | PrintArg::List(..) => None,
+            PrintArg::Str(text) => {
+                crate::heap_rc::hold_owned(rt, crate::heap_rc::HeapKind::Str, text);
+                None
+            }
+            PrintArg::List(Scalar::List(list), true) => {
+                crate::heap_rc::hold_owned(rt, crate::heap_rc::HeapKind::List, list);
+                None
+            }
+            PrintArg::None | PrintArg::List(..) => None,
         };
         evaluated.push((value, held));
     }
+    crate::heap_rc::truncate_pending(rt, mark);
     for (i, (arg, held)) in evaluated.into_iter().enumerate() {
         if i > 0 {
             builder

@@ -6,8 +6,7 @@
 //! compile error here rather than a node an analysis silently skips.
 
 use crate::{
-    CompSource, MirCompElt, MirExceptionValue, MirExpr, MirFStringPart, MirStmt,
-    ObjIsInstanceClass,
+    CompSource, MirCompElt, MirExceptionValue, MirExpr, MirFStringPart, MirStmt, ObjIsInstanceClass,
 };
 
 impl MirExpr {
@@ -149,8 +148,7 @@ impl MirExpr {
                 out.extend([start, stop, step].into_iter().flatten().map(|b| &**b));
             }
             MirExpr::FrozenSetFrom { source } => out.extend(source.as_deref()),
-            MirExpr::ObjMethodCall { base, args, .. }
-            | MirExpr::ObjCall { callee: base, args } => {
+            MirExpr::ObjMethodCall { base, args, .. } | MirExpr::ObjCall { callee: base, args } => {
                 out.push(base);
                 out.extend(args);
             }

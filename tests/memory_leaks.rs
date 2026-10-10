@@ -59,6 +59,14 @@ def swap_items(b: Bag) -> int:
     return 0
 
 
+def find(xs: list[int]) -> int:
+    for x in xs:
+        xs = [0]
+        if x > 0:
+            return x
+    return -1
+
+
 def mkp(i: int) -> P:
     return P(i, mk(i))
 
@@ -294,6 +302,11 @@ probe!(
     pinned_subscript_base,
     "b: Bag = Bag().add(mkp(i))\ntotal += b.items[swap_items(b)].x"
 );
+// A `for` loop's own hold on a list it must keep is released by `return`.
+probe!(
+    for_loop_hold_released_on_return,
+    "total += find(mklist(i + 1))"
+);
 // A fresh target of a store dies once stored into.
 probe!(fresh_attribute_target, "mkp(i).name = mk(i)");
 probe!(fresh_list_target, "mklist(i)[0] = i");
@@ -367,6 +380,15 @@ fn operands_outlive_later_siblings_that_drop_their_owner() {
     assert_memcheck_clean(&bin);
 }
 
+/// A list of exception instances holds them without a count: those objects
+/// have none, and counting them corrupted their fields.
+#[test]
+fn a_list_of_exception_instances_leaves_them_intact() {
+    let dir = ScratchDir::new("memory_fixture_exception_list").expect("scratch dir");
+    let bin = assert_fixture_matches_cpython(&dir, "refcount_exception_list");
+    assert_memcheck_clean(&bin);
+}
+
 #[test]
 fn a_million_node_chain_is_released_without_recursing_and_a_cycle_is_harmless() {
     let dir = ScratchDir::new("memory_fixture_chain").expect("scratch dir");
@@ -410,6 +432,190 @@ fn a_hosted_loop_calling_compiled_functions_runs_in_constant_memory() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
+
+/// Freeing an instance leaves the CPython object of its `object` slot
+/// alive: a function local read from the slot holds the same pointer
+/// without a reference of its own, so the slot's reference is what keeps
+/// it alive once the instance is gone (the slot leaks it until object
+/// locals own their values, `docs/DEVIATIONS.md`).
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_local_read_from_an_object_slot_outlives_the_instance() {
+    let dir = ScratchDir::new("memory_ext_object_slot").expect("scratch dir");
+    let src = dir.join("m.py");
+    std::fs::write(
+        &src,
+        "class Holder:\n    o: object\n\n    def __init__(self, o: object) -> None:\n        \
+         self.o = o\n\n\ndef take(src: object) -> object:\n    h = Holder(src)\n    \
+         h.o = src.copy()\n    y = h.o\n    h = Holder(src)\n    return y\n",
+    )
+    .expect("write the module source");
+    let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(&src)
+        .arg("-o")
+        .arg(dir.join("pycc_memory_obj_slot"))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let driver = "import pycc_memory_obj_slot as m\nfor _ in range(50):\n    \
+                  r = m.take([1, 2, 3])\n    assert r == [1, 2, 3], r\nprint('ok')\n";
+    let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
+        .arg("-c")
+        .arg(driver)
+        .current_dir(&*dir)
+        .output()
+        .expect("python3 should spawn");
+    assert!(
+        run.status.success() && run.stdout == b"ok\n",
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// A list or instance temporary live when an exception unwinds is released
+/// on the exception edge: a host loop catching compiled exceptions keeps
+/// the runtime's live list and instance counts flat. (Exception objects and
+/// their messages are leak-only, so `str` is not counted here.)
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn temporaries_live_when_an_exception_unwinds_are_released() {
+    let dir = ScratchDir::new("memory_ext_unwind").expect("scratch dir");
+    let src = dir.join("m.py");
+    std::fs::write(&src, UNWIND_MODULE).expect("write the module source");
+    let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(&src)
+        .arg("-o")
+        .arg(dir.join("pycc_memory_unwind"))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
+        .arg("-c")
+        .arg(UNWIND_DRIVER)
+        .current_dir(&*dir)
+        .output()
+        .expect("python3 should spawn");
+    assert!(
+        run.status.success() && run.stdout == b"ok\n",
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+const UNWIND_MODULE: &str = r#"class P:
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+
+class Q:
+    def __init__(self, p: P, fail: bool) -> None:
+        self.p = p
+        if fail:
+            raise ValueError("init")
+
+
+def boom(n: int) -> int:
+    if n >= 0:
+        raise ValueError("boom")
+    return n
+
+
+def _boom_list(n: int) -> list[int]:
+    if n >= 0:
+        raise ValueError("boom")
+    return [n]
+
+
+def _take(xs: list[int], n: int) -> int:
+    return len(xs) + n
+
+
+def _mk(i: int) -> list[int]:
+    return [i, i]
+
+
+def operand(i: int) -> int:
+    return len(_mk(i) + _boom_list(i))
+
+
+def argument(i: int) -> int:
+    return _take(_mk(i), boom(i))
+
+
+def display(i: int) -> int:
+    return len([_mk(i), _mk(i), _boom_list(i)])
+
+
+def constructor(i: int) -> int:
+    return Q(P(i), True).p.x
+
+
+def element(i: int) -> int:
+    return _mk(i)[i + 5]
+
+
+def hold(i: int) -> int:
+    xs = _mk(i)
+    for x in xs:
+        xs = [x]
+        boom(i)
+    return 0
+
+
+def caught(i: int) -> int:
+    total = 0
+    for k in range(3):
+        try:
+            total += _take(_mk(i), boom(k))
+        except ValueError:
+            total += 1
+    return total
+"#;
+
+const UNWIND_DRIVER: &str = r#"import ctypes, gc
+import pycc_memory_unwind as m
+lib = ctypes.CDLL(m.__file__)
+def counter(name):
+    f = getattr(lib, name)
+    f.restype = ctypes.c_int64
+    f.argtypes = []
+    return f
+counters = [counter('pycc_rt_%s_live_objects' % k) for k in ('list', 'instance')]
+def live():
+    gc.collect()
+    return [c() for c in counters]
+fns = [m.operand, m.argument, m.display, m.constructor, m.element, m.hold]
+def round_trip():
+    for f in fns:
+        try:
+            f(3)
+        except (ValueError, IndexError):
+            pass
+        else:
+            raise AssertionError(f.__name__)
+    assert m.caught(1) == 3
+round_trip()
+before = live()
+for _ in range(200):
+    round_trip()
+after = live()
+assert after == before, 'live list/instance counts grew: %r -> %r' % (before, after)
+print('ok')
+"#;
 
 const EXT_MODULE: &str = r#"class Cell:
     def __init__(self, v: int, label: str) -> None:

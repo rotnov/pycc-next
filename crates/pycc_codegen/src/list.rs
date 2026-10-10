@@ -20,14 +20,17 @@ use crate::exception::jump_to_exception_target;
 use inkwell::values::BasicValue as _;
 use pycc_mir::Ty;
 
-/// `pycc_rt::LIST_KIND_*` for a list whose elements are `elem`.
-pub(crate) fn list_kind(elem: &Ty) -> u64 {
+/// `pycc_rt::LIST_KIND_*` for a list whose elements are `elem`. An
+/// instance of an exception class carries no reference count, so its list
+/// kind is the uncounted one (`6`).
+pub(crate) fn list_kind(rt: &RtFns<'_>, elem: &Ty) -> u64 {
     match elem {
         Ty::Int => 0,
         Ty::Float => 1,
         Ty::Bool => 2,
         Ty::Str => 3,
-        Ty::Instance(_) => 4,
+        Ty::Instance(_) if crate::heap_rc::heap_kind(rt, elem).is_some() => 4,
+        Ty::Instance(_) => 6,
         Ty::List(_) => 5,
         other => panic!(
             "pycc_codegen: internal error: `list[{}]` -- pycc_hir::is_list_element_ty should \
@@ -61,7 +64,7 @@ pub(crate) fn build_list_new<'ctx>(
         .build_call(
             rt.list_new,
             &[
-                i64_type.const_int(list_kind(elem), false).into(),
+                i64_type.const_int(list_kind(rt, elem), false).into(),
                 i64_type.const_int(capacity, false).into(),
             ],
             "list_new",

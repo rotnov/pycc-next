@@ -413,6 +413,64 @@ pub(crate) fn release_attr_slot<'ctx>(
     emit_decref(context, builder, rt, kind, old);
 }
 
+/// The depth of the pending-release stack, for a later
+/// [`truncate_pending`]: a consumer holds its operands with
+/// [`hold_temporary`] while later siblings or its own operation may raise,
+/// then truncates back to the mark on the fallthrough, where it releases
+/// (or stores) them itself. Nested consumers truncate only their own
+/// entries.
+pub(crate) fn pending_mark(rt: &RtFns<'_>) -> usize {
+    rt.exceptions.pending_heap_releases.borrow().len()
+}
+
+/// Drops the entries pushed since `mark` without releasing them.
+pub(crate) fn truncate_pending(rt: &RtFns<'_>, mark: usize) {
+    rt.exceptions
+        .pending_heap_releases
+        .borrow_mut()
+        .truncate(mark);
+}
+
+/// Holds `scalar` (the value of `source`) on the pending-release stack when
+/// it is a fresh counted reference, so an exception edge emitted before the
+/// matching [`truncate_pending`] releases it instead of leaking it.
+pub(crate) fn hold_temporary<'ctx>(rt: &RtFns<'ctx>, source: &MirExpr, scalar: &Scalar<'ctx>) {
+    if !is_borrowed_read(source)
+        && let Some(entry) = counted(rt, &source.ty(), scalar)
+    {
+        rt.exceptions.pending_heap_releases.borrow_mut().push(entry);
+    }
+}
+
+/// Holds `scalar`, an owned reference of type `ty` (a fresh value, or a
+/// borrowed one just retained), when its type is counted.
+pub(crate) fn hold_owned_value<'ctx>(rt: &RtFns<'ctx>, ty: &Ty, scalar: &Scalar<'ctx>) {
+    if let Some(entry) = counted(rt, ty, scalar) {
+        rt.exceptions.pending_heap_releases.borrow_mut().push(entry);
+    }
+}
+
+/// Holds an owned reference of `kind` at `ptr` (an object being built).
+pub(crate) fn hold_owned<'ctx>(rt: &RtFns<'ctx>, kind: HeapKind, ptr: PointerValue<'ctx>) {
+    rt.exceptions
+        .pending_heap_releases
+        .borrow_mut()
+        .push((kind, ptr));
+}
+
+/// Releases every held temporary: emitted on an exception edge
+/// (`exception::jump_to_exception_target`), which leaves the statement.
+pub(crate) fn release_pending<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+) {
+    let snapshot = rt.exceptions.pending_heap_releases.borrow().clone();
+    for (kind, ptr) in snapshot.into_iter().rev() {
+        emit_decref(context, builder, rt, kind, ptr);
+    }
+}
+
 #[cfg(test)]
 #[path = "heap_rc_tests.rs"]
 mod tests;

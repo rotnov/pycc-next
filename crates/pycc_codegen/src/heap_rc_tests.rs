@@ -59,10 +59,7 @@ fn a_walrus_rebinding_a_local_receiver_does_not_free_it_under_the_call() {
             value: Box::new(MirExpr::Sequence {
                 discard: Box::new(MirExpr::NamedExpr {
                     name: "xs".to_string(),
-                    value: Box::new(MirExpr::ListLiteral(vec![
-                        fresh_str("b"),
-                        fresh_str("c"),
-                    ])),
+                    value: Box::new(MirExpr::ListLiteral(vec![fresh_str("b"), fresh_str("c")])),
                     ty: list_str(),
                 }),
                 value: Box::new(fresh_str("d")),

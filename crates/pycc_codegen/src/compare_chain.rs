@@ -51,14 +51,19 @@ pub(super) fn emit_compare_chain<'ctx>(
     let mut l = emitter.emit(first);
     for (index, link) in links.iter().enumerate() {
         let pending_l = push_pending_int_release_if_scalar_temporary(emitter.rt, left, &l);
+        let mark = crate::heap_rc::pending_mark(emitter.rt);
+        crate::heap_rc::hold_temporary(emitter.rt, left, &l);
         let r = emitter.emit(&link.right);
+        crate::heap_rc::truncate_pending(emitter.rt, mark);
         pop_pending_int_release(emitter.rt, pending_l);
         let bit = link_bit(emitter, &link.kind, left, l, &link.right, r);
         release(emitter, left, &l);
         if link_can_raise(&link.kind) {
             let pending_r =
                 push_pending_int_release_if_scalar_temporary(emitter.rt, &link.right, &r);
+            crate::heap_rc::hold_temporary(emitter.rt, &link.right, &r);
             guard_statement_effects(emitter.context, emitter.builder, emitter.rt);
+            crate::heap_rc::truncate_pending(emitter.rt, mark);
             pop_pending_int_release(emitter.rt, pending_r);
         }
         if index + 1 == links.len() {

@@ -25,6 +25,12 @@ pub(super) struct ExceptionCodegenState<'ctx> {
     /// unwinds release a snapshot of it, and it is empty at every statement
     /// boundary; `object_release.rs` owns the push/pop discipline.
     pub(super) pending_object_releases: RefCell<Vec<crate::object_release::PendingObject<'ctx>>>,
+    /// The counted (`heap_rc`) counterpart: fresh `str`/list/instance
+    /// temporaries a consumer holds while a sibling or the consuming
+    /// operation can still raise. Released by the same two unwinds, empty
+    /// at every statement boundary; `heap_rc::hold_temporary` owns the
+    /// push/pop discipline.
+    pub(super) pending_heap_releases: RefCell<Vec<(crate::heap_rc::HeapKind, PointerValue<'ctx>)>>,
     /// The iterator of every enclosing `for x in <object>:` loop, paired
     /// with the cleanup block it pushed onto `targets` (Part 3 of #1092).
     /// Unlike `pending_object_releases` it lives across whole statements:
@@ -50,6 +56,7 @@ impl ExceptionCodegenState<'_> {
             targets: RefCell::new(Vec::new()),
             pending_int_releases: RefCell::new(Vec::new()),
             pending_object_releases: RefCell::new(Vec::new()),
+            pending_heap_releases: RefCell::new(Vec::new()),
             loop_iterators: RefCell::new(Vec::new()),
             module_exec_exit: Cell::new(None),
         }
@@ -434,7 +441,8 @@ pub(super) fn guard_statement_effects<'ctx>(
     // Part 1 of #1092: a held object temporary needs the unwind block
     // exactly as a held bigint does; both empty keeps the two-block shape.
     let nothing_pending = rt.exceptions.pending_int_releases.borrow().is_empty()
-        && rt.exceptions.pending_object_releases.borrow().is_empty();
+        && rt.exceptions.pending_object_releases.borrow().is_empty()
+        && rt.exceptions.pending_heap_releases.borrow().is_empty();
     if nothing_pending {
         builder
             .build_conditional_branch(has_exc, exception_target, continuation)
@@ -482,6 +490,7 @@ pub(super) fn jump_to_exception_target<'ctx>(
         emit_bigint_refcount_call(context, builder, rt, word, BigIntRefcount::Release);
     }
     crate::object_release::release_pending(builder, rt);
+    crate::heap_rc::release_pending(context, builder, rt);
     builder
         .build_unconditional_branch(exception_target)
         .expect("build_unconditional_branch should not fail for a fresh unwind block");
@@ -1620,11 +1629,20 @@ mod tests {
             pycc_mir::BinOpKind::Div,
             pycc_mir::BinOpKind::Pow,
         ] {
-            assert!(!expression_can_set_exception(&float_op(op, MirExpr::IntLiteral(1))));
-            assert!(!expression_can_set_exception(&float_op(op, MirExpr::FloatLiteral(1.0))));
+            assert!(!expression_can_set_exception(&float_op(
+                op,
+                MirExpr::IntLiteral(1)
+            )));
+            assert!(!expression_can_set_exception(&float_op(
+                op,
+                MirExpr::FloatLiteral(1.0)
+            )));
         }
         for op in [pycc_mir::BinOpKind::FloorDiv, pycc_mir::BinOpKind::Mod] {
-            assert!(expression_can_set_exception(&float_op(op, MirExpr::FloatLiteral(1.0))));
+            assert!(expression_can_set_exception(&float_op(
+                op,
+                MirExpr::FloatLiteral(1.0)
+            )));
         }
         assert!(expression_can_set_exception(&MirExpr::BinOp {
             op: pycc_mir::BinOpKind::Div,
