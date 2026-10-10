@@ -70,6 +70,8 @@ def main() -> int:
     ap.add_argument("--flags", default="")
     ap.add_argument("-j", type=int, default=4)
     ap.add_argument("--show-errors", action="store_true")
+    ap.add_argument("--require-correct", action="store_true",
+                    help="exit 1 on any wrong output, compile error, timeout or harness error")
     a = ap.parse_args()
     probs = sorted(p for p in CORPUS.iterdir() if p.is_dir())
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="pycc-corpus-"))
@@ -105,6 +107,11 @@ def main() -> int:
         for name, (s, d) in sorted(results.items()):
             if s != "pass":
                 print(f"{name}: {s}: {d}")
+    if a.require_correct and counts["pass"] != n:
+        for name, (s, d) in sorted(results.items()):
+            if s != "pass":
+                print(f"FAIL {name}: {s}: {d}")
+        return 1
     return 0
 
 

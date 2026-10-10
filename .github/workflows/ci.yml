@@ -25,3 +25,6 @@ jobs:
       - run: >-
           cargo test --release --workspace -- --include-ignored
           --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
+      # Real-world gate: every corpus program must compile in non-strict mode and
+      # print exactly what CPython prints (wrong output = miscompilation).
+      - run: python3 bench/corpus.py -j 4 --flags=--non-strict --require-correct
