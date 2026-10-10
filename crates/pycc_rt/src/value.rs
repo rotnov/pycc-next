@@ -10,8 +10,8 @@
 //!
 //! Hashes are CPython's for `int`, `bool`, `float` and tuples of them, so a
 //! set of those iterates in CPython's order (`set.rs`). A `str` hash is
-//! randomized per process in CPython, so no program can depend on it; this
-//! one is FNV-1a.
+//! CPython's keyed SipHash-1-3, randomized per process unless
+//! `PYTHONHASHSEED` fixes it (`str_hash.rs`).
 
 use crate::dict::PyDictObj;
 use crate::instance::PyInstanceObj;
@@ -192,16 +192,6 @@ pub(crate) fn hash_float(v: f64) -> i64 {
     if x == -1 { -2 } else { x }
 }
 
-fn hash_str(bytes: &[u8]) -> i64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in bytes {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    let h = h as i64;
-    if h == -1 { -2 } else { h }
-}
-
 /// Python `hash(word)`; `None` for an unhashable kind (a list, dict or
 /// set).
 pub(crate) fn hash(kind: i64, word: i64) -> Option<i64> {
@@ -209,7 +199,7 @@ pub(crate) fn hash(kind: i64, word: i64) -> Option<i64> {
         LIST_KIND_INT => crate::pycc_rt_hash_int(word),
         LIST_KIND_BOOL => word,
         LIST_KIND_FLOAT => hash_float(f64::from_bits(word as u64)),
-        LIST_KIND_STR => hash_str(str_bytes(word)),
+        LIST_KIND_STR => crate::str_hash::hash_str(str_bytes(word)),
         LIST_KIND_TUPLE => {
             let mut lanes = Vec::new();
             for (k, w) in sequence_items(word) {

@@ -10,14 +10,16 @@
 //! growth factors, the same dummy handling on deletion, and the same
 //! algorithms for copy, update, `pop`, `|`, `&`, `-` and `^` -- with
 //! CPython's hashes (`value.rs`), so a set of ints, floats or tuples of
-//! them iterates in CPython's order. (A `str` hash is randomized per
-//! process in CPython, so no program can depend on that order.)
+//! them iterates in CPython's order. A `str` hash is CPython's keyed
+//! SipHash, randomized per process unless `PYTHONHASHSEED` fixes it, so a
+//! set of `str` iterates in CPython's order under the same seed.
 //!
 //! **Ownership.** The set owns one reference to every element: adding
 //! adopts the caller's reference (dropping it when the element is already
 //! present), and removing releases it. [`pycc_rt_set_get`] borrows;
-//! [`pycc_rt_set_pop`] hands its element's reference to the caller. A set
-//! itself is not reference counted yet (leak-only, `docs/DEVIATIONS.md`).
+//! [`pycc_rt_set_pop`] hands its element's reference to the caller. The
+//! set itself is reference counted ([`pycc_rt_set_incref`]/
+//! [`pycc_rt_set_decref`]).
 
 use crate::list::PyListObj;
 use crate::value;
@@ -418,18 +420,22 @@ pub unsafe extern "C" fn pycc_rt_set_incref(s: *mut PySetObj) {
 /// `s` must be null or a live set not used again after its last release.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_set_decref(s: *mut PySetObj) {
-    if s.is_null() {
-        return;
-    }
-    let rc = unsafe { s.cast::<u8>().add(crate::rc::RC_OFFSET).cast::<i64>() };
-    unsafe { *rc -= 1 };
-    if unsafe { *rc } != 0 {
-        return;
-    }
+    crate::rc::release_word(b'e', s as i64);
+}
+
+/// Frees a set of either kind whose count reached zero, its elements'
+/// releases going onto `dead` (`crate::rc`'s worklist) rather than
+/// recursing.
+pub(crate) fn free_set_into(s: *mut PySetObj, dead: &mut crate::rc::Worklist) {
     if is_instance_set(s) {
-        crate::int_set::free(s.cast());
-    } else {
-        free_set(s);
+        crate::int_set::free(s.cast(), dead);
+        return;
+    }
+    let owned = unsafe { Box::from_raw(s) };
+    crate::rc::SET_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    let kind = value::rc_kind(owned.kind);
+    for entry in owned.table.iter().filter(|e| e.state == ACTIVE) {
+        crate::rc::release_word_into(kind, entry.key, dead);
     }
 }
 
@@ -772,11 +778,22 @@ pub unsafe extern "C" fn pycc_rt_set_symmetric_difference(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_set_intersection_update(a: *mut PySetObj, b: *mut PySetObj) {
     let tmp = intersection(set(a), set(b));
-    let finger = set(a).finger;
-    let old = std::mem::replace(set(a), unsafe { std::ptr::read(tmp) });
-    set(a).finger = finger;
-    unsafe { std::ptr::write(tmp, old) };
+    swap_bodies(set(a), set(tmp));
     free_set(tmp);
+}
+
+/// CPython's `set_swap_bodies`: exchanges only the table state (`len`,
+/// `fill`, `mask`, `table`). Each object keeps its own identity -- its
+/// reference count, marker, element kind, frozen flag and `pop` finger --
+/// so aliases of `a` keep a valid count and `a` stays the object they see.
+fn swap_bodies(a: &mut PySetObj, b: &mut PySetObj) {
+    debug_assert_eq!(a.kind, b.kind);
+    std::mem::swap(&mut a.len, &mut b.len);
+    std::mem::swap(&mut a.fill, &mut b.fill);
+    std::mem::swap(&mut a.mask, &mut b.mask);
+    std::mem::swap(&mut a.table, &mut b.table);
+    a.invalidate();
+    b.invalidate();
 }
 
 /// `a -= b`.
@@ -855,7 +872,21 @@ pub unsafe extern "C" fn pycc_rt_set_isdisjoint(a: *mut PySetObj, b: *mut PySetO
 }
 
 /// `a == b` for two sets of one kind.
+///
+/// The type checker never routes an instance set here (its elements need
+/// their class's `__eq__`); should one arrive anyway it is compared by
+/// element identity rather than read as a hash table.
 pub(crate) fn sets_equal(a: *mut PySetObj, b: *mut PySetObj) -> bool {
+    if is_instance_set(a) || is_instance_set(b) {
+        if !(is_instance_set(a) && is_instance_set(b)) {
+            return false;
+        }
+        let (xs, ys) = (
+            crate::int_set::items(a.cast()),
+            crate::int_set::items(b.cast()),
+        );
+        return xs.len() == ys.len() && xs.iter().all(|x| ys.contains(x));
+    }
     let (a, b) = (set(a), set(b));
     a.len == b.len && a.active().iter().all(|(k, h)| b.contains_entry(*k, *h))
 }
@@ -886,6 +917,16 @@ pub unsafe extern "C" fn pycc_rt_set_to_list(s: *mut PySetObj) -> *mut PyListObj
 
 /// Appends `repr(s)` to `out` (`{1, 2}`, `set()` when empty).
 pub(crate) fn set_repr_into(s: *mut PySetObj, out: &mut String) -> bool {
+    if is_instance_set(s) {
+        // Rendering an instance needs its class's `__repr__`, which the
+        // runtime cannot call; the type checker never routes one here.
+        crate::raise_builtin(
+            crate::exception::EXCEPTION_TYPE_TYPE_ERROR,
+            "TypeError",
+            "repr of a set of class instances is not compiled",
+        );
+        return false;
+    }
     let s = set(s);
     if s.frozen != 0 {
         if s.len == 0 {
@@ -991,6 +1032,48 @@ mod tests {
             unsafe { pycc_rt_set_add(floats, v.to_bits() as i64) };
         }
         assert_eq!(render(floats), "{0.5, 2.25, 3.0, -1.0}");
+    }
+
+    /// `a &= b` swaps only the table in: `a` keeps its count (an alias
+    /// still owns a reference), kind and marker, and the temporary is freed
+    /// with the old table, not with `a`'s identity.
+    #[test]
+    fn intersection_update_keeps_the_left_operand_identity() {
+        let a = ints(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        let b = ints(&[5, 6, 70]);
+        unsafe {
+            pycc_rt_set_incref(a);
+            pycc_rt_set_intersection_update(a, b);
+            assert_eq!(set(a).rc, 2);
+            assert_eq!(set(a).marker, SET_MARKER);
+            assert_eq!(set(a).kind, LIST_KIND_INT);
+            assert_eq!(render(a), "{5, 6}");
+            pycc_rt_set_add(a, int(11));
+            assert_eq!(render(a), "{11, 5, 6}");
+            pycc_rt_set_decref(a);
+            pycc_rt_set_decref(a);
+            pycc_rt_set_decref(b);
+        }
+    }
+
+    /// An instance set reaching the value routines is never read as a hash
+    /// table.
+    #[test]
+    fn instance_sets_are_not_read_as_hash_tables() {
+        let a = crate::int_set::pycc_rt_int_set_new().cast::<PySetObj>();
+        let b = crate::int_set::pycc_rt_int_set_new().cast::<PySetObj>();
+        unsafe {
+            crate::int_set::pycc_rt_obj_set_push(a.cast(), 100, 1);
+            crate::int_set::pycc_rt_obj_set_push(b.cast(), 100, 1);
+        }
+        assert!(sets_equal(a, b));
+        unsafe { crate::int_set::pycc_rt_obj_set_push(b.cast(), 200, 2) };
+        assert!(!sets_equal(a, b));
+        assert!(!sets_equal(a, ints(&[1])));
+        let mut out = String::new();
+        assert!(!set_repr_into(a, &mut out));
+        assert_eq!(crate::pycc_rt_exception_active(), 1);
+        crate::pycc_rt_exception_clear();
     }
 
     #[test]

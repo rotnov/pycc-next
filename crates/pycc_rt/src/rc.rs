@@ -18,8 +18,9 @@
 //! * `i` -- an `int` word (a heap bigint reference, nothing for an inline
 //!   int);
 //! * `l` -- a list; `c` -- a class instance (counted here);
-//! * `d` -- a dict; `e` -- a set or frozenset (counted by their own
-//!   runtime functions, which release their keys and instance elements);
+//! * `d` -- a dict; `e` -- a set or frozenset (freed through the same
+//!   worklist, so a long chain of dicts or sets holding instances that hold
+//!   dicts is freed in constant stack too);
 //! * `o` -- an opaque CPython object (`PyObject *`), counted through the
 //!   hooks the C shim installs ([`pycc_rt_object_install`]) when its module
 //!   is executed: `pycc_rt` itself keeps no CPython dependency. A program
@@ -100,6 +101,9 @@ fn decref_reaches_zero<T>(object: *mut T) -> bool {
 pub(crate) enum Dead {
     List(*mut PyListObj),
     Instance(*mut PyInstanceObj),
+    Dict(*mut crate::dict::PyDictObj),
+    /// A set or an instance set (`int_set.rs`), told apart by its marker.
+    Set(*mut crate::set::PySetObj),
 }
 
 /// The objects a free found dead and has not freed yet.
@@ -145,9 +149,9 @@ pub(crate) fn retain_word(kind: u8, word: i64) {
     }
 }
 
-/// Drops one reference to the word `word` of kind `kind`. A list or
-/// instance whose count reaches zero is pushed onto `dead` rather than
-/// freed here.
+/// Drops one reference to the word `word` of kind `kind`. A list,
+/// instance, dict or set whose count reaches zero is pushed onto `dead`
+/// rather than freed here.
 pub(crate) fn release_word_into(kind: u8, word: i64, dead: &mut Worklist) {
     match kind {
         b's' => unsafe { crate::pycc_rt_str_decref(word as *mut crate::PyStrObj) },
@@ -158,8 +162,12 @@ pub(crate) fn release_word_into(kind: u8, word: i64, dead: &mut Worklist) {
         b'c' if decref_reaches_zero(word as *mut PyInstanceObj) => {
             dead.push(Dead::Instance(word as *mut PyInstanceObj));
         }
-        b'd' => unsafe { crate::dict::pycc_rt_dict_decref(word as *mut crate::dict::PyDictObj) },
-        b'e' => unsafe { crate::set::pycc_rt_set_decref(word as *mut crate::set::PySetObj) },
+        b'd' if decref_reaches_zero(word as *mut crate::dict::PyDictObj) => {
+            dead.push(Dead::Dict(word as *mut crate::dict::PyDictObj));
+        }
+        b'e' if decref_reaches_zero(word as *mut crate::set::PySetObj) => {
+            dead.push(Dead::Set(word as *mut crate::set::PySetObj));
+        }
         b'o' => object_hook(&OBJECT_RELEASE, word),
         _ => {}
     }
@@ -178,6 +186,8 @@ pub(crate) fn free_all(mut dead: Worklist) {
         match object {
             Dead::List(list) => crate::list::free_list(list, &mut dead),
             Dead::Instance(instance) => crate::instance::free_instance(instance, &mut dead),
+            Dead::Dict(dict) => crate::dict::free_dict(dict, &mut dead),
+            Dead::Set(set) => crate::set::free_set_into(set, &mut dead),
         }
     }
 }

@@ -199,6 +199,21 @@ fn container_compare_ty(op: CmpOp, left: &Ty, right: &Ty) -> Option<Result<Ty, D
     if left != right {
         return Some(refuse());
     }
+    // The runtime compares elements by value (`pycc_rt::value`): a
+    // user-class instance element needs its own `__eq__`/`__hash__`, and an
+    // instance set is a different runtime object (`int_set.rs`) that the
+    // value routines must never read as a hash table.
+    if !pycc_hir::builtins::value_comparable(left) {
+        return Some(Err(Diagnostic::error(
+            "T0021",
+            format!(
+                "cannot compare `{}` and `{}` -- comparing containers of class instances is not compiled yet",
+                left.name(),
+                right.name()
+            ),
+            Span::new(0, 0),
+        )));
+    }
     if matches!(op, CmpOp::Eq | CmpOp::NotEq) {
         return Some(Ok(Ty::Bool));
     }

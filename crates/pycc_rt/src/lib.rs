@@ -73,6 +73,7 @@ mod rc;
 /// The `round()` builtin over `float`.
 mod round;
 pub mod set;
+mod str_hash;
 /// `str` builtins and methods, and `input()`.
 mod str_ops;
 pub mod tuple;

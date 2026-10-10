@@ -106,7 +106,8 @@ fn orderable(elem: &Ty) -> bool {
 /// Whether two values of `elem` compare by value in the runtime
 /// (`pycc_rt::value::eq`): everything but a user-class instance, which
 /// compares by identity there.
-fn value_comparable(elem: &Ty) -> bool {
+#[must_use]
+pub fn value_comparable(elem: &Ty) -> bool {
     match elem {
         Ty::Instance(_) => false,
         Ty::List(inner) | Ty::Set(inner) | Ty::FrozenSet(inner) => value_comparable(inner),

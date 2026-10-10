@@ -54,11 +54,11 @@ fn new_set(counted: bool, items: Vec<i64>, hashes: Vec<i64>) -> *mut PyIntSetObj
 
 /// Frees an instance set whose count reached zero, releasing the instances
 /// a counted set owns.
-pub(crate) fn free(set: *mut PyIntSetObj) {
+pub(crate) fn free(set: *mut PyIntSetObj, dead: &mut crate::rc::Worklist) {
     let set = unsafe { Box::from_raw(set) };
     if set.counted {
         for word in set.items.take() {
-            crate::rc::release_word(b'c', word);
+            crate::rc::release_word_into(b'c', word, dead);
         }
     }
     crate::rc::SET_LIVE.fetch_sub(1, Ordering::Relaxed);
@@ -70,6 +70,14 @@ pub(crate) fn element_at(set: *mut PyIntSetObj, index: i64) -> i64 {
     let value = items[index as usize];
     unsafe { &*set }.items.set(items);
     value
+}
+
+/// The stored element words in insertion order (a copy).
+pub(crate) fn items(set: *mut PyIntSetObj) -> Vec<i64> {
+    let items = unsafe { &*set }.items.take();
+    let copy = items.clone();
+    unsafe { &*set }.items.set(items);
+    copy
 }
 
 /// A fresh, empty set of uncounted (exception) instances.

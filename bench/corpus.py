@@ -10,6 +10,7 @@ import ast
 import collections
 import concurrent.futures
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -56,7 +57,10 @@ def build_and_run(pdir: pathlib.Path, pycc: str, flags: list[str], exe: pathlib.
     cases = json.loads((pdir / "tests.json").read_text())["cases"]
     for c in cases:
         try:
-            r = subprocess.run([str(exe)], input=c["input"], capture_output=True, text=True, timeout=20)
+            # `str` hashes are randomized per process, as in CPython; a fixed
+            # seed keeps the gate reproducible.
+            r = subprocess.run([str(exe)], input=c["input"], capture_output=True, text=True, timeout=20,
+                               env={**os.environ, "PYTHONHASHSEED": "0"})
         except subprocess.TimeoutExpired:
             return "timeout", ""
         if norm(r.stdout) != norm(c["output"]):

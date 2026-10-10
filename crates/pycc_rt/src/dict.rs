@@ -12,9 +12,9 @@
 //! as CPython keeps the first key object), and deleting releases both. A
 //! read through [`pycc_rt_dict_get`] and the other value-returning lookups
 //! returns a new reference; [`pycc_rt_dict_key_at`] and
-//! [`pycc_rt_dict_value_at`] borrow. A dict itself is not reference counted
-//! yet (leak-only, `docs/DEVIATIONS.md`); the count field sits at
-//! `rc::RC_OFFSET` like a list's for when it is.
+//! [`pycc_rt_dict_value_at`] borrow. The dict itself is reference counted
+//! (its count at `rc::RC_OFFSET`, like a list's) and freed through
+//! `crate::rc`'s worklist.
 
 use crate::exception::raise_key_error;
 use crate::list::{LIST_KIND_TUPLE, PyListObj};
@@ -637,16 +637,23 @@ pub unsafe extern "C" fn pycc_rt_dict_incref(d: *mut PyDictObj) {
 /// `d` must be null or a live dict not used again after its last release.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_dict_decref(d: *mut PyDictObj) {
-    if d.is_null() {
-        return;
-    }
-    dict(d).rc -= 1;
-    if dict(d).rc != 0 {
-        return;
-    }
-    unsafe { pycc_rt_dict_clear(d) };
-    drop(unsafe { Box::from_raw(d) });
+    crate::rc::release_word(b'd', d as i64);
+}
+
+/// Frees a dict whose count reached zero, its keys' and values' releases
+/// going onto `dead` (`crate::rc`'s worklist) rather than recursing, so a
+/// long chain of nested dicts is freed in constant stack.
+pub(crate) fn free_dict(d: *mut PyDictObj, dead: &mut crate::rc::Worklist) {
+    let owned = unsafe { Box::from_raw(d) };
     crate::rc::DICT_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    let (key_kind, value_kind) = (
+        value::rc_kind(owned.key_kind),
+        value::rc_kind(owned.value_kind),
+    );
+    for (_, k, v) in owned.table.entries.into_iter().flatten() {
+        crate::rc::release_word_into(key_kind, k, dead);
+        crate::rc::release_word_into(value_kind, v, dead);
+    }
 }
 
 #[cfg(test)]
