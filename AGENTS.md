@@ -6,7 +6,8 @@ default; `--non-strict` falls back to `PyObject*` (CPython C API) for unprovable
 
 - Oracle: CPython 3.13 — same stdout and exceptions. Known gaps: `docs/DEVIATIONS.md`.
 - Build: `export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 && cargo build --release`.
-- Test before push: `cargo test --release --workspace`. Read-only/unreadable permission
+- Test before push: `cargo test --release --workspace -- --include-ignored` (CI runs exactly
+  this with python3 = CPython 3.13). Read-only/unreadable permission
   tests fail only when running as root; everything else must pass.
 - Design wrong -> rewrite the module; design right but incomplete -> extend. Split files
   over ~1000 lines you touch. Delete dead code.
