@@ -1,88 +1,86 @@
-//! Class instance runtime object (D-154, Part 1 of #375; see the
-//! class-instance-layout ADR): `PyInstanceObj` and its `extern "C"`
-//! accessor functions.
+//! Class instance runtime object (D-154; see the class-instance-layout ADR):
+//! `PyInstanceObj` and its `extern "C"` accessor functions.
 //!
-//! Follows the exact opaque-heap-object-with-FFI-accessors shape every
-//! other `pycc_rt` container object (`PyStrObj`, `PyListObj`,
-//! `PyDictObj`, `PyIntSetObj`) already uses: `PyInstanceObj` is `pub` only
-//! so it can appear in an `extern "C"` function signature (the
-//! `private_interfaces` lint, a hard error under this workspace's `-D
-//! warnings` clippy gate, refuses a private type there) -- its field stays
-//! private, so nothing outside this module can construct one or read its
-//! contents except through the functions below. It is deliberately **not**
-//! `#[repr(C)]`: `pycc_codegen` never reads or writes a slot by computing a
-//! field offset itself (no LLVM `GEP` against this struct anywhere), only
-//! by calling [`pycc_rt_instance_get_slot_checked`] (or the unchecked
-//! [`pycc_rt_instance_get_slot`]) and [`pycc_rt_instance_set_slot`] with a
-//! slot index `pycc_mir` already resolved at compile time against the
-//! class's declared attribute list -- exactly the ADR's own recommended
-//! fork (opaque-with-accessors, not a cross-crate ABI layout commitment).
+//! **Layout (a fixed ABI shared with `pycc_codegen`).** An instance is one
+//! allocation: a `#[repr(C)]` header of four words followed inline by
+//! `slot_count` [`InstanceSlot`]s of 16 bytes each -- the slot's `i64` word,
+//! then an `i64` "assigned" flag (`0` until the first store, #1388).
+//! Compiled code reads and writes a slot directly, at
+//! [`INSTANCE_SLOTS_OFFSET`] `+` [`INSTANCE_SLOT_SIZE`] `* slot` (the word)
+//! and `+` [`INSTANCE_SLOT_ASSIGNED_OFFSET`] (the flag), and calls
+//! [`pycc_rt_instance_get_slot_checked`] only on the cold path where the flag
+//! is clear, to raise `AttributeError`. `pycc_codegen`'s `attr_slot` module
+//! mirrors the three constants; this module's tests pin them.
 //!
-//! **Slot representation.** Every assigned slot holds a plain `i64` word,
-//! matching this crate's own existing `PyListObj` element
-//! representation; since #1388 the slot is an `Option<i64>` whose `None`
-//! marks "not yet assigned" (16 bytes per slot instead of 8, see
-//! [`PyInstanceObj`]). `int`/`bool`
-//! attributes store their value directly; a `float` attribute stores its
-//! `f64::to_bits()` bit pattern (`pycc_codegen` bitcasts around the call,
-//! there is no separate float-typed accessor pair to keep this module's own
-//! FFI surface minimal); a heap-object-typed attribute (`str`, or another
-//! class instance, or a leak-only `list[int]`/`dict[str, int]` container
-//! since #1262) stores its pointer, reinterpreted as an `i64` (valid on
-//! every target this workspace compiles for, where a pointer and `i64` are
-//! both 8 bytes) -- `pycc_codegen` handles the `inttoptr`/`ptrtoint`
-//! conversion around the call, mirroring the float bitcast.
+//! **Slot representation.** An `int`/`bool` attribute stores its encoded
+//! word, a `float` attribute its `f64::to_bits()` pattern, and a
+//! heap-object-typed attribute (`str`, another instance, a container, a
+//! foreign object) its pointer as an `i64`.
 //!
-//! **No reference counting.** Per the class-instance-layout ADR and this
-//! issue's own explicit scope ("no new garbage-collection/reference-
-//! counting design beyond what `pycc_rt`'s existing heap objects already
-//! do"): `PyListObj`/`PyDictObj`/`PyIntSetObj` all define an `incref`/
-//! `decref` pair, but `pycc_codegen` never actually calls any of them (D-107,
-//! confirmed directly in `pycc_codegen`'s own doc comments) -- every
-//! container value already leaks in practice, refcounting exists only as
-//! unused-but-present infrastructure. `PyInstanceObj` does not even define
-//! that unused pair, and deliberately carries no `rc` field the way
-//! `PyListObj`/`PyDictObj`/`PyIntSetObj` do: an `rc` field with no
-//! `incref`/`decref` pair ever reading or writing it past construction is
-//! dead code (`-D warnings` rejects it outright), not merely unused-but-
-//! harmless infrastructure -- so matching the *effective* (not aspirational)
-//! behavior of every other heap object here means omitting the field
-//! entirely, not carrying an inert placeholder. A future PR that wires up
-//! real project-wide refcounting adds `rc` back alongside its own
-//! `incref`/`decref` pair, exactly as it must add the same to every other
-//! heap object in this file.
+//! **No reference counting of the instance itself.** Instances are never
+//! freed, the same leak-only status the containers have (D-107).
 
 use std::cell::Cell;
 use std::ffi::c_void;
 
 use crate::exception::{EXCEPTION_TYPE_ATTRIBUTE_ERROR, raise_builtin};
 
-/// See this module's own doc comment for the opacity/layout and
-/// no-refcounting rationale.
+/// Byte offset of slot 0 from the start of a `PyInstanceObj`.
+pub const INSTANCE_SLOTS_OFFSET: usize = 32;
+/// Size in bytes of one [`InstanceSlot`].
+pub const INSTANCE_SLOT_SIZE: usize = 16;
+/// Byte offset of a slot's "assigned" flag within the slot.
+pub const INSTANCE_SLOT_ASSIGNED_OFFSET: usize = 8;
+
+/// One attribute slot: its word, and whether it has been assigned. No
+/// sentinel word could mark "unassigned", because `0` is a valid `int`,
+/// `bool` and `float` word. A slot can be read before it is assigned --
+/// `self.a = self.b` in `__init__`, or a derived `__init__` that never
+/// assigns a base slot (#1148) -- and CPython raises `AttributeError` there.
+#[repr(C)]
+pub struct InstanceSlot {
+    word: Cell<i64>,
+    assigned: Cell<i64>,
+}
+
+impl InstanceSlot {
+    fn get(&self) -> Option<i64> {
+        (self.assigned.get() != 0).then(|| self.word.get())
+    }
+
+    fn set(&self, value: Option<i64>) {
+        self.word.set(value.unwrap_or(0));
+        self.assigned.set(i64::from(value.is_some()));
+    }
+}
+
+/// See this module's own doc comment for the layout.
 ///
-/// **Unassigned slots (#1388).** A slot is `None` until its first
-/// [`pycc_rt_instance_set_slot`]. No sentinel word could mark that state,
-/// because `0` is a valid `int`, `bool` and `float` word. A slot can be read
-/// before it is assigned -- `self.a = self.b` in `__init__`, a helper method
-/// `__init__` calls before its assignments, or a derived `__init__` that
-/// never assigns a base slot (#1148) -- and CPython raises `AttributeError`
-/// there, so every compiled `base.attr` read goes through
-/// [`pycc_rt_instance_get_slot_checked`], which raises it too.
-///
-/// `layout` is the static descriptor the constructor call site passes (see
-/// [`pycc_rt_instance_new`]); it is read only to word that error and, since
-/// #1435, to name the instance's class to an `--ext` host
+/// `layout_ptr`/`layout_len` is the static descriptor the constructor call
+/// site passes (see [`pycc_rt_instance_new`]); it is read only to word the
+/// unassigned-slot error and to name the instance's class to an `--ext` host
 /// ([`pycc_rt_ext_instance_class`]).
 ///
 /// `carrier` is the `--ext` host-side object currently standing for this
 /// instance, or null (#1435). It is opaque here: `pycc_rt` keeps no CPython
 /// dependency (D-244 rule 2), and only the C shim reads or writes it, through
 /// [`pycc_rt_ext_instance_carrier`] and [`pycc_rt_ext_instance_set_carrier`].
+#[repr(C)]
 pub struct PyInstanceObj {
-    slots: Cell<Vec<Option<i64>>>,
-    layout: &'static [u8],
+    layout_ptr: *const u8,
+    layout_len: usize,
     carrier: Cell<*mut c_void>,
+    slot_count: usize,
+    slots: [InstanceSlot; 0],
 }
+
+// The ABI `pycc_codegen` compiles against, checked at build time.
+const _: () = {
+    assert!(std::mem::offset_of!(PyInstanceObj, slots) == INSTANCE_SLOTS_OFFSET);
+    assert!(std::mem::size_of::<InstanceSlot>() == INSTANCE_SLOT_SIZE);
+    assert!(std::mem::offset_of!(InstanceSlot, word) == 0);
+    assert!(std::mem::offset_of!(InstanceSlot, assigned) == INSTANCE_SLOT_ASSIGNED_OFFSET);
+};
 
 mod carrier;
 pub use carrier::{
@@ -93,21 +91,55 @@ pub use copy::pycc_rt_ext_instance_copy;
 mod store;
 pub use store::{pycc_rt_ext_instance_delete_slot, pycc_rt_ext_instance_store_slot};
 
-/// Allocates a fresh instance with `slot_count` unassigned slots. A negative
-/// `slot_count` is an internal-error panic (impossible from real
-/// `pycc_codegen` output, which only ever emits a class's own non-negative
-/// declared attribute count as a compile-time constant), held in this
-/// private function so the panic-across-FFI split matches every other
-/// bounds check in this module (see `read_slot`'s own doc comment).
-fn new_instance(slot_count: i64, layout: &'static [u8]) -> PyInstanceObj {
-    let slot_count = usize::try_from(slot_count).unwrap_or_else(|_| {
-        panic!("pycc_rt: internal error: negative instance slot count {slot_count}")
-    });
-    PyInstanceObj {
-        slots: Cell::new(vec![None; slot_count]),
-        layout,
-        carrier: Cell::new(std::ptr::null_mut()),
+impl PyInstanceObj {
+    /// The class's static layout descriptor.
+    fn layout(&self) -> &'static [u8] {
+        if self.layout_ptr.is_null() {
+            &[]
+        } else {
+            // SAFETY: `pycc_rt_instance_new`'s contract -- the descriptor
+            // lives for the rest of the process.
+            unsafe { std::slice::from_raw_parts(self.layout_ptr, self.layout_len) }
+        }
     }
+
+    /// The inline slot array.
+    fn slots(&self) -> &[InstanceSlot] {
+        // SAFETY: `allocate_instance` allocated `slot_count` initialized
+        // slots directly after the header.
+        unsafe { std::slice::from_raw_parts(self.slots.as_ptr(), self.slot_count) }
+    }
+}
+
+/// Allocates an instance with `slot_count` unassigned slots and `layout` as
+/// its descriptor. Never freed.
+fn allocate_instance(slot_count: usize, layout: &'static [u8]) -> *mut PyInstanceObj {
+    let size = INSTANCE_SLOTS_OFFSET + INSTANCE_SLOT_SIZE * slot_count;
+    let alloc_layout = std::alloc::Layout::from_size_align(size, 8)
+        .expect("an instance allocation size never overflows isize");
+    // SAFETY: `size` is non-zero (the header alone is 32 bytes). A zeroed
+    // allocation is a null carrier plus `slot_count` unassigned slots; the
+    // remaining header fields are written before the pointer escapes.
+    unsafe {
+        let ptr = std::alloc::alloc_zeroed(alloc_layout).cast::<PyInstanceObj>();
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(alloc_layout);
+        }
+        std::ptr::addr_of_mut!((*ptr).layout_ptr).write(layout.as_ptr());
+        std::ptr::addr_of_mut!((*ptr).layout_len).write(layout.len());
+        std::ptr::addr_of_mut!((*ptr).slot_count).write(slot_count);
+        ptr
+    }
+}
+
+/// Validates a constructor's slot count. A negative count is an
+/// internal-error panic (impossible from `pycc_codegen` output, which only
+/// ever passes a class's own declared attribute count), held in this private
+/// function so a test can observe it -- see [`slot_ref`]'s panic note.
+fn checked_slot_count(slot_count: i64) -> usize {
+    usize::try_from(slot_count).unwrap_or_else(|_| {
+        panic!("pycc_rt: internal error: negative instance slot count {slot_count}")
+    })
 }
 
 /// Allocates an instance of a class with `slot_count` slots, all
@@ -136,40 +168,33 @@ pub unsafe extern "C" fn pycc_rt_instance_new(
     } else {
         unsafe { std::slice::from_raw_parts(layout_ptr, layout_len) }
     };
-    Box::into_raw(Box::new(new_instance(slot_count, layout)))
+    allocate_instance(checked_slot_count(slot_count), layout)
 }
 
-/// # Safety (panic-across-FFI note, same rationale as `pycc_rt_int_add`'s
-/// own doc comment)
-/// The getters below are plain `extern "C" fn`s, not `extern "C-unwind"`.
-/// A panic that would otherwise unwind past their boundary is instead
-/// turned into a process abort -- correct for pycc-generated LLVM code
-/// calling them (an out-of-range `slot` is impossible from a
-/// `pycc_types`-checked program, since every `AttrGet`/`AttrSet` slot index
-/// is resolved at compile time against the class's own declared attribute
-/// count), but unsuitable for a `#[should_panic]` test directly against a
-/// public wrapper (confirmed empirically the same way
-/// `pycc_rt_float_to_str`'s own split was: see this module's own tests
-/// below). This private function holds the real, freely-panicking logic.
-/// Takes `slot` as the raw `i64` the FFI boundary receives, exactly like
-/// `list_get`'s own `index: i64` -- a negative `slot` and an
-/// out-of-range `slot` are both "index out of range" here, matching that
-/// function's own combined bounds check, not two separate failure modes.
-/// Returns `None` for a slot not yet assigned.
-fn read_slot(instance: &PyInstanceObj, slot: i64) -> Option<i64> {
-    let slots = instance.slots.take();
-    if slot < 0 || slot as usize >= slots.len() {
-        let len = slots.len();
-        instance.slots.set(slots);
-        panic!(
-            "pycc_rt: internal error: instance slot {slot} out of range (instance has {len} \
+/// Slot `slot` of `instance`. A negative or out-of-range `slot` is an
+/// internal-error panic: every `AttrGet`/`AttrSet` slot index is resolved at
+/// compile time against the class's own declared attribute count.
+///
+/// The FFI wrappers below are plain `extern "C" fn`s, not `extern
+/// "C-unwind"`, so a panic reaching their boundary aborts the process
+/// (same rationale as `pycc_rt_int_add`'s own doc comment); this private
+/// function holds the freely-panicking logic so tests can observe it.
+fn slot_ref(instance: &PyInstanceObj, slot: i64) -> &InstanceSlot {
+    let slots = instance.slots();
+    match usize::try_from(slot).ok().and_then(|i| slots.get(i)) {
+        Some(cell) => cell,
+        None => panic!(
+            "pycc_rt: internal error: instance slot {slot} out of range (instance has {} \
              slots) -- pycc_mir should have resolved a slot index within the class's own \
-             declared attribute count"
-        );
+             declared attribute count",
+            slots.len()
+        ),
     }
-    let value = slots[slot as usize];
-    instance.slots.set(slots);
-    value
+}
+
+/// Slot `slot`'s word, or `None` when it is not yet assigned.
+fn read_slot(instance: &PyInstanceObj, slot: i64) -> Option<i64> {
+    slot_ref(instance, slot).get()
 }
 
 /// The unchecked read: an unassigned slot reads as the word `0`.
@@ -177,19 +202,15 @@ fn instance_get_slot(instance: &PyInstanceObj, slot: i64) -> i64 {
     read_slot(instance, slot).unwrap_or(0)
 }
 
-/// Reads slot `slot`'s raw `i64` word, `0` when it is not yet assigned --
-/// see this module's own doc comment for what that word means for each
-/// attribute type.
+/// Reads slot `slot`'s raw `i64` word, `0` when it is not yet assigned.
 ///
-/// This is not the read a compiled `base.attr` performs (that is
-/// [`pycc_rt_instance_get_slot_checked`]). Its callers are the stores that
-/// release a slot's old value before overwriting it, for which "nothing to
-/// release" and the `0` word mean the same thing.
+/// Not the read a compiled `base.attr` performs (that is an inline load,
+/// with [`pycc_rt_instance_get_slot_checked`] as its cold path). Its callers
+/// are the stores that release a slot's old value before overwriting it, for
+/// which "nothing to release" and the `0` word mean the same thing.
 ///
 /// # Safety
-/// `instance` must be a live `PyInstanceObj` pointer -- every `pycc_codegen`
-/// call site only ever passes a value it just evaluated from a
-/// well-typed `Ty::Instance` expression.
+/// `instance` must be a live `PyInstanceObj` pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_instance_get_slot(instance: *mut PyInstanceObj, slot: i64) -> i64 {
     instance_get_slot(unsafe { &*instance }, slot)
@@ -219,8 +240,8 @@ fn instance_get_slot_checked(instance: &PyInstanceObj, slot: i64) -> i64 {
     if let Some(word) = read_slot(instance, slot) {
         return word;
     }
-    let class_name = layout_field(instance.layout, 0);
-    let attr = layout_field(instance.layout, 1 + slot as usize);
+    let class_name = layout_field(instance.layout(), 0);
+    let attr = layout_field(instance.layout(), 1 + slot as usize);
     raise_builtin(
         EXCEPTION_TYPE_ATTRIBUTE_ERROR,
         "AttributeError",
@@ -229,7 +250,7 @@ fn instance_get_slot_checked(instance: &PyInstanceObj, slot: i64) -> i64 {
     0
 }
 
-/// The read every compiled `base.attr` performs; see
+/// The cold path of every compiled `base.attr` read; see
 /// [`instance_get_slot_checked`]. `pycc_codegen` follows the call with the
 /// pending-exception check it emits after any operation that can raise.
 ///
@@ -244,21 +265,9 @@ pub unsafe extern "C" fn pycc_rt_instance_get_slot_checked(
 }
 
 /// Writes `value` into slot `slot`, overwriting whatever was there and
-/// marking the slot assigned -- mirrors [`read_slot`]'s own
-/// panic-across-FFI split and out-of-range reasoning.
+/// marking the slot assigned.
 fn instance_set_slot(instance: &PyInstanceObj, slot: i64, value: i64) {
-    let mut slots = instance.slots.take();
-    if slot < 0 || slot as usize >= slots.len() {
-        let len = slots.len();
-        instance.slots.set(slots);
-        panic!(
-            "pycc_rt: internal error: instance slot {slot} out of range (instance has {len} \
-             slots) -- pycc_mir should have resolved a slot index within the class's own \
-             declared attribute count"
-        );
-    }
-    slots[slot as usize] = Some(value);
-    instance.slots.set(slots);
+    slot_ref(instance, slot).set(Some(value));
 }
 
 /// # Safety
@@ -277,6 +286,22 @@ pub unsafe extern "C" fn pycc_rt_instance_set_slot(
 mod tests {
     use super::*;
     use crate::tests::pending_tag_and_message;
+
+    /// A store is observable at the documented address `pycc_codegen` reads
+    /// and writes directly, and so is the flag.
+    #[test]
+    fn a_slot_lives_at_its_documented_address() {
+        let ptr = unsafe { pycc_rt_instance_new(3, std::ptr::null(), 0) };
+        unsafe { pycc_rt_instance_set_slot(ptr, 2, 77) };
+        let base = ptr.cast::<u8>();
+        let slot = INSTANCE_SLOTS_OFFSET + 2 * INSTANCE_SLOT_SIZE;
+        let word = unsafe { base.add(slot).cast::<i64>().read() };
+        let flag =
+            unsafe { base.add(slot + INSTANCE_SLOT_ASSIGNED_OFFSET).cast::<i64>().read() };
+        assert_eq!((word, flag), (77, 1));
+        let unset = INSTANCE_SLOTS_OFFSET + INSTANCE_SLOT_ASSIGNED_OFFSET;
+        assert_eq!(unsafe { base.add(unset).cast::<i64>().read() }, 0);
+    }
 
     #[test]
     fn a_fresh_instance_reads_every_slot_as_zero_unchecked() {
@@ -307,15 +332,9 @@ mod tests {
 
     #[test]
     fn a_zero_slot_instance_allocates_without_panicking() {
-        // A class could in principle declare no attributes at all (not
-        // reachable from this PR's own HIR lowering, which requires
-        // `__init__`, but not that it assign any attribute) -- confirm the
-        // degenerate zero-slot case is not an internal-error trap.
         let instance = unsafe { &*pycc_rt_instance_new(0, std::ptr::null(), 0) };
-        let slots = instance.slots.take();
-        assert!(slots.is_empty());
-        assert!(instance.layout.is_empty());
-        instance.slots.set(slots);
+        assert!(instance.slots().is_empty());
+        assert!(instance.layout().is_empty());
     }
 
     #[test]
@@ -342,15 +361,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "negative instance slot count")]
     fn a_negative_slot_count_panics_with_an_internal_error() {
-        // Calls the private `new_instance` directly, not the public
-        // `pycc_rt_instance_new` FFI wrapper -- that wrapper is a plain
-        // `extern "C" fn`, not `extern "C-unwind"`, so a panic propagating
-        // through it aborts the process instead of unwinding, the same
-        // panic-across-FFI reasoning `instance_get_slot`'s own doc comment
-        // documents (confirmed empirically: an earlier version of this test
-        // called the public wrapper and aborted the whole test process
-        // instead of being caught by `#[should_panic]`).
-        new_instance(-1, &[]);
+        // The private validator, not the `extern "C"` wrapper, whose panic
+        // would abort the test process instead of unwinding.
+        checked_slot_count(-1);
     }
 
     #[test]

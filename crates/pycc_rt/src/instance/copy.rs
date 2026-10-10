@@ -24,33 +24,29 @@
 //! The copy has no carrier yet: the shim links it to the one it allocates.
 //! Like every instance, the copy is never freed (D-107, D-154).
 
-use std::cell::Cell;
-
-use super::PyInstanceObj;
+use super::{PyInstanceObj, allocate_instance};
 
 /// The clone [`pycc_rt_ext_instance_copy`] allocates, or `None` when
 /// `kinds` does not describe `instance`'s slots one byte each.
-fn instance_copy(instance: &PyInstanceObj, kinds: &[u8]) -> Option<PyInstanceObj> {
-    let slots = instance.slots.take();
+fn instance_copy(instance: &PyInstanceObj, kinds: &[u8]) -> Option<*mut PyInstanceObj> {
+    let slots = instance.slots();
     if kinds.len() != slots.len() {
-        instance.slots.set(slots);
         return None;
     }
-    for (slot, kind) in slots.iter().zip(kinds) {
-        match (slot, kind) {
+    let copy = allocate_instance(slots.len(), instance.layout());
+    // SAFETY: `allocate_instance` returns a live, exclusively owned instance.
+    let copy_slots = unsafe { &*copy }.slots();
+    for ((slot, kind), target) in slots.iter().zip(kinds).zip(copy_slots) {
+        let value = slot.get();
+        match (value, kind) {
             // SAFETY: an assigned `str` slot holds a live `PyStrObj` pointer:
             // the slot's own reference keeps it alive.
-            (Some(word), b's') => unsafe { crate::pycc_rt_str_incref(*word as *mut _) },
-            (Some(word), b'i') => crate::pycc_rt_bigint_retain(*word),
+            (Some(word), b's') => unsafe { crate::pycc_rt_str_incref(word as *mut _) },
+            (Some(word), b'i') => crate::pycc_rt_bigint_retain(word),
             _ => {}
         }
+        target.set(value);
     }
-    let copy = PyInstanceObj {
-        slots: Cell::new(slots.clone()),
-        layout: instance.layout,
-        carrier: Cell::new(std::ptr::null_mut()),
-    };
-    instance.slots.set(slots);
     Some(copy)
 }
 
@@ -78,8 +74,7 @@ pub unsafe extern "C" fn pycc_rt_ext_instance_copy(
     } else {
         unsafe { std::slice::from_raw_parts(kinds_ptr, kinds_len) }
     };
-    instance_copy(unsafe { &*instance }, kinds)
-        .map_or(std::ptr::null_mut(), |copy| Box::into_raw(Box::new(copy)))
+    instance_copy(unsafe { &*instance }, kinds).unwrap_or(std::ptr::null_mut())
 }
 
 #[cfg(test)]
@@ -126,7 +121,7 @@ mod tests {
         );
         let copy = unsafe { pycc_rt_ext_instance_copy(slotless, std::ptr::null(), 0) };
         assert!(!copy.is_null());
-        assert_eq!(unsafe { &*copy }.layout, unsafe { &*slotless }.layout);
+        assert_eq!(unsafe { &*copy }.layout(), unsafe { &*slotless }.layout());
     }
 
     #[test]
@@ -197,8 +192,8 @@ mod tests {
         assert!(unsafe { pycc_rt_ext_instance_carrier(copy) }.is_null());
         assert_eq!(unsafe { pycc_rt_ext_instance_carrier(instance) }, carrier);
         assert!(std::ptr::eq(
-            unsafe { &*copy }.layout,
-            unsafe { &*instance }.layout
+            unsafe { &*copy }.layout(),
+            unsafe { &*instance }.layout()
         ));
     }
 }

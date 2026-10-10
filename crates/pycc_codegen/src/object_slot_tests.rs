@@ -357,7 +357,8 @@ fn an_attribute_store_retains_a_borrowed_object_and_releases_nothing() {
     assert_eq!(ir.matches(RETAIN).count(), 1, "{ir}");
     assert_eq!(ir.matches(RELEASE).count(), 0, "{ir}");
     let retain = at(ir, RETAIN);
-    let first_set = at(ir, "@pycc_rt_instance_set_slot(");
+    // The slot store is inline: the stored word is this `ptrtoint`.
+    let first_set = at(ir, "%attr_container_ptrtoint");
     assert!(retain < first_set, "{ir}");
 }
 

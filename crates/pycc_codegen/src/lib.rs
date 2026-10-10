@@ -45,6 +45,8 @@ mod int_const;
 /// `list[T]` emission over the generic `PyListObj` (`pycc_rt::list`).
 mod list;
 mod int_fast;
+mod float_fast;
+mod for_range_fast;
 use int_const::{emit_int_constant, tag_smallint_const};
 mod exception_isinstance;
 mod exception_render;
@@ -294,13 +296,10 @@ enum Scalar<'ctx> {
     /// non-`Optional` `Ty` once narrowed) -- see this PR's ADR.
     Optional(inkwell::values::StructValue<'ctx>),
     /// A pointer to a heap-allocated `pycc_rt::PyInstanceObj` (D-154, Part 1
-    /// of #375) -- like `List`/`Dict`/`Set`, opaque to this crate, which
-    /// only ever stores it, passes it to a `pycc_rt_instance_*` call, or
-    /// marshals it across a function boundary. Never `GEP`'d into directly
-    /// (the class-instance-layout ADR's own opaque-accessor decision):
-    /// every attribute read/write goes through
-    /// `pycc_rt_instance_get_slot`/`_set_slot` with a compile-time-resolved
-    /// slot index, exactly like `List`'s own `pycc_rt_list_*` calls.
+    /// of #375). Attribute reads and writes address its slots directly at a
+    /// compile-time-resolved slot index, through `pycc_rt::instance`'s
+    /// documented `#[repr(C)]` layout (see `attr_slot`); everything else
+    /// about it goes through `pycc_rt_instance_*` calls.
     ///
     /// Its own variant rather than a reuse of `List`'s/`Dict`'s/`Set`'s
     /// (D-107/D-124's exact reasoning, extended identically): `PyInstanceObj`
@@ -1283,12 +1282,7 @@ fn range_operand_to_normalized_int<'ctx>(
             // D-141's bool normalization by round-tripping through a raw
             // `i64`, which made every bigint operand abort. The runtime
             // normalizer keeps that bool contract and lets a bigint through.
-            builder
-                .build_call(rt.range_normalize_operand, &[encoded.into()], "range_norm")
-                .expect("build_call should not fail for a declared runtime function")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_range_normalize_operand returns a non-void i64")
-                .into_int_value()
+            int_fast::emit_range_normalize(context, builder, rt, encoded)
         }
         // `List`/`Dict`/`Set`/`Tuple` join this arm's existing or-pattern
         // rather than getting their own (D-107, extended to dict/set by
@@ -2359,8 +2353,11 @@ fn emit_expr_unchecked<'ctx>(
                     Scalar::Float(quotient)
                 }
                 Ty::Float => {
-                    let l = to_float(context, builder, rt, l);
-                    let r = to_float(context, builder, rt, r);
+                    // `float_fast`: each `int` operand's conversion, `/` and
+                    // `**` guard the pending exception on their own cold
+                    // paths (see `expression_can_set_exception`).
+                    let l = float_fast::operand(context, builder, rt, l);
+                    let r = float_fast::operand(context, builder, rt, r);
                     match op {
                         pycc_mir::BinOpKind::Add => Scalar::Float(
                             builder
@@ -2378,7 +2375,7 @@ fn emit_expr_unchecked<'ctx>(
                                 .expect("build_float_mul should not fail for two f64 operands"),
                         ),
                         pycc_mir::BinOpKind::Div => {
-                            Scalar::Float(build_float_rt_binop(builder, rt.float_div, l, r))
+                            Scalar::Float(float_fast::emit_div(context, builder, rt, l, r))
                         }
                         // Each arm binds its own `rt_fn` directly (rather
                         // than a shared `FloorDiv | Mod | Pow` arm re-matching
@@ -2397,7 +2394,18 @@ fn emit_expr_unchecked<'ctx>(
                             Scalar::Float(build_float_rt_binop(builder, rt.float_floormod, l, r))
                         }
                         pycc_mir::BinOpKind::Pow => {
-                            Scalar::Float(build_float_rt_binop(builder, rt.float_pow, l, r))
+                            let exponent_literal = match right.as_ref() {
+                                MirExpr::FloatLiteral(value) => Some(*value),
+                                _ => None,
+                            };
+                            Scalar::Float(float_fast::emit_pow(
+                                context,
+                                builder,
+                                rt,
+                                l,
+                                r,
+                                exponent_literal,
+                            ))
                         }
                         other => unreachable!("pycc_types rejects a float `{other:?}` (T0021)"),
                     }
@@ -3686,28 +3694,15 @@ fn emit_expr_unchecked<'ctx>(
             );
             Scalar::Instance(instance_ptr)
         }
-        // `base.attr` (D-154, Part 1 of #375): read the raw slot word via
-        // the opaque `pycc_rt_instance_get_slot_checked` accessor (never a
-        // direct `GEP`, per the class-instance-layout ADR) -- which raises
-        // `AttributeError` for a slot not yet assigned (#1388), the raise
-        // `expression_can_set_exception` guards -- then reinterpret it as
-        // the attribute's own declared `Ty` -- see `slot_word_to_scalar`'s
-        // own doc comment for the conversion and its own reachable-`Ty`
-        // scope.
+        // `base.attr` (D-154): an inline read of the slot word, raising
+        // `AttributeError` on the cold path for a slot not yet assigned
+        // (#1388) -- see `attr_slot::emit_slot_load_checked` -- then
+        // reinterpreted as the attribute's own declared `Ty` (see
+        // `slot_word_to_scalar`).
         MirExpr::AttrGet { base, slot, ty } => {
             let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
             let base_ptr = expect_instance_pointer(base_scalar, "attribute access base");
-            let slot_index = context.i64_type().const_int(*slot as u64, false);
-            let raw = builder
-                .build_call(
-                    rt.instance_get_slot_checked,
-                    &[base_ptr.into(), slot_index.into()],
-                    "instance_get_slot",
-                )
-                .expect("build_call should not fail for a well-formed attribute read")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_instance_get_slot_checked returns a non-void i64")
-                .into_int_value();
+            let raw = attr_slot::emit_slot_load_checked(context, builder, rt, base_ptr, *slot as u64);
             slot_word_to_scalar(context, builder, raw, ty)
         }
         // Part 2 of #1026: the string-keyed runtime sibling of the
@@ -6012,6 +6007,7 @@ fn compile_to_object_with_observer(
     let i64_type = context.i64_type();
     let rt = declare_rt_functions(&context, &module);
     rt.thread_safe_exception_check.set(options.ext);
+    rt.glibc_libm.set(float_fast::target_libm_is_glibc(target_triple));
 
     // First pass: declare every user-defined function -- with its real
     // parameter types and return type (Task 5), instead of Task 3/4's
@@ -7475,9 +7471,22 @@ fn emit_stmt<'ctx>(
             let body_bb = context.append_basic_block(function, "for_body");
             let after_bb = context.append_basic_block(function, "for_after");
 
-            builder
-                .build_unconditional_branch(test_bb)
-                .expect("build_unconditional_branch should not fail entering the loop test");
+            // `for_range_fast`: smallint bounds and a literal step take a
+            // raw-counter copy of the loop; this generic loop stays for
+            // bigint bounds. Both leave through `exit_bb`.
+            let small_version = for_range_fast::versionable_step(rt, stmt, step, body)
+                .map(|k| {
+                    let small_bb = context.append_basic_block(function, "small_range_entry");
+                    let exit_bb = context.append_basic_block(function, "for_exit");
+                    let small = for_range_fast::bounds_are_small(context, builder, start_v, stop_v);
+                    int_fast::likely_branch(context, builder, small, small_bb, test_bb);
+                    (k, small_bb, exit_bb)
+                });
+            if small_version.is_none() {
+                builder
+                    .build_unconditional_branch(test_bb)
+                    .expect("build_unconditional_branch should not fail entering the loop test");
+            }
             builder.position_at_end(test_bb);
             let induction = builder
                 .build_phi(context.i64_type(), "for_current")
@@ -7519,7 +7528,7 @@ fn emit_stmt<'ctx>(
                 locals,
                 body,
                 latch_bb,
-                expected_return_ty,
+                expected_return_ty.clone(),
                 finally_stack,
             )?;
             rt.loops.exit();
@@ -7560,6 +7569,30 @@ fn emit_stmt<'ctx>(
             emit_bigint_refcount_call(context, builder, rt, current, BigIntRefcount::Release);
             emit_bigint_refcount_call(context, builder, rt, stop_v, BigIntRefcount::Release);
             emit_bigint_refcount_call(context, builder, rt, step_v, BigIntRefcount::Release);
+            if let Some((k, small_bb, exit_bb)) = small_version {
+                builder.build_unconditional_branch(exit_bb).expect("branch");
+                // Smallint bounds and step own nothing, so the smallint
+                // loop leaves straight to `exit_bb`, with no releases.
+                builder.position_at_end(small_bb);
+                for_range_fast::emit(
+                    context,
+                    builder,
+                    module,
+                    rt,
+                    user_functions,
+                    locals,
+                    stmt,
+                    var,
+                    start_v,
+                    stop_v,
+                    k,
+                    body,
+                    exit_bb,
+                    expected_return_ty,
+                    finally_stack,
+                )?;
+                builder.position_at_end(exit_bb);
+            }
             Ok(())
         }
         // An intentional inline duplicate of `ForRange`'s loop-building
@@ -8494,8 +8527,8 @@ fn emit_stmt<'ctx>(
             held.release(builder, rt);
             Ok(())
         }
-        // `base.attr = value` (D-154, Part 1 of #375): writes the raw slot
-        // word via the opaque `pycc_rt_instance_set_slot` accessor -- the
+        // `base.attr = value` (D-154, Part 1 of #375): stores the raw slot
+        // word inline (`attr_slot::emit_slot_store`) -- the
         // mirror image of `MirExpr::AttrGet`'s read, using
         // `scalar_to_slot_word` for the identical encoding
         // `slot_word_to_scalar` decodes.
@@ -8530,9 +8563,9 @@ fn emit_stmt<'ctx>(
                 )),
                 other => other,
             };
-            let slot_index = context.i64_type().const_int(*slot as u64, false);
+            let slot = *slot as u64;
             if value_ty == pycc_mir::Ty::Str {
-                decref_str_attr_slot_before_store(context, builder, rt, base_ptr, slot_index);
+                decref_str_attr_slot_before_store(context, builder, rt, base_ptr, slot);
             }
             // Unlike a local's storage slot, an instance attribute's
             // declared `Ty` is not reachable from `MirStmt::AttrSet` (it
@@ -8560,16 +8593,10 @@ fn emit_stmt<'ctx>(
             // the coincidence silently; threading the declared type
             // through from `mir.class_defs` remains out of scope.
             if value_ty == pycc_mir::Ty::Int {
-                release_int_attr_slot_before_store(context, builder, rt, base_ptr, slot_index);
+                release_int_attr_slot_before_store(context, builder, rt, base_ptr, slot);
             }
             let word = scalar_to_slot_word(context, builder, value_scalar);
-            builder
-                .build_call(
-                    rt.instance_set_slot,
-                    &[base_ptr.into(), slot_index.into(), word.into()],
-                    "instance_set_slot",
-                )
-                .expect("build_call should not fail for a well-formed attribute write");
+            attr_slot::emit_slot_store(context, builder, base_ptr, slot, word);
             Ok(())
         }
         // `for k in d:` (PR-11 Task 5, D-123): an intentional inline

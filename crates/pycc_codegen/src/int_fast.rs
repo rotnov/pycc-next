@@ -52,7 +52,7 @@ fn weight_branch<'ctx>(context: &'ctx Context, branch: InstructionValue<'ctx>, l
 }
 
 /// `br cond, then, else` with `then` marked likely.
-fn likely_branch<'ctx>(
+pub(super) fn likely_branch<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
     cond: IntValue<'ctx>,
@@ -442,6 +442,29 @@ pub(super) fn emit_int_to_float<'ctx>(
     rt: &RtFns<'ctx>,
     word: IntValue<'ctx>,
 ) -> FloatValue<'ctx> {
+    int_to_float(context, builder, rt, word, false)
+}
+
+/// [`emit_int_to_float`] followed, on its cold runtime path only, by the
+/// pending-exception guard: the conversion raises `OverflowError` past
+/// `1e308`. For an operation that guards itself (`float_fast`) instead of
+/// relying on `emit_expr`'s guard after the whole node.
+pub(super) fn emit_int_to_float_guarded<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    word: IntValue<'ctx>,
+) -> FloatValue<'ctx> {
+    int_to_float(context, builder, rt, word, true)
+}
+
+fn int_to_float<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    word: IntValue<'ctx>,
+    guard: bool,
+) -> FloatValue<'ctx> {
     let function = current_function(builder);
     let fast_bb = context.append_basic_block(function, "itof_fast");
     let slow_bb = context.append_basic_block(function, "itof_slow");
@@ -465,14 +488,44 @@ pub(super) fn emit_int_to_float<'ctx>(
         .try_as_basic_value()
         .expect_basic("pycc_rt_int_to_float returns f64")
         .into_float_value();
+    if guard {
+        crate::exception::guard_statement_effects(context, builder, rt);
+    }
+    let slow_end = builder.get_insert_block().expect("positioned");
     builder.build_unconditional_branch(join_bb).expect("branch");
 
     builder.position_at_end(join_bb);
     let phi = builder
         .build_phi(context.f64_type(), "itof_result")
         .expect("phi");
-    phi.add_incoming(&[(&fast_value, fast_bb), (&slow_value, slow_bb)]);
+    phi.add_incoming(&[(&fast_value, fast_bb), (&slow_value, slow_end)]);
     phi.as_basic_value().into_float_value()
+}
+
+/// One `range()` operand normalized for the induction phi: a smallint passes
+/// through inline; anything else (a bool marker, a heap bigint) goes through
+/// `pycc_rt_range_normalize_operand`.
+pub(super) fn emit_range_normalize<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    word: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    let function = current_function(builder);
+    let fast_bb = builder.get_insert_block().expect("positioned");
+    let slow_bb = context.append_basic_block(function, "range_norm_slow");
+    let join_bb = context.append_basic_block(function, "range_norm_join");
+    let small = is_small(context, builder, word);
+    likely_branch(context, builder, small, join_bb, slow_bb);
+    builder.position_at_end(slow_bb);
+    let slow_value = call_i64(builder, rt.range_normalize_operand, &[word], "range_norm");
+    builder.build_unconditional_branch(join_bb).expect("branch");
+    builder.position_at_end(join_bb);
+    let phi = builder
+        .build_phi(context.i64_type(), "range_operand")
+        .expect("phi");
+    phi.add_incoming(&[(&word, fast_bb), (&slow_value, slow_bb)]);
+    phi.as_basic_value().into_int_value()
 }
 
 /// `range`'s continuation test for three encoded operands: inline signed

@@ -40,7 +40,7 @@ pub unsafe extern "C" fn pycc_rt_ext_instance_class(
     instance: *mut PyInstanceObj,
     len: *mut usize,
 ) -> *const u8 {
-    let layout = unsafe { &*instance }.layout;
+    let layout = unsafe { &*instance }.layout();
     let name = class_name(layout);
     unsafe { *len = name.len() };
     name.as_ptr()

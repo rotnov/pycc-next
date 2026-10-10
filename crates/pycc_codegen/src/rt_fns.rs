@@ -69,6 +69,13 @@ pub(super) struct RtFns<'ctx> {
     pub(super) float_floordiv: FunctionValue<'ctx>,
     pub(super) float_floormod: FunctionValue<'ctx>,
     pub(super) float_pow: FunctionValue<'ctx>,
+    /// libm's own `pow`, the function `pycc_rt_float_pow` (and CPython's
+    /// `float_pow`) computes with; `float_fast` calls it directly on the
+    /// domain where no Python exception is possible.
+    pub(super) libm_pow: FunctionValue<'ctx>,
+    /// `llvm.sqrt.f64` (correctly rounded), for `float_fast`'s proof that
+    /// `pow(x, 0.5) == sqrt(x)`.
+    pub(super) sqrt_f64: FunctionValue<'ctx>,
     pub(super) str_from_literal: FunctionValue<'ctx>,
     pub(super) str_concat: FunctionValue<'ctx>,
     /// #575 (Part 2 of #123): `pycc_rt_str_repeat`, the `str * int` /
@@ -237,14 +244,12 @@ pub(super) struct RtFns<'ctx> {
     /// D-154 (Part 1 of #375): `pycc_rt::instance`'s own function
     /// cluster -- `instance_new` (allocates a fresh instance with the
     /// class's own declared slot count, every slot unassigned, and -- since
-    /// #1388 -- its layout descriptor), and the class-instance-layout ADR's
-    /// opaque accessors (codegen never `GEP`s into a `PyInstanceObj`
-    /// directly): `instance_get_slot_checked`, the read every `base.attr`
-    /// performs, which raises `AttributeError` for an unassigned slot
-    /// (#1388); `instance_get_slot`, the unchecked read the stores use to
-    /// release a slot's old value; and `instance_set_slot`.
+    /// #1388 -- its layout descriptor); `instance_get_slot_checked`, the cold
+    /// path of an inline `base.attr` read that raises `AttributeError` for an
+    /// unassigned slot (#1388, see `attr_slot`); and `instance_set_slot`,
+    /// which only enum member initialization still calls (attribute stores
+    /// are inline).
     pub(super) instance_new: FunctionValue<'ctx>,
-    pub(super) instance_get_slot: FunctionValue<'ctx>,
     pub(super) instance_get_slot_checked: FunctionValue<'ctx>,
     pub(super) instance_set_slot: FunctionValue<'ctx>,
     /// Issue #22: runtime NameError for call-before-`def`. Takes a
@@ -262,6 +267,9 @@ pub(super) struct RtFns<'ctx> {
     /// Set for an `ext` build: check the pending state with
     /// `exception_active` rather than the process-wide `exc_pending` load.
     pub(super) thread_safe_exception_check: std::cell::Cell<bool>,
+    /// Set when the target's libm is glibc, whose documented `pow` error
+    /// bound lets `float_fast` prove `pow(x, 0.5) == sqrt(x)` for most `x`.
+    pub(super) glibc_libm: std::cell::Cell<bool>,
     /// `exception_value` returns a pointer to the current exception object.
     pub(super) exception_value: FunctionValue<'ctx>,
     /// `exception_clear` resets the thread-local pending state (void).
@@ -340,7 +348,13 @@ pub(super) fn declare_rt_functions<'ctx>(
             .and_then(|intrinsic| intrinsic.get_declaration(module, &[i64_type.into()]))
             .expect("LLVM provides the integer overflow intrinsics")
     };
+    let f64_intrinsic = |name: &str| {
+        inkwell::intrinsics::Intrinsic::find(name)
+            .and_then(|intrinsic| intrinsic.get_declaration(module, &[f64_type.into()]))
+            .expect("LLVM provides the f64 math intrinsics")
+    };
     RtFns {
+        sqrt_f64: f64_intrinsic("llvm.sqrt"),
         int_truediv: declare(
             "pycc_rt_int_truediv",
             f64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
@@ -444,6 +458,10 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         float_pow: declare(
             "pycc_rt_float_pow",
+            f64_type.fn_type(&[f64_type.into(), f64_type.into()], false),
+        ),
+        libm_pow: declare(
+            "pow",
             f64_type.fn_type(&[f64_type.into(), f64_type.into()], false),
         ),
         str_from_literal: declare(
@@ -689,10 +707,6 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_instance_new",
             ptr_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
         ),
-        instance_get_slot: declare(
-            "pycc_rt_instance_get_slot",
-            i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
-        ),
         instance_get_slot_checked: declare(
             "pycc_rt_instance_get_slot_checked",
             i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
@@ -715,6 +729,7 @@ pub(super) fn declare_rt_functions<'ctx>(
             context.i8_type().fn_type(&[], false),
         ),
         thread_safe_exception_check: std::cell::Cell::new(false),
+        glibc_libm: std::cell::Cell::new(false),
         exception_value: declare("pycc_rt_exception_value", ptr_type.fn_type(&[], false)),
         exception_clear: declare("pycc_rt_exception_clear", void_type.fn_type(&[], false)),
         exception_alloc: declare(

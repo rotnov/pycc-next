@@ -2363,7 +2363,10 @@ mod tests {
         // `stop` is the `len(b)` word -- the target slot's previous word
         // inside `emit_assign`, the induction word once `next` is computed,
         // and three in `for_after` (the surviving induction word, `stop`
-        // and `step`).
+        // and `step`). Plus one: the smallint copy of the loop
+        // (`for_range_fast`) binds the target through `emit_assign` too,
+        // releasing the slot's previous word; it retains nothing, since its
+        // induction word is always a smallint.
         //
         // Classifying `BufferLen` as a borrowed duplicate instead makes
         // `int_temporary_word` answer `None` for `stop`, which drops
@@ -2373,6 +2376,6 @@ mod tests {
         // program's output or in its RSS here -- a buffer length is always
         // an inline D-141 smallint, so the release is a runtime no-op -- so
         // this count is the only place the classification is observable.
-        assert_eq!((retains, releases), (4, 8), "got {calls:?}");
+        assert_eq!((retains, releases), (4, 9), "got {calls:?}");
     }
 }

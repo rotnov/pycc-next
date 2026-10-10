@@ -23,7 +23,7 @@
 //! The new word is stored as given: the setter hands over a reference it
 //! owns (a fresh `PyStrObj`, a new CPython reference), or a plain word.
 
-use super::{PyInstanceObj, instance_get_slot_checked, instance_set_slot, read_slot};
+use super::{PyInstanceObj, instance_get_slot_checked, instance_set_slot, read_slot, slot_ref};
 use crate::PyStrObj;
 
 /// Releases the reference a slot of kind `kind` held in `word`, per this
@@ -56,9 +56,7 @@ fn delete_slot(instance: &PyInstanceObj, slot: i64, kind: u8) -> bool {
         instance_get_slot_checked(instance, slot);
         return false;
     };
-    let mut slots = instance.slots.take();
-    slots[slot as usize] = None;
-    instance.slots.set(slots);
+    slot_ref(instance, slot).set(None);
     release_slot_word(old, kind);
     true
 }

@@ -90,6 +90,11 @@ impl<'ctx> LoopControlState<'ctx> {
         });
     }
 
+    /// Whether an `else:` flag waits for the [`Self::enter`] of `stmt`.
+    pub(crate) fn has_pending_else_flag(&self, stmt: &MirStmt) -> bool {
+        matches!(*self.pending_else_flag.borrow(), Some((owner, _)) if std::ptr::eq(owner, stmt))
+    }
+
     /// Drops the innermost loop registered by [`Self::enter`].
     pub(crate) fn exit(&self) {
         self.targets

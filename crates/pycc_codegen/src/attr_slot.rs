@@ -1,6 +1,7 @@
 //! Instance attribute slot words (D-154): the encoding between a `Scalar`
-//! and the raw `i64` word `pycc_rt_instance_get_slot`/`set_slot` carry, and
-//! the release of a slot's previous `str`/`int` value before a store.
+//! and a slot's raw `i64` word, the inline slot loads and stores against
+//! `pycc_rt::instance`'s `#[repr(C)]` layout, and the release of a slot's
+//! previous `str`/`int` value before a store.
 //!
 //! Extracted from `lib.rs` per AGENTS.md's decomposition rule when #1262
 //! (Part 1 of #1218) added the `list[int]`/`dict[str, int]` pointer word.
@@ -43,8 +44,7 @@ pub(crate) fn instance_layout_constant<'ctx>(
     (ptr, len)
 }
 
-/// Reinterprets a raw `i64` slot word read from `pycc_rt_instance_get_slot`
-/// as the `Scalar` its declared attribute `ty` names (D-154, Part 1 of
+/// Reinterprets a raw `i64` slot word as the `Scalar` its declared attribute `ty` names (D-154, Part 1 of
 /// #375; see `pycc_rt::instance`'s own doc comment for the slot
 /// representation this mirrors exactly): `int` passes through unchanged;
 /// `bool` truncates to `pycc_codegen`'s own `i8` `Scalar::Bool` carrier;
@@ -199,17 +199,144 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
     }
 }
 
+/// `pycc_rt::instance::INSTANCE_SLOTS_OFFSET`: byte offset of slot 0.
+const SLOTS_OFFSET: u64 = 32;
+/// `pycc_rt::instance::INSTANCE_SLOT_SIZE`.
+const SLOT_SIZE: u64 = 16;
+/// `pycc_rt::instance::INSTANCE_SLOT_ASSIGNED_OFFSET`.
+const SLOT_ASSIGNED_OFFSET: u64 = 8;
+
+/// Address of slot `slot`'s word (`field == 0`) or assigned flag
+/// (`field == SLOT_ASSIGNED_OFFSET`) inside the instance at `base`. The
+/// instance layout is `pycc_rt::instance`'s documented `#[repr(C)]` ABI,
+/// which that module pins at build time.
+fn slot_field_ptr<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    base: PointerValue<'ctx>,
+    slot: u64,
+    field: u64,
+) -> PointerValue<'ctx> {
+    let offset = context
+        .i64_type()
+        .const_int(SLOTS_OFFSET + SLOT_SIZE * slot + field, false);
+    // SAFETY (LLVM): the offset stays inside the instance allocation, whose
+    // slot count `pycc_types` checked `slot` against.
+    unsafe {
+        builder
+            .build_in_bounds_gep(context.i8_type(), base, &[offset], "slot_addr")
+            .expect("build_in_bounds_gep should not fail for a constant byte offset")
+    }
+}
+
+/// The word of slot `slot`, read inline with no assigned check: an
+/// unassigned slot holds the word `0` (`pycc_rt` zeroes it). Used by the
+/// stores that release a slot's old value, for which "nothing to release"
+/// and the `0` word mean the same thing.
+pub(crate) fn emit_slot_load<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    base: PointerValue<'ctx>,
+    slot: u64,
+) -> IntValue<'ctx> {
+    let ptr = slot_field_ptr(context, builder, base, slot, 0);
+    builder
+        .build_load(context.i64_type(), ptr, "slot_word")
+        .expect("build_load should not fail for an i64 slot word")
+        .into_int_value()
+}
+
+/// `base.attr`'s read: the slot's word when its assigned flag is set,
+/// otherwise the cold call to `pycc_rt_instance_get_slot_checked`, which
+/// raises CPython's `AttributeError` (#1388), followed by the
+/// pending-exception guard. The guard lives on that cold path only, so the
+/// common read is two loads and a predictable branch;
+/// `exception::expression_can_set_exception` therefore leaves `AttrGet`
+/// out of the nodes `emit_expr` guards after the fact.
+pub(crate) fn emit_slot_load_checked<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    base: PointerValue<'ctx>,
+    slot: u64,
+) -> IntValue<'ctx> {
+    let i64_type = context.i64_type();
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("an attribute read is emitted inside a function body");
+    let fast_bb = context.append_basic_block(function, "attr_assigned");
+    let slow_bb = context.append_basic_block(function, "attr_unassigned");
+    let join_bb = context.append_basic_block(function, "attr_join");
+    let flag_ptr = slot_field_ptr(context, builder, base, slot, SLOT_ASSIGNED_OFFSET);
+    let flag = builder
+        .build_load(i64_type, flag_ptr, "slot_assigned")
+        .expect("build_load should not fail for an i64 flag")
+        .into_int_value();
+    let assigned = builder
+        .build_int_compare(
+            inkwell::IntPredicate::NE,
+            flag,
+            i64_type.const_zero(),
+            "is_assigned",
+        )
+        .expect("icmp of two i64");
+    crate::int_fast::likely_branch(context, builder, assigned, fast_bb, slow_bb);
+
+    builder.position_at_end(fast_bb);
+    let fast_value = emit_slot_load(context, builder, base, slot);
+    builder.build_unconditional_branch(join_bb).expect("branch");
+
+    builder.position_at_end(slow_bb);
+    let slow_value = builder
+        .build_call(
+            rt.instance_get_slot_checked,
+            &[base.into(), i64_type.const_int(slot, false).into()],
+            "instance_get_slot",
+        )
+        .expect("build_call should not fail for a well-formed attribute read")
+        .try_as_basic_value()
+        .expect_basic("pycc_rt_instance_get_slot_checked returns a non-void i64")
+        .into_int_value();
+    crate::exception::guard_statement_effects(context, builder, rt);
+    let slow_end = builder.get_insert_block().expect("positioned");
+    builder.build_unconditional_branch(join_bb).expect("branch");
+
+    builder.position_at_end(join_bb);
+    let phi = builder
+        .build_phi(i64_type, "attr_word")
+        .expect("build_phi in a fresh block");
+    phi.add_incoming(&[(&fast_value, fast_bb), (&slow_value, slow_end)]);
+    phi.as_basic_value().into_int_value()
+}
+
+/// `base.attr = word`'s store: the word, then the assigned flag.
+pub(crate) fn emit_slot_store<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    base: PointerValue<'ctx>,
+    slot: u64,
+    word: IntValue<'ctx>,
+) {
+    let i64_type = context.i64_type();
+    let word_ptr = slot_field_ptr(context, builder, base, slot, 0);
+    builder
+        .build_store(word_ptr, word)
+        .expect("build_store should not fail for an i64 slot word");
+    let flag_ptr = slot_field_ptr(context, builder, base, slot, SLOT_ASSIGNED_OFFSET);
+    builder
+        .build_store(flag_ptr, i64_type.const_int(1, false))
+        .expect("build_store should not fail for an i64 flag");
+}
+
 /// Mirror of [`crate::decref_str_slot_before_store`] for an instance attribute slot
 /// rather than a local's own alloca (D-154, Part 1 of #375): only
 /// meaningful for a `Ty::Str` attribute -- reads the slot's *current* raw
-/// word through the same opaque `pycc_rt_instance_get_slot` accessor
-/// `MirExpr::AttrGet` itself uses, reinterprets it as a `str` pointer, and
-/// decrefs it before the new value overwrites the slot. The read is the
-/// unchecked one: a freshly allocated instance's slots start unassigned
-/// (`pycc_rt::instance::new_instance`), which that read returns as the `0`
-/// word -- a null pointer whose runtime decref is a documented
+/// word inline ([`emit_slot_load`]), reinterprets it as a `str` pointer, and
+/// decrefs it before the new value overwrites the slot. An unassigned slot
+/// holds the `0` word -- a null pointer whose runtime decref is a documented
 /// no-op (`pycc_rt_str_decref`'s own null check) -- exactly like a local's
-/// null-initialized string slot -- so the same call is correct for both
+/// null-initialized string slot -- so the same code is correct for both
 /// `__init__`'s first assignment and any later reassignment.
 ///
 /// Unlike `decref_str_slot_before_store`, this function has no runtime
@@ -226,18 +353,9 @@ pub(crate) fn decref_str_attr_slot_before_store<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
     base_ptr: PointerValue<'ctx>,
-    slot_index: IntValue<'ctx>,
+    slot: u64,
 ) {
-    let raw = builder
-        .build_call(
-            rt.instance_get_slot,
-            &[base_ptr.into(), slot_index.into()],
-            "instance_get_slot_old",
-        )
-        .expect("build_call should not fail for a well-formed attribute read")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_instance_get_slot returns a non-void i64")
-        .into_int_value();
+    let raw = emit_slot_load(context, builder, base_ptr, slot);
     let old = builder
         .build_int_to_ptr(
             raw,
@@ -253,30 +371,18 @@ pub(crate) fn decref_str_attr_slot_before_store<'ctx>(
 /// [`crate::bigint_rc::release_int_slot_before_store`]'s counterpart for an instance
 /// attribute slot, and the exact `int` mirror of
 /// [`decref_str_attr_slot_before_store`] directly above: reads the slot's
-/// current raw word through `pycc_rt_instance_get_slot` and releases it
-/// before the new value overwrites it. A freshly allocated instance's slots
-/// start unassigned (`pycc_rt::instance::new_instance`), which the
-/// unchecked read returns as the `0` word, and `0` is the word
-/// `pycc_rt_bigint_release` returns on without classifying, so the
-/// same call is correct for `__init__`'s first assignment and every later
-/// reassignment.
+/// current raw word inline and releases it before the new value overwrites
+/// it. An unassigned slot holds the `0` word, and `0` is a word the guarded
+/// release skips, so the same code is correct for `__init__`'s first
+/// assignment and every later reassignment.
 pub(crate) fn release_int_attr_slot_before_store<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
     base_ptr: PointerValue<'ctx>,
-    slot_index: IntValue<'ctx>,
+    slot: u64,
 ) {
-    let old = builder
-        .build_call(
-            rt.instance_get_slot,
-            &[base_ptr.into(), slot_index.into()],
-            "instance_get_slot_old_int",
-        )
-        .expect("build_call should not fail for a well-formed attribute read")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_instance_get_slot returns a non-void i64")
-        .into_int_value();
+    let old = emit_slot_load(context, builder, base_ptr, slot);
     emit_bigint_refcount_call(context, builder, rt, old, BigIntRefcount::Release);
 }
 

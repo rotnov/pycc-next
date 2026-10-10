@@ -63,15 +63,14 @@ impl ExceptionCodegenState<'_> {
 /// operations converted to catchable Python exceptions remain fail-closed.
 pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
     match expr {
-        // `AttrGet` joins the `true` group with #1388, and the dependency is
-        // live: `pycc_rt_instance_get_slot_checked` sets pycc's own D-173
-        // pending state (`AttributeError`) and returns a `0` word for a slot
-        // read before its assignment, so this guard is the whole of the
-        // failure handling.
+        // `AttrGet` is *not* in this group although it raises
+        // `AttributeError` for a slot read before its assignment (#1388):
+        // `attr_slot::emit_slot_load_checked` emits the guard itself, on the
+        // cold unassigned path only, so the common read pays no flag test.
         //
-        // `ObjAttrGet` joins the `true` group too (D-244, Part 2 of #1026):
-        // like `AttrGet`, but unlike its compile-time-resolved slot, a
-        // foreign attribute load is a real `PyObject_GetAttrString` call
+        // `ObjAttrGet` is in the `true` group (D-244, Part 2 of #1026):
+        // unlike `AttrGet`'s compile-time-resolved slot, a foreign attribute
+        // load is a real `PyObject_GetAttrString` call
         // that returns `NULL` with a CPython exception set whenever the
         // attribute is missing or its descriptor raises.
         //
@@ -98,7 +97,6 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // classification stays correct should a future emitter defer its
         // branch to that guard instead.
         MirExpr::Call { .. }
-        | MirExpr::AttrGet { .. }
         | MirExpr::DictGet { .. }
         | MirExpr::Instantiate(_)
         | MirExpr::ObjAttrGet { .. }
@@ -205,6 +203,28 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // result too large to allocate. `int` `+`, `-` and `*` never raise
         // (arbitrary precision), but a `float` operation with an `int`
         // operand converts it, which raises `OverflowError` past `1e308`.
+        // A `float` `+`, `-`, `*`, `/` or `**` (other than `int / int`,
+        // computed exactly by `pycc_rt_int_truediv`) guards itself on the
+        // cold paths `float_fast` emits -- an `int` operand's conversion,
+        // a zero divisor, `pow` outside its exception-free domain -- so
+        // `emit_expr` adds no guard after it.
+        MirExpr::BinOp {
+            op, left, right, ty, ..
+        } if *ty == pycc_mir::Ty::Float
+            && matches!(
+                op,
+                pycc_mir::BinOpKind::Add
+                    | pycc_mir::BinOpKind::Sub
+                    | pycc_mir::BinOpKind::Mul
+                    | pycc_mir::BinOpKind::Div
+                    | pycc_mir::BinOpKind::Pow
+            )
+            && !(*op == pycc_mir::BinOpKind::Div
+                && matches!(left.ty(), pycc_mir::Ty::Int | pycc_mir::Ty::Bool)
+                && matches!(right.ty(), pycc_mir::Ty::Int | pycc_mir::Ty::Bool)) =>
+        {
+            false
+        }
         MirExpr::BinOp {
             op, left, right, ty, ..
         } => {
@@ -240,6 +260,8 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
             true
         }
         MirExpr::IntLiteral(_)
+        // Guards itself on its cold path; see the comment at the top.
+        | MirExpr::AttrGet { .. }
         | MirExpr::FloatLiteral(_)
         | MirExpr::BoolLiteral(_)
         | MirExpr::IntBoundary(_)
@@ -1574,18 +1596,33 @@ mod tests {
         ] {
             assert!(expression_can_set_exception(&int_binop(op)));
         }
-        // A `float` operation converts an `int` operand, which can overflow;
-        // two `float` operands cannot raise on `+`.
-        let mixed = |left: MirExpr| MirExpr::BinOp {
-            op: pycc_mir::BinOpKind::Add,
+        // A `float` `+ - * / **` guards itself (`float_fast`): an `int`
+        // operand's overflowing conversion, a zero divisor and `pow`'s
+        // errors are all handled on cold paths it emits. `//` and `%` are
+        // still guarded after the node, and so is `int / int`.
+        let float_op = |op, left: MirExpr| MirExpr::BinOp {
+            op,
             left: Box::new(left),
             right: Box::new(MirExpr::FloatLiteral(1.5)),
             ty: pycc_mir::Ty::Float,
         };
-        assert!(expression_can_set_exception(&mixed(MirExpr::IntLiteral(1))));
-        assert!(!expression_can_set_exception(&mixed(
-            MirExpr::FloatLiteral(1.0)
-        )));
+        for op in [
+            pycc_mir::BinOpKind::Add,
+            pycc_mir::BinOpKind::Div,
+            pycc_mir::BinOpKind::Pow,
+        ] {
+            assert!(!expression_can_set_exception(&float_op(op, MirExpr::IntLiteral(1))));
+            assert!(!expression_can_set_exception(&float_op(op, MirExpr::FloatLiteral(1.0))));
+        }
+        for op in [pycc_mir::BinOpKind::FloorDiv, pycc_mir::BinOpKind::Mod] {
+            assert!(expression_can_set_exception(&float_op(op, MirExpr::FloatLiteral(1.0))));
+        }
+        assert!(expression_can_set_exception(&MirExpr::BinOp {
+            op: pycc_mir::BinOpKind::Div,
+            left: Box::new(MirExpr::IntLiteral(1)),
+            right: Box::new(MirExpr::IntLiteral(2)),
+            ty: pycc_mir::Ty::Float,
+        }));
         // `str()` of an `int` can exceed CPython's digit limit.
         assert!(expression_can_set_exception(&MirExpr::FString(vec![
             pycc_mir::MirFStringPart::Interpolation(Box::new(MirExpr::IntLiteral(1))),
@@ -1629,10 +1666,10 @@ mod tests {
         // base is a `memoryview`, so `pycc_rt_buffer_f64_get`'s bounds check
         // can always set an `IndexError`. Unlike `Subscript` above there is
         // no false direction to pin: no base shape makes it non-raising.
-        // #1388: an instance attribute read is always raising too -- the
-        // checked slot read sets `AttributeError` for a slot not yet
-        // assigned, whatever the attribute's type.
-        assert!(expression_can_set_exception(&MirExpr::AttrGet {
+        // #1388: an instance attribute read can raise `AttributeError`, but
+        // guards itself on its cold unassigned path
+        // (`attr_slot::emit_slot_load_checked`), so `emit_expr` adds none.
+        assert!(!expression_can_set_exception(&MirExpr::AttrGet {
             base: Box::new(MirExpr::Name {
                 name: "c".to_string(),
                 ty: pycc_mir::Ty::Instance(Box::new("C".to_string())),
