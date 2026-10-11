@@ -772,11 +772,10 @@ fn a_yield_nested_inside_a_top_level_if_is_still_context_invalid() {
 
 #[test]
 fn a_yield_inside_a_real_function_is_still_unsupported() {
-    // Regression guard: a real enclosing function keeps `yield` on the
-    // existing valid-but-unimplemented `C0001` path -- generator codegen
-    // remains out of scope for this issue.
+    // A generator compiles, but `yield` used as a value (`send()`) keeps
+    // the valid-but-unimplemented `C0001` path.
     assert_capability_error_message(
-        "def f() -> None:\n    yield 1\n",
+        "def f() -> None:\n    x = yield 1\n",
         "expression kind not supported yet",
     );
 }
@@ -784,7 +783,7 @@ fn a_yield_inside_a_real_function_is_still_unsupported() {
 #[test]
 fn a_yield_from_inside_a_real_function_is_still_unsupported() {
     assert_capability_error_message(
-        "def f() -> None:\n    yield from [1, 2]\n",
+        "def f() -> None:\n    x = yield from [1, 2]\n",
         "expression kind not supported yet",
     );
 }

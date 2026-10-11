@@ -13,9 +13,11 @@ use super::*;
 pub(crate) fn ty_contains_param(ty: &Ty) -> bool {
     match ty {
         Ty::Param(_) => true,
-        Ty::List(inner) | Ty::Set(inner) | Ty::FrozenSet(inner) | Ty::Optional(inner) => {
-            ty_contains_param(inner)
-        }
+        Ty::List(inner)
+        | Ty::Set(inner)
+        | Ty::FrozenSet(inner)
+        | Ty::Optional(inner)
+        | Ty::Generator(inner) => ty_contains_param(inner),
         Ty::Dict(kv) => ty_contains_param(&kv.0) || ty_contains_param(&kv.1),
         Ty::Tuple(elems) => elems.iter().any(ty_contains_param),
         // D-154: an instance's payload is only its class's name, never a
@@ -94,9 +96,11 @@ pub(crate) fn scan_signature_ty_for_param(
             }
             Ok(())
         }
-        Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) | Ty::Optional(elem) => {
-            scan_signature_ty_for_param(elem, false, found)
-        }
+        Ty::List(elem)
+        | Ty::Set(elem)
+        | Ty::FrozenSet(elem)
+        | Ty::Optional(elem)
+        | Ty::Generator(elem) => scan_signature_ty_for_param(elem, false, found),
         Ty::Dict(kv) => {
             scan_signature_ty_for_param(&kv.0, false, found)?;
             scan_signature_ty_for_param(&kv.1, false, found)

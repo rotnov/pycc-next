@@ -149,6 +149,16 @@ pub(crate) fn lower_call_expr(
             }
         })
         .collect();
+    // A generator argument of a builtin that consumes it (`pycc_types`
+    // types it as the list of its values).
+    let args = if is_user_defined {
+        args
+    } else {
+        match crate::generator::lower_generator_consumer(callee, args) {
+            Ok(lowered) => return lowered,
+            Err(args) => args,
+        }
+    };
     // Part 3 of #1026 (PR 3a of #1082): `len(o)` on a CPython object
     // becomes its own node rather than the `Call { callee: "len" }`
     // below. The two are not interchangeable at codegen -- the

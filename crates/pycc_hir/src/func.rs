@@ -15,6 +15,7 @@
 //! resolving unchanged.
 
 mod bare_container;
+mod generator;
 mod buffer_spelling;
 mod container_annotation;
 pub(crate) mod params;
@@ -117,6 +118,16 @@ pub(crate) fn lower_function(
         signatures,
     )?;
     let mut body = body;
+    if crate::body_yields(&body) {
+        let return_ty = generator::generator_return_ty(return_ty, aliases, def)?;
+        generator::generator_returns(&mut body, def)?;
+        return Ok(HirItem::Function {
+            name: def.name.to_string(),
+            params,
+            return_ty,
+            body,
+        });
+    }
     // Non-strict mode (#3): a function returning an object that can run off
     // its end returns `None` there, as every Python function does.
     if return_ty == Ty::Object
@@ -722,6 +733,44 @@ pub(crate) fn annotation_to_ty(
                 ));
             };
             match base_name.id.as_str() {
+                // A generator: `Iterator[T]`, `Iterable[T]` or
+                // `Generator[T, None, None]` (send and return types `None`:
+                // a compiled generator is driven by `next()` only and
+                // returns no value).
+                "Iterator" | "Iterable" | "Generator"
+                    if !class_defs.iter().any(|info| info.name == base_name.id.as_str()) =>
+                {
+                    let args: Vec<&Expr> = match sub.slice.as_ref() {
+                        Expr::Tuple(tuple) => tuple.elts.iter().collect(),
+                        other => vec![other],
+                    };
+                    let well_formed = match base_name.id.as_str() {
+                        "Generator" => {
+                            matches!(args.len(), 1 | 3)
+                                && args[1..].iter().all(|a| matches!(a, Expr::NoneLiteral(_)))
+                        }
+                        _ => args.len() == 1,
+                    };
+                    if !well_formed {
+                        return Err(unsupported(
+                            format!(
+                                "`{}[...]` is supported with one type argument (and, for \
+                                 `Generator`, `None` send and return types)",
+                                base_name.id
+                            ),
+                            pycc_ast::expr_range(annotation),
+                        ));
+                    }
+                    let element =
+                        annotation_to_ty(args[0], type_param, class_name, aliases, class_defs)?;
+                    let ty = Ty::Generator(Box::new(element));
+                    crate::check_container_ty(&ty, Span::new(0, 0)).map_err(|mut d| {
+                        let r = pycc_ast::expr_range(annotation);
+                        d.span = Some(Span::new(r.start, r.end));
+                        d
+                    })?;
+                    Ok(ty)
+                }
                 // #911: see the bare-`ClassVar` arm above -- `ClassVar[T]`
                 // is legal only on a class-body attribute declaration, where
                 // `pycc_hir::class::body::strip_class_var` removes it before

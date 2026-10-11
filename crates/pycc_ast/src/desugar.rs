@@ -22,8 +22,14 @@
 //! * `key=`/`reverse=` arguments of `sorted`, `min`, `max` and
 //!   `list.sort` become a list of `(key, element)` pairs (see [`keys`]);
 //!   comprehension tuple targets become subscripts of a fresh variable and
-//!   a generator argument of `sum`/`min`/`max`/`any`/`all`/`str.join`
-//!   becomes a list comprehension (see [`comps`]).
+//!   a generator argument of `sum`/`min`/`max`/`str.join` becomes a list
+//!   comprehension (see [`comps`]).
+//! * Any other generator expression becomes a call of a module-level
+//!   generator helper, comprehensions with several clauses (or over a
+//!   generator) helpers with nested loops, and a starred call a helper
+//!   checking the count (see [`helpers`]); `yield from it` becomes `for v
+//!   in it: yield v`. An `--ext` module's public generators are split by
+//!   [`split_ext_generators`], which HIR lowering calls.
 //! * `map(f, xs)` and `filter(f, xs)` become list comprehensions, a lambda
 //!   argument inlined; `[*xs]` becomes `list(xs)`; `print(*xs, sep=s)`
 //!   becomes `print(s.join([str(x) for x in xs]))`.
@@ -39,6 +45,7 @@ mod build;
 mod closures;
 mod comps;
 mod exprs;
+mod ext_generators;
 mod globals;
 mod helpers;
 mod hoist;
@@ -50,6 +57,8 @@ mod webs;
 mod wildcard;
 
 use ruff_python_ast::{Expr, ModModule, Stmt};
+
+pub use ext_generators::split_ext_generators;
 
 /// The return annotation [`desugar`] gives a synthesized `def` whose
 /// signature is to be inferred rather than declared.

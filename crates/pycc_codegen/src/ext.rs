@@ -995,7 +995,8 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::ForList { body, .. }
         | MirStmt::ForObject { body, .. }
         | MirStmt::ForDict { body, .. }
-        | MirStmt::ForSet { body, .. } => body_returns_buffer_slice(body),
+        | MirStmt::ForSet { body, .. }
+        | MirStmt::ForGen { body, .. } => body_returns_buffer_slice(body),
         MirStmt::Seq(stmts) => body_returns_buffer_slice(stmts),
         MirStmt::LoopElse { loop_stmt, orelse } => {
             body_returns_buffer_slice(std::slice::from_ref(loop_stmt.as_ref()))
@@ -1043,6 +1044,7 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::ForeignImport { .. }
         | MirStmt::Break
         | MirStmt::Continue
+        | MirStmt::Yield(_)
         | MirStmt::Reraise => false,
     })
 }

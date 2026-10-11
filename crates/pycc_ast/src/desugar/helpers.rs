@@ -23,6 +23,8 @@
 //!   comprehension collects `(key, value)` pairs -- each key evaluated
 //!   before its value, as CPython does -- and returns `dict(...)` of them.
 //!   Module globals and builtins stay free names of the helper.
+//! * A generator expression becomes a call of a generator helper
+//!   (`genexpr`).
 //! * A call of a module-level function with one starred argument
 //!   (`f(a, *xs)`) becomes a call of a helper receiving the same arguments,
 //!   which checks the starred value's length against the parameters it must
@@ -33,6 +35,8 @@
 //! the enclosing scope (a walrus), or uses `super()`, `yield` or `await`;
 //! a starred call when the callee is not a plain module-level function
 //! with positional parameters only and no defaults.
+
+mod genexpr;
 
 use super::Fresh;
 use super::INFER_MARKER;
@@ -61,11 +65,16 @@ struct Callee {
 /// top-level statement whose code uses it.
 pub(crate) fn lift_helpers(body: &mut Vec<Stmt>, fresh: &Fresh) {
     let callees = module_callees(body);
+    let module_names = bound_of(body).names;
+    let generators = generator_names(body);
     let old = std::mem::take(body);
     for mut stmt in old {
         let lift = Lift {
             fresh,
             callees: &callees,
+            module_names: &module_names,
+            generators: &generators,
+            consumer_arg: std::cell::Cell::new(false),
             out: RefCell::new(Vec::new()),
             scopes: RefCell::new(Vec::new()),
             lifted_inside: std::cell::Cell::new(0),
@@ -112,8 +121,12 @@ fn module_callees(body: &[Stmt]) -> HashMap<String, Callee> {
 
 #[derive(Clone)]
 enum Frame {
-    /// A function, lambda or comprehension scope and the names it binds.
-    Local(HashSet<String>),
+    /// A function, lambda or comprehension scope, the names it binds, and
+    /// those of them that keep one value once bound (`genexpr`).
+    Local {
+        names: HashSet<String>,
+        stable: HashSet<String>,
+    },
     /// A class body: nothing in it is rewritten.
     Class,
 }
@@ -121,6 +134,13 @@ enum Frame {
 struct Lift<'a> {
     fresh: &'a Fresh,
     callees: &'a HashMap<String, Callee>,
+    /// The names the module binds (shadowing a builtin).
+    module_names: &'a HashSet<String>,
+    /// The module's generator functions and generator method names.
+    generators: &'a Generators,
+    /// Set right before visiting a generator expression passed to a
+    /// consuming builtin; read (and cleared) by `visit_expr`.
+    consumer_arg: std::cell::Cell<bool>,
     out: RefCell<Vec<Stmt>>,
     scopes: RefCell<Vec<Frame>>,
     /// Helpers emitted so far inside the current comprehension body.
@@ -141,7 +161,20 @@ impl Lift<'_> {
         self.scopes
             .borrow()
             .iter()
-            .any(|f| matches!(f, Frame::Local(names) if names.contains(name)))
+            .any(|f| matches!(f, Frame::Local { names, .. } if names.contains(name)))
+    }
+
+    /// Whether the innermost scope binding `name` keeps one value for it.
+    fn is_stable(&self, name: &str) -> bool {
+        self.scopes.borrow().iter().rev().find_map(|f| match f {
+            Frame::Local { names, stable } if names.contains(name) => Some(stable.contains(name)),
+            _ => None,
+        }) == Some(true)
+    }
+
+    /// Whether `name` is the builtin of that name here.
+    fn builtin(&self, name: &str) -> bool {
+        !self.is_local(name) && !self.module_names.contains(name)
     }
 
     fn with(&self, frame: Frame, f: impl FnOnce()) {
@@ -195,6 +228,9 @@ impl Lift<'_> {
             Expr::DictComp(c) => (&c.generators, CompKind::Dict(c.key.as_deref()?, &c.value)),
             _ => return None,
         };
+        // A comprehension over a generator loops over it in a helper: only
+        // a `for` statement iterates one.
+        let force = force || generators.iter().any(|g| self.makes_generator(&g.iter));
         if (generators.len() < 2 && generators.iter().all(|g| g.ifs.len() < 2) && !force) || generators.iter().any(|g| g.is_async) || !liftable(expr) {
             return None;
         }
@@ -585,10 +621,12 @@ impl Transformer for Lift<'_> {
                     self.visit_expr(&mut d.expression);
                 }
                 let bound = bound_of(&def.body);
-                let mut names: HashSet<String> =
+                let params: HashSet<String> =
                     def.parameters.iter().map(|p| p.name().to_string()).collect();
+                let mut names = params.clone();
                 names.extend(bound.names.iter().filter(|n| !bound.globals.contains(*n)).cloned());
-                self.with(Frame::Local(names), || {
+                let stable = stable_names(&def.body, &names, &params);
+                self.with(Frame::Local { names, stable }, || {
                     for s in def.body.iter_mut() {
                         self.visit_stmt(s);
                     }
@@ -606,6 +644,7 @@ impl Transformer for Lift<'_> {
     }
 
     fn visit_expr(&self, expr: &mut Expr) {
+        let consumed = self.consumer_arg.replace(false);
         if self.in_class() {
             return;
         }
@@ -642,13 +681,31 @@ impl Transformer for Lift<'_> {
                         names.insert(p.name().to_string());
                     }
                 }
-                self.with(Frame::Local(names), || self.visit_expr(&mut lambda.body));
+                let stable = names.clone();
+                self.with(Frame::Local { names, stable }, || self.visit_expr(&mut lambda.body));
+            }
+            Expr::Call(c) => {
+                self.materialize_argument(c);
+                let consumer = match c.func.as_ref() {
+                    Expr::Name(f) => genexpr::is_consumer(f.id.as_str()) && self.builtin(f.id.as_str()),
+                    Expr::Attribute(a) => a.attr.as_str() == "join",
+                    _ => false,
+                };
+                self.visit_expr(&mut c.func);
+                for arg in c.arguments.args.iter_mut() {
+                    self.consumer_arg.set(consumer && matches!(arg, Expr::Generator(_)));
+                    self.visit_expr(arg);
+                }
+                for keyword in c.arguments.keywords.iter_mut() {
+                    self.visit_expr(&mut keyword.value);
+                }
             }
             _ => transformer::walk_expr(self, expr),
         }
         let force = std::mem::replace(&mut *self.force_next.borrow_mut(), false);
         if let Some(replacement) = self
             .comprehension(expr, force)
+            .or_else(|| self.generator_expression(expr, consumed))
             .or_else(|| self.starred_call(expr))
         {
             *expr = replacement;
@@ -657,7 +714,113 @@ impl Transformer for Lift<'_> {
     }
 }
 
+/// The generator functions (module-level `def`s containing `yield`) and
+/// the method names every class defining them makes generators.
+pub(super) struct Generators {
+    functions: HashSet<String>,
+    methods: HashSet<String>,
+}
+
+fn generator_names(body: &[Stmt]) -> Generators {
+    let mut functions = HashSet::new();
+    let mut methods = HashSet::new();
+    let mut plain_methods = HashSet::new();
+    for stmt in body {
+        match stmt {
+            Stmt::FunctionDef(def) if super::ext_generators::yields(&def.body) => {
+                functions.insert(def.name.to_string());
+            }
+            Stmt::ClassDef(class) => {
+                for item in class.body.iter() {
+                    if let Stmt::FunctionDef(def) = item {
+                        if super::ext_generators::yields(&def.body) {
+                            methods.insert(def.name.to_string());
+                        } else {
+                            plain_methods.insert(def.name.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    methods.retain(|m| !plain_methods.contains(m));
+    Generators { functions, methods }
+}
+
 impl Lift<'_> {
+    /// Whether `iter` is a call making a generator: of a module-level
+    /// generator function, a generator method, or a lifted generator
+    /// expression.
+    fn makes_generator(&self, iter: &Expr) -> bool {
+        let Expr::Call(c) = iter else { return false };
+        match c.func.as_ref() {
+            Expr::Name(f) => {
+                !self.is_local(f.id.as_str())
+                    && (self.generators.functions.contains(f.id.as_str())
+                        || f.id.as_str().starts_with("_pycc_genexpr_"))
+            }
+            Expr::Attribute(a) => self.generators.methods.contains(a.attr.as_str()),
+            _ => false,
+        }
+    }
+}
+
+/// The names of `names` a function body binds at most once, before any
+/// read: a parameter never rebound, or a variable assigned by one top-level
+/// statement and nowhere else.
+fn stable_names(body: &[Stmt], names: &HashSet<String>, params: &HashSet<String>) -> HashSet<String> {
+    let top_level: HashSet<String> = body
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::Assign(a) if a.targets.len() == 1 => match &a.targets[0] {
+                Expr::Name(n) => Some(n.id.to_string()),
+                _ => None,
+            },
+            Stmt::AnnAssign(a) if a.value.is_some() => match a.target.as_ref() {
+                Expr::Name(n) => Some(n.id.to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    names
+        .iter()
+        .filter(|n| {
+            let bindings = super::closures::count_uses(body, n).bindings;
+            if params.contains(*n) {
+                bindings == 0
+            } else {
+                bindings == 1 && top_level.contains(*n)
+            }
+        })
+        .cloned()
+        .collect()
+}
+
+impl Lift<'_> {
+    /// A generator expression passed as the only argument of a consumer
+    /// that materializes it becomes the list comprehension of the same
+    /// elements (`comps::materialize_generator`), lifted like any other.
+    fn materialize_argument(&self, c: &mut ruff_python_ast::ExprCall) {
+        if c.arguments.args.len() != 1 || !c.arguments.keywords.is_empty() {
+            return;
+        }
+        let consumer = match c.func.as_ref() {
+            Expr::Name(f)
+                if super::comps::is_materializing_consumer(f.id.as_str())
+                    && self.builtin(f.id.as_str()) =>
+            {
+                f.id.to_string()
+            }
+            Expr::Attribute(a) if a.attr.as_str() == "join" => "join".to_string(),
+            _ => return,
+        };
+        if let Some(list) = super::comps::materialize_generator(&consumer, &c.arguments.args[0]) {
+            c.arguments.args[0] = list;
+        }
+    }
+
     fn visit_comprehension(
         &self,
         generators: &mut [Comprehension],
@@ -668,7 +831,7 @@ impl Lift<'_> {
             self.visit_expr(&mut first.iter);
         }
         let before = self.lifted_inside.get();
-        self.with(Frame::Local(scope), || {
+        self.with(Frame::Local { names: scope, stable: HashSet::new() }, || {
             for (i, g) in generators.iter_mut().enumerate() {
                 if i > 0 {
                     self.visit_expr(&mut g.iter);

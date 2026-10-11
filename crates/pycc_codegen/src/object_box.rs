@@ -2,7 +2,8 @@
 //! boxing amendment).
 //!
 //! `pycc_types::object_box::admits` lets a native `int`, `float`, `bool`,
-//! `str`, compiled-instance or `None` value into an `object` slot at four
+//! `str`, compiled-instance or `None` value (or a generator of such values,
+//! `generator_box`) into an `object` slot at four
 //! seams. Each reaches [`emit_boxed`]:
 //!
 //! - a binding, a rebinding or an attribute store, through
@@ -74,6 +75,18 @@ pub(crate) fn emit_boxed<'ctx>(
             &display,
         );
         return crate::foreign_attr::expect_object_pointer(built);
+    }
+    if let pycc_mir::Ty::Generator(element) = value.ty() {
+        return crate::generator_box::emit_boxed_generator(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            value,
+            &element,
+        );
     }
     if value.ty() == pycc_mir::Ty::None {
         if !matches!(value, MirExpr::NoneLiteral) {

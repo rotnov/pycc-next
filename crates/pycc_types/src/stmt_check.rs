@@ -534,7 +534,7 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
                 Ty::List(elem_ty) => *elem_ty,
                 Ty::Str => Ty::Str,
                 Ty::Dict(kv) => kv.0,
-                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,
+                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) | Ty::Generator(elem_ty) => *elem_ty,
                 other => {
                     return Err(Diagnostic::error(
                         "T0033",

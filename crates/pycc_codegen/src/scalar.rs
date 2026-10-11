@@ -191,6 +191,9 @@ pub(crate) enum Scalar<'ctx> {
     /// reference, a producer such as `pycc_ext_obj_getattr` returns a new
     /// one, and an unbound temporary is released by its consumer
     /// (`object_release.rs`).
+    /// A generator object (`pycc_rt::generator::PyGenObj *`), counted
+    /// through its runtime incref/decref.
+    Generator(PointerValue<'ctx>),
     Object(PointerValue<'ctx>),
     /// A pointer to the `PyccExtBufferView` -- `pycc_rt`'s `{ ptr, len }`
     /// pair -- that a `pycc build --ext` wrapper passed for a `memoryview`
@@ -461,6 +464,8 @@ pub(crate) fn ty_to_basic_type(
         // `Py_buffer` itself, so the pointee layout is pycc's own and the
         // representation is just the pointer `Str`/`Object` already get.
         pycc_mir::Ty::MemoryView => context.ptr_type(inkwell::AddressSpace::default()).into(),
+        // A generator object (`pycc_rt::generator::PyGenObj *`).
+        pycc_mir::Ty::Generator(_) => context.ptr_type(inkwell::AddressSpace::default()).into(),
         // Deviation from the task brief: the brief's own version of this
         // catch-all's message read "(only int/float/bool/str/list[int] do)"
         // -- but that parenthetical is inaccurate twice over. This function
@@ -498,7 +503,8 @@ pub(crate) fn default_value_for_type<'ctx>(
         | pycc_mir::Ty::Instance(_)
         | pycc_mir::Ty::Protocol(_)
         | pycc_mir::Ty::Object
-        | pycc_mir::Ty::MemoryView => context
+        | pycc_mir::Ty::MemoryView
+        | pycc_mir::Ty::Generator(_) => context
             .ptr_type(inkwell::AddressSpace::default())
             .const_null()
             .into(),

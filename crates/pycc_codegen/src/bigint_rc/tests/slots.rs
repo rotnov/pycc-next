@@ -32,10 +32,11 @@ fn an_int_slot_store_emits_a_guarded_release_of_the_word_it_overwrites() {
         .iter()
         .filter(|c| c.callee == "pycc_rt_bigint_release")
         .count();
-    // Two retains (the assignment's duplicate and the return's), one
-    // release (the store's). Every one of them was proved guarded, on
-    // its own operand, by `guarded_bigint_refcount_calls`.
-    assert_eq!((retains, releases), (2, 1), "got {calls:?}");
+    // One retain (the assignment's duplicate; the return moves the
+    // slot's reference out, #625), one release (the store's). Every one
+    // of them was proved guarded, on its own operand, by
+    // `guarded_bigint_refcount_calls`.
+    assert_eq!((retains, releases), (1, 1), "got {calls:?}");
 }
 
 /// PEP 572 (#774), deep-review follow-up: `retain_if_int_duplicate`'s

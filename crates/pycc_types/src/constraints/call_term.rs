@@ -135,6 +135,27 @@ pub(crate) fn collect_call_constraints(
             signatures, parents, concrete, deferred, env, arg,
         )?);
     }
+    // A generator argument of a builtin (`crate::generator`): `next(g)` is
+    // its element; a consumer sees the list of its values.
+    if !signatures.contains_key(callee) {
+        if callee == "next"
+            && let Some(Some(Ok(Ty::Generator(element)))) = arg_terms.first()
+        {
+            return Ok(Some(Ok((**element).clone())));
+        }
+        // An argument still being inferred (a generator whose element
+        // type is not known yet): no term until the next round.
+        if callee == "next" && matches!(arg_terms.first(), Some(None)) {
+            return Ok(None);
+        }
+        if crate::generator::is_generator_consumer(callee) {
+            for term in arg_terms.iter_mut() {
+                if let Some(Ok(Ty::Generator(element))) = term {
+                    *term = Some(Ok(Ty::List(element.clone())));
+                }
+            }
+        }
+    }
     if let Some(symbol) = std_qualified_symbol(callee)
         && let Some(shadowed) =
             shadowed_std_receiver(symbol.module, &env.std_module_aliases, |receiver| {
@@ -619,6 +640,13 @@ pub(crate) fn collect_call_constraints(
                 &format!("argument {} of private helper `{callee}`", index + 1),
             )?;
         }
+    }
+    // A call of a generator function whose element type the solver is
+    // still inferring yields no term until it is resolved.
+    if let Ok(Ty::Generator(element)) = &signature.2
+        && crate::empty_container::contains_infer(element)
+    {
+        return Ok(None);
     }
     Ok(Some(signature.2.clone()))
 }

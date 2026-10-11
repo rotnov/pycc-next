@@ -23,6 +23,9 @@
 //! - an attribute store into an `object`-typed slot, including a property
 //!   setter's `object` parameter (`class::attr_set`).
 //!
+//! A generator of such values boxes too, as a CPython iterator over the
+//! same native generator ([`is_boxable_generator`]).
+//!
 //! Everything else keeps the strict rule: a native container (D-258 rule 4:
 //! a copy would break aliasing), an `Optional[T]` value (its `None` and its
 //! payload have no single packer), an enum member and an exception
@@ -48,7 +51,16 @@ use pycc_hir::{HirExpr, Ty};
 pub(crate) fn admits(env: &Environment, from: &Ty, to: &Ty) -> bool {
     matches!(to, Ty::Object)
         && !matches!(from, Ty::Object)
-        && (matches!(from, Ty::None) || foreign::is_object_operand(env, from))
+        && (matches!(from, Ty::None)
+            || foreign::is_object_operand(env, from)
+            || is_boxable_generator(env, from))
+}
+
+/// Whether `ty` is a generator whose values box (`admits`): it crosses as
+/// a CPython iterator sharing the native generator (`pycc_ext_gen_wrap`),
+/// so, unlike a container, no copy breaks aliasing.
+pub(crate) fn is_boxable_generator(env: &Environment, ty: &Ty) -> bool {
+    matches!(ty, Ty::Generator(element) if foreign::is_object_operand(env, element))
 }
 
 /// [`admits`] for a value whose expression is known, refusing (`I0404`)

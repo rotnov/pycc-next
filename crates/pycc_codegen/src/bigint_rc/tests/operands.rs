@@ -368,8 +368,11 @@ fn a_successfully_completed_tuple_literal_truncates_without_releasing() {
         "no sibling element here can set D-173's pending-exception \
          state, so no unwind block should be emitted; got:\n{ir}"
     );
+    // The epilogue's release of the parameter `n` (#625) is the only one.
     assert!(
-        !ir.contains("call void @pycc_rt_bigint_release"),
+        ir.lines()
+            .filter(|line| line.contains("call void @pycc_rt_bigint_release"))
+            .all(|line| line.contains("%int_epilogue_live")),
         "the success path must truncate the pending entry for the \
          first (owned) tuple element without ever releasing it; got:\n{ir}"
     );
@@ -561,15 +564,30 @@ fn an_in_range_literal_operand_emits_no_refcount_guard_at_all() {
         Some(&mut observer),
     )
     .expect("codegen should succeed");
+    // The only guard left is the epilogue's release of the parameter `n`
+    // (#625): one call block, one continuation, one call.
+    let calls = super::guarded_bigint_refcount_calls(&ir);
     assert!(
-        !ir.contains("bigint_rc_call"),
+        calls
+            .iter()
+            .all(|call| call.word.starts_with("%int_epilogue_live")),
         "a constant word must not reach the guard emitter, but the IR \
-         contains a `bigint_rc_call` block:\n{ir}"
+         guards another word:\n{ir}"
     );
-    assert!(
-        !ir.contains("bigint_rc_cont"),
-        "a constant word must not reach the guard emitter, but the IR \
-         contains a `bigint_rc_cont` block:\n{ir}"
+    let labels = |prefix: &str| {
+        ir.lines()
+            .filter(|line| line.starts_with(prefix) && line.contains(':'))
+            .count()
+    };
+    assert_eq!(
+        labels("bigint_rc_call") + labels("bigint_param_call"),
+        calls.len(),
+        "{ir}"
+    );
+    assert_eq!(
+        labels("bigint_rc_cont") + labels("bigint_param_cont"),
+        calls.len(),
+        "{ir}"
     );
 }
 
@@ -615,9 +633,10 @@ fn binding_a_tuple_element_to_an_int_local_retains_the_shared_word() {
         .filter(|c| c.callee == "pycc_rt_bigint_release")
         .count();
     // D-182's two ingress retains for the `TupleLiteral`'s borrowed
-    // `n` elements, plus the tuple bind's retain and the `return`'s,
-    // against the `y` slot's own release-before-store.
-    assert_eq!((retains, releases), (4, 1), "got {calls:?}");
+    // `n` elements, plus the tuple bind's retain, against the `y` slot's
+    // own release-before-store. The `return` moves `y`'s reference out of
+    // the slot the epilogue would release instead of retaining (#625).
+    assert_eq!((retains, releases), (3, 1), "got {calls:?}");
 }
 
 /// Counts the refcount calls in a one-statement function whose only

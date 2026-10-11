@@ -630,6 +630,11 @@ static int pycc_ext_raise_pending(void)
     case 32:
         exc_type = PyExc_MemoryError;
         break;
+    /* `StopIteration`, appended past `MemoryError` the same way -- `next()`
+     * of an exhausted generator. */
+    case 33:
+        exc_type = PyExc_StopIteration;
+        break;
     /* #1316: a bridged non-`Exception` `BaseException`. Only a fallback --
      * the bridge-table lookup above normally re-raises the original -- and
      * a named label so the decimal-tag drift guard does not read it as a

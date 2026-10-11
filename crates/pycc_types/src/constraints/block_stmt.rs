@@ -294,6 +294,23 @@ pub(super) fn collect_stmt_constraints(
                 )?;
             }
         }
+        // `yield value`: the value unifies with the generator's element
+        // type, which the body walk carries as its return term.
+        HirStmt::ExprStmt(HirExpr::Call { callee, args })
+            if callee == pycc_hir::YIELD_MARKER && env.in_generator =>
+        {
+            let actual = collect_expr_constraints(
+                signatures,
+                parents,
+                concrete,
+                &mut constraints.deferred,
+                env,
+                &args[0],
+            )?;
+            if let (Some(element), Some(actual)) = (return_term.clone(), actual) {
+                unify_terms(element, actual, parents, concrete, "T0022", "generator element type")?;
+            }
+        }
         HirStmt::ExprStmt(expr) => {
             // PEP 572 (#774), deep-review follow-up (round 4): bind
             // before unifying -- see `bind_named_expr_targets`'s own
@@ -645,6 +662,8 @@ pub(super) fn collect_stmt_constraints(
                 return_term.clone(),
             )?;
         }
+        // A generator's `return` carries no value (`pycc_hir` refuses one).
+        HirStmt::Return(_) if env.in_generator => {}
         HirStmt::Return(value) => {
             let Some(return_term) = return_term.clone() else {
                 return Ok(());

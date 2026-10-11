@@ -196,3 +196,98 @@ int pycc_ext_obj_delitem(PyObject *o, PyObject *k)
     Py_XDECREF(k);
     return status;
 }
+
+/*
+ * A compiled generator crossing into CPython (`object` boxing, see
+ * `crates/pycc_codegen/src/generator_box.rs`): an iterator holding one
+ * reference to the native generator and the compiled function that
+ * produces its next value as a new reference -- or NULL, with the
+ * runtime's exception pending when the generator raised, and nothing
+ * pending when it is exhausted (`tp_iternext`'s NULL-without-error then
+ * means `StopIteration`). Releasing the iterator releases the generator,
+ * which closes it if it is unfinished, running its `finally` clauses.
+ */
+extern void pycc_rt_gen_decref(void *gen);
+
+typedef PyObject *(*pycc_ext_gen_next_fn)(void *gen);
+
+typedef struct {
+    PyObject_HEAD
+    void *gen;
+    pycc_ext_gen_next_fn next;
+} PyccExtGenObj;
+
+static PyObject *pycc_ext_gen_type = NULL;
+
+static PyObject *pycc_ext_gen_iternext(PyObject *self)
+{
+    PyccExtGenObj *obj = (PyccExtGenObj *)self;
+    Py_ssize_t bridge_mark;
+    PyObject *value;
+
+    if (obj->gen == NULL) {
+        return NULL;
+    }
+    bridge_mark = pycc_ext_bridge_mark();
+    value = obj->next(obj->gen);
+    if (value == NULL && pycc_rt_ext_pending_type() >= 0) {
+        pycc_ext_raise_pending();
+    }
+    pycc_ext_bridge_release_to(bridge_mark);
+    return value;
+}
+
+static void pycc_ext_gen_dealloc(PyObject *self)
+{
+    PyTypeObject *tp = Py_TYPE(self);
+    PyccExtGenObj *obj = (PyccExtGenObj *)self;
+    void *gen = obj->gen;
+    freefunc tp_free;
+
+    obj->gen = NULL;
+    if (gen != NULL) {
+        pycc_rt_gen_decref(gen);
+    }
+    tp_free = (freefunc)PyType_GetSlot(tp, Py_tp_free);
+    tp_free(self);
+    Py_DECREF(tp);
+}
+
+static PyType_Slot pycc_ext_gen_type_slots[] = {
+    {Py_tp_dealloc, pycc_ext_gen_dealloc},
+    {Py_tp_iter, PyObject_SelfIter},
+    {Py_tp_iternext, pycc_ext_gen_iternext},
+    {0, NULL},
+};
+
+static PyType_Spec pycc_ext_gen_type_spec = {
+    "builtins.generator",
+    sizeof(PyccExtGenObj),
+    0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION | Py_TPFLAGS_IMMUTABLETYPE,
+    pycc_ext_gen_type_slots,
+};
+
+/* Steals `gen`'s reference on every path. */
+PyObject *pycc_ext_gen_wrap(void *gen, pycc_ext_gen_next_fn next)
+{
+    PyccExtGenObj *obj;
+    allocfunc tp_alloc;
+
+    if (pycc_ext_gen_type == NULL) {
+        pycc_ext_gen_type = PyType_FromSpec(&pycc_ext_gen_type_spec);
+        if (pycc_ext_gen_type == NULL) {
+            pycc_rt_gen_decref(gen);
+            return NULL;
+        }
+    }
+    tp_alloc = (allocfunc)PyType_GetSlot((PyTypeObject *)pycc_ext_gen_type, Py_tp_alloc);
+    obj = (PyccExtGenObj *)tp_alloc((PyTypeObject *)pycc_ext_gen_type, 0);
+    if (obj == NULL) {
+        pycc_rt_gen_decref(gen);
+        return NULL;
+    }
+    obj->gen = gen;
+    obj->next = next;
+    return (PyObject *)obj;
+}

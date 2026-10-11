@@ -21,6 +21,9 @@ pub(crate) fn to_numeric_encoded_int<'ctx>(
     scalar: Scalar<'ctx>,
 ) -> IntValue<'ctx> {
     match scalar {
+        Scalar::Generator(_) => {
+            panic!("pycc_codegen: internal error: expected an int-or-bool operand, got generator")
+        }
         Scalar::Int(v) => v,
         Scalar::Bool(v) => {
             let widened = builder
@@ -450,6 +453,9 @@ pub(crate) fn range_operand_to_normalized_int<'ctx>(
     position: &str,
 ) -> IntValue<'ctx> {
     match scalar {
+        Scalar::Generator(_) => {
+            panic!("pycc_codegen: internal error: a generator is never a range() operand")
+        }
         scalar @ (Scalar::Int(_) | Scalar::Bool(_)) => {
             let encoded = to_encoded_int(context, builder, scalar);
             // #147 (D-179): normalize instead of decode-and-re-tag. The old
@@ -570,6 +576,9 @@ pub(crate) fn to_float<'ctx>(
 ) -> FloatValue<'ctx> {
     match scalar {
         Scalar::Float(v) => v,
+        Scalar::Generator(_) => {
+            panic!("pycc_codegen: internal error: expected a numeric operand, got generator")
+        }
         Scalar::Int(v) => int_fast::emit_int_to_float(context, builder, rt, v),
         Scalar::Bool(v) => builder
             .build_unsigned_int_to_float(v, context.f64_type(), "bool_to_float")

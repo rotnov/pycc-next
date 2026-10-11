@@ -207,6 +207,22 @@ pub(crate) fn lower_stmt(
     signatures: &SignatureTable,
 ) -> Result<HirStmt, Diagnostic> {
     let lowered = match stmt {
+        // `yield value` as a statement in a generator function: the marker
+        // call `pycc_types` checks against the generator's element type and
+        // `pycc_mir` lowers to its own statement (`MirStmt::Yield`).
+        Stmt::Expr(expr_stmt) if in_function && matches!(*expr_stmt.value, Expr::Yield(_)) => {
+            let Expr::Yield(y) = expr_stmt.value.as_ref() else {
+                unreachable!()
+            };
+            let value = match y.value.as_deref() {
+                Some(value) => lower_expr(value, in_function, class_name, imports, signatures)?,
+                None => HirExpr::NoneLiteral,
+            };
+            HirStmt::ExprStmt(HirExpr::Call {
+                callee: crate::YIELD_MARKER.to_string(),
+                args: vec![value],
+            })
+        }
         Stmt::Expr(expr_stmt) => HirStmt::ExprStmt(lower_expr(
             &expr_stmt.value,
             in_function,

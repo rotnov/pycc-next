@@ -171,6 +171,22 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
             }
             Ok(())
         }
+        // A generator yields what a list can hold (its value area holds one
+        // element in the same representation).
+        Ty::Generator(element) => {
+            if !is_list_element_ty(element) {
+                return Err(Diagnostic::error(
+                    "T0034",
+                    format!(
+                        "{} is not compiled yet -- a generator must yield int, float, bool, \
+                         str, a user-class instance, or a list, tuple, dict or set of those",
+                        ty.name()
+                    ),
+                    span,
+                ));
+            }
+            Ok(())
+        }
         Ty::Set(element) => check_set_element(ty, element, "set", span),
         Ty::FrozenSet(element) => check_set_element(ty, element, "frozenset", span),
         Ty::Tuple(elements) => {

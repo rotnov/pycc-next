@@ -246,6 +246,10 @@ pub(crate) struct ConstraintEnvironment<'scope, 'hir> {
     /// in for the distinction (a function with no locals also has an empty
     /// slice).
     pub(crate) in_function_body: bool,
+    /// Whether the body is a generator function's: its return term is the
+    /// element type its `yield`s unify with, and its `return`s carry no
+    /// value.
+    pub(crate) in_generator: bool,
     /// The solver's counterpart of `Environment::returns_inside_finally`,
     /// and the solver half of review round 5's egress narrowing.
     ///
@@ -330,6 +334,7 @@ impl<'scope, 'hir> ConstraintEnvironment<'scope, 'hir> {
             std_module_aliases: Vec::new(),
             owned_buffers: HashSet::new(),
             in_function_body: false,
+            in_generator: false,
             returns_inside_finally: false,
             shadowed_producers: HashSet::new(),
             finals: HashSet::new(),

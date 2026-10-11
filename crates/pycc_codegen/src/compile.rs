@@ -545,6 +545,21 @@ pub(crate) fn compile_to_object_with_observer(
                 .expect("function body has matching declaration");
             let block = context.append_basic_block(f, "entry");
             builder.position_at_end(block);
+            // A generator function is a coroutine: its frame is allocated
+            // first, and its body is emitted as if it returned `None`
+            // (`generator`).
+            let generator_element = match return_ty {
+                pycc_mir::Ty::Generator(element) => Some((**element).clone()),
+                _ => None,
+            };
+            let generator_begin = generator_element
+                .is_some()
+                .then(|| crate::generator::begin(&context, &module, &builder, &rt, f));
+            let return_ty = if generator_element.is_some() {
+                &pycc_mir::Ty::None
+            } else {
+                return_ty
+            };
             let mut fn_locals: HashMap<_, _> = module_globals
                 .iter()
                 .map(|(global_name, binding)| (global_name.clone(), binding.clone()))
@@ -576,6 +591,14 @@ pub(crate) fn compile_to_object_with_observer(
             // under the same invariant: a parameter slot owns its argument
             // and a local slot what it was last assigned, or null.
             let mut owned_heap_slots: Vec<(PointerValue, heap_rc::HeapKind)> = Vec::new();
+            // #625: the same list for `int` slots. A parameter slot owns its
+            // argument (the caller transfers a fresh word and retains a
+            // borrowed one, `emit_user_call_args`) and a local slot the word
+            // it was last assigned (`release_int_slot_before_store`), or `0`;
+            // the epilogue releases them as it does a `str` slot, so a heap
+            // bigint held by a parameter or a local dies with its frame.
+            let mut owned_int_slots: Vec<(PointerValue, bool)> = Vec::new();
+            rt.owned_int_names.borrow_mut().clear();
             // Part 2a of #1142 (#1165): the same list for artifact-owned
             // buffer storage, kept separate from `owned_str_slots` because
             // the two release through different runtime helpers.
@@ -609,6 +632,9 @@ pub(crate) fn compile_to_object_with_observer(
                 );
                 if *ty == pycc_mir::Ty::Str {
                     owned_str_slots.push(slot.ptr);
+                } else if *ty == pycc_mir::Ty::Int {
+                    owned_int_slots.push((slot.ptr, true));
+                    rt.owned_int_names.borrow_mut().insert(param_name.clone());
                 } else if let Some(kind) = heap_rc::heap_kind(&rt, ty) {
                     owned_heap_slots.push((slot.ptr, kind));
                 }
@@ -669,7 +695,12 @@ pub(crate) fn compile_to_object_with_observer(
                 // storage and joins the release list; the parameter loop above
                 // deliberately has no counterpart.
                 let is_buffer = ty == pycc_mir::Ty::MemoryView;
+                let is_int = ty == pycc_mir::Ty::Int;
                 let slot = storage_slot_at_entry(&context, &builder, ty, &local_name, true);
+                if is_int {
+                    owned_int_slots.push((slot.ptr, false));
+                    rt.owned_int_names.borrow_mut().insert(local_name.clone());
+                }
                 if is_str {
                     owned_str_slots.push(slot.ptr);
                 }
@@ -788,6 +819,7 @@ pub(crate) fn compile_to_object_with_observer(
             let owned_slot_epilogue_bb = if owned_str_slots.is_empty()
                 && owned_buffer_slots.is_empty()
                 && owned_heap_slots.is_empty()
+                && owned_int_slots.is_empty()
             {
                 None
             } else {
@@ -819,6 +851,11 @@ pub(crate) fn compile_to_object_with_observer(
             };
             let exception_exit = context.append_basic_block(f, "exception_exit");
             rt.exceptions.targets.borrow_mut().push(exception_exit);
+            if let (Some(begun), Some(element)) = (generator_begin, generator_element.clone()) {
+                crate::generator::initial_suspend(
+                    &context, &module, &builder, &rt, f, begun, element,
+                );
+            }
             emit_body(
                 &context,
                 &builder,
@@ -937,30 +974,14 @@ pub(crate) fn compile_to_object_with_observer(
             // `str`-owning function still emits byte-identical IR.
             if let Some((epilogue_bb, ret_slot)) = owned_slot_epilogue_bb {
                 builder.position_at_end(epilogue_bb);
-                for slot_ptr in &owned_str_slots {
-                    let live = builder
-                        .build_load(
-                            context.ptr_type(inkwell::AddressSpace::default()),
-                            *slot_ptr,
-                            "str_epilogue_live",
-                        )
-                        .expect("build_load should not fail for a str slot this function allocated")
-                        .into_pointer_value();
-                    builder
-                        .build_call(rt.str_decref, &[live.into()], "str_epilogue_decref")
-                        .expect("build_call should not fail for pycc_rt_str_decref");
-                }
-                for (slot_ptr, kind) in &owned_heap_slots {
-                    let live = builder
-                        .build_load(
-                            context.ptr_type(inkwell::AddressSpace::default()),
-                            *slot_ptr,
-                            "heap_epilogue_live",
-                        )
-                        .expect("build_load should not fail for a slot this function allocated")
-                        .into_pointer_value();
-                    heap_rc::emit_decref(&context, &builder, &rt, *kind, live);
-                }
+                crate::slot_epilogue::release_owned_slots(
+                    &context,
+                    &builder,
+                    &rt,
+                    &owned_str_slots,
+                    &owned_int_slots,
+                    &owned_heap_slots,
+                );
                 // Part 2a of #1142 (#1165): one `pycc_rt_buffer_f64_free`
                 // per artifact-owned buffer slot, on exactly the `str`
                 // model above -- the null a never-assigned local still
@@ -1138,6 +1159,9 @@ pub(crate) fn compile_to_object_with_observer(
                     }
                 }
             }
+            if generator_element.is_some() {
+                crate::generator::finish(&context, &module, &builder, &rt, f);
+            }
         }
     }
 
@@ -1170,6 +1194,17 @@ pub(crate) fn compile_to_object_with_observer(
     // vanishingly narrow chance this ever legitimately panics on Windows,
     // the `LLVMString`'s `Drop` would run during unwinding (D-029's crash)
     // -- an accepted, currently unreachable risk, not a silently ignored one.
+    // A generator is an LLVM coroutine, which only LLVM's coroutine passes
+    // lower: a debug build of a module with one runs the `O0` pipeline,
+    // which includes them.
+    let has_coroutines = mir.items.iter().any(|item| {
+        matches!(item, MirItem::Function { return_ty: pycc_mir::Ty::Generator(_), .. })
+    });
+    if !release && has_coroutines {
+        module
+            .run_passes("default<O0>", &target_machine, PassBuilderOptions::create())
+            .expect("LLVM's \"default<O0>\" pipeline lowers a verified module's coroutines");
+    }
     let applied_pipeline = if release {
         module
             .run_passes(

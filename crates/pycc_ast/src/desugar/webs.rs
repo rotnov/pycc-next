@@ -182,7 +182,17 @@ struct Builder<'a> {
     functions: Vec<&'a StmtFunctionDef>,
     /// The scope cannot be reasoned about (`locals()`, `match`).
     opaque: bool,
+    /// The builtins consuming a generator argument at once that the
+    /// module does not rebind.
+    consumers: HashSet<&'static str>,
 }
+
+/// Builtins that run a generator argument before returning: its reads
+/// happen where it stands.
+const CONSUMERS: [&str; 12] = [
+    "any", "all", "next", "sum", "min", "max", "sorted", "list", "set", "frozenset", "tuple",
+    "dict",
+];
 
 impl<'a> Builder<'a> {
     fn new_block(&mut self) -> usize {
@@ -624,7 +634,24 @@ impl<'b, 'a> Visitor<'a> for Uses<'b, 'a> {
             }
             Expr::ListComp(comp) => self.comprehension(&comp.generators, &[&comp.elt]),
             Expr::SetComp(comp) => self.comprehension(&comp.generators, &[&comp.elt]),
-            Expr::Generator(comp) => self.comprehension(&comp.generators, &[&comp.elt]),
+            // A generator expression reads its variables when each element
+            // is produced, not where it stands (all but its first
+            // iterable): like a lambda's, they are never split.
+            Expr::Generator(comp) => {
+                self.comprehension(&comp.generators, &[&comp.elt]);
+                let mut scan = ScopeScan::default();
+                scan.visit_expr(&comp.elt);
+                for (i, generator) in comp.generators.iter().enumerate() {
+                    if i > 0 {
+                        scan.visit_expr(&generator.iter);
+                    }
+                    for cond in &generator.ifs {
+                        scan.visit_expr(cond);
+                    }
+                }
+                self.builder.excluded.extend(scan.read);
+                self.builder.excluded.extend(scan.nested_free);
+            }
             Expr::DictComp(comp) => {
                 let mut elts: Vec<&'a Expr> = comp.key.iter().map(|k| k.as_ref()).collect();
                 elts.push(&comp.value);
@@ -639,7 +666,24 @@ impl<'b, 'a> Visitor<'a> for Uses<'b, 'a> {
                 {
                     self.builder.opaque = true;
                 }
-                visitor::walk_expr(self, expr);
+                let consumer = match call.func.as_ref() {
+                    Expr::Name(callee) => self.builder.consumers.contains(callee.id.as_str()),
+                    Expr::Attribute(attr) => attr.attr.as_str() == "join",
+                    _ => false,
+                };
+                self.visit_expr(&call.func);
+                for arg in call.arguments.args.iter() {
+                    match arg {
+                        // Consumed right here: an ordinary comprehension.
+                        Expr::Generator(comp) if consumer => {
+                            self.comprehension(&comp.generators, &[&comp.elt])
+                        }
+                        _ => self.visit_expr(arg),
+                    }
+                }
+                for keyword in call.arguments.keywords.iter() {
+                    self.visit_expr(&keyword.value);
+                }
             }
             _ => visitor::walk_expr(self, expr),
         }
@@ -696,6 +740,11 @@ fn analyze_scope<'a>(
             frames: Vec::new(),
             functions: Vec::new(),
             opaque: false,
+            consumers: CONSUMERS
+                .iter()
+                .copied()
+                .filter(|name| !taken.contains(*name))
+                .collect(),
         };
         let entry = builder.new_block();
         builder.exit = builder.new_block();

@@ -43,6 +43,9 @@ pub const EXCEPTION_TYPE_NAME_ERROR: u8 = 31;
 /// `MemoryError`'s tag (an allocation CPython refuses), pinned like
 /// [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
 pub const EXCEPTION_TYPE_MEMORY_ERROR: u8 = 32;
+/// `StopIteration`'s tag: `next()` of an exhausted generator. Pinned like
+/// [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
+pub const EXCEPTION_TYPE_STOP_ITERATION: u8 = 33;
 /// #1316: the reserved tag the `ext` C shim's foreign-operation bridge gives
 /// a CPython exception that is not an `Exception` at all -- `SystemExit`,
 /// `KeyboardInterrupt`, `GeneratorExit`, a non-`Exception`
@@ -679,6 +682,46 @@ fn exception_print_and_exit(obj: *mut PyExceptionObj) -> ! {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_exception_print_and_exit(obj: *mut PyExceptionObj) -> ! {
     exception_print_and_exit(obj)
+}
+
+/// The pending exception state, to be put back with [`restore_pending`]
+/// after running code (a generator's close) that must not see or clobber
+/// it.
+pub(crate) fn save_pending() -> (i8, *mut PyExceptionObj) {
+    let state = EXCEPTION_STATE.with(Cell::get);
+    set_state(ExceptionState::CLEAR);
+    (state.active, state.value)
+}
+
+pub(crate) fn restore_pending(saved: (i8, *mut PyExceptionObj)) {
+    set_state(ExceptionState {
+        active: saved.0,
+        value: saved.1,
+    });
+}
+
+/// Whether `obj` is an exception of the class named `name`.
+pub(crate) fn is_named(obj: *mut PyExceptionObj, name: &str) -> bool {
+    if obj.is_null() {
+        return false;
+    }
+    // SAFETY: a non-null `obj` is a live exception object.
+    let exc = unsafe { &*obj };
+    !exc.name.is_null()
+        && unsafe { std::slice::from_raw_parts(exc.name, exc.name_len) } == name.as_bytes()
+}
+
+/// Reports an exception nothing can catch (raised while a generator is
+/// closed on deallocation) the way CPython's unraisable hook does.
+pub(crate) fn report_unraisable(obj: *mut PyExceptionObj, what: &str) {
+    crate::io::flush();
+    eprintln!("Exception ignored in: <{what} object>");
+    if obj.is_null() {
+        eprintln!("Exception");
+    } else {
+        // SAFETY: a non-null `obj` is a live exception object.
+        eprintln!("{}", render_exception_chain(unsafe { &*obj }));
+    }
 }
 
 fn alloc_exception_message(msg: &str) -> *mut PyStrObj {

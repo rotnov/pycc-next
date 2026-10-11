@@ -232,6 +232,14 @@ pub(crate) fn declare_module_globals<'ctx>(
                         .const_named_struct(&[payload, context.i8_type().const_zero().into()]);
                     (struct_ty.into(), zeroed.into())
                 }
+                // A generator object: a pointer, null until bound.
+                pycc_mir::Ty::Generator(_) => (
+                    context.ptr_type(inkwell::AddressSpace::default()).into(),
+                    context
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null()
+                        .into(),
+                ),
                 other => panic!(
                     "pycc_codegen: a `{}`-typed module binding is not supported yet",
                     other.name()

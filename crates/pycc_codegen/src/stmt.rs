@@ -170,6 +170,21 @@ pub(crate) fn emit_stmt<'ctx>(
     finally_stack: &mut Vec<FinallyTarget<'ctx>>,
 ) -> Result<(), String> {
     match stmt {
+        MirStmt::Yield(value) => {
+            crate::generator::emit_yield(context, builder, module, rt, user_functions, locals, value);
+            Ok(())
+        }
+        MirStmt::ForGen { .. } => crate::generator::emit_for_gen_stmt(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            stmt,
+            expected_return_ty,
+            finally_stack,
+        ),
         MirStmt::ExprStmt(MirExpr::Call { callee, args, .. }) if callee == "print" => {
             // Two-phase evaluate-then-output (fixes #145): evaluate *all*
             // arguments left-to-right before emitting any output, so a

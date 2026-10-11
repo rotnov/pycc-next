@@ -65,8 +65,8 @@ Coming next: numpy arrays as native types, published benchmarks against CPython
   build of such a program embeds CPython (as a foreign import does); `--ext` just
   works. Known gaps are listed in `docs/DEVIATIONS.md`.
 - **Per-function fallback** (non-strict only): a top-level function, class or
-  statement that pycc cannot compile yet (a lambda used as a value, a generator, a
-  nested function used as a value, ...) is kept as Python source and run by CPython's own `exec` in the
+  statement that pycc cannot compile yet (a lambda used as a value, a
+  nested function used as a value, a generator's `send()`, ...) is kept as Python source and run by CPython's own `exec` in the
   module's namespace, at its place in the module. Compiled code calls a fallback
   function as a CPython object; fallback code calls compiled functions as the
   module's published callables (an unannotated function that fallback code calls

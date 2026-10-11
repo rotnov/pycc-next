@@ -50,7 +50,19 @@ impl MirExpr {
             | MirExpr::BufferAlloc { len: inner }
             | MirExpr::ObjUnpackFloatTuple { base: inner, .. }
             | MirExpr::ObjUnpack { value: inner, .. }
-            | MirExpr::NamedExpr { value: inner, .. } => out.push(inner),
+            | MirExpr::NamedExpr { value: inner, .. }
+            | MirExpr::GenToList {
+                generator: inner, ..
+            }
+            | MirExpr::GenAnyAll {
+                generator: inner, ..
+            } => out.push(inner),
+            MirExpr::GenNext {
+                generator, default, ..
+            } => {
+                out.push(generator);
+                out.extend(default.iter().map(|d| &**d));
+            }
             MirExpr::Call { args, .. } => out.extend(args),
             MirExpr::RtCall(call) => out.extend(&call.args),
             MirExpr::Instantiate(inst) => out.extend(&inst.args),
@@ -211,6 +223,7 @@ impl MirStmt {
             | MirStmt::If { test: expr, .. }
             | MirStmt::While { test: expr, .. }
             | MirStmt::ForObject { iter: expr, .. }
+            | MirStmt::Yield(expr)
             | MirStmt::ObjRaise { value: expr } => vec![expr],
             MirStmt::Return(value) => value.iter().collect(),
             MirStmt::ReturnBufferSlice { start, stop, .. } => {
@@ -270,6 +283,7 @@ impl MirStmt {
             MirStmt::NoOp
             | MirStmt::Unreachable
             | MirStmt::ForList { .. }
+            | MirStmt::ForGen { .. }
             | MirStmt::ForDict { .. }
             | MirStmt::ForSet { .. }
             | MirStmt::Seq(_)
@@ -295,7 +309,8 @@ impl MirStmt {
             | MirStmt::ForList { body, .. }
             | MirStmt::ForObject { body, .. }
             | MirStmt::ForDict { body, .. }
-            | MirStmt::ForSet { body, .. } => vec![body],
+            | MirStmt::ForSet { body, .. }
+            | MirStmt::ForGen { body, .. } => vec![body],
             MirStmt::Seq(stmts) => vec![stmts],
             MirStmt::LoopElse { loop_stmt, orelse } => {
                 vec![std::slice::from_ref(&**loop_stmt), orelse]
@@ -339,6 +354,7 @@ impl MirStmt {
             | MirStmt::RaiseFrom { .. }
             | MirStmt::Reraise
             | MirStmt::ObjRaise { .. }
+            | MirStmt::Yield(_)
             | MirStmt::ForeignImport { .. } => Vec::new(),
         }
     }

@@ -190,7 +190,7 @@ fn issue_1054_f_an_unassigned_str_local_is_released_unconditionally() {
     );
 }
 
-/// (g) The gate itself: a function with no `str` slot pushes no synthetic
+/// (g) The gate itself: a function with no `str` (or other owned) slot pushes no synthetic
 /// frame and emits no epilogue, which is what keeps the "no outer
 /// `finally_stack` entry" arms of `MirStmt::Return` and of `emit_try`/
 /// `emit_try_star`'s `ret_bb` reachable for the tests that cover them.
@@ -200,11 +200,11 @@ fn issue_1054_g_a_str_free_function_gets_no_epilogue() {
         "issue_1054_g_no_str_slot",
         vec![MirItem::Function {
             name: "arithmetic".to_string(),
-            params: vec![("n".to_string(), Ty::Int)],
-            return_ty: Ty::Int,
+            params: vec![("n".to_string(), Ty::Float)],
+            return_ty: Ty::Float,
             body: vec![MirStmt::Return(Some(MirExpr::Name {
                 name: "n".to_string(),
-                ty: Ty::Int,
+                ty: Ty::Float,
             }))],
         }],
         |ir| {

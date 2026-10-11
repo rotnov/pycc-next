@@ -16,6 +16,7 @@ use pycc_mir::{RtCallExpr, Ty};
 /// The value `scalar` (already coerced to `ty`) passes as.
 fn abi_value<'ctx>(scalar: Scalar<'ctx>) -> BasicMetadataValueEnum<'ctx> {
     match scalar {
+        Scalar::Generator(v) => v.into(),
         Scalar::Int(v) | Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),
         Scalar::Str(v)
@@ -49,8 +50,16 @@ pub(super) fn emit_rt_call<'ctx>(
     let passes_through = sig.symbol == "pycc_rt_list_unpack";
     // A fresh argument is released if a later argument raises.
     let mark = heap_rc::pending_mark(rt);
+    let mut pending_ints = Vec::new();
     for ((arg, param), is_word) in call.args.iter().zip(&sig.params).zip(&sig.word_args) {
         let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
+        // #625: a fresh `int` argument (`str(x * 2)`) is released after the
+        // call, or if a later argument raises.
+        if !passes_through {
+            pending_ints.push(bigint_rc::push_pending_int_release_if_scalar_temporary(
+                rt, arg, &scalar,
+            ));
+        }
         let scalar = if passes_through {
             // The result is this very list: it carries the reference.
             heap_rc::retain_if_heap_duplicate(context, builder, rt, arg, scalar)
@@ -111,9 +120,18 @@ pub(super) fn emit_rt_call<'ctx>(
         .build_call(function, &values, "rt_call")
         .expect("build_call should not fail for a declared runtime builtin");
     heap_rc::truncate_pending(rt, mark);
+    for pushed in pending_ints.into_iter().rev() {
+        bigint_rc::pop_pending_int_release(rt, pushed);
+    }
+    // The runtime borrows its arguments, and an `int` result is always a
+    // reference of its own (`pycc_rt_int_max2` retains the argument it
+    // answers), so every fresh argument dies here.
     for (arg, scalar) in temporaries {
-        if !matches!(scalar, Scalar::Int(_)) {
-            heap_rc::release_scalar_if_temporary(context, builder, rt, arg, &scalar);
+        match scalar {
+            Scalar::Int(word) => {
+                bigint_rc::release_if_int_temporary(context, builder, rt, arg, word);
+            }
+            _ => heap_rc::release_scalar_if_temporary(context, builder, rt, arg, &scalar),
         }
     }
     for boxed in boxes {

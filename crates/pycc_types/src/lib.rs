@@ -96,6 +96,7 @@ use std::sync::Arc;
 // module re-exports into the root so `crate::x` and `super::x` paths keep
 // resolving.
 mod assign_check;
+mod generator;
 mod generic_reject;
 mod local_names;
 mod match_check;

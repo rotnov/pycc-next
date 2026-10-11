@@ -392,7 +392,12 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // `PyObject_Size` to call, and `pycc_rt_buffer_len` has no path that
         // sets D-173's pending state. Classifying it `true` would emit a
         // never-taken exception-check branch after every `len(b)`.
-        | MirExpr::BufferLen { .. } => false,
+        | MirExpr::BufferLen { .. }
+        // The generator consumers guard each resume themselves
+        // (`generator::resume_branch`, `pycc_rt_gen_next`'s guard).
+        | MirExpr::GenNext { .. }
+        | MirExpr::GenToList { .. }
+        | MirExpr::GenAnyAll { .. } => false,
     }
 }
 

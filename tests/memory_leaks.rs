@@ -21,6 +21,22 @@ const GROWTH_LIMIT_KB: i64 = 1024;
 
 /// Helpers every probe body may call.
 const PRELUDE: &str = r#"
+from typing import Iterator
+
+
+def gstr(i: int) -> Iterator[str]:
+    try:
+        yield mk(i)
+        yield mk(i + 1)
+    finally:
+        D["a"] = i
+
+
+def gpair(i: int) -> Iterator[int]:
+    for x in mklist(i):
+        yield x
+
+
 class P:
     def __init__(self, x: int, name: str) -> None:
         self.x = x
@@ -77,6 +93,11 @@ def px(p: P) -> int:
 
 def mklist(i: int) -> list[int]:
     return [i, i + 1]
+
+
+def bump(v: int) -> int:
+    w = v + 1
+    return w
 
 
 def mk(i: int) -> str:
@@ -362,6 +383,26 @@ probe!(
 // A fresh target of a store dies once stored into.
 probe!(fresh_attribute_target, "mkp(i).name = mk(i)");
 probe!(fresh_list_target, "mklist(i)[0] = i");
+
+// #625: a heap `int` passed to a function or a builtin, returned, and held
+// by a function's parameter and locals when it returns.
+probe!(
+    bigint_through_a_function_and_builtins,
+    "big: int = i + 2 ** 70\ntotal += bump(big * 2) % 7 + len(str(big * 3)) + max(big, big + 1) % 5"
+);
+
+// Generators: exhausted, abandoned unfinished (closed on release), and
+// consumed by builtins; generator expressions.
+probe!(generator_exhausted, "for v in gpair(i):\n    total += v");
+probe!(
+    generator_abandoned_holding_a_str,
+    "g = gstr(i)\nt: str = next(g)\nif t == \"q\":\n    total += 1"
+);
+probe!(generator_listed, "total += len(list(gstr(i)))");
+probe!(
+    generator_expression_short_circuit,
+    "if any(x > i for x in mklist(i)):\n    total += 1\ntotal += next(len(t) for t in gstr(i))"
+);
 
 /// Builds and runs a fixture under `tests/fixtures/` in both profiles and
 /// compares its output with CPython's, returning the release binary's path

@@ -179,8 +179,11 @@ pub(crate) fn bind_local_types_in_stmt(
             bind_local_types_in_body(env, local_names, body);
         }
         HirStmt::ForList { var, list, body } => {
-            if let Some(BindingState::Definitely(Ty::List(elt_ty))) = env.binding_state(list) {
-                env.bind(var.clone(), (**elt_ty).clone());
+            match env.binding_state(list) {
+                Some(BindingState::Definitely(Ty::List(elt_ty) | Ty::Generator(elt_ty))) => {
+                    env.bind(var.clone(), (**elt_ty).clone());
+                }
+                _ => {}
             }
             bind_local_types_in_body(env, local_names, body);
         }

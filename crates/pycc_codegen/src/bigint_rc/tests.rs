@@ -132,6 +132,24 @@ fn guarded_bigint_refcount_calls_in_one_function(ir: &str) -> Vec<RefcountCall> 
     // that never runs is an uncovered function under D-014's region
     // gate, whereas `assert!`'s cold arm lives in `core`.
     for (block, call) in &calls {
+        // #625: a parameter's epilogue release, behind `(w & 3) == 0`.
+        if block.starts_with("bigint_param_call") {
+            let key: &str = &format!("%{block}");
+            let (cond, cont) = *branches
+                .get(key)
+                .expect("a guard's call block is always the target of its own branch");
+            assert!(cont.starts_with("%bigint_param_cont"), "{cont}");
+            let low_tag = defs[cond]
+                .strip_prefix("icmp eq i64 ")
+                .and_then(|rest| rest.strip_suffix(", 0"))
+                .expect("the parameter guard compares a masked word against 0");
+            let tagged_word = defs[low_tag]
+                .strip_prefix("and i64 ")
+                .and_then(|rest| rest.strip_suffix(", 3"))
+                .expect("the parameter guard masks the word with 0b11");
+            assert_eq!(tagged_word, call.word, "the guard tests another word");
+            continue;
+        }
         assert!(
             block.starts_with("bigint_rc_call"),
             "{} is emitted in block `{block}`, not a guard's own call block",
@@ -212,7 +230,57 @@ fn refcount_calls_with_options(
     };
     compile_to_object_with_observer(mir, &obj_path, options, Some(&mut observer))
         .expect("codegen should succeed");
+    // Each fixture observes the sites it names; the epilogue's own
+    // releases of the frame's `int` slots (#625, still checked as guarded
+    // above) are counted by `epilogue_releases_in` instead.
+    calls.retain(|call| !call.word.starts_with("%int_epilogue_live"));
     calls
+}
+
+/// The epilogue's releases of `int` slots in `mir`'s functions (#625).
+fn epilogue_releases_in(label: &str, mir: &MirModule) -> usize {
+    let dir = pycc_scratch::ScratchDir::new(label).expect("failed to create scratch dir");
+    let obj_path = dir.join(format!("{label}.o"));
+    let mut count = 0;
+    let mut observer = |module: &inkwell::module::Module<'_>, _| {
+        count = guarded_bigint_refcount_calls(&llvm_string_to_owned(module.print_to_string()))
+            .iter()
+            .filter(|call| {
+                call.callee == "pycc_rt_bigint_release"
+                    && call.word.starts_with("%int_epilogue_live")
+            })
+            .count();
+    };
+    compile_to_object_with_observer(mir, &obj_path, &CompileOptions::default(), Some(&mut observer))
+        .expect("codegen should succeed");
+    count
+}
+
+/// #625: a function's `int` parameter and `int` local each hold a reference
+/// its epilogue releases on the way out.
+#[test]
+fn a_functions_int_parameter_and_local_are_released_by_its_epilogue() {
+    let mir = MirModule {
+        items: vec![MirItem::Function {
+            name: "f".to_string(),
+            params: vec![("n".to_string(), Ty::Int)],
+            return_ty: Ty::Int,
+            body: vec![
+                MirStmt::Assign {
+                    target: "m".to_string(),
+                    value: MirExpr::BinOp {
+                        op: pycc_mir::BinOpKind::Mul,
+                        left: Box::new(int_name("n")),
+                        right: Box::new(int_name("n")),
+                        ty: Ty::Int,
+                    },
+                },
+                MirStmt::Return(Some(int_name("m"))),
+            ],
+        }],
+        class_defs: Vec::new(),
+    };
+    assert_eq!(epilogue_releases_in("issue_625_epilogue", &mir), 2);
 }
 
 fn int_name(name: &str) -> MirExpr {

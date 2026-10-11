@@ -5,7 +5,7 @@ use crate::ImportBinding;
 use pycc_ast::visitor::{self, Visitor};
 use pycc_ast::{Expr, ExprStringLiteral, ModModule, Stmt};
 
-pub const BUILTIN_EXCEPTION_CLASSES: [&str; 33] = [
+pub const BUILTIN_EXCEPTION_CLASSES: [&str; 34] = [
     "Exception",
     "ValueError",
     "TypeError",
@@ -70,6 +70,8 @@ pub const BUILTIN_EXCEPTION_CLASSES: [&str; 33] = [
     "NameError",
     // `MemoryError`, tag 32: a list repeat whose size cannot be allocated.
     "MemoryError",
+    // `StopIteration`, tag 33: `next()` of an exhausted generator.
+    "StopIteration",
 ];
 
 /// Part 2 of #541 (D-189): the number of names in [`BUILTIN_EXCEPTION_CLASSES`]
@@ -221,7 +223,7 @@ pub fn builtin_exception_parent(name: &str) -> Option<&'static str> {
         "OSError" | "ValueError" | "TypeError" | "KeyError" | "IndexError"
         | "ZeroDivisionError" | "RuntimeError" | "BaseExceptionGroup" | "OverflowError"
         | "ImportError" | "AssertionError" | "AttributeError" | "EOFError" | "NameError"
-        | "MemoryError" => {
+        | "MemoryError" | "StopIteration" => {
             Some("Exception")
         }
         "ExceptionGroup" => Some("BaseExceptionGroup"),
@@ -918,6 +920,7 @@ mod tests {
             ("EOFError", 30),
             ("NameError", 31),
             ("MemoryError", 32),
+            ("StopIteration", 33),
         ] {
             assert_eq!(tag_of(name), Some(tag), "`{name}` must carry tag {tag}");
         }

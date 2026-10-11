@@ -63,10 +63,14 @@ fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>, module_level: boo
     };
     let mut stmt = stmt;
     match &mut stmt {
-        Stmt::FunctionDef(def) => expand_thin(&mut def.body, fresh),
+        Stmt::FunctionDef(def) => {
+            yield_from_loops(&mut def.body, fresh);
+            expand_thin(&mut def.body, fresh)
+        }
         Stmt::ClassDef(def) => {
             for item in def.body.iter_mut() {
                 if let Stmt::FunctionDef(method) = item {
+                    yield_from_loops(&mut method.body, fresh);
                     expand_thin(&mut method.body, fresh);
                 }
             }
@@ -383,4 +387,51 @@ fn hoist_container_receiver(value: &mut Expr, fresh: &Fresh, out: &mut Vec<Stmt>
     }
     let receiver = std::mem::replace(attr.value.as_mut(), load("_", range));
     *attr.value = hoist(receiver, fresh, out, range);
+}
+
+/// `yield from it` as a statement of a function's `body` becomes `for v in
+/// it: yield v`: a compiled generator is driven by `next()` only (no
+/// `send`/`throw`), and closing it closes the loop's iterator first, as
+/// delegation does. Nested functions and classes are left to their own
+/// expansion; a `yield from` outside a function keeps its `L0001`.
+fn yield_from_loops(body: &mut [Stmt], fresh: &Fresh) {
+    use ruff_python_ast::visitor::transformer::{self, Transformer};
+    struct Loops<'f>(&'f Fresh);
+    impl Transformer for Loops<'_> {
+        fn visit_stmt(&self, stmt: &mut Stmt) {
+            match stmt {
+                Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
+                Stmt::Expr(s) if matches!(*s.value, Expr::YieldFrom(_)) => {
+                    let range = s.range;
+                    let Expr::YieldFrom(yield_from) =
+                        std::mem::replace(s.value.as_mut(), load("None", range))
+                    else {
+                        unreachable!()
+                    };
+                    let value = self.0.name();
+                    let yield_stmt = Stmt::Expr(ruff_python_ast::StmtExpr {
+                        node_index: Default::default(),
+                        range,
+                        value: Box::new(Expr::Yield(ruff_python_ast::ExprYield {
+                            node_index: Default::default(),
+                            range,
+                            value: Some(Box::new(load(&value, range))),
+                        })),
+                    });
+                    *stmt = for_loop(
+                        store(&value, range),
+                        *yield_from.value,
+                        vec![yield_stmt],
+                        Vec::new(),
+                        range,
+                    );
+                }
+                _ => transformer::walk_stmt(self, stmt),
+            }
+        }
+    }
+    let loops = Loops(fresh);
+    for stmt in body.iter_mut() {
+        loops.visit_stmt(stmt);
+    }
 }

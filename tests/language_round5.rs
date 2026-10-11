@@ -208,3 +208,53 @@ fn defs_in_module_level_blocks_match_cpython() {
     let report = matches_cpython("block_defs.py", &["--non-strict", "--report-fallbacks"], "");
     assert!(!report.contains("blk.py:2-") && !report.contains("block_defs.py:2-"), "{report}");
 }
+
+/// Generator functions: `for` over them, `next()` with and without a
+/// default, `StopIteration`, consumers (`list`, `sum`, `max`, `sorted`,
+/// `any`, `all`), `return` ending one, `try`/`finally` run when a loop
+/// `break`s or a generator is abandoned, `yield from`, an exception raised
+/// inside one, a generator method and an inferred private generator.
+#[test]
+fn generators_match_cpython() {
+    matches_cpython("generators.py", &[], "");
+}
+
+/// Generator expressions: lazy, `any`/`all` stopping at the first deciding
+/// element, `next()` of one, several clauses, one kept in a variable and
+/// consumed later, and nested ones.
+#[test]
+fn generator_expressions_match_cpython() {
+    matches_cpython("generator_expressions.py", &[], "");
+}
+
+/// Both fixtures compile natively in non-strict mode.
+#[test]
+fn generators_compile_natively_in_non_strict_mode() {
+    for name in ["generators.py", "generator_expressions.py"] {
+        let report = matches_cpython(name, &["--non-strict", "--report-fallbacks"], "");
+        assert!(!report.contains("fallback:"), "{report}");
+    }
+}
+
+/// A generator expression reading a variable its function rebinds after
+/// creating it is refused rather than compiled with the earlier value.
+#[test]
+fn a_generator_expression_over_a_rebound_variable_is_refused() {
+    let text = check(
+        "def f() -> list[int]:\n    k = 1\n    g = (x + k for x in range(3))\n    k = 10\n    return list(g)\n\n\nprint(f())\n",
+    );
+    assert!(text.contains("error[C0001]"), "{text}");
+}
+
+/// A public generator of an `--ext` module is a CPython iterator: `list`,
+/// `next`, `zip`, `StopIteration`, its `finally` run when the iterator is
+/// released unfinished, and in-module consumers of the native generator.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn generators_cross_the_ext_boundary_as_iterators() {
+    ext_matches_cpython(
+        "gen_probe",
+        "from typing import Iterator\n\n\ndef count(n: int) -> Iterator[int]:\n    for i in range(n):\n        yield i * i\n\n\ndef words(s: str) -> Iterator[str]:\n    try:\n        for w in s.split():\n            yield w.upper()\n    finally:\n        print(\"words done\")\n\n\ndef total(n: int) -> int:\n    return sum(count(n))\n\n\nclass Bag:\n    def __init__(self, n: int) -> None:\n        self.n = n\n\n    def evens(self) -> Iterator[int]:\n        for x in range(self.n):\n            if x % 2 == 0:\n                yield x\n",
+        "import gen_probe as m\ng = m.count(4)\nprint(type(g).__name__, iter(g) is g, list(g), list(g))\nprint(m.total(5), sum(m.count(5)))\nw = m.words('ab cd')\nprint(next(w))\ndel w\nprint('after')\ntry:\n    next(m.count(0))\nexcept StopIteration:\n    print('stop')\nprint(list(zip(m.count(3), m.words('x y z'))))\nprint(list(m.Bag(5).evens()))\n",
+    );
+}

@@ -112,6 +112,49 @@ pub fn is_public_name(name: &str) -> bool {
     !name.starts_with('_')
 }
 
+/// The callee of the call `pycc_hir` lowers a `yield value` statement to
+/// (`HirStmt::ExprStmt`); not a Python identifier, so no source name can
+/// spell it.
+pub const YIELD_MARKER: &str = "<yield>";
+
+/// Whether `body` holds a call of [`YIELD_MARKER`] anywhere: a generator
+/// function's body (`func::lower_function` marks its return type).
+pub fn body_yields(body: &[HirStmt]) -> bool {
+    fn expr_yields(expr: &HirExpr) -> bool {
+        matches!(expr, HirExpr::Call { callee, .. } if callee == YIELD_MARKER)
+    }
+    body.iter().any(|stmt| match stmt {
+        HirStmt::ExprStmt(expr) => expr_yields(expr),
+        HirStmt::If { body, orelse, .. } => body_yields(body) || body_yields(orelse),
+        HirStmt::While { body, .. }
+        | HirStmt::ForRange { body, .. }
+        | HirStmt::ForList { body, .. }
+        | HirStmt::ForObject { body, .. } => body_yields(body),
+        HirStmt::LoopElse { loop_stmt, orelse } => {
+            body_yields(std::slice::from_ref(loop_stmt.as_ref())) || body_yields(orelse)
+        }
+        HirStmt::Try {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        }
+        | HirStmt::TryStar {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        } => {
+            body_yields(body)
+                || handlers.iter().any(|h| body_yields(&h.body))
+                || body_yields(orelse)
+                || body_yields(finalbody)
+        }
+        HirStmt::Match { cases, .. } => cases.iter().any(|c| body_yields(&c.body)),
+        _ => false,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ty {
     Int,
@@ -257,6 +300,14 @@ pub enum Ty {
     /// was spelled -- so diagnostics render the canonical `memoryview` for
     /// all three, exactly as they already do for an alias of it.
     MemoryView,
+    /// A generator object yielding values of the boxed type: what calling
+    /// a generator function (a `def` whose body contains `yield`) returns,
+    /// spelled `Iterator[T]`, `Iterable[T]` or `Generator[T, None, None]`
+    /// in an annotation. A reference-counted pointer to a
+    /// `pycc_rt::generator::PyGenObj`, which owns the function's LLVM
+    /// coroutine frame (`pycc_codegen::generator`). Boxed as a thin
+    /// pointer, like `List`, so `size_of::<Ty>()` stays 16 bytes.
+    Generator(Box<Ty>),
 }
 
 impl Ty {
@@ -282,6 +333,7 @@ impl Ty {
             Ty::Optional(inner) => format!("{} | None", inner.name()),
             Ty::Object => "object".to_string(),
             Ty::MemoryView => "memoryview".to_string(),
+            Ty::Generator(elem) => format!("Generator[{}, None, None]", elem.name()),
         }
     }
 }

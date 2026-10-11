@@ -73,6 +73,8 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
             MirStmt::ExprStmt(_)
             | MirStmt::Assign { .. }
             | MirStmt::NoOp
+            | MirStmt::Yield(_)
+            | MirStmt::ForGen { .. }
             | MirStmt::ForRange { .. }
             | MirStmt::ForList { .. }
             | MirStmt::ForObject { .. }
@@ -143,7 +145,8 @@ pub(crate) fn loop_body(stmt: &MirStmt) -> Option<&[MirStmt]> {
         | MirStmt::ForList { body, .. }
         | MirStmt::ForObject { body, .. }
         | MirStmt::ForDict { body, .. }
-        | MirStmt::ForSet { body, .. } => Some(body),
+        | MirStmt::ForSet { body, .. }
+        | MirStmt::ForGen { body, .. } => Some(body),
         _ => None,
     }
 }

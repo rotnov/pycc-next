@@ -52,6 +52,11 @@ pub(super) fn lower_stmt(
     current_class: Option<&str>,
 ) -> MirStmt {
     match stmt {
+        HirStmt::ExprStmt(pycc_hir::HirExpr::Call { callee, args })
+            if callee == pycc_hir::YIELD_MARKER =>
+        {
+            MirStmt::Yield(lower_expr(&args[0], scopes, classes, current_class))
+        }
         HirStmt::ExprStmt(expr) => {
             // PEP 572 (#774): bind before lowering the whole expression --
             // see `pre_bind_named_expr_targets`'s own doc comment for why a
@@ -574,6 +579,25 @@ pub(super) fn lower_stmt(
                         var: var.clone(),
                         var_ty,
                         set: list.clone(),
+                        body,
+                    }
+                }
+                // `for x in gen:` over a generator: the loop holds its own
+                // reference in a hidden local (a digit-led name no source
+                // can spell), taken over from a desugaring temporary bound
+                // only for this loop (`_pycc_N`, `pycc_ast::desugar`).
+                Ty::Generator(elem_ty) => {
+                    let hold = format!("0genhold_{var}_{list}");
+                    bind_variable(scopes, hold.clone(), Ty::Generator(elem_ty.clone()));
+                    bind_variable(scopes, var.clone(), (*elem_ty).clone());
+                    super::kill_narrowing(scopes, var);
+                    let body = lower_loop_body(body, scopes, classes, current_class);
+                    MirStmt::ForGen {
+                        var: var.clone(),
+                        var_ty: *elem_ty,
+                        generator: list.clone(),
+                        hold,
+                        consume: list.starts_with("_pycc_"),
                         body,
                     }
                 }

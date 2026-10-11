@@ -207,6 +207,13 @@ pub fn lower_module(
     resolved: &ResolvedImports<'_>,
     module_name: Option<&str>,
 ) -> Result<LoweredModule, Vec<Diagnostic>> {
+    // An `--ext` module's public generators export through a wrapper
+    // returning the CPython iterator (`pycc_ast::split_ext_generators`).
+    let split = resolved
+        .ext_module()
+        .then(|| pycc_ast::split_ext_generators(module))
+        .flatten();
+    let module = split.as_ref().unwrap_or(module);
     let mut state = ModuleState {
         aliases: Vec::new(),
         imports: Vec::new(),

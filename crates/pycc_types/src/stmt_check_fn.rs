@@ -131,7 +131,11 @@ pub(crate) fn check_function_in(
             resolved_return.clone(),
         )?;
     }
-    if !is_abstract_method && resolved_return != Ty::None && !block_always_returns(body) {
+    if !is_abstract_method
+        && resolved_return != Ty::None
+        && !matches!(resolved_return, Ty::Generator(_))
+        && !block_always_returns(body)
+    {
         let diagnostic = Diagnostic::error(
             "T0022",
             format!(
@@ -228,8 +232,16 @@ pub(crate) fn check_stmt_arm_in_function(
     return_ty: Ty,
 ) -> Result<(), Diagnostic> {
     match stmt {
+        // `yield value` in a generator function: the value must suit the
+        // generator's element type.
+        HirStmt::ExprStmt(HirExpr::Call { callee, args }) if callee == pycc_hir::YIELD_MARKER => {
+            crate::generator::check_yield(env, local_names, args, &return_ty)
+        }
         HirStmt::Return(None) => {
-            if return_ty != Ty::None && !object_none::admits_none_return(&return_ty, None) {
+            if return_ty != Ty::None
+                && !matches!(return_ty, Ty::Generator(_))
+                && !object_none::admits_none_return(&return_ty, None)
+            {
                 return Err(Diagnostic::error(
                     "T0022",
                     format!(
@@ -602,7 +614,7 @@ pub(crate) fn check_stmt_arm_in_function(
                 Ty::List(elem_ty) => *elem_ty,
                 Ty::Str => Ty::Str,
                 Ty::Dict(kv) => kv.0,
-                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,
+                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) | Ty::Generator(elem_ty) => *elem_ty,
                 other => {
                     return Err(Diagnostic::error(
                         "T0033",

@@ -144,6 +144,22 @@ pub(crate) fn infer_call_expr(
             .collect::<Result<Vec<_>, _>>()?;
         &heap_arg_tys
     };
+    // A generator passed to a builtin that consumes it: `next(g)`, and the
+    // consumers typed as if given the list of its values (`pycc_mir`
+    // materializes it, or loops over it for `any`/`all`).
+    let user_callee = env.lookup_function(callee).is_some();
+    if !user_callee && let Some(ty) = crate::generator::next_call(callee, arg_tys, env)? {
+        return Ok(ty);
+    }
+    let materialized;
+    let arg_tys: &[Ty] = if !user_callee
+        && let Some(listed) = crate::generator::consumer_arg_tys(callee, arg_tys)
+    {
+        materialized = listed;
+        &materialized
+    } else {
+        arg_tys
+    };
     // A stdlib function the builtin table types (`math.log`) is still
     // refused when a local shadows its module's spelling.
     if let Some(symbol) = std_qualified_symbol(callee)

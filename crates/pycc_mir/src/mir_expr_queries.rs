@@ -172,6 +172,8 @@ impl MirExpr {
             // count is an `int` unconditionally. See the variant's own
             // documentation.
             MirExpr::BufferLen { .. } => Ty::Int,
+            MirExpr::GenNext { ty, .. } | MirExpr::GenToList { ty, .. } => ty.clone(),
+            MirExpr::GenAnyAll { .. } => Ty::Bool,
             // Hardcoded for the same reason once more, and it is this fact
             // that the rest of Part 2a rests on: the producer's result is
             // the very same `Ty::MemoryView` a `memoryview` parameter
@@ -255,6 +257,17 @@ impl MirExpr {
                 value.collect_named_expr_bindings(out);
             }
             MirExpr::IntBoundary(inner) => inner.collect_named_expr_bindings(out),
+            MirExpr::GenToList { generator, .. } | MirExpr::GenAnyAll { generator, .. } => {
+                generator.collect_named_expr_bindings(out)
+            }
+            MirExpr::GenNext {
+                generator, default, ..
+            } => {
+                generator.collect_named_expr_bindings(out);
+                if let Some(default) = default {
+                    default.collect_named_expr_bindings(out);
+                }
+            }
             MirExpr::OptionalWrap(inner, _) | MirExpr::ObjectBox(inner) => {
                 inner.collect_named_expr_bindings(out)
             }

@@ -416,6 +416,23 @@ const REGISTRY: &[StdSymbol] = &[
         name: "Any",
         kind: StdSymbolKind::TypingFormMarker,
     },
+    // The generator annotations (`pycc_hir::func::annotation_to_ty`'s
+    // `Iterator[T]` arm).
+    StdSymbol {
+        module: StdModule::Typing,
+        name: "Iterator",
+        kind: StdSymbolKind::TypingFormMarker,
+    },
+    StdSymbol {
+        module: StdModule::Typing,
+        name: "Iterable",
+        kind: StdSymbolKind::TypingFormMarker,
+    },
+    StdSymbol {
+        module: StdModule::Typing,
+        name: "Generator",
+        kind: StdSymbolKind::TypingFormMarker,
+    },
     StdSymbol {
         module: StdModule::Typing,
         name: "Generic",

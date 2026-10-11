@@ -246,6 +246,24 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         }
     }
 
+    // A generator function's element type: the term its `yield`s unify
+    // with while its body is walked (its signature's own return term is the
+    // generator type, which a call site sees as unresolved until then).
+    let mut generator_elements: HashMap<String, TypeTerm> = HashMap::new();
+    for item in &hir.items {
+        if let HirItem::Function {
+            name,
+            return_ty: Ty::Generator(element),
+            ..
+        } = item
+        {
+            generator_elements.insert(
+                name.clone(),
+                term_for_type((**element).clone(), &mut parents, &mut concrete),
+            );
+        }
+    }
+
     let mut constraints = SolverConstraints::default();
     let mut globals = ConstraintEnvironment {
         bindings: HashMap::new(),
@@ -263,6 +281,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         // producer is refused there outright.
         owned_buffers: HashSet::new(),
         in_function_body: false,
+        in_generator: false,
         // Part 2b of #1142 (#1164): module-level code is not a function
         // body, so there is no body to walk for a `return` in a `finally`.
         returns_inside_finally: false,
@@ -377,6 +396,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             // one place the function-body flag is set.
             owned_buffers: HashSet::new(),
             in_function_body: true,
+            in_generator: generator_elements.contains_key(name),
             // Part 2b of #1142 (#1164), review round 5: the same
             // whole-function predicate the check phase reads, from the same
             // `pycc_hir` walk, so the two admissions cannot drift.
@@ -463,7 +483,12 @@ pub(crate) fn infer_function_signatures_with_solver_all(
                 &mut constraints,
                 &mut env,
                 body,
-                Some(signature.2.clone()),
+                Some(
+                    generator_elements
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| signature.2.clone()),
+                ),
             )
         }) {
             // #1418: a widened comparison method's native return explains
@@ -545,6 +570,30 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(module_level)?;
+        // A generator's element type, resolved like a return type.
+        if let Some(element) = generator_elements.get(name) {
+            let element = resolved_private_signature_term(
+                element.clone(),
+                &mut parents,
+                &concrete,
+                &non_scalar_local_roots,
+            )
+            .or_else(object_when_non_strict)
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "T0021",
+                    format!(
+                        "cannot infer the type of the values generator `{name}` yields; add a \
+                         return annotation (`Iterator[...]`)"
+                    ),
+                    Span::new(0, 0),
+                )
+                .with_help(format!("add a return type annotation to `{name}`"))
+            })
+            .map_err(module_level)?;
+            resolved.insert(name.clone(), (param_tys, Ty::Generator(Box::new(element))));
+            continue;
+        }
         let return_ty = resolved_private_signature_term(
             signature.2.clone(),
             &mut parents,

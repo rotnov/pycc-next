@@ -64,6 +64,9 @@ pub(crate) enum HeapKind {
     Dict,
     Set,
     Object,
+    /// A generator object, counted through `pycc_rt_gen_incref`/`_decref`
+    /// (whose last release closes an unfinished generator).
+    Generator,
 }
 
 /// Every reference-counted class of `class_defs` with its slot kind string
@@ -106,6 +109,7 @@ pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
         Ty::Dict(_) => Some(HeapKind::Dict),
         Ty::Set(_) | Ty::FrozenSet(_) => Some(HeapKind::Set),
         Ty::Object => Some(HeapKind::Object),
+        Ty::Generator(_) => Some(HeapKind::Generator),
         // A boxed tuple is a `PyListObj` (`containers.rs`).
         Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => Some(HeapKind::List),
         Ty::Instance(class) if rt.rc_class_kinds.borrow().contains_key(class.as_str()) => {
@@ -171,6 +175,7 @@ fn counted<'ctx>(
         (HeapKind::Dict, Scalar::Dict(ptr)) => Some((HeapKind::Dict, *ptr)),
         (HeapKind::Set, Scalar::Set(ptr)) => Some((HeapKind::Set, *ptr)),
         (HeapKind::Object, Scalar::Object(ptr)) => Some((HeapKind::Object, *ptr)),
+        (HeapKind::Generator, Scalar::Generator(ptr)) => Some((HeapKind::Generator, *ptr)),
         _ => None,
     }
 }
@@ -272,6 +277,7 @@ pub(crate) fn emit_incref<'ctx>(
         HeapKind::Dict => Some(rt.dict_incref),
         HeapKind::Set => Some(rt.set_incref),
         HeapKind::Object => Some(rt.obj_retain),
+        HeapKind::Generator => Some(rt.gens.incref),
         HeapKind::List | HeapKind::Instance => None,
     };
     if let Some(incref) = out_of_line {
@@ -317,6 +323,7 @@ pub(crate) fn emit_decref<'ctx>(
         HeapKind::List => rt.list_free,
         HeapKind::Instance => rt.instance_free,
         HeapKind::Object => rt.obj_release,
+        HeapKind::Generator => rt.gens.decref,
     };
     if !matches!(kind, HeapKind::List | HeapKind::Instance) {
         builder

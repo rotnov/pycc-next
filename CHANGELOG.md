@@ -14,6 +14,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - Instance attributes initialised in `__init__` from any expression
   (`self.t = [0] * (n + 1)`): the slot takes the value's inferred type.
 - `len()` of a tuple bound to a name.
+- Generators, native in strict mode: `def`s with `yield` (annotated `Iterator[T]`,
+  `Iterable[T]` or `Generator[T, None, None]`, or inferred for a private helper),
+  `yield from` statements, `return` in a generator, `for`/`next()`/`list()`/`sum()`/...
+  over them, and generator expressions, lazy (so `any()`/`all()` stop at the first
+  deciding element). An unfinished generator is closed when its last reference goes,
+  running its `finally` clauses. An `--ext` module's public generator returns a
+  CPython iterator.
+
+### Fixed
+- A heap `int` (beyond 63 bits) held by a function's parameters or locals is released
+  when the function returns, and one passed to a builtin (`str(x * 2)`,
+  `max(x, x + 1)`) after the call: big-int loops through functions run in constant
+  memory (#625).
 
 ### Changed
 - Type-checker diagnostics (`T0xxx`, and the `C0001`/`I0404` the checker raises) point

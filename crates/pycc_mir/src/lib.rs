@@ -13,6 +13,7 @@ mod class;
 use class::eval_isinstance_protocol;
 use class::{class_def_of, mro_attrs};
 mod exception;
+mod generator;
 mod exception_isinstance;
 pub use exception::{MirExceptHandler, MirExceptionValue};
 use exception::{handler_type_tags, lower_raise};
@@ -435,7 +436,8 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::ForList { body, .. }
             | MirStmt::ForObject { body, .. }
             | MirStmt::ForDict { body, .. }
-            | MirStmt::ForSet { body, .. } => set_frame_function(body, frame_name),
+            | MirStmt::ForSet { body, .. }
+            | MirStmt::ForGen { body, .. } => set_frame_function(body, frame_name),
             MirStmt::Seq(stmts) => set_frame_function(stmts, frame_name),
             MirStmt::LoopElse { loop_stmt, orelse } => {
                 set_frame_function(std::slice::from_mut(loop_stmt.as_mut()), frame_name);
@@ -461,6 +463,7 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
                 set_frame_function(finalbody, frame_name);
             }
             MirStmt::ExprStmt(_)
+            | MirStmt::Yield(_)
             | MirStmt::Assign { .. }
             | MirStmt::NoOp
             | MirStmt::Unreachable

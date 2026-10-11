@@ -162,6 +162,7 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
             push_pending_int_release_if_scalar_temporary(rt, a, &scalar);
             let scalar = coerce_scalar_to_type(context, builder, scalar, param_ty.clone());
             match scalar {
+                Scalar::Generator(v) => v.into(),
                 Scalar::Int(v) => v.into(),
                 Scalar::Bool(v) => v.into(),
                 Scalar::Float(v) => v.into(),

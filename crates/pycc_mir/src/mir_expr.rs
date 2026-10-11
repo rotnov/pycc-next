@@ -668,6 +668,27 @@ pub enum MirExpr {
     BufferLen {
         base: Box<MirExpr>,
     },
+    /// `next(gen)` / `next(gen, default)` of a generator (`ty`, its element
+    /// type): resumes it, raising `StopIteration` (or answering `default`)
+    /// when it is exhausted.
+    GenNext {
+        generator: Box<MirExpr>,
+        default: Option<Box<MirExpr>>,
+        ty: Ty,
+    },
+    /// The list of a generator's remaining values, `list(gen)` (and the
+    /// operand of a consumer `pycc_types` types as given that list: `sum`,
+    /// `sorted`, ...). `ty` is the `list[T]`.
+    GenToList {
+        generator: Box<MirExpr>,
+        ty: Ty,
+    },
+    /// `any(gen)` / `all(gen)`: resumes the generator only until the first
+    /// deciding value.
+    GenAnyAll {
+        generator: Box<MirExpr>,
+        all: bool,
+    },
     /// `ndarray(n)` / `NDArray(n)` (Part 2a of #1142, issue #1165): the
     /// allocation of `n` zero-filled contiguous `f64`s that the artifact
     /// itself owns, together with the [`PyccExtBufferView`-shaped] pair that

@@ -244,7 +244,9 @@ impl Verifier<'_> {
         match stmt {
             MirStmt::ExprStmt(value)
             | MirStmt::Assign { value, .. }
-            | MirStmt::ObjRaise { value } => self.expr(value),
+            | MirStmt::ObjRaise { value }
+            | MirStmt::Yield(value) => self.expr(value),
+            MirStmt::ForGen { body, .. } => self.stmts(body),
             MirStmt::NoOp
             | MirStmt::Unreachable
             | MirStmt::Reraise
@@ -560,6 +562,15 @@ impl Verifier<'_> {
             }
             MirExpr::Sequence { discard, value } => self.exprs([discard.as_ref(), value.as_ref()]),
             MirExpr::RtCall(call) => self.exprs(&call.args),
+            MirExpr::GenNext {
+                generator, default, ..
+            } => {
+                self.expr(generator);
+                self.exprs(default.as_deref());
+            }
+            MirExpr::GenToList { generator, .. } | MirExpr::GenAnyAll { generator, .. } => {
+                self.expr(generator)
+            }
         }
     }
 }

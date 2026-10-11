@@ -56,6 +56,41 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
     use pycc_mir::Ty;
     match expr {
         MirExpr::IntLiteral(n) => Scalar::Int(emit_int_constant(context, builder, rt, *n)),
+        MirExpr::GenNext {
+            generator,
+            default,
+            ty,
+        } => crate::generator::emit_next(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            generator,
+            default.as_deref(),
+            ty,
+        ),
+        MirExpr::GenToList { generator, ty } => crate::generator::emit_to_list(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            generator,
+            ty,
+        ),
+        MirExpr::GenAnyAll { generator, all } => crate::generator::emit_any_all(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            generator,
+            *all,
+        ),
         // #1346: a receiver evaluated for its effects, then the attribute.
         MirExpr::Sequence { discard, value } => sequence::emit_sequence(
             context,

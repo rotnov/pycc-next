@@ -120,6 +120,50 @@ pub(super) fn emit_bigint_refcount_call<'ctx>(
     builder.position_at_end(continue_block);
 }
 
+/// Releases a parameter slot's word on the way out of its function (#625)
+/// behind the one-test guard `(word & 0b11) == 0`: a parameter slot never
+/// holds the empty word `0` (it is stored from an argument, and a `return`
+/// that moves it out leaves the smallint `0`, see `return_stmt`), so the
+/// non-zero half of [`emit_bigint_refcount_call`]'s guard is dropped from
+/// the hottest exit of a small recursive function.
+pub(super) fn emit_param_release<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    word: IntValue<'ctx>,
+) {
+    let i64_type = context.i64_type();
+    let low_tag = builder
+        .build_and(word, i64_type.const_int(0b11, false), "param_low_tag")
+        .expect("build_and should not fail for two i64 values");
+    let is_heap = builder
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            low_tag,
+            i64_type.const_zero(),
+            "param_is_heap",
+        )
+        .expect("build_int_compare should not fail for two i64 values");
+    let function = builder
+        .get_insert_block()
+        .expect("builder is always positioned inside some block while emitting")
+        .get_parent()
+        .expect("the block the builder is positioned in always belongs to a function");
+    let call_block = context.append_basic_block(function, "bigint_param_call");
+    let continue_block = context.append_basic_block(function, "bigint_param_cont");
+    builder
+        .build_conditional_branch(is_heap, call_block, continue_block)
+        .expect("build_conditional_branch should not fail for a well-formed i1");
+    builder.position_at_end(call_block);
+    builder
+        .build_call(rt.bigint_release, &[word.into()], "bigint_param_release")
+        .expect("build_call should not fail for a well-formed refcount call");
+    builder
+        .build_unconditional_branch(continue_block)
+        .expect("build_unconditional_branch should not fail for a fresh block");
+    builder.position_at_end(continue_block);
+}
+
 /// Loads `slot`'s current encoded word and releases it. `emit_assign` calls
 /// this for every `Ty::Int` slot before storing, which is what makes the
 /// slot's single owned reference an invariant: the slot holds `0` (released
@@ -546,6 +590,10 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         | MirExpr::SetAdd { .. }
         | MirExpr::Instantiate(_)
         | MirExpr::NullInstance { .. }
+        // A value a generator handed over (`next(g)`) is owned.
+        | MirExpr::GenNext { .. }
+        | MirExpr::GenToList { .. }
+        | MirExpr::GenAnyAll { .. }
         // `ExceptionMessage`'s own `.ty()` is always `Ty::Str` (Part 3A of
         // #541, #736), never `Ty::Int`, so like `OptionalWrap` immediately
         // below it can never reach this function as the `Ty::Int`-classified

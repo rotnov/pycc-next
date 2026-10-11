@@ -407,6 +407,7 @@ static unsigned char pycc_ext_obj_error_tag(PyObject *exc, const char **class_na
     PYCC_EXT_OBJ_TAG(PyExc_EOFError, 30, "EOFError")
     PYCC_EXT_OBJ_TAG(PyExc_NameError, 31, "NameError")
     PYCC_EXT_OBJ_TAG(PyExc_MemoryError, 32, "MemoryError")
+    PYCC_EXT_OBJ_TAG(PyExc_StopIteration, 33, "StopIteration")
     PYCC_EXT_OBJ_TAG(PyExc_BrokenPipeError, 19, "BrokenPipeError")
     PYCC_EXT_OBJ_TAG(PyExc_ConnectionAbortedError, 20, "ConnectionAbortedError")
     PYCC_EXT_OBJ_TAG(PyExc_ConnectionRefusedError, 21, "ConnectionRefusedError")

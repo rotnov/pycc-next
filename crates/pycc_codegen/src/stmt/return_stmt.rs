@@ -201,7 +201,33 @@ pub(crate) fn emit_return_stmt<'ctx>(
                 emit_expr(context, builder, module, rt, user_functions, locals, expr)
             };
             let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, expr, scalar);
-            let scalar = retain_if_int_duplicate(context, builder, rt, expr, scalar);
+            // #625: `return n` of an `int` slot the epilogue would release
+            // next, with no user `finally` in between that could read it,
+            // moves the slot's reference out instead of retaining a second
+            // one for the epilogue to drop. The slot keeps the smallint
+            // `0` (word `1`), which the epilogue's guard skips without a
+            // call (`emit_param_release`).
+            let moved = match expr {
+                MirExpr::Name {
+                    name,
+                    ty: pycc_mir::Ty::Int,
+                } if finally_stack.len() == 1
+                    && rt.owned_int_names.borrow().contains(name)
+                    && expected_return_ty == pycc_mir::Ty::Int =>
+                {
+                    locals.get(name).map(|slot| slot.ptr)
+                }
+                _ => None,
+            };
+            let scalar = match moved {
+                Some(slot) => {
+                    builder
+                        .build_store(slot, context.i64_type().const_int(1, false))
+                        .expect("build_store should not fail for an int slot");
+                    scalar
+                }
+                None => retain_if_int_duplicate(context, builder, rt, expr, scalar),
+            };
             let scalar =
                 coerce_scalar_to_type(context, builder, scalar, expected_return_ty.clone());
             // Part 2b of #1142 (#1164): a returned artifact-owned
@@ -391,6 +417,7 @@ pub(crate) fn emit_return_stmt<'ctx>(
                 return Ok(());
             }
             let basic_value: inkwell::values::BasicValueEnum = match scalar {
+                Scalar::Generator(v) => v.into(),
                 Scalar::Int(v) => v.into(),
                 Scalar::Bool(v) => v.into(),
                 Scalar::Float(v) => v.into(),

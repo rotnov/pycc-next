@@ -119,6 +119,7 @@ pub(crate) fn storage_slot_at_entry<'ctx>(
             | pycc_mir::Ty::Set(_)
             | pycc_mir::Ty::FrozenSet(_)
             | pycc_mir::Ty::Object
+            | pycc_mir::Ty::Generator(_)
     ) || matches!(&ty, pycc_mir::Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements))
     {
         // Lists, instances, dicts, sets, boxed tuples and CPython objects are
@@ -236,6 +237,7 @@ pub(crate) fn emit_assign<'ctx>(
     }
     let value = coerce_scalar_to_type(context, builder, value, slot.ty);
     let basic_value: inkwell::values::BasicValueEnum = match value {
+        Scalar::Generator(v) => v.into(),
         Scalar::Int(v) => v.into(),
         Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),

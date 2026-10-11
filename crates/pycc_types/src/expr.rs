@@ -365,7 +365,8 @@ fn is_walrus_value_ty_supported(ty: &Ty) -> bool {
         | Ty::Instance(_)
         | Ty::Protocol(_)
         | Ty::Object
-        | Ty::MemoryView => false,
+        | Ty::MemoryView
+        | Ty::Generator(_) => false,
     }
 }
 

@@ -13,6 +13,10 @@ use super::*;
 pub(super) struct RtFns<'ctx> {
     /// The generic tuple, dict and set objects' functions.
     pub(super) containers: crate::containers::ContainerFns<'ctx>,
+    /// The generator objects' functions and coroutine intrinsics.
+    pub(super) gens: crate::generator::GenFns<'ctx>,
+    /// The coroutine state of the generator function being emitted, if any.
+    pub(super) gen_frame: std::cell::RefCell<Option<crate::generator::GenFrame<'ctx>>>,
     /// The LLVM context, for emitters that receive only a builder.
     pub(super) context: &'ctx Context,
     pub(super) int_from_i64: FunctionValue<'ctx>,
@@ -351,6 +355,10 @@ pub(super) struct RtFns<'ctx> {
     /// The current function's locals that hold borrowed references
     /// (`borrowed_locals`).
     pub(super) borrowed_locals: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The names of the current function's `int` parameters and locals,
+    /// whose slots its epilogue releases (#625): `return n` of one moves
+    /// the slot's reference out instead of retaining a second one.
+    pub(super) owned_int_names: std::cell::RefCell<std::collections::HashSet<String>>,
     /// The current function's hidden frame slots holding a `for` loop's
     /// own reference to the list it iterates, keyed by the `ForList`
     /// statement's address: the owned-slot epilogue releases one a
@@ -382,6 +390,8 @@ pub(super) fn declare_rt_functions<'ctx>(
     };
     RtFns {
         containers: crate::containers::ContainerFns::declare(context, module),
+        gens: crate::generator::GenFns::declare(context, module),
+        gen_frame: std::cell::RefCell::new(None),
         context,
         sqrt_f64: f64_intrinsic("llvm.sqrt"),
         int_truediv: declare(
@@ -870,6 +880,7 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         rc_class_kinds: std::cell::RefCell::new(HashMap::new()),
         borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
+        owned_int_names: std::cell::RefCell::new(std::collections::HashSet::new()),
         loop_list_slots: std::cell::RefCell::new(HashMap::new()),
     }
 }

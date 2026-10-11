@@ -323,6 +323,17 @@ pub(crate) fn emit_name_expr<'ctx>(
                 .expect("build_load should not fail for a slot this function itself allocated");
             Scalar::MemoryView(loaded.into_pointer_value())
         }
+        // A generator object: the slot's pointer, borrowed.
+        Ty::Generator(_) => {
+            let loaded = builder
+                .build_load(
+                    context.ptr_type(inkwell::AddressSpace::default()),
+                    slot.ptr,
+                    "load",
+                )
+                .expect("build_load should not fail for a slot this function itself allocated");
+            Scalar::Generator(loaded.into_pointer_value())
+        }
         other => {
             panic!(
                 "pycc_codegen: reading a `{}`-typed local is not supported yet",

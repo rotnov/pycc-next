@@ -412,6 +412,7 @@ fn payload_scalar<'ctx>(inner: &Ty, payload: BasicValueEnum<'ctx>) -> Scalar<'ct
 /// The LLVM value a `Scalar` carries.
 pub(super) fn basic_value(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
     match scalar {
+        Scalar::Generator(v) => v.into(),
         Scalar::Int(v) | Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),
         Scalar::Str(v)

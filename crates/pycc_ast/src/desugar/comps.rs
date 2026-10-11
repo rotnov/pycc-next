@@ -11,9 +11,7 @@
 //!   materializes it anyway (`sum`, `min`, `max`, `sorted`, `list`, `set`,
 //!   `frozenset`, `tuple`, `dict`, `str.join`) becomes the list
 //!   comprehension with the same elements. `any`/`all` stop at the first
-//!   deciding element, so for them the rewrite applies only when evaluating
-//!   every element can have no observable effect: an element and filters
-//!   with no call (`docs/DEVIATIONS.md` names the remaining difference).
+//!   deciding element, so theirs stays a generator (`helpers`).
 
 use super::Fresh;
 use super::build::{int, load, store, subscript};
@@ -166,25 +164,6 @@ pub(super) fn flatten_tuple_targets(expr: &mut Expr, fresh: &Fresh) {
     }
 }
 
-/// Whether evaluating `expr` can call anything (so it may have an effect).
-fn has_call(expr: &Expr) -> bool {
-    struct Calls(bool);
-    impl<'a> Visitor<'a> for Calls {
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            if matches!(
-                expr,
-                Expr::Call(_) | Expr::Await(_) | Expr::Yield(_) | Expr::YieldFrom(_)
-            ) {
-                self.0 = true;
-            }
-            visitor::walk_expr(self, expr);
-        }
-    }
-    let mut calls = Calls(false);
-    calls.visit_expr(expr);
-    calls.0
-}
-
 /// The list comprehension a generator-expression argument of the consumer
 /// `consumer` becomes, or `None` when it stays as it is.
 pub(super) fn materialize_generator(consumer: &str, arg: &Expr) -> Option<Expr> {
@@ -195,15 +174,7 @@ pub(super) fn materialize_generator(consumer: &str, arg: &Expr) -> Option<Expr> 
         return None;
     }
     if matches!(consumer, "any" | "all") {
-        let effect = has_call(&generator.elt)
-            || generator
-                .generators
-                .iter()
-                .enumerate()
-                .any(|(i, g)| g.ifs.iter().any(has_call) || (i > 0 && has_call(&g.iter)));
-        if effect {
-            return None;
-        }
+        return None;
     }
     Some(Expr::ListComp(ExprListComp {
         node_index: Default::default(),

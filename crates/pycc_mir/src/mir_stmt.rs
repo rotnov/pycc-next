@@ -340,6 +340,21 @@ pub enum MirStmt {
     },
     /// Bare `raise` (re-raise, #382). Only valid inside an except handler.
     Reraise,
+    /// `yield value` in a generator function (`pycc_codegen::generator`).
+    Yield(MirExpr),
+    /// `for var in gen:` over a local bound to a generator. The loop holds
+    /// its own reference in the hidden local `hold` (taken over from `gen`
+    /// when `consume`, a temporary bound only for this loop), released when
+    /// the loop ends -- so an unfinished generator is closed there, as in
+    /// CPython -- or by the frame's epilogue on a `return` or an exception.
+    ForGen {
+        var: String,
+        var_ty: Ty,
+        generator: String,
+        hold: String,
+        consume: bool,
+        body: Vec<MirStmt>,
+    },
     /// `raise value` where `value` is a CPython object (Part 9 of #1371,
     /// from a cause-less `HirStmt::Raise` whose operand is `Ty::Object`).
     /// CPython decides what is raised, as its own `raise` does: an

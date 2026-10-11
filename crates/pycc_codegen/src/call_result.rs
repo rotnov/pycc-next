@@ -62,6 +62,12 @@ pub(super) fn call_result_scalar<'ctx>(
         // `ty_to_basic_type` gives an `Instance`-returning
         // function's LLVM signature the same pointer return type a
         // `str`-returning one gets.
+        Ty::Generator(_) => Scalar::Generator(
+            call_site
+                .try_as_basic_value()
+                .expect_basic("this function is declared to return a generator")
+                .into_pointer_value(),
+        ),
         Ty::Instance(_) => Scalar::Instance(
             call_site
                 .try_as_basic_value()

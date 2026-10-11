@@ -41,6 +41,7 @@ pub(super) fn collect_expr_bindings(expr: &MirExpr, bindings: &mut BTreeMap<Stri
                 | pycc_mir::Ty::Tuple(_)
                 | pycc_mir::Ty::Instance(_)
                 | pycc_mir::Ty::Optional(_)
+                | pycc_mir::Ty::Generator(_)
         ) {
             bindings.entry(name).or_insert(ty);
         }
@@ -106,6 +107,8 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
                     // the same walk over the function body, and needs its
                     // predeclared slot for the identical reason.
                     | pycc_mir::Ty::Object
+                    // A generator object, owned like a list.
+                    | pycc_mir::Ty::Generator(_)
             ) {
                 bindings.entry(target.clone()).or_insert(ty);
             }
@@ -177,6 +180,26 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
                 collect_stmt_bindings(stmt, bindings);
             }
         }
+        // `for x in gen:` binds its target and the loop's hidden hold of the
+        // generator (`pycc_mir`'s `0genhold_` local).
+        MirStmt::ForGen {
+            var,
+            var_ty,
+            hold,
+            body,
+            ..
+        } => {
+            bindings
+                .entry(var.clone())
+                .or_insert_with(|| var_ty.clone());
+            bindings
+                .entry(hold.clone())
+                .or_insert_with(|| pycc_mir::Ty::Generator(Box::new(var_ty.clone())));
+            for stmt in body {
+                collect_stmt_bindings(stmt, bindings);
+            }
+        }
+        MirStmt::Yield(value) => collect_expr_bindings(value, bindings),
         // `d[k] = v` (PR-11 Task 4) reassigns an existing binding's
         // contents, not a name -- mirrors `pycc_types::collect_local_names`'s
         // own identical `HirStmt::DictSet` arm and its comment. Unlike

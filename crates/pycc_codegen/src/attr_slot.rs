@@ -172,6 +172,9 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
     scalar: Scalar<'ctx>,
 ) -> IntValue<'ctx> {
     match scalar {
+        Scalar::Generator(_) => {
+            panic!("pycc_codegen: internal error: an attribute slot never holds a generator")
+        }
         Scalar::Int(v) => v,
         Scalar::Bool(v) => builder
             .build_int_z_extend(v, context.i64_type(), "attr_bool_zext")

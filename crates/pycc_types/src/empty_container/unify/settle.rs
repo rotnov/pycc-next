@@ -89,6 +89,19 @@ impl Engine {
                         self.store.unify(v, value);
                         progressed = true;
                     }
+                    // A loop over a generator binds its element type.
+                    (
+                        Some(Shape::Known(Ty::Generator(element))),
+                        Deferred::Element {
+                            result,
+                            iterate: true,
+                            ..
+                        },
+                    ) if !crate::empty_container::contains_infer(&element) => {
+                        let known = self.store.known(*element);
+                        self.store.unify(result, known);
+                        progressed = true;
+                    }
                     (Some(Shape::Known(Ty::Str)), Deferred::Element { result, .. }) => {
                         let known = self.store.known(Ty::Str);
                         self.store.unify(result, known);

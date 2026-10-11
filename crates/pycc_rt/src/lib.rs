@@ -48,6 +48,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 pub mod container_ops;
 pub mod dict;
 mod exception;
+pub mod generator;
 /// D-244 rule 2's `PyObject*` boundary, runtime half (#1025/#1028).
 pub mod ext_bridge;
 /// `hash()` of `int`, `bool` and int/bool tuples (#1331).
