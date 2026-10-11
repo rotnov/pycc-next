@@ -489,7 +489,74 @@ pub(crate) fn module_references(stmt: &Stmt) -> BTreeSet<String> {
     rewriter.visit_stmt(stmt);
     let mut found = rewriter.record.unwrap_or_default();
     found.extend(all_global_declarations(stmt));
+    found.extend(evaluated_annotation_names(stmt));
     found
+}
+
+/// The names read by the annotations CPython evaluates when `stmt` runs:
+/// every `def`'s parameter and return annotations (evaluated when the
+/// `def` runs, PEP 649 aside) and a module- or class-level annotated
+/// assignment's. Fallback code reading them needs them in the namespace
+/// (a compiled `from typing import Callable` is mirrored for it). A local
+/// of a function body shadowing one is counted too, which only mirrors
+/// more.
+fn evaluated_annotation_names(stmt: &Stmt) -> BTreeSet<String> {
+    #[derive(Default)]
+    struct Names {
+        found: BTreeSet<String>,
+        /// Inside a function body, where `x: T = v` is not evaluated.
+        in_function: bool,
+    }
+    impl Names {
+        fn annotation(&mut self, expr: &Expr) {
+            struct Reads<'n>(&'n mut BTreeSet<String>);
+            impl<'a> Visitor<'a> for Reads<'_> {
+                fn visit_expr(&mut self, expr: &'a Expr) {
+                    if let Expr::Name(name) = expr {
+                        self.0.insert(name.id.to_string());
+                    }
+                    visitor::walk_expr(self, expr);
+                }
+            }
+            Reads(&mut self.found).visit_expr(expr);
+        }
+    }
+    impl<'a> Visitor<'a> for Names {
+        fn visit_stmt(&mut self, stmt: &'a Stmt) {
+            match stmt {
+                Stmt::FunctionDef(def) => {
+                    for param in def.parameters.iter() {
+                        if let Some(annotation) = param.annotation() {
+                            self.annotation(annotation);
+                        }
+                    }
+                    if let Some(returns) = &def.returns {
+                        self.annotation(returns);
+                    }
+                    let outer = std::mem::replace(&mut self.in_function, true);
+                    self.visit_body(&def.body);
+                    self.in_function = outer;
+                    return;
+                }
+                Stmt::ClassDef(class) => {
+                    let outer = std::mem::replace(&mut self.in_function, false);
+                    self.visit_body(&class.body);
+                    self.in_function = outer;
+                    return;
+                }
+                Stmt::AnnAssign(assign) if !self.in_function => {
+                    self.annotation(&assign.annotation);
+                }
+                _ => {}
+            }
+            visitor::walk_stmt(self, stmt);
+        }
+
+        fn visit_annotation(&mut self, _expr: &'a Expr) {}
+    }
+    let mut names = Names::default();
+    names.visit_stmt(stmt);
+    names.found
 }
 
 /// Every name declared `global` anywhere in `stmt`.

@@ -61,6 +61,8 @@ mod rt_call;
 mod rt_fns;
 use rt_fns::{RtFns, declare_rt_functions};
 mod closure;
+#[cfg(test)]
+mod closure_tests;
 mod ext;
 mod ext_publish;
 mod ext_thunk;

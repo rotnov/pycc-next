@@ -26,6 +26,8 @@
 //! lambda ...` is first turned into the equivalent `def`. Anything else
 //! stays nested, and the compiler reports it as before.
 
+#[cfg(test)]
+mod tests;
 mod values;
 
 use super::Fresh;
@@ -50,17 +52,39 @@ struct ScopeNames {
     /// Names read anywhere in the function (comprehension and lambda
     /// scopes included) that the function itself does not bind.
     free: BTreeSet<String>,
+    /// How many binding sites each name has in the function's own scope
+    /// (its parameters aside); a `global` or `nonlocal` declaration counts
+    /// as two, so it is never mistaken for one assignment.
+    sites: HashMap<String, usize>,
 }
 
 /// Collects a function body's own bindings (not those of nested functions,
-/// lambdas or comprehensions).
+/// lambdas or comprehensions): the one binding analysis both lifting and
+/// function values (`values`) read, so the two cannot disagree. Every
+/// binding form counts: assignment, augmented, annotated, `for`, `with`
+/// and `del` targets, a walrus (also inside a comprehension), `except ...
+/// as`, match captures (`case x`, `case [*rest]`, `case {**rest}`, `case
+/// P(x=a)`, `case _ as a`), `type` aliases, imports and nested `def` and
+/// `class` statements.
 struct Bindings<'s>(&'s mut ScopeNames);
+
+impl Bindings<'_> {
+    fn bind(&mut self, name: &str) {
+        self.0.bound.insert(name.to_string());
+        *self.0.sites.entry(name.to_string()).or_default() += 1;
+    }
+
+    /// A `global`/`nonlocal` declaration: not a local, but never stable.
+    fn declare(&mut self, name: &str) {
+        *self.0.sites.entry(name.to_string()).or_default() += 2;
+    }
+}
 
 impl<'a> Visitor<'a> for Bindings<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::FunctionDef(def) => {
-                self.0.bound.insert(def.name.to_string());
+                self.bind(def.name.as_str());
                 // Defaults and decorators are evaluated here; the body is
                 // another scope.
                 for decorator in &def.decorator_list {
@@ -69,39 +93,44 @@ impl<'a> Visitor<'a> for Bindings<'_> {
                 return;
             }
             Stmt::ClassDef(def) => {
-                self.0.bound.insert(def.name.to_string());
+                self.bind(def.name.as_str());
                 return;
             }
             Stmt::Global(global) => {
                 for name in &global.names {
                     self.0.globals.insert(name.to_string());
+                    self.declare(name.as_str());
                 }
             }
             Stmt::Nonlocal(nonlocal) => {
                 for name in &nonlocal.names {
                     self.0.nonlocals.insert(name.to_string());
+                    self.declare(name.as_str());
                 }
             }
             Stmt::Import(import) => {
                 for alias in &import.names {
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
-                    self.0
-                        .bound
-                        .insert(bound.split('.').next().unwrap_or("").to_string());
+                    self.bind(bound.split('.').next().unwrap_or(""));
                 }
             }
             Stmt::ImportFrom(import) => {
                 for alias in &import.names {
-                    self.0
-                        .bound
-                        .insert(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
+                    let bound = alias.asname.as_ref().unwrap_or(&alias.name);
+                    // `from m import *` may bind anything.
+                    if bound.as_str() == "*" {
+                        self.0.sites.insert("*".to_string(), 2);
+                    }
+                    self.bind(bound.as_str());
                 }
             }
             Stmt::Try(try_stmt) => {
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(h) = handler;
                     if let Some(name) = &h.name {
-                        self.0.bound.insert(name.to_string());
+                        // Bound, then deleted at the handler's end.
+                        self.bind(name.as_str());
+                        self.bind(name.as_str());
                     }
                 }
             }
@@ -110,15 +139,29 @@ impl<'a> Visitor<'a> for Bindings<'_> {
         visitor::walk_stmt(self, stmt);
     }
 
+    fn visit_pattern(&mut self, pattern: &'a ruff_python_ast::Pattern) {
+        use ruff_python_ast::Pattern;
+        let name = match pattern {
+            Pattern::MatchAs(p) => p.name.as_ref(),
+            Pattern::MatchStar(p) => p.name.as_ref(),
+            Pattern::MatchMapping(p) => p.rest.as_ref(),
+            _ => None,
+        };
+        if let Some(name) = name {
+            self.bind(name.as_str());
+        }
+        visitor::walk_pattern(self, pattern);
+    }
+
     fn visit_expr(&mut self, expr: &'a Expr) {
         match expr {
             Expr::Name(name) if name.ctx != ExprContext::Load => {
-                self.0.bound.insert(name.id.to_string());
+                self.bind(name.id.as_str());
             }
             // A walrus in a comprehension binds in the enclosing function.
             Expr::Named(named) => {
                 if let Expr::Name(name) = named.target.as_ref() {
-                    self.0.bound.insert(name.id.to_string());
+                    self.bind(name.id.as_str());
                 }
                 self.visit_expr(&named.value);
                 return;
@@ -130,24 +173,34 @@ impl<'a> Visitor<'a> for Bindings<'_> {
             | Expr::Generator(_) => {
                 // Their own bindings are local to them; walrus targets
                 // inside comprehensions are found by the walk below.
-                struct Walrus<'w>(&'w mut ScopeNames);
-                impl<'b> Visitor<'b> for Walrus<'_> {
+                struct Walrus<'w, 's>(&'w mut Bindings<'s>);
+                impl<'b> Visitor<'b> for Walrus<'_, '_> {
                     fn visit_expr(&mut self, expr: &'b Expr) {
                         if let Expr::Named(named) = expr
                             && let Expr::Name(name) = named.target.as_ref()
                         {
-                            self.0.bound.insert(name.id.to_string());
+                            self.0.bind(name.id.as_str());
                         }
                         visitor::walk_expr(self, expr);
                     }
                 }
-                Walrus(self.0).visit_expr(expr);
+                Walrus(self).visit_expr(expr);
                 return;
             }
             _ => {}
         }
         visitor::walk_expr(self, expr);
     }
+}
+
+/// The binding sites of `body`'s own scope ([`Bindings`]), by name.
+fn binding_sites(body: &[Stmt]) -> HashMap<String, usize> {
+    let mut names = ScopeNames::default();
+    let mut bindings = Bindings(&mut names);
+    for stmt in body {
+        bindings.visit_stmt(stmt);
+    }
+    names.sites
 }
 
 /// Collects every name read in a function body (nested functions
@@ -767,6 +820,7 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
         .iter()
         .map(|p| p.name().to_string())
         .collect();
+    let sites = binding_sites(&body);
     let mut excluded: HashSet<String> = HashSet::new();
     let (chosen, chosen_names, cells, captures) = loop {
         // Choose the liftable ones.
@@ -862,7 +916,8 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
                 count_uses(&body, name).other != 0
                     && !values::def_index(&body, name).is_some_and(|index| {
                         let own: Vec<String> = captures[name].iter().cloned().collect();
-                        values::stable_captures(&body, &params, index, &own)
+                        values::used_after_def(&body, name, index)
+                            && values::stable_captures(&body, &sites, &params, index, &own)
                     })
             })
             .collect();

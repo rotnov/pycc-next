@@ -32,6 +32,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   when the function returns, and one passed to a builtin (`str(x * 2)`,
   `max(x, x + 1)`) after the call: big-int loops through functions run in constant
   memory (#625).
+- Function values: a call keeps the called closure alive while its arguments run
+  (an argument rebinding the variable that held it no longer frees it under the
+  call); a closure capturing a variable rebound by `except ... as`, a `match`
+  capture, a `type` alias or a comprehension walrus, or used before its `def`, is
+  refused (strict) or runs in CPython (non-strict) instead of seeing a stale or
+  unassigned value; the compiler's internal names (`__pycc_closure__`, `_pycc_*`)
+  are reserved (`E0109`). A `--non-strict` fallback function annotated with a
+  compiled `typing` import (`Callable`) no longer fails with `NameError`.
 
 ### Changed
 - Type-checker diagnostics (`T0xxx`, and the `C0001`/`I0404` the checker raises) point

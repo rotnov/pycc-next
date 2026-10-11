@@ -5,14 +5,16 @@
 //! nested function's enclosing variables, lifted by
 //! `pycc_ast::desugar::closures`, or none for a module-level function used
 //! as a value). Each captured value is stored as one word and owned by the
-//! object. Two functions are emitted once per `F`:
+//! object. Two functions are emitted once per `F` and number `N` of
+//! captured values (which fix the object's layout and the call's
+//! signature):
 //!
-//! * `pycc_closure_call.F(obj, args...)` loads the captured values, takes a
-//!   reference of each for `F`'s parameter slots (which own their
+//! * `pycc_closure_call.F.N(obj, args...)` loads the captured values, takes
+//!   a reference of each for `F`'s parameter slots (which own their
 //!   arguments) and calls `F` with them and `args`. Every function value of
 //!   one `Callable[[A...], R]` type is called through this one signature,
 //!   whatever it captured.
-//! * `pycc_closure_drop.F(obj)` releases the captured values; the runtime
+//! * `pycc_closure_drop.F.N(obj)` releases the captured values; the runtime
 //!   calls it when the last reference to the object goes.
 
 use super::*;
@@ -174,8 +176,17 @@ fn closure_functions<'ctx>(
     function: &str,
     captures: usize,
 ) -> (FunctionValue<'ctx>, FunctionValue<'ctx>) {
-    let call_name = format!("pycc_closure_call.{function}");
-    let drop_name = format!("pycc_closure_drop.{function}");
+    let params = user_function.fn_type.get_param_types();
+    assert!(
+        captures <= params.len() && captures <= user_function.param_tys.len(),
+        "pycc_codegen: internal error: a function value of `{function}` binds {captures} \
+         captured values, more than its parameters"
+    );
+    // Keyed by the capture count too: the layout of the object and the
+    // parameters the call function receives both depend on it (the
+    // captured types are `function`'s first `captures` parameter types).
+    let call_name = format!("pycc_closure_call.{function}.{captures}");
+    let drop_name = format!("pycc_closure_drop.{function}.{captures}");
     if let (Some(call), Some(drop)) = (
         module.get_function(&call_name),
         module.get_function(&drop_name),
@@ -183,7 +194,6 @@ fn closure_functions<'ctx>(
         return (call, drop);
     }
     let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
-    let params = user_function.fn_type.get_param_types();
     let mut call_params: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = vec![ptr_type.into()];
     call_params.extend(params[captures..].iter().copied());
     let call_type = match user_function.fn_type.get_return_type() {
@@ -334,38 +344,8 @@ pub(crate) fn emit_call_closure<'ctx>(
     else {
         panic!("pycc_codegen: internal error: a called value is not a function value")
     };
-    // A fresh value (`make_adder(1)(2)`) is released after the call, or if
-    // an argument raises.
-    let mark = heap_rc::pending_mark(rt);
-    let fresh = !heap_rc::is_borrowed_read(callee);
-    if fresh {
-        heap_rc::hold_owned(rt, heap_rc::HeapKind::Closure, obj);
-    }
-    let mut values: Vec<BasicMetadataValueEnum<'ctx>> = vec![obj.into()];
-    values.extend(crate::user_call::marshal_args(
-        context,
-        builder,
-        module,
-        rt,
-        user_functions,
-        locals,
-        &sig.0,
-        "function",
-        args,
-    ));
+    // The call function is read before any argument runs.
     let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
-    let mut param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = vec![ptr_type.into()];
-    param_types.extend(
-        sig.0
-            .iter()
-            .map(|t| -> inkwell::types::BasicMetadataTypeEnum<'ctx> {
-                ty_to_basic_type(context, t.clone()).into()
-            }),
-    );
-    let fn_type = match &sig.1 {
-        Ty::None => context.void_type().fn_type(&param_types, false),
-        other => ty_to_basic_type(context, other.clone()).fn_type(&param_types, false),
-    };
     // SAFETY: `CALL_OFFSET` is inside the object's header.
     let call_slot = unsafe {
         builder
@@ -381,10 +361,48 @@ pub(crate) fn emit_call_closure<'ctx>(
         .build_load(ptr_type, call_slot, "closure_call")
         .expect("build_load should not fail for the call function")
         .into_pointer_value();
+    // The object must outlive the call. A fresh value (`make_adder(1)(2)`)
+    // is owned here. A borrowed one (a variable, a global) is owned by its
+    // storage, which an argument that runs code may rebind (`f(g())` where
+    // `g` rebinds `f`), so it is retained before the arguments run. Either
+    // is released after the call, or if an argument raises.
+    let mark = heap_rc::pending_mark(rt);
+    let borrowed = heap_rc::is_borrowed_read(callee);
+    let owned = !borrowed || args.iter().any(crate::operand_pin::may_release);
+    if borrowed && owned {
+        heap_rc::emit_incref(context, builder, rt, heap_rc::HeapKind::Closure, obj);
+    }
+    if owned {
+        heap_rc::hold_owned(rt, heap_rc::HeapKind::Closure, obj);
+    }
+    let mut values: Vec<BasicMetadataValueEnum<'ctx>> = vec![obj.into()];
+    values.extend(crate::user_call::marshal_args(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        &sig.0,
+        "function",
+        args,
+    ));
+    let mut param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = vec![ptr_type.into()];
+    param_types.extend(
+        sig.0
+            .iter()
+            .map(|t| -> inkwell::types::BasicMetadataTypeEnum<'ctx> {
+                ty_to_basic_type(context, t.clone()).into()
+            }),
+    );
+    let fn_type = match &sig.1 {
+        Ty::None => context.void_type().fn_type(&param_types, false),
+        other => ty_to_basic_type(context, other.clone()).fn_type(&param_types, false),
+    };
     let call_site = builder
         .build_indirect_call(fn_type, call, &values, "call_closure")
         .expect("build_indirect_call should not fail for a function value");
-    if fresh {
+    if owned {
         heap_rc::truncate_pending(rt, mark);
         heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::Closure, obj);
     }

@@ -1406,6 +1406,23 @@ import a  # cycle: a's top level needs b, b's top level needs a
 ",
     },
     DiagnosticExplanation {
+        code: "E0109",
+        severity: Severity::Error,
+        summary: "name reserved for the compiler",
+        explanation: "\
+E0109 reports a name the compiler reserves for its own rewrites: the \
+function-value marker `__pycc_closure__` and every name starting with \
+`_pycc_` (lifted nested functions, cells and temporaries). A program that \
+bound or read one could reach compiler internals -- forge a function value \
+or alias a temporary -- so any binding or read of such a name is refused. \
+Rename it.",
+        example: "\
+def f() -> int:
+    _pycc_x = 1  # E0109: rename it
+    return _pycc_x
+",
+    },
+    DiagnosticExplanation {
         code: "I0401",
         severity: Severity::Error,
         summary: "untyped value leaks across interop boundary",

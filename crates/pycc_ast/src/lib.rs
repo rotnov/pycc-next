@@ -7,8 +7,10 @@
 pub use ruff_python_ast::visitor;
 
 mod desugar;
+mod reserved;
 mod string_annotation;
 pub use desugar::{CLOSURE_MARKER, INFER_MARKER, desugar, split_ext_generators};
+pub use reserved::{is_reserved_name, reserved_name_uses};
 pub use string_annotation::{
     normalize_string_annotations, parse_string_annotation, unquote_nested_string_annotations,
 };

@@ -1,0 +1,5 @@
+error[E0109]: `__pycc_closure__` is reserved for names the compiler introduces -- rename it
+ --> tests/diagnostics/e0109_reserved_closure_marker.py:5:5
+  |
+5 | f = __pycc_closure__(add, 1, 2, 3)
+  |     ^^^^^^^^^^^^^^^^ `__pycc_closure__` is reserved for names the compiler introduces -- rename it

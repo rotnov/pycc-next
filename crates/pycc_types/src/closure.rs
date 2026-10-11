@@ -10,6 +10,20 @@ fn unsupported(message: impl Into<String>) -> Diagnostic {
     Diagnostic::error("C0001", message, Span::new(0, 0))
 }
 
+/// A closure marker binding more values than `function` has parameters.
+/// Desugaring never makes one, and user source cannot name the marker
+/// (E0109); this keeps a malformed one a diagnostic rather than a panic.
+pub(crate) fn too_many_captures(function: &str, captures: usize, params: usize) -> Diagnostic {
+    Diagnostic::error(
+        "T0021",
+        format!(
+            "a function value of `{function}` binds {captures} captured values, but \
+             `{function}` takes {params} parameters"
+        ),
+        Span::new(0, 0),
+    )
+}
+
 /// Whether a value of type `ty` can be captured by a function value: one
 /// word (not a struct-by-value tuple or optional, not a buffer view).
 fn capturable(ty: &Ty) -> bool {
@@ -46,6 +60,9 @@ pub(crate) fn closure_value(
     let Some((params, ret)) = env.lookup_function(function) else {
         return Err(unsupported(format!("`{function}` is not a function")));
     };
+    if captures.len() > params.len() {
+        return Err(too_many_captures(function, captures.len(), params.len()));
+    }
     for (capture, param) in captures.iter().zip(params) {
         let actual = infer_expr_in(env, local_names, capture)?;
         if !capturable(&actual) {

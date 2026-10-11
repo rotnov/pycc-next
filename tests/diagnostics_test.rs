@@ -968,6 +968,12 @@ fn c0001_nested_def_used_as_a_value() {
     assert_diagnostic_matches_fixture("c0001_nested_def_used_as_a_value");
 }
 
+/// A program cannot forge a function value through the compiler's marker.
+#[test]
+fn e0109_reserved_closure_marker() {
+    assert_diagnostic_matches_fixture("e0109_reserved_closure_marker");
+}
+
 #[test]
 fn c0001_nested_class() {
     assert_diagnostic_matches_fixture("c0001_nested_class");

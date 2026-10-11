@@ -46,6 +46,13 @@ pub(crate) fn collect_call_constraints(
         let Some(signature) = signatures.get(function) else {
             return Ok(None);
         };
+        if captures.len() > signature.1.len() {
+            return Err(crate::closure::too_many_captures(
+                function,
+                captures.len(),
+                signature.1.len(),
+            ));
+        }
         for (index, (term, parameter)) in capture_terms.into_iter().zip(&signature.1).enumerate() {
             if let Some(term) = term {
                 unify_terms(

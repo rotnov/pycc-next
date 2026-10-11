@@ -278,6 +278,23 @@ impl Loader {
         };
         let mut parsed = pycc_parser::parse_all(&source)
             .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
+        // Names the compiler's own rewrites introduce are not the
+        // program's to bind or read (E0109).
+        let reserved: Vec<Diagnostic> = pycc_ast::reserved_name_uses(&parsed)
+            .into_iter()
+            .map(|(name, range)| {
+                Diagnostic::error(
+                    "E0109",
+                    format!(
+                        "`{name}` is reserved for names the compiler introduces -- rename it"
+                    ),
+                    Span::new(range.start, range.end),
+                )
+            })
+            .collect();
+        if !reserved.is_empty() {
+            return Err(FrontendFailure::compile(&display, &source, reserved));
+        }
         pycc_ast::desugar(&mut parsed);
         if is_entry && let Some(message) = self.entry_package_collision() {
             let diagnostic = Diagnostic::error("C0001", message, Span::new(0, 0));
