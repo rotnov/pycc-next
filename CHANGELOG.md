@@ -4,6 +4,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.1.0-rc.2] - 2026-10-11
+
+The release archive is now self-contained (rc.1 could not build programs). Changes
+since rc.1:
+
 ### Added
 - `global` statements: a module global a function rebinds lives in a one-element
   cell, so every function and the module see its writes (native in strict mode).
