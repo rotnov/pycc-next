@@ -39,14 +39,30 @@ Caught **before** it runs. Not in CI logs. Not in production. At compile time.
 - 🤝 **Plays with the ecosystem.** Target: a CPython extension module you `import`, calling numpy and torch as usual.
 - 🧪 **CPython is the judge.** Correct means: same output, same exceptions as CPython 3.13.
 
-## Status: pre-alpha, honestly 🧭
+## Status: 0.1, honestly 🧭
 
-Works today: strict type checking with Rust-style diagnostics, native compilation via
-LLVM, classes, exceptions, containers, comprehensions, `match` — 8,800+ tests.
-`fib(32)` runs ~3x faster than CPython including process start.
+Works today: strict type checking with Rust-style diagnostics pointing at the offending
+code; native compilation via LLVM; classes, exceptions, generators, closures, lists,
+dicts, sets, comprehensions, `match`, arbitrary-precision `int`; reference-counted memory;
+CPython extension modules; `--non-strict` for untyped code. 9,500+ tests.
 
-Coming next: numpy arrays as native types, published benchmarks against CPython
-**and** hand-written Rust.
+**Speed** (`python3 bench/run.py`, best of 7, Xeon 2.1 GHz, process start included):
+
+| program | CPython 3.13 | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
+|---|---|---|---|---|---|
+| fib(32) | 0.231s | 0.021s | 0.006s | **10.8x faster** | 3.8x slower |
+| mandelbrot | 1.368s | 0.041s | 0.038s | **33.7x faster** | 1.1x slower |
+| nbody | 2.042s | 0.088s | 0.021s | **23.3x faster** | 4.2x slower |
+| sieve | 1.061s | 0.064s | 0.021s | **16.6x faster** | 3.1x slower |
+| spectral_norm | 0.801s | 0.027s | 0.008s | **29.2x faster** | 3.5x slower |
+
+**Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
+compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
+wrong outputs (CI-gated), 84% of top-level statements native and the rest per-statement
+CPython fallback; strict mode compiles 93/200 unchanged — most of the rest only lack the
+annotations strict mode requires.
+
+Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
 ## Modes
 

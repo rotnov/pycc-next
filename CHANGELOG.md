@@ -4,6 +4,29 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-11
+
+First release of pycc-next: an ahead-of-time compiler for typed Python that turns
+type mismatches into compile errors and runs 11-34x faster than CPython on the
+benchmark set, interoperating with CPython through extension modules and an
+embedded interpreter. Everything below in 0.1.0-rc.1 and 0.1.0-rc.2 is included.
+
+Highlights:
+- Strict mode (default): Rust-style diagnostics at the offending code; native
+  representations; generators, closures, classes, exceptions, containers, bigints.
+- `--non-strict`: untyped code compiles; unprovable parts run through CPython,
+  per statement if needed. 200/200 real-world corpus programs match CPython.
+- `--ext`: abi3 CPython extension modules (CPython >= 3.13).
+- Reference-counted memory with no per-iteration leaks; security review fixes
+  (keyed str hashing, int(str) digit limit, no host aborts on big ints).
+- Benchmarks vs CPython 3.13 / hand-written Rust: fib 10.8x / 3.8x slower,
+  mandelbrot 33.7x / 1.1x, nbody 23.3x / 4.2x, sieve 16.6x / 3.1x,
+  spectral_norm 29.2x / 3.5x (see README).
+- Self-contained Linux x86_64 release archive (needs `cc`; CPython 3.13+ with headers
+  for `--ext` and `--non-strict`).
+
+Known differences from CPython: docs/DEVIATIONS.md.
+
 ## [0.1.0-rc.2] - 2026-10-11
 
 The release archive is now self-contained (rc.1 could not build programs). Changes
