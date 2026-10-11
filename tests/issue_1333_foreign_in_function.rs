@@ -306,19 +306,15 @@ fn unadmitted_operations_on_a_function_local_object_are_diagnosed() {
     ] {
         assert_one_error(tag, &format!("{HEAD}{tail}"), code, needle);
     }
-    // `self.a = y` is refused because `y` is not an `__init__` parameter,
-    // the same C0001 any non-parameter local gets. It does not reach
-    // `init_slot.rs`'s type-keyed parameter arm. Since Part 1 of #1367 that
-    // arm admits a parameter annotated with a class a foreign import binds
-    // (`tests/issue_1367_foreign_class_annotations.rs`); a local is still no
-    // parameter.
-    assert_one_error(
-        "obj_fn_self_attr_non_parameter",
+    // `self.a = y` establishes an object slot: the attribute takes the
+    // type of the value `__init__` first assigns it.
+    let dir = ScratchDir::new("obj_fn_self_attr_local").expect("scratch");
+    let output = check_with(
+        &dir,
         "import json\n\nclass C:\n    def __init__(self) -> None:\n        \
          y = json.loads(\"[1]\")\n        self.a = y\n\nC()\n",
-        "C0001",
-        "`self.<attr> = y` must reference one of `__init__`'s own parameters",
     );
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
     assert_one_error(
         "obj_fn_list_return",
         "import json\n\ndef _h():\n    y = json.loads(\"[1]\")\n    return [y]\n\n\

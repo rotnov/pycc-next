@@ -573,12 +573,33 @@ fn collect_expr_constraints_here(
         // carrier is destructured by the `Subscript`/`ListPop` arms, never
         // unified. `EmptyDict` stays `Ok(None)` because the `DictLiteral`
         // arm below never produces a term either.
+        // A container element the empty-container pass resolved is concrete
+        // too (that pass stores only fully concrete types); the check phase
+        // still applies the element gate to it.
         HirExpr::EmptyList(element_ty) => {
-            if is_private_solver_scalar(element_ty) {
+            if is_private_solver_scalar(element_ty)
+                || (!crate::empty_container::contains_infer(element_ty)
+                    && !contains_param(element_ty)
+                    && matches!(element_ty, Ty::List(_) | Ty::Tuple(_) | Ty::Dict(_) | Ty::Set(_)))
+            {
                 Ok(Some(Ok(Ty::List(Box::new(element_ty.clone())))))
             } else {
                 Ok(None)
             }
+        }
+        // The same for a resolved empty dict or set: its type is concrete.
+        HirExpr::EmptyDict(kv)
+            if !crate::empty_container::contains_infer(&kv.0)
+                && !crate::empty_container::contains_infer(&kv.1)
+                && !contains_param(&kv.0)
+                && !contains_param(&kv.1) =>
+        {
+            Ok(Some(Ok(Ty::Dict(kv.clone()))))
+        }
+        HirExpr::EmptySet(element)
+            if !crate::empty_container::contains_infer(element) && !contains_param(element) =>
+        {
+            Ok(Some(Ok(Ty::Set(Box::new(element.clone())))))
         }
         HirExpr::EmptyDict(_) | HirExpr::EmptySet(_) => Ok(None),
         // Part 2d of #1371: a list display built as a CPython `list` is an
@@ -1019,4 +1040,15 @@ pub(crate) fn introduces_bindings(body: &[HirStmt]) -> bool {
         }
         HirStmt::Raise { .. } => false,
     })
+}
+
+/// Whether `ty` mentions a PEP 695 type parameter anywhere.
+fn contains_param(ty: &Ty) -> bool {
+    match ty {
+        Ty::Param(_) => true,
+        Ty::List(e) | Ty::Set(e) | Ty::FrozenSet(e) | Ty::Optional(e) => contains_param(e),
+        Ty::Dict(kv) => contains_param(&kv.0) || contains_param(&kv.1),
+        Ty::Tuple(es) => es.iter().any(contains_param),
+        _ => false,
+    }
 }

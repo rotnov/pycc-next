@@ -101,14 +101,27 @@ pub(crate) fn resolve_class_slots(
             })
             .collect();
         let mut attrs = class.attrs.clone();
-        for (attr, ty) in attrs.iter_mut() {
+        for i in 0..attrs.len() {
+            let (attr, ty) = &attrs[i];
             if !contains_infer(ty) {
                 continue;
             }
-            let found = inherited_slot(&resolved.class_defs, class, attr, ty)
-                .or_else(|| produced_slot(&methods, local_names, hir, class, attr));
+            let found = if *ty == Ty::Infer {
+                established_slot(hir, class, attr, &module_env, local_names)
+            } else {
+                inherited_slot(&resolved.class_defs, class, attr, ty)
+                    .or_else(|| produced_slot(&methods, local_names, hir, class, attr))
+            };
             if let Some(found) = found {
-                *ty = found;
+                attrs[i].1 = found;
+                // A later attribute's value may read this one
+                // (`self.t = [0] * (self.n + 1)`).
+                let name = &resolved.class_defs[index].0;
+                if let Some(def) =
+                    std::sync::Arc::make_mut(&mut module_env.classes).get_mut(name.as_str())
+                {
+                    def.attrs.clone_from(&attrs);
+                }
             }
         }
         let (name, class) = &mut resolved.class_defs[index];
@@ -121,6 +134,60 @@ pub(crate) fn resolve_class_slots(
         class.attrs = attrs;
     }
     rewrite_attr_resets(resolved);
+}
+
+/// The slot type of an attribute `pycc_hir` established from an arbitrary
+/// expression (a bare `Ty::Infer` slot): the type of the establishing
+/// `self.<attr> = <value>` -- the first one at the top level of `__init__`,
+/// the statement `pycc_hir::class::init_slot` read -- inferred in
+/// `__init__`'s environment. Parameters are typed, so are the locals bound
+/// anywhere in the body and the class's attributes resolved before this
+/// one. Only a type an attribute slot can hold is accepted (the set a
+/// parameter may seed, `pycc_hir::class::init_slot`); anything else stays
+/// provisional and the gate reports it.
+fn established_slot(
+    hir: &HirModule,
+    class: &HirClassDef,
+    attr: &str,
+    module_env: &crate::Environment,
+    local_names: &[Vec<&str>],
+) -> Option<Ty> {
+    let init = class
+        .methods
+        .iter()
+        .find(|(method, _)| method == "__init__")
+        .map(|(_, mangled)| mangled.as_str())?;
+    let (item, name, params, body) = hir.items.iter().enumerate().find_map(|(index, item)| {
+        match item {
+            HirItem::Function {
+                name, params, body, ..
+            } if name == init => Some((index, name.as_str(), params.as_slice(), body.as_slice())),
+            _ => None,
+        }
+    })?;
+    let receivers = receiver_spellings(body);
+    let value = body.iter().find_map(|stmt| match stmt {
+        HirStmt::AttrSet {
+            base: HirExpr::Name(base),
+            attr: target,
+            value,
+        } if target == attr && receivers.contains(&base.as_str()) => Some(value),
+        _ => None,
+    })?;
+    let env = function_environment(module_env, name, params, body, &local_names[item]);
+    let ty = crate::infer_expr_in(&env, &local_names[item], value).ok()?;
+    let admitted = matches!(
+        ty,
+        Ty::Int
+            | Ty::Float
+            | Ty::Bool
+            | Ty::Str
+            | Ty::List(_)
+            | Ty::Dict(..)
+            | Ty::Object
+            | Ty::Instance(_)
+    );
+    (admitted && !contains_infer(&ty)).then_some(ty)
 }
 
 /// Source (a): the first ancestor slot for `attr` with `slot`'s shape and
@@ -308,12 +375,12 @@ fn rewrite_reset(value: &mut HirExpr, layout: &[(String, Ty)], attr: &str) {
 /// `Span::new(0, 0)` every container `T0003` uses (`HirStmt::AttrSet`
 /// carries none), so the message names the attribute and the class.
 pub(crate) fn reject_unresolved_attr_slots(hir: &HirModule) -> Result<(), KeyedDiagnostics> {
-    let Some((class_name, class, attr)) = hir.class_defs.iter().find_map(|(name, class)| {
+    let Some((class_name, class, attr, slot)) = hir.class_defs.iter().find_map(|(name, class)| {
         class
             .attrs
             .iter()
             .find(|(_, ty)| contains_infer(ty))
-            .map(|(attr, _)| (name, class, attr))
+            .map(|(attr, ty)| (name, class, attr, ty))
     }) else {
         return Ok(());
     };
@@ -341,6 +408,20 @@ pub(crate) fn reject_unresolved_attr_slots(hir: &HirModule) -> Result<(), KeyedD
     let receiver = init_item
         .and_then(|(_, body)| establishing_receiver(body, attr))
         .unwrap_or("self");
+    if *slot == Ty::Infer {
+        let diagnostic = Diagnostic::error(
+            "T0003",
+            format!(
+                "the type of `{receiver}.{attr}` in class `{class_name}` cannot be inferred from \
+                 the value `__init__` first assigns it"
+            ),
+            Span::new(0, 0),
+        )
+        .with_help(format!(
+            "declare the attribute in the class body (`{attr}: <type>`)"
+        ));
+        return Err(vec![(key, diagnostic)]);
+    }
     let message = format!(
         "an empty list literal has no inferable element type for `{receiver}.{attr}` in class \
          `{class_name}`"

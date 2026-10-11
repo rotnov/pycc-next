@@ -204,10 +204,17 @@ pub(crate) fn infer_call_expr(
         // an annotation (only a foreign-imported class resolves to
         // it, Part 1 of #1367), so naming it in the message a user
         // sees for `len(5)` would point at a type they cannot write.
-        if !matches!(
-            arg_tys[0],
-            Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Object
-        ) {
+        // A tuple bound to a name: its length is its type's arity
+        // (`pycc_mir` folds the call to the constant; reading a name has
+        // no effect to keep).
+        let named_tuple =
+            matches!(arg_tys[0], Ty::Tuple(_)) && matches!(args.first(), Some(HirExpr::Name(_)));
+        if !named_tuple
+            && !matches!(
+                arg_tys[0],
+                Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Object
+            )
+        {
             return Err(Diagnostic::error(
                 "T0033",
                 format!(

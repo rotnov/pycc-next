@@ -172,6 +172,15 @@ pub(crate) fn lower_call_expr(
     // checker/CPython divergence itself -- that shadowing `len` is
     // silently ignored rather than refused -- is filed as #1098 and
     // is not this lowering's to fix.
+    // `len(t)` of a tuple bound to a name (the only tuple `pycc_types`
+    // admits there) is the tuple type's arity.
+    if callee == "len"
+        && args.len() == 1
+        && matches!(args[0], MirExpr::Name { .. })
+        && let Ty::Tuple(elements) = args[0].ty()
+    {
+        return MirExpr::IntLiteral(elements.len() as i64);
+    }
     if callee == "len" && args.len() == 1 && matches!(args[0].ty(), Ty::Object) {
         return MirExpr::ObjLen {
             base: Box::new(args.into_iter().next().expect("checked len() == 1")),

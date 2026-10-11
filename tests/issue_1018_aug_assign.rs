@@ -100,13 +100,16 @@ fn s1_a_mutable_or_user_defined_operand_is_refused() {
     }
 }
 
-/// S2: `global` is refused, so no call inside the value can rebind the
-/// container or index between the load and the store.
+/// S2: a `global` the cell rewrite does not model (here: a name no
+/// module-level statement binds) is refused. A modelled one becomes a store
+/// through a module-level cell, `_pycc_global_x[0] += 1`, whose container
+/// is bound once and whose index is a literal, so no call inside the value
+/// can rebind either between the load and the store.
 #[test]
-fn s2_a_global_declaration_is_still_refused() {
+fn s2_an_unmodelled_global_declaration_is_still_refused() {
     let text = check_fails(
         "e2e_1018_s2",
-        "x = 1\ndef g() -> None:\n    global x\n    x += 1\n",
+        "def g() -> None:\n    global x\n    x += 1\n",
     );
     assert!(
         text.contains("error[C0001]: statement kind not supported yet: a `global` declaration"),

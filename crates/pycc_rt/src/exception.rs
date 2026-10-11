@@ -705,6 +705,9 @@ fn alloc_exception_message(msg: &str) -> *mut PyStrObj {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_raise_name_error(name: *const u8, len: usize) {
     let name = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(name, len) });
+    // A global some function rebinds lives in the cell `_pycc_global_<name>`
+    // (`pycc_ast::desugar`): the user's name is the variable's.
+    let name = name.strip_prefix("_pycc_global_").unwrap_or(&name);
     raise_builtin(
         EXCEPTION_TYPE_NAME_ERROR,
         "NameError",

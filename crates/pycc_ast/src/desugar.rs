@@ -39,6 +39,9 @@ mod build;
 mod closures;
 mod comps;
 mod exprs;
+mod globals;
+mod helpers;
+mod hoist;
 mod keys;
 mod starred;
 mod stdlib;
@@ -87,11 +90,17 @@ pub fn desugar(module: &mut ModModule) {
         import_roots: import_roots(&module.body),
         ..Fresh::default()
     };
+    {
+        let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+        globals::cell_globals(&mut body, &fresh);
+        module.body = body.into();
+    }
     let sys = aliases::SysNames::collect(&module.body);
     aliases::module_level_defs(&mut module.body, &sys);
     closures::lift_closures(&mut module.body, &fresh);
     exprs::rewrite_exprs(&mut module.body, &sys, &fresh);
     let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+    helpers::lift_helpers(&mut body, &fresh);
     stmts::expand_body(&mut body, &fresh, true);
     aliases::drop_unused_sys_imports(&mut body, &sys);
     module.body = body.into();

@@ -293,13 +293,13 @@ fn scope_names(def: &StmtFunctionDef) -> ScopeNames {
 /// How each use of a name occurs in a body: direct calls, and any other
 /// use (a read as a value, a binding, a `del`).
 #[derive(Default)]
-struct Uses {
-    calls: usize,
-    other: usize,
-    bindings: usize,
+pub(super) struct Uses {
+    pub(super) calls: usize,
+    pub(super) other: usize,
+    pub(super) bindings: usize,
 }
 
-fn count_uses(body: &[Stmt], name: &str) -> Uses {
+pub(super) fn count_uses(body: &[Stmt], name: &str) -> Uses {
     struct Count<'n> {
         name: &'n str,
         uses: Uses,
@@ -379,7 +379,7 @@ fn literal_default(expr: &Expr) -> bool {
 }
 
 /// Whether `def` can be lifted at all, judged on its own shape.
-fn liftable_shape(def: &StmtFunctionDef) -> bool {
+pub(super) fn liftable_shape(def: &StmtFunctionDef) -> bool {
     !def.is_async
         && def.decorator_list.is_empty()
         && def.type_params.is_none()
@@ -898,6 +898,7 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
 /// documentation), placing each lifted `def` right before the top-level
 /// statement that contained it.
 pub(crate) fn lift_closures(body: &mut thin_vec::ThinVec<Stmt>, fresh: &Fresh) {
+    super::hoist::hoist_block_defs(body);
     let old = std::mem::take(body);
     for mut stmt in old {
         let mut lifted = Vec::new();

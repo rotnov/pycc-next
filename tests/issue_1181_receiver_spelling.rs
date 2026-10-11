@@ -898,8 +898,8 @@ fn an_implicitly_rebound_dunder_still_requires_self() {
 /// `collect_init_attrs`' companion: `slot_ty_from_init_rhs` resolves an RHS
 /// naming the receiver through the *source* spelling, so a renamed receiver
 /// establishes the same instance-typed slot its `self`-spelled twin does
-/// (#1389) -- not the unresolvable-name rejection -- and an unknown name's
-/// message quotes the receiver as the user spelled it.
+/// (#1389) -- and an unknown name, which leaves the slot untyped, is
+/// reported quoting the receiver as the user spelled it.
 #[test]
 fn an_init_rhs_naming_a_renamed_receiver_resolves_to_the_receivers_own_type() {
     twins_agree(
@@ -907,10 +907,16 @@ fn an_init_rhs_naming_a_renamed_receiver_resolves_to_the_receivers_own_type() {
         "class C:\n    def __init__(this, v: int) -> None:\n        this.v = v\n        \
          this.x = this\nc = C(4)\nprint(c.x.x.v)\n",
     );
-    refused(
+    let dir = fixture(
         "1181_init_rhs_unknown",
         "class C:\n    def __init__(this, v: int) -> None:\n        this.x = nope\n",
-        "`this.<attr> = nope` must reference one of `__init__`'s own parameters",
+    );
+    let output = check(&dir);
+    let reported = format!("{}{}", stdout_of(&output), stderr_of(&output));
+    assert!(!output.status.success(), "{reported}");
+    assert!(
+        reported.contains("error[T0003]: the type of `this.x` in class `C` cannot be inferred"),
+        "{reported}"
     );
 }
 

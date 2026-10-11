@@ -1,0 +1,210 @@
+//! Core language constructs: `global` statements, `def`s in module-level
+//! blocks, generators, first-class nested functions, multi-clause
+//! comprehensions, starred call arguments and computed instance attributes.
+//!
+//! The oracle is CPython itself: each fixture is built (strict unless the
+//! test says otherwise), run with the same stdin as `python3` running the
+//! file, and compared byte for byte -- stdout, the uncaught exception's last
+//! line and the exit status. `--ext` arms import the built module from a
+//! real interpreter and compare with importing the source.
+
+use pycc_scratch::ScratchDir;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+
+fn pycc() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_pycc"))
+}
+
+fn python() -> Command {
+    Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
+}
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).replace("\r\n", "\n")
+}
+
+fn last_line(bytes: &[u8]) -> String {
+    text(bytes).lines().last().unwrap_or_default().to_string()
+}
+
+fn run_with_stdin(mut command: Command, stdin: &str) -> Output {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the program should spawn");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+/// Builds fixture `name` (plus `flags`) in both profiles, runs it with
+/// `stdin`, and compares with CPython. Returns the build's stderr (the
+/// fallback report, when asked for).
+fn matches_cpython(name: &str, flags: &[&str], stdin: &str) -> String {
+    let mut report = String::new();
+    for release in [false, true] {
+        let dir = ScratchDir::new("language_round5").expect("scratch");
+        let out = dir.join("prog");
+        let mut build = pycc();
+        build
+            .arg("build")
+            .arg(fixture(name))
+            .arg("-o")
+            .arg(&out)
+            .args(flags);
+        if release {
+            build.arg("--release");
+        }
+        let build = build.output().expect("pycc should spawn");
+        assert!(
+            build.status.success(),
+            "{}{}",
+            text(&build.stdout),
+            text(&build.stderr)
+        );
+        report = text(&build.stderr);
+        let ours = run_with_stdin(Command::new(&out), stdin);
+        let mut theirs = python();
+        theirs.arg(fixture(name));
+        let theirs = run_with_stdin(theirs, stdin);
+        assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs ({name})");
+        assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr), "{name}");
+        assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
+    }
+    report
+}
+
+/// Builds `source` as `--ext` module `name`, then runs `program` against
+/// the built module and against the source, and compares their output.
+fn ext_matches_cpython(name: &str, source: &str, program: &str) {
+    let built = ScratchDir::new("language_round5_ext").expect("scratch");
+    let plain = ScratchDir::new("language_round5_src").expect("scratch");
+    std::fs::write(built.join(format!("{name}.py")), source).expect("write");
+    std::fs::write(plain.join(format!("{name}.py")), source).expect("write");
+    let build = pycc()
+        .arg("build")
+        .arg(built.join(format!("{name}.py")))
+        .arg("-o")
+        .arg(built.join(name))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    assert!(
+        build.status.success(),
+        "{}{}",
+        text(&build.stdout),
+        text(&build.stderr)
+    );
+    std::fs::remove_file(built.join(format!("{name}.py"))).expect("remove the source");
+    let run = |dir: &Path| {
+        python()
+            .arg("-c")
+            .arg(program)
+            .current_dir(dir)
+            .output()
+            .expect("python3 should spawn")
+    };
+    let ours = run(&built);
+    let theirs = run(&plain);
+    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs: {}", text(&ours.stderr));
+    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
+    assert_eq!(ours.status.code(), theirs.status.code());
+}
+
+fn check(source: &str) -> String {
+    let dir = ScratchDir::new("language_round5_check").expect("scratch");
+    let path = dir.join("subject.py");
+    std::fs::write(&path, source).expect("write");
+    let out = pycc().arg("check").arg(&path).output().expect("pycc should spawn");
+    format!("{}{}", text(&out.stdout), text(&out.stderr))
+}
+
+/// Functions rebinding module globals they declare `global` (augmented,
+/// plain, `for`-target and recursive writes), functions and comprehensions
+/// only reading them, a local of the same name, module code rebinding them
+/// between calls, evaluation order of `cnt += f()` where `f` writes `cnt`,
+/// and an exception raised through a global write.
+#[test]
+fn global_statements_match_cpython() {
+    matches_cpython("global_statements.py", &[], "");
+}
+
+/// The same program in non-strict mode compiles without falling back.
+#[test]
+fn global_statements_compile_natively_in_non_strict_mode() {
+    let report = matches_cpython(
+        "global_statements.py",
+        &["--non-strict", "--report-fallbacks"],
+        "",
+    );
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+/// A `global` the cell rewrite does not model -- no module-level binding,
+/// or a module-level binding that is not a plain assignment -- is still
+/// refused with the spanned `C0001`.
+#[test]
+fn unmodelled_global_declarations_are_refused() {
+    for source in [
+        "def g() -> None:\n    global x\n    x = 1\n",
+        "import os\ndef g() -> None:\n    global os\n    os = 1\n",
+        "x = 1\ndef g() -> None:\n    global x\n    del x\n",
+    ] {
+        let text = check(source);
+        assert!(
+            text.contains("error[C0001]: statement kind not supported yet: a `global` declaration"),
+            "{source}: {text}"
+        );
+    }
+}
+
+/// Module globals rebound by `global` functions of an `--ext` module, called
+/// from Python.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn global_statements_cross_the_ext_boundary() {
+    ext_matches_cpython(
+        "glob_probe",
+        "count = 0\nnames: list[str] = []\n\n\ndef bump(k: int) -> int:\n    global count\n    count += k\n    return count\n\n\ndef add(s: str) -> int:\n    global names\n    names = names + [s]\n    return len(names)\n",
+        "import glob_probe\nprint(glob_probe.bump(2), glob_probe.bump(3), glob_probe.add('a'), glob_probe.add('b'))\n",
+    );
+}
+
+/// Comprehensions with several `for`/`if` clauses (list, set, dict, nested,
+/// inside a generator argument, evaluation order of side effects, a target
+/// rebinding an outer clause's name), and starred call arguments with
+/// CPython's `TypeError` messages for a wrong count.
+#[test]
+fn multi_clause_comprehensions_and_starred_calls_match_cpython() {
+    matches_cpython("multi_clause_comprehensions.py", &[], "");
+}
+
+/// Instance attributes established in `__init__` from arbitrary
+/// expressions: arithmetic, list repetition, calls, a local built from a
+/// comprehension, earlier attributes and another class's instance.
+#[test]
+fn computed_instance_attributes_match_cpython() {
+    matches_cpython("computed_instance_attrs.py", &[], "");
+}
+
+/// `def`s inside module-level `for` and `if` blocks, used only after their
+/// definition in the same block, compile natively.
+#[test]
+fn defs_in_module_level_blocks_match_cpython() {
+    let report = matches_cpython("block_defs.py", &["--non-strict", "--report-fallbacks"], "");
+    assert!(!report.contains("blk.py:2-") && !report.contains("block_defs.py:2-"), "{report}");
+}

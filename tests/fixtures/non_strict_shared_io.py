@@ -7,8 +7,10 @@ import sys
 calls = 0
 
 def ask(prefix):
-    # Falls back (a `global` declaration); reads a line through CPython's
-    # `sys.stdin`.
+    # Falls back (a class nested in a function); reads a line through
+    # CPython's `sys.stdin`.
+    class Tag:
+        pass
     global calls
     calls += 1
     tidy = lambda s: s.strip().upper()
@@ -18,7 +20,9 @@ def ask(prefix):
 
 
 def echo_rest():
-    # Falls back (a `global` declaration); reads the rest of stdin.
+    # Falls back (a class nested in a function); reads the rest of stdin.
+    class Tag:
+        pass
     global calls
     calls += 1
     show = lambda s: print("rest:", s.split())

@@ -169,21 +169,6 @@ fn the_rhs_shape_gate_still_applies_in_a_generic_class() {
     }
 }
 
-/// #1388: an undeclared attribute keeps the gate, and its message names the
-/// declaration that lifts it.
-#[test]
-fn an_undeclared_attribute_keeps_the_gate_and_names_the_declaration() {
-    let message =
-        c0001("class C:\n    def __init__(self, n: int) -> None:\n        self.x = n + 1\n");
-    assert!(
-        message.ends_with(
-            "is known at compile time -- or declare it in the class body (`x: <type>`), which \
-             admits any expression"
-        ),
-        "{message}"
-    );
-}
-
 /// In a PEP 695 generic class a declaration keeps the gate, so the
 /// diagnostic does not suggest one.
 #[test]

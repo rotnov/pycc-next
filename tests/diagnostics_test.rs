@@ -784,16 +784,6 @@ fn d0021_set_add_value_type_mismatch() {
     assert_diagnostic_matches_fixture("d0021_set_add_value_type_mismatch");
 }
 
-#[test]
-fn c0001_comprehension_two_for_clauses() {
-    assert_diagnostic_matches_fixture("c0001_comprehension_two_for_clauses");
-}
-
-#[test]
-fn c0001_comprehension_two_if_filters() {
-    assert_diagnostic_matches_fixture("c0001_comprehension_two_if_filters");
-}
-
 // #1254 (D-250): a comprehension lowers in any expression position now, so
 // the former call-argument refusal is gone; a walrus inside one is refused
 // in both the expression and the statement form, spanning the comprehension.
@@ -807,11 +797,6 @@ fn c0001_comprehension_walrus_in_assignment() {
     assert_diagnostic_matches_fixture("c0001_comprehension_walrus_in_assignment");
 }
 
-// #1254: the one-`for`-clause limit applies to the expression form too.
-#[test]
-fn c0001_comprehension_expression_two_for_clauses() {
-    assert_diagnostic_matches_fixture("c0001_comprehension_expression_two_for_clauses");
-}
 
 // #1254: the expression form resolves its iterable exactly like `for`.
 

@@ -124,6 +124,43 @@ pub(crate) fn bind_local_types_in_stmt(
         // own recursion into `body`/`orelse` -- has no other point where
         // `test` is visited at all, so a walrus bound only in `test` was
         // never pre-bound here without this call.
+        // A comprehension assigned to a name: its type is the expression
+        // form's (`HirExpr::Comprehension`), bound like an `Assign`'s.
+        HirStmt::ListCompAssign {
+            target,
+            var,
+            iter,
+            cond,
+            elt,
+        }
+        | HirStmt::SetCompAssign {
+            target,
+            var,
+            iter,
+            cond,
+            elt,
+        } => {
+            let element = if matches!(stmt, HirStmt::ListCompAssign { .. }) {
+                pycc_hir::CompElt::List((**elt).clone())
+            } else {
+                pycc_hir::CompElt::Set((**elt).clone())
+            };
+            bind_comprehension(env, local_names, target, var, iter, cond, element);
+        }
+        HirStmt::DictCompAssign {
+            target,
+            var,
+            iter,
+            cond,
+            key,
+            value,
+        } => {
+            let element = pycc_hir::CompElt::Dict {
+                key: (**key).clone(),
+                value: (**value).clone(),
+            };
+            bind_comprehension(env, local_names, target, var, iter, cond, element);
+        }
         HirStmt::If { test, body, orelse } => {
             bind_named_expr_types_in_expr(env, local_names, test);
             bind_local_types_in_body(env, local_names, body);
@@ -196,4 +233,29 @@ pub(crate) fn bind_local_types_in_stmt(
 /// successful binding.
 fn bind_named_expr_types_in_expr(env: &mut Environment, local_names: &[&str], expr: &HirExpr) {
     let _ = collect_named_expr_bindings(env, local_names, expr);
+}
+
+/// Binds `target` to the type of the comprehension a `*CompAssign`
+/// statement assigns, first assignment winning as for an `Assign`.
+fn bind_comprehension(
+    env: &mut Environment,
+    local_names: &[&str],
+    target: &str,
+    var: &str,
+    iter: &pycc_hir::CompIter,
+    cond: &Option<Box<HirExpr>>,
+    elt: pycc_hir::CompElt,
+) {
+    if env.lookup_any(target).is_some() {
+        return;
+    }
+    let expr = HirExpr::Comprehension(Box::new(pycc_hir::HirComprehension {
+        var: var.to_string(),
+        iter: iter.clone(),
+        cond: cond.as_deref().cloned(),
+        elt,
+    }));
+    if let Ok(ty) = infer_expr_in(env, local_names, &expr) {
+        env.bind(target.to_string(), ty);
+    }
 }

@@ -306,6 +306,18 @@ fn resolve_empty_containers_inner(hir: &HirModule) -> Option<HirModule> {
         &local_names,
         &top_level_names,
     );
+    // An attribute established from an arbitrary value (a bare `Ty::Infer`
+    // slot) may read a local whose own empty containers only the function
+    // phase and the unification above typed (`adj = [[] for _ in range(n)]; ...; self.adj =
+    // adj`): give the class phase a second look at the rewritten bodies.
+    if resolved
+        .class_defs
+        .iter()
+        .any(|(_, class)| class.attrs.iter().any(|(_, ty)| *ty == Ty::Infer))
+    {
+        let snapshot = resolved.clone();
+        attr_slot::resolve_class_slots(&snapshot, &mut resolved, &local_names);
+    }
     Some(resolved)
 }
 
@@ -526,7 +538,10 @@ fn demote_conditional_bindings(
 fn collect_definite_top_level_names<'a>(body: &'a [HirStmt], names: &mut Vec<&'a str>) {
     for stmt in body {
         match stmt {
-            HirStmt::Assign { target, .. } => names.push(target),
+            HirStmt::Assign { target, .. }
+            | HirStmt::ListCompAssign { target, .. }
+            | HirStmt::SetCompAssign { target, .. }
+            | HirStmt::DictCompAssign { target, .. } => names.push(target),
             // A value-less `AnnAssign` (`x: int`) declares without binding,
             // matching `Environment::declared`'s own "declared, not yet
             // assigned" state.

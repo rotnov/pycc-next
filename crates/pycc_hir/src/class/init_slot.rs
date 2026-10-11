@@ -268,11 +268,13 @@ fn receiver_attr(target: &Expr, receiver_name: &str) -> Option<String> {
 /// naming the two spellings that work: the annotated assignment and a
 /// class-body declaration, whose type `declared_slot_ty` supplies without
 /// calling this function for an empty literal. Every other RHS shape --
-/// including an arithmetic expression, a call, or a reference to `self`
-/// itself -- is `C0001`. `declaration_hint` is the attribute's name when a
-/// class-body declaration would admit that shape (#1388: an undeclared
-/// attribute outside a PEP 695 generic class), and the diagnostic then
-/// names the declaration; it is `None` where a declaration would not help.
+/// an arithmetic expression, a call, a non-empty display, a name that is
+/// not a parameter -- yields the provisional slot `Ty::Infer`, which
+/// `pycc_types`' class phase types from the value itself in `__init__`'s
+/// environment (`empty_container::attr_slot::established_slot`), refusing
+/// the program with `T0003` when it cannot. `declaration_hint` is the
+/// attribute's name outside a PEP 695 generic class; inside one (`None`)
+/// the shape gate stays and every other shape is `C0001`.
 fn slot_ty_from_init_rhs(
     value: &Expr,
     params: &[(String, Ty)],
@@ -391,6 +393,9 @@ fn slot_ty_from_init_rhs(
                     ),
                     pycc_ast::expr_range(value),
                 )),
+                // Any other name (a local of `__init__`, a module global):
+                // the provisional slot `pycc_types` types from the value.
+                None if declaration_hint.is_some() => Ok(Ty::Infer),
                 None => Err(unsupported(
                     format!(
                         "`{receiver_name}.<attr> = {}` must reference one of `__init__`'s own \
@@ -417,23 +422,18 @@ fn slot_ty_from_init_rhs(
             ),
             pycc_ast::expr_range(value),
         )),
-        other => {
-            let hint = declaration_hint.map_or(String::new(), |attr| {
-                format!(
-                    " -- or declare it in the class body (`{attr}: <type>`), which admits any \
-                     expression"
-                )
-            });
-            Err(unsupported(
-                format!(
-                    "an instance attribute's first assignment inside `__init__` must be a bare \
-                     parameter name, a scalar literal (int/float/bool/str) or an empty list \
-                     `[]` whose element type the class's own methods supply, so its type is \
-                     known at compile time{hint}"
-                ),
-                pycc_ast::expr_range(other),
-            ))
-        }
+        // Any other expression (`[0] * (n + 1)`, a call, arithmetic): the
+        // provisional slot `Ty::Infer`, which `pycc_types`' class phase
+        // types from the value in `__init__`'s environment
+        // (`empty_container::attr_slot`). In a PEP 695 generic class the
+        // shape gate stays (see `declared_slot_ty`).
+        _ if declaration_hint.is_some() => Ok(Ty::Infer),
+        other => Err(unsupported(
+            "an instance attribute's first assignment inside `__init__` must be a bare \
+             parameter name, a scalar literal (int/float/bool/str) or an empty list `[]` whose \
+             element type the class's own methods supply, so its type is known at compile time",
+            pycc_ast::expr_range(other),
+        )),
     }
 }
 
@@ -443,8 +443,17 @@ mod tests {
     use crate::class::tests::{assert_c0001, lower_ok};
 
     #[test]
-    fn an_init_attr_assigned_from_an_unrelated_name_is_unsupported() {
-        assert_c0001("class C:\n    def __init__(self, x: int) -> None:\n        self.y = z\n");
+    fn an_init_attr_assigned_from_a_non_parameter_name_is_provisional() {
+        // `pycc_types`' class phase types it from the value.
+        let hir = lower_ok("class C:\n    def __init__(self, x: int) -> None:\n        self.y = z\n");
+        assert_eq!(hir.class_defs[0].1.attrs, vec![("y".to_string(), Ty::Infer)]);
+    }
+
+    #[test]
+    fn a_generic_class_attr_assigned_from_an_unrelated_name_is_unsupported() {
+        assert_c0001(
+            "class C[T]:\n    def __init__(self, x: T) -> None:\n        self.y = z\n",
+        );
     }
 
     #[test]
@@ -574,9 +583,17 @@ mod tests {
     }
 
     #[test]
-    fn any_other_init_rhs_names_every_admitted_shape() {
+    fn any_other_init_rhs_is_provisional() {
+        let hir = lower_ok(
+            "class C:\n    def __init__(self, n: int) -> None:\n        self.xs = [0] * (n + 1)\n",
+        );
+        assert_eq!(hir.class_defs[0].1.attrs, vec![("xs".to_string(), Ty::Infer)]);
+    }
+
+    #[test]
+    fn any_other_init_rhs_of_a_generic_class_names_every_admitted_shape() {
         let message =
-            c0001_message("class C:\n    def __init__(self) -> None:\n        self.xs = [1]\n");
+            c0001_message("class C[T]:\n    def __init__(self) -> None:\n        self.xs = [1]\n");
         assert!(
             message.contains(
                 "must be a bare parameter name, a scalar literal (int/float/bool/str) or an \
@@ -622,8 +639,9 @@ mod tests {
     }
 
     #[test]
-    fn an_init_attr_assigned_an_arithmetic_expression_is_unsupported() {
-        assert_c0001("class C:\n    def __init__(self, x: int) -> None:\n        self.y = x + 1\n");
+    fn an_init_attr_assigned_an_arithmetic_expression_is_provisional() {
+        let hir = lower_ok("class C:\n    def __init__(self, x: int) -> None:\n        self.y = x + 1\n");
+        assert_eq!(hir.class_defs[0].1.attrs, vec![("y".to_string(), Ty::Infer)]);
     }
 
     #[test]

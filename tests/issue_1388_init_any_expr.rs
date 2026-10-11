@@ -184,27 +184,23 @@ fn a_base_slot_a_derived_init_never_assigns_raises() {
     );
 }
 
-/// An undeclared attribute keeps the shape gate, whose message now names
-/// the declaration that lifts it.
+/// An undeclared attribute established from an expression takes the
+/// expression's type, inferred in `__init__`'s environment.
 #[test]
-fn an_undeclared_attribute_keeps_the_shape_gate() {
+fn an_undeclared_attribute_takes_its_values_type() {
     let dir = ScratchDir::new("1388_undeclared").expect("scratch");
     let output = pycc()
         .arg("check")
         .arg(write(
             &dir,
             "m.py",
-            "class C:\n    def __init__(self, n: int) -> None:\n        self.x = n + 1\n",
+            "class C:\n    def __init__(self, n: int) -> None:\n        self.x = n + 1\n\n\
+             def f(c: C) -> int:\n    return c.x * 2\n",
         ))
         .output()
         .expect("pycc should spawn");
     let rendered = stdout_of(&output);
-    assert_eq!(output.status.code(), Some(1), "{rendered}");
-    assert!(rendered.contains("error[C0001]"), "{rendered}");
-    assert!(
-        rendered.contains("or declare it in the class body (`x: <type>`)"),
-        "{rendered}"
-    );
+    assert_eq!(output.status.code(), Some(0), "{rendered}");
 }
 
 // ---------------------------------------------------------------------

@@ -249,8 +249,20 @@ impl Prepared {
         // Container parameters of private helpers, from their call sites:
         // after the empty containers, whose resolved types the arguments
         // carry (`empty_container::call_site`).
-        let resolved = empty_container::resolve_call_site_params(resolved.as_ref().unwrap_or(hir))
-            .or(resolved);
+        // Each can unblock the other: a container parameter typed from its
+        // call sites types the elements a helper appends to its own empty
+        // list (`r = []; r.append((x, y))` over `for x in xs`), and that
+        // list typed may type a further call site. Alternate until neither
+        // changes anything (bounded).
+        let mut resolved = resolved;
+        for _ in 0..4 {
+            let Some(params) =
+                empty_container::resolve_call_site_params(resolved.as_ref().unwrap_or(hir))
+            else {
+                break;
+            };
+            resolved = Some(empty_container::resolve_empty_containers(&params).unwrap_or(params));
+        }
         let base = resolved.as_ref().unwrap_or(hir);
         empty_container::attr_slot::reject_unresolved_attr_slots(base)?;
         let copied = inherited_copies::add_inherited_copies(base);

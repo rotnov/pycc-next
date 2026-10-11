@@ -4,6 +4,17 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+- `global` statements: a module global a function rebinds lives in a one-element
+  cell, so every function and the module see its writes (native in strict mode).
+- `def`s inside module-level blocks (`for _ in range(t): def solve(): ...`) compile
+  natively when used only after their definition in that block.
+- Comprehensions with several `for`/`if` clauses, and starred call arguments
+  (`f(*xs)`, `f(a, *t)`) with CPython's `TypeError` for a wrong count.
+- Instance attributes initialised in `__init__` from any expression
+  (`self.t = [0] * (n + 1)`): the slot takes the value's inferred type.
+- `len()` of a tuple bound to a name.
+
 ### Changed
 - Type-checker diagnostics (`T0xxx`, and the `C0001`/`I0404` the checker raises) point
   at the offending expression or statement instead of `1:1`, with a short caret label

@@ -190,7 +190,12 @@ pub(crate) fn collect_call_constraints(
         if let Some(Ok(arg_ty)) = &arg_terms[0]
             && !matches!(
                 arg_ty,
-                Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Object
+                Ty::List(_)
+                    | Ty::Dict(_)
+                    | Ty::Set(_)
+                    | Ty::FrozenSet(_)
+                    | Ty::Object
+                    | Ty::Tuple(_)
             )
         {
             return Err(Diagnostic::error(
