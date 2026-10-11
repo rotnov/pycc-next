@@ -23,7 +23,8 @@
 //!    the one built with this binary and serves both profiles);
 //! 2. development: a Cargo target directory -- `CARGO_TARGET_DIR` or
 //!    `CARGO_BUILD_TARGET_DIR` when set, else the one this executable sits
-//!    in (`<root>/<profile>/pycc`), searched by
+//!    in (`<root>/<profile>/pycc`, or `<root>/<profile>/deps/` for a test
+//!    harness), searched by
 //!    [`pycc_codegen::artifact_layout::find_pycc_rt_lib_dir_in`].
 
 use pycc_codegen::artifact_layout::{
@@ -61,12 +62,21 @@ pub(crate) fn find_runtime_dir_for(
     {
         return Ok(dir.clone());
     }
+    let env_target_root_is_unset = env_target_root.is_none();
     let Some(target_root) = env_target_root.or_else(|| prefix.map(Path::to_path_buf)) else {
         return Err(
             "cannot locate pycc's runtime library: the path of the running pycc is unknown"
                 .to_string(),
         );
     };
+    // A test harness binary sits one level deeper, in `<root>/<profile>/deps/`.
+    if env_target_root_is_unset
+        && let Some(root) = target_root.parent()
+        && exe.and_then(Path::parent).and_then(Path::file_name) == Some("deps".as_ref())
+        && let Ok(dir) = find_pycc_rt_lib_dir_in(root, target, release, exists)
+    {
+        return Ok(dir);
+    }
     find_pycc_rt_lib_dir_in(&target_root, target, release, exists).map_err(|dev| match installed {
         // An installed pycc missing its runtime is the likelier story for a
         // host build, so name the installed path first.
@@ -93,7 +103,7 @@ mod tests {
     }
 
     fn only_dev_release(path: &Path) -> bool {
-        path == Path::new("/w/target/release/libpycc_rt.a")
+        path == Path::new("/w/tgt/release/libpycc_rt.a")
     }
 
     #[test]
@@ -113,17 +123,24 @@ mod tests {
 
     #[test]
     fn a_development_binary_searches_its_own_target_directory() {
-        let exe = Path::new("/w/target/release/pycc");
+        let exe = Path::new("/w/tgt/release/pycc");
         let dir = find_runtime_dir_for(Some(exe), None, None, true, only_dev_release);
-        assert_eq!(dir, Ok(PathBuf::from("/w/target/release")));
+        assert_eq!(dir, Ok(PathBuf::from("/w/tgt/release")));
+    }
+
+    #[test]
+    fn a_test_harness_binary_searches_the_target_directory_above_deps() {
+        let exe = Path::new("/w/tgt/release/deps/pycc-0123");
+        let dir = find_runtime_dir_for(Some(exe), None, None, true, only_dev_release);
+        assert_eq!(dir, Ok(PathBuf::from("/w/tgt/release")));
     }
 
     #[test]
     fn the_environment_target_directory_wins_over_the_executable_s() {
         let exe = Path::new("/elsewhere/release/pycc");
-        let env = Some(PathBuf::from("/w/target"));
+        let env = Some(PathBuf::from("/w/tgt"));
         let dir = find_runtime_dir_for(Some(exe), env, None, true, only_dev_release);
-        assert_eq!(dir, Ok(PathBuf::from("/w/target/release")));
+        assert_eq!(dir, Ok(PathBuf::from("/w/tgt/release")));
     }
 
     #[test]
