@@ -40,6 +40,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   unassigned value; the compiler's internal names (`__pycc_closure__`, `_pycc_*`)
   are reserved (`E0109`). A `--non-strict` fallback function annotated with a
   compiled `typing` import (`Callable`) no longer fails with `NameError`.
+- The release archive is self-contained and relocatable (#5): it ships
+  `bin/pycc` + `lib/pycc/libpycc_rt.a`, and `pycc` finds its runtime relative to
+  its own executable instead of the checkout it was built in (`v0.1.0-rc.1` failed
+  with "no pycc_rt build found (expected /home/runner/work/...)"). The release
+  workflow smoke-tests the unpacked tarball (native, `--ext`, `--non-strict`)
+  before publishing. A missing C toolchain is reported with what to install.
+- `pycc version` reports the LLVM it was built against (from `llvm-config`)
+  instead of a hard-coded `22.1.1`.
 
 ### Changed
 - Type-checker diagnostics (`T0xxx`, and the `C0001`/`I0404` the checker raises) point

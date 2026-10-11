@@ -12,7 +12,10 @@ description: Use when cutting a pycc-next release (version bump, changelog, tag,
    copy open rows from `docs/DEVIATIONS.md` into Known gaps). The release workflow uses
    this section as the release notes.
 5. Commit, push, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
-6. The `release` workflow tests, packages `pycc-vX.Y.Z-x86_64-linux.tar.gz` (+ sha256) and
-   creates the GitHub Release. Verify the release exists and the tarball runs:
-   download, `./pycc version`, build `bench/py/fib.py`.
+6. The `release` workflow tests, packages `pycc-vX.Y.Z-x86_64-linux.tar.gz` (+ sha256)
+   with `scripts/package.sh` (`bin/pycc`, `lib/pycc/libpycc_rt.a`, README, LICENSE,
+   CHANGELOG), smoke-tests the unpacked tarball with `scripts/smoke.sh` (native, `--ext`,
+   `--non-strict` vs CPython, cleared environment) and creates the GitHub Release.
+   Verify the release exists and the tarball runs on a machine without the checkout:
+   download, unpack, `scripts/smoke.sh pycc-vX.Y.Z-x86_64-linux`.
 7. Publish a launch post (`blog-post` skill).

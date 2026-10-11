@@ -327,16 +327,42 @@ fn build_rejects_a_module_value_binding_that_shadows_a_function_call() {
 /// evidence through a different channel than `src/main.rs`'s macro without
 /// re-resolving the compiler itself.
 ///
-/// "LLVM 22.1.1" is D-015's pinned contract literal on both sides -- see the
-/// version arm's own comment in `src/main.rs` for why the *installed* LLVM's
-/// truthfulness is #75's scope, not this test's.
+/// The LLVM version is read the same way, from `OUT_DIR/llvm_version.txt`;
+/// `version_reports_the_llvm_that_llvm_config_reports` checks the reported
+/// value against `llvm-config` itself.
 fn expected_version_summary_line() -> String {
     let captured_rustc_version = include_str!(concat!(env!("OUT_DIR"), "/rustc_version.txt"));
+    let captured_llvm_version = include_str!(concat!(env!("OUT_DIR"), "/llvm_version.txt"));
     format!(
-        "pycc {} (rustc {}, LLVM 22.1.1)\n",
+        "pycc {} (rustc {}, LLVM {})\n",
         env!("CARGO_PKG_VERSION"),
         captured_rustc_version,
+        captured_llvm_version,
     )
+}
+
+/// The reported LLVM is what `LLVM_SYS_221_PREFIX`'s `llvm-config` reports
+/// (the line used to print a hard-coded "22.1.1" while linking 22.1.8).
+#[test]
+fn version_reports_the_llvm_that_llvm_config_reports() {
+    let Some(prefix) = option_env!("LLVM_SYS_221_PREFIX") else {
+        eprintln!("skipping: LLVM_SYS_221_PREFIX was not set at build time");
+        return;
+    };
+    let config = std::path::Path::new(prefix)
+        .join("bin")
+        .join(format!("llvm-config{}", std::env::consts::EXE_SUFFIX));
+    let Ok(out) = Command::new(&config).arg("--version").output() else {
+        eprintln!("skipping: {} is not runnable here", config.display());
+        return;
+    };
+    let real = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let output = Command::new(pycc_bin()).arg("version").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!("LLVM {real})")),
+        "expected LLVM {real}, got: {stdout}"
+    );
 }
 
 #[test]
@@ -2092,7 +2118,6 @@ fn check_without_files_is_a_clean_invocation_error() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("at least one Python file"));
 }
-
 
 #[cfg(target_os = "windows")]
 #[test]

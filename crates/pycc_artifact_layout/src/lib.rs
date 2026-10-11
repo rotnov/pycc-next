@@ -90,13 +90,21 @@ pub fn resolve_cargo_target_root(
     manifest_dir: &std::path::Path,
     env_lookup: fn(&str) -> Option<String>,
 ) -> std::path::PathBuf {
-    match env_lookup("CARGO_TARGET_DIR") {
-        Some(value) if !value.is_empty() => std::path::PathBuf::from(value),
-        _ => match env_lookup("CARGO_BUILD_TARGET_DIR") {
-            Some(value) if !value.is_empty() => std::path::PathBuf::from(value),
-            _ => manifest_dir.join(DEFAULT_TARGET_DIR_NAME),
-        },
-    }
+    target_dir_from_env(env_lookup).unwrap_or_else(|| manifest_dir.join(DEFAULT_TARGET_DIR_NAME))
+}
+
+/// Levels 1 and 2 of [`resolve_cargo_target_root`]: the target directory
+/// the environment redirects to, or `None` when neither variable is set to
+/// a non-empty value. The compiler driver uses this directly, with its own
+/// executable's location instead of a manifest directory as the fallback,
+/// so that a built `pycc` never depends on the path of the checkout it was
+/// compiled in.
+pub fn target_dir_from_env(env_lookup: fn(&str) -> Option<String>) -> Option<std::path::PathBuf> {
+    ["CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"]
+        .into_iter()
+        .filter_map(env_lookup)
+        .find(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
 }
 
 /// Reads the named variable from this process's real environment.

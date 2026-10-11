@@ -23,7 +23,9 @@ jobs:
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo 'deb https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -q && sudo apt-get install -y -q llvm-22-dev libpolly-22-dev clang-22 libzstd-dev
-      - run: cargo test --release --workspace
+      - run: >-
+          cargo test --release --workspace -- --include-ignored
+          --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
       - name: Resolve tag
         env: { INPUT_VERSION: "${{ inputs.version }}" }
         run: |
@@ -38,9 +40,19 @@ jobs:
       - name: Package
         run: |
           name=pycc-${TAG}-x86_64-linux
-          mkdir -p dist/$name && cp target/release/pycc README.md LICENSE dist/$name/
+          scripts/package.sh dist/$name
           tar -C dist -czf dist/$name.tar.gz $name
-          sha256sum dist/$name.tar.gz > dist/$name.tar.gz.sha256
+          (cd dist && sha256sum $name.tar.gz > $name.tar.gz.sha256)
+      # Unpack the tarball elsewhere and use it like a user would (cleared
+      # environment, no checkout paths): native, --ext and --non-strict
+      # builds must match CPython before anything is published.
+      - name: Smoke-test the tarball
+        run: |
+          name=pycc-${TAG}-x86_64-linux
+          (cd dist && sha256sum -c $name.tar.gz.sha256)
+          smoke=$(mktemp -d)
+          tar -C "$smoke" -xzf dist/$name.tar.gz
+          scripts/smoke.sh "$smoke/$name"
       - name: Publish
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |

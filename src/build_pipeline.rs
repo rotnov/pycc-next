@@ -224,10 +224,7 @@ pub(crate) fn try_build(
         // always one of `linker_command`'s compile-time-fixed values
         // (`cc`, or the D-028 bundled-clang path built from
         // `LLVM_SYS_221_PREFIX`), never user-controlled input.
-        eprintln!(
-            "error: could not run the linker driver `{}`: {e}",
-            cmd.get_program().to_string_lossy()
-        );
+        eprintln!("error: {}", linker_spawn_error(&cmd, &e));
         ExitCode::from(2)
     })?;
     #[cfg(windows)]
@@ -243,8 +240,23 @@ pub(crate) fn try_build(
     }
 }
 
-/// The file the shared link writes: the `--ext` artifact, or on Windows
-/// the embedded build's program DLL in the sidecar (D-253), else `OUT`.
+/// The diagnostic for a linker driver that could not be started. A missing
+/// driver is the common case on a fresh machine with only the release
+/// archive unpacked, so it says what to install.
+fn linker_spawn_error(cmd: &std::process::Command, e: &std::io::Error) -> String {
+    let hint = match e.kind() {
+        std::io::ErrorKind::NotFound => {
+            "; pycc links every artifact with a C compiler driver -- install a C toolchain \
+             (gcc or clang, e.g. `apt install build-essential`) so that it is on PATH"
+        }
+        _ => "",
+    };
+    format!(
+        "could not run the linker driver `{}`: {e}{hint}",
+        cmd.get_program().to_string_lossy()
+    )
+}
+
 /// Whether any MIR item works with a CPython object (a `Ty::Object` value
 /// or an `Obj*` operation), which only an embedded interpreter can run.
 fn mir_uses_objects(mir: &pycc_mir::MirModule) -> bool {
@@ -253,6 +265,8 @@ fn mir_uses_objects(mir: &pycc_mir::MirModule) -> bool {
         .any(|item| format!("{item:?}").contains("Obj"))
 }
 
+/// The file the shared link writes: the `--ext` artifact, or on Windows
+/// the embedded build's program DLL in the sidecar (D-253), else `OUT`.
 fn link_output<'a>(out: &'a Path, ext: Option<&'a Path>, embed: Option<&'a Path>) -> &'a Path {
     ext.or(embed).unwrap_or(out)
 }
@@ -270,10 +284,7 @@ fn link_windows_stub(stub: &embed::StubLink, target: Option<&str>) -> Result<(),
     cmd.args(embed::stub_link_args(stub));
     add_windows_system_libs(&mut cmd);
     let status = cmd.status().map_err(|e| {
-        eprintln!(
-            "error: could not run the linker driver `{}`: {e}",
-            cmd.get_program().to_string_lossy()
-        );
+        eprintln!("error: {}", linker_spawn_error(&cmd, &e));
         ExitCode::from(2)
     })?;
     if status.success() {
@@ -625,32 +636,12 @@ fn add_linux_system_libs(cmd: &mut std::process::Command) {
 fn add_linux_system_libs(_cmd: &mut std::process::Command) {}
 
 /// Locates `pycc_rt`'s static library for the requested target and
-/// profile, honoring Cargo's target-directory environment variables.
-///
-/// A thin driver-side wrapper: the resolution rules, the precedence
-/// `CARGO_TARGET_DIR` participates in, and the error messages all live in
-/// [`pycc_codegen::artifact_layout`], which `pycc_codegen`'s own
-/// link-and-run tests and `tests/slice0.rs` share so that every artifact
-/// lookup in this workspace agrees on where Cargo put things.
-///
-/// `env!("CARGO_MANIFEST_DIR")` is the `pycc` package directory, which is
-/// also the workspace root, so it is the correct fallback anchor when
-/// neither `CARGO_TARGET_DIR` nor `CARGO_BUILD_TARGET_DIR` redirects the
-/// target directory.
+/// profile; the rules live in [`crate::install_layout::find_runtime_dir`].
 pub(crate) fn find_pycc_rt_lib_dir(
     target: Option<&str>,
     release: bool,
 ) -> Result<std::path::PathBuf, String> {
-    let target_root = pycc_codegen::artifact_layout::resolve_cargo_target_root(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
-        pycc_codegen::artifact_layout::cargo_target_dir_from_env,
-    );
-    pycc_codegen::artifact_layout::find_pycc_rt_lib_dir_in(
-        &target_root,
-        target,
-        release,
-        std::path::Path::exists,
-    )
+    crate::install_layout::find_runtime_dir(target, release)
 }
 
 /// An embed toolchain whose interpreter does not exist: a test build that

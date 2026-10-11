@@ -6,6 +6,7 @@ mod ext_output;
 mod fallback;
 mod foreign_import;
 mod frontend;
+mod install_layout;
 mod interop_policy;
 mod lock;
 mod memoryview_mode;
@@ -117,14 +118,14 @@ fn main() -> ExitCode {
             // installed rustc than the declared minimum builds cleanly and
             // silently makes the two diverge (#247). `build.rs` captures the
             // real build-time `rustc --version` into
-            // `PYCC_BUILD_RUSTC_VERSION` instead. "LLVM 22.1.1" stays a
-            // literal deliberately: it states D-015's pinned contract value,
-            // and whether the *installed* LLVM actually matches that pin is
-            // #75's open scope, not this line's job.
+            // `PYCC_BUILD_RUSTC_VERSION` instead. LLVM likewise: the
+            // version `llvm-config` reported for the LLVM this binary was
+            // built against, not a pinned literal.
             println!(
-                "pycc {} (rustc {}, LLVM 22.1.1)",
+                "pycc {} (rustc {}, LLVM {})",
                 env!("CARGO_PKG_VERSION"),
                 env!("PYCC_BUILD_RUSTC_VERSION"),
+                env!("PYCC_BUILD_LLVM_VERSION"),
             );
             if verbose {
                 // CLI_SPEC.md's `pycc version --verbose` row promises the
