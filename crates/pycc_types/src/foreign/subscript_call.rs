@@ -39,6 +39,10 @@ pub(crate) fn infer_expr_call(
     args: &[HirExpr],
 ) -> Result<Ty, Diagnostic> {
     let callee_ty = infer_expr_in(env, local_names, callee)?;
+    // A call of a function value (`make_adder(1)(2)`).
+    if let Ty::Callable(sig) = &callee_ty {
+        return crate::closure::call_value(env, local_names, "the function value", sig, args);
+    }
     let arg_tys = args
         .iter()
         .map(|arg| infer_expr_in(env, local_names, arg))

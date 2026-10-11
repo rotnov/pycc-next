@@ -21,7 +21,17 @@ const GROWTH_LIMIT_KB: i64 = 1024;
 
 /// Helpers every probe body may call.
 const PRELUDE: &str = r#"
-from typing import Iterator
+from typing import Callable, Iterator
+
+
+def mkadd(s: str, xs: list[int], n: int) -> Callable[[str], int]:
+    def add(t: str) -> int:
+        return len(s + t) + len(xs) + n
+    return add
+
+
+def call_it(f: Callable[[str], int], t: str) -> int:
+    return f(t)
 
 
 def gstr(i: int) -> Iterator[str]:
@@ -389,6 +399,13 @@ probe!(fresh_list_target, "mklist(i)[0] = i");
 probe!(
     bigint_through_a_function_and_builtins,
     "big: int = i + 2 ** 70\ntotal += bump(big * 2) % 7 + len(str(big * 3)) + max(big, big + 1) % 5"
+);
+
+// Function values capturing a `str`, a list and a big `int`: made, called,
+// passed, rebound and called fresh.
+probe!(
+    closure_capturing_counted_values,
+    "f = mkadd(mk(i), [i, i], i + 2 ** 70)\ntotal += f(\"ab\") + call_it(f, mk(i)) + mkadd(\"x\", [1], 1)(\"y\")"
 );
 
 // Generators: exhausted, abandoned unfinished (closed on release), and

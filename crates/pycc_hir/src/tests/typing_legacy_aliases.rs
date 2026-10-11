@@ -267,25 +267,25 @@ fn a_generic_base_over_a_concrete_type_keeps_its_c0001() {
 
 #[test]
 fn a_legacy_alias_poisoned_by_a_failed_import_still_resolves_by_its_spelling() {
-    // `Callable` is unregistered, so the whole `from typing import` fails and
+    // `AnyStr` is unregistered, so the whole `from typing import` fails and
     // poisons its names; `List` still lowers by spelling (as `Final` does),
     // so the only diagnostic is the import's own `C0002`.
     // The bare `List` is refused with the parameterized-form advice, and that
     // refusal names a poisoned name, so the cascade suppresses it too.
     for source in [
-        "from typing import Callable, List\n\nx: List[int] = [1]\n",
-        "from typing import Callable, List\n\nx: List = [1]\n",
+        "from typing import AnyStr, List\n\nx: List[int] = [1]\n",
+        "from typing import AnyStr, List\n\nx: List = [1]\n",
     ] {
         let diagnostics = lower_module(
             &pycc_parser_test_helper::parse(source),
             &ResolvedImports::default(),
             None,
         )
-        .expect_err("the `Callable` import fails");
+        .expect_err("the `AnyStr` import fails");
         assert_eq!(diagnostics.len(), 1, "{source:?}: {diagnostics:#?}");
         assert_eq!(diagnostics[0].code, "C0002");
         assert!(
-            diagnostics[0].message.contains("`Callable`"),
+            diagnostics[0].message.contains("`AnyStr`"),
             "{}",
             diagnostics[0].message
         );

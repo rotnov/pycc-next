@@ -1,5 +1,8 @@
 def outer() -> int:
+    k = 1
+
     def inner() -> int:
-        return 1
+        return k
     f = inner
+    k = 2
     return f()

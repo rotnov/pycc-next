@@ -60,6 +60,7 @@ use str_rc::incref_if_str_duplicate;
 mod rt_call;
 mod rt_fns;
 use rt_fns::{RtFns, declare_rt_functions};
+mod closure;
 mod ext;
 mod ext_publish;
 mod ext_thunk;
@@ -81,7 +82,6 @@ mod foreign_unpack;
 mod frozenset;
 mod generator;
 mod generator_box;
-mod slot_epilogue;
 mod hash;
 mod object_box;
 mod object_coerce;
@@ -94,6 +94,7 @@ mod sequence;
 /// Set insertion, length and iteration helpers, and the insert of a set of
 /// user-class instances (#1343, Part 1 of #1336).
 mod set_instance;
+mod slot_epilogue;
 use set_instance::{
     SetEmitter, build_int_set_check_not_resized, build_int_set_get, build_int_set_len,
     expect_set_pointer, set_element_scalar,
@@ -155,8 +156,8 @@ type CodegenObserver<'observer> =
 // slots, module globals, the compile driver, and expression/statement
 // lowering. Each module re-exports into the root so existing `crate::x` and
 // `super::x` paths keep resolving.
-mod compile;
 mod coerce;
+mod compile;
 mod container_access;
 mod entry_slots;
 mod expr;
@@ -166,8 +167,8 @@ mod stmt;
 mod str_truthy;
 mod user_call;
 use coerce::*;
-pub use compile::{compile_to_object, compile_to_object_with_options};
 use compile::*;
+pub use compile::{compile_to_object, compile_to_object_with_options};
 use container_access::*;
 use entry_slots::*;
 use expr::*;

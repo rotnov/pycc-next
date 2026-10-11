@@ -585,7 +585,10 @@ fn collect_expr_constraints_here(
             if is_private_solver_scalar(element_ty)
                 || (!crate::empty_container::contains_infer(element_ty)
                     && !contains_param(element_ty)
-                    && matches!(element_ty, Ty::List(_) | Ty::Tuple(_) | Ty::Dict(_) | Ty::Set(_)))
+                    && matches!(
+                        element_ty,
+                        Ty::List(_) | Ty::Tuple(_) | Ty::Dict(_) | Ty::Set(_)
+                    ))
             {
                 Ok(Some(Ok(Ty::List(Box::new(element_ty.clone())))))
             } else {
@@ -746,6 +749,13 @@ fn collect_expr_constraints_here(
                 collect_expr_constraints(signatures, parents, concrete, deferred, env, callee)?;
             for arg in args {
                 collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+            }
+            // A call of a function value answers its return type.
+            if let Some(Ty::Callable(sig)) = callee_term
+                .clone()
+                .and_then(|term| resolved_term(term, parents, concrete))
+            {
+                return Ok(Some(Ok(sig.1)));
             }
             Ok(object_lift::method_call_on_object(callee_term.as_ref()))
         }

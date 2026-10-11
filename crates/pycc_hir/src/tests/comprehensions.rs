@@ -342,8 +342,9 @@ fn an_iterable_source_keeps_the_loop_variables_source_name() {
 #[test]
 fn an_iterable_source_that_fails_to_lower_reports_its_own_error() {
     assert_capability_error_message(
-        "y = [i for i in g()()]\n",
-        "only calling a bare name is supported so far, got a call whose callee is a call expression",
+        "y = [i for i in (g or h)()]\n",
+        "only calling a bare name is supported so far, got a call whose callee is an `and`/`or` \
+         boolean expression",
     );
 }
 

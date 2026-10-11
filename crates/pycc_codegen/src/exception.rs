@@ -109,6 +109,7 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // classification stays correct should a future emitter defer its
         // branch to that guard instead.
         MirExpr::Call { .. }
+        | MirExpr::CallClosure { .. }
         // A runtime builtin can raise (`int("x")`, `input()` at EOF, ...).
         | MirExpr::RtCall(_)
         | MirExpr::DictGet { .. }
@@ -397,7 +398,9 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // (`generator::resume_branch`, `pycc_rt_gen_next`'s guard).
         | MirExpr::GenNext { .. }
         | MirExpr::GenToList { .. }
-        | MirExpr::GenAnyAll { .. } => false,
+        | MirExpr::GenAnyAll { .. }
+        // Building a function value calls nothing that raises.
+        | MirExpr::MakeClosure { .. } => false,
     }
 }
 

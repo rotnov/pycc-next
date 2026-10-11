@@ -45,12 +45,13 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+pub mod closure;
 pub mod container_ops;
 pub mod dict;
 mod exception;
-pub mod generator;
 /// D-244 rule 2's `PyObject*` boundary, runtime half (#1025/#1028).
 pub mod ext_bridge;
+pub mod generator;
 /// `hash()` of `int`, `bool` and int/bool tuples (#1331).
 mod hash;
 mod instance;
@@ -90,10 +91,10 @@ mod range;
 mod str_core;
 pub use buffer::*;
 pub use float_arith::*;
-pub use range::*;
 pub use print::{
     pycc_rt_print_newline, pycc_rt_print_none, pycc_rt_print_space, pycc_rt_print_write_str,
 };
+pub use range::*;
 pub use str_core::*;
 
 #[cfg(not(test))]

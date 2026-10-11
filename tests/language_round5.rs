@@ -81,7 +81,11 @@ fn matches_cpython(name: &str, flags: &[&str], stdin: &str) -> String {
         let mut theirs = python();
         theirs.arg(fixture(name));
         let theirs = run_with_stdin(theirs, stdin);
-        assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs ({name})");
+        assert_eq!(
+            text(&ours.stdout),
+            text(&theirs.stdout),
+            "stdout differs ({name})"
+        );
         assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr), "{name}");
         assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
     }
@@ -120,7 +124,12 @@ fn ext_matches_cpython(name: &str, source: &str, program: &str) {
     };
     let ours = run(&built);
     let theirs = run(&plain);
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs: {}", text(&ours.stderr));
+    assert_eq!(
+        text(&ours.stdout),
+        text(&theirs.stdout),
+        "stdout differs: {}",
+        text(&ours.stderr)
+    );
     assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
     assert_eq!(ours.status.code(), theirs.status.code());
 }
@@ -129,7 +138,11 @@ fn check(source: &str) -> String {
     let dir = ScratchDir::new("language_round5_check").expect("scratch");
     let path = dir.join("subject.py");
     std::fs::write(&path, source).expect("write");
-    let out = pycc().arg("check").arg(&path).output().expect("pycc should spawn");
+    let out = pycc()
+        .arg("check")
+        .arg(&path)
+        .output()
+        .expect("pycc should spawn");
     format!("{}{}", text(&out.stdout), text(&out.stderr))
 }
 
@@ -206,7 +219,10 @@ fn computed_instance_attributes_match_cpython() {
 #[test]
 fn defs_in_module_level_blocks_match_cpython() {
     let report = matches_cpython("block_defs.py", &["--non-strict", "--report-fallbacks"], "");
-    assert!(!report.contains("blk.py:2-") && !report.contains("block_defs.py:2-"), "{report}");
+    assert!(
+        !report.contains("blk.py:2-") && !report.contains("block_defs.py:2-"),
+        "{report}"
+    );
 }
 
 /// Generator functions: `for` over them, `next()` with and without a
@@ -257,4 +273,37 @@ fn generators_cross_the_ext_boundary_as_iterators() {
         "from typing import Iterator\n\n\ndef count(n: int) -> Iterator[int]:\n    for i in range(n):\n        yield i * i\n\n\ndef words(s: str) -> Iterator[str]:\n    try:\n        for w in s.split():\n            yield w.upper()\n    finally:\n        print(\"words done\")\n\n\ndef total(n: int) -> int:\n    return sum(count(n))\n\n\nclass Bag:\n    def __init__(self, n: int) -> None:\n        self.n = n\n\n    def evens(self) -> Iterator[int]:\n        for x in range(self.n):\n            if x % 2 == 0:\n                yield x\n",
         "import gen_probe as m\ng = m.count(4)\nprint(type(g).__name__, iter(g) is g, list(g), list(g))\nprint(m.total(5), sum(m.count(5)))\nw = m.words('ab cd')\nprint(next(w))\ndel w\nprint('after')\ntry:\n    next(m.count(0))\nexcept StopIteration:\n    print('stop')\nprint(list(zip(m.count(3), m.words('x y z'))))\nprint(list(m.Bag(5).evens()))\n",
     );
+}
+
+/// Function values: nested functions returned and passed (capturing `int`,
+/// `str`, `list`, an instance and a `nonlocal` counter), module-level
+/// functions used as values, a call of a call's result, a closure raising,
+/// a big-int capture and a module global holding a function.
+#[test]
+fn closures_match_cpython() {
+    matches_cpython("closures.py", &[], "");
+}
+
+/// The same program compiles natively in non-strict mode.
+#[test]
+fn closures_compile_natively_in_non_strict_mode() {
+    let report = matches_cpython("closures.py", &["--non-strict", "--report-fallbacks"], "");
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+/// A nested function made a value while a variable it reads may still
+/// change (CPython reads it when the function runs) stays refused, as does
+/// one with unannotated parameters; converting a function to a string is
+/// refused rather than miscompiled.
+#[test]
+fn unsound_closures_are_refused() {
+    for source in [
+        "from typing import Callable\n\n\ndef f() -> int:\n    k = 1\n\n    def get() -> int:\n        return k\n    g = get\n    k = 5\n    return g()\n\n\nprint(f())\n",
+        "def f() -> list[int]:\n    out: list[int] = []\n    for i in range(3):\n        def get() -> int:\n            return i\n        out.append(apply(get))\n    return out\n\n\ndef apply(g) -> int:\n    return 0\n",
+        "def make(n: int):\n    def f(x):\n        return x * n\n    return f\n",
+        "def square(x: int) -> int:\n    return x * x\n\n\nprint(square)\n",
+    ] {
+        let text = check(source);
+        assert!(text.contains("error["), "{source}: {text}");
+    }
 }

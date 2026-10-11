@@ -305,9 +305,21 @@ const REGISTRY: &[StdSymbol] = &[
     math_fn("acos", &[ScalarKind::Float], ScalarKind::Float),
     math_fn("atan", &[ScalarKind::Float], ScalarKind::Float),
     math_fn("fabs", &[ScalarKind::Float], ScalarKind::Float),
-    math_fn("atan2", &[ScalarKind::Float, ScalarKind::Float], ScalarKind::Float),
-    math_fn("hypot", &[ScalarKind::Float, ScalarKind::Float], ScalarKind::Float),
-    math_fn("copysign", &[ScalarKind::Float, ScalarKind::Float], ScalarKind::Float),
+    math_fn(
+        "atan2",
+        &[ScalarKind::Float, ScalarKind::Float],
+        ScalarKind::Float,
+    ),
+    math_fn(
+        "hypot",
+        &[ScalarKind::Float, ScalarKind::Float],
+        ScalarKind::Float,
+    ),
+    math_fn(
+        "copysign",
+        &[ScalarKind::Float, ScalarKind::Float],
+        ScalarKind::Float,
+    ),
     math_fn("factorial", &[ScalarKind::Int], ScalarKind::Int),
     math_fn("comb", &[ScalarKind::Int, ScalarKind::Int], ScalarKind::Int),
     math_fn("perm", &[ScalarKind::Int, ScalarKind::Int], ScalarKind::Int),
@@ -431,6 +443,12 @@ const REGISTRY: &[StdSymbol] = &[
     StdSymbol {
         module: StdModule::Typing,
         name: "Generator",
+        kind: StdSymbolKind::TypingFormMarker,
+    },
+    // `Callable[[A, B], R]` (`pycc_hir::func::annotation_to_ty`).
+    StdSymbol {
+        module: StdModule::Typing,
+        name: "Callable",
         kind: StdSymbolKind::TypingFormMarker,
     },
     StdSymbol {
@@ -667,7 +685,6 @@ mod tests {
 
     #[test]
     fn resolve_symbol_rejects_unregistered_symbol_in_typing_module() {
-        assert_eq!(resolve_symbol(StdModule::Typing, "Callable"), None);
         assert_eq!(resolve_symbol(StdModule::Typing, "AnyStr"), None);
     }
 

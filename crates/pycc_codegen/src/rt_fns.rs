@@ -15,6 +15,7 @@ pub(super) struct RtFns<'ctx> {
     pub(super) containers: crate::containers::ContainerFns<'ctx>,
     /// The generator objects' functions and coroutine intrinsics.
     pub(super) gens: crate::generator::GenFns<'ctx>,
+    pub(super) closures: crate::closure::ClosureFns<'ctx>,
     /// The coroutine state of the generator function being emitted, if any.
     pub(super) gen_frame: std::cell::RefCell<Option<crate::generator::GenFrame<'ctx>>>,
     /// The LLVM context, for emitters that receive only a builder.
@@ -391,6 +392,7 @@ pub(super) fn declare_rt_functions<'ctx>(
     RtFns {
         containers: crate::containers::ContainerFns::declare(context, module),
         gens: crate::generator::GenFns::declare(context, module),
+        closures: crate::closure::ClosureFns::declare(context, module),
         gen_frame: std::cell::RefCell::new(None),
         context,
         sqrt_f64: f64_intrinsic("llvm.sqrt"),

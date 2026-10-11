@@ -52,15 +52,17 @@ pub(crate) fn emit_name_expr<'ctx>(
         // `NameError` natively.
         if !foreign_fail::emit_unbound_object_read(context, builder, module, rt, ty, name) {
             let ptr = context.ptr_type(inkwell::AddressSpace::default());
-            let name_error = module.get_function("pycc_rt_raise_name_error").unwrap_or_else(|| {
-                module.add_function(
-                    "pycc_rt_raise_name_error",
-                    context
-                        .void_type()
-                        .fn_type(&[ptr.into(), context.i64_type().into()], false),
-                    Some(inkwell::module::Linkage::External),
-                )
-            });
+            let name_error = module
+                .get_function("pycc_rt_raise_name_error")
+                .unwrap_or_else(|| {
+                    module.add_function(
+                        "pycc_rt_raise_name_error",
+                        context
+                            .void_type()
+                            .fn_type(&[ptr.into(), context.i64_type().into()], false),
+                        Some(inkwell::module::Linkage::External),
+                    )
+                });
             let bytes = builder
                 .build_global_string_ptr(name, &format!("pycc_unbound_name_{name}"))
                 .expect("build_global_string_ptr should not fail")
@@ -333,6 +335,17 @@ pub(crate) fn emit_name_expr<'ctx>(
                 )
                 .expect("build_load should not fail for a slot this function itself allocated");
             Scalar::Generator(loaded.into_pointer_value())
+        }
+        // A function value: the slot's pointer, borrowed.
+        Ty::Callable(_) => {
+            let loaded = builder
+                .build_load(
+                    context.ptr_type(inkwell::AddressSpace::default()),
+                    slot.ptr,
+                    "load",
+                )
+                .expect("build_load should not fail for a slot this function itself allocated");
+            Scalar::Closure(loaded.into_pointer_value())
         }
         other => {
             panic!(

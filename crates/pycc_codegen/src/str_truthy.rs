@@ -40,7 +40,7 @@ pub(crate) fn to_str<'ctx>(
 ) -> PointerValue<'ctx> {
     let (rt_fn, arg): (FunctionValue<'ctx>, inkwell::values::BasicMetadataValueEnum) = match scalar
     {
-        Scalar::Generator(_) => {
+        Scalar::Generator(_) | Scalar::Closure(_) => {
             panic!("pycc_codegen: internal error: a generator is never converted to str")
         }
         Scalar::Str(v) => return v,
@@ -205,7 +205,7 @@ pub(crate) fn truthy<'ctx>(
 ) -> inkwell::values::IntValue<'ctx> {
     let as_i8 = match scalar {
         // A generator object is always truthy.
-        Scalar::Generator(_) => context.i8_type().const_int(1, false),
+        Scalar::Generator(_) | Scalar::Closure(_) => context.i8_type().const_int(1, false),
         Scalar::Bool(v) => v,
         Scalar::Int(v) => builder
             .build_call(rt.int_truthy, &[v.into()], "int_truthy")

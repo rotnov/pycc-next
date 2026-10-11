@@ -182,14 +182,18 @@ fn a_foreign_imported_name_is_not_class_like() {
 /// a CPython object), and a call of a call result is not a subscript callee
 /// at all.
 #[test]
-fn a_keyword_call_is_deferred_and_a_call_result_callee_stays_refused() {
+fn a_keyword_call_is_deferred_and_a_call_result_callee_is_an_expression_call() {
     let HirExpr::KeywordCall { call, .. } = last_expr("t = {}\nt['a'](x=1)\n") else {
         panic!("a keyword call of a subscript result is deferred to pycc_types");
     };
     assert!(is_expr_call(&call), "{call:?}");
-    let module = pycc_parser_test_helper::parse("def g() -> int:\n    return 1\ng()()\n");
-    let diagnostic = lower_checked(&module).expect_err("a call of a call result");
-    assert_eq!(diagnostic.code, "C0001");
+    // A call of a call's result (a function value) is checked by
+    // `pycc_types`.
+    let call = last_expr("def g() -> int:\n    return 1\ng()()\n");
+    assert!(
+        matches!(&call, HirExpr::ExprCall { callee, .. } if matches!(**callee, HirExpr::Call { .. })),
+        "{call:?}"
+    );
 }
 
 /// An argument that fails to lower propagates out of the expression-call

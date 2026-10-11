@@ -68,6 +68,12 @@ pub(super) fn call_result_scalar<'ctx>(
                 .expect_basic("this function is declared to return a generator")
                 .into_pointer_value(),
         ),
+        Ty::Callable(_) => Scalar::Closure(
+            call_site
+                .try_as_basic_value()
+                .expect_basic("this function is declared to return a function value")
+                .into_pointer_value(),
+        ),
         Ty::Instance(_) => Scalar::Instance(
             call_site
                 .try_as_basic_value()

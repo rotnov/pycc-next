@@ -95,11 +95,42 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
     // marshalling loop pushes and pops its own arguments' words while
     // evaluating this loop's own argument, and this loop's earlier
     // pending entries must stay untouched by that nested truncation.
+    let marshalled_args = marshal_args(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        &user_function.param_tys[leading_args.len()..],
+        callee_name,
+        args,
+    );
+    arg_values.extend(marshalled_args);
+    dispatch(context, builder, rt, user_function, &arg_values)
+}
+
+/// Evaluates `args` for parameters of `param_tys`, each value a reference
+/// the callee's parameter slot will own: a borrowed argument is retained, a
+/// fresh one transferred (and released if a later argument raises).
+/// Shared by user-function calls and calls of function values (`closure`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn marshal_args<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    param_tys: &[pycc_mir::Ty],
+    callee_name: &str,
+    args: &[MirExpr],
+) -> Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> {
     let mark = rt.exceptions.pending_int_releases.borrow().len();
     let heap_mark = heap_rc::pending_mark(rt);
     let marshalled_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = args
         .iter()
-        .zip(&user_function.param_tys[leading_args.len()..])
+        .zip(param_tys)
         .enumerate()
         .map(|(index, (a, param_ty))| {
             // Non-strict mode (#3): an object argument to a scalar parameter
@@ -162,7 +193,7 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
             push_pending_int_release_if_scalar_temporary(rt, a, &scalar);
             let scalar = coerce_scalar_to_type(context, builder, scalar, param_ty.clone());
             match scalar {
-                Scalar::Generator(v) => v.into(),
+                Scalar::Generator(v) | Scalar::Closure(v) => v.into(),
                 Scalar::Int(v) => v.into(),
                 Scalar::Bool(v) => v.into(),
                 Scalar::Float(v) => v.into(),
@@ -251,7 +282,18 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
         .borrow_mut()
         .truncate(mark);
     heap_rc::truncate_pending(rt, heap_mark);
-    arg_values.extend(marshalled_args);
+    marshalled_args
+}
+
+/// Calls `user_function` with `arg_values`: directly when it has one
+/// definition, otherwise through its function-pointer slot (issue #22).
+pub(crate) fn dispatch<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_function: &UserFunction<'ctx>,
+    arg_values: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
+) -> inkwell::values::CallSiteValue<'ctx> {
     // Issue #22: dispatch indirectly through the function-pointer slot.
     // Load the current binding; if null, the function hasn't been defined
     // yet at this point in execution -- abort with a runtime NameError.
@@ -261,7 +303,7 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
     // since they are compiler-generated, not user-defined.
     if let Some(ref direct_value) = user_function.direct_value {
         return builder
-            .build_call(*direct_value, &arg_values, "call_user_fn")
+            .build_call(*direct_value, arg_values, "call_user_fn")
             .expect("build_call should not fail for a well-formed direct call");
     }
     // The load, the null check and its `NameError` path are shared with
@@ -277,11 +319,11 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
             ext_thunk::emit_fnptr_dispatch_guard(context, builder, rt, user_function);
         }
         return builder
-            .build_call(target, &arg_values, "call_user_fn")
+            .build_call(target, arg_values, "call_user_fn")
             .expect("build_call should not fail for a well-formed direct call");
     }
     let fn_ptr = ext_thunk::emit_fnptr_dispatch_guard(context, builder, rt, user_function);
     builder
-        .build_indirect_call(user_function.fn_type, fn_ptr, &arg_values, "call_user_fn")
+        .build_indirect_call(user_function.fn_type, fn_ptr, arg_values, "call_user_fn")
         .expect("build_indirect_call should not fail for a well-formed indirect call")
 }

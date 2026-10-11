@@ -20,6 +20,7 @@ pub(crate) fn ty_contains_param(ty: &Ty) -> bool {
         | Ty::Generator(inner) => ty_contains_param(inner),
         Ty::Dict(kv) => ty_contains_param(&kv.0) || ty_contains_param(&kv.1),
         Ty::Tuple(elems) => elems.iter().any(ty_contains_param),
+        Ty::Callable(sig) => sig.0.iter().any(ty_contains_param) || ty_contains_param(&sig.1),
         // D-154: an instance's payload is only its class's name, never a
         // `Ty::Param` (or anything else `Ty`-shaped) -- a class-typed
         // annotation isn't even resolvable yet (`annotation_to_ty` has no
@@ -107,6 +108,12 @@ pub(crate) fn scan_signature_ty_for_param(
         }
         Ty::Tuple(elems) => {
             for elem in elems.iter() {
+                scan_signature_ty_for_param(elem, false, found)?;
+            }
+            Ok(())
+        }
+        Ty::Callable(sig) => {
+            for elem in sig.0.iter().chain(std::iter::once(&sig.1)) {
                 scan_signature_ty_for_param(elem, false, found)?;
             }
             Ok(())

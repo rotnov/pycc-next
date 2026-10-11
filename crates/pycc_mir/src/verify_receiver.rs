@@ -571,6 +571,11 @@ impl Verifier<'_> {
             MirExpr::GenToList { generator, .. } | MirExpr::GenAnyAll { generator, .. } => {
                 self.expr(generator)
             }
+            MirExpr::MakeClosure { captures, .. } => self.exprs(captures),
+            MirExpr::CallClosure { callee, args, .. } => {
+                self.expr(callee);
+                self.exprs(args);
+            }
         }
     }
 }

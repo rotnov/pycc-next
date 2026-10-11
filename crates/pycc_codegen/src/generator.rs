@@ -76,16 +76,31 @@ impl<'ctx> GenFns<'ctx> {
                 "pycc_rt_gen_new",
                 ptr_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
             ),
-            resume: declare("pycc_rt_gen_resume", i8_type.fn_type(&[ptr_type.into()], false)),
-            next: declare("pycc_rt_gen_next", i8_type.fn_type(&[ptr_type.into()], false)),
-            incref: declare("pycc_rt_gen_incref", void_type.fn_type(&[ptr_type.into()], false)),
-            decref: declare("pycc_rt_gen_decref", void_type.fn_type(&[ptr_type.into()], false)),
+            resume: declare(
+                "pycc_rt_gen_resume",
+                i8_type.fn_type(&[ptr_type.into()], false),
+            ),
+            next: declare(
+                "pycc_rt_gen_next",
+                i8_type.fn_type(&[ptr_type.into()], false),
+            ),
+            incref: declare(
+                "pycc_rt_gen_incref",
+                void_type.fn_type(&[ptr_type.into()], false),
+            ),
+            decref: declare(
+                "pycc_rt_gen_decref",
+                void_type.fn_type(&[ptr_type.into()], false),
+            ),
             raise_exit: declare("pycc_rt_gen_raise_exit", void_type.fn_type(&[], false)),
             frame_alloc: declare(
                 "pycc_rt_gen_frame_alloc",
                 ptr_type.fn_type(&[i64_type.into()], false),
             ),
-            frame_free: declare("pycc_rt_gen_frame_free", void_type.fn_type(&[ptr_type.into()], false)),
+            frame_free: declare(
+                "pycc_rt_gen_frame_free",
+                void_type.fn_type(&[ptr_type.into()], false),
+            ),
         }
     }
 }
@@ -161,7 +176,10 @@ pub(crate) fn begin<'ctx>(
     function: FunctionValue<'ctx>,
 ) -> GenBegin<'ctx> {
     let kind = Attribute::get_named_enum_kind_id("presplitcoroutine");
-    function.add_attribute(AttributeLoc::Function, context.create_enum_attribute(kind, 0));
+    function.add_attribute(
+        AttributeLoc::Function,
+        context.create_enum_attribute(kind, 0),
+    );
     let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
     let null = ptr_type.const_null().as_value_ref();
     let i32_zero = context.i32_type().const_zero().as_value_ref();
@@ -363,7 +381,8 @@ fn scalar_basic(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
         | Scalar::Instance(v)
         | Scalar::Object(v)
         | Scalar::MemoryView(v)
-        | Scalar::Generator(v) => v.into(),
+        | Scalar::Generator(v)
+        | Scalar::Closure(v) => v.into(),
         Scalar::Tuple(v) | Scalar::Optional(v) => v.into(),
     }
 }
@@ -386,6 +405,7 @@ fn basic_scalar<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
         Ty::Instance(_) | Ty::Protocol(_) => Scalar::Instance(value.into_pointer_value()),
         Ty::Object => Scalar::Object(value.into_pointer_value()),
         Ty::Generator(_) => Scalar::Generator(value.into_pointer_value()),
+        Ty::Callable(_) => Scalar::Closure(value.into_pointer_value()),
         Ty::MemoryView => Scalar::MemoryView(value.into_pointer_value()),
         Ty::Infer | Ty::Param(_) => {
             panic!("pycc_codegen: internal error: an unresolved generator element type")
@@ -402,7 +422,11 @@ pub(crate) fn load_value<'ctx>(
 ) -> Scalar<'ctx> {
     let slot = byte_ptr(context, builder, object, VALUE_OFFSET);
     let value = builder
-        .build_load(ty_to_basic_type(context, element.clone()), slot, "gen_value")
+        .build_load(
+            ty_to_basic_type(context, element.clone()),
+            slot,
+            "gen_value",
+        )
         .expect("build_load should not fail for the value area");
     basic_scalar(element, value)
 }
@@ -576,7 +600,10 @@ pub(crate) fn emit_for_gen_stmt<'ctx>(
     } else {
         heap_rc::emit_incref(context, builder, rt, heap_rc::HeapKind::Generator, object);
     }
-    let hold_slot = locals.get(hold).cloned().expect("the loop's hold has a slot");
+    let hold_slot = locals
+        .get(hold)
+        .cloned()
+        .expect("the loop's hold has a slot");
     heap_rc::release_slot(context, builder, rt, &hold_slot.ty, hold_slot.ptr);
     builder
         .build_store(hold_slot.ptr, object)
@@ -654,9 +681,15 @@ fn operand<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     generator: &MirExpr,
 ) -> (PointerValue<'ctx>, bool) {
-    let Scalar::Generator(object) =
-        emit_expr(context, builder, module, rt, user_functions, locals, generator)
-    else {
+    let Scalar::Generator(object) = emit_expr(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        generator,
+    ) else {
         panic!("pycc_codegen: internal error: a generator operand is not a generator")
     };
     let fresh = !heap_rc::is_borrowed_read(generator);
@@ -695,7 +728,15 @@ pub(crate) fn emit_next<'ctx>(
     ty: &Ty,
 ) -> Scalar<'ctx> {
     let mark = heap_rc::pending_mark(rt);
-    let (object, fresh) = operand(context, builder, module, rt, user_functions, locals, generator);
+    let (object, fresh) = operand(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        generator,
+    );
     let function = builder.get_insert_block().unwrap().get_parent().unwrap();
     let Some(default) = default else {
         builder
@@ -717,10 +758,23 @@ pub(crate) fn emit_next<'ctx>(
         .build_unconditional_branch(join_bb)
         .expect("build_unconditional_branch should not fail");
     builder.position_at_end(exhausted_bb);
-    let fallback = emit_expr(context, builder, module, rt, user_functions, locals, default);
+    let fallback = emit_expr(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        default,
+    );
     let fallback = heap_rc::retain_if_heap_duplicate(context, builder, rt, default, fallback);
     let fallback = retain_if_int_duplicate(context, builder, rt, default, fallback);
-    let fallback = scalar_basic(coerce_scalar_to_type(context, builder, fallback, ty.clone()));
+    let fallback = scalar_basic(coerce_scalar_to_type(
+        context,
+        builder,
+        fallback,
+        ty.clone(),
+    ));
     let fallback_end = builder.get_insert_block().unwrap();
     builder
         .build_unconditional_branch(join_bb)
@@ -750,7 +804,15 @@ pub(crate) fn emit_to_list<'ctx>(
 ) -> Scalar<'ctx> {
     let element = list::element_ty(ty).clone();
     let mark = heap_rc::pending_mark(rt);
-    let (object, fresh) = operand(context, builder, module, rt, user_functions, locals, generator);
+    let (object, fresh) = operand(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        generator,
+    );
     let result = list::build_list_new(context, builder, rt, &element, 0);
     heap_rc::hold_owned(rt, heap_rc::HeapKind::List, result);
     let function = builder.get_insert_block().unwrap().get_parent().unwrap();
@@ -802,7 +864,15 @@ pub(crate) fn emit_any_all<'ctx>(
         panic!("pycc_codegen: internal error: any()/all() of a non-generator")
     };
     let mark = heap_rc::pending_mark(rt);
-    let (object, fresh) = operand(context, builder, module, rt, user_functions, locals, generator);
+    let (object, fresh) = operand(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        generator,
+    );
     let function = builder.get_insert_block().unwrap().get_parent().unwrap();
     let test_bb = context.append_basic_block(function, "gen_any_test");
     let got_bb = context.append_basic_block(function, "gen_any_got");

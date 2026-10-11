@@ -64,6 +64,11 @@ impl MirExpr {
                 out.extend(default.iter().map(|d| &**d));
             }
             MirExpr::Call { args, .. } => out.extend(args),
+            MirExpr::MakeClosure { captures, .. } => out.extend(captures),
+            MirExpr::CallClosure { callee, args, .. } => {
+                out.push(callee);
+                out.extend(args);
+            }
             MirExpr::RtCall(call) => out.extend(&call.args),
             MirExpr::Instantiate(inst) => out.extend(&inst.args),
             MirExpr::BinOp { left, right, .. }

@@ -104,10 +104,18 @@ fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
                     let HirExpr::Call { callee, args } = expr else {
                         return false;
                     };
+                    // A nested function used as a value: its captured
+                    // values are its lifted function's leading arguments.
+                    let (callee, args, partial) = match (callee.as_str(), args.as_slice()) {
+                        (pycc_hir::CLOSURE_MARKER, [HirExpr::Name(function), captures @ ..]) => {
+                            (&*function, captures, true)
+                        }
+                        _ => (&*callee, args.as_slice(), false),
+                    };
                     let Some(flags) = infer_params.get(callee.as_str()) else {
                         return false;
                     };
-                    if flags.len() != args.len() {
+                    if flags.len() < args.len() || (!partial && flags.len() != args.len()) {
                         return false;
                     }
                     for (index, arg) in args.iter().enumerate() {
@@ -125,7 +133,10 @@ fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
                         let entry = observed
                             .entry((callee.clone(), index))
                             .or_insert(Some(ty.clone()));
-                        if !is_container_param(&ty) || entry.as_ref() != Some(&ty) {
+                        // A function value is typed only by such evidence.
+                        if !(is_container_param(&ty) || matches!(ty, Ty::Callable(_)))
+                            || entry.as_ref() != Some(&ty)
+                        {
                             *entry = None;
                         }
                     }

@@ -331,18 +331,25 @@ pub(crate) fn lower_expr(
             // one top-level binding.
             let id = name.id.as_str();
             let shadowed = signatures.binds(id) || signatures.is_rebound(id);
-            let constant = imports.iter().filter(|_| !shadowed).find_map(|binding| match binding {
-                ImportBinding::Symbol {
-                    local_name,
-                    module,
-                    symbol,
-                } if local_name == id
-                    && matches!(symbol.kind, pycc_std::StdSymbolKind::Constant { .. }) =>
-                {
-                    Some(format!("{}.{}", pycc_std::module_name(*module), symbol.name))
-                }
-                _ => None,
-            });
+            let constant = imports
+                .iter()
+                .filter(|_| !shadowed)
+                .find_map(|binding| match binding {
+                    ImportBinding::Symbol {
+                        local_name,
+                        module,
+                        symbol,
+                    } if local_name == id
+                        && matches!(symbol.kind, pycc_std::StdSymbolKind::Constant { .. }) =>
+                    {
+                        Some(format!(
+                            "{}.{}",
+                            pycc_std::module_name(*module),
+                            symbol.name
+                        ))
+                    }
+                    _ => None,
+                });
             HirExpr::Name(constant.unwrap_or_else(|| id.to_string()))
         }
         Expr::List(list) => HirExpr::ListLiteral(
@@ -670,6 +677,21 @@ pub(crate) fn lower_expr(
                     call.range,
                 ));
             }
+            // `make_adder(1)(2)`: a call of a call's result (a function
+            // value, `pycc_types` checks).
+            if matches!(call.func.as_ref(), Expr::Call(_)) && call.arguments.keywords.is_empty() {
+                let callee = lower_expr(&call.func, in_function, class_name, imports, signatures)?;
+                let args = call
+                    .arguments
+                    .args
+                    .iter()
+                    .map(|e| lower_expr(e, in_function, class_name, imports, signatures))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(HirExpr::ExprCall {
+                    callee: Box::new(callee),
+                    args,
+                });
+            }
             let Expr::Name(callee) = call.func.as_ref() else {
                 return Err(unsupported(
                     // The callee here is never a `Name`, `Attribute`, or
@@ -732,18 +754,26 @@ pub(crate) fn lower_expr(
             // Only while the import is the name's one top-level binding.
             let shadowed =
                 signatures.binds(callee.id.as_str()) || signatures.is_rebound(callee.id.as_str());
-            let std_function = imports.iter().filter(|_| !shadowed).find_map(|binding| match binding {
-                ImportBinding::Symbol {
-                    local_name,
-                    module,
-                    symbol,
-                } if local_name == callee.id.as_str()
-                    && matches!(symbol.kind, pycc_std::StdSymbolKind::Function { .. }) =>
-                {
-                    Some(format!("{}.{}", pycc_std::module_name(*module), symbol.name))
-                }
-                _ => None,
-            });
+            let std_function =
+                imports
+                    .iter()
+                    .filter(|_| !shadowed)
+                    .find_map(|binding| match binding {
+                        ImportBinding::Symbol {
+                            local_name,
+                            module,
+                            symbol,
+                        } if local_name == callee.id.as_str()
+                            && matches!(symbol.kind, pycc_std::StdSymbolKind::Function { .. }) =>
+                        {
+                            Some(format!(
+                                "{}.{}",
+                                pycc_std::module_name(*module),
+                                symbol.name
+                            ))
+                        }
+                        _ => None,
+                    });
             HirExpr::Call {
                 callee: std_function.unwrap_or_else(|| callee.id.as_str().to_string()),
                 args,

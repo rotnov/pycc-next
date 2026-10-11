@@ -42,6 +42,7 @@ pub(super) fn collect_expr_bindings(expr: &MirExpr, bindings: &mut BTreeMap<Stri
                 | pycc_mir::Ty::Instance(_)
                 | pycc_mir::Ty::Optional(_)
                 | pycc_mir::Ty::Generator(_)
+                | pycc_mir::Ty::Callable(_)
         ) {
             bindings.entry(name).or_insert(ty);
         }
@@ -109,6 +110,7 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
                     | pycc_mir::Ty::Object
                     // A generator object, owned like a list.
                     | pycc_mir::Ty::Generator(_)
+                    | pycc_mir::Ty::Callable(_)
             ) {
                 bindings.entry(target.clone()).or_insert(ty);
             }

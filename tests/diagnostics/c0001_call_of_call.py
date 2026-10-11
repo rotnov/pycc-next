@@ -1,2 +1,2 @@
 def f() -> int:
-    return g()()
+    return (g or h)()

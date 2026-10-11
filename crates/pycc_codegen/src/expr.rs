@@ -81,6 +81,29 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             generator,
             ty,
         ),
+        MirExpr::MakeClosure {
+            function, captures, ..
+        } => crate::closure::emit_make_closure(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            function,
+            captures,
+        ),
+        MirExpr::CallClosure { callee, args, ty } => crate::closure::emit_call_closure(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            callee,
+            args,
+            ty,
+        ),
         MirExpr::GenAnyAll { generator, all } => crate::generator::emit_any_all(
             context,
             builder,

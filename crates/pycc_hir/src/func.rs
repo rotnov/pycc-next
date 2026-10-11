@@ -15,9 +15,9 @@
 //! resolving unchanged.
 
 mod bare_container;
-mod generator;
 mod buffer_spelling;
 mod container_annotation;
+mod generator;
 pub(crate) mod params;
 #[cfg(test)]
 mod params_tests;
@@ -91,7 +91,11 @@ pub(crate) fn lower_function(
         class_defs,
     )?;
     let return_ty = lower_return_annotation(
-        if synthesized { None } else { def.returns.as_deref() },
+        if synthesized {
+            None
+        } else {
+            def.returns.as_deref()
+        },
         is_public,
         def.name.as_str(),
         type_param.as_deref(),
@@ -142,6 +146,15 @@ pub(crate) fn lower_function(
         return_ty,
         body,
     })
+}
+
+/// The `C0001` for a `Callable[...]` annotation not of the form
+/// `Callable[[A, B], R]`.
+fn callable_shape(annotation: &Expr) -> Diagnostic {
+    unsupported(
+        "`Callable` is supported as `Callable[[A, B], R]` (a parameter list and a return type)",
+        pycc_ast::expr_range(annotation),
+    )
 }
 
 /// Extracts a PEP 695 `TypeVar`'s identifier -- e.g. the `T` in `def
@@ -738,7 +751,9 @@ pub(crate) fn annotation_to_ty(
                 // a compiled generator is driven by `next()` only and
                 // returns no value).
                 "Iterator" | "Iterable" | "Generator"
-                    if !class_defs.iter().any(|info| info.name == base_name.id.as_str()) =>
+                    if !class_defs
+                        .iter()
+                        .any(|info| info.name == base_name.id.as_str()) =>
                 {
                     let args: Vec<&Expr> = match sub.slice.as_ref() {
                         Expr::Tuple(tuple) => tuple.elts.iter().collect(),
@@ -770,6 +785,22 @@ pub(crate) fn annotation_to_ty(
                         d
                     })?;
                     Ok(ty)
+                }
+                // A function value: `Callable[[A, B], R]`.
+                "Callable" if !class_defs.iter().any(|info| info.name == "Callable") => {
+                    let (Expr::Tuple(tuple), true) = (sub.slice.as_ref(), true) else {
+                        return Err(callable_shape(annotation));
+                    };
+                    let [Expr::List(params), ret] = &tuple.elts[..] else {
+                        return Err(callable_shape(annotation));
+                    };
+                    let params = params
+                        .elts
+                        .iter()
+                        .map(|p| annotation_to_ty(p, type_param, class_name, aliases, class_defs))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let ret = annotation_to_ty(ret, type_param, class_name, aliases, class_defs)?;
+                    Ok(Ty::Callable(Box::new((params, ret))))
                 }
                 // #911: see the bare-`ClassVar` arm above -- `ClassVar[T]`
                 // is legal only on a class-body attribute declaration, where

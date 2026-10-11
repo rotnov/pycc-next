@@ -14,8 +14,8 @@ mod hir_module;
 mod if_exp;
 mod import;
 mod int_boundary;
-pub mod locate;
 mod isinstance_narrow;
+pub mod locate;
 mod module;
 mod not_implemented;
 mod post_if;
@@ -82,6 +82,8 @@ pub use module::{LoweredModule, last_item_origins, lower_all, lower_checked, low
 pub use not_implemented::{WIDENED_RETURN_HELP, body_returns_not_implemented};
 pub use post_if::continuation_narrows;
 pub use program::{LinkInput, finalize, link};
+/// The callee of a nested function used as a value (`pycc_ast::desugar`).
+pub use pycc_ast::CLOSURE_MARKER;
 pub use return_coverage::{block_always_returns, block_never_completes, loop_never_ends_normally};
 pub use stmt::del::{deleted_names, mentioned_names};
 pub use typecheck::{
@@ -308,6 +310,14 @@ pub enum Ty {
     /// coroutine frame (`pycc_codegen::generator`). Boxed as a thin
     /// pointer, like `List`, so `size_of::<Ty>()` stays 16 bytes.
     Generator(Box<Ty>),
+    /// A function value, `Callable[[A, B], R]`: a module-level function
+    /// used as a value, or a nested function closed over its enclosing
+    /// variables (`pycc_ast::desugar::closures`). A reference-counted
+    /// pointer to a `pycc_rt::closure::PyClosureObj` holding the captured
+    /// values and the function that receives them (`pycc_codegen::closure`).
+    /// Two callables are the same type when their parameter and return
+    /// types are. Boxed as one thin pointer, like `Dict`.
+    Callable(Box<(Vec<Ty>, Ty)>),
 }
 
 impl Ty {
@@ -334,6 +344,11 @@ impl Ty {
             Ty::Object => "object".to_string(),
             Ty::MemoryView => "memoryview".to_string(),
             Ty::Generator(elem) => format!("Generator[{}, None, None]", elem.name()),
+            Ty::Callable(sig) => format!(
+                "Callable[[{}], {}]",
+                sig.0.iter().map(Ty::name).collect::<Vec<_>>().join(", "),
+                sig.1.name()
+            ),
         }
     }
 }

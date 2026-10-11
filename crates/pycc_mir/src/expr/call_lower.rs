@@ -67,6 +67,42 @@ pub(crate) fn lower_call_expr(
     // panics on an unbound name, which every ordinary function
     // callee is), and the reverse scan finds a function-local that
     // spells a foreign name first, with its own non-`object` type.
+    // A nested function used as a value (`pycc_hir::CLOSURE_MARKER`): the
+    // function value of `args[0]` with its first parameters bound to the
+    // rest.
+    if callee == pycc_hir::CLOSURE_MARKER {
+        let [HirExpr::Name(function), captures @ ..] = args.as_slice() else {
+            panic!("pycc_mir: internal error: a closure marker names its function first")
+        };
+        let Ty::Callable(sig) = lookup(scopes, &format!("$callable:{function}")) else {
+            unreachable!("`$callable:` keys hold function value types")
+        };
+        return MirExpr::MakeClosure {
+            function: function.clone(),
+            captures: captures
+                .iter()
+                .map(|a| lower_expr(a, scopes, classes, current_class))
+                .collect(),
+            ty: Ty::Callable(Box::new((sig.0[captures.len()..].to_vec(), sig.1))),
+        };
+    }
+    // A call of a variable holding a function value.
+    if let Some(Ty::Callable(sig)) = scopes.iter().rev().find_map(|scope| scope.get(callee)) {
+        let ty = sig.1.clone();
+        return MirExpr::CallClosure {
+            callee: Box::new(lower_expr(
+                &HirExpr::Name(callee.clone()),
+                scopes,
+                classes,
+                current_class,
+            )),
+            args: args
+                .iter()
+                .map(|a| lower_expr(a, scopes, classes, current_class))
+                .collect(),
+            ty,
+        };
+    }
     if scopes.iter().rev().find_map(|scope| scope.get(callee)) == Some(&Ty::Object) {
         return MirExpr::ObjCall {
             callee: Box::new(lower_expr(
@@ -420,6 +456,17 @@ pub(crate) fn lower_expr_call_expr(
         unreachable!()
     };
     let callee = lower_expr(callee, scopes, classes, current_class);
+    // A call of a function value (`make_adder(1)(2)`).
+    if let Ty::Callable(sig) = callee.ty() {
+        return MirExpr::CallClosure {
+            callee: Box::new(callee),
+            args: args
+                .iter()
+                .map(|a| lower_expr(a, scopes, classes, current_class))
+                .collect(),
+            ty: sig.1,
+        };
+    }
     debug_assert_eq!(
         callee.ty(),
         Ty::Object,

@@ -19,11 +19,14 @@
 //! other.
 //!
 //! A nested function is lifted only when every use of its name is a direct
-//! call, the name is bound once (by the `def`), it has no decorators, no
+//! call (or, see [`values`], it may be made a function value), the name is
+//! bound once (by the `def`), it has no decorators, no
 //! `*args`/`**kwargs` and no non-literal defaults, and every variable a
 //! `nonlocal` names is bound only by plain assignments. A nested `name =
 //! lambda ...` is first turned into the equivalent `def`. Anything else
 //! stays nested, and the compiler reports it as before.
+
+mod values;
 
 use super::Fresh;
 use super::INFER_MARKER;
@@ -483,6 +486,22 @@ impl Transformer for Rewrite<'_> {
             call.func = Box::new(load(&lift.lifted, range));
             return;
         }
+        // A nested function read as a value: its function value, with its
+        // captures bound now (`values`).
+        if let Expr::Name(name) = expr
+            && name.ctx == ExprContext::Load
+            && let Some(lift) = self.lifts.get(name.id.as_str())
+        {
+            let range = name.range;
+            let mut args = vec![load(&lift.lifted, range)];
+            args.extend(
+                lift.captures
+                    .iter()
+                    .map(|capture| self.capture_arg(capture, range)),
+            );
+            *expr = super::build::call_name(super::CLOSURE_MARKER, args, range);
+            return;
+        }
         if let Expr::Name(name) = expr
             && self.cells.contains(name.id.as_str())
         {
@@ -741,89 +760,117 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
         probe.body = body.clone().into();
         scope_names(&probe)
     };
-    // Choose the liftable ones.
-    let mut chosen: Vec<&StmtFunctionDef> = Vec::new();
-    for candidate in &candidates {
-        let name = candidate.name.as_str();
-        let uses = count_uses(&body, name);
-        if !liftable_shape(candidate)
-            || def
-                .parameters
-                .iter()
-                .any(|param| param.name().as_str() == name)
-            || uses.bindings != 1
-            || uses.other != 0
-            || outer_names.globals.contains(name)
-            || outer_names.nonlocals.contains(name)
-            || candidates
-                .iter()
-                .filter(|c| c.name.as_str() == name)
-                .count()
-                != 1
-        {
-            continue;
+    // A function used as a value whose captures are not stable is dropped
+    // and the choice made again (`values`).
+    let params: HashSet<String> = def
+        .parameters
+        .iter()
+        .map(|p| p.name().to_string())
+        .collect();
+    let mut excluded: HashSet<String> = HashSet::new();
+    let (chosen, chosen_names, cells, captures) = loop {
+        // Choose the liftable ones.
+        let mut chosen: Vec<&StmtFunctionDef> = Vec::new();
+        for candidate in &candidates {
+            let name = candidate.name.as_str();
+            let uses = count_uses(&body, name);
+            if !liftable_shape(candidate)
+                || def
+                    .parameters
+                    .iter()
+                    .any(|param| param.name().as_str() == name)
+                || uses.bindings != 1
+                || (uses.other != 0
+                    && (excluded.contains(name)
+                        || !values::value_shape(candidate)
+                        || values::def_index(&body, name).is_none()))
+                || outer_names.globals.contains(name)
+                || outer_names.nonlocals.contains(name)
+                || candidates
+                    .iter()
+                    .filter(|c| c.name.as_str() == name)
+                    .count()
+                    != 1
+            {
+                continue;
+            }
+            chosen.push(candidate);
         }
-        chosen.push(candidate);
-    }
-    if chosen.is_empty() {
-        def.body = body.into();
-        return;
-    }
-    let chosen_names: HashSet<String> = chosen.iter().map(|d| d.name.to_string()).collect();
-    // Cells: enclosing variables a chosen function declares `nonlocal`.
-    let mut cells: HashSet<String> = HashSet::new();
-    let mut infos: HashMap<String, ScopeNames> = HashMap::new();
-    for candidate in &chosen {
-        let names = scope_names(candidate);
-        for nonlocal in &names.nonlocals {
-            cells.insert(nonlocal.clone());
+        if chosen.is_empty() {
+            def.body = body.into();
+            return;
         }
-        infos.insert(candidate.name.to_string(), names);
-    }
-    let celled_ok = cells.iter().all(|cell| {
-        outer_names.bound.contains(cell)
-            && only_plain_assignments(&body, cell)
-            && !chosen_names.contains(cell)
-    });
-    if !celled_ok {
-        def.body = body.into();
-        return;
-    }
-    // Captures: what each reads (or writes nonlocally) of the enclosing
-    // scope, closed over the calls between chosen functions.
-    let enclosing: HashSet<String> = outer_names.bound.clone();
-    let mut captures: HashMap<String, BTreeSet<String>> = HashMap::new();
-    for (name, names) in &infos {
-        let own: BTreeSet<String> = names
-            .free
-            .iter()
-            .chain(names.nonlocals.iter())
-            .filter(|n| enclosing.contains(*n) && !chosen_names.contains(*n))
-            .cloned()
-            .collect();
-        captures.insert(name.clone(), own);
-    }
-    loop {
-        let mut changed = false;
+        let chosen_names: HashSet<String> = chosen.iter().map(|d| d.name.to_string()).collect();
+        // Cells: enclosing variables a chosen function declares `nonlocal`.
+        let mut cells: HashSet<String> = HashSet::new();
+        let mut infos: HashMap<String, ScopeNames> = HashMap::new();
+        for candidate in &chosen {
+            let names = scope_names(candidate);
+            for nonlocal in &names.nonlocals {
+                cells.insert(nonlocal.clone());
+            }
+            infos.insert(candidate.name.to_string(), names);
+        }
+        let celled_ok = cells.iter().all(|cell| {
+            outer_names.bound.contains(cell)
+                && only_plain_assignments(&body, cell)
+                && !chosen_names.contains(cell)
+        });
+        if !celled_ok {
+            def.body = body.into();
+            return;
+        }
+        // Captures: what each reads (or writes nonlocally) of the enclosing
+        // scope, closed over the calls between chosen functions.
+        let enclosing: HashSet<String> = outer_names.bound.clone();
+        let mut captures: HashMap<String, BTreeSet<String>> = HashMap::new();
         for (name, names) in &infos {
-            let called: Vec<String> = names
+            let own: BTreeSet<String> = names
                 .free
                 .iter()
-                .filter(|n| chosen_names.contains(*n) && *n != name)
+                .chain(names.nonlocals.iter())
+                .filter(|n| enclosing.contains(*n) && !chosen_names.contains(*n))
                 .cloned()
                 .collect();
-            for callee in called {
-                let extra = captures[&callee].clone();
-                let mine = captures.get_mut(name).expect("every chosen function");
-                for capture in extra {
-                    changed |= mine.insert(capture);
+            captures.insert(name.clone(), own);
+        }
+        loop {
+            let mut changed = false;
+            for (name, names) in &infos {
+                let called: Vec<String> = names
+                    .free
+                    .iter()
+                    .filter(|n| chosen_names.contains(*n) && *n != name)
+                    .cloned()
+                    .collect();
+                for callee in called {
+                    let extra = captures[&callee].clone();
+                    let mine = captures.get_mut(name).expect("every chosen function");
+                    for capture in extra {
+                        changed |= mine.insert(capture);
+                    }
                 }
             }
+            if !changed {
+                break;
+            }
         }
-        if !changed {
-            break;
+        let unstable: Vec<String> = chosen
+            .iter()
+            .map(|c| c.name.to_string())
+            .filter(|name| {
+                count_uses(&body, name).other != 0
+                    && !values::def_index(&body, name).is_some_and(|index| {
+                        let own: Vec<String> = captures[name].iter().cloned().collect();
+                        values::stable_captures(&body, &params, index, &own)
+                    })
+            })
+            .collect();
+        if unstable.is_empty() {
+            break (chosen, chosen_names, cells, captures);
         }
-    }
+        excluded.extend(unstable);
+    };
     let owner_tag = owner.replace('.', "_");
     let lifts: HashMap<String, Lift> = chosen
         .iter()

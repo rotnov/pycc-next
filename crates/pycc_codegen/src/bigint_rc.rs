@@ -594,6 +594,9 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         | MirExpr::GenNext { .. }
         | MirExpr::GenToList { .. }
         | MirExpr::GenAnyAll { .. }
+        // A function value's call returns an owned value, like `Call`'s.
+        | MirExpr::MakeClosure { .. }
+        | MirExpr::CallClosure { .. }
         // `ExceptionMessage`'s own `.ty()` is always `Ty::Str` (Part 3A of
         // #541, #736), never `Ty::Int`, so like `OptionalWrap` immediately
         // below it can never reach this function as the `Ty::Int`-classified

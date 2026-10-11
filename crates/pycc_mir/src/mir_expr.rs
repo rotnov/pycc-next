@@ -689,6 +689,22 @@ pub enum MirExpr {
         generator: Box<MirExpr>,
         all: bool,
     },
+    /// A function value (`ty`, a `Ty::Callable`): module-level `function`
+    /// with its leading parameters bound to `captures` -- a nested
+    /// function's enclosing variables (`pycc_ast::desugar::closures`), or
+    /// none for a module-level function used as a value.
+    MakeClosure {
+        function: String,
+        captures: Vec<MirExpr>,
+        ty: Ty,
+    },
+    /// A call of a function value: `callee` (a `Ty::Callable`) applied to
+    /// `args`; `ty` is its return type.
+    CallClosure {
+        callee: Box<MirExpr>,
+        args: Vec<MirExpr>,
+        ty: Ty,
+    },
     /// `ndarray(n)` / `NDArray(n)` (Part 2a of #1142, issue #1165): the
     /// allocation of `n` zero-filled contiguous `f64`s that the artifact
     /// itself owns, together with the [`PyccExtBufferView`-shaped] pair that

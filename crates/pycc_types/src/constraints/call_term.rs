@@ -31,6 +31,67 @@ pub(crate) fn collect_call_constraints(
     // and pass 3's own gate would still catch the shadowing later --
     // there this mirror is fail-fast defense-in-depth, not the only
     // line of defense.
+    // A nested function used as a value (`pycc_hir::CLOSURE_MARKER`):
+    // its captured values constrain the lifted function's leading
+    // parameters as a call's arguments would.
+    if callee == pycc_hir::CLOSURE_MARKER
+        && let [HirExpr::Name(function), captures @ ..] = args.as_slice()
+    {
+        let mut capture_terms = Vec::with_capacity(captures.len());
+        for capture in captures {
+            capture_terms.push(collect_expr_constraints(
+                signatures, parents, concrete, deferred, env, capture,
+            )?);
+        }
+        let Some(signature) = signatures.get(function) else {
+            return Ok(None);
+        };
+        for (index, (term, parameter)) in capture_terms.into_iter().zip(&signature.1).enumerate() {
+            if let Some(term) = term {
+                unify_terms(
+                    parameter.clone(),
+                    term,
+                    parents,
+                    concrete,
+                    "T0021",
+                    &format!(
+                        "captured value {} of nested function `{function}`",
+                        index + 1
+                    ),
+                )?;
+            }
+        }
+        let rest: Option<Vec<Ty>> = signature.1[captures.len().min(signature.1.len())..]
+            .iter()
+            .map(|term| resolved_term(term.clone(), parents, concrete))
+            .collect();
+        let ret = resolved_term(signature.2.clone(), parents, concrete);
+        return Ok(match (rest, ret) {
+            (Some(rest), Some(ret)) => Some(Ok(Ty::Callable(Box::new((rest, ret))))),
+            _ => None,
+        });
+    }
+    // A call of a variable holding a function value.
+    if let Some(term) = env.bindings.get(callee).cloned()
+        && !env.defs_rebound.contains(callee)
+        && let Some(Ty::Callable(sig)) = resolved_term(term, parents, concrete)
+    {
+        for (index, (arg, param)) in args.iter().zip(&sig.0).enumerate() {
+            if let Some(term) =
+                collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?
+            {
+                unify_terms(
+                    Ok(param.clone()),
+                    term,
+                    parents,
+                    concrete,
+                    "T0021",
+                    &format!("argument {} of `{callee}`", index + 1),
+                )?;
+            }
+        }
+        return Ok(Some(Ok(sig.1.clone())));
+    }
     if let Some(term) = env.bindings.get(callee).cloned()
         && !env.defs_rebound.contains(callee)
     {

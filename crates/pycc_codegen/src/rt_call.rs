@@ -16,7 +16,7 @@ use pycc_mir::{RtCallExpr, Ty};
 /// The value `scalar` (already coerced to `ty`) passes as.
 fn abi_value<'ctx>(scalar: Scalar<'ctx>) -> BasicMetadataValueEnum<'ctx> {
     match scalar {
-        Scalar::Generator(v) => v.into(),
+        Scalar::Generator(v) | Scalar::Closure(v) => v.into(),
         Scalar::Int(v) | Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),
         Scalar::Str(v)

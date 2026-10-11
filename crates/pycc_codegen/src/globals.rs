@@ -233,7 +233,7 @@ pub(crate) fn declare_module_globals<'ctx>(
                     (struct_ty.into(), zeroed.into())
                 }
                 // A generator object: a pointer, null until bound.
-                pycc_mir::Ty::Generator(_) => (
+                pycc_mir::Ty::Generator(_) | pycc_mir::Ty::Callable(_) => (
                     context.ptr_type(inkwell::AddressSpace::default()).into(),
                     context
                         .ptr_type(inkwell::AddressSpace::default())

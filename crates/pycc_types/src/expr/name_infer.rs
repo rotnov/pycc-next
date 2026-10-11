@@ -112,6 +112,9 @@ pub(crate) fn infer_name_expr(
         None => {
             if is_local(local_names, name) {
                 Err(unbound_local(name))
+            } else if let Some(value) = crate::closure::function_value(env, name) {
+                // A module-level function used as a value.
+                value
             } else {
                 Err(Diagnostic::error(
                     "T0021",

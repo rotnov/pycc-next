@@ -3,6 +3,7 @@ mod boolop;
 mod buffer;
 mod builtin_call;
 mod class;
+mod closure;
 mod compare_chain;
 mod comprehension;
 mod constraints;
@@ -19,8 +20,8 @@ mod if_exp;
 mod inherited_copies;
 mod int_builtins;
 mod list_ops;
-mod locate;
 mod local_binder;
+mod locate;
 mod loop_flow;
 mod module;
 mod monomorphize;
@@ -63,6 +64,7 @@ pub(crate) use redeclaration::{
 };
 
 pub(crate) use constraints::*;
+pub use locate::with_item_spans;
 pub(crate) use module::module_function_local_names;
 pub use module::{
     DiagnosticKey, KeyedDiagnostics, check, check_all, check_all_keyed, check_and_resolve,
@@ -71,7 +73,6 @@ pub use module::{
 #[cfg(test)]
 pub(crate) use module::{check_with_signatures, checked_function_signatures};
 pub use monomorphize::*;
-pub use locate::with_item_spans;
 pub use non_strict::set_non_strict;
 
 use pycc_diag::{Diagnostic, Span};

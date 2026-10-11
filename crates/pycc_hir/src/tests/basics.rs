@@ -353,9 +353,10 @@ fn non_name_callee_is_unsupported() {
     // `.` callee is now checked for the `.append()` shape first, and
     // rejected with its own dedicated message when it isn't `.append`
     // (see `calling_a_non_append_method_is_unsupported`). This fixture
-    // instead calls the *result* of a call -- neither a bare name nor
-    // an attribute access -- to keep exercising the fallback rejection.
-    assert_capability_error_message("foo()()\n", "only calling a bare name");
+    // instead calls an `and`/`or` expression -- neither a bare name, an
+    // attribute access nor a call (whose result may be a function value)
+    // -- to keep exercising the fallback rejection.
+    assert_capability_error_message("(a or b)()\n", "only calling a bare name");
 }
 
 #[test]

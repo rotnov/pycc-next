@@ -174,6 +174,7 @@ impl MirExpr {
             MirExpr::BufferLen { .. } => Ty::Int,
             MirExpr::GenNext { ty, .. } | MirExpr::GenToList { ty, .. } => ty.clone(),
             MirExpr::GenAnyAll { .. } => Ty::Bool,
+            MirExpr::MakeClosure { ty, .. } | MirExpr::CallClosure { ty, .. } => ty.clone(),
             // Hardcoded for the same reason once more, and it is this fact
             // that the rest of Part 2a rests on: the producer's result is
             // the very same `Ty::MemoryView` a `memoryview` parameter
@@ -266,6 +267,17 @@ impl MirExpr {
                 generator.collect_named_expr_bindings(out);
                 if let Some(default) = default {
                     default.collect_named_expr_bindings(out);
+                }
+            }
+            MirExpr::MakeClosure { captures, .. } => {
+                for capture in captures {
+                    capture.collect_named_expr_bindings(out);
+                }
+            }
+            MirExpr::CallClosure { callee, args, .. } => {
+                callee.collect_named_expr_bindings(out);
+                for arg in args {
+                    arg.collect_named_expr_bindings(out);
                 }
             }
             MirExpr::OptionalWrap(inner, _) | MirExpr::ObjectBox(inner) => {

@@ -28,9 +28,17 @@ pub(crate) fn infer_call_expr(
     // records that consequence (it rejects some later-rebind programs
     // CPython's dynamic order would run) as deliberate; source-order
     // visibility questions stay #22's scope.
+    // A nested function used as a value (`pycc_hir::CLOSURE_MARKER`).
+    if callee == pycc_hir::CLOSURE_MARKER {
+        return crate::closure::closure_value(env, local_names, args);
+    }
     if let Some(ty) = env.lookup(callee)
         && !env.def_rebound.contains(callee)
     {
+        // A call of a variable holding a function value.
+        if let Ty::Callable(sig) = ty {
+            return crate::closure::call_value(env, local_names, callee, &sig, args);
+        }
         // #1313: a direct call of an `object`-typed name (a foreign
         // binding or a `for` loop target) in a module body is an
         // `object` producer under the shared object-call argument
@@ -152,14 +160,13 @@ pub(crate) fn infer_call_expr(
         return Ok(ty);
     }
     let materialized;
-    let arg_tys: &[Ty] = if !user_callee
-        && let Some(listed) = crate::generator::consumer_arg_tys(callee, arg_tys)
-    {
-        materialized = listed;
-        &materialized
-    } else {
-        arg_tys
-    };
+    let arg_tys: &[Ty] =
+        if !user_callee && let Some(listed) = crate::generator::consumer_arg_tys(callee, arg_tys) {
+            materialized = listed;
+            &materialized
+        } else {
+            arg_tys
+        };
     // A stdlib function the builtin table types (`math.log`) is still
     // refused when a local shadows its module's spelling.
     if let Some(symbol) = std_qualified_symbol(callee)
@@ -659,7 +666,10 @@ pub(crate) fn infer_call_expr(
                 )
                 .with_help(format!("pass a `{}` value", param_ty.name()))
             };
-            return Err(crate::locate::place_at(diag, crate::locate::expr_span(&args[i])));
+            return Err(crate::locate::place_at(
+                diag,
+                crate::locate::expr_span(&args[i]),
+            ));
         }
         // Part 1 of #1333: an `object` argument that got this far
         // met a parameter it is assignable to -- an unannotated

@@ -13,8 +13,8 @@ mod class;
 use class::eval_isinstance_protocol;
 use class::{class_def_of, mro_attrs};
 mod exception;
-mod generator;
 mod exception_isinstance;
+mod generator;
 pub use exception::{MirExceptHandler, MirExceptionValue};
 use exception::{handler_type_tags, lower_raise};
 mod expr;
@@ -262,10 +262,23 @@ pub fn build(hir: &HirModule) -> MirModule {
     // of where the callee's `def` appears in the module.
     for item in &hir.items {
         if let HirItem::Function {
-            name, return_ty, ..
+            name,
+            params,
+            return_ty,
+            ..
         } = item
         {
             bind(&mut scopes, format!("$fn:{name}"), return_ty.clone());
+            // The function's value type, for a use of it as a value
+            // (`MirExpr::MakeClosure`).
+            bind(
+                &mut scopes,
+                format!("$callable:{name}"),
+                Ty::Callable(Box::new((
+                    params.iter().map(|(_, ty)| ty.clone()).collect(),
+                    return_ty.clone(),
+                ))),
+            );
         }
     }
     // Lower module statements first, in source order, so the module scope is

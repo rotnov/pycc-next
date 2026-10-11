@@ -157,6 +157,19 @@ pub(super) fn lower_expr(
             let inner = super::narrowed_ty(scopes, name).expect("just matched Some above");
             super::object_narrow::narrowed_read(name, lookup(scopes, name), inner)
         }
+        // A module-level function used as a value: its function value.
+        HirExpr::Name(name)
+            if !scopes.iter().any(|scope| scope.contains_key(name))
+                && scopes
+                    .iter()
+                    .any(|scope| scope.contains_key(&format!("$callable:{name}"))) =>
+        {
+            MirExpr::MakeClosure {
+                function: name.clone(),
+                captures: Vec::new(),
+                ty: lookup(scopes, &format!("$callable:{name}")),
+            }
+        }
         HirExpr::Name(name) => MirExpr::Name {
             name: name.clone(),
             ty: lookup(scopes, name),

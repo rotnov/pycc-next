@@ -21,7 +21,7 @@ pub(crate) fn to_numeric_encoded_int<'ctx>(
     scalar: Scalar<'ctx>,
 ) -> IntValue<'ctx> {
     match scalar {
-        Scalar::Generator(_) => {
+        Scalar::Generator(_) | Scalar::Closure(_) => {
             panic!("pycc_codegen: internal error: expected an int-or-bool operand, got generator")
         }
         Scalar::Int(v) => v,
@@ -453,7 +453,7 @@ pub(crate) fn range_operand_to_normalized_int<'ctx>(
     position: &str,
 ) -> IntValue<'ctx> {
     match scalar {
-        Scalar::Generator(_) => {
+        Scalar::Generator(_) | Scalar::Closure(_) => {
             panic!("pycc_codegen: internal error: a generator is never a range() operand")
         }
         scalar @ (Scalar::Int(_) | Scalar::Bool(_)) => {
@@ -576,7 +576,7 @@ pub(crate) fn to_float<'ctx>(
 ) -> FloatValue<'ctx> {
     match scalar {
         Scalar::Float(v) => v,
-        Scalar::Generator(_) => {
+        Scalar::Generator(_) | Scalar::Closure(_) => {
             panic!("pycc_codegen: internal error: expected a numeric operand, got generator")
         }
         Scalar::Int(v) => int_fast::emit_int_to_float(context, builder, rt, v),

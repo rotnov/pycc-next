@@ -134,6 +134,16 @@ pub(crate) fn reject_unrenderable(
         Ty::Set(elem) | Ty::FrozenSet(elem) if pycc_hir::is_hashable_ty(elem) => Ok(()),
         Ty::Set(_) | Ty::FrozenSet(_) => Err(crate::frozenset::unrenderable_set(ty)),
         Ty::List(_) => crate::list_ops::check_list_renderable(ty),
+        // CPython renders a generator or a function as `<... at 0x...>`, an
+        // address no compiled program reproduces.
+        Ty::Generator(_) | Ty::Callable(_) => Err(Diagnostic::error(
+            "C0001",
+            format!(
+                "converting a `{}` to a string is valid Python but not implemented yet",
+                ty.name()
+            ),
+            Span::new(0, 0),
+        )),
         // This catch-all also swallows every `Ty` variant added later: a new
         // variant `to_str` cannot render needs its own arm above.
         _ => Ok(()),

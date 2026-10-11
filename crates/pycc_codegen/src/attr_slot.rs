@@ -172,7 +172,7 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
     scalar: Scalar<'ctx>,
 ) -> IntValue<'ctx> {
     match scalar {
-        Scalar::Generator(_) => {
+        Scalar::Generator(_) | Scalar::Closure(_) => {
             panic!("pycc_codegen: internal error: an attribute slot never holds a generator")
         }
         Scalar::Int(v) => v,

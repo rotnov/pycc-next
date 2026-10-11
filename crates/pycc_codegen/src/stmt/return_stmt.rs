@@ -417,7 +417,7 @@ pub(crate) fn emit_return_stmt<'ctx>(
                 return Ok(());
             }
             let basic_value: inkwell::values::BasicValueEnum = match scalar {
-                Scalar::Generator(v) => v.into(),
+                Scalar::Generator(v) | Scalar::Closure(v) => v.into(),
                 Scalar::Int(v) => v.into(),
                 Scalar::Bool(v) => v.into(),
                 Scalar::Float(v) => v.into(),

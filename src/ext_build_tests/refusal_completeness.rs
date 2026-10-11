@@ -239,7 +239,8 @@ fn expected_to_carry(ty: &Ty) -> bool {
         | Ty::FrozenSet(_)
         | Ty::Protocol(_)
         | Ty::Optional(_)
-        | Ty::Generator(_) => false,
+        | Ty::Generator(_)
+        | Ty::Callable(_) => false,
         // Part 1 of #1027: admitted at a parameter position, and refused at
         // a return position by `into_scalar` answering `None` for its
         // carrier -- which is the asymmetry this predicate deliberately

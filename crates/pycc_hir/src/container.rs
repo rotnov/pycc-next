@@ -206,7 +206,8 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
         | Ty::Protocol(_)
         | Ty::Optional(_)
         | Ty::Object
-        | Ty::MemoryView => Ok(()),
+        | Ty::MemoryView
+        | Ty::Callable(_) => Ok(()),
     }
 }
 
@@ -233,7 +234,11 @@ pub fn is_list_element_ty(element: &Ty) -> bool {
 /// table this gate lacks.
 fn check_set_element(ty: &Ty, element: &Ty, family: &str, span: Span) -> Result<(), Diagnostic> {
     if !is_hashable_ty(element) && !matches!(element, Ty::Instance(_)) {
-        return Err(Diagnostic::error("T0038", set_element_message(ty, family), span));
+        return Err(Diagnostic::error(
+            "T0038",
+            set_element_message(ty, family),
+            span,
+        ));
     }
     Ok(())
 }

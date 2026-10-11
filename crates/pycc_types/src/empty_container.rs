@@ -932,6 +932,7 @@ pub(crate) fn contains_infer(ty: &Ty) -> bool {
         | Ty::Generator(element) => contains_infer(element),
         Ty::Dict(pair) => contains_infer(&pair.0) || contains_infer(&pair.1),
         Ty::Tuple(elements) => elements.iter().any(contains_infer),
+        Ty::Callable(sig) => sig.0.iter().any(contains_infer) || contains_infer(&sig.1),
         Ty::Int
         | Ty::Float
         | Ty::Bool
@@ -960,6 +961,7 @@ fn contains_optional(ty: &Ty) -> bool {
         }
         Ty::Dict(pair) => contains_optional(&pair.0) || contains_optional(&pair.1),
         Ty::Tuple(elements) => elements.iter().any(contains_optional),
+        Ty::Callable(_) => false,
         Ty::Int
         | Ty::Float
         | Ty::Bool

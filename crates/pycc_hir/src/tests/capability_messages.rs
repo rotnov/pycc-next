@@ -97,10 +97,11 @@ fn a_for_call_with_a_non_bare_name_callee_names_the_callee_kind() {
 }
 
 #[test]
-fn calling_the_result_of_a_call_names_the_callee_kind() {
+fn calling_a_non_name_callee_names_the_callee_kind() {
     assert_capability_error_message(
-        "def f() -> int:\n    return g()()\n",
-        "only calling a bare name is supported so far, got a call whose callee is a call expression",
+        "def f() -> int:\n    return (g or h)()\n",
+        "only calling a bare name is supported so far, got a call whose callee is an `and`/`or` \
+         boolean expression",
     );
 }
 
@@ -203,8 +204,8 @@ fn no_capability_message_renders_an_ast_debug_dump() {
         "for a, b in pairs:\n    pass\n",
         "for x in [1]:\n    pass\n",
         "xs = [1, 2]\nfor k in xs[0]():\n    pass\n",
-        "def f() -> int:\n    return g()()\n",
-        "xs = [k for k in g()()]\n",
+        "def f() -> int:\n    return (g or h)()\n",
+        "xs = [k for k in (g or h)()]\n",
         "from typing import Protocol\nclass P(Protocol):\n    x = 1\n",
     ] {
         let module = pycc_parser_test_helper::parse(source);

@@ -64,6 +64,11 @@ pub use ext_generators::split_ext_generators;
 /// signature is to be inferred rather than declared.
 pub const INFER_MARKER: &str = "__pycc_infer__";
 
+/// The callee of `__pycc_closure__(f, a, b)`: the function value of `f` with
+/// its first parameters bound to `a` and `b` -- a nested function used as a
+/// value, lifted with the enclosing variables it reads ([`closures`]).
+pub const CLOSURE_MARKER: &str = "__pycc_closure__";
+
 /// Fresh temporary names, `_pycc_0`, `_pycc_1`, ...
 #[derive(Default)]
 pub(crate) struct Fresh {
@@ -176,7 +181,8 @@ pub(crate) fn stored_names(body: &[Stmt]) -> std::collections::HashSet<String> {
                 Stmt::Import(import) => {
                     for alias in &import.names {
                         let bound = alias.asname.as_ref().unwrap_or(&alias.name);
-                        self.0.insert(bound.split('.').next().unwrap_or("").to_string());
+                        self.0
+                            .insert(bound.split('.').next().unwrap_or("").to_string());
                     }
                 }
                 Stmt::ImportFrom(import) => {
@@ -213,4 +219,3 @@ pub(crate) fn stored_names(body: &[Stmt]) -> std::collections::HashSet<String> {
     }
     c.0
 }
-

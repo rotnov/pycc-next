@@ -21,6 +21,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   deciding element). An unfinished generator is closed when its last reference goes,
   running its `finally` clauses. An `--ext` module's public generator returns a
   CPython iterator.
+- Function values (`Callable[[A, B], R]`): module-level functions used as values and
+  nested functions returned or passed as closures (capturing their enclosing variables,
+  `nonlocal` counters included), called through a variable or a call's result
+  (`make_adder(1)(2)`). A closure binds a variable when it is made, so one that reads
+  a variable the enclosing function may still change stays unsupported.
 
 ### Fixed
 - A heap `int` (beyond 63 bits) held by a function's parameters or locals is released
