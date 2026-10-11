@@ -12,6 +12,8 @@ default; `--non-strict` falls back to `PyObject*` (CPython C API) for unprovable
 - Design wrong -> rewrite the module; design right but incomplete -> extend. Split files
   over ~1000 lines you touch. Delete dead code.
 - One writer per working tree. Push small commits to `main`; keep CI green.
+- Wait on long commands by running them in the foreground (or as a tracked background
+  task), never with `until ! pgrep -f <pattern>` loops: the pattern matches the loop itself.
 - Durable artifacts in English.
 
 Skills (`.claude/skills/<name>/SKILL.md`, readable by any agent): `oracle-test`, `bench`,
