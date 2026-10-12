@@ -45,6 +45,7 @@ extern long long pycc_rt_ext_bool_encode(int value);
 extern int pycc_rt_ext_int_classify(long long encoded);
 extern long long pycc_rt_ext_int_decode(long long encoded);
 extern int pycc_rt_ext_pending_type(void);
+extern int pycc_rt_ext_pending_is_unbound_local(void);
 extern const unsigned char *pycc_rt_ext_pending_message(size_t *len);
 extern void pycc_rt_exception_clear(void);
 /* D-180 rule 6: a compiled function's scalar return value arrives retained,
@@ -624,7 +625,10 @@ static int pycc_ext_raise_pending(void)
     /* `NameError`, appended past `EOFError` the same way -- a function's
      * read of a module global not bound yet. */
     case 31:
-        exc_type = PyExc_NameError;
+        /* A function local read before its assignment ran raises CPython's
+         * `UnboundLocalError`, which subclasses `NameError`. */
+        exc_type = pycc_rt_ext_pending_is_unbound_local() ? PyExc_UnboundLocalError
+                                                         : PyExc_NameError;
         break;
     /* `MemoryError`, appended past `NameError` the same way. */
     case 32:

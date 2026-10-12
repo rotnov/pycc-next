@@ -208,6 +208,25 @@ pub extern "C" fn pycc_rt_ext_pending_type() -> i32 {
     })
 }
 
+/// 1 when the pending exception is an `UnboundLocalError`
+/// ([`pycc_rt_raise_unbound_local`]), which carries `NameError`'s tag; 0
+/// otherwise. The shim raises CPython's own subclass for it.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_ext_pending_is_unbound_local() -> i32 {
+    EXCEPTION_STATE.with(|state| {
+        let pending = state.get();
+        if pending.active == 0 || pending.value.is_null() {
+            return 0;
+        }
+        let value = unsafe { &*pending.value };
+        if value.name.is_null() {
+            return 0;
+        }
+        let name = unsafe { std::slice::from_raw_parts(value.name, value.name_len) };
+        i32::from(name == b"UnboundLocalError")
+    })
+}
+
 /// The pending exception's message as UTF-8 bytes, writing its length through
 /// `len`. Null (with `*len == 0`) when nothing is pending.
 ///
@@ -775,6 +794,22 @@ pub unsafe extern "C" fn pycc_rt_raise_name_error(name: *const u8, len: usize) {
         EXCEPTION_TYPE_NAME_ERROR,
         "NameError",
         &format!("name '{name}' is not defined"),
+    );
+}
+
+/// Raises CPython's `UnboundLocalError` for a read of the function local
+/// `name` before any assignment to it ran. `UnboundLocalError` subclasses
+/// `NameError`, whose tag it carries, so `except NameError` catches it.
+///
+/// # Safety
+/// `name` must point to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_raise_unbound_local(name: *const u8, len: usize) {
+    let name = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(name, len) });
+    raise_builtin(
+        EXCEPTION_TYPE_NAME_ERROR,
+        "UnboundLocalError",
+        &format!("cannot access local variable '{name}' where it is not associated with a value"),
     );
 }
 

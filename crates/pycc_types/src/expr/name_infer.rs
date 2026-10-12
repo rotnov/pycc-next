@@ -108,6 +108,12 @@ pub(crate) fn infer_name_expr(
             reject_memoryview_read(name, ty, env.owned_buffers.contains(name))?;
             Ok(ty.clone())
         }
+        // Non-strict mode: checked at run time
+        // (`crate::non_strict::admits_maybe_read`).
+        Some(BindingState::Maybe(ty)) if crate::non_strict::admits_maybe_read(name) => {
+            reject_memoryview_read(name, ty, env.owned_buffers.contains(name))?;
+            Ok(ty.clone())
+        }
         Some(BindingState::Maybe(_)) => Err(possibly_unbound(name)),
         None => {
             if is_local(local_names, name) {

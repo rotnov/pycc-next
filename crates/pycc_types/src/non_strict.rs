@@ -85,6 +85,83 @@ pub(crate) fn request_widen(name: &str, previous: &Ty, new: &Ty, boxable: impl F
     }
 }
 
+thread_local! {
+    /// The names some statement of the module being checked unbinds: a
+    /// `del` target or an `except ... as` name (CPython deletes it when the
+    /// handler ends). See [`admits_maybe_read`].
+    static UNBOUND_BY_STATEMENT: RefCell<std::collections::HashSet<String>> =
+        RefCell::new(std::collections::HashSet::new());
+}
+
+/// Whether a read of `name`, bound on some paths reaching it only, is
+/// admitted: in non-strict mode it is, as every global and non-parameter
+/// local carries a run-time initialized flag (`pycc_codegen`'s
+/// `StorageSlot::initialized`) and an unbound read raises CPython's
+/// `NameError` / `UnboundLocalError`. A name some statement unbinds again
+/// (`del`, an `except ... as` name) keeps the static refusal: its flag
+/// stays set after the unbinding.
+pub(crate) fn admits_maybe_read(name: &str) -> bool {
+    is_non_strict() && !UNBOUND_BY_STATEMENT.with(|names| names.borrow().contains(name))
+}
+
+/// Records the names `hir`'s statements unbind ([`admits_maybe_read`]).
+fn record_unbinding_statements(hir: &HirModule) {
+    fn handler_names(body: &[HirStmt], out: &mut std::collections::HashSet<String>) {
+        for stmt in body {
+            match stmt {
+                HirStmt::If { body, orelse, .. } => {
+                    handler_names(body, out);
+                    handler_names(orelse, out);
+                }
+                HirStmt::While { body, .. }
+                | HirStmt::ForRange { body, .. }
+                | HirStmt::ForList { body, .. }
+                | HirStmt::ForObject { body, .. } => handler_names(body, out),
+                HirStmt::LoopElse { loop_stmt, orelse } => {
+                    handler_names(std::slice::from_ref(loop_stmt.as_ref()), out);
+                    handler_names(orelse, out);
+                }
+                HirStmt::Match { cases, .. } => {
+                    for case in cases {
+                        handler_names(&case.body, out);
+                    }
+                }
+                HirStmt::Try {
+                    body,
+                    handlers,
+                    orelse,
+                    finalbody,
+                }
+                | HirStmt::TryStar {
+                    body,
+                    handlers,
+                    orelse,
+                    finalbody,
+                } => {
+                    handler_names(body, out);
+                    for handler in handlers {
+                        out.extend(handler.name.iter().cloned());
+                        handler_names(&handler.body, out);
+                    }
+                    handler_names(orelse, out);
+                    handler_names(finalbody, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut names = std::collections::HashSet::new();
+    for item in &hir.items {
+        let body = match item {
+            HirItem::Function { body, .. } => body.as_slice(),
+            HirItem::TopLevelStmt(stmt) => std::slice::from_ref(stmt),
+        };
+        names.extend(pycc_hir::deleted_names(body));
+        handler_names(body, &mut names);
+    }
+    UNBOUND_BY_STATEMENT.with(|cell| *cell.borrow_mut() = names);
+}
+
 fn take_widen_requests() -> BTreeSet<String> {
     WIDEN.with(|widen| std::mem::take(&mut *widen.borrow_mut()))
 }
@@ -99,6 +176,7 @@ pub(crate) fn with_widening<T, E>(
     if !is_non_strict() {
         return check(hir);
     }
+    record_unbinding_statements(hir);
     let mut widened = BTreeSet::new();
     let mut current = None;
     loop {

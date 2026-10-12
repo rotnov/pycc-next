@@ -24,7 +24,9 @@
 //!   into an item of a nested list widens the outer list; `str % args`
 //!   formats through CPython; `int ** <negative literal>` is a float; a dict
 //!   given a key or value of another type is CPython's own dict; keyed
-//!   sorting and `heapq`/`bisect` over an object run CPython's own.
+//!   sorting and `heapq`/`bisect` over an object run CPython's own; a name
+//!   bound on some paths only is checked when read (`NameError`,
+//!   `UnboundLocalError`).
 //!
 //! The oracle is CPython: each fixture is built, run and compared with
 //! `python3` running the file -- stdout, the uncaught exception's last line
@@ -363,6 +365,15 @@ fn non_strict_mixed_dicts_are_cpython_dicts() {
 fn non_strict_keyed_sorting_and_heaps_over_objects_are_cpythons() {
     let report = matches_cpython(
         "non_strict_object_stdlib.py",
+        &["--non-strict", "--report-fallbacks"],
+    );
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+#[test]
+fn non_strict_maybe_bound_reads_are_checked_at_run_time() {
+    let report = matches_cpython(
+        "non_strict_maybe_bound.py",
         &["--non-strict", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");

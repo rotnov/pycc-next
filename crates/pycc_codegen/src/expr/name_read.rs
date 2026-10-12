@@ -50,19 +50,28 @@ pub(crate) fn emit_name_expr<'ctx>(
         // a catchable `NameError`, as CPython does. Any other global read before its binding ran (a function called
         // before the module statement that binds it) raises CPython's
         // `NameError` natively.
-        if !foreign_fail::emit_unbound_object_read(context, builder, module, rt, ty, name) {
+        // A function local's flag is an `alloca` (`entry_slots`), a
+        // global's a module global: an unbound local is CPython's
+        // `UnboundLocalError`, an unbound global its `NameError`.
+        let local = inkwell::values::BasicValue::as_instruction_value(&initialized_ptr)
+            .is_some_and(|i| i.get_opcode() == inkwell::values::InstructionOpcode::Alloca);
+        let raise_symbol = if local {
+            "pycc_rt_raise_unbound_local"
+        } else {
+            "pycc_rt_raise_name_error"
+        };
+        if local || !foreign_fail::emit_unbound_object_read(context, builder, module, rt, ty, name)
+        {
             let ptr = context.ptr_type(inkwell::AddressSpace::default());
-            let name_error = module
-                .get_function("pycc_rt_raise_name_error")
-                .unwrap_or_else(|| {
-                    module.add_function(
-                        "pycc_rt_raise_name_error",
-                        context
-                            .void_type()
-                            .fn_type(&[ptr.into(), context.i64_type().into()], false),
-                        Some(inkwell::module::Linkage::External),
-                    )
-                });
+            let name_error = module.get_function(raise_symbol).unwrap_or_else(|| {
+                module.add_function(
+                    raise_symbol,
+                    context
+                        .void_type()
+                        .fn_type(&[ptr.into(), context.i64_type().into()], false),
+                    Some(inkwell::module::Linkage::External),
+                )
+            });
             let bytes = builder
                 .build_global_string_ptr(name, &format!("pycc_unbound_name_{name}"))
                 .expect("build_global_string_ptr should not fail")

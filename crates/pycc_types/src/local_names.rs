@@ -64,6 +64,19 @@ pub(crate) fn lookup_bound_name_inner(
             }
             Ok(ty.clone())
         }
+        // A function's read of a module global bound on some paths only is
+        // checked at run time (`NameError`), as `expr::name_infer`'s read
+        // is; so is any such read in non-strict mode
+        // (`crate::non_strict::admits_maybe_read`).
+        Some(BindingState::Maybe(ty))
+            if (env.in_function_body && !is_local(local_names, name))
+                || crate::non_strict::admits_maybe_read(name) =>
+        {
+            if !admit_buffer {
+                reject_memoryview_read(name, ty, env.owned_buffers.contains(name))?;
+            }
+            Ok(ty.clone())
+        }
         Some(BindingState::Maybe(_)) => Err(possibly_unbound(name)),
         None => {
             if is_local(local_names, name) {
