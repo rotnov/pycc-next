@@ -8,7 +8,7 @@ Milestones in order. A milestone is done when every Accept item is met with evid
 Typed Python to native code with compile-time type errors, CPython interop
 (`--ext`, embedded, `--non-strict`), memory management, release archive. See CHANGELOG.
 
-## v0.2 — Rust speed, numpy, more Python
+## v0.2 — Rust speed, numpy, more Python (released 2026-10-12)
 
 Accept:
 1. **Speed:** every `bench/py` program is within 3x of its `bench/rs` Rust twin
@@ -39,3 +39,7 @@ Accept:
    `tests/memory_leaks.rs`.
 5. **Platforms:** the release ships a macOS arm64 archive next to Linux x86_64, both
    smoke-tested in the release workflow.
+   **Met 2026-10-12:** [v0.2.0](https://github.com/rotnov/pycc-next/releases/tag/v0.2.0)
+   ships `pycc-v0.2.0-x86_64-linux.tar.gz` and `pycc-v0.2.0-aarch64-macos.tar.gz` (macOS
+   26.0+), each smoke-tested by release run 38305121948; the Linux archive re-verified
+   after download (sha256, `scripts/smoke.sh`).

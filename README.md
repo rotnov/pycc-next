@@ -39,11 +39,12 @@ Caught **before** it runs. Not in CI logs. Not in production. At compile time.
 - 🤝 **Plays with the ecosystem.** Target: a CPython extension module you `import`, calling numpy and torch as usual.
 - 🧪 **CPython is the judge.** Correct means: same output, same exceptions as CPython 3.13.
 
-## Status: 0.1, honestly 🧭
+## Status: 0.2, honestly 🧭
 
 Works today: strict type checking with Rust-style diagnostics pointing at the offending
 code; native compilation via LLVM; classes, exceptions, generators, closures, lists,
-dicts, sets, comprehensions, `match`, arbitrary-precision `int`; reference-counted memory;
+dicts, sets, comprehensions, `match`, arbitrary-precision `int`, typed numpy arrays;
+reference-counted memory;
 CPython extension modules; `--non-strict` for untyped code. 9,500+ tests.
 
 **Speed** (`python3 bench/run.py --runs 11`, best of 11, shared 4-core Xeon 2.1 GHz, process
