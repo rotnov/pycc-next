@@ -127,7 +127,7 @@ pub(super) fn emit<'ctx>(
     // before the loop can need a release: release it once, on entry to a
     // first iteration (a loop that runs zero times leaves it bound), instead
     // of testing the previous value on every iteration.
-    let hoisted = hoist_release(locals, var, body);
+    let hoisted = hoist_release(rt, locals, var, body);
     if hoisted {
         let enter_bb = context.append_basic_block(function, "small_range_enter");
         let first = builder
@@ -201,7 +201,12 @@ pub(super) fn emit<'ctx>(
 /// Whether the loop variable's release can move out of the loop: an `int`
 /// function local (an `alloca`; a module global could be rebound by any call
 /// in the body) that no statement of the body binds.
-fn hoist_release(locals: &HashMap<String, StorageSlot<'_>>, var: &str, body: &[MirStmt]) -> bool {
+fn hoist_release(
+    rt: &RtFns<'_>,
+    locals: &HashMap<String, StorageSlot<'_>>,
+    var: &str,
+    body: &[MirStmt],
+) -> bool {
     let Some(slot) = locals.get(var) else {
         return false;
     };
@@ -209,7 +214,9 @@ fn hoist_release(locals: &HashMap<String, StorageSlot<'_>>, var: &str, body: &[M
         .ptr
         .as_instruction()
         .is_some_and(|inst| inst.get_opcode() == inkwell::values::InstructionOpcode::Alloca);
-    if slot.ty != pycc_mir::Ty::Int || !is_alloca {
+    // A borrowed local does not own its value, so releasing it would free
+    // memory its owner still uses (same rule as emit_int_self_update).
+    if slot.ty != pycc_mir::Ty::Int || !is_alloca || rt.borrowed_locals.borrow().contains(var) {
         return false;
     }
     let mut bound = std::collections::BTreeMap::new();
