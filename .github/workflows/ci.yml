@@ -13,7 +13,7 @@ jobs:
         with: { python-version: "3.13" }
       # numpy for the hosted numpy tests and benchmarks, pinned by version and
       # wheel hash.
-      - run: python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt
+      - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
       - name: Install LLVM 22
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -42,7 +42,7 @@ jobs:
         with: { python-version: "3.13" }
       # numpy for the hosted numpy tests and benchmarks, pinned by version and
       # wheel hash.
-      - run: python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt
+      - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
       - name: Install LLVM 22
         run: scripts/macos_llvm.sh
       - uses: Swatinem/rust-cache@v2
