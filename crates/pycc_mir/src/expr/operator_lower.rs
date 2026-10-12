@@ -138,6 +138,20 @@ pub(crate) fn lower_bin_op_expr(
     };
     let left = lower_expr(left, scopes, classes, current_class);
     let right = lower_expr(right, scopes, classes, current_class);
+    // `int ** <negative int literal>` is `float(int) ** float(literal)`,
+    // as CPython's `long_pow` defers to `float_pow`.
+    let (left, right) = match (&right, left.ty()) {
+        (MirExpr::IntLiteral(exponent), Ty::Int | Ty::Bool)
+            if *op == BinOpKind::Pow && *exponent < 0 =>
+        {
+            // The mixed `int ** float` converts the base as `float(n)`
+            // does (`OverflowError` beyond range).
+            #[allow(clippy::cast_precision_loss)]
+            let exponent = MirExpr::FloatLiteral(*exponent as f64);
+            (left, exponent)
+        }
+        _ => (left, right),
+    };
     // Non-strict mode (#3): an object operand runs CPython's operator,
     // the in-place one for an augmented assignment.
     let in_place = matches!(expr, HirExpr::AugBinOp { .. });

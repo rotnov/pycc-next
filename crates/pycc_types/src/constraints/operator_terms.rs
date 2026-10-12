@@ -152,15 +152,13 @@ pub(crate) fn collect_unary_op_constraints(
             } else {
                 BinOpKind::Sub
             };
-            deferred
-                .binops
-                .push((
-                    bin_op,
-                    Ok(Ty::Int),
-                    operand,
-                    result.clone(),
-                    crate::locate::expr_location(expr),
-                ));
+            deferred.binops.push((
+                bin_op,
+                Ok(Ty::Int),
+                operand,
+                result.clone(),
+                crate::locate::expr_location(expr),
+            ));
             Ok(Some(result))
         }
         None => Ok(None),
@@ -178,8 +176,18 @@ pub(crate) fn collect_bin_op_constraints(
     let (HirExpr::BinOp { op, left, right } | HirExpr::AugBinOp { op, left, right }) = expr else {
         unreachable!()
     };
+    let negative_exponent =
+        *op == BinOpKind::Pow && matches!(right.as_ref(), HirExpr::IntLiteral(e) if *e < 0);
     let left = collect_expr_constraints(signatures, parents, concrete, deferred, env, left)?;
     let right = collect_expr_constraints(signatures, parents, concrete, deferred, env, right)?;
+    // `int ** <negative int literal>` is a `float` (`expr.rs`).
+    if negative_exponent
+        && let Some(Ok(Ty::Int | Ty::Bool)) = left
+            .clone()
+            .map(|term| resolved_term(term, parents, concrete).ok_or(()))
+    {
+        return Ok(Some(Ok(Ty::Float)));
+    }
     match (left, right) {
         (Some(left), Some(right)) => {
             let result = fresh_term(parents, concrete);
