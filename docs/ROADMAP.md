@@ -32,5 +32,10 @@ Accept:
    mode, with leak probes in `tests/memory_leaks.rs`; remaining gaps in `docs/DEVIATIONS.md`.
 4. **Real-world corpus:** strict passes >= 110/200; `--non-strict` keeps 200/200 with
    >= 95% of top-level statements native.
+   **Met 2026-10-12:** `python3 bench/corpus.py`: strict 124/200, 0 wrong (strict mode
+   infers the signatures of unannotated functions only the module calls);
+   `--non-strict` 200/200, 0 wrong, 1133/1191 top-level statements native (95.1%, 58 in
+   CPython fallback). Oracle fixtures in `tests/corpus_round7.rs`, leak probes in
+   `tests/memory_leaks.rs`.
 5. **Platforms:** the release ships a macOS arm64 archive next to Linux x86_64, both
    smoke-tested in the release workflow.

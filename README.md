@@ -60,9 +60,9 @@ their inputs, like the Python programs' inputs are opaque to pycc-next):
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
-wrong outputs (CI-gated), 84% of top-level statements native and the rest per-statement
-CPython fallback; strict mode compiles 93/200 unchanged — most of the rest only lack the
-annotations strict mode requires.
+wrong outputs (CI-gated), 95% of top-level statements native and the rest per-statement
+CPython fallback; strict mode compiles 124/200 unchanged — most of the rest use dynamic
+values (mixed-type containers, CPython-only builtins) that strict mode refuses.
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
