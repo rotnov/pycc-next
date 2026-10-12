@@ -985,6 +985,26 @@ pub(crate) fn lower_expr(
         Expr::YieldFrom(yf) if !in_function => {
             return Err(context_invalid("'yield from' outside function", yf.range));
         }
+        // A `yield` used as a value (the value sent in) and `yield from`
+        // (the delegate's return value): marker calls `pycc_types` types
+        // from the enclosing generator's signature.
+        Expr::Yield(y) => HirExpr::Call {
+            callee: crate::YIELD_MARKER.to_string(),
+            args: vec![match y.value.as_deref() {
+                Some(value) => lower_expr(value, in_function, class_name, imports, signatures)?,
+                None => HirExpr::NoneLiteral,
+            }],
+        },
+        Expr::YieldFrom(yf) => HirExpr::Call {
+            callee: crate::YIELD_FROM_MARKER.to_string(),
+            args: vec![lower_expr(
+                &yf.value,
+                in_function,
+                class_name,
+                imports,
+                signatures,
+            )?],
+        },
         // #1254 (D-250): a comprehension in any expression position. The
         // `name = <comp>` statement form is recognized earlier, in
         // `stmt::assign`, and builds its statement from the same node.

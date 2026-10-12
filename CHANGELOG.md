@@ -4,6 +4,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- The generator protocol, natively in strict mode: `send()`, `throw()`,
+  `close()` (`GeneratorExit`, "generator ignored GeneratorExit"), `yield` as
+  an expression, `return value` as `StopIteration.value`, `yield from`
+  delegating all three and returning the subgenerator's value, PEP 479, and
+  generators in module globals closed by `del` and at exit.
+- Full call signatures: `*args`, keyword-only parameters, `**kwargs`,
+  positional-only parameters and defaults of every kind, for functions,
+  methods, constructors and nested functions, called with keywords, `*seq`
+  and `**mapping`, with CPython's `TypeError` messages.
+- Function values (module-level functions and closures) stored in lists,
+  dicts and instance attributes and called from there (`fs[0](x)`,
+  `table[k](x)`, `self.f(x)`); `print`, `str()` and f-strings render a
+  function or a generator as CPython does (`<function f at 0x...>`,
+  `<generator object g at 0x...>`).
+
 ### Performance
 - Every benchmark is within 3x of its Rust twin (fib 1.8x, mandelbrot 1.1x, nbody 2.4x,
   sieve 2.1x, spectral_norm 1.8x; v0.1: up to 4.2x). Whole-program proofs drop checks that

@@ -51,7 +51,8 @@ fn exception_is_the_root_and_owns_the_only_constructor() {
 #[test]
 fn every_non_root_builtin_exception_inherits_init_from_its_mro() {
     for (name, def) in builtin_exception_class_defs() {
-        if name == "Exception" {
+        // The two hierarchy roots declare the constructor themselves.
+        if name == "Exception" || name == "GeneratorExit" {
             continue;
         }
         assert!(

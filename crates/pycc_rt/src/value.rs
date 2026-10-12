@@ -4,7 +4,8 @@
 //!
 //! A word is the element's native representation in 8 bytes (see
 //! `list.rs`): an encoded `int`, `f64` bits, `0`/`1` for a `bool`, or a
-//! pointer to a `str`, an instance, a list, a tuple, a dict or a set. The
+//! pointer to a `str`, an instance, a list, a tuple, a dict, a set or a
+//! function value. The
 //! kind (`LIST_KIND_*`) says which. A tuple is a `PyListObj` whose own kind is
 //! [`TUPLE_OBJECT`] and which records one kind per element (`tuple.rs`).
 //!
@@ -16,8 +17,8 @@
 use crate::dict::PyDictObj;
 use crate::instance::PyInstanceObj;
 use crate::list::{
-    LIST_KIND_BOOL, LIST_KIND_DICT, LIST_KIND_FLOAT, LIST_KIND_INSTANCE, LIST_KIND_INT,
-    LIST_KIND_LIST, LIST_KIND_SET, LIST_KIND_STR, LIST_KIND_TUPLE, PyListObj,
+    LIST_KIND_BOOL, LIST_KIND_CLOSURE, LIST_KIND_DICT, LIST_KIND_FLOAT, LIST_KIND_INSTANCE,
+    LIST_KIND_INT, LIST_KIND_LIST, LIST_KIND_SET, LIST_KIND_STR, LIST_KIND_TUPLE, PyListObj,
 };
 use crate::set::PySetObj;
 use crate::{PyStrObj, encoded_int_cmp, inline_int_value};
@@ -34,6 +35,7 @@ pub(crate) fn rc_kind(kind: i64) -> u8 {
         LIST_KIND_INSTANCE => b'c',
         LIST_KIND_DICT => b'd',
         LIST_KIND_SET => b'e',
+        LIST_KIND_CLOSURE => b'f',
         _ => b'w',
     }
 }
@@ -117,6 +119,7 @@ pub(crate) fn type_name(kind: i64) -> &'static str {
         LIST_KIND_TUPLE => "tuple",
         LIST_KIND_DICT => "dict",
         LIST_KIND_SET => "set",
+        LIST_KIND_CLOSURE => "function",
         _ => "object",
     }
 }
@@ -207,7 +210,7 @@ pub(crate) fn hash(kind: i64, word: i64) -> Option<i64> {
             }
             unsafe { crate::pycc_rt_hash_tuple(lanes.as_ptr(), lanes.len()) }
         }
-        LIST_KIND_INSTANCE | crate::list::LIST_KIND_UNCOUNTED_INSTANCE => {
+        LIST_KIND_INSTANCE | crate::list::LIST_KIND_UNCOUNTED_INSTANCE | LIST_KIND_CLOSURE => {
             crate::pycc_rt_hash_pointer(word as *const std::ffi::c_void)
         }
         _ => return None,
@@ -257,6 +260,12 @@ pub(crate) fn repr(kind: i64, word: i64, out: &mut String) -> bool {
         }
         LIST_KIND_DICT => return crate::dict::dict_repr_into(word as *mut PyDictObj, out),
         LIST_KIND_SET => return crate::set::set_repr_into(word as *mut PySetObj, out),
+        LIST_KIND_CLOSURE => {
+            out.push_str(&crate::closure::closure_repr(
+                word as *mut crate::closure::PyClosureObj,
+            ));
+            return true;
+        }
         _ => {
             let instance = word as *mut PyInstanceObj;
             let mut len = 0usize;

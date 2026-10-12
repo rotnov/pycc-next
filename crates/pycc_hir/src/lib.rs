@@ -23,6 +23,7 @@ mod post_if;
 mod program;
 mod return_coverage;
 mod stmt;
+mod stop_iteration;
 mod typecheck;
 mod uses_objects;
 
@@ -52,6 +53,7 @@ pub use container::{
     is_list_element_ty, set_element_message, tuple_is_boxed,
 };
 pub use dunder_name::DUNDER_NAME;
+pub use pycc_ast::function_qualname;
 pub use exception::{
     BUILTIN_EXCEPTION_CLASSES, EXCEPTION_GROUP_TYPE_TAG, EXCEPTION_INIT_MANGLED_NAME,
     FIRST_USER_EXCEPTION_TYPE_TAG, FOREIGN_BASE_EXCEPTION_TYPE_TAG, HirExceptHandler,
@@ -87,6 +89,7 @@ pub use program::{LinkInput, finalize, link};
 pub use pycc_ast::CLOSURE_MARKER;
 pub use return_coverage::{block_always_returns, block_never_completes, loop_never_ends_normally};
 pub use stmt::del::{deleted_names, mentioned_names};
+pub use stop_iteration::{stop_iteration_sources, stop_iteration_value_ty};
 pub use typecheck::{
     ExtractClassNamesError, eval_isinstance_single, eval_issubclass_single, extract_class_names,
     is_abc_base_name, is_builtin_type_name, is_enum_base_name, is_protocol_base_name,
@@ -120,11 +123,20 @@ pub fn is_public_name(name: &str) -> bool {
 /// spell it.
 pub const YIELD_MARKER: &str = "<yield>";
 
+/// The callee of the call `pycc_hir` lowers `yield from sub` to (as a
+/// statement or a value); typed as `sub`'s return type.
+pub const YIELD_FROM_MARKER: &str = "<yield from>";
+
+/// The callee of the statement `pycc_hir` lowers a generator's `return
+/// value` to (followed by a bare `return`): the value becomes
+/// `StopIteration.value`.
+pub const GEN_RETURN_MARKER: &str = "<generator return>";
+
 /// Whether `body` holds a call of [`YIELD_MARKER`] anywhere: a generator
 /// function's body (`func::lower_function` marks its return type).
 pub fn body_yields(body: &[HirStmt]) -> bool {
     fn expr_yields(expr: &HirExpr) -> bool {
-        matches!(expr, HirExpr::Call { callee, .. } if callee == YIELD_MARKER)
+        matches!(expr, HirExpr::Call { callee, .. } if callee == YIELD_MARKER || callee == YIELD_FROM_MARKER)
     }
     body.iter().any(|stmt| match stmt {
         HirStmt::ExprStmt(expr) => expr_yields(expr),
@@ -317,7 +329,10 @@ pub enum Ty {
     /// `pycc_rt::generator::PyGenObj`, which owns the function's LLVM
     /// coroutine frame (`pycc_codegen::generator`). Boxed as a thin
     /// pointer, like `List`, so `size_of::<Ty>()` stays 16 bytes.
-    Generator(Box<Ty>),
+    ///
+    /// The tuple is `(yield, send, return)`: `Generator[Y, S, R]`.
+    /// `Iterator[T]` and `Iterable[T]` are `Generator[T, None, None]`.
+    Generator(Box<(Ty, Ty, Ty)>),
     /// A function value, `Callable[[A, B], R]`: a module-level function
     /// used as a value, or a nested function closed over its enclosing
     /// variables (`pycc_ast::desugar::closures`). A reference-counted
@@ -329,6 +344,16 @@ pub enum Ty {
 }
 
 impl Ty {
+    /// `Generator[element, None, None]` (`Iterator[element]`).
+    pub fn generator(element: Ty) -> Ty {
+        Ty::Generator(Box::new((element, Ty::None, Ty::None)))
+    }
+
+    /// `Generator[yielded, sent, returned]`.
+    pub fn generator_of(yielded: Ty, sent: Ty, returned: Ty) -> Ty {
+        Ty::Generator(Box::new((yielded, sent, returned)))
+    }
+
     pub fn name(&self) -> String {
         match self {
             Ty::Int => "int".to_string(),
@@ -352,7 +377,12 @@ impl Ty {
             Ty::Object => "object".to_string(),
             Ty::MemoryView => "memoryview".to_string(),
             Ty::NdArray(nd) => nd.name(),
-            Ty::Generator(elem) => format!("Generator[{}, None, None]", elem.name()),
+            Ty::Generator(sig) => format!(
+                "Generator[{}, {}, {}]",
+                sig.0.name(),
+                sig.1.name(),
+                sig.2.name()
+            ),
             Ty::Callable(sig) => format!(
                 "Callable[[{}], {}]",
                 sig.0.iter().map(Ty::name).collect::<Vec<_>>().join(", "),

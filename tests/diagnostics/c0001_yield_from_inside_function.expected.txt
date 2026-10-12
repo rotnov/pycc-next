@@ -1,5 +1,5 @@
-error[C0001]: expression kind not supported yet: a `yield from` expression
- --> tests/diagnostics/c0001_yield_from_inside_function.py:5:9
+error[C0001]: `yield from` a `list[int]` is not supported yet -- only a generator yielding `int` (or, as a statement, a `list[int]`)
+ --> tests/diagnostics/c0001_yield_from_inside_function.py:5:5
   |
 5 |     x = yield from [1, 2]
-  |         ^^^^^^^^^^^^^^^^^ expression kind not supported yet: a `yield from` expression
+  |     ^^^^^^^^^^^^^^^^^^^^^ not supported yet

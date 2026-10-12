@@ -34,6 +34,24 @@ pub(crate) fn collect_call_constraints(
     // A nested function used as a value (`pycc_hir::CLOSURE_MARKER`):
     // its captured values constrain the lifted function's leading
     // parameters as a call's arguments would.
+    if callee == pycc_hir::GEN_RETURN_MARKER {
+        collect_expr_constraints(signatures, parents, concrete, deferred, env, &args[0])?;
+        return Ok(Some(Ok(Ty::None)));
+    }
+    if callee == pycc_hir::YIELD_MARKER || callee == pycc_hir::YIELD_FROM_MARKER {
+        let operand =
+            collect_expr_constraints(signatures, parents, concrete, deferred, env, &args[0])?;
+        if callee == pycc_hir::YIELD_FROM_MARKER {
+            return Ok(match operand {
+                Some(Ok(Ty::Generator(sig))) => Some(Ok(sig.2)),
+                _ => None,
+            });
+        }
+        return Ok(Some(Ok(env
+            .generator_sig
+            .as_ref()
+            .map_or(Ty::None, |sig| sig.1.clone()))));
+    }
     if callee == pycc_hir::CLOSURE_MARKER
         && let [HirExpr::Name(function), captures @ ..] = args.as_slice()
     {
@@ -120,9 +138,15 @@ pub(crate) fn collect_call_constraints(
         // it is the capability gap every other use of a `memoryview`
         // is (`C0001`), not D-110's "no value in the current subset
         // is callable" (`T0021`).
-        if let Some(ty) = resolved_term(term, parents, concrete) {
-            crate::expr::reject_memoryview_read(callee, &ty, env.owned_buffers.contains(callee))?;
-        }
+        let Some(ty) = resolved_term(term, parents, concrete) else {
+            // Not known yet (a loop target over a list of function
+            // values): the check phase types the call once it is.
+            for arg in args {
+                collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+            }
+            return Ok(None);
+        };
+        crate::expr::reject_memoryview_read(callee, &ty, env.owned_buffers.contains(callee))?;
         return Err(non_callable_binding(callee));
     }
     // #1313: a foreign import binds its name to a CPython object,
@@ -209,7 +233,7 @@ pub(crate) fn collect_call_constraints(
         if callee == "next"
             && let Some(Some(Ok(Ty::Generator(element)))) = arg_terms.first()
         {
-            return Ok(Some(Ok((**element).clone())));
+            return Ok(Some(Ok(element.0.clone())));
         }
         // An argument still being inferred (a generator whose element
         // type is not known yet): no term until the next round.
@@ -219,7 +243,7 @@ pub(crate) fn collect_call_constraints(
         if crate::generator::is_generator_consumer(callee) {
             for term in arg_terms.iter_mut() {
                 if let Some(Ok(Ty::Generator(element))) = term {
-                    *term = Some(Ok(Ty::List(element.clone())));
+                    *term = Some(Ok(Ty::List(Box::new(element.0.clone()))));
                 }
             }
         }
@@ -712,7 +736,7 @@ pub(crate) fn collect_call_constraints(
     // A call of a generator function whose element type the solver is
     // still inferring yields no term until it is resolved.
     if let Ok(Ty::Generator(element)) = &signature.2
-        && crate::empty_container::contains_infer(element)
+        && crate::empty_container::contains_infer(&element.0)
     {
         return Ok(None);
     }

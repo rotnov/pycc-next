@@ -145,6 +145,12 @@ pub(crate) fn resolve_method_call(
             return Ok(return_ty.clone());
         }
     }
+    // `obj.f(args)` where `f` is an instance attribute holding a function
+    // value: a call of that value.
+    if let Ok(Ty::Callable(sig)) = super::resolve_attr_get(env, base_ty, method) {
+        check_call_args(env, method, args, arg_tys, &sig.0, true)?;
+        return Ok(sig.1.clone());
+    }
     Err(t0044_unknown_member("method", class_name, method))
 }
 

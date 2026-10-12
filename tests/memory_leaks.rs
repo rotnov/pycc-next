@@ -21,7 +21,7 @@ const GROWTH_LIMIT_KB: i64 = 1024;
 
 /// Helpers every probe body may call.
 const PRELUDE: &str = r#"
-from typing import Callable, Iterator
+from typing import Callable, Generator, Iterator
 
 
 def mkadd(s: str, xs: list[int], n: int) -> Callable[[str], int]:
@@ -47,10 +47,54 @@ def gpair(i: int) -> Iterator[int]:
         yield x
 
 
+def gecho(i: int) -> Generator[str, str, str]:
+    got = mk(i)
+    try:
+        while len(got) < 9:
+            got = yield got + "!"
+    finally:
+        D["e"] = i
+    return got
+
+
+def gdelegate(i: int) -> Generator[str, str, str]:
+    first = yield from gecho(i)
+    return first + mk(i)
+
+
+def gfixed(i: int) -> Generator[str, None, str]:
+    yield mk(i)
+    yield "b"
+    return mk(i + 1)
+
+
+def gouter(i: int) -> Iterator[str]:
+    v = yield from gfixed(i)
+    yield v
+
+
+def gcatch(i: int) -> Generator[str, None, None]:
+    while True:
+        try:
+            yield mk(i)
+        except GeneratorExit:
+            D["c"] = i
+            return
+
+
+def sig_varargs(a: int, *rest: str, sep: str = ",", **named: str) -> int:
+    return a + len(sep.join(rest)) + len(named)
+
+
 class P:
     def __init__(self, x: int, name: str) -> None:
         self.x = x
         self.name = name
+
+
+class Slot:
+    def __init__(self, f: Callable[[str], int]) -> None:
+        self.f = f
 
 
 class Link:
@@ -408,6 +452,13 @@ probe!(
     "f = mkadd(mk(i), [i, i], i + 2 ** 70)\ntotal += f(\"ab\") + call_it(f, mk(i)) + mkadd(\"x\", [1], 1)(\"y\")"
 );
 
+// Function values capturing counted values, held by a list, a dict and an
+// instance attribute, called from there, replaced, popped and printed.
+probe!(
+    closure_in_containers_and_attributes,
+    "fs = [mkadd(mk(i), [i], i + 2 ** 70), mkadd(\"x\", [1], 1)]\nfs.append(fs[0])\ntotal += fs[2](\"ab\") + fs.pop()(\"c\")\nd: dict[str, Callable[[str], int]] = {\"a\": fs[1]}\nd[\"a\"] = mkadd(mk(i), [], 0)\ntotal += d[\"a\"](\"q\") + len(str(fs[0])) // 100\nh = Slot(fs[0])\nh.f = fs[1]\ntotal += h.f(mk(i))"
+);
+
 // Generators: exhausted, abandoned unfinished (closed on release), and
 // consumed by builtins; generator expressions.
 probe!(generator_exhausted, "for v in gpair(i):\n    total += v");
@@ -416,6 +467,31 @@ probe!(
     "g = gstr(i)\nt: str = next(g)\nif t == \"q\":\n    total += 1"
 );
 probe!(generator_listed, "total += len(list(gstr(i)))");
+// The generator protocol: values sent in, yielded through a delegation,
+// returned from a subgenerator, and a generator closed while it holds
+// counted locals.
+probe!(
+    generator_send_values,
+    "g = gecho(i)\nt: str = next(g)\nt = g.send(mk(i))\nt = g.send(\"abc\")\ntotal += len(t)"
+);
+probe!(
+    generator_delegation_returning_a_value,
+    "d = gdelegate(i)\nt: str = next(d)\nt = d.send(mk(i + 1))\ntotal += len(t)\nd.close()"
+);
+probe!(
+    generator_return_value_through_yield_from,
+    "for t in gouter(i):\n    total += len(t)"
+);
+probe!(
+    generator_closed_explicitly,
+    "c = gcatch(i)\nt: str = next(c)\nc.close()\ntotal += len(t)"
+);
+// Calls binding `*args`, keyword-only parameters and `**kwargs`, statically
+// and through `*seq`/`**mapping`.
+probe!(
+    signature_varargs_and_kwargs,
+    "total += sig_varargs(1, mk(i), \"b\", sep=mk(2), x=mk(3))\nws: list[str] = [mk(i), \"q\"]\nkw: dict[str, str] = {\"y\": mk(i)}\ntotal += sig_varargs(i, *ws, **kw)"
+);
 probe!(
     generator_expression_short_circuit,
     "if any(x > i for x in mklist(i)):\n    total += 1\ntotal += next(len(t) for t in gstr(i))"

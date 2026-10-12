@@ -125,6 +125,18 @@ pub(super) fn assign(target: Expr, value: Expr, range: TextRange) -> Stmt {
     })
 }
 
+/// `target: annotation = value` for a plain name `target`.
+pub(super) fn ann_assign(target: Expr, annotation: Expr, value: Expr, range: TextRange) -> Stmt {
+    Stmt::AnnAssign(ruff_python_ast::StmtAnnAssign {
+        node_index: AtomicNodeIndex::default(),
+        range,
+        target: Box::new(target),
+        annotation: Box::new(annotation),
+        value: Some(Box::new(value)),
+        simple: true,
+    })
+}
+
 pub(super) fn aug_assign(target: Expr, op: ruff_python_ast::Operator, value: Expr, range: TextRange) -> Stmt {
     Stmt::AugAssign(StmtAugAssign {
         node_index: AtomicNodeIndex::default(),

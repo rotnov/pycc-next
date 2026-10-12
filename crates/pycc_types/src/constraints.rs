@@ -250,6 +250,10 @@ pub(crate) struct ConstraintEnvironment<'scope, 'hir> {
     /// element type its `yield`s unify with, and its `return`s carry no
     /// value.
     pub(crate) in_generator: bool,
+    /// The annotated `(yield, send, return)` types of the generator whose
+    /// body is collected, for the value of a `yield` (the send type) and
+    /// of a `return value`; `None` elsewhere and for an inferred generator.
+    pub(crate) generator_sig: Option<(Ty, Ty, Ty)>,
     /// The solver's counterpart of `Environment::returns_inside_finally`,
     /// and the solver half of review round 5's egress narrowing.
     ///
@@ -335,6 +339,7 @@ impl<'scope, 'hir> ConstraintEnvironment<'scope, 'hir> {
             owned_buffers: HashSet::new(),
             in_function_body: false,
             in_generator: false,
+            generator_sig: None,
             returns_inside_finally: false,
             shadowed_producers: HashSet::new(),
             finals: HashSet::new(),

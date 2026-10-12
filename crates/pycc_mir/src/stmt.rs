@@ -57,6 +57,16 @@ pub(super) fn lower_stmt(
         {
             MirStmt::Yield(lower_expr(&args[0], scopes, classes, current_class))
         }
+        HirStmt::ExprStmt(pycc_hir::HirExpr::Call { callee, args })
+            if callee == pycc_hir::GEN_RETURN_MARKER =>
+        {
+            MirStmt::GenReturn(lower_expr(&args[0], scopes, classes, current_class))
+        }
+        HirStmt::ExprStmt(pycc_hir::HirExpr::Call { callee, args })
+            if callee == pycc_hir::YIELD_FROM_MARKER =>
+        {
+            crate::generator::lower_yield_from_stmt(&args[0], scopes, classes, current_class)
+        }
         HirStmt::ExprStmt(expr) => {
             // PEP 572 (#774): bind before lowering the whole expression --
             // see `pre_bind_named_expr_targets`'s own doc comment for why a
@@ -586,15 +596,16 @@ pub(super) fn lower_stmt(
                 // reference in a hidden local (a digit-led name no source
                 // can spell), taken over from a desugaring temporary bound
                 // only for this loop (`_pycc_N`, `pycc_ast::desugar`).
-                Ty::Generator(elem_ty) => {
+                Ty::Generator(sig) => {
+                    let elem_ty = sig.0.clone();
                     let hold = format!("0genhold_{var}_{list}");
-                    bind_variable(scopes, hold.clone(), Ty::Generator(elem_ty.clone()));
-                    bind_variable(scopes, var.clone(), (*elem_ty).clone());
+                    bind_variable(scopes, hold.clone(), Ty::Generator(sig.clone()));
+                    bind_variable(scopes, var.clone(), elem_ty.clone());
                     super::kill_narrowing(scopes, var);
                     let body = lower_loop_body(body, scopes, classes, current_class);
                     MirStmt::ForGen {
                         var: var.clone(),
-                        var_ty: *elem_ty,
+                        var_ty: elem_ty,
                         generator: list.clone(),
                         hold,
                         consume: list.starts_with("_pycc_"),
@@ -969,7 +980,10 @@ pub(super) fn lower_stmt(
         // #1244: `del name` is static-only. The type checker has already
         // demoted the name's binding state, and under D-124's leak-only
         // model there is no reference to release, so nothing runs.
-        HirStmt::Delete { .. } => MirStmt::NoOp,
+        HirStmt::Delete { name } => match scopes.iter().rev().find_map(|scope| scope.get(name)) {
+            Some(Ty::Generator(_)) => MirStmt::ReleaseName(name.clone()),
+            _ => MirStmt::NoOp,
+        },
         // Part 2c of #1371: `pycc_types` admits a slice `del` only on a
         // CPython object base, so this is always the object deletion;
         // codegen's `expect_object_pointer` panics on any other base.

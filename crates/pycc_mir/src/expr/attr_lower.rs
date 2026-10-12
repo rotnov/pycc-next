@@ -443,7 +443,19 @@ pub(crate) fn lower_method_call_expr(
             };
         }
     }
+    let base_hir = base;
     let base = lower_expr(base, scopes, classes, current_class);
+    if let Ty::Generator(sig) = base.ty() {
+        return crate::generator::lower_generator_method(
+            base,
+            &sig,
+            method,
+            args,
+            scopes,
+            classes,
+            current_class,
+        );
+    }
     // Part 2 of #1026 (PR 2b of #1081): a method call on a foreign
     // CPython object, which has no `HirClassDef` and so no mangled
     // symbol to dispatch to. Placed exactly where the
@@ -502,6 +514,31 @@ pub(crate) fn lower_method_call_expr(
         };
     }
     let class_def = class_def_of(&base, classes);
+    // `obj.f(args)` where `f` is an instance attribute holding a function
+    // value and no class of the MRO defines a method `f`: a call of the
+    // attribute's value (`pycc_types::class::method_call`).
+    let defines_method = class_def.mro.iter().any(|mro_class| {
+        let mro_def = mro_class_def(mro_class, classes);
+        mro_def.methods.iter().any(|(name, _)| name == method)
+            || mro_def.static_methods.iter().any(|(name, _)| name == method)
+            || mro_def.class_methods.iter().any(|(name, _)| name == method)
+    });
+    let holds_function = class_def.mro.iter().any(|mro_class| {
+        mro_class_def(mro_class, classes)
+            .attrs
+            .iter()
+            .any(|(name, ty)| name == method && matches!(ty, Ty::Callable(_)))
+    });
+    if !defines_method && holds_function {
+        let call = HirExpr::ExprCall {
+            callee: Box::new(HirExpr::AttrGet {
+                base: base_hir.clone(),
+                attr: method.clone(),
+            }),
+            args: args.clone(),
+        };
+        return super::call_lower::lower_expr_call_expr(&call, scopes, classes, current_class);
+    }
     // Part 1 of #1284: `x.name(args)` reaching a
     // `staticmethod(<foreign callable>)` class attribute calls the
     // foreign callable. The receiver is not an argument, but a

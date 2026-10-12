@@ -146,6 +146,15 @@ pub struct Environment {
     /// `Option<String>` (not `&str`) because `Environment` is owned/cloned
     /// per function via `child_for_function`/`clone`.
     pub(crate) own_type_param: Option<String>,
+    /// The `(yield, send, return)` types of the generator function whose
+    /// body is being checked (`crate::generator`), `None` elsewhere.
+    pub(crate) generator_sig: Option<Box<(Ty, Ty, Ty)>>,
+    /// The type of `e.value` for each `except StopIteration as e` binding in
+    /// scope (`crate::generator::stop_value_ty`).
+    pub(crate) stop_values: HashMap<String, Ty>,
+    /// Why `e.value` cannot be typed, for a `StopIteration` binding whose
+    /// `try` body's generators cannot be told.
+    pub(crate) stop_value_errors: HashMap<String, String>,
     /// #433: the name of the class whose method body is currently being
     /// type-checked, if any. Set by `check_function_in` from the method's
     /// own mangled `<ClassName>.<method>` name (the `.` separator is unique

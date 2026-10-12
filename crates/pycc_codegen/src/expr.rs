@@ -105,6 +105,20 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             args,
             ty,
         ),
+        MirExpr::GenYield { .. }
+        | MirExpr::GenYieldFrom { .. }
+        | MirExpr::GenSend { .. }
+        | MirExpr::GenThrow { .. }
+        | MirExpr::GenClose { .. }
+        | MirExpr::StopIterationValue { .. } => crate::generator::emit_protocol_expr(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            expr,
+        ),
         MirExpr::GenAnyAll { generator, all } => crate::generator::emit_any_all(
             context,
             builder,

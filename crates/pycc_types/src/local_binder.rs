@@ -180,8 +180,11 @@ pub(crate) fn bind_local_types_in_stmt(
         }
         HirStmt::ForList { var, list, body } => {
             match env.binding_state(list) {
-                Some(BindingState::Definitely(Ty::List(elt_ty) | Ty::Generator(elt_ty))) => {
+                Some(BindingState::Definitely(Ty::List(elt_ty))) => {
                     env.bind(var.clone(), (**elt_ty).clone());
+                }
+                Some(BindingState::Definitely(Ty::Generator(sig))) => {
+                    env.bind(var.clone(), sig.0.clone());
                 }
                 _ => {}
             }

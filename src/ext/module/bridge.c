@@ -635,6 +635,11 @@ static int pycc_ext_raise_pending(void)
     case 33:
         exc_type = PyExc_StopIteration;
         break;
+    /* `GeneratorExit`, appended past `StopIteration` the same way -- what a
+     * closed generator raises at its suspended `yield`. */
+    case 34:
+        exc_type = PyExc_GeneratorExit;
+        break;
     /* #1316: a bridged non-`Exception` `BaseException`. Only a fallback --
      * the bridge-table lookup above normally re-raises the original -- and
      * a named label so the decimal-tag drift guard does not read it as a

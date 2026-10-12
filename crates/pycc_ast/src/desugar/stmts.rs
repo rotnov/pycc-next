@@ -2,9 +2,7 @@
 //! iterables, stores through computed subscripts, tuple targets with
 //! non-name elements, and augmented assignment through computed indices.
 
-use super::build::{
-    assign, aug_assign, call_name, for_loop, int, load, store, subscript, tuple,
-};
+use super::build::{assign, aug_assign, call_name, for_loop, int, load, store, subscript, tuple};
 use super::{Fresh, is_name, is_simple};
 use ruff_python_ast::{Expr, ExprContext, Operator, Stmt};
 use ruff_text_size::TextRange;
@@ -187,7 +185,12 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
         let start = args.get(1).cloned().unwrap_or_else(|| int(0, range));
         pre.push(assign(store(&counter, range), start, range));
         head.push(assign(i.clone(), load(&counter, range), range));
-        head.push(aug_assign(store(&counter, range), Operator::Add, int(1, range), range));
+        head.push(aug_assign(
+            store(&counter, range),
+            Operator::Add,
+            int(1, range),
+            range,
+        ));
         (x.clone(), args[0].clone())
     } else if let (Some(targets), Some(args)) = (tuple_elts(&target), is_call_to(&iter, "zip"))
         && targets.len() == args.len()
@@ -225,7 +228,11 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
     {
         // `for k, v in d.items()`: loop over the keys, read each value.
         let dict = hoist((*attr.value).clone(), fresh, &mut pre, range);
-        let key = if is_name(k) { k.clone() } else { store(&fresh.name(), range) };
+        let key = if is_name(k) {
+            k.clone()
+        } else {
+            store(&fresh.name(), range)
+        };
         let key_load = match &key {
             Expr::Name(n) => load(n.id.as_str(), range),
             _ => unreachable!(),
@@ -373,7 +380,12 @@ fn expand_aug_assign(s: &mut ruff_python_ast::StmtAugAssign, fresh: &Fresh) -> O
 /// lowers to dedicated nodes (`append`, `pop`, `get`, `add`) take a name or
 /// an attribute receiver, so any other receiver is bound first (it is
 /// evaluated first in CPython too).
-fn hoist_container_receiver(value: &mut Expr, fresh: &Fresh, out: &mut Vec<Stmt>, range: TextRange) {
+fn hoist_container_receiver(
+    value: &mut Expr,
+    fresh: &Fresh,
+    out: &mut Vec<Stmt>,
+    range: TextRange,
+) {
     let Expr::Call(call) = value else {
         return;
     };
@@ -389,19 +401,47 @@ fn hoist_container_receiver(value: &mut Expr, fresh: &Fresh, out: &mut Vec<Stmt>
     *attr.value = hoist(receiver, fresh, out, range);
 }
 
-/// `yield from it` as a statement of a function's `body` becomes `for v in
-/// it: yield v`: a compiled generator is driven by `next()` only (no
-/// `send`/`throw`), and closing it closes the loop's iterator first, as
-/// delegation does. Nested functions and classes are left to their own
-/// expansion; a `yield from` outside a function keeps its `L0001`.
+/// `yield from it` as a statement of a function's `body`, where `it` is
+/// plainly not a generator (a display, a comprehension, a literal or a call
+/// of a builtin such as `range`), becomes `for v in it: yield v`: such an
+/// iterator has no `send`/`throw`/`close` and returns no value, so the loop
+/// is delegation. Every other operand keeps its `yield from`, which
+/// `pycc_hir` lowers to delegation. Nested functions and classes are left
+/// to their own expansion; a `yield from` outside a function keeps its
+/// `L0001`.
 fn yield_from_loops(body: &mut [Stmt], fresh: &Fresh) {
+    /// Whether `operand` cannot evaluate to a generator.
+    fn plainly_not_generator(operand: &Expr) -> bool {
+        match operand {
+            Expr::List(_)
+            | Expr::Tuple(_)
+            | Expr::Set(_)
+            | Expr::Dict(_)
+            | Expr::ListComp(_)
+            | Expr::SetComp(_)
+            | Expr::DictComp(_)
+            | Expr::Generator(_)
+            | Expr::StringLiteral(_)
+            | Expr::BytesLiteral(_) => true,
+            Expr::Call(call) => matches!(
+                call.func.as_ref(),
+                Expr::Name(name) if matches!(
+                    name.id.as_str(),
+                    "range" | "list" | "tuple" | "set" | "dict" | "str" | "sorted"
+                        | "reversed" | "enumerate" | "zip" | "map" | "filter" | "frozenset"
+                )
+            ),
+            _ => false,
+        }
+    }
     use ruff_python_ast::visitor::transformer::{self, Transformer};
     struct Loops<'f>(&'f Fresh);
     impl Transformer for Loops<'_> {
         fn visit_stmt(&self, stmt: &mut Stmt) {
             match stmt {
                 Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
-                Stmt::Expr(s) if matches!(*s.value, Expr::YieldFrom(_)) => {
+                Stmt::Expr(s) if matches!(&*s.value, Expr::YieldFrom(y) if plainly_not_generator(&y.value)) =>
+                {
                     let range = s.range;
                     let Expr::YieldFrom(yield_from) =
                         std::mem::replace(s.value.as_mut(), load("None", range))

@@ -96,6 +96,14 @@ pub(super) fn check_try_stmt(
             }
             if let Some(name) = &handler.name {
                 let binding_type = except_handler_binding_type_name(exc_types);
+                crate::generator::bind_stop_value(
+                    &mut handler_env,
+                    &body_env,
+                    local_names,
+                    name,
+                    &binding_type,
+                    body,
+                );
                 handler_env.bind(name.clone(), Ty::Instance(Box::new(binding_type)));
                 // D-068 re-review of #780 (fourth round): `bind` only
                 // overwrites `bindings`, never `narrowed` (see `bind`'s own
@@ -512,6 +520,23 @@ fn check_exception_group_member_operand(
         ),
         Span::new(0, 0),
     ))
+}
+
+/// The operand of `gen.throw(operand)`: an exception `raise` accepts, and
+/// not a CPython object.
+pub(crate) fn check_thrown_operand(
+    env: &Environment,
+    local_names: &[&str],
+    expr: &HirExpr,
+) -> Result<(), Diagnostic> {
+    match check_raise_operand(env, local_names, expr, "can only throw exception instances")? {
+        RaiseOperand::Object => Err(Diagnostic::error(
+            "C0001",
+            "throwing a CPython object into a generator is not supported yet",
+            Span::new(0, 0),
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn check_raise_operand(

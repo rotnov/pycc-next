@@ -181,7 +181,8 @@ fn c0001_issue_864_repro() {
 }
 
 // #867 (D-219) cascade suppression: an unsupported `import os.path as o`, a
-// `class A`, and a later genuine `*args` gap are the three reported
+// `class A`, and a later genuine gap (an `async def`, since `*args` is
+// supported now) are the three reported
 // `C0001`s; `class B(A)` (unknown base) and `def g(a: A)` (unknown
 // annotation) name the skipped `A` and are skipped silently -- no render
 // of any kind between the line-3 and line-9 diagnostics.

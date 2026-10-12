@@ -196,12 +196,12 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
                 .or_insert_with(|| var_ty.clone());
             bindings
                 .entry(hold.clone())
-                .or_insert_with(|| pycc_mir::Ty::Generator(Box::new(var_ty.clone())));
+                .or_insert_with(|| pycc_mir::Ty::generator(var_ty.clone()));
             for stmt in body {
                 collect_stmt_bindings(stmt, bindings);
             }
         }
-        MirStmt::Yield(value) => collect_expr_bindings(value, bindings),
+        MirStmt::Yield(value) | MirStmt::GenReturn(value) => collect_expr_bindings(value, bindings),
         // `d[k] = v` (PR-11 Task 4) reassigns an existing binding's
         // contents, not a name -- mirrors `pycc_types::collect_local_names`'s
         // own identical `HirStmt::DictSet` arm and its comment. Unlike
@@ -363,6 +363,7 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
         MirStmt::Return(_)
         | MirStmt::ReturnBufferSlice { .. }
         | MirStmt::NoOp
+        | MirStmt::ReleaseName(_)
         | MirStmt::Unreachable => {}
         MirStmt::Seq(stmts) => {
             for stmt in stmts {

@@ -151,6 +151,9 @@ pub(crate) fn annotated_function_environment(hir: &HirModule) -> Environment {
         classes: Arc::new(HashMap::new()),
         synthetic_classes: Arc::new(HashSet::new()),
         own_type_param: None,
+        generator_sig: None,
+        stop_values: HashMap::new(),
+        stop_value_errors: HashMap::new(),
         current_class: None,
         finals: HashSet::new(),
         in_except_handler: false,
@@ -250,6 +253,9 @@ pub(crate) fn infer_function_signatures_with_solver_all(
     // with while its body is walked (its signature's own return term is the
     // generator type, which a call site sees as unresolved until then).
     let mut generator_elements: HashMap<String, TypeTerm> = HashMap::new();
+    // Each generator's declared send and return types, which inference
+    // keeps as written.
+    let mut generator_rest: HashMap<String, (Ty, Ty)> = HashMap::new();
     for item in &hir.items {
         if let HirItem::Function {
             name,
@@ -259,8 +265,9 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         {
             generator_elements.insert(
                 name.clone(),
-                term_for_type((**element).clone(), &mut parents, &mut concrete),
+                term_for_type(element.0.clone(), &mut parents, &mut concrete),
             );
+            generator_rest.insert(name.clone(), (element.1.clone(), element.2.clone()));
         }
     }
 
@@ -282,6 +289,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         owned_buffers: HashSet::new(),
         in_function_body: false,
         in_generator: false,
+        generator_sig: None,
         // Part 2b of #1142 (#1164): module-level code is not a function
         // body, so there is no body to walk for a `return` in a `finally`.
         returns_inside_finally: false,
@@ -374,12 +382,21 @@ pub(crate) fn infer_function_signatures_with_solver_all(
     let mut collected = KeyedDiagnostics::new();
     for (index, (item, local_names)) in hir.items.iter().zip(function_local_names).enumerate() {
         let HirItem::Function {
-            name, body, params, ..
+            name,
+            body,
+            params,
+            return_ty,
         } = item
         else {
             continue;
         };
         let signature = &signatures[name];
+        let generator_sig = match return_ty {
+            Ty::Generator(sig) if !crate::empty_container::contains_infer(return_ty) => {
+                Some((**sig).clone())
+            }
+            _ => None,
+        };
         let mut env = ConstraintEnvironment {
             bindings: globals.bindings.clone(),
             local_names,
@@ -397,6 +414,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             owned_buffers: HashSet::new(),
             in_function_body: true,
             in_generator: generator_elements.contains_key(name),
+            generator_sig,
             // Part 2b of #1142 (#1164), review round 5: the same
             // whole-function predicate the check phase reads, from the same
             // `pycc_hir` walk, so the two admissions cannot drift.
@@ -591,7 +609,14 @@ pub(crate) fn infer_function_signatures_with_solver_all(
                 .with_help(format!("add a return type annotation to `{name}`"))
             })
             .map_err(module_level)?;
-            resolved.insert(name.clone(), (param_tys, Ty::Generator(Box::new(element))));
+            let (sent, returned) = generator_rest
+                .get(name)
+                .cloned()
+                .unwrap_or((Ty::None, Ty::None));
+            resolved.insert(
+                name.clone(),
+                (param_tys, Ty::generator_of(element, sent, returned)),
+            );
             continue;
         }
         let return_ty = resolved_private_signature_term(

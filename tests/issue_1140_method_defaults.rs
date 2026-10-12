@@ -93,20 +93,28 @@ fn a_short_constructor_call_keeps_its_arity_error_and_a_method_call_reports_the_
     }
 }
 
+/// A mutable method default is evaluated once and shared between calls, as
+/// in CPython (`pycc_ast::desugar::signatures`).
 #[test]
-fn a_mutable_method_default_is_still_refused() {
-    let output = pycc_on(
-        "check",
-        "1140_native_mutable",
-        "class S:\n    def m(self, a: list[int] = []) -> None:\n        return\n",
+fn a_mutable_method_default_is_shared_between_calls() {
+    let dir = ScratchDir::new("1140_native_mutable").expect("scratch dir");
+    let src = write(
+        &dir,
+        "mutable.py",
+        "class S:\n    def m(self, a: list[int] = []) -> None:\n        a.append(len(a))\n        print(a)\n\n\
+         s = S()\ns.m()\ns.m()\nS().m([7])\nS().m()\n",
     );
-    let rendered = stdout_of(&output);
-    assert_eq!(output.status.code(), Some(1), "{rendered}");
-    assert!(rendered.contains("error[C0001]"), "{rendered}");
-    assert!(
-        rendered.contains("only a literal `int`, `float`, `bool`, `str`, or `None` default"),
-        "{rendered}"
-    );
+    let exe = dir.join("mutable");
+    let build = pycc()
+        .arg("build")
+        .arg(&src)
+        .arg("-o")
+        .arg(&exe)
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", stderr_of(&build));
+    let run = Command::new(&exe).output().expect("the program runs");
+    assert_eq!(stdout_of(&run), "[0]\n[0, 1]\n[7, 1]\n[0, 1, 2]\n");
 }
 
 // ---------------------------------------------------------------------

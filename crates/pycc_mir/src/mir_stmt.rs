@@ -14,6 +14,11 @@ pub enum MirStmt {
     /// nothing observable for either (confirmed empirically during PR-9
     /// planning: no store, no allocation, nothing an oracle diff could see).
     NoOp,
+    /// `del name` of a generator-typed name: releases the reference the
+    /// name holds (the last one closes the generator, running its
+    /// `finally` clauses, as in CPython). Every other `del name` is static
+    /// only (`MirStmt::NoOp`).
+    ReleaseName(String),
     /// A continuation that the validated HIR proves cannot be reached. The
     /// match lowerer uses this for the no-case fallback of an exhaustive
     /// `match`: preserving the proof in MIR keeps later fallthrough analysis
@@ -342,6 +347,9 @@ pub enum MirStmt {
     Reraise,
     /// `yield value` in a generator function (`pycc_codegen::generator`).
     Yield(MirExpr),
+    /// `return value` in a generator: `value` becomes `StopIteration.value`
+    /// (a bare `MirStmt::Return(None)` follows, ending the body).
+    GenReturn(MirExpr),
     /// `for var in gen:` over a local bound to a generator. The loop holds
     /// its own reference in the hidden local `hold` (taken over from `gen`
     /// when `consume`, a temporary bound only for this loop), released when

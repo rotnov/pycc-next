@@ -102,7 +102,7 @@ fn splittable(def: &StmtFunctionDef) -> bool {
 }
 
 /// Whether `body` contains a `yield` of its own (not of a nested scope).
-pub(super) fn yields(body: &[Stmt]) -> bool {
+pub(crate) fn yields(body: &[Stmt]) -> bool {
     struct Find(bool);
     impl<'a> Visitor<'a> for Find {
         fn visit_stmt(&mut self, stmt: &'a Stmt) {
@@ -167,7 +167,11 @@ fn split(def: StmtFunctionDef, receiver: Option<&str>) -> (StmtFunctionDef, Stmt
         range,
     );
     let mut wrapper = def.clone();
-    wrapper.returns = Some(Box::new(super::build::name("object", ExprContext::Load, range)));
+    wrapper.returns = Some(Box::new(super::build::name(
+        "object",
+        ExprContext::Load,
+        range,
+    )));
     wrapper.body = vec![Stmt::Return(StmtReturn {
         node_index: AtomicNodeIndex::default(),
         range,
@@ -193,7 +197,11 @@ fn bindings(body: &[Stmt], name: &str) -> usize {
                     if def.name.as_str() == self.name {
                         self.count += 1;
                     }
-                    if def.parameters.iter().any(|p| p.name().as_str() == self.name) {
+                    if def
+                        .parameters
+                        .iter()
+                        .any(|p| p.name().as_str() == self.name)
+                    {
                         self.count += 1;
                     }
                 }
@@ -203,7 +211,12 @@ fn bindings(body: &[Stmt], name: &str) -> usize {
                         .names
                         .iter()
                         .filter(|a| {
-                            a.asname.as_ref().unwrap_or(&a.name).as_str().split('.').next()
+                            a.asname
+                                .as_ref()
+                                .unwrap_or(&a.name)
+                                .as_str()
+                                .split('.')
+                                .next()
                                 == Some(self.name)
                         })
                         .count()

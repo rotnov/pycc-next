@@ -78,6 +78,10 @@ pub(crate) fn check_function_in(
     env.return_inferred = *return_ty == Ty::Infer;
     env.in_classmethod = name.ends_with(".classmethod");
     env.own_type_param = generic_type_param_name(params, return_ty).ok().flatten();
+    env.generator_sig = match &resolved_return {
+        Ty::Generator(sig) => Some(sig.clone()),
+        _ => None,
+    };
     // #433: extract the class name from a mangled `<ClassName>.<method>`
     // name so `infer_expr_in`'s `HirExpr::Super` arm can resolve the next
     // class in the MRO. A top-level function name contains no `.`, so
@@ -148,7 +152,10 @@ pub(crate) fn check_function_in(
         return Err(crate::locate::place_labeled(
             diagnostic,
             crate::locate::returns_span(),
-            format!("expected `{}` because of this return type", resolved_return.name()),
+            format!(
+                "expected `{}` because of this return type",
+                resolved_return.name()
+            ),
         ));
     }
     Ok(())
@@ -236,6 +243,16 @@ pub(crate) fn check_stmt_arm_in_function(
         // generator's element type.
         HirStmt::ExprStmt(HirExpr::Call { callee, args }) if callee == pycc_hir::YIELD_MARKER => {
             crate::generator::check_yield(env, local_names, args, &return_ty)
+        }
+        HirStmt::ExprStmt(HirExpr::Call { callee, args })
+            if callee == pycc_hir::GEN_RETURN_MARKER =>
+        {
+            crate::generator::check_return(env, local_names, args, &return_ty)
+        }
+        HirStmt::ExprStmt(HirExpr::Call { callee, args })
+            if callee == pycc_hir::YIELD_FROM_MARKER =>
+        {
+            crate::generator::check_yield_from(env, local_names, &args[0], true).map(|_| ())
         }
         HirStmt::Return(None) => {
             if return_ty != Ty::None
@@ -614,7 +631,8 @@ pub(crate) fn check_stmt_arm_in_function(
                 Ty::List(elem_ty) => *elem_ty,
                 Ty::Str => Ty::Str,
                 Ty::Dict(kv) => kv.0,
-                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) | Ty::Generator(elem_ty) => *elem_ty,
+                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,
+                Ty::Generator(sig) => sig.0,
                 other => {
                     return Err(Diagnostic::error(
                         "T0033",
@@ -812,7 +830,11 @@ pub(crate) fn check_stmt_arm_in_function(
                     return Err(crate::locate::place_labeled(
                         diag,
                         crate::locate::expr_span(value),
-                        format!("expected `{}`, found `{}`", annotation.name(), inferred.name()),
+                        format!(
+                            "expected `{}`, found `{}`",
+                            annotation.name(),
+                            inferred.name()
+                        ),
                     ));
                 }
                 // See the module-scope `check_stmt` arm's comment: route

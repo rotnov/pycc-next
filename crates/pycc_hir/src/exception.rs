@@ -5,7 +5,7 @@ use crate::ImportBinding;
 use pycc_ast::visitor::{self, Visitor};
 use pycc_ast::{Expr, ExprStringLiteral, ModModule, Stmt};
 
-pub const BUILTIN_EXCEPTION_CLASSES: [&str; 34] = [
+pub const BUILTIN_EXCEPTION_CLASSES: [&str; 35] = [
     "Exception",
     "ValueError",
     "TypeError",
@@ -72,6 +72,11 @@ pub const BUILTIN_EXCEPTION_CLASSES: [&str; 34] = [
     "MemoryError",
     // `StopIteration`, tag 33: `next()` of an exhausted generator.
     "StopIteration",
+    // `GeneratorExit`, tag 34: raised at a generator's suspended `yield`
+    // when it is closed. Not an `Exception` (CPython parents it under
+    // `BaseException`): it is a second hierarchy root, and `except
+    // Exception:` does not catch it (`pycc_rt::exception`'s catch-all).
+    "GeneratorExit",
 ];
 
 /// Part 2 of #541 (D-189): the number of names in [`BUILTIN_EXCEPTION_CLASSES`]
@@ -202,7 +207,7 @@ pub fn is_builtin_exception_class(name: &str) -> bool {
 /// are children of `ConnectionError`, itself a direct child of `OSError`.
 pub fn builtin_exception_parent(name: &str) -> Option<&'static str> {
     match name {
-        "Exception" => None,
+        "Exception" | "GeneratorExit" => None,
         "BrokenPipeError"
         | "ConnectionAbortedError"
         | "ConnectionRefusedError"
@@ -223,9 +228,7 @@ pub fn builtin_exception_parent(name: &str) -> Option<&'static str> {
         "OSError" | "ValueError" | "TypeError" | "KeyError" | "IndexError"
         | "ZeroDivisionError" | "RuntimeError" | "BaseExceptionGroup" | "OverflowError"
         | "ImportError" | "AssertionError" | "AttributeError" | "EOFError" | "NameError"
-        | "MemoryError" | "StopIteration" => {
-            Some("Exception")
-        }
+        | "MemoryError" | "StopIteration" => Some("Exception"),
         "ExceptionGroup" => Some("BaseExceptionGroup"),
         "ModuleNotFoundError" => Some("ImportError"),
         "BlockingIOError" | "ChildProcessError" | "ConnectionError" | "FileExistsError"
@@ -776,7 +779,10 @@ mod tests {
                     "`{name}`'s parent `{parent}` must itself be in the table"
                 );
             } else {
-                assert_eq!(name, "Exception", "only `Exception` has no parent");
+                assert!(
+                    name == "Exception" || name == "GeneratorExit",
+                    "only `Exception` and `GeneratorExit` have no parent"
+                );
             }
         }
         assert!(!is_builtin_exception_class("NotAnException"));

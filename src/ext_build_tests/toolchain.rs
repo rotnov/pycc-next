@@ -381,7 +381,7 @@ fn every_exception_tag_the_c_shim_switches_on_still_names_that_class() {
     // 23..=24 hole in between. Widening this to `1..=29` would swallow that hole and stop detecting a
     // group tag that drifted into the switch.
     let mut expected = (1..=22).collect::<Vec<_>>();
-    expected.extend([25, 26, 27, 28, 29, 30, 31, 32, 33]);
+    expected.extend([25, 26, 27, 28, 29, 30, 31, 32, 33, 34]);
     assert_eq!(seen, expected);
 }
 
@@ -453,7 +453,7 @@ fn the_c_shims_foreign_error_mapping_names_its_classes() {
     let mut tags: Vec<usize> = mapped.iter().map(|(tag, _)| *tag).collect();
     tags.sort_unstable();
     let mut expected = (0..=22).collect::<Vec<_>>();
-    expected.extend([25, 26, 27, 28, 29, 30, 31, 32, 33]);
+    expected.extend([25, 26, 27, 28, 29, 30, 31, 32, 33, 34]);
     assert_eq!(tags, expected);
     for (position, (_, class)) in mapped.iter().enumerate() {
         let mut ancestor = pycc_hir::builtin_exception_parent(class);

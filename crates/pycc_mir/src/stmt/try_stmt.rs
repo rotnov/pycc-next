@@ -70,6 +70,8 @@ pub(super) fn lower_try(
 ) -> MirStmt {
     let pre_try = narrowing_snapshot(scopes);
     let (body, body_end) = lower_scoped_body(parts.body, scopes, classes, current_class, None);
+    let stop_value =
+        crate::generator::try_stop_value_ty(parts.body, scopes, classes, current_class);
     let mut fallthrough = Vec::new();
     let handlers = parts
         .handlers
@@ -82,7 +84,14 @@ pub(super) fn lower_try(
             // snapshot, not from the previous handler's pruning.
             restore_narrowing(scopes, pre_try.clone());
             apply_kill_prescan(scopes, parts.body);
-            let (handler, end) = lower_handler(h, parts.star, scopes, classes, current_class);
+            let (handler, end) = lower_handler(
+                h,
+                parts.star,
+                stop_value.as_ref(),
+                scopes,
+                classes,
+                current_class,
+            );
             if !block_always_returns(&h.body) {
                 fallthrough.push(end);
             }
@@ -139,6 +148,7 @@ pub(super) fn lower_try(
 fn lower_handler(
     h: &HirExceptHandler,
     star: bool,
+    stop_value: Option<&Ty>,
     scopes: &mut Vec<HashMap<String, Ty>>,
     classes: &HashMap<String, HirClassDef>,
     current_class: Option<&str>,
@@ -174,6 +184,7 @@ fn lower_handler(
         // the same binding before lowering expressions in the handler body.
         // A bare handler cannot have an `as` name in Python.
         bind(scopes, name.clone(), ty.clone());
+        crate::generator::bind_stop_value(scopes, name, ty, stop_value);
         // D-068 re-review of #780 (fourth round): `bind` only overwrites the
         // type scope, never the narrowing sentinel, so a name narrowed
         // before the `try` would otherwise keep lowering reads of it inside

@@ -32,6 +32,19 @@ pub enum MirExceptionValue {
     },
 }
 
+impl MirExceptionValue {
+    /// The expressions the operand evaluates.
+    pub fn exprs(&self) -> Vec<&MirExpr> {
+        match self {
+            MirExceptionValue::Constructed { message, .. } => vec![message],
+            MirExceptionValue::Existing(expr) => vec![expr],
+            MirExceptionValue::ConstructedGroup {
+                message, members, ..
+            } => std::iter::once(message).chain(members).collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MirExceptHandler {
     /// The runtime exception type tags this handler accepts, sorted ascending,

@@ -127,7 +127,8 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
         | pycc_mir::Ty::Set(_)
         | pycc_mir::Ty::FrozenSet(_)
         | pycc_mir::Ty::Object
-        | pycc_mir::Ty::Instance(_) => {
+        | pycc_mir::Ty::Instance(_)
+        | pycc_mir::Ty::Callable(_) => {
             let ptr = builder
                 .build_int_to_ptr(
                     raw,
@@ -140,6 +141,9 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
                 pycc_mir::Ty::Dict(..) => Scalar::Dict(ptr),
                 pycc_mir::Ty::Set(_) | pycc_mir::Ty::FrozenSet(_) => Scalar::Set(ptr),
                 pycc_mir::Ty::Instance(_) => Scalar::Instance(ptr),
+                // A function value (`pycc_rt::closure`), counted like any
+                // heap value (`heap_rc`).
+                pycc_mir::Ty::Callable(_) => Scalar::Closure(ptr),
                 _ => Scalar::Object(ptr),
             }
         }
@@ -172,7 +176,7 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
     scalar: Scalar<'ctx>,
 ) -> IntValue<'ctx> {
     match scalar {
-        Scalar::Generator(_) | Scalar::Closure(_) => {
+        Scalar::Generator(_) => {
             panic!("pycc_codegen: internal error: an attribute slot never holds a generator")
         }
         Scalar::Int(v) => v,
@@ -198,7 +202,8 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
         | Scalar::Dict(v)
         | Scalar::Set(v)
         | Scalar::Object(v)
-        | Scalar::Instance(v) => builder
+        | Scalar::Instance(v)
+        | Scalar::Closure(v) => builder
             .build_ptr_to_int(v, context.i64_type(), "attr_container_ptrtoint")
             .expect("build_ptr_to_int should not fail reinterpreting a pointer as i64"),
         Scalar::Tuple(_)

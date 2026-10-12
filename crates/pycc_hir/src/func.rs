@@ -122,7 +122,7 @@ pub(crate) fn lower_function(
         signatures,
     )?;
     let mut body = body;
-    if crate::body_yields(&body) {
+    if crate::body_yields(&body) || pycc_ast::body_yields(&def.body) {
         let return_ty = generator::generator_return_ty(return_ty, aliases, def)?;
         generator::generator_returns(&mut body, def)?;
         return Ok(HirItem::Function {
@@ -750,9 +750,7 @@ pub(crate) fn annotation_to_ty(
             };
             match base_name.id.as_str() {
                 // A generator: `Iterator[T]`, `Iterable[T]` or
-                // `Generator[T, None, None]` (send and return types `None`:
-                // a compiled generator is driven by `next()` only and
-                // returns no value).
+                // `Generator[T, S, R]` (send type `S`, return type `R`).
                 "Iterator" | "Iterable" | "Generator"
                     if !class_defs
                         .iter()
@@ -763,25 +761,33 @@ pub(crate) fn annotation_to_ty(
                         other => vec![other],
                     };
                     let well_formed = match base_name.id.as_str() {
-                        "Generator" => {
-                            matches!(args.len(), 1 | 3)
-                                && args[1..].iter().all(|a| matches!(a, Expr::NoneLiteral(_)))
-                        }
+                        "Generator" => matches!(args.len(), 1 | 3),
                         _ => args.len() == 1,
                     };
                     if !well_formed {
                         return Err(unsupported(
                             format!(
-                                "`{}[...]` is supported with one type argument (and, for \
-                                 `Generator`, `None` send and return types)",
-                                base_name.id
+                                "`{}[...]` takes one type argument{}",
+                                base_name.id,
+                                if base_name.id.as_str() == "Generator" {
+                                    " or three (`Generator[Y, S, R]`)"
+                                } else {
+                                    ""
+                                }
                             ),
                             pycc_ast::expr_range(annotation),
                         ));
                     }
-                    let element =
-                        annotation_to_ty(args[0], type_param, class_name, aliases, class_defs)?;
-                    let ty = Ty::Generator(Box::new(element));
+                    let lower = |arg: &Expr| {
+                        annotation_to_ty(arg, type_param, class_name, aliases, class_defs)
+                    };
+                    let element = lower(args[0])?;
+                    let (sent, returned) = if args.len() == 3 {
+                        (lower(args[1])?, lower(args[2])?)
+                    } else {
+                        (Ty::None, Ty::None)
+                    };
+                    let ty = Ty::generator_of(element, sent, returned);
                     crate::check_container_ty(&ty, Span::new(0, 0)).map_err(|mut d| {
                         let r = pycc_ast::expr_range(annotation);
                         d.span = Some(Span::new(r.start, r.end));

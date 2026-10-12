@@ -173,7 +173,8 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
         }
         // A generator yields what a list can hold (its value area holds one
         // element in the same representation).
-        Ty::Generator(element) => {
+        Ty::Generator(sig) => {
+            let (element, sent, returned) = &**sig;
             if !is_list_element_ty(element) {
                 return Err(Diagnostic::error(
                     "T0034",
@@ -184,6 +185,19 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
                     ),
                     span,
                 ));
+            }
+            for (what, inner) in [("send", sent), ("return", returned)] {
+                if !matches!(inner, Ty::None | Ty::Infer) && !is_list_element_ty(inner) {
+                    return Err(Diagnostic::error(
+                        "T0034",
+                        format!(
+                            "{} is not compiled yet -- a generator's {what} type must be \
+                             None or what a list can hold",
+                            ty.name()
+                        ),
+                        span,
+                    ));
+                }
             }
             Ok(())
         }
@@ -219,7 +233,7 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
 #[must_use]
 pub fn is_list_element_ty(element: &Ty) -> bool {
     match element {
-        Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Instance(_) => true,
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Instance(_) | Ty::Callable(_) => true,
         Ty::List(inner) => is_list_element_ty(inner),
         Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_list_element_ty),
         Ty::Dict(pair) => is_hashable_ty(&pair.0) && is_list_element_ty(&pair.1),

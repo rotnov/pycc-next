@@ -380,14 +380,15 @@ fn slot_ty_from_init_rhs(
                     | Ty::List(_)
                     | Ty::Dict(..)
                     | Ty::Object
-                    | Ty::Instance(_)),
+                    | Ty::Instance(_)
+                    | Ty::Callable(_)),
                 ) => Ok(ty),
                 Some(other) => Err(unsupported(
                     format!(
                         "`{receiver_name}.<attr> = {}` cannot establish an attribute of type \
                          `{}` yet -- only a scalar (int/float/bool/str), `list[int]`, \
-                         `dict[str, int]`, class instance or foreign-imported class parameter \
-                         is supported",
+                         `dict[str, int]`, class instance, function or foreign-imported class \
+                         parameter is supported",
                         name.id,
                         other.name()
                     ),

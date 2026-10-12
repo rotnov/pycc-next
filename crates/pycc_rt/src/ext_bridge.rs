@@ -230,6 +230,8 @@ mod tests {
         assert_eq!(crate::EXCEPTION_TYPE_OVERFLOW_ERROR, 25);
         // #1388: `AttributeError`, raised by name for an unassigned slot.
         assert_eq!(crate::EXCEPTION_TYPE_ATTRIBUTE_ERROR, 29);
+        assert_eq!(crate::exception::EXCEPTION_TYPE_STOP_ITERATION, 33);
+        assert_eq!(crate::exception::EXCEPTION_TYPE_GENERATOR_EXIT, 34);
         // #1316: the shim's `PYCC_EXT_TAG_FOREIGN_BASE`, which
         // `src/ext_build_tests/toolchain.rs` pins against `pycc_hir`.
         assert_eq!(crate::EXCEPTION_TYPE_FOREIGN_BASE, 255);

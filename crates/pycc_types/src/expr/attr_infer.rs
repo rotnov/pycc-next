@@ -23,6 +23,11 @@ pub(crate) fn infer_attr_get_expr(
     if matches!(base.as_ref(), HirExpr::Super) {
         return class::resolve_super_attr_get(env, attr);
     }
+    if attr == "value"
+        && let Some(ty) = crate::generator::stop_value_ty(env, base)
+    {
+        return ty;
+    }
     // #436: `ClassName.attr` — accessing an attribute on a class
     // name (not an instance) is not supported. A static or class
     // method accessed without calling it (e.g. `C.create` instead
@@ -203,6 +208,9 @@ pub(crate) fn infer_method_call_expr(
         return class::resolve_static_or_class_method_call(env, class_name, method, args, &arg_tys);
     }
     let base_ty = infer_expr_in(env, local_names, base)?;
+    if let Ty::Generator(sig) = &base_ty {
+        return crate::generator::method_call(env, local_names, sig, method, args);
+    }
     let arg_tys = args
         .iter()
         .map(|arg| infer_expr_in(env, local_names, arg))

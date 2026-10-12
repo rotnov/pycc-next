@@ -59,14 +59,11 @@ pub(crate) fn rename_name_in_expr(expr: HirExpr, from: &str, to: &str) -> HirExp
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented => expr,
-        // `callee` (a bare `String`, never an `HirExpr::Name`) is
-        // deliberately left untouched even if it equals `from`: this HIR
-        // subset has no first-class functions, so `callee` always names a
-        // module-level function definition, never a local variable this
-        // rename could plausibly shadow -- unlike `args`, which are
-        // recursed into normally.
+        // `callee` is a bare `String`: a module-level function, or a
+        // variable holding a function value (`f(1) for f in fs`), which
+        // the loop variable's rename renames like any other read of it.
         HirExpr::Call { callee, args } => HirExpr::Call {
-            callee,
+            callee: if callee == from { to.to_string() } else { callee },
             args: args.into_iter().map(recurse).collect(),
         },
         HirExpr::UnaryOp { op, operand } => HirExpr::UnaryOp {
@@ -478,6 +475,32 @@ fn rename_in_comprehension(comp: HirComprehension, from: &str, to: &str) -> HirC
     }
 }
 
+/// A `yield` inside a comprehension is a CPython `SyntaxError` (`'yield'
+/// inside list comprehension`) this compiler does not model: it keeps the
+/// capability `C0001` a `yield` had before generators took values (D-149
+/// correction 5).
+fn refuse_yield(
+    generators: &[pycc_ast::Comprehension],
+    parts: &[&pycc_ast::Expr],
+) -> Result<(), Diagnostic> {
+    let exprs = generators
+        .iter()
+        .flat_map(|g| std::iter::once(&g.iter).chain(g.ifs.iter()))
+        .chain(parts.iter().copied());
+    for expr in exprs {
+        if let Some(found) = pycc_ast::find_yield(expr) {
+            return Err(crate::unsupported(
+                format!(
+                    "expression kind not supported yet: {}",
+                    pycc_ast::expr_kind_name(found)
+                ),
+                pycc_ast::expr_range(found),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Lowers `[elt for ...]` into a [`HirComprehension`], in either position.
 pub(crate) fn lower_list_comp(
     comp: &pycc_ast::ExprListComp,
@@ -485,6 +508,7 @@ pub(crate) fn lower_list_comp(
     imports: &[ImportBinding],
     signatures: &SignatureTable,
 ) -> Result<HirComprehension, Diagnostic> {
+    refuse_yield(&comp.generators, &[comp.elt.as_ref()])?;
     let (source_name, synth_var, iter, cond) =
         lower_comprehension_header(&comp.generators, class_name, imports, signatures)?;
     // Literal `true`: `elt` is lexically inside the comprehension's own
@@ -518,6 +542,7 @@ pub(crate) fn lower_set_comp(
     imports: &[ImportBinding],
     signatures: &SignatureTable,
 ) -> Result<HirComprehension, Diagnostic> {
+    refuse_yield(&comp.generators, &[comp.elt.as_ref()])?;
     let (source_name, synth_var, iter, cond) =
         lower_comprehension_header(&comp.generators, class_name, imports, signatures)?;
     // Literal `true`: same reasoning as `lower_list_comp`'s `elt` above
@@ -545,6 +570,13 @@ pub(crate) fn lower_dict_comp(
     imports: &[ImportBinding],
     signatures: &SignatureTable,
 ) -> Result<HirComprehension, Diagnostic> {
+    refuse_yield(
+        &comp.generators,
+        &[comp.value.as_ref()]
+            .into_iter()
+            .chain(comp.key.as_deref())
+            .collect::<Vec<_>>(),
+    )?;
     // Real Python's dict-comprehension grammar (`{k: v for ...}`) has no
     // `**`-unpacking form the way a plain `Expr::Dict` literal does -- but
     // unlike that literal case, the parser does *not* reject

@@ -311,9 +311,10 @@ fn a_module_with_more_user_exception_classes_than_tags_is_rejected() {
     // shrinking it to 227; #1369 appended `AssertionError`, shrinking it to
     // 226; #1388 appended `AttributeError`, shrinking it to 225; `EOFError`
     // (for `input()`) shrank it to 224, `NameError` to 223,
-    // `MemoryError` to 222 and `StopIteration` to 221.
+    // `MemoryError` to 222, `StopIteration` to 221 and `GeneratorExit` to
+    // 220.
     assert!(
-        text.contains("at most 221"),
+        text.contains("at most 220"),
         "unexpected diagnostic: {text}"
     );
 }

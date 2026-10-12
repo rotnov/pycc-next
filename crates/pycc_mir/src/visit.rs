@@ -56,7 +56,27 @@ impl MirExpr {
             }
             | MirExpr::GenAnyAll {
                 generator: inner, ..
+            }
+            | MirExpr::GenClose { generator: inner }
+            | MirExpr::GenYield { value: inner, .. }
+            | MirExpr::GenYieldFrom { sub: inner, .. }
+            | MirExpr::StopIterationValue {
+                exception: inner, ..
             } => out.push(inner),
+            MirExpr::GenSend {
+                generator, value, ..
+            } => {
+                out.push(generator);
+                out.push(value);
+            }
+            MirExpr::GenThrow {
+                generator,
+                exception,
+                ..
+            } => {
+                out.push(generator);
+                out.extend(exception.exprs());
+            }
             MirExpr::GenNext {
                 generator, default, ..
             } => {
@@ -233,6 +253,7 @@ impl MirStmt {
             | MirStmt::While { test: expr, .. }
             | MirStmt::ForObject { iter: expr, .. }
             | MirStmt::Yield(expr)
+            | MirStmt::GenReturn(expr)
             | MirStmt::ObjRaise { value: expr } => vec![expr],
             MirStmt::Return(value) => value.iter().collect(),
             MirStmt::ReturnBufferSlice { start, stop, .. } => {
@@ -290,6 +311,7 @@ impl MirStmt {
                 .chain(exception_value_exprs(cause))
                 .collect(),
             MirStmt::NoOp
+            | MirStmt::ReleaseName(_)
             | MirStmt::Unreachable
             | MirStmt::ForList { .. }
             | MirStmt::ForGen { .. }
@@ -342,6 +364,7 @@ impl MirStmt {
             MirStmt::ExprStmt(_)
             | MirStmt::Assign { .. }
             | MirStmt::NoOp
+            | MirStmt::ReleaseName(_)
             | MirStmt::Unreachable
             | MirStmt::DictSet { .. }
             | MirStmt::BufferSet { .. }
@@ -364,6 +387,7 @@ impl MirStmt {
             | MirStmt::Reraise
             | MirStmt::ObjRaise { .. }
             | MirStmt::Yield(_)
+            | MirStmt::GenReturn(_)
             | MirStmt::ForeignImport { .. } => Vec::new(),
         }
     }

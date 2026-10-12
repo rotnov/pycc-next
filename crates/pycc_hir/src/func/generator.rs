@@ -15,11 +15,13 @@ pub(super) fn generator_return_ty(
 ) -> Result<Ty, Diagnostic> {
     match return_ty {
         Ty::Generator(_) => Ok(return_ty),
-        Ty::Infer => Ok(Ty::Generator(Box::new(Ty::Infer))),
+        Ty::Infer => Ok(Ty::generator(Ty::Infer)),
         // Non-strict mode: an unannotated public generator outside an
         // `--ext` module is inferred like any other function there.
-        Ty::Object if is_non_strict(aliases) && !is_ext_module(aliases) && def.returns.is_none() => {
-            Ok(Ty::Generator(Box::new(Ty::Infer)))
+        Ty::Object
+            if is_non_strict(aliases) && !is_ext_module(aliases) && def.returns.is_none() =>
+        {
+            Ok(Ty::generator(Ty::Infer))
         }
         other => Err(unsupported(
             format!(
@@ -27,29 +29,40 @@ pub(super) fn generator_return_ty(
                  `Generator[T, None, None]`, not `{}`",
                 other.name()
             ),
-            def.returns
-                .as_deref()
-                .map_or(std::ops::Range::<u32>::from(def.range), pycc_ast::expr_range),
+            def.returns.as_deref().map_or(
+                std::ops::Range::<u32>::from(def.range),
+                pycc_ast::expr_range,
+            ),
         )),
     }
 }
 
 /// A generator's `return` statements end it: `return` and `return None`
-/// are kept as a bare `return`; a `return value` (a value for
-/// `StopIteration.value`) is not supported yet.
+/// are kept as a bare `return`; `return value` becomes the
+/// [`crate::GEN_RETURN_MARKER`] statement (the value for
+/// `StopIteration.value`) followed by a bare `return`.
 pub(super) fn generator_returns(
-    body: &mut [HirStmt],
+    body: &mut Vec<HirStmt>,
     def: &pycc_ast::StmtFunctionDef,
 ) -> Result<(), Diagnostic> {
-    for stmt in body.iter_mut() {
-        match stmt {
-            HirStmt::Return(Some(HirExpr::NoneLiteral)) => *stmt = HirStmt::Return(None),
+    let mut index = 0;
+    while index < body.len() {
+        match &mut body[index] {
+            HirStmt::Return(Some(HirExpr::NoneLiteral)) => body[index] = HirStmt::Return(None),
             HirStmt::Return(Some(_)) => {
-                return Err(unsupported(
-                    "returning a value from a generator is not supported yet -- \
-                     only `return` ends one",
-                    def.range,
-                ));
+                let HirStmt::Return(Some(value)) =
+                    std::mem::replace(&mut body[index], HirStmt::Return(None))
+                else {
+                    unreachable!()
+                };
+                body.insert(
+                    index,
+                    HirStmt::ExprStmt(HirExpr::Call {
+                        callee: crate::GEN_RETURN_MARKER.to_string(),
+                        args: vec![value],
+                    }),
+                );
+                index += 1;
             }
             HirStmt::If { body, orelse, .. } => {
                 generator_returns(body, def)?;
@@ -60,7 +73,9 @@ pub(super) fn generator_returns(
             | HirStmt::ForList { body, .. }
             | HirStmt::ForObject { body, .. } => generator_returns(body, def)?,
             HirStmt::LoopElse { loop_stmt, orelse } => {
-                generator_returns(std::slice::from_mut(loop_stmt.as_mut()), def)?;
+                let mut inner = vec![std::mem::replace(loop_stmt.as_mut(), HirStmt::Return(None))];
+                generator_returns(&mut inner, def)?;
+                **loop_stmt = inner.pop().expect("a loop statement stays one statement");
                 generator_returns(orelse, def)?;
             }
             HirStmt::Try {
@@ -89,6 +104,7 @@ pub(super) fn generator_returns(
             }
             _ => {}
         }
+        index += 1;
     }
     Ok(())
 }

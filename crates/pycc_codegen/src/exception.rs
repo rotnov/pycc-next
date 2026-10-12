@@ -405,6 +405,12 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         | MirExpr::GenNext { .. }
         | MirExpr::GenToList { .. }
         | MirExpr::GenAnyAll { .. }
+        | MirExpr::GenYield { .. }
+        | MirExpr::GenYieldFrom { .. }
+        | MirExpr::GenSend { .. }
+        | MirExpr::GenThrow { .. }
+        | MirExpr::GenClose { .. }
+        | MirExpr::StopIterationValue { .. }
         // Building a function value calls nothing that raises.
         | MirExpr::MakeClosure { .. } => false,
     }

@@ -99,8 +99,24 @@ fn both_i64_extremes_survive_as_defaults() {
     );
 }
 
+/// A default that is not a literal is evaluated once, where the `def` is
+/// (`pycc_ast::desugar::signatures`), so a mutable one is shared between
+/// calls as in CPython.
 #[test]
-fn an_unadmitted_default_fails_check_at_its_own_def() {
+fn a_mutable_default_is_evaluated_once_and_shared() {
+    let dir = ScratchDir::new("e2e_issue_1189_shared").expect("failed to create scratch dir");
+    let out = build_and_run(
+        &dir,
+        "shared",
+        "def f(a: list[int] = [], n: int = 2 * 3) -> None:\n    a.append(n)\n    print(a)\n\n\
+         f()\nf(n=1)\nf([0])\n",
+    );
+    assert_eq!(out, "[6]\n[6, 1]\n[0, 6]\n");
+}
+
+/// A default of the wrong type is a type error at the default itself.
+#[test]
+fn a_non_literal_default_of_the_wrong_type_fails_check_at_the_default() {
     let dir = ScratchDir::new("e2e_issue_1189_bad").expect("failed to create scratch dir");
     let rendered = check_err(
         &dir,
@@ -108,16 +124,11 @@ fn an_unadmitted_default_fails_check_at_its_own_def() {
         "def f(a: int = [1]) -> None:\n    print(a)\n\nf()\nf()\n",
     );
     assert!(
-        rendered.contains("C0001")
-            && rendered.contains(
-                "only a literal `int`, `float`, `bool`, `str`, or `None` default parameter \
-                 value is supported yet"
-            ),
+        rendered.contains("error[T0025]") && rendered.contains("bad.py:1:16"),
         "unexpected diagnostic: {rendered}"
     );
-    // Rejection lives at the `def`, so two call sites do not multiply it.
     assert_eq!(
-        rendered.matches("error[C0001]").count(),
+        rendered.matches("error[").count(),
         1,
         "unexpected diagnostic: {rendered}"
     );

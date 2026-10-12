@@ -2,4 +2,4 @@ from typing import Iterator
 
 
 def f() -> Iterator[int]:
-    x = yield 1
+    xs = [(yield i) for i in range(3)]

@@ -6,14 +6,16 @@
 //! captured values as words (`pycc_codegen::closure` encodes each by its
 //! type) and two compiled functions: `call(obj, args...)`, which passes the
 //! captured values and the arguments to the function, and `drop(obj)`, which
-//! releases the captured values the object owns.
+//! releases the captured values the object owns. It also points at the
+//! function's `__qualname__` (a NUL-terminated constant), which its `repr`
+//! names: `<function make_adder.<locals>.add at 0x...>`.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
 /// Byte offset of the `call` function; mirrored by `pycc_codegen::closure`.
 pub const CALL_OFFSET: usize = 8;
 /// Byte offset of the first captured word; mirrored by codegen.
-pub const CAPTURES_OFFSET: usize = 32;
+pub const CAPTURES_OFFSET: usize = 40;
 
 /// The header of a function value, followed by its captured words.
 #[repr(C)]
@@ -22,6 +24,8 @@ pub struct PyClosureObj {
     call: *const u8,
     drop: Option<unsafe extern "C" fn(*mut PyClosureObj)>,
     captures: i64,
+    /// The function's `__qualname__`, NUL-terminated; null when unknown.
+    name: *const u8,
 }
 
 const _: () = {
@@ -42,13 +46,15 @@ fn layout(captures: usize) -> std::alloc::Layout {
         .expect("a function value fits a layout")
 }
 
-/// A new function value with `captures` zeroed captured words (the caller
-/// stores them) and one reference.
+/// A new function value of the function named `name` (a NUL-terminated
+/// `__qualname__`, or null) with `captures` zeroed captured words (the
+/// caller stores them) and one reference.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_closure_new(
     call: *const u8,
     drop: Option<unsafe extern "C" fn(*mut PyClosureObj)>,
     captures: i64,
+    name: *const u8,
 ) -> *mut PyClosureObj {
     let count = usize::try_from(captures).unwrap_or(0);
     // SAFETY: a non-zero-size layout.
@@ -62,6 +68,7 @@ pub extern "C" fn pycc_rt_closure_new(
         (*obj).call = call;
         (*obj).drop = drop;
         (*obj).captures = captures;
+        (*obj).name = name;
     }
     CLOSURES_LIVE.fetch_add(1, Ordering::Relaxed);
     obj
@@ -98,6 +105,29 @@ pub extern "C" fn pycc_rt_closure_decref(obj: *mut PyClosureObj) {
     CLOSURES_LIVE.fetch_sub(1, Ordering::Relaxed);
 }
 
+/// The text of a NUL-terminated name, or `?` for null.
+pub(crate) fn c_name(name: *const u8) -> String {
+    if name.is_null() {
+        return "?".to_string();
+    }
+    // SAFETY: a non-null name is a NUL-terminated constant.
+    let name = unsafe { std::ffi::CStr::from_ptr(name.cast()) };
+    String::from_utf8_lossy(name.to_bytes()).into_owned()
+}
+
+/// Python `repr(f)` of the function value `obj`: `<function NAME at 0x...>`.
+pub(crate) fn closure_repr(obj: *mut PyClosureObj) -> String {
+    // SAFETY (caller): `obj` is a live function value.
+    let name = c_name(unsafe { (*obj).name });
+    format!("<function {name} at {:#x}>", obj as usize)
+}
+
+/// `str(f)` / `repr(f)` of a function value, as a new `str`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_closure_repr(obj: *mut PyClosureObj) -> *mut crate::PyStrObj {
+    crate::str_core::new_pystr(closure_repr(obj).as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,7 +143,7 @@ mod tests {
     #[test]
     fn the_last_release_runs_drop_and_frees() {
         let before = pycc_rt_closure_live_objects();
-        let obj = pycc_rt_closure_new(std::ptr::null(), Some(count_drop), 1);
+        let obj = pycc_rt_closure_new(std::ptr::null(), Some(count_drop), 1, std::ptr::null());
         pycc_rt_closure_incref(obj);
         pycc_rt_closure_decref(obj);
         assert_eq!(pycc_rt_closure_live_objects(), before + 1);
@@ -121,5 +151,16 @@ mod tests {
         assert_eq!(pycc_rt_closure_live_objects(), before);
         pycc_rt_closure_decref(std::ptr::null_mut());
         pycc_rt_closure_incref(std::ptr::null_mut());
+    }
+
+    #[test]
+    fn a_function_value_renders_its_qualname_and_address() {
+        let obj = pycc_rt_closure_new(std::ptr::null(), None, 0, c"f.<locals>.g".as_ptr().cast());
+        assert_eq!(
+            closure_repr(obj),
+            format!("<function f.<locals>.g at {:#x}>", obj as usize)
+        );
+        pycc_rt_closure_decref(obj);
+        assert_eq!(c_name(std::ptr::null()), "?");
     }
 }

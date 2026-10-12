@@ -46,6 +46,11 @@ pub const EXCEPTION_TYPE_MEMORY_ERROR: u8 = 32;
 /// `StopIteration`'s tag: `next()` of an exhausted generator. Pinned like
 /// [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
 pub const EXCEPTION_TYPE_STOP_ITERATION: u8 = 33;
+/// `GeneratorExit`'s tag: raised at the `yield` of a generator being
+/// closed. Like [`EXCEPTION_TYPE_FOREIGN_BASE`] it is not an `Exception`, so
+/// `except Exception:` does not catch it. Pinned like
+/// [`EXCEPTION_TYPE_OVERFLOW_ERROR`] above.
+pub const EXCEPTION_TYPE_GENERATOR_EXIT: u8 = 34;
 /// #1316: the reserved tag the `ext` C shim's foreign-operation bridge gives
 /// a CPython exception that is not an `Exception` at all -- `SystemExit`,
 /// `KeyboardInterrupt`, `GeneratorExit`, a non-`Exception`
@@ -62,7 +67,9 @@ pub const EXCEPTION_TYPE_FOREIGN_BASE: u8 = u8::MAX;
 /// bridged non-`Exception` [`EXCEPTION_TYPE_FOREIGN_BASE`].
 fn tag_matches(obj_tag: u8, handler_tag: u8) -> bool {
     obj_tag == handler_tag
-        || (handler_tag == EXCEPTION_TYPE_EXCEPTION && obj_tag != EXCEPTION_TYPE_FOREIGN_BASE)
+        || (handler_tag == EXCEPTION_TYPE_EXCEPTION
+            && obj_tag != EXCEPTION_TYPE_FOREIGN_BASE
+            && obj_tag != EXCEPTION_TYPE_GENERATOR_EXIT)
 }
 
 /// Heap-allocated builtin exception object. Exception lifetime management is
@@ -111,6 +118,11 @@ pub struct PyExceptionObj {
     /// `str(exc)` when it differs from `message` (a `KeyError`), built on
     /// first use by [`str_form::exception_str`]; null until then.
     pub(crate) str_form: Cell<*mut PyStrObj>,
+    /// A `StopIteration`'s `value` (a generator's return value), as the
+    /// word codegen stores for the generator's return type; `None` for every
+    /// other exception and a value-less `StopIteration`. The value is owned
+    /// by the exception, which is never freed (`docs/DEVIATIONS.md`).
+    pub(crate) payload: Cell<Option<u64>>,
 }
 
 #[derive(Clone, Copy)]
@@ -240,6 +252,7 @@ pub extern "C" fn pycc_rt_exception_alloc(
         exceptions: std::ptr::null_mut(),
         exceptions_len: 0,
         str_form: Cell::new(std::ptr::null_mut()),
+        payload: Cell::new(None),
     }))
 }
 
@@ -330,6 +343,7 @@ fn build_group_or_null(
         exceptions: exceptions_ptr,
         exceptions_len,
         str_form: Cell::new(std::ptr::null_mut()),
+        payload: Cell::new(None),
     }))
 }
 
@@ -368,6 +382,7 @@ pub unsafe extern "C" fn pycc_rt_exception_group_alloc(
         exceptions: exceptions_ptr,
         exceptions_len,
         str_form: Cell::new(std::ptr::null_mut()),
+        payload: Cell::new(None),
     }))
 }
 
@@ -756,6 +771,59 @@ pub unsafe extern "C" fn pycc_rt_raise_name_error(name: *const u8, len: usize) {
         "NameError",
         &format!("name '{name}' is not defined"),
     );
+}
+
+/// Raises `StopIteration` carrying `value` (a generator's return value, the
+/// word of its type; owned by the exception) and `message` (`str(value)`,
+/// owned; null for a generator that returned no value, whose `str(e)` is
+/// empty).
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_raise_stop_iteration(value: u64, message: *mut PyStrObj) {
+    let name = "StopIteration";
+    let message_was_null = message.is_null();
+    let message = if message.is_null() {
+        alloc_exception_message("")
+    } else {
+        message
+    };
+    let obj = pycc_rt_exception_alloc(
+        EXCEPTION_TYPE_STOP_ITERATION,
+        name.as_ptr(),
+        name.len(),
+        message,
+    );
+    if !message_was_null {
+        // SAFETY: freshly allocated.
+        unsafe { (*obj).payload.set(Some(value)) };
+    }
+    pycc_rt_exception_raise(obj);
+}
+
+/// The `value` word of a `StopIteration` [`pycc_rt_raise_stop_iteration`]
+/// raised (borrowed: the exception keeps its reference). A `StopIteration`
+/// without one -- its `value` is `None` -- raises `TypeError` and answers
+/// `0`: the caller's static type for it cannot hold `None`
+/// (`docs/DEVIATIONS.md`).
+///
+/// # Safety
+/// `obj` must be a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_exception_payload(obj: *mut PyExceptionObj) -> u64 {
+    // SAFETY (caller): live.
+    match (!obj.is_null())
+        .then(|| unsafe { (*obj).payload.get() })
+        .flatten()
+    {
+        Some(word) => word,
+        None => {
+            raise_builtin(
+                EXCEPTION_TYPE_TYPE_ERROR,
+                "TypeError",
+                "StopIteration.value is None here, which its generator's return type excludes",
+            );
+            0
+        }
+    }
 }
 
 pub(crate) fn raise_builtin(type_tag: u8, name: &'static str, msg: &str) {

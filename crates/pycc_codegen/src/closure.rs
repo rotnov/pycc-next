@@ -24,13 +24,15 @@ use pycc_mir::Ty;
 /// `pycc_rt::closure::CALL_OFFSET`.
 const CALL_OFFSET: u64 = 8;
 /// `pycc_rt::closure::CAPTURES_OFFSET`.
-const CAPTURES_OFFSET: u64 = 32;
+const CAPTURES_OFFSET: u64 = 40;
 
 /// The runtime functions of function values.
 pub(crate) struct ClosureFns<'ctx> {
     pub(crate) new: FunctionValue<'ctx>,
     pub(crate) incref: FunctionValue<'ctx>,
     pub(crate) decref: FunctionValue<'ctx>,
+    /// `pycc_rt_closure_repr`: `str(f)`.
+    pub(crate) repr: FunctionValue<'ctx>,
 }
 
 impl<'ctx> ClosureFns<'ctx> {
@@ -46,7 +48,12 @@ impl<'ctx> ClosureFns<'ctx> {
             new: declare(
                 "pycc_rt_closure_new",
                 ptr_type.fn_type(
-                    &[ptr_type.into(), ptr_type.into(), context.i64_type().into()],
+                    &[
+                        ptr_type.into(),
+                        ptr_type.into(),
+                        context.i64_type().into(),
+                        ptr_type.into(),
+                    ],
                     false,
                 ),
             ),
@@ -57,6 +64,10 @@ impl<'ctx> ClosureFns<'ctx> {
             decref: declare(
                 "pycc_rt_closure_decref",
                 void_type.fn_type(&[ptr_type.into()], false),
+            ),
+            repr: declare(
+                "pycc_rt_closure_repr",
+                ptr_type.fn_type(&[ptr_type.into()], false),
             ),
         }
     }
@@ -268,6 +279,26 @@ fn closure_functions<'ctx>(
     (call, drop)
 }
 
+/// A pointer to the NUL-terminated `__qualname__` of the compiled function
+/// `function` (`pycc_hir::function_qualname`), one constant per function.
+pub(crate) fn qualname_ptr<'ctx>(
+    module: &inkwell::module::Module<'ctx>,
+    function: &str,
+) -> PointerValue<'ctx> {
+    let symbol = format!("pycc.qualname.{function}");
+    if let Some(global) = module.get_global(&symbol) {
+        return global.as_pointer_value();
+    }
+    let context = module.get_context();
+    let text = context.const_string(pycc_hir::function_qualname(function).as_bytes(), true);
+    let global = module.add_global(text.get_type(), None, &symbol);
+    global.set_initializer(&text);
+    global.set_constant(true);
+    global.set_linkage(inkwell::module::Linkage::Private);
+    global.set_unnamed_addr(true);
+    global.as_pointer_value()
+}
+
 /// `MirExpr::MakeClosure`: a new function value owning its captured values.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_make_closure<'ctx>(
@@ -305,6 +336,7 @@ pub(crate) fn emit_make_closure<'ctx>(
                     .i64_type()
                     .const_int(captures.len() as u64, false)
                     .into(),
+                qualname_ptr(module, function).into(),
             ],
             "closure",
         )

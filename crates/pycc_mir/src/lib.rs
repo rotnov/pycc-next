@@ -393,7 +393,11 @@ fn lower_item(
             // can resolve the next class in the MRO. A top-level function
             // name contains no `.`, so `current_class` is `None` for those.
             let current_class: Option<&str> = item_anchor_class(name, classes);
-            scopes.push(params.iter().cloned().collect());
+            let mut frame: HashMap<String, Ty> = params.iter().cloned().collect();
+            if matches!(return_ty, Ty::Generator(_)) {
+                frame.insert(generator::GENERATOR_KEY.to_string(), return_ty.clone());
+            }
+            scopes.push(frame);
             let mut body = lower_stmt_sequence(body, scopes, classes, current_class);
             scopes.pop();
             let frame_name = source_frame_name(name);
@@ -477,8 +481,10 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             }
             MirStmt::ExprStmt(_)
             | MirStmt::Yield(_)
+            | MirStmt::GenReturn(_)
             | MirStmt::Assign { .. }
             | MirStmt::NoOp
+            | MirStmt::ReleaseName(_)
             | MirStmt::Unreachable
             | MirStmt::DictSet { .. }
             | MirStmt::BufferSet { .. }

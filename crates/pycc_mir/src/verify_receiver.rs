@@ -245,9 +245,11 @@ impl Verifier<'_> {
             MirStmt::ExprStmt(value)
             | MirStmt::Assign { value, .. }
             | MirStmt::ObjRaise { value }
+            | MirStmt::GenReturn(value)
             | MirStmt::Yield(value) => self.expr(value),
             MirStmt::ForGen { body, .. } => self.stmts(body),
             MirStmt::NoOp
+            | MirStmt::ReleaseName(_)
             | MirStmt::Unreachable
             | MirStmt::Reraise
             | MirStmt::Break
@@ -572,8 +574,27 @@ impl Verifier<'_> {
                 self.expr(generator);
                 self.exprs(default.as_deref());
             }
-            MirExpr::GenToList { generator, .. } | MirExpr::GenAnyAll { generator, .. } => {
-                self.expr(generator)
+            MirExpr::GenToList { generator, .. }
+            | MirExpr::GenAnyAll { generator, .. }
+            | MirExpr::GenClose { generator }
+            | MirExpr::GenYield {
+                value: generator, ..
+            }
+            | MirExpr::GenYieldFrom { sub: generator, .. }
+            | MirExpr::StopIterationValue {
+                exception: generator,
+                ..
+            } => self.expr(generator),
+            MirExpr::GenSend {
+                generator, value, ..
+            } => self.exprs([generator.as_ref(), value.as_ref()]),
+            MirExpr::GenThrow {
+                generator,
+                exception,
+                ..
+            } => {
+                self.expr(generator);
+                self.exprs(exception.exprs());
             }
             MirExpr::MakeClosure { captures, .. } => self.exprs(captures),
             MirExpr::CallClosure { callee, args, .. } => {

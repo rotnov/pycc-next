@@ -32,6 +32,12 @@ pub(crate) fn infer_call_expr(
     if callee == pycc_hir::CLOSURE_MARKER {
         return crate::closure::closure_value(env, local_names, args);
     }
+    if callee == pycc_hir::YIELD_MARKER {
+        return crate::generator::yield_value(env, local_names, args);
+    }
+    if callee == pycc_hir::YIELD_FROM_MARKER {
+        return crate::generator::check_yield_from(env, local_names, &args[0], false);
+    }
     if let Some(ty) = env.lookup(callee)
         && !env.def_rebound.contains(callee)
     {

@@ -34,7 +34,12 @@ const MAX_STEP: i64 = 1 << 40;
 
 /// The step `k` when `stmt` (a `ForRange` with step `step` and body `body`)
 /// may take the smallint version.
-pub(super) fn versionable_step(rt: &RtFns<'_>, stmt: &MirStmt, step: &MirExpr, body: &[MirStmt]) -> Option<i64> {
+pub(super) fn versionable_step(
+    rt: &RtFns<'_>,
+    stmt: &MirStmt,
+    step: &MirExpr,
+    body: &[MirStmt],
+) -> Option<i64> {
     let MirExpr::IntLiteral(k) = step else {
         return None;
     };
@@ -55,6 +60,7 @@ fn is_flat(stmt: &MirStmt, loops: usize) -> bool {
         MirStmt::ExprStmt(_)
         | MirStmt::Assign { .. }
         | MirStmt::NoOp
+        | MirStmt::ReleaseName(_)
         | MirStmt::DictSet { .. }
         | MirStmt::BufferSet { .. }
         | MirStmt::ListSet { .. }

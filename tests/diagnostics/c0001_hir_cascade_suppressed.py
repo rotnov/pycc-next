@@ -6,5 +6,5 @@ class B(A):
         self.v = 1
 def g(a: A) -> int:
     return 1
-def h(*args: int) -> int:
+async def h() -> int:
     return 0

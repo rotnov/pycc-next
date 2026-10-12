@@ -245,6 +245,7 @@ pub fn slot_rc_kind(ty: &Ty, refcounted: &dyn Fn(&str) -> bool) -> u8 {
         Ty::Dict(_) => b'd',
         Ty::Set(_) | Ty::FrozenSet(_) => b'e',
         Ty::Object => b'o',
+        Ty::Callable(_) => b'f',
         _ => b'w',
     }
 }

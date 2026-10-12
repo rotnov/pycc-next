@@ -177,6 +177,11 @@ pub(super) fn lower_expr(
         HirExpr::ReceiverClassCall { .. } => {
             call_lower::lower_receiver_class_call_expr(expr, scopes, classes, current_class)
         }
+        HirExpr::Call { callee, args }
+            if callee == pycc_hir::YIELD_MARKER || callee == pycc_hir::YIELD_FROM_MARKER =>
+        {
+            crate::generator::lower_yield_expr(callee, args, scopes, classes, current_class)
+        }
         HirExpr::Call { .. } => call_lower::lower_call_expr(expr, scopes, classes, current_class),
         HirExpr::UnaryOp { .. } => {
             operator_lower::lower_unary_op_expr(expr, scopes, classes, current_class)
@@ -263,6 +268,14 @@ pub(super) fn lower_expr(
                 set: set.clone(),
                 value: Box::new(lower_expr(value, scopes, classes, current_class)),
                 ops: set_ops::lower_set_element_ops(&elem_ty, scopes, classes).map(Box::new),
+            }
+        }
+        HirExpr::AttrGet { base, attr }
+            if attr == "value" && crate::generator::stop_value_ty(base, scopes).is_some() =>
+        {
+            MirExpr::StopIterationValue {
+                exception: Box::new(lower_expr(base, scopes, classes, current_class)),
+                ty: crate::generator::stop_value_ty(base, scopes).expect("checked by the guard"),
             }
         }
         HirExpr::AttrGet { .. } => {

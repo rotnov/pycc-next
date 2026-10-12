@@ -66,6 +66,22 @@ pub(crate) fn collect_method_call_constraints(
         unreachable!()
     };
     let base_term = collect_expr_constraints(signatures, parents, concrete, deferred, env, base)?;
+    // A generator's `send()`/`throw()`/`close()`: `throw`'s operand is an
+    // exception, which only `pycc_types`' checker types.
+    if let Some(Ok(Ty::Generator(sig))) = &base_term
+        && matches!(method.as_str(), "send" | "throw" | "close")
+    {
+        if method == "send" {
+            for arg in args {
+                collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+            }
+        }
+        return Ok(Some(Ok(if method == "close" {
+            Ty::None
+        } else {
+            sig.0.clone()
+        })));
+    }
     let mut arg_terms = Vec::with_capacity(args.len());
     for arg in args {
         arg_terms.push(collect_expr_constraints(

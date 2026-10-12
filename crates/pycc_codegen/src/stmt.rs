@@ -171,7 +171,28 @@ pub(crate) fn emit_stmt<'ctx>(
 ) -> Result<(), String> {
     match stmt {
         MirStmt::Yield(value) => {
-            crate::generator::emit_yield(context, builder, module, rt, user_functions, locals, value);
+            crate::generator::emit_yield(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                value,
+                false,
+            );
+            Ok(())
+        }
+        MirStmt::GenReturn(value) => {
+            crate::generator::emit_gen_return(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                value,
+            );
             Ok(())
         }
         MirStmt::ForGen { .. } => crate::generator::emit_for_gen_stmt(
@@ -234,6 +255,22 @@ pub(crate) fn emit_stmt<'ctx>(
             store_stmt::emit_assign_stmt(context, builder, module, rt, user_functions, locals, stmt)
         }
         MirStmt::NoOp => Ok(()),
+        MirStmt::ReleaseName(name) => {
+            let slot = locals
+                .get(name)
+                .cloned()
+                .expect("a released name has a storage slot");
+            heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
+            builder
+                .build_store(
+                    slot.ptr,
+                    context
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null(),
+                )
+                .expect("build_store should not fail for a released slot");
+            Ok(())
+        }
         MirStmt::ForeignImport { bindings } => {
             foreign_import::emit_stmt(context, builder, module, rt, locals, bindings);
             Ok(())

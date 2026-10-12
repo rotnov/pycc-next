@@ -689,6 +689,43 @@ pub enum MirExpr {
         generator: Box<MirExpr>,
         all: bool,
     },
+    /// A `yield` used as a value in a generator (`x = yield value`): yields
+    /// `value`, then is the value sent in -- `ty`, the generator's send
+    /// type.
+    GenYield {
+        value: Box<MirExpr>,
+        ty: Ty,
+    },
+    /// `yield from sub`: delegates to the generator `sub` until it finishes;
+    /// `ty` is its return type, the value of the expression.
+    GenYieldFrom {
+        sub: Box<MirExpr>,
+        ty: Ty,
+    },
+    /// `gen.send(value)`: the generator's next value (`ty`, its element
+    /// type).
+    GenSend {
+        generator: Box<MirExpr>,
+        value: Box<MirExpr>,
+        ty: Ty,
+    },
+    /// `gen.throw(exception)`: the generator's next value after it handled
+    /// `exception` (`ty`, its element type).
+    GenThrow {
+        generator: Box<MirExpr>,
+        exception: Box<crate::MirExceptionValue>,
+        ty: Ty,
+    },
+    /// `gen.close()`: `None`.
+    GenClose {
+        generator: Box<MirExpr>,
+    },
+    /// `e.value` of a caught `StopIteration` `e` (`exception`): the
+    /// returning generator's value, of its return type `ty`.
+    StopIterationValue {
+        exception: Box<MirExpr>,
+        ty: Ty,
+    },
     /// A function value (`ty`, a `Ty::Callable`): module-level `function`
     /// with its leading parameters bound to `captures` -- a nested
     /// function's enclosing variables (`pycc_ast::desugar::closures`), or

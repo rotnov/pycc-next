@@ -293,15 +293,14 @@ fn closures_compile_natively_in_non_strict_mode() {
 
 /// A nested function made a value while a variable it reads may still
 /// change (CPython reads it when the function runs) stays refused, as does
-/// one with unannotated parameters; converting a function to a string is
-/// refused rather than miscompiled.
+/// one with unannotated parameters. (Printing a function is supported since
+/// `language_round6`.)
 #[test]
 fn unsound_closures_are_refused() {
     for source in [
         "from typing import Callable\n\n\ndef f() -> int:\n    k = 1\n\n    def get() -> int:\n        return k\n    g = get\n    k = 5\n    return g()\n\n\nprint(f())\n",
         "def f() -> list[int]:\n    out: list[int] = []\n    for i in range(3):\n        def get() -> int:\n            return i\n        out.append(apply(get))\n    return out\n\n\ndef apply(g) -> int:\n    return 0\n",
         "def make(n: int):\n    def f(x):\n        return x * n\n    return f\n",
-        "def square(x: int) -> int:\n    return x * x\n\n\nprint(square)\n",
     ] {
         let text = check(source);
         assert!(text.contains("error["), "{source}: {text}");

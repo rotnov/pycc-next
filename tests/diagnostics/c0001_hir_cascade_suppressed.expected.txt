@@ -8,8 +8,8 @@ error[C0001]: an async method is not supported yet
   |
 3 |     async def m(self) -> None: pass
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ an async method is not supported yet
-error[C0001]: `*args` is not supported yet
- --> tests/diagnostics/c0001_hir_cascade_suppressed.py:9:6
+error[C0001]: async functions are not supported yet
+ --> tests/diagnostics/c0001_hir_cascade_suppressed.py:9:1
   |
-9 | def h(*args: int) -> int:
-  |      ^^^^^^^^^^^^ `*args` is not supported yet
+9 | async def h() -> int:
+  | ^ async functions are not supported yet

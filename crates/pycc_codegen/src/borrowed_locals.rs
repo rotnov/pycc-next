@@ -133,6 +133,7 @@ fn stmt_is_admitted(stmt: &MirStmt) -> bool {
             | MirStmt::Break
             | MirStmt::Continue
             | MirStmt::NoOp
+            | MirStmt::ReleaseName(_)
     );
     shape
         && stmt.exprs().into_iter().all(expr_is_admitted)

@@ -73,7 +73,9 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
             MirStmt::ExprStmt(_)
             | MirStmt::Assign { .. }
             | MirStmt::NoOp
+            | MirStmt::ReleaseName(_)
             | MirStmt::Yield(_)
+            | MirStmt::GenReturn(_)
             | MirStmt::ForGen { .. }
             | MirStmt::ForRange { .. }
             | MirStmt::ForList { .. }

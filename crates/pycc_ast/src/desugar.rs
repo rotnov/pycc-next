@@ -54,6 +54,7 @@ mod helpers;
 mod hoist;
 mod keys;
 mod ndarray_ndim;
+mod signatures;
 mod starred;
 mod stdlib;
 mod stmts;
@@ -62,7 +63,37 @@ mod wildcard;
 
 use ruff_python_ast::{Expr, ModModule, Stmt};
 
+pub use closures::qualname::function_qualname;
 pub use ext_generators::split_ext_generators;
+
+/// The first `yield`/`yield from` inside `expr` (not inside a nested
+/// lambda), for a context where CPython refuses one (a comprehension).
+pub fn find_yield(expr: &Expr) -> Option<&Expr> {
+    use ruff_python_ast::visitor::{self, Visitor};
+    struct Find<'a>(Option<&'a Expr>);
+    impl<'a> Visitor<'a> for Find<'a> {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if self.0.is_some() {
+                return;
+            }
+            match expr {
+                Expr::Yield(_) | Expr::YieldFrom(_) => self.0 = Some(expr),
+                Expr::Lambda(_) => {}
+                _ => visitor::walk_expr(self, expr),
+            }
+        }
+    }
+    let mut find = Find(None);
+    find.visit_expr(expr);
+    find.0
+}
+
+/// Whether a function body contains a `yield` (or `yield from`) of its own
+/// -- not of a nested function, class, lambda or comprehension: whether the
+/// function is a generator.
+pub fn body_yields(body: &[Stmt]) -> bool {
+    ext_generators::yields(body)
+}
 
 /// The return annotation [`desugar`] gives a synthesized `def` whose
 /// signature is to be inferred rather than declared.
@@ -119,6 +150,7 @@ pub fn desugar(module: &mut ModModule) {
     closures::lift_closures(&mut module.body, &fresh);
     exprs::rewrite_exprs(&mut module.body, &sys, &fresh);
     let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+    signatures::bind_signatures(&mut body, &fresh);
     helpers::lift_helpers(&mut body, &fresh);
     stmts::expand_body(&mut body, &fresh, true);
     aliases::drop_unused_sys_imports(&mut body, &sys);

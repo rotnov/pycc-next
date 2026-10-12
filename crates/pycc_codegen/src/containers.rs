@@ -112,6 +112,7 @@ pub(crate) fn word_kind(rt: &RtFns<'_>, ty: &Ty) -> u64 {
         Ty::Tuple(_) => 7,
         Ty::Dict(_) => 8,
         Ty::Set(_) | Ty::FrozenSet(_) => 9,
+        Ty::Callable(_) => 10,
         other => panic!(
             "pycc_codegen: internal error: `{}` is not a container element type -- \
              pycc_hir::is_list_element_ty should have rejected it before codegen",

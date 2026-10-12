@@ -1024,6 +1024,7 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         MirStmt::ExprStmt(_)
         | MirStmt::Assign { .. }
         | MirStmt::NoOp
+        | MirStmt::ReleaseName(_)
         | MirStmt::Unreachable
         | MirStmt::DictSet { .. }
         | MirStmt::BufferSet { .. }
@@ -1045,6 +1046,7 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::Break
         | MirStmt::Continue
         | MirStmt::Yield(_)
+        | MirStmt::GenReturn(_)
         | MirStmt::Reraise => false,
     })
 }

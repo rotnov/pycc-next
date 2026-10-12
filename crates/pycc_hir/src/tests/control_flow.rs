@@ -771,20 +771,20 @@ fn a_yield_nested_inside_a_top_level_if_is_still_context_invalid() {
 }
 
 #[test]
-fn a_yield_inside_a_real_function_is_still_unsupported() {
-    // A generator compiles, but `yield` used as a value (`send()`) keeps
-    // the valid-but-unimplemented `C0001` path.
+fn a_yield_used_as_a_value_in_a_function_not_annotated_as_a_generator_is_refused() {
+    // A `yield` used as a value makes the function a generator; one
+    // annotated `-> None` keeps the generator-annotation `C0001`.
     assert_capability_error_message(
         "def f() -> None:\n    x = yield 1\n",
-        "expression kind not supported yet",
+        "a generator function must be annotated",
     );
 }
 
 #[test]
-fn a_yield_from_inside_a_real_function_is_still_unsupported() {
+fn a_yield_from_in_a_function_not_annotated_as_a_generator_is_refused() {
     assert_capability_error_message(
         "def f() -> None:\n    x = yield from [1, 2]\n",
-        "expression kind not supported yet",
+        "a generator function must be annotated",
     );
 }
 

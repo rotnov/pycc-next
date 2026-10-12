@@ -193,6 +193,7 @@ pub const CALL_NAMES: &[&str] = &[
     "__pycc_heapreplace",
     "__pycc_insort_left",
     "__pycc_insort_right",
+    "__pycc_mark_tuple",
     "__pycc_max_keyed",
     "__pycc_min_keyed",
     "__pycc_print_str",
@@ -287,7 +288,10 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
         name if float_math(name).is_some() || name == "math.log" => Ty::Float,
         "any" | "all" => Ty::Bool,
         "__pycc_stdin_readlines" => Ty::List(Box::new(Ty::Str)),
-        "__pycc_print_str" | "__pycc_stdout_flush" | "__pycc_setrecursionlimit" => Ty::None,
+        "__pycc_print_str"
+        | "__pycc_stdout_flush"
+        | "__pycc_setrecursionlimit"
+        | "__pycc_mark_tuple" => Ty::None,
         _ => return None,
     })
 }
@@ -327,6 +331,10 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             sig("pycc_rt_print_write_str", &[str_.clone()], Ty::None)
         }
         ("__pycc_stdout_flush", []) => sig("pycc_rt_print_flush", &[], Ty::None),
+        // A function's `*args` list (`pycc_ast::desugar::signatures`).
+        ("__pycc_mark_tuple", [Ty::List(_)]) => {
+            sig("pycc_rt_list_mark_tuple", &[args[0].clone()], Ty::None)
+        }
         ("__pycc_setrecursionlimit", [a]) if is_intlike(a) => {
             sig("pycc_rt_setrecursionlimit", &[int], Ty::None)
         }
@@ -345,6 +353,9 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             sig("pycc_rt_list_repr", &[list.clone()], str_)
         }
         ("str", [dict @ Ty::Dict(_)]) => sig("pycc_rt_dict_repr", &[dict.clone()], str_),
+        // `<function f at 0x...>` / `<generator object g at 0x...>`.
+        ("str", [f @ Ty::Callable(_)]) => sig("pycc_rt_closure_repr", &[f.clone()], str_),
+        ("str", [g @ Ty::Generator(_)]) => sig("pycc_rt_gen_repr", &[g.clone()], str_),
         ("len", [Ty::Str]) => sig("pycc_rt_str_len", &[str_], int),
         ("ord", [Ty::Str]) => sig("pycc_rt_str_ord", &[str_], int),
         ("chr", [a]) if is_intlike(a) => sig("pycc_rt_str_chr", &[int], str_),

@@ -174,6 +174,12 @@ impl MirExpr {
             MirExpr::BufferLen { .. } => Ty::Int,
             MirExpr::GenNext { ty, .. } | MirExpr::GenToList { ty, .. } => ty.clone(),
             MirExpr::GenAnyAll { .. } => Ty::Bool,
+            MirExpr::GenYield { ty, .. }
+            | MirExpr::GenYieldFrom { ty, .. }
+            | MirExpr::GenSend { ty, .. }
+            | MirExpr::GenThrow { ty, .. }
+            | MirExpr::StopIterationValue { ty, .. } => ty.clone(),
+            MirExpr::GenClose { .. } => Ty::None,
             MirExpr::MakeClosure { ty, .. } | MirExpr::CallClosure { ty, .. } => ty.clone(),
             // Hardcoded for the same reason once more, and it is this fact
             // that the rest of Part 2a rests on: the producer's result is
@@ -259,8 +265,32 @@ impl MirExpr {
                 value.collect_named_expr_bindings(out);
             }
             MirExpr::IntBoundary(inner) => inner.collect_named_expr_bindings(out),
-            MirExpr::GenToList { generator, .. } | MirExpr::GenAnyAll { generator, .. } => {
-                generator.collect_named_expr_bindings(out)
+            MirExpr::GenToList { generator, .. }
+            | MirExpr::GenAnyAll { generator, .. }
+            | MirExpr::GenClose { generator }
+            | MirExpr::GenYield {
+                value: generator, ..
+            }
+            | MirExpr::GenYieldFrom { sub: generator, .. }
+            | MirExpr::StopIterationValue {
+                exception: generator,
+                ..
+            } => generator.collect_named_expr_bindings(out),
+            MirExpr::GenSend {
+                generator, value, ..
+            } => {
+                generator.collect_named_expr_bindings(out);
+                value.collect_named_expr_bindings(out);
+            }
+            MirExpr::GenThrow {
+                generator,
+                exception,
+                ..
+            } => {
+                generator.collect_named_expr_bindings(out);
+                for expr in exception.exprs() {
+                    expr.collect_named_expr_bindings(out);
+                }
             }
             MirExpr::GenNext {
                 generator, default, ..

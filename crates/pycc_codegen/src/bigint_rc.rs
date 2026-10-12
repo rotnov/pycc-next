@@ -595,6 +595,12 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         | MirExpr::GenNext { .. }
         | MirExpr::GenToList { .. }
         | MirExpr::GenAnyAll { .. }
+        | MirExpr::GenYield { .. }
+        | MirExpr::GenYieldFrom { .. }
+        | MirExpr::GenSend { .. }
+        | MirExpr::GenThrow { .. }
+        | MirExpr::GenClose { .. }
+        | MirExpr::StopIterationValue { .. }
         // A function value's call returns an owned value, like `Call`'s.
         | MirExpr::MakeClosure { .. }
         | MirExpr::CallClosure { .. }

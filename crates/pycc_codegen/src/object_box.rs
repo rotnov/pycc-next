@@ -76,7 +76,7 @@ pub(crate) fn emit_boxed<'ctx>(
         );
         return crate::foreign_attr::expect_object_pointer(built);
     }
-    if let pycc_mir::Ty::Generator(element) = value.ty() {
+    if let pycc_mir::Ty::Generator(sig) = value.ty() {
         return crate::generator_box::emit_boxed_generator(
             context,
             builder,
@@ -85,7 +85,7 @@ pub(crate) fn emit_boxed<'ctx>(
             user_functions,
             locals,
             value,
-            &element,
+            &sig.0,
         );
     }
     if value.ty() == pycc_mir::Ty::None {

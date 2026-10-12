@@ -60,7 +60,7 @@ pub(crate) fn admits(env: &Environment, from: &Ty, to: &Ty) -> bool {
 /// a CPython iterator sharing the native generator (`pycc_ext_gen_wrap`),
 /// so, unlike a container, no copy breaks aliasing.
 pub(crate) fn is_boxable_generator(env: &Environment, ty: &Ty) -> bool {
-    matches!(ty, Ty::Generator(element) if foreign::is_object_operand(env, element))
+    matches!(ty, Ty::Generator(sig) if foreign::is_object_operand(env, &sig.0))
 }
 
 /// [`admits`] for a value whose expression is known, refusing (`I0404`)

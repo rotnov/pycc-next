@@ -145,6 +145,7 @@ pub(crate) fn retain_word(kind: u8, word: i64) {
         b'd' => unsafe { crate::dict::pycc_rt_dict_incref(word as *mut crate::dict::PyDictObj) },
         b'e' => unsafe { crate::set::pycc_rt_set_incref(word as *mut crate::set::PySetObj) },
         b'o' => object_hook(&OBJECT_RETAIN, word),
+        b'f' => crate::closure::pycc_rt_closure_incref(word as *mut crate::closure::PyClosureObj),
         _ => {}
     }
 }
@@ -169,6 +170,7 @@ pub(crate) fn release_word_into(kind: u8, word: i64, dead: &mut Worklist) {
             dead.push(Dead::Set(word as *mut crate::set::PySetObj));
         }
         b'o' => object_hook(&OBJECT_RELEASE, word),
+        b'f' => crate::closure::pycc_rt_closure_decref(word as *mut crate::closure::PyClosureObj),
         _ => {}
     }
 }

@@ -43,7 +43,8 @@ impl Engine {
                         let scalar = |ty: &Option<Ty>| {
                             matches!(ty, Some(Ty::Int | Ty::Float | Ty::Bool | Ty::Str))
                         };
-                        let (lt, rt) = (self.store.resolve(*left, 0), self.store.resolve(*right, 0));
+                        let (lt, rt) =
+                            (self.store.resolve(*left, 0), self.store.resolve(*right, 0));
                         if !(scalar(&lt) && scalar(&rt)) {
                             self.deferred.push(constraint);
                             continue;
@@ -97,8 +98,8 @@ impl Engine {
                             iterate: true,
                             ..
                         },
-                    ) if !crate::empty_container::contains_infer(&element) => {
-                        let known = self.store.known(*element);
+                    ) if !crate::empty_container::contains_infer(&element.0) => {
+                        let known = self.store.known(element.0);
                         self.store.unify(result, known);
                         progressed = true;
                     }

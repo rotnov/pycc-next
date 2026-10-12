@@ -54,6 +54,9 @@ pub const LIST_KIND_TUPLE: i64 = 7;
 pub const LIST_KIND_DICT: i64 = 8;
 /// Element kind of a list of sets (`PySetObj` pointers, `set.rs`).
 pub const LIST_KIND_SET: i64 = 9;
+/// Element kind of a list of function values (`PyClosureObj` pointers,
+/// `closure.rs`).
+pub const LIST_KIND_CLOSURE: i64 = 10;
 
 /// See the module doc comment for the layout and ownership contract.
 #[repr(C)]
@@ -68,6 +71,10 @@ pub struct PyListObj {
     /// A tuple object's per-element kinds (`len` bytes); null for a list,
     /// whose elements all have `kind`.
     pub(crate) kinds: *mut u8,
+    /// A homogeneous tuple held as a list of `kind` (a function's `*args`,
+    /// [`pycc_rt_list_mark_tuple`]): it renders as a tuple, and a slice or
+    /// repeat of it is one too.
+    pub(crate) frozen: bool,
 }
 
 const _: () = assert!(std::mem::offset_of!(PyListObj, rc) == crate::rc::RC_OFFSET);
@@ -218,7 +225,33 @@ fn new_typed_list<T: Elem>(kind: i64, items: Vec<T>) -> *mut PyListObj {
         kind,
         rc: 1,
         kinds: std::ptr::null_mut(),
+        frozen: false,
     }))
+}
+
+/// Marks `list` -- a function's `*args`, built for the call -- a tuple
+/// (`frozen`). A `list[bool]` keeps its byte storage and stays a list
+/// (`docs/DEVIATIONS.md`).
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_mark_tuple(list: *mut PyListObj) {
+    // SAFETY (caller): live.
+    let list = unsafe { &mut *list };
+    if list.kind != LIST_KIND_BOOL && list.kind != crate::value::TUPLE_OBJECT {
+        list.frozen = true;
+    }
+}
+
+/// `result`, frozen when `source` is (a slice or repeat of a tuple is a
+/// tuple).
+fn frozen_like(source: &PyListObj, result: *mut PyListObj) -> *mut PyListObj {
+    if source.frozen {
+        // SAFETY: freshly built.
+        unsafe { (*result).frozen = true };
+    }
+    result
 }
 
 /// Frees `list` (count zero), pushing every element whose count its
@@ -488,7 +521,7 @@ pub unsafe extern "C" fn pycc_rt_list_slice(
     for word in &picked {
         list.retain(*word);
     }
-    new_list(list.kind, picked)
+    frozen_like(list, new_list(list.kind, picked))
 }
 
 /// The positions `seq[start:stop:step]` selects from a sequence of `len`
@@ -563,7 +596,7 @@ pub unsafe extern "C" fn pycc_rt_list_repeat(list: *mut PyListObj, count: i64) -
     for word in &items {
         list.retain(*word);
     }
-    new_list(list.kind, items)
+    frozen_like(list, new_list(list.kind, items))
 }
 
 /// Python `==` between two element words of `kind`.
@@ -628,7 +661,7 @@ pub(crate) fn word_repr(kind: i64, word: i64, out: &mut String) -> bool {
 /// Appends `repr()` of a list (`[a, b]`) or a tuple object (`(a, b)`,
 /// `(a,)`) to `out`.
 pub(crate) fn sequence_repr(list: &PyListObj, out: &mut String) -> bool {
-    let tuple = list.kind == crate::value::TUPLE_OBJECT;
+    let tuple = list.kind == crate::value::TUPLE_OBJECT || list.frozen;
     out.push(if tuple { '(' } else { '[' });
     let items = list.kinded_items();
     for (i, (kind, word)) in items.iter().enumerate() {

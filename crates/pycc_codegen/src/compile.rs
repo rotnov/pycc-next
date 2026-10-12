@@ -463,6 +463,9 @@ pub(crate) fn compile_to_object_with_observer(
     // NULL, so nothing ever tears the module down -- holding the reference
     // for the process lifetime is the correct D-060 accounting, exactly as
     // the exceptional exit below already assumes.
+    if !options.ext {
+        crate::generator::release_generator_globals(&context, &builder, &rt, mir, &module_globals);
+    }
     for slot in module_globals.values() {
         if slot.ty == pycc_mir::Ty::Str && !options.ext {
             let value = builder
@@ -571,7 +574,7 @@ pub(crate) fn compile_to_object_with_observer(
             // first, and its body is emitted as if it returned `None`
             // (`generator`).
             let generator_element = match return_ty {
-                pycc_mir::Ty::Generator(element) => Some((**element).clone()),
+                pycc_mir::Ty::Generator(sig) => Some((**sig).clone()),
                 _ => None,
             };
             let generator_begin = generator_element
@@ -875,7 +878,7 @@ pub(crate) fn compile_to_object_with_observer(
             rt.exceptions.targets.borrow_mut().push(exception_exit);
             if let (Some(begun), Some(element)) = (generator_begin, generator_element.clone()) {
                 crate::generator::initial_suspend(
-                    &context, &module, &builder, &rt, f, begun, element,
+                    &context, &module, &builder, &rt, f, name, begun, element,
                 );
             }
             emit_body(
@@ -1221,7 +1224,13 @@ pub(crate) fn compile_to_object_with_observer(
     // lower: a debug build of a module with one runs the `O0` pipeline,
     // which includes them.
     let has_coroutines = mir.items.iter().any(|item| {
-        matches!(item, MirItem::Function { return_ty: pycc_mir::Ty::Generator(_), .. })
+        matches!(
+            item,
+            MirItem::Function {
+                return_ty: pycc_mir::Ty::Generator(_),
+                ..
+            }
+        )
     });
     if !release && has_coroutines {
         module

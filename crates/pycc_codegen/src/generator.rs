@@ -27,7 +27,103 @@
 //!
 //! The consumers -- `for x in gen`, `next()`, `list()`, `any()`/`all()` --
 //! resume the object through `pycc_rt_gen_resume` and take ownership of
-//! each value it leaves in the value area.
+//! each value it leaves in the value area ([`consume`]). The rest of the
+//! generator protocol -- `send()`, `throw()`, `close()`, a `yield` used as
+//! a value, `return value` and `yield from` -- is [`protocol`].
+
+mod consume;
+mod protocol;
+
+pub(crate) use consume::{emit_any_all, emit_for_gen_stmt, emit_next, emit_to_list, release_owned};
+pub(crate) use protocol::emit_gen_return;
+
+/// A generator-protocol expression: `MirExpr::GenYield`, `GenYieldFrom`,
+/// `GenSend`, `GenThrow`, `GenClose` or `StopIterationValue`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_protocol_expr<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    expr: &MirExpr,
+) -> Scalar<'ctx> {
+    match expr {
+        MirExpr::GenYield { value, .. } => emit_yield(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            value,
+            true,
+        ),
+        MirExpr::GenYieldFrom { sub, ty } => protocol::emit_yield_from(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            sub,
+            ty,
+        ),
+        MirExpr::GenSend {
+            generator, value, ..
+        } => protocol::emit_send(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            generator,
+            value,
+        ),
+        MirExpr::GenThrow {
+            generator,
+            exception,
+            ..
+        } => protocol::emit_throw(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            generator,
+            exception,
+        ),
+        MirExpr::GenClose { generator } => protocol::emit_close(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            generator,
+        ),
+        MirExpr::StopIterationValue { exception, ty } => {
+            let scalar = emit_expr(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                exception,
+            );
+            let pointer = match scalar {
+                Scalar::Instance(ptr) | Scalar::Object(ptr) => ptr,
+                _ => panic!("pycc_codegen: internal error: `e.value` of a non-exception"),
+            };
+            protocol::emit_stop_iteration_value(context, builder, rt, pointer, ty)
+        }
+        _ => unreachable!("emit_protocol_expr is called for generator-protocol nodes only"),
+    }
+}
 
 use super::*;
 use inkwell::attributes::{Attribute, AttributeLoc};
@@ -41,10 +137,14 @@ use pycc_mir::Ty;
 
 /// `pycc_rt::generator::STATE_OFFSET`.
 const STATE_OFFSET: u64 = 16;
-/// `pycc_rt::generator::CLOSING_OFFSET`.
-const CLOSING_OFFSET: u64 = 17;
+/// `pycc_rt::generator::MODE_OFFSET`.
+const MODE_OFFSET: u64 = 17;
+/// `pycc_rt::generator::SENT_OFFSET`.
+const SENT_OFFSET: u64 = 19;
+/// `pycc_rt::generator::HAS_RET_OFFSET`.
+const HAS_RET_OFFSET: u64 = 20;
 /// `pycc_rt::generator::VALUE_OFFSET`.
-const VALUE_OFFSET: u64 = 24;
+const VALUE_OFFSET: u64 = 64;
 /// `pycc_rt::generator`'s `DONE` state.
 const DONE: u64 = 2;
 
@@ -52,12 +152,23 @@ const DONE: u64 = 2;
 pub(crate) struct GenFns<'ctx> {
     pub(crate) new: FunctionValue<'ctx>,
     pub(crate) resume: FunctionValue<'ctx>,
-    pub(crate) next: FunctionValue<'ctx>,
+    pub(crate) step: FunctionValue<'ctx>,
+    pub(crate) can_send: FunctionValue<'ctx>,
+    pub(crate) throw: FunctionValue<'ctx>,
+    pub(crate) close: FunctionValue<'ctx>,
+    pub(crate) delegate: FunctionValue<'ctx>,
+    pub(crate) raise_mode: FunctionValue<'ctx>,
+    pub(crate) raise_nothing_sent: FunctionValue<'ctx>,
+    pub(crate) raise_stop: FunctionValue<'ctx>,
+    pub(crate) raise_no_return: FunctionValue<'ctx>,
+    pub(crate) stop_unless_raised: FunctionValue<'ctx>,
+    pub(crate) exception_payload: FunctionValue<'ctx>,
     pub(crate) incref: FunctionValue<'ctx>,
     pub(crate) decref: FunctionValue<'ctx>,
-    pub(crate) raise_exit: FunctionValue<'ctx>,
     pub(crate) frame_alloc: FunctionValue<'ctx>,
     pub(crate) frame_free: FunctionValue<'ctx>,
+    /// `pycc_rt_gen_repr`: `str(g)`.
+    pub(crate) repr: FunctionValue<'ctx>,
 }
 
 impl<'ctx> GenFns<'ctx> {
@@ -74,15 +185,75 @@ impl<'ctx> GenFns<'ctx> {
         GenFns {
             new: declare(
                 "pycc_rt_gen_new",
-                ptr_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+                ptr_type.fn_type(
+                    &[
+                        ptr_type.into(),
+                        i64_type.into(),
+                        ptr_type.into(),
+                        ptr_type.into(),
+                        ptr_type.into(),
+                    ],
+                    false,
+                ),
             ),
             resume: declare(
                 "pycc_rt_gen_resume",
                 i8_type.fn_type(&[ptr_type.into()], false),
             ),
-            next: declare(
-                "pycc_rt_gen_next",
+            repr: declare(
+                "pycc_rt_gen_repr",
+                ptr_type.fn_type(&[ptr_type.into()], false),
+            ),
+            step: declare(
+                "pycc_rt_gen_step",
+                i8_type.fn_type(&[ptr_type.into(), i8_type.into()], false),
+            ),
+            can_send: declare(
+                "pycc_rt_gen_can_send",
+                i8_type.fn_type(&[ptr_type.into(), i8_type.into()], false),
+            ),
+            throw: declare(
+                "pycc_rt_gen_throw",
+                i8_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+            ),
+            close: declare(
+                "pycc_rt_gen_close",
                 i8_type.fn_type(&[ptr_type.into()], false),
+            ),
+            delegate: declare(
+                "pycc_rt_gen_delegate",
+                i8_type.fn_type(
+                    &[
+                        ptr_type.into(),
+                        ptr_type.into(),
+                        i8_type.into(),
+                        i8_type.into(),
+                        i64_type.into(),
+                        i64_type.into(),
+                    ],
+                    false,
+                ),
+            ),
+            raise_mode: declare(
+                "pycc_rt_gen_raise_mode",
+                void_type.fn_type(&[ptr_type.into()], false),
+            ),
+            raise_nothing_sent: declare(
+                "pycc_rt_gen_raise_nothing_sent",
+                void_type.fn_type(&[], false),
+            ),
+            raise_stop: declare(
+                "pycc_rt_raise_stop_iteration",
+                void_type.fn_type(&[i64_type.into(), ptr_type.into()], false),
+            ),
+            raise_no_return: declare("pycc_rt_gen_raise_no_return", void_type.fn_type(&[], false)),
+            stop_unless_raised: declare(
+                "pycc_rt_gen_stop_unless_raised",
+                void_type.fn_type(&[], false),
+            ),
+            exception_payload: declare(
+                "pycc_rt_exception_payload",
+                i64_type.fn_type(&[ptr_type.into()], false),
             ),
             incref: declare(
                 "pycc_rt_gen_incref",
@@ -92,7 +263,6 @@ impl<'ctx> GenFns<'ctx> {
                 "pycc_rt_gen_decref",
                 void_type.fn_type(&[ptr_type.into()], false),
             ),
-            raise_exit: declare("pycc_rt_gen_raise_exit", void_type.fn_type(&[], false)),
             frame_alloc: declare(
                 "pycc_rt_gen_frame_alloc",
                 ptr_type.fn_type(&[i64_type.into()], false),
@@ -114,8 +284,8 @@ pub(crate) struct GenFrame<'ctx> {
     handle: PointerValue<'ctx>,
     /// The generator object.
     object: PointerValue<'ctx>,
-    /// The type of the values the generator yields.
-    element: Ty,
+    /// The generator's `(yield, send, return)` types.
+    sig: (Ty, Ty, Ty),
     /// Where every suspend point's "suspended" case returns to the caller.
     suspend_bb: BasicBlock<'ctx>,
     /// Where the destroy case frees the frame.
@@ -216,26 +386,110 @@ pub(crate) fn begin<'ctx>(
     }
 }
 
+/// The size of a value of `ty` in a generator's value area (`None`: none).
+pub(super) fn area_size<'ctx>(context: &'ctx Context, ty: &Ty) -> IntValue<'ctx> {
+    if matches!(ty, Ty::None) {
+        return context.i64_type().const_zero();
+    }
+    ty_to_basic_type(context, ty.clone())
+        .size_of()
+        .expect("a sized generator value type")
+}
+
+/// The function releasing a value of `ty` stored at its pointer argument
+/// (`pycc_rt::generator`'s drop hooks), or a null pointer when `ty` holds
+/// no reference. One function per type, shared by every generator.
+fn drop_fn<'ctx>(
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    ty: &Ty,
+) -> PointerValue<'ctx> {
+    let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
+    let counted = matches!(ty, Ty::Int) || heap_rc::heap_kind(rt, ty).is_some();
+    if !counted || matches!(ty, Ty::None) {
+        return ptr_type.const_null();
+    }
+    let name = format!("pycc_gen_drop.{}", ty.name());
+    if let Some(existing) = module.get_function(&name) {
+        return existing.as_global_value().as_pointer_value();
+    }
+    let function = module.add_function(
+        &name,
+        context.void_type().fn_type(&[ptr_type.into()], false),
+        Some(Linkage::Internal),
+    );
+    let builder = context.create_builder();
+    builder.position_at_end(context.append_basic_block(function, "entry"));
+    let slot = function
+        .get_nth_param(0)
+        .expect("the drop function takes the value's address")
+        .into_pointer_value();
+    let value = builder
+        .build_load(
+            ty_to_basic_type(context, ty.clone()),
+            slot,
+            "gen_drop_value",
+        )
+        .expect("build_load should not fail for a generator value");
+    release_owned(context, &builder, rt, ty, &basic_scalar(ty, value));
+    builder
+        .build_return(None)
+        .expect("build_return should not fail for a drop function");
+    function.as_global_value().as_pointer_value()
+}
+
+/// The larger of two sizes.
+fn max_size<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    a: IntValue<'ctx>,
+    b: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    let a_larger = builder
+        .build_int_compare(IntPredicate::UGT, a, b, "gen_size_cmp")
+        .expect("build_int_compare should not fail for sizes");
+    builder
+        .build_select(a_larger, a, b, "gen_size_max")
+        .expect("build_select should not fail for sizes")
+        .into_int_value()
+}
+
 /// Creates the generator object and suspends before the body, at the
 /// builder's position (the parameters bound, the exception exit installed);
 /// leaves the builder where the body starts. Records the frame in `rt` for
 /// [`emit_yield`] and [`finish`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn initial_suspend<'ctx>(
     context: &'ctx Context,
     module: &inkwell::module::Module<'ctx>,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
     function: FunctionValue<'ctx>,
+    name: &str,
     begun: GenBegin<'ctx>,
-    element: Ty,
+    sig: (Ty, Ty, Ty),
 ) {
-    let value_size = ty_to_basic_type(context, element.clone())
-        .size_of()
-        .expect("a sized element type");
+    let value_size = max_size(
+        builder,
+        area_size(context, &sig.0),
+        max_size(
+            builder,
+            area_size(context, &sig.1),
+            area_size(context, &sig.2),
+        ),
+    );
+    let drop_yield = drop_fn(context, module, rt, &sig.0);
+    let drop_return = drop_fn(context, module, rt, &sig.2);
     let object = builder
         .build_call(
             rt.gens.new,
-            &[begun.handle.into(), value_size.into()],
+            &[
+                begun.handle.into(),
+                value_size.into(),
+                drop_yield.into(),
+                drop_return.into(),
+                crate::closure::qualname_ptr(module, name).into(),
+            ],
             "gen_object",
         )
         .expect("build_call should not fail for pycc_rt_gen_new")
@@ -248,7 +502,7 @@ pub(crate) fn initial_suspend<'ctx>(
         id: begun.id,
         handle: begun.handle,
         object,
-        element,
+        sig,
         suspend_bb,
         cleanup_bb,
     };
@@ -256,20 +510,25 @@ pub(crate) fn initial_suspend<'ctx>(
     suspend_and_resume(context, module, builder, rt, "gen_start");
 }
 
+/// The frame of the generator function being emitted.
+pub(super) fn current_frame<'ctx>(rt: &RtFns<'ctx>) -> GenFrame<'ctx> {
+    rt.gen_frame
+        .borrow()
+        .clone()
+        .expect("generator code is emitted inside a generator function")
+}
+
 /// Emits a non-final suspend point and leaves the builder where the body
-/// resumes; a generator being closed raises `GeneratorExit` there.
-fn suspend_and_resume<'ctx>(
+/// resumes, without looking at why it was resumed (`yield from`, which
+/// forwards that to the generator it delegates to).
+pub(super) fn suspend_raw<'ctx>(
     context: &'ctx Context,
     module: &inkwell::module::Module<'ctx>,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
     label: &str,
 ) {
-    let frame = rt
-        .gen_frame
-        .borrow()
-        .clone()
-        .expect("a suspend point is emitted inside a generator function");
+    let frame = current_frame(rt);
     let function = builder.get_insert_block().unwrap().get_parent().unwrap();
     let state = raw_call(
         builder,
@@ -294,34 +553,122 @@ fn suspend_and_resume<'ctx>(
         )
         .expect("build_switch should not fail for a suspend point");
     builder.position_at_end(resumed);
-    let closing_ptr = byte_ptr(context, builder, frame.object, CLOSING_OFFSET);
-    let closing = builder
-        .build_load(context.i8_type(), closing_ptr, "gen_closing")
-        .expect("build_load should not fail for the closing flag")
-        .into_int_value();
-    let is_closing = builder
+}
+
+/// Emits a non-final suspend point and leaves the builder where the body
+/// resumes; a generator being closed raises `GeneratorExit` there, one a
+/// value is thrown into raises that value.
+fn suspend_and_resume<'ctx>(
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    label: &str,
+) {
+    suspend_raw(context, module, builder, rt, label);
+    let frame = current_frame(rt);
+    let function = builder.get_insert_block().unwrap().get_parent().unwrap();
+    let mode = load_byte(context, builder, frame.object, MODE_OFFSET, "gen_mode");
+    let raising = builder
         .build_int_compare(
             IntPredicate::NE,
-            closing,
+            mode,
             context.i8_type().const_zero(),
-            "gen_is_closing",
+            "gen_is_raising",
         )
         .expect("build_int_compare should not fail for an i8 flag");
-    let close_bb = context.append_basic_block(function, "gen_close");
+    let raise_bb = context.append_basic_block(function, "gen_raise_mode");
     let run_bb = context.append_basic_block(function, "gen_run");
     builder
-        .build_conditional_branch(is_closing, close_bb, run_bb)
+        .build_conditional_branch(raising, raise_bb, run_bb)
         .expect("build_conditional_branch should not fail for an i1");
-    builder.position_at_end(close_bb);
+    builder.position_at_end(raise_bb);
     builder
-        .build_call(rt.gens.raise_exit, &[], "")
-        .expect("build_call should not fail for pycc_rt_gen_raise_exit");
+        .build_call(rt.gens.raise_mode, &[frame.object.into()], "")
+        .expect("build_call should not fail for pycc_rt_gen_raise_mode");
     crate::exception::jump_to_exception_target(context, builder, rt);
     builder.position_at_end(run_bb);
 }
 
+/// At the end of a native program, releases every module global holding a
+/// generator, in the order the module first assigns them -- CPython clears
+/// the module's globals at shutdown, closing each unfinished generator
+/// (running its `finally` clauses) in that order.
+pub(crate) fn release_generator_globals<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    mir: &pycc_mir::MirModule,
+    module_globals: &std::collections::BTreeMap<String, StorageSlot<'ctx>>,
+) {
+    fn assigned(stmts: &[MirStmt], out: &mut Vec<String>) {
+        for stmt in stmts {
+            if let MirStmt::Assign { target, .. } = stmt
+                && !out.contains(target)
+            {
+                out.push(target.clone());
+            }
+            for body in stmt.bodies() {
+                assigned(body, out);
+            }
+        }
+    }
+    let mut order = Vec::new();
+    for item in &mir.items {
+        if let pycc_mir::MirItem::TopLevelStmt(stmt) = item {
+            assigned(std::slice::from_ref(stmt), &mut order);
+        }
+    }
+    for name in order {
+        let Some(slot) = module_globals.get(&name) else {
+            continue;
+        };
+        if !matches!(slot.ty, Ty::Generator(_)) {
+            continue;
+        }
+        heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
+        builder
+            .build_store(
+                slot.ptr,
+                context
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .const_null(),
+            )
+            .expect("build_store should not fail for a released global");
+    }
+}
+
+/// The byte at `offset` in the generator `object`.
+pub(super) fn load_byte<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    object: PointerValue<'ctx>,
+    offset: u64,
+    name: &str,
+) -> IntValue<'ctx> {
+    let ptr = byte_ptr(context, builder, object, offset);
+    builder
+        .build_load(context.i8_type(), ptr, name)
+        .expect("build_load should not fail for a generator header byte")
+        .into_int_value()
+}
+
+/// Stores `value` into the byte at `offset` in the generator `object`.
+pub(super) fn store_byte<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    object: PointerValue<'ctx>,
+    offset: u64,
+    value: u64,
+) {
+    let ptr = byte_ptr(context, builder, object, offset);
+    builder
+        .build_store(ptr, context.i8_type().const_int(value, false))
+        .expect("build_store should not fail for a generator header byte");
+}
+
 /// A pointer `offset` bytes into `object`.
-fn byte_ptr<'ctx>(
+pub(super) fn byte_ptr<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     object: PointerValue<'ctx>,
@@ -342,7 +689,11 @@ fn byte_ptr<'ctx>(
 }
 
 /// `yield value`: stores an owned reference to the value, converted to the
-/// element type, into the object's value area and suspends.
+/// element type, into the object's value area and suspends. Returns the
+/// value sent in when the body resumes (`x = yield value`), owned by the
+/// body: `None` for a generator whose send type is `None`, else the value
+/// `send()` stored in the area (a resume by `next()`, which sends nothing,
+/// raises `TypeError` there -- `docs/DEVIATIONS.md`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_yield<'ctx>(
     context: &'ctx Context,
@@ -352,25 +703,78 @@ pub(crate) fn emit_yield<'ctx>(
     user_functions: &HashMap<&str, UserFunction<'ctx>>,
     locals: &HashMap<String, StorageSlot<'ctx>>,
     value: &MirExpr,
-) {
-    let frame = rt
-        .gen_frame
-        .borrow()
-        .clone()
-        .expect("`yield` is emitted inside a generator function");
+    want_value: bool,
+) -> Scalar<'ctx> {
+    let frame = current_frame(rt);
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
     let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, value, scalar);
     let scalar = retain_if_int_duplicate(context, builder, rt, value, scalar);
-    let scalar = coerce_scalar_to_type(context, builder, scalar, frame.element.clone());
+    let scalar = coerce_scalar_to_type(context, builder, scalar, frame.sig.0.clone());
     let slot = byte_ptr(context, builder, frame.object, VALUE_OFFSET);
     builder
         .build_store(slot, scalar_basic(scalar))
         .expect("build_store should not fail for the value area");
     suspend_and_resume(context, module, builder, rt, "gen_resumed");
+    let sent_ty = frame.sig.1.clone();
+    if matches!(sent_ty, Ty::None) {
+        return none_scalar(context);
+    }
+    let function = builder.get_insert_block().unwrap().get_parent().unwrap();
+    let sent = load_byte(context, builder, frame.object, SENT_OFFSET, "gen_sent");
+    if !want_value {
+        // `yield value` as a statement: a value sent in is released.
+        let release_bb = context.append_basic_block(function, "gen_release_sent");
+        let run_bb = context.append_basic_block(function, "gen_after_yield");
+        let was_sent = builder
+            .build_int_compare(
+                IntPredicate::NE,
+                sent,
+                context.i8_type().const_zero(),
+                "gen_was_sent",
+            )
+            .expect("build_int_compare should not fail for an i8 flag");
+        builder
+            .build_conditional_branch(was_sent, release_bb, run_bb)
+            .expect("build_conditional_branch should not fail for an i1");
+        builder.position_at_end(release_bb);
+        let value = load_value(context, builder, frame.object, &sent_ty);
+        release_owned(context, builder, rt, &sent_ty, &value);
+        builder
+            .build_unconditional_branch(run_bb)
+            .expect("build_unconditional_branch should not fail");
+        builder.position_at_end(run_bb);
+        return none_scalar(context);
+    }
+    let was_sent = builder
+        .build_int_compare(
+            IntPredicate::NE,
+            sent,
+            context.i8_type().const_zero(),
+            "gen_was_sent",
+        )
+        .expect("build_int_compare should not fail for an i8 flag");
+    let nothing_bb = context.append_basic_block(function, "gen_nothing_sent");
+    let got_bb = context.append_basic_block(function, "gen_got_sent");
+    builder
+        .build_conditional_branch(was_sent, got_bb, nothing_bb)
+        .expect("build_conditional_branch should not fail for an i1");
+    builder.position_at_end(nothing_bb);
+    builder
+        .build_call(rt.gens.raise_nothing_sent, &[], "")
+        .expect("build_call should not fail for pycc_rt_gen_raise_nothing_sent");
+    crate::exception::jump_to_exception_target(context, builder, rt);
+    builder.position_at_end(got_bb);
+    load_value(context, builder, frame.object, &sent_ty)
+}
+
+/// The value `None`, as `MirExpr::NoneLiteral` emits it.
+pub(super) fn none_scalar(context: &Context) -> Scalar<'_> {
+    let placeholder_ty = context.struct_type(&[context.i8_type().into(); 2], false);
+    Scalar::Optional(placeholder_ty.const_zero())
 }
 
 /// The LLVM value of `scalar`.
-fn scalar_basic(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
+pub(super) fn scalar_basic(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
     match scalar {
         Scalar::Int(v) | Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),
@@ -388,7 +792,7 @@ fn scalar_basic(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
 }
 
 /// The `Scalar` of a value of type `ty` loaded as `value`.
-fn basic_scalar<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
+pub(super) fn basic_scalar<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
     match ty {
         Ty::Int => Scalar::Int(value.into_int_value()),
         Ty::Bool | Ty::None => Scalar::Bool(value.into_int_value()),
@@ -526,432 +930,4 @@ pub(crate) fn finish<'ctx>(
     builder
         .build_return(Some(&frame.object))
         .expect("build_return should not fail for the ramp's return");
-}
-
-/// Resumes the generator `object` and branches on the answer: to `got`
-/// with a value in its value area, to `done` once it is exhausted. An
-/// exception the body raised leaves through the innermost exception target.
-fn resume_branch<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    object: PointerValue<'ctx>,
-    got: BasicBlock<'ctx>,
-    done: BasicBlock<'ctx>,
-) {
-    let answer = builder
-        .build_call(rt.gens.resume, &[object.into()], "gen_resume")
-        .expect("build_call should not fail for pycc_rt_gen_resume")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_gen_resume returns an i8")
-        .into_int_value();
-    guard_statement_effects(context, builder, rt);
-    let has_value = builder
-        .build_int_compare(
-            IntPredicate::NE,
-            answer,
-            context.i8_type().const_zero(),
-            "gen_has_value",
-        )
-        .expect("build_int_compare should not fail for an i8");
-    builder
-        .build_conditional_branch(has_value, got, done)
-        .expect("build_conditional_branch should not fail for an i1");
-}
-
-/// `for var in gen:` (`MirStmt::ForGen`).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn emit_for_gen_stmt<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    user_functions: &HashMap<&str, UserFunction<'ctx>>,
-    locals: &mut HashMap<String, StorageSlot<'ctx>>,
-    stmt: &MirStmt,
-    expected_return_ty: pycc_mir::Ty,
-    finally_stack: &mut Vec<FinallyTarget<'ctx>>,
-) -> Result<(), String> {
-    let MirStmt::ForGen {
-        var,
-        var_ty,
-        generator,
-        hold,
-        consume,
-        body,
-    } = stmt
-    else {
-        unreachable!()
-    };
-    let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
-    let source = locals
-        .get(generator)
-        .cloned()
-        .expect("a generator local has a slot");
-    let object = builder
-        .build_load(ptr_type, source.ptr, "gen_loop_object")
-        .expect("build_load should not fail for a generator slot")
-        .into_pointer_value();
-    if *consume {
-        // The temporary bound only for this loop gives its reference up.
-        builder
-            .build_store(source.ptr, ptr_type.const_null())
-            .expect("build_store should not fail for a generator slot");
-    } else {
-        heap_rc::emit_incref(context, builder, rt, heap_rc::HeapKind::Generator, object);
-    }
-    let hold_slot = locals
-        .get(hold)
-        .cloned()
-        .expect("the loop's hold has a slot");
-    heap_rc::release_slot(context, builder, rt, &hold_slot.ty, hold_slot.ptr);
-    builder
-        .build_store(hold_slot.ptr, object)
-        .expect("build_store should not fail for the loop's hold");
-    let function = builder.get_insert_block().unwrap().get_parent().unwrap();
-    let test_bb = context.append_basic_block(function, "for_gen_test");
-    let body_bb = context.append_basic_block(function, "for_gen_body");
-    let after_bb = context.append_basic_block(function, "for_gen_after");
-    // An exception leaving the loop releases the generator on its way out,
-    // before any enclosing handler or `finally` runs: CPython drops the
-    // loop's iterator while unwinding to the handler.
-    let unwind_bb = context.append_basic_block(function, "for_gen_unwind");
-    let outer_target = *rt
-        .exceptions
-        .targets
-        .borrow()
-        .last()
-        .expect("statement emission always has an installed exception target");
-    rt.exceptions.targets.borrow_mut().push(unwind_bb);
-    builder
-        .build_unconditional_branch(test_bb)
-        .expect("build_unconditional_branch should not fail entering the loop test");
-    builder.position_at_end(test_bb);
-    resume_branch(context, builder, rt, object, body_bb, after_bb);
-    builder.position_at_end(body_bb);
-    // The value is the generator's: the target owns it, releasing what it
-    // held before.
-    let value = load_value(context, builder, object, var_ty);
-    if let Some(slot) = locals.get(var) {
-        heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
-    }
-    emit_assign(context, builder, rt, locals, var, value);
-    rt.loops.enter(stmt, after_bb, test_bb, finally_stack.len());
-    emit_body_then_branch(
-        context,
-        builder,
-        module,
-        rt,
-        user_functions,
-        locals,
-        body,
-        test_bb,
-        expected_return_ty,
-        finally_stack,
-    )?;
-    rt.loops.exit();
-    rt.exceptions.targets.borrow_mut().pop();
-    // Whatever jumped here already released its own pending temporaries.
-    builder.position_at_end(unwind_bb);
-    heap_rc::release_slot(context, builder, rt, &hold_slot.ty, hold_slot.ptr);
-    builder
-        .build_store(hold_slot.ptr, ptr_type.const_null())
-        .expect("build_store should not fail for the loop's hold");
-    builder
-        .build_unconditional_branch(outer_target)
-        .expect("build_unconditional_branch should not fail for the loop's unwind");
-    builder.position_at_end(after_bb);
-    // The loop is over (exhausted, or left by `break`): release the
-    // generator now, closing it if it is unfinished, as CPython does.
-    heap_rc::release_slot(context, builder, rt, &hold_slot.ty, hold_slot.ptr);
-    builder
-        .build_store(hold_slot.ptr, ptr_type.const_null())
-        .expect("build_store should not fail for the loop's hold");
-    Ok(())
-}
-
-/// The generator operand of a consumer, and whether the consumer must
-/// release it once done (a fresh one: `next(make())`).
-fn operand<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    user_functions: &HashMap<&str, UserFunction<'ctx>>,
-    locals: &HashMap<String, StorageSlot<'ctx>>,
-    generator: &MirExpr,
-) -> (PointerValue<'ctx>, bool) {
-    let Scalar::Generator(object) = emit_expr(
-        context,
-        builder,
-        module,
-        rt,
-        user_functions,
-        locals,
-        generator,
-    ) else {
-        panic!("pycc_codegen: internal error: a generator operand is not a generator")
-    };
-    let fresh = !heap_rc::is_borrowed_read(generator);
-    if fresh {
-        heap_rc::hold_owned(rt, heap_rc::HeapKind::Generator, object);
-    }
-    (object, fresh)
-}
-
-/// Releases a fresh generator operand held by [`operand`].
-fn release_operand<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    object: PointerValue<'ctx>,
-    fresh: bool,
-    mark: usize,
-) {
-    if fresh {
-        heap_rc::truncate_pending(rt, mark);
-        heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::Generator, object);
-    }
-}
-
-/// `next(gen)` / `next(gen, default)` (`MirExpr::GenNext`).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn emit_next<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    user_functions: &HashMap<&str, UserFunction<'ctx>>,
-    locals: &HashMap<String, StorageSlot<'ctx>>,
-    generator: &MirExpr,
-    default: Option<&MirExpr>,
-    ty: &Ty,
-) -> Scalar<'ctx> {
-    let mark = heap_rc::pending_mark(rt);
-    let (object, fresh) = operand(
-        context,
-        builder,
-        module,
-        rt,
-        user_functions,
-        locals,
-        generator,
-    );
-    let function = builder.get_insert_block().unwrap().get_parent().unwrap();
-    let Some(default) = default else {
-        builder
-            .build_call(rt.gens.next, &[object.into()], "gen_next")
-            .expect("build_call should not fail for pycc_rt_gen_next");
-        guard_statement_effects(context, builder, rt);
-        let value = load_value(context, builder, object, ty);
-        release_operand(context, builder, rt, object, fresh, mark);
-        return value;
-    };
-    let got_bb = context.append_basic_block(function, "gen_next_got");
-    let exhausted_bb = context.append_basic_block(function, "gen_next_exhausted");
-    let join_bb = context.append_basic_block(function, "gen_next_join");
-    resume_branch(context, builder, rt, object, got_bb, exhausted_bb);
-    builder.position_at_end(got_bb);
-    let got = scalar_basic(load_value(context, builder, object, ty));
-    let got_end = builder.get_insert_block().unwrap();
-    builder
-        .build_unconditional_branch(join_bb)
-        .expect("build_unconditional_branch should not fail");
-    builder.position_at_end(exhausted_bb);
-    let fallback = emit_expr(
-        context,
-        builder,
-        module,
-        rt,
-        user_functions,
-        locals,
-        default,
-    );
-    let fallback = heap_rc::retain_if_heap_duplicate(context, builder, rt, default, fallback);
-    let fallback = retain_if_int_duplicate(context, builder, rt, default, fallback);
-    let fallback = scalar_basic(coerce_scalar_to_type(
-        context,
-        builder,
-        fallback,
-        ty.clone(),
-    ));
-    let fallback_end = builder.get_insert_block().unwrap();
-    builder
-        .build_unconditional_branch(join_bb)
-        .expect("build_unconditional_branch should not fail");
-    builder.position_at_end(join_bb);
-    let phi = builder
-        .build_phi(ty_to_basic_type(context, ty.clone()), "gen_next_value")
-        .expect("build_phi should not fail in a fresh join block");
-    phi.add_incoming(&[(&got, got_end), (&fallback, fallback_end)]);
-    let value = basic_scalar(ty, phi.as_basic_value());
-    release_operand(context, builder, rt, object, fresh, mark);
-    value
-}
-
-/// `list(gen)` (`MirExpr::GenToList`): a new list of the generator's
-/// remaining values.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn emit_to_list<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    user_functions: &HashMap<&str, UserFunction<'ctx>>,
-    locals: &HashMap<String, StorageSlot<'ctx>>,
-    generator: &MirExpr,
-    ty: &Ty,
-) -> Scalar<'ctx> {
-    let element = list::element_ty(ty).clone();
-    let mark = heap_rc::pending_mark(rt);
-    let (object, fresh) = operand(
-        context,
-        builder,
-        module,
-        rt,
-        user_functions,
-        locals,
-        generator,
-    );
-    let result = list::build_list_new(context, builder, rt, &element, 0);
-    heap_rc::hold_owned(rt, heap_rc::HeapKind::List, result);
-    let function = builder.get_insert_block().unwrap().get_parent().unwrap();
-    let test_bb = context.append_basic_block(function, "gen_list_test");
-    let got_bb = context.append_basic_block(function, "gen_list_got");
-    let done_bb = context.append_basic_block(function, "gen_list_done");
-    builder
-        .build_unconditional_branch(test_bb)
-        .expect("build_unconditional_branch should not fail");
-    builder.position_at_end(test_bb);
-    resume_branch(context, builder, rt, object, got_bb, done_bb);
-    builder.position_at_end(got_bb);
-    let value = load_value(context, builder, object, &element);
-    // The list adopts the reference the generator handed over.
-    let word = match (&element, value) {
-        (Ty::Int, Scalar::Int(word)) => word,
-        (Ty::Tuple(elements), Scalar::Tuple(tuple)) => {
-            let boxed = crate::containers::box_struct_tuple(context, builder, rt, elements, tuple);
-            builder
-                .build_ptr_to_int(boxed, context.i64_type(), "boxed_tuple_word")
-                .expect("build_ptr_to_int should not fail for a pointer")
-        }
-        (_, value) => scalar_to_slot_word(context, builder, value),
-    };
-    list::build_list_append(builder, rt, result, word);
-    builder
-        .build_unconditional_branch(test_bb)
-        .expect("build_unconditional_branch should not fail");
-    builder.position_at_end(done_bb);
-    release_operand(context, builder, rt, object, fresh, mark);
-    heap_rc::truncate_pending(rt, mark);
-    Scalar::List(result)
-}
-
-/// `any(gen)` / `all(gen)` (`MirExpr::GenAnyAll`): resumes the generator
-/// only until a value decides the answer.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn emit_any_all<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    user_functions: &HashMap<&str, UserFunction<'ctx>>,
-    locals: &HashMap<String, StorageSlot<'ctx>>,
-    generator: &MirExpr,
-    all: bool,
-) -> Scalar<'ctx> {
-    let Ty::Generator(element) = generator.ty() else {
-        panic!("pycc_codegen: internal error: any()/all() of a non-generator")
-    };
-    let mark = heap_rc::pending_mark(rt);
-    let (object, fresh) = operand(
-        context,
-        builder,
-        module,
-        rt,
-        user_functions,
-        locals,
-        generator,
-    );
-    let function = builder.get_insert_block().unwrap().get_parent().unwrap();
-    let test_bb = context.append_basic_block(function, "gen_any_test");
-    let got_bb = context.append_basic_block(function, "gen_any_got");
-    let exhausted_bb = context.append_basic_block(function, "gen_any_exhausted");
-    let decided_bb = context.append_basic_block(function, "gen_any_decided");
-    let join_bb = context.append_basic_block(function, "gen_any_join");
-    builder
-        .build_unconditional_branch(test_bb)
-        .expect("build_unconditional_branch should not fail");
-    builder.position_at_end(test_bb);
-    resume_branch(context, builder, rt, object, got_bb, exhausted_bb);
-    builder.position_at_end(got_bb);
-    let value = load_value(context, builder, object, &element);
-    let truth = crate::str_truthy::truthy(context, builder, module, rt, value);
-    // The value was handed over; only its truth is kept.
-    release_owned(context, builder, rt, &element, &value);
-    let is_true = truth;
-    let (on_true, on_false) = if all {
-        (test_bb, decided_bb)
-    } else {
-        (decided_bb, test_bb)
-    };
-    builder
-        .build_conditional_branch(is_true, on_true, on_false)
-        .expect("build_conditional_branch should not fail for an i1");
-    builder.position_at_end(decided_bb);
-    builder
-        .build_unconditional_branch(join_bb)
-        .expect("build_unconditional_branch should not fail");
-    builder.position_at_end(exhausted_bb);
-    builder
-        .build_unconditional_branch(join_bb)
-        .expect("build_unconditional_branch should not fail");
-    builder.position_at_end(join_bb);
-    let phi = builder
-        .build_phi(context.i8_type(), "gen_any_result")
-        .expect("build_phi should not fail in a fresh join block");
-    let decided = context.i8_type().const_int(u64::from(!all), false);
-    let exhausted = context.i8_type().const_int(u64::from(all), false);
-    phi.add_incoming(&[(&decided, decided_bb), (&exhausted, exhausted_bb)]);
-    release_operand(context, builder, rt, object, fresh, mark);
-    Scalar::Bool(phi.as_basic_value().into_int_value())
-}
-
-/// Releases an owned value of type `ty`.
-pub(crate) fn release_owned<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    ty: &Ty,
-    value: &Scalar<'ctx>,
-) {
-    match (ty, value) {
-        (Ty::Int, Scalar::Int(word)) => crate::bigint_rc::emit_bigint_refcount_call(
-            context,
-            builder,
-            rt,
-            *word,
-            crate::bigint_rc::BigIntRefcount::Release,
-        ),
-        _ => {
-            if let Some(kind) = heap_rc::heap_kind(rt, ty)
-                && let Some(ptr) = pointer_of(value)
-            {
-                heap_rc::emit_decref(context, builder, rt, kind, ptr);
-            }
-        }
-    }
-}
-
-fn pointer_of<'ctx>(value: &Scalar<'ctx>) -> Option<PointerValue<'ctx>> {
-    match value {
-        Scalar::Str(v)
-        | Scalar::List(v)
-        | Scalar::Dict(v)
-        | Scalar::Set(v)
-        | Scalar::Instance(v)
-        | Scalar::Object(v)
-        | Scalar::Generator(v) => Some(*v),
-        _ => None,
-    }
 }

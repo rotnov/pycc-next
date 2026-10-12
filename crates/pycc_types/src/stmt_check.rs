@@ -287,7 +287,11 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
                     return Err(crate::locate::place_labeled(
                         diag,
                         crate::locate::expr_span(value),
-                        format!("expected `{}`, found `{}`", annotation.name(), inferred.name()),
+                        format!(
+                            "expected `{}`, found `{}`",
+                            annotation.name(),
+                            inferred.name()
+                        ),
                     ));
                 }
                 // Route through `check_assignment` (not a raw `env.bind`) so a
@@ -534,7 +538,8 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
                 Ty::List(elem_ty) => *elem_ty,
                 Ty::Str => Ty::Str,
                 Ty::Dict(kv) => kv.0,
-                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) | Ty::Generator(elem_ty) => *elem_ty,
+                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,
+                Ty::Generator(sig) => sig.0,
                 other => {
                     return Err(Diagnostic::error(
                         "T0033",

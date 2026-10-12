@@ -40,9 +40,9 @@ pub(crate) fn to_str<'ctx>(
 ) -> PointerValue<'ctx> {
     let (rt_fn, arg): (FunctionValue<'ctx>, inkwell::values::BasicMetadataValueEnum) = match scalar
     {
-        Scalar::Generator(_) | Scalar::Closure(_) => {
-            panic!("pycc_codegen: internal error: a generator is never converted to str")
-        }
+        // `<generator object g at 0x...>`, `<function f at 0x...>`.
+        Scalar::Generator(v) => (rt.gens.repr, v.into()),
+        Scalar::Closure(v) => (rt.closures.repr, v.into()),
         Scalar::Str(v) => return v,
         Scalar::Int(v) => (rt.int_to_str, v.into()),
         Scalar::Float(v) => (rt.float_to_str, v.into()),

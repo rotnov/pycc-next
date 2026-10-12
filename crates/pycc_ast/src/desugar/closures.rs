@@ -20,12 +20,13 @@
 //!
 //! A nested function is lifted only when every use of its name is a direct
 //! call (or, see [`values`], it may be made a function value), the name is
-//! bound once (by the `def`), it has no decorators, no
-//! `*args`/`**kwargs` and no non-literal defaults, and every variable a
+//! bound once (by the `def`), it has no decorators and no non-literal
+//! defaults, and every variable a
 //! `nonlocal` names is bound only by plain assignments. A nested `name =
 //! lambda ...` is first turned into the equivalent `def`. Anything else
 //! stays nested, and the compiler reports it as before.
 
+pub(crate) mod qualname;
 #[cfg(test)]
 mod tests;
 mod values;
@@ -439,14 +440,12 @@ pub(super) fn liftable_shape(def: &StmtFunctionDef) -> bool {
     !def.is_async
         && def.decorator_list.is_empty()
         && def.type_params.is_none()
-        && def.parameters.vararg.is_none()
-        && def.parameters.kwarg.is_none()
-        && def.parameters.kwonlyargs.is_empty()
-        && def.parameters.posonlyargs.is_empty()
         && def
             .parameters
-            .args
+            .posonlyargs
             .iter()
+            .chain(&def.parameters.args)
+            .chain(&def.parameters.kwonlyargs)
             .all(|p| p.default.as_deref().is_none_or(literal_default))
 }
 
@@ -792,8 +791,8 @@ fn only_plain_assignments(body: &[Stmt], name: &str) -> bool {
     check.ok
 }
 
-/// Lifts the nested functions of `def` (owned by the module-level item
-/// `owner`), innermost first, appending each lifted `def` to `out`.
+/// Lifts the nested functions of `def` (whose `__qualname__` is `owner`),
+/// innermost first, appending each lifted `def` to `out`.
 fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mut Vec<Stmt>) {
     let mut body: Vec<Stmt> = std::mem::take(&mut def.body).into_iter().collect();
     lambdas_to_defs(&mut body);
@@ -804,7 +803,7 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
         // SAFETY: the pointers address distinct `def`s inside `body`, which
         // is not otherwise borrowed while they are used.
         let inner = unsafe { &mut **ptr };
-        let inner_owner = format!("{owner}_{}", inner.name.as_str());
+        let inner_owner = format!("{owner}.<locals>.{}", inner.name.as_str());
         lift_function(inner, &inner_owner, fresh, out);
     }
     let candidates: Vec<&StmtFunctionDef> = nested.iter().map(|p| unsafe { &**p }).collect();
@@ -926,14 +925,13 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
         }
         excluded.extend(unstable);
     };
-    let owner_tag = owner.replace('.', "_");
     let lifts: HashMap<String, Lift> = chosen
         .iter()
         .map(|candidate| {
             let name = candidate.name.to_string();
-            let lifted = format!(
-                "_pycc_{owner_tag}_{name}{}",
-                fresh.name().trim_start_matches("_pycc")
+            let lifted = qualname::lifted_name(
+                &format!("{owner}.<locals>.{name}"),
+                fresh.name().trim_start_matches("_pycc_"),
             );
             let lift = Lift {
                 name: name.clone(),
@@ -964,8 +962,16 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
                 param(&name, range)
             })
             .collect();
-        params.extend(lifted_def.parameters.args.iter().cloned());
-        lifted_def.parameters.args = params.into();
+        // The captures come first: ahead of any positional-only parameter
+        // too (the `*args`/keyword-only/`**kwargs` parameters stay where
+        // they are, `signatures` binds calls of the lifted function).
+        if lifted_def.parameters.posonlyargs.is_empty() {
+            params.extend(lifted_def.parameters.args.iter().cloned());
+            lifted_def.parameters.args = params.into();
+        } else {
+            params.extend(lifted_def.parameters.posonlyargs.iter().cloned());
+            lifted_def.parameters.posonlyargs = params.into();
+        }
         lifted_def.name = Identifier::new(lift.lifted.as_str(), range);
         if lifted_def.returns.is_none() {
             lifted_def.returns = Some(Box::new(load(INFER_MARKER, range)));
@@ -1013,7 +1019,7 @@ pub(crate) fn lift_closures(body: &mut thin_vec::ThinVec<Stmt>, fresh: &Fresh) {
                 let class_name = class.name.to_string();
                 for item in class.body.iter_mut() {
                     if let Stmt::FunctionDef(method) = item {
-                        let owner = format!("{class_name}_{}", method.name.as_str());
+                        let owner = format!("{class_name}.{}", method.name.as_str());
                         lift_function(method, &owner, fresh, &mut lifted);
                     }
                 }

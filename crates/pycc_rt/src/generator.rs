@@ -7,35 +7,45 @@
 //! returning the object -- so nothing of the body runs until the first
 //! `next()`, as in CPython.
 //!
-//! The object owns the frame. [`pycc_rt_gen_resume`] runs the body to its
+//! The object owns the frame. [`pycc_rt_gen_step`] runs the body to its
 //! next `yield` (which stores the value at [`VALUE_OFFSET`] and suspends) or
 //! to its end (which marks the object done at its final suspend). The
-//! consumer takes ownership of each yielded value.
+//! consumer takes ownership of each yielded value. The same area carries a
+//! value sent in (`send(v)`, read by the `yield` expression the body resumes
+//! at) and the value a `return v` leaves for `StopIteration.value`.
+//!
+//! The body checks the object's mode each time it resumes: a generator being
+//! closed raises `GeneratorExit` at the suspended `yield`, one a value is
+//! thrown into (`throw(e)`) raises that exception there.
 //!
 //! Dropping the last reference to an unfinished generator *closes* it, as
 //! CPython's `generator.close()` does on deallocation: the body is resumed
-//! with the closing flag set, the suspended `yield` raises `GeneratorExit`,
-//! and the body unwinds through its `finally` clauses and its owned-slot
-//! epilogue, which releases every reference its frame holds. A
-//! `GeneratorExit` that leaves the body is swallowed; any other exception
-//! is reported on stderr and swallowed, as CPython's unraisable hook does.
-//! The pending exception of the code that dropped the generator (a
-//! generator is often released while an exception unwinds) is saved and
-//! restored around the close.
+//! closing, so its `finally` clauses and its owned-slot epilogue run and
+//! release every reference its frame holds. A `GeneratorExit` that leaves
+//! the body is swallowed; any other exception, or the `RuntimeError` of a
+//! generator that yields while closing, is reported on stderr and
+//! swallowed, as CPython's unraisable hook does. The pending exception of
+//! the code that dropped the generator (a generator is often released while
+//! an exception unwinds) is saved and restored around the close.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::exception::{
-    EXCEPTION_TYPE_FOREIGN_BASE, EXCEPTION_TYPE_STOP_ITERATION, EXCEPTION_TYPE_VALUE_ERROR,
-    raise_builtin,
+    EXCEPTION_TYPE_GENERATOR_EXIT, EXCEPTION_TYPE_RUNTIME_ERROR, EXCEPTION_TYPE_STOP_ITERATION,
+    EXCEPTION_TYPE_TYPE_ERROR, EXCEPTION_TYPE_VALUE_ERROR, PyExceptionObj, raise_builtin,
 };
 
 /// Byte offset of the state byte; `pycc_codegen::generator` mirrors it.
 pub const STATE_OFFSET: usize = 16;
-/// Byte offset of the closing flag; mirrored by codegen.
-pub const CLOSING_OFFSET: usize = 17;
-/// Byte offset of the yielded value; mirrored by codegen.
-pub const VALUE_OFFSET: usize = 24;
+/// Byte offset of the mode byte (closing / throwing); mirrored by codegen.
+pub const MODE_OFFSET: usize = 17;
+/// Byte offset of the "a value was sent" flag; mirrored by codegen.
+pub const SENT_OFFSET: usize = 19;
+/// Byte offset of the "the area holds a return value" flag; mirrored by
+/// codegen.
+pub const HAS_RET_OFFSET: usize = 20;
+/// Byte offset of the value area; mirrored by codegen.
+pub const VALUE_OFFSET: usize = 64;
 
 /// Suspended at a `yield` (or before the body's first statement).
 const SUSPENDED: u8 = 0;
@@ -44,8 +54,25 @@ const RUNNING: u8 = 1;
 /// Its body has finished; the frame is freed.
 const DONE: u8 = 2;
 
+/// Resumed normally.
+const MODE_NONE: u8 = 0;
+/// Resumed to close: the `yield` raises `GeneratorExit`.
+const MODE_CLOSING: u8 = 1;
+/// Resumed by `throw()`: the `yield` raises [`PyGenObj::thrown`].
+const MODE_THROWING: u8 = 2;
+
+/// [`pycc_rt_gen_step`]'s answers.
+const STEP_FINISHED: i8 = 0;
+const STEP_YIELDED: i8 = 1;
+const STEP_RETURNED: i8 = 2;
+
+/// Releases a value of the generator's yield (or return) type stored at the
+/// pointer; emitted by codegen per generator function, null when the type
+/// holds no reference.
+type DropFn = Option<extern "C" fn(*mut u8)>;
+
 /// A generator object: the header below, then the value area (as large as
-/// the generator's element type needs).
+/// the generator's yield, send and return types need).
 #[repr(C)]
 pub struct PyGenObj {
     rc: i64,
@@ -54,9 +81,26 @@ pub struct PyGenObj {
     /// switch-resumed ABI).
     frame: *mut u8,
     state: u8,
-    closing: u8,
-    _pad: [u8; 6],
+    mode: u8,
+    /// The body has been resumed at least once (it is past its start).
+    started: u8,
+    /// The current resume carries a value sent in.
+    sent: u8,
+    /// The value area holds the value of the body's `return v`.
+    has_ret: u8,
+    _pad: [u8; 3],
+    size: u32,
+    _pad2: u32,
+    /// The exception `throw()` raises at the suspended `yield`.
+    thrown: *mut PyExceptionObj,
+    drop_yield: DropFn,
+    drop_ret: DropFn,
+    /// The generator function's `__qualname__`, NUL-terminated (null when
+    /// unknown), which its `repr` names.
+    name: *const u8,
 }
+
+const _: () = assert!(std::mem::size_of::<PyGenObj>() == VALUE_OFFSET);
 
 static GEN_LIVE: AtomicI64 = AtomicI64::new(0);
 
@@ -71,32 +115,56 @@ fn layout(value_size: usize) -> std::alloc::Layout {
         .expect("a generator's value area fits a layout")
 }
 
-/// A new generator owning coroutine frame `frame`, with a value area of
-/// `value_size` bytes. Called by the ramp, once, before its first suspend.
+/// A new generator of the function named `name` (a NUL-terminated
+/// `__qualname__`, or null) owning coroutine frame `frame`, with a value
+/// area of `value_size` bytes. Called by the ramp, once, before its first
+/// suspend.
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_gen_new(frame: *mut u8, value_size: i64) -> *mut PyGenObj {
+pub extern "C" fn pycc_rt_gen_new(
+    frame: *mut u8,
+    value_size: i64,
+    drop_yield: DropFn,
+    drop_ret: DropFn,
+    name: *const u8,
+) -> *mut PyGenObj {
     let size = usize::try_from(value_size).unwrap_or(0);
     // SAFETY: a non-zero-size layout.
     let g = unsafe { std::alloc::alloc_zeroed(layout(size)) }.cast::<PyGenObj>();
     if g.is_null() {
         std::alloc::handle_alloc_error(layout(size));
     }
-    // SAFETY: freshly allocated and large enough for the header; the size
-    // of the value area is kept right after the header's padding.
+    // SAFETY: freshly allocated (and zeroed) and large enough for the
+    // header.
     unsafe {
         (*g).rc = 1;
         (*g).frame = frame;
         (*g).state = SUSPENDED;
-        size_cell(g).write(size as u32);
+        (*g).size = size as u32;
+        (*g).drop_yield = drop_yield;
+        (*g).drop_ret = drop_ret;
+        (*g).name = name;
     }
     GEN_LIVE.fetch_add(1, Ordering::Relaxed);
     g
 }
 
-/// The value-area size, kept in the header's padding (bytes 20..24).
-fn size_cell(g: *mut PyGenObj) -> *mut u32 {
+/// Python `repr(g)`: `<generator object NAME at 0x...>`.
+pub(crate) fn gen_repr(g: *mut PyGenObj) -> String {
     // SAFETY (caller): `g` is a live generator.
-    unsafe { g.cast::<u8>().add(20).cast::<u32>() }
+    let name = crate::closure::c_name(unsafe { (*g).name });
+    format!("<generator object {name} at {:#x}>", g as usize)
+}
+
+/// `str(g)` / `repr(g)` of a generator, as a new `str`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_gen_repr(g: *mut PyGenObj) -> *mut crate::PyStrObj {
+    crate::str_core::new_pystr(gen_repr(g).as_bytes())
+}
+
+/// The value area of `g`.
+fn area(g: *mut PyGenObj) -> *mut u8 {
+    // SAFETY (caller): `g` is a live generator.
+    unsafe { g.cast::<u8>().add(VALUE_OFFSET) }
 }
 
 /// Allocates a coroutine frame of `size` bytes (the generator function's
@@ -131,7 +199,10 @@ pub unsafe extern "C" fn pycc_rt_gen_frame_free(frame: *mut u8) {
     unsafe {
         let base = frame.sub(16);
         let size = base.cast::<usize>().read();
-        std::alloc::dealloc(base, std::alloc::Layout::from_size_align_unchecked(size, 16));
+        std::alloc::dealloc(
+            base,
+            std::alloc::Layout::from_size_align_unchecked(size, 16),
+        );
     }
 }
 
@@ -161,38 +232,123 @@ fn destroy_frame(g: *mut PyGenObj) {
     }
 }
 
-/// Runs `g`'s body to its next `yield` (`1`: a value is at
-/// [`VALUE_OFFSET`], owned by the caller) or to its end (`0`: exhausted;
-/// an exception the body raised is pending). A generator resumed from its
-/// own body raises `ValueError: generator already executing`.
+/// Releases the value the body's `return v` left in the area, if any.
+fn drop_return_value(g: *mut PyGenObj) {
+    // SAFETY: `g` is live.
+    unsafe {
+        if (*g).has_ret != 0 {
+            (*g).has_ret = 0;
+            if let Some(drop) = (*g).drop_ret {
+                drop(area(g));
+            }
+        }
+    }
+}
+
+/// Releases a value the body yielded that nobody takes (a generator that
+/// yields while it is being closed).
+fn drop_yielded_value(g: *mut PyGenObj) {
+    // SAFETY: `g` is live.
+    unsafe {
+        if let Some(drop) = (*g).drop_yield {
+            drop(area(g));
+        }
+    }
+}
+
+/// Runs the body once, from where it is suspended, with `sent` telling the
+/// `yield` it resumes at whether a value was sent in.
+///
+/// # Safety
+/// `g` must be a live, suspended generator.
+unsafe fn run(g: *mut PyGenObj, sent: u8) -> i8 {
+    // SAFETY (caller): `g` is live and suspended.
+    unsafe {
+        (*g).state = RUNNING;
+        (*g).sent = sent;
+        (*g).started = 1;
+        frame_call((*g).frame, 0);
+        (*g).sent = 0;
+        if (*g).state != DONE {
+            (*g).state = SUSPENDED;
+            return STEP_YIELDED;
+        }
+        destroy_frame(g);
+        if (*g).has_ret != 0 {
+            STEP_RETURNED
+        } else {
+            STEP_FINISHED
+        }
+    }
+}
+
+/// PEP 479: a `StopIteration` leaving a generator's body becomes
+/// `RuntimeError: generator raised StopIteration`.
+fn stop_iteration_to_runtime_error() {
+    if crate::exception::pycc_rt_exception_active() == 0 {
+        return;
+    }
+    let value = crate::exception::pycc_rt_exception_value();
+    // SAFETY: a pending exception value is a live exception object.
+    if !value.is_null() && unsafe { (*value).type_tag } == EXCEPTION_TYPE_STOP_ITERATION {
+        crate::exception::pycc_rt_exception_clear();
+        raise_builtin(
+            EXCEPTION_TYPE_RUNTIME_ERROR,
+            "RuntimeError",
+            "generator raised StopIteration",
+        );
+    }
+}
+
+/// Resumes `g`: `1` when it yielded (the value is in the area, owned by the
+/// caller), `2` when its body returned a value (in the area, owned by the
+/// caller, to become `StopIteration.value`), `0` when it finished without
+/// one, was already finished, or raised (the exception is pending). `sent`
+/// is `1` when the caller stored a value to send in the area.
 ///
 /// # Safety
 /// `g` must be a live generator.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_gen_resume(g: *mut PyGenObj) -> i8 {
+pub unsafe extern "C" fn pycc_rt_gen_step(g: *mut PyGenObj, sent: i8) -> i8 {
     // SAFETY (caller): `g` is live.
     unsafe {
         match (*g).state {
-            DONE => return 0,
+            DONE => return STEP_FINISHED,
             RUNNING => {
                 raise_builtin(
                     EXCEPTION_TYPE_VALUE_ERROR,
                     "ValueError",
                     "generator already executing",
                 );
-                return 0;
+                return STEP_FINISHED;
             }
             _ => {}
         }
-        (*g).state = RUNNING;
-        frame_call((*g).frame, 0);
-        if (*g).state == DONE {
-            destroy_frame(g);
-            0
-        } else {
-            (*g).state = SUSPENDED;
-            1
+        let answer = run(g, u8::from(sent != 0));
+        if answer == STEP_FINISHED {
+            stop_iteration_to_runtime_error();
         }
+        answer
+    }
+}
+
+/// Runs `g`'s body to its next `yield` (`1`: a value is at
+/// [`VALUE_OFFSET`], owned by the caller) or to its end (`0`: exhausted;
+/// an exception the body raised is pending; a returned value is released).
+/// A generator resumed from its own body raises `ValueError: generator
+/// already executing`.
+///
+/// # Safety
+/// `g` must be a live generator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_gen_resume(g: *mut PyGenObj) -> i8 {
+    // SAFETY (caller): `g` is live.
+    match unsafe { pycc_rt_gen_step(g, 0) } {
+        STEP_RETURNED => {
+            drop_return_value(g);
+            STEP_FINISHED
+        }
+        answer => answer,
     }
 }
 
@@ -209,6 +365,120 @@ pub unsafe extern "C" fn pycc_rt_gen_next(g: *mut PyGenObj) -> i8 {
         raise_builtin(EXCEPTION_TYPE_STOP_ITERATION, "StopIteration", "");
     }
     got
+}
+
+/// Whether `g.send(value)` may store `value` in the area and resume
+/// ([`pycc_rt_gen_step`] with `sent == 1`): `1` when `g` is suspended,
+/// else `0` with CPython's exception raised -- `StopIteration` for a
+/// finished generator, `ValueError` for a running one, and `TypeError` for
+/// a non-`None` value sent to one that has not started (`is_none == 0`).
+///
+/// # Safety
+/// `g` must be a live generator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_gen_can_send(g: *mut PyGenObj, is_none: i8) -> i8 {
+    // SAFETY (caller): `g` is live.
+    unsafe {
+        match (*g).state {
+            DONE => {
+                raise_builtin(EXCEPTION_TYPE_STOP_ITERATION, "StopIteration", "");
+                0
+            }
+            RUNNING => {
+                raise_builtin(
+                    EXCEPTION_TYPE_VALUE_ERROR,
+                    "ValueError",
+                    "generator already executing",
+                );
+                0
+            }
+            _ if (*g).started == 0 && is_none == 0 => {
+                raise_builtin(
+                    EXCEPTION_TYPE_TYPE_ERROR,
+                    "TypeError",
+                    "can't send non-None value to a just-started generator",
+                );
+                0
+            }
+            _ => 1,
+        }
+    }
+}
+
+/// `g.throw(exc)`: raises `exc` at the `yield` where `g` is suspended (at
+/// its start when it has not run yet), with [`pycc_rt_gen_step`]'s answers.
+/// A finished generator raises `exc` in the caller.
+///
+/// # Safety
+/// `g` must be a live generator, `exc` a live exception object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_gen_throw(g: *mut PyGenObj, exc: *mut PyExceptionObj) -> i8 {
+    // SAFETY (caller): `g` is live.
+    unsafe {
+        match (*g).state {
+            DONE => {
+                crate::exception::pycc_rt_exception_raise(exc);
+                STEP_FINISHED
+            }
+            RUNNING => {
+                raise_builtin(
+                    EXCEPTION_TYPE_VALUE_ERROR,
+                    "ValueError",
+                    "generator already executing",
+                );
+                STEP_FINISHED
+            }
+            _ => {
+                (*g).mode = MODE_THROWING;
+                (*g).thrown = exc;
+                pycc_rt_gen_step(g, 0)
+            }
+        }
+    }
+}
+
+/// Raises, at a `yield` the body just resumed at, what the generator's mode
+/// asks for: `GeneratorExit` when it is being closed, the thrown exception
+/// for `throw()`. The body calls it only when the mode byte is non-zero.
+///
+/// # Safety
+/// `g` must be a live generator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_gen_raise_mode(g: *mut PyGenObj) {
+    // SAFETY (caller): `g` is live.
+    unsafe {
+        if (*g).mode == MODE_THROWING {
+            (*g).mode = MODE_NONE;
+            let thrown = std::mem::replace(&mut (*g).thrown, std::ptr::null_mut());
+            crate::exception::pycc_rt_exception_raise(thrown);
+        } else {
+            pycc_rt_gen_raise_exit();
+        }
+    }
+}
+
+/// Raises `TypeError` at a `yield` expression resumed by `next()` (no value
+/// sent) whose generator's send type does not admit `None`
+/// (`docs/DEVIATIONS.md`).
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_gen_raise_nothing_sent() {
+    raise_builtin(
+        EXCEPTION_TYPE_TYPE_ERROR,
+        "TypeError",
+        "a yield expression whose send type excludes None was resumed by next() (send a value)",
+    );
+}
+
+/// Raises `TypeError` where a `yield from` whose delegate had already
+/// finished (CPython's result `None`) needs a value of a non-`None` return
+/// type (`docs/DEVIATIONS.md`).
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_gen_raise_no_return() {
+    raise_builtin(
+        EXCEPTION_TYPE_TYPE_ERROR,
+        "TypeError",
+        "yield from a finished generator gave None for a non-None return type",
+    );
 }
 
 /// Raises `GeneratorExit` at the `yield` a closing generator resumes at.
@@ -228,13 +498,143 @@ pub extern "C" fn pycc_rt_gen_raise_exit() {
     }
     let exit = GENERATOR_EXIT.with(|cell| {
         if cell.get().is_null() {
-            raise_builtin(EXCEPTION_TYPE_FOREIGN_BASE, "GeneratorExit", "");
+            raise_builtin(EXCEPTION_TYPE_GENERATOR_EXIT, "GeneratorExit", "");
             cell.set(crate::exception::pycc_rt_exception_value());
             crate::exception::pycc_rt_exception_clear();
         }
         cell.get()
     });
     crate::exception::pycc_rt_exception_raise(exit);
+}
+
+/// Whether the pending exception is `GeneratorExit`.
+fn generator_exit_pending() -> bool {
+    crate::exception::pycc_rt_exception_active() != 0
+        && crate::exception::is_named(crate::exception::pycc_rt_exception_value(), "GeneratorExit")
+}
+
+/// `g.close()`: `1` when the generator is closed (it was finished, never
+/// started, or its body let `GeneratorExit` out or returned), `0` with an
+/// exception pending -- the body raised something else, or yielded
+/// (`RuntimeError: generator ignored GeneratorExit`).
+///
+/// # Safety
+/// `g` must be a live generator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_gen_close(g: *mut PyGenObj) -> i8 {
+    // SAFETY (caller): `g` is live.
+    unsafe {
+        match (*g).state {
+            DONE => return 1,
+            RUNNING => {
+                raise_builtin(
+                    EXCEPTION_TYPE_VALUE_ERROR,
+                    "ValueError",
+                    "generator already executing",
+                );
+                return 0;
+            }
+            _ => {}
+        }
+        (*g).mode = MODE_CLOSING;
+        let answer = run(g, 0);
+        (*g).mode = MODE_NONE;
+        match answer {
+            STEP_YIELDED => {
+                drop_yielded_value(g);
+                raise_builtin(
+                    EXCEPTION_TYPE_RUNTIME_ERROR,
+                    "RuntimeError",
+                    "generator ignored GeneratorExit",
+                );
+                0
+            }
+            STEP_RETURNED => {
+                drop_return_value(g);
+                1
+            }
+            _ => {
+                stop_iteration_to_runtime_error();
+                if generator_exit_pending() {
+                    crate::exception::pycc_rt_exception_clear();
+                }
+                i8::from(crate::exception::pycc_rt_exception_active() == 0)
+            }
+        }
+    }
+}
+
+/// One step of `yield from sub` in the generator `this`: `first` starts
+/// `sub` (`next`); otherwise `this` was just resumed and the step forwards
+/// what resumed it -- a sent value (`send`, copied into `sub` when
+/// `forward_send`), an exception (`throw`), or a close (`sub` is closed and
+/// `GeneratorExit` raised in `this`). Answers like [`pycc_rt_gen_step`]; a
+/// value `sub` yields is moved into `this`'s area (`yield_size` bytes), a
+/// value it returns stays in `sub`'s.
+///
+/// # Safety
+/// `this` and `sub` must be live generators.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_gen_delegate(
+    this: *mut PyGenObj,
+    sub: *mut PyGenObj,
+    first: i8,
+    forward_send: i8,
+    yield_size: i64,
+    send_size: i64,
+) -> i8 {
+    // SAFETY (caller): both are live.
+    unsafe {
+        let answer = if first != 0 {
+            pycc_rt_gen_step(sub, 0)
+        } else {
+            match (*this).mode {
+                MODE_CLOSING => {
+                    if pycc_rt_gen_close(sub) != 0 {
+                        pycc_rt_gen_raise_exit();
+                    }
+                    return STEP_FINISHED;
+                }
+                MODE_THROWING => {
+                    (*this).mode = MODE_NONE;
+                    let thrown = std::mem::replace(&mut (*this).thrown, std::ptr::null_mut());
+                    pycc_rt_gen_throw(sub, thrown)
+                }
+                _ if (*this).sent != 0 => {
+                    if forward_send != 0 {
+                        if pycc_rt_gen_can_send(sub, 0) == 0 {
+                            return STEP_FINISHED;
+                        }
+                        std::ptr::copy_nonoverlapping(
+                            area(this),
+                            area(sub),
+                            usize::try_from(send_size).unwrap_or(0),
+                        );
+                    }
+                    pycc_rt_gen_step(sub, 1)
+                }
+                _ => pycc_rt_gen_step(sub, 0),
+            }
+        };
+        if answer == STEP_YIELDED {
+            std::ptr::copy_nonoverlapping(
+                area(sub),
+                area(this),
+                usize::try_from(yield_size).unwrap_or(0),
+            );
+        }
+        answer
+    }
+}
+
+/// Raises a value-less `StopIteration` unless an exception is already
+/// pending: what a `next()`/`send()`/`throw()` of a generator answering
+/// `0` ([`pycc_rt_gen_step`]) raises in its caller.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_gen_stop_unless_raised() {
+    if crate::exception::pycc_rt_exception_active() == 0 {
+        raise_builtin(EXCEPTION_TYPE_STOP_ITERATION, "StopIteration", "");
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -260,38 +660,53 @@ pub extern "C" fn pycc_rt_gen_decref(g: *mut PyGenObj) {
             return;
         }
         if (*g).state == SUSPENDED && !(*g).frame.is_null() {
-            close(g);
+            close_on_release(g);
         }
         destroy_frame(g);
-        let size = *size_cell(g) as usize;
-        std::alloc::dealloc(g.cast::<u8>(), layout(size));
+        drop_return_value(g);
+        std::alloc::dealloc(g.cast::<u8>(), layout((*g).size as usize));
     }
     GEN_LIVE.fetch_sub(1, Ordering::Relaxed);
 }
 
-/// Resumes a suspended generator with its closing flag set, so its body
+/// Closes a suspended generator whose last reference is going: its body
 /// unwinds from the suspended `yield` (see the module documentation).
-fn close(g: *mut PyGenObj) {
+fn close_on_release(g: *mut PyGenObj) {
     let saved = crate::exception::save_pending();
     // SAFETY: `g` is live and suspended, its frame live.
     unsafe {
-        (*g).closing = 1;
-        // Each `yield` reached while closing raises `GeneratorExit` again,
-        // so the body always reaches its final suspend.
-        while (*g).state != DONE && !(*g).frame.is_null() {
-            (*g).state = RUNNING;
-            frame_call((*g).frame, 0);
-            if (*g).state != DONE {
-                (*g).state = SUSPENDED;
+        let started = (*g).started != 0;
+        (*g).mode = MODE_CLOSING;
+        if run(g, 0) == STEP_YIELDED {
+            // The body caught `GeneratorExit` and yielded again: reported
+            // as CPython reports it, and the frame is freed where it stands
+            // (its locals are not released -- `docs/DEVIATIONS.md`).
+            drop_yielded_value(g);
+            raise_builtin(
+                EXCEPTION_TYPE_RUNTIME_ERROR,
+                "RuntimeError",
+                "generator ignored GeneratorExit",
+            );
+            crate::exception::report_unraisable(
+                crate::exception::pycc_rt_exception_value(),
+                "generator",
+            );
+            crate::exception::pycc_rt_exception_clear();
+            let frame = std::mem::replace(&mut (*g).frame, std::ptr::null_mut());
+            (*g).state = DONE;
+            frame_call(frame, 1);
+        }
+        (*g).mode = MODE_NONE;
+        if crate::exception::pycc_rt_exception_active() != 0 {
+            stop_iteration_to_runtime_error();
+            if started && !generator_exit_pending() {
+                crate::exception::report_unraisable(
+                    crate::exception::pycc_rt_exception_value(),
+                    "generator",
+                );
             }
+            crate::exception::pycc_rt_exception_clear();
         }
-    }
-    if crate::exception::pycc_rt_exception_active() != 0 {
-        let value = crate::exception::pycc_rt_exception_value();
-        if !crate::exception::is_named(value, "GeneratorExit") {
-            crate::exception::report_unraisable(value, "generator");
-        }
-        crate::exception::pycc_rt_exception_clear();
     }
     crate::exception::restore_pending(saved);
 }
