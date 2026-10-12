@@ -100,9 +100,13 @@ fn erase(ty: &mut Ty) {
         Ty::List(inner)
         | Ty::Set(inner)
         | Ty::FrozenSet(inner)
-        | Ty::Optional(inner)
-        | Ty::Generator(inner) => {
+        | Ty::Optional(inner) => {
             erase(inner);
+        }
+        Ty::Generator(sig) => {
+            erase(&mut sig.0);
+            erase(&mut sig.1);
+            erase(&mut sig.2);
         }
         Ty::Dict(pair) => {
             erase(&mut pair.0);
