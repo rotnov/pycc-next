@@ -741,7 +741,11 @@ pub(crate) fn check_dict_set(
     if let Ty::List(elem) = &dict_ty {
         let index_ty = infer_expr_in(env, local_names, key)?;
         let value_ty = infer_expr_in(env, local_names, value)?;
-        return list_ops::check_list_set(elem, &index_ty, &value_ty);
+        return list_ops::check_list_set(elem, &index_ty, &value_ty).inspect_err(|_| {
+            // Non-strict mode (#3): a list holding values of two types is
+            // CPython's own list, as every Python list is.
+            non_strict::request_widen(dict, &dict_ty, &Ty::Object, |_| true);
+        });
     }
     let Ty::Dict(kv) = &dict_ty else {
         return Err(Diagnostic::error(

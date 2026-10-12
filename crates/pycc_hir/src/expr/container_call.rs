@@ -146,6 +146,18 @@ fn lower_list_pop(
     imports: &[ImportBinding],
     signatures: &SignatureTable,
 ) -> Result<HirExpr, Diagnostic> {
+    // Any other receiver (`grid[i].pop()`) is an ordinary method call, as
+    // `xs.pop(i)` is below.
+    if !matches!(attr.value.as_ref(), Expr::Name(_) | Expr::Attribute(_)) {
+        return super::receiver_dispatch::lower_method_call(
+            call,
+            attr,
+            in_function,
+            class_name,
+            imports,
+            signatures,
+        );
+    }
     let list = lower_container_receiver(
         attr,
         "`.pop()` is only supported on a name or an instance attribute so far",

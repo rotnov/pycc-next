@@ -246,13 +246,18 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
             range,
         ));
         (key, dict)
-    } else if !is_name(&target) {
-        // Any other tuple target: bind a temporary, unpack it first thing.
-        let tmp = fresh.name();
-        head.push(assign(target, load(&tmp, range), range));
-        (store(&tmp, range), iter)
     } else {
         (target, iter)
+    };
+    // Any other tuple target -- or what is left of one above, such as the
+    // item of `for i, (a, b) in enumerate(xs)`: bind a temporary, unpack it
+    // right after the head.
+    let target = if is_name(&target) {
+        target
+    } else {
+        let tmp = fresh.name();
+        head.push(assign(target, load(&tmp, range), range));
+        store(&tmp, range)
     };
     let iter = if is_name(&iter)
         || is_call_to(&iter, "range").is_some()

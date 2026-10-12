@@ -492,9 +492,9 @@ pub(crate) fn lower_method_call_expr(
                 index,
                 value,
             },
-            ("pop", Some(index), None) => MirExpr::ListPop {
+            ("pop", index, None) => MirExpr::ListPop {
                 list: receiver,
-                index: Some(index),
+                index,
                 ty: *elem_ty,
             },
             _ => panic!(

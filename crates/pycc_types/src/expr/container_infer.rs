@@ -597,6 +597,11 @@ pub(crate) fn infer_list_append_expr(
     // `is_assignable` rule applies here, not there. Reuses T0021 (a
     // call-site/assignment constraint mismatch), not a new code.
     if !is_assignable(value_ty.clone(), (**elem_ty).clone()) {
+        // Non-strict mode (#3): a list holding values of two types is
+        // CPython's own list, as every Python list is.
+        if let pycc_hir::ContainerReceiver::Name(name) = list {
+            crate::non_strict::request_widen(name, &list_ty, &Ty::Object, |_| true);
+        }
         return Err(Diagnostic::error(
             "T0021",
             format!(

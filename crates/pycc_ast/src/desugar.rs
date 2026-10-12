@@ -46,12 +46,14 @@
 mod aliases;
 mod build;
 mod closures;
+mod displays;
 mod comps;
 mod exprs;
 mod ext_generators;
 mod ext_signatures;
 mod globals;
 mod helpers;
+mod iter_alias;
 mod hoist;
 mod keys;
 mod ndarray_ndim;
@@ -131,9 +133,11 @@ impl Fresh {
 pub fn desugar(module: &mut ModModule) {
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+        displays::canonical_displays(&mut body);
         wildcard::expand_wildcards(&mut body);
         ndarray_ndim::close_ndims(&mut body);
         aliases::builtin_aliases(&mut body);
+        iter_alias::iterator_readers(&mut body);
         aliases::drop_object_bases(&mut body);
         stdlib::native_stdlib_calls(&mut body);
         webs::split_webs(&mut body);

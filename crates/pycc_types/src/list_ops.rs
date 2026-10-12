@@ -123,8 +123,9 @@ pub(crate) fn check_list_set(elem: &Ty, index: &Ty, value: &Ty) -> Result<(), Di
 }
 
 /// A method call on a `list[T]` receiver that is not one of the
-/// hand-recognized `.append(v)` / `.pop()` nodes: `.insert(i, v)` and
-/// `.pop(i)`. Every other method is refused.
+/// hand-recognized `.append(v)` / `.pop()` nodes: `.insert(i, v)`,
+/// `.pop(i)`, and `.pop()` on a receiver the node does not take (a
+/// subscript, a call). Every other method is refused.
 pub(crate) fn list_method_ty(elem: &Ty, method: &str, arg_tys: &[Ty]) -> Result<Ty, Diagnostic> {
     match (method, arg_tys) {
         ("insert", [index, value]) => {
@@ -136,6 +137,8 @@ pub(crate) fn list_method_ty(elem: &Ty, method: &str, arg_tys: &[Ty]) -> Result<
             require_index(index, "list.pop() index")?;
             Ok(elem.clone())
         }
+        // `grid[i].pop()`: a receiver other than a name or an attribute.
+        ("pop", []) => Ok(elem.clone()),
         _ => Err(Diagnostic::error(
             "C0001",
             format!(
