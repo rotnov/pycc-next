@@ -432,10 +432,16 @@ pub(crate) fn check_object_call_args<'a>(
     what: &str,
 ) -> Result<(), Diagnostic> {
     let operation = format!("passing a class method's `cls` argument to a CPython object's {what}");
-    for arg in args {
+    let args: Vec<&HirExpr> = args.into_iter().collect();
+    for arg in &args {
         refuse_classmethod_cls(env, arg, &operation)?;
     }
-    for arg_ty in arg_tys {
+    for (index, arg_ty) in arg_tys.iter().enumerate() {
+        if let Some(arg) = args.get(index)
+            && crate::object_box::fresh_container(env, arg, arg_ty)
+        {
+            continue;
+        }
         if !is_packable_operand(arg_ty)
             && !is_packable_tuple(arg_ty)
             && !matches!(arg_ty, Ty::None)

@@ -57,6 +57,7 @@ mod keys;
 mod ndarray_ndim;
 mod signatures;
 mod starred;
+mod stdin_bytes;
 mod stdlib;
 mod stmts;
 mod webs;

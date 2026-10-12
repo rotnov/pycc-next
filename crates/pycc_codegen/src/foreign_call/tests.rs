@@ -583,9 +583,10 @@ fn an_unmarshallable_subscript_key_is_an_internal_error() {
 
 /// The defensive arm in [`packer_for`]: `pycc_types` refuses every
 /// argument type that has no packer, so reaching it is a front-end
-/// defect. Reached here by handing the node a list argument, which no
+/// defect. Reached here by handing the node a dict argument, which no
 /// type-checked program produces (a `None` one is packed since Part 8 of
-/// #1371, `keyword_tests.rs`).
+/// #1371, `keyword_tests.rs`, and a fresh list is copied in non-strict
+/// mode).
 #[test]
 #[should_panic(expected = "did not evaluate to a marshallable scalar")]
 fn an_unmarshallable_argument_is_an_internal_error() {
@@ -594,7 +595,10 @@ fn an_unmarshallable_argument_is_an_internal_error() {
         call(
             "gc",
             "disable",
-            vec![MirExpr::ListLiteral(vec![MirExpr::IntLiteral(1)])],
+            vec![MirExpr::DictLiteral(vec![(
+                MirExpr::IntLiteral(1),
+                MirExpr::IntLiteral(2),
+            )])],
         ),
     );
 }

@@ -381,6 +381,33 @@ pub unsafe extern "C" fn pycc_rt_list_set(list: *mut PyListObj, index: i64, word
     }
 }
 
+/// The element kind of `xs[index]` (`LIST_KIND_*`): a tuple object's own
+/// per-element kind, a list's one kind. The `--ext` shim reads it to copy a
+/// fresh native container into a CPython one (`pycc_ext_obj_pack_list`).
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer and `index` in `[0, len)`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_elem_kind(list: *mut PyListObj, index: i64) -> i64 {
+    let list = unsafe { &*list };
+    if list.kinds.is_null() {
+        list.kind
+    } else {
+        i64::from(unsafe { *list.kinds.add(index as usize) })
+    }
+}
+
+/// Whether `xs` is a tuple object (it has per-element kinds, or is a
+/// homogeneous tuple held as a list).
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_is_tuple(list: *mut PyListObj) -> i64 {
+    let list = unsafe { &*list };
+    i64::from(!list.kinds.is_null() || list.frozen)
+}
+
 /// `len(xs)` as a raw count.
 ///
 /// # Safety

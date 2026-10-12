@@ -57,6 +57,8 @@ pub(super) fn packer_for<'ctx>(scalar: Scalar<'ctx>) -> (&'static str, BasicValu
         Scalar::Str(value) => (EXT_OBJ_PACK_STR_SYMBOL, value.into()),
         Scalar::Object(value) => (EXT_OBJ_PACK_OBJECT_SYMBOL, value.into()),
         Scalar::Instance(value) => (EXT_OBJ_PACK_INSTANCE_SYMBOL, value.into()),
+        // Non-strict mode: a fresh native list copied into a CPython one.
+        Scalar::List(value) => (EXT_OBJ_PACK_LIST_SYMBOL, value.into()),
         _ => panic!(
             "pycc_codegen: internal error: an operand of a foreign object operation did not \
              evaluate to a marshallable scalar -- pycc_types admits only `int`, `float`, \

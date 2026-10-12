@@ -657,3 +657,87 @@ typedef struct {
     void *inst;
 } PyccExtInstance;
 
+/*
+ * Non-strict mode: a fresh native container copied into the CPython one
+ * (`EXT_OBJ_PACK_LIST_SYMBOL` in `crates/pycc_codegen/src/ext.rs`). The
+ * front end admits this only for a value nothing else holds yet -- a
+ * `list(...)`/`sorted(...)` result, a `str.split()`, a comprehension or
+ * display of such values -- so a copy cannot break aliasing.
+ *
+ * `list` is a pycc `PyListObj` (a list or a tuple object), borrowed. Each
+ * element is packed by its runtime kind (`LIST_KIND_*` in
+ * `crates/pycc_rt/src/list.rs`): an `int`, `float` (bit pattern), `bool`,
+ * `str`, a compiled instance (its carrier, so its identity survives), or a
+ * nested list or tuple, copied the same way. A tuple object becomes a
+ * CPython `tuple`, a list a `list`.
+ *
+ * Returns a new reference, or `NULL` with the exception set.
+ */
+extern long long pycc_rt_list_len(void *list);
+extern long long pycc_rt_list_get(void *list, long long index);
+extern long long pycc_rt_list_elem_kind(void *list, long long index);
+extern long long pycc_rt_list_is_tuple(void *list);
+PyObject *pycc_ext_obj_pack_instance(void *inst);
+
+PyObject *pycc_ext_obj_pack_list(void *list)
+{
+    long long len;
+    long long i;
+    int is_tuple;
+    PyObject *out;
+
+    if (list == NULL) {
+        PyErr_SetString(PyExc_SystemError, "pycc_ext_obj_pack_list called with NULL");
+        return NULL;
+    }
+    len = pycc_rt_list_len(list);
+    is_tuple = pycc_rt_list_is_tuple(list) != 0;
+    out = is_tuple ? PyTuple_New((Py_ssize_t)len) : PyList_New((Py_ssize_t)len);
+    if (out == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < len; i++) {
+        long long word = pycc_rt_list_get(list, i);
+        PyObject *item;
+        double value;
+
+        switch (pycc_rt_list_elem_kind(list, i)) {
+        case 0:
+            item = pycc_ext_obj_pack_int(word);
+            break;
+        case 1:
+            memcpy(&value, &word, sizeof value);
+            item = pycc_ext_obj_pack_float(value);
+            break;
+        case 2:
+            item = pycc_ext_obj_pack_bool((char)(word != 0));
+            break;
+        case 3:
+            item = pycc_ext_obj_pack_str((void *)(intptr_t)word);
+            break;
+        case 4:
+            item = pycc_ext_obj_pack_instance((void *)(intptr_t)word);
+            break;
+        case 5:
+        case 7:
+            item = pycc_ext_obj_pack_list((void *)(intptr_t)word);
+            break;
+        default:
+            PyErr_SetString(PyExc_SystemError,
+                            "pycc_ext_obj_pack_list met an element kind it cannot copy");
+            item = NULL;
+            break;
+        }
+        if (item == NULL) {
+            Py_DECREF(out);
+            return NULL;
+        }
+        if (is_tuple) {
+            PyTuple_SetItem(out, (Py_ssize_t)i, item);
+        } else {
+            PyList_SetItem(out, (Py_ssize_t)i, item);
+        }
+    }
+    return out;
+}
+

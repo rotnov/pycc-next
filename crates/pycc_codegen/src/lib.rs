@@ -19,8 +19,6 @@ use exception_value::{emit_exception_set_frame, emit_exception_value};
 mod attr_slot;
 use attr_slot::{release_int_attr_slot_before_store, scalar_to_slot_word, slot_word_to_scalar};
 mod assigned_slots;
-mod nothrow;
-mod int_tree;
 mod bigint_rc;
 /// `<< >> & | ^` operand encoding and the `bool`-result arm (#1210).
 mod binop;
@@ -32,6 +30,8 @@ mod compare_chain;
 mod comprehension;
 mod copy_slots;
 mod if_exp;
+mod int_tree;
+mod nothrow;
 use bigint_rc::{
     BigIntRefcount, emit_bigint_refcount_call, pop_pending_int_release,
     push_pending_int_release_if_scalar_temporary, push_pending_int_release_if_temporary,
@@ -143,12 +143,13 @@ use ext::{
     EXT_OBJ_ISINSTANCE_SYMBOL, EXT_OBJ_ITER_NEXT_SYMBOL, EXT_OBJ_LEN_SYMBOL,
     EXT_OBJ_NEW_COLLECTION_SYMBOL, EXT_OBJ_NONE_SYMBOL, EXT_OBJ_NOT_IMPLEMENTED_SYMBOL,
     EXT_OBJ_PACK_BOOL_SYMBOL, EXT_OBJ_PACK_FLOAT_SYMBOL, EXT_OBJ_PACK_INSTANCE_SYMBOL,
-    EXT_OBJ_PACK_INT_SYMBOL, EXT_OBJ_PACK_OBJECT_SYMBOL, EXT_OBJ_PACK_STR_SYMBOL,
-    EXT_OBJ_RAISE_SYMBOL, EXT_OBJ_RICHCOMPARE_SYMBOL, EXT_OBJ_SETATTR_SYMBOL,
-    EXT_OBJ_TO_FLOAT_SYMBOL, EXT_OBJ_TO_INT_SYMBOL, EXT_OBJ_TO_STR_SYMBOL, EXT_OBJ_TRUTHY_SYMBOL,
-    EXT_OBJ_TYPE_SYMBOL, EXT_OBJ_UNBOX_BOOL_SYMBOL, EXT_OBJ_UNBOX_FLOAT_SYMBOL,
-    EXT_OBJ_UNBOX_INSTANCE_SYMBOL, EXT_OBJ_UNBOX_INT_SYMBOL, EXT_OBJ_UNBOX_STR_SYMBOL,
-    EXT_OBJ_UNPACK_FLOAT_TUPLE_SYMBOL, ObjCollectionKind, entry_fn_name, is_module_entry_symbol,
+    EXT_OBJ_PACK_INT_SYMBOL, EXT_OBJ_PACK_LIST_SYMBOL, EXT_OBJ_PACK_OBJECT_SYMBOL,
+    EXT_OBJ_PACK_STR_SYMBOL, EXT_OBJ_RAISE_SYMBOL, EXT_OBJ_RICHCOMPARE_SYMBOL,
+    EXT_OBJ_SETATTR_SYMBOL, EXT_OBJ_TO_FLOAT_SYMBOL, EXT_OBJ_TO_INT_SYMBOL, EXT_OBJ_TO_STR_SYMBOL,
+    EXT_OBJ_TRUTHY_SYMBOL, EXT_OBJ_TYPE_SYMBOL, EXT_OBJ_UNBOX_BOOL_SYMBOL,
+    EXT_OBJ_UNBOX_FLOAT_SYMBOL, EXT_OBJ_UNBOX_INSTANCE_SYMBOL, EXT_OBJ_UNBOX_INT_SYMBOL,
+    EXT_OBJ_UNBOX_STR_SYMBOL, EXT_OBJ_UNPACK_FLOAT_TUPLE_SYMBOL, ObjCollectionKind, entry_fn_name,
+    is_module_entry_symbol,
 };
 #[cfg(test)]
 mod tests;

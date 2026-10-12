@@ -84,6 +84,10 @@ pub(crate) fn admits_value(
     if *to == Ty::Object && crate::non_strict::is_non_strict() && display_boxable(value, from) {
         return Ok(true);
     }
+    // Non-strict mode: so does a fresh native list nothing else holds yet.
+    if *to == Ty::Object && fresh_container(env, value, from) {
+        return Ok(true);
+    }
     // Non-strict mode (#3): a name holding a native container that flows
     // into an `object` slot becomes an `object` itself (widening), so the
     // container it builds is the CPython one from the start.
@@ -104,6 +108,61 @@ pub(crate) fn admits_value(
         "boxing a class method's `cls` into an `object` slot",
     )?;
     Ok(true)
+}
+
+/// Non-strict mode: whether `value` is a native list of type `ty` that
+/// nothing else holds yet, whose CPython copy (`pycc_ext_obj_pack_list`)
+/// therefore cannot break aliasing: a display, a comprehension, a
+/// `list(...)`/`sorted(...)`/`reversed(...)` result, a `str.split()`, a
+/// `.copy()`, a concatenation, repetition or slice -- of elements that are
+/// immutable or carry their identity across (a scalar, a `str`, a tuple of
+/// those, a compiled instance), or, for a display or comprehension, of
+/// elements that are fresh lists themselves.
+pub(crate) fn fresh_container(env: &Environment, value: &HirExpr, ty: &Ty) -> bool {
+    crate::non_strict::is_non_strict() && fresh_list(env, value, ty)
+}
+
+fn fresh_list(env: &Environment, value: &HirExpr, ty: &Ty) -> bool {
+    let Ty::List(element) = ty else {
+        return false;
+    };
+    let flat = shareable_element(env, element);
+    match value {
+        HirExpr::ListLiteral(elements) => {
+            elements.iter().all(|e| flat || fresh_list(env, e, element))
+        }
+        HirExpr::Comprehension(comp) => {
+            matches!(&comp.elt, pycc_hir::CompElt::List(e) if flat || fresh_list(env, e, element))
+        }
+        HirExpr::EmptyList(_) => true,
+        HirExpr::Call { callee, .. } => {
+            flat && matches!(callee.as_str(), "list" | "sorted" | "reversed")
+                && env.lookup_function(callee).is_none()
+        }
+        HirExpr::MethodCall { method, .. } => {
+            flat && matches!(method.as_str(), "split" | "rsplit" | "splitlines" | "copy")
+        }
+        HirExpr::BinOp {
+            op: pycc_hir::BinOpKind::Add | pycc_hir::BinOpKind::Mul,
+            ..
+        }
+        | HirExpr::Slice { .. } => flat,
+        _ => false,
+    }
+}
+
+/// Whether a list element of type `ty` may be shared between a native list
+/// and its CPython copy: immutable, or an instance whose carrier keeps its
+/// identity.
+fn shareable_element(env: &Environment, ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+        Ty::Tuple(elements) => elements
+            .iter()
+            .all(|e| matches!(e, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)),
+        Ty::Instance(_) => foreign::is_object_operand(env, ty),
+        _ => false,
+    }
 }
 
 /// Whether `value` is a list, tuple, set or dict display of type `ty` whose

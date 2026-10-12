@@ -274,6 +274,12 @@ pub const EXT_OBJ_PACK_OBJECT_SYMBOL: &str = "pycc_ext_obj_pack_object";
 /// argument.
 pub const EXT_OBJ_PACK_INSTANCE_SYMBOL: &str = "pycc_ext_obj_pack_instance";
 
+/// Non-strict mode: a borrowed native `PyListObj *` (a list or tuple
+/// object) in, a new reference to the CPython `list` or `tuple` copying it
+/// out (`src/ext/module/object_convert.c`). `pycc_types` admits it only for
+/// a fresh container nothing else holds (`object_box::fresh_container`).
+pub const EXT_OBJ_PACK_LIST_SYMBOL: &str = "pycc_ext_obj_pack_list";
+
 /// The fixed C shim's `len` helper (Part 3 of #1026): it takes a borrowed
 /// `PyObject *` and an out-pointer, writes the D-141 encoded `int` word for
 /// `PyObject_Size(o)` through it and returns `0`, or returns `-1` with a

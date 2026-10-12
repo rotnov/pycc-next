@@ -9,6 +9,10 @@
 //!   the entry module mentions (it can never run), so it cannot fall back.
 //! * `reversed(range(...))`, `map(f, range(...))` and `filter(f,
 //!   range(...))` iterate the range as a list.
+//! * Non-strict mode copies a fresh native list (nothing else holds it
+//!   yet) into a CPython one where CPython code takes it.
+//! * `sys.stdin.buffer` reads `bytes`: natively only through an alias
+//!   whose every call is converted to numbers at once.
 //!
 //! The oracle is CPython: each fixture is built, run and compared with
 //! `python3` running the file -- stdout, the uncaught exception's last line
@@ -16,7 +20,7 @@
 
 use pycc_scratch::ScratchDir;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 fn pycc() -> Command {
     Command::new(env!("CARGO_BIN_EXE_pycc"))
@@ -65,13 +69,26 @@ fn matches_cpython(name: &str, flags: &[&str]) -> String {
             text(&build.stderr)
         );
         report = text(&build.stderr);
-        let ours = Command::new(&out).output().expect("the program runs");
-        let theirs = python().arg(fixture(name)).output().expect("python3 runs");
-        assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs ({name})");
+        let ours = run_with_stdin(Command::new(&out), name);
+        let mut oracle = python();
+        oracle.arg(fixture(name));
+        let theirs = run_with_stdin(oracle, name);
+        assert_eq!(
+            text(&ours.stdout),
+            text(&theirs.stdout),
+            "stdout differs ({name})"
+        );
         assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr), "{name}");
         assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
     }
     report
+}
+
+/// Runs `command` with fixture `name`'s `.stdin` file (if any) as stdin.
+fn run_with_stdin(mut command: Command, name: &str) -> Output {
+    let stdin = fixture(&name.replace(".py", ".stdin"));
+    let input = std::fs::File::open(&stdin).map_or_else(|_| Stdio::null(), Stdio::from);
+    command.stdin(input).output().expect("the program runs")
 }
 
 /// `pycc check` (plus `flags`) of `source` fails with exactly one
@@ -89,7 +106,10 @@ fn refused(tag: &str, source: &str, flags: &[&str], code: &str, needle: &str) {
     let rendered = text(&output.stdout);
     assert_eq!(output.status.code(), Some(1), "{tag}: {rendered}");
     assert_eq!(rendered.matches("error[").count(), 1, "{tag}: {rendered}");
-    assert!(rendered.contains(&format!("error[{code}]")), "{tag}: {rendered}");
+    assert!(
+        rendered.contains(&format!("error[{code}]")),
+        "{tag}: {rendered}"
+    );
     assert!(rendered.contains(needle), "{tag}: {rendered}");
 }
 
@@ -183,7 +203,10 @@ fn an_ext_module_keeps_t0001_for_an_unannotated_public_function() {
 
 #[test]
 fn non_strict_does_not_compile_dead_unannotated_definitions() {
-    let report = matches_cpython("non_strict_dead_defs.py", &["--non-strict", "--report-fallbacks"]);
+    let report = matches_cpython(
+        "non_strict_dead_defs.py",
+        &["--non-strict", "--report-fallbacks"],
+    );
     assert!(!report.contains("fallback:"), "{report}");
 }
 
@@ -214,9 +237,38 @@ fn a_definition_only_fallback_code_reads_is_kept() {
         .arg(&out)
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}{}", text(&build.stdout), text(&build.stderr));
+    assert!(
+        build.status.success(),
+        "{}{}",
+        text(&build.stdout),
+        text(&build.stderr)
+    );
     let ours = Command::new(&out).output().expect("the program runs");
     let theirs = python().arg(&path).output().expect("python3 runs");
     assert_eq!(text(&ours.stdout), text(&theirs.stdout));
     assert_eq!(ours.status.code(), theirs.status.code());
+}
+
+#[test]
+fn non_strict_copies_fresh_lists_into_cpython_code() {
+    matches_cpython("non_strict_fresh_lists.py", &["--non-strict"]);
+}
+
+#[test]
+fn a_numbers_only_stdin_buffer_alias_reads_natively() {
+    matches_cpython("stdin_buffer_numbers.py", &[]);
+}
+
+/// Anything else of `sys.stdin.buffer` is `bytes`: refused in strict mode,
+/// CPython's own in non-strict mode (it used to read as `str`).
+#[test]
+fn stdin_buffer_reads_bytes() {
+    matches_cpython("stdin_buffer_bytes.py", &["--non-strict"]);
+    refused(
+        "stdin_buffer_strict",
+        "import sys\ns = sys.stdin.buffer.readline().strip()\nprint(s)\n",
+        &[],
+        "T0043",
+        "cannot read an attribute",
+    );
 }

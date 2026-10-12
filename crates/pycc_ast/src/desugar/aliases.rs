@@ -18,6 +18,10 @@ pub(crate) struct SysNames {
     pub(crate) sys: Option<String>,
     pub(crate) stdin: Option<String>,
     pub(crate) stdout: Option<String>,
+    /// Whether `sys.stdin.buffer` reads as text: only through an alias
+    /// whose every call is converted to numbers
+    /// (`super::stdin_bytes::buffer_reads_as_text`).
+    pub(crate) buffer_text: bool,
 }
 
 /// A `sys` stream operation the desugaring replaces with a native builtin.
@@ -127,7 +131,8 @@ impl SysNames {
                 Stmt::Import(import) => {
                     for alias in &import.names {
                         if alias.name.as_str() == "sys" {
-                            names.sys = Some(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
+                            names.sys =
+                                Some(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
                         }
                     }
                 }
@@ -153,6 +158,7 @@ impl SysNames {
                 *slot = None;
             }
         }
+        names.buffer_text = super::stdin_bytes::buffer_reads_as_text(body, &names);
         names
     }
 
@@ -160,10 +166,14 @@ impl SysNames {
         matches!((expr, slot), (Expr::Name(n), Some(s)) if n.id.as_str() == s)
     }
 
-    /// `sys.stdin`, `sys.stdin.buffer`, `stdin`, `stdin.buffer`.
+    /// `sys.stdin`, `stdin`; `sys.stdin.buffer` and `stdin.buffer` only
+    /// when [`SysNames::buffer_text`]: it reads `bytes`, which print,
+    /// index and compare unlike `str`.
     pub(crate) fn is_stdin(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::Attribute(a) if a.attr.as_str() == "buffer" => self.is_stdin(&a.value),
+            Expr::Attribute(a) if a.attr.as_str() == "buffer" && self.buffer_text => {
+                self.is_stdin(&a.value)
+            }
             Expr::Attribute(a) if a.attr.as_str() == "stdin" => self.is(&a.value, &self.sys),
             other => self.is(other, &self.stdin),
         }
@@ -224,7 +234,13 @@ fn inferred_def(name: &str, params: Parameters, body: Expr, range: TextRange) ->
     annotated_def(name, params, body, load(INFER_MARKER, range), range)
 }
 
-fn annotated_def(name: &str, params: Parameters, body: Expr, returns: Expr, range: TextRange) -> Stmt {
+fn annotated_def(
+    name: &str,
+    params: Parameters,
+    body: Expr,
+    returns: Expr,
+    range: TextRange,
+) -> Stmt {
     Stmt::FunctionDef(StmtFunctionDef {
         node_index: AtomicNodeIndex::default(),
         range,
@@ -285,7 +301,9 @@ pub(crate) fn module_level_defs(body: &mut [Stmt], sys: &SysNames) {
                     range,
                 );
                 let params = parameters(
-                    args.iter().map(|a| parameter(a, annotation, range)).collect(),
+                    args.iter()
+                        .map(|a| parameter(a, annotation, range))
+                        .collect(),
                     range,
                 );
                 annotated_def(&name, params, call_expr, op.returns(range), range)
@@ -325,9 +343,8 @@ pub(crate) fn drop_unused_sys_imports(body: &mut Vec<Stmt>, sys: &SysNames) {
     if reads_name(body, "__pycc_fallback_ns") {
         return;
     }
-    let unread = |name: &Option<String>, body: &[Stmt]| {
-        name.as_ref().is_some_and(|n| !reads_name(body, n))
-    };
+    let unread =
+        |name: &Option<String>, body: &[Stmt]| name.as_ref().is_some_and(|n| !reads_name(body, n));
     let drop_sys = unread(&sys.sys, body);
     let drop_stdin = unread(&sys.stdin, body);
     let drop_stdout = unread(&sys.stdout, body);
@@ -336,7 +353,8 @@ pub(crate) fn drop_unused_sys_imports(body: &mut Vec<Stmt>, sys: &SysNames) {
             import.names.retain(|alias| {
                 !(drop_sys
                     && alias.name.as_str() == "sys"
-                    && sys.sys.as_deref() == Some(alias.asname.as_ref().unwrap_or(&alias.name).as_str()))
+                    && sys.sys.as_deref()
+                        == Some(alias.asname.as_ref().unwrap_or(&alias.name).as_str()))
             });
             !import.names.is_empty()
         }
@@ -362,9 +380,37 @@ pub(crate) fn stdin_lines(range: TextRange) -> Expr {
 /// The builtin functions a module may bind a short name to (`P = print`,
 /// `rg = range`).
 const ALIASABLE_BUILTINS: &[&str] = &[
-    "abs", "all", "any", "bin", "chr", "dict", "divmod", "enumerate", "filter", "float", "hex",
-    "input", "int", "len", "list", "map", "max", "min", "oct", "ord", "pow", "print", "range",
-    "reversed", "round", "set", "sorted", "str", "sum", "tuple", "zip",
+    "abs",
+    "all",
+    "any",
+    "bin",
+    "chr",
+    "dict",
+    "divmod",
+    "enumerate",
+    "filter",
+    "float",
+    "hex",
+    "input",
+    "int",
+    "len",
+    "list",
+    "map",
+    "max",
+    "min",
+    "oct",
+    "ord",
+    "pow",
+    "print",
+    "range",
+    "reversed",
+    "round",
+    "set",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "zip",
 ];
 
 /// Replaces a top-level `X = <builtin>` (both names bound nowhere else)
