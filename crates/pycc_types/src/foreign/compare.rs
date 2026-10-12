@@ -101,14 +101,17 @@ pub(crate) fn rich_compare_ty(
     ) {
         return Some(Err(diagnostic));
     }
-    Some(if super::is_object_operand(env, other) {
-        Ok(Ty::Object)
-    } else {
-        Err(object_operation_unsupported(&format!(
-            "comparing a CPython object with a `{}` value",
-            other.name()
-        )))
-    })
+    // `None` crosses as CPython's own `Py_None` (`o == None`).
+    Some(
+        if super::is_object_operand(env, other) || *other == Ty::None {
+            Ok(Ty::Object)
+        } else {
+            Err(object_operation_unsupported(&format!(
+                "comparing a CPython object with a `{}` value",
+                other.name()
+            )))
+        },
+    )
 }
 
 /// Types `item in container` / `item not in container` (Part 2b of #1371).

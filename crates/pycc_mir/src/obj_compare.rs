@@ -93,6 +93,16 @@ pub(super) fn lower_object_compare(
         });
     }
     if left.ty() == Ty::Object || right.ty() == Ty::Object {
+        // A `None` operand of a rich comparison (`o == None`) is CPython's
+        // `Py_None`; an identity test keeps its own `None` operand.
+        let (left, right) = if matches!(op, CmpOpKind::Is | CmpOpKind::IsNot) {
+            (left, right)
+        } else {
+            (
+                crate::obj_arith::display_element(left),
+                crate::obj_arith::display_element(right),
+            )
+        };
         Ok(MirExpr::ObjCompare {
             op,
             left: Box::new(left),

@@ -21,3 +21,10 @@ print(f(3))
 INF = (5, None)
 print(INF, INF[1] is None)
 print([None, 1], [[None]] * 2)
+last = [None] * 4
+for i in range(6):
+    if last[i % 4] == None:
+        last[i % 4] = i
+    elif last[i % 4] != None and None != last[i % 3]:
+        last[i % 4] = -i
+print(last)

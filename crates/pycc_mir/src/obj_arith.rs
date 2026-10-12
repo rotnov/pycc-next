@@ -69,7 +69,7 @@ pub(crate) fn object_arg(arg: MirExpr) -> MirExpr {
 
 /// An element of a display built as the CPython container: a narrowed read
 /// is the object it still is, and `None` is boxed as `Py_None`.
-pub(super) fn display_element(element: MirExpr) -> MirExpr {
+pub(crate) fn display_element(element: MirExpr) -> MirExpr {
     if element.ty() == Ty::None {
         return MirExpr::ObjectBox(Box::new(element));
     }

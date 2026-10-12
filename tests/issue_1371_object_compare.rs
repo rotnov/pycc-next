@@ -144,12 +144,6 @@ fn the_shapes_outside_part_1_are_refused() {
             "comparing a CPython object with a `list[int]` value",
         ),
         (
-            "obj_cmp_none_eq",
-            "print(o == None)\n",
-            "I0404",
-            "comparing a CPython object with a `None` value",
-        ),
-        (
             "obj_cmp_chain",
             "print(0 < o < 2)\n",
             "I0404",

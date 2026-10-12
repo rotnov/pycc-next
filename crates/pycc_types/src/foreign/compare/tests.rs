@@ -231,11 +231,12 @@ fn a_rich_comparison_with_an_unpackable_operand_is_refused() {
         "I0404",
         "comparing a CPython object with a `list[int]` value",
     );
-    assert_refused(
-        "b = numpy.pi == None\n",
-        "I0404",
-        "comparing a CPython object with a `None` value",
-    );
+}
+
+#[test]
+fn a_rich_comparison_with_none_compares_with_cpythons_none() {
+    assert_admitted("b = numpy.pi == None\n");
+    assert_admitted("b = None != numpy.pi\n");
 }
 
 #[test]
