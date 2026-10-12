@@ -26,7 +26,7 @@
 //!   given a key or value of another type is CPython's own dict; keyed
 //!   sorting and `heapq`/`bisect` over an object run CPython's own; a name
 //!   bound on some paths only is checked when read (`NameError`,
-//!   `UnboundLocalError`).
+//!   `UnboundLocalError`); `open(0)` is standard input.
 //!
 //! The oracle is CPython: each fixture is built, run and compared with
 //! `python3` running the file -- stdout, the uncaught exception's last line
@@ -377,4 +377,12 @@ fn non_strict_maybe_bound_reads_are_checked_at_run_time() {
         &["--non-strict", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
+}
+
+#[test]
+fn open_zero_reads_standard_input() {
+    for fixture in ["open_stdin.py", "open_stdin_lines.py"] {
+        let report = matches_cpython(fixture, &[]);
+        assert!(!report.contains("fallback:"), "{report}");
+    }
 }

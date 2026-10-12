@@ -22,6 +22,9 @@ pub(crate) struct SysNames {
     /// whose every call is converted to numbers
     /// (`super::stdin_bytes::buffer_reads_as_text`).
     pub(crate) buffer_text: bool,
+    /// Whether `open` is the builtin (nothing in the module binds the
+    /// name), so `open(0)` is standard input as a text file.
+    pub(crate) open_builtin: bool,
 }
 
 /// A `sys` stream operation the desugaring replaces with a native builtin.
@@ -125,11 +128,17 @@ pub(crate) fn rebound_names(body: &[Stmt]) -> HashMap<String, usize> {
 
 impl SysNames {
     pub(crate) fn collect(body: &[Stmt]) -> SysNames {
-        let mut names = SysNames::default();
+        let mut names = SysNames {
+            open_builtin: true,
+            ..SysNames::default()
+        };
         for stmt in body {
             match stmt {
                 Stmt::Import(import) => {
                     for alias in &import.names {
+                        if alias.asname.as_ref().unwrap_or(&alias.name).as_str() == "open" {
+                            names.open_builtin = false;
+                        }
                         if alias.name.as_str() == "sys" {
                             names.sys =
                                 Some(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
@@ -142,6 +151,9 @@ impl SysNames {
                 {
                     for alias in &import.names {
                         let bound = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
+                        if bound == "open" {
+                            names.open_builtin = false;
+                        }
                         match alias.name.as_str() {
                             "stdin" => names.stdin = Some(bound),
                             "stdout" => names.stdout = Some(bound),
@@ -153,6 +165,9 @@ impl SysNames {
             }
         }
         let rebound = rebound_names(body);
+        if rebound.contains_key("open") {
+            names.open_builtin = false;
+        }
         for slot in [&mut names.sys, &mut names.stdin, &mut names.stdout] {
             if slot.as_ref().is_some_and(|n| rebound.contains_key(n)) {
                 *slot = None;
@@ -170,6 +185,9 @@ impl SysNames {
     /// when [`SysNames::buffer_text`]: it reads `bytes`, which print,
     /// index and compare unlike `str`.
     pub(crate) fn is_stdin(&self, expr: &Expr) -> bool {
+        if self.is_open_stdin(expr) {
+            return true;
+        }
         match expr {
             Expr::Attribute(a) if a.attr.as_str() == "buffer" && self.buffer_text => {
                 self.is_stdin(&a.value)
@@ -177,6 +195,23 @@ impl SysNames {
             Expr::Attribute(a) if a.attr.as_str() == "stdin" => self.is(&a.value, &self.sys),
             other => self.is(other, &self.stdin),
         }
+    }
+
+    /// `open(0)` with the builtin `open`: file descriptor 0, standard
+    /// input, as a text file (`docs/DEVIATIONS.md`: it shares standard
+    /// input's one buffer).
+    fn is_open_stdin(&self, expr: &Expr) -> bool {
+        let Expr::Call(call) = expr else {
+            return false;
+        };
+        self.open_builtin
+            && matches!(call.func.as_ref(), Expr::Name(n) if n.id.as_str() == "open")
+            && call.arguments.keywords.is_empty()
+            && matches!(
+                call.arguments.args.as_ref(),
+                [Expr::NumberLiteral(n)]
+                    if matches!(&n.value, ruff_python_ast::Number::Int(i) if i.as_u8() == Some(0))
+            )
     }
 
     fn is_stdout(&self, expr: &Expr) -> bool {
