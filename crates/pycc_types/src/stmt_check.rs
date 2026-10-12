@@ -759,6 +759,9 @@ pub(crate) fn check_dict_set(
     // as `Subscript`'s own `Ty::Dict` read arm.
     let key_expr_ty = infer_expr_in(env, local_names, key)?;
     if key_expr_ty != *key_ty {
+        // Non-strict mode: a key of another type (a CPython object, say)
+        // makes the dict CPython's own, which hashes it as CPython does.
+        non_strict::request_widen(dict, &dict_ty, &Ty::Object, |_| true);
         return Err(Diagnostic::error(
             "T0021",
             format!(
@@ -772,6 +775,7 @@ pub(crate) fn check_dict_set(
     }
     let value_ty = infer_expr_in(env, local_names, value)?;
     if !is_assignable(value_ty.clone(), val_ty.clone()) {
+        non_strict::request_widen(dict, &dict_ty, &Ty::Object, |_| true);
         return Err(Diagnostic::error(
             "T0021",
             format!(

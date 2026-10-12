@@ -379,6 +379,16 @@ pub(crate) fn infer_subscript_expr(
         Ty::Dict(kv) => {
             let (key_ty, val_ty) = *kv;
             if index_ty != key_ty {
+                // Non-strict mode: as for a store (`stmt_check`), a key of
+                // another type makes the dict CPython's own.
+                if let HirExpr::Name(dict) = base.as_ref() {
+                    crate::non_strict::request_widen(
+                        dict,
+                        &Ty::Dict(Box::new((key_ty.clone(), val_ty.clone()))),
+                        &Ty::Object,
+                        |_| true,
+                    );
+                }
                 return Err(Diagnostic::error(
                     "T0021",
                     format!(

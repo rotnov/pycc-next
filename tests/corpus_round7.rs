@@ -22,7 +22,8 @@
 //!   elements is CPython's own list or tuple; a comprehension collecting
 //!   CPython objects builds CPython's own list or set; a mixed-type store
 //!   into an item of a nested list widens the outer list; `str % args`
-//!   formats through CPython; `int ** <negative literal>` is a float.
+//!   formats through CPython; `int ** <negative literal>` is a float; a dict
+//!   given a key or value of another type is CPython's own dict.
 //!
 //! The oracle is CPython: each fixture is built, run and compared with
 //! `python3` running the file -- stdout, the uncaught exception's last line
@@ -345,5 +346,14 @@ fn non_strict_percent_formatting_is_cpythons() {
 #[test]
 fn a_negative_literal_exponent_is_a_float() {
     let report = matches_cpython("negative_literal_exponent.py", &[]);
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+#[test]
+fn non_strict_mixed_dicts_are_cpython_dicts() {
+    let report = matches_cpython(
+        "non_strict_dict_widening.py",
+        &["--non-strict", "--report-fallbacks"],
+    );
     assert!(!report.contains("fallback:"), "{report}");
 }
