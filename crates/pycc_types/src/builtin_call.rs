@@ -17,5 +17,13 @@ pub(crate) fn resolve_builtin_call(callee: &str, arg_tys: &[Ty]) -> Option<Resul
         }
         return Some(Ok(acc));
     }
+    // Non-strict mode: a CPython object for the one scalar parameter is
+    // converted at run time (`pycc_hir::builtins::object_param`).
+    if let ([Ty::Object], Some((param, _))) = (arg_tys, pycc_hir::builtins::object_param(callee))
+        && crate::non_strict::is_non_strict()
+    {
+        return pycc_hir::builtins::resolve_call(callee, &[param])
+            .map(|r| r.map(|sig| sig.ret).map_err(to_diag));
+    }
     pycc_hir::builtins::resolve_call(callee, arg_tys).map(|r| r.map(|sig| sig.ret).map_err(to_diag))
 }

@@ -42,7 +42,14 @@ pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirEx
         }
         return Ok(acc);
     }
-    let tys: Vec<_> = args.iter().map(MirExpr::ty).collect();
+    let mut tys: Vec<_> = args.iter().map(MirExpr::ty).collect();
+    // A CPython object for the one scalar parameter `pycc_types` admitted
+    // (non-strict mode): codegen converts it (`object_coerce`).
+    if let ([Ty::Object], Some((param, _))) =
+        (tys.as_slice(), pycc_hir::builtins::object_param(name))
+    {
+        tys = vec![param];
+    }
     match resolve_call(name, &tys) {
         Some(Ok(sig)) => Ok(MirExpr::RtCall(Box::new(RtCallExpr { sig, args }))),
         _ => Err(args),

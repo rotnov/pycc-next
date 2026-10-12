@@ -213,6 +213,16 @@ fn infer_expr_here(
             let left_ty = infer_expr_in(env, local_names, left)?;
             let right_ty = infer_expr_in(env, local_names, right)?;
             reject_negative_literal_exponent(*op, &left_ty, right)?;
+            // Non-strict mode: `str % args` is CPython's own printf-style
+            // formatting, on the `str` and the arguments boxed.
+            if *op == BinOpKind::Mod
+                && left_ty == Ty::Str
+                && crate::non_strict::is_non_strict()
+                && (crate::foreign::is_object_operand(env, &right_ty)
+                    || crate::object_box::display_boxable(right, &right_ty))
+            {
+                return Ok(Ty::Object);
+            }
             // Non-strict mode: a fresh native list operand of an operator
             // on a CPython object crosses as a CPython copy.
             if (left_ty == Ty::Object && crate::object_box::fresh_container(env, right, &right_ty))

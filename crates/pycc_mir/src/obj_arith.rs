@@ -18,12 +18,15 @@ pub(super) fn lower_object_binop(
     left: MirExpr,
     right: MirExpr,
 ) -> Result<MirExpr, Box<(MirExpr, MirExpr)>> {
-    if left.ty() == Ty::Object || right.ty() == Ty::Object {
+    // `str % args` reaches here only as `pycc_types` admitted it in
+    // non-strict mode: CPython's printf-style formatting.
+    let formats = op == BinOpKind::Mod && left.ty() == Ty::Str;
+    if left.ty() == Ty::Object || right.ty() == Ty::Object || formats {
         Ok(MirExpr::ObjBinOp {
             op,
             in_place,
             left: Box::new(object_operand(left)),
-            right: Box::new(object_operand(right)),
+            right: Box::new(object_arg(object_operand(right))),
         })
     } else {
         Err(Box::new((left, right)))

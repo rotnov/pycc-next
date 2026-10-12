@@ -1155,3 +1155,53 @@ fn an_object_comprehension_runs_in_constant_memory() {
         peaks[1]
     );
 }
+
+/// Non-strict mode: `str % args` formats through CPython, and
+/// `sys.stdout.write` converts the CPython `str` it gets; neither the
+/// formatted object nor the converted string outlives its statement.
+#[test]
+#[ignore = "requires a CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn percent_formatting_runs_in_constant_memory() {
+    let dir = ScratchDir::new("memory_percent_format").expect("scratch dir");
+    let mut peaks = Vec::new();
+    for n in [N_SMALL, N_LARGE] {
+        let name = format!("percent_format_{n}");
+        let src = dir.join(format!("{name}.py"));
+        std::fs::write(
+            &src,
+            format!(
+                "import sys\n\ntotal = 0\nfor i in range({n}):\n    \
+                 s = '%d-%s|%.3f' % (i, 'ab' * 40, i / 7)\n    \
+                 total += len(s)\n    \
+                 if i % 50000 == 0:\n        sys.stdout.write('%d ' % i)\n\
+                 print(total)\n"
+            ),
+        )
+        .expect("write the probe source");
+        let bin = dir.join(&name);
+        let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
+            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .expect("pycc should spawn");
+        let report = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{report}");
+        assert!(!report.contains("fallback:"), "{report}");
+        let (out, peak) = run_measured(&bin);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            String::from_utf8_lossy(&cpython(&src)),
+            "output differs from CPython"
+        );
+        peaks.push(peak);
+    }
+    let growth = peaks[1] - peaks[0];
+    assert!(
+        growth <= GROWTH_LIMIT_KB,
+        "peak RSS grew by {growth} kB from {N_SMALL} to {N_LARGE} iterations ({} -> {} kB)",
+        peaks[0],
+        peaks[1]
+    );
+}

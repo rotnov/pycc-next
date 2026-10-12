@@ -253,6 +253,27 @@ pub const CALL_NAMES: &[&str] = &[
     "zip",
 ];
 
+/// Non-strict mode: a builtin whose one parameter takes a CPython object,
+/// converted with a run-time type check: the parameter's type and the
+/// subject of the conversion's `TypeError`, CPython's own wording
+/// (`write() argument must be str, not int`).
+#[must_use]
+pub fn object_param(name: &str) -> Option<(Ty, &'static str)> {
+    match name {
+        "__pycc_stdout_write" => Some((Ty::Str, "write() argument")),
+        _ => None,
+    }
+}
+
+/// [`object_param`]'s `TypeError` subject by runtime symbol.
+#[must_use]
+pub fn object_param_subject(symbol: &str) -> Option<&'static str> {
+    match symbol {
+        "pycc_rt_stdout_write" => object_param("__pycc_stdout_write").map(|(_, what)| what),
+        _ => None,
+    }
+}
+
 /// The result type of builtin `name` whatever its (admitted) argument
 /// types are, when it has one.
 #[must_use]

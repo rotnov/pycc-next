@@ -251,6 +251,12 @@ pub(crate) fn infer_method_call_expr(
     {
         return class::resolve_static_or_class_method_call(env, class_name, method, args, &arg_tys);
     }
+    // Non-strict mode: a `str` method given a CPython object argument
+    // (`" ".join(o)`) is CPython's own method, on the `str` boxed.
+    if base_ty == Ty::Str && arg_tys.contains(&Ty::Object) && crate::non_strict::is_non_strict() {
+        crate::foreign::check_object_call_args(env, args, &arg_tys, "method")?;
+        return Ok(Ty::Object);
+    }
     if let Some(resolved) = pycc_hir::builtins::resolve_method(&base_ty, method, &arg_tys) {
         return resolved
             .map(|sig| sig.ret)

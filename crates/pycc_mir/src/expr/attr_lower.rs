@@ -474,6 +474,20 @@ pub(crate) fn lower_method_call_expr(
         .collect();
     let base = match builtin_call::lower_builtin_method(base, method, lowered_args) {
         Ok(call) => return call,
+        // Non-strict mode: a `str` method given a CPython object argument,
+        // which `pycc_types` admitted as CPython's own method.
+        Err((base, lowered_args))
+            if base.ty() == Ty::Str && lowered_args.iter().any(|a| a.ty() == Ty::Object) =>
+        {
+            return MirExpr::ObjMethodCall {
+                base: Box::new(MirExpr::ObjectBox(Box::new(base))),
+                method: method.clone(),
+                args: lowered_args
+                    .into_iter()
+                    .map(crate::obj_arith::object_arg)
+                    .collect(),
+            };
+        }
         Err((base, _)) => base,
     };
     // `xs.insert(i, v)` / `xs.pop(i)`: the method calls on a list

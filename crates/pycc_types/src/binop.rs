@@ -52,6 +52,11 @@ pub(crate) fn numeric_result_type(op: BinOpKind, left: Ty, right: Ty) -> Result<
     if let Some(result) = crate::foreign::arith::object_binop_ty(None, &left, &right) {
         return result;
     }
+    // Non-strict mode: `str % args` is CPython's formatting (`expr.rs`
+    // admits the exact operand shapes).
+    if op == BinOpKind::Mod && left == Ty::Str && crate::non_strict::is_non_strict() {
+        return Ok(Ty::Object);
+    }
     if pycc_hir::builtins::set_operator(op.as_str(), false, &left, &right).is_some() {
         return Ok(left);
     }

@@ -21,7 +21,8 @@
 //!   `range()` argument is read through `__index__`; a display of `None`
 //!   elements is CPython's own list or tuple; a comprehension collecting
 //!   CPython objects builds CPython's own list or set; a mixed-type store
-//!   into an item of a nested list widens the outer list.
+//!   into an item of a nested list widens the outer list; `str % args`
+//!   formats through CPython.
 //!
 //! The oracle is CPython: each fixture is built, run and compared with
 //! `python3` running the file -- stdout, the uncaught exception's last line
@@ -327,6 +328,15 @@ fn non_strict_object_comprehensions_are_cpython_containers() {
 fn non_strict_nested_item_stores_widen_the_outer_list() {
     let report = matches_cpython(
         "non_strict_nested_stores.py",
+        &["--non-strict", "--report-fallbacks"],
+    );
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+#[test]
+fn non_strict_percent_formatting_is_cpythons() {
+    let report = matches_cpython(
+        "non_strict_percent_format.py",
         &["--non-strict", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");

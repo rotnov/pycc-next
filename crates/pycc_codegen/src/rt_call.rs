@@ -51,7 +51,33 @@ pub(super) fn emit_rt_call<'ctx>(
     // A fresh argument is released if a later argument raises.
     let mark = heap_rc::pending_mark(rt);
     let mut pending_ints = Vec::new();
+    let mut coerced_strs = Vec::new();
     for ((arg, param), is_word) in call.args.iter().zip(&sig.params).zip(&sig.word_args) {
+        // Non-strict mode: a CPython object for a scalar parameter
+        // (`pycc_hir::builtins::object_param`) is converted with a run-time
+        // type check; a converted `str` is a new reference released after
+        // the call.
+        if let Some(what) = pycc_hir::builtins::object_param_subject(sig.symbol)
+            && crate::object_coerce::coerces_into(arg, param)
+        {
+            let scalar = crate::object_coerce::emit_coerced(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                arg,
+                param,
+                what,
+            );
+            if let Scalar::Str(ptr) = scalar {
+                coerced_strs.push(ptr);
+            }
+            values.push(abi_value(scalar));
+            param_types.push(ty_to_basic_type(context, param.clone()).into());
+            continue;
+        }
         let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
         // #625: a fresh `int` argument (`str(x * 2)`) is released after the
         // call, or if a later argument raises.
@@ -136,6 +162,9 @@ pub(super) fn emit_rt_call<'ctx>(
     }
     for boxed in boxes {
         crate::containers::release_boxed(context, builder, rt, boxed);
+    }
+    for ptr in coerced_strs {
+        heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::Str, ptr);
     }
     if boxed_ret {
         let Ty::Tuple(elements) = &sig.ret else {

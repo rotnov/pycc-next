@@ -59,6 +59,10 @@ pub(super) fn builtin_method_term(
 ) -> Option<TypeTerm> {
     let base = resolved_term(base.clone()?, parents, concrete)?;
     let tys = concrete_args(arg_terms, parents, concrete)?;
+    // Non-strict mode: CPython's own `str` method (`expr::attr_infer`).
+    if base == Ty::Str && tys.contains(&Ty::Object) && crate::non_strict::is_non_strict() {
+        return Some(Ok(Ty::Object));
+    }
     match pycc_hir::builtins::resolve_method(&base, method, &tys)? {
         Ok(sig) => Some(Ok(sig.ret)),
         Err(_) => None,
