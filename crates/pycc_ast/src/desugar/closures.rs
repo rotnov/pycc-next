@@ -15,8 +15,8 @@
 //! one-element list (a *cell*) in the enclosing function: every binding of
 //! it there makes a new cell, every read and augmented assignment goes
 //! through `cell[0]`, and the cell itself is what the lifted functions
-//! receive, so their writes are seen by the enclosing function and by each
-//! other.
+//! receive; a lifted function's own assignment stores through `cell[0]`, so
+//! its writes are seen by the enclosing function and by each other.
 //!
 //! A nested function is lifted only when every use of its name is a direct
 //! call (or, see [`values`], it may be made a function value), the name is
@@ -468,6 +468,9 @@ fn cell_name(name: &str) -> String {
 struct Rewrite<'a> {
     lifts: &'a HashMap<String, Lift>,
     cells: &'a HashSet<String>,
+    /// Rewriting a lifted function's body, which receives the cells: an
+    /// assignment stores into the cell rather than making a new one.
+    in_lifted: bool,
 }
 
 impl Rewrite<'_> {
@@ -509,6 +512,10 @@ impl Transformer for Rewrite<'_> {
                 let name = target.id.to_string();
                 let range = assign.range;
                 self.visit_expr(&mut assign.value);
+                if self.in_lifted {
+                    assign.targets[0] = self.cell_item(&name, ExprContext::Store, range);
+                    return;
+                }
                 let value = std::mem::replace(assign.value.as_mut(), load("_", range));
                 *stmt = assign_cell(&name, value, range);
             }
@@ -944,6 +951,7 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
     let rewrite = Rewrite {
         lifts: &lifts,
         cells: &cells,
+        in_lifted: true,
     };
     // The lifted functions, in source order.
     for candidate in &chosen {
@@ -988,6 +996,10 @@ fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fresh, out: &mu
     let lifted_names: HashSet<String> = chosen_names;
     let _ = lifts.values().map(|lift| &lift.name).count();
     remove_defs(&mut body, &lifted_names);
+    let rewrite = Rewrite {
+        in_lifted: false,
+        ..rewrite
+    };
     for stmt in body.iter_mut() {
         rewrite.visit_stmt(stmt);
     }

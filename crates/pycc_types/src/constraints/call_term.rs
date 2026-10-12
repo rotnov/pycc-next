@@ -138,15 +138,24 @@ pub(crate) fn collect_call_constraints(
         // it is the capability gap every other use of a `memoryview`
         // is (`C0001`), not D-110's "no value in the current subset
         // is callable" (`T0021`).
-        let Some(ty) = resolved_term(term, parents, concrete) else {
-            // Not known yet (a loop target over a list of function
-            // values): the check phase types the call once it is.
-            for arg in args {
-                collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+        match resolved_term(term, parents, concrete) {
+            Some(ty) => {
+                crate::expr::reject_memoryview_read(
+                    callee,
+                    &ty,
+                    env.owned_buffers.contains(callee),
+                )?;
             }
-            return Ok(None);
-        };
-        crate::expr::reject_memoryview_read(callee, &ty, env.owned_buffers.contains(callee))?;
+            // A loop target over a container this pass cannot type (a list
+            // of function values): the check phase types the call.
+            None if env.opaque_bindings.contains(callee) => {
+                for arg in args {
+                    collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+                }
+                return Ok(None);
+            }
+            None => {}
+        }
         return Err(non_callable_binding(callee));
     }
     // #1313: a foreign import binds its name to a CPython object,
@@ -167,6 +176,15 @@ pub(crate) fn collect_call_constraints(
             collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
         }
         return Ok(Some(Ok(Ty::Object)));
+    }
+    // A local bound to a value this pass cannot represent (`g = fs[0]`,
+    // `crate::constraints::ConstraintEnvironment::opaque_bindings`): the
+    // check phase types the call.
+    if env.opaque_bindings.contains(callee) && !env.maybe_bindings.contains(callee) {
+        for arg in args {
+            collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+        }
+        return Ok(None);
     }
     if is_local(env.local_names, callee) {
         return Err(unbound_local(callee));

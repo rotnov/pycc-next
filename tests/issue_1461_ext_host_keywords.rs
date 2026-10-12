@@ -294,18 +294,22 @@ attempt(lambda: p.add(1, 2, 3, "x", 5))
 attempt(lambda: m.rep(2))
 "#;
 
+/// A function or method with a default, a positional-only or a keyword-only
+/// parameter binds through its published signature
+/// (`pycc_ast::ext_signatures`), so CPython words those errors; the
+/// argument types are still checked at the boundary.
 const EXT_ONLY_OUT: &str = "TypeError P.copy() got an unexpected keyword argument 'deepcopy_value'\n\
-    TypeError P.add() got an unexpected keyword argument 'self'\n\
-    TypeError pycc_kw_mod.pad() takes no keyword arguments\n\
-    TypeError pycc_kw_mod.only() takes no keyword arguments\n\
-    TypeError pycc_kw_mod.only() takes no keyword arguments\n\
-    TypeError P.add() argument 4: 'int' object cannot be interpreted as a str\n\
+    TypeError P.add() got multiple values for argument 'self'\n\
+    3\n\
+    -1\n\
+    TypeError only() got some positional-only arguments passed as keyword arguments: 'a'\n\
+    TypeError P.add() argument 5: 'int' object cannot be interpreted as a str\n\
     ok114\n\
     TypeError view_n() argument 2: 'str' object cannot be interpreted as an integer\n\
     17\n\
     TypeError P.__init__() takes from 1 to 2 arguments (0 given)\n\
     TypeError P.__init__() takes from 1 to 2 arguments (3 given)\n\
-    TypeError P.add() takes from 1 to 4 arguments (5 given)\n\
+    TypeError P.add() takes from 2 to 5 positional arguments but 6 were given\n\
     TypeError rep() takes exactly 2 arguments (1 given)\n";
 
 /// What CPython answers for [`EXT_ONLY_DRIVER`], so the divergence is

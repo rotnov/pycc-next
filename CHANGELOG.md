@@ -25,6 +25,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   callers with its declared signature (#1194); CPython binds the call and
   raises its own `TypeError`s.
 
+### Fixed
+
+- A nested function's plain assignment to a `nonlocal` variable (`k = v`, not
+  only `k += v`) is seen by the enclosing function; it used to rebind a copy.
+
 ### Performance
 - Every benchmark is within 3x of its Rust twin (fib 1.8x, mandelbrot 1.1x, nbody 2.4x,
   sieve 2.1x, spectral_norm 1.8x; v0.1: up to 4.2x). Whole-program proofs drop checks that
@@ -159,6 +164,11 @@ catch type errors at compile time, interoperate with CPython.
 - Big ints passed into `--ext` modules raise instead of aborting the host.
 - Fixed use-after-free / double-free classes found by review (operand pinning,
   set in-place ops, deep frees without recursion).
+
+### Fixed
+
+- A nested function's plain assignment to a `nonlocal` variable (`k = v`, not
+  only `k += v`) is seen by the enclosing function; it used to rebind a copy.
 
 ### Performance
 - Inline small-int arithmetic, direct calls, inline exception checks, fixed-layout

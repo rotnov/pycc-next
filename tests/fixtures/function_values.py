@@ -47,6 +47,34 @@ class Registry:
 OPS: list[Callable[[int, int], int]] = [add, mul]
 
 
+def rebinding() -> None:
+    # A nested function assigning `nonlocal` variables (a plain assignment,
+    # not only `+=`), one of them a function value called afterwards.
+    k = 10
+    g = double
+
+    def rb() -> int:
+        nonlocal g, k
+        g = ident
+        k = k + 3
+        return 5
+
+    print(g(rb()), k, g(7))
+    cell = [double]
+    h = cell[0]
+    print(h(7))
+    for f in cell:
+        print(f(1))
+
+
+def ident(x: int) -> int:
+    return x
+
+
+def double(x: int) -> int:
+    return 2 * x
+
+
 def main() -> None:
     for op in OPS:
         print(op(3, 4))
@@ -83,3 +111,4 @@ def main() -> None:
 
 
 main()
+rebinding()

@@ -609,6 +609,12 @@ pub(super) fn collect_stmt_constraints(
                         Ty::Str => Some(Ty::Str),
                         _ => None,
                     });
+                // An iterable whose element this pass cannot type (a list
+                // of function values): the target is opaque as well, so a
+                // call of it is left to the check phase.
+                if known.is_none() {
+                    env.opaque_bindings.insert(var.clone());
+                }
                 let term = match known {
                     Some(elem) => Ok(elem),
                     None => fresh_term(parents, concrete),

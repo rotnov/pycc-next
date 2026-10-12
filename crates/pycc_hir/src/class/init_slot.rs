@@ -387,8 +387,8 @@ fn slot_ty_from_init_rhs(
                     format!(
                         "`{receiver_name}.<attr> = {}` cannot establish an attribute of type \
                          `{}` yet -- only a scalar (int/float/bool/str), `list[int]`, \
-                         `dict[str, int]`, class instance, function or foreign-imported class \
-                         parameter is supported",
+                         `dict[str, int]`, class instance or foreign-imported class parameter \
+                         is supported",
                         name.id,
                         other.name()
                     ),
