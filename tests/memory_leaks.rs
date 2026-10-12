@@ -1102,3 +1102,56 @@ fn an_object_index_runs_in_constant_memory() {
         peaks[1]
     );
 }
+
+/// Non-strict mode: a comprehension collecting CPython objects over a native
+/// source, or over a name bound to a CPython object, builds a CPython list
+/// or set each trip; the collection, the packed elements and the operands
+/// are all released.
+#[test]
+#[ignore = "requires a CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn an_object_comprehension_runs_in_constant_memory() {
+    let dir = ScratchDir::new("memory_object_comprehension").expect("scratch dir");
+    let mut peaks = Vec::new();
+    for n in [N_SMALL, N_LARGE] {
+        let name = format!("object_comprehension_{n}");
+        let src = dir.join(format!("{name}.py"));
+        std::fs::write(
+            &src,
+            format!(
+                "import json\n\nx = json.loads(\"2\")\nobjs = json.loads(\"[1, 2, 3]\")\n\
+                 total = 0\nfor i in range({n}):\n    \
+                 ys = [j * x for j in range(20) if j != 3]\n    \
+                 zs = {{x + j % 4 for j in range(8)}}\n    \
+                 ws = [o + x for o in objs]\n    \
+                 total += len(ys) + len(zs) + len(ws) + len([0] * x)\n\
+                 print(total)\n"
+            ),
+        )
+        .expect("write the probe source");
+        let bin = dir.join(&name);
+        let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
+            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .expect("pycc should spawn");
+        let report = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{report}");
+        assert!(!report.contains("fallback:"), "{report}");
+        let (out, peak) = run_measured(&bin);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            String::from_utf8_lossy(&cpython(&src)),
+            "output differs from CPython"
+        );
+        peaks.push(peak);
+    }
+    let growth = peaks[1] - peaks[0];
+    assert!(
+        growth <= GROWTH_LIMIT_KB,
+        "peak RSS grew by {growth} kB from {N_SMALL} to {N_LARGE} iterations ({} -> {} kB)",
+        peaks[0],
+        peaks[1]
+    );
+}

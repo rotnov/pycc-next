@@ -61,6 +61,13 @@ pub(crate) fn resolve_comp_iter(
             Ok(Ty::Int)
         }
         CompIter::Name(name) => {
+            // Non-strict mode: a name bound to a CPython object iterates
+            // through CPython, as `for x in name:` does.
+            if crate::non_strict::is_non_strict()
+                && let Some(crate::BindingState::Definitely(Ty::Object)) = env.binding_state(name)
+            {
+                return Ok(Ty::Object);
+            }
             let base_ty = lookup_bound_name(env, local_names, name)?;
             match base_ty {
                 Ty::List(elem_ty) => Ok(*elem_ty),
@@ -157,12 +164,19 @@ pub(crate) fn comp_container_ty(
     match *elts {
         CompElts::List(elt) => {
             let elt_ty = infer_expr_in(env, local_names, elt)?;
+            if elt_ty == Ty::Object && crate::non_strict::is_non_strict() {
+                // A CPython list (`pycc_mir`'s `collects_objects`).
+                return Ok(Ty::Object);
+            }
             let list_ty = Ty::List(Box::new(elt_ty));
             pycc_hir::check_container_ty(&list_ty, Span::new(0, 0))?;
             Ok(list_ty)
         }
         CompElts::Set(elt) => {
             let elt_ty = infer_expr_in(env, local_names, elt)?;
+            if elt_ty == Ty::Object && crate::non_strict::is_non_strict() {
+                return Ok(Ty::Object);
+            }
             // #1344 (Part 2 of #1336): a set of user-class instances, gated
             // exactly like a set literal's or `.add(...)`'s element (D-255):
             // `T0054` for an unhashable class, `C0001` for a class shape
@@ -197,10 +211,14 @@ pub(crate) fn check_comp_assign(
     comp: CompView<'_>,
 ) -> Result<(), Diagnostic> {
     let var_ty = resolve_comp_iter(env, local_names, comp.iter)?;
-    check_assignment(env, comp.var, var_ty)?;
+    check_assignment(env, comp.var, var_ty.clone())?;
     // A statement form never holds an iterable expression: the HIR lowers
     // that comprehension to a plain `Assign` (Part 1 of #1255).
-    let container_ty = comp_container_ty(env, local_names, comp.cond, &comp.elts, false)?;
+    // Non-strict mode: a name bound to a CPython object is iterated through
+    // CPython (`resolve_comp_iter`), and `pycc_mir` lowers the statement to
+    // the expression form.
+    let over_object = matches!(comp.iter, CompIter::Name(_)) && var_ty == Ty::Object;
+    let container_ty = comp_container_ty(env, local_names, comp.cond, &comp.elts, over_object)?;
     check_assignment(env, target, container_ty)
 }
 
@@ -225,7 +243,8 @@ pub(crate) fn infer_comprehension(
     comp: &HirComprehension,
 ) -> Result<Ty, Diagnostic> {
     let var_ty = resolve_comp_iter(env, local_names, &comp.iter)?;
-    let over_object = matches!(comp.iter, CompIter::Iterable(_)) && var_ty == Ty::Object;
+    let over_object =
+        matches!(comp.iter, CompIter::Iterable(_) | CompIter::Name(_)) && var_ty == Ty::Object;
     let mut scoped = env.clone();
     scoped.bind(comp.var.clone(), var_ty);
     comp_container_ty(

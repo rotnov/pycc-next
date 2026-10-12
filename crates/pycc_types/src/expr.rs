@@ -213,6 +213,14 @@ fn infer_expr_here(
             let left_ty = infer_expr_in(env, local_names, left)?;
             let right_ty = infer_expr_in(env, local_names, right)?;
             reject_negative_literal_exponent(*op, &left_ty, right)?;
+            // Non-strict mode: a fresh native list operand of an operator
+            // on a CPython object crosses as a CPython copy.
+            if (left_ty == Ty::Object && crate::object_box::fresh_container(env, right, &right_ty))
+                || (right_ty == Ty::Object
+                    && crate::object_box::fresh_container(env, left, &left_ty))
+            {
+                return Ok(Ty::Object);
+            }
             if let Some(result) =
                 crate::foreign::arith::object_binop_ty(Some(env), &left_ty, &right_ty)
             {

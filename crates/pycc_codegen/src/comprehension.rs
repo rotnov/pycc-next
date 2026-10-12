@@ -74,6 +74,10 @@ pub(super) enum CompElts<'a> {
     Set(&'a MirExpr, Option<&'a SetElementOps>),
     /// `{key: value for ...}`, producing `dict[str, int]` (T0036).
     Dict(&'a MirExpr, &'a MirExpr),
+    /// Non-strict mode: a list or set of CPython objects over a native
+    /// source (`MirComprehension::collects_objects`), producing the CPython
+    /// collection (`object_comprehension::collect_object`).
+    Objects(&'a MirExpr, super::ObjCollectionKind),
 }
 
 impl CompElts<'_> {
@@ -83,6 +87,7 @@ impl CompElts<'_> {
             CompElts::List(_) => ("listcomp", "list"),
             CompElts::Set(..) => ("setcomp", "set"),
             CompElts::Dict(..) => ("dictcomp", "dict"),
+            CompElts::Objects(..) => ("objcomp", "object"),
         }
     }
 }
@@ -138,7 +143,13 @@ pub(super) fn emit_comprehension<'ctx>(
     let (prefix, word) = elts.names();
     let function = cx.builder.get_insert_block().unwrap().get_parent().unwrap();
     let _ = word;
+    let mut held_collection = None;
     let container = match elts {
+        CompElts::Objects(_, kind) => {
+            let (collection, held) = super::object_comprehension::new_object_collection(cx, kind);
+            held_collection = Some(held);
+            collection
+        }
         CompElts::List(elt) => list::build_list_new(cx.context, cx.builder, cx.rt, &elt.ty(), 0),
         CompElts::Set(elt, _) => {
             crate::set_instance::build_set_new(cx.builder, cx.rt, &Ty::Set(Box::new(elt.ty())))
@@ -206,6 +217,14 @@ pub(super) fn emit_comprehension<'ctx>(
         CompElts::List(_) => Scalar::List(container),
         CompElts::Set(..) => Scalar::Set(container),
         CompElts::Dict(..) => Scalar::Dict(container),
+        CompElts::Objects(..) => {
+            // The result is the node's value, a producer its consumer
+            // releases or binds (`object_release::is_produced`).
+            if let Some(held) = held_collection {
+                held.consumed(cx.rt);
+            }
+            Scalar::Object(container)
+        }
     }
 }
 
@@ -259,6 +278,12 @@ pub(super) fn emit_comprehension_expr<'ctx>(
         ..*cx
     };
     let elts = match &comp.elt {
+        MirCompElt::List(elt) if comp.collects_objects() => {
+            CompElts::Objects(elt, super::ObjCollectionKind::List)
+        }
+        MirCompElt::Set(elt, None) if comp.collects_objects() => {
+            CompElts::Objects(elt, super::ObjCollectionKind::Set)
+        }
         MirCompElt::List(elt) => CompElts::List(elt),
         MirCompElt::Set(elt, ops) => CompElts::Set(elt, ops.as_deref()),
         MirCompElt::Dict { key, value } => CompElts::Dict(key, value),
@@ -312,6 +337,9 @@ fn emit_element<'ctx>(cx: &CompCx<'_, 'ctx>, container: PointerValue<'ctx>, elts
         )
     };
     match elts {
+        CompElts::Objects(elt, kind) => {
+            super::object_comprehension::collect_object(cx, container, kind, elt);
+        }
         CompElts::Set(elt, Some(ops)) => {
             let emitter = SetEmitter {
                 context: cx.context,

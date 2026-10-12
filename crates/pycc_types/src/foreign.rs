@@ -438,7 +438,9 @@ pub(crate) fn check_object_call_args<'a>(
     }
     for (index, arg_ty) in arg_tys.iter().enumerate() {
         if let Some(arg) = args.get(index)
-            && crate::object_box::fresh_container(env, arg, arg_ty)
+            && (crate::object_box::fresh_container(env, arg, arg_ty)
+                || (crate::non_strict::is_non_strict()
+                    && crate::object_box::display_boxable(arg, arg_ty)))
         {
             continue;
         }

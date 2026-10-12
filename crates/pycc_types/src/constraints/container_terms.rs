@@ -172,7 +172,7 @@ pub(crate) fn collect_comprehension_constraints(
     let key_term = terms.pop().flatten();
     // Part 1 of #1255: a comprehension over a CPython object
     // produces a CPython object, whatever its element.
-    if let CompIter::Iterable(_) = comp.iter
+    if let CompIter::Iterable(_) | CompIter::Name(_) = comp.iter
         && matches!(scoped.bindings.get(&comp.var), Some(Ok(Ty::Object)))
     {
         return Ok(Some(Ok(Ty::Object)));

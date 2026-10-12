@@ -866,7 +866,16 @@ fn propagate_binop(
             let right = resolved_term(right_term.clone(), parents, concrete);
             let result = resolved_term(result_term.clone(), parents, concrete);
             if let (Some(left), Some(right)) = (left, right) {
-                let result_ty = numeric_result_type(op, left, right)?;
+                let object_operand = left == Ty::Object || right == Ty::Object;
+                let result_ty = match numeric_result_type(op, left, right) {
+                    Ok(ty) => ty,
+                    // Non-strict mode: an operator on a CPython object is
+                    // CPython's own, whose result is an object; the check
+                    // phase decides which other operands it admits (a fresh
+                    // native list, say), which only it can see.
+                    Err(_) if object_operand && crate::non_strict::is_non_strict() => Ty::Object,
+                    Err(diagnostic) => return Err(diagnostic),
+                };
                 changed |= unify_terms(
                     result_term.clone(),
                     Ok(result_ty),

@@ -271,6 +271,8 @@ pub(crate) fn bind_comp_loop_var(
                     Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => Some(*elem),
                     Ty::Dict(kv) => Some(kv.0),
                     Ty::Str => Some(Ty::Str),
+                    // Non-strict mode: iterated through CPython.
+                    Ty::Object if crate::non_strict::is_non_strict() => Some(Ty::Object),
                     _ => None,
                 });
             match known {

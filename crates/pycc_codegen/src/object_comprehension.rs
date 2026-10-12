@@ -63,6 +63,7 @@ pub(super) fn emit_object_comprehension<'ctx>(
     let (kind, elt) = match elts {
         CompElts::List(elt) => (ObjCollectionKind::List, elt),
         CompElts::Set(elt, None) => (ObjCollectionKind::Set, elt),
+        CompElts::Objects(elt, kind) => (kind, elt),
         CompElts::Set(_, Some(_)) | CompElts::Dict(..) => panic!(
             "pycc_codegen: internal error: only a list or set comprehension of packable \
              elements may iterate a CPython object -- pycc_types::check (I0404) should have \
@@ -199,4 +200,94 @@ pub(super) fn emit_object_comprehension<'ctx>(
     // binds.
     held_collection.consumed(rt);
     Scalar::Object(collection)
+}
+
+/// Creates the CPython collection a comprehension over a native source
+/// collects objects into (`MirComprehension::collects_objects`), held on
+/// `pending_object_releases` until [`super::object_release::Held::consumed`].
+pub(super) fn new_object_collection<'ctx>(
+    cx: &CompCx<'_, 'ctx>,
+    kind: ObjCollectionKind,
+) -> (PointerValue<'ctx>, crate::object_release::Held<'ctx>) {
+    let (context, builder, module, rt) = (cx.context, cx.builder, cx.module, cx.rt);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_ty = context.i64_type();
+    let edge = ForeignFailEdge::for_current(builder);
+    let new_collection = shim_fn(
+        module,
+        EXT_OBJ_NEW_COLLECTION_SYMBOL,
+        ptr.fn_type(&[i64_ty.into()], false),
+    );
+    let kind_code = i64_ty.const_int(kind.shim_code(), false);
+    let collection = builder
+        .build_call(new_collection, &[kind_code.into()], "objcomp_result")
+        .expect("build_call should not fail for pycc_ext_obj_new_collection")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_new_collection returns PyObject *")
+        .into_pointer_value();
+    route_null(
+        context,
+        builder,
+        module,
+        rt,
+        edge,
+        collection,
+        "objcomp_result",
+    );
+    let held = crate::object_release::hold_new_reference(context, module, rt, collection);
+    (collection, held)
+}
+
+/// Packs `elt` and adds it to `collection` (`pycc_ext_obj_collect`, which
+/// consumes the packed element), raising through the current function's
+/// foreign failure edge.
+pub(super) fn collect_object<'ctx>(
+    cx: &CompCx<'_, 'ctx>,
+    collection: PointerValue<'ctx>,
+    kind: ObjCollectionKind,
+    elt: &MirExpr,
+) {
+    let (context, builder, module, rt) = (cx.context, cx.builder, cx.module, cx.rt);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_ty = context.i64_type();
+    let edge = ForeignFailEdge::for_current(builder);
+    let kind_code = i64_ty.const_int(kind.shim_code(), false);
+    let scalar = crate::object_unbox::emit_pack_operand(
+        context,
+        builder,
+        module,
+        rt,
+        cx.user_functions,
+        cx.locals,
+        elt,
+    );
+    let item = emit_pack(context, builder, module, scalar, "objcomp_item");
+    release_scalar_if_temporary(context, builder, rt, elt, &scalar);
+    crate::object_release::release_if_produced(context, builder, module, elt, &scalar);
+    let collect = shim_fn(
+        module,
+        EXT_OBJ_COLLECT_SYMBOL,
+        context
+            .i32_type()
+            .fn_type(&[ptr.into(), i64_ty.into(), ptr.into()], false),
+    );
+    let status = builder
+        .build_call(
+            collect,
+            &[collection.into(), kind_code.into(), item.into()],
+            "objcomp_collect",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_collect")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_collect returns int")
+        .into_int_value();
+    route_negative(
+        context,
+        builder,
+        module,
+        rt,
+        edge,
+        status,
+        "objcomp_collect",
+    );
 }

@@ -113,7 +113,9 @@ pub(crate) fn lower_call_expr(
             )),
             args: args
                 .iter()
-                .map(|a| lower_expr(a, scopes, classes, current_class))
+                .map(|a| {
+                    crate::obj_arith::object_arg(lower_expr(a, scopes, classes, current_class))
+                })
                 .collect(),
         };
     }
@@ -476,7 +478,7 @@ pub(crate) fn lower_expr_call_expr(
         callee: Box::new(callee),
         args: args
             .iter()
-            .map(|a| lower_expr(a, scopes, classes, current_class))
+            .map(|a| crate::obj_arith::object_arg(lower_expr(a, scopes, classes, current_class)))
             .collect(),
     }
 }

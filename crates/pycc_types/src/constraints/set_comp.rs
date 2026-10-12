@@ -72,10 +72,13 @@ pub(crate) fn list_comp_container(
     deferred: &mut DeferredConstraints,
 ) -> TypeTerm {
     let elt_var = term_var(&elt);
-    if let Some(elem) = elt.and_then(|term| resolved_term(term, parents, concrete))
-        && pycc_hir::is_list_element_ty(&elem)
-    {
-        return Ok(Ty::List(Box::new(elem)));
+    if let Some(elem) = elt.and_then(|term| resolved_term(term, parents, concrete)) {
+        if pycc_hir::is_list_element_ty(&elem) {
+            return Ok(Ty::List(Box::new(elem)));
+        }
+        if let Some(object) = collected_objects(&elem) {
+            return Ok(object);
+        }
     }
     let var = fresh_variable(parents, concrete);
     deferred
@@ -102,11 +105,13 @@ pub(crate) fn dict_comp_container(
         return Ok(ty);
     }
     let var = fresh_variable(parents, concrete);
-    deferred.container_defaults.push(ContainerDefault::DictComp {
-        var,
-        key: key_var,
-        value: value_var,
-    });
+    deferred
+        .container_defaults
+        .push(ContainerDefault::DictComp {
+            var,
+            key: key_var,
+            value: value_var,
+        });
     Err(var)
 }
 
@@ -133,6 +138,7 @@ pub(crate) fn set_comp_container(
     };
     match elt.and_then(|term| resolved_term(term, parents, concrete)) {
         Some(Ty::Int | Ty::Bool) => return Ok(Ty::Set(Box::new(Ty::Int))),
+        Some(Ty::Object) if crate::non_strict::is_non_strict() => return Ok(Ty::Object),
         Some(instance @ Ty::Instance(_)) => return Ok(Ty::Set(Box::new(instance))),
         _ => {}
     }
@@ -181,11 +187,19 @@ pub(super) fn apply_container_defaults(
         };
         match default {
             ContainerDefault::ListComp { var, elt } => {
-                let element = settled(parents, concrete, *elt)
-                    .filter(pycc_hir::is_list_element_ty)
-                    .unwrap_or(Ty::Int);
+                let settled = settled(parents, concrete, *elt);
+                let container = settled
+                    .as_ref()
+                    .and_then(collected_objects)
+                    .unwrap_or_else(|| {
+                        Ty::List(Box::new(
+                            settled
+                                .filter(pycc_hir::is_list_element_ty)
+                                .unwrap_or(Ty::Int),
+                        ))
+                    });
                 let root = root(parents, *var);
-                concrete[root].get_or_insert_with(|| Ty::List(Box::new(element)));
+                concrete[root].get_or_insert_with(|| container);
             }
             ContainerDefault::DictComp { var, key, value } => {
                 let dict = settled(parents, concrete, *key)
@@ -200,12 +214,13 @@ pub(super) fn apply_container_defaults(
     }
     for default in defaults {
         if let ContainerDefault::SetComp { var, elt } = default {
-            let element = match elt.map(|elt| &concrete[root(parents, elt)]) {
-                Some(Some(instance @ Ty::Instance(_))) => instance.clone(),
-                _ => Ty::Int,
+            let container = match elt.map(|elt| &concrete[root(parents, elt)]) {
+                Some(Some(instance @ Ty::Instance(_))) => Ty::Set(Box::new(instance.clone())),
+                Some(Some(Ty::Object)) if crate::non_strict::is_non_strict() => Ty::Object,
+                _ => Ty::Set(Box::new(Ty::Int)),
             };
             let root = root(parents, *var);
-            concrete[root].get_or_insert_with(|| Ty::Set(Box::new(element)));
+            concrete[root].get_or_insert_with(|| container);
         }
     }
     loop {
@@ -241,3 +256,9 @@ pub(super) fn apply_container_defaults(
 #[cfg(test)]
 #[path = "set_comp_tests.rs"]
 mod tests;
+
+/// Non-strict mode: a list comprehension of CPython objects is the CPython
+/// list `pycc_mir` builds for it (`MirComprehension::collects_objects`).
+fn collected_objects(elem: &Ty) -> Option<Ty> {
+    (*elem == Ty::Object && crate::non_strict::is_non_strict()).then_some(Ty::Object)
+}

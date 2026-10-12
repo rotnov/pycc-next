@@ -46,6 +46,24 @@ pub(super) fn object_display(kind: crate::ObjDisplayKind, elements: Vec<MirExpr>
     }
 }
 
+/// An argument (or stored value) of an operation on a CPython object: a
+/// native dict, set or tuple display -- which `pycc_types` admits there in
+/// non-strict mode -- crosses boxed, so it is built as the CPython
+/// container (`pycc_codegen::object_box`).
+pub(crate) fn object_arg(arg: MirExpr) -> MirExpr {
+    match arg {
+        MirExpr::DictLiteral(_) | MirExpr::SetLiteral { .. } => MirExpr::ObjectBox(Box::new(arg)),
+        MirExpr::TupleLiteral(ref elements)
+            if elements
+                .iter()
+                .any(|e| !matches!(e.ty(), Ty::Int | Ty::Float | Ty::Bool)) =>
+        {
+            MirExpr::ObjectBox(Box::new(arg))
+        }
+        other => other,
+    }
+}
+
 /// An element of a display built as the CPython container: a narrowed read
 /// is the object it still is, and `None` is boxed as `Py_None`.
 pub(super) fn display_element(element: MirExpr) -> MirExpr {

@@ -185,6 +185,17 @@ pub enum MirCompElt {
 }
 
 impl MirComprehension {
+    /// Whether a list or set comprehension over a native source collects
+    /// CPython objects (non-strict mode, where `pycc_types` admits it): no
+    /// native container holds an `object` element, so it produces a fresh
+    /// CPython `list` or `set`, as one over a CPython source does.
+    pub fn collects_objects(&self) -> bool {
+        match &self.elt {
+            MirCompElt::List(elt) | MirCompElt::Set(elt, None) => elt.ty() == Ty::Object,
+            _ => false,
+        }
+    }
+
     /// The produced container type, derived from the element types exactly
     /// as the statement form's binding of `target` is. A comprehension over
     /// a CPython object ([`CompSource::Object`], Part 1 of #1255) produces a
@@ -192,6 +203,9 @@ impl MirComprehension {
     /// its elements are.
     pub fn ty(&self) -> Ty {
         if let CompSource::Object(_) = self.source {
+            return Ty::Object;
+        }
+        if self.collects_objects() {
             return Ty::Object;
         }
         match &self.elt {
@@ -920,6 +934,16 @@ pub(crate) fn resolve_comp_source(
                     ty: Ty::Str,
                 };
                 (CompSource::ListExpr(str_to_list(name)), Ty::Str)
+            }
+            // Non-strict mode: a name bound to a CPython object.
+            Ty::Object => {
+                bind_variable(scopes, var.to_string(), Ty::Object);
+                kill_narrowing(scopes, var);
+                let name = MirExpr::Name {
+                    name: name.clone(),
+                    ty: Ty::Object,
+                };
+                (CompSource::Object(name), Ty::Object)
             }
             other => panic!(
                 "pycc_mir: internal error: `{name}` is neither a list, dict, set, nor frozenset (found `{}`) -- pycc_types::check should have rejected this HIR before it reached pycc_mir",

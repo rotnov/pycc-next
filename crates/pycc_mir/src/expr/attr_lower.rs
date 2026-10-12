@@ -509,7 +509,9 @@ pub(crate) fn lower_method_call_expr(
             method: method.clone(),
             args: args
                 .iter()
-                .map(|a| lower_expr(a, scopes, classes, current_class))
+                .map(|a| {
+                    crate::obj_arith::object_arg(lower_expr(a, scopes, classes, current_class))
+                })
                 .collect(),
         };
     }
@@ -520,7 +522,10 @@ pub(crate) fn lower_method_call_expr(
     let defines_method = class_def.mro.iter().any(|mro_class| {
         let mro_def = mro_class_def(mro_class, classes);
         mro_def.methods.iter().any(|(name, _)| name == method)
-            || mro_def.static_methods.iter().any(|(name, _)| name == method)
+            || mro_def
+                .static_methods
+                .iter()
+                .any(|(name, _)| name == method)
             || mro_def.class_methods.iter().any(|(name, _)| name == method)
     });
     let holds_function = class_def.mro.iter().any(|mro_class| {
