@@ -117,10 +117,12 @@ building it, failures included.
 
 ## Try it
 
-### From a release (x86_64 Linux)
+### From a release (x86_64 Linux, arm64 macOS)
 
-Download `pycc-vX.Y.Z-x86_64-linux.tar.gz` from
-[Releases](https://github.com/rotnov/pycc-next/releases) and unpack it anywhere:
+Download the archive for your machine from
+[Releases](https://github.com/rotnov/pycc-next/releases) --
+`pycc-vX.Y.Z-x86_64-linux.tar.gz` or `pycc-vX.Y.Z-aarch64-macos.tar.gz` (Apple
+silicon) -- and unpack it anywhere:
 
 ```console
 $ tar xzf pycc-vX.Y.Z-x86_64-linux.tar.gz
@@ -133,22 +135,29 @@ directory itself can live anywhere (or symlink `bin/pycc` into your `PATH`). LLV
 is linked in. What you need on the machine:
 
 - **Linux x86_64 with glibc 2.39+** (Ubuntu 24.04, Debian 13, Fedora 40 or newer),
-  plus `libstdc++`, `zlib`, `zstd` and `libffi` 8 (present on those systems).
-- **A C toolchain** with `cc` on `PATH` (gcc or clang, e.g. `apt install
-  build-essential`) -- pycc links every program with it. Without it `pycc build`
-  stops with "could not run the linker driver" and says what to install.
+  plus `libstdc++`, `zlib`, `zstd` and `libffi` 8 (present on those systems);
+  or **macOS 14+ on Apple silicon (arm64)**.
+- **A C toolchain** with `cc` on `PATH` -- pycc links every program with it. On
+  Linux gcc or clang (e.g. `apt install build-essential`); on macOS the Xcode
+  Command Line Tools (`xcode-select --install`). Without it `pycc build` stops
+  with "could not run the linker driver" and says what to install.
 - **CPython 3.13+ with its headers and shared libpython** (e.g. `apt install
-  python3-dev`, or a python.org / `uv` / `pyenv` build) for `--ext` modules and for
-  programs that need CPython at run time (`--non-strict` code, standard-library
-  imports). Named by `PYCC_PYTHON`, default `python3`. A plain typed program needs
-  no Python at all.
+  python3-dev`; on macOS the python.org installer, Homebrew `python@3.13`, `uv`
+  or `pyenv`) for `--ext` modules and for programs that need CPython at run time
+  (`--non-strict` code, standard-library imports). Named by `PYCC_PYTHON`,
+  default `python3`. A plain typed program needs no Python at all.
+
+On macOS a browser download is quarantined by Gatekeeper; clear the flag once
+after unpacking (`xattr -dr com.apple.quarantine pycc-vX.Y.Z-aarch64-macos`) or
+download with `curl -LO`, which sets no quarantine flag.
 
 ### From source
 
-Rust 1.97.1 and LLVM 22:
+Rust 1.97.1 and LLVM 22 (Linux: apt.llvm.org's `llvm-22-dev`; macOS:
+`brew install llvm@22`):
 
 ```console
-$ export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22
+$ export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22   # macOS: $(brew --prefix llvm@22)
 $ cargo build --release
 $ ./target/release/pycc build hello.py -o hello && ./hello
 $ scripts/package.sh dist/pycc   # the release layout, from target/release
