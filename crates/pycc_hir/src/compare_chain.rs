@@ -68,6 +68,10 @@ pub(crate) fn lower_cmp_op(
     // `pycc_types`' job, not this lowering step's (D-105).
     let is_none_operand_shape = matches!(left, Expr::NoneLiteral(_))
         || matches!(right, Expr::NoneLiteral(_))
+        // `flag is True`: identity with a `bool` singleton
+        // (`pycc_types::compare_chain::compare_link_ty`).
+        || matches!(left, Expr::BooleanLiteral(_))
+        || matches!(right, Expr::BooleanLiteral(_))
         || (general_identity && !is_literal(left) && !is_literal(right));
     Ok(match op {
         CmpOp::Eq => CmpOpKind::Eq,

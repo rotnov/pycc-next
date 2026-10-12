@@ -206,6 +206,52 @@ pub(crate) fn lower_compare_expr(
         left_lowered = super::super::object_narrow::object_operand(left_lowered);
         right_lowered = super::super::object_narrow::object_operand(right_lowered);
     }
+    // `x is True` / `x is None` with a native scalar `x`
+    // (`pycc_types::compare_chain::compare_link_ty`).
+    if matches!(op, CmpOpKind::Is | CmpOpKind::IsNot) {
+        let negate = *op == CmpOpKind::IsNot;
+        let literal_side =
+            |e: &MirExpr| matches!(e, MirExpr::BoolLiteral(_) | MirExpr::NoneLiteral);
+        if literal_side(&left_lowered) || literal_side(&right_lowered) {
+            let (literal, other) = if literal_side(&left_lowered) {
+                (left_lowered, right_lowered)
+            } else {
+                (right_lowered, left_lowered)
+            };
+            match (&literal, other.ty()) {
+                // Equality with the singleton.
+                (MirExpr::BoolLiteral(_), Ty::Bool) => {
+                    return MirExpr::Compare {
+                        op: if negate {
+                            CmpOpKind::NotEq
+                        } else {
+                            CmpOpKind::Eq
+                        },
+                        left: Box::new(other),
+                        right: Box::new(literal),
+                        ty: Ty::Bool,
+                    };
+                }
+                // CPython's identity against `Py_True` / `Py_False`.
+                (MirExpr::BoolLiteral(_), Ty::Object) => {
+                    return MirExpr::ObjCompare {
+                        op: *op,
+                        left: Box::new(other),
+                        right: Box::new(MirExpr::ObjectBox(Box::new(literal))),
+                    };
+                }
+                // Never the same object: the operand is still evaluated.
+                (_, Ty::Int | Ty::Float | Ty::Str) | (MirExpr::NoneLiteral, Ty::Bool) => {
+                    return MirExpr::Sequence {
+                        discard: Box::new(other),
+                        value: Box::new(MirExpr::BoolLiteral(negate)),
+                    };
+                }
+                _ => {}
+            }
+            (left_lowered, right_lowered) = (literal, other);
+        }
+    }
     if matches!(op, CmpOpKind::In | CmpOpKind::NotIn)
         && left_lowered.ty() == Ty::Str
         && right_lowered.ty() == Ty::Str

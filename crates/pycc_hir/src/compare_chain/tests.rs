@@ -307,7 +307,9 @@ fn a_single_general_identity_between_non_literals_lowers() {
 /// HIR rejection on either side, for every literal kind.
 #[test]
 fn a_single_identity_with_a_literal_operand_keeps_its_c0001() {
-    for operand in ["1", "1.5", "'s'", "b's'", "True", "..."] {
+    // `a is True` lowers: identity with a `bool` singleton is typed by
+    // `pycc_types`.
+    for operand in ["1", "1.5", "'s'", "b's'", "..."] {
         for source in [
             format!("def f(a: int) -> bool:\n    return a is {operand}\n"),
             format!("def f(a: int) -> bool:\n    return {operand} is not a\n"),

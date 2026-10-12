@@ -43,6 +43,27 @@ pub(crate) fn compare_link_ty(
             }
         };
         let (left_ty, right_ty) = (&raw_ty(left, left_ty), &raw_ty(right, right_ty));
+        // `x is True` / `x is False`: identity with a `bool` singleton --
+        // equality for a `bool`, CPython's own identity for an object, and
+        // never the same object for any other native value (`pycc_mir`).
+        if matches!(left, HirExpr::BoolLiteral(_)) || matches!(right, HirExpr::BoolLiteral(_)) {
+            let other_ty = if matches!(left, HirExpr::BoolLiteral(_)) {
+                right_ty
+            } else {
+                left_ty
+            };
+            return match other_ty {
+                Ty::Bool | Ty::Object | Ty::Int | Ty::Float | Ty::Str => Ok(Ty::Bool),
+                other => Err(Diagnostic::error(
+                    "T0021",
+                    format!(
+                        "cannot compare `{}` and a `bool` literal with `is`/`is not`",
+                        other.name()
+                    ),
+                    Span::new(0, 0),
+                )),
+            };
+        }
         let other_ty = if matches!(left, HirExpr::NoneLiteral) {
             right_ty
         } else if matches!(right, HirExpr::NoneLiteral) {
@@ -52,6 +73,10 @@ pub(crate) fn compare_link_ty(
         };
         return match other_ty {
             Ty::Optional(_) | Ty::None | Ty::Object => Ok(Ty::Bool),
+            // Non-strict mode: a native scalar is never `None`.
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Str if crate::non_strict::is_non_strict() => {
+                Ok(Ty::Bool)
+            }
             other => Err(Diagnostic::error(
                 "T0021",
                 format!(

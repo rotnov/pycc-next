@@ -26,7 +26,8 @@
 //!   given a key or value of another type is CPython's own dict; keyed
 //!   sorting and `heapq`/`bisect` over an object run CPython's own; a name
 //!   bound on some paths only is checked when read (`NameError`,
-//!   `UnboundLocalError`); `open(0)` is standard input.
+//!   `UnboundLocalError`); `open(0)` is standard input; `x is True` is
+//!   identity with a `bool` singleton.
 //!
 //! The oracle is CPython: each fixture is built, run and compared with
 //! `python3` running the file -- stdout, the uncaught exception's last line
@@ -385,4 +386,13 @@ fn open_zero_reads_standard_input() {
         let report = matches_cpython(fixture, &[]);
         assert!(!report.contains("fallback:"), "{report}");
     }
+}
+
+#[test]
+fn non_strict_identity_with_bool_and_none_literals() {
+    let report = matches_cpython(
+        "non_strict_identity_literals.py",
+        &["--non-strict", "--report-fallbacks"],
+    );
+    assert!(!report.contains("fallback:"), "{report}");
 }
