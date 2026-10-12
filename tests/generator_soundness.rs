@@ -9,6 +9,12 @@
 //!   other value: a `yield` in a generator taking `int` values is read as an
 //!   `int`, so sending it `None` is a compile-time `T0021`.
 //!
+//! * A `None`-typed slot -- `got = yield v` in a generator whose send type
+//!   is `None`, `x = None` -- is stored as the one-byte unit carrier, never
+//!   as the two-byte `None` literal placeholder: that store overran the
+//!   slot, which a debug build (where it is not optimized away) turned into
+//!   a lost yield or a crash depending on the frame layout.
+//!
 //! What CPython runs the same way is compared with CPython byte for byte.
 
 use pycc_scratch::ScratchDir;
@@ -139,5 +145,37 @@ def main() -> None:\n    a = gs()\n    b = gn()\n    try:\n        next(a)\n    
             );
             assert_eq!(ours.status.code(), Some(1), "{body}");
         }
+    }
+}
+
+/// `None`-typed slots in generators and plain functions, in both profiles,
+/// memcheck-clean when valgrind is installed.
+#[test]
+fn none_typed_slots_match_cpython_in_both_profiles() {
+    let name = "generator_none_slots.py";
+    let theirs = python().arg(fixture(name)).output().expect("python3 runs");
+    assert!(theirs.status.success(), "{}", text(&theirs.stderr));
+    for release in [false, true] {
+        let dir = ScratchDir::new("generator_soundness_none").expect("scratch");
+        let ours = build_and_run(&dir, &fixture(name), release);
+        assert_eq!(
+            text(&ours.stdout),
+            text(&theirs.stdout),
+            "stdout differs (release: {release})"
+        );
+        assert!(ours.status.success(), "{}", text(&ours.stderr));
+        let Ok(memcheck) = Command::new("valgrind")
+            .args(["-q", "--error-exitcode=99", "--leak-check=no"])
+            .arg(dir.join("prog"))
+            .output()
+        else {
+            eprintln!("valgrind not installed: memcheck skipped");
+            continue;
+        };
+        assert!(
+            memcheck.status.success(),
+            "memcheck (release: {release}): {}",
+            text(&memcheck.stderr)
+        );
     }
 }

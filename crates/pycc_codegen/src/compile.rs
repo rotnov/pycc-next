@@ -1197,6 +1197,7 @@ pub(crate) fn compile_to_object_with_observer(
     // initialization contract this call satisfies, and for the D-029 and
     // D-073 reasoning behind the triple and relocation-model choices.
     let target_machine = target_machine::target_machine_for(target_triple, release)?;
+    crate::store_width::check(&module, &target_machine.get_target_data());
     // `--release`'s whole-module optimization pipeline (D-094). This is
     // "maximum whole-module optimization," not literal cross-translation-
     // unit LTO: pycc emits exactly one LLVM module per compilation today

@@ -125,6 +125,7 @@ mod string_render;
 #[cfg(test)]
 use slot_bindings::collect_expr_bindings;
 use slot_bindings::{collect_module_bindings, collect_stmt_bindings};
+mod store_width;
 mod target_machine;
 pub use ext::{
     CompileOptions, EXT_MODULE_EXEC_FAILED, EXT_MODULE_EXEC_SYMBOL, EXT_OBJ_IMPORT_FROM_SYMBOL,

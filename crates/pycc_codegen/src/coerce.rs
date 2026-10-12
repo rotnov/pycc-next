@@ -257,6 +257,15 @@ pub(crate) fn coerce_scalar_to_type<'ctx>(
     target_ty: pycc_mir::Ty,
 ) -> Scalar<'ctx> {
     match (target_ty, scalar) {
+        // A `None`-typed slot holds D-075's canonical unit carrier, an `i8`
+        // (`globals::slot_type`'s and `call_result::none_scalar`'s shape).
+        // `MirExpr::NoneLiteral` and a `None`-typed generator-protocol
+        // result (`got = yield v` in a generator whose send type is `None`)
+        // evaluate to the two-byte `{ i8, i8 }` placeholder instead, so
+        // storing that unconverted wrote two bytes into a one-byte slot:
+        // past the end of the alloca, which at `-O0` (where the store is not
+        // dead) clobbered the neighbouring stack slot or the return address.
+        (pycc_mir::Ty::None, Scalar::Optional(_)) => crate::call_result::none_scalar(context),
         (pycc_mir::Ty::Int, Scalar::Bool(value)) => {
             Scalar::Int(to_encoded_int(context, builder, Scalar::Bool(value)))
         }

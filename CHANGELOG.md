@@ -27,6 +27,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- Debug builds (no `--release`) stored a `None`-typed variable -- `x = None`,
+  or `got = yield v` in a generator whose send type is `None` -- as two bytes
+  into its one-byte slot, overrunning the stack frame: depending on the
+  layout a generator lost a yielded value or the program crashed. Codegen
+  now refuses, as an internal error in both profiles, any store wider than
+  the stack slot or global it writes.
 - A nested function's plain assignment to a `nonlocal` variable (`k = v`, not
   only `k += v`) is seen by the enclosing function; it used to rebind a copy.
 
