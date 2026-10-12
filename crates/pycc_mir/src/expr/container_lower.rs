@@ -20,7 +20,7 @@ pub(crate) fn lower_list_literal_expr(
         return MirExpr::ObjList {
             elements: elements
                 .into_iter()
-                .map(super::super::object_narrow::object_operand)
+                .map(super::super::obj_arith::display_element)
                 .collect(),
         };
     }

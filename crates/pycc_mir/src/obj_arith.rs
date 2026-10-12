@@ -42,8 +42,17 @@ pub(super) fn is_object_display(kind: pycc_hir::DisplayKind, elements: &[MirExpr
 pub(super) fn object_display(kind: crate::ObjDisplayKind, elements: Vec<MirExpr>) -> MirExpr {
     MirExpr::ObjDisplay {
         kind,
-        elements: elements.into_iter().map(object_operand).collect(),
+        elements: elements.into_iter().map(display_element).collect(),
     }
+}
+
+/// An element of a display built as the CPython container: a narrowed read
+/// is the object it still is, and `None` is boxed as `Py_None`.
+pub(super) fn display_element(element: MirExpr) -> MirExpr {
+    if element.ty() == Ty::None {
+        return MirExpr::ObjectBox(Box::new(element));
+    }
+    object_operand(element)
 }
 
 /// `Some(ObjUnaryOp)` for `-o`, `+o` or `~o` on a CPython object.

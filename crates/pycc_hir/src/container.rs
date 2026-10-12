@@ -109,9 +109,13 @@ pub fn display_is_object(kind: DisplayKind, elements: &[Ty]) -> bool {
     }
     let span = Span::new(0, 0);
     match kind {
-        // A uniform list keeps its native lowering even where that shape is
-        // not compiled yet: the checker reports the `T0034` then.
-        DisplayKind::List => !uniform(elements.iter()),
+        // A uniform list of an element type no native list holds (`[None]`)
+        // is the CPython list too; in strict mode the checker reports the
+        // `T0034` first.
+        DisplayKind::List => {
+            !uniform(elements.iter())
+                || check_container_ty(&Ty::List(Box::new(elements[0].clone())), span).is_err()
+        }
         DisplayKind::Set => {
             !uniform(elements.iter())
                 || check_container_ty(&Ty::Set(Box::new(elements[0].clone())), span).is_err()

@@ -145,7 +145,8 @@ pub(crate) fn object_display_ty<'a>(
     if !pycc_hir::display_is_object(kind, &tys) {
         return None;
     }
-    Some(match tys.iter().find(|ty| !is_object_operand(env, ty)) {
+    // `None` is CPython's own `Py_None` there.
+    Some(match tys.iter().find(|ty| **ty != Ty::None && !is_object_operand(env, ty)) {
         None => Ok(Ty::Object),
         Some(ty) => Err(object_operation_unsupported(&format!(
             "a `{}` element in a display with a CPython object element",
