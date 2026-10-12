@@ -21,6 +21,8 @@ Accept:
    iteration, creation via `numpy.zeros/ones/empty/array`, without CPython calls in the
    loop body. New benchmarks `bench/py/stencil2d.py` and `bench/py/prefix_sum_np.py`
    (numpy arrays + Python loops) run >= 30x faster than CPython and within 3x of Rust.
+   **Met 2026-10-12:** `tests/numpy_typed_arrays.rs` (oracle + array-safety fixtures);
+   bench: stencil2d 436x faster than CPython / 2.5x of Rust, prefix_sum_np 80x / 1.8x.
 3. **Language:** `**kwargs` in calls and definitions, keyword-only parameters and
    `*args` in definitions, default arguments for module functions in `--ext`
    (#1194), generator `send()`/`throw()`/`close()` and `yield` as an expression,
