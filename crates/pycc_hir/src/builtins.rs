@@ -598,6 +598,49 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             found.word_args.pop();
             found
         }
+        // The same calls over a CPython object (whose pairs list is a
+        // CPython list too), and `heapq`/`bisect` over one: the shim's
+        // `object_stdlib.c` runs them in CPython. A native argument beside
+        // the object is boxed (`pycc_mir::expr::builtin_call`).
+        ("__pycc_sorted_keyed", [Ty::Object, Ty::Bool]) => sig(
+            "pycc_ext_obj_sorted_keyed",
+            &[Ty::Object, Ty::Bool],
+            Ty::Object,
+        ),
+        ("__pycc_sort_keyed", [Ty::Object, Ty::Object, Ty::Bool]) => sig(
+            "pycc_ext_obj_sort_keyed",
+            &[Ty::Object, Ty::Object, Ty::Bool],
+            Ty::None,
+        ),
+        ("__pycc_min_keyed", [Ty::Object]) => {
+            sig("pycc_ext_obj_min_keyed", &[Ty::Object], Ty::Object)
+        }
+        ("__pycc_max_keyed", [Ty::Object]) => {
+            sig("pycc_ext_obj_max_keyed", &[Ty::Object], Ty::Object)
+        }
+        ("__pycc_heapify", [Ty::Object]) => sig("pycc_ext_obj_heapify", &[Ty::Object], Ty::None),
+        ("__pycc_heappop", [Ty::Object]) => sig("pycc_ext_obj_heappop", &[Ty::Object], Ty::Object),
+        (
+            "__pycc_heappush"
+            | "__pycc_heapreplace"
+            | "__pycc_heappushpop"
+            | "__pycc_bisect_left"
+            | "__pycc_bisect_right"
+            | "__pycc_insort_left"
+            | "__pycc_insort_right",
+            [Ty::Object, item],
+        ) if boxes_as_object(item) => {
+            let (symbol, ret) = match name {
+                "__pycc_heappush" => ("pycc_ext_obj_heappush", Ty::None),
+                "__pycc_heapreplace" => ("pycc_ext_obj_heapreplace", Ty::Object),
+                "__pycc_heappushpop" => ("pycc_ext_obj_heappushpop", Ty::Object),
+                "__pycc_bisect_left" => ("pycc_ext_obj_bisect_left", Ty::Object),
+                "__pycc_bisect_right" => ("pycc_ext_obj_bisect_right", Ty::Object),
+                "__pycc_insort_left" => ("pycc_ext_obj_insort_left", Ty::None),
+                _ => ("pycc_ext_obj_insort_right", Ty::None),
+            };
+            sig(symbol, &[Ty::Object, Ty::Object], ret)
+        }
         // `key=`/`reverse=` calls, rewritten by `pycc_ast::desugar::keys`
         // into `(key, element)` pair lists.
         ("__pycc_sorted_keyed", [Ty::List(pair), Ty::Bool]) => {
@@ -970,4 +1013,20 @@ pub fn resolve_method(
         _ => return None,
     };
     Some(Ok(found))
+}
+
+/// Whether a native value of type `ty` crosses into a CPython call as the
+/// object CPython would hold (`pycc_codegen::object_box`): a scalar, `None`,
+/// a CPython object, or a tuple of `int`/`float`/`bool`.
+fn boxes_as_object(ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::None | Ty::Object => true,
+        Ty::Tuple(elements) => {
+            !elements.is_empty()
+                && elements
+                    .iter()
+                    .all(|e| matches!(e, Ty::Int | Ty::Float | Ty::Bool))
+        }
+        _ => false,
+    }
 }

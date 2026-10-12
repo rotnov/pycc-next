@@ -1205,3 +1205,57 @@ fn percent_formatting_runs_in_constant_memory() {
         peaks[1]
     );
 }
+
+/// Non-strict mode: keyed sorting, `min`/`max` and `heapq`/`bisect` over a
+/// CPython object (`object_stdlib.c`) release the pairs list, the boxed
+/// arguments and the results.
+#[test]
+#[ignore = "requires a CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn object_stdlib_calls_run_in_constant_memory() {
+    let dir = ScratchDir::new("memory_object_stdlib").expect("scratch dir");
+    let mut peaks = Vec::new();
+    for n in [N_SMALL, N_LARGE] {
+        let name = format!("object_stdlib_{n}");
+        let src = dir.join(format!("{name}.py"));
+        std::fs::write(
+            &src,
+            format!(
+                "import heapq\nimport json\nfrom bisect import bisect_left\n\n\
+                 xs = json.loads(\"[[3, 5], [1, 9], [2, 4]]\")\nh = json.loads(\"[]\")\n\
+                 total = 0\nfor i in range({n}):\n    \
+                 xs.sort(key=lambda t: t[1] - t[0], reverse=i % 2 == 0)\n    \
+                 ys = sorted(xs, key=lambda t: t[0])\n    \
+                 heapq.heappush(h, (i % 7, i))\n    \
+                 if len(h) > 5:\n        heapq.heappop(h)\n    \
+                 total += bisect_left(ys, xs[0]) + len(min(xs, key=len))\n\
+                 print(total, xs, h)\n"
+            ),
+        )
+        .expect("write the probe source");
+        let bin = dir.join(&name);
+        let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
+            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .expect("pycc should spawn");
+        let report = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{report}");
+        assert!(!report.contains("fallback:"), "{report}");
+        let (out, peak) = run_measured(&bin);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            String::from_utf8_lossy(&cpython(&src)),
+            "output differs from CPython"
+        );
+        peaks.push(peak);
+    }
+    let growth = peaks[1] - peaks[0];
+    assert!(
+        growth <= GROWTH_LIMIT_KB,
+        "peak RSS grew by {growth} kB from {N_SMALL} to {N_LARGE} iterations ({} -> {} kB)",
+        peaks[0],
+        peaks[1]
+    );
+}

@@ -51,7 +51,25 @@ pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirEx
         tys = vec![param];
     }
     match resolve_call(name, &tys) {
-        Some(Ok(sig)) => Ok(MirExpr::RtCall(Box::new(RtCallExpr { sig, args }))),
+        Some(Ok(sig)) => {
+            // A shim helper over a CPython object takes every argument as
+            // an object: a native one is boxed.
+            let args = if sig.symbol.starts_with("pycc_ext_obj_") {
+                args.into_iter()
+                    .zip(&sig.params)
+                    .map(|(arg, param)| {
+                        if *param == Ty::Object && arg.ty() != Ty::Object {
+                            MirExpr::ObjectBox(Box::new(arg))
+                        } else {
+                            arg
+                        }
+                    })
+                    .collect()
+            } else {
+                args
+            };
+            Ok(MirExpr::RtCall(Box::new(RtCallExpr { sig, args })))
+        }
         _ => Err(args),
     }
 }

@@ -23,7 +23,8 @@
 //!   CPython objects builds CPython's own list or set; a mixed-type store
 //!   into an item of a nested list widens the outer list; `str % args`
 //!   formats through CPython; `int ** <negative literal>` is a float; a dict
-//!   given a key or value of another type is CPython's own dict.
+//!   given a key or value of another type is CPython's own dict; keyed
+//!   sorting and `heapq`/`bisect` over an object run CPython's own.
 //!
 //! The oracle is CPython: each fixture is built, run and compared with
 //! `python3` running the file -- stdout, the uncaught exception's last line
@@ -353,6 +354,15 @@ fn a_negative_literal_exponent_is_a_float() {
 fn non_strict_mixed_dicts_are_cpython_dicts() {
     let report = matches_cpython(
         "non_strict_dict_widening.py",
+        &["--non-strict", "--report-fallbacks"],
+    );
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+#[test]
+fn non_strict_keyed_sorting_and_heaps_over_objects_are_cpythons() {
+    let report = matches_cpython(
+        "non_strict_object_stdlib.py",
         &["--non-strict", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");

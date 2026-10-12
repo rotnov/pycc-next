@@ -52,6 +52,9 @@ pub(super) fn emit_rt_call<'ctx>(
     let mark = heap_rc::pending_mark(rt);
     let mut pending_ints = Vec::new();
     let mut coerced_strs = Vec::new();
+    // A produced CPython object argument (a shim helper's, boxed by
+    // `pycc_mir`) is held across the call and released after it.
+    let mut held_objects = Vec::new();
     for ((arg, param), is_word) in call.args.iter().zip(&sig.params).zip(&sig.word_args) {
         // Non-strict mode: a CPython object for a scalar parameter
         // (`pycc_hir::builtins::object_param`) is converted with a run-time
@@ -79,6 +82,11 @@ pub(super) fn emit_rt_call<'ctx>(
             continue;
         }
         let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
+        if let Scalar::Object(_) = scalar {
+            held_objects.push(crate::object_release::hold(
+                context, module, rt, arg, &scalar,
+            ));
+        }
         // #625: a fresh `int` argument (`str(x * 2)`) is released after the
         // call, or if a later argument raises.
         if !passes_through {
@@ -162,6 +170,9 @@ pub(super) fn emit_rt_call<'ctx>(
     }
     for boxed in boxes {
         crate::containers::release_boxed(context, builder, rt, boxed);
+    }
+    for held in held_objects.into_iter().rev() {
+        held.release(builder, rt);
     }
     for ptr in coerced_strs {
         heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::Str, ptr);
