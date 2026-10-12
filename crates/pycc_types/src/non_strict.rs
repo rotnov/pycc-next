@@ -104,13 +104,85 @@ pub(crate) fn with_widening<T, E>(
     loop {
         take_widen_requests();
         let result = check(current.as_ref().unwrap_or(hir));
-        let requested = take_widen_requests();
+        let requested = retarget_temporaries(hir, take_widen_requests());
         if result.is_ok() || requested.is_subset(&widened) {
             return result;
         }
         widened.extend(requested);
         current = Some(widen(hir, &widened));
     }
+}
+
+/// Each requested desugaring temporary (`_pycc_N`) that holds an item of a
+/// named container (`_pycc_1 = rows[i]`, for `rows[i][j] = v`) is replaced
+/// by that container's name: widening the temporary alone would copy the
+/// item out of its container, while a widened container hands out its own
+/// CPython items, so a store through one is seen through the other.
+fn retarget_temporaries(hir: &HirModule, requested: BTreeSet<String>) -> BTreeSet<String> {
+    requested
+        .into_iter()
+        .map(|name| {
+            if !name.starts_with("_pycc_") {
+                return name;
+            }
+            let mut root = None;
+            for item in &hir.items {
+                let body = match item {
+                    HirItem::Function { body, .. } => body.as_slice(),
+                    HirItem::TopLevelStmt(stmt) => std::slice::from_ref(stmt),
+                };
+                if root.is_none() {
+                    root = item_root(body, &name);
+                }
+            }
+            root.unwrap_or(name)
+        })
+        .collect()
+}
+
+/// The container a temporary's first assignment reads an item of.
+fn item_root(body: &[HirStmt], name: &str) -> Option<String> {
+    for stmt in body {
+        let found = match stmt {
+            HirStmt::Assign { target, value } if target == name => {
+                let mut expr = value;
+                let mut subscripted = false;
+                while let pycc_hir::HirExpr::Subscript { base, .. } = expr {
+                    expr = base;
+                    subscripted = true;
+                }
+                return match expr {
+                    pycc_hir::HirExpr::Name(root) if subscripted => Some(root.clone()),
+                    _ => None,
+                };
+            }
+            HirStmt::If { body, orelse, .. } => {
+                item_root(body, name).or_else(|| item_root(orelse, name))
+            }
+            HirStmt::While { body, .. }
+            | HirStmt::ForRange { body, .. }
+            | HirStmt::ForList { body, .. }
+            | HirStmt::ForObject { body, .. } => item_root(body, name),
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                item_root(std::slice::from_ref(loop_stmt.as_ref()), name)
+                    .or_else(|| item_root(orelse, name))
+            }
+            HirStmt::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => item_root(body, name)
+                .or_else(|| handlers.iter().find_map(|h| item_root(&h.body, name)))
+                .or_else(|| item_root(orelse, name))
+                .or_else(|| item_root(finalbody, name)),
+            _ => None,
+        };
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
 }
 
 /// `hir` with the first plain assignment of each name in `names`, in every
@@ -137,6 +209,7 @@ fn widen(hir: &HirModule, names: &BTreeSet<String>) -> HirModule {
 
 fn widen_block(body: &mut [HirStmt], names: &BTreeSet<String>, seen: &mut BTreeSet<String>) {
     for stmt in body {
+        let is_list_comp = matches!(stmt, HirStmt::ListCompAssign { .. });
         match stmt {
             HirStmt::Assign { target, value }
                 if names.contains(target) && !seen.contains(target) =>
@@ -151,6 +224,41 @@ fn widen_block(body: &mut [HirStmt], names: &BTreeSet<String>, seen: &mut BTreeS
             }
             HirStmt::AnnAssign { target, .. } => {
                 seen.insert(target.clone());
+            }
+            // A comprehension's statement form, as its expression.
+            HirStmt::ListCompAssign {
+                target,
+                var,
+                iter,
+                cond,
+                elt,
+            }
+            | HirStmt::SetCompAssign {
+                target,
+                var,
+                iter,
+                cond,
+                elt,
+            } if names.contains(target) && !seen.contains(target) => {
+                seen.insert(target.clone());
+                let elt = if is_list_comp {
+                    pycc_hir::CompElt::List(elt.as_ref().clone())
+                } else {
+                    pycc_hir::CompElt::Set(elt.as_ref().clone())
+                };
+                let value =
+                    pycc_hir::HirExpr::Comprehension(Box::new(pycc_hir::HirComprehension {
+                        var: var.clone(),
+                        iter: iter.clone(),
+                        cond: cond.as_deref().cloned(),
+                        elt,
+                    }));
+                *stmt = HirStmt::AnnAssign {
+                    target: target.clone(),
+                    annotation: Ty::Object,
+                    value: Some(value),
+                    is_final: false,
+                };
             }
             HirStmt::If { body, orelse, .. } => {
                 widen_block(body, names, seen);
