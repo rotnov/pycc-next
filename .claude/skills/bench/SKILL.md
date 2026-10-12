@@ -8,7 +8,8 @@ description: Use when measuring pycc-next performance, after any codegen/runtime
 1. `cargo build --release` (export `LLVM_SYS_221_PREFIX=/usr/lib/llvm-22`).
 2. `python3 bench/run.py` (all programs) or `python3 bench/run.py fib nbody`.
    It compiles each `bench/py/*.py` with pycc-next, checks output equals CPython, and times
-   CPython, pycc-next and `bench/rs/*.rs` (`rustc -O -C target-cpu=native`). Best of 3.
+   CPython, pycc-next and `bench/rs/*.rs` (`rustc -O`, default target CPU like pycc's own
+   output -- no `target-cpu=native`). Best of 7.
 3. A row with `OUTPUT MISMATCH` or `compile error` is a bug, not a footnote.
 4. New program: add `bench/py/<name>.py` (idiomatic typed Python, prints a checksum) and the
    same algorithm in `bench/rs/<name>.rs`. Keep the work identical; use

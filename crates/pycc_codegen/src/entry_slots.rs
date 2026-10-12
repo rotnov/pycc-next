@@ -317,6 +317,25 @@ pub(crate) fn emit_assign<'ctx>(
     }
 }
 
+/// Stores a smallint `word` into an `int` slot whose previous value the
+/// caller has already released (`for_range_fast`'s hoisted release): the
+/// store half of [`emit_assign`] without its release.
+pub(crate) fn store_unowned_int<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    slot: &StorageSlot<'ctx>,
+    word: inkwell::values::IntValue<'ctx>,
+) {
+    builder
+        .build_store(slot.ptr, word)
+        .expect("build_store should not fail for a slot this function itself allocated");
+    if let Some(initialized_ptr) = slot.initialized {
+        builder
+            .build_store(initialized_ptr, context.i8_type().const_int(1, false))
+            .expect("build_store should not fail for a declared flag");
+    }
+}
+
 /// Mirror of [`decref_str_slot_before_store`] for an artifact-owned buffer
 /// slot (Part 2a of #1142, #1165): loads the target's predeclared slot and
 /// frees its current storage before the new view pointer overwrites it.

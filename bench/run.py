@@ -1,7 +1,12 @@
 """Benchmark pycc-next against CPython and hand-written Rust.
 
-Usage: python3 bench/run.py [--pycc target/release/pycc] [--runs 3]
+Usage: python3 bench/run.py [--pycc target/release/pycc] [--runs 7]
 Prints a markdown table; every program's output is checked against CPython.
+
+The Rust twins build with `rustc -O` for the default target CPU, exactly like
+pycc-next's own `--release` output: `-C target-cpu=native` would let rustc use
+instructions (AVX2, FMA) pycc-next deliberately does not assume, so the ratio
+would measure the target flag rather than the compiler.
 """
 import argparse
 import pathlib
@@ -25,7 +30,7 @@ def best(cmd: list[str], runs: int) -> tuple[float, str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pycc", default=str(HERE.parent / "target/release/pycc"))
-    ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--runs", type=int, default=7)
     ap.add_argument("names", nargs="*")
     args = ap.parse_args()
     names = args.names or sorted(p.stem for p in (HERE / "py").glob("*.py"))
@@ -47,7 +52,7 @@ def main() -> int:
         rs = HERE / "rs" / f"{name}.rs"
         t_rs = None
         if rs.exists():
-            subprocess.run(["rustc", "-O", "-C", "target-cpu=native", str(rs), "-o", str(tmp / f"{name}_rs")], check=True)
+            subprocess.run(["rustc", "-O", str(rs), "-o", str(tmp / f"{name}_rs")], check=True)
             t_rs, _ = best([str(tmp / f"{name}_rs")], args.runs)
         rs_col = f"{t_rs:.3f}s" if t_rs else "-"
         vs_rs = f"{t_pc / t_rs:.2f}x slower" if t_rs else "-"

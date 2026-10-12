@@ -277,6 +277,11 @@ pub(super) struct RtFns<'ctx> {
     /// Set when the target's libm is glibc, whose documented `pow` error
     /// bound lets `float_fast` prove `pow(x, 0.5) == sqrt(x)` for most `x`.
     pub(super) glibc_libm: std::cell::Cell<bool>,
+    /// The attribute slots proven always assigned (`assigned_slots`).
+    pub(super) assigned_slots: std::cell::RefCell<crate::assigned_slots::AssignedSlots>,
+    /// Whether the function being emitted is a constructor, whose stores
+    /// set the assigned flags the proof relies on.
+    pub(super) emitting_ctor: std::cell::Cell<bool>,
     /// `exception_value` returns a pointer to the current exception object.
     pub(super) exception_value: FunctionValue<'ctx>,
     /// `exception_clear` resets the thread-local pending state (void).
@@ -776,6 +781,8 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         thread_safe_exception_check: std::cell::Cell::new(false),
         glibc_libm: std::cell::Cell::new(false),
+        assigned_slots: std::cell::RefCell::new(Default::default()),
+        emitting_ctor: std::cell::Cell::new(false),
         exception_value: declare("pycc_rt_exception_value", ptr_type.fn_type(&[], false)),
         exception_clear: declare("pycc_rt_exception_clear", void_type.fn_type(&[], false)),
         exception_alloc: declare(

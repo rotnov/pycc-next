@@ -259,6 +259,11 @@ pub(crate) struct UserFunction<'ctx> {
     /// specialize it; a call from inside the function itself skips even the
     /// check, since the function can only be running once its `def` has.
     pub(crate) single_def: Option<FunctionValue<'ctx>>,
+    /// `single_def`'s definition is bound before any code of the module can
+    /// run: every item before its `def` is another `def` (no top-level
+    /// statement, foreign import or enum singleton runs earlier). Every call
+    /// therefore finds the slot set, and skips the null check too.
+    pub(crate) bound_before_code: bool,
 }
 
 /// Part 2b of #1142 (#1164): the `locals` key under which a

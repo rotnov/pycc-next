@@ -315,7 +315,7 @@ pub(crate) fn dispatch<'ctx>(
             .get_insert_block()
             .and_then(|block| block.get_parent())
             .expect("a call is emitted inside a function");
-        if caller != target {
+        if caller != target && !user_function.bound_before_code {
             ext_thunk::emit_fnptr_dispatch_guard(context, builder, rt, user_function);
         }
         return builder

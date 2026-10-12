@@ -108,10 +108,32 @@ pub(super) fn emit<'ctx>(
     let stop_raw = builder
         .build_right_shift(stop, one, true, "range_stop_raw")
         .expect("ashr");
-    let preheader = builder.get_insert_block().expect("positioned");
     let test_bb = context.append_basic_block(function, "small_range_test");
     let body_bb = context.append_basic_block(function, "small_range_body");
     let latch_bb = context.append_basic_block(function, "small_range_latch");
+    let predicate = if step > 0 {
+        IntPredicate::SLT
+    } else {
+        IntPredicate::SGT
+    };
+    // Every value this loop binds is a smallint, which owns nothing. When
+    // nothing but the loop itself binds the variable, only the value it held
+    // before the loop can need a release: release it once, on entry to a
+    // first iteration (a loop that runs zero times leaves it bound), instead
+    // of testing the previous value on every iteration.
+    let hoisted = hoist_release(locals, var, body);
+    if hoisted {
+        let enter_bb = context.append_basic_block(function, "small_range_enter");
+        let first = builder
+            .build_int_compare(predicate, start_raw, stop_raw, "small_range_first")
+            .expect("icmp");
+        builder
+            .build_conditional_branch(first, enter_bb, exit_bb)
+            .expect("branch");
+        builder.position_at_end(enter_bb);
+        crate::bigint_rc::release_int_slot_before_store(context, builder, rt, &locals[var]);
+    }
+    let preheader = builder.get_insert_block().expect("positioned");
     builder.build_unconditional_branch(test_bb).expect("branch");
 
     builder.position_at_end(test_bb);
@@ -120,11 +142,6 @@ pub(super) fn emit<'ctx>(
         .expect("build_phi in a fresh block");
     induction.add_incoming(&[(&start_raw, preheader)]);
     let i = induction.as_basic_value().into_int_value();
-    let predicate = if step > 0 {
-        IntPredicate::SLT
-    } else {
-        IntPredicate::SGT
-    };
     let more = builder
         .build_int_compare(predicate, i, stop_raw, "small_range_more")
         .expect("icmp");
@@ -141,7 +158,11 @@ pub(super) fn emit<'ctx>(
     let word = builder
         .build_or(shifted, one, "small_range_word")
         .expect("or");
-    crate::emit_assign(context, builder, rt, locals, var, Scalar::Int(word));
+    if hoisted {
+        crate::entry_slots::store_unowned_int(context, builder, &locals[var], word);
+    } else {
+        crate::emit_assign(context, builder, rt, locals, var, Scalar::Int(word));
+    }
     rt.loops.enter(stmt, exit_bb, latch_bb, finally_stack.len());
     crate::emit_body_then_branch(
         context,
@@ -166,4 +187,25 @@ pub(super) fn emit<'ctx>(
         builder.build_unconditional_branch(test_bb).expect("branch");
     }
     Ok(())
+}
+
+/// Whether the loop variable's release can move out of the loop: an `int`
+/// function local (an `alloca`; a module global could be rebound by any call
+/// in the body) that no statement of the body binds.
+fn hoist_release(locals: &HashMap<String, StorageSlot<'_>>, var: &str, body: &[MirStmt]) -> bool {
+    let Some(slot) = locals.get(var) else {
+        return false;
+    };
+    let is_alloca = slot
+        .ptr
+        .as_instruction()
+        .is_some_and(|inst| inst.get_opcode() == inkwell::values::InstructionOpcode::Alloca);
+    if slot.ty != pycc_mir::Ty::Int || !is_alloca {
+        return false;
+    }
+    let mut bound = std::collections::BTreeMap::new();
+    for stmt in body {
+        crate::collect_stmt_bindings(stmt, &mut bound);
+    }
+    !bound.contains_key(var)
 }

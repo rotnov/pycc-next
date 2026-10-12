@@ -74,6 +74,7 @@ pub(crate) fn compile_to_object_with_observer(
     rt.glibc_libm
         .set(float_fast::target_libm_is_glibc(target_triple));
     *rt.rc_class_kinds.borrow_mut() = heap_rc::rc_class_kinds(&mir.class_defs);
+    *rt.assigned_slots.borrow_mut() = assigned_slots::AssignedSlots::analyze(mir, options.ext);
     let _pins = operand_pin::plan_module(&rt, mir);
 
     // First pass: declare every user-defined function -- with its real
@@ -186,6 +187,7 @@ pub(crate) fn compile_to_object_with_observer(
                         name_global: None,
                         direct_value: Some(f),
                         single_def: None,
+                        bound_before_code: false,
                     }
                 } else {
                     let fn_ptr_type = context.ptr_type(inkwell::AddressSpace::default());
@@ -235,6 +237,7 @@ pub(crate) fn compile_to_object_with_observer(
                         name_global: Some(name_global),
                         direct_value: None,
                         single_def: None,
+                        bound_before_code: false,
                     }
                 }
             });
@@ -253,6 +256,23 @@ pub(crate) fn compile_to_object_with_observer(
             && uf.fn_ptr_global.is_some()
         {
             uf.single_def = Some(f);
+        }
+    }
+    // A single definition whose `def` precedes every statement that can run
+    // code is bound before any function body can run, so no call reaches
+    // its slot while it is still null (see `UserFunction::bound_before_code`).
+    // Enum member singletons are built before the first item, so a module
+    // that has any keeps every check.
+    if mir.class_defs.iter().all(|(_, class_def)| class_def.enum_members.is_empty()) {
+        for item in &mir.items {
+            let MirItem::Function { name, .. } = item else {
+                break;
+            };
+            if let Some(uf) = user_functions.get_mut(name.as_str())
+                && uf.single_def.is_some()
+            {
+                uf.bound_before_code = true;
+            }
         }
     }
 
@@ -545,6 +565,7 @@ pub(crate) fn compile_to_object_with_observer(
                 .expect("function body has matching declaration");
             let block = context.append_basic_block(f, "entry");
             builder.position_at_end(block);
+            rt.emitting_ctor.set(rt.assigned_slots.borrow().is_ctor(name));
             // A generator function is a coroutine: its frame is allocated
             // first, and its body is emitted as if it returned `None`
             // (`generator`).
@@ -1205,6 +1226,14 @@ pub(crate) fn compile_to_object_with_observer(
             .run_passes("default<O0>", &target_machine, PassBuilderOptions::create())
             .expect("LLVM's \"default<O0>\" pipeline lowers a verified module's coroutines");
     }
+    // Developer hook for performance work: `PYCC_DUMP_LLVM=<path>` writes the
+    // module's IR before (`<path>.pre.ll`) and after (`<path>`) the pipeline.
+    let dump_path = std::env::var_os("PYCC_DUMP_LLVM").map(std::path::PathBuf::from);
+    if let Some(path) = &dump_path {
+        let mut pre = path.clone().into_os_string();
+        pre.push(".pre.ll");
+        let _ = module.print_to_file(std::path::Path::new(&pre));
+    }
     let applied_pipeline = if release {
         module
             .run_passes(
@@ -1220,6 +1249,9 @@ pub(crate) fn compile_to_object_with_observer(
     } else {
         None
     };
+    if let Some(path) = &dump_path {
+        let _ = module.print_to_file(path);
+    }
     if let Some(observer) = observer.as_mut() {
         observer(&module, applied_pipeline);
     }

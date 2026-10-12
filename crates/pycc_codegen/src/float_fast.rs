@@ -282,33 +282,37 @@ pub(super) fn emit_pow<'ctx>(
                 .build_float_compare(pred, l, f64_type.const_float(bound), name)
                 .expect("fcmp")
         };
-        // A positive finite base raises nothing, and its square root never
-        // overflows; `2^-900..2^1000` is where `emit_pow_half`'s residual
-        // computation is exact, libm `pow` is called directly elsewhere.
-        let positive = cmp(FloatPredicate::OGT, 0.0, "base_pos");
-        let finite = cmp(FloatPredicate::OLT, f64::INFINITY, "base_fin");
-        let fast_ok = builder.build_and(positive, finite, "pow_half_ok").expect("and");
+        // `2^-900 < l < 2^1000` (false for a NaN) is a positive finite base,
+        // which raises nothing and whose square root never overflows, and
+        // where `emit_pow_half`'s residual computation is exact: it is tested
+        // first, alone, so the common base pays two compares. Any other base
+        // takes the general guarded `pow` below (libm for a positive finite
+        // base, the runtime otherwise).
         let low = cmp(FloatPredicate::OGT, 2f64.powi(-900), "base_low");
         let high = cmp(FloatPredicate::OLT, 2f64.powi(1000), "base_high");
         let in_range = builder.build_and(low, high, "pow_half_range").expect("and");
-        return emit_guarded(context, builder, rt, rt.float_pow, l, r, fast_ok, |b| {
-            let function = current_function(b);
-            let proof_bb = context.append_basic_block(function, "pow_half_proof");
-            let libm_bb = context.append_basic_block(function, "pow_half_far");
-            let done_bb = context.append_basic_block(function, "pow_half_join");
-            likely_branch(context, b, in_range, proof_bb, libm_bb);
-            b.position_at_end(proof_bb);
-            let proven = emit_pow_half(context, b, rt, l, r);
-            let proof_end = b.get_insert_block().expect("positioned");
-            b.build_unconditional_branch(done_bb).expect("branch");
-            b.position_at_end(libm_bb);
-            let far = emit_libm_pow(context, b, rt, l, r);
-            b.build_unconditional_branch(done_bb).expect("branch");
-            b.position_at_end(done_bb);
-            let phi = b.build_phi(f64_type, "pow_half_value").expect("phi");
-            phi.add_incoming(&[(&proven, proof_end), (&far, libm_bb)]);
-            (phi.as_basic_value().into_float_value(), None)
+        let function = current_function(builder);
+        let proof_bb = context.append_basic_block(function, "pow_half_proof");
+        let far_bb = context.append_basic_block(function, "pow_half_far");
+        let done_bb = context.append_basic_block(function, "pow_half_join");
+        likely_branch(context, builder, in_range, proof_bb, far_bb);
+        builder.position_at_end(proof_bb);
+        let proven = emit_pow_half(context, builder, rt, l, r);
+        let proof_end = builder.get_insert_block().expect("positioned");
+        builder.build_unconditional_branch(done_bb).expect("branch");
+        builder.position_at_end(far_bb);
+        let positive = cmp(FloatPredicate::OGT, 0.0, "base_pos");
+        let finite = cmp(FloatPredicate::OLT, f64::INFINITY, "base_fin");
+        let fast_ok = builder.build_and(positive, finite, "pow_half_ok").expect("and");
+        let far = emit_guarded(context, builder, rt, rt.float_pow, l, r, fast_ok, |b| {
+            (emit_libm_pow(context, b, rt, l, r), None)
         });
+        let far_end = builder.get_insert_block().expect("positioned");
+        builder.build_unconditional_branch(done_bb).expect("branch");
+        builder.position_at_end(done_bb);
+        let phi = builder.build_phi(f64_type, "pow_half_value").expect("phi");
+        phi.add_incoming(&[(&proven, proof_end), (&far, far_end)]);
+        return phi.as_basic_value().into_float_value();
     }
     let f64_type = context.f64_type();
     let inf = f64_type.const_float(f64::INFINITY);

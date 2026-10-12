@@ -336,13 +336,15 @@ pub(crate) fn emit_slot_load_checked<'ctx>(
     emit_slot_load(context, builder, base, slot)
 }
 
-/// `base.attr = word`'s store: the word, then the assigned flag.
+/// `base.attr = word`'s store: the word, then (`set_flag`) the assigned
+/// flag, which a slot `assigned_slots` proves already set does not need.
 pub(crate) fn emit_slot_store<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     base: PointerValue<'ctx>,
     slot: u64,
     word: IntValue<'ctx>,
+    set_flag: bool,
 ) {
     let i64_type = context.i64_type();
     let word_ptr = slot_field_ptr(context, builder, base, slot, 0);
@@ -350,6 +352,9 @@ pub(crate) fn emit_slot_store<'ctx>(
         .build_store(word_ptr, word)
         .expect("build_store should not fail for an i64 slot word");
     tag_access(context, Some(store), slot, false);
+    if !set_flag {
+        return;
+    }
     let flag_ptr = slot_field_ptr(context, builder, base, slot, SLOT_ASSIGNED_OFFSET);
     let store = builder
         .build_store(flag_ptr, i64_type.const_int(1, false))

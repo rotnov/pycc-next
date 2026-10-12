@@ -143,7 +143,11 @@ pub(crate) fn emit_attr_get_expr<'ctx>(
     // A fresh base is released if the slot is unassigned.
     let mark = heap_rc::pending_mark(rt);
     heap_rc::hold_temporary(rt, base, &base_scalar);
-    let raw = attr_slot::emit_slot_load_checked(context, builder, rt, base_ptr, *slot as u64);
+    let raw = if rt.assigned_slots.borrow().is_always_assigned(&base.ty(), *slot) {
+        attr_slot::emit_slot_load(context, builder, base_ptr, *slot as u64)
+    } else {
+        attr_slot::emit_slot_load_checked(context, builder, rt, base_ptr, *slot as u64)
+    };
     heap_rc::truncate_pending(rt, mark);
     let value = slot_word_to_scalar(context, builder, raw, ty);
     // A fresh base (`f().x`) dies right after the read, so the read

@@ -454,7 +454,14 @@ pub(crate) fn emit_attr_set_stmt<'ctx>(
         release_int_attr_slot_before_store(context, builder, rt, base_ptr, slot);
     }
     let word = scalar_to_slot_word(context, builder, value_scalar);
-    attr_slot::emit_slot_store(context, builder, base_ptr, slot, word);
+    // A slot proven always assigned already has its flag set, except while
+    // a constructor's prefix is setting it.
+    let flag_set = !rt.emitting_ctor.get()
+        && rt
+            .assigned_slots
+            .borrow()
+            .is_always_assigned(&base.ty(), slot as usize);
+    attr_slot::emit_slot_store(context, builder, base_ptr, slot, word, !flag_set);
     heap_rc::release_old(context, builder, rt, old);
     // A fresh target (`f().x = v`, or a base `operand_pin` pinned
     // across the value) is dead once stored into.
