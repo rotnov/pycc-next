@@ -29,7 +29,8 @@ fn name(name: &str, ty: Ty) -> MirExpr {
 }
 
 /// `def add(a: int, x: int) -> int: return a + x` and `def side() -> int:
-/// return 2`, plus `items`; the LLVM text of the whole module.
+/// return 4 // 2` (a `//` may raise, so a call of `side` keeps its
+/// exception edge), plus `items`; the LLVM text of the whole module.
 fn module_ir(label: &str, items: Vec<MirItem>) -> String {
     let mut all = vec![
         function(
@@ -47,7 +48,12 @@ fn module_ir(label: &str, items: Vec<MirItem>) -> String {
             "side",
             Vec::new(),
             Ty::Int,
-            vec![MirStmt::Return(Some(MirExpr::IntLiteral(2)))],
+            vec![MirStmt::Return(Some(MirExpr::BinOp {
+                op: BinOpKind::FloorDiv,
+                left: Box::new(MirExpr::IntLiteral(4)),
+                right: Box::new(MirExpr::IntLiteral(2)),
+                ty: Ty::Int,
+            }))],
         ),
     ];
     all.extend(items);

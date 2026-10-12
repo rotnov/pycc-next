@@ -158,10 +158,56 @@ def call_after() -> int:
     return after(1)
 
 
+def tri(i: int, j: int) -> int:
+    return (i + j) * (i + j + 1) // 2 + i + 1
+
+
+def mix(a: int, b: int) -> int:
+    return (a * 3 - b) // 7 + (a - b * b) % 5 - a % 3
+
+
+def trees() -> None:
+    for i in range(-4, 5):
+        for j in range(-3, 4):
+            print(tri(i, j), mix(i, j), end=" ")
+        print()
+    seeds = [0, 1, -1, 2**61 - 1, -(2**61), 2**31, -(2**31), 3 * 2**59]
+    for sa in seeds:
+        for sb in seeds:
+            for m in range(1, 5):
+                a = sa * m
+                b = sb * (5 - m) - m
+                print(tri(a, b), mix(a, b), tri(a * 10**20, b), mix(a, b - 10**25))
+    t: int = True
+    f: int = False
+    print(tri(t, f), mix(t, t), tri(f, 5))
+
+
+def fib(n: int) -> int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+
+def fib_float(x: float, n: int) -> float:
+    if n == 0:
+        return x
+    return fib_float(x * 1.5 - 0.25, n - 1)
+
+
+def no_throw() -> None:
+    print(fib(20), fib(-3), fib(0))
+    print(fib_float(2.0, 30))
+    x = 2**100
+    print(fib(2) + x)
+
+
 classes()
 loop_vars()
 global_loop()
 calls()
+trees()
+no_throw()
 
 
 def after(n: int) -> int:

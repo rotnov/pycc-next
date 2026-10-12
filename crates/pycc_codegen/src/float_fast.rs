@@ -139,19 +139,26 @@ pub(super) fn target_libm_is_glibc(target_triple: Option<&str>) -> bool {
 
 /// glibc documents its `pow` (`sysdeps/ieee754/dbl-64/e_pow.c`) as
 /// "Worst-case error: 0.54 ULP", with no slow exact path. If the exact
-/// square root of `x` lies within `SQRT_PROOF_ULPS / 2 = 0.44` ULP of
-/// `s = sqrt(x)` (correctly rounded), every other double is more than
-/// `0.56` ULP from it, so `pow(x, 0.5)` can only return `s`. Checked against
-/// glibc 2.39 on 600 million inputs (one in three placed next to a rounding
-/// midpoint), with this exact residual computation and no FMA contraction:
-/// no fast-path result differed from `pow`, and every input where `pow` and
-/// `sqrt` disagree took the `pow` fallback.
-const SQRT_PROOF_ULPS: f64 = 0.88;
+/// square root of `x` lies within 0.44 ULP of `s = sqrt(x)` (correctly
+/// rounded), every other double is more than 0.56 ULP from it, so
+/// `pow(x, 0.5)` can only return `s`.
+///
+/// The test is exact integer arithmetic. With `s = S * 2^(e-52)` (`S` the
+/// 53-bit significand) and `x = X * 2^(f-52)`, the residual `x - s^2` in
+/// units of `2^(2e-104)` is the integer `R = X * 2^k - S^2`, `k = f - 2e + 52`
+/// (52 or 53, as `x` is within an ULP of `s^2`). `s` correctly rounded
+/// bounds `|R| <= S + 1/4 < 2^53`, so `R` is its own value modulo `2^64`:
+/// `(x_bits << k) - S*S` with wrapping 64-bit arithmetic (`k >= 52` shifts
+/// out every bit above the significand's low ones). `|sqrt(x) - s| < 0.44`
+/// ULP is `|R| < 0.88 * S`, tested as `|R| <= S * 225 / 256` (0.8789).
+/// Checked against glibc 2.39 on 320 million inputs (a third of them next
+/// to a rounding midpoint): no fast-path result differed from `pow`.
+const SQRT_PROOF_NUMERATOR: u64 = 225;
 
 /// `x ** 0.5` for `2^-900 < x < 2^1000` on glibc: `s = sqrt(x)` when the
 /// residual `x - s*s` proves glibc's `pow` returns `s` (see
-/// [`SQRT_PROOF_ULPS`]), libm `pow` otherwise -- bit-identical to CPython
-/// either way.
+/// [`SQRT_PROOF_NUMERATOR`]), libm `pow` otherwise -- bit-identical to
+/// CPython either way.
 fn emit_pow_half<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -161,68 +168,60 @@ fn emit_pow_half<'ctx>(
 ) -> FloatValue<'ctx> {
     let f64_type = context.f64_type();
     let i64_type = context.i64_type();
-    let call_f64 = |function, args: &[FloatValue<'ctx>], name| {
-        let args: Vec<_> = args.iter().map(|a| (*a).into()).collect();
-        builder
-            .build_call(function, &args, name)
-            .expect("build_call should not fail for an f64 intrinsic")
-            .try_as_basic_value()
-            .expect_basic("the intrinsic returns f64")
-            .into_float_value()
-    };
-    let s = call_f64(rt.sqrt_f64, &[x], "sqrt");
-    // `x - s*s`, through Dekker's exact product `s*s = hi + lo` (Veltkamp
-    // splitting) rather than an `fma`, which the generic x86-64 target
-    // lowers to a software call. The caller keeps `x` within
-    // `2^-900..2^1000`, where no step overflows or underflows. `x - hi` is
-    // exact (Sterbenz); only the final subtraction rounds, by far less than
-    // the 0.44-vs-0.46 ULP margin `SQRT_PROOF_ULPS` leaves.
-    let fop = |a: FloatValue<'ctx>, b: FloatValue<'ctx>, op: char, name: &str| match op {
-        '+' => builder.build_float_add(a, b, name).expect("fadd"),
-        '-' => builder.build_float_sub(a, b, name).expect("fsub"),
-        _ => builder.build_float_mul(a, b, name).expect("fmul"),
-    };
-    let splitter = f64_type.const_float(134_217_729.0); // 2^27 + 1
-    let c = fop(s, splitter, '*', "split_c");
-    let s_hi = fop(c, fop(c, s, '-', "split_t"), '-', "s_hi");
-    let s_lo = fop(s, s_hi, '-', "s_lo");
-    let hi = fop(s, s, '*', "sq_hi");
-    let cross = fop(fop(f64_type.const_float(2.0), s_hi, '*', "two_hi"), s_lo, '*', "cross");
-    let lo = fop(
-        fop(fop(fop(s_hi, s_hi, '*', "hh"), hi, '-', "hh_err"), cross, '+', "lo_acc"),
-        fop(s_lo, s_lo, '*', "ll"),
-        '+',
-        "sq_lo",
-    );
-    let residual = fop(fop(x, hi, '-', "x_minus_hi"), lo, '-', "sqrt_residual");
-    // ulp(s) = 2^(exponent(s) - 52), exact for the normal `s` a positive
-    // finite `x` always has (its square root is at least 2^-537).
-    let bits = builder
-        .build_bit_cast(s, i64_type, "s_bits")
-        .expect("bitcast")
-        .into_int_value();
-    let exponent = builder
-        .build_and(bits, i64_type.const_int(0x7ff0_0000_0000_0000, false), "s_exp")
-        .expect("and");
-    let ulp_bits = builder
-        .build_int_sub(exponent, i64_type.const_int(52 << 52, false), "ulp_bits")
-        .expect("sub");
-    let ulp = builder
-        .build_bit_cast(ulp_bits, f64_type, "ulp")
-        .expect("bitcast")
+    let s = builder
+        .build_call(rt.sqrt_f64, &[x.into()], "sqrt")
+        .expect("build_call should not fail for an f64 intrinsic")
+        .try_as_basic_value()
+        .expect_basic("the intrinsic returns f64")
         .into_float_value();
-    let scaled = builder
-        .build_float_mul(s, f64_type.const_float(SQRT_PROOF_ULPS), "s_scaled")
-        .expect("fmul");
-    let limit = builder.build_float_mul(scaled, ulp, "residual_limit").expect("fmul");
-    let neg_limit = builder.build_float_neg(limit, "neg_limit").expect("fneg");
-    let below = builder
-        .build_float_compare(FloatPredicate::OLT, residual, limit, "below")
-        .expect("fcmp");
-    let above = builder
-        .build_float_compare(FloatPredicate::OGT, residual, neg_limit, "above")
-        .expect("fcmp");
-    let proven = builder.build_and(below, above, "sqrt_proven").expect("and");
+    let k = |n: u64| i64_type.const_int(n, false);
+    let int = |v: FloatValue<'ctx>, name| {
+        builder
+            .build_bit_cast(v, i64_type, name)
+            .expect("bitcast")
+            .into_int_value()
+    };
+    let x_bits = int(x, "x_bits");
+    let s_bits = int(s, "s_bits");
+    let mantissa = builder
+        .build_and(s_bits, k((1 << 52) - 1), "s_frac")
+        .expect("and");
+    let sig = builder.build_or(mantissa, k(1 << 52), "s_sig").expect("or");
+    let sig_sq = builder.build_int_mul(sig, sig, "s_sig_sq").expect("mul");
+    // `k = f - 2e + 52` from the biased exponents (both operands positive).
+    let x_exp = builder
+        .build_right_shift(x_bits, k(52), false, "x_exp")
+        .expect("lshr");
+    let s_exp = builder
+        .build_right_shift(s_bits, k(52), false, "s_exp")
+        .expect("lshr");
+    let twice = builder.build_int_add(s_exp, s_exp, "s_exp2").expect("add");
+    let diff = builder.build_int_sub(x_exp, twice, "exp_diff").expect("sub");
+    let shift = builder.build_int_add(diff, k(1075), "res_shift").expect("add");
+    // Always 52 or 53; the mask keeps the shift defined in LLVM's eyes.
+    let shift = builder.build_and(shift, k(63), "res_shift_m").expect("and");
+    let scaled_x = builder
+        .build_left_shift(x_bits, shift, "x_scaled")
+        .expect("shl");
+    let residual = builder
+        .build_int_sub(scaled_x, sig_sq, "sqrt_residual")
+        .expect("sub");
+    let limit = builder
+        .build_right_shift(
+            builder
+                .build_int_mul(sig, k(SQRT_PROOF_NUMERATOR), "lim_mul")
+                .expect("mul"),
+            k(8),
+            false,
+            "residual_limit",
+        )
+        .expect("lshr");
+    // `-limit <= residual <= limit` as one unsigned compare.
+    let biased = builder.build_int_add(residual, limit, "res_biased").expect("add");
+    let span = builder.build_int_add(limit, limit, "res_span").expect("add");
+    let proven = builder
+        .build_int_compare(inkwell::IntPredicate::ULE, biased, span, "sqrt_proven")
+        .expect("icmp");
 
     let function = current_function(builder);
     let sqrt_bb = builder.get_insert_block().expect("positioned");

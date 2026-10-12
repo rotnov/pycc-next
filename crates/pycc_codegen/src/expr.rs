@@ -27,7 +27,8 @@ pub(crate) fn emit_expr<'ctx>(
     // Pure literals, reads, comparisons, and ordinary arithmetic skip the
     // TLS call and branch entirely; D-173's original unconditional guard at
     // every node made tight numeric loops several times slower.
-    if expression_can_set_exception(expr) {
+    let nothrow_call = matches!(expr, MirExpr::Call { callee, .. } if rt.nothrow.borrow().contains(callee));
+    if expression_can_set_exception(expr) && !nothrow_call {
         guard_statement_effects(context, builder, rt);
     }
     // An operand a later sibling could free takes its own reference

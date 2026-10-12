@@ -282,6 +282,9 @@ pub(super) struct RtFns<'ctx> {
     /// Whether the function being emitted is a constructor, whose stores
     /// set the assigned flags the proof relies on.
     pub(super) emitting_ctor: std::cell::Cell<bool>,
+    /// The functions that can never raise (`nothrow`): a call to one needs
+    /// no pending-exception guard.
+    pub(super) nothrow: std::cell::RefCell<std::collections::HashSet<String>>,
     /// `exception_value` returns a pointer to the current exception object.
     pub(super) exception_value: FunctionValue<'ctx>,
     /// `exception_clear` resets the thread-local pending state (void).
@@ -783,6 +786,7 @@ pub(super) fn declare_rt_functions<'ctx>(
         glibc_libm: std::cell::Cell::new(false),
         assigned_slots: std::cell::RefCell::new(Default::default()),
         emitting_ctor: std::cell::Cell::new(false),
+        nothrow: std::cell::RefCell::new(Default::default()),
         exception_value: declare("pycc_rt_exception_value", ptr_type.fn_type(&[], false)),
         exception_clear: declare("pycc_rt_exception_clear", void_type.fn_type(&[], false)),
         exception_alloc: declare(

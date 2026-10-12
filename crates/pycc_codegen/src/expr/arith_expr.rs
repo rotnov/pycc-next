@@ -21,6 +21,17 @@ pub(crate) fn emit_bin_op_expr<'ctx>(
     else {
         unreachable!()
     };
+    if crate::int_tree::applies(expr) {
+        return Scalar::Int(crate::int_tree::emit(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            expr,
+        ));
+    }
     // This inkwell version's `try_as_basic_value()` returns its own
     // `ValueKind` enum (not `either::Either` as in older inkwell
     // releases the task brief's original code was written against

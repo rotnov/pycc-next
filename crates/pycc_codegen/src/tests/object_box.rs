@@ -125,7 +125,7 @@ fn a_none_value_is_cpython_s_none_and_a_none_call_still_runs() {
         assert!(arg.contains("call ptr @pycc_ext_obj_none()"), "{arg}");
         assert!(!arg.contains("pycc_ext_obj_pack_"), "{arg}");
         let ret = body_of(ir, "ret_none_call");
-        assert!(ret.contains("@fnptr_nothing"), "{ret}");
+        assert!(ret.contains("@pyfn_nothing("), "{ret}");
         assert!(ret.contains("call ptr @pycc_ext_obj_none()"), "{ret}");
         assert!(!ret.contains("pycc_ext_obj_pack_"), "{ret}");
     });

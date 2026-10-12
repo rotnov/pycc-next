@@ -75,6 +75,7 @@ pub(crate) fn compile_to_object_with_observer(
         .set(float_fast::target_libm_is_glibc(target_triple));
     *rt.rc_class_kinds.borrow_mut() = heap_rc::rc_class_kinds(&mir.class_defs);
     *rt.assigned_slots.borrow_mut() = assigned_slots::AssignedSlots::analyze(mir, options.ext);
+    *rt.nothrow.borrow_mut() = nothrow::nothrow_functions(mir);
     let _pins = operand_pin::plan_module(&rt, mir);
 
     // First pass: declare every user-defined function -- with its real

@@ -151,10 +151,13 @@ pub(super) fn emit<'ctx>(
 
     builder.position_at_end(body_bb);
     // `i` lies between the two smallint bounds, so the tagged word is a
-    // smallint and owns nothing: no retain before the bind.
+    // smallint and owns nothing: no retain before the bind. The doubling
+    // is `nsw` (|i| < 2^62), which lets LLVM fold the body's untagging
+    // `(2i | 1) >> 1` back to `i` and carry the loop's range facts to it.
+    let two = i64_type.const_int(2, false);
     let shifted = builder
-        .build_left_shift(i, one, "small_range_shl")
-        .expect("shl");
+        .build_int_nsw_mul(i, two, "small_range_shl")
+        .expect("mul");
     let word = builder
         .build_or(shifted, one, "small_range_word")
         .expect("or");

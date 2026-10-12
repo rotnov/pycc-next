@@ -34,7 +34,7 @@ const LIKELY_WEIGHT: u64 = 2000;
 
 /// Marks the conditional branch `branch` as taking its `then` edge
 /// (`likely_then`) or its `else` edge almost always.
-fn weight_branch<'ctx>(context: &'ctx Context, branch: InstructionValue<'ctx>, likely_then: bool) {
+pub(crate) fn weight_branch<'ctx>(context: &'ctx Context, branch: InstructionValue<'ctx>, likely_then: bool) {
     let i32_type = context.i32_type();
     let (then_w, else_w) = if likely_then {
         (LIKELY_WEIGHT, 1)
@@ -73,7 +73,7 @@ fn current_function<'ctx>(builder: &Builder<'ctx>) -> FunctionValue<'ctx> {
 }
 
 /// `i1`: whether every word in `words` is a smallint (odd).
-fn all_small<'ctx>(
+pub(crate) fn all_small<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
     words: &[IntValue<'ctx>],
@@ -118,7 +118,7 @@ fn call_i64<'ctx>(
 }
 
 /// One `llvm.*.with.overflow.i64` call: `(result, overflowed)`.
-fn with_overflow<'ctx>(
+pub(crate) fn with_overflow<'ctx>(
     builder: &Builder<'ctx>,
     intrinsic: FunctionValue<'ctx>,
     a: IntValue<'ctx>,

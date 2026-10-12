@@ -19,6 +19,8 @@ use exception_value::{emit_exception_set_frame, emit_exception_value};
 mod attr_slot;
 use attr_slot::{release_int_attr_slot_before_store, scalar_to_slot_word, slot_word_to_scalar};
 mod assigned_slots;
+mod nothrow;
+mod int_tree;
 mod bigint_rc;
 /// `<< >> & | ^` operand encoding and the `bool`-result arm (#1210).
 mod binop;

@@ -103,4 +103,9 @@ fn proven_checks_are_dropped_and_unproven_ones_kept() {
     // `early` is defined before any statement runs; `after` is not.
     assert!(!function(&ir, "pyfn_calls").contains("@fnptr_early"));
     assert!(function(&ir, "pyfn_call_after").contains("@fnptr_after"));
+    // `fib` calls only itself and cannot raise: no pending-exception test.
+    assert!(!function(&ir, "pyfn_fib").contains("@pycc_rt_exc_pending"));
+    assert!(function(&ir, "pyfn_classes").contains("@pycc_rt_exc_pending"));
+    // A tree of `int` operators shares one fast path.
+    assert_eq!(function(&ir, "pyfn_tri").matches("int_tree_fast:").count(), 1);
 }
