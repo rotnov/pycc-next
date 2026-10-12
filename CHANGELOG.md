@@ -4,7 +4,35 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-12
+
+Rust speed, numpy, more Python. Every benchmark is within 3x of hand-written Rust,
+typed numpy arrays compile to native loads and stores, strict mode compiles 124/200
+real-world programs unchanged (was 93), and `--non-strict` runs 95% of their top-level
+statements natively (was 84%). Prebuilt archives for Linux x86_64 and macOS 26+ on
+Apple silicon.
+
 ### Added
+
+- Typed numpy arrays: `numpy.ndarray` / `NDArray[float64|int64|bool]` of 1 and 2
+  dimensions are native in strict and `--ext` code: element reads and writes, `.shape`,
+  `len`, iteration, `numpy.zeros/ones/empty/array`, with no CPython call in the loop
+  body. Benchmarks `stencil2d` (436x faster than CPython, 2.5x of Rust) and
+  `prefix_sum_np` (80x, 1.8x).
+- macOS arm64: a `pycc-vX.Y.Z-aarch64-macos.tar.gz` archive (macOS 26.0+, Apple
+  silicon), built and smoke-tested next to the Linux one; CI runs the full test suite
+  and the corpus gate on macos-26.
+- Strict mode infers the signature of an unannotated public function or method that
+  only the module itself calls; conflicting call sites, `--ext` modules and exported
+  functions still need annotations (T0001).
+- `--non-strict` compiles more everyday code natively: CPython objects as indexes,
+  slice bounds and `range()` arguments (`__index__`), mixed-type containers promoted to
+  CPython containers, `str % args`, `str` methods and `sys.stdout.write` with object
+  arguments, keyed `sort`/`sorted`/`min`/`max` and `heapq`/`bisect` on objects,
+  `x is True`/`x is False`, names bound on only some paths (unbound reads raise
+  `UnboundLocalError`/`NameError` as in CPython), `open(0)` as standard input,
+  `sys.stdin.buffer` as bytes.
+- `10 ** -10` is a float, as in CPython (was a compile error).
 
 - The generator protocol, natively in strict mode: `send()`, `throw()`,
   `close()` (`GeneratorExit`, "generator ignored GeneratorExit"), `yield` as
@@ -35,6 +63,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   the stack slot or global it writes.
 - A nested function's plain assignment to a `nonlocal` variable (`k = v`, not
   only `k += v`) is seen by the enclosing function; it used to rebind a copy.
+- `sys.stdin.buffer` read as `str` printed and compared unlike CPython's bytes.
+- Security review: an object used as an index could leak a heap int; a
+  `StopIteration.value` of another type is refused instead of reinterpreted;
+  `gen.send(None)` is type-checked; numpy array headers are re-read after any call
+  that may run Python.
 
 ### Performance
 - Every benchmark is within 3x of its Rust twin (fib 1.8x, mandelbrot 1.1x, nbody 2.4x,
@@ -48,6 +81,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - `bench/run.py`: best of 7 by default; Rust twins build for the default target CPU and
   black-box every input.
 - `PYCC_DUMP_LLVM=<path>` writes the LLVM IR before and after optimization.
+
+### Known gaps
+- See `docs/DEVIATIONS.md` for every known difference from CPython 3.13.
 
 ## [0.1.0] - 2026-10-11
 
