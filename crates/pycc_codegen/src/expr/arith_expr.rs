@@ -291,6 +291,11 @@ pub(crate) fn emit_compare_expr<'ctx>(
     else {
         unreachable!()
     };
+    if let Some(result) =
+        emit_element_compare(context, builder, module, rt, user_functions, locals, *op, left, right)
+    {
+        return result;
+    }
     let l = emit_expr(context, builder, module, rt, user_functions, locals, left);
     // #638 (D-208): same protection as `BinOp`'s `Ty::Int` arm --
     // `l` must survive `right`'s evaluation intact so its release
@@ -322,6 +327,102 @@ pub(crate) fn emit_compare_expr<'ctx>(
     release_scalar_if_temporary(context, builder, rt, left, &l);
     release_scalar_if_temporary(context, builder, rt, right, &r);
     Scalar::Bool(as_bool)
+}
+
+/// `a[i] op y` or `y op a[i]` for an element of an `int64` array and an
+/// `int` name or literal `y`, `op` an ordering comparison: the element is
+/// compared as a machine integer (`int_fast::emit_int_compare_i64`), so no
+/// `int` is made of it on the inline path. `None` (emitting nothing) for
+/// any other comparison.
+#[allow(clippy::too_many_arguments)]
+fn emit_element_compare<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    op: pycc_mir::CmpOpKind,
+    left: &MirExpr,
+    right: &MirExpr,
+) -> Option<Scalar<'ctx>> {
+    use inkwell::IntPredicate;
+    let predicate = match op {
+        pycc_mir::CmpOpKind::Eq => IntPredicate::EQ,
+        pycc_mir::CmpOpKind::NotEq => IntPredicate::NE,
+        pycc_mir::CmpOpKind::Lt => IntPredicate::SLT,
+        pycc_mir::CmpOpKind::LtE => IntPredicate::SLE,
+        pycc_mir::CmpOpKind::Gt => IntPredicate::SGT,
+        pycc_mir::CmpOpKind::GtE => IntPredicate::SGE,
+        _ => return None,
+    };
+    let plain_int = |e: &MirExpr| {
+        matches!(
+            e,
+            MirExpr::Name {
+                ty: pycc_mir::Ty::Int,
+                ..
+            } | MirExpr::IntLiteral(_)
+        )
+    };
+    fn element(e: &MirExpr) -> Option<&pycc_mir::MirNdExpr> {
+        match e {
+            MirExpr::Nd(nd) if crate::ndarray::is_i64_element(nd) => Some(nd),
+            _ => None,
+        }
+    }
+    // Each operand is evaluated in source order; a name or a literal
+    // evaluates to a word it does not own, so nothing is released.
+    let (raw, word, element_left) = match (element(left), element(right)) {
+        (Some(nd), None) if plain_int(right) => {
+            let raw = crate::ndarray::emit_nd_raw_i64(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                nd,
+            );
+            let r = emit_expr(context, builder, module, rt, user_functions, locals, right);
+            (raw, to_numeric_encoded_int(context, builder, r), true)
+        }
+        // The name is read first, so the element read must run no code
+        // that could rebind it: an array name and simple indices.
+        (None, Some(nd))
+            if plain_int(left)
+                && matches!(nd.base, MirExpr::Name { .. })
+                && nd.args.iter().all(crate::ndarray::is_simple_index) =>
+        {
+            let l = emit_expr(context, builder, module, rt, user_functions, locals, left);
+            let word = to_numeric_encoded_int(context, builder, l);
+            let raw = crate::ndarray::emit_nd_raw_i64(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                nd,
+            );
+            (raw, word, false)
+        }
+        _ => return None,
+    };
+    let cond = crate::int_fast::emit_int_compare_i64(
+        context,
+        builder,
+        rt,
+        predicate,
+        raw,
+        word,
+        element_left,
+    );
+    Some(Scalar::Bool(
+        builder
+            .build_int_z_extend(cond, context.i8_type(), "bool_from_cmp")
+            .expect("build_int_z_extend should not fail widening i1 to i8"),
+    ))
 }
 
 // #1212 (Part 4 of #1018): chained comparisons. See

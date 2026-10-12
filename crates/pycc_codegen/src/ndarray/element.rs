@@ -72,12 +72,15 @@ pub(super) fn untag_word<'ctx>(
     phi.as_basic_value().into_int_value()
 }
 
+/// Loads the element at `address`: an `int64` element as an `int` word
+/// when `tag_int`, as the machine integer otherwise.
 pub(super) fn load_element<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
     rt: &RtFns<'ctx>,
     address: PointerValue<'ctx>,
     dtype: NdDtype,
+    tag_int: bool,
 ) -> Scalar<'ctx> {
     let element_ty: inkwell::types::BasicTypeEnum<'ctx> = match dtype {
         NdDtype::F64 => context.f64_type().into(),
@@ -95,6 +98,7 @@ pub(super) fn load_element<'ctx>(
     }
     match dtype {
         NdDtype::F64 => Scalar::Float(load.into_float_value()),
+        NdDtype::I64 if !tag_int => Scalar::Int(load.into_int_value()),
         NdDtype::I64 => Scalar::Int(tag_i64(context, builder, rt, load.into_int_value())),
         NdDtype::Bool => {
             let nonzero = builder

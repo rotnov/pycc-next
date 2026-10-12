@@ -85,6 +85,21 @@ pub(super) fn is_index_leaf(expr: &MirExpr) -> bool {
     }
 }
 
+/// Whether evaluating the index `expr` runs no code at all: an index
+/// leaf ([`is_index_leaf`]) or the sum or difference of two, the indices
+/// [`evaluate_index`] computes on machine words.
+pub(crate) fn is_simple_index(expr: &MirExpr) -> bool {
+    match expr {
+        MirExpr::BinOp {
+            op: pycc_mir::BinOpKind::Add | pycc_mir::BinOpKind::Sub,
+            left,
+            right,
+            ty: pycc_mir::Ty::Int,
+        } => is_index_leaf(left) && is_index_leaf(right),
+        e => is_index_leaf(e),
+    }
+}
+
 /// An index expression evaluated but not yet decoded ([`evaluate_index`]).
 pub(super) enum PendingIndex<'ctx, 'm> {
     /// A leaf, or the sum or difference of two leaves.

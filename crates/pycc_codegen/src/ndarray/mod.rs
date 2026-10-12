@@ -48,6 +48,7 @@ mod index;
 
 use element::{emit_writeable_check, load_element, store_element};
 pub(crate) use fresh::clear_fresh_after_calls;
+pub(crate) use index::is_simple_index;
 use index::{PendingIndex, decode_index, element_address, evaluate_index};
 
 /// `sizeof(PyObject)` on the 64-bit, non-free-threaded CPython builds pycc
@@ -237,6 +238,68 @@ pub(crate) fn emit_nd<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     nd: &MirNdExpr,
 ) -> Scalar<'ctx> {
+    emit_nd_value(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        nd,
+        false,
+    )
+}
+
+/// Whether `nd` reads an element of an `int64` array, which
+/// [`emit_nd_raw_i64`] can load as a machine integer.
+pub(crate) fn is_i64_element(nd: &MirNdExpr) -> bool {
+    matches!(nd.op, NdOp::Get { .. }) && nd.nd.dtype == NdDtype::I64
+}
+
+/// Emits an `int64` element read ([`is_i64_element`]) and returns the
+/// element as a machine `i64`, not encoded as an `int` word: for a caller
+/// that does its own arithmetic on it and so never creates the `int`.
+pub(crate) fn emit_nd_raw_i64<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    nd: &MirNdExpr,
+) -> IntValue<'ctx> {
+    assert!(
+        is_i64_element(nd),
+        "pycc_codegen: internal error: not an int64 element read"
+    );
+    match emit_nd_value(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        nd,
+        true,
+    ) {
+        Scalar::Int(raw) => raw,
+        _ => unreachable!("an int64 element is an integer"),
+    }
+}
+
+/// [`emit_nd`]; with `raw_i64`, an `int64` element read answers the
+/// machine integer ([`emit_nd_raw_i64`]).
+#[allow(clippy::too_many_arguments)]
+fn emit_nd_value<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    nd: &MirNdExpr,
+    raw_i64: bool,
+) -> Scalar<'ctx> {
     // A store evaluates its value first, then the array, then the indices,
     // as CPython evaluates `a[i] = v`.
     let stored = match nd.op {
@@ -378,7 +441,7 @@ pub(crate) fn emit_nd<'ctx>(
                     );
                     none_value(context)
                 }
-                _ => load_element(context, builder, rt, address, nd.nd.dtype),
+                _ => load_element(context, builder, rt, address, nd.nd.dtype, !raw_i64),
             };
             for (index, word) in words {
                 release_if_int_temporary(context, builder, rt, index, word);

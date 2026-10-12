@@ -388,3 +388,59 @@ fn an_array_changed_by_cpython_code_is_rechecked() {
          7.0\n"
     );
 }
+
+/// `acc += a[i]` and `a[i] > best` on an `int64` array use the element as a
+/// machine integer: no `int` is encoded from it on the inline path (no
+/// `tag_i64` blocks), only on the cold path (`int_from_raw`). The values
+/// these paths compute are checked against CPython by the oracle fixture.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers and numpy"]
+fn int64_elements_join_int_arithmetic_unencoded() {
+    if !numpy_is_importable() {
+        return;
+    }
+    let dir = ScratchDir::new("numpy-typed-raw").expect("scratch");
+    std::fs::write(
+        dir.join("ndraw.py"),
+        format!(
+            "{HEADER}def run(xs: NDArray[np.int64], out: NDArray[np.int64]) -> int:\n    \
+             acc = 0\n    best = -1\n    for i in range(len(xs)):\n        acc += xs[i]\n        \
+             if xs[i] > best:\n            best = acc\n        out[i] = acc\n    return best\n"
+        ),
+    )
+    .expect("write subject");
+    std::fs::create_dir_all(dir.join("ext")).expect("ext dir");
+    let build = pycc()
+        .arg("build")
+        .arg(dir.join("ndraw.py"))
+        .arg("-o")
+        .arg(dir.join("ext").join("ndraw"))
+        .arg("--ext")
+        .env("PYCC_DUMP_LLVM", dir.join("ndraw.ll"))
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", rendered(&build));
+    let pre = std::fs::read_to_string(dir.join("ndraw.ll.pre.ll")).expect("unoptimized IR");
+    let start = pre.find("@pyfn_run(").expect("the function's IR");
+    let body = &pre[start..start + pre[start..].find("\n}\n").expect("function end")];
+    // `tag_i64` names its blocks `nd_tag_*` and its runtime call `nd_bigint`.
+    assert!(
+        !body.contains("nd_tag_small") && !body.contains("nd_bigint"),
+        "an element was encoded:\n{body}"
+    );
+    assert!(body.contains("%int_from_raw = call i64 @pycc_rt_int_from_i64"), "{body}");
+    assert!(body.contains("cmp_raw"), "{body}");
+    let output = python_in(
+        &dir.join("ext"),
+        &[
+            "-c",
+            "import numpy as np, ndraw\nout = np.zeros(3, dtype=np.int64)\n\
+             print(ndraw.run(np.array([3, -1, 2**62], dtype=np.int64), out), out.tolist())",
+        ],
+    );
+    assert!(output.status.success(), "{}", rendered(&output));
+    assert_eq!(
+        text(&output.stdout),
+        "4611686018427387906 [3, 2, 4611686018427387906]\n"
+    );
+}

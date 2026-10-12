@@ -106,6 +106,45 @@ def read_only() -> None:
         print("ValueError:", e)
 
 
+def _accumulate(xs: NDArray[np.int64], ys: NDArray[np.int64]) -> None:
+    """`x += a[i]` and friends, inside and beyond the inline int range."""
+    up = 0
+    down = 0
+    for i in range(len(xs) - 1):
+        up += xs[i]
+        down -= xs[i]
+    prod = 1
+    for i in range(len(ys)):
+        prod *= ys[i]
+    near = -5
+    near += xs[len(xs) - 1]
+    far = 5
+    far -= xs[0]
+    print(int(up), int(down), int(prod), int(near), int(far))
+
+
+def _compare_elements(xs: NDArray[np.int64], y: int) -> list[int]:
+    """An element compared with an int name or literal, on either side."""
+    out: list[int] = []
+    for i in range(len(xs)):
+        out.append(1 if xs[i] > y else 0)
+        out.append(1 if y < xs[i] else 0)
+        out.append(1 if xs[i] == y else 0)
+        out.append(1 if y != xs[i] else 0)
+        out.append(1 if xs[i] <= 3 else 0)
+        out.append(1 if -2 >= xs[i] else 0)
+    return out
+
+
+def _running_max(xs: NDArray[np.int64]) -> int:
+    """The bench's running maximum, from a seed beyond `int64`."""
+    best = -(2**70)
+    for i in range(len(xs)):
+        if xs[i] > best:
+            best = xs[i]
+    return int(best)
+
+
 def main() -> None:
     a = np.zeros(6)
     for i in range(6):
@@ -157,6 +196,13 @@ def main() -> None:
     print(grid.at(1, 2), grid.cells.sum())
     index_errors()
     read_only()
+    edge = np.array([2**62 - 1, 2**62 - 1, 2**63 - 1, -(2**63), 3, -2], dtype=np.int64)
+    wide = np.array([2**62 + 5, 2**61, -(2**62), -7, 2**63 - 1], dtype=np.int64)
+    _accumulate(wide, np.array([2**31, 2**31 + 1, -1], dtype=np.int64))
+    _accumulate(np.array([1, -3, 2], dtype=np.int64), np.array([4, -1], dtype=np.int64))
+    print(_compare_elements(edge, 3), _compare_elements(edge, 2**64))
+    print(_compare_elements(np.array([4, -2, 3], dtype=np.int64), -(2**65)))
+    print(_running_max(edge), _running_max(np.array([-5, -9], dtype=np.int64)))
 
 
 main()

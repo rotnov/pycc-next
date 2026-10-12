@@ -227,6 +227,69 @@ fn release_owned<'ctx>(
     }
 }
 
+/// Emits `l + e` or `l - e` (`op`) for an encoded `int` `l` and a machine
+/// `i64` `e`, and returns the encoded result, releasing the `owned`
+/// operand words as [`emit_guarded`] does.
+///
+/// The fast path never encodes `e`: for a smallint `l` (`2x + 1`) the
+/// result is `l + 2e` (`l - 2e`), and it is taken when `l` is a smallint
+/// and neither `2e` nor the sum overflows -- exactly when `x + e` is in the
+/// inline range. Otherwise the cold path encodes `e`
+/// (`pycc_rt_int_from_i64`, a heap bigint past the inline range), calls the
+/// runtime operation and releases it.
+pub(crate) fn emit_int_addsub_i64<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    op: BinOpKind,
+    l: IntValue<'ctx>,
+    e: IntValue<'ctx>,
+    owned: &[IntValue<'ctx>],
+) -> IntValue<'ctx> {
+    let (intrinsic, slow_fn) = match op {
+        BinOpKind::Add => (rt.sadd_overflow, rt.int_add),
+        BinOpKind::Sub => (rt.ssub_overflow, rt.int_sub),
+        _ => panic!("pycc_codegen: internal error: emit_int_addsub_i64 on {op:?}"),
+    };
+    let function = current_function(builder);
+    let fast_bb = context.append_basic_block(function, "int_fast");
+    let slow_bb = context.append_basic_block(function, "int_slow");
+    let join_bb = context.append_basic_block(function, "int_join");
+    let small = is_small(context, builder, l);
+    let (twice, twice_overflow) = with_overflow(builder, rt.sadd_overflow, e, e);
+    let (sum, sum_overflow) = with_overflow(builder, intrinsic, l, twice);
+    let overflow = builder
+        .build_or(twice_overflow, sum_overflow, "raw_overflow")
+        .expect("or of two i1");
+    let no_overflow = builder.build_not(overflow, "raw_fits").expect("not");
+    let fast = builder
+        .build_and(small, no_overflow, "raw_fast")
+        .expect("and of two i1");
+    likely_branch(context, builder, fast, fast_bb, slow_bb);
+
+    builder.position_at_end(fast_bb);
+    builder
+        .build_unconditional_branch(join_bb)
+        .expect("branch to the join");
+
+    builder.position_at_end(slow_bb);
+    let r = call_i64(builder, rt.int_from_i64, &[e], "int_from_raw");
+    let slow_value = call_i64(builder, slow_fn, &[l, r], "int_slow_call");
+    release_owned(context, builder, rt, owned);
+    release_owned(context, builder, rt, &[r]);
+    let slow_end = builder.get_insert_block().expect("positioned");
+    builder
+        .build_unconditional_branch(join_bb)
+        .expect("branch to the join");
+
+    builder.position_at_end(join_bb);
+    let phi = builder
+        .build_phi(context.i64_type(), "int_result")
+        .expect("build_phi in a fresh block");
+    phi.add_incoming(&[(&sum, fast_bb), (&slow_value, slow_end)]);
+    phi.as_basic_value().into_int_value()
+}
+
 /// Emits `l op r` for two encoded `int` operands and returns the encoded
 /// result, releasing the `owned` operand words (see [`emit_guarded`]).
 pub(super) fn emit_int_binop<'ctx>(
@@ -444,6 +507,60 @@ pub(super) fn emit_int_compare<'ctx>(
         .build_phi(context.bool_type(), "cmp_result")
         .expect("phi");
     phi.add_incoming(&[(&fast_value, fast_bb), (&slow_value, slow_bb)]);
+    phi.as_basic_value().into_int_value()
+}
+
+/// Emits `e op w` (`w op e` when `!element_left`) for a machine `i64` `e`
+/// and an encoded `int` `w`, as an `i1`: inline against the untagged `w`
+/// when it is a smallint (no overflow: both are machine integers), through
+/// `pycc_rt_int_cmp` on an `int` made of `e` otherwise.
+pub(crate) fn emit_int_compare_i64<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    predicate: IntPredicate,
+    e: IntValue<'ctx>,
+    w: IntValue<'ctx>,
+    element_left: bool,
+) -> IntValue<'ctx> {
+    let function = current_function(builder);
+    let fast_bb = context.append_basic_block(function, "cmp_fast");
+    let slow_bb = context.append_basic_block(function, "cmp_slow");
+    let join_bb = context.append_basic_block(function, "cmp_join");
+    let small = is_small(context, builder, w);
+    likely_branch(context, builder, small, fast_bb, slow_bb);
+
+    builder.position_at_end(fast_bb);
+    let raw = builder
+        .build_right_shift(w, context.i64_type().const_int(1, false), true, "cmp_untag")
+        .expect("ashr by a constant");
+    let (a, b) = if element_left { (e, raw) } else { (raw, e) };
+    let fast_value = builder
+        .build_int_compare(predicate, a, b, "cmp_raw")
+        .expect("icmp");
+    builder.build_unconditional_branch(join_bb).expect("branch");
+
+    builder.position_at_end(slow_bb);
+    let boxed = call_i64(builder, rt.int_from_i64, &[e], "int_from_raw");
+    let (a, b) = if element_left { (boxed, w) } else { (w, boxed) };
+    let ordering = builder
+        .build_call(rt.int_cmp, &[a.into(), b.into()], "int_cmp")
+        .expect("build_call should not fail for a comparison")
+        .try_as_basic_value()
+        .expect_basic("pycc_rt_int_cmp returns i32")
+        .into_int_value();
+    let slow_value = builder
+        .build_int_compare(predicate, ordering, context.i32_type().const_zero(), "cmp_big")
+        .expect("icmp");
+    release_owned(context, builder, rt, &[boxed]);
+    let slow_end = builder.get_insert_block().expect("positioned");
+    builder.build_unconditional_branch(join_bb).expect("branch");
+
+    builder.position_at_end(join_bb);
+    let phi = builder
+        .build_phi(context.bool_type(), "cmp_result")
+        .expect("phi");
+    phi.add_incoming(&[(&fast_value, fast_bb), (&slow_value, slow_end)]);
     phi.as_basic_value().into_int_value()
 }
 

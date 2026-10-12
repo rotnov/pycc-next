@@ -57,8 +57,9 @@ pub(crate) fn emit_expr_stmt_stmt<'ctx>(
 }
 
 /// `x = x op y` (`x += y`) for an `int` function local `x`, `op` one of
-/// `+ - *` and `y` a name or a literal: the old value of `x` is the left
-/// operand itself, so it is handed to the operator as an owned operand,
+/// `+ - *` and `y` a name, a literal or an `int64` array element read
+/// with a name for the array and simple indices: the old value of `x` is
+/// the left operand itself, so it is handed to the operator as an owned operand,
 /// which releases it only on the runtime path. On the smallint fast path
 /// it is a smallint and owns nothing, so the store needs no release test.
 /// Returns `false` (emitting nothing) for any other assignment.
@@ -101,11 +102,24 @@ fn emit_int_self_update<'ctx>(
         .ptr
         .as_instruction()
         .is_some_and(|inst| inst.get_opcode() == inkwell::values::InstructionOpcode::Alloca);
+    // `x += a[i]` on an `int64` array: reading the element runs no code
+    // that could rebind `x` (`a` is a name, the indices names, literals or
+    // their sum or difference), and the element is a fresh word.
+    let element = match right.as_ref() {
+        MirExpr::Nd(nd)
+            if crate::ndarray::is_i64_element(nd)
+                && matches!(nd.base, MirExpr::Name { .. })
+                && nd.args.iter().all(crate::ndarray::is_simple_index) =>
+        {
+            Some(nd)
+        }
+        _ => None,
+    };
     if !matches!(
         op,
         pycc_mir::BinOpKind::Add | pycc_mir::BinOpKind::Sub | pycc_mir::BinOpKind::Mul
     ) || !is_target(left)
-        || !simple(right)
+        || !(simple(right) || element.is_some())
         || slot.ty != pycc_mir::Ty::Int
         || !is_alloca
         || rt.borrowed_locals.borrow().contains(target)
@@ -118,12 +132,32 @@ fn emit_int_self_update<'ctx>(
         builder,
         emit_expr(context, builder, module, rt, user_functions, locals, left),
     );
-    let r = to_numeric_encoded_int(
-        context,
-        builder,
-        emit_expr(context, builder, module, rt, user_functions, locals, right),
-    );
-    let result = crate::int_fast::emit_int_binop(context, builder, rt, *op, l, r, &[l]);
+    let result = match element {
+        // The element joins the arithmetic as a machine integer: no `int`
+        // is made of it unless the sum leaves the inline range.
+        Some(nd) if *op != pycc_mir::BinOpKind::Mul => {
+            let raw = crate::ndarray::emit_nd_raw_i64(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                nd,
+            );
+            crate::int_fast::emit_int_addsub_i64(context, builder, rt, *op, l, raw, &[l])
+        }
+        _ => {
+            let r = to_numeric_encoded_int(
+                context,
+                builder,
+                emit_expr(context, builder, module, rt, user_functions, locals, right),
+            );
+            // An element read is a fresh word, owned like the old value.
+            let owned: &[_] = if element.is_some() { &[l, r] } else { &[l] };
+            crate::int_fast::emit_int_binop(context, builder, rt, *op, l, r, owned)
+        }
+    };
     crate::entry_slots::store_unowned_int(context, builder, &slot, result);
     true
 }
