@@ -186,7 +186,7 @@ fn the_shapes_outside_part_2b_are_refused() {
         ),
         (
             "obj_member_display",
-            "print(1 not in (1, 2))\n",
+            "t = (1, 2)\nprint(1 not in t)\n",
             "C0001",
             "comparison operator not supported yet: NotIn",
         ),

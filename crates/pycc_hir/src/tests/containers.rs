@@ -605,10 +605,15 @@ fn list_pop_used_as_a_value_lowers_successfully() {
 }
 
 #[test]
-fn popping_from_a_non_bare_name_base_is_unsupported() {
-    assert_capability_error_message(
-        "f().pop()\n",
-        "`.pop()` is only supported on a name or an instance attribute so far",
+fn popping_from_another_base_is_a_method_call() {
+    // `grid[i].pop()`, `f().pop()`: `pycc_types` types the method call on
+    // the receiver it finds (`list_ops::list_method_ty`).
+    let module = crate::pycc_parser_test_helper::parse("xs = [[1]]\nxs[0].pop()\n");
+    let hir = crate::lower_checked(&module).expect("lowers");
+    assert!(
+        format!("{:?}", hir.items).contains("MethodCall"),
+        "{:?}",
+        hir.items
     );
 }
 

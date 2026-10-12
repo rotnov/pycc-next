@@ -187,9 +187,9 @@ fn the_shapes_outside_part_1_are_refused() {
         ),
         (
             "obj_comp_native_expr",
-            "xs = [k for k in (1, 2)]\n",
+            "xs = [k for k in {1, 2}]\n",
             "C0001",
-            "a CPython object is supported so far as a comprehension's iterable, got an expression of type `tuple[int, int]`",
+            "a CPython object is supported so far as a comprehension's iterable, got an expression of type `set[int]`",
         ),
     ] {
         assert_one_error(tag, &format!("{HEAD}{tail}"), code, needle);
@@ -201,7 +201,7 @@ fn the_shapes_outside_part_1_are_refused() {
     let dir = ScratchDir::new("obj_comp_native_expr_span").expect("scratch");
     let rendered = stdout_of(&check_with(
         &dir,
-        &format!("{HEAD}xs = [k for k in (1, 2)]\n"),
+        &format!("{HEAD}xs = [k for k in {{1, 2}}]\n"),
     ));
     assert!(rendered.contains(".py:4:6"), "{rendered}");
     assert!(!rendered.contains(".py:1:1"), "{rendered}");

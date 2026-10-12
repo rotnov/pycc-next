@@ -93,7 +93,8 @@ fn both_admitted_iterable_shapes_are_admitted() {
 /// The iterable shapes PR 3c deliberately leaves out, each with the
 /// diagnostic that owns it.
 ///
-/// A tuple iterable is refused by the type checker. A subscript iterable
+/// A tuple-typed name iterable is refused by the type checker (a tuple
+/// display only iterated is the list display, `pycc_ast::desugar`). A subscript iterable
 /// (`for x in o[k]:`) is bound to a temporary by `pycc_ast::desugar` and
 /// iterated like any other `object` name. A bare foreign name is an
 /// `Expr::Name` iterable; since #1325 it checks clean like any other
@@ -104,7 +105,7 @@ fn the_deferred_iterable_shapes_keep_their_own_refusals() {
     let dir = ScratchDir::new("foreign_iteration_refused").expect("scratch");
     for (body, code, phrase) in [
         (
-            "for x in (1, 2):\n    pass\n",
+            "t = (1, 2)\nfor x in t:\n    pass\n",
             "T0033",
             "`tuple[int, int]` cannot be iterated",
         ),
