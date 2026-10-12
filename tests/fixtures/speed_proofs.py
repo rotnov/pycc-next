@@ -202,12 +202,61 @@ def no_throw() -> None:
     print(fib(2) + x)
 
 
+def nested(n: int) -> int:
+    t = 0
+    i = -100
+    j = -100
+    for i in range(n):
+        for j in range(i, n):
+            if j == 3:
+                continue
+            t += i * j
+        k = 0
+        while k < i:
+            k += 2
+            if k > 5:
+                break
+        t += k
+    big = 2**63
+    for i in range(3):
+        for j in range(big, big + i):
+            t += j - big + 1
+    for i in range(-2, n, 3):
+        for j in range(n, i, -2):
+            t = t * 3 + j
+    print(i, j)
+    return t
+
+
+def nested_loops() -> None:
+    print(nested(8), nested(0), nested(-2), nested(25))
+
+
+def halves() -> None:
+    # Every normal binade, the edges of the normal range, and bases just
+    # below an even power of two, where sqrt rounds up to a power of two.
+    x = 2.2250738585072014e-308
+    while x < 1e308:
+        print(x**0.5, (x * 0.9999999999999999) ** 0.5, (x * 1.0000000000000002) ** 0.5)
+        x = x * 7.9
+    print(1.7976931348623157e308**0.5, 2.2250738585072014e-308**0.5, 2.225073858507201e-308**0.5)
+    b = 4.0
+    for _ in range(12):
+        y = b
+        for _ in range(5):
+            y = y - y * 1.1102230246251565e-16
+            print(y**0.5)
+        b = b * 16.0
+
+
 classes()
 loop_vars()
 global_loop()
 calls()
 trees()
 no_throw()
+nested_loops()
+halves()
 
 
 def after(n: int) -> int:

@@ -151,11 +151,14 @@ pub(super) fn target_libm_is_glibc(target_triple: Option<&str>) -> bool {
 /// `(x_bits << k) - S*S` with wrapping 64-bit arithmetic (`k >= 52` shifts
 /// out every bit above the significand's low ones). `|sqrt(x) - s| < 0.44`
 /// ULP is `|R| < 0.88 * S`, tested as `|R| <= S * 225 / 256` (0.8789).
-/// Checked against glibc 2.39 on 320 million inputs (a third of them next
-/// to a rounding midpoint): no fast-path result differed from `pow`.
+/// The bound holds for every positive normal `x` (`k` is 51 when `s`
+/// rounds up to a power of two). Checked against glibc 2.39 on 620 million
+/// inputs across every normal binade, a quarter of them next to a rounding
+/// midpoint and a quarter just below an odd power of two: no fast-path
+/// result differed from `pow`.
 const SQRT_PROOF_NUMERATOR: u64 = 225;
 
-/// `x ** 0.5` for `2^-900 < x < 2^1000` on glibc: `s = sqrt(x)` when the
+/// `x ** 0.5` for a positive normal `x` on glibc: `s = sqrt(x)` when the
 /// residual `x - s*s` proves glibc's `pow` returns `s` (see
 /// [`SQRT_PROOF_NUMERATOR`]), libm `pow` otherwise -- bit-identical to
 /// CPython either way.
@@ -281,15 +284,28 @@ pub(super) fn emit_pow<'ctx>(
                 .build_float_compare(pred, l, f64_type.const_float(bound), name)
                 .expect("fcmp")
         };
-        // `2^-900 < l < 2^1000` (false for a NaN) is a positive finite base,
-        // which raises nothing and whose square root never overflows, and
-        // where `emit_pow_half`'s residual computation is exact: it is tested
-        // first, alone, so the common base pays two compares. Any other base
-        // takes the general guarded `pow` below (libm for a positive finite
-        // base, the runtime otherwise).
-        let low = cmp(FloatPredicate::OGT, 2f64.powi(-900), "base_low");
-        let high = cmp(FloatPredicate::OLT, 2f64.powi(1000), "base_high");
-        let in_range = builder.build_and(low, high, "pow_half_range").expect("and");
+        // A positive normal base (one unsigned compare of its bits: false
+        // for zero, a subnormal, a negative, an infinity and a NaN) raises
+        // nothing, and is where `emit_pow_half`'s integer residual is exact.
+        // It is tested first, alone. Any other base takes the general
+        // guarded `pow` below (libm for a positive finite base, the runtime
+        // otherwise).
+        let i64_type = context.i64_type();
+        let bits = builder
+            .build_bit_cast(l, i64_type, "base_bits")
+            .expect("bitcast")
+            .into_int_value();
+        let above_min = builder
+            .build_int_sub(bits, i64_type.const_int(1 << 52, false), "base_off")
+            .expect("sub");
+        let in_range = builder
+            .build_int_compare(
+                inkwell::IntPredicate::ULT,
+                above_min,
+                i64_type.const_int(0x7FF0_0000_0000_0000 - (1 << 52), false),
+                "pow_half_range",
+            )
+            .expect("icmp");
         let function = current_function(builder);
         let proof_bb = context.append_basic_block(function, "pow_half_proof");
         let far_bb = context.append_basic_block(function, "pow_half_far");

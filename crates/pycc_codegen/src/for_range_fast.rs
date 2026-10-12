@@ -1,5 +1,6 @@
-//! The smallint version of an innermost `for v in range(start, stop, k)`
-//! loop with a literal, non-zero step `k`.
+//! The smallint version of a `for v in range(start, stop, k)` loop with a
+//! literal, non-zero step `k` whose body holds at most one level of nested
+//! loops.
 //!
 //! The generic `ForRange` loop keeps its induction value as an encoded `int`
 //! word, so every iteration tests tags, checks the increment for overflow and
@@ -11,10 +12,11 @@
 //! smallint, folding the tag tests of the arithmetic the body does on it.
 //! Bigint bounds still take the generic loop, emitted alongside.
 //!
-//! Emitting the body twice is limited to bodies without a nested loop or a
-//! `try` (so code growth is linear, and no statement whose emission registers
-//! state is emitted twice), and to loops without an `else:` clause (whose
-//! "broke" flag only one emission can claim).
+//! Emitting the body twice is limited to bodies without a `try` (no
+//! statement whose emission registers state is emitted twice), to at most
+//! one level of nested `for`/`while` loops whose own bodies are flat (an
+//! innermost body is emitted at most four times), and to loops without an
+//! `else:` clause (whose "broke" flag only one emission can claim).
 
 use crate::rt_fns::RtFns;
 use crate::{FinallyTarget, Scalar, StorageSlot, UserFunction};
@@ -37,15 +39,19 @@ pub(super) fn versionable_step(rt: &RtFns<'_>, stmt: &MirStmt, step: &MirExpr, b
         return None;
     };
     let k = i64::try_from(*k).ok()?;
-    (k != 0 && k.abs() <= MAX_STEP && body.iter().all(is_flat) && !rt.loops.has_pending_else_flag(stmt))
+    (k != 0 && k.abs() <= MAX_STEP && body.iter().all(|stmt| is_flat(stmt, 1)) && !rt.loops.has_pending_else_flag(stmt))
         .then_some(k)
 }
 
-/// Whether `stmt` contains no loop and no `try` (see the module doc).
-fn is_flat(stmt: &MirStmt) -> bool {
+/// Whether `stmt` contains no `try` and at most `loops` levels of nested
+/// `for ... in range`/`while` loops without `else:` (see the module doc).
+fn is_flat(stmt: &MirStmt, loops: usize) -> bool {
     match stmt {
-        MirStmt::If { body, orelse, .. } => body.iter().chain(orelse).all(is_flat),
-        MirStmt::Seq(stmts) => stmts.iter().all(is_flat),
+        MirStmt::If { body, orelse, .. } => body.iter().chain(orelse).all(|stmt| is_flat(stmt, loops)),
+        MirStmt::Seq(stmts) => stmts.iter().all(|stmt| is_flat(stmt, loops)),
+        MirStmt::ForRange { body, .. } | MirStmt::While { body, .. } if loops > 0 => {
+            body.iter().all(|stmt| is_flat(stmt, loops - 1))
+        }
         MirStmt::ExprStmt(_)
         | MirStmt::Assign { .. }
         | MirStmt::NoOp
