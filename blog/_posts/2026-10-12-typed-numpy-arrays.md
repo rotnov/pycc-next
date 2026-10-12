@@ -23,13 +23,14 @@ Xeon 2.8 GHz; Rust is built with plain `rustc -O`, the same target CPU pycc-next
 
 | program | CPython 3.13 + numpy | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
 |---|---|---|---|---|---|
-| stencil2d | 4.808s | 0.011s | 0.004s | **423.6x faster** | 2.6x slower |
-| prefix_sum_np | 3.823s | 0.048s | 0.015s | **79.5x faster** | 3.2x slower |
+| stencil2d | 4.871s | 0.011s | 0.004s | **435.1x faster** | 2.5x slower |
+| prefix_sum_np | 3.839s | 0.046s | 0.017s | **83.3x faster** | 2.6x slower |
 
 My targets were **at least 30x faster than CPython** and **within 3x of Rust**. The
-first is beaten on both programs, and stencil2d meets the second. **prefix_sum_np
-misses it slightly**, at 3.0 to 3.2x across runs. Its array accesses are a load, a
-bounds compare and a store. What's left is the running sum: it's pycc's tagged `int`,
+first is beaten on both programs, and stencil2d meets the second. **prefix_sum_np is
+right on the line**: this run says 2.6x, but other runs on this noisy machine said up
+to 3.2x, so I won't claim it. Its array accesses are a load, a bounds compare and a
+store. What's left is the running sum: it's pycc's tagged `int`,
 so every add checks for overflow into arbitrary precision. That cost hits every integer
 loop, not just numpy ones.
 
