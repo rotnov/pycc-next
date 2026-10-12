@@ -837,6 +837,142 @@ assert after == before, 'live list/instance counts grew: %r -> %r' % (before, af
 print('ok')
 "#;
 
+/// The generator `throw()` paths -- a thrown exception caught inside the
+/// generator, one propagating out of it, and either thrown through a
+/// `yield from` delegation -- release the generators and the counted values
+/// their frames hold. Exception objects are leak-only, so this counts live
+/// generators and lists through the runtime's own counters rather than
+/// peak memory.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn generator_throw_paths_release_their_frames() {
+    let dir = ScratchDir::new("memory_ext_generator_throw").expect("scratch dir");
+    let src = dir.join("pycc_memory_gen.py");
+    std::fs::write(&src, GENERATOR_THROW_MODULE).expect("write the module source");
+    let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(&src)
+        .arg("-o")
+        .arg(dir.join("pycc_memory_gen"))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    std::fs::remove_file(&src).expect("remove the source");
+    let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
+        .arg("-c")
+        .arg(GENERATOR_THROW_DRIVER)
+        .current_dir(&*dir)
+        .output()
+        .expect("python3 should spawn");
+    assert!(
+        run.status.success() && run.stdout == b"ok\n",
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+const GENERATOR_THROW_MODULE: &str = r#"from typing import Generator
+
+
+def _mk(i: int) -> list[int]:
+    return [i, i]
+
+
+def _catcher(i: int) -> Generator[int, int, int]:
+    xs = _mk(i)
+    total = 0
+    try:
+        while True:
+            try:
+                got = yield len(xs)
+                total += got
+            except ValueError:
+                xs = _mk(i + 1)
+                total += 100
+            if total > 1000:
+                return total
+    finally:
+        xs = _mk(0)
+
+
+def _outer(i: int) -> Generator[int, int, int]:
+    held = _mk(i)
+    result = yield from _catcher(i)
+    return result + len(held)
+
+
+def throw_caught(i: int) -> int:
+    g = _catcher(i)
+    n = next(g)
+    n += g.send(3)
+    n += g.throw(ValueError("x"))
+    g.close()
+    return n
+
+
+def throw_uncaught(i: int) -> int:
+    g = _catcher(i)
+    next(g)
+    try:
+        g.throw(KeyError("k"))
+    except KeyError:
+        return 1
+    return 0
+
+
+def delegated(i: int) -> int:
+    g = _outer(i)
+    n = next(g)
+    n += g.send(5)
+    n += g.throw(ValueError("y"))
+    try:
+        g.send(2000)
+    except StopIteration as e:
+        n += e.value
+    return n
+
+
+def delegated_close(i: int) -> int:
+    g = _outer(i)
+    n = next(g)
+    g.close()
+    return n
+"#;
+
+/// The values are CPython's for the same module.
+const GENERATOR_THROW_DRIVER: &str = r#"import ctypes, gc
+import pycc_memory_gen as m
+assert m.__file__.endswith('.so')
+lib = ctypes.CDLL(m.__file__)
+def counter(name):
+    f = getattr(lib, name)
+    f.restype = ctypes.c_int64
+    f.argtypes = []
+    return f
+counters = [counter('pycc_rt_%s_live_objects' % k) for k in ('list', 'gen')]
+def live():
+    gc.collect()
+    return [c() for c in counters]
+def round_trip():
+    assert m.throw_caught(1) == 6
+    assert m.throw_uncaught(1) == 1
+    assert m.delegated(1) == 2113
+    assert m.delegated_close(1) == 2
+round_trip()
+before = live()
+for _ in range(200):
+    round_trip()
+after = live()
+assert after == before, 'live list/generator counts grew: %r -> %r' % (before, after)
+print('ok')
+"#;
+
 const EXT_MODULE: &str = r#"class Cell:
     def __init__(self, v: int, label: str) -> None:
         self.v = v
