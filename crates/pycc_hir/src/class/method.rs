@@ -79,8 +79,18 @@ pub(super) fn lower_method(
     // this shares with `func::lower_params` (Part 2 of #884, #1189).
     crate::func::params::reject_unsupported_parameter_shapes(parameters)?;
     let method_name = def.name.as_str();
-    let is_public = crate::is_public_name(method_name); // D-038
-    let params_is_public = is_public || method_name == "__init__";
+    // A native build links every caller of a method, so an unannotated
+    // public method's signature is inferred from its uses like a private
+    // method's, in strict and non-strict mode alike
+    // (`func::lower_function`'s `inferred_public`). An `--ext` module's
+    // class is called from Python with anything, so there the annotation
+    // stays required (strict) or the slot is an object (non-strict).
+    // `__init__`'s parameters are typed from the program's constructor
+    // calls (`pycc_types`' `empty_container::init_params`) before the class
+    // phase types the slots they seed.
+    let inferred_public = !crate::func::is_ext_module(aliases);
+    let is_public = crate::is_public_name(method_name) && !inferred_public; // D-038
+    let params_is_public = is_public || (method_name == "__init__" && !inferred_public);
     // #436: a `@staticmethod` takes no implicit `self`/`cls` -- the
     // method's own parameter list is exactly what the user wrote. A
     // `@classmethod` takes an implicit `cls` (typed

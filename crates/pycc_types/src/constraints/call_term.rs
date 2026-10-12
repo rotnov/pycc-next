@@ -748,7 +748,15 @@ pub(crate) fn collect_call_constraints(
                 concrete,
                 "T0021",
                 &format!("argument {} of private helper `{callee}`", index + 1),
-            )?;
+            )
+            .map_err(|conflict| {
+                match signature.0.get(index) {
+                    Some(param) if super::public_inference::reports_missing_annotation(callee) => {
+                        super::public_inference::parameter_conflict(callee, param, &conflict)
+                    }
+                    _ => conflict,
+                }
+            })?;
         }
     }
     // A call of a generator function whose element type the solver is

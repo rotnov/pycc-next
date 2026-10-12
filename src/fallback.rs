@@ -737,6 +737,10 @@ pub(crate) fn with_fallback<T, E>(
     // result falls back less.
     let mut retry = plan.clone();
     retry.fallback.retain(|_, reason| !retryable(reason));
+    // So is a function compiled with objects only for fallback code that
+    // may be gone: a compiled class instance it then received as an object
+    // would have no attributes Python code can see.
+    retry.objectified.clear();
     // What fallback code that stays forces is forced again.
     retry.cascade();
     if retry.fallback.len() < plan.fallback.len() {

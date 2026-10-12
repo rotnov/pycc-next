@@ -145,11 +145,13 @@ use super::*;
 
 pub(crate) mod attr_slot;
 mod call_site;
+mod init_params;
 mod object_slot;
 mod producer;
 mod unify;
 
 pub(crate) use call_site::resolve_call_site_params;
+pub(crate) use init_params::resolve_init_params;
 use producer::find_producer;
 
 /// What a resolution produced: the *element* type of a list, or the

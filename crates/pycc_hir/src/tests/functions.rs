@@ -38,19 +38,25 @@ fn lowers_a_return_with_no_value() {
 }
 
 #[test]
-fn an_unannotated_public_function_missing_param_annotations_produces_t0001() {
+fn an_unannotated_public_function_lowers_its_missing_param_annotations_as_infer() {
+    // A native module infers them like a private helper's; `pycc_types`
+    // reports `T0001` when inference cannot pin one.
     let module = pycc_parser_test_helper::parse("def add(a, b) -> int:\n    return a + b\n");
-    let diag = lower_checked(&module).unwrap_err();
-    assert_eq!(diag.code, "T0001");
-    assert!(diag.message.contains('a'));
+    let hir = lower_checked(&module).unwrap();
+    let HirItem::Function { params, .. } = &hir.items[0] else {
+        panic!("a function")
+    };
+    assert_eq!(params[0].1, Ty::Infer);
 }
 
 #[test]
-fn an_unannotated_public_function_missing_return_annotation_produces_t0001() {
+fn an_unannotated_public_function_lowers_its_missing_return_annotation_as_infer() {
     let module = pycc_parser_test_helper::parse("def add(a: int, b: int):\n    return a + b\n");
-    let diag = lower_checked(&module).unwrap_err();
-    assert_eq!(diag.code, "T0001");
-    assert!(diag.message.contains("add"));
+    let hir = lower_checked(&module).unwrap();
+    let HirItem::Function { return_ty, .. } = &hir.items[0] else {
+        panic!("a function")
+    };
+    assert_eq!(*return_ty, Ty::Infer);
 }
 
 #[test]

@@ -203,13 +203,10 @@ fn a_generic_reading_a_foreign_global_hits_the_monomorphization_gap() {
 /// its own.
 #[test]
 fn a_declared_parameter_keeps_its_argument_mismatch() {
-    refused(
-        &format!(
-            "{IMPORT}class A:\n    def _m(self, x):\n        pass\n\n\ndef f() -> None:\n    A()._m(copy)\n"
-        ),
-        "T0021",
-        "cannot infer type of parameter `x` in private helper `A._m`",
-    );
+    // An unannotated method parameter is inferred from the call: `object`.
+    admitted(&format!(
+        "{IMPORT}class A:\n    def _m(self, x):\n        pass\n\n\ndef f() -> None:\n    A()._m(copy)\n"
+    ));
     refused(
         &format!(
             "{IMPORT}class Box[T]:\n    def __init__(self, v: T) -> None:\n        self.v = v\n\n\ndef f() -> None:\n    Box(copy)\n"

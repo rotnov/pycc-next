@@ -1,0 +1,222 @@
+//! v0.2 accept 4 (the real-world corpus): what the corpus needed natively.
+//!
+//! * Strict mode infers the signature of an unannotated public function or
+//!   method of a native program from its call sites, like a private
+//!   helper's: one signature all call sites agree on, otherwise the
+//!   `T0001` a missing annotation always had. An `--ext` module keeps
+//!   `T0001`: Python calls it with anything.
+//! * Non-strict mode does not compile an unannotated definition nothing in
+//!   the entry module mentions (it can never run), so it cannot fall back.
+//! * `reversed(range(...))`, `map(f, range(...))` and `filter(f,
+//!   range(...))` iterate the range as a list.
+//!
+//! The oracle is CPython: each fixture is built, run and compared with
+//! `python3` running the file -- stdout, the uncaught exception's last line
+//! and the exit status.
+
+use pycc_scratch::ScratchDir;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+fn pycc() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_pycc"))
+}
+
+fn python() -> Command {
+    Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
+}
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).replace("\r\n", "\n")
+}
+
+fn last_line(bytes: &[u8]) -> String {
+    text(bytes).lines().last().unwrap_or_default().to_string()
+}
+
+/// Builds fixture `name` (plus `flags`) in both profiles, runs it and
+/// compares with CPython. Returns the build's stderr.
+fn matches_cpython(name: &str, flags: &[&str]) -> String {
+    let mut report = String::new();
+    for release in [false, true] {
+        let dir = ScratchDir::new("corpus_round7").expect("scratch");
+        let out = dir.join("prog");
+        let mut build = pycc();
+        build
+            .arg("build")
+            .arg(fixture(name))
+            .arg("-o")
+            .arg(&out)
+            .args(flags);
+        if release {
+            build.arg("--release");
+        }
+        let build = build.output().expect("pycc should spawn");
+        assert!(
+            build.status.success(),
+            "{}{}",
+            text(&build.stdout),
+            text(&build.stderr)
+        );
+        report = text(&build.stderr);
+        let ours = Command::new(&out).output().expect("the program runs");
+        let theirs = python().arg(fixture(name)).output().expect("python3 runs");
+        assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs ({name})");
+        assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr), "{name}");
+        assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
+    }
+    report
+}
+
+/// `pycc check` (plus `flags`) of `source` fails with exactly one
+/// diagnostic, `code`, whose text contains `needle`.
+fn refused(tag: &str, source: &str, flags: &[&str], code: &str, needle: &str) {
+    let dir = ScratchDir::new(tag).expect("scratch");
+    let path = dir.join("m.py");
+    std::fs::write(&path, source).expect("write");
+    let output = pycc()
+        .arg("check")
+        .args(flags)
+        .arg(&path)
+        .output()
+        .expect("pycc should spawn");
+    let rendered = text(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{tag}: {rendered}");
+    assert_eq!(rendered.matches("error[").count(), 1, "{tag}: {rendered}");
+    assert!(rendered.contains(&format!("error[{code}]")), "{tag}: {rendered}");
+    assert!(rendered.contains(needle), "{tag}: {rendered}");
+}
+
+#[test]
+fn strict_infers_unannotated_public_functions_and_methods() {
+    matches_cpython("strict_public_inference.py", &[]);
+}
+
+#[test]
+fn non_strict_runs_the_same_program() {
+    matches_cpython("strict_public_inference.py", &["--non-strict"]);
+}
+
+#[test]
+fn an_uninferable_public_signature_keeps_t0001() {
+    let param = "needs a type annotation";
+    // No call site types the parameter.
+    refused(
+        "t0001_uncalled",
+        "def f(x):\n    return x\n\nprint(1)\n",
+        &[],
+        "T0001",
+        "parameter `x` of public function `f` needs a type annotation",
+    );
+    // Call sites disagree: one signature cannot serve both.
+    refused(
+        "t0001_conflict",
+        "def f(x):\n    return x + 1\n\nprint(f(1))\nprint(f(2.5))\n",
+        &[],
+        "T0001",
+        param,
+    );
+    // The body never pins the return type.
+    refused(
+        "t0001_return",
+        "def g(n):\n    if n == 0:\n        return []\n    return [n] + g(n - 1)\n\nprint(g(3))\n",
+        &[],
+        "T0001",
+        "public function `g` needs a return type annotation",
+    );
+    // A method's call sites disagree.
+    refused(
+        "t0001_method_conflict",
+        "class C:\n    def m(self, x):\n        return x\n\nc = C()\nprint(c.m(1), c.m(\"a\"))\n",
+        &[],
+        "T0001",
+        "parameter `x` of public function `m` needs a type annotation",
+    );
+    // Constructor calls disagree on an `__init__` parameter.
+    refused(
+        "t0001_init",
+        "class C:\n    def __init__(self, n):\n        self.n = n\n\nprint(C(1).n, C(\"a\").n)\n",
+        &[],
+        "T0001",
+        "parameter `n` of public function `__init__` needs a type annotation",
+    );
+}
+
+/// Strict mode still checks an unannotated function nothing calls.
+#[test]
+fn strict_mode_still_reports_a_dead_unannotated_function() {
+    refused(
+        "t0001_dead",
+        "def list2d(a, b, c):\n    return [[c] * b for i in range(a)]\n\nprint(1)\n",
+        &[],
+        "T0001",
+        "public function `list2d`",
+    );
+}
+
+#[test]
+fn an_ext_module_keeps_t0001_for_an_unannotated_public_function() {
+    let dir = ScratchDir::new("corpus_round7_ext").expect("scratch");
+    let path = dir.join("m.py");
+    std::fs::write(&path, "def f(x):\n    return x + 1\n\nprint(f(1))\n").expect("write");
+    let output = pycc()
+        .arg("build")
+        .arg(&path)
+        .arg("-o")
+        .arg(dir.join("m"))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    let rendered = format!("{}{}", text(&output.stdout), text(&output.stderr));
+    assert_eq!(output.status.code(), Some(1), "{rendered}");
+    assert!(
+        rendered.contains("parameter `x` of public function `f` needs a type annotation"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn non_strict_does_not_compile_dead_unannotated_definitions() {
+    let report = matches_cpython("non_strict_dead_defs.py", &["--non-strict", "--report-fallbacks"]);
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+/// A compiled class instance that reaches CPython code as an object in an
+/// embedded executable keeps its attributes and properties there.
+#[test]
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn an_embedded_instance_keeps_its_attributes_in_cpython_code() {
+    matches_cpython("embedded_instance_attrs.py", &["--non-strict"]);
+}
+
+/// A definition fallback code reads by name is not dead: the fallback
+/// rewrite's `exec`uted source is scanned too.
+#[test]
+fn a_definition_only_fallback_code_reads_is_kept() {
+    let dir = ScratchDir::new("corpus_round7_fallback_reads").expect("scratch");
+    let path = dir.join("m.py");
+    std::fs::write(
+        &path,
+        "def helper(x):\n    return x * 2\n\nf = lambda: [helper(3), None]\nprint(f())\n",
+    )
+    .expect("write");
+    let out = dir.join("m");
+    let build = pycc()
+        .args(["build", "--non-strict", "--report-fallbacks"])
+        .arg(&path)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}{}", text(&build.stdout), text(&build.stderr));
+    let ours = Command::new(&out).output().expect("the program runs");
+    let theirs = python().arg(&path).output().expect("python3 runs");
+    assert_eq!(text(&ours.stdout), text(&theirs.stdout));
+    assert_eq!(ours.status.code(), theirs.status.code());
+}

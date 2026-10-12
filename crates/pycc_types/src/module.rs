@@ -245,7 +245,12 @@ struct Prepared {
 
 impl Prepared {
     fn new(hir: &HirModule) -> Result<Self, KeyedDiagnostics> {
-        let resolved = empty_container::resolve_empty_containers(hir);
+        // A native program's unannotated `__init__` parameters, from its
+        // constructor calls: the class phase types the slots they seed.
+        let init_params = empty_container::resolve_init_params(hir)?;
+        let hir = init_params.as_ref().unwrap_or(hir);
+        let resolved = empty_container::resolve_empty_containers(hir)
+            .or_else(|| init_params.clone());
         // Container parameters of private helpers, from their call sites:
         // after the empty containers, whose resolved types the arguments
         // carry (`empty_container::call_site`).

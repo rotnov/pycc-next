@@ -117,8 +117,12 @@ costs two overflow checks per add.
 
 ## Modes
 
-- **Strict** (default): every public function is annotated (`T0001`), `Any` is
-  refused (`T0002`), and a type mismatch is a compile error.
+- **Strict** (default): `Any` is refused (`T0002`) and a type mismatch is a compile
+  error. In a native build an unannotated function or method (`__init__` aside) gets
+  one signature inferred from its call sites, as a private helper does: every call
+  site must agree and the body must pin the return, otherwise it is `T0001` and needs
+  annotations. An `--ext` module's public functions must be annotated (`T0001`),
+  since Python may call them with anything.
 - **Non-strict**: `pycc build|run|check --non-strict`, or `[tool.pycc] strict = false`
   in a `pyproject.toml` next to the entry file (`[build] strict = false` in a
   `pycc.toml` works too). A missing annotation and `Any` become a CPython object
@@ -138,7 +142,10 @@ costs two overflow checks per add.
   function as a CPython object; fallback code calls compiled functions as the
   module's published callables (an unannotated function that fallback code calls
   is compiled with object parameters instead of inferred ones; one with a parameter
-  default runs in CPython, as published callables do not apply defaults yet). A
+  default runs in CPython, as published callables do not apply defaults yet). An
+  unannotated definition nothing in the entry module mentions (a template's unused
+  `def list2d(a, b, c)`, a method no attribute access names) is not compiled at
+  all: it can never run, so it neither falls back nor costs anything. A
   module global that fallback code binds lives in the module dict, so both sides
   see one value; one it only reads stays native, each compiled store copied into
   the dict (a list or other container still lives in the dict, built there as a

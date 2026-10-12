@@ -93,52 +93,64 @@ fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
             HirItem::TopLevelStmt(_) => None,
         })
         .collect();
+    let mut observed: HashMap<(String, usize), Option<Ty>> = HashMap::new();
+    for_each_call(hir, &mut |env, names, callee, args| {
+        // A nested function used as a value: its captured values are its
+        // lifted function's leading arguments.
+        let (callee, args, partial) = match (callee, args) {
+            (pycc_hir::CLOSURE_MARKER, [HirExpr::Name(function), captures @ ..]) => {
+                (function.as_str(), captures, true)
+            }
+            _ => (callee, args, false),
+        };
+        let Some(flags) = infer_params.get(callee) else {
+            return;
+        };
+        if flags.len() < args.len() || (!partial && flags.len() != args.len()) {
+            return;
+        }
+        for (index, arg) in args.iter().enumerate() {
+            if !flags[index] {
+                continue;
+            }
+            // An argument still typed by an unresolved parameter (a
+            // recursive call) is not evidence either way.
+            let Ok(ty) = infer_expr_in(env, names, arg) else {
+                continue;
+            };
+            if super::contains_infer(&ty) {
+                continue;
+            }
+            let entry = observed
+                .entry((callee.to_string(), index))
+                .or_insert(Some(ty.clone()));
+            // A function value is typed only by such evidence.
+            if !(is_container_param(&ty) || matches!(ty, Ty::Callable(_)))
+                || entry.as_ref() != Some(&ty)
+            {
+                *entry = None;
+            }
+        }
+    });
+    observed
+}
+
+/// Calls `visit` with every call `callee(args)` of `hir` -- in the module
+/// body and in every function -- and the environment and local names its
+/// arguments type in.
+pub(super) fn for_each_call(
+    hir: &HirModule,
+    visit: &mut dyn FnMut(&crate::Environment, &[&str], &str, &[HirExpr]),
+) {
     let local_names = crate::module::module_function_local_names(hir);
     let module_env = module_environment(hir);
-    let mut observed: HashMap<(String, usize), Option<Ty>> = HashMap::new();
     let mut record = |env: &crate::Environment, names: &[&str], body: &[HirStmt]| {
         let mut body = body.to_vec();
         super::for_each_stmt_mut(&mut body, &mut |stmt| {
             super::unify::stmt_exprs_mut(stmt, &mut |expr| {
                 super::unify::walk_expr_mut(expr, &mut |expr| {
-                    let HirExpr::Call { callee, args } = expr else {
-                        return false;
-                    };
-                    // A nested function used as a value: its captured
-                    // values are its lifted function's leading arguments.
-                    let (callee, args, partial) = match (callee.as_str(), args.as_slice()) {
-                        (pycc_hir::CLOSURE_MARKER, [HirExpr::Name(function), captures @ ..]) => {
-                            (&*function, captures, true)
-                        }
-                        _ => (&*callee, args.as_slice(), false),
-                    };
-                    let Some(flags) = infer_params.get(callee.as_str()) else {
-                        return false;
-                    };
-                    if flags.len() < args.len() || (!partial && flags.len() != args.len()) {
-                        return false;
-                    }
-                    for (index, arg) in args.iter().enumerate() {
-                        if !flags[index] {
-                            continue;
-                        }
-                        // An argument still typed by an unresolved parameter
-                        // (a recursive call) is not evidence either way.
-                        let Ok(ty) = infer_expr_in(env, names, arg) else {
-                            continue;
-                        };
-                        if super::contains_infer(&ty) {
-                            continue;
-                        }
-                        let entry = observed
-                            .entry((callee.clone(), index))
-                            .or_insert(Some(ty.clone()));
-                        // A function value is typed only by such evidence.
-                        if !(is_container_param(&ty) || matches!(ty, Ty::Callable(_)))
-                            || entry.as_ref() != Some(&ty)
-                        {
-                            *entry = None;
-                        }
+                    if let HirExpr::Call { callee, args } = expr {
+                        visit(env, names, callee, args);
                     }
                     false
                 });
@@ -179,7 +191,6 @@ fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
         bind_comprehension_targets(&mut env, names, body);
         record(&env, names, body);
     }
-    observed
 }
 
 /// Binds the target of every comprehension statement (`xs = [... for ...]`)

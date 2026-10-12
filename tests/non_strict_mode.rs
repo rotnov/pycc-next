@@ -182,7 +182,7 @@ fn untyped_ext_module_matches_its_source() {
 fn an_unsupported_construct_is_a_c0001_without_the_fallback() {
     let dir = ScratchDir::new("non_strict_c0001").expect("scratch");
     let source = dir.join("m.py");
-    std::fs::write(&source, "def f(x):\n    return lambda: x\n").expect("write");
+    std::fs::write(&source, "def f(x):\n    return lambda: x\n\nprint(f(1)())\n").expect("write");
     let output = pycc()
         .args(["check", "--non-strict"])
         .arg(&source)

@@ -159,13 +159,15 @@ fn a_failed_from_import_of_a_builtin_name_silences_its_subclass() {
 
 #[test]
 fn a_failed_def_named_like_a_builtin_leaves_the_builtin_base_message() {
-    // An unannotated `def frozenset()` fails (`T0001`) and, being a `def`,
-    // poisons nothing and is not in the item list, so the rebinding check
-    // cannot see it: the class reports the builtin-type text beside it.
-    let diagnostics =
-        lower_all_err("def frozenset():\n    return 1\n\n\nclass F(frozenset):\n    pass\n");
+    // A `def frozenset()` that fails to lower (a decorator) poisons
+    // nothing and is not in the item list, being a `def`, so the rebinding
+    // check cannot see it: the class reports the builtin-type text beside
+    // it.
+    let diagnostics = lower_all_err(
+        "@staticmethod\ndef frozenset() -> int:\n    return 1\n\n\nclass F(frozenset):\n    pass\n",
+    );
     assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
-    assert_eq!(diagnostics[0].code, "T0001");
+    assert_eq!(diagnostics[0].code, "C0001");
     assert_eq!(
         diagnostics[1].message,
         builtin_base_message("F", "frozenset")

@@ -548,9 +548,13 @@ pub(crate) fn plan_embed(
     let launcher = obj_path.with_file_name(LAUNCHER_C_NAME);
     let classes = ext_build::collect_user_exception_classes(typed_hir);
     let carriers = ext_build::collect_carrier_classes(typed_hir);
-    // #1470: the slots only, never #1448's descriptors. A refused slot was
-    // already reported by `try_build` through `embed_slot_dunders`.
+    // #1470: the comparison and hash slots. A refused slot was already
+    // reported by `try_build` through `embed_slot_dunders`.
     let slots = embed_slot_dunders(typed_hir).expect("try_build refuses an uninstallable slot");
+    // #1448's attribute descriptors too: an instance that crosses into
+    // CPython code as an object (an `object` parameter, a CPython
+    // container) answers `obj.field` there with its compiled slot.
+    let getsets = ext_build::collect_carrier_getsets(typed_hir, &carriers);
     let exports_inc = ext_build::generate_exports_inc_with_slots(
         "__main__",
         exports,
@@ -558,7 +562,7 @@ pub(crate) fn plan_embed(
         &[],
         &[],
         &carriers,
-        &[],
+        &getsets,
         &slots,
     );
     write_source(&shim, ext_build::SHIM_C)?;

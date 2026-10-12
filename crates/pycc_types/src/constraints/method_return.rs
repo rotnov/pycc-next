@@ -39,14 +39,9 @@ use super::*;
 /// generic-instantiation step, so handing the raw `Ty::Param` back would
 /// leak it into the caller's inferred signature.
 ///
-/// The call's arguments are deliberately not unified with the method's
-/// parameters, unlike the `Call` arm's module-level helper calls: a method
-/// parameter is never inferred from its call sites (`docs/TYPE_SYSTEM.md`,
-/// "v0.1 local inference"), and an `ext` module's unannotated defaulted
-/// parameter takes its type from its default, which a call-site
-/// unification would override. The arm has already collected each
-/// argument for its own constraints; the check phase validates them
-/// against the resolved signature.
+/// The call's arguments are unified with the method's parameters
+/// separately, by [`unify_method_args`], and only where a parameter is
+/// still an inference variable.
 pub(super) fn method_call_on_instance(
     signatures: &HashMap<String, SignatureTerms>,
     env: &ConstraintEnvironment<'_, '_>,
@@ -85,4 +80,59 @@ fn resolve_method<'hir>(
             .find(|(name, _)| name == method)
             .map(|(_, mangled)| mangled.as_str())
     })
+}
+
+/// Unifies the arguments of `base.method(args)` with the parameters of the
+/// method `base`'s class resolves it to, where a parameter is still an
+/// inference variable: an unannotated method of a native build is inferred
+/// from its call sites as a module-level helper is (`call_term`). A
+/// parameter with a concrete type -- annotated, or an `--ext` parameter
+/// typed from its default -- is left to the check phase, as before.
+pub(super) fn unify_method_args(
+    signatures: &HashMap<String, SignatureTerms>,
+    env: &ConstraintEnvironment<'_, '_>,
+    base_term: Option<&TypeTerm>,
+    method: &str,
+    arg_terms: &[Option<TypeTerm>],
+    parents: &mut [usize],
+    concrete: &mut [Option<Ty>],
+) -> Result<(), Diagnostic> {
+    // A special method is also called implicitly (`a == b`), with
+    // operands an explicit call does not show.
+    let Some(Ok(Ty::Instance(class_name))) = base_term else {
+        return Ok(());
+    };
+    if method.starts_with("__") {
+        return Ok(());
+    }
+    let Some(mangled) = resolve_method(env.class_defs, class_name, method) else {
+        return Ok(());
+    };
+    let Some((names, params, _)) = signatures.get(mangled) else {
+        return Ok(());
+    };
+    // The receiver is the first parameter.
+    for (index, (arg, parameter)) in arg_terms.iter().zip(params.iter().skip(1)).enumerate() {
+        let (Some(arg), Err(_)) = (arg, parameter) else {
+            continue;
+        };
+        if matches!(arg, Ok(ty) if ty_contains_param(ty)) {
+            continue;
+        }
+        unify_terms(
+            parameter.clone(),
+            arg.clone(),
+            parents,
+            concrete,
+            "T0021",
+            &format!("argument {} of private helper `{mangled}`", index + 1),
+        )
+        .map_err(|conflict| match names.get(index + 1) {
+            Some(param) if super::public_inference::reports_missing_annotation(mangled) => {
+                super::public_inference::parameter_conflict(mangled, param, &conflict)
+            }
+            _ => conflict,
+        })?;
+    }
+    Ok(())
 }

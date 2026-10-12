@@ -51,7 +51,44 @@ pub(crate) fn collect_attr_get_constraints(
     if matches!(base_term, Some(Ok(Ty::Object))) {
         return Ok(Some(Ok(Ty::Object)));
     }
+    // An instance attribute slot of a concrete user-class receiver answers
+    // its established type, so `return self.size[self.find(x)]` infers an
+    // unannotated method's return. A slot whose type is still provisional
+    // (an empty `[]` the empty-container pass types later) or generic stays
+    // a hole.
+    let HirExpr::AttrGet { attr, .. } = expr else {
+        unreachable!()
+    };
+    if let Some(Ok(Ty::Instance(class_name))) = &base_term
+        && let Some(ty) = instance_slot_ty(env.class_defs, class_name, attr)
+        && !crate::empty_container::contains_infer(&ty)
+        && !ty_contains_param(&ty)
+    {
+        return Ok(Some(Ok(ty)));
+    }
     Ok(None)
+}
+
+/// The type of attribute slot `attr` that `class_name`'s MRO establishes
+/// first.
+fn instance_slot_ty(
+    class_defs: &[(String, pycc_hir::HirClassDef)],
+    class_name: &str,
+    attr: &str,
+) -> Option<Ty> {
+    let lookup = |name: &str| {
+        class_defs
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, def)| def)
+    };
+    lookup(class_name)?.mro.iter().find_map(|mro_class| {
+        lookup(mro_class)?
+            .attrs
+            .iter()
+            .find(|(name, _)| name == attr)
+            .map(|(_, ty)| ty.clone())
+    })
 }
 
 pub(crate) fn collect_method_call_constraints(
@@ -93,6 +130,15 @@ pub(crate) fn collect_method_call_constraints(
     {
         return Ok(Some(term));
     }
+    method_return::unify_method_args(
+        signatures,
+        env,
+        base_term.as_ref(),
+        method,
+        &arg_terms,
+        parents,
+        concrete,
+    )?;
     // Part 1 of #1333: `o.method(...)` on a concrete `object`
     // receiver answers `object`, on the `AttrGet` and `Subscript`
     // arms' own reasoning above; the three arms change together.

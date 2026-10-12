@@ -80,6 +80,8 @@ mod container_terms;
 mod name_term;
 mod operator_terms;
 mod producer_checks;
+mod public_inference;
+pub(crate) use public_inference::parameter_needs_annotation;
 mod unify;
 pub(crate) use bindings::*;
 pub(crate) use block::*;

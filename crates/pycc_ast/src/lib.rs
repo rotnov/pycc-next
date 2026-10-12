@@ -9,6 +9,8 @@ pub use ruff_python_ast::visitor;
 mod desugar;
 mod reserved;
 mod string_annotation;
+mod unused_defs;
+pub use unused_defs::drop_unused_defs;
 pub use desugar::{
     CLOSURE_MARKER, ExtSignature, INFER_MARKER, body_yields, desugar, ext_entry_target,
     ext_signatures, find_yield, function_qualname, split_ext_generators, split_ext_signatures,

@@ -403,20 +403,15 @@ fn one_bad_default_with_several_call_sites_is_reported_once() {
 // --- the non-default arms of the rewritten parameter loop ---------------
 
 #[test]
-fn a_public_functions_unannotated_parameter_still_needs_an_annotation() {
+fn a_public_functions_unannotated_parameter_is_inferred_in_a_native_module() {
+    // A native module infers it from its call sites like a private
+    // helper's (`T0001` comes from `pycc_types` when inference cannot pin
+    // it); a default does not supply its type.
     for source in [
         "def f(a) -> None:\n    return\n",
-        // A default never supplies the annotation a public function's
-        // parameter needs: `T0001` wins over both inference and the
-        // default's own rules.
         "def f(a = 1) -> None:\n    return\n",
     ] {
-        let diagnostic = lower_err(source);
-        assert_eq!(diagnostic.code, "T0001", "{source}");
-        assert_eq!(
-            diagnostic.message, "parameter `a` of public function `f` needs a type annotation",
-            "{source}"
-        );
+        assert_eq!(params_of(source)[0].1, crate::Ty::Infer, "{source}");
     }
 }
 

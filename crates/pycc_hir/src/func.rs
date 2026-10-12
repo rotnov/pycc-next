@@ -80,7 +80,7 @@ pub(crate) fn lower_function(
     // type the solver cannot pin is an object, `constraints::signatures`).
     // An `--ext` module's function is called from Python with anything, so
     // there it stays an object.
-    let inferred_public = is_non_strict(aliases) && !is_ext_module(aliases);
+    let inferred_public = !is_ext_module(aliases);
     let is_public = crate::is_public_name(def.name.as_str()) && !synthesized && !inferred_public; // D-038
     let params = lower_params(
         &def.parameters,

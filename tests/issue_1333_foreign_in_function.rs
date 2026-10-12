@@ -132,6 +132,11 @@ fn check_accepts_binding_returning_and_passing_an_object_in_a_function() {
         "import json\n\ndef _c():\n    return json.loads(\"[1, 2]\")\n\n\
          def _b(o) -> int:\n    return len(o)\n\ndef _a(o) -> int:\n    return _b(o)\n\n\
          print(_a(_c()))\n",
+        // A method parameter is inferred from its call sites like a
+        // module-level helper's: an object argument makes it an object.
+        "import json\n\nclass C:\n    def _h(self, o):\n        return len(o)\n\n    \
+         def m(self, s: str) -> int:\n        return self._h(json.loads(s))\n\n\
+         print(C().m(\"[1]\"))\n",
     ] {
         assert_checks(&dir, body);
     }
@@ -188,13 +193,6 @@ fn inference_through_a_helper_result_local_or_a_parameter_is_part_3() {
             "obj_fn_part3_param_call",
             "import json\n\ndef _f(g):\n    return g(\"[1]\")\n\nprint(len(_f(json.loads)))\n",
             "name `g` is bound to a non-callable value",
-        ),
-        (
-            "obj_fn_part3_private_method_param",
-            "import json\n\nclass C:\n    def _h(self, o):\n        return len(o)\n\n    \
-             def m(self, s: str) -> int:\n        return self._h(json.loads(s))\n\n\
-             print(C().m(\"[1]\"))\n",
-            "cannot infer type of parameter `o` in private helper `C._h`",
         ),
     ] {
         assert_one_error(tag, body, "T0021", needle);

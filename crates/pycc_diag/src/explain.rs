@@ -280,11 +280,14 @@ string `\"3.14\"` with a plain configuration error, not this diagnostic code.",
         summary: "public function missing annotation",
         explanation: "\
 A function without a leading underscore is part of a module's public \
-surface. pycc's type checker infers types only for private \
-(underscore-prefixed) helper functions; every public function must declare \
-both its parameter types and its return type explicitly, since the checker \
-never performs whole-program inference across a module boundary it cannot \
-see into. T0001 fires separately for a missing parameter annotation \
+surface. In a native build (`pycc build`, `pycc run`, `pycc check`) the \
+program is closed, so an unannotated function or method other than \
+`__init__` gets the one signature its call sites imply, as a private helper \
+does; T0001 reports one whose call sites disagree on a parameter's type, \
+whose parameter no call site types, or whose body does not pin its return. \
+A module compiled into a `pycc build --ext` artifact is called from Python \
+with anything, so there every public function must declare both its \
+parameter types and its return type explicitly. T0001 fires separately for a missing parameter annotation \
 (\"parameter `<name>` of public function `<fn>` needs a type annotation\") \
 and a missing return annotation (\"public function `<fn>` needs a return \
 type annotation\") -- a function can trigger it more than once if both are \

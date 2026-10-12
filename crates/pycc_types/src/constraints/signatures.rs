@@ -577,6 +577,9 @@ pub(crate) fn infer_function_signatures_with_solver_all(
                 )
                 .or_else(object_when_non_strict)
                 .ok_or_else(|| {
+                    if super::public_inference::reports_missing_annotation(name) {
+                        return super::public_inference::at_function(hir, name, super::public_inference::parameter_needs_annotation(name, param_name));
+                    }
                     Diagnostic::error(
                         "T0021",
                         format!(
@@ -598,6 +601,9 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             )
             .or_else(object_when_non_strict)
             .ok_or_else(|| {
+                if super::public_inference::reports_missing_annotation(name) {
+                    return super::public_inference::at_function(hir, name, super::public_inference::return_needs_annotation(name));
+                }
                 Diagnostic::error(
                     "T0021",
                     format!(
@@ -627,6 +633,9 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         )
         .or_else(object_when_non_strict)
         .ok_or_else(|| {
+            if super::public_inference::reports_missing_annotation(name) {
+                return super::public_inference::at_function(hir, name, super::public_inference::return_needs_annotation(name));
+            }
             Diagnostic::error(
                 "T0021",
                 format!("cannot infer return type of private helper `{name}`; add an annotation"),

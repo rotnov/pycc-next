@@ -303,24 +303,6 @@ fn an_unannotated_parameter_the_rule_does_not_cover_keeps_its_diagnostic() {
             "parameter `a` of public function `m` needs a type annotation",
         ),
         (
-            "class C:\n    def m(self, a=True) -> None:\n        return\n",
-            false,
-            "T0001",
-            "parameter `a` of public function `m` needs a type annotation",
-        ),
-        (
-            "class C:\n    def __init__(self, a=None) -> None:\n        return\n",
-            false,
-            "T0001",
-            "parameter `a` of public function `__init__` needs a type annotation",
-        ),
-        (
-            "def f(a=1) -> None:\n    return\n",
-            false,
-            "T0001",
-            "parameter `a` of public function `f` needs a type annotation",
-        ),
-        (
             "from typing import Protocol\n\
              class P(Protocol):\n    def m(self, a=True) -> None:\n        ...\n",
             true,
@@ -332,6 +314,28 @@ fn an_unannotated_parameter_the_rule_does_not_cover_keeps_its_diagnostic() {
         assert_eq!(diagnostic.code, code, "{source}");
         assert_eq!(diagnostic.message, message, "{source}");
     }
+}
+
+/// A native module infers an unannotated public method's or function's
+/// parameter from its call sites (`Ty::Infer`), defaulted or not; `__init__`
+/// keeps its `T0001` above.
+#[test]
+fn a_native_public_unannotated_parameter_infers() {
+    let module = lowered("class C:\n    def m(self, a=True) -> None:\n        return\n", false);
+    let method = module
+        .items
+        .iter()
+        .find_map(|item| match item {
+            crate::HirItem::Function { name, params, .. } if name.ends_with('m') => Some(params),
+            _ => None,
+        })
+        .expect("the method is lowered");
+    assert_eq!(method[1].1, crate::Ty::Infer);
+    let module = lowered("def f(a=1) -> None:\n    return\n", false);
+    let crate::HirItem::Function { params, .. } = &module.items[0] else {
+        panic!("a function")
+    };
+    assert_eq!(params[0].1, crate::Ty::Infer);
 }
 
 /// A private method's or function's unannotated parameter keeps `Ty::Infer`

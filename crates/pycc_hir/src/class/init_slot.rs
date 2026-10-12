@@ -383,6 +383,10 @@ fn slot_ty_from_init_rhs(
                     | Ty::Instance(_)
                     | Ty::Callable(_)),
                 ) => Ok(ty),
+                // A native program's unannotated `__init__` parameter: the
+                // provisional slot, typed once `pycc_types` has typed the
+                // parameter from the constructor calls.
+                Some(Ty::Infer) => Ok(Ty::Infer),
                 Some(other) => Err(unsupported(
                     format!(
                         "`{receiver_name}.<attr> = {}` cannot establish an attribute of type \

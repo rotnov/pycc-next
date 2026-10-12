@@ -280,6 +280,9 @@ impl Rewriter<'_> {
                 | "tuple"
                 | "any"
                 | "all"
+                | "reversed"
+                | "map"
+                | "filter"
         ) || !self.builtin(func.id.as_str())
             || !self.builtin("range")
         {

@@ -211,18 +211,18 @@ fn an_annotated_self_parameter_is_unsupported() {
 }
 
 #[test]
-fn an_init_parameter_without_an_annotation_is_unsupported() {
-    // Unlike an ordinary private (`_`-prefixed) top-level function or
-    // method, `__init__`'s own parameters always require an
-    // annotation, regardless of D-038's usual public-name-only rule --
-    // see `lower_method`'s own doc comment for why. This is a `T0001`
-    // missing-annotation diagnostic (the same code an ordinary public
-    // function's own missing annotation produces), not `C0001`.
+fn an_init_parameter_without_an_annotation_is_inferred_in_a_native_module() {
+    // A native module types an unannotated `__init__` parameter from the
+    // program's constructor calls (`pycc_types`' `init_params`); an
+    // `--ext` module keeps the `T0001` (`method_tests`).
     let module = crate::pycc_parser_test_helper::parse(
         "class C:\n    def __init__(self, x) -> None:\n        return\n",
     );
-    let diagnostic = lower_checked(&module).unwrap_err();
-    assert_eq!(diagnostic.code, "T0001");
+    let hir = lower_checked(&module).unwrap();
+    let crate::HirItem::Function { params, .. } = &hir.items[0] else {
+        panic!("the `__init__` function")
+    };
+    assert_eq!(params[1].1, crate::Ty::Infer);
 }
 
 #[test]
