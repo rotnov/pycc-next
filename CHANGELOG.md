@@ -20,6 +20,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `table[k](x)`, `self.f(x)`); `print`, `str()` and f-strings render a
   function or a generator as CPython does (`<function f at 0x...>`,
   `<generator object g at 0x...>`).
+- `--ext`: a public function or method with defaults, positional-only or
+  keyword-only parameters, `*args` or `**kwargs` is published to Python
+  callers with its declared signature (#1194); CPython binds the call and
+  raises its own `TypeError`s.
 
 ### Performance
 - Every benchmark is within 3x of its Rust twin (fib 1.8x, mandelbrot 1.1x, nbody 2.4x,

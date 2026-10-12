@@ -15,7 +15,12 @@ const PREFIX: &str = "_pycc_q";
 /// The lifted name of a nested function whose `__qualname__` is `qualname`,
 /// made unique by `fresh` (decimal digits).
 pub(crate) fn lifted_name(qualname: &str, fresh: &str) -> String {
-    let mut out = String::from(PREFIX);
+    format!("{PREFIX}{}_{fresh}", encode(qualname))
+}
+
+/// `qualname` as identifier characters (see the module documentation).
+pub(crate) fn encode(qualname: &str) -> String {
+    let mut out = String::new();
     let mut rest = qualname;
     while let Some(c) = rest.chars().next() {
         if let Some(after) = rest.strip_prefix("<locals>") {
@@ -30,21 +35,14 @@ pub(crate) fn lifted_name(qualname: &str, fresh: &str) -> String {
         }
         rest = &rest[c.len_utf8()..];
     }
-    out.push('_');
-    out.push_str(fresh);
     out
 }
 
-/// The Python `__qualname__` of the compiled function `symbol`: the decoded
-/// qualname of a lifted nested function, else `symbol` itself (a
-/// module-level function `f`, or a method `C.m`).
-#[must_use]
-pub fn function_qualname(symbol: &str) -> String {
-    let Some(encoded) = symbol.strip_prefix(PREFIX) else {
-        return symbol.to_string();
-    };
+/// Reverses [`encode`], stopping at a `_` followed by a digit; `None` when
+/// `encoded` is not an encoding.
+pub(crate) fn decode(encoded: &str) -> Option<String> {
     let mut out = String::new();
-    let mut chars = encoded.chars().peekable();
+    let mut chars = encoded.chars();
     while let Some(c) = chars.next() {
         if c != '_' {
             out.push(c);
@@ -54,12 +52,23 @@ pub fn function_qualname(symbol: &str) -> String {
             Some('u') => out.push('_'),
             Some('d') => out.push('.'),
             Some('l') => out.push_str("<locals>"),
-            // The fresh number: the qualname is complete.
-            Some(d) if d.is_ascii_digit() => return out,
-            _ => return symbol.to_string(),
+            // A fresh number follows: the qualname is complete.
+            Some(d) if d.is_ascii_digit() => return Some(out),
+            _ => return None,
         }
     }
-    symbol.to_string()
+    Some(out)
+}
+
+/// The Python `__qualname__` of the compiled function `symbol`: the decoded
+/// qualname of a lifted nested function, else `symbol` itself (a
+/// module-level function `f`, or a method `C.m`).
+#[must_use]
+pub fn function_qualname(symbol: &str) -> String {
+    symbol
+        .strip_prefix(PREFIX)
+        .and_then(decode)
+        .unwrap_or_else(|| symbol.to_string())
 }
 
 #[cfg(test)]
@@ -89,7 +98,7 @@ mod tests {
     fn any_other_symbol_is_its_own_qualname() {
         assert_eq!(function_qualname("add"), "add");
         assert_eq!(function_qualname("Box.area"), "Box.area");
-        assert_eq!(function_qualname("_pycc_qbroken"), "_pycc_qbroken");
         assert_eq!(function_qualname("_pycc_qx_z"), "_pycc_qx_z");
+        assert_eq!(decode("Box_darea").as_deref(), Some("Box.area"));
     }
 }

@@ -10,8 +10,8 @@ mod desugar;
 mod reserved;
 mod string_annotation;
 pub use desugar::{
-    CLOSURE_MARKER, INFER_MARKER, body_yields, desugar, find_yield, function_qualname,
-    split_ext_generators,
+    CLOSURE_MARKER, ExtSignature, INFER_MARKER, body_yields, desugar, ext_entry_target,
+    ext_signatures, find_yield, function_qualname, split_ext_generators, split_ext_signatures,
 };
 pub use reserved::{is_reserved_name, reserved_name_uses};
 pub use string_annotation::{

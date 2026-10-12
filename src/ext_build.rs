@@ -446,6 +446,8 @@ pub(crate) use method_types::*;
 pub(crate) use module_hooks::{EntryHooks, is_module_hook};
 mod publication;
 mod richcompare;
+mod signatures;
+pub(crate) use signatures::install as install_signatures;
 pub(crate) use richcompare::{ExtSlotDunders, SlotArtifact, collect_slot_dunders};
 #[cfg(test)]
 pub(crate) use richcompare::{SLOT_DUNDERS, is_slot_dunder_method};

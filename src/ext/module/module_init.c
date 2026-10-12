@@ -82,6 +82,15 @@ int pycc_ext_publish(const char *name)
     if (func == NULL) {
         return -1;
     }
+#ifdef PYCC_EXT_HAS_SIGNATURES
+    /* #1194: a signature entry installs its Python wrapper instead of
+     * binding itself (`src/ext_build/signatures.rs`). */
+    status = pycc_ext_signature_publish(module, row->ml_name, func);
+    if (status != 0) {
+        Py_DECREF(func);
+        return status < 0 ? -1 : 0;
+    }
+#endif
     status = PyModule_AddObjectRef(module, row->ml_name, func);
     Py_DECREF(func);
     return status;

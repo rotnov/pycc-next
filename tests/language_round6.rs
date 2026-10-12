@@ -10,7 +10,10 @@
 //!   `**mapping`, with CPython's `TypeError` messages;
 //! * function values stored in lists, dicts and instance attributes and
 //!   called from there, and functions and generators printed as CPython
-//!   prints them.
+//!   prints them;
+//! * an `--ext` module's functions and methods publishing their defaults,
+//!   positional-only and keyword-only parameters, `*args` and `**kwargs` to
+//!   Python callers.
 //!
 //! The oracle is CPython itself: each fixture is built, run, and compared
 //! byte for byte with `python3` running the file -- stdout, the uncaught
@@ -98,6 +101,60 @@ fn matches_cpython(name: &str, flags: &[&str]) -> String {
         same_run(&ours, &theirs, name);
     }
     report
+}
+
+/// Builds fixture `module` with `--ext`, runs fixture `driver` (which
+/// imports it) against the artifact and against the source, and compares.
+fn ext_matches_cpython(module: &str, driver: &str) {
+    let built = ScratchDir::new("language_round6_ext").expect("scratch");
+    let plain = ScratchDir::new("language_round6_src").expect("scratch");
+    let source = std::fs::read_to_string(fixture(&format!("{module}.py"))).expect("read");
+    let program = std::fs::read_to_string(fixture(driver)).expect("read");
+    std::fs::write(built.join(format!("{module}.py")), &source).expect("write");
+    std::fs::write(plain.join(format!("{module}.py")), &source).expect("write");
+    let build = pycc()
+        .arg("build")
+        .arg(built.join(format!("{module}.py")))
+        .arg("-o")
+        .arg(built.join(module))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    assert!(
+        build.status.success(),
+        "{}{}",
+        text(&build.stdout),
+        text(&build.stderr)
+    );
+    std::fs::remove_file(built.join(format!("{module}.py"))).expect("remove the source");
+    let run = |dir: &Path| {
+        python()
+            .arg("-c")
+            .arg(&program)
+            .current_dir(dir)
+            .output()
+            .expect("python3 should spawn")
+    };
+    let ours = run(&built);
+    let theirs = run(&plain);
+    assert_eq!(
+        text(&ours.stdout),
+        text(&theirs.stdout),
+        "stdout differs: {}",
+        text(&ours.stderr)
+    );
+    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
+    assert_eq!(ours.status.code(), theirs.status.code());
+}
+
+/// An `--ext` module's functions and methods take their declared signature
+/// from Python callers: defaults (literal, computed and one reading a module
+/// global), positional-only and keyword-only parameters, `*args` and
+/// `**kwargs`, with CPython's `TypeError` for a call that cannot bind.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn ext_signatures_match_cpython() {
+    ext_matches_cpython("ext_signatures", "ext_signatures_driver.py");
 }
 
 /// `pycc check` of `source`, its whole output.

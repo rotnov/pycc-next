@@ -148,7 +148,12 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
     // `Grid.scale() takes no keyword arguments` on the same object (or the
     // keyword binder's messages, #1461). The unpack helpers below take the
     // same spelling for the same reason.
-    let source_name = source_level_name(name);
+    // A signature entry (`pycc_ast::ext_signatures`) is named after the
+    // function or method whose Python wrapper calls it.
+    let entry_target = pycc_ast::ext_entry_target(name);
+    let source_name = entry_target
+        .as_deref()
+        .unwrap_or_else(|| source_level_name(name));
     // A `@classmethod`'s compiled signature leads with `cls` and an
     // instance method's with `self` (`ExtExport::receiver`); neither is a
     // carried argument. The leading `void *` is reinstated textually here,

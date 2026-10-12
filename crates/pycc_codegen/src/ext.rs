@@ -837,6 +837,11 @@ pub fn is_ext_exportable_name(name: &str) -> bool {
     if name.starts_with("0gen_") {
         return false;
     }
+    // The compiled entry of a published signature
+    // (`pycc_ast::ext_signatures`), which the driver exports.
+    if name.starts_with("_pycc_sig_") {
+        return true;
+    }
     // #1467: the two PEP 562 module hooks, which the driver publishes from
     // the entry module although D-038's predicate refuses every dunder. The
     // driver admits only the entry module's own `def`, which this lexical

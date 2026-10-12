@@ -295,6 +295,11 @@ impl Loader {
         if !reserved.is_empty() {
             return Err(FrontendFailure::compile(&display, &source, reserved));
         }
+        // An `--ext` module's public signatures the boundary cannot bind
+        // alone get a compiled entry for a Python wrapper (#1194).
+        if is_entry && self.ext_module {
+            pycc_ast::split_ext_signatures(&mut parsed, &source);
+        }
         pycc_ast::desugar(&mut parsed);
         if is_entry && let Some(message) = self.entry_package_collision() {
             let diagnostic = Diagnostic::error("C0001", message, Span::new(0, 0));

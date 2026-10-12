@@ -117,6 +117,11 @@ pub(crate) fn classify_export_name(name: &str) -> Option<ExportName> {
     if name.starts_with("0gen_") {
         return None;
     }
+    // The compiled entry of a published signature (`pycc_ast::ext_signatures`):
+    // a module-level function the Python wrapper calls.
+    if pycc_ast::ext_entry_target(name).is_some() {
+        return Some(ExportName::ModuleLevel);
+    }
     let mut segments = name.split('.');
     let class_or_fn = segments.next()?;
     // An empty segment is not a name `is_public_name` was written to judge:

@@ -207,9 +207,10 @@ fn an_unannotated_default_generates_its_annotated_twin_s_companion() {
     assert_eq!(unannotated, annotated);
     for needle in [
         "PyObject *v1 = PyTuple_Size(args) > 1 ? PyTuple_GetItem(args, 1) : Py_None;",
-        "PyObject *v0 = nargs > 0 ? args[0] : Py_True;",
         "pycc_ext_unpack_object(v1, ",
-        "pycc_ext_unpack_bool(v0, ",
+        // A defaulted method crosses through its signature entry
+        // (`pycc_ast::ext_signatures`), the receiver first.
+        "pycc_ext_unpack_bool(args[1], \"P.copy\", 1, ",
         // A module-level export keeps its exact arity (#1194).
         "\"f() takes exactly 1 argument (%zd given)\"",
     ] {

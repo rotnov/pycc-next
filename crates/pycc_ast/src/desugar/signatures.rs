@@ -38,6 +38,7 @@ mod emit;
 use super::Fresh;
 use super::build::load;
 use emit::{Emitter, Receiver};
+pub(super) use emit::parse_helper;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{
     AtomicNodeIndex, Expr, ExprContext, ExprSubscript, Parameter, ParameterWithDefault, Parameters,
@@ -91,7 +92,7 @@ impl Sig {
 }
 
 /// Whether `default` is a literal HIR materializes itself.
-fn is_literal(default: &Expr) -> bool {
+pub(super) fn is_literal(default: &Expr) -> bool {
     match default {
         Expr::NumberLiteral(_)
         | Expr::StringLiteral(_)
@@ -116,7 +117,7 @@ fn needs_flattening(parameters: &Parameters) -> bool {
 }
 
 /// The global a hoisted default lives in.
-fn default_global(qualname: &str, param: &str) -> String {
+pub(super) fn default_global(qualname: &str, param: &str) -> String {
     format!("_pycc_default_{}_{param}", qualname.replace('.', "_"))
 }
 

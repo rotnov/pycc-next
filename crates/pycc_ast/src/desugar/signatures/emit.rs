@@ -895,7 +895,7 @@ fn py_str(text: &str) -> String {
 
 /// Parses a generated helper, placing it at `range` (its expressions take
 /// the call's range; its statements start at the call).
-fn parse_helper(source: &str, range: TextRange) -> Vec<Stmt> {
+pub(crate) fn parse_helper(source: &str, range: TextRange) -> Vec<Stmt> {
     let padding = "\n".repeat(range.start().to_usize());
     let text = format!("{padding}{source}");
     let parsed = ruff_python_parser::parse_module(&text)

@@ -49,6 +49,7 @@ mod closures;
 mod comps;
 mod exprs;
 mod ext_generators;
+mod ext_signatures;
 mod globals;
 mod helpers;
 mod hoist;
@@ -65,6 +66,7 @@ use ruff_python_ast::{Expr, ModModule, Stmt};
 
 pub use closures::qualname::function_qualname;
 pub use ext_generators::split_ext_generators;
+pub use ext_signatures::{ExtSignature, ext_entry_target, ext_signatures, split_ext_signatures};
 
 /// The first `yield`/`yield from` inside `expr` (not inside a nested
 /// lambda), for a context where CPython refuses one (a comprehension).

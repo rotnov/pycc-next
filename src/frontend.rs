@@ -133,6 +133,18 @@ struct ProgramSources {
     entry_origins: Vec<u32>,
     /// Every file's `LoweredModule::item_origins`, in file order.
     item_origins: Vec<Vec<u32>>,
+    /// Whether the entry file (the last) is an `--ext` module, whose
+    /// loader adds `pycc_ast::split_ext_signatures`' entries before
+    /// desugaring.
+    ext_entry: bool,
+}
+
+/// Desugars a re-parsed file exactly as the loader did (`modules.rs`).
+fn desugar_as_loaded(parsed: &mut pycc_ast::ModModule, source: &str, ext_entry: bool) {
+    if ext_entry {
+        pycc_ast::split_ext_signatures(parsed, source);
+    }
+    pycc_ast::desugar(parsed);
 }
 
 impl ProgramSources {
@@ -143,15 +155,17 @@ impl ProgramSources {
     fn item_spans(&self, hir: &HirModule) -> Vec<Option<pycc_hir::locate::ItemSpans>> {
         let mut spans = Vec::with_capacity(hir.items.len());
         let mut start = 0;
-        for ((_, source), (end, origins)) in self
+        let last = self.files.len().saturating_sub(1);
+        for (index, ((_, source), (end, origins))) in self
             .files
             .iter()
             .zip(self.bounds.iter().zip(&self.item_origins))
+            .enumerate()
         {
             let items = hir.items.get(start..*end).unwrap_or_default();
             match pycc_parser::parse_all(source) {
                 Ok(mut parsed) => {
-                    pycc_ast::desugar(&mut parsed);
+                    desugar_as_loaded(&mut parsed, source, self.ext_entry && index == last);
                     spans.extend(pycc_hir::locate::item_spans(&parsed, source, items, origins));
                 }
                 Err(_) => spans.extend(items.iter().map(|_| None)),
@@ -295,11 +309,12 @@ fn link_frontend(
             .modules
             .iter()
             .any(|loaded| !loaded.module.deleted_top_level.is_empty());
-    for mut loaded in program.modules {
+    let last = program.modules.len().saturating_sub(1);
+    for (index, mut loaded) in program.modules.into_iter().enumerate() {
         if needs_mentions {
             let mut parsed = pycc_parser::parse_all(&loaded.source)
                 .expect("a module that lowered once parses again");
-            pycc_ast::desugar(&mut parsed);
+            desugar_as_loaded(&mut parsed, &loaded.source, ext_module && index == last);
             loaded.module.mentioned_names = Some(pycc_hir::mentioned_names(&parsed));
         }
         total += loaded.module.hir.items.len();
@@ -333,6 +348,7 @@ fn link_frontend(
         class_bounds,
         entry_origins,
         item_origins,
+        ext_entry: ext_module,
     };
     let linked = pycc_hir::link(inputs).map_err(|keyed| sources.group(keyed))?;
     let hir = pycc_hir::finalize(linked).map_err(|diagnostics| {

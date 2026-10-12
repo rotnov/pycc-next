@@ -492,6 +492,13 @@ fn plan_ext(
         &getsets,
         &slots,
     );
+    // #1194: the Python wrappers of the signatures the boundary cannot bind
+    // alone, planned from the entry source exactly as the loader planned
+    // their compiled entries (`pycc_ast::split_ext_signatures`).
+    let published_signatures = pycc_parser::parse_all(&entry_source)
+        .map(|parsed| pycc_ast::ext_signatures(&parsed, &entry_source))
+        .unwrap_or_default();
+    let inc_body = ext_build::install_signatures(inc_body, &published_signatures);
     write_ext_source(&shim, ext_build::SHIM_C)?;
     write_ext_source(&inc, &inc_body)?;
     Ok(ExtPlan {

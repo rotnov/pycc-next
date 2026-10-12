@@ -279,6 +279,17 @@ pub(crate) fn collect_exports_excluding(
     // carrier `isinstance` table is built from, so ingress can never admit
     // a class that table cannot answer for.
     let carrier_classes = carrier_class_names(module);
+    // The functions and methods a Python wrapper publishes instead
+    // (`pycc_ast::ext_signatures`): their compiled entry is exported, and
+    // they are not, so their flattened parameters are no gap.
+    let wrapped: BTreeSet<String> = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Function { name, .. } => pycc_ast::ext_entry_target(name),
+            _ => None,
+        })
+        .collect();
     for item in &module.items {
         let HirItem::Function {
             name,
@@ -290,7 +301,7 @@ pub(crate) fn collect_exports_excluding(
         else {
             continue;
         };
-        if excluded.contains(name) {
+        if excluded.contains(name) || wrapped.contains(name) {
             continue;
         }
         let Some(spelling) = classify_export_name(name)
@@ -298,6 +309,11 @@ pub(crate) fn collect_exports_excluding(
         else {
             continue;
         };
+        if let ExportName::Method { class, method, .. } = &spelling
+            && wrapped.contains(&format!("{class}.{method}"))
+        {
+            continue;
+        }
         // The driver-only exception-class filter, layered on top of the
         // lexical verdict rather than inside it -- see this function's doc.
         if let ExportName::Method { class, .. } = &spelling

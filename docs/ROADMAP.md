@@ -25,6 +25,9 @@ Accept:
    `*args` in definitions, default arguments for module functions in `--ext`
    (#1194), generator `send()`/`throw()`/`close()` and `yield` as an expression,
    `return value` in generators, closures stored in lists/dicts/attributes.
+   **Met 2026-10-12:** `tests/language_round6.rs` (generator protocol, call signatures,
+   function values, `--ext` signatures) against CPython 3.13, natively and in non-strict
+   mode, with leak probes in `tests/memory_leaks.rs`; remaining gaps in `docs/DEVIATIONS.md`.
 4. **Real-world corpus:** strict passes >= 110/200; `--non-strict` keeps 200/200 with
    >= 95% of top-level statements native.
 5. **Platforms:** the release ships a macOS arm64 archive next to Linux x86_64, both
