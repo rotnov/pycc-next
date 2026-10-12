@@ -46,15 +46,17 @@ code; native compilation via LLVM; classes, exceptions, generators, closures, li
 dicts, sets, comprehensions, `match`, arbitrary-precision `int`; reference-counted memory;
 CPython extension modules; `--non-strict` for untyped code. 9,500+ tests.
 
-**Speed** (`python3 bench/run.py`, best of 7, Xeon 2.1 GHz, process start included):
+**Speed** (`python3 bench/run.py --runs 11`, best of 11, shared 4-core Xeon 2.1 GHz, process
+start included; the Rust twins build with `rustc -O` for the default target CPU and black-box
+their inputs, like the Python programs' inputs are opaque to pycc-next):
 
 | program | CPython 3.13 | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
 |---|---|---|---|---|---|
-| fib(32) | 0.231s | 0.021s | 0.006s | **10.8x faster** | 3.8x slower |
-| mandelbrot | 1.368s | 0.041s | 0.038s | **33.7x faster** | 1.1x slower |
-| nbody | 2.042s | 0.088s | 0.021s | **23.3x faster** | 4.2x slower |
-| sieve | 1.061s | 0.064s | 0.021s | **16.6x faster** | 3.1x slower |
-| spectral_norm | 0.801s | 0.027s | 0.008s | **29.2x faster** | 3.5x slower |
+| fib(32) | 0.354s | 0.015s | 0.008s | **24.0x faster** | 1.8x slower |
+| mandelbrot | 1.810s | 0.061s | 0.055s | **29.5x faster** | 1.1x slower |
+| nbody | 2.584s | 0.084s | 0.034s | **30.9x faster** | 2.4x slower |
+| sieve | 1.776s | 0.057s | 0.028s | **31.3x faster** | 2.1x slower |
+| spectral_norm | 1.175s | 0.021s | 0.012s | **56.4x faster** | 1.8x slower |
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0

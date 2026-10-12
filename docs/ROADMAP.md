@@ -13,7 +13,9 @@ Typed Python to native code with compile-time type errors, CPython interop
 Accept:
 1. **Speed:** every `bench/py` program is within 3x of its `bench/rs` Rust twin
    (`python3 bench/run.py`, best of 7) — v0.1: fib 3.8x, nbody 4.2x, spectral_norm 3.5x,
-   sieve 3.1x, mandelbrot 1.1x.
+   sieve 3.1x, mandelbrot 1.1x. **Met 2026-10-12:** fib 1.8x, mandelbrot 1.1x, nbody 2.4x,
+   sieve 2.1x, spectral_norm 1.8x (shared 4-core box, best of 11; the Rust twins build for
+   the default target CPU and black-box every input).
 2. **numpy:** typed `numpy.ndarray` / `NDArray[float64|int64|bool]` of 1 and 2 dimensions
    is a native type in strict and `--ext` code: element read/write, `.shape`, `len`,
    iteration, creation via `numpy.zeros/ones/empty/array`, without CPython calls in the

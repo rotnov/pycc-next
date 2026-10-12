@@ -4,6 +4,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Performance
+- Every benchmark is within 3x of its Rust twin (fib 1.8x, mandelbrot 1.1x, nbody 2.4x,
+  sieve 2.1x, spectral_norm 1.8x; v0.1: up to 4.2x). Whole-program proofs drop checks that
+  cannot fire: an attribute every constructor assigns before the instance escapes skips the
+  "assigned" test; a function that cannot raise is called without the exception check; a
+  `def` that precedes all module code skips the call-before-definition check. A tree of
+  `int` operators tests its leaves' tags once; `x += y` releases the old value only on the
+  bigint path; range loops with one level of nested loops count with a machine integer;
+  `x ** 0.5` proves `pow == sqrt` with exact integer arithmetic.
+- `bench/run.py`: best of 7 by default; Rust twins build for the default target CPU and
+  black-box every input.
+- `PYCC_DUMP_LLVM=<path>` writes the LLVM IR before and after optimization.
+
 ## [0.1.0] - 2026-10-11
 
 First release of pycc-next: an ahead-of-time compiler for typed Python that turns

@@ -18,3 +18,8 @@ description: Use when measuring pycc-next performance, after any codegen/runtime
    Report slowdowns as prominently as speedups.
 6. To see why something is slow: `objdump -d --no-show-raw-insn <binary>` and look for
    runtime calls (`pycc_rt_*`) in hot functions.
+7. The machine is shared: decide with instruction counts
+   (`valgrind --tool=callgrind <binary>`), quote wall time only from `bench/run.py`.
+   `PYCC_DUMP_LLVM=<path> pycc build ...` writes the IR before (`<path>.pre.ll`) and after
+   (`<path>`) optimization; `opt -passes='default<O3>'` on the `.pre.ll` reproduces a release
+   build for pipeline experiments.
