@@ -166,6 +166,9 @@ $ ./target/release/pycc build hello.py -o hello && ./hello
 $ scripts/package.sh dist/pycc   # the release layout, from target/release
 ```
 
+On macOS `package.sh` refuses a `pycc` that links Homebrew's `libzstd.dylib`;
+the release build links `libzstd.a` instead (`scripts/macos_llvm.sh`).
+
 ## License
 
 MIT

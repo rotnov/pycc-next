@@ -14,12 +14,15 @@ description: Use when cutting a pycc-next release (version bump, changelog, tag,
 5. Commit and push. Then run the `release` workflow with `workflow_dispatch` on `main`,
    input `version: vX.Y.Z` (GitHub creates the tag; pushing tags from a cloud agent session
    is blocked by its git proxy). `git push origin vX.Y.Z` from a normal checkout also works.
-6. The `release` workflow tests, packages `pycc-vX.Y.Z-x86_64-linux.tar.gz` (+ sha256)
-   with `scripts/package.sh` (`bin/pycc`, `lib/pycc/libpycc_rt.a`, README, LICENSE,
-   CHANGELOG), smoke-tests the unpacked tarball with `scripts/smoke.sh` (native, `--ext`,
-   `--non-strict` vs CPython, cleared environment) and creates the GitHub Release.
-   Verify the release exists and the tarball runs on a machine without the checkout:
-   download, unpack, `scripts/smoke.sh pycc-vX.Y.Z-x86_64-linux`.
+6. The `release` workflow's read-only build matrix tests and packages
+   `pycc-vX.Y.Z-x86_64-linux.tar.gz` (ubuntu-24.04) and `pycc-vX.Y.Z-aarch64-macos.tar.gz`
+   (macos-26, `MACOSX_DEPLOYMENT_TARGET=26.0`), each + sha256, with `scripts/package.sh`
+   (`bin/pycc`, `lib/pycc/libpycc_rt.a`, README, LICENSE, CHANGELOG), and smoke-tests each
+   unpacked tarball with `scripts/smoke.sh` (native, `--ext`, `--non-strict` vs CPython,
+   cleared environment). Only then the write-scoped `publish` job verifies both archives
+   and creates one GitHub Release holding both. Verify the release exists and a tarball
+   runs on a machine without the checkout: download, unpack,
+   `scripts/smoke.sh pycc-vX.Y.Z-<platform>`.
 7. Publish a launch post (`blog-post` skill).
 8. A broken pre-release (`vX.Y.Z-suffix`) is removed with the `release-delete` workflow
    (`workflow_dispatch` on `main`, input `tag`); it deletes the release and its tag and
