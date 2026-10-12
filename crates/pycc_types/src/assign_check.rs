@@ -109,7 +109,9 @@ pub(crate) fn check_range_operand_in(
     expr: &HirExpr,
 ) -> Result<(), Diagnostic> {
     let actual = infer_expr_in(env, local_names, expr)?;
-    if is_assignable(actual.clone(), Ty::Int) {
+    // Non-strict mode (#3): an object is read through `__index__`, as
+    // `range()` reads it (`pycc_mir::MirExpr::ObjectIndex`).
+    if is_assignable(actual.clone(), Ty::Int) || crate::non_strict::admits_index(&actual) {
         Ok(())
     } else {
         let diagnostic = Diagnostic::error(

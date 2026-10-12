@@ -44,19 +44,70 @@ pub(crate) fn emit_coerced<'ctx>(
     slot_ty: &Ty,
     what: &str,
 ) -> Scalar<'ctx> {
-    let object = emit_expr(context, builder, module, rt, user_functions, locals, value);
-    let held = crate::object_release::hold(context, module, rt, value, &object);
-    let edge = ForeignFailEdge::for_current(builder);
-    let ptr = context.ptr_type(inkwell::AddressSpace::default());
-    let (kind, slot): (u64, inkwell::types::BasicTypeEnum<'ctx>) = match slot_ty {
-        Ty::Int => (0, context.i64_type().into()),
-        Ty::Float => (1, context.f64_type().into()),
-        Ty::Bool => (2, context.i8_type().into()),
-        Ty::Str => (3, ptr.into()),
+    let kind = match slot_ty {
+        Ty::Int => 0,
+        Ty::Float => 1,
+        Ty::Bool => 2,
+        Ty::Str => 3,
         other => panic!(
             "pycc_codegen: internal error: no run-time conversion of an object to `{}`",
             other.name()
         ),
+    };
+    emit_conversion(context, builder, module, rt, user_functions, locals, value, kind, slot_ty, what)
+}
+
+/// Non-strict mode: evaluates `value` (an object) and reads it as an index
+/// for `use_` (`pycc_mir::MirExpr::ObjectIndex`), an `int`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_index<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    value: &MirExpr,
+    use_: pycc_mir::IndexUse,
+) -> Scalar<'ctx> {
+    emit_conversion(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        value,
+        use_.coerce_kind(),
+        &Ty::Int,
+        "",
+    )
+}
+
+/// The one `pycc_ext_obj_coerce` call [`emit_coerced`] and [`emit_index`]
+/// share: `kind` is the shim's kind code, `slot_ty` the native result.
+#[allow(clippy::too_many_arguments)]
+fn emit_conversion<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    value: &MirExpr,
+    kind: u64,
+    slot_ty: &Ty,
+    what: &str,
+) -> Scalar<'ctx> {
+    let object = emit_expr(context, builder, module, rt, user_functions, locals, value);
+    let held = crate::object_release::hold(context, module, rt, value, &object);
+    let edge = ForeignFailEdge::for_current(builder);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let slot: inkwell::types::BasicTypeEnum<'ctx> = match slot_ty {
+        Ty::Int => context.i64_type().into(),
+        Ty::Float => context.f64_type().into(),
+        Ty::Bool => context.i8_type().into(),
+        _ => ptr.into(),
     };
     let out = super::build_at_entry_block(builder, edge.function(), |b| {
         b.build_alloca(slot, "object_coerce_out")

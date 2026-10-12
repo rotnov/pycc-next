@@ -13,6 +13,7 @@ impl MirExpr {
             MirExpr::NotImplemented | MirExpr::ObjectBox(_) => Ty::Object,
             MirExpr::OptionalWrap(_, inner) => Ty::Optional(inner.clone()),
             MirExpr::OptionalUnwrap(_, inner) | MirExpr::ObjectUnbox(_, inner) => (**inner).clone(),
+            MirExpr::ObjectIndex(..) => Ty::Int,
             MirExpr::Name { ty, .. }
             | MirExpr::Call { ty, .. }
             | MirExpr::BinOp { ty, .. }
@@ -321,9 +322,9 @@ impl MirExpr {
             // 0)`-shaped MIR is not producible by this compiler's own
             // narrowing lowering today, but the recursive walk still must
             // not silently skip whatever sub-expression this node wraps).
-            MirExpr::OptionalUnwrap(inner, _) | MirExpr::ObjectUnbox(inner, _) => {
-                inner.collect_named_expr_bindings(out)
-            }
+            MirExpr::OptionalUnwrap(inner, _)
+            | MirExpr::ObjectUnbox(inner, _)
+            | MirExpr::ObjectIndex(inner, _) => inner.collect_named_expr_bindings(out),
             MirExpr::Call { args, .. } => {
                 for arg in args {
                     arg.collect_named_expr_bindings(out);

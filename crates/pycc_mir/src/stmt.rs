@@ -466,9 +466,10 @@ pub(super) fn lower_stmt(
             step,
             body,
         } => {
-            let start = lower_expr(start, scopes, classes, current_class);
-            let stop = lower_expr(stop, scopes, classes, current_class);
-            let step = lower_expr(step, scopes, classes, current_class);
+            let range_operand = |e| crate::index_operand(e, crate::IndexUse::Range);
+            let start = range_operand(lower_expr(start, scopes, classes, current_class));
+            let stop = range_operand(lower_expr(stop, scopes, classes, current_class));
+            let step = range_operand(lower_expr(step, scopes, classes, current_class));
             bind_variable(scopes, var.clone(), Ty::Int);
             // D-068 re-review of #780 (sixth round): the loop's own
             // induction variable is a rebinding exactly like `Assign`, but
@@ -820,7 +821,7 @@ pub(super) fn lower_stmt(
                         name: dict.clone(),
                         ty: base_ty,
                     },
-                    index: key,
+                    index: crate::index_operand(key, crate::IndexUse::List),
                     value,
                 }
             } else if base_ty == Ty::MemoryView {

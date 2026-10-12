@@ -95,6 +95,17 @@ int pycc_ext_obj_setitem(PyObject *o, PyObject *k, PyObject *v)
  * <type of o>`; an `int` is admitted where a `float` is expected, as the
  * numeric tower does. `o` is borrowed. Returns 0 with the native value
  * written to `out`, or -1 with the exception set.
+ *
+ * Kinds 4..7 read `o` as an index, through `__index__` as CPython does:
+ * 4 a `range()` argument, 5 a list index, 6 a `str` index, 7 a tuple index,
+ * each refusing a non-index object with CPython's own message for that
+ * position. The result is always an inline `int` word, never a heap
+ * bigint the caller would have to release: a sequence index beyond
+ * `Py_ssize_t` raises CPython's own `IndexError` ("cannot fit 'int' into an
+ * index-sized integer"), and one beyond 2**61 -- out of range for any
+ * sequence there is -- is clamped to 2**61, so the sequence raises its own
+ * `IndexError`; a `range()` argument beyond the inline range raises
+ * `OverflowError` (`docs/DEVIATIONS.md`).
  */
 int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
 {
@@ -103,6 +114,55 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
     int admitted;
     double as_double;
 
+    if (o != NULL && out != NULL && kind >= 4 && kind <= 7) {
+        PyObject *index;
+
+        if (!PyIndex_Check(o)) {
+            type_name = PyType_GetName(Py_TYPE(o));
+            if (type_name == NULL) {
+                return -1;
+            }
+            if (kind == 4) {
+                PyErr_Format(PyExc_TypeError,
+                             "'%U' object cannot be interpreted as an integer", type_name);
+            } else if (kind == 5) {
+                PyErr_Format(PyExc_TypeError,
+                             "list indices must be integers or slices, not %U", type_name);
+            } else if (kind == 6) {
+                PyErr_Format(PyExc_TypeError, "string indices must be integers, not '%U'",
+                             type_name);
+            } else {
+                PyErr_Format(PyExc_TypeError,
+                             "tuple indices must be integers or slices, not %U", type_name);
+            }
+            Py_DECREF(type_name);
+            return -1;
+        }
+        index = PyNumber_Index(o);
+        if (index == NULL) {
+            return -1;
+        }
+        {
+            const Py_ssize_t limit = (Py_ssize_t)1 << 61;
+            Py_ssize_t n = PyNumber_AsSsize_t(index, kind == 4 ? PyExc_OverflowError
+                                                               : PyExc_IndexError);
+            Py_DECREF(index);
+            if (n == -1 && PyErr_Occurred()) {
+                return -1;
+            }
+            if (n > limit || n < -limit) {
+                if (kind == 4) {
+                    PyErr_SetString(PyExc_OverflowError,
+                                    "range() argument too large for a compiled range");
+                    return -1;
+                }
+                n = n > 0 ? limit : -limit;
+            }
+            *(long long *)out = pycc_rt_int_from_i64((long long)n);
+        }
+
+        return 0;
+    }
     if (o == NULL || out == NULL || kind < 0 || kind > 3) {
         if (!PyErr_Occurred()) {
             PyErr_SetString(PyExc_SystemError, "pycc: invalid object conversion");

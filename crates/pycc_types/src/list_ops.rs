@@ -118,6 +118,9 @@ pub(crate) fn check_list_renderable(ty: &Ty) -> Result<(), Diagnostic> {
 
 /// `xs[index] = value` on a `list[T]`.
 pub(crate) fn check_list_set(elem: &Ty, index: &Ty, value: &Ty) -> Result<(), Diagnostic> {
+    if crate::non_strict::admits_index(index) {
+        return require_element(value, elem, "assign");
+    }
     require_index(index, "list index")?;
     require_element(value, elem, "assign")
 }

@@ -356,7 +356,9 @@ pub(crate) fn infer_subscript_expr(
             // `Scalar::Bool` arm reached unconditionally by every
             // subscript index, so this was a pure over-rejection in
             // the type checker, not a missing codegen capability.
-            if !is_assignable(index_ty.clone(), Ty::Int) {
+            if !is_assignable(index_ty.clone(), Ty::Int)
+                && !crate::non_strict::admits_index(&index_ty)
+            {
                 return Err(Diagnostic::error(
                     "T0021",
                     format!("list index must be `int`, found `{}`", index_ty.name()),
@@ -472,7 +474,9 @@ pub(crate) fn infer_subscript_expr(
         // scope cut needing its own arm, it is the semantically
         // correct behavior for every other base type as well.
         Ty::Str => {
-            if !is_assignable(index_ty.clone(), Ty::Int) {
+            if !is_assignable(index_ty.clone(), Ty::Int)
+                && !crate::non_strict::admits_index(&index_ty)
+            {
                 return Err(Diagnostic::error(
                     "T0021",
                     format!("string index must be `int`, found `{}`", index_ty.name()),

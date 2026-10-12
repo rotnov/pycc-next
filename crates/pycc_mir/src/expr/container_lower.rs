@@ -79,7 +79,10 @@ pub(crate) fn lower_subscript_expr(
     let base = lower_expr(base, scopes, classes, current_class);
     let index = lower_expr(index, scopes, classes, current_class);
     match base.ty() {
-        Ty::Str => builtin_call::lower_str_getitem(base, index),
+        Ty::Str => builtin_call::lower_str_getitem(
+            base,
+            crate::index_operand(index, crate::IndexUse::Str),
+        ),
         // Part 3 of #1026 (PR 3b of #1082): a foreign CPython
         // object base routes to its own node, in exactly the
         // position `Ty::Dict` occupies and for exactly the same
@@ -109,10 +112,17 @@ pub(crate) fn lower_subscript_expr(
             base: Box::new(base),
             index: Box::new(index),
         },
-        _ => MirExpr::Subscript {
-            base: Box::new(base),
-            index: Box::new(index),
-        },
+        _ => {
+            let use_ = if matches!(base.ty(), Ty::Tuple(_)) {
+                crate::IndexUse::Tuple
+            } else {
+                crate::IndexUse::List
+            };
+            MirExpr::Subscript {
+                base: Box::new(base),
+                index: Box::new(crate::index_operand(index, use_)),
+            }
+        }
     }
 }
 

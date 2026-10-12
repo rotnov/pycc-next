@@ -69,6 +69,13 @@ pub(crate) fn admits_coercion(from: &Ty, to: &Ty) -> bool {
     is_non_strict() && *from == Ty::Object && matches!(to, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
 }
 
+/// Whether an index (a list, tuple or `str` subscript, a `range()`
+/// argument) of type `ty` is read through `__index__` at run time: an
+/// object, in non-strict mode only (`pycc_mir::MirExpr::ObjectIndex`).
+pub(crate) fn admits_index(ty: &Ty) -> bool {
+    is_non_strict() && *ty == Ty::Object
+}
+
 /// Records that `name` was rebound with a value of another type, when both
 /// types fit an `object` slot (`boxable`). The caller still reports its
 /// diagnostic; [`with_widening`] decides whether a retry removes it.

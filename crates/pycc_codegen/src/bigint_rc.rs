@@ -626,6 +626,10 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         // from the CPython object -- always inline (a value outside the
         // inline range raises instead), so owning it releases nothing.
         | MirExpr::ObjectUnbox(_, _)
+        // An object read as an index: the shim encodes an inline word (it
+        // clamps or refuses anything beyond the inline range,
+        // `pycc_ext_obj_coerce` kinds 4..7), so owning it releases nothing.
+        | MirExpr::ObjectIndex(..)
         // Non-`Ty::Int` `NamedExpr` joins the combined "owning" answer for
         // the same reason the non-`Ty::Int` `Name`/`AttrGet` arms do just
         // above: `int_temporary_word`'s caller has already established

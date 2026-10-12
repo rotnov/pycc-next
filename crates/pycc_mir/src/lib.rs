@@ -114,6 +114,43 @@ pub struct MirComprehension {
     pub elt: MirCompElt,
 }
 
+/// How an object is read as an index ([`MirExpr::ObjectIndex`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexUse {
+    /// A `range()` argument.
+    Range,
+    /// A list index.
+    List,
+    /// A `str` index.
+    Str,
+    /// A tuple index.
+    Tuple,
+}
+
+impl IndexUse {
+    /// `pycc_ext_obj_coerce`'s kind code for this use.
+    #[must_use]
+    pub fn coerce_kind(self) -> u64 {
+        match self {
+            IndexUse::Range => 4,
+            IndexUse::List => 5,
+            IndexUse::Str => 6,
+            IndexUse::Tuple => 7,
+        }
+    }
+}
+
+/// [`MirExpr::ObjectIndex`] around `index` when it is a CPython object;
+/// `index` itself otherwise.
+#[must_use]
+pub fn index_operand(index: MirExpr, use_: IndexUse) -> MirExpr {
+    if index.ty() == Ty::Object {
+        MirExpr::ObjectIndex(Box::new(index), use_)
+    } else {
+        index
+    }
+}
+
 /// The CPython container a [`MirExpr::ObjDisplay`] builds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjDisplayKind {
@@ -844,9 +881,10 @@ pub(crate) fn resolve_comp_source(
 ) -> (CompSource, Ty) {
     match iter {
         CompIter::Range { start, stop, step } => {
-            let start = lower_expr(start, scopes, classes, current_class);
-            let stop = lower_expr(stop, scopes, classes, current_class);
-            let step = lower_expr(step, scopes, classes, current_class);
+            let range_operand = |e| index_operand(e, IndexUse::Range);
+            let start = range_operand(lower_expr(start, scopes, classes, current_class));
+            let stop = range_operand(lower_expr(stop, scopes, classes, current_class));
+            let step = range_operand(lower_expr(step, scopes, classes, current_class));
             bind_variable(scopes, var.to_string(), Ty::Int);
             // D-068 re-review of #780 (sixth round): a comprehension's own
             // loop variable is a rebinding exactly like `ForRange`'s

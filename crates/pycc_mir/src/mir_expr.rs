@@ -108,6 +108,11 @@ pub enum MirExpr {
     /// (`pycc_codegen::object_box`'s identity peephole), so the original
     /// object, not an unbox-then-repack copy, reaches CPython.
     ObjectUnbox(Box<MirExpr>, Box<Ty>),
+    /// Non-strict mode (#3): a CPython object used as an index -- a list,
+    /// tuple or `str` subscript, a `range()` argument -- read through
+    /// `__index__` as CPython does, with CPython's own `TypeError` for its
+    /// position (`pycc_ext_obj_coerce`). Its value is an `int`.
+    ObjectIndex(Box<MirExpr>, IndexUse),
     Name {
         name: String,
         ty: Ty,

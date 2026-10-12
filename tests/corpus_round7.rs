@@ -17,7 +17,8 @@
 //!   displays as unpacking targets, nested `for` targets, and a tuple
 //!   display only iterated or searched compile natively.
 //! * Non-strict mode: a list that comes to hold values of two types is
-//!   CPython's own list.
+//!   CPython's own list; an object used as a list or `str` index or as a
+//!   `range()` argument is read through `__index__`.
 //!
 //! The oracle is CPython: each fixture is built, run and compared with
 //! `python3` running the file -- stdout, the uncaught exception's last line
@@ -286,5 +287,11 @@ fn corpus_idioms_compile_natively() {
 #[test]
 fn non_strict_lists_of_two_types_are_cpython_lists() {
     let report = matches_cpython("non_strict_mixed_lists.py", &["--non-strict", "--report-fallbacks"]);
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+#[test]
+fn non_strict_object_indexes_read_through_index() {
+    let report = matches_cpython("non_strict_object_index.py", &["--non-strict", "--report-fallbacks"]);
     assert!(!report.contains("fallback:"), "{report}");
 }

@@ -1047,3 +1047,58 @@ del kept
 assert live() == before, 'carrier release did not free: %r -> %r' % (before, live())
 print('ok')
 "#;
+
+/// Non-strict mode: a CPython object read as an index (`xs[o]`,
+/// `range(o)`) is encoded as an inline word -- an index beyond any
+/// sequence clamps into the sequence's own `IndexError` -- so a loop that
+/// indexes with an object leaks nothing, and a huge index raises what
+/// CPython raises. (An exception raised in the loop would itself leak:
+/// `docs/DEVIATIONS.md`.)
+#[test]
+#[ignore = "requires a CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn an_object_index_runs_in_constant_memory() {
+    let dir = ScratchDir::new("memory_object_index").expect("scratch dir");
+    let mut peaks = Vec::new();
+    for n in [N_SMALL, N_LARGE] {
+        let name = format!("object_index_{n}");
+        let src = dir.join(format!("{name}.py"));
+        std::fs::write(
+            &src,
+            format!(
+                "import json\n\nbig = json.loads(\"9\" * 40)\nsmall = json.loads(\"2\")\n\
+                 xs = [1, 2, 3]\ns = \"abc\"\ntotal = 0\nfor i in range({n}):\n    \
+                 total += xs[small] + len(s[small]) + xs[-small]\n    \
+                 for j in range(small):\n        total += j\n\
+                 print(total)\ntry:\n    print(xs[big])\nexcept IndexError as e:\n    print(e)\n\
+                 try:\n    print(s[-big])\nexcept IndexError as e:\n    print(e)\n\
+                 try:\n    print(xs[big * big])\nexcept IndexError as e:\n    print(e)\n"
+            ),
+        )
+        .expect("write the probe source");
+        let bin = dir.join(&name);
+        let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
+            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .expect("pycc should spawn");
+        let report = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{report}");
+        assert!(!report.contains("fallback:"), "{report}");
+        let (out, peak) = run_measured(&bin);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            String::from_utf8_lossy(&cpython(&src)),
+            "output differs from CPython"
+        );
+        peaks.push(peak);
+    }
+    let growth = peaks[1] - peaks[0];
+    assert!(
+        growth <= GROWTH_LIMIT_KB,
+        "peak RSS grew by {growth} kB from {N_SMALL} to {N_LARGE} iterations ({} -> {} kB)",
+        peaks[0],
+        peaks[1]
+    );
+}

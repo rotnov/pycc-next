@@ -241,6 +241,16 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
         // `OptionalWrap`) for the corresponding compile-time classification.
         // #1476 (Part 3 of #1387): an `object` read an `isinstance` guard
         // narrowed -- see `object_unbox`.
+        MirExpr::ObjectIndex(object, use_) => crate::object_coerce::emit_index(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            object,
+            *use_,
+        ),
         MirExpr::ObjectUnbox(object, inner) => {
             let object = emit_expr(context, builder, module, rt, user_functions, locals, object);
             object_unbox::emit_unboxed(context, builder, module, rt, object, inner)

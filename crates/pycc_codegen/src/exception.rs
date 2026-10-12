@@ -194,6 +194,9 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // inline range is `OverflowError`), and `object_unbox::emit_unboxed`
         // owns the status check.
         | MirExpr::ObjectUnbox(_, _)
+        // Non-strict mode: an object index may fail (`TypeError`), and
+        // `object_coerce::emit_index` owns the status check.
+        | MirExpr::ObjectIndex(..)
         // Non-strict mode (#3): CPython's operators raise (`TypeError`,
         // `ZeroDivisionError`, ...); `foreign_arith` owns the `NULL` check.
         | MirExpr::ObjBinOp { .. }
