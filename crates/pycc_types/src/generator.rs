@@ -250,7 +250,11 @@ pub(crate) fn method_call(
         "send" => {
             arity(1)?;
             let actual = infer_expr_in(env, local_names, &args[0])?;
-            if matches!(actual, Ty::None) || crate::class::is_assignable_env(env, &actual, &sig.1) {
+            // `send(None)` is checked like any other value: a `yield` in a
+            // generator taking `int` values is read as an `int`, and CPython
+            // hands it the `None` sent in. Priming a just-started generator
+            // whose send type excludes `None` takes `next(gen)`.
+            if crate::class::is_assignable_env(env, &actual, &sig.1) {
                 return Ok(sig.0.clone());
             }
             Err(Diagnostic::error(

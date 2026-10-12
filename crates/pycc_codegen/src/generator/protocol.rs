@@ -76,13 +76,38 @@ pub(super) fn raise_stop_with_return<'ctx>(
         let message = to_str(builder, rt, value);
         (scalar_to_slot_word(context, builder, value), message)
     };
+    let tag = context.i64_type().const_int(stop_value_tag(ret), false);
     builder
-        .build_call(rt.gens.raise_stop, &[word.into(), message.into()], "")
+        .build_call(
+            rt.gens.raise_stop,
+            &[word.into(), message.into(), tag.into()],
+            "",
+        )
         .expect("build_call should not fail for pycc_rt_raise_stop_iteration");
+}
+
+/// The runtime tag of a `StopIteration` value of type `ty`
+/// (`pycc_rt::exception::pycc_rt_raise_stop_iteration`): `0` for `None`,
+/// else a nonzero FNV-1a hash of the type's full structure, so `e.value`
+/// read as one type never reinterprets the word of another
+/// (`pycc_rt_exception_payload`).
+fn stop_value_tag(ty: &Ty) -> u64 {
+    if matches!(ty, Ty::None) {
+        return 0;
+    }
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in format!("{ty:?}").bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash | 1
 }
 
 /// `e.value` of a caught `StopIteration` `exception` (an exception object
 /// pointer): the generator's return value of type `ty`, a new reference.
+/// A value of another type -- the `StopIteration` came from a generator
+/// some call in the `try` body resumed, not one the body resumes itself --
+/// raises `TypeError` instead (`pycc_rt_exception_payload`).
 pub(crate) fn emit_stop_iteration_value<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -90,16 +115,21 @@ pub(crate) fn emit_stop_iteration_value<'ctx>(
     exception: PointerValue<'ctx>,
     ty: &Ty,
 ) -> Scalar<'ctx> {
-    if matches!(ty, Ty::None) {
-        return none_scalar(context);
-    }
+    let tag = context.i64_type().const_int(stop_value_tag(ty), false);
     let word = builder
-        .build_call(rt.gens.exception_payload, &[exception.into()], "stop_value")
+        .build_call(
+            rt.gens.exception_payload,
+            &[exception.into(), tag.into()],
+            "stop_value",
+        )
         .expect("build_call should not fail for pycc_rt_exception_payload")
         .try_as_basic_value()
         .expect_basic("pycc_rt_exception_payload returns an i64")
         .into_int_value();
     guard_statement_effects(context, builder, rt);
+    if matches!(ty, Ty::None) {
+        return none_scalar(context);
+    }
     let value = slot_word_to_scalar(context, builder, word, ty);
     heap_rc::retain_scalar(context, builder, rt, ty, &value);
     value

@@ -244,7 +244,7 @@ impl<'ctx> GenFns<'ctx> {
             ),
             raise_stop: declare(
                 "pycc_rt_raise_stop_iteration",
-                void_type.fn_type(&[i64_type.into(), ptr_type.into()], false),
+                void_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
             ),
             raise_no_return: declare("pycc_rt_gen_raise_no_return", void_type.fn_type(&[], false)),
             stop_unless_raised: declare(
@@ -253,7 +253,7 @@ impl<'ctx> GenFns<'ctx> {
             ),
             exception_payload: declare(
                 "pycc_rt_exception_payload",
-                i64_type.fn_type(&[ptr_type.into()], false),
+                i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
             ),
             incref: declare(
                 "pycc_rt_gen_incref",

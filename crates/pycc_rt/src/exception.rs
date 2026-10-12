@@ -119,10 +119,15 @@ pub struct PyExceptionObj {
     /// first use by [`str_form::exception_str`]; null until then.
     pub(crate) str_form: Cell<*mut PyStrObj>,
     /// A `StopIteration`'s `value` (a generator's return value), as the
-    /// word codegen stores for the generator's return type; `None` for every
-    /// other exception and a value-less `StopIteration`. The value is owned
-    /// by the exception, which is never freed (`docs/DEVIATIONS.md`).
-    pub(crate) payload: Cell<Option<u64>>,
+    /// word codegen stores for the generator's return type, paired with the
+    /// tag of that type (`pycc_codegen`'s `stop_value_tag`); `None` for
+    /// every other exception and a value-less `StopIteration`. The value is
+    /// owned by the exception, which is never freed (`docs/DEVIATIONS.md`).
+    /// The tag lets [`pycc_rt_exception_payload`] refuse a word of another
+    /// type: a handler's static type for `e.value` comes from the generators
+    /// its `try` body resumes, but the `StopIteration` may come from
+    /// anywhere a call in that body reaches.
+    pub(crate) payload: Cell<Option<(u64, u64)>>,
 }
 
 #[derive(Clone, Copy)]
@@ -774,11 +779,11 @@ pub unsafe extern "C" fn pycc_rt_raise_name_error(name: *const u8, len: usize) {
 }
 
 /// Raises `StopIteration` carrying `value` (a generator's return value, the
-/// word of its type; owned by the exception) and `message` (`str(value)`,
-/// owned; null for a generator that returned no value, whose `str(e)` is
-/// empty).
+/// word of its type, whose tag is `tag`; owned by the exception) and
+/// `message` (`str(value)`, owned; null for a generator that returned no
+/// value, whose `str(e)` is empty).
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_raise_stop_iteration(value: u64, message: *mut PyStrObj) {
+pub extern "C" fn pycc_rt_raise_stop_iteration(value: u64, message: *mut PyStrObj, tag: u64) {
     let name = "StopIteration";
     let message_was_null = message.is_null();
     let message = if message.is_null() {
@@ -794,32 +799,44 @@ pub extern "C" fn pycc_rt_raise_stop_iteration(value: u64, message: *mut PyStrOb
     );
     if !message_was_null {
         // SAFETY: freshly allocated.
-        unsafe { (*obj).payload.set(Some(value)) };
+        unsafe { (*obj).payload.set(Some((value, tag))) };
     }
     pycc_rt_exception_raise(obj);
 }
 
 /// The `value` word of a `StopIteration` [`pycc_rt_raise_stop_iteration`]
-/// raised (borrowed: the exception keeps its reference). A `StopIteration`
-/// without one -- its `value` is `None` -- raises `TypeError` and answers
-/// `0`: the caller's static type for it cannot hold `None`
-/// (`docs/DEVIATIONS.md`).
+/// raised (borrowed: the exception keeps its reference), read as the type
+/// whose tag is `tag` -- `0` reads it as `None`, the return type of a
+/// generator that returns nothing. A word of any other type is never
+/// reinterpreted: it raises `TypeError` and answers `0`, as does a
+/// `StopIteration` without a value (its `value` is `None`) read as a type
+/// that excludes `None` (`docs/DEVIATIONS.md`).
 ///
 /// # Safety
 /// `obj` must be a live exception object.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_exception_payload(obj: *mut PyExceptionObj) -> u64 {
+pub unsafe extern "C" fn pycc_rt_exception_payload(obj: *mut PyExceptionObj, tag: u64) -> u64 {
     // SAFETY (caller): live.
-    match (!obj.is_null())
+    let payload = (!obj.is_null())
         .then(|| unsafe { (*obj).payload.get() })
-        .flatten()
-    {
-        Some(word) => word,
+        .flatten();
+    match payload {
+        Some((word, found)) if found == tag => word,
+        None if tag == 0 => 0,
         None => {
             raise_builtin(
                 EXCEPTION_TYPE_TYPE_ERROR,
                 "TypeError",
                 "StopIteration.value is None here, which its generator's return type excludes",
+            );
+            0
+        }
+        Some(_) => {
+            raise_builtin(
+                EXCEPTION_TYPE_TYPE_ERROR,
+                "TypeError",
+                "StopIteration.value here comes from a generator whose return type differs \
+                 from that of the generators this `try` body resumes",
             );
             0
         }
