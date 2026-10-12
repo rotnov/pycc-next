@@ -79,10 +79,9 @@ pub(crate) fn lower_subscript_expr(
     let base = lower_expr(base, scopes, classes, current_class);
     let index = lower_expr(index, scopes, classes, current_class);
     match base.ty() {
-        Ty::Str => builtin_call::lower_str_getitem(
-            base,
-            crate::index_operand(index, crate::IndexUse::Str),
-        ),
+        Ty::Str => {
+            builtin_call::lower_str_getitem(base, crate::index_operand(index, crate::IndexUse::Str))
+        }
         // Part 3 of #1026 (PR 3b of #1082): a foreign CPython
         // object base routes to its own node, in exactly the
         // position `Ty::Dict` occupies and for exactly the same
@@ -212,7 +211,17 @@ pub(crate) fn lower_slice_expr(
             .as_deref()
             .map(|e| Box::new(lower_expr(e, scopes, classes, current_class)))
     };
-    let (start, stop, step) = (lower_bound(start), lower_bound(stop), lower_bound(step));
+    let (mut start, mut stop, mut step) =
+        (lower_bound(start), lower_bound(stop), lower_bound(step));
+    // Non-strict mode: a CPython object bound of a native slice is read
+    // through `__index__` (`MirExpr::ObjectIndex`).
+    if base.ty() != Ty::Object {
+        for bound in [&mut start, &mut stop, &mut step] {
+            if let Some(b) = bound.take() {
+                *bound = Some(Box::new(crate::index_operand(*b, crate::IndexUse::Slice)));
+            }
+        }
+    }
     if base.ty() == Ty::Str {
         return builtin_call::lower_str_slice(*base, [start, stop, step]);
     }

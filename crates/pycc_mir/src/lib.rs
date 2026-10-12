@@ -125,6 +125,8 @@ pub enum IndexUse {
     Str,
     /// A tuple index.
     Tuple,
+    /// A slice bound (`xs[o:]`), clamped as CPython clamps one.
+    Slice,
 }
 
 impl IndexUse {
@@ -136,6 +138,7 @@ impl IndexUse {
             IndexUse::List => 5,
             IndexUse::Str => 6,
             IndexUse::Tuple => 7,
+            IndexUse::Slice => 8,
         }
     }
 }

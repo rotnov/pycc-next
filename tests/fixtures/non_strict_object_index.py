@@ -12,6 +12,12 @@ for i in range(o):
     print(i)
 xs[o] = 5
 print(xs, [i * 2 for i in range(o, 4)], list(range(1, 9, o)))
+big = json.loads("9" * 30)
+print(xs[o:], xs[:o], s[1:o + 1], s[::o], xs[-big:big], s[big:])
+try:
+    print(xs[f:])
+except TypeError as e:
+    print(e)
 
 try:
     print(xs[f])

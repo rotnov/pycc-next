@@ -105,7 +105,8 @@ int pycc_ext_obj_setitem(PyObject *o, PyObject *k, PyObject *v)
  * index-sized integer"), and one beyond 2**61 -- out of range for any
  * sequence there is -- is clamped to 2**61, so the sequence raises its own
  * `IndexError`; a `range()` argument beyond the inline range raises
- * `OverflowError` (`docs/DEVIATIONS.md`).
+ * `OverflowError` (`docs/DEVIATIONS.md`). Kind 8 reads a slice bound,
+ * which clamps instead of raising, as CPython's `_PyEval_SliceIndex` does.
  */
 int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
 {
@@ -114,7 +115,7 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
     int admitted;
     double as_double;
 
-    if (o != NULL && out != NULL && kind >= 4 && kind <= 7) {
+    if (o != NULL && out != NULL && kind >= 4 && kind <= 8) {
         PyObject *index;
 
         if (!PyIndex_Check(o)) {
@@ -131,6 +132,9 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
             } else if (kind == 6) {
                 PyErr_Format(PyExc_TypeError, "string indices must be integers, not '%U'",
                              type_name);
+            } else if (kind == 8) {
+                PyErr_SetString(PyExc_TypeError, "slice indices must be integers or None or "
+                                                 "have an __index__ method");
             } else {
                 PyErr_Format(PyExc_TypeError,
                              "tuple indices must be integers or slices, not %U", type_name);
@@ -144,8 +148,10 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
         }
         {
             const Py_ssize_t limit = (Py_ssize_t)1 << 61;
-            Py_ssize_t n = PyNumber_AsSsize_t(index, kind == 4 ? PyExc_OverflowError
-                                                               : PyExc_IndexError);
+            /* A slice bound clamps (`_PyEval_SliceIndex`); an index raises. */
+            Py_ssize_t n = PyNumber_AsSsize_t(index, kind == 8   ? NULL
+                                                     : kind == 4 ? PyExc_OverflowError
+                                                                 : PyExc_IndexError);
             Py_DECREF(index);
             if (n == -1 && PyErr_Occurred()) {
                 return -1;

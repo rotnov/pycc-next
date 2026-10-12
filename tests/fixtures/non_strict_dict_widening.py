@@ -26,3 +26,9 @@ try:
     print(counts[json.loads("1")])
 except KeyError as e:
     print("KeyError", e)
+
+seen = {}
+seen[(1, 2)] = 0
+k = json.loads("3")
+seen[(k, 4)] = 1
+print(seen, (3, 4) in seen)

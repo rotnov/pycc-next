@@ -566,7 +566,9 @@ pub(crate) fn infer_slice_expr(
     for (label, bound) in [("start", start), ("stop", stop), ("step", step)] {
         if let Some(bound) = bound {
             let bound_ty = infer_expr_in(env, local_names, bound)?;
-            if !is_assignable(bound_ty.clone(), Ty::Int) {
+            if !is_assignable(bound_ty.clone(), Ty::Int)
+                && !crate::non_strict::admits_index(&bound_ty)
+            {
                 return Err(Diagnostic::error(
                     "T0021",
                     format!("slice {label} must be `int`, got `{}`", bound_ty.name()),

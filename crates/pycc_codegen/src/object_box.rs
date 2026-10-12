@@ -127,6 +127,11 @@ fn as_object_display(value: &MirExpr) -> Option<MirExpr> {
         MirExpr::ListLiteral(es) => MirExpr::ObjList {
             elements: es.iter().map(element).collect(),
         },
+        MirExpr::EmptyList(_) => MirExpr::ObjList {
+            elements: Vec::new(),
+        },
+        MirExpr::EmptySet(_) => display(pycc_mir::ObjDisplayKind::Set, Vec::new()),
+        MirExpr::EmptyDict(_) => display(pycc_mir::ObjDisplayKind::Dict, Vec::new()),
         MirExpr::TupleLiteral(es) => display(
             pycc_mir::ObjDisplayKind::Tuple,
             es.iter().map(element).collect(),

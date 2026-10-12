@@ -128,7 +128,11 @@ pub(crate) fn membership_ty(
     container_ty: &Ty,
 ) -> Result<Ty, Diagnostic> {
     match (item_ty, container_ty) {
-        (item, Ty::Object) if super::is_packable_operand(item) => Ok(Ty::Bool),
+        (item, Ty::Object)
+            if super::is_packable_operand(item) || super::is_packable_tuple(item) =>
+        {
+            Ok(Ty::Bool)
+        }
         (item, Ty::Object) => Err(object_operation_unsupported(&format!(
             "testing membership of a `{}` value in a CPython object",
             item.name()

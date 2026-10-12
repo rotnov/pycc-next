@@ -179,6 +179,11 @@ pub(crate) fn display_boxable(value: &HirExpr, ty: &Ty) -> bool {
         (HirExpr::DictLiteral(pairs), Ty::Dict(kv)) => pairs
             .iter()
             .all(|(k, v)| element(k, &kv.0) && element(v, &kv.1)),
+        // An empty display whose element type the empty-container pass
+        // resolved (`xs = []` later widened to `object`).
+        (HirExpr::EmptyList(_), Ty::List(_))
+        | (HirExpr::EmptySet(_), Ty::Set(_))
+        | (HirExpr::EmptyDict(_), Ty::Dict(_)) => true,
         _ => false,
     }
 }

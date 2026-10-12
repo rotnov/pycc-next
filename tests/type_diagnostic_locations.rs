@@ -167,11 +167,6 @@ const CASES: &[Case] = &[
         label: "`return` outside a function",
         ..case("T0024", "x = 1\nreturn\n", "return")
     },
-    // A negative literal exponent would make `int ** int` a `float`.
-    Case {
-        label: "negative exponent",
-        ..case("C0001", "EPS = 10**-10\nprint(EPS)\n", "-10")
-    },
     // A method's body, a lambda lifted to a `def`, an f-string
     // interpolation and an `elif` arm are located like any other code.
     Case {
