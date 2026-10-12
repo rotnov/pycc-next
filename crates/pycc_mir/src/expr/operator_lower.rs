@@ -213,7 +213,8 @@ pub(crate) fn lower_compare_expr(
         let literal_side =
             |e: &MirExpr| matches!(e, MirExpr::BoolLiteral(_) | MirExpr::NoneLiteral);
         if literal_side(&left_lowered) || literal_side(&right_lowered) {
-            let (literal, other) = if literal_side(&left_lowered) {
+            let literal_left = literal_side(&left_lowered);
+            let (literal, other) = if literal_left {
                 (left_lowered, right_lowered)
             } else {
                 (right_lowered, left_lowered)
@@ -249,7 +250,11 @@ pub(crate) fn lower_compare_expr(
                 }
                 _ => {}
             }
-            (left_lowered, right_lowered) = (literal, other);
+            (left_lowered, right_lowered) = if literal_left {
+                (literal, other)
+            } else {
+                (other, literal)
+            };
         }
     }
     if matches!(op, CmpOpKind::In | CmpOpKind::NotIn)

@@ -627,8 +627,10 @@ static int pycc_ext_raise_pending(void)
     case 31:
         /* A function local read before its assignment ran raises CPython's
          * `UnboundLocalError`, which subclasses `NameError`. */
-        exc_type = pycc_rt_ext_pending_is_unbound_local() ? PyExc_UnboundLocalError
-                                                         : PyExc_NameError;
+        exc_type = PyExc_NameError;
+        if (pycc_rt_ext_pending_is_unbound_local()) {
+            exc_type = PyExc_UnboundLocalError;
+        }
         break;
     /* `MemoryError`, appended past `NameError` the same way. */
     case 32:
