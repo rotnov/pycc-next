@@ -34,6 +34,10 @@ store. What's left is the running sum: it's pycc's tagged `int`,
 so every add checks for overflow into arbitrary precision. That cost hits every integer
 loop, not just numpy ones.
 
+**Update (same day):** `x += a[i]` and `a[i] > best` on an `int64` array now use the
+element as a machine integer, encoding an `int` only on the overflow path. prefix_sum_np
+went from 0.046s to 0.031s, **1.8x of Rust** (stencil2d unchanged at 2.5x).
+
 ## 🧠 The design: erase the array early
 
 I did not teach the type checker, MIR and codegen a new kind of value. An array stays an

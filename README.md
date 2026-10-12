@@ -108,12 +108,12 @@ import, best of 7, Xeon 2.8 GHz shared with other jobs):
 
 | program | CPython 3.13 + numpy | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
 |---|---|---|---|---|---|
-| stencil2d (200x300 Jacobi, 120 sweeps) | 4.871s | 0.011s | 0.004s | **435.1x faster** | 2.5x slower |
-| prefix_sum_np (400k `int64`, 25 rounds) | 3.839s | 0.046s | 0.017s | **83.3x faster** | 2.6x slower |
+| stencil2d (200x300 Jacobi, 120 sweeps) | 4.913s | 0.011s | 0.004s | **441.6x faster** | 2.5x slower |
+| prefix_sum_np (400k `int64`, 25 rounds) | 4.048s | 0.031s | 0.017s | **129.9x faster** | 1.8x slower |
 
-prefix_sum_np measures between 2.6x and 3.2x of Rust across runs; the gap is pycc's
-tagged `int` (the running sum carries an overflow check into arbitrary precision), not
-array access.
+An `int64` element joins `x += a[i]` and comparisons as a machine integer (an `int` is
+made of it only when the result leaves the inline range), so prefix_sum_np's running sum
+costs two overflow checks per add.
 
 ## Modes
 
