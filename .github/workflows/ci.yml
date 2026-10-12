@@ -46,6 +46,17 @@ jobs:
       - run: cargo build --release
       - name: Show the driver's dynamic dependencies
         run: otool -L target/release/pycc
+      # The release archive as release.yml builds it (no tag here), unpacked
+      # and smoke-tested, so a macOS packaging break shows up before a release.
+      - name: Package and smoke-test the release archive
+        run: |
+          scripts/package.sh dist/pycc-ci-aarch64-macos
+          tar -C dist -czf dist/pycc-ci-aarch64-macos.tar.gz pycc-ci-aarch64-macos
+          smoke=$(mktemp -d)
+          tar -C "$smoke" -xzf dist/pycc-ci-aarch64-macos.tar.gz
+          otool -L "$smoke/pycc-ci-aarch64-macos/bin/pycc"
+          codesign --verify --verbose "$smoke/pycc-ci-aarch64-macos/bin/pycc"
+          scripts/smoke.sh "$smoke/pycc-ci-aarch64-macos"
       # Same skips as the Linux job, for the same reasons.
       - run: >-
           cargo test --release --workspace -- --include-ignored
