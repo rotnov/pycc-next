@@ -28,7 +28,11 @@ mkdir -p "$dest/bin" "$dest/lib/pycc"
 cp "$profile/pycc" "$dest/bin/pycc"
 cp "$profile/libpycc_rt.a" "$dest/lib/pycc/libpycc_rt.a"
 cp "$root/README.md" "$root/LICENSE" "$root/CHANGELOG.md" "$dest/"
-# Debug info only: keeps symbols and every archive member intact.
+# Debug info only: keeps symbols and every archive member intact. Apple's
+# strip spells it -S and has no --strip-debug.
 if command -v strip >/dev/null 2>&1; then
-    strip --strip-debug "$dest/bin/pycc" "$dest/lib/pycc/libpycc_rt.a"
+    case $(uname -s) in
+        Darwin) strip -S "$dest/bin/pycc" "$dest/lib/pycc/libpycc_rt.a" ;;
+        *) strip --strip-debug "$dest/bin/pycc" "$dest/lib/pycc/libpycc_rt.a" ;;
+    esac
 fi

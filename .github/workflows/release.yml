@@ -7,52 +7,98 @@ on:
       version:
         description: "Version tag to create, e.g. v0.1.0"
         required: true
+# Read-only by default; only the final publish job can write.
 permissions:
-  contents: write
+  contents: read
 jobs:
+  # Tests, packages and smoke-tests one archive per platform. Read-only: these
+  # jobs run third-party actions and the whole test suite.
   build:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0') || startsWith(github.ref, 'refs/tags/v1')
-    runs-on: ubuntu-24.04
-    env: { LLVM_SYS_221_PREFIX: /usr/lib/llvm-22 }
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-24.04, platform: x86_64-linux }
+          - { os: macos-14, platform: aarch64-macos }
+    runs-on: ${{ matrix.os }}
+    permissions: { contents: read }
+    env: { PLATFORM: "${{ matrix.platform }}" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.13" }
-      - name: Install LLVM 22
+      - name: Install LLVM 22 (Linux)
+        if: runner.os == 'Linux'
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo 'deb https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -q && sudo apt-get install -y -q llvm-22-dev libpolly-22-dev clang-22 libzstd-dev
+          echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> "$GITHUB_ENV"
+      - name: Install LLVM 22 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@22
+          echo "LLVM_SYS_221_PREFIX=$(brew --prefix llvm@22)" >> "$GITHUB_ENV"
+      - name: Resolve tag
+        env: { INPUT_VERSION: "${{ inputs.version }}" }
+        run: scripts/release_tag.sh
       - run: >-
           cargo test --release --workspace -- --include-ignored
           --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
-      - name: Resolve tag
-        env: { INPUT_VERSION: "${{ inputs.version }}" }
-        run: |
-          tag="${INPUT_VERSION:-$GITHUB_REF_NAME}"
-          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-            echo "bad tag"; exit 1
-          fi
-          if [ -n "$INPUT_VERSION" ] && git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-            echo "tag $tag already exists"; exit 1
-          fi
-          echo "TAG=$tag" >> "$GITHUB_ENV"
       - name: Package
         run: |
-          name=pycc-${TAG}-x86_64-linux
+          name=pycc-${TAG}-${PLATFORM}
           scripts/package.sh dist/$name
           tar -C dist -czf dist/$name.tar.gz $name
-          (cd dist && sha256sum $name.tar.gz > $name.tar.gz.sha256)
+          (cd dist && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
       # Unpack the tarball elsewhere and use it like a user would (cleared
       # environment, no checkout paths): native, --ext and --non-strict
       # builds must match CPython before anything is published.
       - name: Smoke-test the tarball
         run: |
-          name=pycc-${TAG}-x86_64-linux
-          (cd dist && sha256sum -c $name.tar.gz.sha256)
+          name=pycc-${TAG}-${PLATFORM}
+          (cd dist && shasum -a 256 -c $name.tar.gz.sha256)
           smoke=$(mktemp -d)
           tar -C "$smoke" -xzf dist/$name.tar.gz
           scripts/smoke.sh "$smoke/$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pycc-${{ matrix.platform }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # Publishes every platform's archive in one release, only after all of them
+  # passed. The only write-scoped job: GitHub's own actions and `gh` only, and
+  # nothing from the build jobs is executed -- the archives are only hashed
+  # and uploaded.
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v0') || startsWith(github.ref, 'refs/tags/v1')
+    runs-on: ubuntu-24.04
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve tag
+        env: { INPUT_VERSION: "${{ inputs.version }}" }
+        run: scripts/release_tag.sh
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pycc-*
+          path: dist
+          merge-multiple: true
+      - name: Verify the archives
+        run: |
+          cd dist
+          for platform in x86_64-linux aarch64-macos; do
+            name=pycc-${TAG}-${platform}.tar.gz
+            [ -f "$name" ] && [ -f "$name.sha256" ] || { echo "missing $name"; exit 1; }
+            sha256sum -c "$name.sha256"
+          done
+          ls -l
       - name: Publish
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
