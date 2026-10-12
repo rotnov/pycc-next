@@ -109,3 +109,35 @@ fn proven_checks_are_dropped_and_unproven_ones_kept() {
     // A tree of `int` operators shares one fast path.
     assert_eq!(function(&ir, "pyfn_tri").matches("int_tree_fast:").count(), 1);
 }
+
+/// A negative finite base of `** 0.5` still raises from the cold path
+/// (CPython would return a complex; pycc raises, see the runtime's
+/// `float_pow`), after the loop's earlier iterations ran.
+#[test]
+fn a_negative_base_of_a_square_root_still_raises() {
+    let dir = ScratchDir::new("speed_proofs_neg_sqrt").expect("scratch");
+    let source = dir.join("neg.py");
+    std::fs::write(
+        &source,
+        "def roots(xs: list[float]) -> None:\n    for x in xs:\n        print(x ** 0.5)\n\n\nroots([4.0, 0.0, -0.0, 2.0, -4.0, 9.0])\n",
+    )
+    .expect("write the program");
+    let binary = dir.join("neg");
+    let build = Command::new(env!("CARGO_BIN_EXE_pycc"))
+        .arg("build")
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .arg("--release")
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", rendered(&build));
+    let run = Command::new(&binary).output().expect("the program should spawn");
+    assert_eq!(run.status.code(), Some(1), "{}", rendered(&run));
+    assert_eq!(stdout(&run), "2.0\n0.0\n0.0\n1.4142135623730951\n");
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("RuntimeError"),
+        "{}",
+        rendered(&run)
+    );
+}

@@ -8,4 +8,4 @@ fn mandel(w: i64, h: i64, max_iter: i64) -> i64 {
     } }
     inside
 }
-fn main() { println!("{}", mandel(std::hint::black_box(600), 400, 200)); }
+fn main() { println!("{}", mandel(std::hint::black_box(600), std::hint::black_box(400), std::hint::black_box(200))); }

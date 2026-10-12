@@ -315,13 +315,27 @@ pub(super) fn emit_pow<'ctx>(
         let proven = emit_pow_half(context, builder, rt, l, r);
         let proof_end = builder.get_insert_block().expect("positioned");
         builder.build_unconditional_branch(done_bb).expect("branch");
+        // Every other base: a negative finite one always raises (CPython's
+        // result would be complex) and leaves for the exception target, so
+        // the runtime call never rejoins the hot path and LLVM may keep
+        // loads across this expression; every other base (a zero, a
+        // subnormal, an infinity, a NaN) is libm `pow`, which raises nothing
+        // for an exponent of 0.5.
         builder.position_at_end(far_bb);
-        let positive = cmp(FloatPredicate::OGT, 0.0, "base_pos");
-        let finite = cmp(FloatPredicate::OLT, f64::INFINITY, "base_fin");
-        let fast_ok = builder.build_and(positive, finite, "pow_half_ok").expect("and");
-        let far = emit_guarded(context, builder, rt, rt.float_pow, l, r, fast_ok, |b| {
-            (emit_libm_pow(context, b, rt, l, r), None)
-        });
+        let negative = cmp(FloatPredicate::OLT, 0.0, "base_neg");
+        let finite = cmp(FloatPredicate::OGT, f64::NEG_INFINITY, "base_fin");
+        let raises = builder.build_and(negative, finite, "pow_half_raises").expect("and");
+        let raise_bb = context.append_basic_block(function, "pow_half_raise");
+        let libm_bb = context.append_basic_block(function, "pow_half_libm_far");
+        let keep = builder.build_not(raises, "pow_half_keeps").expect("not");
+        likely_branch(context, builder, keep, libm_bb, raise_bb);
+        builder.position_at_end(raise_bb);
+        builder
+            .build_call(rt.float_pow, &[l.into(), r.into()], "float_pow_raise")
+            .expect("build_call should not fail for pycc_rt_float_pow");
+        crate::exception::jump_to_exception_target(context, builder, rt);
+        builder.position_at_end(libm_bb);
+        let far = emit_libm_pow(context, builder, rt, l, r);
         let far_end = builder.get_insert_block().expect("positioned");
         builder.build_unconditional_branch(done_bb).expect("branch");
         builder.position_at_end(done_bb);

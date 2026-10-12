@@ -249,6 +249,35 @@ def halves() -> None:
         b = b * 16.0
 
 
+counter = 0
+
+
+def self_updates(n: int) -> None:
+    global counter
+    x = 3
+    for _ in range(n):
+        x = x * x
+        x += 1
+        x -= 2
+        counter += x % 7
+    print(x % 1000003, counter)
+    y = 2**62 - 3
+    for _ in range(6):
+        y += 1
+        print(y)
+    for _ in range(6):
+        y -= 1
+        print(y)
+    z: int = True
+    z += z
+    z = z * z
+    print(z)
+    w = -(2**61)
+    w = w - w
+    w *= 5
+    print(w)
+
+
 classes()
 loop_vars()
 global_loop()
@@ -257,6 +286,7 @@ trees()
 no_throw()
 nested_loops()
 halves()
+self_updates(9)
 
 
 def after(n: int) -> int:

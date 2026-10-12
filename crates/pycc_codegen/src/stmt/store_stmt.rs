@@ -56,6 +56,78 @@ pub(crate) fn emit_expr_stmt_stmt<'ctx>(
     Ok(())
 }
 
+/// `x = x op y` (`x += y`) for an `int` function local `x`, `op` one of
+/// `+ - *` and `y` a name or a literal: the old value of `x` is the left
+/// operand itself, so it is handed to the operator as an owned operand,
+/// which releases it only on the runtime path. On the smallint fast path
+/// it is a smallint and owns nothing, so the store needs no release test.
+/// Returns `false` (emitting nothing) for any other assignment.
+#[allow(clippy::too_many_arguments)]
+fn emit_int_self_update<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    target: &str,
+    value: &MirExpr,
+) -> bool {
+    let MirExpr::BinOp {
+        op,
+        left,
+        right,
+        ty: pycc_mir::Ty::Int,
+    } = value
+    else {
+        return false;
+    };
+    let is_target = |expr: &MirExpr| {
+        matches!(expr, MirExpr::Name { name, ty: pycc_mir::Ty::Int } if name == target)
+    };
+    let simple = |expr: &MirExpr| {
+        matches!(
+            expr,
+            MirExpr::Name {
+                ty: pycc_mir::Ty::Int,
+                ..
+            } | MirExpr::IntLiteral(_)
+        )
+    };
+    let Some(slot) = locals.get(target) else {
+        return false;
+    };
+    let is_alloca = slot
+        .ptr
+        .as_instruction()
+        .is_some_and(|inst| inst.get_opcode() == inkwell::values::InstructionOpcode::Alloca);
+    if !matches!(
+        op,
+        pycc_mir::BinOpKind::Add | pycc_mir::BinOpKind::Sub | pycc_mir::BinOpKind::Mul
+    ) || !is_target(left)
+        || !simple(right)
+        || slot.ty != pycc_mir::Ty::Int
+        || !is_alloca
+        || rt.borrowed_locals.borrow().contains(target)
+    {
+        return false;
+    }
+    let slot = slot.clone();
+    let l = to_numeric_encoded_int(
+        context,
+        builder,
+        emit_expr(context, builder, module, rt, user_functions, locals, left),
+    );
+    let r = to_numeric_encoded_int(
+        context,
+        builder,
+        emit_expr(context, builder, module, rt, user_functions, locals, right),
+    );
+    let result = crate::int_fast::emit_int_binop(context, builder, rt, *op, l, r, &[l]);
+    crate::entry_slots::store_unowned_int(context, builder, &slot, result);
+    true
+}
+
 pub(crate) fn emit_assign_stmt<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -68,6 +140,9 @@ pub(crate) fn emit_assign_stmt<'ctx>(
     let MirStmt::Assign { target, value } = stmt else {
         unreachable!()
     };
+    if emit_int_self_update(context, builder, module, rt, user_functions, locals, target, value) {
+        return Ok(());
+    }
     let ty = value.ty();
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
     // The slot owns one reference to a counted value: take it, and
