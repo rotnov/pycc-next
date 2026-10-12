@@ -206,6 +206,7 @@ impl MirExpr {
             MirExpr::Comprehension(comp) => comp.ty(),
             MirExpr::Sequence { value, .. } => value.ty(),
             MirExpr::RtCall(call) => call.sig.ret.clone(),
+            MirExpr::Nd(nd) => nd.ty(),
         }
     }
 
@@ -489,6 +490,12 @@ impl MirExpr {
             }
             MirExpr::RtCall(call) => {
                 for arg in &call.args {
+                    arg.collect_named_expr_bindings(out);
+                }
+            }
+            MirExpr::Nd(nd) => {
+                nd.base.collect_named_expr_bindings(out);
+                for arg in &nd.args {
                     arg.collect_named_expr_bindings(out);
                 }
             }

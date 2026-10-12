@@ -128,6 +128,10 @@ fn the_shim_declares_exactly_the_unpack_helpers_the_boundary_refuses_through() {
         "int",
         "int_at",
         "memoryview",
+        // A typed numpy array class attribute's setter
+        // (`src/ext_build/getset/setter.rs`); an argument slot of that type
+        // is an `object` with a check in the function's prologue.
+        "ndarray",
         "object",
         "str",
         "tuple",
@@ -249,6 +253,9 @@ fn expected_to_carry(ty: &Ty) -> bool {
         // D-258 rule 5 (#1397), replacing Part 1 of #1026's refusal: the
         // opaque CPython object crosses as the `PyObject *` itself.
         Ty::Object => true,
+        // A typed numpy array crosses as the array object itself; the
+        // compiled function's prologue checks its dtype and dimensions.
+        Ty::NdArray(_) => true,
         // Part 1 of #1447 (#1449): every compiled-class instance has a
         // carrier shape. Which class names a module may actually carry is
         // `unsupported_boundary_ty`'s narrowing against the module's class

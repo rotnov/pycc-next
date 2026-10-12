@@ -200,7 +200,7 @@ pub(super) fn call_result_scalar<'ctx>(
                 .expect_basic("this function is declared to return a CPython object")
                 .into_pointer_value(),
         ),
-        ty @ (Ty::Infer | Ty::Param(_) | Ty::Protocol(_) | Ty::MemoryView) => {
+        ty @ (Ty::Infer | Ty::Param(_) | Ty::Protocol(_) | Ty::MemoryView | Ty::NdArray(_)) => {
             panic!(
                 "pycc_codegen: a `{}`-typed call result is not supported yet",
                 ty.name()

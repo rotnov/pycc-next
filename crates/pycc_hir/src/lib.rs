@@ -17,6 +17,7 @@ mod int_boundary;
 mod isinstance_narrow;
 pub mod locate;
 mod module;
+pub mod ndarray;
 mod not_implemented;
 mod post_if;
 mod program;
@@ -302,6 +303,13 @@ pub enum Ty {
     /// was spelled -- so diagnostics render the canonical `memoryview` for
     /// all three, exactly as they already do for an alias of it.
     MemoryView,
+    /// A typed numpy array (`NDArray[np.float64]` and friends, see
+    /// `crate::ndarray`): a `numpy.ndarray` whose dtype and number of
+    /// dimensions are known statically. Represented at run time by the
+    /// array's own `PyObject *`; `pycc_mir` erases it to `Ty::Object`
+    /// after lowering the array operations. `NdTy` is two bytes, so
+    /// `size_of::<Ty>()` stays 16.
+    NdArray(crate::ndarray::NdTy),
     /// A generator object yielding values of the boxed type: what calling
     /// a generator function (a `def` whose body contains `yield`) returns,
     /// spelled `Iterator[T]`, `Iterable[T]` or `Generator[T, None, None]`
@@ -343,6 +351,7 @@ impl Ty {
             Ty::Optional(inner) => format!("{} | None", inner.name()),
             Ty::Object => "object".to_string(),
             Ty::MemoryView => "memoryview".to_string(),
+            Ty::NdArray(nd) => nd.name(),
             Ty::Generator(elem) => format!("Generator[{}, None, None]", elem.name()),
             Ty::Callable(sig) => format!(
                 "Callable[[{}], {}]",

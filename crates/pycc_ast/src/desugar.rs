@@ -14,6 +14,9 @@
 //!   buffer whichever spelling a program uses; an `import sys` with no use
 //!   left is dropped. A module-level `input = sys.stdin.readline` becomes
 //!   a `def` (see [`aliases`]).
+//! * A typed numpy array annotation without a dimension count,
+//!   `NDArray[np.float64]`, gets the count its name's uses imply written in
+//!   as a second argument, `NDArray[np.float64, 2]` (see [`ndarray_ndim`]).
 //! * A module-level `name = lambda params: body` becomes `def name(params):
 //!   return body`, its signature inferred (the [`INFER_MARKER`] return
 //!   annotation tells HIR lowering to treat it like a private helper).
@@ -50,6 +53,7 @@ mod globals;
 mod helpers;
 mod hoist;
 mod keys;
+mod ndarray_ndim;
 mod starred;
 mod stdlib;
 mod stmts;
@@ -94,6 +98,7 @@ pub fn desugar(module: &mut ModModule) {
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
         wildcard::expand_wildcards(&mut body);
+        ndarray_ndim::close_ndims(&mut body);
         aliases::builtin_aliases(&mut body);
         aliases::drop_object_bases(&mut body);
         stdlib::native_stdlib_calls(&mut body);

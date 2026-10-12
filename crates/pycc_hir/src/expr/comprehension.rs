@@ -239,6 +239,11 @@ pub(crate) fn rename_name_in_expr(expr: HirExpr, from: &str, to: &str) -> HirExp
         HirExpr::Comprehension(comp) => {
             HirExpr::Comprehension(Box::new(rename_in_comprehension(*comp, from, to)))
         }
+        HirExpr::Nd(mut nd) => {
+            nd.base = recurse(nd.base);
+            nd.args = nd.args.into_iter().map(recurse).collect();
+            HirExpr::Nd(nd)
+        }
     }
 }
 

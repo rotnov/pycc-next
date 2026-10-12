@@ -514,6 +514,7 @@ pub(crate) fn default_value_for_type<'ctx>(
         | pycc_mir::Ty::Protocol(_)
         | pycc_mir::Ty::Object
         | pycc_mir::Ty::MemoryView
+        | pycc_mir::Ty::NdArray(_)
         | pycc_mir::Ty::Generator(_)
         | pycc_mir::Ty::Callable(_) => context
             .ptr_type(inkwell::AddressSpace::default())

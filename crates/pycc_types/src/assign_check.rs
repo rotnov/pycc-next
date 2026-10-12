@@ -361,6 +361,12 @@ pub(crate) fn collect_named_expr_bindings(
         // #1254 (D-250): no walrus can sit inside a comprehension (lowering
         // refuses it), so there is nothing to bind in the enclosing scope.
         HirExpr::Comprehension(_) => Ok(()),
+        HirExpr::Nd(_) => {
+            for sub in pycc_hir::ndarray::expr_children(expr) {
+                collect_named_expr_bindings(env, local_names, sub)?;
+            }
+            Ok(())
+        }
         HirExpr::Call { args, .. } => {
             for arg in args {
                 collect_named_expr_bindings(env, local_names, arg)?;

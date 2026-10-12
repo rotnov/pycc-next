@@ -545,10 +545,22 @@ fn the_931_reject_set_is_intact() {
         "T0002",
     );
 
-    // A non-bare-name base keeps #889's rejection.
+    // A non-bare-name base keeps a `C0001` rejection. `np.NDArray` is now a
+    // typed numpy array spelling (`NDArray[np.float64]`), so the message
+    // names the dtypes it takes instead of #889's "bare class name" text;
+    // `tests/numpy_typed_arrays.rs` pins the accepted forms.
     let text = assert_rejects(
         "1130_reject_attribute_base",
         "def f(a: np.NDArray[int]) -> float:\n    return 0.0\n",
+        "C0001",
+    );
+    assert!(
+        text.contains("a typed numpy array annotation names its dtype"),
+        "{text}"
+    );
+    let text = assert_rejects(
+        "1130_reject_attribute_base_other",
+        "def f(a: np.Other[int]) -> float:\n    return 0.0\n",
         "C0001",
     );
     assert!(

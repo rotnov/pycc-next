@@ -392,6 +392,13 @@ pub(crate) fn rewrite_generic_calls_in_expr(
         HirExpr::Comprehension(comp) => {
             comprehension::rewrite_comprehension_expr(env, local_names, comp, instantiations, seen)
         }
+        HirExpr::Nd(nd) => {
+            let _ = rewrite_generic_calls_in_expr(env, local_names, &mut nd.base, instantiations, seen);
+            for arg in &mut nd.args {
+                let _ = rewrite_generic_calls_in_expr(env, local_names, arg, instantiations, seen);
+            }
+            infer_expr_in(env, local_names, expr)
+        }
         HirExpr::IntLiteral(_)
         | HirExpr::FloatLiteral(_)
         | HirExpr::BoolLiteral(_)

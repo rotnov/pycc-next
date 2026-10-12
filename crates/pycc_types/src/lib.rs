@@ -26,6 +26,7 @@ mod loop_flow;
 mod module;
 mod monomorphize;
 mod narrow;
+mod ndarray;
 mod non_strict;
 mod not_implemented;
 mod object_box;

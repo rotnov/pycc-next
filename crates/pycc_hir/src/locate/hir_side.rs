@@ -228,6 +228,10 @@ pub(super) fn collect_exprs<'a>(expr: &'a HirExpr, out: &mut Vec<&'a HirExpr>) {
         | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::Super => {}
+        HirExpr::Nd(nd) => {
+            child(&nd.base);
+            nd.args.iter().for_each(child);
+        }
         HirExpr::Call { args, .. }
         | HirExpr::ListLiteral(args)
         | HirExpr::ObjectList(args)
@@ -368,6 +372,17 @@ pub(super) fn expr_key(expr: &HirExpr) -> Option<NodeKey> {
         | HirExpr::ReceiverDispatchedCall { .. }
         | HirExpr::KeywordCall { .. }
         | HirExpr::ReceiverClassCall { .. } => return None,
+        HirExpr::Nd(nd) => match nd.op {
+            crate::ndarray::NdOp::Get { .. } => "[]".into(),
+            crate::ndarray::NdOp::Shape => "a:shape".into(),
+            crate::ndarray::NdOp::Size => "a:size".into(),
+            crate::ndarray::NdOp::Ndim => "a:ndim".into(),
+            crate::ndarray::NdOp::Set { .. }
+            | crate::ndarray::NdOp::Dim(_)
+            | crate::ndarray::NdOp::Check => {
+                return None;
+            }
+        },
     };
     Some(NodeKey::new(key))
 }

@@ -942,7 +942,8 @@ pub(crate) fn contains_infer(ty: &Ty) -> bool {
         | Ty::Instance(_)
         | Ty::Protocol(_)
         | Ty::Object
-        | Ty::MemoryView => false,
+        | Ty::MemoryView
+        | Ty::NdArray(_) => false,
     }
 }
 
@@ -972,7 +973,8 @@ fn contains_optional(ty: &Ty) -> bool {
         | Ty::Instance(_)
         | Ty::Protocol(_)
         | Ty::Object
-        | Ty::MemoryView => false,
+        | Ty::MemoryView
+        | Ty::NdArray(_) => false,
     }
 }
 

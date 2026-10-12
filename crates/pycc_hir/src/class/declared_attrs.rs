@@ -138,6 +138,9 @@ pub(super) fn collect_declared_attrs(
                 // Part 1 of #1367: a class a foreign import binds, stored as
                 // its `PyObject*` pointer word (D-154's pointer rule).
                 | Ty::Object
+                // A typed numpy array, an object slot once
+                // `crate::ndarray::lower` has run.
+                | Ty::NdArray(_)
                 // #1389: an instance of a pycc class, stored as its
                 // pointer word. Instances are never freed (`pycc_rt::
                 // instance`), so the slot needs no refcount traffic.

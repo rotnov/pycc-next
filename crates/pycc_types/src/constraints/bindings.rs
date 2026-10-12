@@ -84,6 +84,12 @@ pub(crate) fn bind_named_expr_targets(
         }
         // #1254 (D-250): lowering refuses a walrus inside a comprehension.
         HirExpr::Comprehension(_) => Ok(()),
+        HirExpr::Nd(_) => {
+            for sub in pycc_hir::ndarray::expr_children(expr) {
+                bind_named_expr_targets(signatures, parents, concrete, deferred, env, sub)?;
+            }
+            Ok(())
+        }
         HirExpr::Call { args, .. } => {
             for arg in args {
                 bind_named_expr_targets(signatures, parents, concrete, deferred, env, arg)?;

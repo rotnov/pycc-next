@@ -70,6 +70,10 @@ impl MirExpr {
                 out.extend(args);
             }
             MirExpr::RtCall(call) => out.extend(&call.args),
+            MirExpr::Nd(nd) => {
+                out.push(&nd.base);
+                out.extend(&nd.args);
+            }
             MirExpr::Instantiate(inst) => out.extend(&inst.args),
             MirExpr::BinOp { left, right, .. }
             | MirExpr::Compare { left, right, .. }

@@ -1127,6 +1127,7 @@ pub(crate) fn contains_named_expr(expr: &HirExpr) -> bool {
             contains_named_expr(call) || keywords.iter().any(|(_, v)| contains_named_expr(v))
         }
         HirExpr::Comprehension(comp) => comprehension::comprehension_contains_named_expr(comp),
+        HirExpr::Nd(nd) => contains_named_expr(&nd.base) || nd.args.iter().any(contains_named_expr),
     }
 }
 

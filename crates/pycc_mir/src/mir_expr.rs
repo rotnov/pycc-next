@@ -874,6 +874,36 @@ pub enum MirExpr {
     /// A builtin function or builtin-type method lowered to a direct call
     /// into `pycc_rt` (`pycc_hir::builtins`, whose module doc states the ABI).
     RtCall(Box<RtCallExpr>),
+    /// A typed numpy array operation (`pycc_hir::ndarray`): `base` is the
+    /// array's object, `args` the indices (and, for a store, the value
+    /// last). `pycc_codegen::ndarray` emits element access inline from the
+    /// array's data pointer, shape and strides.
+    Nd(Box<MirNdExpr>),
+}
+
+/// `MirExpr::Nd`'s payload.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MirNdExpr {
+    pub op: pycc_hir::ndarray::NdOp,
+    pub base: MirExpr,
+    pub args: Vec<MirExpr>,
+    pub nd: pycc_hir::ndarray::NdTy,
+    /// `pycc_hir::ndarray::NdExpr::cached`.
+    pub cached: bool,
+}
+
+impl MirNdExpr {
+    /// The type the operation evaluates to (`pycc_hir::ndarray::NdExpr::ty`).
+    #[must_use]
+    pub fn ty(&self) -> Ty {
+        use pycc_hir::ndarray::NdOp;
+        match self.op {
+            NdOp::Get { .. } => self.nd.elem_ty(),
+            NdOp::Set { .. } | NdOp::Check => Ty::None,
+            NdOp::Shape => Ty::Tuple(Box::new(vec![Ty::Int; usize::from(self.nd.ndim)])),
+            NdOp::Size | NdOp::Ndim | NdOp::Dim(_) => Ty::Int,
+        }
+    }
 }
 
 /// `MirExpr::Instantiate`'s payload, boxed (not inlined into that variant

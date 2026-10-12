@@ -13,7 +13,7 @@ use crate::{HirItem, HirModule, HirStmt, Ty};
 /// Whether `ty` is or contains the opaque CPython object.
 fn mentions_object(ty: &Ty) -> bool {
     match ty {
-        Ty::Object => true,
+        Ty::Object | Ty::NdArray(_) => true,
         Ty::List(inner) | Ty::Set(inner) | Ty::FrozenSet(inner) | Ty::Optional(inner) => {
             mentions_object(inner)
         }

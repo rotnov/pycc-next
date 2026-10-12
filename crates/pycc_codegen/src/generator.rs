@@ -407,7 +407,7 @@ fn basic_scalar<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
         Ty::Generator(_) => Scalar::Generator(value.into_pointer_value()),
         Ty::Callable(_) => Scalar::Closure(value.into_pointer_value()),
         Ty::MemoryView => Scalar::MemoryView(value.into_pointer_value()),
-        Ty::Infer | Ty::Param(_) => {
+        Ty::Infer | Ty::Param(_) | Ty::NdArray(_) => {
             panic!("pycc_codegen: internal error: an unresolved generator element type")
         }
     }

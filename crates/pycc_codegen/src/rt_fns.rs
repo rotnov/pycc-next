@@ -338,6 +338,9 @@ pub(super) struct RtFns<'ctx> {
     /// nested handler must not overwrite the exception saved by its outer
     /// handler.
     pub(super) exceptions: ExceptionCodegenState<'ctx>,
+    /// Each typed array local's header snapshot (`ndarray`), keyed by
+    /// function and variable name.
+    pub(super) nd_caches: crate::ndarray::NdCaches<'ctx>,
     /// The enclosing loops' `break`/`continue` targets; `loop_control.rs`
     /// owns it.
     pub(super) loops: crate::loop_control::LoopControlState<'ctx>,
@@ -861,6 +864,7 @@ pub(super) fn declare_rt_functions<'ctx>(
             ),
         ),
         exceptions: ExceptionCodegenState::new(),
+        nd_caches: crate::ndarray::NdCaches::default(),
         loops: crate::loop_control::LoopControlState::default(),
         list_free: declare(
             "pycc_rt_list_free",

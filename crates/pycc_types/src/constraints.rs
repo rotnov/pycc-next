@@ -811,6 +811,14 @@ fn collect_expr_constraints_here(
         HirExpr::Comprehension(..) => container_terms::collect_comprehension_constraints(
             signatures, parents, concrete, deferred, env, expr,
         ),
+        // A typed array operation: its operands are walked for their own
+        // constraints, and its type is fixed by the node.
+        HirExpr::Nd(nd) => {
+            for sub in pycc_hir::ndarray::expr_children(expr) {
+                collect_expr_constraints(signatures, parents, concrete, deferred, env, sub)?;
+            }
+            Ok(Some(Ok(nd.ty())))
+        }
     }
 }
 

@@ -538,6 +538,12 @@ pub enum HirExpr {
     /// to the statement forms (`HirStmt::ListCompAssign` and its siblings).
     /// Boxed: the node is large and rare.
     Comprehension(Box<HirComprehension>),
+    /// A typed numpy array operation (`crate::ndarray`): an element read
+    /// or write, `.shape`, `.size`, `.ndim`, `len()`, or the run-time check
+    /// that a value is an array of the static dtype and dimension count.
+    /// Built only by `crate::ndarray::lower` once the program is linked;
+    /// `base` is always an object-typed expression (the array).
+    Nd(Box<crate::ndarray::NdExpr>),
 }
 
 /// The parts of a [`HirExpr::Comprehension`] (#1254, D-250). `var` is the

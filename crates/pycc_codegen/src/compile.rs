@@ -1187,6 +1187,7 @@ pub(crate) fn compile_to_object_with_observer(
         }
     }
 
+    crate::ndarray::clear_fresh_after_calls(&context, &module, &builder, &rt);
     verify_module(&module);
 
     // See `target_machine::target_machine_for` for the LLVM target-registry

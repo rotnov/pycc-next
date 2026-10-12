@@ -353,6 +353,17 @@ pub(super) fn lower_expr(
         HirExpr::Comprehension(..) => {
             container_lower::lower_comprehension_expr(expr, scopes, classes, current_class)
         }
+        HirExpr::Nd(nd) => MirExpr::Nd(Box::new(super::MirNdExpr {
+            op: nd.op,
+            base: lower_expr(&nd.base, scopes, classes, current_class),
+            args: nd
+                .args
+                .iter()
+                .map(|arg| lower_expr(arg, scopes, classes, current_class))
+                .collect(),
+            nd: nd.nd,
+            cached: nd.cached,
+        })),
         // #433: a bare `HirExpr::Super` should never reach MIR lowering —
         // HIR lowering rejects a standalone `super()` with C0001, and
         // `super().method()`/`super().attr` are handled by the special-case
@@ -438,6 +449,11 @@ pub(super) fn pre_bind_named_expr_targets(
         }
         // #1254 (D-250): `pycc_hir` refuses a walrus inside a comprehension.
         HirExpr::Comprehension(_) => {}
+        HirExpr::Nd(_) => {
+            for sub in pycc_hir::ndarray::expr_children(expr) {
+                pre_bind_named_expr_targets(sub, scopes, classes, current_class);
+            }
+        }
         HirExpr::Call { args, .. } | HirExpr::ReceiverClassCall { args } => {
             for arg in args {
                 pre_bind_named_expr_targets(arg, scopes, classes, current_class);

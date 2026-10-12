@@ -77,6 +77,9 @@ pub(super) fn emit_pack<'ctx>(
     name: &str,
 ) -> PointerValue<'ctx> {
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    if let Scalar::Tuple(aggregate) = scalar {
+        return emit_pack_tuple(context, builder, module, aggregate, name);
+    }
     let (symbol, value) = packer_for(scalar);
     let packer = shim_fn(
         module,
@@ -88,6 +91,83 @@ pub(super) fn emit_pack<'ctx>(
         .unwrap_or_else(|_| panic!("build_call should not fail for {symbol}"))
         .try_as_basic_value()
         .expect_basic("a pycc_ext_obj_pack_* helper returns PyObject *")
+        .into_pointer_value()
+}
+
+/// Packs a native tuple of `int`/`float`/`bool` (`pycc_types`'
+/// `is_packable_tuple`) into a new CPython `tuple`: each field through its
+/// scalar packer, then `pycc_ext_obj_pack_tuple`, which consumes the packed
+/// elements. A field's kind is read off its LLVM type: `i64` is an `int`
+/// word, `double` a `float`, `i8` a `bool`.
+fn emit_pack_tuple<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    aggregate: inkwell::values::StructValue<'ctx>,
+    name: &str,
+) -> PointerValue<'ctx> {
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let fields = aggregate.get_type().get_field_types();
+    let count = u32::try_from(fields.len()).expect("a tuple has few fields");
+    let function = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .expect("packing happens inside a function");
+    let items = crate::build_at_entry_block(builder, function, |b| {
+        b.build_alloca(ptr.array_type(count), "pack_tuple_items")
+            .expect("build_alloca should not fail")
+    });
+    for (index, field_ty) in fields.iter().enumerate() {
+        let index = u32::try_from(index).expect("a tuple has few fields");
+        let value = builder
+            .build_extract_value(aggregate, index, "pack_tuple_field")
+            .expect("build_extract_value should not fail");
+        let scalar = match field_ty {
+            inkwell::types::BasicTypeEnum::FloatType(_) => Scalar::Float(value.into_float_value()),
+            inkwell::types::BasicTypeEnum::IntType(int) if int.get_bit_width() == 64 => {
+                Scalar::Int(value.into_int_value())
+            }
+            inkwell::types::BasicTypeEnum::IntType(_) => Scalar::Bool(value.into_int_value()),
+            _ => panic!(
+                "pycc_codegen: internal error: a packed tuple holds only int, float and bool"
+            ),
+        };
+        let packed = emit_pack(context, builder, module, scalar, "pack_tuple_item");
+        // SAFETY (LLVM): `index < count`, the array's length.
+        let slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    ptr.array_type(count),
+                    items,
+                    &[
+                        context.i64_type().const_zero(),
+                        context.i64_type().const_int(u64::from(index), false),
+                    ],
+                    "pack_tuple_slot",
+                )
+                .expect("build_in_bounds_gep should not fail")
+        };
+        builder
+            .build_store(slot, packed)
+            .expect("build_store should not fail");
+    }
+    let pack = shim_fn(
+        module,
+        "pycc_ext_obj_pack_tuple",
+        ptr.fn_type(&[context.i64_type().into(), ptr.into()], false),
+    );
+    builder
+        .build_call(
+            pack,
+            &[
+                context.i64_type().const_int(u64::from(count), false).into(),
+                items.into(),
+            ],
+            name,
+        )
+        .expect("build_call should not fail for pycc_ext_obj_pack_tuple")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_pack_tuple returns PyObject *")
         .into_pointer_value()
 }
 

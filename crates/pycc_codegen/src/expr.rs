@@ -141,6 +141,7 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
         MirExpr::RtCall(call) => {
             rt_call::emit_rt_call(context, builder, module, rt, user_functions, locals, call)
         }
+        MirExpr::Nd(nd) => crate::ndarray::emit_nd(context, builder, module, rt, user_functions, locals, nd),
         MirExpr::FloatLiteral(f) => Scalar::Float(context.f64_type().const_float(*f)),
         MirExpr::IntBoundary(value) => {
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);

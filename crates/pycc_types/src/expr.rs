@@ -317,6 +317,7 @@ fn infer_expr_here(
         HirExpr::Comprehension(comp) => {
             crate::comprehension::infer_comprehension(env, local_names, comp)
         }
+        HirExpr::Nd(nd) => crate::ndarray::infer_nd(env, local_names, nd),
     }
 }
 
@@ -366,6 +367,7 @@ fn is_walrus_value_ty_supported(ty: &Ty) -> bool {
         | Ty::Protocol(_)
         | Ty::Object
         | Ty::MemoryView
+        | Ty::NdArray(_)
         | Ty::Generator(_)
         | Ty::Callable(_) => false,
     }

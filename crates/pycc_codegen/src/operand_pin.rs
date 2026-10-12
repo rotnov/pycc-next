@@ -318,7 +318,10 @@ pub(crate) fn may_release(expr: &MirExpr) -> bool {
         | MirExpr::IntBoundary(_)
         | MirExpr::OptionalWrap(..)
         | MirExpr::OptionalUnwrap(..)
-        | MirExpr::AttrGet { .. } => true,
+        | MirExpr::AttrGet { .. }
+        // A typed array operation reads or writes the array's own memory
+        // and runs no user code (`ndarray`).
+        | MirExpr::Nd(_) => true,
         MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_) | Ty::Tuple(_)),
         MirExpr::BinOp { left, right, .. }
         | MirExpr::Compare { left, right, .. }

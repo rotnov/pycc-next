@@ -128,6 +128,11 @@ pub(crate) fn collect_named_expr_names_in_expr<'a>(expr: &'a HirExpr, names: &mu
         // #1254 (D-250): lowering refuses a walrus inside a comprehension,
         // and its loop variable is node-scoped, not a local of the function.
         HirExpr::Comprehension(_) => {}
+        HirExpr::Nd(_) => {
+            for sub in pycc_hir::ndarray::expr_children(expr) {
+                collect_named_expr_names_in_expr(sub, names);
+            }
+        }
         HirExpr::Call { args, .. } => {
             for arg in args {
                 collect_named_expr_names_in_expr(arg, names);

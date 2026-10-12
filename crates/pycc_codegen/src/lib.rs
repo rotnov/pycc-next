@@ -49,6 +49,7 @@ mod int_fast;
 mod leaf_inline;
 /// `list[T]` emission over the generic `PyListObj` (`pycc_rt::list`).
 mod list;
+mod ndarray;
 mod tbaa;
 use int_const::{emit_int_constant, tag_smallint_const};
 mod exception_isinstance;

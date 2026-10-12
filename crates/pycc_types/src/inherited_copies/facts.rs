@@ -444,6 +444,11 @@ impl<'a> Walker<'a> {
                 self.name_use(name);
                 self.expr(value);
             }
+            HirExpr::Nd(_) => {
+                for sub in pycc_hir::ndarray::expr_children(expr) {
+                    self.expr(sub);
+                }
+            }
             HirExpr::Comprehension(comp) => {
                 self.name_use(&comp.var);
                 for sub in comp.sub_exprs() {

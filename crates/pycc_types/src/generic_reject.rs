@@ -36,7 +36,8 @@ pub(crate) fn ty_contains_param(ty: &Ty) -> bool {
         | Ty::Instance(_)
         | Ty::Protocol(_)
         | Ty::Object
-        | Ty::MemoryView => false,
+        | Ty::MemoryView
+        | Ty::NdArray(_) => false,
     }
 }
 
@@ -129,7 +130,8 @@ pub(crate) fn scan_signature_ty_for_param(
         | Ty::Instance(_)
         | Ty::Protocol(_)
         | Ty::Object
-        | Ty::MemoryView => Ok(()),
+        | Ty::MemoryView
+        | Ty::NdArray(_) => Ok(()),
     }
 }
 
@@ -528,6 +530,12 @@ pub(crate) fn reject_generic_calls_in_expr(
         // mirroring `AttrGet`'s own single-sub-expression shape just above.
         HirExpr::NamedExpr { name: _, value } => {
             reject_generic_calls_in_expr(module_env, own_name, value)
+        }
+        HirExpr::Nd(_) => {
+            for sub in pycc_hir::ndarray::expr_children(expr) {
+                reject_generic_calls_in_expr(module_env, own_name, sub)?;
+            }
+            Ok(())
         }
         // #1254: every sub-expression, as the statement form's arm does.
         HirExpr::Comprehension(comp) => {

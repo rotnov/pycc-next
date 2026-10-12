@@ -207,6 +207,7 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
         | Ty::Optional(_)
         | Ty::Object
         | Ty::MemoryView
+        | Ty::NdArray(_)
         | Ty::Callable(_) => Ok(()),
     }
 }

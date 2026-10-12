@@ -164,6 +164,11 @@ pub(crate) fn collect_generic_class_instantiations_from_expr(
         HirExpr::NamedExpr { name: _, value } => {
             collect_generic_class_instantiations_from_expr(value, out);
         }
+        HirExpr::Nd(_) => {
+            for sub in pycc_hir::ndarray::expr_children(expr) {
+                collect_generic_class_instantiations_from_expr(sub, out);
+            }
+        }
         HirExpr::Comprehension(comp) => {
             for sub in comp.sub_exprs() {
                 collect_generic_class_instantiations_from_expr(sub, out);

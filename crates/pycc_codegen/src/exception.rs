@@ -212,6 +212,12 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // child's own guard has already handled a raise by the time the
         // sequence yields.
         MirExpr::Sequence { .. } => false,
+        // A typed array operation branches to the foreign failure edge
+        // itself the moment a check or an index fails (`ndarray`), so it
+        // never leaves a pending exception for the post-node guard. The one
+        // exception is converting an `int` element too large for a
+        // smallint, which allocates a bigint and cannot fail.
+        MirExpr::Nd(_) => false,
         // #1210: a shift raises `ValueError` for a negative count and
         // `OverflowError` for a result too large to allocate; `&`, `|` and
         // `^` never raise. `**` raises for a negative exponent and for a

@@ -582,12 +582,13 @@ fn a_module_scope_subscript_of_a_cpython_object_is_admitted() {
 }
 
 /// Only an operand with a `pycc_ext_obj_pack_*` helper may be a key: the
-/// four scalars and, since Part 2a of #1371, a second CPython object
-/// (`foreign::is_packable_operand`). Everything else is refused here rather
-/// than reaching codegen with no packer.
+/// four scalars, since Part 2a of #1371 a second CPython object
+/// (`foreign::is_packable_operand`), and a tuple of `int`/`float`/`bool`
+/// (`foreign::is_packable_tuple`, `pycc_ext_obj_pack_tuple`). Everything
+/// else is refused here rather than reaching codegen with no packer.
 #[test]
 fn a_subscript_key_outside_the_packable_operands_is_refused() {
-    for snippet in ["numpy.pi[None]\n", "numpy.pi[[1]]\n", "numpy.pi[(1, 2)]\n"] {
+    for snippet in ["numpy.pi[None]\n", "numpy.pi[[1]]\n", "numpy.pi[(1, [2])]\n"] {
         assert_refused(
             "`numpy.pi`",
             snippet,
@@ -603,6 +604,15 @@ fn a_subscript_key_outside_the_packable_operands_is_refused() {
 fn an_object_subscript_key_is_admitted() {
     for (shape, source) in both_producer_shapes("numpy.e[numpy.pi]\n") {
         assert!(check_foreign(&source).is_none(), "{shape}: {source}");
+    }
+}
+
+/// A non-empty tuple of `int`, `float` and `bool` is a packable key
+/// (`a[(i, j)]`, the key numpy's two-dimensional indexing receives).
+#[test]
+fn a_tuple_subscript_key_is_admitted() {
+    for source in ["numpy.pi[(1, 2)]\n", "numpy.pi[(1, 2.5, True)]\n"] {
+        assert!(check_foreign(source).is_none(), "{source}");
     }
 }
 

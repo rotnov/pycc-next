@@ -419,6 +419,10 @@ impl Verifier<'_> {
             | MirExpr::ObjUnpackFloatTuple { base: inner, .. }
             | MirExpr::ObjUnpack { value: inner, .. }
             | MirExpr::NamedExpr { value: inner, .. } => self.expr(inner),
+            MirExpr::Nd(nd) => {
+                self.expr(&nd.base);
+                self.exprs(&nd.args);
+            }
             MirExpr::SetAdd { value, ops, .. } => {
                 if let Some(ops) = ops {
                     self.check_set_ops(ops, &value.ty());

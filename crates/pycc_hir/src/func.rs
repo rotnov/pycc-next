@@ -739,6 +739,9 @@ pub(crate) fn annotation_to_ty(
         // metadata element); `Annotated[X]` without metadata is rejected,
         // matching CPython's own `TypeError`.
         Expr::Subscript(sub) => {
+            if let Some(ty) = crate::ndarray::typed_array_annotation(sub, aliases, class_defs)? {
+                return Ok(ty);
+            }
             let Expr::Name(base_name) = sub.value.as_ref() else {
                 return Err(unsupported(
                     "a subscripted type annotation's base must be a bare class name",

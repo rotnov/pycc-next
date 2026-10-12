@@ -66,6 +66,54 @@ annotations strict mode requires.
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
+## numpy arrays
+
+Annotate a numpy array with its dtype and pycc-next compiles element access to machine
+loads and stores -- no CPython call in the loop:
+
+```python
+import numpy as np
+from numpy.typing import NDArray
+
+def relax(src: NDArray[np.float64], dst: NDArray[np.float64]) -> None:
+    n, m = src.shape
+    for i in range(1, n - 1):
+        for j in range(1, m - 1):
+            dst[i, j] = 0.25 * (src[i - 1, j] + src[i + 1, j] + src[i, j - 1] + src[i, j + 1])
+```
+
+- **Types:** `NDArray[np.float64]`, `NDArray[np.int64]`, `NDArray[np.bool_]` (also
+  spelled `npt.NDArray[...]`, or numpy's `np.ndarray[tuple[int, int], np.dtype[np.float64]]`),
+  of 1 or 2 dimensions. The dimension count is read off how the array is indexed
+  (`a[i, j]`, `a[i][j]`, `n, m = a.shape`); with no such use it is 1. Arrays from
+  `np.zeros`/`ones`/`empty`/`full`/`array`/`arange`/`zeros_like`/`.copy()` are typed
+  without an annotation when the dtype and shape are evident from the call.
+- **Native:** `a[i]`, `a[i, j]`, `a[i][j]` reads and writes (negative indices,
+  numpy's own `IndexError` text, read-only arrays refused with numpy's `ValueError`),
+  `.shape`, `.size`, `.ndim`, `len(a)`, `for x in a` over a 1-D array. Any memory
+  layout works (views, transposes, non-contiguous strides).
+- **Checked at the boundary:** a value entering a typed parameter or binding must be a
+  `numpy.ndarray` of that dtype and dimension count (`TypeError` otherwise). A local's
+  shape and data pointer then stay in registers until a call that may run CPython code
+  (which could `resize` the array), after which the array is checked again; a global or
+  attribute is checked at each use (inline, a few instructions). Everything else on an
+  array (`a.sum()`, `np.dot(a, b)`, slices) is an ordinary CPython call.
+- Works in `--ext` modules (the caller's array is shared, so writes are visible to it)
+  and in native builds (numpy is bundled from `pycc.lock`).
+- Elements read as Python `float`/`int`/`bool`, not numpy scalars: see
+  [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
+
+**Speed** (`python3 bench/run.py stencil2d prefix_sum_np`, kernel time without numpy's
+import, best of 7, Xeon 2.8 GHz shared with other jobs):
+
+| program | CPython 3.13 + numpy | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
+|---|---|---|---|---|---|
+| stencil2d (200x300 Jacobi, 120 sweeps) | 4.808s | 0.011s | 0.004s | **423.6x faster** | 2.6x slower |
+| prefix_sum_np (400k `int64`, 25 rounds) | 3.823s | 0.048s | 0.015s | **79.5x faster** | 3.2x slower |
+
+prefix_sum_np's remaining gap is pycc's tagged `int` (the running sum carries an
+overflow check into arbitrary precision), not array access.
+
 ## Modes
 
 - **Strict** (default): every public function is annotated (`T0001`), `Any` is

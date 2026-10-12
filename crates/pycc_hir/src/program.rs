@@ -444,6 +444,9 @@ pub fn finalize(mut hir: HirModule) -> Result<HirModule, Vec<Diagnostic>> {
     if any_user_exception_class {
         hir.items.push(builtin_exception_init_item());
     }
+    // Typed numpy arrays become objects plus `HirExpr::Nd` operations
+    // before any later pass sees them (`crate::ndarray`).
+    crate::ndarray::lower_typed_arrays(&mut hir);
     Ok(hir)
 }
 

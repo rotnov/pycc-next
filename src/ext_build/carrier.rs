@@ -205,7 +205,7 @@ pub(crate) fn boundary_carrier(ty: &Ty) -> Option<BoundaryCarrier> {
         // `pycc_ext_pack_object` hands the host the reference the body
         // returned -- the very pointer, so identity survives the round trip
         // (`f(x) is x`).
-        Ty::Object => Some(BoundaryCarrier::Scalar("void *", "object")),
+        Ty::Object | Ty::NdArray(_) => Some(BoundaryCarrier::Scalar("void *", "object")),
         Ty::Tuple(elements) => elements
             .iter()
             .map(|element| match element {

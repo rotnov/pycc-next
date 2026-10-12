@@ -92,7 +92,7 @@ pub(crate) fn copy_kind(ty: &Ty, refcounted: &dyn Fn(&str) -> bool) -> Option<u8
     match ty {
         Ty::Str => Some(b's'),
         Ty::Int => Some(b'i'),
-        Ty::Object => Some(b'o'),
+        Ty::Object | Ty::NdArray(_) => Some(b'o'),
         Ty::List(_) => Some(b'l'),
         Ty::Dict(_) => Some(b'd'),
         Ty::Instance(class) if refcounted(class) => Some(b'c'),

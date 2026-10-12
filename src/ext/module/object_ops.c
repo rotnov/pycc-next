@@ -146,6 +146,46 @@ PyObject *pycc_ext_obj_pack_object(PyObject *value)
 }
 
 /*
+ * Packs a native tuple of `int`/`float`/`bool` (`pycc_types`'
+ * `is_packable_tuple`): `items` holds the `n` elements already packed by the
+ * scalar packers, new references that are consumed on every path. A `NULL`
+ * item is a packer that already set the exception. Returns a new `tuple`,
+ * or `NULL` with the exception set.
+ */
+PyObject *pycc_ext_obj_pack_tuple(long long n, PyObject **items)
+{
+    PyObject *tuple = NULL;
+    long long i;
+
+    for (i = 0; i < n; i++) {
+        if (items[i] == NULL) {
+            goto fail;
+        }
+    }
+    tuple = PyTuple_New((Py_ssize_t)n);
+    if (tuple == NULL) {
+        goto fail;
+    }
+    for (i = 0; i < n; i++) {
+        /* `PyTuple_SetItem` steals the reference, even on failure. */
+        PyObject *item = items[i];
+        items[i] = NULL;
+        if (PyTuple_SetItem(tuple, (Py_ssize_t)i, item) < 0) {
+            Py_DECREF(tuple);
+            tuple = NULL;
+            goto fail;
+        }
+    }
+    return tuple;
+fail:
+    for (i = 0; i < n; i++) {
+        Py_XDECREF(items[i]);
+        items[i] = NULL;
+    }
+    return NULL;
+}
+
+/*
  * Part 2 of #1026, PR 2b of #1081: the method-call helper compiled code
  * calls for `gc.disable()` on a value whose static type is the opaque
  * `object`.

@@ -292,6 +292,11 @@ fn collect_named_expr_targets_in_expr(expr: &HirExpr, killed: &mut HashSet<Strin
         // comprehension, and its loop variable is node-scoped, so a
         // comprehension kills no name of the enclosing scope.
         HirExpr::Comprehension(_) => {}
+        HirExpr::Nd(_) => {
+            for child in crate::ndarray::expr_children(expr) {
+                collect_named_expr_targets_in_expr(child, killed);
+            }
+        }
         HirExpr::Call { args, .. } => {
             for arg in args {
                 collect_named_expr_targets_in_expr(arg, killed);
