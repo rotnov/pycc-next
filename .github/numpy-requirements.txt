@@ -1,0 +1,8 @@
+# numpy for the hosted numpy tests (tests/numpy_typed_arrays.rs,
+# tests/issue_1114_numpy_oracle.rs) and the numpy benchmarks. Pinned by
+# version and by the sha256 of each wheel CI installs (PyPI's published
+# digests): CPython 3.13 on x86_64 Linux and on arm64 macOS.
+numpy==2.5.3 \
+    --hash=sha256:a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321 \
+    --hash=sha256:92f30e89b8ee0ecf363033576c422b2f58fed6a80bed0aa48dff6d14c654663e \
+    --hash=sha256:f9a2353b37a1a9e78fd82b27ad7e2a32a2d036604d18f02b05e3136c62ca3b09
