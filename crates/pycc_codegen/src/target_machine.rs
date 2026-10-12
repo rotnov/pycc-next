@@ -72,9 +72,17 @@ pub(crate) fn target_machine_for(
     // the success path a trailing forget would. Leaks one small string per
     // compile on every platform -- negligible in a short-lived CLI process,
     // and simpler than cfg-gating a type difference for a Windows-only leak.
-    let triple = std::mem::ManuallyDrop::new(match target_triple {
-        Some(t) => TargetTriple::create(t),
-        None => TargetMachine::get_default_triple(),
+    let deployment = if target_triple.is_none() && cfg!(target_os = "macos") {
+        macos_deployment_triple(
+            std::env::consts::ARCH,
+            std::env::var("MACOSX_DEPLOYMENT_TARGET").ok().as_deref(),
+        )
+    } else {
+        None
+    };
+    let triple = std::mem::ManuallyDrop::new(match (target_triple, deployment.as_deref()) {
+        (Some(t), _) | (None, Some(t)) => TargetTriple::create(t),
+        (None, None) => TargetMachine::get_default_triple(),
     });
     let target = Target::from_triple(&triple).map_err(|e| {
         format!(
@@ -111,4 +119,47 @@ pub(crate) fn target_machine_for(
             "creating a target machine with generic CPU/features should never fail for a \
              triple Target::from_triple has already accepted",
         ))
+}
+
+/// The host triple for a native macOS build pinned to the deployment target
+/// `MACOSX_DEPLOYMENT_TARGET` names (`arm64-apple-macosx26.0`), so the
+/// object file's minimum OS matches what the `cc` link -- which reads the
+/// same variable -- and `rustc`'s `libpycc_rt.a` use. `None` when the
+/// variable is unset or not a dotted version: LLVM's default triple then
+/// targets the running macOS, as `cc` does by default.
+fn macos_deployment_triple(arch: &str, deployment_target: Option<&str>) -> Option<String> {
+    let version = deployment_target?.trim();
+    let valid = !version.is_empty()
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+    if !valid {
+        return None;
+    }
+    let arch = if arch == "aarch64" { "arm64" } else { arch };
+    Some(format!("{arch}-apple-macosx{version}"))
+}
+
+#[cfg(test)]
+mod deployment_tests {
+    use super::macos_deployment_triple;
+
+    #[test]
+    fn a_deployment_target_pins_the_macos_triple() {
+        assert_eq!(
+            macos_deployment_triple("aarch64", Some("26.0")).as_deref(),
+            Some("arm64-apple-macosx26.0")
+        );
+        assert_eq!(
+            macos_deployment_triple("x86_64", Some(" 27 ")).as_deref(),
+            Some("x86_64-apple-macosx27")
+        );
+    }
+
+    #[test]
+    fn an_unset_or_malformed_deployment_target_keeps_the_host_default() {
+        for bad in [None, Some(""), Some("26."), Some("v26"), Some("26.0;x")] {
+            assert_eq!(macos_deployment_triple("aarch64", bad), None, "{bad:?}");
+        }
+    }
 }

@@ -83,5 +83,6 @@ for _ in range(1_000_000):
     m.via_holder(other)
     m.passes(obj)
 after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-print("rss flat", after - before < 4096)
+# 4 MiB; ru_maxrss is in bytes on macOS and in KiB on Linux.
+print("rss flat", after - before < 4096 * (1024 if sys.platform == "darwin" else 1))
 print("counts flat", counts == [sys.getrefcount(a) for a in (big, obj, other)])

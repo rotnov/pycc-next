@@ -131,8 +131,16 @@ before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 total = run(1000000)
 after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 print(total)
-print(after - before < 4096)
+print(after - before < RSS_LIMIT)
 ";
+
+/// `EMBEDDED`'s growth bound, 4 MiB in `ru_maxrss` units: KiB on Linux,
+/// bytes on macOS (getrusage(2) on each).
+const RSS_LIMIT: &str = if cfg!(target_os = "macos") {
+    "4194304"
+} else {
+    "4096"
+};
 
 /// A native embedded build doing object arithmetic a million times runs in
 /// constant memory and prints what CPython prints.
@@ -141,7 +149,8 @@ print(after - before < 4096)
 fn embedded_object_arithmetic_runs_in_constant_memory() {
     let dir = ScratchDir::new("object_ownership_embedded").expect("scratch dir");
     let source = dir.join("loop.py");
-    std::fs::write(&source, EMBEDDED).expect("write the program");
+    let program = EMBEDDED.replace("RSS_LIMIT", RSS_LIMIT);
+    std::fs::write(&source, program).expect("write the program");
     build(&dir, &source, "loop", false);
     let compiled = checked(
         Command::new(dir.join("loop")).output().expect("spawn"),

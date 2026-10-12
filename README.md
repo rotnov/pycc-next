@@ -136,7 +136,10 @@ is linked in. What you need on the machine:
 
 - **Linux x86_64 with glibc 2.39+** (Ubuntu 24.04, Debian 13, Fedora 40 or newer),
   plus `libstdc++`, `zlib`, `zstd` and `libffi` 8 (present on those systems);
-  or **macOS 14+ on Apple silicon (arm64)**.
+  or **macOS 26+ (Apple Silicon)** -- the archive is built for macOS 26.0 and
+  needs no Homebrew libraries. Programs pycc builds target the macOS it runs on
+  (`cc`'s default), or `MACOSX_DEPLOYMENT_TARGET` when set (pycc then emits
+  code for that version too). Intel Macs are not supported.
 - **A C toolchain** with `cc` on `PATH` -- pycc links every program with it. On
   Linux gcc or clang (e.g. `apt install build-essential`); on macOS the Xcode
   Command Line Tools (`xcode-select --install`). Without it `pycc build` stops

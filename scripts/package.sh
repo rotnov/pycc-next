@@ -36,3 +36,12 @@ if command -v strip >/dev/null 2>&1; then
         *) strip --strip-debug "$dest/bin/pycc" "$dest/lib/pycc/libpycc_rt.a" ;;
     esac
 fi
+# A macOS archive must run without Homebrew: pycc may only link libraries
+# that ship with macOS (scripts/macos_llvm.sh links zstd statically).
+if [ "$(uname -s)" = Darwin ]; then
+    foreign=$(otool -L "$dest/bin/pycc" | tail -n +2 | grep -v -E '^[[:space:]]+(/usr/lib/|/System/Library/)' || true)
+    if [ -n "$foreign" ]; then
+        printf 'package.sh: bin/pycc links libraries macOS does not ship:\n%s\n' "$foreign" >&2
+        exit 1
+    fi
+fi
