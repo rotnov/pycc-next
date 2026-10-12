@@ -42,6 +42,14 @@ use inkwell::values::{BasicValue as _, IntValue, PointerValue};
 use pycc_hir::ndarray::{NdDtype, NdOp, NdTy};
 use pycc_mir::MirNdExpr;
 
+mod element;
+mod fresh;
+mod index;
+
+use element::{emit_writeable_check, load_element, store_element};
+pub(crate) use fresh::clear_fresh_after_calls;
+use index::{PendingIndex, decode_index, element_address, evaluate_index};
+
 /// `sizeof(PyObject)` on the 64-bit, non-free-threaded CPython builds pycc
 /// targets; `pycc_ext_nd_check` refuses any other header size.
 const HEAD: u64 = 16;
@@ -265,6 +273,33 @@ pub(crate) fn emit_nd<'ctx>(
             .as_ref()
             .and_then(|key| rt.nd_caches.0.borrow().get(key).copied()),
     };
+    // The indices are evaluated before the array is checked: evaluating one
+    // may run CPython code (`a[f()]`) that resizes, reshapes or retypes the
+    // array, so a check made before them would vouch for a header that no
+    // longer exists. They are only evaluated here; decoding them (which
+    // raises nothing but `IndexError` and runs no CPython code) waits for
+    // the check, so a wrong array still raises its `TypeError` first.
+    let pending: Vec<PendingIndex<'ctx, '_>> = match nd.op {
+        NdOp::Get { .. } | NdOp::Set { .. } => {
+            let index_count = match nd.op {
+                NdOp::Set { .. } => nd.args.len() - 1,
+                _ => nd.args.len(),
+            };
+            nd.args[..index_count]
+                .iter()
+                .map(|index| {
+                    evaluate_index(context, builder, module, rt, user_functions, locals, index)
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+    // Nothing between this check and the element access below may run
+    // CPython code: index decoding, the bounds and writeable checks and the
+    // stored value's conversion call only `pycc_ext_nd_index_word`,
+    // `pycc_ext_nd_index_error`, `pycc_ext_nd_readonly`,
+    // `pycc_ext_nd_int_word` and pycc_rt number helpers (`may_run_python`'s
+    // allowlist).
     if nd.op != NdOp::Check {
         match header.cache {
             Some(cache) => refresh_if_stale(context, builder, module, rt, &header, cache, nd.nd),
@@ -320,15 +355,10 @@ pub(crate) fn emit_nd<'ctx>(
                 .const_int((u64::from(nd.nd.ndim) << 1) | 1, false),
         ),
         NdOp::Get { chained } | NdOp::Set { chained } => {
-            let index_count = match nd.op {
-                NdOp::Set { .. } => nd.args.len() - 1,
-                _ => nd.args.len(),
-            };
-            let mut raw = Vec::with_capacity(index_count);
-            let mut words = Vec::with_capacity(index_count);
-            for index in &nd.args[..index_count] {
-                let (value, word) =
-                    raw_index(context, builder, module, rt, user_functions, locals, index);
+            let mut raw = Vec::with_capacity(pending.len());
+            let mut words = Vec::with_capacity(pending.len());
+            for index in pending {
+                let (value, word) = decode_index(context, builder, module, rt, index);
                 raw.push(value);
                 words.extend(word);
             }
@@ -481,71 +511,6 @@ fn write_cache<'ctx>(
 /// The value a `None`-typed node evaluates to (`call_result`'s carrier).
 fn none_value(context: &Context) -> Scalar<'_> {
     Scalar::Bool(context.i8_type().const_zero())
-}
-
-/// Clears every [`NdCache::fresh`] of a function after each call in it that
-/// may run CPython code: everything but an LLVM intrinsic other than a
-/// coroutine suspension (a generator's consumer runs while it is
-/// suspended), pycc_rt's number arithmetic, and this module's own shim
-/// helpers. Run once the module is fully emitted.
-pub(crate) fn clear_fresh_after_calls<'ctx>(
-    context: &'ctx Context,
-    module: &inkwell::module::Module<'ctx>,
-    builder: &Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-) {
-    let mut by_function: HashMap<String, Vec<PointerValue<'ctx>>> = HashMap::new();
-    for ((function, _), cache) in rt.nd_caches.0.borrow().iter() {
-        by_function
-            .entry(function.clone())
-            .or_default()
-            .push(cache.fresh);
-    }
-    let stale = context.bool_type().const_zero();
-    for (name, flags) in by_function {
-        let Some(function) = module.get_function(&name) else {
-            continue;
-        };
-        let mut calls = Vec::new();
-        for block in function.get_basic_blocks() {
-            let mut next = block.get_first_instruction();
-            while let Some(instruction) = next {
-                next = instruction.get_next_instruction();
-                if instruction.get_opcode() == inkwell::values::InstructionOpcode::Call
-                    && may_run_python(instruction)
-                    && let Some(after) = instruction.get_next_instruction()
-                {
-                    calls.push(after);
-                }
-            }
-        }
-        for after in calls {
-            builder.position_before(&after);
-            for flag in &flags {
-                builder
-                    .build_store(*flag, stale)
-                    .expect("build_store should not fail");
-            }
-        }
-    }
-}
-
-/// Whether `call` may run CPython code ([`clear_fresh_after_calls`]).
-fn may_run_python(call: inkwell::values::InstructionValue<'_>) -> bool {
-    let Ok(site) = inkwell::values::CallSiteValue::try_from(call) else {
-        return true;
-    };
-    let Some(callee) = site.get_called_fn_value() else {
-        return true;
-    };
-    let name = callee.get_name().to_string_lossy();
-    if name.starts_with("llvm.") {
-        return name.starts_with("llvm.coro.suspend");
-    }
-    !(name.starts_with("pycc_rt_int_")
-        || name.starts_with("pycc_rt_bigint_")
-        || name.starts_with("pycc_rt_float")
-        || name.starts_with("pycc_ext_nd_"))
 }
 
 /// The shim's `pycc_ext_nd_canon`: `numpy.ndarray` and the canonical
@@ -711,446 +676,4 @@ fn cold_raise<'ctx>(
     raise(builder);
     emit_failure(context, builder, module, rt, edge);
     builder.position_at_end(ok_bb);
-}
-
-/// Decodes an `int` index word to a machine integer: a smallint (odd
-/// word) by a shift, a bool marker (`0b0010`/`0b0110`) to 0 or 1, and a
-/// bigint -- which numpy refuses as an index -- by raising its `IndexError`
-/// on the foreign failure edge.
-///
-/// Branch-free but for that exit: the two decodings are selected, and the
-/// only branch leaves the loop around the access. So a loop-invariant index
-/// word is decoded once, outside the loop, and nothing that rejoins makes a
-/// call (a call inside a loop would keep LLVM from hoisting the array's
-/// header).
-fn untag_index<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    word: IntValue<'ctx>,
-) -> IntValue<'ctx> {
-    let i64_type = context.i64_type();
-    if let Some(constant) = word.get_sign_extended_constant()
-        && constant & 1 == 1
-    {
-        return i64_type.const_int((constant >> 1) as u64, true);
-    }
-    let one = i64_type.const_int(1, false);
-    let low = builder.build_and(word, one, "nd_low").expect("and");
-    let is_small = builder
-        .build_int_compare(IntPredicate::NE, low, i64_type.const_zero(), "nd_is_small")
-        .expect("build_int_compare should not fail");
-    // `0b0010 | 0b0100 == 0b0110 | 0b0100`: exactly the two markers.
-    let folded = builder
-        .build_or(word, i64_type.const_int(4, false), "nd_marker_fold")
-        .expect("or");
-    let is_marker = builder
-        .build_int_compare(IntPredicate::EQ, folded, i64_type.const_int(6, false), "nd_is_marker")
-        .expect("build_int_compare should not fail");
-    let decodable = builder.build_or(is_small, is_marker, "nd_decodable").expect("or");
-    let big = builder.build_not(decodable, "nd_big_index").expect("not");
-    cold_raise(context, builder, module, rt, big, "nd_index", |b| {
-        let ptr = context.ptr_type(inkwell::AddressSpace::default());
-        let raise = shim_fn(
-            module,
-            ND_INDEX_WORD_SYMBOL,
-            context.i32_type().fn_type(&[i64_type.into(), ptr.into()], false),
-        );
-        b.build_call(raise, &[word.into(), ptr.const_null().into()], "nd_big_index")
-            .expect("build_call should not fail");
-    });
-    let small = builder.build_right_shift(word, one, true, "nd_untag").expect("ashr");
-    let marker = builder
-        .build_right_shift(word, i64_type.const_int(2, false), false, "nd_marker")
-        .expect("lshr");
-    builder
-        .build_select(is_small, small, marker, "nd_index")
-        .expect("build_select should not fail")
-        .into_int_value()
-}
-
-/// Whether `expr` is an index leaf [`raw_index`] can decode without
-/// arithmetic on `int` words: an `int` name or a small literal.
-fn is_index_leaf(expr: &MirExpr) -> bool {
-    match expr {
-        MirExpr::Name { ty, .. } => *ty == pycc_mir::Ty::Int,
-        MirExpr::IntLiteral(k) => k.unsigned_abs() < (1 << 61),
-        _ => false,
-    }
-}
-
-/// The machine value of the index expression `expr`.
-///
-/// `i`, `i - 1` and `i + j` -- an `int` name or small literal, or the sum
-/// or difference of two -- are computed on untagged machine words: each
-/// leaf is below 2**62 in magnitude, so the sum cannot overflow `i64`, and
-/// no `int` temporary is created. Anything else is evaluated as an `int`
-/// and decoded ([`untag_index`]); the second element of the pair is its
-/// word, for the caller to release.
-#[allow(clippy::too_many_arguments)]
-fn raw_index<'ctx, 'm>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    user_functions: &HashMap<&str, UserFunction<'ctx>>,
-    locals: &HashMap<String, StorageSlot<'ctx>>,
-    expr: &'m MirExpr,
-) -> (IntValue<'ctx>, Option<(&'m MirExpr, IntValue<'ctx>)>) {
-    let leaf = |e: &MirExpr| match e {
-        MirExpr::IntLiteral(k) => context.i64_type().const_int(*k as u64, true),
-        _ => {
-            let scalar = emit_expr(context, builder, module, rt, user_functions, locals, e);
-            let word = to_numeric_encoded_int(context, builder, scalar);
-            untag_index(context, builder, module, rt, word)
-        }
-    };
-    match expr {
-        MirExpr::BinOp {
-            op: op @ (pycc_mir::BinOpKind::Add | pycc_mir::BinOpKind::Sub),
-            left,
-            right,
-            ty: pycc_mir::Ty::Int,
-        } if is_index_leaf(left) && is_index_leaf(right) => {
-            let l = leaf(left);
-            let r = leaf(right);
-            let value = if *op == pycc_mir::BinOpKind::Add {
-                builder.build_int_add(l, r, "nd_index_sum")
-            } else {
-                builder.build_int_sub(l, r, "nd_index_diff")
-            }
-            .expect("integer arithmetic should not fail");
-            (value, None)
-        }
-        e if is_index_leaf(e) => (leaf(e), None),
-        other => {
-            let scalar = emit_expr(context, builder, module, rt, user_functions, locals, other);
-            let word = to_numeric_encoded_int(context, builder, scalar);
-            (
-                untag_index(context, builder, module, rt, word),
-                Some((other, word)),
-            )
-        }
-    }
-}
-
-fn untag_word<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    word: IntValue<'ctx>,
-    slow_symbol: &str,
-    label: &str,
-) -> IntValue<'ctx> {
-    let i64_type = context.i64_type();
-    if let Some(constant) = word.get_sign_extended_constant()
-        && constant & 1 == 1
-    {
-        return i64_type.const_int((constant >> 1) as u64, true);
-    }
-    let edge = ForeignFailEdge::for_current(builder);
-    let function = edge.function();
-    let small_bb = context.append_basic_block(function, &format!("{label}_small"));
-    let slow_bb = context.append_basic_block(function, &format!("{label}_slow"));
-    let join_bb = context.append_basic_block(function, &format!("{label}_join"));
-    let low = builder
-        .build_and(word, i64_type.const_int(1, false), "nd_low")
-        .expect("build_and should not fail");
-    let is_small = builder
-        .build_int_compare(IntPredicate::NE, low, i64_type.const_zero(), "nd_is_small")
-        .expect("build_int_compare should not fail");
-    crate::int_fast::likely_branch(context, builder, is_small, small_bb, slow_bb);
-    builder.position_at_end(small_bb);
-    let small = builder
-        .build_right_shift(word, i64_type.const_int(1, false), true, "nd_untag")
-        .expect("build_right_shift should not fail");
-    builder
-        .build_unconditional_branch(join_bb)
-        .expect("br should not fail");
-    builder.position_at_end(slow_bb);
-    let out = crate::build_at_entry_block(builder, function, |b| {
-        b.build_alloca(i64_type, "nd_word_out")
-            .expect("build_alloca should not fail")
-    });
-    let ptr = context.ptr_type(inkwell::AddressSpace::default());
-    let slow = shim_fn(
-        module,
-        slow_symbol,
-        context
-            .i32_type()
-            .fn_type(&[i64_type.into(), ptr.into()], false),
-    );
-    let status = builder
-        .build_call(slow, &[word.into(), out.into()], label)
-        .expect("build_call should not fail")
-        .try_as_basic_value()
-        .expect_basic("an nd word helper returns int")
-        .into_int_value();
-    route_negative(context, builder, module, rt, edge, status, label);
-    let decoded = builder
-        .build_load(i64_type, out, "nd_word")
-        .expect("build_load should not fail")
-        .into_int_value();
-    let slow_end = builder.get_insert_block().expect("positioned");
-    builder
-        .build_unconditional_branch(join_bb)
-        .expect("br should not fail");
-    builder.position_at_end(join_bb);
-    let phi = builder
-        .build_phi(i64_type, label)
-        .expect("build_phi should not fail");
-    phi.add_incoming(&[(&small, small_bb), (&decoded, slow_end)]);
-    phi.as_basic_value().into_int_value()
-}
-
-/// The address of the element at `indices`, after bounds-checking each one
-/// against its axis (a negative index counts from the end).
-///
-/// `chained` is `a[i][j]`: the second index indexes a row, a 1-D array, so
-/// numpy reports it against axis 0.
-fn element_address<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    header: &Header<'ctx>,
-    indices: &[IntValue<'ctx>],
-    chained: bool,
-) -> PointerValue<'ctx> {
-    let i64_type = context.i64_type();
-    let mut offset = i64_type.const_zero();
-    for (axis, index) in indices.iter().enumerate() {
-        let axis = u8::try_from(axis).expect("at most two axes");
-        let size = header.dim(context, builder, axis, false);
-        let negative = builder
-            .build_int_compare(IntPredicate::SLT, *index, i64_type.const_zero(), "nd_neg")
-            .expect("build_int_compare should not fail");
-        let wrapped = builder
-            .build_int_add(*index, size, "nd_wrapped")
-            .expect("build_int_add should not fail");
-        let position = builder
-            .build_select(negative, wrapped, *index, "nd_pos")
-            .expect("build_select should not fail")
-            .into_int_value();
-        // One unsigned compare also catches a still-negative position.
-        let out_of_range = builder
-            .build_int_compare(IntPredicate::UGE, position, size, "nd_oob")
-            .expect("build_int_compare should not fail");
-        let reported_axis = if chained { 0 } else { u64::from(axis) };
-        let index_value = *index;
-        cold_raise(
-            context,
-            builder,
-            module,
-            rt,
-            out_of_range,
-            "nd_bounds",
-            |b| {
-                let raise = shim_fn(
-                    module,
-                    ND_INDEX_ERROR_SYMBOL,
-                    context
-                        .i32_type()
-                        .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
-                );
-                b.build_call(
-                    raise,
-                    &[
-                        index_value.into(),
-                        i64_type.const_int(reported_axis, false).into(),
-                        size.into(),
-                    ],
-                    "nd_index_error",
-                )
-                .expect("build_call should not fail");
-            },
-        );
-        let stride = header.dim(context, builder, axis, true);
-        let scaled = builder
-            .build_int_mul(position, stride, "nd_scaled")
-            .expect("build_int_mul should not fail");
-        offset = builder
-            .build_int_add(offset, scaled, "nd_offset")
-            .expect("build_int_add should not fail");
-    }
-    let data = header.data(context, builder);
-    // SAFETY (LLVM): within the array's data, by the bounds checks above.
-    unsafe {
-        builder
-            .build_gep(context.i8_type(), data, &[offset], "nd_element")
-            .expect("build_gep should not fail")
-    }
-}
-
-fn load_element<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    address: PointerValue<'ctx>,
-    dtype: NdDtype,
-) -> Scalar<'ctx> {
-    let element_ty: inkwell::types::BasicTypeEnum<'ctx> = match dtype {
-        NdDtype::F64 => context.f64_type().into(),
-        NdDtype::I64 => context.i64_type().into(),
-        NdDtype::Bool => context.i8_type().into(),
-    };
-    let load = builder
-        .build_load(element_ty, address, "nd_load")
-        .expect("build_load should not fail");
-    if let Some(instruction) = load.as_instruction_value() {
-        instruction
-            .set_alignment(1)
-            .expect("a load accepts an alignment");
-        crate::tbaa::tag(context, instruction, TAG_ELEMENT);
-    }
-    match dtype {
-        NdDtype::F64 => Scalar::Float(load.into_float_value()),
-        NdDtype::I64 => Scalar::Int(tag_i64(context, builder, rt, load.into_int_value())),
-        NdDtype::Bool => {
-            let nonzero = builder
-                .build_int_compare(
-                    IntPredicate::NE,
-                    load.into_int_value(),
-                    context.i8_type().const_zero(),
-                    "nd_bool",
-                )
-                .expect("build_int_compare should not fail");
-            Scalar::Bool(
-                builder
-                    .build_int_z_extend(nonzero, context.i8_type(), "nd_bool_byte")
-                    .expect("build_int_z_extend should not fail"),
-            )
-        }
-    }
-}
-
-/// Encodes a machine `int64` as an `int` word: a smallint inline when it
-/// fits 63 bits, a bigint through `pycc_rt_int_from_i64` otherwise.
-fn tag_i64<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    value: IntValue<'ctx>,
-) -> IntValue<'ctx> {
-    let i64_type = context.i64_type();
-    let function = builder
-        .get_insert_block()
-        .and_then(|b| b.get_parent())
-        .expect("inside a function");
-    let one = i64_type.const_int(1, false);
-    let shifted = builder.build_left_shift(value, one, "nd_shl").expect("shl");
-    let back = builder
-        .build_right_shift(shifted, one, true, "nd_sar")
-        .expect("sar");
-    let fits = builder
-        .build_int_compare(IntPredicate::EQ, back, value, "nd_fits")
-        .expect("build_int_compare should not fail");
-    let small_bb = context.append_basic_block(function, "nd_tag_small");
-    let big_bb = context.append_basic_block(function, "nd_tag_big");
-    let join_bb = context.append_basic_block(function, "nd_tag_join");
-    crate::int_fast::likely_branch(context, builder, fits, small_bb, big_bb);
-    builder.position_at_end(small_bb);
-    let small = builder.build_or(shifted, one, "nd_tagged").expect("or");
-    builder.build_unconditional_branch(join_bb).expect("br");
-    builder.position_at_end(big_bb);
-    let big = builder
-        .build_call(rt.int_from_i64, &[value.into()], "nd_bigint")
-        .expect("build_call should not fail")
-        .try_as_basic_value()
-        .expect_basic("pycc_rt_int_from_i64 returns i64")
-        .into_int_value();
-    builder.build_unconditional_branch(join_bb).expect("br");
-    builder.position_at_end(join_bb);
-    let phi = builder.build_phi(i64_type, "nd_int").expect("phi");
-    phi.add_incoming(&[(&small, small_bb), (&big, big_bb)]);
-    phi.as_basic_value().into_int_value()
-}
-
-fn emit_writeable_check<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    header: &Header<'ctx>,
-) {
-    let flags = header.flags(context, builder);
-    let i32_type = context.i32_type();
-    let bit = builder
-        .build_and(flags, i32_type.const_int(WRITEABLE, false), "nd_writeable")
-        .expect("build_and should not fail");
-    let read_only = builder
-        .build_int_compare(IntPredicate::EQ, bit, i32_type.const_zero(), "nd_read_only")
-        .expect("build_int_compare should not fail");
-    cold_raise(
-        context,
-        builder,
-        module,
-        rt,
-        read_only,
-        "nd_readonly",
-        |b| {
-            let raise = shim_fn(module, ND_READONLY_SYMBOL, i32_type.fn_type(&[], false));
-            b.build_call(raise, &[], "nd_readonly")
-                .expect("build_call should not fail");
-        },
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn store_element<'ctx>(
-    context: &'ctx Context,
-    builder: &Builder<'ctx>,
-    module: &inkwell::module::Module<'ctx>,
-    rt: &RtFns<'ctx>,
-    address: PointerValue<'ctx>,
-    dtype: NdDtype,
-    value_expr: &MirExpr,
-    value: Scalar<'ctx>,
-) {
-    let stored: inkwell::values::BasicValueEnum<'ctx> = match dtype {
-        NdDtype::F64 => {
-            let word = match value {
-                Scalar::Int(word) => Some(word),
-                _ => None,
-            };
-            let float = to_float(context, builder, rt, value);
-            if let Some(word) = word {
-                release_if_int_temporary(context, builder, rt, value_expr, word);
-            }
-            float.into()
-        }
-        NdDtype::I64 => match value {
-            Scalar::Bool(byte) => builder
-                .build_int_z_extend(byte, context.i64_type(), "nd_bool_word")
-                .expect("build_int_z_extend should not fail")
-                .into(),
-            other => {
-                let word = to_numeric_encoded_int(context, builder, other);
-                let raw = untag_word(
-                    context,
-                    builder,
-                    module,
-                    rt,
-                    word,
-                    ND_INT_WORD_SYMBOL,
-                    "nd_int_value",
-                );
-                release_if_int_temporary(context, builder, rt, value_expr, word);
-                raw.into()
-            }
-        },
-        NdDtype::Bool => match value {
-            Scalar::Bool(byte) => byte.into(),
-            _ => panic!("pycc_codegen: internal error: a bool array stores a non-bool value"),
-        },
-    };
-    let store = builder
-        .build_store(address, stored)
-        .expect("build_store should not fail");
-    store
-        .set_alignment(1)
-        .expect("a store accepts an alignment");
-    crate::tbaa::tag(context, store, TAG_ELEMENT);
 }

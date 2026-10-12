@@ -12,7 +12,18 @@
  * attributes the first time an array is checked, and refuses to run on any
  * other layout, so an incompatible numpy is a clean `RuntimeError` instead
  * of a wild read. The offsets below must match `crates/pycc_codegen/src/
- * ndarray.rs`'s.
+ * ndarray/mod.rs`'s.
+ *
+ * `pycc_ext_nd_index_error`, `pycc_ext_nd_index_word`,
+ * `pycc_ext_nd_int_word` and `pycc_ext_nd_readonly` must never run CPython
+ * code (no attribute access, no `__index__`, no GC-tracked allocation):
+ * compiled code keeps its array header snapshots across calls to them
+ * (`PYTHON_FREE_CALLS`, `crates/pycc_codegen/src/ndarray/fresh.rs`).
+ * Neither may a successful `pycc_ext_nd_check` once `pycc_nd_layout_ok` is
+ * set: until then it imports numpy and reads Python attributes, after it a
+ * success is `PyObject_TypeCheck`, raw field reads and numpy's C dtype
+ * comparison. Its failures may run CPython code (formatting the dtype);
+ * compiled code marks every snapshot stale on that path.
  */
 
 #define PYCC_ND_HEAD ((Py_ssize_t)sizeof(PyObject))
@@ -33,7 +44,7 @@ static int pycc_nd_layout_ok = 0;
 
 /* `numpy.ndarray` and the float64, int64 and bool dtypes again, for the
  * inline success path of compiled code's check (`crates/pycc_codegen/src/
- * ndarray.rs`, `emit_check`): set only once the layout is validated, so
+ * ndarray/mod.rs`, `emit_check`): set only once the layout is validated, so
  * while it is all null every check takes `pycc_ext_nd_check`. */
 PyObject *pycc_ext_nd_canon[4] = {NULL, NULL, NULL, NULL};
 

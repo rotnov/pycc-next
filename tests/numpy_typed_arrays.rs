@@ -349,11 +349,16 @@ fn an_array_changed_by_cpython_code_is_rechecked() {
         \x20   a.__setstate__(np.zeros(2, dtype=np.bool_).__reduce__()[2])\n\
         def grow(a):\n\
         \x20   a.resize(8, refcheck=False)\n\
-        for call in [lambda: ndsafe.after_hook(np.arange(4.0), shrink),\n\
-        \x20            lambda: ndsafe.after_hook(np.arange(4.0), to_bool),\n\
-        \x20            lambda: ndsafe.after_hook(np.arange(4.0), grow),\n\
-        \x20            lambda: ndsafe.element_as_array(np.arange(3.0)),\n\
-        \x20            lambda: ndsafe.row_as_matrix(np.ones((2, 2)))]:\n\
+        calls = [lambda: ndsafe.after_hook(np.arange(4.0), shrink),\n\
+        \x20        lambda: ndsafe.after_hook(np.arange(4.0), to_bool),\n\
+        \x20        lambda: ndsafe.after_hook(np.arange(4.0), grow),\n\
+        \x20        lambda: ndsafe.element_as_array(np.arange(3.0)),\n\
+        \x20        lambda: ndsafe.row_as_matrix(np.ones((2, 2)))]\n\
+        for hook in [shrink, to_bool, grow]:\n\
+        \x20   calls.append(lambda hook=hook: ndsafe.read_with_hooked_index(np.arange(4.0), hook))\n\
+        \x20   calls.append(lambda hook=hook: ndsafe.store_with_hooked_index(np.arange(4.0), hook))\n\
+        \x20   calls.append(lambda hook=hook: ndsafe.store_hooked_value(np.arange(4.0), hook))\n\
+        for call in calls:\n\
         \x20   try:\n\
         \x20       print(call())\n\
         \x20   except (IndexError, TypeError) as e:\n\
@@ -371,6 +376,15 @@ fn an_array_changed_by_cpython_code_is_rechecked() {
          TypeError: expected numpy.ndarray[float64, 1-D], got an array of dtype bool\n\
          3.0\n\
          TypeError: expected numpy.ndarray[float64, 1-D], got float\n\
-         TypeError: expected numpy.ndarray[float64, 2-D], got a 1-D array\n"
+         TypeError: expected numpy.ndarray[float64, 2-D], got a 1-D array\n\
+         IndexError: index 3 is out of bounds for axis 0 with size 1\n\
+         IndexError: index 3 is out of bounds for axis 0 with size 1\n\
+         IndexError: index 3 is out of bounds for axis 0 with size 1\n\
+         TypeError: expected numpy.ndarray[float64, 1-D], got an array of dtype bool\n\
+         TypeError: expected numpy.ndarray[float64, 1-D], got an array of dtype bool\n\
+         TypeError: expected numpy.ndarray[float64, 1-D], got an array of dtype bool\n\
+         3.0\n\
+         7.0\n\
+         7.0\n"
     );
 }
