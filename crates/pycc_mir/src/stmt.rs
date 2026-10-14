@@ -10,6 +10,7 @@ use super::{
 use pycc_hir::{HirStmt, Ty};
 use std::collections::HashMap;
 
+mod for_list;
 mod store;
 mod try_stmt;
 
@@ -493,150 +494,7 @@ pub(super) fn lower_stmt(
             }
         }
         HirStmt::ForList { var, list, body } => {
-            // The loop variable's type is `list`'s element (or, for a
-            // dict-typed binding, key) type, derived via the same `lookup`
-            // mechanism every other name reference in this crate uses --
-            // mirroring `pycc_types::check_stmt`'s own `ForList` arm
-            // (`check_assignment(env, var, *elem_ty)` / `check_assignment(env,
-            // var, kv.0)` / `check_assignment(env, var, *elem_ty)` for the
-            // set case), not hardcoded to `Ty::Int`. Empirically only a
-            // `Ty::List(Box::new(Ty::Int))`, `Ty::Dict(Box::new((Ty::Str,
-            // Ty::Int)))`, `Ty::Set(Box::new(Ty::Int))`, or
-            // `Ty::FrozenSet(Box::new(Ty::Int))` binding, or (#1343) a set or
-            // frozenset of a user-class instance, ever reaches this arm today (`pycc_types`' T0034/T0036/T0037/T0038
-            // gates reject every other element/key-value combination before
-            // HIR ever constructs one -- see those gates' own comments and
-            // this crate's own genericity tests), but deriving here keeps
-            // this lowering correct on its own terms rather than baking in
-            // an assumption this crate has no way to verify independently.
-            // `HirStmt::ForList` is reused unconditionally by `pycc_hir`'s
-            // own lowering for any bare-name iterable, dict, list, or set
-            // alike (it has no type information to pick a different node)
-            // -- this is the point where the real type is resolved and
-            // where a dict- or set-typed binding is routed into
-            // `MirStmt::ForDict`/`MirStmt::ForSet`, and an object-typed one
-            // into `MirStmt::ForObject` (#1325), instead of
-            // `MirStmt::ForList`, mirroring `lower_expr`'s own
-            // `HirExpr::Subscript` arm doing the same list/dict routing for
-            // reads (subscripting a set is rejected earlier, by
-            // `pycc_types`' own T0033, so there is no set counterpart there).
-            match lookup(scopes, list) {
-                Ty::List(elem_ty) => {
-                    bind_variable(scopes, var.clone(), (*elem_ty).clone());
-                    // D-068 re-review of #780 (sixth round): see the
-                    // `ForRange` arm's identical comment above -- the loop
-                    // variable's own rebinding must kill a stale narrowing
-                    // sentinel too.
-                    super::kill_narrowing(scopes, var);
-                    let body = lower_loop_body(body, scopes, classes, current_class);
-                    MirStmt::ForList {
-                        var: var.clone(),
-                        var_ty: *elem_ty,
-                        list: list.clone(),
-                        body,
-                    }
-                }
-                Ty::Str => {
-                    // `for c in s`: the loop runs over `list(s)`, bound to a
-                    // synthetic name (a digit-led name no source can spell).
-                    let chars = format!("0chars_{var}_{list}");
-                    bind_variable(scopes, chars.clone(), Ty::List(Box::new(Ty::Str)));
-                    bind_variable(scopes, var.clone(), Ty::Str);
-                    super::kill_narrowing(scopes, var);
-                    let body = lower_loop_body(body, scopes, classes, current_class);
-                    let source = MirExpr::Name {
-                        name: list.clone(),
-                        ty: Ty::Str,
-                    };
-                    MirStmt::Seq(vec![
-                        MirStmt::Assign {
-                            target: chars.clone(),
-                            value: crate::str_to_list(source),
-                        },
-                        MirStmt::ForList {
-                            var: var.clone(),
-                            var_ty: Ty::Str,
-                            list: chars,
-                            body,
-                        },
-                    ])
-                }
-                Ty::Dict(kv) => {
-                    bind_variable(scopes, var.clone(), kv.0.clone());
-                    // D-068 re-review of #780 (sixth round): see the
-                    // `ForRange` arm's identical comment above.
-                    super::kill_narrowing(scopes, var);
-                    let body = lower_loop_body(body, scopes, classes, current_class);
-                    MirStmt::ForDict {
-                        var: var.clone(),
-                        var_ty: kv.0,
-                        dict: list.clone(),
-                        body,
-                    }
-                }
-                // `for x in s:` (PR-11 Task 8, D-123): iterates a set's own
-                // elements, binding the loop variable as the set's element
-                // type -- mirrors the `Ty::Dict` arm immediately above,
-                // which mirrors `pycc_types::check_stmt`'s own identical
-                // `Ty::Set(elem_ty) => *elem_ty` arm (added in that crate's
-                // Task 7 fix round).
-                Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => {
-                    let var_ty = *elem_ty;
-                    bind_variable(scopes, var.clone(), var_ty.clone());
-                    // D-068 re-review of #780 (sixth round): see the
-                    // `ForRange` arm's identical comment above.
-                    super::kill_narrowing(scopes, var);
-                    let body = lower_loop_body(body, scopes, classes, current_class);
-                    MirStmt::ForSet {
-                        var: var.clone(),
-                        var_ty,
-                        set: list.clone(),
-                        body,
-                    }
-                }
-                // `for x in gen:` over a generator: the loop holds its own
-                // reference in a hidden local (a digit-led name no source
-                // can spell), taken over from a desugaring temporary bound
-                // only for this loop (`_pycc_N`, `pycc_ast::desugar`).
-                Ty::Generator(sig) => {
-                    let elem_ty = sig.0.clone();
-                    let hold = format!("0genhold_{var}_{list}");
-                    bind_variable(scopes, hold.clone(), Ty::Generator(sig.clone()));
-                    bind_variable(scopes, var.clone(), elem_ty.clone());
-                    super::kill_narrowing(scopes, var);
-                    let body = lower_loop_body(body, scopes, classes, current_class);
-                    MirStmt::ForGen {
-                        var: var.clone(),
-                        var_ty: elem_ty,
-                        generator: list.clone(),
-                        hold,
-                        consume: list.starts_with("_pycc_"),
-                        body,
-                    }
-                }
-                // #1325: a bare name bound to a CPython object is the
-                // bare-name form of `HirStmt::ForObject` below, so it lowers
-                // to the same node with a `Name` iterable. `bind`, for the
-                // reason that arm's comment gives.
-                Ty::Object => {
-                    let iter = MirExpr::Name {
-                        name: list.clone(),
-                        ty: Ty::Object,
-                    };
-                    bind(scopes, var.clone(), Ty::Object);
-                    super::kill_narrowing(scopes, var);
-                    let body = lower_loop_body(body, scopes, classes, current_class);
-                    MirStmt::ForObject {
-                        var: var.clone(),
-                        iter,
-                        body,
-                    }
-                }
-                other => panic!(
-                    "pycc_mir: internal error: `{list}` is neither a list, dict, set, nor frozenset (found `{}`) -- pycc_types::check should have rejected this HIR before it reached pycc_mir",
-                    other.name()
-                ),
-            }
+            for_list::lower_for_list(var, list, body, scopes, classes, current_class)
         }
         // PR 3c of #1082: `for x in o.attr:` / `for x in o.method(...):`.
         // `pycc_types` has already proved the iterable is `Ty::Object`, so
@@ -912,12 +770,8 @@ pub(super) fn lower_stmt(
             value,
             ..
         } => {
-            let value = crate::obj_arith::object_arg(lower_expr(
-                value,
-                scopes,
-                classes,
-                current_class,
-            ));
+            let value =
+                crate::obj_arith::object_arg(lower_expr(value, scopes, classes, current_class));
             let base = lower_expr(base, scopes, classes, current_class);
             let lower_bound = |bound: &Option<Box<pycc_hir::HirExpr>>| {
                 bound

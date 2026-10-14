@@ -444,10 +444,16 @@ pub(crate) fn check_object_call_args<'a>(
         {
             continue;
         }
+        // A generator crosses as a CPython iterator sharing it
+        // (`pycc_codegen::generator_box`), each value packed as it is
+        // produced.
+        let boxable_generator = matches!(arg_ty, Ty::Generator(sig)
+            if crate::object_box::is_boxable_generator(env, arg_ty) || is_packable_tuple(&sig.0));
         if !is_packable_operand(arg_ty)
             && !is_packable_tuple(arg_ty)
             && !matches!(arg_ty, Ty::None)
             && !is_carriable_instance(env, arg_ty)
+            && !boxable_generator
         {
             return Err(object_operation_unsupported(&format!(
                 "passing a `{}` argument to a CPython object's {what}",

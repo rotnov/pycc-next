@@ -76,6 +76,7 @@ mod ext_generators;
 mod ext_signatures;
 mod globals;
 mod helpers;
+mod item_dunders;
 mod iter_alias;
 mod itertools;
 mod hoist;
@@ -175,6 +176,7 @@ pub fn desugar(module: &mut ModModule) {
         dataclasses::expand_dataclasses(&mut body);
         enums::enum_lookups(&mut body);
         functools::expand_caches(&mut body);
+        item_dunders::instance_item_access(&mut body);
         const_tuples::constant_tuple_membership(&mut body);
         displays::canonical_displays(&mut body);
         wildcard::expand_wildcards(&mut body);

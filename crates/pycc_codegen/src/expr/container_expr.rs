@@ -113,13 +113,21 @@ pub(crate) fn emit_subscript_expr<'ctx>(
         // `StructValue` with `extractvalue` -- no pointer, no
         // `build_struct_gep`, because the aggregate is an SSA
         // register rather than something in memory.
-        (pycc_mir::Ty::Tuple(_), Scalar::Tuple(struct_value)) => {
+        (pycc_mir::Ty::Tuple(elements), Scalar::Tuple(struct_value)) => {
             let MirExpr::IntLiteral(literal_index) = index.as_ref() else {
-                panic!(
-                    "pycc_codegen: internal error: a tuple subscript index is not a \
-                     literal int -- pycc_types::check (T0040) should have rejected this \
-                     before codegen"
-                )
+                // A computed index into a tuple of one scalar element
+                // type (`pycc_types` admits no other).
+                let index_scalar =
+                    emit_expr(context, builder, module, rt, user_functions, locals, index);
+                let raw_index = list::raw_index(context, builder, rt, index_scalar);
+                return crate::tuple_index::emit_dynamic_tuple_element(
+                    context,
+                    builder,
+                    rt,
+                    &elements,
+                    struct_value,
+                    raw_index,
+                );
             };
             // Delegates the non-negative and in-range validation to
             // `MirExpr::ty()`, which already re-derives exactly this

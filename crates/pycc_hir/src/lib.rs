@@ -37,24 +37,23 @@ pub use boolop::{BoolOpKind, bool_op_result_ty};
 pub use buffer_store::{body_returns_inside_finally, body_returns_slice_of, body_stores_into};
 pub use class::enum_call::enum_class_call_message;
 pub use class::{
-    ClassAttrValue, ClassNamespaceWinner, CopiedMemberKind, HOISTED_CLASS_ATTR_PREFIX, EnumMemberValue, EqRefusal,
-    ForeignCallableRef, HashRefusal, HirClassDef, InheritedCopy, InstanceEq, InstanceHash,
-    InstanceHashLowering, PropertyDef, ProtocolMember, SUPER_TARGET_MARKER, binds_member,
-    class_name_foreign_static, class_namespace_winner, dataclass_repr_body,
-    declares_name_outside_class_attrs, first_definer, flat_attr_layout, inherited_copy_name,
-    inherited_copy_origin, instance_foreign_static, is_refcounted_class,
+    ClassAttrValue, ClassNamespaceWinner, CopiedMemberKind, EnumMemberValue, EqRefusal,
+    ForeignCallableRef, HOISTED_CLASS_ATTR_PREFIX, HashRefusal, HirClassDef, InheritedCopy,
+    InstanceEq, InstanceHash, InstanceHashLowering, PropertyDef, ProtocolMember,
+    SUPER_TARGET_MARKER, binds_member, class_name_foreign_static, class_namespace_winner,
+    dataclass_repr_body, declares_name_outside_class_attrs, first_definer, flat_attr_layout,
+    inherited_copy_name, inherited_copy_origin, instance_foreign_static, is_refcounted_class,
     method_shadows_foreign_static, mro_has_instance_slot, resolve_instance_eq,
     resolve_instance_hash, slot_behind_foreign_static_meets_property, slot_rc_kind,
     subclass_divergence,
 };
 pub use compare_chain::{CompareLink, compare_chain_operands};
 pub use container::{
-    DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object, is_hashable_ty,
-    is_list_element_ty, set_element_message, tuple_is_boxed,
+    DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object,
+    homogeneous_tuple_element, is_hashable_ty, is_list_element_ty, set_element_message,
+    tuple_is_boxed,
 };
 pub use dunder_name::DUNDER_NAME;
-pub use pycc_ast::function_qualname;
-pub use pycc_ast::namespace;
 pub use exception::{
     BUILTIN_EXCEPTION_CLASSES, EXCEPTION_GROUP_TYPE_TAG, EXCEPTION_INIT_MANGLED_NAME,
     FIRST_USER_EXCEPTION_TYPE_TAG, FOREIGN_BASE_EXCEPTION_TYPE_TAG, HirExceptHandler,
@@ -88,6 +87,8 @@ pub use post_if::continuation_narrows;
 pub use program::{LinkInput, LinkLayout, Placement, finalize, link, link_layout};
 /// The callee of a nested function used as a value (`pycc_ast::desugar`).
 pub use pycc_ast::CLOSURE_MARKER;
+pub use pycc_ast::function_qualname;
+pub use pycc_ast::namespace;
 pub use return_coverage::{block_always_returns, block_never_completes, loop_never_ends_normally};
 pub use stmt::del::{deleted_names, mentioned_names};
 pub use stop_iteration::{stop_iteration_sources, stop_iteration_value_ty};

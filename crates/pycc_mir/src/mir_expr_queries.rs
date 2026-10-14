@@ -59,10 +59,14 @@ impl MirExpr {
                 // every other panic path in this file re-states "pycc_types
                 // should have rejected this" rather than re-validating.
                 Ty::Tuple(elems) => {
+                    // A computed index: `pycc_types` admits it only on a
+                    // tuple whose elements share one scalar type.
                     let MirExpr::IntLiteral(literal_index) = index.as_ref() else {
-                        panic!(
-                            "pycc_mir: internal error: tuple subscript index is not a literal int -- pycc_types::check should have rejected this HIR before it reached pycc_mir (T0040)"
-                        )
+                        return elems.first().cloned().unwrap_or_else(|| {
+                            panic!(
+                                "pycc_mir: internal error: computed index into an empty tuple -- pycc_types::check should have rejected this HIR before it reached pycc_mir (T0040)"
+                            )
+                        });
                     };
                     let literal_index = usize::try_from(*literal_index).unwrap_or_else(|_| {
                         panic!(

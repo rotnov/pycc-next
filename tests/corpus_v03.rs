@@ -21,6 +21,13 @@
 //!   `sys.stdin.buffer.readline()` read only as numbers is text.
 //! * Non-strict mode solves again with what the solver settled written in,
 //!   so a use met before its operand was typed is native too.
+//! * A tuple whose elements share one type takes a computed index and
+//!   iterates; a generator expression reads a module-level loop variable;
+//!   `any`/`all` of a generator of CPython objects is native.
+//! * Item access on an instance of a class defining the item dunders calls
+//!   them; a scalar local rebound to an empty list is a separate variable;
+//!   `list()`/`dict()` are `[]`/`{}`; `set.update`/`list.extend` take a
+//!   generator, and a generator crosses into a CPython method.
 //! * Strict mode, like non-strict mode, does not compile an unannotated
 //!   definition nothing in the entry module mentions
 //!   (`corpus_round7::strict_mode_does_not_compile_dead_unannotated_definitions`).
@@ -137,7 +144,63 @@ fn a_stream_alias_is_the_stream() {
 /// `.sort(reverse=True)` of a subscripted list.
 #[test]
 fn template_idioms_compile_natively() {
-    for fixture in ["corpus_v03_idioms.py", "corpus_v03_buffer_def.py"] {
+    for fixture in [
+        "corpus_v03_idioms.py",
+        "corpus_v03_buffer_def.py",
+        "corpus_v03_item_producers.py",
+    ] {
+        matches_cpython(fixture, &[]);
+        let report = matches_cpython(fixture, &["--non-strict", "--report-fallbacks"]);
+        assert!(!report.contains("fallback:"), "{fixture}: {report}");
+    }
+}
+
+/// A generator expression reading a module-level loop variable is typed
+/// (the variable is bound where the expression runs; an unbound one raises
+/// `NameError`), and `any`/`all` of a generator of CPython objects runs
+/// natively in non-strict mode.
+#[test]
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn generator_expressions_over_globals_and_objects() {
+    let report = matches_cpython(
+        "corpus_v03_genexpr_global.py",
+        &["--non-strict", "--report-fallbacks"],
+    );
+    assert!(!report.contains("fallback:"), "{report}");
+    for flags in [&[][..], &["--non-strict"][..]] {
+        matches_cpython("corpus_v03_genexpr_unbound.py", flags);
+    }
+}
+
+/// Item dunders through `self`, a local and a global; a scalar local
+/// rebound to an empty list; `list()`/`dict()`; `set.update`/`list.extend`
+/// of a generator.
+#[test]
+fn item_dunders_rebinding_and_generator_updates() {
+    for fixture in ["corpus_v03_item_dunders.py", "corpus_v03_rebinding.py"] {
+        matches_cpython(fixture, &[]);
+        let report = matches_cpython(fixture, &["--non-strict", "--report-fallbacks"]);
+        assert!(!report.contains("fallback:"), "{fixture}: {report}");
+    }
+}
+
+/// Non-strict mode: a generator argument of a CPython object's method.
+#[test]
+#[ignore = "needs CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn a_generator_crosses_into_a_cpython_method() {
+    let report = matches_cpython(
+        "corpus_v03_object_generator_arg.py",
+        &["--non-strict", "--report-fallbacks"],
+    );
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+/// A tuple whose elements share one type: a computed index (`t[k]`, an
+/// out-of-range one raising `IndexError`) and iteration (`for x in t`, a
+/// comprehension over it).
+#[test]
+fn homogeneous_tuples_index_and_iterate() {
+    for fixture in ["corpus_v03_tuple_index.py", "corpus_v03_tuple_iter.py"] {
         matches_cpython(fixture, &[]);
         let report = matches_cpython(fixture, &["--non-strict", "--report-fallbacks"]);
         assert!(!report.contains("fallback:"), "{fixture}: {report}");

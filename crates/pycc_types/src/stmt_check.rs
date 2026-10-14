@@ -540,6 +540,10 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
                 Ty::Dict(kv) => kv.0,
                 Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,
                 Ty::Generator(sig) => sig.0,
+                // A tuple whose elements share one type.
+                Ty::Tuple(items) if pycc_hir::homogeneous_tuple_element(&items).is_some() => {
+                    items[0].clone()
+                }
                 other => {
                     return Err(Diagnostic::error(
                         "T0033",

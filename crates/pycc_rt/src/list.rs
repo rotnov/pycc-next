@@ -390,6 +390,17 @@ pub extern "C" fn pycc_rt_list_index_error(which: i64) {
     raise_builtin(EXCEPTION_TYPE_INDEX_ERROR, "IndexError", message);
 }
 
+/// `IndexError: tuple index out of range` for a computed index into a
+/// struct tuple (`pycc_codegen::tuple_index`), which has no object to name.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_tuple_index_error() {
+    raise_builtin(
+        EXCEPTION_TYPE_INDEX_ERROR,
+        "IndexError",
+        "tuple index out of range",
+    );
+}
+
 /// [`pycc_rt_list_index_error`] naming `list`'s own type: `deque index out
 /// of range`, `tuple index out of range`. Generated code calls it on the
 /// cold path of an inlined bounds check.

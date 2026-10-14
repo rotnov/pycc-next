@@ -249,6 +249,15 @@ pub fn is_list_element_ty(element: &Ty) -> bool {
     }
 }
 
+/// The element type of a tuple whose elements all share one type a list
+/// can hold (`(1, 2, 3)`, `("a", "b")`): such a tuple is iterable, as the
+/// list of its elements. `None` for an empty or mixed tuple.
+#[must_use]
+pub fn homogeneous_tuple_element(items: &[Ty]) -> Option<&Ty> {
+    let first = items.first()?;
+    (is_list_element_ty(first) && items.iter().all(|item| item == first)).then_some(first)
+}
+
 /// The `T0038` gate shared by `set[T]` and `frozenset[T]`: a hashable
 /// element ([`is_hashable_ty`]) and (#1343) a user-class instance element
 /// are compiled. Whether that class is actually hashable is checked where an

@@ -401,7 +401,16 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             bindings: globals.bindings.clone(),
             local_names,
             defs_rebound: globals.defs_rebound.clone(),
-            maybe_bindings: globals.maybe_bindings.clone(),
+            // A helper `pycc_ast::desugar` lifted out of an expression
+            // (`_pycc_genexpr_N`, ...) runs only where that expression is,
+            // so a global it reads is bound there: a module-level loop
+            // variable (`all(q % p for p in primes)` in `for q in ...`)
+            // types the helper.
+            maybe_bindings: if name.starts_with("_pycc_") {
+                HashSet::new()
+            } else {
+                globals.maybe_bindings.clone()
+            },
             opaque_bindings: globals.opaque_bindings.clone(),
             foreign_objects: globals.foreign_objects.clone(),
             // #962: this literal copies field by field on purpose (it is
@@ -630,7 +639,11 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         .or_else(object_when_non_strict)
         .ok_or_else(|| {
             if super::public_inference::reports_missing_annotation(name) {
-                return super::public_inference::at_function(hir, name, super::public_inference::return_needs_annotation(name));
+                return super::public_inference::at_function(
+                    hir,
+                    name,
+                    super::public_inference::return_needs_annotation(name),
+                );
             }
             Diagnostic::error(
                 "T0021",
@@ -645,27 +658,28 @@ pub(crate) fn infer_function_signatures_with_solver_all(
     // Sorted: a body-typed generator may call another one, typed first.
     open_generators.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, param_tys) in open_generators {
-        let element = super::yield_fallback::infer_yield_from_body(hir, &name, &param_tys, &resolved)
-            .or_else(object_when_non_strict)
-            .ok_or_else(|| {
-                if super::public_inference::reports_missing_annotation(&name) {
-                    return super::public_inference::at_function(
-                        hir,
-                        &name,
-                        super::public_inference::return_needs_annotation(&name),
-                    );
-                }
-                Diagnostic::error(
-                    "T0021",
-                    format!(
-                        "cannot infer the type of the values generator `{name}` yields; add a \
+        let element =
+            super::yield_fallback::infer_yield_from_body(hir, &name, &param_tys, &resolved)
+                .or_else(object_when_non_strict)
+                .ok_or_else(|| {
+                    if super::public_inference::reports_missing_annotation(&name) {
+                        return super::public_inference::at_function(
+                            hir,
+                            &name,
+                            super::public_inference::return_needs_annotation(&name),
+                        );
+                    }
+                    Diagnostic::error(
+                        "T0021",
+                        format!(
+                            "cannot infer the type of the values generator `{name}` yields; add a \
                          return annotation (`Iterator[...]`)"
-                    ),
-                    Span::new(0, 0),
-                )
-                .with_help(format!("add a return type annotation to `{name}`"))
-            })
-            .map_err(module_level)?;
+                        ),
+                        Span::new(0, 0),
+                    )
+                    .with_help(format!("add a return type annotation to `{name}`"))
+                })
+                .map_err(module_level)?;
         let (sent, returned) = generator_rest
             .get(&name)
             .cloned()

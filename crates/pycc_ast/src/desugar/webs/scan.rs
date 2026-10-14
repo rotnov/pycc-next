@@ -6,6 +6,27 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{ExceptHandler, Expr, ExprContext, Stmt, StmtClassDef, StmtFunctionDef};
 use std::collections::HashSet;
 
+/// Whether `value` is never a container: a number, string or boolean
+/// literal, an f-string, a comparison or `not`, or a call of a builtin
+/// conversion to a scalar. A name the module rebinds is still read as the
+/// builtin here; at worst a web is split that a reset would have joined,
+/// which only loses an element type.
+pub(super) fn is_scalar_value(value: &Expr) -> bool {
+    match value {
+        Expr::NumberLiteral(_)
+        | Expr::StringLiteral(_)
+        | Expr::BooleanLiteral(_)
+        | Expr::FString(_)
+        | Expr::Compare(_) => true,
+        Expr::UnaryOp(unary) => {
+            unary.op == ruff_python_ast::UnaryOp::Not || is_scalar_value(&unary.operand)
+        }
+        Expr::Call(call) => matches!(call.func.as_ref(), Expr::Name(name)
+            if matches!(name.id.as_str(), "int" | "float" | "str" | "bool" | "ord" | "chr" | "len" | "abs" | "round")),
+        _ => false,
+    }
+}
+
 /// The names a nested function, lambda or class body may read or write in
 /// an enclosing scope: everything it reads that it does not bind itself,
 /// plus everything it declares `global` or `nonlocal`.
@@ -69,20 +90,24 @@ impl<'a> Visitor<'a> for ScopeScan {
                 return;
             }
             Stmt::Global(global) => {
-                self.declared.extend(global.names.iter().map(|n| n.to_string()));
+                self.declared
+                    .extend(global.names.iter().map(|n| n.to_string()));
             }
             Stmt::Nonlocal(nonlocal) => {
-                self.declared.extend(nonlocal.names.iter().map(|n| n.to_string()));
+                self.declared
+                    .extend(nonlocal.names.iter().map(|n| n.to_string()));
             }
             Stmt::Import(import) => {
                 for alias in &import.names {
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
-                    self.bound.insert(bound.split('.').next().unwrap_or("").to_string());
+                    self.bound
+                        .insert(bound.split('.').next().unwrap_or("").to_string());
                 }
             }
             Stmt::ImportFrom(import) => {
                 for alias in &import.names {
-                    self.bound.insert(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
+                    self.bound
+                        .insert(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
                 }
             }
             Stmt::Try(try_stmt) => {
@@ -137,4 +162,3 @@ impl<'a> Visitor<'a> for ScopeScan {
         visitor::walk_expr(self, expr);
     }
 }
-

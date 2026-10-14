@@ -629,6 +629,7 @@ pub(super) fn collect_stmt_constraints(
                         Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => Some(*elem),
                         Ty::Dict(kv) => Some(kv.0),
                         Ty::Str => Some(Ty::Str),
+                        Ty::Tuple(items) => pycc_hir::homogeneous_tuple_element(&items).cloned(),
                         _ => None,
                     });
                 // An iterable whose element this pass cannot type (a list

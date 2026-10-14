@@ -70,6 +70,11 @@ Accept:
    on d5f2a39. Remaining gaps in `docs/DEVIATIONS.md`.
 3. **Real-world corpus:** strict passes >= 150/200; `--non-strict` keeps 200/200, 0 wrong,
    with >= 98% of top-level statements native.
+   **Met 2026-10-14:** `python3 bench/corpus.py` passes 161/200 strict (0 wrong);
+   `python3 bench/corpus.py --flags=--non-strict --require-correct` passes 200/200, 0 wrong,
+   with 1168 of 1191 top-level statements native (98.1%; 186 programs with no fallback).
+   What the corpus needed is pinned by `tests/corpus_v03.rs` against CPython 3.13, with leak
+   probes in `tests/memory_leaks_corpus.rs`; remaining gaps in `docs/DEVIATIONS.md`.
 4. **A real package:** one pinned, permissively licensed pure-Python package from PyPI,
    unchanged, builds with `--ext --non-strict` and passes its own test suite run by
    CPython against the compiled modules (CI-gated).

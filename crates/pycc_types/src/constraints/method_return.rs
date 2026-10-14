@@ -98,11 +98,15 @@ pub(super) fn unify_method_args(
     concrete: &mut [Option<Ty>],
 ) -> Result<(), Diagnostic> {
     // A special method is also called implicitly (`a == b`), with
-    // operands an explicit call does not show.
+    // operands an explicit call does not show. The item dunders are the
+    // exception: native code calls them only explicitly
+    // (`pycc_ast::desugar::item_dunders` spells `x[k]` so; the checker
+    // refuses indexing an instance otherwise).
     let Some(Ok(Ty::Instance(class_name))) = base_term else {
         return Ok(());
     };
-    if method.starts_with("__") {
+    if method.starts_with("__") && !matches!(method, "__getitem__" | "__setitem__" | "__delitem__")
+    {
         return Ok(());
     }
     let Some(mangled) = resolve_method(env.class_defs, class_name, method) else {

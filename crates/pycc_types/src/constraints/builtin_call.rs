@@ -64,6 +64,7 @@ pub(super) fn builtin_method_term(
     if base == Ty::Str && tys.contains(&Ty::Object) && crate::non_strict::is_non_strict() {
         return Some(Ok(Ty::Object));
     }
+    let tys = pycc_hir::builtins::materialized_method_args(&base, method, &tys).unwrap_or(tys);
     match pycc_hir::builtins::resolve_method(&base, method, &tys)? {
         Ok(sig) => Some(Ok(sig.ret)),
         Err(_) => None,

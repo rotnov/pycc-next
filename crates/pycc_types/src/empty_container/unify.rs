@@ -41,8 +41,8 @@ mod store;
 mod unread_default;
 mod walk;
 use store::{Shape, Store};
-pub(super) use walk::{stmt_exprs_mut, walk_expr_mut};
 use walk::all_stmts_mut;
+pub(super) use walk::{stmt_exprs_mut, walk_expr_mut};
 
 /// Which empty container a site is.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -264,7 +264,9 @@ impl Engine {
                 {
                     let len = items.len() as i64;
                     let at = if *i < 0 { *i + len } else { *i };
-                    return usize::try_from(at).ok().and_then(|at| items.get(at).copied());
+                    return usize::try_from(at)
+                        .ok()
+                        .and_then(|at| items.get(at).copied());
                 }
                 let result = self.store.fresh();
                 self.deferred.push(Deferred::Element {
@@ -355,9 +357,10 @@ impl Engine {
             // (or `0 ^ x`), which is CPython's for every numeric operand
             // (`-True` is an `int`; `~` of a float has none).
             HirExpr::UnaryOp {
-                op: op @ (pycc_hir::UnaryOpKind::USub
-                | pycc_hir::UnaryOpKind::UAdd
-                | pycc_hir::UnaryOpKind::Invert),
+                op:
+                    op @ (pycc_hir::UnaryOpKind::USub
+                    | pycc_hir::UnaryOpKind::UAdd
+                    | pycc_hir::UnaryOpKind::Invert),
                 operand,
             } => {
                 let operand_var = self.term(scope, operand);
@@ -568,8 +571,7 @@ impl Engine {
             // declared type (`self.adj = defaultdict(list)` under
             // `adj: dict[...]`). A store on another object is left alone, as
             // the class phase (`attr_slot`) leaves it.
-            HirStmt::AttrSet { base, attr, value }
-                if matches!(base, HirExpr::Name(name) if name == "self") =>
+            HirStmt::AttrSet { base, attr, value } if matches!(base, HirExpr::Name(name) if name == "self") =>
             {
                 let read = HirExpr::AttrGet {
                     base: Box::new(base.clone()),
@@ -699,8 +701,18 @@ impl Engine {
                 };
                 let arg_vars: Vec<Option<usize>> =
                     args.iter().map(|arg| self.term(scope, arg)).collect();
-                self.term(scope, base);
+                let base_var = self.term(scope, base);
                 let Some(name) = base_name else {
+                    // `graph[u].append(v)`: the item is a list of `v`.
+                    if let (HirExpr::Subscript { .. }, Some(item)) = (base.as_ref(), base_var) {
+                        let shape = match (method.as_str(), arg_vars.as_slice()) {
+                            ("append", [Some(v)]) | ("insert", [_, Some(v)]) => Shape::List(*v),
+                            ("add", [Some(v)]) => Shape::Set(*v),
+                            _ => return,
+                        };
+                        let produced = self.store.with_shape(shape);
+                        self.store.unify(item, produced);
+                    }
                     return;
                 };
                 match (method.as_str(), arg_vars.as_slice()) {
@@ -711,6 +723,16 @@ impl Engine {
                         let var = self.name_var(scope, &name);
                         if self.is_container(*other) {
                             self.store.unify(var, *other);
+                        } else if let Some(Shape::Known(Ty::Generator(sig))) = self.store.open(*other) {
+                            // `s.update(g)` / `xs.extend(g)` of a generator.
+                            let element = self.store.known(sig.0.clone());
+                            let shape = if method == "update" {
+                                Shape::Set(element)
+                            } else {
+                                Shape::List(element)
+                            };
+                            let produced = self.store.with_shape(shape);
+                            self.store.unify(var, produced);
                         }
                     }
                     ("setdefault", [Some(k), Some(v)]) => {
@@ -921,10 +943,9 @@ pub(super) fn infer(
             .items
             .iter()
             .filter_map(|item| match item {
-                HirItem::Function { name, params, .. } => Some((
-                    name.clone(),
-                    params.iter().all(|(_, ty)| concrete_ty(ty)),
-                )),
+                HirItem::Function { name, params, .. } => {
+                    Some((name.clone(), params.iter().all(|(_, ty)| concrete_ty(ty))))
+                }
                 HirItem::TopLevelStmt(_) => None,
             })
             .collect(),

@@ -18,10 +18,12 @@ pub(crate) fn collect_list_literal_constraints(
         let term = collect_expr_constraints(signatures, parents, concrete, deferred, env, element)?;
         // A variable already bound to a concrete type (`n + 1` over an
         // `int`) counts as that type.
-        element_terms.push(term.map(|term| match resolved_term(term.clone(), parents, concrete) {
-            Some(ty) => Ok(ty),
-            None => term,
-        }));
+        element_terms.push(term.map(
+            |term| match resolved_term(term.clone(), parents, concrete) {
+                Some(ty) => Ok(ty),
+                None => term,
+            },
+        ));
     }
     if let Some(element_ty) = homogeneous_private_solver_scalar_list_element(&element_terms) {
         Ok(Some(Ok(Ty::List(Box::new(element_ty)))))
@@ -100,10 +102,22 @@ pub(crate) fn collect_subscript_constraints(
         (&resolved_base, index.as_ref())
     {
         let len = items.len() as i64;
-        let position = if *position < 0 { position + len } else { *position };
+        let position = if *position < 0 {
+            position + len
+        } else {
+            *position
+        };
         return Ok((0..len)
             .contains(&position)
             .then(|| Ok(items[position as usize].clone())));
+    }
+    // A computed index into a tuple of one scalar element type.
+    if let Some(Ty::Tuple(items)) = &resolved_base
+        && let Some(first) = items.first()
+        && matches!(first, Ty::Int | Ty::Bool | Ty::Float)
+        && items.iter().all(|item| item == first)
+    {
+        return Ok(Some(Ok(first.clone())));
     }
     if let Some(Ok(Ty::List(element_ty))) = base_term {
         Ok(Some(Ok(*element_ty)))
@@ -182,7 +196,9 @@ pub(crate) fn collect_comprehension_constraints(
     )?;
     let mut terms = Vec::new();
     for sub in comp.body_exprs() {
-        terms.push(collect_expr_constraints(signatures, parents, concrete, deferred, &scoped, sub)?);
+        terms.push(collect_expr_constraints(
+            signatures, parents, concrete, deferred, &scoped, sub,
+        )?);
     }
     // `body_exprs` puts the condition first and a dict's key before its
     // value.
@@ -208,11 +224,9 @@ pub(crate) fn collect_comprehension_constraints(
         CompElt::List(_) => Ok(Some(set_comp::list_comp_container(
             elt_term, parents, concrete, deferred,
         ))),
-        CompElt::Dict { .. } => {
-            Ok(Some(set_comp::dict_comp_container(
-                key_term, elt_term, parents, concrete, deferred,
-            )))
-        }
+        CompElt::Dict { .. } => Ok(Some(set_comp::dict_comp_container(
+            key_term, elt_term, parents, concrete, deferred,
+        ))),
         CompElt::Set(_) => unreachable!("handled above"),
     }
 }

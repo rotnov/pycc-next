@@ -7,6 +7,20 @@ use super::{
 };
 use crate::Ty;
 
+/// `args` with a generator argument of `set.update` / `list.extend` seen as
+/// the list of its values (`pycc_mir` materializes it first, as the
+/// consuming builtins do), or `None` when nothing changes.
+#[must_use]
+pub fn materialized_method_args(receiver: &Ty, method: &str, args: &[Ty]) -> Option<Vec<Ty>> {
+    match (receiver, method, args) {
+        (Ty::Set(_), "update", [Ty::Generator(sig)])
+        | (Ty::List(_), "extend", [Ty::Generator(sig)]) => {
+            Some(vec![Ty::List(Box::new(sig.0.clone()))])
+        }
+        _ => None,
+    }
+}
+
 /// Resolves `receiver.method(args)` for a builtin receiver type. The
 /// receiver becomes the runtime function's first argument.
 #[must_use]

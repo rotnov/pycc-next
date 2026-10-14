@@ -7,18 +7,66 @@
 //!   one) or tested for membership (`v in (a, b)`) yields and compares the
 //!   same elements as the list display: it becomes one, so the iteration and
 //!   `in` the compiler has for lists apply.
+//! - `list()` and `dict()`, called with no argument where the module never
+//!   rebinds the builtin, are the empty displays `[]` and `{}`.
 
 use ruff_python_ast::visitor::transformer::{self, Transformer};
-use ruff_python_ast::{AtomicNodeIndex, CmpOp, Comprehension, Expr, ExprList, ExprTuple, Stmt};
+use ruff_python_ast::{
+    AtomicNodeIndex, CmpOp, Comprehension, Expr, ExprContext, ExprDict, ExprList, ExprTuple, Stmt,
+};
 
 /// Rewrites every such display in `body`.
 pub(crate) fn canonical_displays(body: &mut [Stmt]) {
+    let rebound = super::aliases::rebound_names(body);
+    let displays = Displays {
+        empty_list: !rebound.contains_key("list"),
+        empty_dict: !rebound.contains_key("dict"),
+    };
     for stmt in body {
-        Displays.visit_stmt(stmt);
+        displays.visit_stmt(stmt);
     }
 }
 
-struct Displays;
+struct Displays {
+    /// `list()` is the builtin's: the module never rebinds `list`.
+    empty_list: bool,
+    /// `dict()` is the builtin's.
+    empty_dict: bool,
+}
+
+impl Displays {
+    /// `list()` / `dict()` as the empty display.
+    fn empty_display(&self, expr: &mut Expr) {
+        let Expr::Call(call) = expr else {
+            return;
+        };
+        let Expr::Name(callee) = call.func.as_ref() else {
+            return;
+        };
+        if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
+            return;
+        }
+        let range = call.range;
+        match callee.id.as_str() {
+            "list" if self.empty_list => {
+                *expr = Expr::List(ExprList {
+                    node_index: AtomicNodeIndex::default(),
+                    range,
+                    elts: Vec::new(),
+                    ctx: ExprContext::Load,
+                });
+            }
+            "dict" if self.empty_dict => {
+                *expr = Expr::Dict(ExprDict {
+                    node_index: AtomicNodeIndex::default(),
+                    range,
+                    items: Vec::new(),
+                });
+            }
+            _ => {}
+        }
+    }
+}
 
 /// A list display target as the tuple display, nested ones included.
 fn tuple_target(target: &mut Expr) {
@@ -79,6 +127,7 @@ impl Transformer for Displays {
                 }
             }
         }
+        self.empty_display(expr);
         transformer::walk_expr(self, expr);
     }
 }

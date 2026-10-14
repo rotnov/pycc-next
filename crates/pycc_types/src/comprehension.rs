@@ -77,6 +77,10 @@ pub(crate) fn resolve_comp_iter(
                 // A generator is consumed into the list of its values
                 // first, as `sum`/`sorted` consume one.
                 Ty::Generator(sig) => Ok(sig.0),
+                // A tuple whose elements share one type.
+                Ty::Tuple(items) if pycc_hir::homogeneous_tuple_element(&items).is_some() => {
+                    Ok(items[0].clone())
+                }
                 other => Err(Diagnostic::error(
                     "T0033",
                     format!(
@@ -92,6 +96,14 @@ pub(crate) fn resolve_comp_iter(
             Ty::List(elem_ty) => Ok(*elem_ty),
             Ty::Str => Ok(Ty::Str),
             Ty::Generator(sig) => Ok(sig.0),
+            // A tuple read by name or by subscripts over names and
+            // literals: `pycc_mir::tuple_to_list` reads it once per element.
+            Ty::Tuple(items)
+                if pycc_hir::homogeneous_tuple_element(&items).is_some()
+                    && is_plain_read(iterable) =>
+            {
+                Ok(items[0].clone())
+            }
             other => Err(non_object_iterable(&other)),
         },
     }
@@ -101,6 +113,16 @@ pub(crate) fn resolve_comp_iter(
 /// CPython object (Part 1 of #1255). Before #1255 the HIR refused every
 /// such shape by syntax; the type is what decides it now, and a native
 /// container must still be bound to a name first.
+/// A name, a literal, or a subscript of such reads: an expression whose
+/// repeated evaluation has no side effect.
+fn is_plain_read(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Name(_) | HirExpr::IntLiteral(_) => true,
+        HirExpr::Subscript { base, index } => is_plain_read(base) && is_plain_read(index),
+        _ => false,
+    }
+}
+
 fn non_object_iterable(ty: &Ty) -> Diagnostic {
     Diagnostic::error(
         "C0001",

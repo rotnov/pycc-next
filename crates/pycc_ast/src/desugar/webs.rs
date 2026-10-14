@@ -149,7 +149,9 @@ enum Kind {
     /// `x op= v`: a read of `x` and a binding of `x`, one name node.
     Aug,
     /// `x = []` (an empty container): a binding that stays in the web of
-    /// the bindings it replaces, whose uses type its elements.
+    /// the bindings it replaces, whose uses type its elements -- except a
+    /// binding of a scalar value (`scan::is_scalar_value`), which no
+    /// container's elements can come from.
     Reset,
 }
 
@@ -158,6 +160,8 @@ struct Event {
     name: String,
     kind: Kind,
     offset: u32,
+    /// A `Def` binding a value that is never a container.
+    scalar: bool,
 }
 
 #[derive(Default)]
@@ -216,6 +220,7 @@ impl<'a> Builder<'a> {
             name: name.to_string(),
             kind,
             offset,
+            scalar: false,
         });
         let index = self.events.len() - 1;
         self.blocks[self.cur].events.push(index);
@@ -280,6 +285,12 @@ impl<'a> Builder<'a> {
                     targets => {
                         for target in targets {
                             self.target(target);
+                        }
+                        if let [Expr::Name(_)] = targets
+                            && scan::is_scalar_value(&assign.value)
+                            && let Some(event) = self.events.last_mut()
+                        {
+                            event.scalar = true;
                         }
                     }
                 }
@@ -856,7 +867,15 @@ fn analyze_scope<'a>(
             if matches!(event.kind, Kind::Use | Kind::Aug | Kind::Reset)
                 && let Some(defs) = state.get(&event.name)
             {
-                let real: Vec<usize> = defs.iter().copied().filter(|d| !unbound.contains(d)).collect();
+                let real: Vec<usize> = defs
+                    .iter()
+                    .copied()
+                    .filter(|d| !unbound.contains(d))
+                    .filter(|d| {
+                        event.kind != Kind::Reset
+                            || !def_event[*d].is_some_and(|e| events[e].scalar)
+                    })
+                    .collect();
                 let maybe_unbound = defs.iter().any(|d| unbound.contains(d));
                 let mut joined = real.clone();
                 if matches!(event.kind, Kind::Aug | Kind::Reset) {

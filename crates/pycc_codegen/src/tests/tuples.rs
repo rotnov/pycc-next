@@ -299,27 +299,23 @@ fn to_float_rejects_a_tuple_operand() {
 }
 
 #[test]
-#[should_panic(expected = "a tuple subscript index is not a literal int")]
-fn a_tuple_subscript_with_a_non_literal_index_is_an_internal_error() {
-    // `pycc_types`' T0040 rejects every non-literal tuple index before
-    // codegen, so this is defensive -- but genuinely reachable from
-    // hand-built MIR, because the index expression's shape is
-    // independent of the base's type: nothing about `base.ty()` being
-    // `Ty::Tuple` constrains `index` to be an `IntLiteral`. Fires
-    // before `MirExpr::ty()` would raise `pycc_mir`'s own equivalent
-    // panic, so the message pinned here is this crate's.
+#[should_panic(expected = "a computed index into a struct tuple of mixed element types")]
+fn a_computed_index_into_a_mixed_tuple_is_an_internal_error() {
+    // `pycc_types` admits a computed tuple index only when every element
+    // has one `int`/`bool`/`float` type (T0040 otherwise), so this is
+    // defensive -- reachable only from hand-built MIR.
     let mir = MirModule {
         items: vec![MirItem::Function {
             name: "f".to_string(),
             params: vec![
-                ("t".to_string(), Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int]))),
+                ("t".to_string(), Ty::Tuple(Box::new(vec![Ty::Int, Ty::Float]))),
                 ("i".to_string(), Ty::Int),
             ],
             return_ty: Ty::Int,
             body: vec![MirStmt::Return(Some(MirExpr::Subscript {
                 base: Box::new(MirExpr::Name {
                     name: "t".to_string(),
-                    ty: Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])),
+                    ty: Ty::Tuple(Box::new(vec![Ty::Int, Ty::Float])),
                 }),
                 index: Box::new(MirExpr::Name {
                     name: "i".to_string(),

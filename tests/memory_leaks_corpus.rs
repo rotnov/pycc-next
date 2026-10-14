@@ -113,3 +113,58 @@ fn next_of_stdin_runs_in_constant_memory() {
         peaks[1]
     );
 }
+
+/// `any`/`all` of a generator of CPython objects (non-strict mode) and
+/// iterating a homogeneous tuple of strings release every value they read,
+/// as do `set.update`/`list.extend` of a generator and a generator passed
+/// to a CPython object's method.
+#[test]
+#[ignore = "requires a CPython 3.13+ with a shared libpython (PYCC_PYTHON, default python3)"]
+fn object_any_all_and_tuple_iteration_run_in_constant_memory() {
+    let dir = ScratchDir::new("memory_corpus_any_all").expect("scratch dir");
+    let mut peaks = Vec::new();
+    for n in [N_SMALL, N_LARGE] {
+        let name = format!("any_all_{n}");
+        let src = dir.join(format!("{name}.py"));
+        std::fs::write(
+            &src,
+            format!(
+                "import json\n\nmixed = json.loads('[0, \"\", \"x\", [1]]')\nempty = json.loads('[]')\n\
+                 words = (\"a\", \"bc\", \"def\")\ntotal = 0\nfor i in range({n}):\n    \
+                 total += any(v for v in mixed) + all(v for v in mixed)\n    \
+                 total += sum([len(w + \"!\") for w in words])\n    \
+                 for w in words:\n        total += len(w * 2)\n    \
+                 seen = {{\"a\"}}\n    seen.update(w + \"?\" for w in words)\n    \
+                 xs = [\"x\"]\n    xs.extend(str(i) for i in range(3))\n    \
+                 out = empty.copy()\n    out.extend(w * 2 for w in words)\n    \
+                 total += len(seen) + len(xs) + len(out)\nprint(total)\n"
+            ),
+        )
+        .expect("write the probe source");
+        let bin = dir.join(&name);
+        let output = Command::new(env!("CARGO_BIN_EXE_pycc"))
+            .args(["build", "--release", "--non-strict", "--report-fallbacks"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .expect("pycc should spawn");
+        let report = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{report}");
+        assert!(!report.contains("fallback:"), "{report}");
+        let (out, peak) = memory_support::run_measured(&bin);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            String::from_utf8_lossy(&memory_support::cpython(&src)),
+            "output differs from CPython"
+        );
+        peaks.push(peak);
+    }
+    let growth = peaks[1] - peaks[0];
+    assert!(
+        growth <= GROWTH_LIMIT_KB,
+        "peak RSS grew by {growth} kB from {N_SMALL} to {N_LARGE} iterations ({} -> {} kB)",
+        peaks[0],
+        peaks[1]
+    );
+}

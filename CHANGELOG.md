@@ -109,6 +109,22 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - Non-strict mode: the inference solver runs again with what it settled written in, and
   a return it leaves open is typed from the body when every `return` agrees, so less
   code becomes a CPython object.
+- A tuple whose elements share one type: `t[k]` with a computed index (int, bool and
+  float elements; `IndexError: tuple index out of range` outside `[-len, len)`), and
+  `for x in t` / a comprehension over it (any element a list can hold).
+- A generator expression reading a module-level loop variable (`all(q % p for p in
+  primes)` inside `for q in ...`) is typed; `graph[u].append(v)` types the empty list
+  `graph`'s items start as (`{i: [] for i in range(n)}`); non-strict mode runs
+  `any`/`all` of a generator of CPython objects natively.
+- Item access on an instance of a module class defining `__getitem__`/`__setitem__`/
+  `__delitem__` (through `self`, or a name bound only to calls of the class) calls those
+  methods, and their unannotated parameters are inferred from those calls.
+- `list()` and `dict()` with no argument are `[]` and `{}`; `set.update(g)` and
+  `list.extend(g)` take a generator; a local rebound from a scalar (`temp = ord(c)`) to an
+  empty list is a separate variable; non-strict mode passes a generator to a CPython
+  object's method as an iterator over it.
+- The real-world corpus (v0.3 accept 3): strict mode passes 161/200, non-strict mode runs
+  98.1% of top-level statements natively.
 
 ### Changed
 

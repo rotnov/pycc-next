@@ -165,6 +165,15 @@ pub(crate) fn infer_call_expr(
     if !user_callee && let Some(ty) = crate::generator::next_call(callee, arg_tys, env)? {
         return Ok(ty);
     }
+    // `any(g)` / `all(g)` of a generator of CPython objects: each value's
+    // truth is CPython's (`pycc_mir`'s `GenAnyAll`).
+    if !user_callee
+        && matches!(callee.as_str(), "any" | "all")
+        && let [Ty::Generator(sig)] = arg_tys
+        && sig.0 == Ty::Object
+    {
+        return Ok(Ty::Bool);
+    }
     let materialized;
     let arg_tys: &[Ty] =
         if !user_callee && let Some(listed) = crate::generator::consumer_arg_tys(callee, arg_tys) {

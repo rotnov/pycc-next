@@ -25,7 +25,7 @@ mod itertools;
 mod methods;
 
 pub use itertools::{is_itertools_call, itertools_call};
-pub use methods::resolve_method;
+pub use methods::{materialized_method_args, resolve_method};
 
 /// How one builtin call lowers: the runtime symbol and its ABI.
 #[derive(Debug, Clone, PartialEq)]

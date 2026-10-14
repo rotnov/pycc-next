@@ -56,6 +56,8 @@ pub(super) fn object_display(kind: crate::ObjDisplayKind, elements: Vec<MirExpr>
 pub(crate) fn object_arg(arg: MirExpr) -> MirExpr {
     match arg {
         MirExpr::DictLiteral(_) | MirExpr::SetLiteral { .. } => MirExpr::ObjectBox(Box::new(arg)),
+        // A generator crosses as the CPython iterator over it.
+        _ if matches!(arg.ty(), Ty::Generator(_)) => MirExpr::ObjectBox(Box::new(arg)),
         MirExpr::TupleLiteral(ref elements)
             if elements
                 .iter()

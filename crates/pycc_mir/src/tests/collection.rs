@@ -713,14 +713,16 @@ fn tuple_subscript_ty_derives_the_positional_element_type() {
 }
 
 #[test]
-#[should_panic(expected = "tuple subscript index is not a literal int")]
-fn a_tuple_subscript_with_a_non_literal_index_ty_panics_with_an_internal_error() {
-    // By construction, `pycc_types::check` already rejects a
-    // non-literal tuple subscript index (T0040) before any HIR reaches
-    // `pycc_mir` -- but the panic path itself still needs direct
-    // coverage via a hand-built node that bypasses that guarantee.
+#[should_panic(expected = "computed index into an empty tuple")]
+fn a_computed_index_into_an_empty_tuple_ty_panics_with_an_internal_error() {
+    // A computed index is admitted only into a non-empty tuple of one
+    // scalar element type (T0040 otherwise); the panic path still needs
+    // direct coverage via a hand-built node.
     let expr = MirExpr::Subscript {
-        base: Box::new(MirExpr::TupleLiteral(vec![MirExpr::IntLiteral(1)])),
+        base: Box::new(MirExpr::Name {
+            name: "t".to_string(),
+            ty: Ty::Tuple(Box::new(Vec::new())),
+        }),
         index: Box::new(MirExpr::Name {
             name: "i".to_string(),
             ty: Ty::Int,

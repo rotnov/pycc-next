@@ -272,6 +272,7 @@ pub(crate) fn bind_comp_loop_var(
                     Ty::Dict(kv) => Some(kv.0),
                     Ty::Str => Some(Ty::Str),
                     Ty::Generator(sig) => Some(sig.0),
+                    Ty::Tuple(items) => pycc_hir::homogeneous_tuple_element(&items).cloned(),
                     // Non-strict mode: iterated through CPython.
                     Ty::Object if crate::non_strict::is_non_strict() => Some(Ty::Object),
                     _ => None,

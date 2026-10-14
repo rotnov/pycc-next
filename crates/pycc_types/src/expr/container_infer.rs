@@ -410,6 +410,17 @@ pub(crate) fn infer_subscript_expr(
         // when `k` is known at compile time, so every failure shape
         // (non-literal, negative, out-of-range) shares one code.
         Ty::Tuple(elems) => {
+            // A computed `int` index into a tuple whose elements share one
+            // `int`/`bool`/`float` type (`t[k]` over `(True, False, True)`):
+            // every position has that type.
+            if !matches!(index.as_ref(), HirExpr::IntLiteral(_))
+                && matches!(index_ty, Ty::Int | Ty::Bool)
+                && let Some(first) = elems.first()
+                && matches!(first, Ty::Int | Ty::Bool | Ty::Float)
+                && elems.iter().all(|elem| elem == first)
+            {
+                return Ok(first.clone());
+            }
             let HirExpr::IntLiteral(literal_index) = index.as_ref() else {
                 return Err(Diagnostic::error(
                     "T0040",

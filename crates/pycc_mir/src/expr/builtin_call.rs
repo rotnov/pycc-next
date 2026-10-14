@@ -80,7 +80,12 @@ pub(crate) fn lower_builtin_method(
     method: &str,
     args: Vec<MirExpr>,
 ) -> Result<MirExpr, (MirExpr, Vec<MirExpr>)> {
-    let tys: Vec<_> = args.iter().map(MirExpr::ty).collect();
+    let mut tys: Vec<_> = args.iter().map(MirExpr::ty).collect();
+    let mut args = args;
+    if let Some(listed) = pycc_hir::builtins::materialized_method_args(&base.ty(), method, &tys) {
+        args = args.into_iter().map(crate::comp_source::gen_to_list).collect();
+        tys = listed;
+    }
     match resolve_method(&base.ty(), method, &tys) {
         Some(Ok(sig)) => {
             let mut all = Vec::with_capacity(args.len() + 1);

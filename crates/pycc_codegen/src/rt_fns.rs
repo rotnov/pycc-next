@@ -146,6 +146,7 @@ pub(super) struct RtFns<'ctx> {
     pub(super) list_new: FunctionValue<'ctx>,
     pub(super) list_append: FunctionValue<'ctx>,
     pub(super) list_index_error: FunctionValue<'ctx>,
+    pub(super) tuple_index_error: FunctionValue<'ctx>,
     pub(super) list_set: FunctionValue<'ctx>,
     pub(super) list_pop: FunctionValue<'ctx>,
     pub(super) list_insert: FunctionValue<'ctx>,
@@ -641,6 +642,7 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_list_index_error_of",
             void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
+        tuple_index_error: declare("pycc_rt_tuple_index_error", void_type.fn_type(&[], false)),
         list_set: declare(
             "pycc_rt_list_set",
             void_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),

@@ -105,9 +105,9 @@ fn the_deferred_iterable_shapes_keep_their_own_refusals() {
     let dir = ScratchDir::new("foreign_iteration_refused").expect("scratch");
     for (body, code, phrase) in [
         (
-            "t = (1, 2)\nfor x in t:\n    pass\n",
+            "t = (1, \"a\")\nfor x in t:\n    pass\n",
             "T0033",
-            "`tuple[int, int]` cannot be iterated",
+            "`tuple[int, str]` cannot be iterated",
         ),
     ] {
         let out = check(&dir, body);
