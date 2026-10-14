@@ -25,6 +25,11 @@ pub(super) struct RtFns<'ctx> {
     /// of an encoded int and of a tuple's already-hashed lanes.
     pub(super) hash_int: FunctionValue<'ctx>,
     pub(super) hash_tuple: FunctionValue<'ctx>,
+    /// `pycc_rt_hash_str`/`pycc_rt_hash_float`, a tuple lane of those types.
+    pub(super) hash_str: FunctionValue<'ctx>,
+    pub(super) hash_float: FunctionValue<'ctx>,
+    /// `pycc_rt_hash_tuple_object`, a tuple held as a tuple object.
+    pub(super) hash_tuple_object: FunctionValue<'ctx>,
     /// #1335: `pycc_rt_hash_pointer`/`pycc_rt_hash_slot_int`, an
     /// instance's identity hash and a user `__hash__`'s `int` result
     /// reduced as CPython's `slot_tp_hash` does.
@@ -591,6 +596,18 @@ pub(super) fn declare_rt_functions<'ctx>(
         hash_tuple: declare(
             "pycc_rt_hash_tuple",
             i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+        ),
+        hash_str: declare(
+            "pycc_rt_hash_str",
+            i64_type.fn_type(&[ptr_type.into()], false),
+        ),
+        hash_float: declare(
+            "pycc_rt_hash_float",
+            i64_type.fn_type(&[f64_type.into()], false),
+        ),
+        hash_tuple_object: declare(
+            "pycc_rt_hash_tuple_object",
+            i64_type.fn_type(&[ptr_type.into()], false),
         ),
         hash_pointer: declare(
             "pycc_rt_hash_pointer",

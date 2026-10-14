@@ -81,7 +81,14 @@ impl SourceSignatures {
     /// the same text successfully, so the empty table is a fail-closed
     /// default rather than a reachable outcome.
     pub(crate) fn from_source(source: &str) -> Self {
-        pycc_parser::parse(source).map_or_else(|_| Self::default(), |module| Self::collect(&module))
+        // A `@dataclass` class's `__init__` is the one the desugaring writes.
+        pycc_parser::parse(source).map_or_else(
+            |_| Self::default(),
+            |mut module| {
+                pycc_ast::expand_dataclasses(&mut module);
+                Self::collect(&module)
+            },
+        )
     }
 
     pub(crate) fn collect(module: &ModModule) -> Self {

@@ -122,7 +122,7 @@ fn a_native_compare_of_two_instances_stays_refused() {
     );
     let diagnostic = refusal(&source, true);
     assert_eq!(diagnostic.code, "T0021", "{diagnostic:#?}");
-    assert_eq!(diagnostic.message, "cannot compare `C` and `C`");
+    assert!(diagnostic.message.contains("`C.__eq__` returns `object`"), "{diagnostic:#?}");
 }
 
 #[test]

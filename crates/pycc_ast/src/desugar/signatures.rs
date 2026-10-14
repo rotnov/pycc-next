@@ -116,6 +116,20 @@ fn needs_flattening(parameters: &Parameters) -> bool {
             .any(|p| p.default.as_deref().is_some_and(|d| !is_literal(d)))
 }
 
+/// The factory of a `default_factory` default
+/// (`super::dataclasses::FACTORY_MARKER`), if `default` is one.
+fn factory_default(default: &Expr) -> Option<&Expr> {
+    let Expr::Call(call) = default else {
+        return None;
+    };
+    match (&*call.func, call.arguments.args.as_ref()) {
+        (Expr::Name(n), [factory]) if n.id.as_str() == super::dataclasses::FACTORY_MARKER => {
+            Some(factory)
+        }
+        _ => None,
+    }
+}
+
 /// The global a hoisted default lives in.
 pub(super) fn default_global(qualname: &str, param: &str) -> String {
     format!("_pycc_default_{}_{param}", qualname.replace('.', "_"))
@@ -134,6 +148,11 @@ fn take_signature(
         let name = p.parameter.name.to_string();
         let annotation = p.parameter.annotation.as_deref().cloned();
         let default = p.default.as_deref().map(|d| {
+            // A dataclass `default_factory` (`super::dataclasses`): the
+            // factory is called at every call site omitting the argument.
+            if let Some(factory) = factory_default(d) {
+                return super::build::call(factory.clone(), Vec::new(), range);
+            }
             if is_literal(d) || !flatten {
                 d.clone()
             } else {
@@ -256,7 +275,10 @@ struct Sigs {
 impl Sigs {
     fn any_flat(&self) -> bool {
         self.functions.values().any(|s| s.flat)
-            || self.constructors.values().any(|s| s.flat)
+            || self
+                .constructors
+                .values()
+                .any(|s| s.flat || s.positional().any(|p| p.default.is_some()))
             || self.methods.values().any(|(s, ..)| s.flat)
     }
 }
@@ -331,6 +353,20 @@ fn collect(body: &mut Vec<Stmt>) -> Sigs {
                     } else if method_counts.get(def.name.as_str()) == Some(&1) {
                         sigs.methods
                             .insert(def.name.to_string(), (sig, is_static, class_name.clone()));
+                    }
+                }
+                // A class without its own `__init__` is constructed through
+                // the first base's (in base order) that has one.
+                if !sigs.constructors.contains_key(&class_name) {
+                    let inherited = class.arguments.as_ref().and_then(|args| {
+                        args.args.iter().find_map(|base| match base {
+                            Expr::Name(n) => sigs.constructors.get(n.id.as_str()).cloned(),
+                            _ => None,
+                        })
+                    });
+                    if let Some(mut ctor) = inherited {
+                        ctor.returns = Some(load(&class_name, class.range));
+                        sigs.constructors.insert(class_name.clone(), ctor);
                     }
                 }
             }
@@ -439,7 +475,11 @@ impl Rewrite<'_> {
         // A `*seq` call of a function without defaults keeps the starred
         // unpacking `desugar::starred` gives it, which takes a tuple too.
         let defaults = sig.positional().any(|p| p.default.is_some());
-        if !sig.flat && !mapping && (!star || !defaults) {
+        // HIR fills omitted defaults for function and method calls but not
+        // for a constructor call, so one of a constructor with defaults is
+        // bound here.
+        let constructor = matches!(receiver, Receiver::Implicit) && defaults;
+        if !sig.flat && !mapping && (!star || !defaults) && !constructor {
             return None;
         }
         let emitter = Emitter {

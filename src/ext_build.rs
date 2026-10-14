@@ -619,6 +619,20 @@ fn register_class_c(slot: usize, class: &UserExceptionClass) -> String {
     // attribute of this module.
     let qualified = pycc_ast::namespace::split_module_global(name);
     let type_name = type_spec_name(name);
+    // `dataclasses.FrozenInstanceError` (`pycc_ast::desugar::dataclasses`)
+    // is CPython's own class, so the host catches it by its real name.
+    if name == "__pycc_FrozenInstanceError" {
+        return format!(
+            "    if (pycc_ext_user_exception_classes[{slot}] == NULL) {{\n        \
+             PyObject *dataclasses = PyImport_ImportModule(\"dataclasses\");\n        \
+             if (dataclasses == NULL) {{\n            return -1;\n        }}\n        \
+             pycc_ext_user_exception_classes[{slot}] =\n            \
+             PyObject_GetAttrString(dataclasses, \"FrozenInstanceError\");\n        \
+             Py_DECREF(dataclasses);\n        \
+             if (pycc_ext_user_exception_classes[{slot}] == NULL) {{\n            \
+             return -1;\n        }}\n    }}\n"
+        );
+    }
     let mut out = format!("    if (pycc_ext_user_exception_classes[{slot}] == NULL) {{\n");
     // A single base is passed directly; two or more need a `PyTuple`, which
     // `PyErr_NewException` accepts and which is what gives the synthesized

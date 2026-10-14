@@ -181,12 +181,26 @@ pub(crate) fn lower_call_expr(
                 // shape before lowering instead of letting the
                 // dataclass `__repr__` run on an exception object.
                 let lowered = rewrite_exception_to_message(&lowered, classes);
-                rewrite_instance_to_repr(&lowered, classes)
+                rewrite_instance_to_text(&lowered, classes, scopes, false)
             } else {
                 lowered
             }
         })
         .collect();
+    // `str(x)` / `repr(x)` of an instance whose class defines `__str__` or
+    // `__repr__` is that method's result
+    // (`pycc_types::string_conversion::instance_text_call`).
+    if !is_user_defined
+        && !classes.contains_key(callee.as_str())
+        && matches!(callee.as_str(), "str" | "repr")
+        && let [arg] = args.as_slice()
+        && matches!(arg.ty(), Ty::Instance(_))
+    {
+        let rewritten = rewrite_instance_to_text(arg, classes, scopes, callee == "repr");
+        if rewritten.ty() == Ty::Str {
+            return rewritten;
+        }
+    }
     // A generator argument of a builtin that consumes it (`pycc_types`
     // types it as the list of its values).
     let args = if is_user_defined {

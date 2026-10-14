@@ -274,55 +274,37 @@ pub(crate) fn lower_compare_expr(
             Ok(object_compare) => return object_compare,
             Err(operands) => *operands,
         };
-    // #378 (PR-18): `==`/`!=` between same-class dataclass instances
-    // is rewritten to a `MirExpr::Call` to the class's
-    // compiler-synthesized `__eq__` method. `!=` is lowered as
-    // `__eq__(left, right) != True` (a `MirExpr::Compare` against a
-    // `BoolLiteral`, predating #604's `MirExpr::Not`) rather than
-    // negating the call result with `MirExpr::Not` directly --
-    // `MirExpr::Not` computes truthiness (bool/int/float/str/
-    // None/Optional) via `pycc_codegen`'s `truthy` helper, but this
-    // call's result is already a `bool`, so an equality compare
-    // against `true` is the simpler, equally-correct rewrite. This
-    // mirrors how `@property` redirects attribute access to method
-    // calls -- a MIR-level rewrite, not a new MIR node. Only `Eq`
-    // and `NotEq` are rewritten, and only for dataclass classes
-    // (whose synthesized `__eq__` has a known-correct signature);
-    // other comparison operators (`<`, `<=`, `>`, `>=`) and
-    // non-dataclass classes
-    // fall through to the default `MirExpr::Compare` (the type
-    // checker rejects them with `T0021` before they reach MIR
-    // lowering in normal compilation, but the MIR itself stays
-    // semantically correct for defense-in-depth).
-    if matches!(op, pycc_hir::CmpOpKind::Eq | pycc_hir::CmpOpKind::NotEq)
-        && let Some(eq_mangled) = super::super::compare_chain::dataclass_eq_callee(
-            &left_lowered.ty(),
-            &right_lowered.ty(),
-            classes,
-        )
-    {
-        let eq_call = MirExpr::Call {
-            callee: eq_mangled,
+    // A comparison between two instances of one class defining the
+    // operator's dunder is a call of it; `!=` through `__eq__` compares
+    // the call's result against `True` (the result is already a `bool`).
+    if let Some((callee, negate)) = super::super::compare_chain::instance_compare_callee(
+        *op,
+        &left_lowered.ty(),
+        &right_lowered.ty(),
+        classes,
+        scopes,
+    ) {
+        let call = MirExpr::Call {
+            callee,
             args: vec![left_lowered, right_lowered],
             ty: Ty::Bool,
         };
-        // The `matches!` guard above limits entry to
-        // `Eq`/`NotEq`, so an if/else (rather than a match
-        // with a `_` arm) suffices and avoids an unreachable
-        // arm that would be permanently uncovered under
-        // D-014's 100% coverage gate.
-        if *op == pycc_hir::CmpOpKind::Eq {
-            return eq_call;
+        if !negate {
+            return call;
         }
         return MirExpr::Compare {
             op: pycc_hir::CmpOpKind::NotEq,
-            left: Box::new(eq_call),
+            left: Box::new(call),
             right: Box::new(MirExpr::BoolLiteral(true)),
             ty: Ty::Bool,
         };
     }
     MirExpr::Compare {
-        op: *op,
+        op: super::super::compare_chain::instance_identity_op(
+            *op,
+            &left_lowered.ty(),
+            &right_lowered.ty(),
+        ),
         left: Box::new(left_lowered),
         right: Box::new(right_lowered),
         ty: Ty::Bool,
@@ -353,6 +335,7 @@ pub(crate) fn lower_compare_chain_expr(
             })
             .collect(),
         classes,
+        scopes,
     )
 }
 
@@ -382,7 +365,7 @@ pub(crate) fn lower_f_string_expr(
                     // rewrite first -- see the identical `print`-argument
                     // ordering comment above for why.
                     let lowered = rewrite_exception_to_message(&lowered, classes);
-                    let rewritten = rewrite_instance_to_repr(&lowered, classes);
+                    let rewritten = rewrite_instance_to_text(&lowered, classes, scopes, false);
                     MirFStringPart::Interpolation(Box::new(rewritten))
                 }
             })

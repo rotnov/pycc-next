@@ -479,6 +479,15 @@ fn shared_method_names(body: &[Stmt]) -> Vec<String> {
         .collect()
 }
 
+/// Writes out `module`'s `@dataclass` classes (`super::dataclasses`), so
+/// their generated `__init__` is published with its declared signature.
+/// The later [`super::desugar`] finds them already written out.
+pub fn expand_dataclasses_in(module: &mut ModModule) {
+    let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+    super::dataclasses::expand_dataclasses(&mut body);
+    module.body = body.into();
+}
+
 /// Each planned top-level statement's index with what it plans.
 fn plan(module: &ModModule, source: &str) -> Vec<(usize, Planned)> {
     let shared = shared_method_names(&module.body);
@@ -512,7 +521,11 @@ fn plan(module: &ModModule, source: &str) -> Vec<(usize, Planned)> {
 /// wrapper; [`split_ext_signatures`] adds their entries.
 #[must_use]
 pub fn ext_signatures(module: &ModModule, source: &str) -> Vec<ExtSignature> {
-    plan(module, source)
+    // The `@dataclass` classes' generated methods are planned as written
+    // out, as [`split_ext_signatures`] plans them.
+    let mut module = module.clone();
+    expand_dataclasses_in(&mut module);
+    plan(&module, source)
         .into_iter()
         .map(|(_, planned)| planned.signature)
         .collect()
@@ -522,6 +535,7 @@ pub fn ext_signatures(module: &ModModule, source: &str) -> Vec<ExtSignature> {
 /// right after the `def` or class statement it belongs to. Runs on the
 /// parsed `--ext` entry module, before [`super::desugar`].
 pub fn split_ext_signatures(module: &mut ModModule, source: &str) {
+    expand_dataclasses_in(module);
     let mut planned = plan(module, source);
     if planned.is_empty() {
         return;

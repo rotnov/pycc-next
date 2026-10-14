@@ -183,6 +183,14 @@ pub(crate) fn infer_call_expr(
     {
         return Err(std_receiver_shadowed(shadowed, symbol.module));
     }
+    // `str(x)` / `repr(x)` of an instance whose class defines `__str__` or
+    // `__repr__` (`pycc_mir` calls the method).
+    if env.lookup_function(callee).is_none()
+        && env.lookup_class(callee).is_none()
+        && let Some(resolved) = crate::string_conversion::instance_text_call(env, callee, arg_tys)
+    {
+        return resolved;
+    }
     if env.lookup_function(callee).is_none()
         && env.lookup_class(callee).is_none()
         && env.lookup_generic(callee).is_none()

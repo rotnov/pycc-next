@@ -231,7 +231,7 @@ fn isinstance_with_call_first_arg_is_c0001() {
 // -- #378 (PR-18): dataclass __eq__ comparison type checking ---------
 
 #[test]
-fn a_same_class_instance_comparison_without_eq_is_t0021() {
+fn a_same_class_instance_comparison_without_eq_is_identity() {
     // `Point` has `__init__` and `bump` but no `__eq__` method.
     // Comparing two `Point` instances with `==` should fall through
     // the `has_eq` check and produce T0021 (cannot compare instances).
@@ -261,8 +261,7 @@ fn a_same_class_instance_comparison_without_eq_is_t0021() {
             }],
         })),
     ]);
-    let diagnostic = check(&hir).unwrap_err();
-    assert_eq!(diagnostic.code, "T0021");
+    check(&hir).expect("two instances without `__eq__` compare by identity");
 }
 
 #[test]
@@ -363,7 +362,7 @@ fn a_same_class_dataclass_instance_comparison_with_eq_type_checks() {
 }
 
 #[test]
-fn a_non_dataclass_instance_comparison_with_user_eq_is_t0021() {
+fn a_non_dataclass_instance_comparison_with_user_eq_type_checks() {
     // A non-dataclass class with a user-defined `__eq__` method does
     // NOT accept `==` between same-class instances -- the MIR rewrite
     // for `__eq__` is restricted to dataclass classes (whose
@@ -456,6 +455,5 @@ fn a_non_dataclass_instance_comparison_with_user_eq_is_t0021() {
             },
         )],
     };
-    let diagnostic = check(&hir).unwrap_err();
-    assert_eq!(diagnostic.code, "T0021");
+    check(&hir).expect("a user `__eq__(self, other) -> bool` is called");
 }

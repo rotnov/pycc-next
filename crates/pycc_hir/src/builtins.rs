@@ -283,6 +283,7 @@ pub const CALL_NAMES: &[&str] = &[
     "oct",
     "ord",
     "pow",
+    "repr",
     "reversed",
     "set",
     "sorted",
@@ -319,6 +320,7 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
     Some(match name {
         "input"
         | "str"
+        | "repr"
         | "chr"
         | "bin"
         | "hex"
@@ -425,6 +427,18 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         // `<function f at 0x...>` / `<generator object g at 0x...>`.
         ("str", [f @ Ty::Callable(_)]) => sig("pycc_rt_closure_repr", &[f.clone()], str_),
         ("str", [g @ Ty::Generator(_)]) => sig("pycc_rt_gen_repr", &[g.clone()], str_),
+        // `repr(x)`: equal to `str(x)` for every type but `str` itself, whose
+        // repr is quoted and escaped (a container's `str` is its repr).
+        ("repr", [Ty::Int]) => sig("pycc_rt_int_to_str", &[int], str_),
+        ("repr", [Ty::Float]) => sig("pycc_rt_float_to_str", &[float], str_),
+        ("repr", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),
+        ("repr", [Ty::Str]) => sig("pycc_rt_str_repr", &[str_.clone()], str_),
+        ("repr", [list @ Ty::List(_)]) if renders_natively(list) => {
+            sig("pycc_rt_list_repr", &[list.clone()], str_)
+        }
+        ("repr", [dict @ Ty::Dict(_)]) => sig("pycc_rt_dict_repr", &[dict.clone()], str_),
+        ("repr", [f @ Ty::Callable(_)]) => sig("pycc_rt_closure_repr", &[f.clone()], str_),
+        ("repr", [g @ Ty::Generator(_)]) => sig("pycc_rt_gen_repr", &[g.clone()], str_),
         ("len", [Ty::Str]) => sig("pycc_rt_str_len", &[str_], int),
         ("ord", [Ty::Str]) => sig("pycc_rt_str_ord", &[str_], int),
         ("chr", [a]) if is_intlike(a) => sig("pycc_rt_str_chr", &[int], str_),

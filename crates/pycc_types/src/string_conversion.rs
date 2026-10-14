@@ -110,6 +110,7 @@ pub(crate) fn reject_unrenderable(
                         && env.lookup_class(name).is_none())
             } else {
                 env.lookup_class(name).is_some_and(|def| def.is_dataclass)
+                    || instance_text_dunder(env, name, false).is_some()
             };
             if renderable {
                 Ok(())
@@ -141,6 +142,65 @@ pub(crate) fn reject_unrenderable(
         // variant `to_str` cannot render needs its own arm above.
         _ => Ok(()),
     }
+}
+
+/// The method a class instance's text conversion calls, when its class
+/// renders through one: `__str__` (falling back to `__repr__`, as
+/// `object.__str__` does) for `str()`/`print`/an f-string, `__repr__` alone
+/// for `repr()`. The method must be found in the class's MRO and take only
+/// `self`, returning `str`; `pycc_mir` resolves the same MRO walk.
+pub(crate) fn instance_text_dunder(
+    env: &Environment,
+    class_name: &str,
+    want_repr: bool,
+) -> Option<&'static str> {
+    if pycc_hir::is_builtin_exception_class(class_name) || env.lookup_class(class_name).is_none() {
+        return None;
+    }
+    let candidates: &[&'static str] = if want_repr {
+        &["__repr__"]
+    } else {
+        &["__str__", "__repr__"]
+    };
+    let receiver = Ty::Instance(Box::new(class_name.to_string()));
+    candidates.iter().copied().find(|method| {
+        declares_method(env, class_name, method)
+            && matches!(
+                crate::class::resolve_method_call(env, &receiver, method, &[], &[]),
+                Ok(Ty::Str)
+            )
+    })
+}
+
+/// Whether a class of `class_name`'s MRO defines a method `method`.
+fn declares_method(env: &Environment, class_name: &str, method: &str) -> bool {
+    env.lookup_class(class_name).is_some_and(|def| {
+        def.mro.iter().any(|mro_class| {
+            !env.is_synthetic_class(mro_class)
+                && env
+                    .lookup_class(mro_class)
+                    .is_some_and(|mro_def| mro_def.methods.iter().any(|(name, _)| name == method))
+        })
+    })
+}
+
+/// `str(x)` / `repr(x)` of a class instance that renders through its own
+/// `__str__`/`__repr__` ([`instance_text_dunder`]): `Some(Ok(str))`; `None`
+/// for any other call.
+pub(crate) fn instance_text_call(
+    env: &Environment,
+    callee: &str,
+    arg_tys: &[Ty],
+) -> Option<Result<Ty, Diagnostic>> {
+    let want_repr = match callee {
+        "str" => false,
+        "repr" => true,
+        _ => return None,
+    };
+    let [Ty::Instance(class_name)] = arg_tys else {
+        return None;
+    };
+    instance_text_dunder(env, class_name, want_repr).map(|_| Ok(Ty::Str))
 }
 
 /// Gates a string-conversion *expression*: [`reject_unrenderable`] on its
@@ -207,14 +267,15 @@ fn unrenderable_instance(
     } else {
         format!(
             "print the instance's attributes individually, or declare `{class_name}` with \
-             `@dataclass` to get a synthesized `__repr__`"
+             `@dataclass` (or give it a `__repr__(self) -> str`)"
         )
     };
     Diagnostic::error(
         "C0001",
         format!(
             "string conversion of a `{class_name}` instance as {} is not supported yet; \
-             `print()` and f-string interpolation can render only a `@dataclass` instance \
+             `print()` and f-string interpolation can render only an instance whose class defines \
+             `__str__`/`__repr__` returning `str` \
              or a caught builtin exception",
             site.describe()
         ),
@@ -334,7 +395,7 @@ mod tests {
             err.help.as_deref(),
             Some(
                 "print the instance's attributes individually, or declare `C` with \
-                 `@dataclass` to get a synthesized `__repr__`"
+                 `@dataclass` (or give it a `__repr__(self) -> str`)"
             )
         );
     }
@@ -487,31 +548,16 @@ mod tests {
     const UPCAST: &str = "from typing import cast\n\n@dataclass\nclass Base:\n    x: int\n\n\
 class Derived(Base):\n    pass\n\nd = Derived(1)\n";
 
-    /// Codex round 2 on PR #985: MIR erases `cast(Base, d)` to `d`, whose
-    /// class is not a dataclass, so the gate must judge the erased value.
+    /// Codex round 2 on PR #985: MIR erases `cast(Base, d)` to `d`, so the
+    /// gate judges the erased value too; a subclass inheriting the
+    /// dataclass `__repr__` renders through it.
     #[test]
-    fn a_cast_from_a_plain_subclass_to_a_dataclass_base_is_c0001_under_print() {
-        assert_rejected(
-            &format!("{UPCAST}print(cast(Base, d))\n"),
-            "`Derived` instance",
-        );
+    fn a_cast_from_a_plain_subclass_to_a_dataclass_base_renders_under_print() {
+        assert_accepted(&format!("{UPCAST}print(cast(Base, d))\n"));
+        assert_accepted(&format!("{UPCAST}s: str = f\"{{cast(Base, d)}}\"\n"));
+        assert_accepted(&format!("{UPCAST}print(cast(Base, cast(Derived, d)))\n"));
     }
 
-    #[test]
-    fn a_cast_from_a_plain_subclass_to_a_dataclass_base_is_c0001_in_an_fstring() {
-        assert_rejected(
-            &format!("{UPCAST}s: str = f\"{{cast(Base, d)}}\"\n"),
-            "`Derived` instance as an f-string interpolation",
-        );
-    }
-
-    #[test]
-    fn a_nested_cast_is_looked_through_to_the_erased_value() {
-        assert_rejected(
-            &format!("{UPCAST}print(cast(Base, cast(Derived, d)))\n"),
-            "`Derived` instance",
-        );
-    }
 
     #[test]
     fn a_cast_to_the_dataclass_own_type_stays_renderable() {
@@ -535,15 +581,32 @@ class Derived(Base):\n    pass\n\nd = Derived(1)\n";
     }
 
     #[test]
-    fn a_user_written_repr_does_not_make_the_instance_renderable() {
-        // MIR never calls a non-dataclass `__repr__`; honouring it is the
-        // deferred positive slice, so this test flips visibly when it lands.
-        assert_rejected(
+    fn a_user_written_repr_makes_the_instance_renderable() {
+        assert_accepted(
             "class C:\n    def __init__(self, x: int) -> None:\n        self.x = x\n\n\
              \x20   def __repr__(self) -> str:\n        return \"C()\"\n\n\
-             print(C(1))\n",
+             print(C(1))\nprint(str(C(1)), repr(C(1)))\n",
+        );
+    }
+
+    #[test]
+    fn a_text_dunder_that_does_not_return_str_is_c0001() {
+        assert_rejected(
+            "class C:\n    def __repr__(self) -> int:\n        return 1\n\nprint(C())\n",
             "`C` instance",
         );
+        assert_rejected(
+            "class C:\n    def __str__(self, x: int) -> str:\n        return \"\"\n\nprint(C())\n",
+            "`C` instance",
+        );
+    }
+
+    #[test]
+    fn repr_of_an_instance_ignores_its_str() {
+        let source = "class C:\n    def __str__(self) -> str:\n        return \"s\"\n\n";
+        assert_accepted(&format!("{source}print(C(), str(C()))\n"));
+        let err = check_source(&format!("{source}x = repr(C())\n")).unwrap_err();
+        assert_eq!(err.code, "C0001");
     }
 
     #[test]
@@ -556,11 +619,10 @@ class Derived(Base):\n    pass\n\nd = Derived(1)\n";
     }
 
     #[test]
-    fn a_non_dataclass_subclass_of_a_dataclass_is_c0001() {
-        assert_rejected(
-            &format!("{DATACLASS}class Q(P):\n    pass\n\nprint(Q(1, 2))\n"),
-            "`Q` instance",
-        );
+    fn a_non_dataclass_subclass_of_a_dataclass_inherits_its_repr() {
+        assert_accepted(&format!(
+            "{DATACLASS}class Q(P):\n    pass\n\nprint(Q(1, 2))\n"
+        ));
     }
 
     #[test]

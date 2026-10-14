@@ -21,20 +21,24 @@ use std::collections::HashMap;
 /// `pycc_types::check` (or `check_and_resolve`) already accepted, so only a
 /// hand-built `MirExpr`/`HirModule` bypassing that validation (e.g. this
 /// crate's own internal-error tests under `tests/`) can reach either panic.
-/// #378 (PR-18): If `expr` is a class-instance-typed expression whose
-/// class has a `__repr__` method (found via the MRO), rewrites it to a
-/// `MirExpr::Call` to that `__repr__` method, passing the original
-/// expression as the `self` argument. The result type is `Ty::Str`. If
-/// the expression is not an instance or the class has no `__repr__`,
-/// returns the original expression unchanged.
 ///
-/// This is used by `HirExpr::FString`'s interpolation lowering and
-/// `HirExpr::Call`'s `print` argument lowering so the codegen's `to_str`
-/// receives a `str` scalar (from the `__repr__` call's return value)
-/// instead of an `Instance` scalar (which would panic in `to_str`).
-pub(super) fn rewrite_instance_to_repr(
+/// If `expr` is a class instance whose class defines a text-conversion
+/// dunder (found via the MRO), rewrites it to a `MirExpr::Call` of that
+/// method with `expr` as `self`; the result type is `Ty::Str`. With
+/// `want_repr` the method is `__repr__` (`repr(x)`, `!r`); without it
+/// `__str__`, falling back to `__repr__` as `object.__str__` does
+/// (`print`, `str(x)`, an f-string). Any other expression is returned
+/// unchanged.
+///
+/// `pycc_types::string_conversion::instance_text_dunder` admits exactly the
+/// instances this rewrites (a `(self) -> str` method), so the codegen's
+/// `to_str` receives a `str` scalar instead of an `Instance` one (which
+/// would panic in `to_str`).
+pub(super) fn rewrite_instance_to_text(
     expr: &MirExpr,
     classes: &HashMap<String, HirClassDef>,
+    scopes: &[HashMap<String, Ty>],
+    want_repr: bool,
 ) -> MirExpr {
     let Ty::Instance(class_name) = expr.ty() else {
         return expr.clone();
@@ -42,51 +46,37 @@ pub(super) fn rewrite_instance_to_repr(
     let Some(class_def) = classes.get(class_name.as_str()) else {
         return expr.clone();
     };
-    // #378 (PR-18): only rewrite for dataclass classes, whose
-    // compiler-synthesized `__repr__` has a known-correct signature
-    // `(self) -> str`. A user-defined `__repr__` on a non-dataclass class
-    // may have a different arity or return type, which would cause a
-    // codegen panic if rewritten to a call here. Non-dataclass instances
-    // pass through unchanged. The real gate is upstream (#977, D-237):
-    // `pycc_types::string_conversion` rejects with `C0001` every `print`
-    // argument and f-string interpolation that neither this rewrite nor
-    // `rewrite_exception_to_message` renders -- a conservative
-    // under-approximation, stricter than MIR's own resolution for a user
-    // class (plain or `@dataclass`) declared under any builtin
-    // exception name and for a tagged user exception class instantiated
-    // as a value -- so a widening here must widen the checker first, or
-    // the widened shape can never reach this function.
-    if !class_def.is_dataclass {
-        return expr.clone();
+    let candidates: &[&str] = if want_repr {
+        &["__repr__"]
+    } else {
+        &["__str__", "__repr__"]
+    };
+    for method in candidates {
+        let found = class_def.mro.iter().find_map(|mro_class| {
+            classes.get(mro_class.as_str()).and_then(|mro_def| {
+                mro_def
+                    .methods
+                    .iter()
+                    .find(|(mn, _)| mn == method)
+                    .map(|(_, mangled)| (mro_class, mangled.clone()))
+            })
+        });
+        if let Some((owner, mangled)) = found {
+            let callee = crate::receiver_exact::exact_callee(
+                class_name.as_str(),
+                owner,
+                mangled,
+                scopes,
+                classes,
+            );
+            return MirExpr::Call {
+                callee,
+                args: vec![expr.clone()],
+                ty: Ty::Str,
+            };
+        }
     }
-    let repr_mangled = class_def.mro.iter().find_map(|mro_class| {
-        // Every class in the MRO was registered when the class was lowered;
-        // using `.expect` (whose panic path lives in libcore, outside this
-        // crate's instrumented regions) avoids a `?` whose `None` branch is
-        // structurally unreachable and would show up as a permanently
-        // uncovered region under D-014's 100% coverage gate.
-        let mro_def = classes
-            .get(mro_class.as_str())
-            .expect("MRO class must be registered");
-        mro_def
-            .methods
-            .iter()
-            .find(|(mn, _)| mn == "__repr__")
-            .map(|(_, mangled)| mangled.clone())
-    });
-    // A dataclass always has a synthesized `__repr__` in its MRO (the
-    // `is_dataclass` guard above ensures we only reach here for dataclass
-    // classes). Using `.expect` (whose panic path lives in libcore,
-    // outside this crate's instrumented regions) avoids a `match` whose
-    // `None` arm is structurally unreachable for a dataclass and would
-    // show up as a permanently uncovered region under D-014's 100%
-    // coverage gate.
-    let repr_mangled = repr_mangled.expect("dataclass must have __repr__");
-    MirExpr::Call {
-        callee: repr_mangled,
-        args: vec![expr.clone()],
-        ty: Ty::Str,
-    }
+    expr.clone()
 }
 
 /// Part 3A of #541 (#736): if `expr` is typed as a registered exception

@@ -52,6 +52,7 @@ mod closures;
 mod collections;
 mod displays;
 mod comps;
+mod dataclasses;
 mod exprs;
 mod ext_generators;
 mod ext_signatures;
@@ -74,7 +75,10 @@ use ruff_python_ast::{Expr, ModModule, Stmt};
 
 pub use closures::qualname::function_qualname;
 pub use ext_generators::split_ext_generators;
-pub use ext_signatures::{ExtSignature, ext_entry_target, ext_signatures, split_ext_signatures};
+pub use ext_signatures::{
+    ExtSignature, expand_dataclasses_in as expand_dataclasses, ext_entry_target, ext_signatures,
+    split_ext_signatures,
+};
 
 /// The first `yield`/`yield from` inside `expr` (not inside a nested
 /// lambda), for a context where CPython refuses one (a comprehension).
@@ -138,6 +142,7 @@ impl Fresh {
 pub fn desugar(module: &mut ModModule) {
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+        dataclasses::expand_dataclasses(&mut body);
         displays::canonical_displays(&mut body);
         wildcard::expand_wildcards(&mut body);
         ndarray_ndim::close_ndims(&mut body);

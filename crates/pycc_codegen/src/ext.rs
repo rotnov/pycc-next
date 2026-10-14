@@ -899,8 +899,8 @@ pub fn is_ext_exportable_name(name: &str) -> bool {
 /// than a `PyMethodDef` row (#1427): the six rich comparisons and
 /// `__hash__`. Mirrors `src/ext_build/richcompare.rs`'s `SLOT_DUNDERS`;
 /// the parity test in `src/ext_build_tests/exports.rs` keeps the two equal.
-const SLOT_DUNDERS: [&str; 7] = [
-    "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__hash__",
+const SLOT_DUNDERS: [&str; 9] = [
+    "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__hash__", "__repr__", "__str__",
 ];
 
 /// #1427: whether `name` is `<Class>.<slot dunder>` -- a comparison or

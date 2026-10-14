@@ -129,7 +129,7 @@ fn link_bit<'ctx>(
             right,
             r,
         ),
-        MirCompareKind::DataclassEq { callee, negate } => {
+        MirCompareKind::InstanceDunder { callee, negate } => {
             // The synthesized `__eq__` is registered as an ordinary user
             // function, and the checker admits an instance operand only in
             // a same-dataclass `==`/`!=` link, so both lookups below hold
@@ -175,7 +175,7 @@ fn link_bit<'ctx>(
 /// Whether a link can leave a Python exception pending: only a dataclass
 /// `__eq__` call, which is guarded like every `MirExpr::Call`.
 fn link_can_raise(kind: &MirCompareKind) -> bool {
-    matches!(kind, MirCompareKind::DataclassEq { .. })
+    matches!(kind, MirCompareKind::InstanceDunder { .. })
 }
 
 fn release<'ctx>(emitter: &Emitter<'_, 'ctx>, source: &MirExpr, scalar: &Scalar<'ctx>) {

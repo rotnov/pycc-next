@@ -127,6 +127,32 @@ pub(super) fn emit_compare_values<'ctx>(
              pycc_types admits membership only in a CPython object"
         ),
     };
+    // Two class instances whose class defines no `__eq__` (`pycc_mir` calls
+    // the dunder otherwise), or `is`/`is not` between instances: identity,
+    // a pointer comparison.
+    if let (Scalar::Instance(lp), Scalar::Instance(rp)) = (&l, &r) {
+        let predicate = match op {
+            OrderedCmpOp::Eq => IntPredicate::EQ,
+            OrderedCmpOp::NotEq => IntPredicate::NE,
+            _ => panic!(
+                "pycc_codegen: internal error: an ordering comparison of two instances \
+                 reached codegen -- pycc_mir calls the class's dunder"
+            ),
+        };
+        let i64_ty = context.i64_type();
+        let li = builder
+            .build_ptr_to_int(*lp, i64_ty, "inst_l")
+            .expect("build_ptr_to_int should not fail for a pointer");
+        let ri = builder
+            .build_ptr_to_int(*rp, i64_ty, "inst_r")
+            .expect("build_ptr_to_int should not fail for a pointer");
+        let cond = builder
+            .build_int_compare(predicate, li, ri, "inst_is")
+            .expect("build_int_compare should not fail for two i64 operands");
+        return builder
+            .build_int_z_extend(cond, context.i8_type(), "bool_from_inst_is")
+            .expect("build_int_z_extend should not fail widening i1 to i8");
+    }
     // Two containers (lists, tuples, dicts, sets): CPython's own element-wise
     // comparison in the runtime (`pycc_rt::value`).
     if crate::containers::is_container_ty(&left_ty) {

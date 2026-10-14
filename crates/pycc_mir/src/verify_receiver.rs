@@ -470,7 +470,7 @@ impl Verifier<'_> {
             MirExpr::CompareChain { first, links } => {
                 self.expr(first);
                 for link in links {
-                    if let MirCompareKind::DataclassEq { callee, .. } = &link.kind {
+                    if let MirCompareKind::InstanceDunder { callee, .. } = &link.kind {
                         self.check_call(callee, &first.ty());
                     }
                     self.expr(&link.right);

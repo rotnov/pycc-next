@@ -1,13 +1,13 @@
 //! #1331 (Part 1 of #1327): the `hash(...)` builtin call, extended by #1335
 //! (Part 1 of #1332) to a user-class instance.
 //!
-//! `hash(x)` is admitted for an `int`, a `bool`, a tuple whose elements are
-//! all `int`/`bool`, and an instance whose class resolves to the identity
+//! `hash(x)` is admitted for an `int`, a `bool`, a `str`, a `float`, a tuple whose elements are
+//! all of those, and an instance whose class resolves to the identity
 //! hash or to a plain `def __hash__(self)` returning `int`/`bool`; it always
 //! yields `int`. A `list`, `dict` or `set` argument, and an instance whose
 //! class binds `__eq__` without `__hash__`, is `T0021` "unhashable type",
 //! the `TypeError` CPython raises for it reported statically (the `len(5)`
-//! precedent). Every other argument -- `str`, `float`, a float-element tuple,
+//! precedent). Every other argument -- a tuple holding a non-scalar,
 //! `None`, `frozenset[int]`, an instance `pycc_hir::resolve_instance_hash`
 //! refuses -- is hashable in CPython but not yet here, so it is an honest
 //! `C0001`.
@@ -51,8 +51,8 @@ fn wrong_arity(count: usize) -> Diagnostic {
 /// Whether `ty` is a type `hash()` compiles today.
 fn is_admitted(ty: &Ty) -> bool {
     match ty {
-        Ty::Int | Ty::Bool => true,
-        Ty::Tuple(elements) => elements.iter().all(|e| matches!(e, Ty::Int | Ty::Bool)),
+        Ty::Int | Ty::Bool | Ty::Str | Ty::Float => true,
+        Ty::Tuple(elements) => elements.iter().all(|e| matches!(e, Ty::Int | Ty::Bool | Ty::Str | Ty::Float)),
         _ => false,
     }
 }
@@ -69,7 +69,7 @@ fn refusal(ty: &Ty) -> Diagnostic {
     }
     not_implemented(
         ty,
-        "`hash()` currently accepts an `int`, a `bool`, a tuple of them, or a class instance"
+        "`hash()` currently accepts an `int`, `bool`, `str` or `float`, a tuple of them, or a class instance"
             .to_string(),
     )
 }
@@ -195,10 +195,8 @@ mod tests {
     #[test]
     fn a_hashable_but_unimplemented_argument_is_c0001() {
         for arg in [
-            Ty::Str,
-            Ty::Float,
             Ty::None,
-            tuple(vec![Ty::Float, Ty::Int]),
+            tuple(vec![Ty::None, Ty::Int]),
             Ty::FrozenSet(Box::new(Ty::Int)),
         ] {
             let err = check_call(std::slice::from_ref(&arg), &env()).unwrap_err();
@@ -234,7 +232,7 @@ mod tests {
             check_call_terms::<usize>(&[Some(Ok(Ty::Bool))]).unwrap(),
             Ty::Int
         );
-        let err = check_call_terms::<usize>(&[Some(Ok(Ty::Str))]).unwrap_err();
+        let err = check_call_terms::<usize>(&[Some(Ok(Ty::None))]).unwrap_err();
         assert_eq!(err.code, "C0001");
         let empty: [Option<Result<Ty, usize>>; 0] = [];
         let err = check_call_terms(&empty).unwrap_err();

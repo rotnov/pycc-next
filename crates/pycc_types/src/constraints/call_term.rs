@@ -285,6 +285,18 @@ pub(crate) fn collect_call_constraints(
     {
         return Ok(term);
     }
+    // `str(x)`/`repr(x)` of an instance: the check phase decides whether
+    // its class renders (`crate::string_conversion::instance_text_call`).
+    if !signatures.contains_key(callee)
+        && matches!(callee.as_str(), "str" | "repr")
+        && let [Some(term)] = arg_terms.as_slice()
+        && matches!(
+            super::unify::resolved_term(term.clone(), parents, concrete),
+            Some(Ty::Instance(_))
+        )
+    {
+        return Ok(Some(Ok(Ty::Str)));
+    }
     if callee == "print" {
         return Ok(Some(Ok(Ty::None)));
     }

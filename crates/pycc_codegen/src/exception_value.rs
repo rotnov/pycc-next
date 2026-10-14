@@ -46,6 +46,16 @@ pub(super) fn emit_str_bytes_constant<'ctx>(
 /// `Raise`/`RaiseFrom` on the raised exception only -- never on a `from`
 /// clause's cause -- immediately after `emit_exception_value` produces
 /// `exc_obj`, before the runtime's pending-exception state is set.
+/// The name an uncaught exception of class `class_name` prints with: a
+/// stdlib exception class `pycc_ast::desugar` declares under a reserved
+/// name prints as CPython names it (`dataclasses.FrozenInstanceError`).
+pub(super) fn display_class_name(class_name: &str) -> &str {
+    match class_name {
+        "__pycc_FrozenInstanceError" => "dataclasses.FrozenInstanceError",
+        other => other,
+    }
+}
+
 pub(super) fn emit_exception_set_frame<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -108,7 +118,7 @@ pub(super) fn emit_exception_value<'ctx>(
             };
             let type_tag = context.i8_type().const_int(*type_tag as u64, false);
             let (class_name_ptr, class_name_len) =
-                emit_str_bytes_constant(context, module, class_name, "exc_class_name");
+                emit_str_bytes_constant(context, module, display_class_name(class_name), "exc_class_name");
             Ok(builder
                 .build_call(
                     rt.exception_alloc,
@@ -192,7 +202,7 @@ pub(super) fn emit_exception_value<'ctx>(
             }
             let type_tag = context.i8_type().const_int(*type_tag as u64, false);
             let (class_name_ptr, class_name_len) =
-                emit_str_bytes_constant(context, module, class_name, "exc_class_name");
+                emit_str_bytes_constant(context, module, display_class_name(class_name), "exc_class_name");
             let members_len = context.i64_type().const_int(members.len() as u64, false);
             Ok(builder
                 .build_call(

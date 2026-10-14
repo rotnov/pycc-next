@@ -4,7 +4,7 @@
 
 use super::class::{
     class_def_of, class_source_name, lower_isinstance, lower_issubclass, mro_attrs,
-    rewrite_exception_to_message, rewrite_instance_to_repr, self_expr,
+    rewrite_exception_to_message, rewrite_instance_to_text, self_expr,
 };
 use super::{
     HirClassDef, InstantiateExpr, MirCompElt, MirComprehension, MirContainerReceiver, MirExpr,

@@ -77,6 +77,34 @@ pub(super) fn hash_bool<'ctx>(
         .expect("build_int_z_extend should not fail widening i8 to i64")
 }
 
+/// `pycc_rt_hash_str(s)`, the raw hash of a borrowed `str`.
+fn hash_str<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    text: inkwell::values::PointerValue<'ctx>,
+) -> IntValue<'ctx> {
+    builder
+        .build_call(rt.hash_str, &[text.into()], "hash_str")
+        .expect("build_call should not fail for pycc_rt_hash_str")
+        .try_as_basic_value()
+        .expect_basic("pycc_rt_hash_str returns an i64")
+        .into_int_value()
+}
+
+/// `pycc_rt_hash_float(x)`, the raw hash of a `float`.
+fn hash_float<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    value: inkwell::values::FloatValue<'ctx>,
+) -> IntValue<'ctx> {
+    builder
+        .build_call(rt.hash_float, &[value.into()], "hash_float")
+        .expect("build_call should not fail for pycc_rt_hash_float")
+        .try_as_basic_value()
+        .expect_basic("pycc_rt_hash_float returns an i64")
+        .into_int_value()
+}
+
 /// The raw hash of a tuple value whose element types are `elements`. A
 /// field is never released: a tuple field reader does not own its word
 /// (D-182), and tuple fields are never released at all today (D-124).
@@ -100,11 +128,12 @@ fn hash_tuple<'ctx>(
     for (index, element) in elements.iter().enumerate() {
         let field = builder
             .build_extract_value(tuple, index as u32, "hash_field")
-            .expect("build_extract_value should not fail for an in-range field")
-            .into_int_value();
+            .expect("build_extract_value should not fail for an in-range field");
         let lane = match element {
-            pycc_mir::Ty::Bool => hash_bool(context, builder, field),
-            _ => hash_int_word(builder, rt, field),
+            pycc_mir::Ty::Bool => hash_bool(context, builder, field.into_int_value()),
+            pycc_mir::Ty::Str => hash_str(builder, rt, field.into_pointer_value()),
+            pycc_mir::Ty::Float => hash_float(builder, rt, field.into_float_value()),
+            _ => hash_int_word(builder, rt, field.into_int_value()),
         };
         let slot = unsafe {
             builder
@@ -144,6 +173,23 @@ pub(super) fn emit_hash<'ctx>(
             hash_tuple(context, builder, rt, &elements, tuple)
         }
         (_, Scalar::Bool(value)) => hash_bool(context, builder, value),
+        (_, Scalar::Float(value)) => hash_float(builder, rt, value),
+        // A tuple display or call result held as a tuple object.
+        (_, Scalar::List(tuple)) => {
+            let hash = builder
+                .build_call(rt.hash_tuple_object, &[tuple.into()], "hash_tuple_object")
+                .expect("build_call should not fail for pycc_rt_hash_tuple_object")
+                .try_as_basic_value()
+                .expect_basic("pycc_rt_hash_tuple_object returns an i64")
+                .into_int_value();
+            release_scalar_if_temporary(context, builder, rt, arg, &scalar);
+            hash
+        }
+        (_, Scalar::Str(text)) => {
+            let hash = hash_str(builder, rt, text);
+            release_scalar_if_temporary(context, builder, rt, arg, &scalar);
+            hash
+        }
         // An instance argument is `MirExpr::InstanceHash`, never this call.
         (_, other) => {
             let word = to_encoded_int(context, builder, other);

@@ -348,6 +348,12 @@ pub extern "C" fn pycc_rt_str_copy(s: *mut PyStrObj) -> *mut PyStrObj {
     s
 }
 
+/// `repr(s)` of a `str`: CPython's quoting and escapes (`'a'`, `"it's"`).
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_str_repr(s: *mut PyStrObj) -> *mut PyStrObj {
+    new_str(&repr(text_of(s)))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_empty() -> *mut PyStrObj {
     new_str("")

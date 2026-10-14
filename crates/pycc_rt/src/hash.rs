@@ -71,6 +71,26 @@ pub extern "C" fn pycc_rt_hash_int(word: i64) -> i64 {
     if hash == -1 { -2 } else { hash }
 }
 
+/// CPython's `hash(s)` of a `str` (the per-process SipHash key, or
+/// `PYTHONHASHSEED`'s). Borrows `s`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_hash_str(s: *mut crate::PyStrObj) -> i64 {
+    crate::str_hash::hash_str(unsafe { (*s).bytes() })
+}
+
+/// CPython's `hash(t)` of a tuple object (a `PyListObj` holding a tuple),
+/// raising `TypeError` for an unhashable element. Borrows `t`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_hash_tuple_object(t: *mut crate::PyListObj) -> i64 {
+    crate::value::hash_or_raise(crate::list::LIST_KIND_TUPLE, t as i64).unwrap_or(-1)
+}
+
+/// CPython's `hash(x)` of a `float`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_hash_float(x: f64) -> i64 {
+    crate::value::hash_float(x)
+}
+
 /// `object.__hash__` of the instance at `pointer`: CPython's
 /// `_Py_HashPointer`, the address rotated right by four bits, with `-1`
 /// mapped to `-2`. An instance is a `Box::into_raw` allocation that never

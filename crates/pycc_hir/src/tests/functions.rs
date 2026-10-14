@@ -376,6 +376,6 @@ fn an_f_string_with_a_format_spec_is_not_supported_yet() {
 }
 
 #[test]
-fn an_f_string_with_a_conversion_flag_is_not_supported_yet() {
-    assert_capability_error_message("x = 1\ny = f\"{x!r}\"\n", "conversion");
+fn an_f_string_with_the_ascii_conversion_flag_is_not_supported_yet() {
+    assert_capability_error_message("x = 1\ny = f\"{x!a}\"\n", "conversion flag");
 }

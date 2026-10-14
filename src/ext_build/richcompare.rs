@@ -54,8 +54,8 @@ use super::{
 /// The seven special methods this module installs. The lexical mirror in
 /// `pycc_codegen::is_ext_exportable_name` copies this list, and the export
 /// parity test pins the two together.
-pub(crate) const SLOT_DUNDERS: [&str; 7] = [
-    "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__hash__",
+pub(crate) const SLOT_DUNDERS: [&str; 9] = [
+    "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__hash__", "__repr__", "__str__",
 ];
 
 /// The six comparisons and the `Py_LT`... operation each one answers.
@@ -123,7 +123,14 @@ pub(crate) struct ExtSlotDunders {
     pub(crate) comparisons: Vec<(&'static str, ExtExport)>,
     /// The `Py_tp_hash` slot, always installed.
     pub(crate) hash: SlotHash,
+    /// `__repr__` / `__str__` the class resolves, as `(dunder name,
+    /// export)`, installed as `Py_tp_repr` / `Py_tp_str` so the host's
+    /// `repr()`, `str()` and `print` run them.
+    pub(crate) text: Vec<(&'static str, ExtExport)>,
 }
+
+/// The text-conversion dunders and the slot each one fills.
+const TEXT_SLOTS: [(&str, &str); 2] = [("__repr__", "Py_tp_repr"), ("__str__", "Py_tp_str")];
 
 /// How a class's own namespace binds one of the seven names.
 enum Binding<'m> {
@@ -369,16 +376,27 @@ pub(crate) fn collect_slot_dunders(
             Some(_) => Some(SlotHash::NotImplemented),
             None => Some(SlotHash::Identity),
         };
+        let mut text = Vec::new();
+        for (name, _) in TEXT_SLOTS {
+            match slot_export(artifact, module, def, name) {
+                Ok(Some(export)) => text.push((name, export)),
+                Ok(None) => {}
+                Err(gap) => refused.push(gap),
+            }
+        }
         gaps.extend(refused);
-        // A class resolving none of the seven keeps `object`'s slots: no
-        // entry, so its generated C is unchanged.
+        // A class resolving none of the slot dunders keeps `object`'s
+        // slots: no entry, so its generated C is unchanged.
         if let Some(hash) = hash
-            && (matches!(hash, SlotHash::Compiled(_)) || !comparisons.is_empty())
+            && (matches!(hash, SlotHash::Compiled(_))
+                || !comparisons.is_empty()
+                || !text.is_empty())
         {
             out.push(ExtSlotDunders {
                 class: carrier.class.clone(),
                 comparisons,
                 hash,
+                text,
             });
         }
     }
@@ -408,6 +426,7 @@ pub(crate) fn slot_functions_c(slots: &ExtSlotDunders, emitted: &mut Vec<String>
     for export in slots
         .comparisons
         .iter()
+        .chain(&slots.text)
         .map(|(_, export)| export)
         .chain(hash_export)
     {
@@ -469,6 +488,14 @@ pub(crate) fn slot_functions_c(slots: &ExtSlotDunders, emitted: &mut Vec<String>
             symbol = pycc_codegen::mangle_ext_name(&export.name)
         ));
     }
+    for (name, export) in &slots.text {
+        out.push_str(&format!(
+            "static PyObject *pycc_ext_{slot}_{class}(PyObject *self)\n{{\n    \
+             return pycc_ext_wrap_{symbol}(self, NULL, 0);\n}}\n\n",
+            slot = name.trim_matches('_'),
+            symbol = pycc_codegen::mangle_ext_name(&export.name)
+        ));
+    }
     out
 }
 
@@ -487,6 +514,17 @@ pub(crate) fn slot_rows(slots: &ExtSlotDunders) -> String {
         SlotHash::Identity => "pycc_ext_identity_hash".to_string(),
     };
     out.push_str(&format!("    {{Py_tp_hash, {hash}}},\n"));
+    for (name, _) in &slots.text {
+        let slot = TEXT_SLOTS
+            .iter()
+            .find(|(held, _)| held == name)
+            .map(|(_, slot)| *slot)
+            .expect("a resolved text dunder is one of the two");
+        out.push_str(&format!(
+            "    {{{slot}, pycc_ext_{}_{class}}},\n",
+            name.trim_matches('_')
+        ));
+    }
     out
 }
 

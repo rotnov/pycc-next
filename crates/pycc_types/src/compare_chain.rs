@@ -68,6 +68,12 @@ pub(crate) fn compare_link_ty(
             right_ty
         } else if matches!(right, HirExpr::NoneLiteral) {
             left_ty
+        } else if matches!(
+            (left_ty, right_ty),
+            (Ty::Instance(_), Ty::Instance(_))
+        ) {
+            // Two class instances: identity, a pointer comparison.
+            return Ok(Ty::Bool);
         } else {
             return crate::foreign::compare::general_identity_ty(op, left_ty, right_ty);
         };
@@ -121,23 +127,18 @@ pub(crate) fn compare_link_ty(
     {
         return result;
     }
-    // #378 (PR-18): `==`/`!=` between same-class dataclass instances
-    // is accepted -- the compiler-synthesized `__eq__` method has a
-    // known-correct signature `(self, other: SameClass) -> bool`.
-    // This is restricted to dataclass classes (not any class with a
-    // user-defined `__eq__`) because the MIR rewrite assumes the
-    // synthesized signature; a user-defined `__eq__` with wrong
-    // arity or return type would reach codegen and panic. Ordering
-    // operators (`<`, `<=`, `>`, `>=`) between instances are always
-    // rejected with T0021 -- pycc has no `__lt__`/`__le__`/`__gt__`/
-    // `__ge__` dispatch. Different-class comparisons also stay T0021.
-    if matches!(op, CmpOp::Eq | CmpOp::NotEq)
-        && let (Ty::Instance(left_class), Ty::Instance(right_class)) = (left_ty, right_ty)
+    // A comparison between two instances of one class: the operator's
+    // dunder (`__eq__`, `__lt__`, ...; `!=` falls back to `__eq__`),
+    // which must take the other instance and return `bool`; `==`/`!=`
+    // without `__eq__` is identity. `pycc_mir::compare_chain` resolves
+    // the same MRO walk. Different-class comparisons stay T0021.
+    if let (Ty::Instance(left_class), Ty::Instance(right_class)) = (left_ty, right_ty)
         && left_class == right_class
-        && let Some(class_def) = env.lookup_class(left_class)
-        && class_def.is_dataclass
+        && env.lookup_class(left_class).is_some()
+        && !env.is_synthetic_class(left_class)
+        && let Some(result) = instance_compare_ty(env, op, left_ty, right, right_ty)
     {
-        return Ok(Ty::Bool);
+        return result;
     }
     if let Some(result) = container_compare_ty(op, left_ty, right_ty) {
         return result;
@@ -204,6 +205,61 @@ pub(crate) fn infer_compare_chain(
 /// between two lists or tuples of one type whose elements are ordered
 /// (`pycc_rt::value` compares them element by element, as CPython does).
 /// `None` when the operands are not two containers.
+/// Types `left op right` between two instances of one class (see
+/// [`compare_link_ty`]): `None` when the class defines no dunder for an
+/// ordering operator, which then stays `T0021`.
+fn instance_compare_ty(
+    env: &Environment,
+    op: CmpOp,
+    left_ty: &Ty,
+    right: &HirExpr,
+    right_ty: &Ty,
+) -> Option<Result<Ty, Diagnostic>> {
+    let Ty::Instance(class_name) = left_ty else {
+        return None;
+    };
+    let candidates: &[&str] = match op {
+        CmpOp::Eq => &["__eq__"],
+        CmpOp::NotEq => &["__ne__", "__eq__"],
+        CmpOp::Lt => &["__lt__"],
+        CmpOp::LtE => &["__le__"],
+        CmpOp::Gt => &["__gt__"],
+        CmpOp::GtE => &["__ge__"],
+        _ => return None,
+    };
+    let class_def = env.lookup_class(class_name)?;
+    let declared = |method: &str| {
+        class_def.mro.iter().any(|mro_class| {
+            env.lookup_class(mro_class)
+                .is_some_and(|def| def.methods.iter().any(|(name, _)| name == method))
+        })
+    };
+    let Some(method) = candidates.iter().copied().find(|m| declared(m)) else {
+        // Identity, as `object.__eq__` compares.
+        return matches!(op, CmpOp::Eq | CmpOp::NotEq).then_some(Ok(Ty::Bool));
+    };
+    let result = crate::class::resolve_method_call(
+        env,
+        left_ty,
+        method,
+        std::slice::from_ref(right),
+        std::slice::from_ref(right_ty),
+    );
+    Some(match result {
+        Ok(Ty::Bool) => Ok(Ty::Bool),
+        Ok(other) => Err(Diagnostic::error(
+            "T0021",
+            format!(
+                "`{class_name}.{method}` returns `{}`; a comparison dunder pycc calls must \
+                 return `bool`",
+                other.name()
+            ),
+            Span::new(0, 0),
+        )),
+        Err(err) => Err(err),
+    })
+}
+
 fn container_compare_ty(op: CmpOp, left: &Ty, right: &Ty) -> Option<Result<Ty, Diagnostic>> {
     let container = |ty: &Ty| {
         matches!(

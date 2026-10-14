@@ -113,7 +113,10 @@ pub use exception::{
     pycc_rt_exception_raise_with_cause, pycc_rt_exception_type_matches,
     pycc_rt_ext_pending_message, pycc_rt_ext_pending_type,
 };
-pub use hash::{pycc_rt_hash_int, pycc_rt_hash_pointer, pycc_rt_hash_slot_int, pycc_rt_hash_tuple};
+pub use hash::{
+    pycc_rt_hash_float, pycc_rt_hash_int, pycc_rt_hash_pointer, pycc_rt_hash_slot_int,
+    pycc_rt_hash_str, pycc_rt_hash_tuple, pycc_rt_hash_tuple_object,
+};
 pub use instance::{
     PyInstanceObj, pycc_rt_ext_instance_carrier, pycc_rt_ext_instance_class,
     pycc_rt_ext_instance_copy, pycc_rt_ext_instance_delete_slot, pycc_rt_ext_instance_set_carrier,

@@ -75,12 +75,14 @@ pub fn dataclass_repr_body(display_name: &str, fields: &[(String, Ty)]) -> Vec<H
             parts.push(crate::FStringPart::Literal(", ".to_string()));
         }
         parts.push(crate::FStringPart::Literal(format!("{name}=")));
-        parts.push(crate::FStringPart::Interpolation(Box::new(
-            HirExpr::AttrGet {
+        // CPython renders each field with `repr()` (`name='a'`).
+        parts.push(crate::FStringPart::Interpolation(Box::new(HirExpr::Call {
+            callee: "repr".to_string(),
+            args: vec![HirExpr::AttrGet {
                 base: Box::new(HirExpr::Name("self".to_string())),
                 attr: name.clone(),
-            },
-        )));
+            }],
+        })));
     }
     parts.push(crate::FStringPart::Literal(")".to_string()));
     vec![HirStmt::Return(Some(HirExpr::FString(parts)))]

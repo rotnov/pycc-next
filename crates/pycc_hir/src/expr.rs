@@ -37,6 +37,7 @@
 mod bin_op_kind;
 pub(crate) mod comprehension;
 mod container_call;
+mod fstring;
 pub(crate) mod keyword_bind;
 pub(crate) mod object_keyword_call;
 mod receiver_class_call;
@@ -821,50 +822,7 @@ pub(crate) fn lower_expr(
         Expr::StringLiteral(lit) => HirExpr::StringLiteral(lit.value.to_str().to_string()),
         Expr::NoneLiteral(_) => HirExpr::NoneLiteral,
         Expr::FString(fstring) => {
-            let parts = fstring
-                .value
-                .elements()
-                .map(|element| -> Result<FStringPart, Diagnostic> {
-                    Ok(match element {
-                        pycc_ast::InterpolatedStringElement::Literal(lit) => {
-                            FStringPart::Literal(lit.value.to_string())
-                        }
-                        pycc_ast::InterpolatedStringElement::Interpolation(interp) => {
-                            if interp.debug_text.is_some() {
-                                // #720: the `=` debug specifier (`f"{n=}"`) renders the
-                                // source text plus `repr(value)`, which this crate does
-                                // not implement. Silently discarding `debug_text` would
-                                // compile cleanly and print the wrong value, so reject
-                                // it explicitly instead.
-                                return Err(unsupported(
-                                    "f-string debug specifier (=) is not supported yet",
-                                    interp.range,
-                                ));
-                            }
-                            if interp.conversion != pycc_ast::ConversionFlag::None {
-                                return Err(unsupported(
-                                    "f-string conversion flags (!r/!s/!a) are not supported yet",
-                                    interp.range,
-                                ));
-                            }
-                            if interp.format_spec.is_some() {
-                                return Err(unsupported(
-                                    "f-string format spec ({x:...}) is not supported yet",
-                                    interp.range,
-                                ));
-                            }
-                            FStringPart::Interpolation(Box::new(lower_expr(
-                                &interp.expression,
-                                in_function,
-                                class_name,
-                                imports,
-                                signatures,
-                            )?))
-                        }
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            HirExpr::FString(parts)
+            fstring::lower_fstring(fstring, in_function, class_name, imports, signatures)?
         }
         // #1212 (Part 4 of #1018): two or more operators lower to a
         // `HirExpr::CompareChain` (see `crate::compare_chain`); a single
