@@ -162,7 +162,7 @@ impl PyListObj {
     }
 
     /// The word of element `i`, which must be in range.
-    fn word_at(&self, i: usize) -> i64 {
+    pub(crate) fn word_at(&self, i: usize) -> i64 {
         if self.kind == LIST_KIND_BOOL {
             self.typed::<u8>()[i].word()
         } else {

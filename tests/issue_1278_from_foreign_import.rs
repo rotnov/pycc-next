@@ -1,7 +1,7 @@
 //! #1278: an unaliased, top-level `from <undotted module> import a, b` of a
 //! CPython module binds each name to the CPython object `module.<name>`,
 //! fetched with CPython's own `IMPORT_NAME`/`IMPORT_FROM` semantics, so
-//! `from itertools import product` behaves as it does under CPython. Part 1
+//! `from itertools import zip_longest` behaves as it does under CPython. Part 1
 //! of #1138 extends the channel to a dotted module
 //! (`tests/issue_1138_dotted_foreign_from_import.rs`).
 //!
@@ -68,7 +68,7 @@ fn check_accepts_a_foreign_from_import() {
     let dir = ScratchDir::new("from_foreign_check").expect("scratch");
     let output = check_with(
         &dir,
-        "from itertools import product, chain\nprint(str(product.__name__))\n",
+        "from itertools import zip_longest, chain\nprint(str(zip_longest.__name__))\n",
         &[],
     );
     assert_eq!(
@@ -117,7 +117,7 @@ fn the_shapes_outside_this_channel_keep_their_c0001() {
             // (`tests/issue_1383_block_from_import.rs`); a function body
             // does not.
             "from_foreign_function",
-            "def f() -> None:\n    from itertools import product\n",
+            "def f() -> None:\n    from itertools import zip_longest\n",
             "an `import` inside a function or block body",
         ),
         (
@@ -138,7 +138,7 @@ fn the_bound_name_follows_the_foreign_object_rules() {
     let dir = ScratchDir::new("from_foreign_fn_bind").expect("scratch");
     let output = check_with(
         &dir,
-        "from itertools import product\n\n\ndef f() -> None:\n    print(str(product))\n    p = product\n",
+        "from itertools import zip_longest\n\n\ndef f() -> None:\n    print(str(zip_longest))\n    p = zip_longest\n",
         &[],
     );
     assert_eq!(
@@ -150,10 +150,10 @@ fn the_bound_name_follows_the_foreign_object_rules() {
     );
     assert_one_error(
         "from_foreign_early_read",
-        "print(str(product))\nfrom itertools import product\n",
+        "print(str(zip_longest))\nfrom itertools import zip_longest\n",
         &[],
         "T0021",
-        "name `product` is not defined",
+        "name `zip_longest` is not defined",
     );
 }
 
@@ -216,26 +216,26 @@ fn an_embedded_build_of_a_non_stdlib_from_import_needs_the_lock() {
 #[test]
 fn a_project_module_s_from_import_links_but_is_not_re_exported() {
     let dir = ScratchDir::new("from_foreign_two_modules").expect("scratch");
-    write(&dir, "dep.py", "from itertools import product\nX = 1\n");
+    write(&dir, "dep.py", "from itertools import zip_longest\nX = 1\n");
     let admitted = pycc()
         .arg("check")
         .arg(write(
             &dir,
             "main.py",
-            "from dep import X\nfrom itertools import product\nprint(X)\n",
+            "from dep import X\nfrom itertools import zip_longest\nprint(X)\n",
         ))
         .output()
         .expect("pycc should spawn");
     assert_eq!(admitted.status.code(), Some(0), "{}", stdout_of(&admitted));
     let refused = pycc()
         .arg("check")
-        .arg(write(&dir, "main.py", "from dep import product\n"))
+        .arg(write(&dir, "main.py", "from dep import zip_longest\n"))
         .output()
         .expect("pycc should spawn");
     assert_eq!(refused.status.code(), Some(1));
     assert!(
         stdout_of(&refused).contains(
-            "dep.py` binds `product` to the CPython object `itertools.product`; re-exporting a \
+            "dep.py` binds `zip_longest` to the CPython object `itertools.zip_longest`; re-exporting a \
              foreign import across project modules is not supported yet"
         ),
         "{}",
@@ -309,12 +309,12 @@ fn a_from_import_binds_the_cpython_object_in_the_host() {
     let out = assert_matches_cpython(
         "from_foreign_hosted",
         "pycc_from_itertools_mod",
-        "from itertools import product, chain\n\
-         print(str(product))\nprint(str(product.__name__))\nprint(str(chain.__name__))\n",
+        "from itertools import zip_longest, chain\n\
+         print(str(zip_longest))\nprint(str(zip_longest.__name__))\nprint(str(chain.__name__))\n",
     );
     assert_eq!(
         out,
-        "<class 'itertools.product'>\nproduct\nchain\nno error\n"
+        "<class 'itertools.zip_longest'>\nzip_longest\nchain\nno error\n"
     );
 }
 
@@ -329,8 +329,8 @@ fn a_dependency_module_s_from_import_runs_in_the_host() {
     write(
         &dir,
         "dep.py",
-        "from itertools import product\n\
-         nm = str(product.__name__)\n\n\n\
+        "from itertools import zip_longest\n\
+         nm = str(zip_longest.__name__)\n\n\n\
          def name() -> str:\n    return nm\n",
     );
     build_ext(
@@ -343,7 +343,7 @@ fn a_dependency_module_s_from_import_runs_in_the_host() {
     let oracle = python(&dir, &raised_report("runpy.run_path('m.py')"));
     assert_ok(&oracle);
     assert_eq!(stdout_of(&compiled), stdout_of(&oracle));
-    assert_eq!(stdout_of(&compiled), "product\nno error\n");
+    assert_eq!(stdout_of(&compiled), "zip_longest\nno error\n");
 }
 
 #[test]
@@ -407,7 +407,7 @@ fn a_later_missing_name_fails_in_source_order_in_the_host() {
     let out = assert_matches_cpython(
         "from_foreign_missing_later",
         "pycc_from_missing_later_mod",
-        "print('before')\nfrom itertools import product, nope\nprint('after')\n",
+        "print('before')\nfrom itertools import zip_longest, nope\nprint('after')\n",
     );
     assert!(out.starts_with("before\nImportError "), "{out}");
     assert!(!out.contains("after"), "{out}");
@@ -437,7 +437,7 @@ fn an_embedded_build_runs_a_from_import_like_cpython() {
     let source = write(
         &dir,
         "m.py",
-        "from itertools import product\nprint(str(product))\n",
+        "from itertools import zip_longest\nprint(str(zip_longest))\n",
     );
     let build = pycc()
         .arg("build")
@@ -457,5 +457,5 @@ fn an_embedded_build_runs_a_from_import_like_cpython() {
         .expect("python3 should spawn");
     assert_ok(&oracle);
     assert_eq!(stdout_of(&embedded), stdout_of(&oracle));
-    assert_eq!(stdout_of(&embedded), "<class 'itertools.product'>\n");
+    assert_eq!(stdout_of(&embedded), "<class 'itertools.zip_longest'>\n");
 }

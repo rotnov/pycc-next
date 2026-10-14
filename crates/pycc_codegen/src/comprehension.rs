@@ -44,7 +44,7 @@
 use super::bigint_rc::{
     BigIntRefcount, emit_bigint_refcount_call, int_temporary_word, release_if_int_temporary,
 };
-use super::heap_rc::release_scalar_if_temporary;
+use super::heap_rc::{self, release_scalar_if_temporary};
 use super::rt_fns::RtFns;
 use super::set_instance::{SetEmitter, set_element_scalar};
 use super::{
@@ -125,6 +125,10 @@ struct CompLoop<'ctx> {
     tail: CompLoopTail<'ctx>,
     /// Freshly built `range` bounds this loop must release at `after_bb`.
     owned_range_operands: Vec<IntValue<'ctx>>,
+    /// A freshly built list this loop iterates (a call's result, a `str`'s
+    /// characters, a generator's values), released at `after_bb`, with the
+    /// pending-release mark it was held at.
+    owned_list: Option<(PointerValue<'ctx>, usize)>,
 }
 
 /// Emits the whole comprehension loop and returns the produced container
@@ -462,6 +466,7 @@ fn open_loop<'ctx>(
                     step_v,
                 },
                 owned_range_operands,
+                owned_list: None,
             }
         }
         CompSource::List(_) | CompSource::ListExpr(_) => {
@@ -490,6 +495,16 @@ fn open_loop<'ctx>(
                 ),
                 _ => unreachable!("the outer arm matched a list source"),
             };
+            // A fresh list is owned by the loop: held so an exception in the
+            // body releases it, and released after the loop.
+            let owned_list = match source {
+                CompSource::ListExpr(iterable) if !heap_rc::is_borrowed_read(iterable) => {
+                    let mark = heap_rc::pending_mark(rt);
+                    heap_rc::hold_owned(rt, heap_rc::HeapKind::List, list_ptr);
+                    Some((list_ptr, mark))
+                }
+                _ => None,
+            };
             // CPython lets a list grow while it is iterated, so the length is
             // re-read on every trip with no resize guard.
             let (lp, current) = open_indexed_loop(cx, function, prefix, None, |b| {
@@ -500,7 +515,7 @@ fn open_loop<'ctx>(
             // A borrowed element: the loop variable owns its own reference,
             // as `MirStmt::ForList`'s does.
             bind_borrowed(cx, var, var_ty, element);
-            lp
+            CompLoop { owned_list, ..lp }
         }
         CompSource::Dict(name) => {
             // Mirrors `MirStmt::ForDict`'s own shape exactly, including its
@@ -666,6 +681,7 @@ fn open_indexed_loop<'ctx>(
             // A container-iterating comprehension has no `range` bounds to
             // own.
             owned_range_operands: Vec::new(),
+            owned_list: None,
         },
         current,
     )
@@ -730,5 +746,9 @@ fn close_loop<'ctx>(cx: &CompCx<'_, 'ctx>, prefix: &str, lp: CompLoop<'ctx>) {
     // `pycc_rt_range_continue` read.
     for word in lp.owned_range_operands {
         emit_bigint_refcount_call(context, builder, rt, word, BigIntRefcount::Release);
+    }
+    if let Some((list_ptr, mark)) = lp.owned_list {
+        heap_rc::truncate_pending(rt, mark);
+        heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::List, list_ptr);
     }
 }

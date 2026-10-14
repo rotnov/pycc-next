@@ -81,8 +81,8 @@ fn assert_one_error(tag: &str, body: &str, code: &str, needle: &str) {
 /// module-level foreign-callable global called in a function, and a local
 /// bound to a foreign callable and called.
 const SUCCESS: &str = "import json\n\
-    from itertools import product\n\
-    P = product(\"ab\", \"c\")\n\
+    from itertools import zip_longest\n\
+    P = zip_longest(\"ab\", \"c\")\n\
     G = json.loads\n\
     \n\
     def f(s: str) -> int:\n    y = json.loads(s)\n    z = y\n    return len(z)\n\
@@ -418,10 +418,10 @@ fn an_unbound_object_global_raises_name_error_until_it_is_bound() {
     let out = assert_matches_cpython(
         "obj_fn_unbound_global",
         "pycc_obj_fn_unbound_mod",
-        "from itertools import product\n\n\
+        "from itertools import zip_longest\n\n\
          def _read() -> bool:\n    try:\n        return bool(P)\n    except Exception:\n        \
          print(\"unbound\")\n        return False\n\n\
-         print(_read())\nP = product(\"ab\", \"c\")\nprint(_read())\n",
+         print(_read())\nP = zip_longest(\"ab\", \"c\")\nprint(_read())\n",
     );
     assert_eq!(out, "unbound\nFalse\nTrue\nno error\n");
 }
@@ -529,10 +529,10 @@ fn an_embedded_build_catches_an_unbound_object_global_like_cpython() {
     let source = write(
         &dir,
         "m.py",
-        "from itertools import product\n\n\
+        "from itertools import zip_longest\n\n\
          def _read() -> bool:\n    try:\n        return bool(P)\n    except Exception:\n        \
          print(\"unbound\")\n        return False\n\n\
-         print(_read())\nP = product(\"ab\", \"c\")\nprint(_read())\n",
+         print(_read())\nP = zip_longest(\"ab\", \"c\")\nprint(_read())\n",
     );
     let build = pycc()
         .arg("build")

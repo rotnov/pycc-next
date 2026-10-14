@@ -62,6 +62,8 @@ mod int_bitwise;
 mod int_encoding;
 /// `set[int]`/`frozenset[int]`'s `PyIntSetObj` (D-121, Part 1 of #1319).
 mod int_set;
+/// Native `itertools` iterators (generator objects with a Rust frame).
+mod itertools;
 /// Standard input and output, shared with CPython's `sys` streams when an
 /// interpreter is present.
 mod io;

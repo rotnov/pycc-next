@@ -9,6 +9,24 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - Linux aarch64: a `pycc-vX.Y.Z-aarch64-linux.tar.gz` archive (glibc 2.39+), built,
   tested and smoke-tested on GitHub's `ubuntu-24.04-arm` runner next to the other two;
   CI runs the full test suite and the corpus gate on Linux aarch64.
+- `itertools` natively in strict mode (and in `--non-strict` and `--ext` code), with no
+  embedded CPython: `count`, `islice`, `chain`, `chain.from_iterable`, `accumulate`
+  (`operator` functions, `max`/`min`, two-argument lambdas of those, `initial=`),
+  `pairwise`, `groupby` (with a `key`), `product` (with `repeat=`), `permutations`,
+  `combinations` and `combinations_with_replacement`. Each returns a lazy iterator
+  implemented in the runtime, consumed by `for`, `list()`, `sum()`, `next()`,
+  comprehensions and every other generator consumer; inputs are lists, `str`s, `range`s
+  and generators, pulled only as far as CPython pulls them.
+- A list, set or dict comprehension over a generator (`[x for x in gen()]`).
+- An unannotated generator helper whose yields the solver cannot type from their terms
+  alone (a yielded tuple display, a value read from a local container) is typed from its
+  body once its parameters are known; this includes every lifted generator expression.
+
+### Fixed
+- A tuple boxed inside a loop (`list(...)` of a generator of tuples, a tuple stored in a
+  container) grew the stack on every iteration and crashed after ~10^5 iterations.
+- A comprehension over a fresh list (a call's result, a `str` expression) leaked that
+  list.
 
 ## [0.2.0] - 2026-10-12
 

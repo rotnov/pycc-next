@@ -41,7 +41,8 @@ pub(super) fn pending_builtin_call(
     parents: &mut [usize],
     concrete: &[Option<Ty>],
 ) -> Option<Option<TypeTerm>> {
-    if !pycc_hir::builtins::CALL_NAMES.contains(&callee)
+    if !(pycc_hir::builtins::CALL_NAMES.contains(&callee)
+        || pycc_hir::builtins::is_itertools_call(callee))
         || concrete_args(arg_terms, parents, concrete).is_some()
     {
         return None;

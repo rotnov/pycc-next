@@ -74,6 +74,9 @@ pub(crate) fn resolve_comp_iter(
                 Ty::Str => Ok(Ty::Str),
                 Ty::Dict(kv) => Ok(kv.0),
                 Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => Ok(*elem_ty),
+                // A generator is consumed into the list of its values
+                // first, as `sum`/`sorted` consume one.
+                Ty::Generator(sig) => Ok(sig.0),
                 other => Err(Diagnostic::error(
                     "T0033",
                     format!(
@@ -88,6 +91,7 @@ pub(crate) fn resolve_comp_iter(
             Ty::Object => Ok(Ty::Object),
             Ty::List(elem_ty) => Ok(*elem_ty),
             Ty::Str => Ok(Ty::Str),
+            Ty::Generator(sig) => Ok(sig.0),
             other => Err(non_object_iterable(&other)),
         },
     }

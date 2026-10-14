@@ -2,9 +2,9 @@
 //!
 //! ```python
 //! try:
-//!     from more_itertools import product   # or `import X as product`
+//!     from more_itertools import zip_longest   # or `import X as zip_longest`
 //! except ImportError:
-//!     product = None                       # or another foreign import
+//!     zip_longest = None                       # or another foreign import
 //! ```
 //!
 //! is admitted at module level. The name is whichever binding ran, typed
@@ -84,9 +84,9 @@ fn check_accepts_the_import_fallback_idiom() {
     for (tag, body) in [
         (
             "fallback_from_none",
-            "try:\n    from pycc_nosuch_1485 import product\nexcept ImportError:\n    \
-             product = None\nif product is None:\n    print('fallback')\n\n\
-             def has() -> bool:\n    return product is not None\n",
+            "try:\n    from pycc_nosuch_1485 import zip_longest\nexcept ImportError:\n    \
+             zip_longest = None\nif zip_longest is None:\n    print('fallback')\n\n\
+             def has() -> bool:\n    return zip_longest is not None\n",
         ),
         (
             "fallback_plain_none",
@@ -118,12 +118,12 @@ fn check_accepts_the_import_fallback_idiom() {
 fn a_native_fallback_value_is_refused_with_a_tailored_message() {
     let rendered = one_error(
         "fallback_native",
-        "try:\n    from itertools import product\nexcept ImportError:\n    product = 0\n",
+        "try:\n    from itertools import zip_longest\nexcept ImportError:\n    zip_longest = 0\n",
         "C0001",
     );
     assert!(
         rendered.contains(
-            "`product` is rebound in an `except ImportError` handler to a value other than \
+            "`zip_longest` is rebound in an `except ImportError` handler to a value other than \
              `None`; only a `None` or a fallback `import`/`from ... import` statement is \
              supported as the fallback of a foreign import yet"
         ),
@@ -137,39 +137,39 @@ fn a_native_fallback_value_is_refused_with_a_tailored_message() {
 /// `try` importing a different object.
 #[test]
 fn every_other_rebinding_keeps_the_shadowing_refusal() {
-    const TRY: &str = "try:\n    from itertools import product\n";
+    const TRY: &str = "try:\n    from itertools import zip_longest\n";
     for (tag, tail) in [
         (
             "fallback_else",
-            "except ImportError:\n    product = None\nelse:\n    product = None\n",
+            "except ImportError:\n    zip_longest = None\nelse:\n    zip_longest = None\n",
         ),
         (
             "fallback_value_error",
-            "except ValueError:\n    product = None\n",
+            "except ValueError:\n    zip_longest = None\n",
         ),
         (
             "fallback_after",
-            "except ImportError:\n    product = None\nproduct = None\n",
+            "except ImportError:\n    zip_longest = None\nzip_longest = None\n",
         ),
         (
             "fallback_two_trys",
-            "except ImportError:\n    product = None\n\
-             try:\n    from functools import product\nexcept ImportError:\n    product = None\n",
+            "except ImportError:\n    zip_longest = None\n\
+             try:\n    from functools import zip_longest\nexcept ImportError:\n    zip_longest = None\n",
         ),
         // A stray import beside a formed group: only a pair of imports both
         // recorded in the group, in different arms, is exempt.
         (
             "fallback_stray_value_error",
-            "except ValueError:\n    from functools import product\n\
-             except ImportError:\n    product = None\n",
+            "except ValueError:\n    from functools import zip_longest\n\
+             except ImportError:\n    zip_longest = None\n",
         ),
         (
             "fallback_stray_else",
-            "except ImportError:\n    product = None\nelse:\n    from functools import product\n",
+            "except ImportError:\n    zip_longest = None\nelse:\n    from functools import zip_longest\n",
         ),
         (
             "fallback_stray_finally",
-            "except ImportError:\n    product = None\nfinally:\n    from functools import product\n",
+            "except ImportError:\n    zip_longest = None\nfinally:\n    from functools import zip_longest\n",
         ),
     ] {
         let rendered = one_error(tag, &format!("{TRY}{tail}"), "C0001");
@@ -182,11 +182,11 @@ fn every_other_rebinding_keeps_the_shadowing_refusal() {
 fn a_handler_that_only_reads_the_name_is_unbound() {
     let rendered = one_error(
         "fallback_read_only",
-        "try:\n    from itertools import product\nexcept ImportError:\n    print(product)\n",
+        "try:\n    from itertools import zip_longest\nexcept ImportError:\n    print(zip_longest)\n",
         "T0021",
     );
     assert!(
-        rendered.contains("name `product` is not defined"),
+        rendered.contains("name `zip_longest` is not defined"),
         "{rendered}"
     );
 }
@@ -198,22 +198,22 @@ fn a_handler_that_only_reads_the_name_is_unbound() {
 fn a_read_after_a_handler_that_does_not_rebind_is_may_be_unbound() {
     let rendered = one_error(
         "fallback_read_after",
-        "try:\n    from itertools import product\nexcept ImportError:\n    pass\nprint(product)\n",
+        "try:\n    from itertools import zip_longest\nexcept ImportError:\n    pass\nprint(zip_longest)\n",
         "T0041",
     );
     assert!(
-        rendered.contains("`product` may not be bound on every path"),
+        rendered.contains("`zip_longest` may not be bound on every path"),
         "{rendered}"
     );
     // A handler read before its own rebinding is the same `T0041`.
     let rendered = one_error(
         "fallback_read_before",
-        "try:\n    from itertools import product\nexcept ImportError:\n    print(product)\n    \
-         product = None\n",
+        "try:\n    from itertools import zip_longest\nexcept ImportError:\n    print(zip_longest)\n    \
+         zip_longest = None\n",
         "T0041",
     );
     assert!(
-        rendered.contains("`product` may not be bound on every path"),
+        rendered.contains("`zip_longest` may not be bound on every path"),
         "{rendered}"
     );
 }
@@ -224,8 +224,8 @@ fn check_project(tag: &str, main: &str) -> Output {
     let dir = ScratchDir::new(tag).expect("scratch");
     std::fs::write(
         dir.join("a.py"),
-        "try:\n    from pycc_nosuch_1485 import product\nexcept ImportError:\n    \
-         from itertools import product\n\ndef f() -> bool:\n    return product is None\n",
+        "try:\n    from pycc_nosuch_1485 import zip_longest\nexcept ImportError:\n    \
+         from itertools import zip_longest\n\ndef f() -> bool:\n    return zip_longest is None\n",
     )
     .expect("write a.py");
     let entry = dir.join("main.py");
@@ -249,13 +249,13 @@ fn a_sibling_module_binding_the_fallback_name_is_refused_at_link() {
     for (tag, main, phrase) in [
         (
             "fallback_link_import",
-            "from a import f\nfrom itertools import product\n\nprint(f())\n",
-            "binds `product` to the CPython object `itertools.product`",
+            "from a import f\nfrom itertools import zip_longest\n\nprint(f())\n",
+            "binds `zip_longest` to the CPython object `itertools.zip_longest`",
         ),
         (
             "fallback_link_definition",
-            "from a import f\n\nproduct = 1\nprint(f())\n",
-            "defines `product`",
+            "from a import f\n\nzip_longest = 1\nprint(f())\n",
+            "defines `zip_longest`",
         ),
     ] {
         let output = check_project(tag, main);
@@ -325,9 +325,9 @@ fn a_missing_module_falls_back_to_none_in_the_host() {
     assert_hosted_like_cpython(
         "fallback_none_hosted",
         "pycc_fallback_none_mod",
-        "try:\n    from pycc_nosuch_1485 import product\nexcept ImportError:\n    \
-         product = None\nif product is None:\n    print('fallback none')\n\n\
-         def has() -> bool:\n    return product is not None\n\nprint(has())\n",
+        "try:\n    from pycc_nosuch_1485 import zip_longest\nexcept ImportError:\n    \
+         zip_longest = None\nif zip_longest is None:\n    print('fallback none')\n\n\
+         def has() -> bool:\n    return zip_longest is not None\n\nprint(has())\n",
         "fallback none\nFalse\n",
     );
 }

@@ -33,6 +33,8 @@
 //!   checking the count (see [`helpers`]); `yield from it` becomes `for v
 //!   in it: yield v`. An `--ext` module's public generators are split by
 //!   [`split_ext_generators`], which HIR lowering calls.
+//! * `itertools` calls become native builtins `__pycc_it_<function>`
+//!   (see [`itertools`]).
 //! * `map(f, xs)` and `filter(f, xs)` become list comprehensions, a lambda
 //!   argument inlined; `[*xs]` becomes `list(xs)`; `print(*xs, sep=s)`
 //!   becomes `print(s.join([str(x) for x in xs]))`.
@@ -54,6 +56,7 @@ mod ext_signatures;
 mod globals;
 mod helpers;
 mod iter_alias;
+mod itertools;
 mod hoist;
 mod keys;
 mod ndarray_ndim;
@@ -140,6 +143,7 @@ pub fn desugar(module: &mut ModModule) {
         iter_alias::iterator_readers(&mut body);
         aliases::drop_object_bases(&mut body);
         stdlib::native_stdlib_calls(&mut body);
+        itertools::native_itertools_calls(&mut body);
         webs::split_webs(&mut body);
         module.body = body.into();
     }

@@ -67,6 +67,7 @@ mod object_narrow;
 mod set_comp;
 mod signatures;
 mod try_stmt;
+mod yield_fallback;
 
 // Large `collect_expr_constraints` arms (mechanical extraction: each helper
 // re-destructures its own node and runs the arm body verbatim) and the

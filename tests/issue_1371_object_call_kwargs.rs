@@ -66,12 +66,12 @@ const KEYWORD: &str = "keyword call arguments are not supported yet";
 /// (a native-mode check, so no `object` annotation) accepts too.
 const MODULE_BODY: &str = "import builtins\n\
     from collections import OrderedDict\n\
-    from itertools import product\n\
+    from itertools import zip_longest\n\
     \n\
     srt = builtins.sorted\n\
     print(srt(\"312\", reverse=True))\n\
     print(builtins.sorted(\"cab\", key=None, reverse=False))\n\
-    print(builtins.list(product(\"ab\", repeat=2)))\n\
+    print(builtins.list(zip_longest(\"ab\", \"c\", fillvalue=\"-\")))\n\
     print(OrderedDict(a=1, b=\"x\", c=2.5, d=None))\n\
     print(builtins.int(\"ff\", base=16))\n\
     s = builtins.str(\"a,b,c\")\n\
@@ -83,7 +83,7 @@ const MODULE_BODY: &str = "import builtins\n\
 
 /// What `MODULE_BODY` prints under CPython.
 const MODULE_BODY_OUT: &str = "['3', '2', '1']\n['a', 'b', 'c']\n\
-    [('a', 'a'), ('a', 'b'), ('b', 'a'), ('b', 'b')]\n\
+    [('a', 'c'), ('b', '-')]\n\
     OrderedDict({'a': 1, 'b': 'x', 'c': 2.5, 'd': None})\n255\n['a', 'b,c']\n3\n3\nNone\n\
     ['c', 'b', 'a', ',', ',']\n";
 
@@ -140,11 +140,11 @@ fn check_accepts_every_module_body_keyword_call() {
 /// The shapes Part 8 does not admit keep a diagnostic, never a panic.
 #[test]
 fn the_shapes_outside_part_8_are_refused() {
-    const HEAD: &str = "import builtins\nfrom itertools import product\n";
+    const HEAD: &str = "import builtins\nfrom itertools import zip_longest\n";
     for (tag, tail, code, needle) in [
         (
             "obj_kw_list_value",
-            "product(\"ab\", repeat=[1])\n",
+            "zip_longest(\"ab\", fillvalue=[1])\n",
             "I0404",
             "passing a `list[int]` argument to a CPython object's call",
         ),
@@ -153,13 +153,13 @@ fn the_shapes_outside_part_8_are_refused() {
             // (`tests/issue_1435_instance_argument.rs`); a class method's
             // `cls`, which holds no instance, is not.
             "obj_kw_classmethod_cls",
-            "class P:\n    @classmethod\n    def f(cls) -> None:\n        product(state=cls)\n",
+            "class P:\n    @classmethod\n    def f(cls) -> None:\n        zip_longest(state=cls)\n",
             "I0404",
             "passing a class method's `cls` argument to a CPython object's call",
         ),
         (
             "obj_kw_double_star",
-            "d = {\"repeat\": 2}\nproduct(\"ab\", **d)\n",
+            "d = {\"fillvalue\": 2}\nzip_longest(\"ab\", **d)\n",
             "C0001",
             KEYWORD,
         ),
@@ -171,7 +171,7 @@ fn the_shapes_outside_part_8_are_refused() {
         ),
         (
             "obj_kw_duplicate",
-            "product(repeat=1, repeat=2)\n",
+            "zip_longest(fillvalue=1, fillvalue=2)\n",
             "L0001",
             "",
         ),

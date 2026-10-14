@@ -21,6 +21,7 @@ const GROWTH_LIMIT_KB: i64 = 1024;
 
 /// Helpers every probe body may call.
 const PRELUDE: &str = r#"
+import itertools
 from typing import Callable, Generator, Iterator
 
 
@@ -302,6 +303,10 @@ macro_rules! probe {
         }
     };
 }
+
+// `itertools` and `collections`, compiled natively.
+#[path = "memory_leaks/stdlib.rs"]
+mod stdlib;
 
 // `str` temporaries consumed without being stored.
 probe!(

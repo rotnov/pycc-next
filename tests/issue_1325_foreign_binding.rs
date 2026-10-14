@@ -1,5 +1,5 @@
 //! #1325: a module-level name bound to a CPython object value -- `x =
-//! product("ab", "c")` after `from itertools import product` -- holds the
+//! zip_longest("ab", "c")` after `from itertools import zip_longest` -- holds the
 //! object itself, and a bare-name `for t in x:` iterates it through
 //! CPython's own iterator protocol, so the items and any raised exception
 //! are CPython's own.
@@ -64,17 +64,17 @@ fn assert_one_error(tag: &str, body: &str, code: &str, needle: &str) {
 /// again over the now-exhausted iterator (which prints nothing), alias it
 /// to a second name that a truth test reads, then rebind the name to a
 /// second producer and iterate that.
-const SUCCESS: &str = "from itertools import product\n\
-    x = product(\"ab\", \"c\")\n\
+const SUCCESS: &str = "from itertools import zip_longest\n\
+    x = zip_longest(\"ab\", \"c\")\n\
     for t in x:\n    print(str(t))\n\
     for t in x:\n    print(str(t))\n\
     y = x\n\
     print(bool(y))\n\
-    x = product(\"d\", \"ef\")\n\
+    x = zip_longest(\"d\", \"ef\")\n\
     for t in x:\n    print(str(t))\n";
 
 /// What `SUCCESS` prints under CPython.
-const SUCCESS_OUT: &str = "('a', 'c')\n('b', 'c')\nTrue\n('d', 'e')\n('d', 'f')\n";
+const SUCCESS_OUT: &str = "('a', 'c')\n('b', None)\nTrue\n('d', 'e')\n(None, 'f')\n";
 
 #[test]
 fn check_accepts_a_module_level_object_binding_and_loop() {
@@ -105,13 +105,13 @@ fn check_accepts_a_module_level_object_binding_and_loop() {
 fn the_shapes_outside_the_admitted_binding_are_refused() {
     assert_one_error(
         "obj_bind_retype",
-        "from itertools import product\nx = 1\nif x:\n    x = product(\"ab\")\nprint(x)\n",
+        "from itertools import zip_longest\nx = 1\nif x:\n    x = zip_longest(\"ab\")\nprint(x)\n",
         "T0023",
         "cannot assign `object` to `x`, previously inferred as `int`",
     );
     assert_one_error(
         "obj_bind_comprehension",
-        "from itertools import product\nx = product(\"ab\")\nys = [t for t in x]\n",
+        "from itertools import zip_longest\nx = zip_longest(\"ab\")\nys = [t for t in x]\n",
         "I0404",
         "using `x`, which is bound to a CPython object",
     );
@@ -191,7 +191,7 @@ fn a_raising_binding_raises_cpythons_exception_in_the_host() {
     let out = assert_matches_cpython(
         "obj_bind_raises",
         "pycc_obj_bind_raises_mod",
-        "from itertools import product\nx = product(1, 2)\n",
+        "from itertools import zip_longest\nx = zip_longest(1, 2)\n",
     );
     assert_eq!(out, "TypeError 'int' object is not iterable\n");
 }
@@ -222,7 +222,7 @@ fn a_dependency_module_s_object_binding_iterates_in_the_host() {
     let dep = write(
         &dir,
         "dep.py",
-        "from itertools import product\nx = product(\"ab\", \"c\")\n",
+        "from itertools import zip_longest\nx = zip_longest(\"ab\", \"c\")\n",
     );
     let body = "from dep import x\nfor t in x:\n    print(str(t))\n";
     build_ext(&dir, "pycc_obj_bind_two_mod", body);
@@ -240,7 +240,7 @@ fn a_dependency_module_s_object_binding_iterates_in_the_host() {
     let compiled = python(&dir, "import pycc_obj_bind_two_mod\n");
     assert_ok(&compiled);
     assert_eq!(stdout_of(&compiled), stdout_of(&oracle));
-    assert_eq!(stdout_of(&compiled), "('a', 'c')\n('b', 'c')\n");
+    assert_eq!(stdout_of(&compiled), "('a', 'c')\n('b', None)\n");
 }
 
 /// A plain (embedded) build compiles its module with `ext` set, so the

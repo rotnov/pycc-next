@@ -938,6 +938,17 @@ pub(crate) fn resolve_comp_source(
                 };
                 (CompSource::ListExpr(str_to_list(name)), Ty::Str)
             }
+            // A generator is consumed into the list of its values first.
+            Ty::Generator(sig) => {
+                let elem = sig.0.clone();
+                bind_variable(scopes, var.to_string(), elem.clone());
+                kill_narrowing(scopes, var);
+                let generator = MirExpr::Name {
+                    name: name.clone(),
+                    ty: Ty::Generator(sig),
+                };
+                (CompSource::ListExpr(gen_to_list(generator)), elem)
+            }
             // Non-strict mode: a name bound to a CPython object.
             Ty::Object => {
                 bind_variable(scopes, var.to_string(), Ty::Object);
@@ -961,12 +972,28 @@ pub(crate) fn resolve_comp_source(
             let (source, elem) = match iterable.ty() {
                 Ty::List(elem) => (CompSource::ListExpr(iterable), *elem),
                 Ty::Str => (CompSource::ListExpr(str_to_list(iterable)), Ty::Str),
+                Ty::Generator(sig) => {
+                    let elem = sig.0.clone();
+                    (CompSource::ListExpr(gen_to_list(iterable)), elem)
+                }
                 _ => (CompSource::Object(iterable), Ty::Object),
             };
             bind_variable(scopes, var.to_string(), elem.clone());
             kill_narrowing(scopes, var);
             (source, elem)
         }
+    }
+}
+
+/// `list(g)` of a generator: the iteration source of a comprehension over
+/// it, consumed first as `sum`/`sorted` consume one.
+fn gen_to_list(generator: MirExpr) -> MirExpr {
+    let Ty::Generator(sig) = generator.ty() else {
+        panic!("pycc_mir: internal error: gen_to_list of a non-generator");
+    };
+    MirExpr::GenToList {
+        generator: Box::new(generator),
+        ty: Ty::List(Box::new(sig.0)),
     }
 }
 

@@ -271,6 +271,7 @@ pub(crate) fn bind_comp_loop_var(
                     Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => Some(*elem),
                     Ty::Dict(kv) => Some(kv.0),
                     Ty::Str => Some(Ty::Str),
+                    Ty::Generator(sig) => Some(sig.0),
                     // Non-strict mode: iterated through CPython.
                     Ty::Object if crate::non_strict::is_non_strict() => Some(Ty::Object),
                     _ => None,
@@ -296,6 +297,7 @@ pub(crate) fn bind_comp_loop_var(
             let elem = match term.and_then(|t| resolved_term(t, parents, concrete)) {
                 Some(Ty::List(elem)) => Ok(*elem),
                 Some(Ty::Str) => Ok(Ty::Str),
+                Some(Ty::Generator(sig)) => Ok(sig.0),
                 Some(Ty::Object) => Ok(Ty::Object),
                 None => fresh_term(parents, concrete),
                 Some(_) => fresh_term(parents, concrete),

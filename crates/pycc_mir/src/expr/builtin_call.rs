@@ -13,7 +13,7 @@ pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirEx
         args.into_iter()
             .enumerate()
             .map(|(i, arg)| {
-                if arg.ty() == Ty::Str && (i == 0 || name == "zip") {
+                if arg.ty() == Ty::Str && pycc_hir::builtins::str_iterable_arg(name, i) {
                     crate::str_to_list(arg)
                 } else {
                     arg
@@ -102,6 +102,7 @@ fn rt(symbol: &'static str, params: Vec<Ty>, ret: Ty, args: Vec<MirExpr>) -> Mir
             ret_word: false,
             word_args,
             kind_args: Vec::new(),
+            desc_args: Vec::new(),
         },
         args,
     }))

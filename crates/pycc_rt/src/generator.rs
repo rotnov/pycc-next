@@ -57,7 +57,7 @@ const DONE: u8 = 2;
 /// Resumed normally.
 const MODE_NONE: u8 = 0;
 /// Resumed to close: the `yield` raises `GeneratorExit`.
-const MODE_CLOSING: u8 = 1;
+pub(crate) const MODE_CLOSING: u8 = 1;
 /// Resumed by `throw()`: the `yield` raises [`PyGenObj::thrown`].
 const MODE_THROWING: u8 = 2;
 
@@ -88,7 +88,10 @@ pub struct PyGenObj {
     sent: u8,
     /// The value area holds the value of the body's `return v`.
     has_ret: u8,
-    _pad: [u8; 3],
+    /// A native iterator (`crate::itertools`): its `repr` is
+    /// `<NAME object at 0x...>`, as CPython's `itertools` objects print.
+    native: u8,
+    _pad: [u8; 2],
     size: u32,
     _pad2: u32,
     /// The exception `throw()` raises at the suspended `yield`.
@@ -152,7 +155,41 @@ pub extern "C" fn pycc_rt_gen_new(
 pub(crate) fn gen_repr(g: *mut PyGenObj) -> String {
     // SAFETY (caller): `g` is a live generator.
     let name = crate::closure::c_name(unsafe { (*g).name });
+    if unsafe { (*g).native } != 0 {
+        return format!("<{name} object at {:#x}>", g as usize);
+    }
     format!("<generator object {name} at {:#x}>", g as usize)
+}
+
+/// Marks `g` a native iterator (see [`PyGenObj::native`]).
+pub(crate) fn mark_native(g: *mut PyGenObj) {
+    // SAFETY (caller): `g` is live.
+    unsafe { (*g).native = 1 };
+}
+
+/// What a native iterator's frame is resumed for: `0` for the next value,
+/// [`MODE_CLOSING`] to close, [`MODE_THROWING`] to raise a thrown exception
+/// (which this call raises, clearing the mode).
+pub(crate) fn native_resume_mode(g: *mut PyGenObj) -> u8 {
+    // SAFETY (caller): `g` is live and running.
+    let mode = unsafe { (*g).mode };
+    if mode == MODE_THROWING {
+        // SAFETY: as above.
+        unsafe { pycc_rt_gen_raise_mode(g) };
+    }
+    mode
+}
+
+/// Ends a native iterator from its own resume: the object is finished and
+/// [`run`] frees its frame.
+pub(crate) fn native_finish(g: *mut PyGenObj) {
+    // SAFETY (caller): `g` is live and running.
+    unsafe { (*g).state = DONE };
+}
+
+/// The value area of a native iterator.
+pub(crate) fn native_area(g: *mut PyGenObj) -> *mut u8 {
+    area(g)
 }
 
 /// `str(g)` / `repr(g)` of a generator, as a new `str`.

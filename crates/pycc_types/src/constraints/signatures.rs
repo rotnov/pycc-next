@@ -563,6 +563,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         .collect::<HashSet<_>>();
 
     let mut resolved = HashMap::new();
+    let mut open_generators: Vec<(String, Vec<Ty>)> = Vec::new();
     for (name, signature) in &signatures {
         let param_tys = signature
             .0
@@ -591,30 +592,19 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(module_level)?;
-        // A generator's element type, resolved like a return type.
+        // A generator's element type, resolved like a return type; one the
+        // terms leave open is typed from the body once every other
+        // signature is known (`yield_fallback`).
         if let Some(element) = generator_elements.get(name) {
-            let element = resolved_private_signature_term(
+            let Some(element) = resolved_private_signature_term(
                 element.clone(),
                 &mut parents,
                 &concrete,
                 &non_scalar_local_roots,
-            )
-            .or_else(object_when_non_strict)
-            .ok_or_else(|| {
-                if super::public_inference::reports_missing_annotation(name) {
-                    return super::public_inference::at_function(hir, name, super::public_inference::return_needs_annotation(name));
-                }
-                Diagnostic::error(
-                    "T0021",
-                    format!(
-                        "cannot infer the type of the values generator `{name}` yields; add a \
-                         return annotation (`Iterator[...]`)"
-                    ),
-                    Span::new(0, 0),
-                )
-                .with_help(format!("add a return type annotation to `{name}`"))
-            })
-            .map_err(module_level)?;
+            ) else {
+                open_generators.push((name.clone(), param_tys));
+                continue;
+            };
             let (sent, returned) = generator_rest
                 .get(name)
                 .cloned()
@@ -645,6 +635,36 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         })
         .map_err(module_level)?;
         resolved.insert(name.clone(), (param_tys, return_ty));
+    }
+    // Sorted: a body-typed generator may call another one, typed first.
+    open_generators.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, param_tys) in open_generators {
+        let element = super::yield_fallback::infer_yield_from_body(hir, &name, &param_tys, &resolved)
+            .or_else(object_when_non_strict)
+            .ok_or_else(|| {
+                if super::public_inference::reports_missing_annotation(&name) {
+                    return super::public_inference::at_function(
+                        hir,
+                        &name,
+                        super::public_inference::return_needs_annotation(&name),
+                    );
+                }
+                Diagnostic::error(
+                    "T0021",
+                    format!(
+                        "cannot infer the type of the values generator `{name}` yields; add a \
+                         return annotation (`Iterator[...]`)"
+                    ),
+                    Span::new(0, 0),
+                )
+                .with_help(format!("add a return type annotation to `{name}`"))
+            })
+            .map_err(module_level)?;
+        let (sent, returned) = generator_rest
+            .get(&name)
+            .cloned()
+            .unwrap_or((Ty::None, Ty::None));
+        resolved.insert(name, (param_tys, Ty::generator_of(element, sent, returned)));
     }
     Ok(resolved)
 }

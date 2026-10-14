@@ -121,6 +121,46 @@ pub(crate) fn word_kind(rt: &RtFns<'_>, ty: &Ty) -> u64 {
     }
 }
 
+/// `pycc_rt::itertools`' descriptor of a value of type `ty`: its word kind,
+/// and for a tuple whether it is held by value, its arity and each
+/// element's kind (bit layout mirrored from `pycc_rt::itertools`).
+fn value_desc(rt: &RtFns<'_>, ty: &Ty) -> u64 {
+    match ty {
+        Ty::Tuple(elements) => {
+            let mut desc = word_kind(rt, ty);
+            if !pycc_hir::tuple_is_boxed(elements) {
+                desc |= 1 << 4;
+            }
+            desc |= (elements.len() as u64) << 5;
+            for (i, element) in elements.iter().enumerate() {
+                desc |= word_kind(rt, element) << (9 + 4 * i as u64);
+            }
+            desc
+        }
+        other => word_kind(rt, other),
+    }
+}
+
+/// The descriptor word of a builtin's descriptor argument
+/// (`pycc_hir::builtins::DescArg`): a value's, or an iterable source's --
+/// its element's descriptor with the list (bit 60) or generator (bit 61)
+/// flag.
+pub(crate) fn desc_word(rt: &RtFns<'_>, desc: &pycc_hir::builtins::DescArg) -> u64 {
+    match desc {
+        pycc_hir::builtins::DescArg::Value(ty) => value_desc(rt, ty),
+        pycc_hir::builtins::DescArg::Source(Ty::List(element)) => {
+            value_desc(rt, element) | (1 << 60)
+        }
+        pycc_hir::builtins::DescArg::Source(Ty::Generator(sig)) => {
+            value_desc(rt, &sig.0) | (1 << 61)
+        }
+        pycc_hir::builtins::DescArg::Source(other) => panic!(
+            "pycc_codegen: internal error: `{}` is not an iterable source",
+            other.name()
+        ),
+    }
+}
+
 fn i64_const<'ctx>(context: &'ctx Context, value: u64) -> IntValue<'ctx> {
     context.i64_type().const_int(value, false)
 }
@@ -139,9 +179,8 @@ pub(crate) fn build_tuple_new<'ctx>(
         .map(|ty| i8_type.const_int(word_kind(rt, ty), false))
         .collect();
     let array_type = i8_type.array_type(kinds.len() as u32);
-    let slot = builder
-        .build_alloca(array_type, "tuple_kinds")
-        .expect("build_alloca should not fail for a small byte array");
+    // In the entry block: a tuple built in a loop must not grow the stack.
+    let slot = crate::entry_slots::alloca_at_entry(builder, array_type, "tuple_kinds");
     builder
         .build_store(slot, i8_type.const_array(&kinds))
         .expect("build_store should not fail for a constant byte array");

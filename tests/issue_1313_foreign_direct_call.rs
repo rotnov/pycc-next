@@ -1,5 +1,5 @@
 //! #1313: a module-body direct call of a name bound to a CPython object --
-//! `from itertools import product` followed by `product("ab")` -- calls the
+//! `from itertools import zip_longest` followed by `zip_longest("ab")` -- calls the
 //! object through CPython's own vectorcall with positional scalar arguments,
 //! so the result and any raised exception are CPython's own.
 //!
@@ -75,7 +75,7 @@ fn check_accepts_a_module_body_direct_call() {
     let dir = ScratchDir::new("obj_call_check").expect("scratch");
     for body in [
         SUCCESS,
-        "from itertools import product\nproduct(\"ab\", \"cd\")\nproduct()\n",
+        "from itertools import zip_longest\nzip_longest(\"ab\", \"cd\")\nzip_longest()\n",
         "import itertools\nitertools(\"ab\")\n",
     ] {
         let output = check_with(&dir, body);
@@ -122,7 +122,7 @@ fn the_callee_follows_the_foreign_object_rules() {
     let dir = ScratchDir::new("obj_call_fn_body").expect("scratch");
     let output = check_with(
         &dir,
-        "from itertools import product\n\n\ndef f() -> None:\n    product(\"ab\")\n    p = product(\"ab\")\n",
+        "from itertools import zip_longest\n\n\ndef f() -> None:\n    zip_longest(\"ab\")\n    p = zip_longest(\"ab\")\n",
     );
     assert_eq!(
         output.status.code(),
@@ -133,9 +133,9 @@ fn the_callee_follows_the_foreign_object_rules() {
     );
     assert_one_error(
         "obj_call_early",
-        "product(\"ab\")\nfrom itertools import product\n",
+        "zip_longest(\"ab\")\nfrom itertools import zip_longest\n",
         "T0021",
-        "call to undefined function `product`",
+        "call to undefined function `zip_longest`",
     );
 }
 
@@ -145,7 +145,7 @@ fn the_callee_follows_the_foreign_object_rules() {
 fn the_argument_shapes_outside_the_scalars_are_refused() {
     assert_one_error(
         "obj_call_list_arg",
-        "from itertools import product\nproduct([1, 2])\n",
+        "from itertools import zip_longest\nzip_longest([1, 2])\n",
         "I0404",
         "passing a `list[int]` argument to a CPython object's call",
     );
@@ -153,13 +153,13 @@ fn the_argument_shapes_outside_the_scalars_are_refused() {
         // A plain keyword argument is admitted since Part 8 of #1371;
         // `**` unpacking is not.
         "obj_call_keyword",
-        "from itertools import product\nd = {\"repeat\": 2}\nproduct(\"ab\", **d)\n",
+        "from itertools import zip_longest\nd = {\"repeat\": 2}\nzip_longest(\"ab\", **d)\n",
         "C0001",
         "keyword call arguments are not supported yet",
     );
     assert_one_error(
         "obj_call_starred",
-        "from itertools import product\nxs = [\"ab\"]\nproduct(*xs)\n",
+        "from itertools import zip_longest\nxs = [\"ab\"]\nzip_longest(*xs)\n",
         "C0001",
         "a starred expression",
     );
@@ -172,7 +172,7 @@ fn iterating_a_direct_call_checks() {
     let dir = ScratchDir::new("obj_call_for").expect("scratch");
     let output = check_with(
         &dir,
-        "from itertools import product\nfor t in product(\"ab\", \"cd\"):\n    pass\n",
+        "from itertools import zip_longest\nfor t in zip_longest(\"ab\", \"cd\"):\n    pass\n",
     );
     assert!(output.status.success(), "{}", stdout_of(&output));
 }
@@ -286,7 +286,7 @@ fn a_raising_direct_call_raises_cpythons_exception_in_the_host() {
     let out = assert_matches_cpython(
         "obj_call_raises",
         "pycc_obj_call_raises_mod",
-        "from itertools import product\nproduct(1, 2)\n",
+        "from itertools import zip_longest\nzip_longest(1, 2)\n",
     );
     assert_eq!(out, "TypeError 'int' object is not iterable\n");
     let out = assert_matches_cpython(
