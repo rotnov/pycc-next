@@ -171,3 +171,10 @@ fn collections_deque_matches_cpython() {
 fn collections_counter_and_defaultdict_match_cpython() {
     assert_matches_cpython("collections_counter");
 }
+
+/// A `defaultdict` factory that rebinds the only global holding the dict it
+/// fills, read through `d[k]` and through the fused `d[k] += n`.
+#[test]
+fn a_reentrant_defaultdict_factory_matches_cpython() {
+    assert_matches_cpython("collections_defaultdict_reentrant");
+}

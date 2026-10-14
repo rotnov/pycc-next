@@ -168,10 +168,33 @@ pub(crate) fn missing(d: &mut PyDictObj, key: i64) -> Option<Result<i64, ()>> {
         (Flavor::Counter, _) => return Some(Ok(crate::tag_smallint(0))),
         (Flavor::DefaultDict, Factory::None) => return None,
         (Flavor::DefaultDict, Factory::Proto(proto)) => fresh_copy(d.value_kind, *proto),
-        (Flavor::DefaultDict, Factory::Call(obj)) => match call_factory(*obj, d.value_kind) {
-            Some(value) => value,
-            None => return Some(Err(())),
-        },
+        (Flavor::DefaultDict, Factory::Call(obj)) => {
+            // The factory is user code: it may drop the last reference to
+            // this dict (rebinding the global that held it) or rebind
+            // nothing but mutate it. Keep the dict and the factory alive
+            // across the call; `extra` is not used after it.
+            let obj = *obj;
+            let dict_ptr: *mut PyDictObj = d;
+            // SAFETY: `d` is live here; the matching decref is below.
+            unsafe { super::pycc_rt_dict_incref(dict_ptr) };
+            crate::closure::pycc_rt_closure_incref(obj);
+            let result = call_factory(obj, d.value_kind);
+            crate::closure::pycc_rt_closure_decref(obj);
+            let outcome = match result {
+                Some(value) => {
+                    value::retain(d.key_kind, key);
+                    value::retain(d.value_kind, value);
+                    // A factory that stored `key` itself is overwritten, as
+                    // CPython's `__missing__` does.
+                    d.insert(key, value);
+                    Some(Ok(value))
+                }
+                None => Some(Err(())),
+            };
+            // SAFETY: balances the incref above; `d` is not used after it.
+            unsafe { super::pycc_rt_dict_decref(dict_ptr) };
+            return outcome;
+        }
     };
     value::retain(d.key_kind, key);
     value::retain(d.value_kind, value);

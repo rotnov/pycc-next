@@ -256,14 +256,23 @@ pub unsafe extern "C" fn pycc_rt_dict_get(d: *mut PyDictObj, key: i64) -> i64 {
             value::retain(d.value_kind, v);
             v
         }
-        Ok((None, _)) => match flavor::missing(d, key) {
-            Some(Ok(value)) => value,
-            Some(Err(())) => d.sentinel(),
-            None => {
-                raise_key_error(d.key_kind, key);
-                d.sentinel()
-            }
-        },
+        Ok((None, _)) => {
+            // A `defaultdict` factory is user code that may drop the last
+            // reference to `d`: keep it alive until this call is done.
+            let dict_ptr: *mut PyDictObj = d;
+            unsafe { pycc_rt_dict_incref(dict_ptr) };
+            let out = match flavor::missing(d, key) {
+                Some(Ok(value)) => value,
+                Some(Err(())) => d.sentinel(),
+                None => {
+                    raise_key_error(d.key_kind, key);
+                    d.sentinel()
+                }
+            };
+            // SAFETY: balances the incref above; `d` is not used after it.
+            unsafe { pycc_rt_dict_decref(dict_ptr) };
+            out
+        }
         Err(()) => d.sentinel(),
     }
 }
@@ -277,7 +286,17 @@ pub unsafe extern "C" fn pycc_rt_dict_get(d: *mut PyDictObj, key: i64) -> i64 {
 /// `d` must be a live dict with `int` values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_dict_add_int(d: *mut PyDictObj, key: i64, n: i64) {
-    let d = dict(d);
+    // A `defaultdict` factory run for a missing key is user code that may
+    // drop the last reference to `d` or mutate it: keep `d` alive for the
+    // whole operation (`insert` re-locates the key, so a mutation is fine).
+    unsafe { pycc_rt_dict_incref(d) };
+    unsafe { dict_add_int(dict(d), key, n) };
+    // SAFETY: balances the incref above.
+    unsafe { pycc_rt_dict_decref(d) };
+}
+
+/// [`pycc_rt_dict_add_int`] on a dict its caller keeps alive.
+unsafe fn dict_add_int(d: &mut PyDictObj, key: i64, n: i64) {
     let found = match d.locate(key) {
         Ok((found, _)) => found,
         Err(()) => return,
