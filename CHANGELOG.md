@@ -4,6 +4,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- Linux aarch64: a `pycc-vX.Y.Z-aarch64-linux.tar.gz` archive (glibc 2.39+), built,
+  tested and smoke-tested on GitHub's `ubuntu-24.04-arm` runner next to the other two;
+  CI runs the full test suite and the corpus gate on Linux aarch64.
+
 ## [0.2.0] - 2026-10-12
 
 Rust speed, numpy, more Python. Every benchmark is within 3x of hand-written Rust,

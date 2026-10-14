@@ -176,12 +176,13 @@ building it, failures included.
 
 ## Try it
 
-### From a release (x86_64 Linux, arm64 macOS)
+### From a release (x86_64 and aarch64 Linux, arm64 macOS)
 
 Download the archive for your machine from
 [Releases](https://github.com/rotnov/pycc-next/releases) --
-`pycc-vX.Y.Z-x86_64-linux.tar.gz` or `pycc-vX.Y.Z-aarch64-macos.tar.gz` (Apple
-silicon) -- and unpack it anywhere:
+`pycc-vX.Y.Z-x86_64-linux.tar.gz`, `pycc-vX.Y.Z-aarch64-linux.tar.gz` (arm64
+Linux) or `pycc-vX.Y.Z-aarch64-macos.tar.gz` (Apple silicon) -- and unpack it
+anywhere:
 
 ```console
 $ tar xzf pycc-vX.Y.Z-x86_64-linux.tar.gz
@@ -193,7 +194,7 @@ this README, `LICENSE` and `CHANGELOG.md`. Keep `bin/` and `lib/` together; the
 directory itself can live anywhere (or symlink `bin/pycc` into your `PATH`). LLVM
 is linked in. What you need on the machine:
 
-- **Linux x86_64 with glibc 2.39+** (Ubuntu 24.04, Debian 13, Fedora 40 or newer),
+- **Linux x86_64 or aarch64 with glibc 2.39+** (Ubuntu 24.04, Debian 13, Fedora 40 or newer),
   plus `libstdc++`, `zlib`, `zstd` and `libffi` 8 (present on those systems);
   or **macOS 26+ (Apple Silicon)** -- the archive is built for macOS 26.0 and
   needs no Homebrew libraries. Programs pycc builds target the macOS it runs on
