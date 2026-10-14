@@ -51,3 +51,19 @@ probe!(
     deque_bounded_rotation,
     "q = collections.deque([mkp(i), mkp(1)], 2)\nq.append(mkp(2))\nq.rotate(1)\ntotal += q[0].x"
 );
+probe!(
+    counter_of_strs,
+    "c = collections.Counter([mk(i), mk(i), \"a\"])\nc.update([mk(i + 1)])\ntotal += c[mk(i)] + c[\"zz\"] + len(c.most_common(1)) + c.total()"
+);
+probe!(
+    counter_arithmetic,
+    "a = collections.Counter([mk(i), \"b\"])\nb = collections.Counter([\"b\", \"b\"])\ntotal += len(a + b) + len(a - b) + len(a | b) + len(a & b)"
+);
+probe!(
+    defaultdict_of_lists,
+    "g = collections.defaultdict(list)\ng[mk(i)].append(mk(i))\ng[\"k\"].append(\"v\")\ntotal += len(g) + len(g[mk(i)])"
+);
+probe!(
+    defaultdict_nested,
+    "n = collections.defaultdict(lambda: collections.defaultdict(int))\nn[mk(i)][\"x\"] += 1\ntotal += n[mk(i)][\"x\"]"
+);

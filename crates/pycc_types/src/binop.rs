@@ -252,18 +252,18 @@ mod tests {
 
     #[test]
     fn the_set_and_dict_operators_cpython_defines_are_not_supported_yet() {
-        // Sets of different element types, and dicts, have no native operator.
+        // Sets of different element types have no native operator, and
+        // dicts only `|` (and, of `int` values, `Counter`'s `&`, `-`, `+`).
         let set = || Ty::Set(Box::new(Ty::Int));
         let other = || Ty::Set(Box::new(Ty::Str));
         let frozen = || Ty::FrozenSet(Box::new(Ty::Int));
-        let dict = || Ty::Dict(Box::new((Ty::Str, Ty::Int)));
+        let dict = || Ty::Dict(Box::new((Ty::Str, Ty::Str)));
         for (op, left, right, reason) in [
             (BinOpKind::BitOr, set(), other(), "is not supported yet"),
             (BinOpKind::BitAnd, set(), other(), "is not supported yet"),
             (BinOpKind::BitXor, set(), other(), "is not supported yet"),
             (BinOpKind::LShift, set(), set(), "is not defined"),
             (BinOpKind::RShift, set(), set(), "is not defined"),
-            (BinOpKind::BitOr, dict(), dict(), "is not supported yet"),
             (BinOpKind::BitAnd, dict(), dict(), "is not defined"),
             (BinOpKind::BitXor, dict(), dict(), "is not defined"),
             (BinOpKind::BitOr, set(), Ty::Int, "is not defined"),

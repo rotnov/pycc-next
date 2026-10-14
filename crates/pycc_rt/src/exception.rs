@@ -777,6 +777,7 @@ fn alloc_exception_message(msg: &str) -> *mut PyStrObj {
     Box::into_raw(Box::new(PyStrObj {
         rc: Cell::new(1),
         payload,
+        hash: Cell::new(-1),
     }))
 }
 

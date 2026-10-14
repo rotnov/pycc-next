@@ -110,13 +110,8 @@ fn a_non_integer_operand_is_a_type_error() {
             "error[T0021]: operator `|` on `set[int]` and `set[str]` is not supported yet",
         ),
         (
-            "d1 = {\"a\": 1}\nd2 = {\"b\": 2}\nx = d1 | d2\n",
-            "error[T0021]: operator `|` on `dict[str, int]` and `dict[str, int]` is not \
-             supported yet",
-        ),
-        (
-            "d1 = {\"a\": 1}\nd2 = {\"b\": 2}\nx = d1 & d2\n",
-            "error[T0021]: operator `&` on `dict[str, int]` and `dict[str, int]` is not defined",
+            "d1 = {\"a\": \"x\"}\nd2 = {\"b\": \"y\"}\nx = d1 & d2\n",
+            "error[T0021]: operator `&` on `dict[str, str]` and `dict[str, str]` is not defined",
         ),
         (
             "x = {1} | 1\n",

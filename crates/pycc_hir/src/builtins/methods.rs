@@ -125,7 +125,37 @@ pub fn resolve_method(
             &[],
             list_of(Ty::Tuple(Box::new(vec![kv.0.clone(), kv.1.clone()]))),
         ),
-        (Ty::Dict(_), "copy", []) => s("pycc_rt_dict_copy_of", &[], receiver.clone()),
+        // Keeps a `Counter`'s or `defaultdict`'s flavor (`dict(d)` is
+        // `pycc_rt_dict_copy_of`).
+        (Ty::Dict(_), "copy", []) => s("pycc_rt_dict_copy_method", &[], receiver.clone()),
+        // `collections.Counter`'s own methods (`pycc_rt::dict::flavor`); a
+        // plain dict raises CPython's `AttributeError` at run time.
+        (Ty::Dict(kv), "most_common", []) if kv.1 == Ty::Int => s(
+            "pycc_rt_counter_most_common_all",
+            &[],
+            list_of(Ty::Tuple(Box::new(vec![kv.0.clone(), Ty::Int]))),
+        ),
+        (Ty::Dict(kv), "most_common", [n]) if kv.1 == Ty::Int && is_intlike(n) => s(
+            "pycc_rt_counter_most_common",
+            &[Ty::Int],
+            list_of(Ty::Tuple(Box::new(vec![kv.0.clone(), Ty::Int]))),
+        ),
+        (Ty::Dict(kv), "total", []) if kv.1 == Ty::Int => s("pycc_rt_counter_total", &[], Ty::Int),
+        (Ty::Dict(kv), "elements", []) if kv.1 == Ty::Int => {
+            s("pycc_rt_counter_elements", &[], list_of(kv.0.clone()))
+        }
+        (Ty::Dict(kv), "update", [Ty::List(elem)]) if kv.1 == Ty::Int && **elem == kv.0 => {
+            s("pycc_rt_counter_update_list", &[args[0].clone()], Ty::None)
+        }
+        (Ty::Dict(kv), "update", [Ty::Str]) if kv == &Box::new((Ty::Str, Ty::Int)) => {
+            s("pycc_rt_counter_update_str", &[Ty::Str], Ty::None)
+        }
+        (Ty::Dict(kv), "subtract", [Ty::List(elem)]) if kv.1 == Ty::Int && **elem == kv.0 => {
+            s("pycc_rt_counter_subtract_list", &[args[0].clone()], Ty::None)
+        }
+        (Ty::Dict(kv), "subtract", [other]) if kv.1 == Ty::Int && other == receiver => {
+            s("pycc_rt_counter_subtract_dict", &[receiver.clone()], Ty::None)
+        }
         (Ty::Dict(_), "clear", []) => s("pycc_rt_dict_clear", &[], Ty::None),
         (Ty::Dict(_), "update", [other]) if other == receiver => {
             s("pycc_rt_dict_update", &[receiver.clone()], Ty::None)

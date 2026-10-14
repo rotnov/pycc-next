@@ -206,7 +206,18 @@ pub(crate) fn hash(kind: i64, word: i64) -> Option<i64> {
         LIST_KIND_INT => crate::pycc_rt_hash_int(word),
         LIST_KIND_BOOL => word,
         LIST_KIND_FLOAT => hash_float(f64::from_bits(word as u64)),
-        LIST_KIND_STR => crate::str_hash::hash_str(str_bytes(word)),
+        LIST_KIND_STR => {
+            // SAFETY: a `str` word is a live `PyStrObj`.
+            let s = unsafe { &*(word as *mut PyStrObj) };
+            match s.hash.get() {
+                -1 => {
+                    let h = crate::str_hash::hash_str(s.bytes());
+                    s.hash.set(h);
+                    h
+                }
+                h => h,
+            }
+        }
         LIST_KIND_TUPLE => {
             let mut lanes = Vec::new();
             for (k, w) in sequence_items(word) {

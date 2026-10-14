@@ -63,6 +63,8 @@ enum Deferred {
     /// `items` are `base` unpacked (`a, b = base`, a `for a, b in xs`
     /// target): each a list's element, or a tuple's item at its position.
     Unpack { base: usize, items: Vec<usize> },
+    /// `key` indexes `base` (`base[key]` read): a dict's key.
+    Key { base: usize, key: usize },
     /// `base[key] = value`.
     Store {
         base: usize,
@@ -243,8 +245,14 @@ impl Engine {
             }
             HirExpr::Subscript { base, index } => {
                 let base_var = self.term(scope, base);
-                self.term(scope, index);
+                let index_var = self.term(scope, index);
                 let base_var = base_var?;
+                if let Some(key) = index_var {
+                    self.deferred.push(Deferred::Key {
+                        base: base_var,
+                        key,
+                    });
+                }
                 // A constant index into a tuple (an unpacking temporary's
                 // `t[0]`): that item.
                 if let HirExpr::IntLiteral(i) = index.as_ref()
@@ -433,7 +441,17 @@ impl Engine {
                 if self.helpers.contains_key(callee) {
                     return self.helper_return(callee);
                 }
-                if let Some(native) = self.native_container_call(callee, &arg_vars) {
+                // A `defaultdict` factory function's return type is its values'.
+                let factory = match args.get(1) {
+                    Some(HirExpr::Name(f)) if callee == "__pycc_defaultdict_call" => scope
+                        .env
+                        .functions
+                        .get(f)
+                        .map(|(_, ret)| ret.clone())
+                        .filter(concrete_ty),
+                    _ => None,
+                };
+                if let Some(native) = self.native_container_call(callee, &arg_vars, factory) {
                     return Some(native);
                 }
                 if let Some(known) = self.inferred(scope, expr) {
@@ -542,6 +560,23 @@ impl Engine {
                 }
             }
             HirStmt::ExprStmt(expr) => self.effect(scope, expr),
+            // A store on the receiver: the value takes the attribute's
+            // declared type (`self.adj = defaultdict(list)` under
+            // `adj: dict[...]`). A store on another object is left alone, as
+            // the class phase (`attr_slot`) leaves it.
+            HirStmt::AttrSet { base, attr, value }
+                if matches!(base, HirExpr::Name(name) if name == "self") =>
+            {
+                let read = HirExpr::AttrGet {
+                    base: Box::new(base.clone()),
+                    attr: attr.clone(),
+                };
+                if let Some(t) = self.term(scope, value)
+                    && let Some(known) = self.inferred(scope, &read)
+                {
+                    self.store.unify(t, known);
+                }
+            }
             HirStmt::DictSet { dict, key, value } => {
                 let base = self.name_var(scope, dict);
                 let (k, v) = (self.term(scope, key), self.term(scope, value));

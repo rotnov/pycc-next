@@ -40,10 +40,18 @@ impl Engine {
         &mut self,
         callee: &str,
         args: &[Option<usize>],
+        factory: Option<Ty>,
     ) -> Option<usize> {
         let container = match callee {
-            "__pycc_deque" | "__pycc_defaultdict_none" | "__pycc_defaultdict_call" => {
-                (*args.first()?)?
+            "__pycc_deque" | "__pycc_defaultdict_none" => (*args.first()?)?,
+            "__pycc_defaultdict_call" => {
+                let container = (*args.first()?)?;
+                if let Some(ret) = factory {
+                    let (key, value) = (self.store.fresh(), self.store.known(ret));
+                    let shaped = self.store.with_shape(Shape::Dict(key, value));
+                    self.store.unify(container, shaped);
+                }
+                container
             }
             "__pycc_counter" => {
                 let container = (*args.first()?)?;

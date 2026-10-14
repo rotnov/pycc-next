@@ -33,7 +33,7 @@ use ruff_text_size::TextRange;
 use std::collections::{HashMap, HashSet};
 
 /// The `collections` names compiled natively.
-const NAMES: &[&str] = &["deque"];
+const NAMES: &[&str] = &["deque", "Counter", "defaultdict"];
 
 struct Rewrite {
     /// Local names bound to the `collections` module.

@@ -31,6 +31,10 @@ pub(crate) enum PyStrPayload {
 pub struct PyStrObj {
     pub(crate) rc: Cell<u32>,
     pub(crate) payload: PyStrPayload,
+    /// `hash(s)` once computed (a `str` is immutable), `-1` before: CPython
+    /// caches it the same way, so a dict or set keyed by `str` hashes each
+    /// key object once.
+    pub(crate) hash: Cell<i64>,
 }
 
 impl PyStrObj {
@@ -87,6 +91,7 @@ pub(crate) fn new_pystr(bytes: &[u8]) -> *mut PyStrObj {
     Box::into_raw(Box::new(PyStrObj {
         rc: Cell::new(1),
         payload,
+        hash: Cell::new(-1),
     }))
 }
 

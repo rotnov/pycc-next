@@ -161,3 +161,13 @@ fn permutations_without_a_literal_r_is_refused() {
 fn collections_deque_matches_cpython() {
     assert_matches_cpython("collections_deque");
 }
+
+/// `collections.Counter` (from a `str`, a list, empty; missing keys reading
+/// `0`, `most_common`, `elements`, `total`, `update`, `subtract`, `+`/`-`/
+/// `|`/`&`, equality, `repr` in `most_common` order) and
+/// `collections.defaultdict` with `int`, `list`, `set`, `float`, `str`, a
+/// nested `defaultdict` and a lambda as factories.
+#[test]
+fn collections_counter_and_defaultdict_match_cpython() {
+    assert_matches_cpython("collections_counter");
+}

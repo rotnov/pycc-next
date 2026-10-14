@@ -105,6 +105,12 @@ pub extern "C" fn pycc_rt_closure_decref(obj: *mut PyClosureObj) {
     CLOSURES_LIVE.fetch_sub(1, Ordering::Relaxed);
 }
 
+/// The function `obj` calls (`call(obj, args...)`).
+pub(crate) fn call_ptr(obj: *mut PyClosureObj) -> *const u8 {
+    // SAFETY (caller): `obj` is a live function value.
+    unsafe { (*obj).call }
+}
+
 /// The text of a NUL-terminated name, or `?` for null.
 pub(crate) fn c_name(name: *const u8) -> String {
     if name.is_null() {

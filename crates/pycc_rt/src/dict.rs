@@ -16,6 +16,8 @@
 //! (its count at `rc::RC_OFFSET`, like a list's) and freed through
 //! `crate::rc`'s worklist.
 
+pub(crate) mod flavor;
+
 use crate::exception::raise_key_error;
 use crate::list::{LIST_KIND_TUPLE, PyListObj};
 use crate::value;
@@ -26,7 +28,10 @@ use crate::{PyStrObj, new_pystr};
 pub struct PyDictObj {
     /// Live entries.
     len: i64,
-    _reserved: [i64; 3],
+    /// A `Counter`'s or `defaultdict`'s flavor (`flavor`); null for a
+    /// plain dict.
+    extra: *mut flavor::Extra,
+    _reserved: [i64; 2],
     rc: i64,
     key_kind: i64,
     value_kind: i64,
@@ -219,7 +224,8 @@ pub extern "C" fn pycc_rt_dict_new(key_kind: i64, value_kind: i64) -> *mut PyDic
     crate::rc::DICT_LIVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Box::into_raw(Box::new(PyDictObj {
         len: 0,
-        _reserved: [0; 3],
+        extra: std::ptr::null_mut(),
+        _reserved: [0; 2],
         rc: 1,
         key_kind,
         value_kind,
@@ -250,11 +256,59 @@ pub unsafe extern "C" fn pycc_rt_dict_get(d: *mut PyDictObj, key: i64) -> i64 {
             value::retain(d.value_kind, v);
             v
         }
-        Ok((None, _)) => {
-            raise_key_error(d.key_kind, key);
-            d.sentinel()
-        }
+        Ok((None, _)) => match flavor::missing(d, key) {
+            Some(Ok(value)) => value,
+            Some(Err(())) => d.sentinel(),
+            None => {
+                raise_key_error(d.key_kind, key);
+                d.sentinel()
+            }
+        },
         Err(()) => d.sentinel(),
+    }
+}
+
+/// `d[key] += n` on a dict of `int` values with one lookup (`pycc_mir`'s
+/// `dict_add`): a missing key raises `KeyError`, or reads a `Counter`'s `0`
+/// or a `defaultdict`'s new value, as `d[key]` would. `key` and `n` are
+/// borrowed.
+///
+/// # Safety
+/// `d` must be a live dict with `int` values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_dict_add_int(d: *mut PyDictObj, key: i64, n: i64) {
+    let d = dict(d);
+    let found = match d.locate(key) {
+        Ok((found, _)) => found,
+        Err(()) => return,
+    };
+    let old = match found {
+        Some(ix) => d.table.entries[ix].expect("live entry").2,
+        None => match flavor::missing(d, key) {
+            Some(Ok(value)) => {
+                // `missing` handed back a new reference: an `int` word,
+                // which needs no release.
+                value
+            }
+            Some(Err(())) => return,
+            None => {
+                raise_key_error(d.key_kind, key);
+                return;
+            }
+        },
+    };
+    let sum = crate::int_arith::int_add(old, n);
+    if crate::int_encoding::inline_int_value(sum).is_none() {
+        crate::int_arith::int_untag_checked(sum, 0);
+        crate::pycc_rt_bigint_release(sum);
+        return;
+    }
+    match found {
+        Some(ix) => d.table.entries[ix].as_mut().expect("live entry").2 = sum,
+        None => {
+            value::retain(d.key_kind, key);
+            d.insert(key, sum);
+        }
     }
 }
 
@@ -434,6 +488,19 @@ pub unsafe extern "C" fn pycc_rt_dict_copy(d: *mut PyDictObj) -> *mut PyDictObj 
 /// `d` and `other` must be live dicts of the same kinds.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_dict_update(d: *mut PyDictObj, other: *mut PyDictObj) {
+    if flavor::flavor(dict(d)) == Some(flavor::Flavor::Counter) {
+        // `Counter.update(mapping)` adds the counts.
+        unsafe { flavor::pycc_rt_counter_add_dict(d, other, crate::tag_smallint(1)) };
+        return;
+    }
+    unsafe { update_plain(d, other) };
+}
+
+/// `dict.update(other)`: `other`'s values replace `d`'s.
+///
+/// # Safety
+/// `d` and `other` must be live dicts of the same kinds.
+pub(crate) unsafe fn update_plain(d: *mut PyDictObj, other: *mut PyDictObj) {
     let pairs: Vec<(i64, i64)> = dict(other).live().collect();
     let d = dict(d);
     for (k, v) in pairs {
@@ -551,6 +618,9 @@ pub unsafe extern "C" fn pycc_rt_dict_from_pairs(
 /// `a == b` for two dicts of the same kinds.
 pub(crate) fn dicts_equal(a: *mut PyDictObj, b: *mut PyDictObj) -> bool {
     let (a, b) = (dict(a), dict(b));
+    if let Some(equal) = flavor::counters_equal(a, b) {
+        return equal;
+    }
     a.len == b.len
         && a.live().all(|(k, v)| match b.locate(k) {
             Ok((Some(ix), _)) => value::eq(a.value_kind, v, b.table.entries[ix].expect("live").2),
@@ -560,6 +630,14 @@ pub(crate) fn dicts_equal(a: *mut PyDictObj, b: *mut PyDictObj) -> bool {
 
 /// Appends `repr(d)` to `out`.
 pub(crate) fn dict_repr_into(d: *mut PyDictObj, out: &mut String) -> bool {
+    if let Some(rendered) = flavor::repr_into(d, out) {
+        return rendered;
+    }
+    plain_repr_into(d, out)
+}
+
+/// Appends `repr(d)` of the dict's contents (`{k: v, ...}`) to `out`.
+pub(crate) fn plain_repr_into(d: *mut PyDictObj, out: &mut String) -> bool {
     let d = dict(d);
     out.push('{');
     for (i, (k, v)) in d.live().enumerate() {
@@ -616,7 +694,8 @@ pub unsafe extern "C" fn pycc_rt_dict_decref(d: *mut PyDictObj) {
 /// going onto `dead` (`crate::rc`'s worklist) rather than recursing, so a
 /// long chain of nested dicts is freed in constant stack.
 pub(crate) fn free_dict(d: *mut PyDictObj, dead: &mut crate::rc::Worklist) {
-    let owned = unsafe { Box::from_raw(d) };
+    let mut owned = unsafe { Box::from_raw(d) };
+    flavor::free_extra(&mut owned);
     crate::rc::DICT_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     let (key_kind, value_kind) = (
         value::rc_kind(owned.key_kind),

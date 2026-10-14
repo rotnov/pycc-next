@@ -22,6 +22,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `in`, `index`, `count`, `remove`, iteration, `copy`, `+`/`*`, equality and `repr`
   (`deque([...], maxlen=n)`); `deque[T]` annotations. Both ends are O(1) amortized, and a
   BFS over a deque runs ~10x faster than CPython.
+- `collections.Counter` and `collections.defaultdict` natively: `Counter()`,
+  `Counter(list|str|dict)`, `c[k]` reading `0` for a missing key, `most_common([n])`,
+  `update`, `subtract`, `elements`, `total`, `+`/`-`/`|`/`&`, equality and CPython's
+  `repr` order; `defaultdict(int|float|str|list|set|dict|lambda|function)` with the
+  factory run on a missing-key read, and nested defaultdicts. `Counter[K]` and
+  `defaultdict[K, V]` annotations, and `defaultdict(list)` typed from its uses.
+  `bench/py/collections_bfs.py` (a deque BFS plus a `Counter`) runs ~9x faster than
+  CPython.
+- Dict `|` (union) between two dicts.
 - A list, set or dict comprehension over a generator (`[x for x in gen()]`).
 - An unannotated generator helper whose yields the solver cannot type from their terms
   alone (a yielded tuple display, a value read from a local container) is typed from its
@@ -55,6 +64,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - `hash()` of a `str`, a `float` and a tuple holding them.
 
 ### Changed
+
+- `d[k] += n` on a dict of `int` values (a `Counter`'s `c[x] += 1`) is one lookup, and a
+  `str` caches its hash as CPython does: a word-counting loop runs ~4x faster than
+  CPython.
 
 - A dependency module's top-level names no longer share the entry module's namespace:
   two modules may define the same name, and an `--ext` artifact no longer exports the

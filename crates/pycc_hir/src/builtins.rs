@@ -196,12 +196,19 @@ fn list_of(elem: Ty) -> Ty {
     Ty::List(Box::new(elem))
 }
 
+/// Whether `ty` is a tuple compiled code holds by value (only `int`,
+/// `float` and `bool` elements), which no runtime function returns as a
+/// word.
+fn unboxed_tuple(ty: &Ty) -> bool {
+    matches!(ty, Ty::Tuple(elements) if !crate::tuple_is_boxed(elements))
+}
+
 /// Whether builtin `name` takes a `str` iterable argument as the list of its
 /// characters (`zip`'s every argument, `enumerate`'s first): MIR lowering
 /// converts it with `pycc_rt_str_to_list` before the call.
 #[must_use]
 pub fn iterates_str_as_list(name: &str) -> bool {
-    matches!(name, "zip" | "enumerate") || is_itertools_call(name)
+    matches!(name, "zip" | "enumerate" | "__pycc_counter_of") || is_itertools_call(name)
 }
 
 /// Whether argument `index` of builtin `name` (one
@@ -398,6 +405,38 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         // A function's `*args` list (`pycc_ast::desugar::signatures`).
         ("__pycc_mark_tuple", [Ty::List(_)]) => {
             sig("pycc_rt_list_mark_tuple", &[args[0].clone()], Ty::None)
+        }
+        // `collections.Counter` / `defaultdict` (`pycc_ast::desugar::collections`).
+        ("__pycc_counter", [d @ Ty::Dict(kv)]) if kv.1 == Ty::Int => {
+            sig("pycc_rt_counter_new", &[d.clone()], d.clone())
+        }
+        ("__pycc_counter_of", [Ty::List(elem)]) if crate::is_hashable_ty(elem) => sig(
+            "pycc_rt_counter_of_list",
+            &[args[0].clone()],
+            Ty::Dict(Box::new(((**elem).clone(), int.clone()))),
+        ),
+        ("__pycc_counter_of", [d @ Ty::Dict(kv)]) if kv.1 == Ty::Int => {
+            sig("pycc_rt_counter_of_dict", &[d.clone()], d.clone())
+        }
+        ("__pycc_defaultdict", [d @ Ty::Dict(kv), proto, Ty::Str])
+            if same_elem(proto, &kv.1) && crate::is_list_element_ty(&kv.1) =>
+        {
+            word_sig(
+                "pycc_rt_defaultdict_new",
+                &[d.clone(), kv.1.clone(), str_.clone()],
+                &[false, true, false],
+                d.clone(),
+                false,
+                &[],
+            )
+        }
+        ("__pycc_defaultdict_call", [d @ Ty::Dict(kv), f @ Ty::Callable(sig_), Ty::Str])
+            if sig_.0.is_empty() && sig_.1 == kv.1 && !unboxed_tuple(&kv.1) =>
+        {
+            sig("pycc_rt_defaultdict_call_new", &[d.clone(), f.clone(), str_.clone()], d.clone())
+        }
+        ("__pycc_defaultdict_none", [d @ Ty::Dict(_)]) => {
+            sig("pycc_rt_defaultdict_none_new", &[d.clone()], d.clone())
         }
         // `collections.deque(items, maxlen, has_maxlen)`
         // (`pycc_ast::desugar::collections`).
@@ -823,6 +862,18 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
 /// index as a trailing int).
 #[must_use]
 pub fn set_operator(op: &str, in_place: bool, left: &Ty, right: &Ty) -> Option<BuiltinSig> {
+    // `Counter` arithmetic (`+`, `-`, `|`, `&`) and the dict union `|`
+    // (`pycc_rt::dict::flavor`): the runtime picks by flavor.
+    if let (Ty::Dict(a), Ty::Dict(b)) = (left, right)
+        && a == b
+        && (op == "|" || (a.1 == Ty::Int && matches!(op, "&" | "-" | "+")))
+    {
+        return Some(sig(
+            "pycc_rt_counter_binop",
+            &[left.clone(), right.clone(), Ty::Int],
+            left.clone(),
+        ));
+    }
     if hashed_set(left).is_none() || hashed_set(left) != hashed_set(right) {
         return None;
     }
@@ -874,6 +925,7 @@ pub fn set_inplace_index(op: &str) -> i64 {
         "|" => 0,
         "&" => 1,
         "-" => 2,
+        // `^` of sets, `+` of counters.
         _ => 3,
     }
 }

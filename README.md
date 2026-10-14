@@ -44,6 +44,7 @@ Caught **before** it runs. Not in CI logs. Not in production. At compile time.
 Works today: strict type checking with Rust-style diagnostics pointing at the offending
 code; native compilation via LLVM; classes, exceptions, generators, closures, lists,
 dicts, sets, comprehensions, `match`, arbitrary-precision `int`, typed numpy arrays;
+`itertools`, `collections.deque`, `Counter` and `defaultdict` without CPython;
 programs of several modules and packages; `@dataclass`, `enum.Enum`/`IntEnum`/`StrEnum`,
 `functools.cache`/`lru_cache`; reference-counted memory;
 CPython extension modules; `--non-strict` for untyped code. 9,500+ tests.

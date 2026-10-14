@@ -14,6 +14,7 @@ use class::eval_isinstance_protocol;
 use class::{class_def_of, mro_attrs};
 mod exception;
 mod exception_isinstance;
+mod dict_add;
 mod generator;
 pub use exception::{MirExceptHandler, MirExceptionValue};
 use exception::{handler_type_tags, lower_raise};

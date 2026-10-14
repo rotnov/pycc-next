@@ -47,7 +47,17 @@ pub(crate) fn check_yield(
 pub fn is_generator_consumer(callee: &str) -> bool {
     matches!(
         callee,
-        "list" | "sum" | "min" | "max" | "sorted" | "set" | "frozenset" | "any" | "all" | "tuple"
+        "list"
+            | "sum"
+            | "min"
+            | "max"
+            | "sorted"
+            | "set"
+            | "frozenset"
+            | "any"
+            | "all"
+            | "tuple"
+            | "__pycc_counter_of"
     )
 }
 

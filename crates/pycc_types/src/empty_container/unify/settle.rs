@@ -13,7 +13,9 @@ impl Engine {
             let pending = std::mem::take(&mut self.deferred);
             for constraint in pending {
                 let base = match &constraint {
-                    Deferred::Element { base, .. } | Deferred::Store { base, .. } => *base,
+                    Deferred::Element { base, .. }
+                    | Deferred::Store { base, .. }
+                    | Deferred::Key { base, .. } => *base,
                     Deferred::Unpack { base, items } => {
                         let slots = match self.store.open(*base) {
                             Some(Shape::List(e)) => vec![e; items.len()],
@@ -83,6 +85,10 @@ impl Engine {
                     }
                     (Some(Shape::List(e)), Deferred::Store { value, .. }) => {
                         self.store.unify(e, value);
+                        progressed = true;
+                    }
+                    (Some(Shape::Dict(k, _)), Deferred::Key { key, .. }) => {
+                        self.store.unify(k, key);
                         progressed = true;
                     }
                     (Some(Shape::Dict(k, v)), Deferred::Store { key, value, .. }) => {
