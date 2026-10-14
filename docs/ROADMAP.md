@@ -44,7 +44,7 @@ Accept:
    26.0+), each smoke-tested by release run 38305121948; the Linux archive re-verified
    after download (sha256, `scripts/smoke.sh`).
 
-## v0.3 — Packages, stdlib, everyday code
+## v0.3 — Packages, stdlib, everyday code (released 2026-10-14)
 
 Accept:
 1. **Multi-module programs:** a program of several `.py` files and packages (`import m`,
@@ -88,3 +88,7 @@ Accept:
    CPython; remaining gaps in `docs/DEVIATIONS.md`.
 5. **Platforms:** the release also ships a Linux aarch64 archive, smoke-tested in the
    release workflow.
+   **Met 2026-10-14:** [v0.3.0](https://github.com/rotnov/pycc-next/releases/tag/v0.3.0)
+   ships `pycc-v0.3.0-aarch64-linux.tar.gz` next to the x86_64 Linux and arm64 macOS
+   archives, each smoke-tested by release run 38584309286; CI also runs the full suite on
+   `ubuntu-24.04-arm`.
