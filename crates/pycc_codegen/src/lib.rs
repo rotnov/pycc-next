@@ -93,6 +93,7 @@ mod hash;
 mod object_box;
 mod object_coerce;
 mod object_comprehension;
+mod native_operand;
 mod object_release;
 mod object_return;
 mod object_slot;

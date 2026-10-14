@@ -52,7 +52,9 @@
 //! business, exactly as `foreign_attr.rs` documents for an attribute load.
 //! A *produced* argument (`o.m(p.q)`) is a different matter since Part 1 of
 //! #1092: the packer took a reference of its own, so the argument is held
-//! across the call and released after it (`foreign_call_emit.rs`).
+//! across the call and released after it (`foreign_call_emit.rs`). So is a
+//! *fresh native* argument (`m(str(i))`, `m([i])`, a bigint): its packer
+//! copied it, so the compiled code still owns it (`native_operand.rs`).
 
 use super::*;
 use crate::foreign_attr::expect_object_pointer;

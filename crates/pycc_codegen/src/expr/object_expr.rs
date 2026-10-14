@@ -226,9 +226,13 @@ pub(crate) fn emit_obj_subscript_expr<'ctx>(
         index,
     );
     let held_index = object_release::hold(context, module, rt, index, &index_scalar);
+    // A fresh native key (`o[str(i)]`) is copied by its packer, so it is
+    // still this consumer's to release (`native_operand`).
+    let native_index = crate::native_operand::hold(rt, index, index_scalar);
     let result =
         foreign_call::emit_subscript(context, builder, module, rt, base_scalar, index_scalar);
     held_index.release(builder, rt);
+    native_index.release(context, builder, rt);
     held_base.release(builder, rt);
     result
 }

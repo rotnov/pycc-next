@@ -888,5 +888,20 @@ pub(super) fn pop_pending_int_release<'ctx>(rt: &RtFns<'ctx>, pushed: Option<Int
     }
 }
 
+/// Removes the word [`push_pending_int_release_if_scalar_temporary`]
+/// pushed wherever it sits in the stack, for a consumer whose holds outlive
+/// later pushes it does not pop itself (`native_operand`). A `None`
+/// `pushed` value is a no-op, as for [`pop_pending_int_release`].
+pub(super) fn remove_pending_int_release<'ctx>(rt: &RtFns<'ctx>, pushed: Option<IntValue<'ctx>>) {
+    if let Some(expected) = pushed {
+        let mut stack = rt.exceptions.pending_int_releases.borrow_mut();
+        let position = stack.iter().rposition(|word| *word == expected).expect(
+            "pycc_codegen: internal error: a held int temporary is missing from \
+             pending_int_releases",
+        );
+        stack.remove(position);
+    }
+}
+
 #[cfg(test)]
 mod tests;

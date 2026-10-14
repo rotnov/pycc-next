@@ -221,3 +221,49 @@ fn the_part_3_producers_are_classified() {
     assert!(is_produced(&choose(attr("a"), attr("b"))));
     assert!(is_produced(&choose(copy_name(), attr("b"))));
 }
+
+/// A fresh native `str` argument of a call on a CPython object
+/// (`copy.m("s")`) is copied by its packer, so it is still the compiled
+/// code's: the call releases it once the call is done, and the call's own
+/// failure edge releases it too (`native_operand`). A borrowed `str` read
+/// (the parameter `s`) is never released there -- its slot owns it.
+#[test]
+fn a_fresh_native_str_argument_is_released_after_the_call() {
+    const STR_DECREF: &str = "call void @pycc_rt_str_decref(";
+    let call = |arg: MirExpr| MirExpr::ObjMethodCall {
+        base: boxed(copy_name()),
+        method: "m".to_string(),
+        args: vec![arg],
+    };
+    let ir = discard_ir(
+        "release_native_str_arg",
+        call(MirExpr::StringLiteral("s".to_string())),
+    );
+    for label in ["foreign_call_cont", "foreign_call_fail"] {
+        let found = blocks(&ir, label);
+        assert_eq!(found.len(), 1, "{label}\n{ir}");
+        assert_eq!(found[0].matches(STR_DECREF).count(), 1, "{label}\n{ir}");
+    }
+    let ir = functions_ir(
+        "borrowed_native_str_arg",
+        vec![MirItem::Function {
+            name: "f".to_string(),
+            params: vec![("s".to_string(), Ty::Str)],
+            return_ty: Ty::None,
+            body: vec![
+                MirStmt::ExprStmt(call(MirExpr::Name {
+                    name: "s".to_string(),
+                    ty: Ty::Str,
+                })),
+                MirStmt::Return(None),
+            ],
+        }],
+        &["pyfn_f"],
+    )
+    .remove(0);
+    for label in ["foreign_call_cont", "foreign_call_fail"] {
+        let found = blocks(&ir, label);
+        assert_eq!(found.len(), 1, "{label}\n{ir}");
+        assert!(!found[0].contains(STR_DECREF), "{label}\n{ir}");
+    }
+}

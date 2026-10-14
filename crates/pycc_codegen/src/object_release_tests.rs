@@ -139,6 +139,25 @@ fn releases(text: &str) -> usize {
     text.matches(RELEASE).count()
 }
 
+/// [`releases`] along a failure edge that first releases a held native
+/// `int` argument (`native_operand`): that release branches on the word's
+/// tag, so the edge continues in its `bigint_rc_cont` block, which is
+/// followed here.
+fn edge_releases(ir: &str, text: &str) -> usize {
+    let mut count = releases(text);
+    if let Some(at) = text.find("label %bigint_rc_cont") {
+        let label: String = text[at + "label %".len()..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        let header = format!("\n{label}:");
+        let start = ir.find(&header).unwrap_or_else(|| panic!("{label}\n{ir}")) + header.len();
+        let end = ir[start..].find("\n\n").map_or(ir.len(), |e| start + e);
+        count += edge_releases(ir, &ir[start..end]);
+    }
+    count
+}
+
 #[test]
 fn every_shim_producer_is_produced_and_nothing_else_is() {
     let produced = [
@@ -770,7 +789,7 @@ fn a_native_raise_in_an_argument_releases_the_bound_method() {
         assert_eq!(releases(native), unwind_releases, "{label}\n{ir}");
         let call_fail = blocks(&ir, "foreign_call_fail");
         assert_eq!(call_fail.len(), 1, "{label}\n{ir}");
-        assert_eq!(releases(call_fail[0]), call_releases, "{label}\n{ir}");
+        assert_eq!(edge_releases(&ir, call_fail[0]), call_releases, "{label}\n{ir}");
     }
 }
 

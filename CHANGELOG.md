@@ -150,6 +150,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   container) grew the stack on every iteration and crashed after ~10^5 iterations.
 - A comprehension over a fresh list (a call's result, a `str` expression) leaked that
   list.
+- A fresh native value passed to CPython leaked once per call: a `str` (a literal, `str(i)`,
+  a concatenation, an f-string), a list, a bigint `int` or a class instance as a positional
+  or keyword argument of a call on a CPython function or method, or a `str` subscript key
+  of a CPython object (`json.dumps(str(i))` grew ~47 bytes per iteration; it now runs in
+  constant memory, strict and non-strict).
 
 ## [0.2.0] - 2026-10-12
 

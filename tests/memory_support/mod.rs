@@ -8,6 +8,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn build(dir: &Path, name: &str, source: &str) -> PathBuf {
+    build_with(dir, name, source, &[])
+}
+
+/// [`build`] with extra `pycc build` flags (`--non-strict`).
+pub fn build_with(dir: &Path, name: &str, source: &str, flags: &[&str]) -> PathBuf {
     let src = dir.join(format!("{name}.py"));
     std::fs::write(&src, source).expect("write the probe source");
     let bin = dir.join(name);
@@ -17,6 +22,7 @@ pub fn build(dir: &Path, name: &str, source: &str) -> PathBuf {
         .arg("-o")
         .arg(&bin)
         .arg("--release")
+        .args(flags)
         .output()
         .expect("pycc should spawn");
     assert!(

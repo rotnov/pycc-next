@@ -541,6 +541,34 @@ pub(crate) fn hold_temporary<'ctx>(rt: &RtFns<'ctx>, source: &MirExpr, scalar: &
     }
 }
 
+/// [`hold_temporary`] answering the entry it pushed, for a consumer whose
+/// holds do not nest as a contiguous run above one [`pending_mark`]
+/// (`native_operand`): it retires the entry itself with [`unhold`].
+pub(crate) fn hold_temporary_entry<'ctx>(
+    rt: &RtFns<'ctx>,
+    source: &MirExpr,
+    scalar: &Scalar<'ctx>,
+) -> Option<(HeapKind, PointerValue<'ctx>)> {
+    if is_borrowed_read(source) {
+        return None;
+    }
+    let entry = counted_temporary(rt, &source.ty(), scalar)?;
+    rt.exceptions.pending_heap_releases.borrow_mut().push(entry);
+    Some(entry)
+}
+
+/// Removes the entry [`hold_temporary_entry`] pushed, without releasing it
+/// (the fallthrough releases it itself). The topmost equal entry is the
+/// one: a pointer is held at most once by one consumer at a time.
+pub(crate) fn unhold<'ctx>(rt: &RtFns<'ctx>, entry: (HeapKind, PointerValue<'ctx>)) {
+    let mut stack = rt.exceptions.pending_heap_releases.borrow_mut();
+    let position = stack.iter().rposition(|held| *held == entry).expect(
+        "pycc_codegen: internal error: a held native temporary is missing from \
+         pending_heap_releases",
+    );
+    stack.remove(position);
+}
+
 /// Holds `scalar`, an owned reference of type `ty` (a fresh value, or a
 /// borrowed one just retained), when its type is counted.
 pub(crate) fn hold_owned_value<'ctx>(rt: &RtFns<'ctx>, ty: &Ty, scalar: &Scalar<'ctx>) {

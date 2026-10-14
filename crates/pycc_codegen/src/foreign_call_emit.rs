@@ -25,23 +25,36 @@ use crate::foreign_attr::expect_object_pointer;
 use pycc_mir::{ObjKeywordCall, Ty};
 
 /// The evaluated arguments of a call on a CPython object, and the holds on
-/// the produced ones (Part 1 of #1092).
-pub(super) struct ObjectArgs<'ctx> {
+/// the produced ones (Part 1 of #1092) and on the fresh native ones
+/// (`native_operand`: the packer copies a `str`, list or `int`, so the
+/// native temporary is still the compiled code's to release).
+pub(super) struct ObjectArgs<'a, 'ctx> {
     pub(super) scalars: Vec<Scalar<'ctx>>,
     held: Vec<object_release::Held<'ctx>>,
+    natives: Vec<crate::native_operand::NativeHeld<'a, 'ctx>>,
 }
 
-impl<'ctx> ObjectArgs<'ctx> {
-    /// Releases every produced argument, last first, once the call is done.
-    pub(super) fn release(self, builder: &inkwell::builder::Builder<'ctx>, rt: &RtFns<'ctx>) {
+impl<'ctx> ObjectArgs<'_, 'ctx> {
+    /// Releases every produced and every fresh native argument, last
+    /// first, once the call is done.
+    pub(super) fn release(
+        self,
+        context: &'ctx Context,
+        builder: &inkwell::builder::Builder<'ctx>,
+        rt: &RtFns<'ctx>,
+    ) {
         for held in self.held.into_iter().rev() {
             held.release(builder, rt);
+        }
+        for native in self.natives.into_iter().rev() {
+            native.release(context, builder, rt);
         }
     }
 
     fn extend(&mut self, other: Self) {
         self.scalars.extend(other.scalars);
         self.held.extend(other.held);
+        self.natives.extend(other.natives);
     }
 }
 
@@ -53,18 +66,19 @@ impl<'ctx> ObjectArgs<'ctx> {
 /// effects, and then replaced by CPython's own `None`
 /// (`foreign_pack::none_pointer`), which packs as an `object`: pycc's
 /// `None` placeholder has no `PyObject *` of its own.
-pub(super) fn emit_object_args<'ctx>(
+pub(super) fn emit_object_args<'a, 'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     module: &inkwell::module::Module<'ctx>,
     rt: &RtFns<'ctx>,
     user_functions: &HashMap<&str, UserFunction<'ctx>>,
     locals: &HashMap<String, StorageSlot<'ctx>>,
-    args: &[MirExpr],
-) -> ObjectArgs<'ctx> {
+    args: &'a [MirExpr],
+) -> ObjectArgs<'a, 'ctx> {
     let mut evaluated = ObjectArgs {
         scalars: Vec::with_capacity(args.len()),
         held: Vec::new(),
+        natives: Vec::new(),
     };
     for arg in args {
         let value = crate::object_unbox::emit_pack_operand(
@@ -82,6 +96,9 @@ pub(super) fn emit_object_args<'ctx>(
         } else {
             let held = object_release::hold(context, module, rt, arg, &value);
             evaluated.held.push(held);
+            evaluated
+                .natives
+                .push(crate::native_operand::hold(rt, arg, value));
             evaluated.scalars.push(value);
         }
     }
@@ -118,7 +135,7 @@ pub(super) fn emit_method_call<'ctx>(
     let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
     held_bound.consumed(rt);
     let result = foreign_call::emit_call(context, builder, module, rt, bound, &args.scalars);
-    args.release(builder, rt);
+    args.release(context, builder, rt);
     result
 }
 
@@ -150,7 +167,7 @@ pub(super) fn emit_direct_call<'ctx>(
         callee_scalar,
         &args.scalars,
     );
-    args.release(builder, rt);
+    args.release(context, builder, rt);
     result
 }
 
@@ -256,6 +273,6 @@ pub(super) fn emit_keyword_call<'ctx>(
         &args.scalars,
         &call.names,
     );
-    args.release(builder, rt);
+    args.release(context, builder, rt);
     result
 }
