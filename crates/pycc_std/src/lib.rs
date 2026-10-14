@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn resolve_symbol_rejects_unregistered_symbol_in_enum_module() {
-        assert_eq!(resolve_symbol(StdModule::Enum, "IntEnum"), None);
+        assert_eq!(resolve_symbol(StdModule::Enum, "Flag"), None);
         let auto_sym = resolve_symbol(StdModule::Enum, "auto").expect("enum.auto is registered");
         assert_eq!(auto_sym.kind, StdSymbolKind::EnumAutoMarker);
         assert!(format!("{auto_sym:?}").contains("EnumAutoMarker"));

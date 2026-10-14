@@ -1363,13 +1363,6 @@ fn c0001_enum_class_call_no_args() {
     assert_diagnostic_matches_fixture("c0001_enum_class_call_no_args");
 }
 
-/// #921/#944: the value-lookup spelling `Color(1)` is the same `C0001` at
-/// its own call expression.
-#[test]
-fn c0001_enum_class_call_value() {
-    assert_diagnostic_matches_fixture("c0001_enum_class_call_value");
-}
-
 // #1021 (D-245): `T0003` is the code an empty `[]`/`{}` reports once the
 // pre-check resolution pass finds no annotation, no existing binding, and no
 // forward producer. Before #1021 it was registered but never emitted, and

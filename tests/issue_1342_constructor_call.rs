@@ -124,7 +124,7 @@ fn an_enum_class_call_keeps_the_lowering_refusal() {
             &dir,
             "m.py",
             "from enum import Enum\n\n\nclass E(Enum):\n    A = 1\n\n\n\
-             def _mk():\n    return E(1)\n\n\nprint(_mk())\n",
+             def _mk():\n    return E()\n\n\nprint(_mk())\n",
         ))
         .output()
         .expect("pycc should spawn");

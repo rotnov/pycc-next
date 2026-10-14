@@ -120,16 +120,26 @@ fn a_zero_argument_enum_call_in_a_function_is_c0001_not_a_panic() {
     );
 }
 
-/// CPython's by-value member lookup, at module scope.
+/// CPython's by-value member lookup compiles (`pycc_ast::desugar::enums`).
 #[test]
-fn a_by_value_enum_call_at_module_scope_is_c0001_not_a_panic() {
-    assert_enum_call_rejected(
-        "921_by_value",
-        "check",
-        "from enum import Enum\n\n\nclass Color(Enum):\n    RED = 1\n    GREEN = 2\n\n\nc = Color(1)\nprint(c.value)\n",
-        "Color",
-        "Color(1)",
+fn a_by_value_enum_call_looks_the_member_up() {
+    // `Color(1)` and `S("a")` are the value lookup
+    // (`pycc_ast::desugar::enums`), at module scope as in a function.
+    let dir = ScratchDir::new("921_by_value").expect("failed to create scratch dir");
+    let src = write_fixture(
+        &dir,
+        "prog.py",
+        "from enum import Enum, StrEnum\n\n\nclass Color(Enum):\n    RED = 1\n    GREEN = 2\n\n\n\
+         class S(StrEnum):\n    A = \"a\"\n\n\nc = Color(1)\nprint(c.value, S(\"a\").value)\n",
     );
+    let out = dir.join("prog");
+    let build = Command::new(pycc_bin())
+        .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    let run = Command::new(&out).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "1 a\n");
 }
 
 /// `raise Color()` is a call expression like any other to the scan, so it
@@ -162,13 +172,13 @@ fn calling_a_member_less_enum_is_c0001_not_a_panic() {
 /// The `StrEnum` spelling (#892) shares `lower_enum_class`, so it carries
 /// the same marker and the same rejection.
 #[test]
-fn calling_a_str_enum_class_is_c0001_not_a_panic() {
+fn calling_a_str_enum_class_without_a_value_is_c0001_not_a_panic() {
     assert_enum_call_rejected(
         "921_str_enum",
         "check",
-        "from enum import StrEnum\n\n\nclass S(StrEnum):\n    A = \"a\"\n\n\ns = S(\"a\")\nprint(s.value)\n",
+        "from enum import StrEnum\n\n\nclass S(StrEnum):\n    A = \"a\"\n\n\ns = S()\nprint(s.value)\n",
         "S",
-        "S(\"a\")",
+        "S()",
     );
 }
 

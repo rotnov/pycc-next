@@ -193,20 +193,18 @@ fn walk_if_as_lowered<'a, V: Visitor<'a>>(
     }
 }
 
-/// The one `C0001` message for every positional-argument call shape on an
-/// enum class (`Color()`, `Color(1)`, `Color(1, 2)`). Shared with
+/// The one `C0001` message for an enum class call the value lookup does not
+/// cover (`Color()`, `Color(1, 2)`; `Color(1)` itself is rewritten to the
+/// lookup by `pycc_ast::desugar::enums`). Shared with
 /// `pycc_types::class::resolve_instantiation` so the spanned and the
-/// span-less rejection render identically (#942's wording, unchanged by
-/// #944). The "not supported yet" clause attaches only to the by-value
-/// lookup, which a later slice can implement; `Color()` is a CPython error
-/// too and no slice will accept it (`docs/DIAGNOSTICS.md`'s `C0001` is a
-/// versioned capability code).
+/// span-less rejection render identically.
 pub fn enum_class_call_message(class_name: &str) -> String {
     format!(
-        "cannot call enum class `{class_name}` -- enum members are accessed \
-         by name (`{class_name}.MEMBER`); looking a member up by value \
-         (`{class_name}(1)`) is not supported yet, and a zero-argument call \
-         (`{class_name}()`) is a `TypeError` in CPython as well"
+        "cannot call enum class `{class_name}` this way -- a call takes exactly \
+         one positional argument, the value of the member it returns \
+         (`{class_name}(1)`); members are also accessed by name \
+         (`{class_name}.MEMBER`), and a zero-argument call (`{class_name}()`) is \
+         a `TypeError` in CPython as well"
     )
 }
 

@@ -38,11 +38,16 @@ pub(super) fn enum_lookups(body: &mut [Stmt]) {
             }
             _ => None,
         })
+        // A name the module binds again (anywhere) keeps HIR's refusal.
+        .filter(|name| super::closures::count_uses(body, name).bindings == 1)
         .collect();
     if enums.is_empty() {
         return;
     }
-    let rewrite = Rewrite { enums };
+    let rewrite = Rewrite {
+        enums,
+        scopes: std::cell::RefCell::new(Vec::new()),
+    };
     for stmt in body.iter_mut() {
         rewrite.visit_stmt(stmt);
     }
@@ -50,9 +55,30 @@ pub(super) fn enum_lookups(body: &mut [Stmt]) {
 
 struct Rewrite {
     enums: HashSet<String>,
+    /// The names each enclosing function binds (its parameters included):
+    /// a local named like an enum class shadows it.
+    scopes: std::cell::RefCell<Vec<HashSet<String>>>,
 }
 
 impl Transformer for Rewrite {
+    fn visit_stmt(&self, stmt: &mut Stmt) {
+        if let Stmt::FunctionDef(def) = stmt {
+            let mut names = super::stored_names(&def.body);
+            let p = &def.parameters;
+            for param in p.posonlyargs.iter().chain(&p.args).chain(&p.kwonlyargs) {
+                names.insert(param.parameter.name.to_string());
+            }
+            for v in p.vararg.iter().chain(&p.kwarg) {
+                names.insert(v.name.to_string());
+            }
+            self.scopes.borrow_mut().push(names);
+            transformer::walk_stmt(self, stmt);
+            self.scopes.borrow_mut().pop();
+            return;
+        }
+        transformer::walk_stmt(self, stmt);
+    }
+
     fn visit_expr(&self, expr: &mut Expr) {
         transformer::walk_expr(self, expr);
         let Expr::Call(call) = expr else {
@@ -62,6 +88,7 @@ impl Transformer for Rewrite {
             return;
         };
         if !self.enums.contains(name.id.as_str())
+            || self.scopes.borrow().iter().any(|s| s.contains(name.id.as_str()))
             || call.arguments.args.len() != 1
             || !call.arguments.keywords.is_empty()
             || matches!(call.arguments.args[0], Expr::Starred(_))

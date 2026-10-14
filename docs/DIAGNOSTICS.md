@@ -307,7 +307,8 @@ of such a class to a name (`e = MyError("boom")`, for a user subclass
 whose MRO reaches a builtin exception without overriding its inherited
 constructor) reports `cannot instantiate exception class \`...\` as a
 value` -- `raise MyError("boom")` stays the one supported construction
-(Part 3 of issue #541). Calling an enum class (`Color()`, `Color(1)`)
+(Part 3 of issue #541). Calling an enum class other than with one value (`Color()`, `Color(1, 2)`;
+`Color(1)` is the member lookup, `pycc_ast::desugar::enums`)
 reports `cannot call enum class \`...\`` at the call expression, from HIR
 lowering's per-item AST scan (`pycc_hir::class::enum_call`, issue #944,
 D-233), with a guard of the same text in `pycc_types`'s
@@ -316,8 +317,8 @@ the call, at the call, for the residual shapes D-233 enumerates, such as a
 module-level rebinding of the class name anywhere in the module
 (`Color(); Color = 1`) or a sibling-comprehension rebinding, where the scan
 stays suppressed: members are
-compile-time singletons reached by name (`Color.RED`), and by-value lookup
-is the not-yet-implemented construct; the zero-argument form is a CPython
+compile-time singletons reached by name (`Color.RED`) or by value
+(`Color(1)`); the zero-argument form is a CPython
 `TypeError` too and is named as such rather than as unsupported. The scan
 folds `if`/`elif TYPE_CHECKING:` bodies exactly as HIR lowering does
 (#790), so a call inside such a dead body is not reported. A name that
