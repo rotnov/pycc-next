@@ -428,16 +428,16 @@ mod tests {
             assert_eq!(err.span, Some(pycc_diag::Span::new(0, 0)));
         }
         // The wording stays pinned in the crate that used to own it: the
-        // zero-argument form is a CPython error, the by-value form is the
-        // versioned-capability clause.
+        // zero-argument form is a CPython error, and the message names the
+        // by-value lookup (`Color(1)`), which compiles.
         let message = pycc_hir::enum_class_call_message("Color");
         assert!(
             message.contains("(`Color()`) is a `TypeError` in CPython as well"),
             "the zero-argument form must not be described as merely unsupported: {message}"
         );
         assert!(
-            message.contains("(`Color(1)`) is not supported yet"),
-            "the by-value form carries the versioned-capability clause: {message}"
+            message.contains("(`Color(1)`)") && !message.contains("not supported yet"),
+            "the by-value form is the supported call, not a missing capability: {message}"
         );
     }
 }
