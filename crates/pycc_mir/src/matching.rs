@@ -180,15 +180,29 @@ fn lower_pattern_conds(
         HirPattern::Capture(name) => (vec![vec![]], vec![(name.clone(), subj.clone())]),
         HirPattern::Literal(lit) => {
             let lowered = lower_expr(lit, scopes, classes, current_class);
-            (
-                vec![vec![MirExpr::Compare {
+            // A dotted value pattern of a class instance (`case Color.RED:`)
+            // calls the class's `__eq__` when it defines one, else compares
+            // identity.
+            let test = match crate::compare_chain::instance_compare_callee(
+                CmpOpKind::Eq,
+                &subj.ty(),
+                &lowered.ty(),
+                classes,
+                scopes,
+            ) {
+                Some((callee, _)) => MirExpr::Call {
+                    callee,
+                    args: vec![subj.clone(), lowered],
+                    ty: Ty::Bool,
+                },
+                None => MirExpr::Compare {
                     op: CmpOpKind::Eq,
                     left: Box::new(subj.clone()),
                     right: Box::new(lowered),
                     ty: Ty::Bool,
-                }]],
-                vec![],
-            )
+                },
+            };
+            (vec![vec![test]], vec![])
         }
         HirPattern::Singleton(b) => (
             vec![vec![MirExpr::Compare {

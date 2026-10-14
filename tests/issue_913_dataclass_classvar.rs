@@ -217,7 +217,7 @@ fn a_dataclass_field_over_an_inherited_class_var_is_rejected() {
         "913_inherited_class_var_collision",
         "from typing import ClassVar\n\n\n@dataclass\nclass A:\n    LIMIT: ClassVar[int] = 8\n\n\n@dataclass\nclass B(A):\n    LIMIT: int\n",
         "C0001",
-        "dataclass field `LIMIT` of class `B` shares its name with the class attribute `A.LIMIT`",
+        "cannot inherit from non-dataclass class `A`",
     );
 }
 
@@ -240,7 +240,7 @@ fn a_dataclass_field_colliding_with_a_sibling_bases_class_var_is_rejected() {
                 "from typing import ClassVar\n\n\n@dataclass\nclass A:\n    LIMIT: ClassVar[int] = 8\n\n\n@dataclass\nclass B:\n    LIMIT: int\n    other: int\n\n\n@dataclass\nclass D({bases}):\n    pass\n"
             ),
             "C0001",
-            "dataclass field `LIMIT` of class `D` shares its name with the class attribute `A.LIMIT`",
+            "cannot inherit from non-dataclass class",
         );
     }
 }
@@ -256,7 +256,7 @@ fn a_derived_class_var_shadowing_an_inherited_dataclass_field_is_rejected() {
         "913_class_var_over_inherited_field",
         "from typing import ClassVar\n\n\n@dataclass\nclass A:\n    v: int\n\n\n@dataclass\nclass B(A):\n    v: ClassVar[int] = 5\n",
         "C0001",
-        "collides with an instance attribute inherited from `A`",
+        "cannot inherit from non-dataclass class `A`",
     );
 }
 
@@ -320,17 +320,16 @@ fn a_non_scalar_class_var_in_a_dataclass_body_is_rejected() {
     );
 }
 
-/// Diagnostic precedence. `T0052` is raised inside the dataclass field-merge
-/// loop, which runs before the new field/class-attribute check, so a program
-/// carrying both defects keeps reporting `T0052`. Pinned so a later reorder
-/// of these checks cannot pass unnoticed.
+/// Diagnostic precedence: `A` is written out as a plain class
+/// (`pycc_ast::desugar::dataclasses`), so `B`, whose `LIMIT` field collides
+/// with `A`'s `ClassVar`, stays decorated and HIR refuses its base first.
 #[test]
-fn a_dataclass_field_type_conflict_outranks_the_class_var_collision() {
+fn a_dataclass_inheriting_a_class_var_collision_is_refused_at_its_base() {
     assert_rejected(
         "913_precedence_t0052",
         "from typing import ClassVar\n\n\n@dataclass\nclass A:\n    v: int\n    LIMIT: ClassVar[int] = 8\n\n\n@dataclass\nclass B(A):\n    v: float\n    LIMIT: int\n",
-        "T0052",
-        "attribute `v` is declared as `int` in a base class and as `float`",
+        "C0001",
+        "cannot inherit from non-dataclass class `A`",
     );
 }
 

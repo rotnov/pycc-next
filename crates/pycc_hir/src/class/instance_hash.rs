@@ -76,9 +76,6 @@ pub enum HashRefusal {
     /// `class` binds `__hash__` as something other than a plain instance
     /// method: a property, a static or class method, or a class attribute.
     NotAMethod { class: String },
-    /// `class`, in the MRO, is an enum class (`Enum.__hash__` hashes the
-    /// member name, a randomized `str` hash).
-    Enum { class: String },
     /// `class`, in the MRO, is an exception class, whose runtime value is
     /// not a plain instance object.
     Exception { class: String },
@@ -106,9 +103,6 @@ impl HashRefusal {
                 "`{class}` binds `__hash__` as something other than a plain `def __hash__(self)` \
                  method, which pycc does not compile yet"
             ),
-            HashRefusal::Enum { class } => {
-                format!("`hash()` of an enum member (`{class}`) is not supported yet")
-            }
             HashRefusal::Exception { class } => {
                 format!("`hash()` of an exception instance (`{class}`) is not supported yet")
             }
@@ -141,8 +135,6 @@ fn precheck(def: &HirClassDef, classes: &HashMap<String, HirClassDef>) -> Option
         let class = name.clone();
         if mro_def.is_protocol {
             Some(HashRefusal::Protocol { class })
-        } else if mro_def.is_enum {
-            Some(HashRefusal::Enum { class })
         } else if mro_def.exception_type_tag.is_some() || is_builtin_exception_class(name) {
             // The seven basic builtin exceptions are seeded with tag
             // `None`, so the name check is what catches them (and, as a

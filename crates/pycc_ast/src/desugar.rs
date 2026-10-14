@@ -7,6 +7,11 @@
 //! says otherwise (`map`/`filter` produce a list instead of a lazy
 //! iterator). The rewrites:
 //!
+//! * A `@dataclass` class becomes a plain class with the methods
+//!   `dataclasses` generates (see [`dataclasses`]); `Color(value)` of an enum
+//!   class becomes its synthesized value lookup (see [`enums`]); a
+//!   `@functools.cache`/`@lru_cache` function gets a native memo table (see
+//!   [`functools`]).
 //! * `sys.stdin.readline()`, `sys.stdin.read()`, `sys.stdin.readlines()`,
 //!   `sys.stdout.write(s)`, `sys.stdout.flush()` and
 //!   `sys.setrecursionlimit(n)` become calls of native builtins
@@ -53,7 +58,9 @@ mod collections;
 mod displays;
 mod comps;
 mod dataclasses;
+mod enums;
 mod exprs;
+mod functools;
 mod ext_generators;
 mod ext_signatures;
 mod globals;
@@ -143,6 +150,8 @@ pub fn desugar(module: &mut ModModule) {
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
         dataclasses::expand_dataclasses(&mut body);
+        enums::enum_lookups(&mut body);
+        functools::expand_caches(&mut body);
         displays::canonical_displays(&mut body);
         wildcard::expand_wildcards(&mut body);
         ndarray_ndim::close_ndims(&mut body);

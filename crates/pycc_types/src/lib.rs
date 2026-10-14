@@ -3,6 +3,7 @@ mod boolop;
 mod buffer;
 mod builtin_call;
 mod class;
+mod dict_key;
 mod closure;
 mod compare_chain;
 mod comprehension;

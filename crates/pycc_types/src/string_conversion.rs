@@ -46,6 +46,8 @@ pub(crate) enum StringConversionSite {
     PrintArgument,
     /// An `{expr}` interpolation inside an f-string.
     FStringInterpolation,
+    /// The argument of a `str(...)` or `repr(...)` call.
+    ConversionCall,
 }
 
 impl StringConversionSite {
@@ -53,6 +55,7 @@ impl StringConversionSite {
         match self {
             StringConversionSite::PrintArgument => "a `print()` argument",
             StringConversionSite::FStringInterpolation => "an f-string interpolation",
+            StringConversionSite::ConversionCall => "a `str()`/`repr()` argument",
         }
     }
 }
@@ -135,6 +138,19 @@ pub(crate) fn reject_unrenderable(
         Ty::Set(elem) | Ty::FrozenSet(elem) if pycc_hir::is_hashable_ty(elem) => Ok(()),
         Ty::Set(_) | Ty::FrozenSet(_) => Err(crate::frozenset::unrenderable_set(ty)),
         Ty::List(_) => crate::list_ops::check_list_renderable(ty),
+        // The runtime renders a dict's words itself, with no `__repr__` call
+        // for an instance key or value.
+        Ty::Dict(pair) if matches!(pair.0, Ty::Instance(_)) || matches!(pair.1, Ty::Instance(_)) => {
+            Err(Diagnostic::error(
+                "C0001",
+                format!(
+                    "rendering `{}` (a dict holding class instances) as a string is not \
+                     supported yet",
+                    ty.name()
+                ),
+                Span::new(0, 0),
+            ))
+        }
         // A generator or a function value renders as CPython's does,
         // `<generator object g at 0x...>` / `<function f at 0x...>`, with
         // the object's own address (`pycc_rt::closure`).
@@ -197,10 +213,49 @@ pub(crate) fn instance_text_call(
         "repr" => true,
         _ => return None,
     };
-    let [Ty::Instance(class_name)] = arg_tys else {
+    let [arg] = arg_tys else {
         return None;
     };
-    instance_text_dunder(env, class_name, want_repr).map(|_| Ok(Ty::Str))
+    // A dict holding instances: the runtime cannot render them.
+    if let Ty::Dict(_) = arg
+        && let Err(err) = reject_unrenderable(env, arg, StringConversionSite::ConversionCall)
+    {
+        return Some(Err(err));
+    }
+    let Ty::Instance(class_name) = arg else {
+        // `repr()` of a tuple, set, `None`, ...: its `str`, which `print`
+        // renders (`pycc_mir` lowers it to an f-string of the value).
+        if want_repr
+            && pycc_hir::builtins::resolve_call("repr", arg_tys).is_none()
+            && repr_is_str(arg)
+            && reject_unrenderable(env, arg, StringConversionSite::ConversionCall).is_ok()
+        {
+            return Some(Ok(Ty::Str));
+        }
+        return None;
+    };
+    if pycc_hir::is_builtin_exception_class(class_name) {
+        return None;
+    }
+    Some(match instance_text_dunder(env, class_name, want_repr) {
+        Some(_) => Ok(Ty::Str),
+        None => Err(unrenderable_instance(
+            class_name,
+            StringConversionSite::ConversionCall,
+            false,
+        )),
+    })
+}
+
+/// Whether `repr(x)` equals `str(x)` for every value of `ty` (everything
+/// but `str` itself and a value that may hold one at the top level).
+pub(crate) fn repr_is_str(ty: &Ty) -> bool {
+    match ty {
+        Ty::Tuple(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::None => true,
+        Ty::Optional(inner) => !matches!(**inner, Ty::Str) && repr_is_str(inner),
+        Ty::Int | Ty::Float | Ty::Bool => true,
+        _ => false,
+    }
 }
 
 /// Gates a string-conversion *expression*: [`reject_unrenderable`] on its
@@ -610,11 +665,10 @@ class Derived(Base):\n    pass\n\nd = Derived(1)\n";
     }
 
     #[test]
-    fn an_enum_member_is_c0001() {
-        assert_rejected(
+    fn an_enum_member_renders() {
+        assert_accepted(
             "from enum import Enum\n\nclass Color(Enum):\n    RED = 1\n    BLUE = 2\n\n\
              print(Color.RED)\n",
-            "`Color` instance",
         );
     }
 

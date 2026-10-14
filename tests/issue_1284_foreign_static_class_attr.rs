@@ -370,16 +370,15 @@ fn the_annotated_spelling_is_refused_after_the_annotation_check() {
     );
 }
 
-/// `@dataclass` and `Enum` bodies never reach the classifier; their own
-/// diagnostics are unchanged.
+/// A `@dataclass` is written out as a plain class
+/// (`pycc_ast::desugar::dataclasses`), so its bare assignment is a class
+/// attribute like any other; an `Enum` body keeps its own diagnostic.
 #[test]
 fn dataclass_and_enum_bodies_keep_their_own_diagnostics() {
-    assert_one_error(
+    assert_checks(
         "fs_dataclass_body",
         "import os\nfrom dataclasses import dataclass\n\n\n@dataclass\n\
          class C:\n    exists = staticmethod(os.path.exists)\n",
-        "C0001",
-        "a `@dataclass` body statement must be a field declaration",
     );
     assert_one_error(
         "fs_enum_body",

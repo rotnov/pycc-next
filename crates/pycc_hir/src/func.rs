@@ -51,7 +51,10 @@ pub(crate) fn lower_function(
     }
     if !def.decorator_list.is_empty() {
         return Err(unsupported(
-            "function decorators are not supported yet",
+            "function decorators are not supported yet -- only `@functools.cache` and \
+             `@functools.lru_cache` on a module-level function with annotated `int`/`float`/\
+             `bool`/`str` parameters compile; `--non-strict` runs any other decorated function \
+             in CPython",
             def.range,
         ));
     }

@@ -189,12 +189,7 @@ fn a_subclass_that_hashes_differently_refuses_the_base() {
 }
 
 #[test]
-fn enum_and_generic_classes_are_refused() {
-    let enum_source = "from enum import Enum\n\n\nclass Color(Enum):\n    RED = 1\n";
-    assert_eq!(
-        unsupported(enum_source, "Color"),
-        HashRefusal::Enum { class: s("Color") }
-    );
+fn generic_classes_are_refused() {
     let generic = "class Box[T]:\n    def __init__(self, v: T) -> None:\n        self.v = v\n";
     assert_eq!(
         unsupported(generic, "Box"),
@@ -255,7 +250,6 @@ fn every_refusal_has_a_help_line_naming_its_class() {
             HashRefusal::NotAMethod { class: s("K") },
             "plain `def __hash__(self)`",
         ),
-        (HashRefusal::Enum { class: s("K") }, "enum member"),
         (
             HashRefusal::Exception { class: s("K") },
             "exception instance",

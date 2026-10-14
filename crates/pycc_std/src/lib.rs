@@ -335,6 +335,11 @@ const REGISTRY: &[StdSymbol] = &[
     },
     StdSymbol {
         module: StdModule::Enum,
+        name: "IntEnum",
+        kind: StdSymbolKind::EnumMarker,
+    },
+    StdSymbol {
+        module: StdModule::Enum,
         name: "auto",
         kind: StdSymbolKind::EnumAutoMarker,
     },

@@ -258,6 +258,7 @@ pub(super) const SPELLING_MARKERS: &[&str] = &[
     "Enum",
     "Final",
     "FrozenSet",
+    "IntEnum",
     "List",
     "NDArray",
     "Protocol",

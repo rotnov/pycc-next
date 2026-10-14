@@ -400,7 +400,7 @@ class D:
 def f() -> int:
     return 1
 ",
-            "dataclass field `x` has type `memoryview`",
+            "cannot establish an attribute of type `memoryview`",
         ),
     ];
     for (name, source, expected) in CASES {

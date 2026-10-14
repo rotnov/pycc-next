@@ -273,11 +273,12 @@ const DEVIATION_DRIVER: &str = "import pycc_inst_dev_mod as mod\n\
 /// comparison slot;
 /// `__eq__` override: CPython `True`, and since #1427 pycc's too (the
 /// carrier type's `tp_richcompare` runs the compiled `__eq__`); `__repr__`
-/// override: CPython `Same!` (`__repr__` is not wired to a type slot); a
+/// override: CPython `Same!`, and pycc's too (`tp_repr` runs the compiled
+/// `__repr__`, so the `startswith` check is `False`); a
 /// `self` escaping during `__init__`:
 /// CPython `True True` (the escape is packed before `tp_init` links the
 /// host's object, so it gets its own carrier of the same type).
-const DEVIATION_PINNED: &str = "False\nTrue\nTrue\nTrue\nTrue\nFalse True\n";
+const DEVIATION_PINNED: &str = "False\nTrue\nTrue\nTrue\nFalse\nFalse True\n";
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]

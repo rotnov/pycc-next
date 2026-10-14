@@ -176,9 +176,9 @@ fn reject_non_dataclass_decorator() {
     );
 }
 
-/// #378: `@dataclass(frozen=True)` is rejected with C0001.
+/// #378: `@dataclass(frozen=True)` compiles (`pycc_ast::desugar::dataclasses`).
 #[test]
-fn reject_dataclass_with_options() {
+fn accept_dataclass_with_options() {
     let dir = ScratchDir::new("378_rej_frozen").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -186,14 +186,14 @@ fn reject_dataclass_with_options() {
         "@dataclass(frozen=True)\nclass Point:\n    x: int\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "`@dataclass(frozen=True)` should be rejected"
+        !check_fails(&dir, &src),
+        "`@dataclass(frozen=True)` now compiles"
     );
 }
 
-/// #378: `field(default=...)` is rejected with C0001.
+/// #378: `field(default=...)` compiles.
 #[test]
-fn reject_field_default() {
+fn accept_field_default() {
     let dir = ScratchDir::new("378_rej_field").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -201,8 +201,8 @@ fn reject_field_default() {
         "@dataclass\nclass Point:\n    x: int = field(default=0)\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "`field(default=...)` should be rejected"
+        !check_fails(&dir, &src),
+        "`field(default=...)` now compiles"
     );
 }
 
@@ -221,9 +221,9 @@ fn reject_field_default_factory() {
     );
 }
 
-/// #378: a plain default value (`x: int = 42`) is rejected with C0001.
+/// #378: a plain default value (`x: int = 42`) compiles.
 #[test]
-fn reject_plain_default() {
+fn accept_plain_default() {
     let dir = ScratchDir::new("378_rej_plain").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -231,14 +231,14 @@ fn reject_plain_default() {
         "@dataclass\nclass Point:\n    x: int = 42\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "a plain default value should be rejected"
+        !check_fails(&dir, &src),
+        "a plain default value now compiles"
     );
 }
 
-/// #378: an explicit `__init__` in a `@dataclass` is rejected with C0001.
+/// #378: an explicit `__init__` in a `@dataclass` is kept, as in CPython.
 #[test]
-fn reject_explicit_init() {
+fn accept_explicit_init() {
     let dir = ScratchDir::new("378_rej_init").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -246,14 +246,14 @@ fn reject_explicit_init() {
         "@dataclass\nclass Point:\n    x: int\n    def __init__(self, x: int) -> None:\n        self.x = x\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "an explicit `__init__` in a dataclass should be rejected"
+        !check_fails(&dir, &src),
+        "an explicit `__init__` in a dataclass now compiles"
     );
 }
 
-/// #378: a `@dataclass` inheriting from a non-dataclass base is rejected.
+/// #378: a `@dataclass` inheriting from a non-dataclass base compiles: only dataclass bases contribute fields.
 #[test]
-fn reject_non_dataclass_base() {
+fn accept_non_dataclass_base() {
     let dir = ScratchDir::new("378_rej_base").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -261,14 +261,14 @@ fn reject_non_dataclass_base() {
         "class Base:\n    def __init__(self, a: int) -> None:\n        self.a = a\n@dataclass\nclass Derived(Base):\n    b: int\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "a dataclass inheriting from a non-dataclass should be rejected"
+        !check_fails(&dir, &src),
+        "a dataclass inheriting from a non-dataclass now compiles"
     );
 }
 
-/// #378: an explicit `__eq__` in a `@dataclass` is rejected with C0001.
+/// #378: an explicit `__eq__` in a `@dataclass` is kept.
 #[test]
-fn reject_explicit_eq() {
+fn accept_explicit_eq() {
     let dir = ScratchDir::new("378_rej_eq").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -276,14 +276,14 @@ fn reject_explicit_eq() {
         "@dataclass\nclass Point:\n    x: int\n    def __eq__(self, other: Point) -> bool:\n        return self.x == other.x\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "an explicit `__eq__` in a dataclass should be rejected"
+        !check_fails(&dir, &src),
+        "an explicit `__eq__` in a dataclass now compiles"
     );
 }
 
-/// #378: an explicit `__repr__` in a `@dataclass` is rejected with C0001.
+/// #378: an explicit `__repr__` in a `@dataclass` is kept.
 #[test]
-fn reject_explicit_repr() {
+fn accept_explicit_repr() {
     let dir = ScratchDir::new("378_rej_repr").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -291,8 +291,8 @@ fn reject_explicit_repr() {
         "@dataclass\nclass Point:\n    x: int\n    def __repr__(self) -> str:\n        return \"Point\"\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "an explicit `__repr__` in a dataclass should be rejected"
+        !check_fails(&dir, &src),
+        "an explicit `__repr__` in a dataclass now compiles"
     );
 }
 
@@ -405,11 +405,9 @@ fn reject_ordering_between_dataclass_instances() {
 }
 
 /// #378: `==` between non-dataclass instances with a user-defined `__eq__`
-/// is rejected with T0021 -- the MIR `__eq__` rewrite is restricted to
-/// dataclass classes (whose synthesized `__eq__` has a known-correct
-/// signature).
+/// is called, as is any `__eq__(self, other) -> bool`.
 #[test]
-fn reject_eq_between_non_dataclass_instances_with_user_eq() {
+fn accept_eq_between_non_dataclass_instances_with_user_eq() {
     let dir = ScratchDir::new("378_rej_nondc_eq").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -417,18 +415,14 @@ fn reject_eq_between_non_dataclass_instances_with_user_eq() {
         "class C:\n    def __init__(self, x: int) -> None:\n        self.x = x\n    def __eq__(self, other: C) -> bool:\n        return self.x == other.x\nc1 = C(1)\nc2 = C(2)\nprint(c1 == c2)\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "== between non-dataclass instances with user __eq__ should be rejected with T0021"
+        !check_fails(&dir, &src),
+        "== between non-dataclass instances with user __eq__ now compiles"
     );
 }
 
-/// #378: a self-referential dataclass field (`next: Node`) is rejected with
-/// C0001 -- the instance attribute-slot storage is a single word per slot
-/// (D-154), with no representation for a class instance. Without the
-/// scalar-slot-type check in HIR lowering, this panics in codegen with an
-/// "internal error" message; the check rejects it cleanly at HIR time.
+/// #378: a self-referential dataclass field (`next: Node`) is an instance slot.
 #[test]
-fn reject_self_referential_dataclass_field() {
+fn accept_self_referential_dataclass_field() {
     let dir = ScratchDir::new("378_rej_self_ref").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -436,16 +430,14 @@ fn reject_self_referential_dataclass_field() {
         "@dataclass\nclass Node:\n    next: Node\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "a self-referential dataclass field should be rejected with C0001, not panic in codegen"
+        !check_fails(&dir, &src),
+        "a self-referential dataclass field now compiles"
     );
 }
 
-/// #378: a `Self`-typed dataclass field (`next: Self`) is rejected with
-/// C0001 -- `Self` resolves to `Ty::Instance(class_name)` (PEP 673), the
-/// same non-scalar case as a self-referential class-name field.
+/// #378: a `Self`-typed dataclass field (`next: Self`) is an instance slot too.
 #[test]
-fn reject_self_typed_dataclass_field() {
+fn accept_self_typed_dataclass_field() {
     let dir = ScratchDir::new("378_rej_self_typed").expect("failed to create scratch dir");
     let src = write_fixture(
         &dir,
@@ -453,8 +445,8 @@ fn reject_self_typed_dataclass_field() {
         "@dataclass\nclass Node:\n    next: Self\n",
     );
     assert!(
-        check_fails(&dir, &src),
-        "a `Self`-typed dataclass field should be rejected with C0001, not panic in codegen"
+        !check_fails(&dir, &src),
+        "a `Self`-typed dataclass field now compiles"
     );
 }
 

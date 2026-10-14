@@ -33,6 +33,26 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   namespace and `__name__`, and its body runs once at its first import, in CPython's
   import order. An unresolved module or name, a module used as a value and an import
   cycle are compile errors (`T0021`, `C0001`, `E0108`).
+- `dataclasses.dataclass`, natively in strict mode: `@dataclass` and
+  `@dataclass(...)` with `init`/`repr`/`eq`/`order`/`frozen`/`unsafe_hash`, field
+  defaults, `field(default=..., default_factory=..., init=, repr=, compare=)`,
+  `__post_init__`, inherited fields, generated `__init__`/`__repr__`/`__eq__`/
+  ordering/`__hash__`, and `dataclasses.FrozenInstanceError` on assignment to a frozen
+  field. An `--ext` dataclass takes keyword arguments and prints as in CPython.
+- `enum`: `IntEnum` beside `Enum`/`StrEnum`; members print, `str()`, `repr()` and
+  format exactly as CPython's (`Color.RED`, `<Color.RED: 1>`, `2` for an `IntEnum`),
+  `Color(value)` looks a member up (`ValueError: 4 is not a valid Color`), `case
+  Color.RED:` patterns, members as set elements and dict keys, `IntEnum` ordering.
+- `functools.cache` / `functools.lru_cache` (bare, `()`, `maxsize=None`, `maxsize=N`
+  with least-recently-used eviction, `maxsize=0`) on module-level functions with
+  `int`/`float`/`bool`/`str` parameters, and `f.cache_clear()`. Any other decorator
+  still runs in CPython under `--non-strict`.
+- Classes: `print`/`str()`/f-strings call a class's `__str__` or `__repr__`, the
+  `repr()` builtin and f-string `!r`/`!s` work, `==`/`!=`/`<`/`<=`/`>`/`>=` between
+  instances call the class's dunders, `==` without `__eq__` and `is` compare identity,
+  and a call of a constructor with defaults may omit them. `--ext` classes install
+  `__repr__`/`__str__` as `tp_repr`/`tp_str`.
+- `hash()` of a `str`, a `float` and a tuple holding them.
 
 ### Changed
 

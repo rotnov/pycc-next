@@ -462,37 +462,29 @@ fn an_uncompiled_hash_binding_is_c0001() {
 
 #[test]
 fn a_dataclass_without_its_own_hash_is_c0001() {
-    for (tag, import, decorator) in [
-        (
-            "e2e_1335_dataclass",
-            "from dataclasses import dataclass",
-            "@dataclass",
-        ),
-        (
-            "e2e_1335_dataclass_transform",
-            "from typing import dataclass_transform",
-            "@dataclass_transform()",
-        ),
-    ] {
-        assert_one_error(
-            tag,
-            &format!("{import}\n\n\n{decorator}\nclass D:\n    x: int\n\n\nprint(hash(D(1)))\n"),
-            "C0001",
-            "`hash()` of `D` is valid Python but not implemented yet",
-            "define `__hash__` explicitly",
-        );
-    }
+    // A `@dataclass` (eq, not frozen) sets `__hash__ = None`: CPython's
+    // `TypeError`, reported statically.
+    assert_one_error(
+        "e2e_1335_dataclass",
+        "from dataclasses import dataclass\n\n\n@dataclass\nclass D:\n    x: int\n\n\n\
+         print(hash(D(1)))\n",
+        "T0021",
+        "unhashable type: `D`",
+        "defines `__eq__` without `__hash__`",
+    );
+    assert_one_error(
+        "e2e_1335_dataclass_transform",
+        "from typing import dataclass_transform\n\n\n@dataclass_transform()\nclass D:\n    x: int\n\n\n\
+         print(hash(D(1)))\n",
+        "C0001",
+        "`hash()` of `D` is valid Python but not implemented yet",
+        "define `__hash__` explicitly",
+    );
 }
 
 #[test]
-fn an_enum_exception_protocol_or_generic_value_is_c0001() {
+fn an_exception_protocol_or_generic_value_is_c0001() {
     let cases = [
-        (
-            "e2e_1335_enum",
-            "from enum import Enum\n\n\nclass Color(Enum):\n    RED = 1\n\n\nprint(hash(Color.RED))\n",
-            "Color",
-            "enum member",
-        ),
         (
             "e2e_1335_builtin_exception",
             "try:\n    raise ValueError(\"x\")\nexcept ValueError as e:\n    print(hash(e))\n",

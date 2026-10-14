@@ -696,21 +696,14 @@ fn an_uncompiled_element_class_is_c0001() {
     };
     let dataclass =
         "from dataclasses import dataclass\n\n\n@dataclass\nclass D:\n    x: int\n\n\ns = {D(1)}\n";
+    // A `@dataclass` (eq, not frozen) is unhashable: CPython's `TypeError`.
+    // An enum member hashes as CPython's does (`tests/stdlib_enum_functools.rs`).
     assert_one_error(
         "e2e_1343_dataclass",
         dataclass,
-        "C0001",
-        &message("D"),
-        "`D` has no `__hash__` of its own",
-    );
-    let enumeration =
-        "from enum import Enum\n\n\nclass Color(Enum):\n    RED = 1\n\n\ns = {Color.RED}\n";
-    assert_one_error(
-        "e2e_1343_enum",
-        enumeration,
-        "C0001",
-        &message("Color"),
-        "enum member",
+        "T0054",
+        "cannot use 'D' as a set element (unhashable type: 'D')",
+        "`D` defines `__eq__` without `__hash__`",
     );
     let exception = "class Err(Exception):\n    pass\n\n\ndef f(e: Err) -> int:\n    s = {e}\n    return len(s)\n";
     assert_one_error(

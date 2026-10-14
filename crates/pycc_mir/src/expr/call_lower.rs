@@ -201,6 +201,19 @@ pub(crate) fn lower_call_expr(
             return rewritten;
         }
     }
+    // `repr(x)` of a value whose repr is its `str` and that no builtin row
+    // claims (a tuple, a set, `None`): the f-string rendering of `x`
+    // (`pycc_types::string_conversion::repr_is_str`).
+    if !is_user_defined
+        && callee == "repr"
+        && let [arg] = args.as_slice()
+        && matches!(
+            arg.ty(),
+            Ty::Tuple(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::None | Ty::Optional(_)
+        )
+    {
+        return MirExpr::FString(vec![MirFStringPart::Interpolation(Box::new(arg.clone()))]);
+    }
     // A generator argument of a builtin that consumes it (`pycc_types`
     // types it as the list of its values).
     let args = if is_user_defined {

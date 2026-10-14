@@ -198,6 +198,7 @@ pub(crate) fn comp_container_ty(
             let value_ty = infer_expr_in(env, local_names, value)?;
             let dict_ty = Ty::Dict(Box::new((key_ty, value_ty)));
             pycc_hir::check_container_ty(&dict_ty, Span::new(0, 0))?;
+            crate::dict_key::check_dict_key(env, &dict_ty)?;
             Ok(dict_ty)
         }
     }

@@ -101,7 +101,7 @@ pub(crate) fn lower_class(
     // any member is read, so the marker base's own spelling has to be
     // captured here -- `bases.clear()` below consumes it, and
     // `lower_enum_class` is not called until well after that point.
-    let is_str_enum = is_enum && bases[0] == "StrEnum";
+    let enum_marker = if is_enum { bases[0].clone() } else { String::new() };
     if is_enum {
         if type_param.is_some() {
             return Err(unsupported(
@@ -255,7 +255,7 @@ pub(crate) fn lower_class(
     // not method definitions. Handle this in a separate function before the
     // regular class-body loop below, which rejects non-`def` statements.
     if is_enum {
-        return lower_enum_class(def, class_name, bases, mro, type_param, is_str_enum);
+        return lower_enum_class(def, class_name, bases, mro, type_param, &enum_marker);
     }
     // #380 (PR-20): a protocol class body contains method definitions
     // (with `...` or `pass` bodies) and annotated assignments

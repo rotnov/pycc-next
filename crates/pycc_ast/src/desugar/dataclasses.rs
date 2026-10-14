@@ -29,7 +29,7 @@ use super::signatures::parse_helper;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{Expr, ExprContext, Stmt, StmtClassDef};
 use ruff_text_size::{Ranged, TextRange};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The call wrapping a `default_factory` default (see the module doc).
 pub const FACTORY_MARKER: &str = "__pycc_default_factory__";
@@ -82,6 +82,8 @@ struct Known {
 /// Rewrites every top-level `@dataclass` class of `body` (module doc).
 pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
     let mut known: HashMap<String, Known> = HashMap::new();
+    // Every class's class-level names, its bases' included.
+    let mut class_attrs: HashMap<String, HashSet<String>> = HashMap::new();
     let mut any_frozen = false;
     let mut factories: Vec<(usize, Vec<Stmt>)> = Vec::new();
     for (index, stmt) in body.iter_mut().enumerate() {
@@ -98,11 +100,31 @@ pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
         );
         let base_options = bases.iter().find_map(|b| known.get(b)).map(|k| k.options.clone());
         let base_frozen = base_options.as_ref().is_some_and(|o| o.frozen);
+        let own_attrs = class_level_names(class);
+        let inherited_attrs: HashSet<String> = bases
+            .iter()
+            .filter_map(|b| class_attrs.get(b))
+            .flatten()
+            .cloned()
+            .collect();
+        let mut all_attrs = own_attrs.clone();
+        all_attrs.extend(inherited_attrs.iter().cloned());
+        class_attrs.insert(class.name.to_string(), all_attrs);
         match dataclass_options(class) {
             Some(Ok(options)) => {
                 let Some(mut own) = own_fields(class) else {
                     continue;
                 };
+                // A class attribute sharing a field's name, a dunder class
+                // variable, or a class-level default for an inherited field
+                // (CPython's field-collection order decides each): left to
+                // HIR, which refuses them.
+                let clashes = own.iter().chain(&inherited).any(|f| {
+                    own_attrs.contains(&f.name) || inherited_attrs.contains(&f.name)
+                }) || own_attrs.iter().any(|n| n.starts_with("__") && n.ends_with("__"));
+                if clashes {
+                    continue;
+                }
                 let helpers = factory_helpers(&class.name, &mut own, class.range);
                 let mut fields = inherited;
                 merge_fields(&mut fields, &own);
@@ -119,7 +141,10 @@ pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
             }
             Some(Err(())) => {}
             None => {
-                if let Some(options) = base_options {
+                let clashes = inherited
+                    .iter()
+                    .any(|f| own_attrs.contains(&f.name) || inherited_attrs.contains(&f.name));
+                if let Some(options) = base_options.filter(|_| !clashes) {
                     let generated = dunders(class, &inherited, &options);
                     class.body.extend(generated);
                     known.insert(
@@ -155,6 +180,35 @@ pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
             }
         }
     }
+}
+
+/// The names `class`'s body binds as class attributes: a bare assignment,
+/// a `ClassVar` annotation, and (outside a dataclass) an annotation with a
+/// value.
+fn class_level_names(class: &StmtClassDef) -> HashSet<String> {
+    let dataclass = dataclass_options(class).is_some();
+    let mut names = HashSet::new();
+    for stmt in &class.body {
+        match stmt {
+            Stmt::Assign(assign) => {
+                for target in &assign.targets {
+                    if let Expr::Name(n) = target {
+                        names.insert(n.id.to_string());
+                    }
+                }
+            }
+            Stmt::AnnAssign(ann) => {
+                let class_var = annotation_marker(&ann.annotation) == Some("ClassVar");
+                if let Expr::Name(n) = &*ann.target
+                    && (class_var || (!dataclass && ann.value.is_some()))
+                {
+                    names.insert(n.id.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    names
 }
 
 fn is_docstring(stmt: &Stmt) -> bool {

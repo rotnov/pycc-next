@@ -302,14 +302,14 @@ fn a_non_scalar_final_class_attribute_is_rejected() {
 
 /// #916 does not widen into #913. A `@dataclass` field never reaches the
 /// class-attribute path at all, so a `Final`-annotated field behaves exactly
-/// as the plain one does: a default is still rejected, and a required field
-/// still works.
+/// as the plain one does: a default is the `__init__` default, and a
+/// required field still works.
 #[test]
 fn a_final_dataclass_field_follows_the_plain_spelling() {
-    assert_rejected(
+    assert_runs(
         "916_dataclass_default",
-        "from dataclasses import dataclass\nfrom typing import Final\n\n\n@dataclass\nclass C:\n    x: Final[int] = 1\n\n\nprint(C(2).x)\n",
-        "dataclass field defaults are not supported yet",
+        "from dataclasses import dataclass\nfrom typing import Final\n\n\n@dataclass\nclass C:\n    x: Final[int] = 1\n\n\nprint(C(2).x, C().x)\n",
+        "2 1\n",
     );
     assert_runs(
         "916_dataclass_required",

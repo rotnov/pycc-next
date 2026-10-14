@@ -344,7 +344,7 @@ fn lowers_match_with_non_literal_value_pattern_is_c0001() {
     assert_eq!(err.code, "C0001");
     assert!(
         err.message
-            .contains("only a literal value pattern is supported so far")
+            .contains("only a literal value pattern")
     );
 }
 

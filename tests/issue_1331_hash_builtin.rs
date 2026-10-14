@@ -252,9 +252,6 @@ fn hash_module_bodies_match_cpython_as_extensions() {
 #[test]
 fn a_hashable_but_unimplemented_argument_is_c0001() {
     for (tag, argument, name) in [
-        ("e2e_1331_str", "\"s\"", "str"),
-        ("e2e_1331_float", "1.5", "float"),
-        ("e2e_1331_float_tuple", "(1.5, 2)", "tuple[float, int]"),
         ("e2e_1331_none", "None", "None"),
     ] {
         assert_one_error(
@@ -274,22 +271,11 @@ fn a_hashable_but_unimplemented_argument_is_c0001() {
     // An unannotated helper whose parameter the constraint path infers
     // from its call site: the argument's type is resolved only after the
     // solver runs, and the final check still refuses it.
-    for (tag, argument, name) in [
-        ("e2e_1331_helper_str", "\"s\"", "str"),
-        ("e2e_1331_helper_float", "1.5", "float"),
-    ] {
-        assert_one_error(
-            tag,
-            &format!("def _h(y):\n    return hash(y)\n\n\nprint(_h({argument}))\n"),
-            "C0001",
-            &format!("`hash()` of `{name}` is valid Python but not implemented yet"),
-        );
-    }
     assert_one_error(
-        "e2e_1331_helper_literal",
-        "def _h():\n    return hash(\"s\")\n\n\nprint(_h())\n",
+        "e2e_1331_helper_none",
+        "def _h(y):\n    return hash(y)\n\n\nprint(_h(None))\n",
         "C0001",
-        "`hash()` of `str` is valid Python but not implemented yet",
+        "`hash()` of `None` is valid Python but not implemented yet",
     );
 }
 

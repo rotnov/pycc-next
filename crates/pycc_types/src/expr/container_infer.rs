@@ -136,6 +136,7 @@ pub(crate) fn infer_dict_literal_expr(
     let dict_ty = Ty::Dict(Box::new((key_ty, val_ty)));
     // Shared with annotation lowering -- see the `ListLiteral` arm.
     pycc_hir::check_container_ty(&dict_ty, Span::new(0, 0))?;
+    crate::dict_key::check_dict_key(env, &dict_ty)?;
     Ok(dict_ty)
 }
 

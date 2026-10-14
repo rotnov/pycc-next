@@ -132,15 +132,14 @@ fn a_class_without_init_printed_is_rejected_by_check() {
     assert_c0001("noinit", "class C:\n    pass\n\nprint(C())\n", "`C`");
 }
 
-/// A user-written `__repr__` is never called by MIR for a non-dataclass;
-/// honouring it is a deferred slice, so this pin flips visibly when it lands.
+/// A user-written `__repr__` renders the instance.
 #[test]
-fn a_user_repr_on_a_plain_class_is_still_rejected_by_check() {
-    assert_c0001(
+fn a_user_repr_on_a_plain_class_renders() {
+    assert_prints(
         "userrepr",
         "class C:\n    def __init__(self, x: int) -> None:\n        self.x = x\n\n\
          \x20   def __repr__(self) -> str:\n        return \"C()\"\n\nprint(C(1))\n",
-        "`C`",
+        "C()\n",
     );
 }
 
@@ -154,24 +153,23 @@ fn a_plain_instance_interpolated_in_an_fstring_is_rejected_by_check() {
 }
 
 #[test]
-fn an_enum_member_printed_is_rejected_by_check() {
-    assert_c0001(
+fn an_enum_member_printed_renders() {
+    assert_prints(
         "enum",
         "from enum import Enum\n\nclass Color(Enum):\n    RED = 1\n    BLUE = 2\n\nprint(Color.RED)\n",
-        "`Color`",
+        "Color.RED\n",
     );
 }
 
-/// D-237's repro table: a non-dataclass subclass of a `@dataclass` base.
-/// `is_dataclass` is a class's own decorator, not inherited, so `Q` has no
-/// synthesized `__repr__` and the dataclass rewrite would not fire.
+/// D-237's repro table: a non-dataclass subclass of a `@dataclass` base
+/// renders with its own name, as CPython's `type(self).__qualname__` does.
 #[test]
-fn a_non_dataclass_subclass_of_a_dataclass_is_rejected_by_check() {
-    assert_c0001(
+fn a_non_dataclass_subclass_of_a_dataclass_renders() {
+    assert_prints(
         "subclass",
         "from dataclasses import dataclass\n\n@dataclass\nclass P:\n    x: int\n\n\
          class Q(P):\n    pass\n\nprint(Q(1))\n",
-        "`Q`",
+        "Q(x=1)\n",
     );
 }
 

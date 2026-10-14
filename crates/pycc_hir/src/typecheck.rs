@@ -48,7 +48,7 @@ pub fn is_builtin_type_name(name: &str) -> bool {
 /// textual-resolution precedent for `math.sqrt`. `StrEnum` additionally
 /// fixes the class's member-value type to `str`; see `lower_enum_class`.
 pub fn is_enum_base_name(name: &str) -> bool {
-    name == "Enum" || name == "StrEnum"
+    name == "Enum" || name == "StrEnum" || name == "IntEnum"
 }
 
 /// Returns `true` if `name` is the builtin `Protocol` base name recognized

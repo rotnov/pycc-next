@@ -98,7 +98,7 @@ fn user_methods_are_kept_and_not_generated() {
 }
 
 #[test]
-fn a_subclass_inherits_fields_and_a_plain_subclass_gets_its_own_repr() {
+fn a_subclass_inherits_fields_and_a_plain_subclass_gets_its_own_dunders() {
     let body = expand(
         "@dataclass\nclass A:\n    x: int\n\n@dataclass\nclass B(A):\n    y: str = \"\"\n\n\
          class C(B):\n    pass\n",
@@ -111,7 +111,7 @@ fn a_subclass_inherits_fields_and_a_plain_subclass_gets_its_own_repr() {
             ("y".to_string(), true)
         ]
     );
-    assert_eq!(methods_of(class(&body, "C")), ["__repr__"]);
+    assert_eq!(methods_of(class(&body, "C")), ["__eq__", "__repr__"]);
 }
 
 #[test]

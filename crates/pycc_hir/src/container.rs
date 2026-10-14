@@ -162,7 +162,10 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
             Ok(())
         }
         Ty::Dict(pair) => {
-            if !is_hashable_ty(&pair.0) || !is_list_element_ty(&pair.1) {
+            // An instance key is admitted here; `pycc_types::dict_key` refuses one
+            // whose class compares by `__eq__` (it has the class table).
+            let key_ok = is_hashable_ty(&pair.0) || matches!(pair.0, Ty::Instance(_));
+            if !key_ok || !is_list_element_ty(&pair.1) {
                 return Err(Diagnostic::error(
                     "T0036",
                     format!(

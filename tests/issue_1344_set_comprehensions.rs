@@ -952,9 +952,9 @@ fn a_set_comprehension_keeps_the_set_element_refusals() {
     assert_one_error(
         "e2e_1344_dataclass",
         "from dataclasses import dataclass\n\n\n@dataclass\nclass D:\n    x: int\n\n\ns = {D(i) for i in range(3)}\n",
-        "C0001",
-        "a set element of class `D` is valid Python but not implemented yet",
-        "`D` has no `__hash__` of its own",
+        "T0054",
+        "cannot use 'D' as a set element (unhashable type: 'D')",
+        "`D` defines `__eq__` without `__hash__`",
     );
     let subclassed = format!("{HASHED_R}class B(R):\n    pass\n\n\n");
     assert_one_error(

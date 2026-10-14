@@ -481,6 +481,14 @@ pub(crate) fn collect_enum_member_patterns<'a>(
                 collect_enum_member_patterns(sub, class_name, members, covered);
             }
         }
+        // `case Color.RED:` covers that member.
+        HirPattern::Literal(pycc_hir::HirExpr::AttrGet { base, attr }) => {
+            if matches!(base.as_ref(), pycc_hir::HirExpr::Name(n) if n == class_name)
+                && let Some((member, _)) = members.iter().find(|(m, _)| m == attr)
+            {
+                covered.insert(member.as_str());
+            }
+        }
         _ => {}
     }
 }

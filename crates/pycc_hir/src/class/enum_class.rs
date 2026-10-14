@@ -22,17 +22,16 @@ use pycc_diag::Diagnostic;
 /// enum-specific code paths (see cargo-llvm-cov#276 for the coverage
 /// instantiation issue that motivated the extraction).
 ///
-/// #892: `is_str_enum` is `true` when the class's marker base was
-/// `StrEnum` rather than `Enum`. `lower_class` must capture it *before* it
-/// clears `bases` (the marker base is consumed, not inherited), so it
-/// arrives here as a parameter rather than being re-read from `bases`.
+/// #892: `marker` is the class's marker base (`Enum`, `StrEnum`, `IntEnum`).
+/// `lower_class` must capture it *before* it clears `bases` (the marker base
+/// is consumed, not inherited), so it arrives here as a parameter.
 pub(super) fn lower_enum_class(
     def: &pycc_ast::StmtClassDef,
     class_name: String,
     bases: Vec<String>,
     mro: Vec<String>,
     type_param: Option<String>,
-    is_str_enum: bool,
+    marker: &str,
 ) -> Result<(HirClassDef, Vec<HirItem>), Diagnostic> {
     let mut enum_members: Vec<(String, EnumMemberValue)> = Vec::new();
     // #892: the class's single member-value type, as the word that names it
@@ -41,7 +40,13 @@ pub(super) fn lower_enum_class(
     // so the base decides the type and a disagreeing member is the error,
     // not the other way round. A plain `Enum` leaves it `None` until the
     // first member fixes it, and every later member must agree.
-    let mut value_kind: Option<&'static str> = if is_str_enum { Some("str") } else { None };
+    let is_str_enum = marker == "StrEnum";
+    let is_int_enum = marker == "IntEnum";
+    let mut value_kind: Option<&'static str> = match marker {
+        "StrEnum" => Some("str"),
+        "IntEnum" => Some("int"),
+        _ => None,
+    };
     // #892: the value `auto()` would produce for the next `int`-valued
     // member. CPython's `enum.auto` continues from the last explicit value,
     // starting at 1, so this advances past every `int` member -- explicit or
@@ -205,6 +210,15 @@ pub(super) fn lower_enum_class(
                     assign.range,
                 ));
             }
+            Some(kind) if kind != member_kind && is_int_enum => {
+                return Err(unsupported(
+                    format!(
+                        "enum class `{class_name}` derives from `IntEnum`, so member \
+                         `{member_name}` must be assigned an integer literal"
+                    ),
+                    assign.range,
+                ));
+            }
             Some(kind) if kind != member_kind => {
                 return Err(unsupported(
                     format!(
@@ -225,20 +239,15 @@ pub(super) fn lower_enum_class(
     // `value`'s type per-class, so this is built after the member loop has
     // settled `value_kind`. A body with no members at all (`class E(Enum):
     // "doc"`, accepted since #744) keeps the historical `Ty::Int`.
+    let value_ty = if value_kind == Some("str") { Ty::Str } else { Ty::Int };
+    let (methods, static_methods, items) =
+        super::enum_methods::enum_methods(&class_name, marker, &value_ty, &enum_members);
     let attrs = vec![
-        (
-            "value".to_string(),
-            if value_kind == Some("str") {
-                Ty::Str
-            } else {
-                Ty::Int
-            },
-        ),
+        ("value".to_string(), value_ty),
         ("name".to_string(), Ty::Str),
     ];
-    // An enum class has no methods, no __init__, and no items. Its
-    // members are compile-time singletons allocated by codegen, not
-    // runtime-instantiated objects.
+    // An enum class has no __init__: its members are compile-time
+    // singletons allocated by codegen, not runtime-instantiated objects.
     Ok((
         HirClassDef {
             class_attrs: Vec::new(),
@@ -247,9 +256,9 @@ pub(super) fn lower_enum_class(
             bases,
             mro,
             attrs,
-            methods: Vec::new(),
+            methods,
             properties: Vec::new(),
-            static_methods: Vec::new(),
+            static_methods,
             class_methods: Vec::new(),
             type_param,
             is_enum: true,
@@ -264,7 +273,7 @@ pub(super) fn lower_enum_class(
             abstract_methods: Vec::new(),
             is_abstract: false,
         },
-        Vec::new(),
+        items,
     ))
 }
 

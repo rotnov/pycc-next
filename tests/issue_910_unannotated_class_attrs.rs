@@ -132,16 +132,16 @@ fn writing_an_inferred_class_attribute_is_rejected() {
     );
 }
 
-/// In a `@dataclass` body a bare assignment is Python's class-level default
-/// for a field declared elsewhere, not a constant -- so it keeps falling
-/// through to the class-body catch-all rather than becoming a class
-/// attribute (#378).
+/// In a `@dataclass` body a bare assignment is a class attribute; one that
+/// names a field (a class-level default for an inherited field) keeps the
+/// class decorated, which HIR refuses (`pycc_ast::desugar::dataclasses`).
 #[test]
-fn a_bare_assignment_in_a_dataclass_body_stays_unsupported() {
-    assert_rejected(
+fn a_bare_assignment_in_a_dataclass_body_is_a_class_attribute() {
+    // Not a field (no annotation): CPython keeps it a class attribute.
+    assert_runs(
         "910_dataclass_assign",
-        "from dataclasses import dataclass\n\n\n@dataclass\nclass C:\n    x: int\n    y = 5\n",
-        "a `@dataclass` body statement must be a field declaration",
+        "from dataclasses import dataclass\n\n\n@dataclass\nclass C:\n    x: int\n    y = 5\n\n\nc = C(1)\nprint(c, c.y, C.y)\n",
+        "C(x=1) 5 5\n",
     );
 }
 

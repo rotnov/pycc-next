@@ -227,12 +227,6 @@ fn an_untypeable_copy_is_refused_and_names_the_subclass() {
         ),
         (
             "from dataclasses import dataclass\n@dataclass\nclass A:\n    x: int\n    \
-             def show(self) -> None:\n        print(self)\nclass B(A):\n    pass\nB(1).show()\n",
-            "\"C0001\"",
-            "while compiling `A.show` inherited by subclass `B`",
-        ),
-        (
-            "from dataclasses import dataclass\n@dataclass\nclass A:\n    x: int\n    \
              def same(self, o: A) -> bool:\n        return self == o\nclass B(A):\n    pass\n\
              print(B(1).same(A(1)))\n",
             "\"T0021\"",

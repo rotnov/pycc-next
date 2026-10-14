@@ -74,10 +74,23 @@ fn a_defaulted_method_runs_natively_when_every_argument_is_passed() {
 }
 
 #[test]
-fn a_short_constructor_call_keeps_its_arity_error_and_a_method_call_reports_the_range() {
+fn a_short_constructor_call_binds_as_cpython_and_a_method_call_reports_the_range() {
+    // A constructor call omitting a default is bound at the call site
+    // (`pycc_ast::desugar::signatures`); one missing a required argument
+    // raises CPython's `TypeError` when it runs.
+    let output = pycc_on(
+        "run",
+        "1140_native_ctor",
+        &format!("{CLASS}print(S(1).label)\nS()\n"),
+    );
+    assert_ne!(output.status.code(), Some(0), "{}", stderr_of(&output));
+    assert_eq!(stdout_of(&output), "x\n");
+    assert!(
+        stderr_of(&output).contains("TypeError: S.__init__() missing 1 required positional argument: 'n'"),
+        "{}",
+        stderr_of(&output)
+    );
     for (tail, message) in [
-        ("S()\n", "`S` expects 2 argument(s), got 0"),
-        ("S(1)\n", "`S` expects 2 argument(s), got 1"),
         // Part 1 of #1191 fills omitted method defaults, not a missing
         // required argument.
         (

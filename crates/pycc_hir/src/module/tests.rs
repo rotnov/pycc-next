@@ -204,19 +204,19 @@ fn a_failed_from_import_of_a_marker_base_does_not_silence_the_class_using_it() {
     // Round-1 false-suppression class: `Enum` is resolved by spelling before
     // any table lookup, so `class Color(Enum)` lowers and only the import's
     // own `C0002` is reported.
-    // (#892 registered `enum.auto`, so this uses `IntEnum` -- still
+    // (#892 registered `enum.auto`, and later `enum.IntEnum`, so this uses `Flag` -- still
     // unregistered -- as the symbol that fails to import.)
-    let source = "from enum import Enum, IntEnum\nclass Color(Enum):\n    RED = 1\n";
+    let source = "from enum import Enum, Flag\nclass Color(Enum):\n    RED = 1\n";
     let diagnostics = lower_all_err(source);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
     assert_eq!(diagnostics[0].code, "C0002");
     assert_eq!(
         diagnostics[0].message,
-        "module `enum` has no importable symbol named `IntEnum`"
+        "module `enum` has no importable symbol named `Flag`"
     );
     assert_eq!(
         diagnostics[0].span,
-        Some(span_of(source, "from enum import Enum, IntEnum", 0))
+        Some(span_of(source, "from enum import Enum, Flag", 0))
     );
 }
 

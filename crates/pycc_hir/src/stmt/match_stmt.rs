@@ -84,8 +84,16 @@ pub(super) fn lower_pattern(
                 | HirExpr::FloatLiteral(_)
                 | HirExpr::StringLiteral(_)
                 | HirExpr::BoolLiteral(_) => Ok(HirPattern::Literal(expr)),
+                // A dotted value pattern on a module class (`case Color.RED:`), compared with
+                // `==` as CPython compares it.
+                HirExpr::AttrGet { base, .. }
+                    if matches!(base.as_ref(), HirExpr::Name(n) if signatures.is_class_like(n)) =>
+                {
+                    Ok(HirPattern::Literal(expr))
+                }
                 _ => Err(unsupported(
-                    "only a literal value pattern is supported so far",
+                    "only a literal value pattern (or `Class.NAME` of a module class) is supported \
+                     so far",
                     pycc_ast::expr_range(&value.value),
                 )),
             }

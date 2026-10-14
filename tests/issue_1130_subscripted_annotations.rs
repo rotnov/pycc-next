@@ -432,7 +432,7 @@ fn the_class_body_positions_move_to_three_different_answers() {
         "C0001",
     );
     assert!(
-        text.contains("dataclass field `x` has type `NDArray`, which is not a scalar slot type"),
+        text.contains("string conversion of a `NDArray` instance as a `str()`/`repr()` argument"),
         "{text}"
     );
     // A *protocol* attribute is not a code swap: a protocol attribute typed

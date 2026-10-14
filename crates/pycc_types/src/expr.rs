@@ -268,6 +268,7 @@ fn infer_expr_here(
         HirExpr::EmptyDict(pair) => {
             let dict_ty = Ty::Dict(pair.clone());
             pycc_hir::check_container_ty(&dict_ty, Span::new(0, 0))?;
+            crate::dict_key::check_dict_key(env, &dict_ty)?;
             Ok(dict_ty)
         }
         // Part 2d of #1371: a list display the empty-container pre-pass
