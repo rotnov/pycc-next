@@ -43,3 +43,23 @@ Accept:
    ships `pycc-v0.2.0-x86_64-linux.tar.gz` and `pycc-v0.2.0-aarch64-macos.tar.gz` (macOS
    26.0+), each smoke-tested by release run 38305121948; the Linux archive re-verified
    after download (sha256, `scripts/smoke.sh`).
+
+## v0.3 — Packages, stdlib, everyday code
+
+Accept:
+1. **Multi-module programs:** a program of several `.py` files and packages (`import m`,
+   `from pkg.sub import f`, relative imports, `__init__.py`) compiles as one unit, natively
+   (strict and `--non-strict`) and as `--ext` modules importable from CPython; calls between
+   compiled modules are direct calls. Oracle fixtures against CPython 3.13.
+2. **Stdlib, native in strict mode:** `dataclasses.dataclass` (fields, defaults,
+   `field(default_factory=...)`, generated `__init__`/`__repr__`/`__eq__`, `order=True`,
+   `frozen=True`), `enum.Enum`/`IntEnum`, `collections.deque`/`defaultdict`/`Counter`,
+   `functools.cache`/`lru_cache`, and `itertools` `product`/`permutations`/`combinations`/
+   `accumulate`/`chain`/`islice`/`count`. Oracle fixtures and leak probes.
+3. **Real-world corpus:** strict passes >= 150/200; `--non-strict` keeps 200/200, 0 wrong,
+   with >= 98% of top-level statements native.
+4. **A real package:** one pinned, permissively licensed pure-Python package from PyPI,
+   unchanged, builds with `--ext --non-strict` and passes its own test suite run by
+   CPython against the compiled modules (CI-gated).
+5. **Platforms:** the release also ships a Linux aarch64 archive, smoke-tested in the
+   release workflow.
