@@ -4,6 +4,21 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-14
+
+Packages, stdlib, everyday code. Programs of several modules and packages compile as
+one unit; dataclasses, enums, `functools.cache`, `deque`/`Counter`/`defaultdict` and
+`itertools` compile natively; a real PyPI package (diff-match-patch) builds unchanged
+as `--ext` modules and passes its own test suite in CI; strict mode compiles 161/200
+real-world programs unchanged (was 124) and `--non-strict` runs 98.1% of their
+top-level statements natively (was 95.1%). Prebuilt archives for Linux x86_64, Linux
+aarch64 and macOS 26+ on Apple silicon.
+
+Benchmarks (`python3 bench/run.py`, best of 7, shared 4-core box): fib 19.9x faster
+than CPython / 2.0x of Rust, mandelbrot 43.9x / 0.96x, nbody 29.4x / 2.6x, sieve 25.0x
+/ 1.9x, spectral_norm 46.1x / 1.7x, collections_bfs 6.8x / 2.9x, numpy kernels
+stencil2d 677x / 2.3x and prefix_sum_np 78x / 1.7x.
+
 ### Added
 
 - A real PyPI package, unchanged: `bench/package_check.py` (CI-gated on Linux x86_64)
@@ -159,6 +174,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   len(text) - n`) crashed the backend in a build with fallback code (and `--ext`), whose
   export thunk flattened the tuple as if it were a struct of scalars; such a return is now
   typed from the body like any other instead of falling back to a CPython object.
+
+### Known gaps
+- See `docs/DEVIATIONS.md` for every known difference from CPython 3.13.
 
 ## [0.2.0] - 2026-10-12
 
