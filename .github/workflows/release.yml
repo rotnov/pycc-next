@@ -20,6 +20,9 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-24.04, platform: x86_64-linux }
+          # GitHub's arm64 Linux runner (same Ubuntu 24.04 and LLVM 22 from
+          # apt.llvm.org as the x86_64 leg).
+          - { os: ubuntu-24.04-arm, platform: aarch64-linux }
           # Apple silicon, macOS 26 (the minimum the archive supports).
           - { os: macos-26, platform: aarch64-macos, macos_target: "26.0" }
     runs-on: ${{ matrix.os }}
@@ -94,7 +97,7 @@ jobs:
       - name: Verify the archives
         run: |
           cd dist
-          for platform in x86_64-linux aarch64-macos; do
+          for platform in x86_64-linux aarch64-linux aarch64-macos; do
             name=pycc-${TAG}-${platform}.tar.gz
             [ -f "$name" ] && [ -f "$name.sha256" ] || { echo "missing $name"; exit 1; }
             sha256sum -c "$name.sha256"

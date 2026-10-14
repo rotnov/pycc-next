@@ -5,7 +5,13 @@ on:
 permissions: { contents: read }
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    # Linux x86_64 and aarch64 (GitHub's arm64 runner); the same LLVM, tests
+    # and corpus gate on both.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     env: { LLVM_SYS_221_PREFIX: /usr/lib/llvm-22 }
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +27,17 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -y -q llvm-22-dev libpolly-22-dev clang-22 libzstd-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
+      # The release archive as release.yml builds it (no tag here), unpacked
+      # and smoke-tested, so a packaging break shows up before a release.
+      - name: Package and smoke-test the release archive
+        run: |
+          name=pycc-ci-$(uname -m)-linux
+          scripts/package.sh dist/$name
+          tar -C dist -czf dist/$name.tar.gz $name
+          smoke=$(mktemp -d)
+          tar -C "$smoke" -xzf dist/$name.tar.gz
+          file "$smoke/$name/bin/pycc"
+          scripts/smoke.sh "$smoke/$name"
       # Includes the hosted tests that build against and compare with the
       # CPython found as `python3` (the oracle). Skipped: the static-libpython
       # tests (need a relocatable CPython with a PIC `libpython3.X.a`) and the
