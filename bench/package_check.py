@@ -97,8 +97,9 @@ def count_defs(src: str) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pycc", default=str(ROOT / "target/release/pycc"))
-    ap.add_argument("--cache", default=str(ROOT / "target/package_check"))
+    target = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+    ap.add_argument("--pycc", default=str(target / "release/pycc"))
+    ap.add_argument("--cache", default=str(target / "package_check"))
     ap.add_argument("--keep", help="build in this (new) directory and keep it")
     ap.add_argument("--time", action="store_true")
     ap.add_argument("--runs", type=int, default=5)
