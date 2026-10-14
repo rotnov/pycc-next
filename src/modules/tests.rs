@@ -771,7 +771,11 @@ fn a_wildcard_import_of_a_project_module_is_rejected() {
 fn aliasing_a_name_imported_from_a_project_module_is_admitted() {
     let scratch = ScratchDir::new("modules_tests").expect("scratch");
     write(&scratch, "helper.py", HELPER);
-    let entry = write(&scratch, "main.py", "from helper import helper as h\nprint(h(1))\n");
+    let entry = write(
+        &scratch,
+        "main.py",
+        "from helper import helper as h\nprint(h(1))\n",
+    );
     assert_eq!(loaded_paths(&entry).len(), 2);
 }
 
@@ -995,3 +999,15 @@ fn a_dependency_relative_import_stays_a_project_import_under_foreign_from_entry(
 
 mod entry_package;
 mod nested;
+
+#[test]
+fn module_name_segments_must_be_identifiers() {
+    assert!(is_identifier("pkg"));
+    assert!(is_identifier("_private2"));
+    assert!(is_identifier("modulé"));
+    assert!(!is_identifier(""));
+    assert!(!is_identifier("2fast"));
+    assert!(!is_identifier("my-mod"));
+    assert!(!is_identifier("a\"b"));
+    assert!(!is_identifier("a\\b"));
+}

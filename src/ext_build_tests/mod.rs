@@ -178,3 +178,9 @@ mod object_text;
 mod publication_order;
 mod refusal_completeness;
 mod toolchain;
+
+#[test]
+fn type_spec_names_are_escaped_c_literals() {
+    assert_eq!(super::c_string_literal("geo.P"), "\"geo.P\"");
+    assert_eq!(super::c_string_literal("a\"b\\c\n"), "\"a\\\"b\\\\c\\012\"");
+}

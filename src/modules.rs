@@ -318,9 +318,7 @@ impl Loader {
             .map(|(name, range)| {
                 Diagnostic::error(
                     "E0109",
-                    format!(
-                        "`{name}` is reserved for names the compiler introduces -- rename it"
-                    ),
+                    format!("`{name}` is reserved for names the compiler introduces -- rename it"),
                     Span::new(range.start, range.end),
                 )
             })
@@ -554,7 +552,12 @@ impl Loader {
             }
             let qual = self.qual_of(&init_canonical)?;
             self.current_import = Some((importer_canonical.to_path_buf(), offset));
-            loaded.push(self.load_module(&init_canonical, init_display.clone(), false, Some(qual))?);
+            loaded.push(self.load_module(
+                &init_canonical,
+                init_display.clone(),
+                false,
+                Some(qual),
+            )?);
         }
         let target_qual = self.qual_of(&canonical)?;
         let index = match in_progress {
@@ -574,7 +577,11 @@ impl Loader {
         // `from pkg import sub`: a name the package itself does not bind but
         // a submodule file provides is that submodule, imported now.
         let mut submodules = HashMap::new();
-        let package_dir = target.path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let package_dir = target
+            .path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
         let display_dir = Path::new(&target.display)
             .parent()
             .map(Path::to_path_buf)
@@ -627,7 +634,8 @@ impl Loader {
     /// The dotted module name of the project file at `canonical`: its path
     /// below the source root, `__init__.py` naming its package. A file
     /// outside the root (reached by a relative import) is named by its own
-    /// stem, made unique if another module already has that name.
+    /// stem; a name another file already has is refused, as is a segment
+    /// that is not a Python identifier.
     fn qual_of(&mut self, canonical: &Path) -> Result<String, FrontendFailure> {
         let root = self.source_root()?.canonical;
         let mut segments: Vec<String> = match canonical.strip_prefix(&root) {
@@ -649,14 +657,36 @@ impl Loader {
             segments.pop();
         }
         if segments.is_empty() {
-            segments.push(
-                canonical
-                    .parent()
-                    .and_then(Path::file_name)
-                    .map_or_else(|| "module".to_string(), |name| name.to_string_lossy().into_owned()),
-            );
+            segments.push(canonical.parent().and_then(Path::file_name).map_or_else(
+                || "module".to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            ));
         }
-        Ok(segments.join("."))
+        // A module name reaches generated C (type names) and the renamer's
+        // encoding; CPython can only import identifier segments anyway.
+        if let Some(bad) = segments.iter().find(|segment| !is_identifier(segment)) {
+            return Err(FrontendFailure::input(
+                canonical.display().to_string(),
+                format!(
+                    "cannot compile module file {}: `{bad}` is not a valid Python module name",
+                    canonical.display()
+                ),
+            ));
+        }
+        let qual = segments.join(".");
+        if let Some(&other) = self.by_qual.get(&qual)
+            && self.memo.get(canonical) != Some(&other)
+        {
+            return Err(FrontendFailure::input(
+                canonical.display().to_string(),
+                format!(
+                    "module name `{qual}` of {} is already used by {}; rename one of the files",
+                    canonical.display(),
+                    self.modules[other].display_path
+                ),
+            ));
+        }
+        Ok(qual)
     }
 
     /// The `C0001` refusal for an entry whose own top-level package (#1382)
@@ -800,3 +830,13 @@ fn identity_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `segment` is a Python identifier (letters, digits, `_`, not
+/// starting with a digit): a module name CPython could import.
+fn is_identifier(segment: &str) -> bool {
+    let mut chars = segment.chars();
+    chars
+        .next()
+        .is_some_and(|first| first == '_' || first.is_alphabetic())
+        && chars.all(|c| c == '_' || c.is_alphanumeric())
+}

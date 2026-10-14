@@ -448,10 +448,10 @@ pub(crate) use module_hooks::{EntryHooks, is_module_hook};
 mod publication;
 mod richcompare;
 mod signatures;
-pub(crate) use signatures::install as install_signatures;
 pub(crate) use richcompare::{ExtSlotDunders, SlotArtifact, collect_slot_dunders};
 #[cfg(test)]
 pub(crate) use richcompare::{SLOT_DUNDERS, is_slot_dunder_method};
+pub(crate) use signatures::install as install_signatures;
 
 use publication::namespace_owner;
 pub(crate) use publication::{ExtPublishedClass, collect_class_publications};
@@ -607,7 +607,7 @@ fn base_expression(base: &ExceptionBase) -> String {
 /// program (v0.3 accept 1), as CPython names it.
 pub(crate) fn type_spec_name(class: &str) -> String {
     match pycc_ast::namespace::split_module_global(class) {
-        Some((module, plain)) => format!("\"{module}.{plain}\""),
+        Some((module, plain)) => c_string_literal(&format!("{module}.{plain}")),
         None => format!("PYCC_EXT_MODULE_NAME_STR \".{class}\""),
     }
 }
@@ -746,3 +746,20 @@ impl ExtToolchain {
 #[cfg(test)]
 #[path = "ext_build_tests/mod.rs"]
 mod ext_build_tests;
+
+/// `text` as a C string literal: backslash, `"` and non-printable bytes escaped.
+fn c_string_literal(text: &str) -> String {
+    let mut out = String::from("\"");
+    for byte in text.bytes() {
+        match byte {
+            b'"' | b'\\' => {
+                out.push('\\');
+                out.push(byte as char);
+            }
+            0x20..=0x7e => out.push(byte as char),
+            _ => out.push_str(&format!("\\{byte:03o}")),
+        }
+    }
+    out.push('"');
+    out
+}
