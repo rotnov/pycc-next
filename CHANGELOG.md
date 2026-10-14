@@ -155,6 +155,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   or keyword argument of a call on a CPython function or method, or a `str` subscript key
   of a CPython object (`json.dumps(str(i))` grew ~47 bytes per iteration; it now runs in
   constant memory, strict and non-strict).
+- Non-strict: a function returning a tuple with a non-scalar element (`return text[:n],
+  len(text) - n`) crashed the backend in a build with fallback code (and `--ext`), whose
+  export thunk flattened the tuple as if it were a struct of scalars; such a return is now
+  typed from the body like any other instead of falling back to a CPython object.
 
 ## [0.2.0] - 2026-10-12
 

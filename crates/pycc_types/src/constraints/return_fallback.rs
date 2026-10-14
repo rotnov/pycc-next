@@ -143,11 +143,6 @@ fn type_returns_from_bodies(
         if !admissible(module, &found)
             || (every_return
                 && (contains_object(&found)
-                    // A boxed tuple return does not cross to fallback code
-                    // yet (`pycc_codegen::ext_thunk` passes a tuple as its
-                    // scalar fields), and fallback code may call any
-                    // function.
-                    || matches!(&found, Ty::Tuple(items) if pycc_hir::tuple_is_boxed(items))
                     || !super::yield_fallback::every_value_from_body_is(
                         module, name, params, &resolved, &return_value, &found,
                     )))

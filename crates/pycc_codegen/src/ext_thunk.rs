@@ -189,8 +189,13 @@ fn emit_one_thunk<'ctx>(
     }
     // A tuple return leaves through the out-pointers, so the thunk itself
     // returns `void` -- the same shape a `-> None` export already has.
+    // A boxed tuple is one pointer (`crate::ext::is_flat_tuple`) and is
+    // returned as itself, like a list.
     let thunk_type = match return_ty {
-        Ty::None | Ty::Tuple(_) => context.void_type().fn_type(&thunk_params, false),
+        Ty::None => context.void_type().fn_type(&thunk_params, false),
+        flat if crate::ext::is_flat_tuple(flat) => {
+            context.void_type().fn_type(&thunk_params, false)
+        }
         other => ty_to_basic_type(context, other.clone()).fn_type(&thunk_params, false),
     };
     let thunk = module.add_function(&ext_thunk_symbol(name), thunk_type, None);
@@ -201,7 +206,9 @@ fn emit_one_thunk<'ctx>(
     let mut next_param: u32 = 0;
     let mut arg_values: Vec<inkwell::values::BasicMetadataValueEnum> = Vec::new();
     for ty in param_tys {
-        if let Ty::Tuple(elems) = ty {
+        if let Ty::Tuple(elems) = ty
+            && crate::ext::is_flat_tuple(ty)
+        {
             let struct_ty = ty_to_basic_type(context, ty.clone()).into_struct_type();
             let mut aggregate = struct_ty.get_undef();
             for field in 0..elems.len() {

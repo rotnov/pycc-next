@@ -113,6 +113,7 @@ fn value_of(ty: &Ty) -> MirExpr {
         Ty::Int => MirExpr::IntLiteral(7),
         Ty::Float => MirExpr::FloatLiteral(2.5),
         Ty::Bool => MirExpr::BoolLiteral(true),
+        Ty::Str => MirExpr::StringLiteral("s".to_string()),
         Ty::Tuple(elems) => MirExpr::TupleLiteral(elems.iter().map(value_of).collect()),
         other => panic!("no literal fixture for {other:?}"),
     }
@@ -565,4 +566,35 @@ fn a_method_that_needs_a_thunk_gets_the_mangled_thunk_symbol() {
             .collect::<Vec<_>>(),
         vec!["pycc_ext_thunk_0m4_Grid4_pair6_static"]
     );
+}
+
+/// A *boxed* tuple (`tuple[str, int]`: an element other than
+/// `int`/`bool`/`float`) is one pointer to its runtime list, not an
+/// aggregate: it needs no thunk of its own, and next to a flat tuple that
+/// does need one it crosses as that pointer, in place. Flattening it
+/// panicked codegen for a non-strict function whose return the checker
+/// typed from its body (`tests/non_strict_boxed_tuple_return.rs`).
+#[test]
+fn a_boxed_tuple_is_one_pointer_slot_and_needs_no_thunk() {
+    let boxed = tuple(vec![Ty::Str, Ty::Int]);
+    assert!(!crate::ext::is_flat_tuple(&boxed));
+    assert!(crate::ext::is_flat_tuple(&tuple(vec![Ty::Int, Ty::Float])));
+    assert_eq!(crate::ext::ext_boundary_slots(&boxed), &[boxed.clone()]);
+    assert!(crate::ext::ext_thunk_out_tys(&boxed, false).is_empty());
+    assert!(!ext_thunk_required("f", &[boxed.clone()], &boxed, false));
+    let alone = thunks_of(
+        "ext_thunk_boxed_alone",
+        &module(vec![func("f", &[("t", boxed.clone())], boxed.clone())]),
+    );
+    assert_eq!(alone, Vec::new());
+    let mixed = thunks_of(
+        "ext_thunk_boxed_mixed",
+        &module(vec![func(
+            "g",
+            &[("t", tuple(vec![Ty::Int, Ty::Float])), ("u", boxed.clone())],
+            boxed,
+        )]),
+    );
+    assert_eq!(mixed.len(), 1, "{mixed:?}");
+    assert_eq!(mixed[0].signature, "ptr (i64, double, ptr)");
 }

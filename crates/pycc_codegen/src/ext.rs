@@ -934,12 +934,28 @@ fn is_slot_dunder_method_name(name: &str) -> bool {
 /// and `float` (`pycc_hir`'s `check_tuple_element_ty` rejects anything else
 /// with `T0039`, and `tuple[int, ...]`/`tuple[()]` with `T0053`), so the
 /// returned slice is always non-empty and never itself contains a tuple.
+///
+/// A *boxed* tuple (`pycc_hir::tuple_is_boxed`: an element other than
+/// `int`/`bool`/`float`, such as `tuple[str, int]`) is not an aggregate at
+/// all but one pointer to its runtime list, so it occupies one slot of its
+/// own like a `list`. No export carries one -- the driver refuses it with
+/// `C0003` -- but codegen emits thunks for every exportable *name*, which
+/// includes a non-strict function whose return is typed from its body and
+/// that the driver leaves unpublished ([`ext_thunk_required`]).
 #[must_use]
 pub fn ext_boundary_slots(ty: &Ty) -> &[Ty] {
     match ty {
-        Ty::Tuple(elems) => elems.as_slice(),
+        Ty::Tuple(elems) if is_flat_tuple(ty) => elems.as_slice(),
         _ => std::slice::from_ref(ty),
     }
+}
+
+/// Whether `ty` is a tuple that crosses the seam flattened into its
+/// elements: an unboxed (struct) tuple. A boxed tuple is a single pointer
+/// ([`ext_boundary_slots`]).
+#[must_use]
+pub fn is_flat_tuple(ty: &Ty) -> bool {
+    matches!(ty, Ty::Tuple(elems) if !pycc_hir::tuple_is_boxed(elems))
 }
 
 /// The thunk's own parameter list: every declared parameter flattened in
@@ -980,7 +996,7 @@ pub fn ext_thunk_param_tys(param_tys: &[Ty]) -> Vec<Ty> {
 #[must_use]
 pub fn ext_thunk_out_tys(return_ty: &Ty, returns_buffer_slice: bool) -> Vec<Ty> {
     match return_ty {
-        Ty::Tuple(elems) => (**elems).clone(),
+        Ty::Tuple(elems) if is_flat_tuple(return_ty) => (**elems).clone(),
         _ if returns_buffer_slice => vec![Ty::Int, Ty::Int, Ty::Int],
         _ => Vec::new(),
     }
@@ -1111,7 +1127,8 @@ pub fn buffer_slice_out_names(items: &[pycc_mir::MirItem]) -> std::collections::
 /// Only a signature that actually carries an aggregate does: a scalar-only
 /// export's generated wrapper still reaches the compiled function through
 /// the `fnptr_<name>` global directly, and emitting a thunk it would never
-/// call would be dead weight in every artifact.
+/// call would be dead weight in every artifact. A boxed tuple is a single
+/// pointer, not an aggregate ([`is_flat_tuple`]), so it needs no thunk.
 ///
 /// Part 2 of #1175 (#1179) adds one non-signature reason: an export whose
 /// body returns a sub-range of a buffer parameter needs the three trailing
@@ -1129,7 +1146,5 @@ pub fn ext_thunk_required(
     returns_buffer_slice: bool,
 ) -> bool {
     is_ext_exportable_name(name)
-        && (param_tys.iter().any(|ty| matches!(ty, Ty::Tuple(_)))
-            || matches!(return_ty, Ty::Tuple(_))
-            || returns_buffer_slice)
+        && (param_tys.iter().any(is_flat_tuple) || is_flat_tuple(return_ty) || returns_buffer_slice)
 }
