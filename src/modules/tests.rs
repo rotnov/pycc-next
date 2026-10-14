@@ -284,18 +284,28 @@ fn a_namespace_package_as_the_import_target_is_rejected() {
 }
 
 #[test]
-fn a_bare_import_of_a_real_project_module_is_recognized_but_unsupported() {
+fn a_bare_import_of_a_project_module_loads_it_and_binds_its_namespace() {
     let scratch = ScratchDir::new("modules_tests").expect("scratch");
     write(&scratch, "helper.py", HELPER);
     let entry = write(
         &scratch,
         "main.py",
-        "import helper\n\n\ndef main() -> None:\n    print(1)\n",
+        "import helper\n\n\ndef main() -> None:\n    print(helper.helper(1))\n",
     );
+    let paths = loaded_paths(&entry);
+    assert!(paths[0].ends_with("helper.py"), "{paths:?}");
+    assert!(paths[1].ends_with("main.py"), "{paths:?}");
+}
+
+#[test]
+fn a_bare_project_import_nested_in_a_block_is_refused() {
+    let scratch = ScratchDir::new("modules_tests").expect("scratch");
+    write(&scratch, "helper.py", HELPER);
+    let entry = write(&scratch, "main.py", "if True:\n    import helper\n");
     let (_, code, message) = first_diagnostic(&entry);
     assert_eq!(code, "C0001");
     assert!(
-        message.contains("module namespace bindings (`import helper`)"),
+        message.contains("inside an `if`/`try` block"),
         "unexpected message: {message}"
     );
 }
@@ -757,17 +767,11 @@ fn a_wildcard_import_of_a_project_module_is_rejected() {
 }
 
 #[test]
-fn aliasing_a_name_imported_from_a_project_module_is_rejected() {
+fn aliasing_a_name_imported_from_a_project_module_is_admitted() {
     let scratch = ScratchDir::new("modules_tests").expect("scratch");
     write(&scratch, "helper.py", HELPER);
-    let entry = write(&scratch, "main.py", "from helper import helper as h\n");
-    let (path, code, message) = first_diagnostic(&entry);
-    assert!(path.ends_with("main.py"), "unexpected file: {path}");
-    assert_eq!(code, "C0001");
-    assert!(
-        message.contains("aliasing is not supported yet"),
-        "unexpected message: {message}"
-    );
+    let entry = write(&scratch, "main.py", "from helper import helper as h\nprint(h(1))\n");
+    assert_eq!(loaded_paths(&entry).len(), 2);
 }
 
 #[test]
@@ -822,6 +826,10 @@ fn a_bare_file_name_importer_renders_its_directory_as_a_single_dot() {
     let importer = write(&scratch, "main.py", "from . import helper\n");
     let mut loader = Loader {
         modules: Vec::new(),
+        infos: Vec::new(),
+        by_qual: HashMap::new(),
+        current_import: None,
+        placements: Vec::new(),
         memo: HashMap::new(),
         in_progress: Vec::new(),
         entry_dir: PathBuf::new(),

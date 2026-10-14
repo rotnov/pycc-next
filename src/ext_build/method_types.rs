@@ -250,8 +250,9 @@ pub(crate) fn method_types_c(
         };
         out.push_str(&format!(
             "static PyType_Spec pycc_ext_type_spec_{class} = {{\n    \
-             PYCC_EXT_MODULE_NAME_STR \".{class}\",\n    sizeof(PyccExtInstance),\n    0,\n    \
-             {flags},\n    pycc_ext_type_slots_{class},\n}};\n\n"
+             {spec_name},\n    sizeof(PyccExtInstance),\n    0,\n    \
+             {flags},\n    pycc_ext_type_slots_{class},\n}};\n\n",
+            spec_name = super::type_spec_name(class)
         ));
     }
     let (hidden, hidden_registration) =

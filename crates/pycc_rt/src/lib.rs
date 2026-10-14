@@ -75,6 +75,7 @@ mod math_float;
 mod math_ops;
 /// `print`'s stdout flush (#1340); the other print primitives stay below.
 mod print;
+mod qualified;
 mod rc;
 /// The `round()` builtin over `float`.
 mod round;

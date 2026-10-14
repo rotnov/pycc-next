@@ -601,8 +601,24 @@ fn base_expression(base: &ExceptionBase) -> String {
 /// (`docs/RUNTIME.md`), and reuse keeps class identity stable across it.
 /// A mid-registration failure leaves the already-created classes cached, so
 /// a later import completes the remaining slots.
+/// The C expression naming a compiled class's type object (`tp_name`):
+/// `<module>.<Class>` for the entry module's own class, and the defining
+/// module's dotted name for a class of another project module of the
+/// program (v0.3 accept 1), as CPython names it.
+pub(crate) fn type_spec_name(class: &str) -> String {
+    match pycc_ast::namespace::split_module_global(class) {
+        Some((module, plain)) => format!("\"{module}.{plain}\""),
+        None => format!("PYCC_EXT_MODULE_NAME_STR \".{class}\""),
+    }
+}
+
 fn register_class_c(slot: usize, class: &UserExceptionClass) -> String {
     let name = &class.name;
+    // A class another project module of the program defines (v0.3 accept
+    // 1) is named after that module, as CPython names it, and is not an
+    // attribute of this module.
+    let qualified = pycc_ast::namespace::split_module_global(name);
+    let type_name = type_spec_name(name);
     let mut out = format!("    if (pycc_ext_user_exception_classes[{slot}] == NULL) {{\n");
     // A single base is passed directly; two or more need a `PyTuple`, which
     // `PyErr_NewException` accepts and which is what gives the synthesized
@@ -622,13 +638,16 @@ fn register_class_c(slot: usize, class: &UserExceptionClass) -> String {
     };
     out.push_str(&format!(
         "        pycc_ext_user_exception_classes[{slot}] = PyErr_NewException(\n            \
-         PYCC_EXT_MODULE_NAME_STR \".{name}\", {base}, NULL);\n"
+         {type_name}, {base}, NULL);\n"
     ));
     out.push_str(release);
     out.push_str(&format!(
         "        if (pycc_ext_user_exception_classes[{slot}] == NULL) {{\n            \
          return -1;\n        }}\n    }}\n"
     ));
+    if qualified.is_some() {
+        return out;
+    }
     out.push_str(&format!(
         "    if (PyModule_AddObjectRef(module, \"{name}\", \
          pycc_ext_user_exception_classes[{slot}]) < 0) {{\n        return -1;\n    }}\n"

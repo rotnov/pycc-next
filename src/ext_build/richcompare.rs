@@ -562,9 +562,10 @@ pub(crate) fn hidden_carrier_types_c(
              {{Py_tp_dealloc, pycc_ext_instance_dealloc}},\n    \
              {{Py_tp_methods, pycc_ext_carrier_methods_{class}}},\n{rows}    {{0, NULL}},\n}};\n\n\
              static PyType_Spec pycc_ext_carrier_spec_{class} = {{\n    \
-             PYCC_EXT_MODULE_NAME_STR \".{class}\",\n    sizeof(PyccExtInstance),\n    0,\n    \
+             {spec_name},\n    sizeof(PyccExtInstance),\n    0,\n    \
              Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION | \
-             Py_TPFLAGS_IMMUTABLETYPE,\n    pycc_ext_carrier_slots_{class},\n}};\n\n"
+             Py_TPFLAGS_IMMUTABLETYPE,\n    pycc_ext_carrier_slots_{class},\n}};\n\n",
+            spec_name = super::type_spec_name(class)
         ));
         registration.push_str(&format!(
             "    type = PyType_FromSpec(&pycc_ext_carrier_spec_{class});\n    \

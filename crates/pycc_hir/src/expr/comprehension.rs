@@ -264,7 +264,21 @@ pub(crate) fn rename_name_in_expr(expr: HirExpr, from: &str, to: &str) -> HirExp
 /// `expr_range`/`stmt_range` exist specifically to keep that boundary from
 /// leaking (see their doc comments).
 fn synthesize_comp_var_name(target_start: u32, source_name: &str) -> String {
-    format!("0comp_{target_start}_{source_name}")
+    COMP_PREFIX.with(|prefix| format!("0comp_{}{target_start}_{source_name}", prefix.borrow()))
+}
+
+thread_local! {
+    /// The module key the module being lowered prefixes its synthesized
+    /// comprehension variables with (v0.3 accept 1): a module-level one is
+    /// a global of the linked program, so two modules' same-offset
+    /// comprehensions must not share it. Empty for the entry module.
+    static COMP_PREFIX: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Sets the prefix [`synthesize_comp_var_name`] uses for the module about
+/// to be lowered.
+pub(crate) fn set_comp_prefix(prefix: &str) {
+    COMP_PREFIX.with(|cell| *cell.borrow_mut() = prefix.to_string());
 }
 
 /// Resolves a comprehension's `for var in <iter>` clause into a `CompIter`,

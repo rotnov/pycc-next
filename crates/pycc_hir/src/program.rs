@@ -3,19 +3,24 @@
 //! the pipeline (`pycc_types`, `pycc_mir`, `pycc_codegen`) consumes, then
 //! runs the program-wide phases that used to close `lower_all`.
 //!
-//! Part 1 of #881 links modules into one flat namespace: every module's
-//! items are concatenated in the driver's dependency order (each module
-//! after the modules it imports, the entry file last), the alias, import,
-//! and class tables are unioned, and two definitions of one top-level name
-//! in different modules are rejected (`C0001`) rather than silently
-//! shadowed. A per-module namespace is a later part of #881.
+//! The linked program is one item list. Per-module namespaces (v0.3
+//! accept 1) are made before linking: the driver renames every top-level
+//! name a dependency module defines to its qualified spelling
+//! (`pycc_ast::namespace`), so modules cannot collide on a definition, and
+//! two definitions of one top-level name in different inputs are still
+//! rejected (`C0001`) as a guard. Each module's items run where its
+//! [`Placement`] puts them -- spliced into its first importer at the import
+//! (`order`) -- and the alias, import and class tables are unioned. Names
+//! a dependency binds by a CPython or standard-library import keep their
+//! spelling, which is why the foreign-import checks below still compare
+//! modules.
 //!
 //! `pycc_hir` stays filesystem-free: the driver's `src/modules.rs` finds,
 //! reads, and orders the files and hands lowered modules in here.
 
 use crate::module::LoweredModule;
 use crate::{
-    FIRST_USER_EXCEPTION_TYPE_TAG, FOREIGN_BASE_EXCEPTION_TYPE_TAG, ForeignImportSite, FromImport,
+    FIRST_USER_EXCEPTION_TYPE_TAG, FOREIGN_BASE_EXCEPTION_TYPE_TAG, FromImport,
     HirModule, ImportBinding, MAX_USER_EXCEPTION_CLASSES, builtin_exception_class_defs,
     builtin_exception_init_item, foreign_bound_module, foreign_bound_object,
     is_builtin_exception_class, unsupported,
@@ -30,7 +35,14 @@ use std::collections::{HashMap, HashSet};
 pub struct LinkInput {
     pub display_path: String,
     pub module: LoweredModule,
+    /// Where the module's items run in the linked program (v0.3 accept 1):
+    /// spliced into its first importer at the import statement, or `None`
+    /// for a root emitted in input order (see [`order`]).
+    pub placement: Option<Placement>,
 }
+
+mod order;
+pub use order::{LinkLayout, Placement};
 
 /// One foreign binding of one linked input, as the cross-module foreign
 /// checks in [`link`] compare it: the object is identified by the module
@@ -100,6 +112,16 @@ impl ForeignLocal<'_> {
 /// so `from a import Point` in two modules is fine, and a module's own
 /// rebinding of its own name (`x = 1; x = 2`) is as legal as it was.
 pub fn link(inputs: Vec<LinkInput>) -> Result<HirModule, Vec<(usize, Diagnostic)>> {
+    link_layout(inputs).map(|(hir, _)| hir)
+}
+
+/// [`link`], also returning which input each linked item, import binding
+/// and class came from: with placements the items of one input are no
+/// longer contiguous, so the driver attributes a diagnostic through this
+/// layout rather than through per-input counts.
+pub fn link_layout(
+    inputs: Vec<LinkInput>,
+) -> Result<(HirModule, LinkLayout), Vec<(usize, Diagnostic)>> {
     let any_seeded = inputs
         .iter()
         .any(|input| input.module.hir.seeded_builtin_exception_classes);
@@ -258,10 +280,10 @@ pub fn link(inputs: Vec<LinkInput>) -> Result<HirModule, Vec<(usize, Diagnostic)
         .map(|input| input.display_path.clone())
         .collect();
     let mut owners: HashMap<String, usize> = HashMap::new();
-    let mut items = Vec::new();
+    let mut parts = Vec::with_capacity(inputs.len());
     let mut type_aliases = Vec::new();
-    let mut imports = Vec::new();
     let mut class_defs = Vec::new();
+    let mut class_owner = Vec::new();
     for (index, input) in inputs.into_iter().enumerate() {
         let LoweredModule {
             hir,
@@ -283,8 +305,9 @@ pub fn link(inputs: Vec<LinkInput>) -> Result<HirModule, Vec<(usize, Diagnostic)
             // Consumed by the driver too (#1425): it feeds each importer's
             // object-receiver admission, and linking has no use for it.
             object_receivers: _,
-            // Consumed by the driver (#10): it places type diagnostics.
-            item_origins: _,
+            // Where each item came from: the ordering splices an imported
+            // module before the first item at or after its import.
+            item_origins,
         } = input.module;
         let mut own: HashSet<&str> = HashSet::new();
         for (name, span) in &definition_spans {
@@ -296,8 +319,7 @@ pub fn link(inputs: Vec<LinkInput>) -> Result<HirModule, Vec<(usize, Diagnostic)
                     index,
                     unsupported(
                         format!(
-                            "top-level name `{name}` is already defined by `{}`; a separate \
-                             namespace per module is not supported yet",
+                            "top-level name `{name}` is already defined by `{}`",
                             display_paths[*owner]
                         ),
                         span_range(*span),
@@ -308,53 +330,45 @@ pub fn link(inputs: Vec<LinkInput>) -> Result<HirModule, Vec<(usize, Diagnostic)
         for name in own {
             owners.insert(name.to_string(), index);
         }
-        // Part 1 of #1026: a `ForeignImportSite::Item` index is the
-        // position of the import in its *own* module's item list, so it
-        // has to be rebased onto the concatenated program the moment that
-        // list is appended after the preceding modules' items. Captured
-        // before the `extend` below, which is what makes it the offset of
-        // this module's first item in the linked program.
-        let item_offset = items.len();
-        items.extend(hir.items);
         type_aliases.extend(hir.type_aliases);
-        imports.extend(hir.imports.into_iter().map(|binding| match binding {
-            ImportBinding::Foreign {
-                local_name,
-                module_path,
-                from,
-                site,
-                span,
-            } => ImportBinding::Foreign {
-                local_name,
-                module_path,
-                from,
-                // A block import runs inside its own statement, so it has
-                // no item position to rebase (#1291).
-                site: match site {
-                    ForeignImportSite::Item(index) => ForeignImportSite::Item(index + item_offset),
-                    site @ ForeignImportSite::Block { .. } => site,
-                },
-                span,
-            },
-            other => other,
-        }));
         let seeded = hir.seeded_builtin_exception_classes;
-        class_defs.extend(
-            hir.class_defs
-                .into_iter()
-                .filter(|(name, _)| !(seeded && is_builtin_exception_class(name))),
-        );
+        for class in hir.class_defs {
+            if !(seeded && is_builtin_exception_class(&class.0)) {
+                class_defs.push(class);
+                class_owner.push(index);
+            }
+        }
+        // Part 1 of #1026: a `ForeignImportSite::Item` index is the
+        // position of the import in its *own* module's item list; the
+        // ordering rebases it onto the linked program.
+        parts.push(order::Parts {
+            items: hir.items,
+            imports: hir.imports,
+            origins: item_origins,
+            placement: input.placement,
+        });
     }
+    let ordered = order::order(parts);
+    let layout = LinkLayout {
+        item_owner: ordered.item_owner,
+        import_owner: ordered.import_owner,
+        class_owner,
+    };
+    let items = ordered.items;
+    let imports = ordered.imports;
     if any_seeded {
         class_defs.extend(builtin_exception_class_defs());
     }
-    Ok(HirModule {
-        items,
-        type_aliases,
-        imports,
-        class_defs,
-        seeded_builtin_exception_classes: any_seeded,
-    })
+    Ok((
+        HirModule {
+            items,
+            type_aliases,
+            imports,
+            class_defs,
+            seeded_builtin_exception_classes: any_seeded,
+        },
+        layout,
+    ))
 }
 
 fn span_range(span: Span) -> std::ops::Range<u32> {

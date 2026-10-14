@@ -402,12 +402,9 @@ fn a_walrus_binding_inside_a_function_body_does_not_withhold_the_seed() {
 }
 
 #[test]
-fn a_dependencys_nested_binding_withholds_the_entry_seed() {
-    // The driver asks `pycc_hir` for the same module-scope answer the entry
-    // module's own gate uses, so a dependency binding nested inside a compound
-    // statement withholds the entry seed exactly as a direct one does. The
-    // earlier `definition_spans` gate recorded only direct children and so
-    // seeded the entry anyway, which failed the program with `T0023`.
+fn a_dependencys_nested_binding_is_its_own() {
+    // A dependency binding nested inside a compound statement is the
+    // dependency's own global (v0.3 accept 1); the entry keeps its seed.
     assert_eq!(
         build_and_run_program(
             "dn_dep_nested",
@@ -423,23 +420,20 @@ fn a_dependencys_nested_binding_withholds_the_entry_seed() {
                 "    return 1\n",
             ),
         ),
-        "dep\n1\n"
+        "__main__\n1\n"
     );
 }
 
 #[test]
-fn a_dependencys_walrus_binding_withholds_the_entry_seed() {
-    // The cross-module half of the gate, reached through the walrus door: a
-    // dependency's own top-level `(__name__ := 7)` is the program's single
-    // `__name__` global in #881's flat namespace, so the entry module is not
-    // seeded and both modules read the dependency's value.
+fn a_dependencys_walrus_binding_is_its_own() {
+    // A dependency's own top-level `(__name__ := 7)` binds its own global.
     assert_eq!(
         build_and_run_program(
             "dn_dep_walrus",
             "from dep import helper\n\nprint(__name__)\nprint(helper())\n",
             "print((__name__ := 7))\n\ndef helper() -> int:\n    return 1\n",
         ),
-        "7\n7\n1\n"
+        "7\n__main__\n1\n"
     );
 }
 
@@ -521,25 +515,7 @@ print(__name__)
     );
 }
 
-// -- the multi-module gap -------------------------------------------
-
-/// Writes a two-file program into a fresh scratch directory and runs
-/// `pycc check` on its entry module, returning success plus both streams.
-fn check_program(category: &str, entry: &str, dependency: &str) -> (bool, String) {
-    let dir = ScratchDir::new(category).expect("scratch");
-    std::fs::write(dir.join("dep.py"), dependency).expect("write the dependency");
-    let src = dir.join("m.py");
-    std::fs::write(&src, entry).expect("write the entry module");
-    let out = pycc()
-        .arg("check")
-        .arg(&src)
-        .output()
-        .expect("pycc should spawn");
-    (
-        out.status.success(),
-        format!("{}{}", stdout_of(&out), stderr_of(&out)),
-    )
-}
+// -- multi-module programs -----------------------------------------
 
 /// Builds a two-file program (`dep.py` plus the `m.py` entry) and returns the
 /// entry artifact's stdout, panicking with the compiler's own diagnostics when
@@ -565,106 +541,74 @@ fn build_and_run_program(category: &str, entry: &str, dependency: &str) -> Strin
     stdout_of(&run)
 }
 
-// -- a dependency's own top-level binding withholds the entry seed --
+// -- each module has its own `__name__` (v0.3 accept 1) --
 //
-// The program is one flat namespace (Part 1 of #881), so the seed and a
-// dependency's binding are the same global. Seeding anyway would silently
-// overwrite a `str`-valued dependency binding and would fail the whole
-// program with `T0023` for any other type; both compiled before #1156, so
-// both must keep compiling to the same values.
+// A dependency is its own namespace, so its `__name__` is its own module
+// name (`dep`), its own binding of the name is its own global, and the
+// entry module's seed is unaffected by either -- as in CPython.
 
 #[test]
-fn a_dependencys_str_binding_withholds_the_entry_seed() {
+fn a_dependencys_str_binding_is_its_own() {
     assert_eq!(
         build_and_run_program(
             "dn_dep_str",
             "from dep import helper\nprint(__name__)\nprint(helper())\n",
-            "__name__ = \"dep\"\n\ndef helper() -> str:\n    return __name__\n",
+            "__name__ = \"renamed\"\n\ndef helper() -> str:\n    return __name__\n",
         ),
-        "dep\ndep\n"
+        "__main__\nrenamed\n"
     );
 }
 
 #[test]
-fn a_dependencys_non_str_binding_withholds_the_entry_seed() {
+fn a_dependencys_non_str_binding_is_its_own() {
     assert_eq!(
         build_and_run_program(
             "dn_dep_int",
             "from dep import helper\nprint(__name__)\nprint(helper())\n",
             "__name__ = 7\n\ndef helper() -> int:\n    return __name__\n",
         ),
-        "7\n7\n"
+        "__main__\n7\n"
     );
 }
 
 #[test]
-fn a_dependency_function_body_read_withholds_the_entry_seed() {
-    // A dependency that only *reads* the name still withholds the seed. An
-    // earlier revision let the read observe the entry module's value, which
-    // held only while nothing in the dependency ran before the seed -- and
-    // `program::link` puts every dependency statement ahead of it. Withholding
-    // makes the name undefined, so the read is a `T0021` rather than a value
-    // whose validity depends on where the call happens to appear.
-    let (ok, rendered) = check_program(
-        "dn_dep_body_read",
-        "from dep import report\n\nreport()\nprint(__name__)\n",
-        "\
-def report() -> None:
-    print(__name__)
-",
+fn a_dependency_function_body_reads_its_own_module_name() {
+    assert_eq!(
+        build_and_run_program(
+            "dn_dep_body_read",
+            "from dep import report\n\nreport()\nprint(__name__)\n",
+            "def report() -> None:\n    print(__name__)\n",
+        ),
+        "dep\n__main__\n"
     );
-    assert!(!ok, "{rendered}");
-    assert!(rendered.contains("error[T0021]"), "{rendered}");
 }
 
 #[test]
-fn a_dependencys_top_level_call_into_its_own_function_withholds_the_entry_seed() {
-    // The shape a binding-only dependency test cannot see: nothing in the
-    // dependency's *module scope* binds or reads the name, yet its top-level
-    // call reaches a function-body read -- which runs before the entry seed
-    // stores anything. Before this gate `pycc check` accepted the program and
-    // the built artifact aborted at codegen's uninitialized-global trap, the
-    // one outcome D-246 rules out. It is a diagnostic now.
-    let (ok, rendered) = check_program(
-        "dn_dep_indirect",
-        "from dep import show\n\nprint(__name__)\n",
-        "\
-def show() -> str:
-    return __name__
-
-print(show())
-",
+fn a_dependencys_top_level_call_into_its_own_function_reads_its_own_name() {
+    assert_eq!(
+        build_and_run_program(
+            "dn_dep_indirect",
+            "from dep import show\n\nprint(__name__)\n",
+            "def show() -> str:\n    return __name__\n\nprint(show())\n",
+        ),
+        "dep\n__main__\n"
     );
-    assert!(!ok, "{rendered}");
-    assert!(rendered.contains("error[T0021]"), "{rendered}");
 }
 
 #[test]
-fn a_dependency_main_guard_withholds_the_entry_seed() {
-    // `if __name__ == "__main__":` in a dependency is the common shape this
-    // gate protects: the flat namespace would give the dependency the entry
-    // module's own name, so the guard would be true in an imported module and
-    // its body would run -- silently unlike CPython. Withholding the seed
-    // turns that into a diagnostic instead.
-    let (ok, rendered) = check_program(
-        "dn_dep_guard",
-        "from dep import f\n\nprint(__name__)\nprint(f())\n",
-        "\
-def f() -> int:
-    return 1
-
-if __name__ == \"__main__\":
-    print(\"dependency main\")
-",
+fn a_dependency_main_guard_is_false_in_an_imported_module() {
+    assert_eq!(
+        build_and_run_program(
+            "dn_dep_guard",
+            "from dep import f\n\nprint(__name__)\nprint(f())\n",
+            "def f() -> int:\n    return 1\n\nif __name__ == \"__main__\":\n    print(\"dependency main\")\n",
+        ),
+        "__main__\n1\n"
     );
-    assert!(!ok, "{rendered}");
-    assert!(rendered.contains("error[T0021]"), "{rendered}");
 }
 
 #[test]
 fn a_dependency_that_never_mentions_the_name_leaves_the_entry_seed_intact() {
-    // The control for the three tests above: the gate keys on the dependency
-    // mentioning the name, not on the program having a dependency at all.
     assert_eq!(
         build_and_run_program(
             "dn_dep_silent",
@@ -676,44 +620,26 @@ fn a_dependency_that_never_mentions_the_name_leaves_the_entry_seed_intact() {
 }
 
 #[test]
-fn a_dependency_read_is_t0021_when_the_entry_module_never_references_the_name() {
-    // No reference in the entry module means Gate 1 withholds the seed, so
-    // the program has no `__name__` global at all.
-    let (ok, rendered) = check_program(
-        "dn_multi_unseeded",
-        "from dep import report\n\nreport()\n",
-        "\
-def report() -> None:
-    print(__name__)
-",
-    );
-    assert!(!ok, "{rendered}");
-    assert!(
-        rendered.contains("error[T0021]") && rendered.contains("dep.py"),
-        "{rendered}"
+fn a_dependency_reads_its_name_when_the_entry_module_never_references_it() {
+    assert_eq!(
+        build_and_run_program(
+            "dn_multi_unseeded",
+            "from dep import report\n\nreport()\n",
+            "def report() -> None:\n    print(__name__)\n",
+        ),
+        "dep\n"
     );
 }
 
 #[test]
-fn a_dependencys_own_top_level_read_is_t0021() {
-    // Linking concatenates dependencies before the entry module, so the
-    // entry's seed has not run yet when a dependency's module-level code
-    // does — the type checker reports the read against the dependency.
-    let (ok, rendered) = check_program(
-        "dn_multi_top_level",
-        "from dep import report\n\nreport()\nprint(__name__)\n",
-        "\
-print(__name__)
-
-
-def report() -> None:
-    pass
-",
-    );
-    assert!(!ok, "{rendered}");
-    assert!(
-        rendered.contains("error[T0021]") && rendered.contains("dep.py"),
-        "{rendered}"
+fn a_dependencys_own_top_level_read_runs_at_its_import() {
+    assert_eq!(
+        build_and_run_program(
+            "dn_multi_top_level",
+            "from dep import report\n\nreport()\nprint(__name__)\n",
+            "print(__name__)\n\n\ndef report() -> None:\n    pass\n",
+        ),
+        "dep\n__main__\n"
     );
 }
 

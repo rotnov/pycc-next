@@ -44,7 +44,7 @@ Caught **before** it runs. Not in CI logs. Not in production. At compile time.
 Works today: strict type checking with Rust-style diagnostics pointing at the offending
 code; native compilation via LLVM; classes, exceptions, generators, closures, lists,
 dicts, sets, comprehensions, `match`, arbitrary-precision `int`, typed numpy arrays;
-reference-counted memory;
+programs of several modules and packages; reference-counted memory;
 CPython extension modules; `--non-strict` for untyped code. 9,500+ tests.
 
 **Speed** (`python3 bench/run.py --runs 11`, best of 11, shared 4-core Xeon 2.1 GHz, process
@@ -115,6 +115,40 @@ import, best of 7, Xeon 2.8 GHz shared with other jobs):
 An `int64` element joins `x += a[i]` and comparisons as a machine integer (an `int` is
 made of it only when the result leaves the inline range), so prefix_sum_np's running sum
 costs two overflow checks per add.
+
+## Programs of several modules
+
+A program can span several `.py` files and packages: `import m`, `import pkg.sub`,
+`import pkg.sub as s`, `from pkg.sub import f`, `from m import f as g`, relative
+imports (`from . import x`, `from ..util import f`) and `__init__.py`. pycc-next finds
+them next to the entry file (a package's root is found by walking up while directories
+hold an `__init__.py`; a `pycc.toml` names it explicitly) and compiles the whole program
+as one unit:
+
+- each module keeps its own namespace: two modules may both define `main` or `CONFIG`,
+  and each module's `__name__` is its own dotted name;
+- `m.f(...)`, `m.CONST`, `m.Class(...)` and `from m import f` reach the definition
+  directly: a call between modules is a direct native call;
+- each module body runs once, at the first `import` that reaches it, in CPython's import
+  order (`pkg/__init__.py` before `pkg/sub.py`);
+- `from m import x` of a variable copies its value, as in CPython, while `m.x` reads
+  the current one.
+
+```console
+$ pycc build app/main.py -o app/main && ./app/main     # strict, native
+$ pycc build app/main.py -o app/main --non-strict      # untyped code too
+$ pycc build app/main.py -o main --ext                 # one CPython extension module
+```
+
+With `--ext` the artifact is the entry module: `import main` from CPython runs the whole
+program, with every project module it imports compiled in. Those modules are private to
+the extension (not attributes of it, and not in `sys.modules`); only the entry module's
+own definitions are exported. To ship each module of a package as its own extension,
+build them one by one with `pycc build pkg/mod.py --ext --foreign-relative-imports`:
+their relative imports then bind the other modules through CPython. Imports of anything
+else (the standard library, third-party packages) work as in a single file. A module used
+as a value, an import cycle and a project import inside an `if`/`try` block are compile
+errors; the details are in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
 ## Modes
 

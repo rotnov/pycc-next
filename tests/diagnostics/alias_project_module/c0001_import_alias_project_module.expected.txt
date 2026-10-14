@@ -1,5 +1,5 @@
-error[C0001]: import of module `geometry` is not supported yet
- --> tests/diagnostics/alias_project_module/c0001_import_alias_project_module.py:1:1
+error[C0001]: the module `geometry` used as a value is not supported yet (only `g.<name>` is)
+ --> tests/diagnostics/alias_project_module/c0001_import_alias_project_module.py:3:7
   |
-1 | import geometry as g
-  | ^^^^^^^^^^^^^^^^^^^^ import of module `geometry` is not supported yet
+3 | print(g)
+  |       ^ the module `geometry` used as a value is not supported yet (only `g.<name>` is)

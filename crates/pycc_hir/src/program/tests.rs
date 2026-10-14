@@ -16,6 +16,7 @@ fn input(display_path: &str, source: &str) -> LinkInput {
         display_path: display_path.to_string(),
         module: lower_module(&parse(source), &ResolvedImports::default(), None)
             .expect("a fixture module must lower"),
+        placement: None,
     }
 }
 
@@ -120,13 +121,6 @@ fn two_modules_defining_one_function_name_collide() {
         diagnostic
             .message
             .contains("top-level name `helper` is already defined by `dep.py`"),
-        "unexpected message: {}",
-        diagnostic.message
-    );
-    assert!(
-        diagnostic
-            .message
-            .contains("a separate namespace per module is not supported yet"),
         "unexpected message: {}",
         diagnostic.message
     );
@@ -320,6 +314,7 @@ fn foreign_input(display_path: &str, source: &str, import_stmt: &str) -> LinkInp
     LinkInput {
         display_path: display_path.to_string(),
         module: lower_module(&parsed, &resolved, None).expect("a fixture module must lower"),
+        placement: None,
     }
 }
 
@@ -472,6 +467,7 @@ fn all_foreign_input(display_path: &str, source: &str) -> LinkInput {
     LinkInput {
         display_path: display_path.to_string(),
         module: lower_module(&parsed, &resolved, None).expect("a fixture module must lower"),
+        placement: None,
     }
 }
 

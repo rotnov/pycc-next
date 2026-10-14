@@ -1341,17 +1341,15 @@ fn l0001_yield_outside_function_type_checking() {
 
 // Part 1 of #883 (#962): `import <stdlib module> as <alias>`. The
 // unregistered-symbol diagnostic names the canonical module and, because
-// the receiver was spelled through an alias, the alias too; a project
-// module behind `import X as Y` keeps the plain-`import` C0001 verbatim.
+// the receiver was spelled through an alias, the alias too.
 #[test]
 fn c0001_import_alias_unregistered_symbol() {
     assert_diagnostic_matches_fixture("c0001_import_alias_unregistered_symbol");
 }
 
 /// The fixture sits beside a real `geometry.py`, so `import geometry as g`
-/// resolves to a project module and keeps #964's C0001. Without that
-/// sibling the name is answered as a CPython module, which #1291 admits
-/// under an alias.
+/// binds the project module's namespace (v0.3 accept 1): `g.area(...)`
+/// compiles, and the module itself used as a value is `C0001`.
 #[test]
 fn c0001_import_alias_project_module() {
     assert_diagnostic_matches_fixture("alias_project_module/c0001_import_alias_project_module");

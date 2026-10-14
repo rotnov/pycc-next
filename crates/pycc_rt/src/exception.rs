@@ -627,7 +627,8 @@ fn render_single_exception(exc: &PyExceptionObj) -> String {
         out.push_str("Traceback (most recent call last):\n");
         out.push_str(&format!("  File \"<compiled>\", in {frame}\n"));
     }
-    let type_name = exception_type_name(exc);
+    let type_name = crate::qualified::exception(exception_type_name(exc));
+    let type_name = type_name.as_str();
     // CPython's traceback prints a bare `ValueError` for `raise
     // ValueError("")` and a bare `AssertionError` for a failing `assert`
     // with no message (#1369, which lowers that to `AssertionError("")`):

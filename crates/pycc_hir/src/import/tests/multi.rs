@@ -118,15 +118,18 @@ fn an_unresolvable_later_alias_fails_the_whole_statement_at_its_span() {
 }
 
 #[test]
-fn a_project_module_among_stdlib_modules_names_the_namespace_gap() {
+fn a_project_module_among_stdlib_modules_names_the_block_import_gap() {
     let diagnostic = only_error(lower_answering(
         "import math, pkg\n",
         &[("pkg", ResolvedImport::Found)],
     ));
     assert_eq!(diagnostic.code, "C0001");
-    assert_eq!(
-        diagnostic.message,
-        "module namespace bindings (`import pkg`) are not supported yet"
+    assert!(
+        diagnostic
+            .message
+            .starts_with("importing the project module `pkg` inside an `if`/`try` block"),
+        "{}",
+        diagnostic.message
     );
 }
 

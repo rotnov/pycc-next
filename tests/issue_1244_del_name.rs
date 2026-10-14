@@ -112,47 +112,44 @@ fn a_module_deletes_a_name_no_other_module_mentions() {
     assert_eq!(pycc_out, "5\n");
 }
 
-/// The flat top-level namespace every linked module shares: a module-level
-/// `del x` is refused while another module mentions `x` (whether it merely
-/// defines it or reads its own `x`), and importing a name its defining
-/// module deletes is refused.
+/// Each module is its own namespace (v0.3 accept 1): a module-level `del x`
+/// deletes the module's own `x` only, whatever another module defines, and
+/// importing a name its defining module deletes is still refused.
 #[test]
-fn the_multi_module_rules_refuse_a_shared_deleted_name() {
-    for (entry, dependency, fragments) in [
-        (
-            "from b import g\ndel x\nprint(g())\n",
-            "x = 1\ndef g() -> int:\n    return 2\n",
-            [
-                "error[C0001]: a module-level `del x` is not supported when another module of \
-                 the program (`",
-                "b.py`) mentions `x`: every module shares one top-level namespace",
-            ],
-        ),
-        (
-            "from b import g\nx = 1\ndel x\nprint(g())\n",
-            "x = 5\ndef g() -> int:\n    return x\n",
-            [
-                "error[C0001]: a module-level `del x` is not supported when another module of \
-                 the program (`",
-                "b.py`) mentions `x`: every module shares one top-level namespace",
-            ],
-        ),
-        (
-            "from b import x\nprint(x)\n",
-            "x = 1\ndel x\nx = 2\n",
-            [
-                "error[C0001]: `",
-                "b.py` deletes its top-level `x` with `del`, so importing `x` from it is not \
-                 supported",
-            ],
-        ),
+fn a_module_level_del_is_per_module() {
+    let text = check_fails(
+        "e2e_1244_modules",
+        &[
+            ("a.py", "from b import g\ndel x\nprint(g())\n"),
+            ("b.py", "x = 1\ndef g() -> int:\n    return 2\n"),
+        ],
+    );
+    assert!(
+        text.contains("error[T0021]: local name `x` is not bound before this use"),
+        "{text}"
+    );
+    let text = check_fails(
+        "e2e_1244_modules",
+        &[
+            ("a.py", "from b import x\nprint(x)\n"),
+            ("b.py", "x = 1\ndel x\nx = 2\n"),
+        ],
+    );
+    for fragment in [
+        "error[C0001]: `",
+        "b.py` deletes its top-level `x` with `del`, so importing `x` from it is not \
+         supported",
     ] {
-        let text = check_fails("e2e_1244_modules", &[("a.py", entry), ("b.py", dependency)]);
-        // The diagnostic names the other module by its full path.
-        for fragment in fragments {
-            assert!(text.contains(fragment), "{entry}: {text}");
-        }
+        assert!(text.contains(fragment), "{text}");
     }
+    let dir = ScratchDir::new("e2e_1244_own_del").expect("scratch");
+    std::fs::write(dir.join("a.py"), "from b import g\nx = 1\ndel x\nprint(g())\n")
+        .expect("write the entry module");
+    std::fs::write(dir.join("b.py"), "x = 5\ndef g() -> int:\n    return x\n")
+        .expect("write the dependency");
+    let (pycc_out, cpython_out) = build_run_and_oracle(&dir, "a.py");
+    assert_eq!(pycc_out, cpython_out);
+    assert_eq!(pycc_out, "5\n");
 }
 
 /// Every `del` refusal names its reason: the HIR target kinds and scopes,

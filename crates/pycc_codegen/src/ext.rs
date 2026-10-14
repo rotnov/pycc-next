@@ -840,7 +840,9 @@ pub fn ext_thunk_symbol(name: &str) -> String {
 /// driver alike -- it is only ever called from another copy, never hosted.
 #[must_use]
 pub fn is_ext_exportable_name(name: &str) -> bool {
-    if name.starts_with("0gen_") {
+    // `0gen_` specializations and the `0m` qualified globals of another
+    // project module (v0.3 accept 1) are compiler spellings, never exports.
+    if name.starts_with('0') {
         return false;
     }
     // The compiled entry of a published signature

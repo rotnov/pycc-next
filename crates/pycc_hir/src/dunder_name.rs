@@ -57,10 +57,9 @@ pub const DUNDER_NAME: &str = "__name__";
 /// Whether `module_name` should be seeded into `module`, and with what value.
 ///
 /// Both gates below must pass, and the driver must have supplied a name at
-/// all. A non-entry module of a multi-file program is given `None`: Part 1 of
-/// #881 links every module into one flat namespace, so a per-module
-/// `__name__` global would collide, and withholding the seed there is the
-/// fail-closed choice until per-module namespaces land.
+/// all. A non-entry module of a multi-file program is given `None`: the
+/// driver renames its `__name__` into its own namespace and binds it there
+/// (v0.3 accept 1), so no dependency mentions the entry's `__name__`.
 pub(crate) fn seed_item(
     module: &ModModule,
     module_name: Option<&str>,

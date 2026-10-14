@@ -94,6 +94,7 @@ fn derive() -> Derived {
     let linked = pycc_hir::link(vec![pycc_hir::LinkInput {
         display_path: FIXTURE.to_string(),
         module: lowered,
+        placement: None,
     }])
     .expect("a single-module program links");
     let finalized = pycc_hir::finalize(linked).expect("the linked program finalizes");

@@ -132,6 +132,12 @@ pub(crate) fn classify_export_name(name: &str) -> Option<ExportName> {
     if class_or_fn.is_empty() || !is_public_name(class_or_fn) {
         return None;
     }
+    // A function or class of another project module of the program (v0.3
+    // accept 1) is compiled into the artifact but is not an attribute of
+    // this module.
+    if pycc_ast::namespace::split_module_global(class_or_fn).is_some() {
+        return None;
+    }
     let Some(method) = segments.next() else {
         return Some(ExportName::ModuleLevel);
     };

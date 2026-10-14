@@ -209,6 +209,7 @@ pub fn lower_module(
 ) -> Result<LoweredModule, Vec<Diagnostic>> {
     // An `--ext` module's public generators export through a wrapper
     // returning the CPython iterator (`pycc_ast::split_ext_generators`).
+    crate::expr::comprehension::set_comp_prefix(resolved.module_key());
     let split = resolved
         .ext_module()
         .then(|| pycc_ast::split_ext_generators(module))
@@ -226,7 +227,7 @@ pub fn lower_module(
         definition_spans: Vec::new(),
         fallback_groups: Vec::new(),
         signatures: SignatureTable::collect(&module.body, |import| {
-            resolved.resolves_to_project_module(import.range)
+            resolved.resolves_to_project_module(import)
         }),
         // No import is known yet, so only the unaliased `TYPE_CHECKING`
         // guards are recognized; a binding under an aliased guard counts,

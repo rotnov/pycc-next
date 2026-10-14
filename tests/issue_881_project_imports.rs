@@ -224,7 +224,7 @@ fn a_program_wide_pre_check_failure_is_reported_against_the_entry() {
 }
 
 #[test]
-fn a_flat_namespace_collision_names_both_files() {
+fn two_modules_defining_one_name_each_keep_their_own() {
     let scratch = ScratchDir::new("issue_881").unwrap();
     write(
         &scratch,
@@ -236,17 +236,11 @@ fn a_flat_namespace_collision_names_both_files() {
         "main.py",
         "from helper import double\n\n\ndef report() -> None:\n    print(2)\n\n\nprint(double(21))\n",
     );
-    let result = check(&entry);
-    assert_eq!(result.code, 1, "{}", result.both());
-    assert!(
-        result
-            .both()
-            .contains("top-level name `report` is already defined by")
-            && result.both().contains("helper.py")
-            && result.both().contains("main.py"),
-        "{}",
-        result.both()
-    );
+    // v0.3 accept 1: each module is its own namespace, so `report` is
+    // defined once in each and the entry's call reaches its own.
+    let result = run(&["run", entry.to_str().unwrap()], None);
+    assert_eq!(result.code, 0, "{}", result.both());
+    assert_eq!(result.stdout, "42\n", "{}", result.both());
 }
 
 #[test]

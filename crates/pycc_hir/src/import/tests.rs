@@ -184,12 +184,18 @@ fn importing_a_submodule_name_is_a_capability_gap_not_a_missing_name() {
 }
 
 #[test]
-fn a_bare_import_of_a_resolved_project_module_names_the_module_namespace_gap() {
+fn a_bare_import_answered_found_names_the_block_import_gap() {
+    // The driver answers `Found` only for a bare project import nested in a
+    // module-level block; a top-level one is loaded and rewritten.
     let diagnostics = lower_with_answer("import geometry\n", &ResolvedImport::Found);
     assert_eq!(diagnostics[0].code, "C0001");
-    assert_eq!(
-        diagnostics[0].message,
-        "module namespace bindings (`import geometry`) are not supported yet"
+    assert!(
+        diagnostics[0].message.starts_with(
+            "importing the project module `geometry` inside an `if`/`try` block is not \
+             supported yet"
+        ),
+        "{}",
+        diagnostics[0].message
     );
 }
 

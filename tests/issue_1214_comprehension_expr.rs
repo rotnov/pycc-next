@@ -179,13 +179,12 @@ fn same_offset_comprehensions_in_two_modules_link_and_run() {
     );
 }
 
-/// A known gap under #1237, not intended behavior: the linked program is
-/// one flat namespace, so same-offset, same-name loop variables of
-/// *different* types (a `range` `int` and a `dict` `str` key) still share
-/// one module-global slot and the checker refuses the second binding.
-/// CPython prints `4`. The refusal is fail-closed (nothing is emitted).
+/// Same-offset, same-name loop variables of *different* types (a `range`
+/// `int` and a `dict` `str` key) in two modules are two globals, since each
+/// module's synthesized names carry its module key (v0.3 accept 1). CPython
+/// prints `4`.
 #[test]
-fn same_offset_comprehension_variables_of_different_types_are_still_refused() {
+fn same_offset_comprehension_variables_of_different_types_link_and_run() {
     let (build, run) = build_program(
         "e2e_1237_two_types",
         &[
@@ -196,12 +195,10 @@ fn same_offset_comprehension_variables_of_different_types_are_still_refused() {
             ("b.py", "v={\"\":1}\nzs = {y: 1 for y in v}\n"),
         ],
     );
-    assert!(run.is_none(), "the build is expected to be refused");
-    assert!(
-        rendered(&build).contains(
-            "error[T0023]: cannot assign `int` to `0comp_24_y`, previously inferred as `str`"
-        ),
-        "{}",
-        rendered(&build)
+    let run = run.unwrap_or_else(|| panic!("{}", rendered(&build)));
+    assert_eq!(run.status.code(), Some(0), "{}", rendered(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        "4\n"
     );
 }

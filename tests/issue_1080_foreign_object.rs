@@ -979,11 +979,12 @@ fn a_definition_shadowing_another_module_s_foreign_import_is_refused() {
     );
 }
 
-/// The reverse link order: `shadow.py` is linked before the module whose
-/// foreign import it shadows, so an incremental check over the names
-/// already linked would not see the collision.
+/// A dependency's own definition is in its own namespace (v0.3 accept 1),
+/// so `shadow.py`'s `def json` does not shadow `dep.py`'s CPython `json`:
+/// `dep`'s `json()` is the call of a CPython object (whose result is an
+/// object, refused where an `int` is declared), never `shadow.json`.
 #[test]
-fn a_definition_linked_before_the_foreign_module_is_refused_too() {
+fn a_dependency_definition_does_not_shadow_another_dependencys_foreign_import() {
     let dir = ScratchDir::new("foreign_shadow_dep").expect("scratch");
     std::fs::write(dir.join("shadow.py"), "def json() -> int:\n    return 1\n")
         .expect("write the shadowing dependency");
@@ -1005,13 +1006,13 @@ fn a_definition_linked_before_the_foreign_module_is_refused_too() {
         .expect("pycc should spawn");
     let rendered = stdout_of(&output);
     assert_eq!(output.status.code(), Some(1), "{rendered}");
-    assert!(rendered.contains("error[C0001]"), "{rendered}");
+    assert!(!rendered.contains("shadowing"), "{rendered}");
     assert!(
-        rendered.contains("shadowing a foreign import across modules is not supported yet"),
+        rendered.contains("error[T0022]: return type mismatch: expected `int`, found `object`"),
         "{rendered}"
     );
     assert!(
-        rendered.contains(&format!("{}:1:1", rendered_path(&dir.join("shadow.py")))),
-        "the diagnostic names the shadowing module: {rendered}"
+        rendered.contains(&format!("{}:3:5", rendered_path(&dir.join("dep.py")))),
+        "{rendered}"
     );
 }

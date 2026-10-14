@@ -35,7 +35,7 @@
 //! literal that reproduces current behavior.
 
 mod bin_op_kind;
-mod comprehension;
+pub(crate) mod comprehension;
 mod container_call;
 pub(crate) mod keyword_bind;
 pub(crate) mod object_keyword_call;

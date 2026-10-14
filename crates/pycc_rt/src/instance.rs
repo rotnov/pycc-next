@@ -284,6 +284,7 @@ fn instance_get_slot_checked(instance: &PyInstanceObj, slot: i64) -> i64 {
         return word;
     }
     let class_name = layout_field(instance.layout(), 0);
+    let class_name = crate::qualified::plain(&class_name);
     let attr = layout_field(instance.layout(), 1 + slot as usize);
     raise_builtin(
         EXCEPTION_TYPE_ATTRIBUTE_ERROR,

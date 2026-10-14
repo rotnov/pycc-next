@@ -54,6 +54,7 @@ pub use container::{
 };
 pub use dunder_name::DUNDER_NAME;
 pub use pycc_ast::function_qualname;
+pub use pycc_ast::namespace;
 pub use exception::{
     BUILTIN_EXCEPTION_CLASSES, EXCEPTION_GROUP_TYPE_TAG, EXCEPTION_INIT_MANGLED_NAME,
     FIRST_USER_EXCEPTION_TYPE_TAG, FOREIGN_BASE_EXCEPTION_TYPE_TAG, HirExceptHandler,
@@ -84,7 +85,7 @@ pub use isinstance_narrow::{IsInstancePolarity, isinstance_narrow_target, isinst
 pub use module::{LoweredModule, last_item_origins, lower_all, lower_checked, lower_module};
 pub use not_implemented::{WIDENED_RETURN_HELP, body_returns_not_implemented};
 pub use post_if::continuation_narrows;
-pub use program::{LinkInput, finalize, link};
+pub use program::{LinkInput, LinkLayout, Placement, finalize, link, link_layout};
 /// The callee of a nested function used as a value (`pycc_ast::desugar`).
 pub use pycc_ast::CLOSURE_MARKER;
 pub use return_coverage::{block_always_returns, block_never_completes, loop_never_ends_normally};

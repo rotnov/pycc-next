@@ -64,21 +64,14 @@ fn a_name_repeated_in_one_foreign_import_is_admitted() {
     assert_eq!(stdout_of(&output), "");
 }
 
-/// A project module among the names fails the statement with the module
-/// namespace gap, and the failed statement still poisons every name it
-/// would have bound: the later `class A(math)` reports no cascade.
+/// A project module among the names binds its namespace (v0.3 accept 1)
+/// next to the standard module.
 #[test]
-fn a_project_module_in_a_multi_name_import_is_one_diagnostic() {
+fn a_project_module_in_a_multi_name_import_binds_its_namespace() {
     let dir = ScratchDir::new("multi_import_project").expect("scratch");
     std::fs::write(dir.join("pkg.py"), "x = 1\n").expect("write pkg.py");
-    let output = check(&dir, "import pkg, math\n\n\nclass A(math):\n    pass\n");
-    assert_eq!(output.status.code(), Some(1), "{}", stderr_of(&output));
-    let rendered = stdout_of(&output);
-    assert_eq!(rendered.matches("error[").count(), 1, "{rendered}");
-    assert!(
-        rendered.contains("module namespace bindings (`import pkg`) are not supported yet"),
-        "{rendered}"
-    );
+    let output = check(&dir, "import pkg, math\n\nprint(pkg.x, math.floor(2.5))\n");
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
 }
 
 /// A native build refuses the alias it cannot embed, at the whole

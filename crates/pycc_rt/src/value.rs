@@ -272,8 +272,8 @@ pub(crate) fn repr(kind: i64, word: i64, out: &mut String) -> bool {
             let name = unsafe { crate::pycc_rt_ext_instance_class(instance, &mut len) };
             let name = unsafe { std::slice::from_raw_parts(name, len) };
             out.push_str(&format!(
-                "<__main__.{} object at {:#x}>",
-                String::from_utf8_lossy(name),
+                "<{} object at {:#x}>",
+                crate::qualified::with_module(&String::from_utf8_lossy(name)),
                 word
             ));
             return true;

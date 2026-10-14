@@ -18,9 +18,14 @@
 //! touches the filesystem beyond its own read, which is what keeps the
 //! `check_frontend_throughput.rb` gate honest.
 
+mod namespace;
+mod probe;
+
 use crate::frontend::FrontendFailure;
 use crate::project_config;
 use crate::source;
+use namespace::{Imported, ModuleInfo};
+
 use pycc_diag::{Diagnostic, Span};
 use pycc_hir::{
     LoweredModule, ProjectImportRequest, ResolvedImport, ResolvedImports, ResolvedModule,
@@ -35,6 +40,12 @@ pub(crate) struct LoadedModule {
     pub(crate) display_path: String,
     pub(crate) source: String,
     pub(crate) module: LoweredModule,
+    /// The module exactly as it was lowered (desugared, and renamed for
+    /// per-module namespaces), for passes that locate items in it.
+    pub(crate) parsed: pycc_ast::ModModule,
+    /// Where the module's body runs: spliced into module `.0` at source
+    /// offset `.1`, the import that first ran it (`None` for the entry).
+    pub(crate) placement: Option<(usize, u32)>,
 }
 
 /// Every module reachable from the entry file, in dependency order with
@@ -85,16 +96,18 @@ struct RootInfo {
 /// borrowing the module store) so the resolution phase can keep mutating
 /// that store while the answers accumulate.
 enum Resolution {
-    /// The dependency loaded; `index` addresses it in the module store.
+    /// The dependency loaded (or, for `from pkg import sub` inside the
+    /// package being initialized, only its submodules did): `loaded` is
+    /// every module this request loaded or reached, the package
+    /// `__init__.py`s on the way included (issue #1188), and `imported`
+    /// what the request names, for the namespace rewrite.
     Loaded {
-        index: usize,
-        submodules: Vec<String>,
-        /// The package `__init__.py`s loaded on the way to `index`, which
-        /// are dependencies of the importer too (issue #1188).
-        package_inits: Vec<usize>,
+        loaded: Vec<usize>,
+        imported: Imported,
     },
-    /// A bare `import m` naming a real project module: recognized, not
-    /// loaded (Part 1 binds no module namespace).
+    /// A bare `import m` nested in a module-level `if`/`try` block naming a
+    /// real project module: recognized, not loaded (a conditionally run
+    /// module body is not something static linking can express).
     Found,
     /// The import cannot be satisfied, with the exact diagnostic to report.
     NotFound { code: &'static str, message: String },
@@ -167,10 +180,9 @@ pub(crate) fn load(
 ///
 /// `entry_module_name` is the `__name__` value the *entry* module is compiled
 /// with (W0 of #882, #1156); every module loaded recursively from it is a
-/// dependency and receives `None`. Part 1 of #881 links the whole program into
-/// one flat namespace, so seeding a `__name__` global per module would collide
-/// -- withholding it from dependencies is the fail-closed choice until
-/// per-module namespaces land.
+/// dependency and receives `None` here: its own `__name__` is a renamed
+/// global of its own namespace that the rewrite binds to its dotted module
+/// name (`namespace`, v0.3 accept 1).
 ///
 /// `relative_imports` is how the entry module's relative imports (#1366),
 /// and since #1382 its absolute imports rooted at its own top-level package,
@@ -198,6 +210,10 @@ pub(crate) fn load_with(
     entry_display_dir.pop();
     let mut loader = Loader {
         modules: Vec::new(),
+        infos: Vec::new(),
+        by_qual: HashMap::new(),
+        current_import: None,
+        placements: Vec::new(),
         memo: HashMap::new(),
         in_progress: Vec::new(),
         entry_dir,
@@ -215,15 +231,30 @@ pub(crate) fn load_with(
         ext_module,
         non_strict,
     };
-    loader.load_module(&canonical, display, true)?;
+    loader.load_module(&canonical, display, true, None)?;
+    let mut modules = loader.modules;
+    for (module, placement) in modules.iter_mut().zip(loader.placements) {
+        module.placement =
+            placement.and_then(|(parent, offset)| Some((*loader.memo.get(&parent)?, offset)));
+    }
     Ok(LoadedProgram {
-        modules: loader.modules,
+        modules,
         manifest: loader.manifest,
     })
 }
 
 struct Loader {
     modules: Vec<LoadedModule>,
+    /// Each loaded module's dotted name and exports, parallel to `modules`.
+    infos: Vec<ModuleInfo>,
+    /// Dotted module name -> index in `modules`.
+    by_qual: HashMap<String, usize>,
+    /// The importer and source offset of the import request being
+    /// resolved, which a module loaded for it is placed at.
+    current_import: Option<(PathBuf, u32)>,
+    /// Each loaded module's placement, by the importer's canonical path,
+    /// parallel to `modules`; resolved to indices once loading ends.
+    placements: Vec<Option<(PathBuf, u32)>>,
     /// Canonical path -> index in `modules`, so two spellings of one file
     /// (a symlink, a `./` prefix) are one module.
     memo: HashMap<PathBuf, usize>,
@@ -263,10 +294,12 @@ impl Loader {
         canonical: &Path,
         display: String,
         is_entry: bool,
+        qual: Option<String>,
     ) -> Result<usize, FrontendFailure> {
         if let Some(index) = self.memo.get(canonical) {
             return Ok(*index);
         }
+        let placement = self.current_import.take();
         let bytes = std::fs::read(canonical)
             .map_err(|error| FrontendFailure::input(display.clone(), error.to_string()))?;
         let source = source::decode_python_source(&bytes)
@@ -329,6 +362,9 @@ impl Loader {
         self.in_progress.pop();
 
         let mut resolved = ResolvedImports::default();
+        if let Some(qual) = &qual {
+            resolved.set_module_key(pycc_ast::namespace::module_key(qual));
+        }
         resolved.set_ext_module(self.ext_module);
         resolved.set_non_strict(self.non_strict);
         for loaded in &self.modules {
@@ -338,34 +374,26 @@ impl Loader {
                 &loaded.module.class_slots,
             );
         }
+        let mut imported: HashMap<Span, Imported> = HashMap::new();
         for (span, answer) in answers {
             match answer {
                 Resolution::Loaded {
-                    index,
-                    submodules,
-                    package_inits,
+                    loaded,
+                    imported: names,
                 } => {
                     // Issue #1188: a direct dependency's container method
                     // names reach this module, and through them the whole
                     // transitive import closure's. Issue #1425: so does
                     // whether it can hold a CPython object -- its final
                     // state, which already includes what it inherited.
-                    for dependency in package_inits.into_iter().chain([index]) {
+                    for dependency in loaded {
                         let dependency = &self.modules[dependency].module;
                         resolved.inherit_container_method_names(
                             dependency.container_method_names.iter().copied(),
                         );
                         resolved.inherit_object_receivers(dependency.object_receivers);
                     }
-                    let loaded = &self.modules[index];
-                    resolved.insert(
-                        span,
-                        ResolvedImport::Module(ResolvedModule {
-                            display_path: loaded.display_path.clone(),
-                            hir: &loaded.module.hir,
-                            submodule_names: submodules,
-                        }),
-                    );
+                    imported.insert(span, names);
                 }
                 Resolution::Found => resolved.insert(span, ResolvedImport::Found),
                 Resolution::NotFound { code, message } => {
@@ -375,51 +403,58 @@ impl Loader {
                 Resolution::Unanswered => {}
             }
         }
-        // W0 of #882 (#1156): any *dependency* that mentions `__name__` at all
-        // withholds the entry module's seed program-wide. Part 1 of #881 links
-        // every module into one flat namespace, so the seed and a dependency's
-        // use of the name are the same global, and `program::link` places every
-        // dependency's top-level statements *ahead* of the entry module's items
-        // -- the seed among them. Two failures follow from that ordering, and
-        // one gate closes both. A dependency *binding*: a `str`-valued one is
-        // silently overwritten by the seed, and one of any other type fails the
-        // whole program with `T0023`. A dependency *read*: it observes the
-        // global before the seed has stored anything, which `pycc check`
-        // accepts and the built artifact then aborts on at codegen's
-        // uninitialized-global trap -- the one outcome D-246 rules out, since
-        // every divergence it admits is meant to be a diagnostic. The read need
-        // not be textually top-level either: a dependency's top-level call to
-        // one of its own functions reaches a function-body read just the same,
-        // which is why the dependency test is "mentions" rather than "binds".
-        // Withholding restores the pre-#1156 behavior in every case -- the
-        // dependency's own binding is the one global, or the name is undefined
-        // and the read is a `T0021`, exactly as before this feature existed.
-        // Dependencies are lowered before the entry module, so every one of
-        // them is already in `self.modules` here.
-        //
-        // The predicate is `pycc_hir`'s own, published on `LoweredModule`, so
-        // both halves of the gate answer their question the same way. An
-        // earlier revision asked `definition_spans` instead, which records
-        // neither a dependency's import bindings (`import __name__` binds an
-        // opaque `object` in an `--ext` program) nor anything nested inside a
-        // top-level compound statement, and so answered "no" for both.
-        let dependency_uses_dunder_name = self
-            .modules
-            .iter()
-            .any(|loaded| loaded.module.mentions_dunder_name);
-        let module_name = (is_entry && !dependency_uses_dunder_name)
+        // Per-module namespaces (v0.3 accept 1): a dependency's own names
+        // are renamed to their qualified spelling, and every reference to
+        // another project module's name reaches it directly.
+        let index = self.modules.len();
+        let program = namespace::Program {
+            infos: &self.infos,
+            by_qual: &self.by_qual,
+            display_paths: self
+                .modules
+                .iter()
+                .map(|loaded| loaded.display_path.as_str())
+                .collect(),
+        };
+        let scan = namespace::scan_exports(&parsed, index, &imported, &program);
+        let rewritten = namespace::rewrite(&mut parsed, qual.as_deref(), &imported, &program)
+            .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
+        for (origin, key) in rewritten.synthesized {
+            let origin = &self.modules[origin];
+            resolved.insert_synthesized(
+                key,
+                ResolvedImport::Module(ResolvedModule {
+                    display_path: origin.display_path.clone(),
+                    hir: &origin.module.hir,
+                    submodule_names: Vec::new(),
+                }),
+            );
+        }
+        // The entry module's `__name__` (#1156); a dependency's own
+        // `__name__` is a renamed global the rewrite binds.
+        let module_name = is_entry
             .then_some(self.entry_module_name.as_deref())
             .flatten();
         let module = pycc_hir::lower_module(&parsed, &resolved, module_name)
             .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
         drop(resolved);
+        let exports = match &qual {
+            Some(qual) => namespace::exports(&scan, qual, index, &module.hir),
+            None => HashMap::new(),
+        };
 
-        let index = self.modules.len();
         self.modules.push(LoadedModule {
             display_path: display,
             source,
             module,
+            parsed,
+            placement: None,
         });
+        if let Some(qual) = &qual {
+            self.by_qual.insert(qual.clone(), index);
+        }
+        self.infos.push(ModuleInfo { qual, exports });
+        self.placements.push(placement);
         self.memo.insert(canonical.to_path_buf(), index);
         Ok(index)
     }
@@ -471,30 +506,41 @@ impl Loader {
             Ok(target) => target,
             Err(resolution) => return Ok(resolution),
         };
-        if request.names.is_empty() {
-            // A bare `import m`: the module exists, but Part 1 binds no
-            // module namespace, so the file is never loaded.
+        if request.names.is_empty() && request.nested {
+            // A bare `import m` nested in a block: recognized, refused by
+            // `pycc_hir` (a conditionally run module body).
             return Ok(Resolution::Found);
         }
         let canonical = identity_path(&target.path);
-        if let Some(position) = self
+        let offset = request.span.start;
+        let in_progress = self
             .in_progress
             .iter()
-            .position(|(path, _)| *path == canonical)
-        {
-            let mut chain: Vec<String> = self.in_progress[position..]
-                .iter()
-                .map(|(_, display)| format!("`{}`", pycc_diag::display_path(display)))
-                .collect();
-            chain.push(format!("`{}`", pycc_diag::display_path(&target.display)));
-            return Ok(Resolution::NotFound {
-                code: "E0108",
-                message: format!("import cycle: {}", chain.join(" -> ")),
-            });
+            .position(|(path, _)| *path == canonical);
+        if let Some(position) = in_progress {
+            // `from . import sub` inside the package being initialized (or a
+            // module it is importing) loads the submodules alone; anything
+            // else would read the partially initialized module: a cycle.
+            let only_submodules = !request.names.is_empty()
+                && request
+                    .names
+                    .iter()
+                    .all(|name| target.submodules.iter().any(|sub| sub == name));
+            if !only_submodules {
+                let mut chain: Vec<String> = self.in_progress[position..]
+                    .iter()
+                    .map(|(_, display)| format!("`{}`", pycc_diag::display_path(display)))
+                    .collect();
+                chain.push(format!("`{}`", pycc_diag::display_path(&target.display)));
+                return Ok(Resolution::NotFound {
+                    code: "E0108",
+                    message: format!("import cycle: {}", chain.join(" -> ")),
+                });
+            }
         }
-        let mut package_inits = Vec::new();
-        for (init_path, init_display) in target.package_inits {
-            let init_canonical = identity_path(&init_path);
+        let mut loaded = Vec::new();
+        for (init_path, init_display) in &target.package_inits {
+            let init_canonical = identity_path(init_path);
             // An `__init__.py` already on the in-progress stack is the
             // importer itself (a package initializer importing its own
             // submodule); loading it again would be a cycle. Re-loading an
@@ -506,14 +552,111 @@ impl Loader {
             {
                 continue;
             }
-            package_inits.push(self.load_module(&init_canonical, init_display, false)?);
+            let qual = self.qual_of(&init_canonical)?;
+            self.current_import = Some((importer_canonical.to_path_buf(), offset));
+            loaded.push(self.load_module(&init_canonical, init_display.clone(), false, Some(qual))?);
         }
-        let index = self.load_module(&canonical, target.display, false)?;
+        let target_qual = self.qual_of(&canonical)?;
+        let index = match in_progress {
+            Some(_) => None,
+            None => {
+                self.current_import = Some((importer_canonical.to_path_buf(), offset));
+                let index = self.load_module(
+                    &canonical,
+                    target.display.clone(),
+                    false,
+                    Some(target_qual.clone()),
+                )?;
+                loaded.push(index);
+                Some(index)
+            }
+        };
+        // `from pkg import sub`: a name the package itself does not bind but
+        // a submodule file provides is that submodule, imported now.
+        let mut submodules = HashMap::new();
+        let package_dir = target.path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let display_dir = Path::new(&target.display)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        for name in &request.names {
+            let bound = index.is_some_and(|index| self.infos[index].exports.contains_key(name));
+            if bound || !target.submodules.iter().any(|sub| sub == name) {
+                continue;
+            }
+            let (file, file_display) = if package_dir.join(format!("{name}.py")).is_file() {
+                (
+                    package_dir.join(format!("{name}.py")),
+                    display_dir.join(format!("{name}.py")),
+                )
+            } else if package_dir.join(name).join("__init__.py").is_file() {
+                (
+                    package_dir.join(name).join("__init__.py"),
+                    display_dir.join(name).join("__init__.py"),
+                )
+            } else {
+                continue;
+            };
+            let sub_canonical = identity_path(&file);
+            if self
+                .in_progress
+                .iter()
+                .any(|(path, _)| *path == sub_canonical)
+            {
+                continue;
+            }
+            let qual = self.qual_of(&sub_canonical)?;
+            self.current_import = Some((importer_canonical.to_path_buf(), offset));
+            loaded.push(self.load_module(
+                &sub_canonical,
+                file_display.to_string_lossy().into_owned(),
+                false,
+                Some(qual.clone()),
+            )?);
+            submodules.insert(name.clone(), qual);
+        }
         Ok(Resolution::Loaded {
-            index,
-            submodules: target.submodules,
-            package_inits,
+            loaded,
+            imported: Imported {
+                target: target_qual,
+                submodules,
+            },
         })
+    }
+
+    /// The dotted module name of the project file at `canonical`: its path
+    /// below the source root, `__init__.py` naming its package. A file
+    /// outside the root (reached by a relative import) is named by its own
+    /// stem, made unique if another module already has that name.
+    fn qual_of(&mut self, canonical: &Path) -> Result<String, FrontendFailure> {
+        let root = self.source_root()?.canonical;
+        let mut segments: Vec<String> = match canonical.strip_prefix(&root) {
+            Ok(relative) => relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .collect(),
+            Err(_) => canonical
+                .file_name()
+                .map(|name| vec![name.to_string_lossy().into_owned()])
+                .unwrap_or_default(),
+        };
+        if let Some(last) = segments.last_mut()
+            && let Some(stem) = last.strip_suffix(".py")
+        {
+            *last = stem.to_string();
+        }
+        if segments.last().is_some_and(|last| last == "__init__") {
+            segments.pop();
+        }
+        if segments.is_empty() {
+            segments.push(
+                canonical
+                    .parent()
+                    .and_then(Path::file_name)
+                    .map_or_else(|| "module".to_string(), |name| name.to_string_lossy().into_owned()),
+            );
+        }
+        Ok(segments.join("."))
     }
 
     /// The `C0001` refusal for an entry whose own top-level package (#1382)
@@ -554,299 +697,6 @@ impl Loader {
             .and_then(|module| module.split('.').next());
         request.level == 0 && root.is_some() && root == self.entry_package.as_deref()
     }
-
-    /// The directory `request`'s dotted name resolves against: the source
-    /// root for an absolute import, the importer's package (climbed
-    /// `level - 1` times) for a relative one. A base that cannot be
-    /// resolved at all carries its own rejection (see [`Base::rejected`])
-    /// rather than being absent.
-    fn base_dir(
-        &mut self,
-        request: &ProjectImportRequest,
-        importer_display: &str,
-        importer_canonical: &Path,
-    ) -> Result<Base, FrontendFailure> {
-        if request.level == 0 {
-            let root = self.source_root()?;
-            return Ok(Base {
-                path: root.canonical,
-                display: root.display,
-                relative: false,
-                rejection: None,
-            });
-        }
-        let mut display = PathBuf::from(importer_display);
-        display.pop();
-        if display.as_os_str().is_empty() {
-            // The entry was named by a bare file name, so its directory
-            // spelling is empty; `.` is the same directory and is what a
-            // diagnostic can actually render.
-            display = PathBuf::from(".");
-        }
-        // The importer's own canonical path is already known, so the base
-        // never has to be re-derived from the display spelling: popping the
-        // file name off it is exact even when the display path is relative
-        // to the process working directory or spelled through a symlink.
-        let mut canonical = importer_canonical.to_path_buf();
-        canonical.pop();
-        for climb in 0..request.level {
-            if !canonical.join("__init__.py").is_file() {
-                let message = if climb == 0 {
-                    format!(
-                        "attempted relative import with no known parent package: `{}` has no `__init__.py`",
-                        pycc_diag::display_path(&display.to_string_lossy())
-                    )
-                } else {
-                    "attempted relative import beyond the top-level package".to_string()
-                };
-                return Ok(Base::rejected(message));
-            }
-            if climb + 1 < request.level {
-                canonical.pop();
-                display.pop();
-            }
-        }
-        Ok(Base {
-            path: canonical,
-            display,
-            relative: true,
-            rejection: None,
-        })
-    }
-
-    /// Discovers, once per invocation, the directory absolute project
-    /// module names resolve against.
-    fn source_root(&mut self) -> Result<RootInfo, FrontendFailure> {
-        if let Some(root) = &self.root {
-            return Ok(root.clone());
-        }
-        let root = self.discover_root()?;
-        self.root = Some(root.clone());
-        Ok(root)
-    }
-
-    fn discover_root(&mut self) -> Result<RootInfo, FrontendFailure> {
-        if let Some((climbs, ancestor)) = nearest_manifest(&self.entry_dir) {
-            let toml = ancestor.join("pycc.toml");
-            // Rendered as-typed (relative to the entry's own spelling)
-            // rather than as the canonical absolute path the walk uses.
-            let display = display_root(&self.entry_display_dir, climbs)
-                .join("pycc.toml")
-                .to_string_lossy()
-                .into_owned();
-            let contents = std::fs::read_to_string(&toml)
-                .map_err(|error| FrontendFailure::input(display.clone(), error.to_string()))?;
-            let config = project_config::parse(&contents)
-                .map_err(|message| FrontendFailure::input(display.clone(), message))?;
-            let mut root = ancestor.join(&config.project.entry);
-            root.pop();
-            // Recorded before the source-root check below, so a manifest
-            // whose `entry` locates no source root (the fall-through below) still
-            // governs the interop policy (#1224).
-            self.manifest = Some(DiscoveredManifest { display, config });
-            let resolved = root
-                .canonicalize()
-                .ok()
-                .and_then(|root| climbs_between(&self.entry_dir, &root).map(|c| (root, c)));
-            if let Some((canonical, climbs)) = resolved {
-                return Ok(RootInfo {
-                    canonical,
-                    display: display_root(&self.entry_display_dir, climbs),
-                });
-            }
-        }
-        let mut climbs = 0;
-        let mut dir = self.entry_dir.clone();
-        while dir.join("__init__.py").is_file() && dir.pop() {
-            climbs += 1;
-        }
-        Ok(RootInfo {
-            canonical: dir,
-            display: display_root(&self.entry_display_dir, climbs),
-        })
-    }
-
-    /// Walks `segments` down from `base`, returning the module file they
-    /// name plus the package `__init__.py`s passed on the way. `Err`
-    /// carries the [`Resolution`] to report instead.
-    fn probe(
-        &self,
-        base: &Base,
-        segments: &[&str],
-        request: &ProjectImportRequest,
-    ) -> Result<Target, Resolution> {
-        if let Some(rejection) = &base.rejection {
-            return Err(Resolution::NotFound {
-                code: "T0021",
-                message: rejection.clone(),
-            });
-        }
-        let mut path = base.path.clone();
-        let mut display = base.display.clone();
-        let mut package_inits = Vec::new();
-        for (position, segment) in segments.iter().enumerate() {
-            let last = position + 1 == segments.len();
-            let file = path.join(format!("{segment}.py"));
-            let file_display = display.join(format!("{segment}.py"));
-            if last && file.is_file() {
-                return Ok(Target::new(file, file_display, package_inits, Vec::new()));
-            }
-            let init = path.join(segment).join("__init__.py");
-            let init_display = display.join(segment).join("__init__.py");
-            if !path.join(segment).is_dir() {
-                return Err(self.missing(base, request, position));
-            }
-            if last {
-                if !init.is_file() {
-                    return Err(Resolution::NotFound {
-                        code: "C0001",
-                        message: format!(
-                            "namespace package `{}` (a directory without `__init__.py`) is not supported yet",
-                            pycc_diag::display_path(&display.join(segment).to_string_lossy())
-                        ),
-                    });
-                }
-                let submodules = submodule_names(&path.join(segment));
-                return Ok(Target::new(init, init_display, package_inits, submodules));
-            }
-            if init.is_file() {
-                package_inits.push((init, init_display));
-            }
-            path.push(segment);
-            display.push(segment);
-        }
-        // A relative `from . import x`: the base package itself.
-        let submodules = submodule_names(&path);
-        Ok(Target::new(
-            path.join("__init__.py"),
-            display.join("__init__.py"),
-            package_inits,
-            submodules,
-        ))
-    }
-
-    /// The diagnostic for a dotted name that resolves to nothing: a
-    /// CPython-rejected relative import (`T0021`), a foreign CPython
-    /// module (Part 1 of #1026), or -- for every other absolute name --
-    /// no answer at all, so `pycc_hir` keeps its own
-    /// "import of module `x` is not supported yet" `C0001`. `position` is
-    /// the index of the segment whose directory [`Loader::probe`] did not
-    /// find.
-    fn missing(&self, base: &Base, request: &ProjectImportRequest, position: usize) -> Resolution {
-        if !base.relative {
-            // Part 1 of #1026 admits a foreign import of a single, undotted
-            // root: a bare `import X`, one such name of a multi-name
-            // `import X, Y` (which `pycc_hir` requests alias by alias under
-            // each alias's own span, #1280), an aliased `import X as Y`
-            // (#1291; `pycc_hir` binds `Y`), and -- when `request.names` is
-            // non-empty -- a `from X import a, b` at top level (#1278) or
-            // nested in a module-level `if`/`try` body (#1383), whose
-            // names `pycc_hir` binds to the module's attributes. A non-relative
-            // base means `request.level` is `0` and `base.path` is the
-            // source root the probe walked.
-            let module = request.module.as_deref().unwrap_or_default();
-            if !module.is_empty() && !module.contains('.') {
-                return Resolution::Foreign;
-            }
-            // Part 1 of #1138: the from form's module may be dotted
-            // (`from X.Y import a`) when its root `X` is neither a project
-            // package (the probe missed at the first segment) nor a project
-            // module (`X.py` beside the root). So may a plain `import X.Y`
-            // or `import X.Y as Z` (empty `names`, #1381), at top level or
-            // nested, under the same two conditions; `pycc_hir` binds the
-            // root `X` for the first and the leaf `X.Y` for the second. A
-            // dotted name under a project root keeps the `C0001`: that root
-            // is compiled into the artifact, so a runtime lookup of `X.Y` in
-            // the host would name a different `X` than the one pycc
-            // compiled. A non-package `X/` directory that shadows a CPython
-            // root (`json/` without an `__init__.py`) is walked into, and
-            // keeps the `C0001` too -- conservative, as for the undotted
-            // form's namespace-package refusal.
-            let root = module.split('.').next().unwrap_or_default();
-            if position == 0 && !base.path.join(format!("{root}.py")).is_file() {
-                return Resolution::Foreign;
-            }
-            return Resolution::Unanswered;
-        }
-        let spec = format!(
-            "{}{}",
-            ".".repeat(request.level as usize),
-            request.module.as_deref().unwrap_or_default()
-        );
-        Resolution::NotFound {
-            code: "T0021",
-            message: format!(
-                "no module named `{spec}` in `{}`",
-                pycc_diag::display_path(&base.display.to_string_lossy())
-            ),
-        }
-    }
-}
-
-/// The directory a dotted name resolves against, or the reason it cannot
-/// be resolved at all (a relative import outside a package).
-struct Base {
-    path: PathBuf,
-    display: PathBuf,
-    relative: bool,
-    rejection: Option<String>,
-}
-
-impl Base {
-    fn rejected(message: String) -> Self {
-        Self {
-            path: PathBuf::new(),
-            display: PathBuf::new(),
-            relative: true,
-            rejection: Some(message),
-        }
-    }
-}
-
-struct Target {
-    path: PathBuf,
-    display: String,
-    package_inits: Vec<(PathBuf, String)>,
-    submodules: Vec<String>,
-}
-
-impl Target {
-    fn new(
-        path: PathBuf,
-        display: PathBuf,
-        package_inits: Vec<(PathBuf, PathBuf)>,
-        submodules: Vec<String>,
-    ) -> Self {
-        Self {
-            path,
-            display: display.to_string_lossy().into_owned(),
-            package_inits: package_inits
-                .into_iter()
-                .map(|(path, display)| (path, display.to_string_lossy().into_owned()))
-                .collect(),
-            submodules,
-        }
-    }
-}
-
-/// The submodule names a package directory offers: every `name.py` other
-/// than `__init__.py`, and every subdirectory. Sorted so a diagnostic that
-/// mentions them is deterministic across filesystems.
-fn submodule_names(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            match name.strip_suffix(".py") {
-                Some(stem) => (stem != "__init__").then(|| stem.to_string()),
-                None => entry.path().is_dir().then_some(name),
-            }
-        })
-        .collect();
-    names.sort();
-    names
 }
 
 /// `entry` made absolute without resolving the symlinks it spells, the

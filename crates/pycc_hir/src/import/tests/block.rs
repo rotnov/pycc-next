@@ -240,7 +240,7 @@ fn nested_imports_that_are_not_all_foreign_keep_a_diagnostic() {
     let diagnostics = errors("if c:\n    import pkg\n", &["pkg"]);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
     assert!(
-        diagnostics[0].message.contains("module namespace"),
+        diagnostics[0].message.contains("inside an `if`/`try` block"),
         "{}",
         diagnostics[0].message
     );

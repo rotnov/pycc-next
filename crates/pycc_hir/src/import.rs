@@ -19,6 +19,7 @@
 mod block;
 mod carrier;
 mod fallback;
+mod project;
 mod request;
 mod shadow;
 mod spelling;
@@ -33,8 +34,7 @@ pub(crate) use type_alias::{lower_legacy_type_alias_ann_assign, lower_type_alias
 
 use crate::class::slots::ClassSlotsRow;
 use crate::{
-    ForeignImportSite, FromImport, HirClassDef, HirItem, HirModule, ImportBinding,
-    ProjectBindingKind, Ty, is_builtin_exception_class, top_level_bound_names, unresolved_symbol,
+    ForeignImportSite, FromImport, HirClassDef, HirModule, ImportBinding, Ty, unresolved_symbol,
     unsupported,
 };
 use pycc_ast::{Expr, Stmt, StmtImportFrom};
@@ -191,9 +191,11 @@ pub enum ResolvedImport<'a> {
     /// `from m import ...`: `m` resolved to a project file that lowered
     /// successfully, so its names can be bound.
     Module(ResolvedModule<'a>),
-    /// `import m`: `m` resolved to a project file or package directory.
-    /// Part 1 recognizes the shape but binds no module namespace
-    /// (`C0001`); the driver does not load the file.
+    /// `import m` nested in a module-level `if`/`try` block, where `m` is a
+    /// project file or package: refused (`C0001`), since a module body that
+    /// runs conditionally is not something static linking expresses. A
+    /// top-level `import m` is loaded and rewritten by the driver
+    /// (v0.3 accept 1) and never reaches lowering.
     Found,
     /// The import cannot be satisfied. `code` and `message` are exactly
     /// what [`lower_import_stmt`] reports at the statement's span: a
@@ -240,6 +242,16 @@ pub enum ResolvedImport<'a> {
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedImports<'a> {
     by_span: HashMap<Span, ResolvedImport<'a>>,
+    /// The answers for the compile-time `from <key> import ...` statements
+    /// the driver synthesizes for per-module namespaces
+    /// (`pycc_ast::namespace::synthesized_import`), keyed by the statement's
+    /// module key rather than its span: several such statements may share
+    /// the span of the import they stand for.
+    by_module_key: HashMap<String, ResolvedImport<'a>>,
+    /// The module key of the module being lowered (`pycc_ast::namespace::
+    /// module_key`), empty for the entry module: it prefixes the names
+    /// lowering synthesizes at module level.
+    module_key: String,
     modules: HashMap<String, RegisteredModule<'a>>,
     /// Issue #1188: the container method names (`append`, `pop`, `get`,
     /// `add`) that a class in the module's transitive import closure defines
@@ -336,21 +348,43 @@ impl<'a> ResolvedImports<'a> {
             .insert(display_path, RegisteredModule { hir, class_slots });
     }
 
+    /// Names the module being lowered for the names its lowering
+    /// synthesizes at module level (see `module_key`).
+    pub fn set_module_key(&mut self, key: String) {
+        self.module_key = key;
+    }
+
+    pub(crate) fn module_key(&self) -> &str {
+        &self.module_key
+    }
+
+    /// Records the answer for every synthesized `from <key> import ...`
+    /// statement naming `module_key` (see `by_module_key`).
+    pub fn insert_synthesized(&mut self, module_key: String, resolved: ResolvedImport<'a>) {
+        self.by_module_key.insert(module_key, resolved);
+    }
+
     fn get(&self, span: Span) -> Option<&ResolvedImport<'a>> {
         self.by_span.get(&span)
     }
 
-    /// Whether the `from ... import` statement spanning `range` resolved to
-    /// a project module (Part 2a of #1371, `SignatureTable`'s class-like
+    /// The answer for a `from ... import` statement: a synthesized one's by
+    /// its module key, any other by its span.
+    fn get_from(&self, import: &StmtImportFrom) -> Option<&ResolvedImport<'a>> {
+        if import.level == 0
+            && let Some(module) = &import.module
+            && let Some(answer) = self.by_module_key.get(module.as_str())
+        {
+            return Some(answer);
+        }
+        self.get(statement_span(import.range))
+    }
+
+    /// Whether the `from ... import` statement `import` resolved to a
+    /// project module (Part 2a of #1371, `SignatureTable`'s class-like
     /// names).
-    pub(crate) fn resolves_to_project_module<R>(&self, range: R) -> bool
-    where
-        std::ops::Range<u32>: From<R>,
-    {
-        matches!(
-            self.get(statement_span(range)),
-            Some(ResolvedImport::Module(_))
-        )
+    pub(crate) fn resolves_to_project_module(&self, import: &StmtImportFrom) -> bool {
+        matches!(self.get_from(import), Some(ResolvedImport::Module(_)))
     }
 
     /// The module a `Project` binding's `module_path` names. Every such
@@ -458,9 +492,9 @@ pub(crate) fn lower_import_stmt(
             }))
         }
         Stmt::ImportFrom(import) => {
-            match resolved.get(statement_span(import.range)) {
+            match resolved.get_from(import) {
                 Some(ResolvedImport::Module(module)) => {
-                    return lower_project_from_import(import, module, resolved).map(Some);
+                    return project::lower_project_from_import(import, module, resolved).map(Some);
                 }
                 Some(ResolvedImport::NotFound { code, message }) => {
                     return Err(Diagnostic::error(
@@ -572,13 +606,19 @@ fn lower_import_alias(
     // arm below can admit it, but an aliased project import keeps the
     // "not supported yet" text below: project-module aliasing is Part 3 of
     // #883, #964.
+    if let Some(ResolvedImport::NotFound { code, message }) = answer {
+        // An import cycle through a bare `import m` (`E0108`).
+        return Err(Diagnostic::error(code, message.clone(), statement));
+    }
     if matches!(answer, Some(ResolvedImport::Found)) {
-        let message = if alias.asname.is_some() {
-            format!("import of module `{module_name}` is not supported yet")
-        } else {
-            format!("module namespace bindings (`import {module_name}`) are not supported yet")
-        };
-        return Err(unsupported(message, statement.start..statement.end));
+        return Err(unsupported(
+            format!(
+                "importing the project module `{module_name}` inside an `if`/`try` block is \
+                 not supported yet (a project module's body runs where it is first imported \
+                 at module level)"
+            ),
+            statement.start..statement.end,
+        ));
     }
     // Part 1 of #1026: a foreign root binds an opaque CPython object rather
     // than failing. `site` is where the import runs: for a top-level
@@ -775,232 +815,6 @@ fn check_alias_shape(import: &StmtImportFrom, alias: &pycc_ast::Alias) -> Result
         ));
     }
     Ok(())
-}
-
-/// The project arm of [`lower_import_stmt`]: binds every name of a
-/// `from m import a, b` against the loaded module `m`.
-fn lower_project_from_import(
-    import: &StmtImportFrom,
-    module: &ResolvedModule<'_>,
-    resolved: &ResolvedImports<'_>,
-) -> Result<LoweredImport, Diagnostic> {
-    check_from_import_shape(import)?;
-    let mut lowered = LoweredImport::default();
-    for alias in &import.names {
-        check_alias_shape(import, alias)?;
-        let name = alias.name.as_str();
-        if module
-            .submodule_names
-            .iter()
-            .any(|submodule| submodule == name)
-        {
-            return Err(unsupported(
-                "module namespace bindings (`from pkg import submodule`) are not supported yet",
-                import.range,
-            ));
-        }
-        if !bind_project_name(
-            name,
-            module,
-            resolved,
-            statement_span(import.range),
-            &mut lowered,
-        )? {
-            let module_name = match &import.module {
-                Some(module_name) => format!("module `{module_name}` (`{}`)", module.display_path),
-                None => format!("package `{}`", module.display_path),
-            };
-            return Err(Diagnostic::error(
-                "T0021",
-                format!("{module_name} has no top-level name `{name}`"),
-                statement_span(import.range),
-            ));
-        }
-    }
-    Ok(lowered)
-}
-
-/// Looks `name` up in `module`'s top level in the documented order and,
-/// when found, records the binding (and any class/alias copies it needs)
-/// into `lowered`. Returns `Ok(false)` when the module has no such name,
-/// and `Err` when the name resolves to a shape this part cannot re-export
-/// (see the re-export branch). `span` is the importing statement's source
-/// span, which is where such a diagnostic is reported.
-fn bind_project_name(
-    name: &str,
-    module: &ResolvedModule<'_>,
-    resolved: &ResolvedImports<'_>,
-    span: Span,
-    lowered: &mut LoweredImport,
-) -> Result<bool, Diagnostic> {
-    let origin = module.hir;
-    let is_synthetic = |class_name: &str| {
-        origin.seeded_builtin_exception_classes && is_builtin_exception_class(class_name)
-    };
-    let project = |kind| ImportBinding::Project {
-        local_name: name.to_string(),
-        module_path: module.display_path.clone(),
-        kind,
-    };
-    if origin
-        .class_defs
-        .iter()
-        .any(|(class_name, _)| class_name == name && !is_synthetic(class_name))
-    {
-        // The module being imported from is registered like every loaded
-        // module (the driver registers each one as it lowers), so its
-        // `__slots__` rows are found under its display path.
-        let registered = resolved.origin(&module.display_path);
-        copy_class_with_ancestors(registered, name, lowered);
-        lowered.bindings.push(project(ProjectBindingKind::Class));
-        return Ok(true);
-    }
-    if origin
-        .items
-        .iter()
-        .any(|item| matches!(item, HirItem::Function { name: function_name, .. } if function_name == name))
-    {
-        lowered.bindings.push(project(ProjectBindingKind::Function));
-        return Ok(true);
-    }
-    if let Some(alias) = origin
-        .type_aliases
-        .iter()
-        .find(|(alias_name, _)| alias_name == name)
-    {
-        lowered.aliases.push(alias.clone());
-        lowered
-            .bindings
-            .push(project(ProjectBindingKind::TypeAlias));
-        return Ok(true);
-    }
-    if let Some(binding) = origin
-        .imports
-        .iter()
-        .find(|binding| import_local_name(binding) == name)
-    {
-        // A re-export: `pkg/__init__.py` did `from .geometry import Point`
-        // and the importer asks `pkg` for `Point`. The recorded binding
-        // already names the defining module, so copy the class/alias from
-        // there and keep pointing at it (one hop always suffices). A
-        // re-exported stdlib binding is cloned as-is.
-        if let ImportBinding::Project {
-            module_path, kind, ..
-        } = binding
-        {
-            let defining = resolved.origin(module_path);
-            match kind {
-                ProjectBindingKind::Class => {
-                    copy_class_with_ancestors(defining, name, lowered);
-                }
-                ProjectBindingKind::TypeAlias => {
-                    let alias = defining
-                        .hir
-                        .type_aliases
-                        .iter()
-                        .find(|(alias_name, _)| alias_name == name)
-                        .expect("a TypeAlias binding names an alias its origin module defines");
-                    lowered.aliases.push(alias.clone());
-                }
-                ProjectBindingKind::Function | ProjectBindingKind::Variable => {}
-            }
-        }
-        if let ImportBinding::Foreign {
-            module_path, from, ..
-        } = binding
-        {
-            // Part 1 of #1026 binds a foreign import at its own source
-            // position in its own module: its item index counts the items
-            // *that* module's preceding statements produced, and
-            // `program::link` rebases it onto the linked program as though
-            // it belonged to the module that recorded it. Cloning the
-            // binding into the importer would hand the importer's offset
-            // to a dependency-local index (an out-of-range splice in
-            // `pycc_mir`) and would run a second CPython import for one
-            // source statement. The importer produces no item of its own
-            // here, so there is no position in its item list that could
-            // carry the binding honestly; representing this shape is a
-            // later part's work.
-            return Err(unsupported(
-                format!(
-                    "`{}` binds `{name}` to {}; re-exporting a foreign import across \
-                     project modules is not supported yet",
-                    module.display_path,
-                    match from {
-                        None => format!(
-                            "the CPython module object `{}`",
-                            crate::foreign_bound_module(name, module_path, None)
-                        ),
-                        Some(_) => crate::foreign_bound_object(module_path, from.as_ref()),
-                    }
-                ),
-                span.start..span.end,
-            ));
-        }
-        lowered.bindings.push(binding.clone());
-        return Ok(true);
-    }
-    if top_level_bound_names(&origin.items).contains(name) {
-        // #1244: CPython answers `from m import x` with `ImportError` when
-        // `m`'s top level has deleted `x` by the time the import runs.
-        // Refused whenever `m`'s top level deletes `x` anywhere, even if it
-        // binds `x` again afterwards -- conservative, and sound.
-        if crate::stmt::del::top_level_deleted_names(&origin.items).contains(name) {
-            return Err(unsupported(
-                format!(
-                    "`{}` deletes its top-level `{name}` with `del`, so importing `{name}` \
-                     from it is not supported",
-                    module.display_path
-                ),
-                span.start..span.end,
-            ));
-        }
-        lowered.bindings.push(project(ProjectBindingKind::Variable));
-        return Ok(true);
-    }
-    Ok(false)
-}
-
-/// Copies `name`'s class definition and every class in its MRO (which
-/// starts with the class itself) from `origin` into `classes`, skipping
-/// any already copied. `class::lower_class` looks every MRO entry of a base
-/// up in the importer's class table (`.expect("every class in the MRO must
-/// be in defined_classes")`), so a class cannot be imported without its
-/// ancestors; the seeded builtin exception ancestors come along too and
-/// `module::lower_module` reconciles them with the importer's own seeding.
-/// Each copied user class brings its `__slots__` row (#1368); a seeded
-/// builtin exception class has none.
-fn copy_class_with_ancestors(
-    origin: RegisteredModule<'_>,
-    name: &str,
-    lowered: &mut LoweredImport,
-) {
-    let classes = &mut lowered.classes;
-    let (_, def) = origin
-        .hir
-        .class_defs
-        .iter()
-        .find(|(class_name, _)| class_name == name)
-        .expect("a class binding names a class its origin module defines");
-    for ancestor in &def.mro {
-        if classes.iter().any(|(copied, _)| copied == ancestor) {
-            continue;
-        }
-        let entry = origin
-            .hir
-            .class_defs
-            .iter()
-            .find(|(class_name, _)| class_name == ancestor)
-            .expect("every class in an MRO is in its module's class table");
-        classes.push(entry.clone());
-        if let Some(row) = origin
-            .class_slots
-            .iter()
-            .find(|(class_name, _)| class_name == ancestor)
-        {
-            lowered.class_slots.push(row.clone());
-        }
-    }
 }
 
 #[cfg(test)]

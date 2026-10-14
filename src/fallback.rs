@@ -278,6 +278,33 @@ impl Plan {
         self.binds_alone(index)
     }
 
+    /// Whether statement `index` imports a project module (a relative
+    /// import, or an absolute one naming a module beside the entry file).
+    /// Such a module is compiled into the program, not importable by
+    /// CPython, so the statement cannot fall back (v0.3 accept 1).
+    fn is_project_import(&self, index: usize) -> bool {
+        let modules: Vec<&str> = match &self.ast[index] {
+            Stmt::Import(import) => import.names.iter().map(|a| a.name.as_str()).collect(),
+            Stmt::ImportFrom(import) if import.level > 0 => return true,
+            Stmt::ImportFrom(import) => import.module.iter().map(|m| m.as_str()).collect(),
+            _ => return false,
+        };
+        modules.iter().any(|module| {
+            let top = module.split('.').next().unwrap_or(module);
+            self.entry_dir.as_ref().is_some_and(|dir| {
+                dir.join(format!("{top}.py")).exists() || dir.join(top).is_dir()
+            })
+        })
+    }
+
+    /// Whether the plan makes a project import fall back, which no plan
+    /// can do ([`Self::is_project_import`]).
+    fn falls_back_a_project_import(&self) -> bool {
+        self.fallback
+            .keys()
+            .any(|index| self.is_project_import(*index))
+    }
+
     /// Whether no other top-level statement binds a name statement `index`
     /// binds.
     fn binds_alone(&self, index: usize) -> bool {
@@ -730,6 +757,12 @@ pub(crate) fn with_fallback<T, E>(
         set_override(None);
         return first;
     };
+    // Fallback code that reaches a project module would need CPython to
+    // import it: the program is refused with its original diagnostics.
+    if plan.falls_back_a_project_import() {
+        set_override(None);
+        return first;
+    }
     // A statement that fell back for a type error early on may compile now
     // that later rounds changed what it sees (a global kept native, a
     // function compiled with objects, a builtin called through CPython):
@@ -753,7 +786,10 @@ pub(crate) fn with_fallback<T, E>(
                 .and_then(|failures| converge(&mut retry, Some(rendered), failures, &attempt, &split)),
         };
         match retried {
-            Some(better) if retry.fallback.len() < plan.fallback.len() => {
+            Some(better)
+                if retry.fallback.len() < plan.fallback.len()
+                    && !retry.falls_back_a_project_import() =>
+            {
                 plan = retry;
                 value = better;
             }

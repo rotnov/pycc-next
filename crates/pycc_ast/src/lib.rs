@@ -7,6 +7,7 @@
 pub use ruff_python_ast::visitor;
 
 mod desugar;
+pub mod namespace;
 mod reserved;
 mod string_annotation;
 mod unused_defs;
@@ -16,6 +17,7 @@ pub use desugar::{
     ext_signatures, find_yield, function_qualname, split_ext_generators, split_ext_signatures,
 };
 pub use reserved::{is_reserved_name, reserved_name_uses};
+pub use ruff_text_size::TextRange;
 pub use string_annotation::{
     normalize_string_annotations, parse_string_annotation, unquote_nested_string_annotations,
 };

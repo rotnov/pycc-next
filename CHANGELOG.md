@@ -21,6 +21,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - An unannotated generator helper whose yields the solver cannot type from their terms
   alone (a yielded tuple display, a value read from a local container) is typed from its
   body once its parameters are known; this includes every lifted generator expression.
+- Programs of several modules and packages compile as one unit (natively in strict and
+  `--non-strict` mode, and as an `--ext` module): `import m`, `import pkg.sub [as s]`,
+  `from pkg.sub import f [as g]`, relative imports and `__init__.py`; `m.f(...)`,
+  `m.CONST` and `m.Class(...)` are direct native calls and reads. Each module has its own
+  namespace and `__name__`, and its body runs once at its first import, in CPython's
+  import order. An unresolved module or name, a module used as a value and an import
+  cycle are compile errors (`T0021`, `C0001`, `E0108`).
+
+### Changed
+
+- A dependency module's top-level names no longer share the entry module's namespace:
+  two modules may define the same name, and an `--ext` artifact no longer exports the
+  public functions of the project modules it imports (only the entry module's own).
 
 ### Fixed
 - A tuple boxed inside a loop (`list(...)` of a generator of tuples, a tuple stored in a

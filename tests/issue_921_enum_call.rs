@@ -239,8 +239,9 @@ fn a_call_to_a_def_bound_name_before_the_enum_class_reports_the_collision_only()
 }
 
 /// PR #971 review, second round: the same rule for a project import --
-/// `from colors import Color` beside `class Color(Enum)` collides at the
-/// class item, and a `Color()` between the two resolves to the import.
+/// `from colors import Color` beside `class Color(Enum)` is refused at the
+/// class item (a rebinding of a project-import name, v0.3 accept 1), and a
+/// `Color()` between the two resolves to the import.
 #[test]
 fn a_call_to_an_import_bound_name_before_the_enum_class_reports_the_collision_only() {
     let dir = ScratchDir::new("921_import_shadow").expect("failed to create scratch dir");
@@ -262,7 +263,7 @@ fn a_call_to_an_import_bound_name_before_the_enum_class_reports_the_collision_on
     );
     assert_eq!(result.status.code(), Some(1), "got: {combined}");
     assert!(
-        combined.contains("class `Color` collides with an import of the same name"),
+        combined.contains("rebinding `Color`, which a project import binds, is not supported yet"),
         "the collision diagnostic should be reported, got: {combined}"
     );
     assert!(

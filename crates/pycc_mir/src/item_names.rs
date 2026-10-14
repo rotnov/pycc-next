@@ -100,6 +100,8 @@ pub(super) fn source_frame_name(mangled: &str) -> String {
         .unwrap_or(without_suffix);
     match without_suffix.split_once('.') {
         Some((_class_name, method_name)) => method_name.to_string(),
-        None => without_suffix.to_string(),
+        // A dependency module's function is compiled under its qualified
+        // spelling (v0.3 accept 1); its frame shows the plain name.
+        None => pycc_hir::namespace::plain_name(without_suffix).to_string(),
     }
 }

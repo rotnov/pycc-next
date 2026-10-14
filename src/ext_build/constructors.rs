@@ -160,7 +160,9 @@ pub(crate) fn instance_shape_admissible(class_def: &HirClassDef, class: &str) ->
 /// [`collect_class_publications`]' third condition holds for any of them before
 /// this predicate's answer could matter.
 pub(crate) fn class_publishable(class_def: &HirClassDef, class: &str) -> bool {
-    is_public_name(class) && class_def.exception_type_tag.is_none()
+    is_public_name(class)
+        && pycc_ast::namespace::split_module_global(class).is_none()
+        && class_def.exception_type_tag.is_none()
 }
 
 /// Whether `class`'s own shape admits instance exports **and** the host can

@@ -107,72 +107,45 @@ impl FrontendFailure {
 /// module so a diagnostic can be rendered against the file that owns it.
 struct ProgramSources {
     files: Vec<(String, String)>,
-    /// `bounds[i]` is the number of `HirModule` items contributed by files
-    /// `0..=i`, so `bounds.partition_point(|end| *end <= index)` names the
-    /// file that owns item `index`. An index past the last bound belongs to
-    /// an item `link`/`finalize` appended for the whole program (the seeded
-    /// builtin exception classes, `Exception.__init__`), which is attributed
-    /// to the entry file.
-    bounds: Vec<usize>,
-    /// `import_bounds[i]` is the number of `ImportBinding`s contributed by
-    /// files `0..=i`, the import-table analogue of `bounds` (Part 1 of
-    /// #1026). Read by [`Self::owner_of_import`].
-    import_bounds: Vec<usize>,
-    /// `class_bounds[i]` is the number of `class_defs` entries contributed
-    /// by files `0..=i`, the class-table analogue of `bounds`. Read by
-    /// [`Self::owner_of_class`].
-    ///
-    /// It is *not* each module's own `hir.class_defs.len()`:
-    /// `pycc_hir::link` drops a module's seeded builtin exception classes
-    /// as it concatenates and appends one set for the whole program at the
-    /// back, so a module's contribution is its non-seeded entry count. That
-    /// trailing program-wide block is past the last bound and falls to the
-    /// entry file, exactly as `bounds` treats `finalize`'s appended items.
-    class_bounds: Vec<usize>,
+    /// Each file's module exactly as it was lowered, for locating items.
+    parsed: Vec<pycc_ast::ModModule>,
+    /// Which file each linked item, import binding and class came from
+    /// (`pycc_hir::link_layout`). Program order is execution order, so one
+    /// file's items need not be contiguous: an imported module's body is
+    /// spliced in at its import (v0.3 accept 1). An index past the owner
+    /// table belongs to an item `finalize` appended for the whole program
+    /// (`Exception.__init__`) or to the seeded builtin exception classes,
+    /// and is attributed to the entry file.
+    layout: pycc_hir::LinkLayout,
     /// The entry module's `pycc_hir::last_item_origins`.
     entry_origins: Vec<u32>,
     /// Every file's `LoweredModule::item_origins`, in file order.
     item_origins: Vec<Vec<u32>>,
-    /// Whether the entry file (the last) is an `--ext` module, whose
-    /// loader adds `pycc_ast::split_ext_signatures`' entries before
-    /// desugaring.
-    ext_entry: bool,
-}
-
-/// Desugars a re-parsed file exactly as the loader did (`modules.rs`).
-fn desugar_as_loaded(parsed: &mut pycc_ast::ModModule, source: &str, ext_entry: bool) {
-    if ext_entry {
-        pycc_ast::split_ext_signatures(parsed, source);
-    }
-    pycc_ast::desugar(parsed);
 }
 
 impl ProgramSources {
     /// The source spans of every item of the linked program `hir` (#10),
-    /// recovered from each file's re-parsed, desugared AST
-    /// (`pycc_hir::locate`). Called only once a check has failed, so a
-    /// program that checks pays for no second parse.
+    /// recovered from each file's lowered AST (`pycc_hir::locate`). Called
+    /// only once a check has failed.
     fn item_spans(&self, hir: &HirModule) -> Vec<Option<pycc_hir::locate::ItemSpans>> {
-        let mut spans = Vec::with_capacity(hir.items.len());
-        let mut start = 0;
-        let last = self.files.len().saturating_sub(1);
-        for (index, ((_, source), (end, origins))) in self
-            .files
-            .iter()
-            .zip(self.bounds.iter().zip(&self.item_origins))
-            .enumerate()
-        {
-            let items = hir.items.get(start..*end).unwrap_or_default();
-            match pycc_parser::parse_all(source) {
-                Ok(mut parsed) => {
-                    desugar_as_loaded(&mut parsed, source, self.ext_entry && index == last);
-                    spans.extend(pycc_hir::locate::item_spans(&parsed, source, items, origins));
-                }
-                Err(_) => spans.extend(items.iter().map(|_| None)),
+        let mut spans: Vec<Option<pycc_hir::locate::ItemSpans>> =
+            (0..hir.items.len()).map(|_| None).collect();
+        for (file, (parsed, origins)) in self.parsed.iter().zip(&self.item_origins).enumerate() {
+            let positions: Vec<usize> = (0..hir.items.len())
+                .filter(|index| self.owner_of_item(*index) == file)
+                .collect();
+            let items: Vec<pycc_hir::HirItem> = positions
+                .iter()
+                .map(|index| hir.items[*index].clone())
+                .collect();
+            let source = &self.files[file].1;
+            for (position, span) in positions
+                .into_iter()
+                .zip(pycc_hir::locate::item_spans(parsed, source, &items, origins))
+            {
+                spans[position] = span;
             }
-            start = *end;
         }
-        spans.resize_with(hir.items.len(), || None);
         spans
     }
 
@@ -189,44 +162,41 @@ impl ProgramSources {
 
     /// The file that owns item `index` of the linked program.
     fn owner_of_item(&self, index: usize) -> usize {
-        self.bounds
-            .partition_point(|end| *end <= index)
-            .min(self.entry())
+        self.layout
+            .item_owner
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| self.entry())
+    }
+
+    /// Item `index`'s position among its own file's items.
+    fn local_item_index(&self, index: usize) -> usize {
+        let owner = self.owner_of_item(index);
+        self.layout.item_owner[..index.min(self.layout.item_owner.len())]
+            .iter()
+            .filter(|file| **file == owner)
+            .count()
     }
 
     /// The file that owns import `position` of the linked program's import
     /// table (Part 1 of #1026).
-    ///
-    /// Same shape as [`Self::owner_of_item`] against the import bounds
-    /// instead of the item bounds. An import's own item index cannot
-    /// serve here: it is the item count at the moment the `import` lowered,
-    /// so a trailing import in one file and a leading import in the next
-    /// record the same linked index. The import table has no such boundary
-    /// ambiguity -- `pycc_hir::link` concatenates each module's imports in
-    /// the same file order as its items.
-    ///
-    /// The `.min(entry())` clamp is unreachable here (the last import bound
-    /// *is* the linked import count, so `partition_point` can never exceed
-    /// `entry()`); it is kept for shape parity with `owner_of_item`, where
-    /// `finalize`'s appended program-wide items make it load-bearing.
     fn owner_of_import(&self, position: usize) -> usize {
-        self.import_bounds
-            .partition_point(|end| *end <= position)
-            .min(self.entry())
+        self.layout
+            .import_owner
+            .get(position)
+            .copied()
+            .unwrap_or_else(|| self.entry())
     }
 
     /// The file that owns class `index` of the linked program's class table
-    /// (Part 1 of #1027).
-    ///
-    /// Same shape as [`Self::owner_of_item`] against the class bounds. The
-    /// `.min(entry())` clamp is load-bearing here for the same reason it is
-    /// there: `pycc_hir::link` appends the seeded builtin exception classes
-    /// once, after every module's own contribution, so their indices sit
-    /// past the last bound.
+    /// (Part 1 of #1027): the seeded builtin exception classes, appended
+    /// once after every module's own, fall to the entry.
     fn owner_of_class(&self, index: usize) -> usize {
-        self.class_bounds
-            .partition_point(|end| *end <= index)
-            .min(self.entry())
+        self.layout
+            .class_owner
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| self.entry())
     }
 
     /// Groups keyed diagnostics into per-file payloads, in program order.
@@ -292,65 +262,43 @@ fn link_frontend(
     let entry_origins = pycc_hir::last_item_origins();
     let manifest = program.manifest;
     let mut files = Vec::with_capacity(program.modules.len());
-    let mut bounds = Vec::with_capacity(program.modules.len());
-    let mut import_bounds = Vec::with_capacity(program.modules.len());
-    let mut class_bounds = Vec::with_capacity(program.modules.len());
+    let mut parsed_files = Vec::with_capacity(program.modules.len());
     let mut inputs = Vec::with_capacity(program.modules.len());
-    let mut total = 0;
-    let mut imports_total = 0;
-    let mut classes_total = 0;
     let mut item_origins = Vec::with_capacity(program.modules.len());
     // #1244: `pycc_hir::link` refuses a module-scope `del x` while another
     // module mentions `x`. Lowering leaves each module's mentions unset,
-    // since the walk would cost every build; they are computed here, from
-    // the kept source, only for a multi-module program that deletes a name.
+    // since the walk would cost every build; they are computed here only
+    // for a multi-module program that deletes a name.
     let needs_mentions = program.modules.len() > 1
         && program
             .modules
             .iter()
             .any(|loaded| !loaded.module.deleted_top_level.is_empty());
-    let last = program.modules.len().saturating_sub(1);
-    for (index, mut loaded) in program.modules.into_iter().enumerate() {
+    for mut loaded in program.modules {
         if needs_mentions {
-            let mut parsed = pycc_parser::parse_all(&loaded.source)
-                .expect("a module that lowered once parses again");
-            desugar_as_loaded(&mut parsed, &loaded.source, ext_module && index == last);
-            loaded.module.mentioned_names = Some(pycc_hir::mentioned_names(&parsed));
+            loaded.module.mentioned_names = Some(pycc_hir::mentioned_names(&loaded.parsed));
         }
-        total += loaded.module.hir.items.len();
-        bounds.push(total);
-        imports_total += loaded.module.hir.imports.len();
-        import_bounds.push(imports_total);
-        // Mirrors `pycc_hir::link`'s own filter exactly: a seeded module's
-        // builtin exception classes are dropped as it concatenates, so
-        // counting this module's raw `class_defs` would misalign every
-        // later file's bound.
-        let seeded = loaded.module.hir.seeded_builtin_exception_classes;
-        classes_total += loaded
-            .module
-            .hir
-            .class_defs
-            .iter()
-            .filter(|(name, _)| !(seeded && pycc_hir::is_builtin_exception_class(name)))
-            .count();
-        class_bounds.push(classes_total);
-        item_origins.push(std::mem::take(&mut loaded.module.item_origins));
+        item_origins.push(loaded.module.item_origins.clone());
         files.push((loaded.display_path.clone(), loaded.source));
+        parsed_files.push(loaded.parsed);
         inputs.push(LinkInput {
             display_path: loaded.display_path,
             module: loaded.module,
+            placement: loaded
+                .placement
+                .map(|(parent, offset)| pycc_hir::Placement { parent, offset }),
         });
     }
-    let sources = ProgramSources {
+    let mut sources = ProgramSources {
         files,
-        bounds,
-        import_bounds,
-        class_bounds,
+        parsed: parsed_files,
+        layout: pycc_hir::LinkLayout::default(),
         entry_origins,
         item_origins,
-        ext_entry: ext_module,
     };
-    let linked = pycc_hir::link(inputs).map_err(|keyed| sources.group(keyed))?;
+    let (linked, layout) =
+        pycc_hir::link_layout(inputs).map_err(|keyed| sources.group(keyed))?;
+    sources.layout = layout;
     let hir = pycc_hir::finalize(linked).map_err(|diagnostics| {
         let entry = sources.entry();
         sources.group(diagnostics.into_iter().map(|d| (entry, d)).collect())
@@ -854,16 +802,25 @@ fn attribute(
                 .item_index()
                 .filter(|_| file == sources.entry())
                 .and_then(|index| {
-                    let base = match file {
-                        0 => 0,
-                        file => sources.bounds[file - 1],
-                    };
-                    sources.entry_origins.get(index.checked_sub(base)?).copied()
+                    sources
+                        .entry_origins
+                        .get(sources.local_item_index(index))
+                        .copied()
                 })
                 .filter(|origin| *origin != u32::MAX);
             (file, diagnostic, origin)
         })
         .collect()
+}
+
+/// `diagnostic` with every qualified module-global spelling in its text
+/// shown as CPython spells the name (`helper.double`, v0.3 accept 1).
+fn demangled(diagnostic: &Diagnostic) -> Diagnostic {
+    let mut shown = diagnostic.clone();
+    shown.message = pycc_ast::namespace::demangle_text(&shown.message);
+    shown.label = shown.label.map(|label| pycc_ast::namespace::demangle_text(&label));
+    shown.help = shown.help.map(|help| pycc_ast::namespace::demangle_text(&help));
+    shown
 }
 
 /// Renders every collected diagnostic for one file, in order, into one
@@ -881,9 +838,11 @@ fn render_all(
     let mut out = String::new();
     for diagnostic in diagnostics {
         match error_format {
-            ErrorFormat::Human => out.push_str(&pycc_diag::render_human(diagnostic, path, source)),
+            ErrorFormat::Human => {
+                out.push_str(&pycc_diag::render_human(&demangled(diagnostic), path, source));
+            }
             ErrorFormat::Json => {
-                out.push_str(&pycc_diag::render_json(diagnostic, path, source));
+                out.push_str(&pycc_diag::render_json(&demangled(diagnostic), path, source));
                 out.push('\n');
             }
         }
