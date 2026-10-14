@@ -23,6 +23,26 @@ pub(super) fn infer_yield_from_body(
     params: &[Ty],
     resolved: &FunctionSignatures,
 ) -> Option<Ty> {
+    first_value_from_body(hir, name, params, resolved, &|stmt| match stmt {
+        HirStmt::ExprStmt(HirExpr::Call { callee, args })
+            if callee == pycc_hir::YIELD_MARKER && args.len() == 1 =>
+        {
+            Some(&args[0])
+        }
+        _ => None,
+    })
+}
+
+/// The type of the first value `pick` finds in the body of `name` (in
+/// statement order, at any block depth) that infers, with `params` bound
+/// and `resolved` registered for the calls it makes.
+pub(super) fn first_value_from_body(
+    hir: &HirModule,
+    name: &str,
+    params: &[Ty],
+    resolved: &FunctionSignatures,
+    pick: &dyn Fn(&HirStmt) -> Option<&HirExpr>,
+) -> Option<Ty> {
     let (param_names, body) = hir.items.iter().find_map(|item| match item {
         HirItem::Function {
             name: item_name,
@@ -52,29 +72,36 @@ pub(super) fn infer_yield_from_body(
         env.bind(param.clone(), ty.clone());
     }
     bind_local_types_in_body(&mut env, &local_names, body);
-    first_yield(&env, &local_names, body)
+    first_yield(&env, &local_names, body, pick)
 }
 
-/// The type of the first `yield` value in `body` that infers.
-fn first_yield(env: &Environment, local_names: &[&str], body: &[HirStmt]) -> Option<Ty> {
+/// The type of the first value `pick` finds in `body` that infers.
+fn first_yield(
+    env: &Environment,
+    local_names: &[&str],
+    body: &[HirStmt],
+    pick: &dyn Fn(&HirStmt) -> Option<&HirExpr>,
+) -> Option<Ty> {
     for stmt in body {
-        let found = match stmt {
-            HirStmt::ExprStmt(HirExpr::Call { callee, args })
-                if callee == pycc_hir::YIELD_MARKER && args.len() == 1 =>
-            {
-                infer_expr_in(env, local_names, &args[0])
-                    .ok()
-                    .filter(|ty| !crate::empty_container::contains_infer(ty))
+        if let Some(value) = pick(stmt) {
+            let found = infer_expr_in(env, local_names, value)
+                .ok()
+                .filter(|ty| !crate::empty_container::contains_infer(ty));
+            if found.is_some() {
+                return found;
             }
-            HirStmt::If { body, orelse, .. } => first_yield(env, local_names, body)
-                .or_else(|| first_yield(env, local_names, orelse)),
+            continue;
+        }
+        let found = match stmt {
+            HirStmt::If { body, orelse, .. } => first_yield(env, local_names, body, pick)
+                .or_else(|| first_yield(env, local_names, orelse, pick)),
             HirStmt::While { body, .. }
             | HirStmt::ForRange { body, .. }
             | HirStmt::ForList { body, .. }
-            | HirStmt::ForObject { body, .. } => first_yield(env, local_names, body),
+            | HirStmt::ForObject { body, .. } => first_yield(env, local_names, body, pick),
             HirStmt::LoopElse { loop_stmt, orelse } => {
-                first_yield(env, local_names, std::slice::from_ref(loop_stmt.as_ref()))
-                    .or_else(|| first_yield(env, local_names, orelse))
+                first_yield(env, local_names, std::slice::from_ref(loop_stmt.as_ref()), pick)
+                    .or_else(|| first_yield(env, local_names, orelse, pick))
             }
             HirStmt::Try {
                 body,
@@ -87,17 +114,17 @@ fn first_yield(env: &Environment, local_names: &[&str], body: &[HirStmt]) -> Opt
                 handlers,
                 orelse,
                 finalbody,
-            } => first_yield(env, local_names, body)
+            } => first_yield(env, local_names, body, pick)
                 .or_else(|| {
                     handlers
                         .iter()
-                        .find_map(|h| first_yield(env, local_names, &h.body))
+                        .find_map(|h| first_yield(env, local_names, &h.body, pick))
                 })
-                .or_else(|| first_yield(env, local_names, orelse))
-                .or_else(|| first_yield(env, local_names, finalbody)),
+                .or_else(|| first_yield(env, local_names, orelse, pick))
+                .or_else(|| first_yield(env, local_names, finalbody, pick)),
             HirStmt::Match { cases, .. } => cases
                 .iter()
-                .find_map(|case| first_yield(env, local_names, &case.body)),
+                .find_map(|case| first_yield(env, local_names, &case.body, pick)),
             _ => None,
         };
         if found.is_some() {

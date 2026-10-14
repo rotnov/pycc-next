@@ -860,7 +860,10 @@ fn private_division_return_rejects_an_int_constrained_call_site() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    assert_eq!(check(&hir).unwrap_err().code, "T0021");
+    // The division's operands are concrete once the call site has typed
+    // `value`, so its `float` result reaches the `return` itself, which
+    // conflicts with the `int` the `range` stop demands (`T0022`).
+    assert_eq!(check(&hir).unwrap_err().code, "T0022");
 }
 
 #[test]

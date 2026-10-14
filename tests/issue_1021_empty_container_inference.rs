@@ -541,7 +541,11 @@ print(_pick())
 /// so the helper's return type stays uninferable.
 #[test]
 fn a_nested_empty_list_element_is_not_carried_by_the_private_helper_solver() {
-    let rendered = check_error(
+    // The solver itself still gives the nested element no term; strict mode
+    // then types the return from the body (`return_fallback`), where `xs`
+    // is the `list[list[int]]` it was annotated as, and the program runs as
+    // CPython's does.
+    let output = check_build_and_run(
         "private_helper_nested_empty_list",
         "\
 def _pick():
@@ -551,9 +555,10 @@ def _pick():
 print(_pick())
 ",
     );
+    assert!(!output.status.success());
     assert!(
-        rendered.contains("error[T0021]: cannot infer return type of private helper `_pick`"),
-        "{rendered}"
+        String::from_utf8_lossy(&output.stderr).contains("IndexError: pop from empty list"),
+        "{output:?}"
     );
 }
 
@@ -842,19 +847,22 @@ print(f())
 /// which this module permits, rather than a wrong one, which it does not.
 #[test]
 fn an_unresolved_parameter_producer_misses_rather_than_freezing_the_placeholder() {
-    let error = check_error(
+    // Since v0.3 the pass runs once more after the solver has pinned `x`
+    // from its call site (`empty_container::solved_signatures`), so the
+    // list is typed from the solved parameter, never from the placeholder.
+    let output = check_build_and_run(
         "placeholder_producer_empty_list",
         "\
 def _f(x) -> int:
     xs = []
     xs.append(x)
-    return 0
+    return len(xs)
 
 print(_f(1))
 ",
     );
-    assert!(error.contains("T0003"), "{error}");
-    assert!(!error.contains("<inferred>"), "{error}");
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"1\n");
     let non_empty = check_build_and_run(
         "placeholder_producer_non_empty_list",
         "\
@@ -873,19 +881,19 @@ print(_f(1))
 /// the value position is discarded for the same reason.
 #[test]
 fn an_unresolved_parameter_producer_misses_for_a_dict_too() {
-    let error = check_error(
+    let output = check_build_and_run(
         "placeholder_producer_empty_dict",
         "\
 def _f(x) -> int:
     d = {}
     d[\"k\"] = x
-    return 0
+    return d[\"k\"] + 1
 
 print(_f(1))
 ",
     );
-    assert!(error.contains("T0003"), "{error}");
-    assert!(!error.contains("<inferred>"), "{error}");
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"2\n");
 }
 
 /// Round 8. The two inferred sources read the flat whole-function
@@ -1204,7 +1212,9 @@ print(a.go())
 /// the inference is correct here; resolving it is not.
 #[test]
 fn an_unannotated_override_producer_misses_rather_than_resolving_to_the_base_class() {
-    let rendered = check_error(
+    // Since v0.3 the producer is typed from `A._one`'s solved signature
+    // (`int`), the method `self` resolves to -- never `Base._one`'s `str`.
+    let output = check_build_and_run(
         "unannotated_override_producer",
         "\
 class Base:
@@ -1219,17 +1229,15 @@ class A(Base):
     def go(self) -> int:
         xs = []
         xs.append(self._one())
-        return len(xs)
+        return xs[0] + len(xs)
 
 
 a = A()
 print(a.go())
 ",
     );
-    assert!(
-        rendered.contains("T0003"),
-        "the override producer must miss, got: {rendered}",
-    );
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"2\n");
 }
 
 /// #1021 bot review round 14: `bind_local_types_in_body` records every target
@@ -1315,7 +1323,7 @@ print(go(True))
 #[test]
 fn the_t0003_help_names_a_remedy_that_works_in_the_position_it_is_raised() {
     let list_at_module_level =
-        check_error_json("t0003_help_module_list", "xs = []\nprint(len(xs))\n");
+        check_error_json("t0003_help_module_list", "xs = []\nprint(xs[0])\n");
     assert!(
         list_at_module_level.contains("annotate the assignment target"),
         "module-level list help must suggest the annotation, got: {list_at_module_level}",
@@ -1328,7 +1336,7 @@ fn the_t0003_help_names_a_remedy_that_works_in_the_position_it_is_raised() {
     assert!(annotated_at_module_level.status.success());
     assert_eq!(annotated_at_module_level.stdout, b"0\n");
     let dict_at_module_level =
-        check_error_json("t0003_help_module_dict", "d = {}\nprint(len(d))\n");
+        check_error_json("t0003_help_module_dict", "d = {}\nprint(d[0])\n");
     assert!(
         dict_at_module_level.contains("annotate the assignment target"),
         "module-level dict help must suggest the annotation, got: {dict_at_module_level}",
@@ -1338,7 +1346,7 @@ fn the_t0003_help_names_a_remedy_that_works_in_the_position_it_is_raised() {
         "\
 def f() -> int:
     xs = []
-    return len(xs)
+    return len(xs) + xs[0]
 
 
 print(f())

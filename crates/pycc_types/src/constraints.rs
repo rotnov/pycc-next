@@ -82,6 +82,7 @@ mod name_term;
 mod operator_terms;
 mod producer_checks;
 mod public_inference;
+pub(crate) mod return_fallback;
 pub(crate) use public_inference::parameter_needs_annotation;
 mod unify;
 pub(crate) use bindings::*;

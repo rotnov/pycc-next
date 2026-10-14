@@ -494,6 +494,68 @@ pub(crate) fn builtin_aliases(body: &mut Vec<Stmt>) {
     }
 }
 
+/// Replaces a top-level `X = sys.stdin` / `X = sys.stdout` (`X` bound
+/// nowhere else, `sys` an `import sys` name the module never rebinds) by the
+/// stream itself at every read of `X`, so `X.readline()` and `X.write(s)`
+/// are the native stream operations [`SysNames::classify`] knows.
+pub(crate) fn stream_aliases(body: &mut Vec<Stmt>) {
+    use ruff_python_ast::visitor::transformer::{self, Transformer};
+    let rebound = rebound_names(body);
+    let sys_names: Vec<String> = body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::Import(import) => Some(import.names.iter().filter_map(|alias| {
+                (alias.name.as_str() == "sys")
+                    .then(|| alias.asname.as_ref().unwrap_or(&alias.name).to_string())
+            })),
+            _ => None,
+        })
+        .flatten()
+        .filter(|name| !rebound.contains_key(name))
+        .collect();
+    let mut aliases: HashMap<String, Expr> = HashMap::new();
+    body.retain(|stmt| {
+        let Stmt::Assign(assign) = stmt else {
+            return true;
+        };
+        let ([Expr::Name(target)], Expr::Attribute(stream)) =
+            (assign.targets.as_slice(), assign.value.as_ref())
+        else {
+            return true;
+        };
+        let is_sys = matches!(stream.value.as_ref(), Expr::Name(n) if sys_names.iter().any(|s| s == n.id.as_str()));
+        if !is_sys
+            || !matches!(stream.attr.as_str(), "stdin" | "stdout")
+            || rebound.get(target.id.as_str()).copied().unwrap_or(0) != 1
+            || target.id.as_str().starts_with("__")
+        {
+            return true;
+        }
+        aliases.insert(target.id.to_string(), assign.value.as_ref().clone());
+        false
+    });
+    if aliases.is_empty() {
+        return;
+    }
+    struct Substitute(HashMap<String, Expr>);
+    impl Transformer for Substitute {
+        fn visit_expr(&self, expr: &mut Expr) {
+            if let Expr::Name(name) = expr
+                && name.ctx == ExprContext::Load
+                && let Some(stream) = self.0.get(name.id.as_str())
+            {
+                *expr = stream.clone();
+                return;
+            }
+            transformer::walk_expr(self, expr);
+        }
+    }
+    let substitute = Substitute(aliases);
+    for stmt in body.iter_mut() {
+        substitute.visit_stmt(stmt);
+    }
+}
+
 /// `class C(object):` is `class C:` (every class derives from `object`),
 /// unless the module binds `object` itself.
 pub(crate) fn drop_object_bases(body: &mut [Stmt]) {

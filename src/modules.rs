@@ -340,10 +340,10 @@ impl Loader {
         if is_entry && self.ext_module {
             pycc_ast::split_ext_signatures(&mut parsed, &source);
         }
-        // Non-strict mode: a native program's entry module is closed, so a
-        // dead unannotated definition there can never run and is not
-        // compiled (strict mode still checks it: `T0001`).
-        if is_entry && !self.ext_module && self.non_strict {
+        // A native program's entry module is closed, so a dead unannotated
+        // definition there can never run and is not compiled: no call site
+        // could type it, in strict mode as in non-strict mode.
+        if is_entry && !self.ext_module {
             pycc_ast::drop_unused_defs(&mut parsed);
         }
         pycc_ast::desugar(&mut parsed);

@@ -268,6 +268,14 @@ impl Prepared {
             };
             resolved = Some(empty_container::resolve_empty_containers(&params).unwrap_or(params));
         }
+        // An empty container whose producer reads an unannotated
+        // function's parameter or return: typed once the solver has pinned
+        // those (`empty_container::solved_signatures`).
+        if let Some(solved) =
+            empty_container::resolve_with_solved_signatures(resolved.as_ref().unwrap_or(hir))
+        {
+            resolved = Some(solved);
+        }
         let base = resolved.as_ref().unwrap_or(hir);
         empty_container::attr_slot::reject_unresolved_attr_slots(base)?;
         let copied = inherited_copies::add_inherited_copies(base);
@@ -584,7 +592,17 @@ fn check_prepared(hir: &HirModule) -> Result<(), KeyedDiagnostics> {
         None => None,
     };
     match infer_function_signatures_with_solver_all(hir, &function_local_names) {
-        Err(solver) => Err(merge_solver_first(solver, concrete)),
+        // The same recovery `checked_function_signatures_all` makes, so
+        // `pycc check` and `pycc build` accept the same programs.
+        Err(solver) => match crate::constraints::return_fallback::recover_returns(
+            hir,
+            &function_local_names,
+        ) {
+            Some(signatures) => {
+                check_with_signatures_all(hir, &signatures, &function_local_names)
+            }
+            None => Err(merge_solver_first(solver, concrete)),
+        },
         Ok(signatures) => check_with_signatures_all(hir, &signatures, &function_local_names),
     }
 }
@@ -632,7 +650,15 @@ pub(crate) fn checked_function_signatures_all(
         None => None,
     };
     let signatures = match infer_function_signatures_with_solver_all(hir, function_local_names) {
-        Err(solver) => return Err(merge_solver_first(solver, concrete)),
+        // Strict mode: a return the solver could not type, typed from the
+        // function's body once its parameters are (`return_fallback`).
+        Err(solver) => match crate::constraints::return_fallback::recover_returns(
+            hir,
+            function_local_names,
+        ) {
+            Some(signatures) => signatures,
+            None => return Err(merge_solver_first(solver, concrete)),
+        },
         Ok(signatures) => signatures,
     };
     check_with_signatures_all(hir, &signatures, function_local_names)?;

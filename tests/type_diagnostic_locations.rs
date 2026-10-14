@@ -104,7 +104,7 @@ const CASES: &[Case] = &[
     },
     Case {
         label: "needs a type annotation",
-        ..case("T0003", "def f() -> None:\n    xs = []\n    print(len(xs))\n", "[]")
+        ..case("T0003", "def f() -> None:\n    xs = []\n    print(xs[0])\n", "[]")
     },
     Case {
         label: "not all cases are covered",

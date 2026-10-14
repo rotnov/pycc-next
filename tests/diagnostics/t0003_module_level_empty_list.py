@@ -1,2 +1,2 @@
 xs = []
-print(len(xs))
+print(len(xs), xs[0])

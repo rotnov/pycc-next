@@ -191,6 +191,24 @@ pub(crate) fn collect_bin_op_constraints(
     match (left, right) {
         (Some(left), Some(right)) => {
             let result = fresh_term(parents, concrete);
+            // Two operands already concrete settle the result now, so a
+            // builtin call or method over it (`a.count(m - 1)`) sees a
+            // concrete argument; the deferred step below re-derives the
+            // same type and still owns every refusal.
+            if let (Some(left_ty), Some(right_ty)) = (
+                resolved_term(left.clone(), parents, concrete),
+                resolved_term(right.clone(), parents, concrete),
+            ) && let Ok(ty) = numeric_result_type(*op, left_ty, right_ty)
+            {
+                unify_terms(
+                    result.clone(),
+                    Ok(ty),
+                    parents,
+                    concrete,
+                    "T0021",
+                    "binary expression",
+                )?;
+            }
             deferred.binops.push((
                 *op,
                 left,

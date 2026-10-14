@@ -5,8 +5,9 @@
 //!   helper's: one signature all call sites agree on, otherwise the
 //!   `T0001` a missing annotation always had. An `--ext` module keeps
 //!   `T0001`: Python calls it with anything.
-//! * Non-strict mode does not compile an unannotated definition nothing in
-//!   the entry module mentions (it can never run), so it cannot fall back.
+//! * A native program does not compile an unannotated definition nothing in
+//!   the entry module mentions (it can never run), so it cannot fall back
+//!   (non-strict mode) or need annotations (strict mode, since v0.3).
 //! * `reversed(range(...))`, `map(f, range(...))` and `filter(f,
 //!   range(...))` iterate the range as a list.
 //! * Non-strict mode copies a fresh native list (nothing else holds it
@@ -141,10 +142,10 @@ fn non_strict_runs_the_same_program() {
 #[test]
 fn an_uninferable_public_signature_keeps_t0001() {
     let param = "needs a type annotation";
-    // No call site types the parameter.
+    // No call site types the parameter of a function the program names.
     refused(
         "t0001_uncalled",
-        "def f(x):\n    return x\n\nprint(1)\n",
+        "def f(x):\n    return x\n\nif False:\n    f\nprint(1)\n",
         &[],
         "T0001",
         "parameter `x` of public function `f` needs a type annotation",
@@ -157,10 +158,10 @@ fn an_uninferable_public_signature_keeps_t0001() {
         "T0001",
         param,
     );
-    // The body never pins the return type.
+    // The body never pins the return type (only its own recursion does).
     refused(
         "t0001_return",
-        "def g(n):\n    if n == 0:\n        return []\n    return [n] + g(n - 1)\n\nprint(g(3))\n",
+        "def g(n):\n    return g(n - 1)\n\nif False:\n    print(g(3))\n",
         &[],
         "T0001",
         "public function `g` needs a return type annotation",
@@ -183,16 +184,12 @@ fn an_uninferable_public_signature_keeps_t0001() {
     );
 }
 
-/// Strict mode still checks an unannotated function nothing calls.
+/// Strict mode, like non-strict mode, does not compile an unannotated
+/// definition nothing in the entry module mentions: no call site could type
+/// it, and it can never run.
 #[test]
-fn strict_mode_still_reports_a_dead_unannotated_function() {
-    refused(
-        "t0001_dead",
-        "def list2d(a, b, c):\n    return [[c] * b for i in range(a)]\n\nprint(1)\n",
-        &[],
-        "T0001",
-        "public function `list2d`",
-    );
+fn strict_mode_does_not_compile_dead_unannotated_definitions() {
+    matches_cpython("non_strict_dead_defs.py", &[]);
 }
 
 #[test]

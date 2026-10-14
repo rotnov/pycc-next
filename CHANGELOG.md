@@ -82,6 +82,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   and a call of a constructor with defaults may omit them. `--ext` classes install
   `__repr__`/`__str__` as `tp_repr`/`tp_str`.
 - `hash()` of a `str`, a `float` and a tuple holding them.
+- Strict mode infers more of real-world untyped code (the corpus, v0.3 accept 3):
+  - a return the solver cannot type from its terms (a returned tuple display such as
+    `return up, down`, a value computed from a local it did not type) is typed from the
+    function's body once its parameters are, and inference runs again with it, so its
+    callers and the parameters they feed are typed too;
+  - an empty list whose producer reads an unannotated function's parameter or return
+    (`result.append(x % num)`) is typed once those are inferred;
+  - an empty list bound to a name whose element nothing reads, produces or compares
+    (`L = []` only rebound, measured or printed) is a `list[int]`: no operation can
+    observe it;
+  - an operator over two operands already typed is typed at once, so `a.count(m - 1)`
+    types the parameter it is passed to.
+- The builtins `exit()`/`quit()` and `from sys import exit` are `sys.exit` (run through
+  the embedded CPython, so `finally` blocks run and the exit status and message are
+  CPython's).
+- A module-level `X = sys.stdin` / `X = sys.stdout` alias: `X.readline()`,
+  `X.write(s)` and the other stream operations are the native ones.
 
 ### Changed
 
@@ -90,12 +107,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - `d[k] += n` on a dict of `int` values (a `Counter`'s `c[x] += 1`) is one lookup, and a
   `str` caches its hash as CPython does: a word-counting loop runs ~4x faster than
   CPython.
-
+- Strict mode, like non-strict mode, does not compile an unannotated definition nothing
+  in a native program's entry module names: it can never run and no call site could type
+  it (previously `T0001`). An `--ext` module keeps every definition.
 - A dependency module's top-level names no longer share the entry module's namespace:
   two modules may define the same name, and an `--ext` artifact no longer exports the
   public functions of the project modules it imports (only the entry module's own).
 
 ### Fixed
+- `print()`, `str()` or an f-string of a value that may be `None` (`int | None`) passed
+  `pycc check` and crashed the backend; it is refused with `C0001`.
+- A `__str__` whose signature is not `(self) -> str` was called for `print()`/`str()` and
+  its result used as a `str`; the conversion is now refused (`C0001`), as CPython raises
+  `TypeError`.
 - A tuple boxed inside a loop (`list(...)` of a generator of tuples, a tuple stored in a
   container) grew the stack on every iteration and crashed after ~10^5 iterations.
 - A comprehension over a fresh list (a call's result, a `str` expression) leaked that

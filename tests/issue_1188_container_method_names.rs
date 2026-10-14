@@ -958,16 +958,15 @@ fn annotated_class_bindings_beside_an_unannotated_helper() {
 fn a_rejected_twin_stays_rejected() {
     twins_rejected(
         "1188_rejected_param",
-        &with_all_four("def _h(c):\n    return c.%get%()\n"),
+        &with_all_four("def _h(c):\n    return c.%get%()\n\n\nif False:\n    _h\n"),
     );
     twins_rejected(
         "1188_rejected_pop_param",
-        &with_all_four("def _p(xs):\n    return xs.pop(0, 1, 2)\n"),
+        &with_all_four("def _p(xs):\n    return xs.pop(0, 1, 2)\n\n\nif False:\n    _p\n"),
     );
-    twins_rejected(
-        "1188_rejected_pop_local",
-        &with_all_four("def _q():\n    ys = [1]\n    return ys.pop(0)\n"),
-    );
+    // `def _q(): ys = [1]; return ys.pop(0)` used to be a third case; since
+    // v0.3 strict mode types its return from the body
+    // (`constraints::return_fallback`), so neither twin is refused.
 }
 
 /// The one case where the constraint solver cannot tell the readings apart:
@@ -977,7 +976,7 @@ fn an_unresolvable_receiver_is_refused_through_check_and_run() {
     for subcommand in ["check", "run"] {
         twins_same_diagnostic(
             &format!("1188_soundness_{subcommand}"),
-            &with_all_four("def _h(c):\n    return c.%get%()\n"),
+            &with_all_four("def _h(c):\n    return c.%get%()\n\n\nif False:\n    _h\n"),
             subcommand,
             "error[T0021]: cannot infer type of parameter `c` in private helper `_h`; add an \
              annotation",
@@ -991,7 +990,7 @@ fn an_unresolvable_receiver_is_refused_through_check_and_run() {
 fn a_gate_off_module_keeps_the_container_diagnostic() {
     let dir = write_project(
         "1188_gate_off",
-        &single("def _p(xs):\n    return xs.pop(0, 1, 2)\n"),
+        &single("def _p(xs):\n    return xs.pop(0, 1, 2)\n\n\nif False:\n    _p\n"),
         false,
     );
     let outcome = pycc_in(&dir, "check");

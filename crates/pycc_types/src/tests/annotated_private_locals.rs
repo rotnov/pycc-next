@@ -165,7 +165,7 @@ fn a_container_annotation_cannot_escape_the_scalar_only_private_solver() {
 }
 
 #[test]
-fn a_container_annotated_target_cannot_resolve_an_inferred_private_return() {
+fn a_container_annotated_target_types_the_return_from_the_body() {
     let hir = HirModule {
         seeded_builtin_exception_classes: false,
         items: vec![HirItem::Function {
@@ -187,16 +187,19 @@ fn a_container_annotated_target_cannot_resolve_an_inferred_private_return() {
         class_defs: Vec::new(),
     };
 
-    let err = check_and_resolve(&hir).unwrap_err();
-    assert_eq!(err.code, "T0021");
-    assert!(
-        err.message
-            .contains("cannot infer return type of private helper `_helper`")
-    );
+    // The solver stays scalar-only; strict mode then types the return from
+    // the body (`return_fallback`), where `y` is the `list[int]` it was
+    // annotated as.
+    let resolved = check_and_resolve(&hir).expect("the body types the return");
+    let return_ty = resolved.items.iter().find_map(|item| match item {
+        HirItem::Function { name, return_ty, .. } if name == "_helper" => Some(return_ty.clone()),
+        _ => None,
+    });
+    assert_eq!(return_ty, Some(Ty::List(Box::new(Ty::Int))));
 }
 
 #[test]
-fn hard_call_evidence_cannot_turn_a_container_local_into_an_inferred_signature() {
+fn hard_call_evidence_leaves_a_container_local_to_the_body_fallback() {
     let hir = HirModule {
         seeded_builtin_exception_classes: false,
         items: vec![
@@ -230,12 +233,15 @@ fn hard_call_evidence_cannot_turn_a_container_local_into_an_inferred_signature()
         class_defs: Vec::new(),
     };
 
-    let err = check_and_resolve(&hir).unwrap_err();
-    assert_eq!(err.code, "T0021");
-    assert!(
-        err.message
-            .contains("cannot infer return type of private helper `_helper`")
-    );
+    // The solver stays scalar-only; strict mode then types the return from
+    // the body (`return_fallback`), where `y` is the `list[int]` it was
+    // annotated as.
+    let resolved = check_and_resolve(&hir).expect("the body types the return");
+    let return_ty = resolved.items.iter().find_map(|item| match item {
+        HirItem::Function { name, return_ty, .. } if name == "_helper" => Some(return_ty.clone()),
+        _ => None,
+    });
+    assert_eq!(return_ty, Some(Ty::List(Box::new(Ty::Int))));
 }
 
 #[test]

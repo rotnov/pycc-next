@@ -110,6 +110,11 @@ fn a_project_file_next_to_the_entry_selects_non_strict() {
     ] {
         let dir = ScratchDir::new("non_strict_config").expect("scratch");
         let source = copy_into(&dir, "non_strict_ext.py", "m.py");
+        // A native program does not compile a definition nothing names, in
+        // strict mode too: name one the strict check cannot type.
+        let mut copied = std::fs::read_to_string(&source).expect("read the copy");
+        copied.push_str("\n\nif False:\n    add\n");
+        std::fs::write(&source, copied).expect("write the copy");
         let strict = pycc().arg("check").arg(&source).output().expect("spawn");
         assert_eq!(strict.status.code(), Some(1), "{file}");
         std::fs::write(dir.join(file), contents).expect("write the project file");

@@ -272,32 +272,30 @@ fn an_imported_object_s_container_methods_pass_check() {
 /// needs no annotation.
 #[test]
 fn an_unannotated_private_helper_needs_a_return_annotation() {
-    for (category, helper, name) in [
+    // Since v0.3 strict mode types such a helper's return from its body
+    // (`constraints::return_fallback`): the slot's element or value type.
+    for (category, helper, name, expected) in [
         (
             "e2e_1263_take",
             "    def _take(self):\n        return self.xs.pop()\n",
             "_take",
+            "2\n",
         ),
         (
             "e2e_1263_look",
             "    def _look(self):\n        return self.d.get(\"a\", 0)\n",
             "_look",
+            "1\n",
         ),
     ] {
-        let text = check_fails(
+        let out = matches_cpython(
             category,
             &format!(
                 "{SLOTS}\n\nclass D(C):\n{helper}\n    def run(self) -> None:\n        \
-                 print(self.{name}())\n"
+                 print(self.{name}())\n\n\nD([1, 2], {{\"a\": 1}}, 3).run()\n"
             ),
         );
-        assert!(
-            text.contains(&format!(
-                "error[T0021]: cannot infer return type of private helper `D.{name}`; add an \
-                 annotation"
-            )),
-            "{text}"
-        );
+        assert_eq!(out, expected);
     }
     // #1420: the annotated caller's `-> int` constrains each helper.
     let out = matches_cpython(

@@ -1,6 +1,6 @@
-def f() -> int:
+def f():
     xs = []
-    return len(xs)
+    print(len(xs), xs[0])
 
 
-print(f())
+f()

@@ -731,9 +731,11 @@ fn solver_private_helper_with_maybe_bound_return_does_not_infer_wrong_type() {
     // The solver cannot infer the return type because x is maybe-bound
     // and `return x` skips unification. This is the conservative
     // behavior the issue requires.
+    // Since v0.3 strict mode then types the return from the body
+    // (`return_fallback`), where the maybe-bound read is refused: still
+    // never a wrong type.
     let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0021");
-    assert!(err.message.contains("cannot infer return type"));
+    assert_eq!(err.code, "T0041");
 }
 
 #[test]

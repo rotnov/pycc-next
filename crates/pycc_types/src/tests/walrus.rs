@@ -87,7 +87,7 @@ fn a_walrus_with_an_optional_int_value_type_checks() {
     // `is_walrus_value_ty_supported`'s `Ty::Optional(inner)` arm recurses
     // into `inner` -- here an `Optional[int]` walrus value, reached via a
     // `Name` already declared `int | None`.
-    let result = check_source("x: int | None = 5\nif (y := x) is not None:\n    print(y)\n");
+    let result = check_source("x: int | None = 5\nif (y := x) is not None:\n    z = y\n");
     assert!(
         result.is_ok(),
         "an `Optional[int]`-valued walrus must type-check: {result:?}"

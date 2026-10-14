@@ -437,8 +437,10 @@ fn negating_a_maybe_bound_operand_leaves_the_helper_uninferable() {
         "maybe_bound",
         "def _f(flag: bool):\n    if flag:\n        m = 1\n    return -m\n\n\nprint(_f(True))\n",
     );
+    // Typed from the body (`return_fallback`), the maybe-bound read is
+    // the refusal -- never an invented type.
     assert!(
-        message.contains("cannot infer return type of private helper `_f`"),
+        message.contains("local name `m` may not be bound"),
         "unexpected diagnostic: {message}"
     );
 }

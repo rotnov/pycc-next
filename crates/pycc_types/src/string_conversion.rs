@@ -151,6 +151,17 @@ pub(crate) fn reject_unrenderable(
                 Span::new(0, 0),
             ))
         }
+        // `pycc_codegen`'s `to_str` has no `Optional` arm: before this
+        // refusal `print(x)` of an `int | None` passed `pycc check` and
+        // panicked in the backend.
+        Ty::Optional(_) => Err(Diagnostic::error(
+            "C0001",
+            format!(
+                "rendering `{}` (a value that may be `None`) as a string is not supported yet",
+                ty.name()
+            ),
+            Span::new(0, 0),
+        )),
         // A generator or a function value renders as CPython's does,
         // `<generator object g at 0x...>` / `<function f at 0x...>`, with
         // the object's own address (`pycc_rt::closure`).

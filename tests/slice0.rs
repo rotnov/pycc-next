@@ -768,7 +768,7 @@ fn a_type_error_is_a_compile_error_exit_code_1() {
 #[test]
 fn an_unannotated_public_function_is_a_compile_error_exit_code_1() {
     let dir = ScratchDir::new("e2e_t0001").expect("failed to create scratch dir");
-    let src = write_fixture(&dir, "t0001.py", "def add(a, b):\n    return a + b\n");
+    let src = write_fixture(&dir, "t0001.py", "def add(a, b):\n    return a + b\n\n\nif False:\n    add\n");
     let out = dir.join("t0001");
 
     let output = Command::new(pycc_bin())
@@ -1144,7 +1144,9 @@ fn check_subcommand_rejects_true_division_with_an_int_result_annotation() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("T0021"));
+    // `value` is typed `int` by the call site, so the division's `float`
+    // meets the declared `int` at the `return`.
+    assert!(String::from_utf8_lossy(&output.stdout).contains("T0022"));
 }
 
 #[test]
@@ -1178,7 +1180,7 @@ fn check_subcommand_rejects_known_string_operands_for_an_int_result() {
 #[test]
 fn check_subcommand_reports_t0001_on_an_unannotated_public_function() {
     let dir = ScratchDir::new("e2e_check_t0001").expect("failed to create scratch dir");
-    let src = write_fixture(&dir, "bad.py", "def add(a, b):\n    return a + b\n");
+    let src = write_fixture(&dir, "bad.py", "def add(a, b):\n    return a + b\n\n\nif False:\n    add\n");
 
     let output = Command::new(pycc_bin())
         .args(["check", src.to_str().unwrap()])
@@ -1191,7 +1193,7 @@ fn check_subcommand_reports_t0001_on_an_unannotated_public_function() {
 #[test]
 fn check_subcommand_supports_json_error_format() {
     let dir = ScratchDir::new("e2e_check_json").expect("failed to create scratch dir");
-    let src = write_fixture(&dir, "bad.py", "def add(a, b):\n    return a + b\n");
+    let src = write_fixture(&dir, "bad.py", "def add(a, b):\n    return a + b\n\n\nif False:\n    add\n");
 
     let output = Command::new(pycc_bin())
         .args(["check", src.to_str().unwrap(), "--error-format", "json"])

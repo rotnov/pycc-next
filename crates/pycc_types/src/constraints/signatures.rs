@@ -676,7 +676,11 @@ pub(crate) fn infer_function_signatures_with_solver_all(
 }
 
 /// Non-strict mode (#3): a helper parameter or return the solver cannot
-/// type is a CPython object, as every unannotated Python name is.
+/// type is a CPython object, as every unannotated Python name is. While
+/// [`super::return_fallback`] collects a partial table, it is `Ty::Infer`.
 fn object_when_non_strict() -> Option<Ty> {
+    if super::return_fallback::collecting_partial() {
+        return Some(Ty::Infer);
+    }
     crate::non_strict::is_non_strict().then_some(Ty::Object)
 }

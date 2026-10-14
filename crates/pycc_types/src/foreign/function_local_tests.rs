@@ -101,11 +101,9 @@ fn binding_returning_and_passing_an_object_in_a_function_are_admitted() {
 /// inferred, whatever order the definitions appear in.
 #[test]
 fn an_object_reached_through_a_parameter_is_part_3() {
-    refused(
-        &format!("{IMPORT}def _k(o):\n    return o.keys()\n\n\nprint(len(_k(json)))\n"),
-        "T0021",
-        "cannot infer return type of private helper `_k`",
-    );
+    // Strict mode types the return from the body once `o` is typed
+    // (`return_fallback`): an object.
+    admitted(&format!("{IMPORT}def _k(o):\n    return o.keys()\n\n\nprint(len(_k(json)))\n"));
     refused(
         &format!("{IMPORT}def _f(g):\n    return g(\"[1]\")\n\n\nprint(len(_f(json.loads)))\n"),
         "T0021",

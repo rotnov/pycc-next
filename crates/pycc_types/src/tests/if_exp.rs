@@ -169,24 +169,24 @@ fn the_solver_unifies_an_inference_variable_branch() {
 
 #[test]
 fn the_solver_yields_no_term_for_a_variable_against_none() {
+    // The solver gives the node no term; the return is typed from the body
+    // (`return_fallback`) as `int | None`, which `print` cannot render yet.
     refused(
         "def _g(a):\n    return a if True else None\n\nprint(_g(1))\n",
-        "T0021",
-        "cannot infer return type of private helper `_g`",
+        "C0001",
+        "a value that may be `None`",
     );
-    refused(
-        "def _g(a):\n    return None if True else a\n\nprint(_g(1))\n",
-        "T0021",
-        "cannot infer return type of private helper `_g`",
-    );
+    checks("def _g(a):\n    return None if True else a\n\nx = _g(1)\n");
 }
 
 #[test]
 fn the_solver_defers_a_branch_with_no_type_term() {
+    // Typed from the body (`return_fallback`), where the maybe-bound read
+    // is the refusal.
     refused(
         "def _g(c: bool):\n    if c:\n        v = 1\n    return v if c else 2\n\nprint(_g(True))\n",
-        "T0021",
-        "cannot infer return type of private helper `_g`",
+        "T0041",
+        "may not be bound",
     );
 }
 

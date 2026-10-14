@@ -112,7 +112,7 @@ fn the_literals_part_2d_leaves_refused_into_an_object_slot() {
     );
     assert_ext_error(
         "1397_empty_list_no_evidence",
-        "def f(x: object) -> int:\n    xs = []\n    return len(xs)\n",
+        "def f(x: object) -> int:\n    xs = []\n    return len(xs) + xs[0]\n",
         "T0003",
         "an empty list literal has no inferable element type for `xs`",
     );

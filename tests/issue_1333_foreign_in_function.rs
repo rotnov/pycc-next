@@ -156,22 +156,23 @@ fn check_accepts_a_dependency_module_s_object_read_in_a_function() {
 
 /// Part 3 (#1364): the solver does not infer an object type through a local
 /// bound to a helper's result, whichever order the two helpers are written
-/// in, nor through a parameter.
+/// in, nor through a parameter. Since v0.3 strict mode types such a return
+/// from the body once the solver has settled everything else
+/// (`constraints::return_fallback`), so those helpers check; a local bound to
+/// a foreign callable a helper returns is still not callable.
 #[test]
 fn inference_through_a_helper_result_local_or_a_parameter_is_part_3() {
+    for body in [
+        "import json\n\ndef _mk():\n    return json.loads(\"[1]\")\n\n\
+         def _u():\n    y = _mk()\n    return y.copy()\n\nprint(len(_u()))\n",
+        "import json\n\ndef _u():\n    y = _mk()\n    return y.copy()\n\n\
+         def _mk():\n    return json.loads(\"[1]\")\n\nprint(len(_u()))\n",
+        "import json\n\ndef _k(o):\n    return o.keys()\n\nprint(len(_k(json.loads(\"{}\"))))\n",
+    ] {
+        let dir = ScratchDir::new("obj_fn_part3_typed").expect("scratch");
+        assert_checks(&dir, body);
+    }
     for (tag, body, needle) in [
-        (
-            "obj_fn_part3_result_after",
-            "import json\n\ndef _mk():\n    return json.loads(\"[1]\")\n\n\
-             def _u():\n    y = _mk()\n    return y.copy()\n\nprint(len(_u()))\n",
-            "cannot infer return type of private helper `_u`",
-        ),
-        (
-            "obj_fn_part3_result_before",
-            "import json\n\ndef _u():\n    y = _mk()\n    return y.copy()\n\n\
-             def _mk():\n    return json.loads(\"[1]\")\n\nprint(len(_u()))\n",
-            "cannot infer return type of private helper `_u`",
-        ),
         (
             "obj_fn_part3_callable_after",
             "import json\n\ndef _getf():\n    return json.loads\n\n\
@@ -183,11 +184,6 @@ fn inference_through_a_helper_result_local_or_a_parameter_is_part_3() {
             "import json\n\ndef _v():\n    g = _getf()\n    return g(\"[1]\")\n\n\
              def _getf():\n    return json.loads\n\nprint(len(_v()))\n",
             "name `g` is bound to a non-callable value",
-        ),
-        (
-            "obj_fn_part3_param_method",
-            "import json\n\ndef _k(o):\n    return o.keys()\n\nprint(len(_k(json.loads(\"{}\"))))\n",
-            "cannot infer return type of private helper `_k`",
         ),
         (
             "obj_fn_part3_param_call",

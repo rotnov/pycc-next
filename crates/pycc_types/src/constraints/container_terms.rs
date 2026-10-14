@@ -15,9 +15,13 @@ pub(crate) fn collect_list_literal_constraints(
     };
     let mut element_terms = Vec::with_capacity(elements.len());
     for element in elements {
-        element_terms.push(collect_expr_constraints(
-            signatures, parents, concrete, deferred, env, element,
-        )?);
+        let term = collect_expr_constraints(signatures, parents, concrete, deferred, env, element)?;
+        // A variable already bound to a concrete type (`n + 1` over an
+        // `int`) counts as that type.
+        element_terms.push(term.map(|term| match resolved_term(term.clone(), parents, concrete) {
+            Some(ty) => Ok(ty),
+            None => term,
+        }));
     }
     if let Some(element_ty) = homogeneous_private_solver_scalar_list_element(&element_terms) {
         Ok(Some(Ok(Ty::List(Box::new(element_ty)))))

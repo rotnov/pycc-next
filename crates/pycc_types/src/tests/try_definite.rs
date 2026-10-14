@@ -502,7 +502,9 @@ def _h(d):
 
 print(_h(0))
 ";
-    assert_eq!(code_of(src), "T0021");
+    // The solver still leaves the return open; typed from the body
+    // (`return_fallback`), the maybe-bound read is the refusal.
+    assert_eq!(code_of(src), "T0041");
 }
 
 /// A terminating handler is excluded, so the body alone promotes the name.
@@ -555,7 +557,9 @@ def _h(d):
 
 print(_h(0))
 ";
-    assert_eq!(code_of(src), "T0021");
+    // The solver still leaves the return open; typed from the body
+    // (`return_fallback`), the maybe-bound read is the refusal.
+    assert_eq!(code_of(src), "T0041");
 }
 
 /// A name bound before the `try` is never re-promoted by it: a pre-existing
@@ -575,7 +579,9 @@ def _h(d):
 
 print(_h(0))
 ";
-    assert_eq!(code_of(src), "T0021");
+    // Bound on every path that reaches the `return`: since v0.3 strict
+    // mode types the return from the body (`return_fallback`).
+    assert!(parse_check(src).is_ok());
 }
 
 /// The `as` name is unbound after its handler, so returning it is still not
@@ -612,5 +618,7 @@ def _h(d):
 
 print(_h(5))
 ";
-    assert_eq!(code_of(src), "T0021");
+    // The solver still leaves the return open; typed from the body
+    // (`return_fallback`), the maybe-bound read is the refusal.
+    assert_eq!(code_of(src), "T0041");
 }

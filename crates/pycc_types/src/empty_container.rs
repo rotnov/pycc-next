@@ -144,10 +144,12 @@
 use super::*;
 
 pub(crate) mod attr_slot;
+pub(crate) use solved_signatures::resolve_with_solved_signatures;
 mod call_site;
 mod init_params;
 mod object_slot;
 mod producer;
+mod solved_signatures;
 mod unify;
 
 pub(crate) use call_site::resolve_call_site_params;

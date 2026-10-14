@@ -670,13 +670,9 @@ fn a_local_shadowing_a_foreign_import_is_not_a_foreign_object() {
         &dir,
         "import numpy\n\ndef _helper():\n    numpy = {\"x\": 1}\n    return numpy\n\n\nz = _helper()\n",
     );
-    assert_eq!(output.status.code(), Some(1), "{}", stderr_of(&output));
-    let rendered = stdout_of(&output);
-    assert!(!rendered.contains("T0022"), "{rendered}");
-    assert!(
-        rendered.contains("cannot infer return type of private helper `_helper`"),
-        "{rendered}"
-    );
+    // Since v0.3 strict mode types the return from the body
+    // (`return_fallback`): the local's own `dict[str, int]`, never `object`.
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
 }
 
 /// Builds `body` as an extension module named `module` inside `dir`.

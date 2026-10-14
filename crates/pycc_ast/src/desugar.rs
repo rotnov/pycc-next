@@ -18,7 +18,9 @@
 //!   (`__pycc_stdin_readline` and so on), so stdin is read through one
 //!   buffer whichever spelling a program uses; an `import sys` with no use
 //!   left is dropped. A module-level `input = sys.stdin.readline` becomes
-//!   a `def` (see [`aliases`]).
+//!   a `def`, and `X = sys.stdin` reads `X` as the stream itself (see
+//!   [`aliases`]). The builtins `exit`/`quit` and `from sys
+//!   import exit` read as `sys.exit`, CPython's own (see [`exit`]).
 //! * A typed numpy array annotation without a dimension count,
 //!   `NDArray[np.float64]`, gets the count its name's uses imply written in
 //!   as a second argument, `NDArray[np.float64, 2]` (see [`ndarray_ndim`]).
@@ -59,6 +61,7 @@ mod displays;
 mod comps;
 mod dataclasses;
 mod enums;
+mod exit;
 mod exprs;
 mod functools;
 mod ext_generators;
@@ -155,7 +158,9 @@ pub fn desugar(module: &mut ModModule) {
         displays::canonical_displays(&mut body);
         wildcard::expand_wildcards(&mut body);
         ndarray_ndim::close_ndims(&mut body);
+        exit::sys_exit_calls(&mut body);
         aliases::builtin_aliases(&mut body);
+        aliases::stream_aliases(&mut body);
         iter_alias::iterator_readers(&mut body);
         aliases::drop_object_bases(&mut body);
         stdlib::native_stdlib_calls(&mut body);

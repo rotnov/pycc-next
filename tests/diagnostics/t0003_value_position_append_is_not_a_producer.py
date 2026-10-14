@@ -1,4 +1,7 @@
-def f() -> int:
+def f():
     xs = []
     y = xs.append(1)
-    return len(xs)
+    print(xs[0], y)
+
+
+f()

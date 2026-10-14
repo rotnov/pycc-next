@@ -583,10 +583,7 @@ fn dict_get_or_default_assigned_inside_an_unannotated_private_helper_reaches_the
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0021");
-    assert_eq!(
-        err.message,
-        "cannot infer return type of private helper `_h`; add an annotation"
-    );
+    // Since v0.3 strict mode types the return from the body
+    // (`return_fallback`): `y` is the dict's `int` value.
+    check(&hir).expect("the body types the return");
 }

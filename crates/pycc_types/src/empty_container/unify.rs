@@ -38,6 +38,7 @@ use std::collections::{HashMap, HashSet};
 mod settle;
 mod sources;
 mod store;
+mod unread_default;
 mod walk;
 use store::{Shape, Store};
 pub(super) use walk::{stmt_exprs_mut, walk_expr_mut};
@@ -96,6 +97,8 @@ struct Engine {
     /// annotated.
     helpers: HashMap<String, bool>,
     deferred: Vec<Deferred>,
+    /// The element variable each empty list site was made with.
+    list_elements: HashSet<usize>,
 }
 
 /// The scope a statement list is checked in.
@@ -172,6 +175,7 @@ impl Engine {
         let var = match self.site_kinds[number] {
             SiteKind::List => {
                 let e = self.store.fresh();
+                self.list_elements.insert(e);
                 self.store.with_shape(Shape::List(e))
             }
             SiteKind::Set => {
@@ -925,6 +929,7 @@ pub(super) fn infer(
             })
             .collect(),
         deferred: Vec::new(),
+        list_elements: HashSet::new(),
     };
     // Two rounds: the second sees, through the environments' bindings, the
     // names the first round resolved only partially.
@@ -988,6 +993,7 @@ pub(super) fn infer(
         }
         engine.settle();
     }
+    engine.default_unread_list_elements();
     let types: Vec<Option<Ty>> = (0..sites.len())
         .map(|number| {
             let var = engine.sites[number]?;
