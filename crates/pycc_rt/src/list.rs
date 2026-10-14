@@ -75,6 +75,15 @@ pub struct PyListObj {
     /// [`pycc_rt_list_mark_tuple`]): it renders as a tuple, and a slice or
     /// repeat of it is one too.
     pub(crate) frozen: bool,
+    /// [`deque::DEQUE`] for a `collections.deque` (`list/deque.rs`).
+    pub(crate) flavor: u8,
+    /// A deque's `maxlen`, or `-1` for none.
+    pub(crate) maxlen: i64,
+    /// Unused element slots in front of `data` (a deque that popped from
+    /// the left): the allocation starts `head` elements before `data`, and
+    /// `cap` counts from there. Every operation other than the deque's own
+    /// end operations first moves the elements back to the start.
+    pub(crate) head: i64,
 }
 
 const _: () = assert!(std::mem::offset_of!(PyListObj, rc) == crate::rc::RC_OFFSET);
@@ -174,6 +183,7 @@ impl PyListObj {
     /// reallocated) parts back afterwards. `T` must be the kind's element
     /// type; [`with_vec!`] picks it.
     fn with_typed_vec<T: Elem, R>(&mut self, f: impl FnOnce(&mut Vec<T>) -> R) -> R {
+        self.compact_front::<T>();
         let mut vec = unsafe {
             Vec::from_raw_parts(self.data.cast::<T>(), self.len as usize, self.cap as usize)
         };
@@ -183,6 +193,21 @@ impl PyListObj {
         self.len = vec.len() as i64;
         self.cap = vec.capacity() as i64;
         result
+    }
+
+    /// Moves the elements back to the start of the allocation (see
+    /// [`PyListObj::head`]).
+    fn compact_front<T: Elem>(&mut self) {
+        if self.head == 0 {
+            return;
+        }
+        // SAFETY: the allocation holds `head + len` elements from `base`.
+        unsafe {
+            let base = self.data.cast::<T>().sub(self.head as usize);
+            std::ptr::copy(self.data.cast::<T>(), base, self.len as usize);
+            self.data = base.cast::<u8>();
+        }
+        self.head = 0;
     }
 
     /// The `crate::rc` kind byte of this list's elements.
@@ -226,6 +251,9 @@ fn new_typed_list<T: Elem>(kind: i64, items: Vec<T>) -> *mut PyListObj {
         rc: 1,
         kinds: std::ptr::null_mut(),
         frozen: false,
+        flavor: 0,
+        maxlen: -1,
+        head: 0,
     }))
 }
 
@@ -316,6 +344,10 @@ pub extern "C" fn pycc_rt_list_new(kind: i64, capacity: i64) -> *mut PyListObj {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_append(list: *mut PyListObj, word: i64) {
     let list = unsafe { &mut *list };
+    if list.flavor == deque::DEQUE {
+        deque::append(list, word);
+        return;
+    }
     with_vec!(list, |items| items.push(Elem::from_word(word)));
 }
 
@@ -356,6 +388,24 @@ pub extern "C" fn pycc_rt_list_index_error(which: i64) {
         "list assignment index out of range"
     };
     raise_builtin(EXCEPTION_TYPE_INDEX_ERROR, "IndexError", message);
+}
+
+/// [`pycc_rt_list_index_error`] naming `list`'s own type: `deque index out
+/// of range`, `tuple index out of range`. Generated code calls it on the
+/// cold path of an inlined bounds check.
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_index_error_of(list: *mut PyListObj, which: i64) {
+    let list = unsafe { &*list };
+    let name = deque::type_name(list).trim_start_matches("collections.");
+    let message = if which == 0 || name == "tuple" {
+        format!("{name} index out of range")
+    } else {
+        format!("{name} assignment index out of range")
+    };
+    raise_builtin(EXCEPTION_TYPE_INDEX_ERROR, "IndexError", &message);
 }
 
 /// `xs[index] = word`, adopting the caller's reference and releasing the
@@ -426,6 +476,9 @@ pub unsafe extern "C" fn pycc_rt_list_len(list: *mut PyListObj) -> i64 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_pop(list: *mut PyListObj, has_index: i64, index: i64) -> i64 {
     let list = unsafe { &mut *list };
+    if list.flavor == deque::DEQUE && has_index == 0 {
+        return deque::pop_right(list);
+    }
     if list.len == 0 {
         raise_builtin(
             EXCEPTION_TYPE_INDEX_ERROR,
@@ -595,6 +648,9 @@ pub unsafe extern "C" fn pycc_rt_list_concat(
     b: *mut PyListObj,
 ) -> *mut PyListObj {
     let (a, b) = unsafe { (&*a, &*b) };
+    if !deque::concat_compatible(a, b) {
+        return new_list(a.kind, Vec::new());
+    }
     let (a_items, b_items) = (a.items(), b.items());
     let mut items = Vec::with_capacity(a_items.len() + b_items.len());
     items.extend_from_slice(&a_items);
@@ -602,7 +658,7 @@ pub unsafe extern "C" fn pycc_rt_list_concat(
     for word in &items {
         a.retain(*word);
     }
-    new_list(a.kind, items)
+    deque::flavored_like(a, new_list(a.kind, items))
 }
 
 /// `xs * count` (and `count * xs`) as a new list; a non-positive count gives
@@ -623,7 +679,7 @@ pub unsafe extern "C" fn pycc_rt_list_repeat(list: *mut PyListObj, count: i64) -
     for word in &items {
         list.retain(*word);
     }
-    frozen_like(list, new_list(list.kind, items))
+    deque::flavored_like(list, frozen_like(list, new_list(list.kind, items)))
 }
 
 /// Python `==` between two element words of `kind`.
@@ -688,6 +744,9 @@ pub(crate) fn word_repr(kind: i64, word: i64, out: &mut String) -> bool {
 /// Appends `repr()` of a list (`[a, b]`) or a tuple object (`(a, b)`,
 /// `(a,)`) to `out`.
 pub(crate) fn sequence_repr(list: &PyListObj, out: &mut String) -> bool {
+    if list.flavor == deque::DEQUE {
+        return deque::repr(list, out);
+    }
     let tuple = list.kind == crate::value::TUPLE_OBJECT || list.frozen;
     out.push(if tuple { '(' } else { '[' });
     let items = list.kinded_items();
@@ -726,6 +785,7 @@ pub(crate) fn list_words(list: *mut PyListObj) -> Vec<i64> {
     unsafe { &*list }.items().to_vec()
 }
 
+pub(crate) mod deque;
 pub(crate) mod heap;
 pub(crate) mod ops;
 

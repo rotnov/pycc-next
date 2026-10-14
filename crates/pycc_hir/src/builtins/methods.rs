@@ -64,7 +64,33 @@ pub fn resolve_method(
         (Ty::List(elem), "sort", []) if orderable(elem) => s("pycc_rt_list_sort", &[], Ty::None),
         (Ty::List(_), "reverse", []) => s("pycc_rt_list_reverse", &[], Ty::None),
         (Ty::List(_), "clear", []) => s("pycc_rt_list_clear", &[], Ty::None),
-        (Ty::List(_), "copy", []) => s("pycc_rt_list_copy", &[], receiver.clone()),
+        // Keeps a deque's flavor (`list(xs)` is `pycc_rt_list_copy`).
+        (Ty::List(_), "copy", []) => s("pycc_rt_list_copy_method", &[], receiver.clone()),
+        // `collections.deque`'s own methods (`pycc_rt::list::deque`); a
+        // plain list raises CPython's `AttributeError` at run time.
+        (Ty::List(elem), "appendleft", [item]) if same_elem(item, elem) => word_sig(
+            "pycc_rt_deque_appendleft",
+            &[receiver.clone(), (**elem).clone()],
+            &[false, true],
+            Ty::None,
+            false,
+            &[],
+        ),
+        (Ty::List(elem), "popleft", []) => word_sig(
+            "pycc_rt_deque_popleft",
+            &[receiver.clone()],
+            &[false],
+            (**elem).clone(),
+            true,
+            &[],
+        ),
+        (Ty::List(elem), "extendleft", [Ty::List(other)]) if elem == other => {
+            s("pycc_rt_deque_extendleft", &[receiver.clone()], Ty::None)
+        }
+        (Ty::List(_), "rotate", []) => s("pycc_rt_deque_rotate1", &[], Ty::None),
+        (Ty::List(_), "rotate", [n]) if is_intlike(n) => {
+            s("pycc_rt_deque_rotate", &[Ty::Int], Ty::None)
+        }
         (Ty::List(elem), "extend", [Ty::List(other)]) if elem == other => {
             s("pycc_rt_list_extend", &[receiver.clone()], Ty::None)
         }

@@ -32,6 +32,53 @@ impl Engine {
         Some(self.store.with_shape(Shape::List(elem)))
     }
 
+    /// The flavored containers `pycc_ast::desugar::collections` builds: the
+    /// container is its first argument (an empty `[]`/`{}` typed by its
+    /// uses), a `Counter`'s values are `int`s, and a `defaultdict`'s values
+    /// have its prototype's type.
+    pub(super) fn native_container_call(
+        &mut self,
+        callee: &str,
+        args: &[Option<usize>],
+    ) -> Option<usize> {
+        let container = match callee {
+            "__pycc_deque" | "__pycc_defaultdict_none" | "__pycc_defaultdict_call" => {
+                (*args.first()?)?
+            }
+            "__pycc_counter" => {
+                let container = (*args.first()?)?;
+                let (key, count) = (self.store.fresh(), self.store.known(Ty::Int));
+                let shaped = self.store.with_shape(Shape::Dict(key, count));
+                self.store.unify(container, shaped);
+                container
+            }
+            "__pycc_counter_of" => {
+                let source = (*args.first()?)?;
+                let key = self.store.fresh();
+                self.deferred.push(Deferred::Element {
+                    base: source,
+                    result: key,
+                    iterate: true,
+                });
+                let count = self.store.known(Ty::Int);
+                return Some(self.store.with_shape(Shape::Dict(key, count)));
+            }
+            "__pycc_defaultdict" => {
+                let container = (*args.first()?)?;
+                let key = self.store.fresh();
+                let value = match args.get(1) {
+                    Some(Some(proto)) => *proto,
+                    _ => self.store.fresh(),
+                };
+                let shaped = self.store.with_shape(Shape::Dict(key, value));
+                self.store.unify(container, shaped);
+                container
+            }
+            _ => return None,
+        };
+        Some(container)
+    }
+
     /// A comprehension's container: its loop variable (a synthesized,
     /// unique name) is an element of its iterable, or an `int` over a
     /// range, and its element (or key and value) is the container's.
@@ -206,7 +253,6 @@ impl Engine {
     }
 
     fn term_or_fresh(&mut self, scope: &Scope<'_>, expr: &HirExpr) -> usize {
-        self.term(scope, expr)
-            .unwrap_or_else(|| self.store.fresh())
+        self.term(scope, expr).unwrap_or_else(|| self.store.fresh())
     }
 }

@@ -151,3 +151,13 @@ fn permutations_without_a_literal_r_is_refused() {
         "compiled only with `r` given as an int literal",
     );
 }
+
+/// `collections.deque`: construction (empty, from an iterable, `maxlen`),
+/// both ends, `extend`/`extendleft`, `rotate`, `index`/`count`/`in`,
+/// iteration, `copy`, `+`/`*`, equality, `repr`, a BFS queue, and the
+/// errors CPython raises (`pop from an empty deque`, `deque index out of
+/// range`, a list's missing `appendleft`).
+#[test]
+fn collections_deque_matches_cpython() {
+    assert_matches_cpython("collections_deque");
+}

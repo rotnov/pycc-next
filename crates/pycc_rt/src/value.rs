@@ -69,6 +69,10 @@ pub(crate) fn eq(kind: i64, a: i64, b: i64) -> bool {
             if a == b {
                 return true;
             }
+            // A deque never equals a list.
+            if unsafe { (*(a as *mut PyListObj)).flavor != (*(b as *mut PyListObj)).flavor } {
+                return false;
+            }
             let (xs, ys) = (sequence_items(a), sequence_items(b));
             xs.len() == ys.len()
                 && xs

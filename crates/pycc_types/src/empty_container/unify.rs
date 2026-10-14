@@ -433,6 +433,9 @@ impl Engine {
                 if self.helpers.contains_key(callee) {
                     return self.helper_return(callee);
                 }
+                if let Some(native) = self.native_container_call(callee, &arg_vars) {
+                    return Some(native);
+                }
                 if let Some(known) = self.inferred(scope, expr) {
                     return Some(known);
                 }

@@ -17,6 +17,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   implemented in the runtime, consumed by `for`, `list()`, `sum()`, `next()`,
   comprehensions and every other generator consumer; inputs are lists, `str`s, `range`s
   and generators, pulled only as far as CPython pulls them.
+- `collections.deque` natively: `deque()`, `deque(iterable[, maxlen])`, `append`,
+  `appendleft`, `pop`, `popleft`, `extend`, `extendleft`, `rotate`, indexing, `len`,
+  `in`, `index`, `count`, `remove`, iteration, `copy`, `+`/`*`, equality and `repr`
+  (`deque([...], maxlen=n)`); `deque[T]` annotations. Both ends are O(1) amortized, and a
+  BFS over a deque runs ~10x faster than CPython.
 - A list, set or dict comprehension over a generator (`[x for x in gen()]`).
 - An unannotated generator helper whose yields the solver cannot type from their terms
   alone (a yielded tuple display, a value read from a local container) is typed from its

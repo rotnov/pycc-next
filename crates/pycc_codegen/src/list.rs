@@ -352,7 +352,7 @@ fn resolve_index<'ctx>(
     builder
         .build_call(
             rt.list_index_error,
-            &[i64_type.const_int(u64::from(store), false).into()],
+            &[list.into(), i64_type.const_int(u64::from(store), false).into()],
             "",
         )
         .expect("build_call should not fail for a declared runtime function");

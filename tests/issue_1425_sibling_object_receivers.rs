@@ -71,7 +71,7 @@ fn assert_passes(tag: &str, files: &[(&str, &str)], entry: &str) {
 
 /// The objects live two modules away: `dep1` binds them, `dep2` re-exports
 /// them, and the entry module imports them from `dep2`.
-const DEP1: &str = "import collections\nimport gc\n\nd = collections.deque()\nod = \
+const DEP1: &str = "import collections\nimport gc\n\nd = collections.UserList()\nod = \
                     collections.OrderedDict()\ng = gc\n";
 const DEP2: &str = "from dep1 import d, od, g\n";
 
@@ -214,7 +214,7 @@ fn native_containers_beside_a_sibling_import_keep_their_diagnostics() {
     assert_eq!(message(&sibling), message(&own));
 }
 
-/// The embedded program: deque `append`/`pop`, OrderedDict `get`,
+/// The embedded program: UserList `append`/`pop`, OrderedDict `get`,
 /// `gc.garbage.append`/`pop`, the def and method positions, the
 /// `isinstance` branch, and a native list observed through `len` (printing
 /// a native list is the separate #1220).

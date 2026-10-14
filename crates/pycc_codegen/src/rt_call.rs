@@ -139,7 +139,8 @@ pub(super) fn emit_rt_call<'ctx>(
         param_types.push(i64_type.into());
     }
     // A struct tuple comes back from the runtime boxed.
-    let boxed_ret = matches!(&sig.ret, Ty::Tuple(elements) if !pycc_hir::tuple_is_boxed(elements));
+    let boxed_ret = !sig.ret_word
+        && matches!(&sig.ret, Ty::Tuple(elements) if !pycc_hir::tuple_is_boxed(elements));
     let fn_type = if boxed_ret {
         context
             .ptr_type(inkwell::AddressSpace::default())

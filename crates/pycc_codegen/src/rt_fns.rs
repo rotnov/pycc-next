@@ -621,8 +621,8 @@ pub(super) fn declare_rt_functions<'ctx>(
             void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
         list_index_error: declare(
-            "pycc_rt_list_index_error",
-            void_type.fn_type(&[i64_type.into()], false),
+            "pycc_rt_list_index_error_of",
+            void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
         list_set: declare(
             "pycc_rt_list_set",

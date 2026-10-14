@@ -43,3 +43,11 @@ probe!(
     itertools_chain_from_iterable_of_lists,
     "total += sum(itertools.chain.from_iterable([[i], [1, 2]]))"
 );
+probe!(
+    deque_queue_of_strs,
+    "q = collections.deque([mk(i)])\nq.append(mk(i + 1))\nq.appendleft(\"a\")\ntotal += len(q.popleft()) + len(q.pop()) + len(q)"
+);
+probe!(
+    deque_bounded_rotation,
+    "q = collections.deque([mkp(i), mkp(1)], 2)\nq.append(mkp(2))\nq.rotate(1)\ntotal += q[0].x"
+);

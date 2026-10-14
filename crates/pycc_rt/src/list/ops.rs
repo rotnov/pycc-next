@@ -298,7 +298,11 @@ pub unsafe extern "C" fn pycc_rt_list_index(list: *mut PyListObj, word: i64) -> 
             raise_builtin(
                 EXCEPTION_TYPE_VALUE_ERROR,
                 "ValueError",
-                &format!("{} is not in list", word_repr_string(list.kind, word)),
+                &format!(
+                    "{} is not in {}",
+                    word_repr_string(list.kind, word),
+                    if list.flavor == super::deque::DEQUE { "deque" } else { "list" }
+                ),
             );
             tag_smallint(0)
         }
@@ -322,6 +326,11 @@ pub unsafe extern "C" fn pycc_rt_list_remove(list: *mut PyListObj, word: i64) {
             let removed = edit_words(list, |items| items.remove(i));
             list.release(removed);
         }
+        None if list.flavor == super::deque::DEQUE => raise_builtin(
+            EXCEPTION_TYPE_VALUE_ERROR,
+            "ValueError",
+            &format!("{} is not in deque", word_repr_string(kind, word)),
+        ),
         None => raise_builtin(
             EXCEPTION_TYPE_VALUE_ERROR,
             "ValueError",

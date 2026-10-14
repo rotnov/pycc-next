@@ -21,6 +21,7 @@ const GROWTH_LIMIT_KB: i64 = 1024;
 
 /// Helpers every probe body may call.
 const PRELUDE: &str = r#"
+import collections
 import itertools
 from typing import Callable, Generator, Iterator
 

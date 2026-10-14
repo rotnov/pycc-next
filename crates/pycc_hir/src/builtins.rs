@@ -216,6 +216,12 @@ pub fn str_iterable_arg(name: &str, index: usize) -> bool {
 
 /// Every builtin name [`resolve_call`] claims for some argument types.
 pub const CALL_NAMES: &[&str] = &[
+    "__pycc_counter",
+    "__pycc_counter_of",
+    "__pycc_defaultdict",
+    "__pycc_defaultdict_call",
+    "__pycc_defaultdict_none",
+    "__pycc_deque",
     "__pycc_bisect_left",
     "__pycc_bisect_right",
     "__pycc_heapify",
@@ -391,6 +397,13 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("__pycc_mark_tuple", [Ty::List(_)]) => {
             sig("pycc_rt_list_mark_tuple", &[args[0].clone()], Ty::None)
         }
+        // `collections.deque(items, maxlen, has_maxlen)`
+        // (`pycc_ast::desugar::collections`).
+        ("__pycc_deque", [list @ Ty::List(_), m, h]) if is_intlike(m) && is_intlike(h) => sig(
+            "pycc_rt_deque_new",
+            &[list.clone(), int.clone(), int.clone()],
+            list.clone(),
+        ),
         ("__pycc_setrecursionlimit", [a]) if is_intlike(a) => {
             sig("pycc_rt_setrecursionlimit", &[int], Ty::None)
         }

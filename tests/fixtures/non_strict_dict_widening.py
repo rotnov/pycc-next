@@ -2,10 +2,13 @@
 # object, a mixed value) is CPython's own dict, which hashes and stores it
 # as CPython does.
 import json
-from collections import deque
+import collections
+
+# A CPython deque (a deque called by its own name is compiled natively).
+CDeque = collections.deque
 
 visited = {(0, 0): 0}
-q = deque([(0, 0)])
+q = CDeque([(0, 0)])
 steps = json.loads("[[0, 1], [1, 0], [1, 1]]")
 while len(q) > 0:
     x, y = q.popleft()
