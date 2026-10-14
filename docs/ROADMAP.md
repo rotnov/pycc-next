@@ -63,6 +63,11 @@ Accept:
    `frozen=True`), `enum.Enum`/`IntEnum`, `collections.deque`/`defaultdict`/`Counter`,
    `functools.cache`/`lru_cache`, and `itertools` `product`/`permutations`/`combinations`/
    `accumulate`/`chain`/`islice`/`count`. Oracle fixtures and leak probes.
+   **Met 2026-10-14:** `tests/stdlib_dataclasses.rs`, `tests/stdlib_enum_functools.rs` and
+   `tests/stdlib_native.rs` (deque, Counter, defaultdict, itertools) run every fixture
+   natively in strict and `--non-strict` mode and as `--ext` against CPython 3.13; leak
+   probes in `tests/memory_leaks_stdlib.rs` and `tests/memory_leaks/stdlib.rs`; CI green
+   on d5f2a39. Remaining gaps in `docs/DEVIATIONS.md`.
 3. **Real-world corpus:** strict passes >= 150/200; `--non-strict` keeps 200/200, 0 wrong,
    with >= 98% of top-level statements native.
 4. **A real package:** one pinned, permissively licensed pure-Python package from PyPI,
