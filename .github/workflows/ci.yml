@@ -48,6 +48,12 @@ jobs:
       # Real-world gate: every corpus program must compile in non-strict mode and
       # print exactly what CPython prints (wrong output = miscompilation).
       - run: python3 bench/corpus.py -j 4 --flags=--non-strict --require-correct
+      # Real-package gate (v0.3 accept 4): diff-match-patch, pinned by version
+      # and sdist sha256, built module by module with --ext --non-strict, and
+      # its own test suite run by CPython against the compiled modules.
+      - name: Real package (diff-match-patch) against its own tests
+        if: matrix.os == 'ubuntu-24.04'
+        run: python3 bench/package_check.py --time --runs 1
   macos:
     # Apple silicon, macOS 26 -- the newest arm64 image GitHub hosts; macOS 26
     # is also the minimum the binaries target (README).

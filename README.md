@@ -152,6 +152,27 @@ else (the standard library, third-party packages) work as in a single file. A mo
 as a value, an import cycle and a project import inside an `if`/`try` block are compile
 errors; the details are in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
+### A real package, unchanged
+
+`python3 bench/package_check.py` (CI-gated) downloads
+[diff-match-patch](https://pypi.org/project/diff-match-patch/) 20241021 (Apache-2.0,
+Google's diff/match/patch algorithms, pinned by sdist sha256), builds each of its three
+modules unchanged as its own extension, removes the `.py` files and runs the package's
+own unittest suite with CPython against the compiled modules:
+
+```console
+$ pycc build diff_match_patch/__init__.py -o diff_match_patch/__init__ \
+      --ext --non-strict --foreign-relative-imports            # likewise for every module
+$ python3 -m unittest diff_match_patch.tests                    # 28 tests, OK
+```
+
+A package `__init__.py` builds to `pkg/__init__.abi3.so`, imported as the package. Every
+function and method of the package compiles (`--report-fallbacks` reports none; the
+`__init__`'s re-exporting imports also run as CPython imports). Its untyped text
+parameters are CPython `str` objects, so the speed-up is modest: the package's own speed
+test (`diff_main` on two ~30 KB texts) takes 6.4 s compiled against 10.9 s in CPython
+(1.7x, best of 5, same machine as the table above).
+
 ## Modes
 
 - **Strict** (default): `Any` is refused (`T0002`) and a type mismatch is a compile
@@ -171,7 +192,9 @@ errors; the details are in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
   (a parameter or return nothing pins is an object); an `--ext` module's stays an
   object, since Python may call it with anything. A native
   build of such a program embeds CPython (as a foreign import does); `--ext` just
-  works. Known gaps are listed in `docs/DEVIATIONS.md`.
+  works, and publishes the module's variables and imports as module attributes and
+  its classes' constants as class attributes. Known gaps are listed in
+  `docs/DEVIATIONS.md`.
 - **Per-function fallback** (non-strict only): a top-level function, class or
   statement that pycc cannot compile yet (a lambda used as a value, ...) is
   kept as Python source and run by CPython's own `exec` in the

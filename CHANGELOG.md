@@ -6,6 +6,26 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Added
 
+- A real PyPI package, unchanged: `bench/package_check.py` (CI-gated on Linux x86_64)
+  builds every module of diff-match-patch 20241021 with `--ext --non-strict` and runs the
+  package's own test suite with CPython against the compiled modules; every function
+  and method compiles (v0.3 accept 4).
+- `--ext`: a package's `__init__.py` builds to `pkg/__init__.abi3.so` (`-o pkg/__init__`),
+  imported as the package; under `--foreign-relative-imports` a module's `__name__` is
+  its dotted name (`pkg.mod`); the module docstring is `__doc__`; a class's literal
+  constants (`INSERT = 1`) are attributes of its published type.
+- Non-strict `--ext`: module-level variables and imports are module attributes
+  (`mod.X`, `from mod import X`, a package `__init__`'s re-exports).
+- Non-strict: `o[a:b] = v` on a CPython object; a class attribute initialized with any
+  expression (`PATTERN = re.compile(...)`), evaluated once where the class runs; a
+  method that can run off its end returns `None`; an in-module call fills an `object`
+  parameter's `None` or scalar default; a builtin exception built from an object message
+  (`ValueError("bad: " + obj)`).
+- Non-strict typing: an instance attribute nothing types is an object; an attribute
+  stored values of two types becomes an object; a local first bound to `None` and later
+  to something else is an object; a helper parameter or return inferred both as an
+  object and as a scalar is an object; a helper returning a tuple or `None` returns an
+  object; a container held by a name that flows into an object tuple becomes an object.
 - Linux aarch64: a `pycc-vX.Y.Z-aarch64-linux.tar.gz` archive (glibc 2.39+), built,
   tested and smoke-tested on GitHub's `ubuntu-24.04-arm` runner next to the other two;
   CI runs the full test suite and the corpus gate on Linux aarch64.
@@ -65,6 +85,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Changed
 
+- Non-strict mode: `chr()` runs in CPython, whose `str` holds a lone surrogate
+  (`chr(0xD800)`) that pycc's UTF-8 `str` cannot.
 - `d[k] += n` on a dict of `int` values (a `Counter`'s `c[x] += 1`) is one lookup, and a
   `str` caches its hash as CPython does: a word-counting loop runs ~4x faster than
   CPython.
