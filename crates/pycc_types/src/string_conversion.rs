@@ -179,23 +179,29 @@ pub(crate) fn instance_text_dunder(
         &["__str__", "__repr__"]
     };
     let receiver = Ty::Instance(Box::new(class_name.to_string()));
-    candidates.iter().copied().find(|method| {
-        declares_method(env, class_name, method)
-            && matches!(
-                crate::class::resolve_method_call(env, &receiver, method, &[], &[]),
-                Ok(Ty::Str)
-            )
-    })
+    // The first declared candidate is the one `pycc_mir` calls: a `__str__`
+    // of the wrong shape refuses the conversion rather than falling back to
+    // `__repr__`, so the checked and the lowered call never differ.
+    let method = candidates
+        .iter()
+        .copied()
+        .find(|method| declares_method(env, class_name, method))?;
+    matches!(
+        crate::class::resolve_method_call(env, &receiver, method, &[], &[]),
+        Ok(Ty::Str)
+    )
+    .then_some(method)
 }
 
-/// Whether a class of `class_name`'s MRO defines a method `method`.
+/// Whether a class of `class_name`'s MRO defines a method `method`: the
+/// same walk `pycc_mir::class::rewrite_instance_to_text` makes, over every
+/// MRO class including the builtin exception classes lowering synthesizes
+/// (which declare only `__init__`), so the two never pick differently.
 fn declares_method(env: &Environment, class_name: &str, method: &str) -> bool {
     env.lookup_class(class_name).is_some_and(|def| {
         def.mro.iter().any(|mro_class| {
-            !env.is_synthetic_class(mro_class)
-                && env
-                    .lookup_class(mro_class)
-                    .is_some_and(|mro_def| mro_def.methods.iter().any(|(name, _)| name == method))
+            env.lookup_class(mro_class)
+                .is_some_and(|mro_def| mro_def.methods.iter().any(|(name, _)| name == method))
         })
     })
 }

@@ -59,4 +59,10 @@ fn shapes_left_out_are_refused() {
         "class P:\n    def __str__(self) -> str:\n        return \"p\"\n\nx = repr(P())\n",
     );
     assert!(rendered.contains("C0001"), "{rendered}");
+    // A `__str__` of the wrong shape is refused, not skipped for `__repr__`
+    // (CPython raises `TypeError: __str__ returned non-string`).
+    let rendered = check_fails(
+        "class P:\n    def __str__(self) -> int:\n        return 1\n\n    def __repr__(self) -> str:\n        return \"P()\"\n\nprint(P())\n",
+    );
+    assert!(rendered.contains("C0001"), "{rendered}");
 }
