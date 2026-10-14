@@ -17,6 +17,14 @@ pub(crate) fn resolve_builtin_call(callee: &str, arg_tys: &[Ty]) -> Option<Resul
         }
         return Some(Ok(acc));
     }
+    // Non-strict mode: `chr` runs in CPython (the fallback loop calls it
+    // through `builtins`), whose `str` holds a lone surrogate (`chr(0xD800)`)
+    // that pycc's UTF-8 `str` cannot (`docs/DEVIATIONS.md`).
+    if callee == "chr" && crate::non_strict::is_non_strict() {
+        return Some(Err(crate::name_diagnostics::unsupported_callable_builtin(
+            callee,
+        )));
+    }
     // Non-strict mode: a CPython object for the one scalar parameter is
     // converted at run time (`pycc_hir::builtins::object_param`).
     if let ([Ty::Object], Some((param, _))) = (arg_tys, pycc_hir::builtins::object_param(callee))

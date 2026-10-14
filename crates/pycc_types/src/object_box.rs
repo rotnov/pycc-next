@@ -99,6 +99,23 @@ pub(crate) fn admits_value(
     {
         crate::non_strict::request_widen(name, from, &Ty::Object, |_| true);
     }
+    // So does one that is an element of a tuple display flowing there
+    // (`return (chars1, chars2, line_array)`): once widened, the display's
+    // elements all box and it is the fresh CPython tuple above.
+    if let (Ty::Object, HirExpr::TupleLiteral(elements), Ty::Tuple(element_tys)) =
+        (to, value, from)
+    {
+        for (element, element_ty) in elements.iter().zip(element_tys.iter()) {
+            if let HirExpr::Name(name) = element
+                && matches!(
+                    element_ty,
+                    Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_)
+                )
+            {
+                crate::non_strict::request_widen(name, element_ty, &Ty::Object, |_| true);
+            }
+        }
+    }
     if !admits(env, from, to) {
         return Ok(false);
     }

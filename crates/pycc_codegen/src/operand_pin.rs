@@ -243,6 +243,7 @@ fn stmt_runs_code_on_operands(stmt: &MirStmt) -> bool {
             | MirStmt::ObjSetItem { .. }
             | MirStmt::ObjDelItem { .. }
             | MirStmt::ObjDelSlice { .. }
+            | MirStmt::ObjSetSlice { .. }
     )
 }
 

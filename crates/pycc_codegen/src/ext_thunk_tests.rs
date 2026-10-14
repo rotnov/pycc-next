@@ -473,7 +473,8 @@ fn the_export_predicate_admits_a_classes_comparison_and_hash_slot_dunders() {
     // published class or on the carrier type of a private one, so a
     // tuple-carrying comparison needs its thunk whatever the class is named.
     for dunder in [
-        "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__hash__",
+        "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__hash__", "__repr__",
+        "__str__",
     ] {
         assert!(crate::is_ext_exportable_name(&format!("Grid.{dunder}")));
         assert!(crate::is_ext_exportable_name(&format!("_Grid.{dunder}")));

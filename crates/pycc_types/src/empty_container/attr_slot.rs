@@ -112,6 +112,10 @@ pub(crate) fn resolve_class_slots(
                 inherited_slot(&resolved.class_defs, class, attr, ty)
                     .or_else(|| produced_slot(&methods, local_names, hir, class, attr))
             };
+            // Non-strict mode (#3): an attribute no source types (`self.x =
+            // None`, an empty list nothing appends to in its own class) is a
+            // CPython object instead of a `T0003`.
+            let found = found.or_else(|| crate::non_strict::is_non_strict().then_some(Ty::Object));
             if let Some(found) = found {
                 attrs[i].1 = found;
                 // A later attribute's value may read this one

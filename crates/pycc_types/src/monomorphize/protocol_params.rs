@@ -470,6 +470,28 @@ pub(crate) fn rewrite_protocol_calls_in_stmt(
                 );
             }
         }
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            ..
+        } => {
+            for operand in [value, base]
+                .into_iter()
+                .chain([start, stop, step].into_iter().flatten())
+            {
+                rewrite_protocol_calls_in_expr(
+                    operand,
+                    protocol_funcs,
+                    env,
+                    local_names,
+                    specializations,
+                    seen,
+                );
+            }
+        }
         // #1457: an attribute `del` reads its base, for the same reason.
         HirStmt::DeleteAttr { base, .. } => {
             rewrite_protocol_calls_in_expr(

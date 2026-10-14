@@ -411,12 +411,24 @@ pub(super) fn walk_class_body(input: &ClassBodyInput<'_>) -> Result<ClassBodyOut
         if let Stmt::Assign(assign) = stmt
             && !is_dataclass
         {
-            class_attrs.push(lower_unannotated_class_attr(
-                assign,
-                class_name,
-                &class_attrs,
-                &scope,
-            )?);
+            match lower_unannotated_class_attr(assign, class_name, &class_attrs, &scope) {
+                Ok(entry) => class_attrs.push(entry),
+                Err(diagnostic) => {
+                    let Some((entry, item)) = super::attrs::hoist_class_attr(
+                        assign,
+                        class_name,
+                        &class_attrs,
+                        aliases,
+                        imports,
+                        signatures,
+                    )?
+                    else {
+                        return Err(diagnostic);
+                    };
+                    class_attrs.push(entry);
+                    items.push(item);
+                }
+            }
             continue;
         }
         // #1244: a class-body `del` would unbind a class attribute, which the

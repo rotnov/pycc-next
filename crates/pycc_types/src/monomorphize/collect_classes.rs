@@ -319,6 +319,20 @@ pub(crate) fn collect_generic_class_instantiations_from_stmt(
                 collect_generic_class_instantiations_from_expr(bound, out);
             }
         }
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            ..
+        } => {
+            collect_generic_class_instantiations_from_expr(value, out);
+            collect_generic_class_instantiations_from_expr(base, out);
+            for bound in [start, stop, step].into_iter().flatten() {
+                collect_generic_class_instantiations_from_expr(bound, out);
+            }
+        }
         HirStmt::DeleteAttr { base, .. } => {
             collect_generic_class_instantiations_from_expr(base, out)
         }

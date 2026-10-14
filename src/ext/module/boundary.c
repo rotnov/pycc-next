@@ -244,6 +244,28 @@ static int pycc_ext_unpack_float_at(PyObject *obj, const char *fn_name, Py_ssize
 }
 
 /*
+ * Non-strict mode (#3): a Python store into an inferred `float` attribute,
+ * which takes a `float` or an `int` (a `bool` included), converted as
+ * `float(x)` converts it (`OverflowError` past the `double` range). Any
+ * other type is the strict helper's `TypeError`.
+ */
+static int pycc_ext_unpack_float_or_int(PyObject *obj, const char *fn_name, Py_ssize_t index,
+                                        double *out)
+{
+    double value;
+
+    if (!PyLong_Check(obj)) {
+        return pycc_ext_unpack_float_at(obj, fn_name, index, -1, out);
+    }
+    value = PyLong_AsDouble(obj);
+    if (value == -1.0 && PyErr_Occurred()) {
+        return -1;
+    }
+    *out = value;
+    return 0;
+}
+
+/*
  * The plain-argument entry point for a `float` parameter: the same check,
  * with no tuple-element clause in its message. Kept as its own symbol rather
  * than folded into the caller because a scalar parameter is by far the

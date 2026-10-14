@@ -271,6 +271,28 @@ pub(super) fn collect_stmt_constraints(
                 )?;
             }
         }
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            ..
+        } => {
+            for operand in [&**value, &**base]
+                .into_iter()
+                .chain([start, stop, step].into_iter().flatten().map(|b| &**b))
+            {
+                collect_expr_constraints(
+                    signatures,
+                    parents,
+                    concrete,
+                    &mut constraints.deferred,
+                    env,
+                    operand,
+                )?;
+            }
+        }
         // #1457: an attribute `del` reads its base, for the same reason.
         HirStmt::DeleteAttr { base, .. } => {
             collect_expr_constraints(
@@ -836,6 +858,12 @@ pub(super) fn collect_stmt_constraints(
                 )
             {
                 return Ok(());
+            }
+            if actual.is_none()
+                && crate::non_strict::is_non_strict()
+                && let Err(var) = &return_term
+            {
+                constraints.opaque_returns.push(*var);
             }
             if let Some(actual) = actual {
                 // #949: this solver runs over *every* module-level

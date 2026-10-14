@@ -62,6 +62,7 @@ fn block_exits(body: &[HirStmt], jumps: bool) -> bool {
             // returns (a raising `__delitem__`/`__delattr__` takes the
             // failure edge, like any object call).
             | HirStmt::DeleteSlice { .. }
+            | HirStmt::SetSlice { .. }
             | HirStmt::DeleteAttr { .. }
             | HirStmt::DeleteItem { .. }
             // #1291: a nested foreign import never returns. Its failure is

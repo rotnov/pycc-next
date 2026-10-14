@@ -182,19 +182,24 @@ fn a_slice_with_an_unsupported_step_propagates_the_step_error() {
 }
 
 #[test]
-fn a_slice_assignment_target_is_not_specially_recognized() {
-    // Pins `HirExpr::Slice`'s own documented "Load position only"
-    // restriction (D-118): unlike a plain-index assignment target
-    // (`xs[0] = 1`, which reaches `HirStmt::DictSet` via `Stmt::Assign`'s
-    // own `Expr::Subscript` target arm), a slice assignment target
-    // (`xs[1:3] = value`) calls `lower_expr` directly on the bare
-    // `Expr::Slice` node -- which has no top-level arm -- and falls
-    // through to the same generic catch-all as any other unsupported
-    // expression kind. This is intentional (slicing ships read-only in
-    // this PR), not a regression to fix later without revisiting D-118.
-    assert_capability_error_message(
-        "xs = [1, 2, 3]\nxs[1:3] = [4, 5]\n",
-        "expression kind not supported yet",
+fn a_slice_assignment_lowers_to_a_set_slice_statement() {
+    // Whether the base admits the store is `pycc_types`' call (a CPython
+    // object only): this lowering is type-blind, as `DeleteSlice`'s is.
+    let module = pycc_parser_test_helper::parse("xs = [1, 2, 3]\nxs[1:] = [4, 5]\n");
+    let hir = lower_checked(&module).unwrap();
+    assert_eq!(
+        hir.items[1],
+        HirItem::TopLevelStmt(HirStmt::SetSlice {
+            base: Box::new(HirExpr::Name("xs".to_string())),
+            start: Some(Box::new(HirExpr::IntLiteral(1))),
+            stop: None,
+            step: None,
+            value: Box::new(HirExpr::ListLiteral(vec![
+                HirExpr::IntLiteral(4),
+                HirExpr::IntLiteral(5)
+            ])),
+            span: pycc_diag::Span::new(15, 21),
+        })
     );
 }
 

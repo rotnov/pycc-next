@@ -224,6 +224,20 @@ pub enum HirStmt {
         step: Option<Box<HirExpr>>,
         span: Span,
     },
+    /// `base[start:stop:step] = value`, any bound omitted (non-strict mode,
+    /// #3). Like [`HirStmt::DeleteSlice`] it reads `base` and every present
+    /// bound -- after `value`, CPython's order -- and asks the base to store
+    /// the slice. `pycc_types` admits only a CPython-object base
+    /// (`PyObject_SetItem` with a `slice` key, `foreign::slice`) and refuses
+    /// every other base with this node's `span`, the target's own range.
+    SetSlice {
+        base: Box<HirExpr>,
+        start: Option<Box<HirExpr>>,
+        stop: Option<Box<HirExpr>>,
+        step: Option<Box<HirExpr>>,
+        value: Box<HirExpr>,
+        span: Span,
+    },
     /// `del base.attr` (Part 2 of #1443, #1457), one per attribute target of
     /// a `del` statement, in the statement's left-to-right target order. Like
     /// [`HirStmt::DeleteSlice`] it unbinds no name: it *reads* `base` and at

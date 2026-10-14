@@ -215,6 +215,7 @@ fn collect_deleted_names(body: &[HirStmt], deleted: &mut HashSet<String>) {
             | HirStmt::Return(_)
             | HirStmt::AttrSet { .. }
             | HirStmt::DeleteSlice { .. }
+            | HirStmt::SetSlice { .. }
             | HirStmt::DeleteAttr { .. }
             | HirStmt::DeleteItem { .. }
             | HirStmt::ForeignImport { .. }

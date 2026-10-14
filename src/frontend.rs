@@ -328,6 +328,8 @@ const NATIVE_PUBLISHES: crate::fallback::Publishes = crate::fallback::Publishes 
     functions: true,
     classes: false,
     infers_unannotated: true,
+    variables: false,
+    foreign_relative_imports: false,
 };
 
 /// Runs `attempt` under the non-strict fallback loop (#12, `crate::fallback`).
@@ -439,6 +441,8 @@ pub(crate) fn resolve_frontend_with(
         functions: true,
         classes: true,
         infers_unannotated: false,
+        variables: true,
+        foreign_relative_imports: relative_imports == RelativeImports::ForeignFromEntry,
     };
     with_fallback(path, publishes, || {
         resolve_linked(path, module_name, relative_imports, true)

@@ -96,6 +96,7 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
             // `__setattr__` or `__delattr__` leaves on the foreign-failure
             // edge; the success path falls through.
             | MirStmt::ObjDelSlice { .. }
+            | MirStmt::ObjSetSlice { .. }
             | MirStmt::ObjAttrSet { .. }
             | MirStmt::ObjDelAttr { .. }
             | MirStmt::ObjSetItem { .. }

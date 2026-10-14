@@ -45,6 +45,7 @@ fn an_init_only_class_is_published_with_only_the_copy_row_and_a_constructor() {
             class: "ParseConf".to_string(),
             methods: Vec::new(),
             mro: vec!["ParseConf".to_string()],
+            constants: Vec::new(),
         }]
     );
     assert_eq!(

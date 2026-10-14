@@ -228,6 +228,19 @@ pub enum MirStmt {
         stop: Option<MirExpr>,
         step: Option<MirExpr>,
     },
+    /// `base[start:stop:step] = value` where `base` is a CPython object
+    /// (non-strict mode, #3, from `HirStmt::SetSlice`): CPython's
+    /// `PyObject_SetItem` with the `slice` key [`MirStmt::ObjDelSlice`]
+    /// builds. `value` is always an object (`MirExpr::ObjectBox` boxes a
+    /// native one) and is evaluated first, CPython's order. Its failure is
+    /// routed as [`MirStmt::ObjDelSlice`]'s is.
+    ObjSetSlice {
+        base: MirExpr,
+        start: Option<MirExpr>,
+        stop: Option<MirExpr>,
+        step: Option<MirExpr>,
+        value: MirExpr,
+    },
     /// `base.attr = value` where `base` is a CPython object (Part 2 of
     /// #1443, #1457, from a `HirStmt::AttrSet` whose base types as
     /// `Ty::Object`): CPython's `PyObject_SetAttr`, String-keyed like

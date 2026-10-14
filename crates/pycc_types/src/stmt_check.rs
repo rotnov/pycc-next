@@ -690,6 +690,21 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
             [start.as_deref(), stop.as_deref(), step.as_deref()],
             *span,
         ),
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            span,
+        } => foreign::slice::check_set_slice(
+            env,
+            &[],
+            base,
+            [start.as_deref(), stop.as_deref(), step.as_deref()],
+            value,
+            *span,
+        ),
         HirStmt::DeleteAttr { base, span, .. } => {
             foreign::attr_store::check_delete_attr(env, &[], base, *span)
         }

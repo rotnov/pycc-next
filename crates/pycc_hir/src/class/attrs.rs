@@ -1000,3 +1000,57 @@ mod tests {
         );
     }
 }
+
+/// The prefix of the hidden module global a hoisted class attribute
+/// ([`hoist_class_attr`]) lives in.
+pub const HOISTED_CLASS_ATTR_PREFIX: &str = "__pycc_class_attr_";
+
+/// Non-strict mode (#3): a class attribute initialized with an expression
+/// that is not a literal (`PATTERN = re.compile(...)`, `TABLE = [1, 2]`) is
+/// evaluated once, where the class statement runs, into a hidden module
+/// global, and every read of the attribute is a read of that global (the
+/// `staticmethod(<ref>)` machinery, D-256): an instance or the class shares
+/// the one object, as in CPython. Returns the attribute's entry and the
+/// statement binding the global, or `None` for a shape this does not cover
+/// (strict mode, a bare name or a `lambda`, whose reads CPython would bind
+/// as a method, a dunder or class-private name, a container-method name).
+pub(super) fn hoist_class_attr(
+    assign: &pycc_ast::StmtAssign,
+    class_name: &str,
+    already: &[(String, Ty, ClassAttrValue)],
+    aliases: &[(String, Ty)],
+    imports: &[crate::ImportBinding],
+    signatures: &crate::expr::keyword_bind::SignatureTable,
+) -> Result<Option<((String, Ty, ClassAttrValue), crate::HirItem)>, Diagnostic> {
+    let ([Expr::Name(target)], value) = (assign.targets.as_slice(), assign.value.as_ref()) else {
+        return Ok(None);
+    };
+    let attr_name = target.id.as_str();
+    let staticmethod_call = matches!(value, Expr::Call(call)
+        if matches!(call.func.as_ref(), Expr::Name(name)
+            if matches!(name.id.as_str(), "staticmethod" | "classmethod")));
+    if !crate::func::is_non_strict(aliases)
+        || matches!(value, Expr::Name(_) | Expr::Lambda(_))
+        || staticmethod_call
+        || attr_name.starts_with("__")
+        || crate::expr::receiver_dispatch::RECEIVER_DISPATCHED_NAMES.contains(&attr_name)
+        || already.iter().any(|(name, _, _)| name == attr_name)
+    {
+        return Ok(None);
+    }
+    let hidden = format!("{HOISTED_CLASS_ATTR_PREFIX}{class_name}_{attr_name}");
+    let lowered = crate::expr::lower_expr(value, false, None, imports, signatures)?;
+    let entry = (
+        attr_name.to_string(),
+        Ty::Object,
+        ClassAttrValue::ForeignStatic(super::foreign_static::ForeignCallableRef {
+            root: hidden.clone(),
+            path: Vec::new(),
+        }),
+    );
+    let item = crate::HirItem::TopLevelStmt(crate::HirStmt::Assign {
+        target: hidden,
+        value: lowered,
+    });
+    Ok(Some((entry, item)))
+}

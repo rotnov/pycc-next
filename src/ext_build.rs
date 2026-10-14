@@ -761,8 +761,32 @@ impl ExtToolchain {
 #[path = "ext_build_tests/mod.rs"]
 mod ext_build_tests;
 
+/// `inc` with `PYCC_EXT_MODULE_DOC` defined as the entry module's docstring
+/// when `source` opens with one, so the module object's `__doc__` is it, as
+/// CPython sets it (`PyModuleDef.m_doc`); without one the shim keeps `NULL`
+/// and `__doc__` is `None`, as for a module with no docstring.
+pub(crate) fn with_module_doc(inc: String, source: &str) -> String {
+    let Ok(module) = pycc_parser::parse_all(source) else {
+        return inc;
+    };
+    let Some(pycc_ast::Stmt::Expr(first)) = module.body.first() else {
+        return inc;
+    };
+    let pycc_ast::Expr::StringLiteral(doc) = first.value.as_ref() else {
+        return inc;
+    };
+    let define = format!(
+        "#define PYCC_EXT_MODULE_DOC {}\n",
+        c_string_literal(doc.value.to_str())
+    );
+    match inc.find("\n\n") {
+        Some(at) => format!("{}\n{define}{}", &inc[..at], &inc[at + 1..]),
+        None => format!("{define}{inc}"),
+    }
+}
+
 /// `text` as a C string literal: backslash, `"` and non-printable bytes escaped.
-fn c_string_literal(text: &str) -> String {
+pub(crate) fn c_string_literal(text: &str) -> String {
     let mut out = String::from("\"");
     for byte in text.bytes() {
         match byte {

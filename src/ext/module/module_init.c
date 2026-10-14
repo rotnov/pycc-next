@@ -375,10 +375,16 @@ static PyModuleDef_Slot pycc_ext_slots[] = {
     {0, NULL},
 };
 
+/* The entry module's docstring, when it has one (`with_module_doc` in
+ * `src/ext_build.rs`), else no `__doc__` text. */
+#ifndef PYCC_EXT_MODULE_DOC
+#define PYCC_EXT_MODULE_DOC NULL
+#endif
+
 static struct PyModuleDef pycc_ext_moduledef = {
     PyModuleDef_HEAD_INIT,
     PYCC_EXT_MODULE_NAME_STR,
-    NULL,
+    PYCC_EXT_MODULE_DOC,
     0,
     /*
      * #1199: no `m_methods`. CPython would add every row before the body

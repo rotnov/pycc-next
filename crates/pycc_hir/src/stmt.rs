@@ -786,6 +786,7 @@ fn violates_walrus_placement(lowered: &HirStmt) -> bool {
         | HirStmt::TryStar { .. }
         | HirStmt::Delete { .. }
         | HirStmt::DeleteSlice { .. }
+        | HirStmt::SetSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::DeleteItem { .. }
         | HirStmt::ForeignImport { .. } => false,

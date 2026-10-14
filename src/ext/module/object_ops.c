@@ -796,6 +796,34 @@ int pycc_ext_obj_delslice(PyObject *o, PyObject *start, PyObject *stop, PyObject
 }
 
 /*
+ * Non-strict mode (#3): `o[start:stop:step] = value` with a CPython object
+ * `o` (`EXT_OBJ_SETSLICE_SYMBOL` in `crates/pycc_codegen/src/ext.rs`), the
+ * store twin of `pycc_ext_obj_delslice`.
+ *
+ * The bounds follow `pycc_ext_obj_slice_of`'s contract and the base is
+ * borrowed. `value` is a packer's new reference, consumed on every path; a
+ * NULL `value` is a failed packer whose exception is already set, and must
+ * not reach `PyObject_SetItem`. Returns `0`, or `-1` with the exception
+ * set -- whatever the base's own `__setitem__` raises for the `slice` key.
+ */
+int pycc_ext_obj_setslice(PyObject *o, PyObject *start, PyObject *stop, PyObject *step,
+                          int present, PyObject *value)
+{
+    PyObject *slice = pycc_ext_obj_slice_of(o, start, stop, step, present);
+    int status;
+
+    if (slice == NULL || value == NULL) {
+        Py_XDECREF(slice);
+        Py_XDECREF(value);
+        return -1;
+    }
+    status = PyObject_SetItem(o, slice, value);
+    Py_DECREF(slice);
+    Py_DECREF(value);
+    return status;
+}
+
+/*
  * #1457 (Part 2 of #1443): `o.name = value` with a CPython object `o`
  * (`EXT_OBJ_SETATTR_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
  *

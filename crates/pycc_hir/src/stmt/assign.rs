@@ -11,7 +11,7 @@ use crate::expr::{
     lower_set_comp,
 };
 use crate::int_boundary::check_boundary_literal;
-use crate::{HirStmt, ImportBinding, unsupported};
+use crate::{HirExpr, HirStmt, ImportBinding, unsupported};
 use pycc_ast::{Expr, ExprAttribute, StmtAssign};
 use pycc_diag::Diagnostic;
 
@@ -79,6 +79,27 @@ pub(super) fn lower_assign(
             // -- this compiler never gives a dict key an `int`-typed,
             // boundary-sensitive representation, so a key literal has
             // no runtime `int`-untagging boundary to protect.
+            if let Expr::Slice(slice) = sub.slice.as_ref() {
+                let value =
+                    lower_expr(&assign.value, in_function, class_name, imports, signatures)?;
+                let lower_bound = |bound: &Option<Box<Expr>>| {
+                    bound
+                        .as_deref()
+                        .map(|bound| {
+                            lower_expr(bound, in_function, class_name, imports, signatures)
+                                .map(Box::new)
+                        })
+                        .transpose()
+                };
+                return Ok(HirStmt::SetSlice {
+                    base: Box::new(HirExpr::Name(base_name.id.to_string())),
+                    start: lower_bound(&slice.lower)?,
+                    stop: lower_bound(&slice.upper)?,
+                    step: lower_bound(&slice.step)?,
+                    value: Box::new(value),
+                    span: pycc_diag::Span::new(sub.range.start().into(), sub.range.end().into()),
+                });
+            }
             let key = lower_expr(&sub.slice, in_function, class_name, imports, signatures)?;
             let value = lower_expr(&assign.value, in_function, class_name, imports, signatures)?;
             // This lowering step is type-blind (see the comment

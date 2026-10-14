@@ -224,6 +224,7 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
         // `del o[a:b]` (Part 2c of #1371) binds no name, and `pycc_hir`
         // refuses a walrus in its operands.
         MirStmt::ObjDelSlice { .. } => {}
+        MirStmt::ObjSetSlice { .. } => {}
         // `o.x = v` and `del o.x` (#1457) bind no name either: the store
         // writes into the object, and `pycc_hir` refuses a walrus in a `del`.
         MirStmt::ObjAttrSet { .. } | MirStmt::ObjDelAttr { .. } => {}

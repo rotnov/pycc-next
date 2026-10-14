@@ -408,6 +408,41 @@ pub(crate) fn emit_obj_del_slice_stmt<'ctx>(
     Ok(())
 }
 
+// Non-strict mode (#3): `o[a:b:c] = v`, the store twin of `del o[a:b:c]`;
+// `foreign_slice::emit_set_slice` owns the evaluation order.
+pub(crate) fn emit_obj_set_slice_stmt<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &mut HashMap<String, StorageSlot<'ctx>>,
+    stmt: &MirStmt,
+) -> Result<(), String> {
+    let MirStmt::ObjSetSlice {
+        base,
+        start,
+        stop,
+        step,
+        value,
+    } = stmt
+    else {
+        unreachable!()
+    };
+    foreign_slice::emit_set_slice(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        base,
+        [start.as_ref(), stop.as_ref(), step.as_ref()],
+        value,
+    );
+    Ok(())
+}
+
 // #1457 (Part 2 of #1443): `o.x = v` and `del o.x` on a CPython
 // object; `foreign_store` owns the evaluation order and packing.
 pub(crate) fn emit_obj_attr_set_stmt<'ctx>(

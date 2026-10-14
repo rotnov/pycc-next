@@ -200,3 +200,80 @@ pub(super) fn emit_del_slice<'ctx>(
         "foreign_del_slice",
     );
 }
+
+/// Emits one `o[start:stop:step] = value` (non-strict mode, #3). The value
+/// -- always a CPython object, `pycc_mir` boxes a native one -- is evaluated
+/// first and held across the base and bounds, CPython's order, then packed
+/// into the new reference `pycc_ext_obj_setslice` consumes. It returns `0`,
+/// or `-1` with the CPython exception set, which takes the failure edge.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn emit_set_slice<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    base: &MirExpr,
+    bounds: [Option<&MirExpr>; 3],
+    value: &MirExpr,
+) {
+    let value_scalar = crate::object_unbox::emit_pack_operand(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        value,
+    );
+    let held_value = crate::object_release::hold(context, module, rt, value, &value_scalar);
+    emit_with_operands(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        base,
+        bounds,
+        |base, bounds| {
+            let edge = ForeignFailEdge::for_current(builder);
+            let mut args = slice_arguments(context, builder, module, base, bounds);
+            args.push(emit_pack(context, builder, module, value_scalar, "foreign_slice_value").into());
+            let ptr = context.ptr_type(inkwell::AddressSpace::default());
+            let setslice = shim_fn(
+                module,
+                EXT_OBJ_SETSLICE_SYMBOL,
+                context.i32_type().fn_type(
+                    &[
+                        ptr.into(),
+                        ptr.into(),
+                        ptr.into(),
+                        ptr.into(),
+                        context.i32_type().into(),
+                        ptr.into(),
+                    ],
+                    false,
+                ),
+            );
+            let status = builder
+                .build_call(setslice, &args, "foreign_set_slice")
+                .expect("build_call should not fail for pycc_ext_obj_setslice")
+                .try_as_basic_value()
+                .expect_basic("pycc_ext_obj_setslice returns int")
+                .into_int_value();
+            route_negative(
+                context,
+                builder,
+                module,
+                rt,
+                edge,
+                status,
+                "foreign_set_slice",
+            );
+        },
+    );
+    held_value.release(builder, rt);
+    release_scalar_if_temporary(context, builder, rt, value, &value_scalar);
+}

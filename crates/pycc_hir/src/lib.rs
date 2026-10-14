@@ -37,7 +37,7 @@ pub use boolop::{BoolOpKind, bool_op_result_ty};
 pub use buffer_store::{body_returns_inside_finally, body_returns_slice_of, body_stores_into};
 pub use class::enum_call::enum_class_call_message;
 pub use class::{
-    ClassAttrValue, ClassNamespaceWinner, CopiedMemberKind, EnumMemberValue, EqRefusal,
+    ClassAttrValue, ClassNamespaceWinner, CopiedMemberKind, HOISTED_CLASS_ATTR_PREFIX, EnumMemberValue, EqRefusal,
     ForeignCallableRef, HashRefusal, HirClassDef, InheritedCopy, InstanceEq, InstanceHash,
     InstanceHashLowering, PropertyDef, ProtocolMember, SUPER_TARGET_MARKER, binds_member,
     class_name_foreign_static, class_namespace_winner, dataclass_repr_body,

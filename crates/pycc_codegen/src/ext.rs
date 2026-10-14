@@ -395,6 +395,15 @@ pub const EXT_OBJ_BUILD_LIST_SYMBOL: &str = "pycc_ext_obj_build_list";
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_DELSLICE_SYMBOL: &str = "pycc_ext_obj_delslice";
 
+/// The fixed C shim's slice-store helper (non-strict mode, #3):
+/// `int pycc_ext_obj_setslice(PyObject *o, PyObject *start, PyObject *stop,
+/// PyObject *step, int present, PyObject *value)`, the store twin of
+/// [`EXT_OBJ_DELSLICE_SYMBOL`] with the same bounds contract and `value` a
+/// packer's new reference it consumes on every path. It performs
+/// `PyObject_SetItem(base, slice(start, stop, step), value)` and returns
+/// `0`, or `-1` with the CPython exception already set.
+pub const EXT_OBJ_SETSLICE_SYMBOL: &str = "pycc_ext_obj_setslice";
+
 /// The fixed C shim's attribute-store helper (#1457, Part 2 of #1443):
 /// `int pycc_ext_obj_setattr(PyObject *o, const char *name, PyObject *value)`
 /// with `o` borrowed and `value` a packer's new reference the helper
@@ -1048,6 +1057,7 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::Return(_)
         | MirStmt::AttrSet { .. }
         | MirStmt::ObjDelSlice { .. }
+        | MirStmt::ObjSetSlice { .. }
         | MirStmt::ObjAttrSet { .. }
         | MirStmt::ObjDelAttr { .. }
         | MirStmt::ObjSetItem { .. }

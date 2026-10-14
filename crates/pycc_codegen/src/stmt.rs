@@ -419,6 +419,15 @@ pub(crate) fn emit_stmt<'ctx>(
             locals,
             stmt,
         ),
+        MirStmt::ObjSetSlice { .. } => store_stmt::emit_obj_set_slice_stmt(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            stmt,
+        ),
         MirStmt::ObjAttrSet { .. } => store_stmt::emit_obj_attr_set_stmt(
             context,
             builder,

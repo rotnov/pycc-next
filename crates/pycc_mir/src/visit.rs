@@ -283,6 +283,18 @@ impl MirStmt {
                 .chain(stop.iter())
                 .chain(step.iter())
                 .collect(),
+            MirStmt::ObjSetSlice {
+                base,
+                start,
+                stop,
+                step,
+                value,
+            } => [value, base]
+                .into_iter()
+                .chain(start.iter())
+                .chain(stop.iter())
+                .chain(step.iter())
+                .collect(),
             MirStmt::ListCompAssign {
                 source, cond, elt, ..
             }
@@ -377,6 +389,7 @@ impl MirStmt {
             | MirStmt::ReturnBufferSlice { .. }
             | MirStmt::AttrSet { .. }
             | MirStmt::ObjDelSlice { .. }
+            | MirStmt::ObjSetSlice { .. }
             | MirStmt::ObjAttrSet { .. }
             | MirStmt::ObjDelAttr { .. }
             | MirStmt::ObjSetItem { .. }

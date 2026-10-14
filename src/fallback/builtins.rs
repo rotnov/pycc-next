@@ -60,7 +60,18 @@ impl Plan {
         let message = failure.diagnostic.message.as_str();
         let edits = if let Some(name) = between(message, "call to builtin `", "` is valid Python")
         {
-            self.builtin_call(at, name)
+            // The span may cover an enclosing expression (`xs.append(chr(n))`
+            // in a nested function): the first call of `name` inside it that
+            // is not rewritten yet.
+            let end = at + (span.end - span.start);
+            (at..end.max(at + 1))
+                .map(|start| self.builtin_call(start, name))
+                .find(|edits| {
+                    edits
+                        .first()
+                        .is_some_and(|(start, ..)| !self.object_builtins.contains_key(start))
+                })
+                .unwrap_or_default()
         } else if let Some(name) = between(message, "name `", "` is not defined") {
             self.builtin_value(at, name)
         } else if let Some(name) = between(message, "call to undefined function `", "`") {
@@ -88,7 +99,12 @@ impl Plan {
     }
 
     fn builtin_call(&self, at: u32, name: &str) -> Vec<(u32, u32, String)> {
-        if !name.starts_with(|c: char| c.is_ascii_lowercase())
+        // A builtin function, or a builtin exception class constructed
+        // with a CPython object (`ValueError("bad: " + obj)`).
+        let exception = ["Error", "Exception", "Warning"]
+            .iter()
+            .any(|suffix| name.ends_with(suffix));
+        if !(name.starts_with(|c: char| c.is_ascii_lowercase()) || exception)
             || FRAME_BUILTINS.contains(&name)
             || !self.name_at(at, name, true)
         {

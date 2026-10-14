@@ -65,6 +65,7 @@ fn collect_stmt<'a>(stmt: &'a HirStmt, out: &mut Vec<&'a HirStmt>) {
         | HirStmt::Raise { .. }
         | HirStmt::Delete { .. }
         | HirStmt::DeleteSlice { .. }
+        | HirStmt::SetSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::DeleteItem { .. }
         | HirStmt::ForeignImport { .. }
@@ -96,6 +97,7 @@ pub(super) fn stmt_key(stmt: &HirStmt) -> Option<NodeKey> {
         HirStmt::DeleteSlice { .. } | HirStmt::DeleteAttr { .. } | HirStmt::DeleteItem { .. } => {
             "del".into()
         }
+        HirStmt::SetSlice { .. } => "[:]=".into(),
         HirStmt::ForeignImport { .. } => "import".into(),
         HirStmt::Break => "break".into(),
         HirStmt::Continue => "continue".into(),
@@ -177,6 +179,20 @@ pub(super) fn stmt_own_exprs<'a>(stmt: &'a HirStmt, visit: &mut dyn FnMut(&'a Hi
             step,
             ..
         } => {
+            visit(base);
+            for bound in [start, stop, step].into_iter().flatten() {
+                visit(bound);
+            }
+        }
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            ..
+        } => {
+            visit(value);
             visit(base);
             for bound in [start, stop, step].into_iter().flatten() {
                 visit(bound);

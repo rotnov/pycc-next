@@ -305,6 +305,17 @@ impl Verifier<'_> {
                 self.expr(base);
                 self.exprs([start, stop, step].into_iter().flatten());
             }
+            MirStmt::ObjSetSlice {
+                base,
+                start,
+                stop,
+                step,
+                value,
+            } => {
+                self.expr(value);
+                self.expr(base);
+                self.exprs([start, stop, step].into_iter().flatten());
+            }
             MirStmt::ListCompAssign {
                 source, cond, elt, ..
             } => {

@@ -551,6 +551,7 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::ReturnBufferSlice { .. }
             | MirStmt::AttrSet { .. }
             | MirStmt::ObjDelSlice { .. }
+            | MirStmt::ObjSetSlice { .. }
             | MirStmt::ObjAttrSet { .. }
             | MirStmt::ObjDelAttr { .. }
             | MirStmt::ObjSetItem { .. }

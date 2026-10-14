@@ -283,6 +283,18 @@ impl Scope<'_, '_> {
                 exprs.push(base);
                 exprs.extend([start, stop, step].into_iter().flatten().map(AsMut::as_mut));
             }
+            HirStmt::SetSlice {
+                base,
+                start,
+                stop,
+                step,
+                value,
+                ..
+            } => {
+                exprs.push(value);
+                exprs.push(base);
+                exprs.extend([start, stop, step].into_iter().flatten().map(AsMut::as_mut));
+            }
             HirStmt::DeleteAttr { base, .. } => exprs.push(base),
             HirStmt::DeleteItem { base, key, .. } => {
                 exprs.push(base);

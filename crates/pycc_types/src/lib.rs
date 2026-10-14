@@ -75,7 +75,7 @@ pub use module::{
 #[cfg(test)]
 pub(crate) use module::{check_with_signatures, checked_function_signatures};
 pub use monomorphize::*;
-pub use non_strict::set_non_strict;
+pub use non_strict::{non_strict_checked, set_non_strict};
 
 use pycc_diag::{Diagnostic, Span};
 #[cfg(test)]

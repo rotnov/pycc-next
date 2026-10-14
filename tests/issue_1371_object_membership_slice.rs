@@ -208,14 +208,21 @@ fn the_shapes_outside_part_2b_are_refused() {
             "I0404",
             "slicing a CPython object with a `None` bound",
         ),
-        // A slice store keeps the HIR's own refusal. A slice `del` was a
-        // row here until Part 2c of #1371 admitted it
-        // (`tests/issue_1371_object_slice_del.rs`).
+        // A slice store on an object is admitted (`tests/package_ext.rs`);
+        // a native list stored there is not, as a copy would break
+        // aliasing. A slice `del` was a row here until Part 2c of #1371
+        // admitted it (`tests/issue_1371_object_slice_del.rs`).
         (
             "obj_slice_store",
-            "callbacks[1:2] = 3\n",
+            "callbacks[1:2] = xs\n",
+            "I0404",
+            "assigning a `list[int]` to a slice of a CPython object",
+        ),
+        (
+            "native_slice_store",
+            "xs[0:1] = [3]\n",
             "C0001",
-            "a slice (`a:b`)",
+            "assigning to a slice (`xs[a:b] = ys`) is supported only on a CPython object yet",
         ),
     ] {
         assert_one_error(tag, &format!("{HEAD}{tail}"), code, needle);

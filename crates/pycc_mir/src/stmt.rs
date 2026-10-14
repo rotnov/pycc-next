@@ -902,6 +902,36 @@ pub(super) fn lower_stmt(
                 step: lower_bound(step),
             }
         }
+        // Non-strict mode (#3): `pycc_types` admits a slice store only on a
+        // CPython object base; the value is evaluated first.
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            ..
+        } => {
+            let value = crate::obj_arith::object_arg(lower_expr(
+                value,
+                scopes,
+                classes,
+                current_class,
+            ));
+            let base = lower_expr(base, scopes, classes, current_class);
+            let lower_bound = |bound: &Option<Box<pycc_hir::HirExpr>>| {
+                bound
+                    .as_deref()
+                    .map(|bound| lower_expr(bound, scopes, classes, current_class))
+            };
+            MirStmt::ObjSetSlice {
+                base,
+                start: lower_bound(start),
+                stop: lower_bound(stop),
+                step: lower_bound(step),
+                value,
+            }
+        }
         // #1457: `pycc_types` admits an attribute `del` only on a CPython
         // object base, as it does a slice `del`.
         HirStmt::DeleteAttr { base, attr, .. } => MirStmt::ObjDelAttr {

@@ -253,6 +253,20 @@ impl<'a> Walker<'a> {
                     self.expr(bound);
                 }
             }
+            HirStmt::SetSlice {
+                base,
+                start,
+                stop,
+                step,
+                value,
+                ..
+            } => {
+                self.expr(value);
+                self.expr(base);
+                for bound in [start, stop, step].into_iter().flatten() {
+                    self.expr(bound);
+                }
+            }
             HirStmt::DeleteAttr { base, .. } => self.expr(base),
             HirStmt::DeleteItem { base, key, .. } => {
                 self.expr(base);

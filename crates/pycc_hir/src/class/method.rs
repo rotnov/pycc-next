@@ -278,6 +278,18 @@ pub(super) fn lower_method(
     } else {
         return_ty
     };
+    // Non-strict mode (#3): a method returning an object that can run off
+    // its end returns `None` there, as a module-level function does
+    // (`crate::func`).
+    let mut body = body;
+    if return_ty == Ty::Object
+        && crate::func::is_non_strict(aliases)
+        && !matches!(kind, MethodKind::AbstractMethod)
+        && !crate::body_yields(&body)
+        && !crate::return_coverage::block_always_returns(&body)
+    {
+        body.push(crate::HirStmt::Return(Some(HirExpr::NoneLiteral)));
+    }
     // #377/#436: compute the mangled name based on the method kind. A
     // regular method uses `<Class>.<name>`. A property getter uses the
     // same `<Class>.<name>`. A property setter uses

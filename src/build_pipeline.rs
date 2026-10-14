@@ -499,6 +499,7 @@ fn plan_ext(
         .map(|parsed| pycc_ast::ext_signatures(&parsed, &entry_source))
         .unwrap_or_default();
     let inc_body = ext_build::install_signatures(inc_body, &published_signatures);
+    let inc_body = ext_build::with_module_doc(inc_body, &entry_source);
     write_ext_source(&shim, ext_build::SHIM_C)?;
     write_ext_source(&inc, &inc_body)?;
     Ok(ExtPlan {

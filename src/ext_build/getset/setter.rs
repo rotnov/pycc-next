@@ -46,9 +46,16 @@ fn unpack_value(
     match ty {
         Ty::Int => ("long long v;", call("int"), "word = v;"),
         // The `f64` bit pattern, the inverse of the getter's `memcpy`.
+        // Non-strict mode (#3): a Python store into an inferred `float`
+        // attribute takes an `int` too (`dmp.Diff_Timeout = 0`), converted
+        // as `float(x)`; strict mode keeps D-086's exact boundary.
         Ty::Float => (
             "double v;",
-            call("float"),
+            call(if pycc_types::non_strict_checked() {
+                "float_or_int"
+            } else {
+                "float"
+            }),
             "memcpy(&word, &v, sizeof word);",
         ),
         // `0` or `1`, widened with no sign extension, as the compiled store

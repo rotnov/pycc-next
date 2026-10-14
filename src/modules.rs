@@ -220,7 +220,16 @@ pub(crate) fn load_with(
         entry_display_dir,
         root: None,
         manifest: None,
-        entry_module_name: entry_module_name.map(str::to_string),
+        // An artifact built to live in its package is imported under its
+        // dotted name, which is what its `__name__` reads in CPython
+        // (`pkg/m.abi3.so` is `pkg.m`).
+        entry_module_name: match relative_imports {
+            RelativeImports::ForeignFromEntry => entry_module_name.map(|name| {
+                dotted_entry_name(&spelled_path(entry, &canonical))
+                    .unwrap_or_else(|| name.to_string())
+            }),
+            RelativeImports::Project => entry_module_name.map(str::to_string),
+        },
         entry_package: match relative_imports {
             RelativeImports::ForeignFromEntry => {
                 top_level_package(&spelled_path(entry, &canonical))
@@ -766,6 +775,30 @@ fn spelled_path(entry: &Path, canonical: &Path) -> PathBuf {
 /// `entry`'s directory is not a package. Read from the source tree alone,
 /// never from `pycc.toml`: the package a module sits in is a property of
 /// the tree CPython imports it from, not of pycc's source root.
+/// The dotted name CPython imports `entry` under when its directory is a
+/// package: the package directories above it (each holding an
+/// `__init__.py`), then the module's own name, which a package
+/// `__init__.py` does not add (`pkg/sub/m.py` is `pkg.sub.m`,
+/// `pkg/__init__.py` is `pkg`). `None` outside a package, or when a part is
+/// not valid UTF-8.
+fn dotted_entry_name(entry: &Path) -> Option<String> {
+    let stem = entry.file_stem()?.to_str()?;
+    let mut parts = Vec::new();
+    if stem != "__init__" {
+        parts.push(stem.to_string());
+    }
+    let mut dir = entry.parent();
+    while let Some(current) = dir.filter(|dir| dir.join("__init__.py").is_file()) {
+        parts.push(current.file_name()?.to_str()?.to_string());
+        dir = current.parent();
+    }
+    if parts.is_empty() || (stem != "__init__" && parts.len() == 1) {
+        return None;
+    }
+    parts.reverse();
+    Some(parts.join("."))
+}
+
 fn top_level_package(entry: &Path) -> Option<String> {
     let mut package = None;
     let mut dir = entry.parent();

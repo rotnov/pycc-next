@@ -566,6 +566,20 @@ fn check_raise_operand(
             ));
         }
         let argument_type = infer_expr_in(env, local_names, &args[0])?;
+        // Non-strict mode (#3): a message that is a CPython object (`"bad: "
+        // + param` on an object `param`) builds the exception in CPython:
+        // the fallback loop calls it through `builtins`, and the CPython
+        // exception object is raised.
+        if argument_type == Ty::Object && crate::non_strict::is_non_strict() {
+            return Err(crate::locate::place_expr(
+                Diagnostic::error(
+                    "C0001",
+                    format!("call to builtin `{callee}` is valid Python but not implemented yet"),
+                    Span::new(0, 0),
+                ),
+                expr,
+            ));
+        }
         if argument_type != Ty::Str {
             return Err(Diagnostic::error(
                 "T0021",

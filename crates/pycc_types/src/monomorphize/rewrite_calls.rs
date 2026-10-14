@@ -633,6 +633,21 @@ pub(crate) fn rewrite_generic_calls_in_stmt(
             }
             Ok(())
         }
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            ..
+        } => {
+            rewrite_generic_calls_in_expr(env, local_names, value, instantiations, seen)?;
+            rewrite_generic_calls_in_expr(env, local_names, base, instantiations, seen)?;
+            for bound in [start, stop, step].into_iter().flatten() {
+                rewrite_generic_calls_in_expr(env, local_names, bound, instantiations, seen)?;
+            }
+            Ok(())
+        }
         // #1457: an attribute `del` reads its base.
         HirStmt::DeleteAttr { base, .. } => {
             rewrite_generic_calls_in_expr(env, local_names, base, instantiations, seen)?;

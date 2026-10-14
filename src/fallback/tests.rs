@@ -8,6 +8,8 @@ const NATIVE: Publishes = Publishes {
     functions: true,
     classes: false,
     infers_unannotated: true,
+    variables: false,
+    foreign_relative_imports: false,
 };
 
 fn stmts(source: &str) -> Vec<Stmt> {
@@ -169,6 +171,8 @@ fn a_compiled_definition_fallback_code_cannot_see_falls_back_too() {
         functions: true,
         classes: true,
         infers_unannotated: false,
+        variables: false,
+        foreign_relative_imports: false,
     };
     let mut plan = Plan::new(source, "m.py", ext).expect("parses");
     plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);

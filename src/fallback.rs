@@ -90,6 +90,18 @@ pub(crate) struct Publishes {
     /// Python code may call it with anything, so fallback code that reads
     /// one makes it fall back too, like a private helper.
     pub(crate) infers_unannotated: bool,
+    /// Whether every module-level variable and import binding is visible to
+    /// Python code as a module attribute (an `--ext` module: `mod.X`,
+    /// `from mod import X`, a package `__init__`'s re-exports). Each such
+    /// name is then read by Python code as if by fallback code: a compiled
+    /// global is kept native and copied into the namespace at every store
+    /// (`Plan::native_globals`), an import is also run by CPython
+    /// (`Plan::mirrored`) or falls back.
+    pub(crate) variables: bool,
+    /// Whether the entry module's relative imports bind CPython objects
+    /// (`--foreign-relative-imports`): such an import is not a project
+    /// import, so it may fall back.
+    pub(crate) foreign_relative_imports: bool,
 }
 
 impl Publishes {
@@ -176,6 +188,10 @@ pub(crate) struct Plan {
     /// publishes both; an embedded executable with fallback code publishes
     /// its functions).
     publishes: Publishes,
+    /// The module-level names Python code outside the module reads
+    /// (`Publishes::variables`): every name a top-level statement other
+    /// than a `def` or `class` binds.
+    external: BTreeSet<String>,
 }
 
 impl Plan {
@@ -204,6 +220,17 @@ impl Plan {
                     if def.parameters.iter_non_variadic_params().any(|p| p.default.is_some())),
             })
             .collect::<Vec<_>>();
+        let external = if publishes.variables {
+            stmts
+                .iter()
+                .filter(|stmt| matches!(stmt.kind, Kind::Other | Kind::Import))
+                .flat_map(|stmt| stmt.bound.iter())
+                .filter(|name| !name.starts_with("__pycc") && name.as_str() != "*")
+                .cloned()
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
         Some(Self {
             source: source.to_string(),
             display: display.to_string(),
@@ -216,6 +243,7 @@ impl Plan {
             objectified: BTreeSet::new(),
             entry_dir: None,
             publishes,
+            external,
         })
     }
 
@@ -285,7 +313,9 @@ impl Plan {
     fn is_project_import(&self, index: usize) -> bool {
         let modules: Vec<&str> = match &self.ast[index] {
             Stmt::Import(import) => import.names.iter().map(|a| a.name.as_str()).collect(),
-            Stmt::ImportFrom(import) if import.level > 0 => return true,
+            Stmt::ImportFrom(import) if import.level > 0 => {
+                return !self.publishes.foreign_relative_imports;
+            }
             Stmt::ImportFrom(import) => import.module.iter().map(|m| m.as_str()).collect(),
             _ => return false,
         };
@@ -425,6 +455,7 @@ impl Plan {
                 .keys()
                 .chain(&self.mirrored)
                 .flat_map(|index| &self.stmts[*index].mentions)
+                .chain(&self.external)
                 .collect();
             // A name fallback code reads that no top-level statement binds
             // may come from a `from m import *`, whose names are not known
@@ -568,7 +599,7 @@ impl Plan {
     /// The module globals that live in the namespace dictionary.
     fn dict_globals(&self) -> BTreeSet<String> {
         let mut fallback_bound = BTreeSet::new();
-        let mut fallback_read = BTreeSet::new();
+        let mut fallback_read = self.external.clone();
         let mut compiled_bound = BTreeSet::new();
         for (index, stmt) in self.stmts.iter().enumerate() {
             if self.fallback.contains_key(&index) {
@@ -737,11 +768,51 @@ pub(crate) fn with_fallback<T, E>(
     set_override(None);
     let first = attempt();
     let failures = match &first {
+        Ok(_) if publishes.variables && mode_allows(path) => {
+            // Nothing falls back, but Python code reads the module's
+            // variables: compile the rewrite that publishes them.
+            let Some(mut plan) =
+                read_entry(path).and_then(|s| Plan::new(&s, display, publishes))
+            else {
+                return first;
+            };
+            if plan.external.is_empty() {
+                return first;
+            }
+            plan.set_entry_dir(path.parent().map(Path::to_path_buf));
+            plan.cascade();
+            if plan.falls_back_a_project_import() {
+                return first;
+            }
+            let rendered = plan.render();
+            if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
+                eprintln!("--- fallback rewrite ---\n{}", rendered.text);
+            }
+            set_override(Some(rendered.text.clone()));
+            let value = match attempt() {
+                Ok(value) => Some(value),
+                Err(failure) => split(&failure).and_then(|failures| {
+                    converge(&mut plan, Some(rendered), failures, &attempt, &split)
+                }),
+            };
+            return match value {
+                Some(value) if !plan.falls_back_a_project_import() => {
+                    if REPORT.load(Ordering::Relaxed) {
+                        for line in plan.report_lines() {
+                            eprintln!("{line}");
+                        }
+                    }
+                    Ok(value)
+                }
+                _ => {
+                    set_override(None);
+                    attempt()
+                }
+            };
+        }
         Ok(_) => return first,
         Err(failure) => match split(failure) {
-            Some(failures)
-                if crate::mode::non_strict_for(path)
-                    && std::env::var_os("PYCC_NO_FALLBACK").is_none() =>
+            Some(failures) if mode_allows(path) =>
             {
                 failures
             }
@@ -802,6 +873,12 @@ pub(crate) fn with_fallback<T, E>(
         }
     }
     Ok(value)
+}
+
+/// Whether the fallback loop runs for `path`: non-strict mode, and not
+/// disabled with `PYCC_NO_FALLBACK`.
+fn mode_allows(path: &Path) -> bool {
+    crate::mode::non_strict_for(path) && std::env::var_os("PYCC_NO_FALLBACK").is_none()
 }
 
 /// Whether a statement that fell back for `reason` may compile in a later

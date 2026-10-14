@@ -336,6 +336,7 @@ pub(crate) fn collect_local_names<'a>(body: &'a [HirStmt], names: &mut Vec<&'a s
             | HirStmt::DictSet { .. }
             | HirStmt::AttrSet { .. }
             | HirStmt::DeleteSlice { .. }
+            | HirStmt::SetSlice { .. }
             | HirStmt::DeleteAttr { .. }
             | HirStmt::DeleteItem { .. }
             | HirStmt::Break

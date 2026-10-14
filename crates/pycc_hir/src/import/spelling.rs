@@ -88,6 +88,10 @@ pub(super) fn carrier_spelling(local_name: &str) -> Option<&str> {
 /// [`shadows_a_resolved_spelling`] can binary-search it. Regenerate with
 /// `python3.14 -c "import builtins, keyword; print(sorted(n for n in
 /// dir(builtins) if not keyword.iskeyword(n)))"`.
+///
+/// `__doc__` is left out: every module has its own `__doc__` attribute, pycc
+/// never reads the bare spelling as the builtins module's, and a package
+/// `__init__` re-exporting `from .impl import __doc__` is common.
 pub(super) const PYTHON_BUILTINS: &[&str] = &[
     "ArithmeticError",
     "AssertionError",
@@ -164,7 +168,6 @@ pub(super) const PYTHON_BUILTINS: &[&str] = &[
     "_IncompleteInputError",
     "__build_class__",
     "__debug__",
-    "__doc__",
     "__import__",
     "__loader__",
     "__name__",
@@ -302,6 +305,7 @@ mod tests {
             assert!(shadows_a_resolved_spelling(name), "{name}");
         }
         assert!(!shadows_a_resolved_spelling("np"));
+        assert!(!shadows_a_resolved_spelling("__doc__"));
     }
 
     /// #1378: the pre-PEP 585 `typing` container aliases are resolved by

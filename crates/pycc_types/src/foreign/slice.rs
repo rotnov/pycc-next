@@ -69,5 +69,39 @@ pub(crate) fn check_delete_slice(
     object_slice_ty(env, local_names, bounds).map(|_| ())
 }
 
+/// Checks `base[start:stop:step] = value` (non-strict mode, #3): the value
+/// is inferred first, as CPython evaluates it first, then the base, then --
+/// only for a CPython object base -- every present bound under
+/// [`object_slice_ty`]'s rule. The value must be packable into the CPython
+/// object the store receives ([`crate::object_box::admits_value`]); any
+/// other base is a located `C0001`.
+pub(crate) fn check_set_slice(
+    env: &Environment,
+    local_names: &[&str],
+    base: &HirExpr,
+    bounds: [Option<&HirExpr>; 3],
+    value: &HirExpr,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let value_ty = infer_expr_in(env, local_names, value)?;
+    if infer_expr_in(env, local_names, base)? != Ty::Object {
+        return Err(Diagnostic::error(
+            "C0001",
+            "assigning to a slice (`xs[a:b] = ys`) is supported only on a CPython object yet",
+            span,
+        ));
+    }
+    object_slice_ty(env, local_names, bounds)?;
+    if value_ty == Ty::Object
+        || crate::object_box::admits_value(env, value, &value_ty, &Ty::Object)?
+    {
+        return Ok(());
+    }
+    Err(super::object_operation_unsupported(&format!(
+        "assigning a `{}` to a slice of a CPython object",
+        value_ty.name()
+    )))
+}
+
 #[cfg(test)]
 mod tests;

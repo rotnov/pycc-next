@@ -89,6 +89,7 @@ pub(super) fn collect_bindings<'a>(
             | HirStmt::AttrSet { .. }
             | HirStmt::Raise { .. }
             | HirStmt::DeleteSlice { .. }
+            | HirStmt::SetSlice { .. }
             | HirStmt::DeleteAttr { .. }
             | HirStmt::DeleteItem { .. }
             | HirStmt::Break
@@ -219,6 +220,20 @@ pub(super) fn for_each_stmt_expr<'a>(stmt: &'a HirStmt, f: &mut dyn FnMut(&'a Hi
             step,
             ..
         } => {
+            f(base);
+            for e in [start, stop, step].into_iter().flatten() {
+                f(e);
+            }
+        }
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            ..
+        } => {
+            f(value);
             f(base);
             for e in [start, stop, step].into_iter().flatten() {
                 f(e);

@@ -31,6 +31,12 @@ pub(crate) struct ExtPublishedClass {
     /// classes an object `isinstance` against which this class's type
     /// object answers (Part 7 of #1371, `compiled_class_isinstance_c`).
     pub(crate) mro: Vec<String>,
+    /// The literal class attributes (`DIFF_DELETE = -1`) the class and its
+    /// bases bind, MRO-resolved like `methods`, each set on the type object
+    /// when it is created, so `mod.Class.NAME` and `instance.NAME` read
+    /// them from Python as CPython does. A class attribute compiled code
+    /// folds is a constant, so the copy never goes stale.
+    pub(crate) constants: Vec<(String, pycc_hir::ClassAttrValue)>,
 }
 
 /// The published classes and, for each, its MRO-resolved method set.
@@ -174,10 +180,42 @@ pub(crate) fn collect_class_publications(
                 class: class.to_string(),
                 methods,
                 mro: class_def.mro.clone(),
+                constants: class_constants(module, class_def),
             });
         }
     }
     published
+}
+
+/// The literal class attributes `class_def` reads through its MRO, each
+/// from the class that owns the name ([`namespace_owner`]), in MRO order.
+fn class_constants(
+    module: &HirModule,
+    class_def: &HirClassDef,
+) -> Vec<(String, pycc_hir::ClassAttrValue)> {
+    use pycc_hir::ClassAttrValue;
+    let mut constants: Vec<(String, ClassAttrValue)> = Vec::new();
+    for ancestor in &class_def.mro {
+        let Some((_, def)) = module.class_defs.iter().find(|(held, _)| held == ancestor) else {
+            continue;
+        };
+        for (name, _, value) in &def.class_attrs {
+            let literal = matches!(
+                value,
+                ClassAttrValue::Int(_)
+                    | ClassAttrValue::Float(_)
+                    | ClassAttrValue::Bool(_)
+                    | ClassAttrValue::Str(_)
+            );
+            if literal
+                && !constants.iter().any(|(held, _)| held == name)
+                && namespace_owner(module, &class_def.mro, name) == Some(ancestor.as_str())
+            {
+                constants.push((name.clone(), value.clone()));
+            }
+        }
+    }
+    constants
 }
 
 /// Every name `class_def`'s own body binds **in the class namespace**, in

@@ -190,6 +190,9 @@ pub(crate) fn check_attr_set(
     if !is_assignable(value_ty.clone(), attr_ty.clone())
         && !object_box::admits_value(env, value, &value_ty, &attr_ty)?
     {
+        if let Ty::Instance(class_name) = &base_ty {
+            crate::non_strict::request_attr_widen(env, class_name, attr, &attr_ty, &value_ty);
+        }
         return Err(Diagnostic::error(
             "T0021",
             format!(

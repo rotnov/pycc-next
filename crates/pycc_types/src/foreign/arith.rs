@@ -135,8 +135,9 @@ pub(crate) fn object_display_ty<'a>(
     if !crate::non_strict::is_non_strict() {
         return None;
     }
+    let elements: Vec<&HirExpr> = elements.into_iter().collect();
     let tys = elements
-        .into_iter()
+        .iter()
         .map(|element| infer_expr_in(env, local_names, element).ok())
         .collect::<Option<Vec<Ty>>>()?;
     if tys.is_empty() && crate::non_strict::empty_display_untyped() {
@@ -146,7 +147,21 @@ pub(crate) fn object_display_ty<'a>(
         return None;
     }
     // `None` is CPython's own `Py_None` there.
-    Some(match tys.iter().find(|ty| **ty != Ty::None && !is_object_operand(env, ty)) {
+    // A fresh native list nothing else holds (`(text, [])`) is copied into
+    // the CPython one as it is boxed, which no alias can observe.
+    let fresh = |element: &HirExpr, ty: &Ty| crate::object_box::fresh_container(env, element, ty);
+    // A name holding a native container there becomes an `object` itself
+    // (widening), so the container it builds is the CPython one.
+    for (element, ty) in elements.iter().zip(&tys) {
+        if let HirExpr::Name(name) = element
+            && matches!(ty, Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_))
+        {
+            crate::non_strict::request_widen(name, ty, &Ty::Object, |_| true);
+        }
+    }
+    Some(match elements.iter().zip(&tys).find(|(element, ty)| {
+        **ty != Ty::None && !is_object_operand(env, ty) && !fresh(element, ty)
+    }).map(|(_, ty)| ty) {
         None => Ok(Ty::Object),
         Some(ty) => Err(object_operation_unsupported(&format!(
             "a `{}` element in a display with a CPython object element",

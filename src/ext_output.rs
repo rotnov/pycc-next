@@ -93,7 +93,8 @@ pub(crate) struct ExtOutput {
     /// `OUT` with the platform's stable-ABI suffix appended.
     pub(crate) artifact: PathBuf,
     /// The `<mod>` of the exported `PyInit_<mod>`. A valid ASCII Python
-    /// identifier that is not `__init__`.
+    /// identifier that is not `__init__` (a package `__init__` takes its
+    /// directory's name).
     pub(crate) module_name: String,
 }
 
@@ -118,8 +119,8 @@ pub(crate) enum ExtOutputError {
         /// The name as derived, for the diagnostic.
         name: String,
     },
-    /// The derived module name is `__init__`, a packaging shape `ext` mode
-    /// does not claim.
+    /// The derived module name is `__init__` and `OUT`'s directory is not
+    /// named by a valid identifier, so there is no package name to export.
     PackageInit {
         /// `OUT`'s basename, for the diagnostic.
         basename: String,
@@ -148,8 +149,8 @@ impl ExtOutputError {
             Self::PackageInit { basename } => format!(
                 "--ext output path `{basename}` derives the module name `__init__`; CPython's \
                  finder takes a package's name from the parent directory and looks for \
-                 `PyInit_<package>`, a name this contract does not derive -- ext mode builds one \
-                 extension module per artifact, not a package `__init__`"
+                 `PyInit_<package>`, so a package `__init__` artifact must sit in a directory \
+                 whose name is a valid ASCII Python identifier"
             ),
         }
     }
@@ -195,11 +196,26 @@ pub(crate) fn resolve(out: &Path, platform: &ExtPlatform) -> Result<ExtOutput, E
     if !is_ascii_identifier(&module_name) {
         return Err(ExtOutputError::InvalidModuleName { name: module_name });
     }
-    if module_name == "__init__" {
-        return Err(ExtOutputError::PackageInit {
-            basename: basename.into_owned(),
-        });
-    }
+    // A package's `__init__` extension (`pkg/__init__.abi3.so`) is imported
+    // as the package itself: CPython's finder names it after the directory
+    // and looks for `PyInit_<package>`.
+    let module_name = if module_name == "__init__" {
+        let package = out
+            .parent()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| is_ascii_identifier(name));
+        match package {
+            Some(package) => package,
+            None => {
+                return Err(ExtOutputError::PackageInit {
+                    basename: basename.into_owned(),
+                });
+            }
+        }
+    } else {
+        module_name
+    };
 
     Ok(ExtOutput {
         artifact,
@@ -397,13 +413,24 @@ mod ext_output_tests {
     }
 
     #[test]
-    fn unix_rejects_a_package_init_basename_separately() {
-        assert_eq!(
-            err("pkg/__init__.abi3.so", &ExtPlatform::Unix),
-            ExtOutputError::PackageInit {
-                basename: "__init__.abi3.so".to_string()
-            }
-        );
+    fn a_package_init_is_named_after_its_directory() {
+        let got = resolve(Path::new("src/pkg/__init__"), &ExtPlatform::Unix).unwrap();
+        assert_eq!(got.module_name, "pkg");
+        assert_eq!(got.artifact, PathBuf::from("src/pkg/__init__.abi3.so"));
+        let got = resolve(Path::new("pkg/__init__.pyd"), &ExtPlatform::Windows).unwrap();
+        assert_eq!(got.module_name, "pkg");
+    }
+
+    #[test]
+    fn unix_rejects_a_package_init_without_an_identifier_directory() {
+        for out in ["__init__.abi3.so", "my-pkg/__init__.abi3.so"] {
+            assert_eq!(
+                err(out, &ExtPlatform::Unix),
+                ExtOutputError::PackageInit {
+                    basename: "__init__.abi3.so".to_string()
+                }
+            );
+        }
     }
 
     #[test]

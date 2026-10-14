@@ -170,8 +170,11 @@ fn check_use_site(
     target: &ForeignCallableRef,
 ) -> Result<(), Diagnostic> {
     let root = target.root.as_str();
+    // A hoisted class attribute's hidden global (`pycc_hir`'s
+    // `hoist_class_attr`) is a module global no source can bind.
+    let hoisted = root.starts_with(pycc_hir::HOISTED_CLASS_ATTR_PREFIX);
     let shadowed = local_names.contains(&root)
-        || (env.in_function_body && !env.foreign_globals.contains(root));
+        || (env.in_function_body && !env.foreign_globals.contains(root) && !hoisted);
     if !shadowed {
         return Ok(());
     }

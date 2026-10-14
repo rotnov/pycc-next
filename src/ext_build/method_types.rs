@@ -258,6 +258,9 @@ pub(crate) fn method_types_c(
     let (hidden, hidden_registration) =
         richcompare::hidden_carrier_types_c(publications, getsets, slots, &mut emitted_getters);
     out.push_str(&hidden);
+    if publications.iter().any(|published| !published.constants.is_empty()) {
+        out.push_str(SET_CONSTANT_C);
+    }
     out.push_str(&compiled_class_isinstance_c(publications));
     out.push_str(&publish_class_c(publications));
     out.push_str(&format!("{METHOD_TYPE_REGISTER_DECL}\n{{\n"));
@@ -266,7 +269,8 @@ pub(crate) fn method_types_c(
         return out;
     }
     out.push_str("    PyObject *type;\n");
-    for class in publications.iter().map(|published| &published.class) {
+    for published in publications {
+        let class = &published.class;
         // The carrier-type cache (#1435) takes its own reference, so on a
         // failing arm the local one is released, which keeps a failed
         // registration from leaking the type. On success the local
@@ -282,11 +286,12 @@ pub(crate) fn method_types_c(
         }
         out.push_str(&format!(
             "    type = PyType_FromSpec(&pycc_ext_type_spec_{class});\n    \
-             if (type == NULL) {{\n        return -1;\n    }}\n    \
+             if (type == NULL) {{\n        return -1;\n    }}\n{constants}    \
              if (pycc_ext_carrier_register(\"{class}\", type) < 0) {{\n        \
              Py_DECREF(type);\n        return -1;\n    }}\n    \
              Py_XDECREF(pycc_ext_type_object_{class});\n    \
-             pycc_ext_type_object_{class} = type;\n"
+             pycc_ext_type_object_{class} = type;\n",
+            constants = class_constants_c(&published.constants)
         ));
     }
     out.push_str(&hidden_registration);
@@ -650,5 +655,68 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
     // #1435: storing the instance also links it to `self`, so `self`
     // handed out by one of its methods is this very object.
     out.push_str("    pycc_ext_carrier_bind(self, inst);\n    return 0;\n}\n\n");
+    out
+}
+
+/// Sets one class constant on a freshly created type object, consuming
+/// `value` (a `NULL` one is a failed constructor whose exception is set).
+/// `PyObject_GenericSetAttr` writes the type's own dictionary, which the
+/// immutable type's `__setattr__` would refuse, and `PyType_Modified`
+/// (emitted once per class) drops the attribute cache.
+const SET_CONSTANT_C: &str = "static int pycc_ext_type_set_constant(PyObject *type, const char *name,
+                                      PyObject *value)
+{
+    PyObject *key;
+    int status;
+
+    if (value == NULL) {
+        return -1;
+    }
+    key = PyUnicode_FromString(name);
+    if (key == NULL) {
+        Py_DECREF(value);
+        return -1;
+    }
+    status = PyObject_GenericSetAttr(type, key, value);
+    Py_DECREF(key);
+    Py_DECREF(value);
+    return status;
+}
+
+";
+
+/// The C statements setting `constants` on `type` right after it is
+/// created, or nothing for a class without one.
+fn class_constants_c(constants: &[(String, pycc_hir::ClassAttrValue)]) -> String {
+    use pycc_hir::ClassAttrValue;
+    if constants.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for (name, value) in constants {
+        let value = match value {
+            ClassAttrValue::Int(i64::MIN) => "PyLong_FromLongLong(-9223372036854775807LL - 1)".to_string(),
+            ClassAttrValue::Int(n) => format!("PyLong_FromLongLong({n}LL)"),
+            ClassAttrValue::Float(f) if f.is_nan() => "PyFloat_FromDouble(Py_NAN)".to_string(),
+            ClassAttrValue::Float(f) if f.is_infinite() => format!(
+                "PyFloat_FromDouble({}Py_HUGE_VAL)",
+                if *f < 0.0 { "-" } else { "" }
+            ),
+            ClassAttrValue::Float(f) => format!("PyFloat_FromDouble({f:e})"),
+            ClassAttrValue::Bool(b) => format!("PyBool_FromLong({})", i32::from(*b)),
+            ClassAttrValue::Str(text) => format!(
+                "PyUnicode_FromStringAndSize({}, {})",
+                super::c_string_literal(text),
+                text.len()
+            ),
+            ClassAttrValue::ForeignStatic(_) => continue,
+        };
+        out.push_str(&format!(
+            "    if (pycc_ext_type_set_constant(type, {}, {value}) < 0) {{\n        \
+             Py_DECREF(type);\n        return -1;\n    }}\n",
+            super::c_string_literal(name)
+        ));
+    }
+    out.push_str("    PyType_Modified((PyTypeObject *)type);\n");
     out
 }

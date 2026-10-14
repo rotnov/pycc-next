@@ -555,6 +555,12 @@ pub(crate) fn infer_function_signatures_with_solver_all(
     )
     .map_err(module_level)?;
     propagate_binop_constraints(&constraints.deferred.binops, &mut parents, &mut concrete)?;
+    for var in &constraints.opaque_returns {
+        let return_root = root(&mut parents, *var);
+        if concrete[return_root] == Some(Ty::None) {
+            concrete[return_root] = Some(Ty::Object);
+        }
+    }
 
     let non_scalar_local_roots = constraints
         .non_scalar_local_terms

@@ -172,6 +172,11 @@ pub(crate) struct SolverConstraints {
     pub(crate) deferred: DeferredConstraints,
     pub(crate) annotation_defaults: Vec<AnnotationDefaultConstraint>,
     non_scalar_local_terms: Vec<usize>,
+    /// Non-strict mode (#3): the inferred return terms some `return`
+    /// gives a value the solver has no term for (a tuple display, say).
+    /// One that resolves to `None` from its other returns is a CPython
+    /// object, which holds both.
+    pub(crate) opaque_returns: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -414,8 +419,18 @@ pub(crate) fn fresh_term(parents: &mut Vec<usize>, concrete: &mut Vec<Option<Ty>
 fn merge_inferred_types(left: Ty, right: Ty) -> Option<Ty> {
     if left == right {
         Some(left)
-    } else if matches!((left, right), (Ty::Bool, Ty::Int) | (Ty::Int, Ty::Bool)) {
+    } else if matches!((&left, &right), (Ty::Bool, Ty::Int) | (Ty::Int, Ty::Bool)) {
         Some(Ty::Int)
+    } else if crate::non_strict::is_non_strict()
+        && [&left, &right].contains(&&Ty::Object)
+        && [&left, &right].iter().all(|ty| {
+            matches!(ty, Ty::Object | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::None)
+        })
+    {
+        // Non-strict mode (#3): a term inferred both as a CPython object
+        // and as a scalar (a helper called with an object and with an
+        // `int`) is the object, which holds either.
+        Some(Ty::Object)
     } else {
         None
     }
@@ -994,6 +1009,7 @@ pub(crate) fn contains_return(body: &[HirStmt]) -> bool {
         | HirStmt::DictCompAssign { .. }
         | HirStmt::Delete { .. }
         | HirStmt::DeleteSlice { .. }
+        | HirStmt::SetSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::DeleteItem { .. }
         | HirStmt::ForeignImport { .. }
@@ -1057,6 +1073,7 @@ pub(crate) fn introduces_bindings(body: &[HirStmt]) -> bool {
         HirStmt::Return(_)
         | HirStmt::ExprStmt(_)
         | HirStmt::DeleteSlice { .. }
+        | HirStmt::SetSlice { .. }
         | HirStmt::DeleteAttr { .. }
         | HirStmt::DeleteItem { .. }
         | HirStmt::Break

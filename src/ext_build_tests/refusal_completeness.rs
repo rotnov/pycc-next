@@ -124,6 +124,9 @@ fn the_shim_declares_exactly_the_unpack_helpers_the_boundary_refuses_through() {
         "bool_at",
         "float",
         "float_at",
+        // A non-strict class's inferred `float` attribute setter, which
+        // takes an `int` too (`src/ext_build/getset/setter.rs`).
+        "float_or_int",
         "instance",
         "int",
         "int_at",

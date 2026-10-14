@@ -289,6 +289,18 @@ pub(crate) fn reject_generic_calls_in_stmt(
             exprs.push(base);
             exprs.extend([start, stop, step].into_iter().flatten().map(|b| &**b));
         }
+        HirStmt::SetSlice {
+            base,
+            start,
+            stop,
+            step,
+            value,
+            ..
+        } => {
+            exprs.push(value);
+            exprs.push(base);
+            exprs.extend([start, stop, step].into_iter().flatten().map(|b| &**b));
+        }
         HirStmt::DeleteAttr { base, .. } => exprs.push(base),
         HirStmt::DeleteItem { base, key, .. } => {
             exprs.push(base);

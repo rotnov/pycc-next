@@ -59,10 +59,23 @@ pub(super) fn check_method_call_args(
     let mut filled = arg_tys.to_vec();
     for default in omitted {
         let position = filled.len();
-        if matches!(default, HirExpr::NoneLiteral) && param_tys[position] == Ty::Object {
+        if matches!(default, HirExpr::NoneLiteral)
+            && param_tys[position] == Ty::Object
+            && !crate::non_strict::is_non_strict()
+        {
             return Err(none_at_object(method, position + 1));
         }
-        filled.push(crate::infer_expr(env, default)?);
+        let default_ty = crate::infer_expr(env, default)?;
+        // Non-strict mode (#3): codegen boxes a filled scalar or `None`
+        // default into its `object` parameter, as it boxes an argument.
+        if param_tys[position] == Ty::Object
+            && crate::non_strict::is_non_strict()
+            && crate::object_box::admits(env, &default_ty, &Ty::Object)
+        {
+            filled.push(Ty::Object);
+            continue;
+        }
+        filled.push(default_ty);
     }
     check_call_args(env, method, args, &filled, param_tys, true)
 }
