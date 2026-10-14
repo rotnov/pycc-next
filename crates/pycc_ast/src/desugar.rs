@@ -21,6 +21,12 @@
 //!   a `def`, and `X = sys.stdin` reads `X` as the stream itself (see
 //!   [`aliases`]). The builtins `exit`/`quit` and `from sys
 //!   import exit` read as `sys.exit`, CPython's own (see [`exit`]).
+//! * A module-level `if` whose test is known before the program runs (a
+//!   flag bound once to a literal, `sys.gettrace()`) is replaced by the
+//!   branch that runs (see [`static_branches`]); `x in c` of a constant
+//!   tuple `c` tests a list display (see [`const_tuples`]); a parameter whose
+//!   default is a builtin conversion no call passes is that builtin (see
+//!   [`builtin_defaults`]).
 //! * A typed numpy array annotation without a dimension count,
 //!   `NDArray[np.float64]`, gets the count its name's uses imply written in
 //!   as a second argument, `NDArray[np.float64, 2]` (see [`ndarray_ndim`]).
@@ -55,10 +61,12 @@
 
 mod aliases;
 mod build;
+mod builtin_defaults;
 mod closures;
 mod collections;
 mod displays;
 mod comps;
+mod const_tuples;
 mod dataclasses;
 mod enums;
 mod exit;
@@ -75,6 +83,7 @@ mod keys;
 mod ndarray_ndim;
 mod signatures;
 mod starred;
+mod static_branches;
 mod stdin_bytes;
 mod stdlib;
 mod stmts;
@@ -84,6 +93,16 @@ mod wildcard;
 use ruff_python_ast::{Expr, ModModule, Stmt};
 
 pub use closures::qualname::function_qualname;
+
+/// Replaces each module-level `if` whose test is known before the program
+/// runs by the branch that runs (see [`static_branches`]). [`desugar`] runs
+/// it too; the driver runs it first, so the dead-definition pass sees the
+/// definitions of the branch that runs at module level.
+pub fn fold_static_branches(module: &mut ModModule) {
+    let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+    static_branches::fold_static_branches(&mut body);
+    module.body = body.into();
+}
 pub use ext_generators::split_ext_generators;
 pub use ext_signatures::{
     ExtSignature, expand_dataclasses_in as expand_dataclasses, ext_entry_target, ext_signatures,
@@ -152,15 +171,18 @@ impl Fresh {
 pub fn desugar(module: &mut ModModule) {
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+        static_branches::fold_static_branches(&mut body);
         dataclasses::expand_dataclasses(&mut body);
         enums::enum_lookups(&mut body);
         functools::expand_caches(&mut body);
+        const_tuples::constant_tuple_membership(&mut body);
         displays::canonical_displays(&mut body);
         wildcard::expand_wildcards(&mut body);
         ndarray_ndim::close_ndims(&mut body);
         exit::sys_exit_calls(&mut body);
         aliases::builtin_aliases(&mut body);
         aliases::stream_aliases(&mut body);
+        builtin_defaults::inline_builtin_defaults(&mut body);
         iter_alias::iterator_readers(&mut body);
         aliases::drop_object_bases(&mut body);
         stdlib::native_stdlib_calls(&mut body);

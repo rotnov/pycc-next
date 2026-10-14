@@ -328,6 +328,16 @@ impl Transformer for Rewriter<'_> {
             *expr = call_name(op.builtin(), args, range);
             return;
         }
+        // `next(sys.stdin)`: the stream's next line.
+        if let Expr::Call(call_expr) = expr
+            && matches!(call_expr.func.as_ref(), Expr::Name(n) if n.id.as_str() == "next")
+            && self.builtin("next")
+            && call_expr.arguments.keywords.is_empty()
+            && matches!(call_expr.arguments.args.as_ref(), [arg] if self.sys.is_stdin(arg))
+        {
+            *expr = call_name("__pycc_stdin_next", Vec::new(), call_expr.range);
+            return;
+        }
         if self.sys.is_stdin(expr) {
             *expr = stdin_lines(expr.range());
             return;

@@ -591,7 +591,7 @@ fn check_prepared(hir: &HirModule) -> Result<(), KeyedDiagnostics> {
         },
         None => None,
     };
-    match infer_function_signatures_with_solver_all(hir, &function_local_names) {
+    match solve(hir, &function_local_names) {
         // The same recovery `checked_function_signatures_all` makes, so
         // `pycc check` and `pycc build` accept the same programs.
         Err(solver) => match crate::constraints::return_fallback::recover_returns(
@@ -649,7 +649,7 @@ pub(crate) fn checked_function_signatures_all(
         }
         None => None,
     };
-    let signatures = match infer_function_signatures_with_solver_all(hir, function_local_names) {
+    let signatures = match solve(hir, function_local_names) {
         // Strict mode: a return the solver could not type, typed from the
         // function's body once its parameters are (`return_fallback`).
         Err(solver) => match crate::constraints::return_fallback::recover_returns(
@@ -663,6 +663,19 @@ pub(crate) fn checked_function_signatures_all(
     };
     check_with_signatures_all(hir, &signatures, function_local_names)?;
     Ok(signatures)
+}
+
+/// The private-helper solver over `hir`; in non-strict mode, run until
+/// what it settles stops growing (`return_fallback::solve_non_strict`).
+fn solve(
+    hir: &HirModule,
+    function_local_names: &[Vec<&str>],
+) -> Result<FunctionSignatures, KeyedDiagnostics> {
+    if crate::non_strict::is_non_strict() {
+        crate::constraints::return_fallback::solve_non_strict(hir, function_local_names)
+    } else {
+        infer_function_signatures_with_solver_all(hir, function_local_names)
+    }
 }
 
 /// The per-function solver-first merge (D-220 rule C4).

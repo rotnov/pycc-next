@@ -13,6 +13,14 @@
 //!   solver runs again with it (`constraints::return_fallback`).
 //! * `exit`/`quit` and `from sys import exit` are `sys.exit`; a module-level
 //!   `X = sys.stdin` (or `sys.stdout`) reads `X` as the stream itself.
+//! * A module-level `if` on a flag bound once to a literal, or on
+//!   `sys.gettrace()`, is the branch that runs; `next(sys.stdin)` reads a
+//!   line; a parameter whose default is a builtin conversion no call passes
+//!   is that builtin; `x in c` of a constant tuple, `a, b = x, y` and
+//!   `g[i].sort(reverse=True)` compile natively; a `def` returning
+//!   `sys.stdin.buffer.readline()` read only as numbers is text.
+//! * Non-strict mode solves again with what the solver settled written in,
+//!   so a use met before its operand was typed is native too.
 //! * Strict mode, like non-strict mode, does not compile an unannotated
 //!   definition nothing in the entry module mentions
 //!   (`corpus_round7::strict_mode_does_not_compile_dead_unannotated_definitions`).
@@ -121,4 +129,17 @@ fn a_stream_alias_is_the_stream() {
         &["--non-strict", "--report-fallbacks"],
     );
     assert!(!report.contains("fallback:"), "{report}");
+}
+
+/// Template idioms: module-level `if`s on a literal flag or
+/// `sys.gettrace()`, `next(sys.stdin)`, a builtin default no call passes,
+/// membership in a constant tuple, unpacked tuple displays and
+/// `.sort(reverse=True)` of a subscripted list.
+#[test]
+fn template_idioms_compile_natively() {
+    for fixture in ["corpus_v03_idioms.py", "corpus_v03_buffer_def.py"] {
+        matches_cpython(fixture, &[]);
+        let report = matches_cpython(fixture, &["--non-strict", "--report-fallbacks"]);
+        assert!(!report.contains("fallback:"), "{fixture}: {report}");
+    }
 }

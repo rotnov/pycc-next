@@ -686,10 +686,21 @@ fn collect_expr_constraints_here(
         // gate is `infer_expr_in`'s job, not this solver's. Recurse into
         // every element only to keep propagating genuine errors.
         HirExpr::TupleLiteral(elements) => {
+            // Every element already concrete: the tuple's type (`a, b = 1,
+            // 2` reads its items back); otherwise no term, as before.
+            let mut items = Some(Vec::with_capacity(elements.len()));
             for element in elements {
-                collect_expr_constraints(signatures, parents, concrete, deferred, env, element)?;
+                let term =
+                    collect_expr_constraints(signatures, parents, concrete, deferred, env, element)?;
+                let item = term.and_then(|term| resolved_term(term, parents, concrete));
+                items = items.zip(item).map(|(mut items, item)| {
+                    items.push(item);
+                    items
+                });
             }
-            Ok(None)
+            Ok(items
+                .filter(|items| !items.is_empty() && items.iter().all(is_private_solver_scalar))
+                .map(|items| Ok(Ty::Tuple(Box::new(items)))))
         }
         // PR-12 Task 10 (D-119): the base-type gate (`T0033`) and the
         // value/key/default-type gate (`T0021`) are `infer_expr_in`'s job,

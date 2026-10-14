@@ -29,11 +29,18 @@ fn not(operand: Expr, range: TextRange) -> Expr {
 }
 
 /// Whether `expr` can be evaluated twice with no observable difference: a
-/// name or an attribute chain over one.
+/// name, an attribute chain over one, or a subscript of one by a name or
+/// literal.
 fn is_rereadable(expr: &Expr) -> bool {
     match expr {
         Expr::Name(_) => true,
         Expr::Attribute(attr) => is_rereadable(&attr.value),
+        // `g[i].sort(reverse=True)`: a name or literal index reads the same
+        // item each time.
+        Expr::Subscript(sub) => {
+            is_rereadable(&sub.value)
+                && matches!(sub.slice.as_ref(), Expr::Name(_) | Expr::NumberLiteral(_))
+        }
         _ => false,
     }
 }

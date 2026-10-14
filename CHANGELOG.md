@@ -99,6 +99,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   CPython's).
 - A module-level `X = sys.stdin` / `X = sys.stdout` alias: `X.readline()`,
   `X.write(s)` and the other stream operations are the native ones.
+- More template idioms of competitive-programming code compile natively: a module-level
+  `if` on a flag bound once to a literal (`DEBUG = 0`) or on `sys.gettrace()` is the
+  branch that runs; `next(sys.stdin)` (a line, `StopIteration` at EOF); a parameter
+  whose default is a builtin conversion no call passes (`def rl(t=int)`); `x in c` of a
+  constant tuple; `a, b = x, y` typing both targets for inference;
+  `g[i].sort(reverse=True)`; a `def` returning `sys.stdin.buffer.readline()` read only
+  as numbers.
+- Non-strict mode: the inference solver runs again with what it settled written in, and
+  a return it leaves open is typed from the body when every `return` agrees, so less
+  code becomes a CPython object.
 
 ### Changed
 

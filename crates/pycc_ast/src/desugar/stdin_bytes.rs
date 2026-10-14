@@ -4,7 +4,8 @@
 //! iterates and compares unlike `str`, so it is not the native `str`
 //! readline in general. One use is common enough to matter and is
 //! indistinguishable from text: a module-level alias
-//! (`input = sys.stdin.buffer.readline`) whose every call is converted to
+//! (`input = sys.stdin.buffer.readline`, or a `def` whose body is `return
+//! sys.stdin.buffer.readline()`) whose every call is converted to
 //! numbers at once -- `int(input())`, `float(input())`,
 //! `map(int, input().split())` and `[int(x) for x in input().split()]`.
 //! `int()` and `float()` accept the same ASCII digits, signs and
@@ -32,6 +33,22 @@ pub(crate) fn buffer_reads_as_text(body: &[Stmt], sys: &SysNames) -> bool {
     let mut aliases: HashSet<String> = HashSet::new();
     let mut alias_values: HashSet<TextRange> = HashSet::new();
     for stmt in body {
+        // `def _r(): return sys.stdin.buffer.readline()` is the same alias.
+        if let Stmt::FunctionDef(def) = stmt
+            && def.decorator_list.is_empty()
+            && def.parameters.is_empty()
+            && rebound.get(def.name.as_str()).copied() == Some(1)
+            && let [Stmt::Return(ret)] = &def.body[..]
+            && let Some(Expr::Call(call)) = ret.value.as_deref()
+            && call.arguments.is_empty()
+            && let Expr::Attribute(readline) = call.func.as_ref()
+            && readline.attr.as_str() == "readline"
+            && is_buffer(sys, &readline.value)
+        {
+            aliases.insert(def.name.to_string());
+            alias_values.insert(readline.value.range());
+            continue;
+        }
         let Stmt::Assign(assign) = stmt else { continue };
         let [Expr::Name(target)] = assign.targets.as_slice() else {
             continue;

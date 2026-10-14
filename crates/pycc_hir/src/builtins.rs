@@ -245,6 +245,7 @@ pub const CALL_NAMES: &[&str] = &[
     "__pycc_setrecursionlimit",
     "__pycc_sort_keyed",
     "__pycc_sorted_keyed",
+    "__pycc_stdin_next",
     "__pycc_stdin_read",
     "__pycc_stdin_readline",
     "__pycc_stdin_readlines",
@@ -333,6 +334,7 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
         | "hex"
         | "oct"
         | "__pycc_stdin_readline"
+        | "__pycc_stdin_next"
         | "__pycc_stdin_read" => Ty::Str,
         "int"
         | "len"
@@ -395,6 +397,8 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("input", []) => sig("pycc_rt_input", &[], str_),
         // The `sys` stream operations `pycc_ast::desugar` rewrites to.
         ("__pycc_stdin_readline", []) => sig("pycc_rt_stdin_readline", &[], str_),
+        // `next(sys.stdin)`: a line, `StopIteration` at EOF.
+        ("__pycc_stdin_next", []) => sig("pycc_rt_stdin_next", &[], str_),
         ("__pycc_stdin_read", []) => sig("pycc_rt_stdin_read", &[], str_),
         ("__pycc_stdin_readlines", []) => sig("pycc_rt_stdin_readlines", &[], list_of(str_)),
         ("__pycc_stdout_write", [Ty::Str]) => sig("pycc_rt_stdout_write", &[str_], int),

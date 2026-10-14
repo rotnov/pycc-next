@@ -91,6 +91,20 @@ pub(crate) fn collect_subscript_constraints(
     if matches!(base_term, Some(Ok(Ty::Object))) {
         return Ok(Some(Ok(Ty::Object)));
     }
+    // A tuple's item at a literal index (`t[0]`, and the reads a tuple
+    // target's desugaring makes, `a, b = 1, 2`).
+    let resolved_base = base_term
+        .clone()
+        .and_then(|term| resolved_term(term, parents, concrete));
+    if let (Some(Ty::Tuple(items)), HirExpr::IntLiteral(position)) =
+        (&resolved_base, index.as_ref())
+    {
+        let len = items.len() as i64;
+        let position = if *position < 0 { position + len } else { *position };
+        return Ok((0..len)
+            .contains(&position)
+            .then(|| Ok(items[position as usize].clone())));
+    }
     if let Some(Ok(Ty::List(element_ty))) = base_term {
         Ok(Some(Ok(*element_ty)))
     } else {

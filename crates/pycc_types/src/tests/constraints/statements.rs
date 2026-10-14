@@ -523,7 +523,7 @@ fn constraint_collection_propagates_an_error_from_a_set_literal_element() {
     assert_eq!(err.code, "T0021");
 }
 #[test]
-fn constraint_collection_treats_a_tuple_literal_as_unconstrained_but_recurses_into_elements() {
+fn constraint_collection_types_a_tuple_literal_of_concrete_scalars_and_recurses_into_elements() {
     let signatures = HashMap::new();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
@@ -541,6 +541,18 @@ fn constraint_collection_treats_a_tuple_literal_as_unconstrained_but_recurses_in
     )
     .unwrap();
 
+    assert_eq!(term, Some(Ok(Ty::Tuple(Box::new(vec![Ty::Int])))));
+    // A non-scalar element leaves the tuple without a term, as before.
+    let expr = HirExpr::TupleLiteral(vec![HirExpr::ListLiteral(vec![HirExpr::IntLiteral(1)])]);
+    let term = collect_expr_constraints(
+        &signatures,
+        &mut parents,
+        &mut concrete,
+        &mut binops,
+        &env,
+        &expr,
+    )
+    .unwrap();
     assert!(term.is_none());
 }
 #[test]

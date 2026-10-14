@@ -43,6 +43,40 @@ pub(super) fn first_value_from_body(
     resolved: &FunctionSignatures,
     pick: &dyn Fn(&HirStmt) -> Option<&HirExpr>,
 ) -> Option<Ty> {
+    with_body_env(hir, name, params, resolved, &mut |env, local_names, body| {
+        first_yield(env, local_names, body, pick)
+    })?
+}
+
+/// Whether every value `pick` finds in the body of `name` (typed as
+/// [`first_value_from_body`] types them) infers to `expected`.
+pub(super) fn every_value_from_body_is(
+    hir: &HirModule,
+    name: &str,
+    params: &[Ty],
+    resolved: &FunctionSignatures,
+    pick: &dyn Fn(&HirStmt) -> Option<&HirExpr>,
+    expected: &Ty,
+) -> bool {
+    with_body_env(hir, name, params, resolved, &mut |env, local_names, body| {
+        let mut values = Vec::new();
+        collect_values(body, pick, &mut values);
+        values
+            .iter()
+            .all(|value| infer_expr_in(env, local_names, value).ok().as_ref() == Some(expected))
+    })
+    .unwrap_or(false)
+}
+
+/// Runs `f` over the body of `name` with the checker's flat local binder
+/// over it: `params` bound and `resolved` registered for the calls it makes.
+fn with_body_env<T>(
+    hir: &HirModule,
+    name: &str,
+    params: &[Ty],
+    resolved: &FunctionSignatures,
+    f: &mut dyn FnMut(&Environment, &[&str], &[HirStmt]) -> T,
+) -> Option<T> {
     let (param_names, body) = hir.items.iter().find_map(|item| match item {
         HirItem::Function {
             name: item_name,
@@ -72,7 +106,60 @@ pub(super) fn first_value_from_body(
         env.bind(param.clone(), ty.clone());
     }
     bind_local_types_in_body(&mut env, &local_names, body);
-    first_yield(&env, &local_names, body, pick)
+    Some(f(&env, &local_names, body))
+}
+
+/// Every value `pick` finds in `body`, at any block depth, in order.
+fn collect_values<'a>(
+    body: &'a [HirStmt],
+    pick: &dyn Fn(&HirStmt) -> Option<&HirExpr>,
+    out: &mut Vec<&'a HirExpr>,
+) {
+    for stmt in body {
+        if let Some(value) = pick(stmt) {
+            out.push(value);
+            continue;
+        }
+        match stmt {
+            HirStmt::If { body, orelse, .. } => {
+                collect_values(body, pick, out);
+                collect_values(orelse, pick, out);
+            }
+            HirStmt::While { body, .. }
+            | HirStmt::ForRange { body, .. }
+            | HirStmt::ForList { body, .. }
+            | HirStmt::ForObject { body, .. } => collect_values(body, pick, out),
+            HirStmt::LoopElse { loop_stmt, orelse } => {
+                collect_values(std::slice::from_ref(loop_stmt.as_ref()), pick, out);
+                collect_values(orelse, pick, out);
+            }
+            HirStmt::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            }
+            | HirStmt::TryStar {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                collect_values(body, pick, out);
+                for handler in handlers {
+                    collect_values(&handler.body, pick, out);
+                }
+                collect_values(orelse, pick, out);
+                collect_values(finalbody, pick, out);
+            }
+            HirStmt::Match { cases, .. } => {
+                for case in cases {
+                    collect_values(&case.body, pick, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// The type of the first value `pick` finds in `body` that infers.

@@ -344,6 +344,7 @@ impl Loader {
         // definition there can never run and is not compiled: no call site
         // could type it, in strict mode as in non-strict mode.
         if is_entry && !self.ext_module {
+            pycc_ast::fold_static_branches(&mut parsed);
             pycc_ast::drop_unused_defs(&mut parsed);
         }
         pycc_ast::desugar(&mut parsed);

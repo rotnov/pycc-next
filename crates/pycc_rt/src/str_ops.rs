@@ -8,7 +8,7 @@
 //! CPython for ASCII and Rust's Unicode tables beyond it.
 
 use super::*;
-use crate::exception::EXCEPTION_TYPE_EOF_ERROR;
+use crate::exception::{EXCEPTION_TYPE_EOF_ERROR, EXCEPTION_TYPE_STOP_ITERATION};
 use crate::list::{PyListObj, str_list};
 
 fn bytes_of<'a>(s: *mut PyStrObj) -> &'a [u8] {
@@ -108,6 +108,19 @@ pub extern "C" fn pycc_rt_input_prompt(prompt: *mut PyStrObj) -> *mut PyStrObj {
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_stdin_readline() -> *mut PyStrObj {
     crate::io::read_line().unwrap_or_else(|| new_str(""))
+}
+
+/// `next(sys.stdin)`: one line including its newline; `StopIteration` at
+/// EOF, as the exhausted file iterator raises.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_stdin_next() -> *mut PyStrObj {
+    let line = pycc_rt_stdin_readline();
+    if text_of(line).is_empty() {
+        unsafe { pycc_rt_str_decref(line) };
+        raise_builtin(EXCEPTION_TYPE_STOP_ITERATION, "StopIteration", "");
+        return new_str("");
+    }
+    line
 }
 
 /// `sys.stdin.read()`: the rest of stdin.
