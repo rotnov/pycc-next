@@ -147,6 +147,22 @@ fn a_program_of_modules_and_packages_matches_cpython_as_an_extension() {
     ext_matches_cpython("program");
 }
 
+/// A package `__init__.py` re-exporting its submodule's names and a
+/// standard-library module and function: `pkg.area`, `from pkg import
+/// area`, `pkg.math.sqrt`, `from pkg import sqrt`, `pkg.core.area`.
+#[test]
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn names_a_package_re_exports_match_cpython() {
+    native_matches_cpython("reexports", &[]);
+    native_matches_cpython("reexports", &["--non-strict"]);
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn names_a_package_re_exports_match_cpython_as_an_extension() {
+    ext_matches_cpython("reexports");
+}
+
 /// An exception class one module defines, raised there and not caught:
 /// CPython reports it by its module-qualified name.
 #[test]

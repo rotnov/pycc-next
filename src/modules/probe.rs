@@ -243,10 +243,10 @@ impl Loader {
 /// The directory a dotted name resolves against, or the reason it cannot
 /// be resolved at all (a relative import outside a package).
 pub(super) struct Base {
-    path: PathBuf,
-    display: PathBuf,
-    relative: bool,
-    rejection: Option<String>,
+    pub(super) path: PathBuf,
+    pub(super) display: PathBuf,
+    pub(super) relative: bool,
+    pub(super) rejection: Option<String>,
 }
 
 impl Base {

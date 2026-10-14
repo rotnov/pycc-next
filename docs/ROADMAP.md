@@ -51,6 +51,13 @@ Accept:
    `from pkg.sub import f`, relative imports, `__init__.py`) compiles as one unit, natively
    (strict and `--non-strict`) and as `--ext` modules importable from CPython; calls between
    compiled modules are direct calls. Oracle fixtures against CPython 3.13.
+   **Met 2026-10-14:** `tests/multi_module.rs` runs the trees under
+   `tests/fixtures/multi_module/` (`import m`, `import pkg.sub.mod as x`, `from pkg import
+   submodule`, `.`/`..` imports, `__init__.py` bodies and re-exports, `m.f`/`m.CONST`/
+   `m.Class`, cross-module subclasses, an uncaught exception from another module) against
+   CPython 3.13 natively in strict and `--non-strict` mode and as an `--ext` module, plus
+   the refusal diagnostics. Each module has its own namespace (`pycc_ast::namespace`) and
+   its body runs at its first import; remaining gaps in `docs/DEVIATIONS.md`.
 2. **Stdlib, native in strict mode:** `dataclasses.dataclass` (fields, defaults,
    `field(default_factory=...)`, generated `__init__`/`__repr__`/`__eq__`, `order=True`,
    `frozen=True`), `enum.Enum`/`IntEnum`, `collections.deque`/`defaultdict`/`Counter`,

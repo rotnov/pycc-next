@@ -10,6 +10,7 @@
 //! is covered by `tests/issue_881_project_imports.rs` through the real
 //! CLI.
 
+use super::probe::submodule_names;
 use super::*;
 use pycc_scratch::ScratchDir;
 
