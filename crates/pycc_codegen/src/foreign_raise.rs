@@ -4,7 +4,7 @@
 //! The operand is evaluated, then handed borrowed to
 //! [`EXT_OBJ_RAISE_SYMBOL`]. The helper decides what is raised the way
 //! CPython's own `raise` does and always leaves a pending pycc exception,
-//! with the original CPython exception kept in the bridge table. So the
+//! carrying the original CPython exception (`pycc_ext_bridge_store`). So the
 //! block ends with the same `unreachable` marker a native `MirStmt::Raise`
 //! emits, and `emit_body` replaces it with a branch to the innermost
 //! exception target: an enclosing `try`, the function's exceptional exit,
@@ -45,7 +45,8 @@ pub(super) fn emit_obj_raise<'ctx>(
     // Part 3 of #1092: a produced operand (`raise o.Error()`) is released
     // once the helper is done with it. The raised exception outlives it:
     // `PyErr_SetObject` takes its own reference to the instance, which the
-    // bridge table then owns, and an instance keeps its class alive.
+    // bridged pycc exception then owns, and an instance keeps its class
+    // alive.
     crate::object_release::release_if_produced(context, builder, module, value, &scalar);
     // The same marker `MirStmt::Raise` leaves for `emit_body` to route.
     builder

@@ -288,18 +288,15 @@ static PyObject *pycc_ext_gen_type = NULL;
 static PyObject *pycc_ext_gen_iternext(PyObject *self)
 {
     PyccExtGenObj *obj = (PyccExtGenObj *)self;
-    Py_ssize_t bridge_mark;
     PyObject *value;
 
     if (obj->gen == NULL) {
         return NULL;
     }
-    bridge_mark = pycc_ext_bridge_mark();
     value = obj->next(obj->gen);
     if (value == NULL && pycc_rt_ext_pending_type() >= 0) {
         pycc_ext_raise_pending();
     }
-    pycc_ext_bridge_release_to(bridge_mark);
     return value;
 }
 

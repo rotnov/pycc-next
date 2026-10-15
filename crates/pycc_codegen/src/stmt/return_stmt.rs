@@ -402,6 +402,14 @@ pub(crate) fn emit_return_stmt<'ctx>(
                 // intentionally discarded here. Returning it as an
                 // `i8` previously built invalid IR that only the
                 // non-Windows verifier caught (D-029).
+                // The return leaves the `except` handlers it is in, up to the
+                // innermost `finally` it runs first.
+                crate::exception::owned_slots::release_above(
+                    context,
+                    builder,
+                    rt,
+                    crate::exception::owned_slots::return_depth(finally_stack),
+                );
                 if let Some(ft) = finally_target {
                     builder
                         .build_store(ft.is_returning, context.i8_type().const_int(1, false))
@@ -520,6 +528,14 @@ pub(crate) fn emit_return_stmt<'ctx>(
                 // null name and abort the host.
                 Scalar::MemoryView(v) => v.into(),
             };
+            // The return leaves the `except` handlers it is in, up to the
+            // innermost `finally` it runs first.
+            crate::exception::owned_slots::release_above(
+                context,
+                builder,
+                rt,
+                crate::exception::owned_slots::return_depth(finally_stack),
+            );
             if let Some(ft) = finally_target {
                 // Route through finally: store the return value,
                 // set the is_returning flag, and branch to finally.
@@ -551,6 +567,14 @@ pub(crate) fn emit_return_stmt<'ctx>(
             // is well-typed; the abstract method is never called,
             // so the value doesn't matter.
             if expected_return_ty == pycc_mir::Ty::None {
+                // The return leaves the `except` handlers it is in, up to the
+                // innermost `finally` it runs first.
+                crate::exception::owned_slots::release_above(
+                    context,
+                    builder,
+                    rt,
+                    crate::exception::owned_slots::return_depth(finally_stack),
+                );
                 if let Some(ft) = finally_target {
                     builder
                         .build_store(ft.is_returning, context.i8_type().const_int(1, false))
@@ -565,6 +589,14 @@ pub(crate) fn emit_return_stmt<'ctx>(
                 }
             } else {
                 let default = default_value_for_type(context, expected_return_ty.clone());
+                // The return leaves the `except` handlers it is in, up to the
+                // innermost `finally` it runs first.
+                crate::exception::owned_slots::release_above(
+                    context,
+                    builder,
+                    rt,
+                    crate::exception::owned_slots::return_depth(finally_stack),
+                );
                 if let Some(ft) = finally_target {
                     let slot = ft.ret_slot.expect(
                         "a non-None default return routed through finally has a return slot",

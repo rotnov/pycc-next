@@ -25,8 +25,9 @@
 //!   hooks the C shim installs ([`pycc_rt_object_install`]) when its module
 //!   is executed: `pycc_rt` itself keeps no CPython dependency. A program
 //!   without CPython has no `o` word, so the hooks are never needed there.
-//! * anything else -- no reference released here (`float`, `bool`, an
-//!   exception instance, which is leak-only).
+//! * `x` -- an exception instance (`exception/lifetime.rs`);
+//! * `g` -- a generator object (only a `StopIteration`'s value holds one);
+//! * anything else -- no reference released here (`float`, `bool`).
 //!
 //! **Cycles are not collected.** CPython's cycle GC frees an unreachable
 //! cycle (`a.other = b; b.other = a`); here its objects keep each other's
@@ -146,6 +147,8 @@ pub(crate) fn retain_word(kind: u8, word: i64) {
         b'e' => unsafe { crate::set::pycc_rt_set_incref(word as *mut crate::set::PySetObj) },
         b'o' => object_hook(&OBJECT_RETAIN, word),
         b'f' => crate::closure::pycc_rt_closure_incref(word as *mut crate::closure::PyClosureObj),
+        b'x' => crate::exception::pycc_rt_exception_incref(word as *mut crate::PyExceptionObj),
+        b'g' => crate::generator::pycc_rt_gen_incref(word as *mut crate::generator::PyGenObj),
         _ => {}
     }
 }
@@ -171,6 +174,8 @@ pub(crate) fn release_word_into(kind: u8, word: i64, dead: &mut Worklist) {
         }
         b'o' => object_hook(&OBJECT_RELEASE, word),
         b'f' => crate::closure::pycc_rt_closure_decref(word as *mut crate::closure::PyClosureObj),
+        b'x' => crate::exception::pycc_rt_exception_decref(word as *mut crate::PyExceptionObj),
+        b'g' => crate::generator::pycc_rt_gen_decref(word as *mut crate::generator::PyGenObj),
         _ => {}
     }
 }

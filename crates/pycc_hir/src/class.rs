@@ -93,7 +93,10 @@ pub use instance_hash::{
 };
 mod mro;
 pub use attrs::HOISTED_CLASS_ATTR_PREFIX;
-pub use mro::{flat_attr_layout, is_refcounted_class, slot_rc_kind};
+pub use mro::{
+    class_lookup, flat_attr_layout, instance_rc_kind, is_exception_object_class,
+    is_refcounted_class, slot_rc_kind,
+};
 mod protocol;
 #[cfg(test)]
 mod protocol_return_tests;

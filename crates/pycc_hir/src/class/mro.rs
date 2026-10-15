@@ -224,7 +224,7 @@ pub fn flat_attr_layout(mro_defs: &[&HirClassDef]) -> Vec<(String, Ty)> {
 
 /// Whether instances of `def` are reference-counted `pycc_rt` instances:
 /// every class except an exception class, whose values are the runtime's
-/// separate, leak-only exception objects.
+/// separate (and separately counted) exception objects.
 pub fn is_refcounted_class(def: &HirClassDef) -> bool {
     !def.mro
         .iter()
@@ -232,16 +232,82 @@ pub fn is_refcounted_class(def: &HirClassDef) -> bool {
         .any(|name| crate::is_builtin_exception_class(name))
 }
 
+/// Whether the values of class `def` are the runtime's exception objects:
+/// an exception class whose `__init__` resolves to `Exception`'s, so that
+/// `raise C("message")` builds one. An exception class that declares or
+/// inherits another `__init__` is never raised natively (`pycc_types`
+/// refuses it); calling it builds an ordinary, uncounted instance.
+/// `lookup` resolves a class name on `def`'s MRO -- the module's classes,
+/// and the builtin exception classes the module need not define.
+pub fn is_exception_object_class(
+    def: &HirClassDef,
+    lookup: &dyn Fn(&str) -> Option<HirClassDef>,
+) -> bool {
+    if is_refcounted_class(def) {
+        return false;
+    }
+    let init = def.mro.iter().find_map(|ancestor| {
+        let ancestor_def = if *ancestor == def.name {
+            Some(def.clone())
+        } else {
+            lookup(ancestor)
+        }?;
+        if ancestor_def.implicit_object_init {
+            return None;
+        }
+        ancestor_def
+            .methods
+            .iter()
+            .find(|(method, _)| method == "__init__")
+            .map(|(_, mangled)| mangled.clone())
+    });
+    init.as_deref() == Some(crate::EXCEPTION_INIT_MANGLED_NAME)
+}
+
+/// The `pycc_rt::rc` kind byte of an instance of the class named `name`,
+/// whose definition (if the module has one) is `def`: `c` for a counted
+/// instance, `x` for an exception object (`is_exception_object_class`, or
+/// a builtin exception class the module need not define), `w` for anything
+/// else. `lookup` is `is_exception_object_class`'s.
+pub fn instance_rc_kind(
+    name: &str,
+    def: Option<&HirClassDef>,
+    lookup: &dyn Fn(&str) -> Option<HirClassDef>,
+) -> u8 {
+    match def {
+        Some(def) if is_refcounted_class(def) => b'c',
+        Some(def) if is_exception_object_class(def, lookup) => b'x',
+        Some(_) => b'w',
+        None if crate::is_builtin_exception_class(name) => b'x',
+        None => b'w',
+    }
+}
+
+/// A class lookup over `class_defs` falling back to the builtin exception
+/// classes, for [`is_exception_object_class`] and [`instance_rc_kind`].
+pub fn class_lookup(
+    class_defs: &[(String, HirClassDef)],
+) -> impl Fn(&str) -> Option<HirClassDef> + '_ {
+    let builtins = crate::builtin_exception_class_defs();
+    move |name: &str| {
+        class_defs
+            .iter()
+            .chain(builtins.iter())
+            .find(|(held, _)| held == name)
+            .map(|(_, def)| def.clone())
+    }
+}
+
 /// The `pycc_rt::rc` kind byte of a slot declared `ty`: what the slot's
-/// word owns, and so what freeing its instance releases. `refcounted`
-/// answers [`is_refcounted_class`] for a class name.
-pub fn slot_rc_kind(ty: &Ty, refcounted: &dyn Fn(&str) -> bool) -> u8 {
+/// word owns, and so what freeing its instance releases. `instance_kind`
+/// answers [`instance_rc_kind`] for a class name.
+pub fn slot_rc_kind(ty: &Ty, instance_kind: &dyn Fn(&str) -> u8) -> u8 {
     match ty {
         Ty::Str => b's',
         Ty::Int => b'i',
         Ty::List(_) => b'l',
         Ty::Tuple(elements) if crate::tuple_is_boxed(elements) => b'l',
-        Ty::Instance(class) if refcounted(class) => b'c',
+        Ty::Instance(class) => instance_kind(class),
         Ty::Dict(_) => b'd',
         Ty::Set(_) | Ty::FrozenSet(_) => b'e',
         Ty::Object => b'o',

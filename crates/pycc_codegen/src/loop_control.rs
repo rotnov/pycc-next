@@ -21,7 +21,9 @@
 //! `pycc_hir` refuses a `break`/`continue` that would leave a `try` with a
 //! `finally` clause, so a jump never has a pending `finally` between it and
 //! its loop; [`emit_jump`] re-checks that against the `finally` stack depth
-//! the loop recorded rather than emitting a jump that skips one.
+//! the loop recorded rather than emitting a jump that skips one. A jump out
+//! of an `except` handler releases the exceptions the handlers entered
+//! since its loop hold (`exception::owned_slots`).
 
 use crate::{
     FinallyTarget, RtFns, StorageSlot, UserFunction, emit_body, emit_body_then_branch, emit_stmt,
@@ -43,6 +45,8 @@ struct LoopTarget<'ctx> {
     broke_flag: Option<PointerValue<'ctx>>,
     /// `finally_stack.len()` when the loop was entered.
     finally_depth: usize,
+    /// `exception::owned_slots::depth` when the loop was entered.
+    exc_depth: usize,
 }
 
 /// The loop-target stack of the function being emitted.
@@ -71,6 +75,7 @@ impl<'ctx> LoopControlState<'ctx> {
         break_bb: BasicBlock<'ctx>,
         continue_bb: BasicBlock<'ctx>,
         finally_depth: usize,
+        exc_depth: usize,
     ) {
         let broke_flag = {
             let mut pending = self.pending_else_flag.borrow_mut();
@@ -87,6 +92,7 @@ impl<'ctx> LoopControlState<'ctx> {
             continue_bb,
             broke_flag,
             finally_depth,
+            exc_depth,
         });
     }
 
@@ -130,11 +136,11 @@ impl<'ctx> LoopControlState<'ctx> {
 pub(crate) fn emit_jump<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
-    loops: &LoopControlState<'ctx>,
+    rt: &RtFns<'ctx>,
     finally_stack: &[FinallyTarget<'ctx>],
     jump: LoopJump,
 ) -> Result<(), String> {
-    let target = *loops.targets.borrow().last().ok_or_else(|| {
+    let target = *rt.loops.targets.borrow().last().ok_or_else(|| {
         "pycc_codegen: internal error: a `break`/`continue` outside every loop reached codegen"
             .to_string()
     })?;
@@ -145,6 +151,7 @@ pub(crate) fn emit_jump<'ctx>(
                 .to_string(),
         );
     }
+    crate::exception::owned_slots::release_above(context, builder, rt, target.exc_depth);
     let dest = match jump {
         LoopJump::Break => {
             if let Some(flag) = target.broke_flag {

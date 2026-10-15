@@ -306,14 +306,14 @@ pub(crate) fn emit_stmt<'ctx>(
         MirStmt::Break => loop_control::emit_jump(
             context,
             builder,
-            &rt.loops,
+            rt,
             finally_stack,
             loop_control::LoopJump::Break,
         ),
         MirStmt::Continue => loop_control::emit_jump(
             context,
             builder,
-            &rt.loops,
+            rt,
             finally_stack,
             loop_control::LoopJump::Continue,
         ),

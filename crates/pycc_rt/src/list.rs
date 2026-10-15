@@ -43,10 +43,9 @@ pub const LIST_KIND_STR: i64 = 3;
 pub const LIST_KIND_INSTANCE: i64 = 4;
 /// Element kind of a list of lists (`PyListObj` pointers).
 pub const LIST_KIND_LIST: i64 = 5;
-/// Element kind of a list of exception-class instances: the runtime's
-/// leak-only exception objects, which carry no reference count, so the
-/// list holds them without one.
-pub const LIST_KIND_UNCOUNTED_INSTANCE: i64 = 6;
+/// Element kind of a list of exception-class instances (counted
+/// `PyExceptionObj` pointers, `exception/lifetime.rs`).
+pub const LIST_KIND_EXCEPTION: i64 = 6;
 /// Element kind of a list of tuples (tuple-object `PyListObj` pointers,
 /// `tuple.rs`).
 pub const LIST_KIND_TUPLE: i64 = 7;

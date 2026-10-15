@@ -94,10 +94,10 @@ fn unpack_value(
 /// `ty`, of class `class`.
 pub(super) fn slot_setter_c(class: &str, name: &str, index: usize, ty: &Ty) -> String {
     let symbol = setter_symbol(class, name);
-    // A carried instance slot is of a carrier class, never an (uncounted)
-    // exception class.
+    // A carried instance slot is of a carrier class, never an exception
+    // class.
     let kind = char::from(
-        copy_kind(ty, &|_: &str| true).expect("every carried slot type has a copy kind"),
+        copy_kind(ty, &|_: &str| b'c').expect("every carried slot type has a copy kind"),
     );
     let (local, unpack, to_word) = unpack_value(
         &format!("{class}.{name}"),

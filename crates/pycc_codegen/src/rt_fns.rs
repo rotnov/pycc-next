@@ -293,8 +293,12 @@ pub(super) struct RtFns<'ctx> {
     pub(super) nothrow: std::cell::RefCell<std::collections::HashSet<String>>,
     /// `exception_value` returns a pointer to the current exception object.
     pub(super) exception_value: FunctionValue<'ctx>,
-    /// `exception_clear` resets the thread-local pending state (void).
-    pub(super) exception_clear: FunctionValue<'ctx>,
+    /// `exception_take` clears the pending state and returns the exception
+    /// it held, with the state's reference (null when nothing was pending).
+    pub(super) exception_take: FunctionValue<'ctx>,
+    /// `pycc_rt_exception_incref`/`_decref`: an exception object's count.
+    pub(super) exc_incref: FunctionValue<'ctx>,
+    pub(super) exc_decref: FunctionValue<'ctx>,
     /// `exception_alloc(type_tag: u8, name: *const u8, name_len: usize,
     /// message: *mut PyStrObj) -> *mut PyExceptionObj`. Part 2 of #541
     /// (D-189) added the class name: user-defined exception classes carry
@@ -368,8 +372,12 @@ pub(super) struct RtFns<'ctx> {
     /// Every reference-counted class of the module (`pycc_hir::
     /// is_refcounted_class`), keyed by its MIR name, with the slot kind
     /// string its layout descriptor records (`pycc_hir::slot_rc_kind`). A
-    /// class absent here -- an exception class -- is not counted.
+    /// class absent here is an exception class (`exception_classes`).
     pub(super) rc_class_kinds: std::cell::RefCell<HashMap<String, String>>,
+    /// Every exception class an instance type can name: the module's own
+    /// and the builtin ones. Their instances are the runtime's exception
+    /// objects, counted through `exc_incref`/`exc_decref`.
+    pub(super) exception_classes: std::cell::RefCell<std::collections::HashSet<String>>,
     /// The current function's locals that hold borrowed references
     /// (`borrowed_locals`).
     pub(super) borrowed_locals: std::cell::RefCell<std::collections::HashSet<String>>,
@@ -810,7 +818,15 @@ pub(super) fn declare_rt_functions<'ctx>(
         emitting_ctor: std::cell::Cell::new(false),
         nothrow: std::cell::RefCell::new(Default::default()),
         exception_value: declare("pycc_rt_exception_value", ptr_type.fn_type(&[], false)),
-        exception_clear: declare("pycc_rt_exception_clear", void_type.fn_type(&[], false)),
+        exception_take: declare("pycc_rt_exception_take", ptr_type.fn_type(&[], false)),
+        exc_incref: declare(
+            "pycc_rt_exception_incref",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
+        exc_decref: declare(
+            "pycc_rt_exception_decref",
+            void_type.fn_type(&[ptr_type.into()], false),
+        ),
         exception_alloc: declare(
             "pycc_rt_exception_alloc",
             ptr_type.fn_type(
@@ -915,6 +931,7 @@ pub(super) fn declare_rt_functions<'ctx>(
             void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
         rc_class_kinds: std::cell::RefCell::new(HashMap::new()),
+        exception_classes: std::cell::RefCell::new(Default::default()),
         borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
         owned_int_names: std::cell::RefCell::new(std::collections::HashSet::new()),
         loop_list_slots: std::cell::RefCell::new(HashMap::new()),

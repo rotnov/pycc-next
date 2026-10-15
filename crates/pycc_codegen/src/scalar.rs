@@ -335,6 +335,10 @@ pub(crate) struct FinallyTarget<'ctx> {
     /// Alloca i8 flag: `1` = a `return` was intercepted, `0` = normal
     /// completion (fall-through to finally).
     pub(crate) is_returning: PointerValue<'ctx>,
+    /// The number of live exception slots (`exception::owned_slots`) when
+    /// the `try` was entered: a `return` routed here releases the slots
+    /// above it, and this `finally` may still read the ones below.
+    pub(crate) exc_depth: usize,
 }
 
 #[derive(Clone)]

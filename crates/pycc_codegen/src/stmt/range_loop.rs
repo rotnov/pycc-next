@@ -121,7 +121,13 @@ pub(crate) fn emit_while_stmt<'ctx>(
         .expect("build_conditional_branch should not fail for a well-formed i1 condition");
 
     builder.position_at_end(body_bb);
-    rt.loops.enter(stmt, after_bb, test_bb, finally_stack.len());
+    rt.loops.enter(
+        stmt,
+        after_bb,
+        test_bb,
+        finally_stack.len(),
+        crate::exception::owned_slots::depth(rt),
+    );
     emit_body_then_branch(
         context,
         builder,
@@ -306,8 +312,13 @@ pub(crate) fn emit_for_range_stmt<'ctx>(
     // `after_bb`, whose release of `current` balances this
     // iteration's owned value exactly as the normal exit's does.
     let latch_bb = context.append_basic_block(function, "for_latch");
-    rt.loops
-        .enter(stmt, after_bb, latch_bb, finally_stack.len());
+    rt.loops.enter(
+        stmt,
+        after_bb,
+        latch_bb,
+        finally_stack.len(),
+        crate::exception::owned_slots::depth(rt),
+    );
     emit_body_then_branch(
         context,
         builder,

@@ -150,6 +150,11 @@ pub(crate) fn emit_reraise_stmt<'ctx>(
         )
         .expect("build_load should not fail for a handler exception slot")
         .into_pointer_value();
+    // The handler's slot keeps its reference until the handler is left; the
+    // pending state takes one of its own.
+    builder
+        .build_call(rt.exc_incref, &[exc_val.into()], "")
+        .expect("build_call should not fail for pycc_rt_exception_incref");
     builder
         .build_call(rt.exception_raise, &[exc_val.into()], "")
         .expect("build_call should not fail for exception_raise");

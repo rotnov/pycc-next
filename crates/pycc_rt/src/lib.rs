@@ -108,8 +108,10 @@ pub use exception::{
     EXCEPTION_TYPE_INDEX_ERROR, EXCEPTION_TYPE_KEY_ERROR, EXCEPTION_TYPE_OVERFLOW_ERROR,
     EXCEPTION_TYPE_RUNTIME_ERROR, EXCEPTION_TYPE_TYPE_ERROR, EXCEPTION_TYPE_VALUE_ERROR,
     EXCEPTION_TYPE_ZERO_DIV_ERROR, PyExceptionObj, pycc_rt_exception_active,
-    pycc_rt_exception_alloc, pycc_rt_exception_clear, pycc_rt_exception_group_alloc,
-    pycc_rt_exception_group_partition, pycc_rt_exception_message, pycc_rt_exception_raise,
+    pycc_rt_exception_alloc, pycc_rt_exception_clear, pycc_rt_exception_decref,
+    pycc_rt_exception_group_alloc, pycc_rt_exception_group_partition,
+    pycc_rt_exception_incref, pycc_rt_exception_live_objects, pycc_rt_exception_message,
+    pycc_rt_exception_raise, pycc_rt_exception_take,
     pycc_rt_exception_raise_with_cause, pycc_rt_exception_type_matches,
     pycc_rt_ext_pending_message, pycc_rt_ext_pending_type,
 };
@@ -140,7 +142,7 @@ pub use int_set::{
 };
 pub use list::{
     LIST_KIND_BOOL, LIST_KIND_DICT, LIST_KIND_FLOAT, LIST_KIND_INSTANCE, LIST_KIND_INT,
-    LIST_KIND_LIST, LIST_KIND_SET, LIST_KIND_STR, LIST_KIND_TUPLE, LIST_KIND_UNCOUNTED_INSTANCE,
+    LIST_KIND_LIST, LIST_KIND_SET, LIST_KIND_STR, LIST_KIND_TUPLE, LIST_KIND_EXCEPTION,
     PyListObj, SLICE_HAS_START, SLICE_HAS_STEP, SLICE_HAS_STOP, pycc_rt_list_append,
     pycc_rt_list_concat, pycc_rt_list_contains, pycc_rt_list_get, pycc_rt_list_index_error,
     pycc_rt_list_insert, pycc_rt_list_len, pycc_rt_list_new, pycc_rt_list_pop, pycc_rt_list_repeat,

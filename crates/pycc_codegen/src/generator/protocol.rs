@@ -77,10 +77,13 @@ pub(super) fn raise_stop_with_return<'ctx>(
         (scalar_to_slot_word(context, builder, value), message)
     };
     let tag = context.i64_type().const_int(stop_value_tag(ret), false);
+    let kind = context
+        .i8_type()
+        .const_int(u64::from(heap_rc::rc_kind_byte(rt, ret)), false);
     builder
         .build_call(
             rt.gens.raise_stop,
-            &[word.into(), message.into(), tag.into()],
+            &[word.into(), message.into(), tag.into(), kind.into()],
             "",
         )
         .expect("build_call should not fail for pycc_rt_raise_stop_iteration");

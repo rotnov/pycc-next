@@ -206,7 +206,7 @@ fn render_exception_chain_shows_the_direct_cause_separator_oldest_first() {
     let effect = alloc_named(EXCEPTION_TYPE_RUNTIME_ERROR, "RuntimeError", "effect");
     const EFFECT_FRAME: &str = "outer";
     unsafe { pycc_rt_exception_set_frame(effect, EFFECT_FRAME.as_ptr(), EFFECT_FRAME.len()) };
-    unsafe { (*effect).cause = cause };
+    unsafe { (*effect).cause.set(cause) };
     let rendered = render_exception_chain(unsafe { &*effect });
     let expected = format!(
         "{}\n\nThe above exception was the direct cause of the following exception:\n\n{}",
@@ -230,9 +230,9 @@ fn render_exception_chain_walks_a_multi_level_cause_chain() {
     // two levels deep.
     let root = alloc_named(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", "root");
     let middle = alloc_named(EXCEPTION_TYPE_TYPE_ERROR, "TypeError", "middle");
-    unsafe { (*middle).cause = root };
+    unsafe { (*middle).cause.set(root) };
     let leaf = alloc_named(EXCEPTION_TYPE_RUNTIME_ERROR, "RuntimeError", "leaf");
-    unsafe { (*leaf).cause = middle };
+    unsafe { (*leaf).cause.set(middle) };
     let rendered = render_exception_chain(unsafe { &*leaf });
     let root_pos = rendered.find("ValueError: root").unwrap();
     let middle_pos = rendered.find("TypeError: middle").unwrap();
@@ -253,7 +253,7 @@ fn render_exception_chain_breaks_a_self_cycle_instead_of_overflowing() {
     // and sets `e.cause = e`. Rendering must detect the repeat and stop
     // instead of recursing forever.
     let exc = alloc_named(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", "self cycle");
-    unsafe { (*exc).cause = exc };
+    unsafe { (*exc).cause.set(exc) };
     let rendered = render_exception_chain(unsafe { &*exc });
     assert_eq!(rendered, render_single_exception(unsafe { &*exc }));
     assert!(!rendered.contains("direct cause"));
@@ -265,8 +265,8 @@ fn render_exception_chain_breaks_a_two_node_cycle() {
     // statements: `e1.cause = e2` and, separately, `e2.cause = e1`.
     let e1 = alloc_named(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", "e1");
     let e2 = alloc_named(EXCEPTION_TYPE_TYPE_ERROR, "TypeError", "e2");
-    unsafe { (*e1).cause = e2 };
-    unsafe { (*e2).cause = e1 };
+    unsafe { (*e1).cause.set(e2) };
+    unsafe { (*e2).cause.set(e1) };
     let rendered = render_exception_chain(unsafe { &*e1 });
     let expected = format!(
         "{}\n\nThe above exception was the direct cause of the following exception:\n\n{}",
@@ -293,9 +293,9 @@ fn render_exception_chain_renders_a_non_cyclic_prefix_before_a_later_cycle() {
     let a = alloc_named(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", "a");
     let b = alloc_named(EXCEPTION_TYPE_TYPE_ERROR, "TypeError", "b");
     let c = alloc_named(EXCEPTION_TYPE_RUNTIME_ERROR, "RuntimeError", "c");
-    unsafe { (*a).cause = b };
-    unsafe { (*b).cause = c };
-    unsafe { (*c).cause = b };
+    unsafe { (*a).cause.set(b) };
+    unsafe { (*b).cause.set(c) };
+    unsafe { (*c).cause.set(b) };
     let rendered = render_exception_chain(unsafe { &*a });
     let expected = format!(
         "{}\n\nThe above exception was the direct cause of the following exception:\n\n{}\n\nThe above exception was the direct cause of the following exception:\n\n{}",
@@ -361,10 +361,9 @@ fn explicit_cause_and_default_fields_are_preserved() {
     let cause = alloc_named(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", "cause");
     let exc = alloc_named(EXCEPTION_TYPE_RUNTIME_ERROR, "RuntimeError", "effect");
     assert_eq!(unsafe { (*(*exc).message).bytes() }, b"effect");
-    assert!(unsafe { (*exc).cause }.is_null());
-    assert!(unsafe { (*exc)._context }.is_null());
+    assert!(unsafe { (*exc).cause.get() }.is_null());
     unsafe { pycc_rt_exception_raise_with_cause(exc, cause) };
-    assert_eq!(unsafe { (*exc).cause }, cause);
+    assert_eq!(unsafe { (*exc).cause.get() }, cause);
     assert_eq!(pycc_rt_exception_value(), exc);
     pycc_rt_exception_clear();
 }

@@ -111,7 +111,13 @@ pub(crate) fn emit_for_gen_stmt<'ctx>(
         heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
     }
     emit_assign(context, builder, rt, locals, var, value);
-    rt.loops.enter(stmt, after_bb, test_bb, finally_stack.len());
+    rt.loops.enter(
+        stmt,
+        after_bb,
+        test_bb,
+        finally_stack.len(),
+        crate::exception::owned_slots::depth(rt),
+    );
     emit_body_then_branch(
         context,
         builder,

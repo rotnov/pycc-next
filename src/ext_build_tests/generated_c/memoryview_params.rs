@@ -110,7 +110,7 @@ fn a_memoryview_parameter_is_released_on_the_success_path_and_on_the_pending_bai
     // buffer is still held when the compiled call returns normally.
     assert!(
         inc.contains(
-            "    pycc_ext_bridge_release_to(bridge_mark);\n    PyBuffer_Release(&b0);\n    \
+            "    PyBuffer_Release(&b0);\n    \
              return pycc_ext_pack_float(result);\n}\n\n"
         ),
         "{inc}"
@@ -121,7 +121,7 @@ fn a_memoryview_parameter_is_released_on_the_success_path_and_on_the_pending_bai
     assert!(
         inc.contains(
             "    if (pycc_rt_ext_pending_type() >= 0) {\n        PyBuffer_Release(&b0);\n        \
-             pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
+             pycc_ext_raise_pending();\n        \
              return NULL;\n    }\n"
         ),
         "{inc}"
@@ -240,8 +240,8 @@ fn an_export_with_no_memoryview_parameter_emits_no_release_at_all() {
     assert!(
         inc.contains(
             "    if (pycc_rt_ext_pending_type() >= 0) {\n        pycc_ext_raise_pending();\n        \
-             pycc_ext_bridge_release_to(bridge_mark);\n        return NULL;\n    }\n    \
-             pycc_ext_bridge_release_to(bridge_mark);\n    return pycc_ext_pack_str(result);\n"
+             return NULL;\n    }\n    \
+             return pycc_ext_pack_str(result);\n"
         ),
         "{inc}"
     );

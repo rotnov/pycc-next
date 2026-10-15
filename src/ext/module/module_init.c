@@ -168,7 +168,6 @@ static PyObject *pycc_ext_snapshot_classes(void)
  */
 static int pycc_ext_exec_module(PyObject *module)
 {
-    Py_ssize_t mark;
     void *saved_target;
     void *saved_classes;
     PyObject *classes;
@@ -229,25 +228,11 @@ static int pycc_ext_exec_module(PyObject *module)
         return -1;
     }
     /*
-     * #1316: the bridge table's thread-specific-storage key, created once
+     * #1366: the exec-target key's thread-specific storage, created once
      * per process. A re-import after `del sys.modules[...]` runs this slot
      * again, and must not replace a key that live wrappers on other threads
      * still read.
      */
-    if (pycc_ext_bridge_key == NULL) {
-        Py_tss_t *key = PyThread_tss_alloc();
-        if (key == NULL) {
-            PyErr_NoMemory();
-            return -1;
-        }
-        if (PyThread_tss_create(key) != 0) {
-            PyThread_tss_free(key);
-            PyErr_SetString(PyExc_RuntimeError, "pycc: cannot create the bridge-table key");
-            return -1;
-        }
-        pycc_ext_bridge_key = key;
-    }
-    /* #1366: the exec-target key, on the same create-once rule. */
     if (pycc_ext_exec_target_key == NULL) {
         Py_tss_t *key = PyThread_tss_alloc();
         if (key == NULL) {
@@ -301,15 +286,6 @@ static int pycc_ext_exec_module(PyObject *module)
         PyErr_SetString(PyExc_RuntimeError, "pycc: cannot record the executing module");
         return -1;
     }
-    /*
-     * The watermark, not a whole-table clear: when this exec runs beneath a
-     * live wrapper on the same thread (a handler whose foreign helper
-     * re-imports the module), that wrapper's entries survive it. When exec
-     * is the outermost frame the mark is 0, which empties the table. Taken
-     * immediately before the body, after every early return above, so each
-     * mark is released exactly once.
-     */
-    mark = pycc_ext_bridge_mark();
     exec_status = pycc_ext_module_exec();
     (void)PyThread_tss_set(pycc_ext_exec_target_key, saved_target);
     (void)PyThread_tss_set(pycc_ext_exec_classes_key, saved_classes);
@@ -323,8 +299,8 @@ static int pycc_ext_exec_module(PyObject *module)
          * CPython directly -- an exception CPython already set, with no
          * pycc pending state at all. The first channel has a third case
          * since #1293: a pending exception the failed-import bridge made
-         * from a CPython one, which `pycc_ext_raise_pending` finds in the
-         * bridge table and re-raises as that original object.
+         * from a CPython one, which `pycc_ext_raise_pending` re-raises as
+         * that original object.
          * `pycc_ext_raise_pending` returns 0 for the second channel, so
          * raising unconditionally here would replace
          * the real exception (a `ModuleNotFoundError` from a failed host
@@ -336,12 +312,8 @@ static int pycc_ext_exec_module(PyObject *module)
         if (!pycc_ext_raise_pending() && !PyErr_Occurred()) {
             PyErr_SetString(PyExc_ImportError, "pycc module body failed");
         }
-        /* Only after the lookup above: any entry still here belongs to a
-         * bridged exception that was caught, or replaced by another. */
-        pycc_ext_bridge_release_to(mark);
         return -1;
     }
-    pycc_ext_bridge_release_to(mark);
     status = pycc_ext_publish_unbound_classes(module, classes);
     Py_DECREF(classes);
     if (status != 0) {

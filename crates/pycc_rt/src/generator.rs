@@ -442,9 +442,10 @@ pub unsafe extern "C" fn pycc_rt_gen_can_send(g: *mut PyGenObj, is_none: i8) -> 
     }
 }
 
-/// `g.throw(exc)`: raises `exc` at the `yield` where `g` is suspended (at
-/// its start when it has not run yet), with [`pycc_rt_gen_step`]'s answers.
-/// A finished generator raises `exc` in the caller.
+/// `g.throw(exc)`: raises `exc` (whose reference passes to the call) at the
+/// `yield` where `g` is suspended (at its start when it has not run yet),
+/// with [`pycc_rt_gen_step`]'s answers. A finished generator raises `exc`
+/// in the caller.
 ///
 /// # Safety
 /// `g` must be a live generator, `exc` a live exception object.
@@ -458,6 +459,7 @@ pub unsafe extern "C" fn pycc_rt_gen_throw(g: *mut PyGenObj, exc: *mut PyExcepti
                 STEP_FINISHED
             }
             RUNNING => {
+                crate::exception::pycc_rt_exception_decref(exc);
                 raise_builtin(
                     EXCEPTION_TYPE_VALUE_ERROR,
                     "ValueError",
@@ -522,11 +524,10 @@ pub extern "C" fn pycc_rt_gen_raise_no_return() {
 /// It is not an `Exception`: `except Exception:` lets it through, a bare
 /// `except:` and `finally` see it, as in CPython.
 ///
-/// Exception objects are not reference counted (`docs/DEVIATIONS.md`), so
-/// one `GeneratorExit` per thread is raised by every close rather than a
-/// new one each time: closing generators in a loop runs in constant memory.
-/// Nothing a program can observe tells the two apart -- it carries no
-/// message, and the close swallows it.
+/// One `GeneratorExit` per thread, kept alive by a reference of its own, is
+/// raised by every close rather than a new one each time. Nothing a program
+/// can observe tells the two apart -- it carries no message, and the close
+/// swallows it.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_gen_raise_exit() {
     thread_local! {
@@ -536,11 +537,11 @@ pub extern "C" fn pycc_rt_gen_raise_exit() {
     let exit = GENERATOR_EXIT.with(|cell| {
         if cell.get().is_null() {
             raise_builtin(EXCEPTION_TYPE_GENERATOR_EXIT, "GeneratorExit", "");
-            cell.set(crate::exception::pycc_rt_exception_value());
-            crate::exception::pycc_rt_exception_clear();
+            cell.set(crate::exception::pycc_rt_exception_take());
         }
         cell.get()
     });
+    crate::exception::pycc_rt_exception_incref(exit);
     crate::exception::pycc_rt_exception_raise(exit);
 }
 
@@ -701,6 +702,7 @@ pub extern "C" fn pycc_rt_gen_decref(g: *mut PyGenObj) {
         }
         destroy_frame(g);
         drop_return_value(g);
+        crate::exception::pycc_rt_exception_decref((*g).thrown);
         std::alloc::dealloc(g.cast::<u8>(), layout((*g).size as usize));
     }
     GEN_LIVE.fetch_sub(1, Ordering::Relaxed);

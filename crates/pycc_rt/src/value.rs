@@ -36,6 +36,7 @@ pub(crate) fn rc_kind(kind: i64) -> u8 {
         LIST_KIND_DICT => b'd',
         LIST_KIND_SET => b'e',
         LIST_KIND_CLOSURE => b'f',
+        crate::list::LIST_KIND_EXCEPTION => b'x',
         _ => b'w',
     }
 }
@@ -225,7 +226,7 @@ pub(crate) fn hash(kind: i64, word: i64) -> Option<i64> {
             }
             unsafe { crate::pycc_rt_hash_tuple(lanes.as_ptr(), lanes.len()) }
         }
-        LIST_KIND_INSTANCE | crate::list::LIST_KIND_UNCOUNTED_INSTANCE | LIST_KIND_CLOSURE => {
+        LIST_KIND_INSTANCE | crate::list::LIST_KIND_EXCEPTION | LIST_KIND_CLOSURE => {
             crate::pycc_rt_hash_pointer(word as *const std::ffi::c_void)
         }
         _ => return None,

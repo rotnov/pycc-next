@@ -628,13 +628,11 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
             _ => format!("a{index}"),
         });
     }
-    // #1316: the same bridge-table watermark `wrapper_for` takes.
     // `__init__`'s `self` parameter owns a reference of its own; the one
     // `pycc_rt_instance_new` returned goes to the carrier, or is released
     // when the constructor raises.
     out.push_str(&format!(
         "    pycc_rt_instance_incref(inst);\n    \
-         Py_ssize_t bridge_mark = pycc_ext_bridge_mark();\n    \
          ((void (*)({params}))fnptr_{symbol})({call_args});\n",
         call_args = call_args.join(", ")
     ));
@@ -646,9 +644,8 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
     out.push_str(&format!(
         "    if (pycc_rt_ext_pending_type() >= 0) {{\n{}        \
          pycc_rt_instance_decref(inst);\n        \
-         pycc_ext_raise_pending();\n        pycc_ext_bridge_release_to(bridge_mark);\n        \
-         return -1;\n    }}\n    \
-         pycc_ext_bridge_release_to(bridge_mark);\n{}",
+         pycc_ext_raise_pending();\n        \
+         return -1;\n    }}\n{}",
         buffer_releases(&slots, "        "),
         buffer_releases(&slots, "    ")
     ));

@@ -5,7 +5,7 @@
 //! a future generated thread cannot overwrite another thread's pending
 //! exception. Current generated programs remain single-threaded.
 
-use super::{PyStrObj, PyStrPayload};
+use super::PyStrObj;
 use std::cell::Cell;
 use std::collections::HashSet;
 
@@ -72,10 +72,10 @@ fn tag_matches(obj_tag: u8, handler_tag: u8) -> bool {
             && obj_tag != EXCEPTION_TYPE_GENERATOR_EXIT)
 }
 
-/// Heap-allocated builtin exception object. Exception lifetime management is
-/// intentionally leak-only in this first implementation: clearing a pending
-/// exception drops the runtime reference but does not free the object.
+/// Heap-allocated exception object, reference counted (`lifetime.rs`).
 pub struct PyExceptionObj {
+    /// The reference count (`lifetime.rs` owns every change to it).
+    pub(crate) rc: Cell<i64>,
     pub(crate) type_tag: u8,
     /// The exception class's source name, as a pointer to UTF-8 bytes with no
     /// terminator, plus `name_len`. Part 2 of #541 (D-189): the name used to
@@ -100,10 +100,8 @@ pub struct PyExceptionObj {
     /// blank or placeholder function name.
     pub(crate) frame_function: *const u8,
     pub(crate) frame_function_len: usize,
-    /// Explicit `raise ... from cause` chain.
-    pub(crate) cause: *mut PyExceptionObj,
-    /// Implicit handler context. Reserved but not wired in this part.
-    pub(crate) _context: *mut PyExceptionObj,
+    /// Explicit `raise ... from cause` chain: an owned reference, or null.
+    pub(crate) cause: Cell<*mut PyExceptionObj>,
     /// Part 3 of #382 (#542, PEP 654): an `ExceptionGroup`/`BaseExceptionGroup`
     /// instance's member exceptions, as an owned, heap-allocated array of
     /// `exceptions_len` pointers. Null (with `exceptions_len == 0`) for every
@@ -116,18 +114,21 @@ pub struct PyExceptionObj {
     pub(crate) exceptions: *mut *mut PyExceptionObj,
     pub(crate) exceptions_len: usize,
     /// `str(exc)` when it differs from `message` (a `KeyError`), built on
-    /// first use by [`str_form::exception_str`]; null until then.
+    /// first use by [`str_form::exception_str`]; null until then. Owned.
     pub(crate) str_form: Cell<*mut PyStrObj>,
     /// A `StopIteration`'s `value` (a generator's return value), as the
     /// word codegen stores for the generator's return type, paired with the
-    /// tag of that type (`pycc_codegen`'s `stop_value_tag`); `None` for
-    /// every other exception and a value-less `StopIteration`. The value is
-    /// owned by the exception, which is never freed (`docs/DEVIATIONS.md`).
-    /// The tag lets [`pycc_rt_exception_payload`] refuse a word of another
-    /// type: a handler's static type for `e.value` comes from the generators
-    /// its `try` body resumes, but the `StopIteration` may come from
-    /// anywhere a call in that body reaches.
-    pub(crate) payload: Cell<Option<(u64, u64)>>,
+    /// tag of that type (`pycc_codegen`'s `stop_value_tag`) and the
+    /// `crate::rc` kind byte that releases it; `None` for every other
+    /// exception and a value-less `StopIteration`. The value is owned by
+    /// the exception. The tag lets [`pycc_rt_exception_payload`] refuse a
+    /// word of another type: a handler's static type for `e.value` comes
+    /// from the generators its `try` body resumes, but the `StopIteration`
+    /// may come from anywhere a call in that body reaches.
+    pub(crate) payload: Cell<Option<(u64, u64, u8)>>,
+    /// The original CPython exception (`PyObject *`, owned) the `ext` shim
+    /// translated this one from, or null (`lifetime.rs`).
+    pub(crate) foreign: Cell<*mut std::ffi::c_void>,
 }
 
 #[derive(Clone, Copy)]
@@ -176,9 +177,20 @@ pub extern "C" fn pycc_rt_exception_value() -> *mut PyExceptionObj {
     EXCEPTION_STATE.with(|state| state.get().value)
 }
 
+/// Clears the pending exception, releasing the state's reference to it.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_exception_clear() {
+    pycc_rt_exception_decref(pycc_rt_exception_take());
+}
+
+/// Clears the pending exception and hands the state's reference to it to
+/// the caller (null when nothing is pending): what a compiled `except`
+/// handler and `finally` clause do on entry.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_exception_take() -> *mut PyExceptionObj {
+    let value = EXCEPTION_STATE.with(|state| state.get().value);
     set_state(ExceptionState::CLEAR);
+    value
 }
 
 /// D-244's `ext` boundary, exception half: the pending exception's type tag,
@@ -230,10 +242,10 @@ pub extern "C" fn pycc_rt_ext_pending_is_unbound_local() -> i32 {
 /// The pending exception's message as UTF-8 bytes, writing its length through
 /// `len`. Null (with `*len == 0`) when nothing is pending.
 ///
-/// The bytes belong to the pending exception object, which this runtime never
-/// frees (see [`PyExceptionObj`]'s leak-only note), so they stay readable
-/// until the caller has copied them into a CPython exception -- which the
-/// shim does immediately, before [`pycc_rt_exception_clear`].
+/// The bytes belong to the pending exception object, which the pending state
+/// keeps alive, so they stay readable until the caller has copied them into
+/// a CPython exception -- which the shim does immediately, before
+/// [`pycc_rt_exception_clear`] releases it.
 ///
 /// # Safety
 ///
@@ -255,29 +267,6 @@ pub unsafe extern "C" fn pycc_rt_ext_pending_message(len: *mut usize) -> *const 
         unsafe { *len = bytes.len() };
         bytes.as_ptr()
     })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_exception_alloc(
-    type_tag: u8,
-    name: *const u8,
-    name_len: usize,
-    message: *mut PyStrObj,
-) -> *mut PyExceptionObj {
-    Box::into_raw(Box::new(PyExceptionObj {
-        type_tag,
-        name,
-        name_len,
-        message,
-        frame_function: std::ptr::null(),
-        frame_function_len: 0,
-        cause: std::ptr::null_mut(),
-        _context: std::ptr::null_mut(),
-        exceptions: std::ptr::null_mut(),
-        exceptions_len: 0,
-        str_form: Cell::new(std::ptr::null_mut()),
-        payload: Cell::new(None),
-    }))
 }
 
 /// Records `frame_function`/`frame_function_len` on `obj` (#707) --
@@ -309,189 +298,20 @@ pub unsafe extern "C" fn pycc_rt_exception_set_frame(
     }
 }
 
-/// Copies `exceptions_len` member pointers out of the caller-supplied
-/// `exceptions` array into a freshly heap-allocated, owned slice, returning
-/// its thin pointer and length (`(null, 0)` for an empty array). Shared by
-/// [`pycc_rt_exception_group_alloc`] (a source-level `ExceptionGroup(...)`
-/// construction) and [`pycc_rt_exception_group_partition`] (each subgroup it
-/// builds), so both leave the exact same "owned, independently freed later
-/// under this runtime's leak-only model" shape on `PyExceptionObj::exceptions`.
-///
-/// # Safety
-/// `exceptions` must be null (iff `exceptions_len == 0`) or point to
-/// `exceptions_len` valid `*mut PyExceptionObj` values, readable for the
-/// duration of this call.
-unsafe fn copy_member_array(
-    exceptions: *const *mut PyExceptionObj,
-    exceptions_len: usize,
-) -> (*mut *mut PyExceptionObj, usize) {
-    if exceptions_len == 0 {
-        return (std::ptr::null_mut(), 0);
-    }
-    let slice = unsafe { std::slice::from_raw_parts(exceptions, exceptions_len) };
-    let boxed: Box<[*mut PyExceptionObj]> = slice.to_vec().into_boxed_slice();
-    (Box::leak(boxed).as_mut_ptr(), exceptions_len)
-}
-
-/// Builds a fresh `ExceptionGroup`-shaped [`PyExceptionObj`] wrapping
-/// `members`, or returns null when `members` is empty. Used by
-/// [`pycc_rt_exception_group_partition`] for both the matched and remaining
-/// halves of a partition -- an empty half means "this handler caught
-/// nothing" / "nothing is left to reraise", which codegen tests via a null
-/// pointer check exactly like every other D-173 exception-object slot.
-fn build_group_or_null(
-    members: Vec<*mut PyExceptionObj>,
-    group_type_tag: u8,
-    group_name: *const u8,
-    group_name_len: usize,
-    message: *mut PyStrObj,
-) -> *mut PyExceptionObj {
-    if members.is_empty() {
-        return std::ptr::null_mut();
-    }
-    // Safety: `members` was just built from live `*mut PyExceptionObj`
-    // values (either `pycc_rt_exception_group_partition`'s own `group`, its
-    // existing member array, or both), so the pointer and length passed to
-    // `copy_member_array` are valid for the duration of this call.
-    let (exceptions_ptr, exceptions_len) =
-        unsafe { copy_member_array(members.as_ptr(), members.len()) };
-    Box::into_raw(Box::new(PyExceptionObj {
-        type_tag: group_type_tag,
-        name: group_name,
-        name_len: group_name_len,
-        message,
-        frame_function: std::ptr::null(),
-        frame_function_len: 0,
-        cause: std::ptr::null_mut(),
-        _context: std::ptr::null_mut(),
-        exceptions: exceptions_ptr,
-        exceptions_len,
-        str_form: Cell::new(std::ptr::null_mut()),
-        payload: Cell::new(None),
-    }))
-}
-
-/// Constructs a heap-allocated `ExceptionGroup`/`BaseExceptionGroup`
-/// instance carrying `exceptions_len` member exceptions, copied out of
-/// `exceptions` (Part 3 of #382, #542, PEP 654). The one production caller
-/// is codegen's lowering of a literal-list `ExceptionGroup(msg, [e1, e2])`
-/// construction (`pycc_types`/`pycc_mir` restrict the second argument to a
-/// literal list -- see D-202 -- so codegen always has a fixed-size array of
-/// already-evaluated member pointers to hand this in).
-///
-/// # Safety
-/// `exceptions` must be null (iff `exceptions_len == 0`) or point to
-/// `exceptions_len` valid `*mut PyExceptionObj` values, readable for the
-/// duration of this call; the array is copied, not retained by pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_exception_group_alloc(
-    type_tag: u8,
-    name: *const u8,
-    name_len: usize,
-    message: *mut PyStrObj,
-    exceptions: *const *mut PyExceptionObj,
-    exceptions_len: usize,
-) -> *mut PyExceptionObj {
-    // Safety: forwarded from this function's own safety contract.
-    let (exceptions_ptr, exceptions_len) = unsafe { copy_member_array(exceptions, exceptions_len) };
-    Box::into_raw(Box::new(PyExceptionObj {
-        type_tag,
-        name,
-        name_len,
-        message,
-        frame_function: std::ptr::null(),
-        frame_function_len: 0,
-        cause: std::ptr::null_mut(),
-        _context: std::ptr::null_mut(),
-        exceptions: exceptions_ptr,
-        exceptions_len,
-        str_form: Cell::new(std::ptr::null_mut()),
-        payload: Cell::new(None),
-    }))
-}
-
-/// Partitions `group`'s member exceptions by whether they match any tag in
-/// `tags` (Part 3 of #382, #542, PEP 654 `except*` dispatch): an empty
-/// `tags` (`tags_len == 0`) matches every member, mirroring a bare
-/// `except*:`; a nonempty `tags` matches a member whose own `type_tag`
-/// equals [`EXCEPTION_TYPE_EXCEPTION`] (the catch-all, consistent with
-/// [`pycc_rt_exception_type_matches`], which excludes only
-/// [`EXCEPTION_TYPE_FOREIGN_BASE`]) or any entry in `tags`
-/// (Part 2 of #541's multi-tag subclass matching, carried over unchanged).
-///
-/// `matched_out` receives a fresh `ExceptionGroup`-shaped group wrapping the
-/// matched members, or null when none matched; `rest_out` receives the same
-/// for the unmatched members, or null when none remain. Both constructed
-/// groups are tagged `group_type_tag`/`group_name`/`group_name_len` --
-/// supplied by codegen (which resolves `ExceptionGroup`'s fixed builtin tag
-/// and name at MIR-lowering time) rather than hardcoded here, so this
-/// runtime module carries no compile-time knowledge of that tag's numeric
-/// value.
-///
-/// A `group` whose own `exceptions_len` is 0 is treated as an implicit
-/// single-member group containing `group` itself: an ordinary exception
-/// raised inside a `try*` body that is not already an `ExceptionGroup`,
-/// which a matching `except*` clause still catches (and still wraps in a
-/// fresh one-member group on the way out, matching CPython's own PEP 654
-/// semantics).
-///
-/// # Safety
-/// `group` must be non-null and point to a live `PyExceptionObj`. `tags`
-/// must be null (iff `tags_len == 0`) or point to `tags_len` readable
-/// bytes. `matched_out`/`rest_out` must be valid, non-null, writable
-/// out-pointers.
-#[allow(clippy::too_many_arguments)]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_exception_group_partition(
-    group: *mut PyExceptionObj,
-    tags: *const u8,
-    tags_len: usize,
-    group_type_tag: u8,
-    group_name: *const u8,
-    group_name_len: usize,
-    matched_out: *mut *mut PyExceptionObj,
-    rest_out: *mut *mut PyExceptionObj,
-) {
-    let obj = unsafe { &*group };
-    let members: Vec<*mut PyExceptionObj> = if obj.exceptions_len == 0 {
-        vec![group]
-    } else {
-        unsafe { std::slice::from_raw_parts(obj.exceptions, obj.exceptions_len) }.to_vec()
-    };
-    let tag_slice: &[u8] = if tags_len == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(tags, tags_len) }
-    };
-    let mut matched = Vec::new();
-    let mut rest = Vec::new();
-    for member in members {
-        let member_tag = unsafe { (*member).type_tag };
-        let is_match =
-            tag_slice.is_empty() || tag_slice.iter().any(|tag| tag_matches(member_tag, *tag));
-        if is_match {
-            matched.push(member);
-        } else {
-            rest.push(member);
-        }
-    }
-    let message = obj.message;
-    unsafe {
-        *matched_out =
-            build_group_or_null(matched, group_type_tag, group_name, group_name_len, message);
-        *rest_out = build_group_or_null(rest, group_type_tag, group_name, group_name_len, message);
-    }
-}
-
+/// Makes `obj` the pending exception, taking over the caller's reference
+/// to it; an exception already pending is released (replaced).
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_exception_raise(obj: *mut PyExceptionObj) {
+    let old = EXCEPTION_STATE.with(|state| state.get().value);
     set_state(ExceptionState {
         active: 1,
         value: obj,
     });
+    pycc_rt_exception_decref(old);
 }
 
-/// Raises `obj` and records its explicit cause.
+/// Raises `obj` with `cause` as its `__cause__`, taking over the caller's
+/// reference to each.
 ///
 /// # Safety
 ///
@@ -501,8 +321,10 @@ pub unsafe extern "C" fn pycc_rt_exception_raise_with_cause(
     obj: *mut PyExceptionObj,
     cause: *mut PyExceptionObj,
 ) {
-    if !obj.is_null() {
-        unsafe { (*obj).cause = cause };
+    if obj.is_null() {
+        pycc_rt_exception_decref(cause);
+    } else {
+        lifetime::set_cause(unsafe { &*obj }, cause);
     }
     pycc_rt_exception_raise(obj);
 }
@@ -550,20 +372,24 @@ pub unsafe extern "C" fn pycc_rt_exception_message(obj: *mut PyExceptionObj) -> 
     str_form::exception_str(unsafe { &*obj })
 }
 
-/// Records `text` as `obj`'s `str()` form. The CPython error bridge passes
-/// the bridged exception's own `str(exc)`, which is also its message, so a
-/// bridged `KeyError` shows CPython's text rather than its `repr` again.
+/// Records `text` (borrowed: the exception takes a reference of its own)
+/// as `obj`'s `str()` form. The CPython error bridge passes the bridged
+/// exception's own `str(exc)`, which is also its message, so a bridged
+/// `KeyError` shows CPython's text rather than its `repr` again.
 ///
 /// # Safety
 ///
 /// `obj` must point to a live `PyExceptionObj` and `text` to a live
-/// `PyStrObj` that outlives it (the leak-only message the bridge allocated).
+/// `PyStrObj`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_exception_set_str_form(
     obj: *mut PyExceptionObj,
     text: *mut PyStrObj,
 ) {
-    unsafe { (*obj).str_form.set(text) };
+    unsafe {
+        crate::pycc_rt_str_incref(text);
+        crate::pycc_rt_str_decref((*obj).str_form.replace(text));
+    }
 }
 
 /// The exception class's name, or `Exception` when the object carries none.
@@ -683,10 +509,10 @@ fn render_exception_chain(exc: &PyExceptionObj) -> String {
         }
         let current_ref = unsafe { &*current };
         chain.push(current_ref);
-        if current_ref.cause.is_null() {
+        if current_ref.cause.get().is_null() {
             break;
         }
-        current = current_ref.cause;
+        current = current_ref.cause.get();
     }
     let mut out = String::new();
     for (idx, e) in chain.into_iter().rev().enumerate() {
@@ -724,20 +550,21 @@ pub unsafe extern "C" fn pycc_rt_exception_print_and_exit(obj: *mut PyExceptionO
     exception_print_and_exit(obj)
 }
 
-/// The pending exception state, to be put back with [`restore_pending`]
-/// after running code (a generator's close) that must not see or clobber
-/// it.
+/// The pending exception state (with its reference), to be put back with
+/// [`restore_pending`] after running code (a generator's close) that must
+/// not see or clobber it.
 pub(crate) fn save_pending() -> (i8, *mut PyExceptionObj) {
-    let state = EXCEPTION_STATE.with(Cell::get);
-    set_state(ExceptionState::CLEAR);
-    (state.active, state.value)
+    let active = pycc_rt_exception_active();
+    (active, pycc_rt_exception_take())
 }
 
+/// Puts back what [`save_pending`] saved, releasing anything pending now.
 pub(crate) fn restore_pending(saved: (i8, *mut PyExceptionObj)) {
-    set_state(ExceptionState {
-        active: saved.0,
-        value: saved.1,
-    });
+    if saved.0 == 0 {
+        pycc_rt_exception_clear();
+    } else {
+        pycc_rt_exception_raise(saved.1);
+    }
 }
 
 /// Whether `obj` is an exception of the class named `name`.
@@ -765,20 +592,7 @@ pub(crate) fn report_unraisable(obj: *mut PyExceptionObj, what: &str) {
 }
 
 fn alloc_exception_message(msg: &str) -> *mut PyStrObj {
-    let bytes = msg.as_bytes();
-    let len = bytes.len();
-    let payload = if len <= 22 {
-        let mut buf = [0u8; 22];
-        buf[..len].copy_from_slice(bytes);
-        PyStrPayload::Inline(buf, len as u8)
-    } else {
-        PyStrPayload::Heap(bytes.into())
-    };
-    Box::into_raw(Box::new(PyStrObj {
-        rc: Cell::new(1),
-        payload,
-        hash: Cell::new(-1),
-    }))
+    crate::new_pystr(msg.as_bytes())
 }
 
 /// Raises `NameError: name '<name>' is not defined` for a read of the
@@ -816,11 +630,17 @@ pub unsafe extern "C" fn pycc_rt_raise_unbound_local(name: *const u8, len: usize
 }
 
 /// Raises `StopIteration` carrying `value` (a generator's return value, the
-/// word of its type, whose tag is `tag`; owned by the exception) and
-/// `message` (`str(value)`, owned; null for a generator that returned no
-/// value, whose `str(e)` is empty).
+/// word of its type, whose tag is `tag`; owned by the exception, which
+/// releases it as a word of `crate::rc` kind `kind`) and `message`
+/// (`str(value)`, owned; null for a generator that returned no value, whose
+/// `str(e)` is empty).
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_raise_stop_iteration(value: u64, message: *mut PyStrObj, tag: u64) {
+pub extern "C" fn pycc_rt_raise_stop_iteration(
+    value: u64,
+    message: *mut PyStrObj,
+    tag: u64,
+    kind: u8,
+) {
     let name = "StopIteration";
     let message_was_null = message.is_null();
     let message = if message.is_null() {
@@ -836,7 +656,7 @@ pub extern "C" fn pycc_rt_raise_stop_iteration(value: u64, message: *mut PyStrOb
     );
     if !message_was_null {
         // SAFETY: freshly allocated.
-        unsafe { (*obj).payload.set(Some((value, tag))) };
+        unsafe { (*obj).payload.set(Some((value, tag, kind))) };
     }
     pycc_rt_exception_raise(obj);
 }
@@ -858,7 +678,7 @@ pub unsafe extern "C" fn pycc_rt_exception_payload(obj: *mut PyExceptionObj, tag
         .then(|| unsafe { (*obj).payload.get() })
         .flatten();
     match payload {
-        Some((word, found)) if found == tag => word,
+        Some((word, found, _)) if found == tag => word,
         None if tag == 0 => 0,
         None => {
             raise_builtin(
@@ -912,10 +732,21 @@ pub(crate) fn raise_key_error(kind: i64, key: i64) {
     pycc_rt_exception_raise(obj);
 }
 
+mod group;
+mod lifetime;
 mod str_form;
+
+pub use group::{pycc_rt_exception_group_alloc, pycc_rt_exception_group_partition};
+pub use lifetime::{
+    pycc_rt_exception_alloc, pycc_rt_exception_decref, pycc_rt_exception_incref,
+    pycc_rt_exception_live_objects,
+};
 
 #[cfg(test)]
 mod foreign_base_tests;
+
+#[cfg(test)]
+mod lifetime_tests;
 
 #[cfg(test)]
 mod tests;

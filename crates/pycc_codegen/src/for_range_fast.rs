@@ -178,7 +178,13 @@ pub(super) fn emit<'ctx>(
     } else {
         crate::emit_assign(context, builder, rt, locals, var, Scalar::Int(word));
     }
-    rt.loops.enter(stmt, exit_bb, latch_bb, finally_stack.len());
+    rt.loops.enter(
+        stmt,
+        exit_bb,
+        latch_bb,
+        finally_stack.len(),
+        crate::exception::owned_slots::depth(rt),
+    );
     crate::emit_body_then_branch(
         context,
         builder,

@@ -26,8 +26,9 @@
 //! `pycc_rt::RC_OFFSET` in both objects, so the increment and the decrement
 //! are inlined here; only a decrement that reaches zero calls the runtime,
 //! on a cold path, to free the object and release what it holds. Instances
-//! of an exception class are not counted (they are the runtime's leak-only
-//! exception objects). An `object` counts through the shim's `Py_XINCREF`/
+//! of an exception class are the runtime's exception objects, counted
+//! through `pycc_rt_exception_incref`/`_decref`. An `object` counts through
+//! the shim's `Py_XINCREF`/
 //! `Py_XDECREF` (`pycc_ext_obj_retain`/`pycc_ext_obj_release`); the GIL is
 //! held wherever compiled code runs with CPython present.
 //!
@@ -70,6 +71,50 @@ pub(crate) enum HeapKind {
     /// A function value, counted through `pycc_rt_closure_incref`/`_decref`
     /// (whose last release releases its captured values).
     Closure,
+    /// An exception object, counted through `pycc_rt_exception_incref`/
+    /// `_decref` (whose last release releases its message, cause, members
+    /// and payload).
+    Exception,
+}
+
+/// Every class whose values are the runtime's exception objects
+/// (`pycc_hir::is_exception_object_class`), and every builtin exception
+/// class. An exception class with an `__init__` of its own builds ordinary
+/// instances, which stay uncounted.
+pub(super) fn exception_classes(
+    class_defs: &[(String, pycc_hir::HirClassDef)],
+) -> std::collections::HashSet<String> {
+    let lookup = pycc_hir::class_lookup(class_defs);
+    class_defs
+        .iter()
+        .filter(|(_, def)| pycc_hir::is_exception_object_class(def, &lookup))
+        .map(|(name, _)| name.clone())
+        .chain(
+            pycc_hir::BUILTIN_EXCEPTION_CLASSES
+                .iter()
+                .map(|name| (*name).to_string()),
+        )
+        .collect()
+}
+
+/// The `pycc_rt::rc` kind byte that releases a word of type `ty` (`w`,
+/// nothing, for an uncounted type).
+pub(crate) fn rc_kind_byte(rt: &RtFns<'_>, ty: &Ty) -> u8 {
+    if *ty == Ty::Int {
+        return b'i';
+    }
+    match heap_kind(rt, ty) {
+        Some(HeapKind::Str) => b's',
+        Some(HeapKind::List) => b'l',
+        Some(HeapKind::Instance) => b'c',
+        Some(HeapKind::Dict) => b'd',
+        Some(HeapKind::Set) => b'e',
+        Some(HeapKind::Object) => b'o',
+        Some(HeapKind::Generator) => b'g',
+        Some(HeapKind::Closure) => b'f',
+        Some(HeapKind::Exception) => b'x',
+        None => b'w',
+    }
 }
 
 /// Every reference-counted class of `class_defs` with its slot kind string
@@ -81,11 +126,9 @@ pub(super) fn rc_class_kinds(
         .iter()
         .map(|(name, def)| (name.as_str(), def))
         .collect();
-    let refcounted = |name: &str| {
-        by_name
-            .get(name)
-            .is_some_and(|def| pycc_hir::is_refcounted_class(def))
-    };
+    let lookup = pycc_hir::class_lookup(class_defs);
+    let instance_kind =
+        |name: &str| pycc_hir::instance_rc_kind(name, by_name.get(name).copied(), &lookup);
     class_defs
         .iter()
         .filter(|(_, def)| pycc_hir::is_refcounted_class(def))
@@ -97,7 +140,7 @@ pub(super) fn rc_class_kinds(
                 .collect();
             let kinds: String = pycc_hir::flat_attr_layout(&mro)
                 .iter()
-                .map(|(_, ty)| pycc_hir::slot_rc_kind(ty, &refcounted) as char)
+                .map(|(_, ty)| pycc_hir::slot_rc_kind(ty, &instance_kind) as char)
                 .collect();
             (name.clone(), kinds)
         })
@@ -118,6 +161,9 @@ pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
         Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => Some(HeapKind::List),
         Ty::Instance(class) if rt.rc_class_kinds.borrow().contains_key(class.as_str()) => {
             Some(HeapKind::Instance)
+        }
+        Ty::Instance(class) if rt.exception_classes.borrow().contains(class.as_str()) => {
+            Some(HeapKind::Exception)
         }
         _ => None,
     }
@@ -181,6 +227,7 @@ fn counted<'ctx>(
         (HeapKind::Object, Scalar::Object(ptr)) => Some((HeapKind::Object, *ptr)),
         (HeapKind::Generator, Scalar::Generator(ptr)) => Some((HeapKind::Generator, *ptr)),
         (HeapKind::Closure, Scalar::Closure(ptr)) => Some((HeapKind::Closure, *ptr)),
+        (HeapKind::Exception, Scalar::Instance(ptr)) => Some((HeapKind::Exception, *ptr)),
         _ => None,
     }
 }
@@ -284,6 +331,7 @@ pub(crate) fn emit_incref<'ctx>(
         HeapKind::Object => Some(rt.obj_retain),
         HeapKind::Generator => Some(rt.gens.incref),
         HeapKind::Closure => Some(rt.closures.incref),
+        HeapKind::Exception => Some(rt.exc_incref),
         HeapKind::List | HeapKind::Instance => None,
     };
     if let Some(incref) = out_of_line {
@@ -331,6 +379,7 @@ pub(crate) fn emit_decref<'ctx>(
         HeapKind::Object => rt.obj_release,
         HeapKind::Generator => rt.gens.decref,
         HeapKind::Closure => rt.closures.decref,
+        HeapKind::Exception => rt.exc_decref,
     };
     if !matches!(kind, HeapKind::List | HeapKind::Instance) {
         builder

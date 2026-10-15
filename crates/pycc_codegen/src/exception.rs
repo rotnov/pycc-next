@@ -4,6 +4,8 @@ use super::exception_value::emit_str_bytes_constant;
 use super::*;
 use std::cell::{Cell, RefCell};
 
+mod finally;
+pub(crate) mod owned_slots;
 mod try_star;
 mod try_stmt;
 pub(crate) use try_star::emit_try_star;
@@ -52,6 +54,9 @@ pub(super) struct ExceptionCodegenState<'ctx> {
     /// directly": `foreign_fail::emit_failure` then keeps the direct
     /// `EXT_MODULE_EXEC_FAILED` return instead of bridging a foreign failure.
     pub(super) module_exec_exit: Cell<Option<inkwell::basic_block::BasicBlock<'ctx>>>,
+    /// The exception slots live while a `try` clause runs, outermost first
+    /// (`owned_slots`). Empty at every function boundary.
+    pub(super) owned_slots: RefCell<Vec<PointerValue<'ctx>>>,
 }
 
 impl ExceptionCodegenState<'_> {
@@ -64,6 +69,7 @@ impl ExceptionCodegenState<'_> {
             pending_heap_releases: RefCell::new(Vec::new()),
             loop_iterators: RefCell::new(Vec::new()),
             module_exec_exit: Cell::new(None),
+            owned_slots: RefCell::new(Vec::new()),
         }
     }
 }

@@ -132,8 +132,13 @@ pub(crate) fn emit_for_list_stmt<'ctx>(
     // `ForRange`'s latch shape: fall-through and `continue` advance
     // the index here, `break` leaves through `after_bb`.
     let latch_bb = context.append_basic_block(function, "for_list_latch");
-    rt.loops
-        .enter(stmt, after_bb, latch_bb, finally_stack.len());
+    rt.loops.enter(
+        stmt,
+        after_bb,
+        latch_bb,
+        finally_stack.len(),
+        crate::exception::owned_slots::depth(rt),
+    );
     emit_body_then_branch(
         context,
         builder,
@@ -211,6 +216,7 @@ pub(crate) fn emit_for_object_stmt<'ctx>(
         loop_blocks.after_bb,
         loop_blocks.header_bb,
         finally_stack.len(),
+        crate::exception::owned_slots::depth(rt),
     );
     // `emit_body_then_branch` carries `ForList`'s own
     // terminator-safety guard: a `Return` inside `body` already
@@ -389,8 +395,13 @@ pub(crate) fn emit_for_dict_stmt<'ctx>(
     emit_assign(context, builder, rt, locals, var, key);
     // `ForList`'s latch shape (see that arm).
     let latch_bb = context.append_basic_block(function, "for_dict_latch");
-    rt.loops
-        .enter(stmt, after_bb, latch_bb, finally_stack.len());
+    rt.loops.enter(
+        stmt,
+        after_bb,
+        latch_bb,
+        finally_stack.len(),
+        crate::exception::owned_slots::depth(rt),
+    );
     emit_body_then_branch(
         context,
         builder,
@@ -594,8 +605,13 @@ pub(crate) fn emit_for_set_stmt<'ctx>(
     emit_assign(context, builder, rt, locals, var, element);
     // `ForList`'s latch shape (see that arm).
     let latch_bb = context.append_basic_block(function, "for_set_latch");
-    rt.loops
-        .enter(stmt, after_bb, latch_bb, finally_stack.len());
+    rt.loops.enter(
+        stmt,
+        after_bb,
+        latch_bb,
+        finally_stack.len(),
+        crate::exception::owned_slots::depth(rt),
+    );
     emit_body_then_branch(
         context,
         builder,

@@ -106,7 +106,11 @@ pub(crate) fn word_kind(rt: &RtFns<'_>, ty: &Ty) -> u64 {
         Ty::Float => 1,
         Ty::Bool => 2,
         Ty::Str => 3,
-        Ty::Instance(_) if crate::heap_rc::heap_kind(rt, ty).is_some() => 4,
+        Ty::Instance(_)
+            if crate::heap_rc::heap_kind(rt, ty) == Some(crate::heap_rc::HeapKind::Instance) =>
+        {
+            4
+        }
         Ty::Instance(_) => 6,
         Ty::List(_) => 5,
         Ty::Tuple(_) => 7,

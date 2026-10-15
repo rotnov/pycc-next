@@ -319,15 +319,18 @@ fn instance_slot_names(module: &HirModule, class_def: &HirClassDef) -> Vec<Strin
 /// as one string: what freeing an instance of `class_def` releases. The same
 /// string `pycc_codegen`'s `MirExpr::Instantiate` descriptor carries.
 pub(crate) fn instance_slot_kinds(module: &HirModule, class_def: &HirClassDef) -> String {
-    let refcounted = |name: &str| {
-        module
+    let lookup = pycc_hir::class_lookup(&module.class_defs);
+    let instance_kind = |name: &str| {
+        let def = module
             .class_defs
             .iter()
-            .any(|(held, def)| held == name && pycc_hir::is_refcounted_class(def))
+            .find(|(held, _)| held == name)
+            .map(|(_, def)| def);
+        pycc_hir::instance_rc_kind(name, def, &lookup)
     };
     flat_attr_layout(&mro_class_defs(module, class_def))
         .iter()
-        .map(|(_, ty)| pycc_hir::slot_rc_kind(ty, &refcounted) as char)
+        .map(|(_, ty)| pycc_hir::slot_rc_kind(ty, &instance_kind) as char)
         .collect()
 }
 

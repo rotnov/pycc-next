@@ -259,43 +259,31 @@ fn a_call_argument_borrowed_value_survives_the_calls_own_raising_argument() {
 // assertion above -- releasing an object one iteration late (or never) does
 // not corrupt any value this program prints, only its memory footprint.
 //
-// A naive single-vs-double-iteration RSS *ratio* (the convention
-// `tests/issue_146_bigint_release.rs`'s own `peak_rss` module uses) is
-// blind here: every repro below raises and catches `ZeroDivisionError` on
-// *every* trip, and `crates/pycc_rt/src/exception.rs` documents that
-// exception-object lifetime management is "intentionally leak-only in this
-// first implementation" -- `pycc_rt_exception_clear` never frees the
-// `PyExceptionObj` (or its message) that `pycc_rt_exception_alloc` built.
-// That pre-existing, already-accepted, out-of-#638-scope leak scales
-// linearly with the raise count on *both* a correctly-fixed and a
-// still-buggy binary, so a plain ratio against a `< 1.35` threshold would
-// fail unconditionally regardless of whether this issue's fix works --
-// confirmed empirically: with the D-208 codegen changes applied, the
-// straight single-vs-double ratio of the binop repro alone is still
-// ~1.947 (250k -> 38,125,568 bytes; 500k -> 74,235,904 bytes), because the
-// ratio measures the exception-object leak, not the bigint leak.
-//
-// Each test below instead compares the *marginal* RSS growth (250k -> 500k
+// Each test below compares the *marginal* RSS growth (250k -> 500k
 // iterations) of the leak-shape repro against a same-exception-rate control
 // repro that never allocates the fresh temporary this issue is about (its
-// exception-side operand is a plain `Name` read, D-181's own
-// "duplicate reference" case, not a birth reference). Both repros raise
-// exactly once per trip, so both marginals include one exception-object
-// leak per iteration; the control's marginal is therefore the calibration
-// the plain ratio is missing: the leak rate contributed by the
-// pre-existing, accepted exception-object model alone. Measured directly:
-// with the D-208 fix applied, `leak_marginal / control_marginal` is
-// ~0.9995 for all three flavors (the two marginals track each other almost
-// exactly); reverting the fix alone (keeping this test's own repro shapes)
-// widens it to ~1.333 (one extra `BigIntObj` release's worth of marginal
-// growth per iteration). `< 1.15` sits with a comfortable margin on both
-// sides of that gap.
+// exception-side operand is a plain `Name` read, D-181's own "duplicate
+// reference" case, not a birth reference). Both repros raise exactly once
+// per trip. When exception objects were leak-only both marginals grew by
+// one exception per iteration and the control calibrated that; now that
+// they are freed both marginals are near zero. The leak shape may exceed
+// the control by at most 15% plus [`peak_rss::SLACK_BYTES`] of allocator
+// noise: one leaked `BigIntObj` per trip is several megabytes over 250k
+// trips, far past either bound.
 // ---------------------------------------------------------------------------
 
 #[cfg(unix)]
 mod peak_rss {
     use super::{PROMOTED, pycc_bin, write_case};
     use std::process::Command;
+
+    /// Allocator noise a flat marginal may show (bytes).
+    pub(super) const SLACK_BYTES: i64 = 1 << 20;
+
+    /// Whether `leak_marginal` tracks `control_marginal` (module docs).
+    fn tracks(leak_marginal: i64, control_marginal: i64) -> bool {
+        (leak_marginal as f64) < (control_marginal.max(0) as f64) * 1.15 + SLACK_BYTES as f64
+    }
 
     /// Duplicated from `tests/issue_146_bigint_release.rs::peak_rss::peak_rss`
     /// per that file's own stated convention for this measurement.
@@ -370,8 +358,8 @@ mod peak_rss {
     /// Same exception rate (one raise per trip) as [`binop_exception_edge_repro`]
     /// but the left `BinOp` operand is a plain `Name` read of `x` -- D-181's
     /// "duplicate reference" case, not a birth reference -- so this repro's
-    /// marginal RSS growth reflects only the pre-existing, accepted
-    /// exception-object leak-only model, not any `BigIntObj` release.
+    /// marginal RSS growth reflects only the exception handling itself, not
+    /// any `BigIntObj` release.
     fn binop_control_repro(iterations: u32) -> String {
         format!(
             "x: int = {PROMOTED}\nz: int = 0\ny: int = 0\nfor i in range({iterations}):\n    \
@@ -384,7 +372,7 @@ mod peak_rss {
         let leak_marginal = marginal_rss("rss_exc_binop", binop_exception_edge_repro, 250_000);
         let control_marginal = marginal_rss("rss_ctl_binop", binop_control_repro, 250_000);
         assert!(
-            (leak_marginal as f64) < (control_marginal as f64) * 1.15,
+            tracks(leak_marginal, control_marginal),
             "leak-shape marginal RSS growth must track the same-exception-rate \
              control's, not scale by an extra `BigIntObj` release per trip: \
              leak_marginal={leak_marginal} control_marginal={control_marginal}"
@@ -413,7 +401,7 @@ mod peak_rss {
         let leak_marginal = marginal_rss("rss_exc_cmp", compare_exception_edge_repro, 250_000);
         let control_marginal = marginal_rss("rss_ctl_cmp", compare_control_repro, 250_000);
         assert!(
-            (leak_marginal as f64) < (control_marginal as f64) * 1.15,
+            tracks(leak_marginal, control_marginal),
             "leak-shape marginal RSS growth must track the same-exception-rate \
              control's, not scale by an extra `BigIntObj` release per trip: \
              leak_marginal={leak_marginal} control_marginal={control_marginal}"
@@ -447,7 +435,7 @@ mod peak_rss {
             marginal_rss("rss_exc_call", call_argument_exception_edge_repro, 250_000);
         let control_marginal = marginal_rss("rss_ctl_call", call_argument_control_repro, 250_000);
         assert!(
-            (leak_marginal as f64) < (control_marginal as f64) * 1.15,
+            tracks(leak_marginal, control_marginal),
             "leak-shape marginal RSS growth must track the same-exception-rate \
              control's, not scale by an extra `BigIntObj` release per trip: \
              leak_marginal={leak_marginal} control_marginal={control_marginal}"
@@ -484,7 +472,7 @@ mod peak_rss {
             marginal_rss("rss_exc_tuple", tuple_literal_exception_edge_repro, 250_000);
         let control_marginal = marginal_rss("rss_ctl_tuple", tuple_literal_control_repro, 250_000);
         assert!(
-            (leak_marginal as f64) < (control_marginal as f64) * 1.15,
+            tracks(leak_marginal, control_marginal),
             "leak-shape marginal RSS growth must track the same-exception-rate \
              control's, not scale by an extra `BigIntObj` release per trip: \
              leak_marginal={leak_marginal} control_marginal={control_marginal}"
@@ -512,7 +500,7 @@ mod peak_rss {
     /// first element is a plain literal `1` -- `x` is computed but never
     /// placed anywhere `retain_if_int_duplicate` would see it, so this
     /// repro's marginal growth reflects only `x`'s own allocation/release
-    /// cost and the pre-existing exception-object leak-only model.
+    /// cost and the exception handling itself.
     fn tuple_literal_borrowed_element_control_repro(iterations: u32) -> String {
         format!(
             "z: int = 0\nfor i in range({iterations}):\n    x: int = 9223372036854775807 + i\n    \
@@ -533,7 +521,7 @@ mod peak_rss {
             250_000,
         );
         assert!(
-            (leak_marginal as f64) < (control_marginal as f64) * 1.15,
+            tracks(leak_marginal, control_marginal),
             "borrowed-element marginal RSS growth must track the same-allocation-rate \
              control's, not scale by an extra `BigIntObj` retain-and-leak per trip: \
              leak_marginal={leak_marginal} control_marginal={control_marginal}"
@@ -574,7 +562,7 @@ mod peak_rss {
             250_000,
         );
         assert!(
-            (leak_marginal as f64) < (control_marginal as f64) * 1.15,
+            tracks(leak_marginal, control_marginal),
             "borrowed-argument marginal RSS growth must track the same-allocation-rate \
              control's, not scale by an extra `BigIntObj` retain-and-leak per trip: \
              leak_marginal={leak_marginal} control_marginal={control_marginal}"

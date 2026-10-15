@@ -60,6 +60,7 @@ pub(crate) fn emit_try<'ctx>(
             finally_bb,
             ret_slot,
             is_returning,
+            exc_depth: owned_slots::depth(rt),
         });
     } else {
         saved_is_returning = None;
@@ -203,91 +204,20 @@ pub(crate) fn emit_try<'ctx>(
             .build_unconditional_branch(finally_bb)
             .expect("build_unconditional_branch should not fail");
 
-        // Emit each handler body. Save the current exception value
-        // to a handler-local slot, then clear the exception state so the
-        // handler body runs with no active exception. A bare `raise`
-        // (Reraise) inside the handler loads the saved value and
-        // re-raises it. After the handler body, if it completes
-        // normally (no active exception), just branch to finally.
         for (i, handler) in handlers.iter().enumerate() {
             builder.position_at_end(handler_body_bbs[i]);
-            // Save the current exception value and clear the state.
-            let exc_val = builder
-                .build_call(rt.exception_value, &[], "handler_exc_val")
-                .expect("build_call should not fail for exception_value")
-                .try_as_basic_value()
-                .expect_basic("pycc_rt_exception_value returns a pointer")
-                .into_pointer_value();
-            let saved_exc = alloca_at_entry(
-                builder,
-                context.ptr_type(inkwell::AddressSpace::default()),
-                "handler_saved_exc",
-            );
-            builder
-                .build_store(saved_exc, exc_val)
-                .expect("build_store should not fail for a handler exception slot");
-            builder
-                .build_call(rt.exception_clear, &[], "")
-                .expect("build_call should not fail for exception_clear");
-            // #382: If the handler has an `as` binding (e.g.
-            // `except ValueError as e:`), allocate a local slot
-            // for it and store the exception value there so the
-            // handler body can reference `e`. The slot is a
-            // pointer-typed alloca (all exception objects are
-            // pointer-represented, like class instances).
-            if let Some(binding_name) = &handler.binding_name {
-                let exc_slot = alloca_at_entry(
-                    builder,
-                    context.ptr_type(inkwell::AddressSpace::default()),
-                    binding_name,
-                );
-                builder
-                    .build_store(exc_slot, exc_val)
-                    .expect("build_store should not fail for an exception binding");
-                locals.insert(
-                    binding_name.clone(),
-                    StorageSlot {
-                        ptr: exc_slot,
-                        ty: handler
-                            .binding_ty
-                            .clone()
-                            .expect("an exception binding always carries its static type"),
-                        initialized: None,
-                    },
-                );
-            }
-            rt.exceptions.reraise_values.borrow_mut().push(saved_exc);
-            rt.exceptions.targets.borrow_mut().push(finally_bb);
-            emit_body(
+            emit_handler(
                 context,
                 builder,
                 module,
                 rt,
                 user_functions,
                 locals,
-                &handler.body,
+                handler,
                 expected_return_ty.clone(),
                 finally_stack,
+                finally_bb,
             )?;
-            rt.exceptions.targets.borrow_mut().pop();
-            rt.exceptions.reraise_values.borrow_mut().pop();
-            // #382: A `raise`/`reraise` inside the handler body
-            // terminates the block with `unreachable`. Erase it so
-            // the handler-completion check can run here.
-            erase_unreachable_if_present(builder);
-            let handler_falls_through = builder
-                .get_insert_block()
-                .unwrap()
-                .get_terminator()
-                .is_none();
-            if handler_falls_through {
-                // Handler completed normally — exception was already
-                // cleared before the handler body. Just branch to
-                // finally.
-                builder
-                    .build_unconditional_branch(finally_bb)
-                    .expect("build_unconditional_branch should not fail");
-            }
         }
     }
 
@@ -327,201 +257,111 @@ pub(crate) fn emit_try<'ctx>(
         }
     }
 
-    // Pop the FinallyTarget before emitting the finally body —
-    // a `return` inside the finally body should NOT be intercepted
-    // by this same finally (it would loop).
+    // Pop the FinallyTarget before emitting the finally body -- a `return`
+    // inside the finally body must not be intercepted by this same finally
+    // (it would loop).
     if has_finally {
         finally_stack.pop();
     }
+    super::finally::emit_finally_tail(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        finalbody,
+        expected_return_ty,
+        finally_stack,
+        super::finally::FinallyTail {
+            finally_bb,
+            after_bb,
+            is_returning: saved_is_returning,
+            ret_slot: saved_ret_slot,
+            prefix: "try",
+        },
+    )
+}
 
-    // Finally body: always runs. After finally, check if a return
-    // was intercepted (is_returning flag) or branch to after_bb
-    // for normal completion. The structured-statement guard at
-    // after_bb propagates any pending exception.
-    builder.position_at_end(finally_bb);
-    let finally_exception_bb = context.append_basic_block(function, "try_finally_exception");
-    let pending_exception = if finalbody.is_empty() {
-        None
-    } else {
-        // A pending exception must not prevent `finally` from
-        // executing. Preserve it in SSA values and clear the
-        // pending state while the final body runs. Normal
-        // completion restores it; a new exception or a return from
-        // `finally` deliberately replaces/suppresses it.
-        let active =
-            crate::int_fast::emit_exception_pending(context, builder, rt, "finally_pending_active");
-        let value = builder
-            .build_call(rt.exception_value, &[], "finally_pending_value")
-            .expect("build_call should not fail for exception_value")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_exception_value returns a pointer")
-            .into_pointer_value();
+/// Emits one `except` handler's body at the builder's position, the
+/// handler having matched the pending exception.
+///
+/// The handler takes the pending exception: its saved slot (what a bare
+/// `raise` re-raises) owns the reference, and an `as` binding owns one of
+/// its own. Both are exception slots (`owned_slots`): released when the
+/// handler falls through to `finally_bb`, by a cleanup block on its
+/// exception edge, and by a `return`, `break` or `continue` out of it --
+/// so `e` is unbound after the handler, as in CPython.
+#[allow(clippy::too_many_arguments)]
+fn emit_handler<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &mut HashMap<String, StorageSlot<'ctx>>,
+    handler: &pycc_mir::MirExceptHandler,
+    expected_return_ty: pycc_mir::Ty,
+    finally_stack: &mut Vec<FinallyTarget<'ctx>>,
+    finally_bb: inkwell::basic_block::BasicBlock<'ctx>,
+) -> Result<(), String> {
+    let depth = owned_slots::depth(rt);
+    let exc_val = builder
+        .build_call(rt.exception_take, &[], "handler_exc_val")
+        .expect("build_call should not fail for exception_take")
+        .try_as_basic_value()
+        .expect_basic("pycc_rt_exception_take returns a pointer")
+        .into_pointer_value();
+    let saved_exc = owned_slots::new_slot(context, builder, "handler_saved_exc");
+    owned_slots::hold(builder, rt, saved_exc, exc_val);
+    if let Some(binding_name) = &handler.binding_name {
+        let exc_slot = owned_slots::new_slot(context, builder, binding_name);
         builder
-            .build_call(rt.exception_clear, &[], "")
-            .expect("build_call should not fail for exception_clear");
-        Some((active, value))
-    };
-    if finalbody.is_empty() {
-        // No finally body — just check is_returning / branch.
-    } else {
-        rt.exceptions
-            .targets
-            .borrow_mut()
-            .push(finally_exception_bb);
-        emit_body(
-            context,
-            builder,
-            module,
-            rt,
-            user_functions,
-            locals,
-            finalbody,
-            expected_return_ty.clone(),
-            finally_stack,
-        )?;
-        rt.exceptions.targets.borrow_mut().pop();
+            .build_call(rt.exc_incref, &[exc_val.into()], "")
+            .expect("build_call should not fail for pycc_rt_exception_incref");
+        owned_slots::hold(builder, rt, exc_slot, exc_val);
+        locals.insert(
+            binding_name.clone(),
+            StorageSlot {
+                ptr: exc_slot,
+                ty: handler
+                    .binding_ty
+                    .clone()
+                    .expect("an exception binding always carries its static type"),
+                initialized: None,
+            },
+        );
     }
-    // #382: A `raise` inside the finally body terminates the
-    // block with `unreachable`. Erase it so the
-    // finally-completion check can run here.
+    rt.exceptions.reraise_values.borrow_mut().push(saved_exc);
+    let cleanup = owned_slots::push_cleanup_target(context, builder, rt, "handler_exc_cleanup");
+    emit_body(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        &handler.body,
+        expected_return_ty,
+        finally_stack,
+    )?;
+    rt.exceptions.targets.borrow_mut().pop();
+    rt.exceptions.reraise_values.borrow_mut().pop();
+    owned_slots::fill_cleanup_target(context, builder, rt, cleanup, depth, finally_bb);
+    // A `raise`/`reraise` inside the handler body terminates the block with
+    // `unreachable`. Erase it so the handler-completion check can run here.
     erase_unreachable_if_present(builder);
-    let finally_falls_through = builder
+    let handler_falls_through = builder
         .get_insert_block()
         .unwrap()
         .get_terminator()
         .is_none();
-    if finally_falls_through {
-        if let Some((pending_active, pending_value)) = pending_exception {
-            let had_pending = builder
-                .build_int_compare(
-                    inkwell::IntPredicate::NE,
-                    pending_active,
-                    context.i8_type().const_zero(),
-                    "finally_had_pending",
-                )
-                .expect("build_int_compare should not fail");
-            let restore_bb = context.append_basic_block(function, "try_finally_restore_exception");
-            let restored_bb =
-                context.append_basic_block(function, "try_finally_exception_restored");
-            builder
-                .build_conditional_branch(had_pending, restore_bb, restored_bb)
-                .expect("build_conditional_branch should not fail");
-            builder.position_at_end(restore_bb);
-            builder
-                .build_call(rt.exception_raise, &[pending_value.into()], "")
-                .expect("build_call should not fail for exception_raise");
-            builder
-                .build_unconditional_branch(restored_bb)
-                .expect("build_unconditional_branch should not fail");
-            builder.position_at_end(restored_bb);
-        }
-        if has_finally {
-            // Check if a return was intercepted: if so, load the
-            // return value and emit `ret` (or propagate to an
-            // enclosing finally). Otherwise, branch to after_bb.
-            let is_returning = saved_is_returning.unwrap();
-            let ret_slot = saved_ret_slot;
-            let flag_val = builder
-                .build_load(context.i8_type(), is_returning, "finally_ret_flag")
-                .expect("build_load should not fail for is_returning flag")
-                .into_int_value();
-            let is_ret = builder
-                .build_int_compare(
-                    inkwell::IntPredicate::NE,
-                    flag_val,
-                    context.i8_type().const_zero(),
-                    "finally_is_ret",
-                )
-                .expect("build_int_compare should not fail");
-            let ret_bb = context.append_basic_block(function, "try_finally_ret");
-            builder
-                .build_conditional_branch(is_ret, ret_bb, after_bb)
-                .expect("build_conditional_branch should not fail");
-            // Return block: load the saved return value and emit
-            // `ret`, or propagate to an enclosing finally.
-            builder.position_at_end(ret_bb);
-            if let Some(slot) = ret_slot {
-                let ret_val = builder
-                    .build_load(
-                        ty_to_basic_type(context, expected_return_ty.clone()),
-                        slot,
-                        "finally_ret_val",
-                    )
-                    .expect("build_load should not fail for ret_slot");
-                if let Some(outer) = finally_stack.last_mut() {
-                    // Propagate to the enclosing finally: store the
-                    // return value to the outer's ret_slot, set its
-                    // is_returning flag, and branch to its finally_bb.
-                    let outer_slot = outer
-                        .ret_slot
-                        .expect("nested finally in the same non-None function has a return slot");
-                    builder
-                        .build_store(outer_slot, ret_val)
-                        .expect("build_store should not fail for outer ret_slot");
-                    builder
-                        .build_store(outer.is_returning, context.i8_type().const_int(1, false))
-                        .expect("build_store should not fail for outer is_returning");
-                    builder
-                        .build_unconditional_branch(outer.finally_bb)
-                        .expect("build_unconditional_branch should not fail");
-                } else {
-                    builder
-                        .build_return(Some(&ret_val))
-                        .expect("build_return should not fail for a finally-routed return");
-                }
-            } else {
-                // Void function (Ty::None) or top-level code (main
-                // returns i64). `ret_slot` is None because
-                // `expected_return_ty` is `Ty::None`. For a void
-                // function, emit `ret void`. For top-level `main`
-                // (which returns i64), this block is dead code (no
-                // `return` is allowed at top level), so emit
-                // `unreachable` to satisfy the verifier.
-                if let Some(outer) = finally_stack.last_mut() {
-                    builder
-                        .build_store(outer.is_returning, context.i8_type().const_int(1, false))
-                        .expect("build_store should not fail for outer is_returning");
-                    builder
-                        .build_unconditional_branch(outer.finally_bb)
-                        .expect("build_unconditional_branch should not fail");
-                } else if function.get_type().get_return_type().is_none() {
-                    // LLVM void function — emit `ret void`.
-                    builder
-                        .build_return(None)
-                        .expect("build_return should not fail for a finally-routed void return");
-                } else {
-                    // Non-void LLVM function (e.g. `main` returns
-                    // i64) with no `ret_slot` — dead code (no
-                    // `return` was intercepted). Emit
-                    // `unreachable` to satisfy the verifier.
-                    builder
-                        .build_unreachable()
-                        .expect("build_unreachable should not fail for dead ret_bb");
-                }
-            }
-        } else {
-            // No finally body — branch to after_bb unconditionally.
-            // The structured-statement guard at after_bb propagates any
-            // pending exception before the enclosing suite can continue.
-            builder
-                .build_unconditional_branch(after_bb)
-                .expect("build_unconditional_branch should not fail");
-        }
+    if handler_falls_through {
+        owned_slots::release_above(context, builder, rt, depth);
+        builder
+            .build_unconditional_branch(finally_bb)
+            .expect("build_unconditional_branch should not fail");
     }
-
-    // An exception raised by `finally` overrides an intercepted
-    // return. It keeps the runtime exception active while skipping
-    // the return-flag dispatch.
-    builder.position_at_end(finally_exception_bb);
-    builder
-        .build_unconditional_branch(after_bb)
-        .expect("build_unconditional_branch should propagate a finally exception");
-
-    builder.position_at_end(after_bb);
-    // A locally unmatched exception (or one restored after `finally`) must
-    // leave this structured statement immediately. Expression nodes already
-    // guard their own raising operations; this is the corresponding boundary
-    // for a complete try statement.
-    guard_statement_effects(context, builder, rt);
+    owned_slots::pop_to(rt, depth);
     Ok(())
 }

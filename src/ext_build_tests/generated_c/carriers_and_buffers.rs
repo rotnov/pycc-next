@@ -255,8 +255,7 @@ fn a_buffer_returning_export_with_no_buffer_parameter_packs_as_it_always_did() {
         inc.contains(concat!(
             "    if (pycc_rt_ext_pending_type() >= 0) {\n",
             "        pycc_ext_raise_pending();\n",
-            "        pycc_ext_bridge_release_to(bridge_mark);\n        return NULL;\n    }\n",
-            "    pycc_ext_bridge_release_to(bridge_mark);\n",
+            "        return NULL;\n    }\n",
             "    return pycc_ext_pack_memoryview(result);\n",
         )),
         "{inc}"

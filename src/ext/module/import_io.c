@@ -324,15 +324,14 @@ PyObject *pycc_ext_obj_import_dotted(const char *name, long long bind_root)
  *
  * An `ImportError` (a `ModuleNotFoundError` or a subclass of it becomes
  * pycc's tag 27, any other `ImportError` tag 26) is translated into a
- * pending pycc exception whose message is CPython's own `str(exc)`, and the
- * original is kept in the bridge table (see `pycc_ext_bridge_restore`).
+ * pending pycc exception whose message is CPython's own `str(exc)` and which
+ * carries the original (see `pycc_ext_bridge_store`).
  * Returns 1 with CPython's error indicator clear, and the generated code
  * branches to the enclosing handler exactly as an explicit `raise` does.
  *
  * Anything else -- a module body's own `ValueError`, a `SyntaxError`, a
  * `BaseException` -- is left exactly as CPython set it, and so is an
- * `ImportError` this function cannot translate (the table cannot grow, or
- * `str(exc)` fails): it returns 0, and the generated code takes the module
+ * `ImportError` this function cannot translate (`str(exc)` fails): it returns 0, and the generated code takes the module
  * body's foreign failure edge (Part 1 of #1096): `pycc_ext_obj_error_bridge`
  * inside a module-level `try`, and the direct `-1` edge out of
  * `Py_mod_exec` outside every one. Every fallible step
@@ -382,7 +381,7 @@ int pycc_ext_import_error_bridge(void)
  * its nearest modelled base, and anything else under `Exception` to tag 0.
  * That is sound for compiled code -- `except NameError` is compile-time
  * `T0021`, so no pycc handler can tell -- and
- * the host always sees the original through the bridge table.
+ * the host always sees the original, which the pycc exception carries.
  *
  * `ext_build_tests`' `the_c_shims_foreign_error_mapping_names_its_classes`
  * parses these lines against `pycc_hir::BUILTIN_EXCEPTION_CLASSES` and
@@ -447,8 +446,8 @@ static unsigned char pycc_ext_obj_error_tag(PyObject *exc, const char **class_na
  * function body, and in the module body inside a module-level `try`
  * (Part 1 of #1096), when a foreign operation
  * (`pycc_ext_obj_getattr`, `_call`, `_len`, ...) failed with CPython's
- * exception set. It translates that exception into a pending pycc one and
- * keeps the original in the bridge table, so an enclosing `try` in the
+ * exception set. It translates that exception into a pending pycc one that
+ * carries the original, so an enclosing `try` in the
  * compiled function runs exactly as CPython's would, and an exception that
  * escapes unchanged reaches the host as the original object.
  *
@@ -459,7 +458,7 @@ static unsigned char pycc_ext_obj_error_tag(PyObject *exc, const char **class_na
  *
  *  - No exception set. The shim that failed broke CPython's contract;
  *    bridge a `SystemError` saying so rather than raising nothing.
- *  - The table cannot grow, or `str(exc)` fails. Raise a pycc exception of
+ *  - `str(exc)` fails. Raise a pycc exception of
  *    the mapped class whose message is that class's name, and drop the
  *    original. The mapped tag, not tag 0, is kept deliberately, so a
  *    degraded `SystemExit` still escapes `except Exception`.

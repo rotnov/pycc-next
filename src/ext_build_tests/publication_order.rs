@@ -270,14 +270,14 @@ fn a_published_class_is_registered_but_bound_only_through_its_publication() {
         "kwds",
         "pycc_ext_unpack_",
         "pycc_rt_instance_new",
-        "pycc_ext_bridge_mark",
+        "fnptr_",
     ] {
         assert!(init[at..].contains(later), "{later:?} missing:\n{init}");
     }
 }
 
 /// The guard is the wrapper's first statement, before the receiver is
-/// unwrapped, any argument is unpacked or the bridge mark is taken, for
+/// unwrapped or any argument is unpacked, for
 /// the scalar call, the thunk call and a method alike.
 #[test]
 fn every_wrapper_refuses_an_unbound_slot_before_anything_else() {

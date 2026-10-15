@@ -11,7 +11,7 @@ use crate::PyStrObj;
 
 /// `exc`'s `str()` form, borrowed from `exc` like its message: for a
 /// `KeyError`, the `repr` of its message, built on first use and cached on
-/// the (leak-only) exception object.
+/// the exception object, which releases it when it is freed.
 pub(super) fn exception_str(exc: &PyExceptionObj) -> *mut PyStrObj {
     if exc.type_tag != EXCEPTION_TYPE_KEY_ERROR || exc.message.is_null() {
         return exc.message;

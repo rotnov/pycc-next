@@ -105,8 +105,7 @@ pub(super) fn emit_exception_value<'ctx>(
             // whatever the message's shape. A borrowed read (`msg`, `obj.s`)
             // is retained here, so the exception's pointer survives its
             // owner releasing it; a fresh message already arrives as +1.
-            // The reference is never released because exception objects
-            // are leak-only -- the same leak a literal message has.
+            // Freeing the exception releases it.
             let message = incref_if_str_duplicate(builder, rt, message, message_scalar);
             let Scalar::Str(message) = message else {
                 let prefix = if role == "cause" {
@@ -157,12 +156,8 @@ pub(super) fn emit_exception_value<'ctx>(
                 message,
             );
             // #1298: as in the `Constructed` arm, the group owns its own
-            // reference to its message. Leak-only exception objects are
-            // also what makes it sound for `pycc_rt`'s group partition to
-            // share this pointer with each derived group without an incref:
-            // a change that frees exception objects must first give each
-            // derived group its own reference and release the message in
-            // the destructor.
+            // reference to its message; each group a partition derives from
+            // it takes one of its own.
             let message_scalar = incref_if_str_duplicate(builder, rt, message, message_scalar);
             let Scalar::Str(message_scalar) = message_scalar else {
                 return Err(format!(
@@ -180,9 +175,11 @@ pub(super) fn emit_exception_value<'ctx>(
                 ptr_type.array_type(members.len() as u32),
                 &format!("{role}_group_members"),
             );
+            let mut member_scalars = Vec::with_capacity(members.len());
             for (index, member) in members.iter().enumerate() {
                 let member_scalar =
                     emit_expr(context, builder, module, rt, user_functions, locals, member);
+                member_scalars.push(member_scalar);
                 let Scalar::Instance(member_ptr) = member_scalar else {
                     return Err(format!("{role} group member must be an exception instance"));
                 };
@@ -204,7 +201,7 @@ pub(super) fn emit_exception_value<'ctx>(
             let (class_name_ptr, class_name_len) =
                 emit_str_bytes_constant(context, module, display_class_name(class_name), "exc_class_name");
             let members_len = context.i64_type().const_int(members.len() as u64, false);
-            Ok(builder
+            let group = builder
                 .build_call(
                     rt.exception_group_alloc,
                     &[
@@ -220,10 +217,19 @@ pub(super) fn emit_exception_value<'ctx>(
                 .expect("build_call should not fail for exception_group_alloc")
                 .try_as_basic_value()
                 .expect_basic("pycc_rt_exception_group_alloc returns a pointer")
-                .into_pointer_value())
+                .into_pointer_value();
+            // The group took its own reference to each member: a fresh
+            // member is the consumer's to release.
+            for (member, scalar) in members.iter().zip(&member_scalars) {
+                heap_rc::release_scalar_if_temporary(context, builder, rt, member, scalar);
+            }
+            Ok(group)
         }
+        // The raise takes a reference of its own to a borrowed exception
+        // (`raise e`); a fresh one (`raise make_error()`) passes its own.
         MirExceptionValue::Existing(expr) => {
             let value = emit_expr(context, builder, module, rt, user_functions, locals, expr);
+            let value = heap_rc::retain_if_heap_duplicate(context, builder, rt, expr, value);
             let Scalar::Instance(value) = value else {
                 return Err(format!("raise {role} must be an exception instance"));
             };
