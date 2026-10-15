@@ -201,16 +201,15 @@ pub unsafe extern "C" fn pycc_rt_str_skip_in_set(
     // SAFETY: the caller passes a live `str`.
     let obj = unsafe { &*text };
     let bytes = obj.bytes();
-    let count = obj.char_count() as i64;
     let ascii_set = !is_instance_set(s)
         && set(s).frozen != 0
         && set(s).kind == crate::list::LIST_KIND_STR;
     let bits = if ascii_set { set(s).ascii_members() } else { 0 };
-    let ascii = ascii_set && count == bytes.len() as i64;
     let stop_on = negate == 0;
     let mut i = index >> 1;
-    // ASCII text from a non-negative index: a run of bit tests.
-    if ascii && i >= 0 {
+    // Text already known to be ASCII (its counted code points are its
+    // bytes), from a non-negative index: a run of bit tests.
+    if ascii_set && i >= 0 && obj.chars.get() == bytes.len() as i64 {
         let (low, high) = (bits as u64, (bits >> 64) as u64);
         let mut at = i as usize;
         while let Some(&byte) = bytes.get(at) {
@@ -222,6 +221,8 @@ pub unsafe extern "C" fn pycc_rt_str_skip_in_set(
         }
         return ((at as i64) << 1) | 1;
     }
+    let count = obj.char_count() as i64;
+    let ascii = ascii_set && count == bytes.len() as i64;
     loop {
         let at = if i < 0 { i + count } else { i };
         if !(0..count).contains(&at) {
