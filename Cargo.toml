@@ -21,6 +21,12 @@ rust-version = "1.97.1"
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 
+# The runtime every compiled program links: one codegen unit lets its small
+# helpers (a shared character, a count, a word release) inline into the
+# entry points compiled code calls.
+[profile.release.package.pycc_rt]
+codegen-units = 1
+
 
 
 [package]

@@ -142,11 +142,14 @@ pub(crate) fn ascii_char(byte: u8) -> *mut PyStrObj {
     retain_immortal(obj)
 }
 
-/// A new reference to the immortal `obj`, which stays immortal however
-/// unbalanced a caller's counting is.
+/// A reference to `obj`, made immortal: from then on its count never
+/// changes (`pycc_rt_str_incref`/`pycc_rt_str_decref` leave a count at or
+/// above `IMMORTAL / 2` alone) and it is never freed.
 pub(crate) fn retain_immortal(obj: *mut PyStrObj) -> *mut PyStrObj {
     let rc = &unsafe { &*obj }.rc;
-    rc.set(if rc.get() < IMMORTAL / 2 { IMMORTAL } else { rc.get() + 1 });
+    if rc.get() < IMMORTAL / 2 {
+        rc.set(IMMORTAL);
+    }
     obj
 }
 

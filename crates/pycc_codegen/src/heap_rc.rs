@@ -187,6 +187,9 @@ fn reads_storage(expr: &MirExpr) -> bool {
     match expr {
         MirExpr::Sequence { value, .. } => is_borrowed_read(value),
         MirExpr::Name { .. } | MirExpr::NamedExpr { .. } | MirExpr::ExceptionMessage(_) => true,
+        // A literal reads its site's cached, immortal `str`
+        // (`str_truthy::emit_string_literal`), which nothing frees.
+        MirExpr::StringLiteral(_) => true,
         MirExpr::AttrGet { base, .. } | MirExpr::Subscript { base, .. } => is_borrowed_read(base),
         _ => false,
     }

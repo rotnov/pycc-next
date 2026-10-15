@@ -293,7 +293,12 @@ pub unsafe extern "C" fn pycc_rt_str_incref(s: *mut PyStrObj) {
         return;
     }
     let obj = unsafe { &*s };
-    obj.rc.set(obj.rc.get() + 1);
+    let rc = obj.rc.get();
+    // An immortal `str` (a literal, a shared one-character string) is
+    // never counted: a reference to it needs no count of its own.
+    if rc < crate::str_index::IMMORTAL / 2 {
+        obj.rc.set(rc + 1);
+    }
 }
 
 /// D-060's unconditional refcounting for `str`: decrements `s`'s refcount by
@@ -307,7 +312,12 @@ pub unsafe extern "C" fn pycc_rt_str_decref(s: *mut PyStrObj) {
     if s.is_null() {
         return;
     }
-    let new_rc = unsafe { &*s }.rc.get() - 1;
+    let rc = unsafe { &*s }.rc.get();
+    // See `pycc_rt_str_incref`: an immortal `str` is never freed.
+    if rc >= crate::str_index::IMMORTAL / 2 {
+        return;
+    }
+    let new_rc = rc - 1;
     if new_rc == 0 {
         STR_LIVE.fetch_sub(1, Ordering::Relaxed);
         drop(unsafe { Box::from_raw(s) });

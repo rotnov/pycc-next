@@ -223,10 +223,11 @@ fn the_part_3_producers_are_classified() {
 }
 
 /// A fresh native `str` argument of a call on a CPython object
-/// (`copy.m("s")`) is copied by its packer, so it is still the compiled
+/// (`copy.m(f"s{1}")`) is copied by its packer, so it is still the compiled
 /// code's: the call releases it once the call is done, and the call's own
 /// failure edge releases it too (`native_operand`). A borrowed `str` read
-/// (the parameter `s`) is never released there -- its slot owns it.
+/// (the parameter `s`) is never released there -- its slot owns it -- and
+/// neither is a literal, which reads its site's immortal `str`.
 #[test]
 fn a_fresh_native_str_argument_is_released_after_the_call() {
     const STR_DECREF: &str = "call void @pycc_rt_str_decref(";
@@ -237,12 +238,24 @@ fn a_fresh_native_str_argument_is_released_after_the_call() {
     };
     let ir = discard_ir(
         "release_native_str_arg",
-        call(MirExpr::StringLiteral("s".to_string())),
+        call(MirExpr::FString(vec![
+            MirFStringPart::Literal("s".to_string()),
+            MirFStringPart::Interpolation(Box::new(MirExpr::IntLiteral(1))),
+        ])),
     );
     for label in ["foreign_call_cont", "foreign_call_fail"] {
         let found = blocks(&ir, label);
         assert_eq!(found.len(), 1, "{label}\n{ir}");
         assert_eq!(found[0].matches(STR_DECREF).count(), 1, "{label}\n{ir}");
+    }
+    let ir = discard_ir(
+        "literal_native_str_arg",
+        call(MirExpr::StringLiteral("s".to_string())),
+    );
+    for label in ["foreign_call_cont", "foreign_call_fail"] {
+        let found = blocks(&ir, label);
+        assert_eq!(found.len(), 1, "{label}\n{ir}");
+        assert!(!found[0].contains(STR_DECREF), "{label}\n{ir}");
     }
     let ir = functions_ir(
         "borrowed_native_str_arg",

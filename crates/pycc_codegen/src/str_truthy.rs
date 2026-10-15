@@ -193,7 +193,29 @@ pub(crate) fn emit_string_literal<'ctx>(
     let slot = module.add_global(ptr_ty, None, "str_lit_cache");
     slot.set_initializer(&ptr_ty.const_null());
     slot.set_linkage(Linkage::Private);
-    builder
+    // Every evaluation after the first reads the cached object: it is
+    // immortal (`pycc_rt::str_index::IMMORTAL`), so the reference this
+    // expression stands for needs no count of its own.
+    let cached = builder
+        .build_load(ptr_ty, slot.as_pointer_value(), "str_lit_cached")
+        .expect("build_load should not fail for a literal's cache slot")
+        .into_pointer_value();
+    let built = builder
+        .build_is_null(cached, "str_lit_unbuilt")
+        .expect("build_is_null should not fail for a pointer");
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("a string literal is emitted inside a function");
+    let entry = builder.get_insert_block().expect("the builder is positioned");
+    let build_block = context.append_basic_block(function, "str_lit_build");
+    let join = context.append_basic_block(function, "str_lit_join");
+    let branch = builder
+        .build_conditional_branch(built, build_block, join)
+        .expect("build_conditional_branch should not fail for a literal's cache test");
+    crate::int_fast::weight_branch(context, branch, false);
+    builder.position_at_end(build_block);
+    let fresh = builder
         .build_call(
             rt.str_from_literal,
             &[ptr.into(), len.into(), slot.as_pointer_value().into()],
@@ -202,7 +224,17 @@ pub(crate) fn emit_string_literal<'ctx>(
         .expect("build_call should not fail for a well-formed string literal construction")
         .try_as_basic_value()
         .expect_basic("pycc_rt_str_from_literal returns a non-void pointer")
-        .into_pointer_value()
+        .into_pointer_value();
+    let built_end = builder.get_insert_block().expect("the builder is positioned");
+    builder
+        .build_unconditional_branch(join)
+        .expect("build_unconditional_branch should not fail for a literal's join");
+    builder.position_at_end(join);
+    let phi = builder
+        .build_phi(ptr_ty, "str_lit")
+        .expect("build_phi should not fail for a pointer");
+    phi.add_incoming(&[(&cached, entry), (&fresh, built_end)]);
+    phi.as_basic_value().into_pointer_value()
 }
 
 /// Turns any supported `Scalar` into an LLVM `i1` for use as a `br`
