@@ -265,11 +265,12 @@ pub(super) struct RtFns<'ctx> {
     pub(super) instance_new: FunctionValue<'ctx>,
     pub(super) instance_get_slot_checked: FunctionValue<'ctx>,
     pub(super) instance_set_slot: FunctionValue<'ctx>,
-    /// Issue #22: runtime NameError for call-before-`def`. Takes a
-    /// null-terminated C string (the function name) and panics -- which
-    /// becomes a process abort at the `extern "C"` boundary, matching every
-    /// other runtime error in `pycc_rt`.
-    pub(super) name_error: FunctionValue<'ctx>,
+    /// `pycc_rt_raise_name_error(name, len)`: makes CPython's
+    /// `NameError: name '<name>' is not defined` the pending exception and
+    /// returns. Issue #22's call-before-`def` path raises it and unwinds
+    /// (`ext_thunk::emit_fnptr_dispatch_guard`); an unbound global read
+    /// (`expr::name_read`) finds this same declaration.
+    pub(super) raise_name_error: FunctionValue<'ctx>,
     /// The runtime's `pycc_rt_exc_pending` `i8` global, the pending-exception
     /// flag a native program loads inline (`int_fast::emit_exception_pending`).
     pub(super) exc_pending: inkwell::values::GlobalValue<'ctx>,
@@ -799,9 +800,9 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_instance_set_slot",
             void_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
         ),
-        name_error: declare(
-            "pycc_rt_name_error",
-            void_type.fn_type(&[ptr_type.into()], false),
+        raise_name_error: declare(
+            "pycc_rt_raise_name_error",
+            void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
         exc_pending: {
             let global = module.add_global(context.i8_type(), None, "pycc_rt_exc_pending");

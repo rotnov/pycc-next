@@ -126,19 +126,6 @@ fn the_extern_c_bigint_refcount_wrappers_forward_to_the_private_pair() {
 }
 
 #[test]
-#[should_panic(expected = "pycc_rt: NameError: name 'foo' is not defined")]
-fn name_error_panics_with_function_name() {
-    let name = std::ffi::CString::new("foo").unwrap();
-    name_error(name.as_ptr());
-}
-
-#[test]
-#[should_panic(expected = "pycc_rt: NameError: name '<unknown>' is not defined")]
-fn name_error_on_null_pointer_uses_unknown() {
-    name_error(std::ptr::null());
-}
-
-#[test]
 fn tagging_a_small_value_and_untagging_it_round_trips() {
     for n in [0i64, 1, -1, 42, -42, i64::MAX >> 1, -(i64::MAX >> 1)] {
         let tagged = tag_smallint(n);

@@ -11,6 +11,11 @@
 //! of functions that qualify. The set is the greatest fixed point, so
 //! recursion qualifies (`fib`): a call can then only fail by exhausting the
 //! stack or memory, which aborts the process in compiled code either way.
+//!
+//! A call can also raise `NameError` when the callee's `def` has not run yet
+//! (issue #22), so a call qualifies only when its callee is certainly bound
+//! by then: a function calling itself, or a callee bound before any code of
+//! the module runs ([`bound_before_code`]).
 
 use pycc_mir::{BinOpKind, CmpOpKind, MirExpr, MirItem, MirModule, MirStmt, Ty};
 use std::collections::{HashMap, HashSet};
@@ -23,6 +28,7 @@ pub(crate) fn nothrow_functions(mir: &MirModule) -> HashSet<String> {
             *defs.entry(name.as_str()).or_default() += 1;
         }
     }
+    let bound = bound_before_code(mir);
     let mut candidates: Vec<(&str, HashSet<&str>, &[MirStmt])> = mir
         .items
         .iter()
@@ -52,8 +58,13 @@ pub(crate) fn nothrow_functions(mir: &MirModule) -> HashSet<String> {
     loop {
         let set: HashSet<&str> = candidates.iter().map(|(name, ..)| *name).collect();
         let before = candidates.len();
-        candidates.retain(|(_, params, body)| {
-            let cx = Cx { params, set: &set };
+        candidates.retain(|(name, params, body)| {
+            let cx = Cx {
+                this: name,
+                params,
+                set: &set,
+                bound: &bound,
+            };
             body.iter().all(|stmt| cx.stmt(stmt))
         });
         if candidates.len() == before {
@@ -62,9 +73,34 @@ pub(crate) fn nothrow_functions(mir: &MirModule) -> HashSet<String> {
     }
 }
 
+/// The functions whose `def` runs before any other code of `mir` can: every
+/// item before it is another `def` (no top-level statement, foreign import
+/// or enum singleton runs earlier), so a call never finds its slot unbound.
+/// Enum member singletons are built before the first item, so a module that
+/// has any leaves the set empty.
+pub(crate) fn bound_before_code(mir: &MirModule) -> HashSet<&str> {
+    if mir
+        .class_defs
+        .iter()
+        .any(|(_, class_def)| !class_def.enum_members.is_empty())
+    {
+        return HashSet::new();
+    }
+    mir.items
+        .iter()
+        .map_while(|item| match item {
+            MirItem::Function { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 struct Cx<'a> {
+    /// The function being checked: a call of itself finds its slot bound.
+    this: &'a str,
     params: &'a HashSet<&'a str>,
     set: &'a HashSet<&'a str>,
+    bound: &'a HashSet<&'a str>,
 }
 
 fn scalar(ty: &Ty) -> bool {
@@ -150,6 +186,7 @@ impl Cx<'_> {
             } => scalar(ty) && scalar(&test.ty()) && self.expr(test) && self.expr(body) && self.expr(orelse),
             MirExpr::Call { callee, args, .. } => {
                 self.set.contains(callee.as_str())
+                    && (callee == self.this || self.bound.contains(callee.as_str()))
                     && args.iter().all(|arg| scalar(&arg.ty()) && self.expr(arg))
             }
             _ => false,

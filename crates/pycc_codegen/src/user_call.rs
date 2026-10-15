@@ -72,6 +72,7 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
     leading_args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
     args: &[MirExpr],
 ) -> inkwell::values::CallSiteValue<'ctx> {
+    let callee = resolve_callee(context, builder, rt, user_function);
     let mut arg_values: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = leading_args.to_vec();
     // A leading argument (an instance the caller keeps: `__init__`'s fresh
     // `self`, a `__hash__`/`__eq__` operand) goes to a parameter slot that
@@ -107,7 +108,7 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
         args,
     );
     arg_values.extend(marshalled_args);
-    dispatch(context, builder, rt, user_function, &arg_values)
+    call_resolved(builder, user_function, callee, &arg_values)
 }
 
 /// Evaluates `args` for parameters of `param_tys`, each value a reference
@@ -294,22 +295,39 @@ pub(crate) fn dispatch<'ctx>(
     user_function: &UserFunction<'ctx>,
     arg_values: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
 ) -> inkwell::values::CallSiteValue<'ctx> {
-    // Issue #22: dispatch indirectly through the function-pointer slot.
-    // Load the current binding; if null, the function hasn't been defined
-    // yet at this point in execution -- abort with a runtime NameError.
-    // Otherwise, call through the loaded pointer.
-    // Monomorphized generic specializations (`0gen_...` names) have no
-    // `fn_ptr_global` -- they dispatch directly through `direct_value`
-    // since they are compiler-generated, not user-defined.
-    if let Some(ref direct_value) = user_function.direct_value {
-        return builder
-            .build_call(*direct_value, arg_values, "call_user_fn")
-            .expect("build_call should not fail for a well-formed direct call");
+    let callee = resolve_callee(context, builder, rt, user_function);
+    call_resolved(builder, user_function, callee, arg_values)
+}
+
+/// What a call of a user function goes to once its name has been looked up.
+#[derive(Clone, Copy)]
+pub(crate) enum Callee<'ctx> {
+    /// A function known at compile time.
+    Direct(FunctionValue<'ctx>),
+    /// The pointer loaded from the function's `fnptr_` slot.
+    Indirect(PointerValue<'ctx>),
+}
+
+/// Looks `user_function` up as CPython looks up the callee's name: before
+/// any argument is evaluated, so a call of a function whose `def` has not
+/// run yet raises `NameError` (issue #22) without evaluating an argument.
+///
+/// Monomorphized generic specializations (`0gen_...` names) have no
+/// `fn_ptr_global` -- they are compiler-generated, not user-defined, and go
+/// directly through `direct_value`. Any other function goes through its
+/// function-pointer slot, whose load, null check and `NameError` path are
+/// shared with #1050's `ext` export thunks
+/// (`ext_thunk::emit_fnptr_dispatch_guard`, which returns with the builder
+/// on the non-null path).
+pub(crate) fn resolve_callee<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_function: &UserFunction<'ctx>,
+) -> Callee<'ctx> {
+    if let Some(direct_value) = user_function.direct_value {
+        return Callee::Direct(direct_value);
     }
-    // The load, the null check and its `NameError` path are shared with
-    // #1050's `ext` export thunks, which dispatch through the same slot:
-    // see `ext_thunk::emit_fnptr_dispatch_guard`. It returns with the
-    // builder positioned on the non-null path.
     if let Some(target) = user_function.single_def {
         let caller = builder
             .get_insert_block()
@@ -318,12 +336,29 @@ pub(crate) fn dispatch<'ctx>(
         if caller != target && !user_function.bound_before_code {
             ext_thunk::emit_fnptr_dispatch_guard(context, builder, rt, user_function);
         }
-        return builder
-            .build_call(target, arg_values, "call_user_fn")
-            .expect("build_call should not fail for a well-formed direct call");
+        return Callee::Direct(target);
     }
-    let fn_ptr = ext_thunk::emit_fnptr_dispatch_guard(context, builder, rt, user_function);
-    builder
-        .build_indirect_call(user_function.fn_type, fn_ptr, arg_values, "call_user_fn")
-        .expect("build_indirect_call should not fail for a well-formed indirect call")
+    Callee::Indirect(ext_thunk::emit_fnptr_dispatch_guard(
+        context,
+        builder,
+        rt,
+        user_function,
+    ))
+}
+
+/// Emits the call of a [`resolve_callee`] result with `arg_values`.
+pub(crate) fn call_resolved<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    user_function: &UserFunction<'ctx>,
+    callee: Callee<'ctx>,
+    arg_values: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
+) -> inkwell::values::CallSiteValue<'ctx> {
+    match callee {
+        Callee::Direct(function) => builder
+            .build_call(function, arg_values, "call_user_fn")
+            .expect("build_call should not fail for a well-formed direct call"),
+        Callee::Indirect(fn_ptr) => builder
+            .build_indirect_call(user_function.fn_type, fn_ptr, arg_values, "call_user_fn")
+            .expect("build_indirect_call should not fail for a well-formed indirect call"),
+    }
 }

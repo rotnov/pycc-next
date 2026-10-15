@@ -312,6 +312,23 @@ fn a_circular_import_matches_cpython_as_an_extension() {
     ext_matches_cpython("cycle");
 }
 
+/// A call of a function whose `def` has not run yet raises a catchable
+/// exception: in a dependency module's own body, and from a module that
+/// imports it back while it runs (CPython's `AttributeError`, pycc's
+/// `NameError`; the fixture catches both, docs/DEVIATIONS.md).
+#[test]
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn a_call_before_def_across_a_circular_import_is_catchable() {
+    native_matches_cpython("cycle_call", &[]);
+    native_matches_cpython("cycle_call", &["--non-strict"]);
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_call_before_def_across_a_circular_import_is_catchable_as_an_extension() {
+    ext_matches_cpython("cycle_call");
+}
+
 /// `from m import x` while the partially initialized `m` has not bound `x`
 /// raises CPython's `ImportError`: for a module next to the entry script
 /// with its "consider renaming" hint, in a package with its "partially

@@ -43,6 +43,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- A call of a module-level function before its `def` statement ran (from a function
+  called earlier) raises CPython's catchable `NameError: name 'f' is not defined`, before
+  any argument is evaluated, in native strict, `--non-strict` and `--ext` builds and
+  across a circular import; it aborted the process (exit 134).
 - A `NameError` for a global of an imported project module read before it is bound
   names it as written (`name 'LATE' is not defined`), not by the compiler's qualified
   spelling.

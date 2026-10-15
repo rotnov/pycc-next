@@ -226,7 +226,7 @@ pub(crate) struct UserFunction<'ctx> {
     /// Initialized to null; set to the current definition's address when
     /// the `def` executes at module level. Calls load from this slot and
     /// dispatch indirectly, so a call before the `def` has executed sees
-    /// null and aborts with `pycc_rt_name_error`, and a redefinition
+    /// null and raises `NameError`, and a redefinition
     /// updates the slot so later calls see the new function.
     /// `None` for monomorphized generic specializations (`0gen_...` names),
     /// which are compiler-generated, not user-defined: they have no
@@ -239,7 +239,7 @@ pub(crate) struct UserFunction<'ctx> {
     /// type the indirect call through `fn_ptr_global`.
     pub(crate) fn_type: inkwell::types::FunctionType<'ctx>,
     /// Issue #22: a global string constant holding the function name as a
-    /// null-terminated C string, passed to `pycc_rt_name_error` on the
+    /// null-terminated C string, passed to `pycc_rt_raise_name_error` on the
     /// null-pointer (call-before-`def`) path. Created once per function
     /// name in the declaration pass and reused at every call site, rather
     /// than recreating a duplicate-named global on each call.

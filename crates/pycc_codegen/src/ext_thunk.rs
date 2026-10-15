@@ -41,9 +41,10 @@ use std::collections::HashSet;
 ///
 /// Issue #22's dispatch discipline: the slot is null until the `def`
 /// executes at module level, so a call that reaches it first is Python's
-/// `NameError` and not a jump through null. The null path calls
-/// `pycc_rt_name_error`, which does not return, and is terminated with
-/// `unreachable`.
+/// `NameError` and not a jump through null. The null path raises CPython's
+/// `NameError: name '<name>' is not defined` as the pending exception and
+/// unwinds ([`emit_unbound_function_raise`]), so a `try`/`except NameError`
+/// around the call catches it.
 ///
 /// Shared by `emit_call`'s ordinary user-function call and by
 /// [`emit_export_thunks`] below rather than replicated: a thunk that skipped
@@ -79,24 +80,65 @@ pub(super) fn emit_fnptr_dispatch_guard<'ctx>(
     builder
         .build_conditional_branch(is_null, is_null_block, not_null_block)
         .expect("build_conditional_branch should not fail for a null-check dispatch");
-    // Null path: call pycc_rt_name_error with the function name as a C
-    // string, then unreachable (name_error never returns). The name
-    // global was created once per function name in the declaration pass
-    // and is reused at every call site.
+    // The name global was created once per function name in the
+    // declaration pass and is reused at every call site.
     builder.position_at_end(is_null_block);
     let name_global = user_function
         .name_global
         .as_ref()
         .expect("non-monomorphized user function has a name_global");
-    let name_ptr = name_global.as_pointer_value();
-    builder
-        .build_call(rt.name_error, &[name_ptr.into()], "name_error")
-        .expect("build_call should not fail for a well-formed runtime error call");
-    builder
-        .build_unreachable()
-        .expect("build_unreachable terminates the null-pointer path");
+    emit_unbound_function_raise(context, builder, rt, *name_global, current_fn);
     builder.position_at_end(not_null_block);
     fn_ptr
+}
+
+/// The null path of [`emit_fnptr_dispatch_guard`]: raises
+/// `NameError: name '<name>' is not defined` through
+/// `pycc_rt_raise_name_error` (which strips a dependency module's qualified
+/// spelling down to the plain name) and terminates the block.
+///
+/// Inside a body whose innermost exception target belongs to `current_fn`
+/// (a user function, the module's entry code) the block unwinds to that
+/// target like any other raise, releasing the references the enclosing
+/// expression holds. A function emitted on the side -- an `ext` export
+/// thunk, a closure's call trampoline -- has no target of its own, so it
+/// returns a zero of its return type with the exception pending, which its
+/// caller (the generated C wrapper, or the calling code's post-call check)
+/// observes.
+fn emit_unbound_function_raise<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    name_global: inkwell::values::GlobalValue<'ctx>,
+    current_fn: FunctionValue<'ctx>,
+) {
+    // `fnname_<name>` holds the name plus its NUL terminator.
+    let len = name_global.get_value_type().into_array_type().len() - 1;
+    builder
+        .build_call(
+            rt.raise_name_error,
+            &[
+                name_global.as_pointer_value().into(),
+                context.i64_type().const_int(u64::from(len), false).into(),
+            ],
+            "",
+        )
+        .expect("build_call should not fail for pycc_rt_raise_name_error");
+    let own_target = rt
+        .exceptions
+        .targets
+        .borrow()
+        .last()
+        .is_some_and(|target| target.get_parent() == Some(current_fn));
+    if own_target {
+        crate::exception::jump_to_exception_target(context, builder, rt);
+        return;
+    }
+    match current_fn.get_type().get_return_type() {
+        Some(ty) => builder.build_return(Some(&ty.const_zero())),
+        None => builder.build_return(None),
+    }
+    .expect("build_return should not fail on the unbound-function path");
 }
 
 /// Emits one `pycc_ext_thunk_<name>` for every export whose signature

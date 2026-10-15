@@ -220,7 +220,7 @@ pub(crate) fn compile_to_object_with_observer(
                     // Deliberately *not* mangled, on both counts. The symbol
                     // is internal-linkage and never declared from C, so it
                     // needs no C-legal spelling; and its contents are the
-                    // string `pycc_rt_name_error` prints, so the array size
+                    // name `pycc_rt_raise_name_error` reports, so the array size
                     // and initializer stay on the source dotted name --
                     // mangling them would make a method's `NameError` read
                     // `0m4_Grid5_scale6_static`.
@@ -263,18 +263,11 @@ pub(crate) fn compile_to_object_with_observer(
     // A single definition whose `def` precedes every statement that can run
     // code is bound before any function body can run, so no call reaches
     // its slot while it is still null (see `UserFunction::bound_before_code`).
-    // Enum member singletons are built before the first item, so a module
-    // that has any keeps every check.
-    if mir.class_defs.iter().all(|(_, class_def)| class_def.enum_members.is_empty()) {
-        for item in &mir.items {
-            let MirItem::Function { name, .. } = item else {
-                break;
-            };
-            if let Some(uf) = user_functions.get_mut(name.as_str())
-                && uf.single_def.is_some()
-            {
-                uf.bound_before_code = true;
-            }
+    for name in nothrow::bound_before_code(mir) {
+        if let Some(uf) = user_functions.get_mut(name)
+            && uf.single_def.is_some()
+        {
+            uf.bound_before_code = true;
         }
     }
 
@@ -316,7 +309,7 @@ pub(crate) fn compile_to_object_with_observer(
     // represents a `def` statement's runtime binding effect: store the
     // function's address into the global function-pointer slot so calls
     // after this point dispatch to it. A call before the `def` (the slot
-    // is still null) aborts with `pycc_rt_name_error` -- matching
+    // is still null) raises `pycc_rt_raise_name_error` -- matching
     // CPython's `NameError: name 'foo' is not defined`.
     let mut def_iter = function_defs_in_order.iter().peekable();
     let copy_slots = copy_slots::CopySlots::new(mir);
