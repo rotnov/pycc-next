@@ -92,6 +92,17 @@ pub(super) fn lower_object_compare(
             container: Box::new(right),
         });
     }
+    // An object in a native `str`: the `str` is boxed into a CPython one.
+    if matches!(op, CmpOpKind::In | CmpOpKind::NotIn)
+        && left.ty() == Ty::Object
+        && right.ty() == Ty::Str
+    {
+        return Ok(MirExpr::ObjContains {
+            negate: op == CmpOpKind::NotIn,
+            item: Box::new(left),
+            container: Box::new(MirExpr::ObjectBox(Box::new(right))),
+        });
+    }
     if left.ty() == Ty::Object || right.ty() == Ty::Object {
         // A `None` operand of a rich comparison (`o == None`) is CPython's
         // `Py_None`; an identity test keeps its own `None` operand.

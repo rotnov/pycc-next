@@ -28,7 +28,9 @@ use std::collections::BTreeSet;
 
 thread_local! {
     static NON_STRICT: Cell<bool> = const { Cell::new(false) };
-    static WIDEN: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+    /// Names to widen, each keyed by the function item whose local it is
+    /// (`None`: every scope, the module's included), see [`WidenKey`].
+    static WIDEN: RefCell<BTreeSet<WidenKey>> = const { RefCell::new(BTreeSet::new()) };
     /// `(class, attribute)` slots to widen ([`request_attr_widen`]).
     static WIDEN_ATTRS: RefCell<BTreeSet<(String, String)>> =
         const { RefCell::new(BTreeSet::new()) };
@@ -85,12 +87,21 @@ pub(crate) fn admits_index(ty: &Ty) -> bool {
     is_non_strict() && *ty == Ty::Object
 }
 
+/// A name to widen: `(Some(i), name)` is the local `name` of function item
+/// `i` only, `(None, name)` the name in every scope. A function's locals
+/// are its own (a nested function is lifted into a function of its own
+/// that receives the values it reads as parameters), so a name one
+/// function rebinds with another type stays native in every other
+/// function that binds it once.
+type WidenKey = (Option<usize>, String);
+
 /// Records that `name` was rebound with a value of another type, when both
 /// types fit an `object` slot (`boxable`). The caller still reports its
 /// diagnostic; [`with_widening`] decides whether a retry removes it.
 pub(crate) fn request_widen(name: &str, previous: &Ty, new: &Ty, boxable: impl Fn(&Ty) -> bool) {
     if is_non_strict() && boxable(previous) && boxable(new) {
-        WIDEN.with(|widen| widen.borrow_mut().insert(name.to_string()));
+        let item = crate::locate::current_item();
+        WIDEN.with(|widen| widen.borrow_mut().insert((item, name.to_string())));
     }
 }
 
@@ -192,8 +203,91 @@ fn record_unbinding_statements(hir: &HirModule) {
     UNBOUND_BY_STATEMENT.with(|cell| *cell.borrow_mut() = names);
 }
 
-fn take_widen_requests() -> BTreeSet<String> {
+fn take_widen_requests() -> BTreeSet<WidenKey> {
     WIDEN.with(|widen| std::mem::take(&mut *widen.borrow_mut()))
+}
+
+/// `requests` with every key that is not a local of an ordinary function
+/// item of `hir` made module-wide: a name of the module scope, a name the
+/// module scope binds too (a function may declare it `global`), or a
+/// request from no item or from an item the check added (an inherited
+/// method's copy).
+fn scope_keys(hir: &HirModule, requests: BTreeSet<WidenKey>) -> BTreeSet<WidenKey> {
+    let module_names = module_scope_names(hir);
+    requests
+        .into_iter()
+        .map(|(item, name)| {
+            let local = item.is_some_and(|index| {
+                matches!(hir.items.get(index), Some(HirItem::Function { .. }))
+                    && !module_names.contains(&name)
+            });
+            (if local { item } else { None }, name)
+        })
+        .collect()
+}
+
+/// The names a module-level statement of `hir` binds.
+fn module_scope_names(hir: &HirModule) -> BTreeSet<String> {
+    fn walk(body: &[HirStmt], out: &mut BTreeSet<String>) {
+        for stmt in body {
+            match stmt {
+                HirStmt::Assign { target, .. }
+                | HirStmt::AnnAssign { target, .. }
+                | HirStmt::ListCompAssign { target, .. }
+                | HirStmt::SetCompAssign { target, .. } => {
+                    out.insert(target.clone());
+                }
+                HirStmt::ForRange { var, body, .. }
+                | HirStmt::ForList { var, body, .. }
+                | HirStmt::ForObject { var, body, .. } => {
+                    out.insert(var.clone());
+                    walk(body, out);
+                }
+                HirStmt::If { body, orelse, .. } => {
+                    walk(body, out);
+                    walk(orelse, out);
+                }
+                HirStmt::While { body, .. } => walk(body, out),
+                HirStmt::LoopElse { loop_stmt, orelse } => {
+                    walk(std::slice::from_ref(loop_stmt.as_ref()), out);
+                    walk(orelse, out);
+                }
+                HirStmt::Try {
+                    body,
+                    handlers,
+                    orelse,
+                    finalbody,
+                }
+                | HirStmt::TryStar {
+                    body,
+                    handlers,
+                    orelse,
+                    finalbody,
+                } => {
+                    walk(body, out);
+                    for handler in handlers {
+                        out.extend(handler.name.iter().cloned());
+                        walk(&handler.body, out);
+                    }
+                    walk(orelse, out);
+                    walk(finalbody, out);
+                }
+                HirStmt::Match { cases, .. } => {
+                    for case in cases {
+                        walk(&case.body, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = BTreeSet::new();
+    for item in &hir.items {
+        if let HirItem::TopLevelStmt(stmt) = item {
+            walk(std::slice::from_ref(stmt), &mut out);
+        }
+    }
+    out
 }
 
 /// Runs `check` over `hir`, and in non-strict mode re-runs it with every
@@ -218,7 +312,7 @@ pub(crate) fn with_widening<T, E>(
     loop {
         take_widen_requests();
         let result = check(current.as_ref().unwrap_or(hir));
-        let requested = retarget_temporaries(hir, take_widen_requests());
+        let requested = retarget_temporaries(hir, scope_keys(hir, take_widen_requests()));
         let requested_attrs = WIDEN_ATTRS.with(|widen| std::mem::take(&mut *widen.borrow_mut()));
         if result.is_ok()
             || (requested.is_subset(&widened) && requested_attrs.is_subset(&widened_attrs))
@@ -236,15 +330,18 @@ pub(crate) fn with_widening<T, E>(
 /// by that container's name: widening the temporary alone would copy the
 /// item out of its container, while a widened container hands out its own
 /// CPython items, so a store through one is seen through the other.
-fn retarget_temporaries(hir: &HirModule, requested: BTreeSet<String>) -> BTreeSet<String> {
+fn retarget_temporaries(hir: &HirModule, requested: BTreeSet<WidenKey>) -> BTreeSet<WidenKey> {
     requested
         .into_iter()
-        .map(|name| {
+        .map(|(key, name)| {
             if !name.starts_with("_pycc_") {
-                return name;
+                return (key, name);
             }
             let mut root = None;
-            for item in &hir.items {
+            for (index, item) in hir.items.iter().enumerate() {
+                if key.is_some_and(|key| key != index) {
+                    continue;
+                }
                 let body = match item {
                     HirItem::Function { body, .. } => body.as_slice(),
                     HirItem::TopLevelStmt(stmt) => std::slice::from_ref(stmt),
@@ -253,7 +350,7 @@ fn retarget_temporaries(hir: &HirModule, requested: BTreeSet<String>) -> BTreeSe
                     root = item_root(body, &name);
                 }
             }
-            root.unwrap_or(name)
+            (key, root.unwrap_or(name))
         })
         .collect()
 }
@@ -305,7 +402,7 @@ fn item_root(body: &[HirStmt], name: &str) -> Option<String> {
 
 /// The names some scope of `hir` first binds to `None` with a plain
 /// assignment and binds again, in the same scope, to anything else.
-fn none_first_names(hir: &HirModule) -> BTreeSet<String> {
+fn none_first_names(hir: &HirModule) -> BTreeSet<WidenKey> {
     fn walk(
         body: &[HirStmt],
         first_none: &mut std::collections::BTreeMap<String, bool>,
@@ -363,23 +460,27 @@ fn none_first_names(hir: &HirModule) -> BTreeSet<String> {
             }
         }
     }
-    let mut rebound = BTreeSet::new();
+    let mut keyed = BTreeSet::new();
     let mut top_level = std::collections::BTreeMap::new();
-    for item in &hir.items {
+    let mut module_rebound = BTreeSet::new();
+    for (index, item) in hir.items.iter().enumerate() {
         match item {
             HirItem::Function { params, body, .. } => {
                 let mut first_none = params
                     .iter()
                     .map(|(name, _)| (name.clone(), false))
                     .collect();
+                let mut rebound = BTreeSet::new();
                 walk(body, &mut first_none, &mut rebound);
+                keyed.extend(rebound.into_iter().map(|name| (Some(index), name)));
             }
             HirItem::TopLevelStmt(stmt) => {
-                walk(std::slice::from_ref(stmt), &mut top_level, &mut rebound);
+                walk(std::slice::from_ref(stmt), &mut top_level, &mut module_rebound);
             }
         }
     }
-    rebound
+    keyed.extend(module_rebound.into_iter().map(|name| (None, name)));
+    scope_keys(hir, keyed)
 }
 
 /// `hir` with the first plain assignment of each name in `names`, in every
@@ -387,9 +488,14 @@ fn none_first_names(hir: &HirModule) -> BTreeSet<String> {
 /// value`.
 fn widen(
     hir: &HirModule,
-    names: &BTreeSet<String>,
+    keys: &BTreeSet<WidenKey>,
     attrs: &BTreeSet<(String, String)>,
 ) -> HirModule {
+    let everywhere: BTreeSet<String> = keys
+        .iter()
+        .filter(|(item, _)| item.is_none())
+        .map(|(_, name)| name.clone())
+        .collect();
     let mut module = hir.clone();
     // Each widened attribute slot is `object` in the class that declares
     // it and in every class of the store's MRO that redeclares it.
@@ -412,16 +518,22 @@ fn widen(
         }
     }
     let mut top_level_seen = BTreeSet::new();
-    for item in &mut module.items {
+    for (index, item) in module.items.iter_mut().enumerate() {
         match item {
             HirItem::Function { params, body, .. } => {
                 // A parameter already has its declared slot.
                 let mut seen: BTreeSet<String> =
                     params.iter().map(|(name, _)| name.clone()).collect();
-                widen_block(body, names, &mut seen);
+                let mut names = everywhere.clone();
+                names.extend(
+                    keys.iter()
+                        .filter(|(item, _)| *item == Some(index))
+                        .map(|(_, name)| name.clone()),
+                );
+                widen_block(body, &names, &mut seen);
             }
             HirItem::TopLevelStmt(stmt) => {
-                widen_block(std::slice::from_mut(stmt), names, &mut top_level_seen);
+                widen_block(std::slice::from_mut(stmt), &everywhere, &mut top_level_seen);
             }
         }
     }

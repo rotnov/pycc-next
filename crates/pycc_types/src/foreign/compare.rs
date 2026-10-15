@@ -137,6 +137,9 @@ pub(crate) fn membership_ty(
             "testing membership of a `{}` value in a CPython object",
             item.name()
         ))),
+        // `c in "aeiou"` for an object `c` (a character of untyped text):
+        // the `str` crosses as a CPython `str`, which answers.
+        (Ty::Object, Ty::Str) => Ok(Ty::Bool),
         (Ty::Object, container) => Err(object_operation_unsupported(&format!(
             "testing membership of a CPython object in a `{}` value",
             container.name()

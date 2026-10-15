@@ -123,6 +123,11 @@ pub(crate) fn in_item<R>(index: usize, f: impl FnOnce() -> R) -> R {
     f()
 }
 
+/// The index of the item being checked ([`in_item`]), if any.
+pub(crate) fn current_item() -> Option<usize> {
+    CURRENT_ITEM.with(Cell::get)
+}
+
 fn lookup(f: impl FnOnce(&Locator, usize) -> Option<Span>) -> Option<Span> {
     let item = CURRENT_ITEM.with(Cell::get)?;
     LOCATORS.with(|cell| cell.borrow().last().and_then(|locator| f(locator, item)))
