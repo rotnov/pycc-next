@@ -14,6 +14,17 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   own speed test now runs 8.3x faster than CPython (1.60 s vs 13.2 s) (v0.3: 1.7x), its suite passing
   (`python3 bench/package_check.py --time`). `--report-fallbacks` lists `specialized:`
   and `not specialized:` functions.
+- Language gaps from v0.3 (v0.4 accept 5, in part): `IntEnum` members are usable where
+  an `int` is needed (arithmetic, comparisons, `range()`, indexing, `int` parameters);
+  `sorted()`, `min()`, `max()` and `list.sort()` of class instances order by `__lt__`
+  (or `__gt__`, or `@dataclass(order=True)`), also with `key=` returning instances and
+  `reverse=`; a list changed while it is sorted raises `ValueError: list modified during
+  sort` as in CPython; `x in s` for a set of instances uses `__hash__`/`__eq__`;
+  `dataclasses.fields()`, `asdict()`, `astuple()` and `replace()` compile natively
+  (`asdict()` of mixed field types needs `--non-strict`); printing a list or tuple of
+  instances uses their `__repr__`; a strict `--ext` module publishes its native
+  module-level variables (numbers, strings, tuples of them) as attributes, kept current
+  when a function rebinds them with `global`.
 
 ### Changed
 

@@ -45,7 +45,8 @@ Works today: strict type checking with Rust-style diagnostics pointing at the of
 code; native compilation via LLVM; classes, exceptions, generators, closures, lists,
 dicts, sets, comprehensions, `match`, arbitrary-precision `int`, typed numpy arrays;
 `itertools`, `collections.deque`, `Counter` and `defaultdict` without CPython;
-programs of several modules and packages; `@dataclass`, `enum.Enum`/`IntEnum`/`StrEnum`,
+programs of several modules and packages; `@dataclass` (with `fields()`/`asdict()`/
+`astuple()`/`replace()`), `enum.Enum`/`IntEnum`/`StrEnum`, sorting and hashing instances,
 `functools.cache`/`lru_cache`; reference-counted memory;
 CPython extension modules; `--non-strict` for untyped code. 9,500+ tests.
 
