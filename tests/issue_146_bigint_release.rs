@@ -20,6 +20,10 @@
 //!   invisible to every value assertion above. The ratio test at the bottom
 //!   of this file is the one that fails loudly for it.
 
+#[cfg(unix)]
+#[path = "memory_support/mod.rs"]
+mod memory_support;
+
 use pycc_scratch::ScratchDir;
 use std::io::Write;
 use std::process::Command;
@@ -298,9 +302,8 @@ fn a_dict_comprehension_over_a_named_bigint_bound_leaves_the_bound_intact() {
 // ---------------------------------------------------------------------------
 // Peak-RSS ratio: the test that actually fails for a *missed release*.
 //
-// Deliberately a ratio and never an absolute bound: `rusage::ru_maxrss` is
-// bytes on macOS/BSD and kilobytes on Linux, and the baseline footprint of a
-// pycc binary differs per platform and per libc. A leak of one `BigIntObj`
+// Deliberately a ratio and never an absolute bound: the baseline footprint
+// of a pycc binary differs per platform and per libc. A leak of one `BigIntObj`
 // per iteration is linear in the trip count, so doubling the iterations
 // doubles the peak. A fixed program's peak is flat.
 // ---------------------------------------------------------------------------
@@ -574,46 +577,9 @@ mod peak_rss {
     use super::{PROMOTED, pycc_bin, write_case};
     use std::process::Command;
 
-    /// Spawns `command`, waits for it via `wait4`, and returns the child's
-    /// `ru_maxrss`. Follows `tests/nbody_bench.rs::time_command`'s reaping
-    /// pattern (duplicated rather than shared -- this repository's
-    /// integration tests each carry their own helpers, see that file's
-    /// `oracle_python_bin` doc comment), but reads the resident-set high
-    /// water mark instead of the CPU times.
-    #[allow(clippy::zombie_processes)]
-    fn peak_rss(mut command: Command) -> libc::c_long {
-        let child = command.spawn().expect("command must spawn");
-        let pid = child.id() as libc::pid_t;
-        let mut status = 0;
-        let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-        let waited = loop {
-            // SAFETY: `pid` identifies the live child spawned immediately
-            // above; both output pointers are valid for writes for the
-            // duration of the call, and a successful `wait4` initializes the
-            // complete `rusage` value.
-            let result = unsafe { libc::wait4(pid, &mut status, 0, usage.as_mut_ptr()) };
-            if result != -1 {
-                break result;
-            }
-            let error = std::io::Error::last_os_error();
-            assert_eq!(
-                error.kind(),
-                std::io::ErrorKind::Interrupted,
-                "wait failed for {command:?}: {error}"
-            );
-        };
-        assert_eq!(waited, pid, "wait4 reaped the wrong child for {command:?}");
-        // SAFETY: the successful `wait4` above initialized `usage`.
-        let usage = unsafe { usage.assume_init() };
-        assert!(
-            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
-            "command failed: {command:?}"
-        );
-        // `ru_maxrss` is `i64` on macOS/BSD and `i64` on 64-bit Linux, but
-        // the field is the *peak resident set*, in bytes on macOS/BSD and in
-        // kilobytes on Linux -- which is why every assertion below is a
-        // ratio of two readings from the same platform, never an absolute.
-        usage.ru_maxrss
+    /// The probe's own peak resident set, in kilobytes (`tests/memory_support`).
+    fn peak_rss(command: Command) -> libc::c_long {
+        crate::memory_support::peak_kb(command)
     }
 
     /// Builds `source` with `pycc build` and returns the produced binary's

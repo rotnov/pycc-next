@@ -4,10 +4,10 @@
 //! Each probe is one loop body, compiled into a program that runs it `n`
 //! times. The program is built and run for two `n`, and the peak resident
 //! set of the second run may exceed the first by no more than
-//! [`GROWTH_LIMIT_KB`]. A leak of one 48-byte object per iteration over the
-//! [`N_LARGE`]` - `[`N_SMALL`] extra iterations would be roughly ten
-//! megabytes, so the limit separates a per-iteration leak from allocator
-//! noise by two orders of magnitude. Every run's output is also compared
+//! [`GROWTH_LIMIT_KB`] (`tests/memory_support` explains the bound and how
+//! the peak is measured). A leak of one 48-byte object per iteration over
+//! the [`N_LARGE`]` - `[`N_SMALL`] extra iterations would be roughly ten
+//! megabytes, five times the limit. Every run's output is also compared
 //! with CPython's for the same program.
 #![cfg(unix)]
 
@@ -21,7 +21,7 @@ use std::process::Command;
 
 const N_SMALL: u64 = 20_000;
 const N_LARGE: u64 = 220_000;
-const GROWTH_LIMIT_KB: i64 = 1024;
+use memory_support::GROWTH_LIMIT_KB;
 
 /// Helpers every probe body may call.
 const PRELUDE: &str = r#"

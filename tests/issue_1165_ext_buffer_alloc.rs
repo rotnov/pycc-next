@@ -47,6 +47,10 @@
 //! `llvm-cov` without `--include-ignored` and `scripts/check_diff_coverage.py`
 //! excludes `tests/` from its denominator either way.
 
+#[cfg(unix)]
+#[path = "memory_support/mod.rs"]
+mod memory_support;
+
 use pycc_scratch::ScratchDir;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -1516,27 +1520,26 @@ def negative(n: int) -> float:
 /// returns the host interpreter's own peak resident set together with the
 /// number of exceptions it actually caught.
 ///
-/// The measurement is taken *inside* CPython, with `resource.getrusage`,
-/// rather than by reaping the child with `wait4` the way
-/// `tests/issue_146_bigint_release.rs`'s `peak_rss` module does. Both read
-/// the same `ru_maxrss` field; doing it in-process keeps this arm inside
-/// this file's existing `run_hosted` convention and needs no `libc`
-/// dependency here. `resource` is Unix-only, which is why the whole arm is
-/// `#[cfg(unix)]`.
+/// The measurement is taken *inside* CPython, with the shared `peak_kb()`
+/// (`tests/memory_support`'s `PYTHON_PEAK_KB`: `VmHWM` on Linux, whose
+/// `ru_maxrss` would also count this test harness), which keeps this arm
+/// inside this file's existing `run_hosted` convention. `resource` is
+/// Unix-only, which is why the whole arm is `#[cfg(unix)]`.
 #[cfg(unix)]
 fn hosted_peak_rss(dir: &Path, export: &str, argument: &str, trips: u32) -> (f64, u32) {
     let run = run_hosted(
         dir,
         &format!(
-            "import resource, alloc_probe\n\
+            "{}\nimport alloc_probe\n\
              caught = 0\n\
              for _ in range({trips}):\n\
              \x20   try:\n\
              \x20       alloc_probe.{export}({argument})\n\
              \x20   except (OverflowError, ValueError):\n\
              \x20       caught += 1\n\
-             print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)\n\
-             print(caught)\n"
+             print(peak_kb())\n\
+             print(caught)\n",
+            memory_support::PYTHON_PEAK_KB
         ),
     );
     assert!(run.status.success(), "{}", stderr_of(&run));

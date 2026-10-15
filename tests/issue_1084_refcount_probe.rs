@@ -38,6 +38,10 @@
 //! `tests/`; they are run by the Tier-1 `native-build-test` leg's
 //! `cargo test --workspace -- --include-ignored`.
 
+#[cfg(unix)]
+#[path = "memory_support/mod.rs"]
+mod memory_support;
+
 use pycc_scratch::ScratchDir;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -279,43 +283,9 @@ mod peak_rss {
     use super::{PRODUCING_OPERATIONS, build_ext, fixture, stderr_of};
     use std::process::Command;
 
-    /// Spawns `command`, waits for it via `wait4`, and returns the child's
-    /// `ru_maxrss`. Duplicated from `tests/issue_146_bigint_release.rs` per
-    /// this repository's convention that each integration test carries its
-    /// own helpers.
-    #[allow(clippy::zombie_processes)]
-    fn peak_rss(mut command: Command) -> libc::c_long {
-        let child = command.spawn().expect("command must spawn");
-        let pid = child.id() as libc::pid_t;
-        let mut status = 0;
-        let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-        let waited = loop {
-            // SAFETY: `pid` identifies the live child spawned immediately
-            // above; both output pointers are valid for writes for the
-            // duration of the call, and a successful `wait4` initializes the
-            // complete `rusage` value.
-            let result = unsafe { libc::wait4(pid, &mut status, 0, usage.as_mut_ptr()) };
-            if result != -1 {
-                break result;
-            }
-            let error = std::io::Error::last_os_error();
-            assert_eq!(
-                error.kind(),
-                std::io::ErrorKind::Interrupted,
-                "wait failed for {command:?}: {error}"
-            );
-        };
-        assert_eq!(waited, pid, "wait4 reaped the wrong child for {command:?}");
-        // SAFETY: the successful `wait4` above initialized `usage`.
-        let usage = unsafe { usage.assume_init() };
-        assert!(
-            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
-            "command failed: {command:?}"
-        );
-        // `ru_maxrss` is the peak resident set, in bytes on macOS/BSD and in
-        // kilobytes on Linux -- which is why the assertion below is a ratio
-        // of two readings from the same platform, never an absolute.
-        usage.ru_maxrss
+    /// The probe's own peak resident set, in kilobytes (`tests/memory_support`).
+    fn peak_rss(command: Command) -> libc::c_long {
+        crate::memory_support::peak_kb(command)
     }
 
     /// Builds a `str(o)` loop at `trips` trips and returns the peak RSS of

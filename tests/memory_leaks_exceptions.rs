@@ -8,11 +8,11 @@
 //!
 //! Each probe runs its loop body `n` times for two `n`, in strict and in
 //! non-strict mode; the peak resident set may grow by at most
-//! [`GROWTH_LIMIT_KB`] and the output must equal CPython's. The counts are
-//! larger than `tests/memory_leaks.rs`' so that a program embedding CPython
-//! (non-strict mode, or `import json`), whose peak varies by a few hundred
-//! kilobytes from run to run, still separates a leak from noise: even one
-//! byte per iteration grows the peak by about two megabytes, and an
+//! [`GROWTH_LIMIT_KB`] (`tests/memory_support` explains the bound) and the
+//! output must equal CPython's. The counts are ten times
+//! `tests/memory_leaks.rs`' so that a small leak stands far above the noise
+//! of a program embedding CPython (non-strict mode, or `import json`): ten
+//! bytes per iteration grow the peak by about twenty megabytes, and an
 //! exception leaked with its message is over a hundred bytes. Before
 //! exceptions were counted, catching `ZeroDivisionError` grew by about 220
 //! bytes per iteration and catching a failing `json.loads` by about 1.9 kB.
@@ -26,7 +26,7 @@ use pycc_scratch::ScratchDir;
 
 const N_SMALL: u64 = 200_000;
 const N_LARGE: u64 = 2_200_000;
-const GROWTH_LIMIT_KB: i64 = 1536;
+use memory_support::GROWTH_LIMIT_KB;
 
 /// Helpers every probe body may call.
 const PRELUDE: &str = r#"

@@ -74,15 +74,16 @@ tracemalloc.stop()
 print("traced memory flat", grown < 64 * 1024)
 
 # A million calls through the boundary: the resident set stays flat.
-import resource
+# `peak_kb.py` is `tests/fixtures/peak_kb.py`, written beside this driver.
+from peak_kb import peak_kb
 
-before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+before = peak_kb()
 counts = [sys.getrefcount(a) for a in (big, obj, other)]
 for _ in range(1_000_000):
     m.add(big, big)
     m.via_holder(other)
     m.passes(obj)
-after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-# 4 MiB; ru_maxrss is in bytes on macOS and in KiB on Linux.
-print("rss flat", after - before < 4096 * (1024 if sys.platform == "darwin" else 1))
+after = peak_kb()
+# 4 MiB.
+print("rss flat", after - before < 4096)
 print("counts flat", counts == [sys.getrefcount(a) for a in (big, obj, other)])

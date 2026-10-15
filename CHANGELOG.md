@@ -47,6 +47,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   called earlier) raises CPython's catchable `NameError: name 'f' is not defined`, before
   any argument is evaluated, in native strict, `--non-strict` and `--ext` builds and
   across a circular import; it aborted the process (exit 134).
+- The peak-RSS leak tests no longer fail at random when the suite runs in parallel. On
+  Linux a child's `ru_maxrss` also counts the resident set of the test harness that
+  spawned it (`exec` folds the replaced address space's high-water mark into it), so
+  two probes compared how much the harness grew in between. Every probe now reads its
+  own peak (`VmHWM`, at its exit) through one helper, `tests/memory_support`. The growth
+  limit is 2 MB (was 1 MB): a probe embedding CPython grows by up to one 1 MiB obmalloc
+  arena or not depending on the loop count; one leaked object per iteration still adds
+  3-6 MB.
 - A `NameError` for a global of an imported project module read before it is bound
   names it as written (`name 'LATE' is not defined`), not by the compiler's qualified
   spelling.

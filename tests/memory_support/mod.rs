@@ -1,11 +1,58 @@
-//! The peak-RSS probe harness shared by `tests/memory_leaks*.rs`: build a
-//! probe with `pycc build --release`, run it measuring its peak resident
-//! set, and run CPython on the same source.
+//! The peak-RSS probe harness shared by the memory tests
+//! (`tests/memory_leaks*.rs`, the `tests/issue_*` leak probes): build a probe
+//! with `pycc build --release`, run it measuring its peak resident set, and
+//! run CPython on the same source.
+//!
+//! # Why not `ru_maxrss`
+//!
+//! On Linux a child's `ru_maxrss` (from `wait4`, or its own
+//! `getrusage(RUSAGE_SELF)`) is not the child's peak: `exec` folds the
+//! high-water mark of the address space it replaces into the process's
+//! `maxrss`, and that address space is the parent's (shared through
+//! `vfork`, which `std::process::Command` uses, or copied by `fork`). So
+//! `ru_maxrss` reads `max(the test harness's resident set at spawn, the
+//! probe's own peak)`: a few-megabyte probe spawned by a harness running
+//! tests in parallel reports the harness's size, and two probes compared
+//! for growth compare how much the harness grew in between (a 1072 kB
+//! "growth" against a 1024 kB limit, passing with `--test-threads=1`).
+//!
+//! The probe's own address space starts fresh at `exec`, and its high-water
+//! mark is `VmHWM` in `/proc/<pid>/status`. It is read while the probe exits
+//! but before its memory is torn down: the probe is traced
+//! (`PTRACE_TRACEME`) with `PTRACE_O_TRACEEXIT`, which stops it at that
+//! point. Elsewhere (macOS: `posix_spawn` gives the child a new task, and
+//! `ru_maxrss` is in bytes there), or where tracing is not permitted, the
+//! peak is `ru_maxrss`.
 
 #![allow(dead_code)]
 
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+
+/// How much a probe's peak resident set may grow between its two loop
+/// counts (20 000 and 220 000 iterations in most suites) without counting as
+/// a leak.
+///
+/// Not tighter, because a probe embedding CPython grows in steps of up to
+/// one obmalloc arena (1 MiB in CPython 3.13): whether the larger run
+/// touches one more arena depends on fragmentation, not on a leak, and the
+/// step shows up or not between neighbouring loop counts (the same json
+/// probe measured ~16.1 MB at 50 000 iterations, ~16.9 MB at 100 000 and
+/// 800 000, ~16.1 MB at 2 000 000). Not looser, because the smallest leak
+/// worth catching -- one 16-byte object per iteration, more with its
+/// allocator header -- adds at least 3.1 MB over 200 000 extra iterations.
+pub const GROWTH_LIMIT_KB: i64 = 2048;
+
+/// Python source defining `peak_kb()`, the running process's own peak
+/// resident set in kilobytes, for a probe measuring from inside Python:
+/// prepend it to the probe's source.
+pub const PYTHON_PEAK_KB: &str = include_str!("../fixtures/peak_kb.py");
+
+/// `ptrace`'s unused `addr`/`data` argument: pointer-sized, as the variadic
+/// C prototype reads it.
+#[cfg(target_os = "linux")]
+const NULL: *mut libc::c_void = std::ptr::null_mut();
 
 pub fn build(dir: &Path, name: &str, source: &str) -> PathBuf {
     build_with(dir, name, source, &[])
@@ -33,35 +80,262 @@ pub fn build_with(dir: &Path, name: &str, source: &str, flags: &[&str]) -> PathB
     bin
 }
 
-/// Runs `bin`, returning its stdout and peak resident set in kilobytes.
+/// A finished probe: its stdout, raw wait status and peak resident set.
+pub struct Measured {
+    pub stdout: Vec<u8>,
+    /// The raw `waitpid` status (`libc::WIFEXITED` and friends apply).
+    pub status: libc::c_int,
+    /// The probe's own peak resident set, in kilobytes.
+    pub peak_kb: i64,
+}
+
+impl Measured {
+    pub fn success(&self) -> bool {
+        libc::WIFEXITED(self.status) && libc::WEXITSTATUS(self.status) == 0
+    }
+}
+
+/// Runs `bin`, returning its stdout and peak resident set in kilobytes;
+/// panics unless it exits with status 0.
 pub fn run_measured(bin: &Path) -> (Vec<u8>, i64) {
-    let child = Command::new(bin)
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .expect("the probe should spawn");
+    let measured = measure(Command::new(bin), None);
+    assert!(
+        measured.success(),
+        "{} exited abnormally: {:#x}",
+        bin.display(),
+        measured.status
+    );
+    (measured.stdout, measured.peak_kb)
+}
+
+/// The peak resident set, in kilobytes, of `command`, which must exit with
+/// status 0 (its stdout is discarded).
+pub fn peak_kb(command: Command) -> i64 {
+    let shown = format!("{command:?}");
+    let measured = measure(command, None);
+    assert!(
+        measured.success(),
+        "command failed ({:#x}): {shown}",
+        measured.status
+    );
+    measured.peak_kb
+}
+
+/// Runs `command` to completion -- with `input` on its stdin when given,
+/// stdout captured, stderr as `command` configures it -- and measures its
+/// own peak resident set (see the module documentation).
+pub fn measure(mut command: Command, input: Option<&[u8]>) -> Measured {
+    command.stdout(Stdio::piped());
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: `ptrace(PTRACE_TRACEME)` is async-signal-safe, as
+        // `pre_exec` requires.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::ptrace(libc::PTRACE_TRACEME, 0, NULL, NULL) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        match command.spawn() {
+            Ok(child) => return traced::finish(child, input),
+            Err(error) if error.raw_os_error() == Some(libc::EPERM) => {
+                eprintln!(
+                    "memory_support: ptrace is not permitted ({error}); \
+                     measuring ru_maxrss, which includes this process's resident set"
+                );
+                // A plain spawn below: the `pre_exec` hook stays on the
+                // command, so rebuild it without one.
+                command = untraced_copy(&command);
+                command.stdout(Stdio::piped());
+                if input.is_some() {
+                    command.stdin(Stdio::piped());
+                }
+            }
+            Err(error) => panic!("the probe should spawn: {error}"),
+        }
+    }
+    let child = command.spawn().expect("the probe should spawn");
     let pid = child.id() as libc::pid_t;
-    let mut stdout = child.stdout.expect("piped stdout");
-    let mut out = Vec::new();
-    std::io::Read::read_to_end(&mut stdout, &mut out).expect("read the probe's stdout");
+    let stdout = collect_io(child, input);
     let mut status = 0;
     // SAFETY: an all-zero `rusage` is a valid value for `wait4` to fill.
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
     // SAFETY: `pid` is our own unreaped child; both out-pointers are live.
     let waited = unsafe { libc::wait4(pid, &mut status, 0, &mut usage) };
     assert_eq!(waited, pid, "wait4 should reap the probe");
-    assert!(
-        libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
-        "{} exited abnormally: {status:#x}",
-        bin.display()
-    );
     let max_rss = usage.ru_maxrss;
     // `ru_maxrss` is in bytes on macOS and in kilobytes elsewhere.
-    let kb = if cfg!(target_os = "macos") {
+    let peak_kb = if cfg!(target_os = "macos") {
         max_rss / 1024
     } else {
         max_rss
     };
-    (out, kb)
+    Measured {
+        stdout: stdout.join().expect("the stdout reader"),
+        status,
+        peak_kb,
+    }
+}
+
+/// A copy of `command` (program, arguments, environment, directory) without
+/// its `pre_exec` hook.
+#[cfg(target_os = "linux")]
+fn untraced_copy(command: &Command) -> Command {
+    let mut copy = Command::new(command.get_program());
+    copy.args(command.get_args());
+    for (key, value) in command.get_envs() {
+        match value {
+            Some(value) => copy.env(key, value),
+            None => copy.env_remove(key),
+        };
+    }
+    if let Some(dir) = command.get_current_dir() {
+        copy.current_dir(dir);
+    }
+    copy
+}
+
+/// Feeds `input` to `child`'s stdin and reads its stdout to the end, both on
+/// threads of their own (a probe blocked on a full pipe must not stall the
+/// thread that waits for it), returning the reader to join.
+fn collect_io(
+    mut child: std::process::Child,
+    input: Option<&[u8]>,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    if let Some(input) = input {
+        let mut stdin = child.stdin.take().expect("piped stdin");
+        let input = input.to_vec();
+        // Detached: it ends when the input is written or the probe exits.
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&input);
+        });
+    }
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        stdout
+            .read_to_end(&mut out)
+            .expect("read the probe's stdout");
+        out
+    })
+}
+
+#[cfg(target_os = "linux")]
+mod traced {
+    use super::{Measured, NULL, collect_io};
+
+    /// Drives the traced `child` to its exit, reading its `VmHWM` at the
+    /// exit stop. Every `ptrace` request comes from this thread, the one
+    /// that spawned the child: the tracer.
+    pub(super) fn finish(child: std::process::Child, input: Option<&[u8]>) -> Measured {
+        let pid = child.id() as libc::pid_t;
+        let stdout = collect_io(child, input);
+        let mut status = wait(pid);
+        // `PTRACE_TRACEME` stops the child with `SIGTRAP` at its `exec`.
+        assert!(
+            libc::WIFSTOPPED(status) && libc::WSTOPSIG(status) == libc::SIGTRAP,
+            "the traced probe should stop at exec: {status:#x}"
+        );
+        let options = libc::PTRACE_O_TRACEEXIT | libc::PTRACE_O_TRACEEXEC | libc::PTRACE_O_EXITKILL;
+        // SAFETY: `pid` is our tracee, stopped.
+        let set = unsafe {
+            libc::ptrace(
+                libc::PTRACE_SETOPTIONS,
+                pid,
+                NULL,
+                options as usize as *mut libc::c_void,
+            )
+        };
+        assert_eq!(
+            set,
+            0,
+            "PTRACE_SETOPTIONS: {}",
+            std::io::Error::last_os_error()
+        );
+        resume(pid, 0);
+        let mut peak_kb = None;
+        loop {
+            status = wait(pid);
+            if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) {
+                break;
+            }
+            assert!(
+                libc::WIFSTOPPED(status),
+                "unexpected wait status {status:#x}"
+            );
+            let event = (status >> 16) & 0xffff;
+            let signal = libc::WSTOPSIG(status);
+            if signal == libc::SIGTRAP && event == libc::PTRACE_EVENT_EXIT {
+                peak_kb = Some(vm_hwm_kb(pid));
+                resume(pid, 0);
+            } else if signal == libc::SIGTRAP && event != 0 {
+                // Another ptrace event (an `exec` of the probe's own).
+                resume(pid, 0);
+            } else {
+                // A signal for the probe: deliver it.
+                resume(pid, signal);
+            }
+        }
+        Measured {
+            stdout: stdout.join().expect("the stdout reader"),
+            status,
+            peak_kb: peak_kb.expect("the probe should stop at its exit"),
+        }
+    }
+
+    fn wait(pid: libc::pid_t) -> libc::c_int {
+        let mut status = 0;
+        loop {
+            // SAFETY: `pid` is our own child; `status` is live.
+            let waited = unsafe { libc::waitpid(pid, &mut status, libc::__WALL) };
+            if waited == pid {
+                return status;
+            }
+            let error = std::io::Error::last_os_error();
+            assert_eq!(
+                error.kind(),
+                std::io::ErrorKind::Interrupted,
+                "waitpid: {error}"
+            );
+        }
+    }
+
+    fn resume(pid: libc::pid_t, signal: libc::c_int) {
+        // SAFETY: `pid` is our tracee, stopped.
+        let resumed = unsafe {
+            libc::ptrace(
+                libc::PTRACE_CONT,
+                pid,
+                NULL,
+                signal as usize as *mut libc::c_void,
+            )
+        };
+        assert_eq!(
+            resumed,
+            0,
+            "PTRACE_CONT: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    /// `VmHWM` of `/proc/<pid>/status`: the peak resident set of the
+    /// address space `pid` got at its `exec`, in kilobytes.
+    fn vm_hwm_kb(pid: libc::pid_t) -> i64 {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status"))
+            .expect("read the probe's /proc status");
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix("VmHWM:"))
+            .and_then(|value| value.trim().strip_suffix("kB"))
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or_else(|| panic!("no VmHWM in /proc/{pid}/status:\n{status}"))
+    }
 }
 
 pub fn cpython(src: &Path) -> Vec<u8> {

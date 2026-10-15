@@ -10,6 +10,10 @@
 //! [#1211]: https://github.com/rotnov/pycc/issues/1211
 //! [#1018]: https://github.com/rotnov/pycc/issues/1018
 
+#[cfg(unix)]
+#[path = "memory_support/mod.rs"]
+mod memory_support;
+
 use pycc_scratch::ScratchDir;
 use std::process::{Command, Output};
 
@@ -203,29 +207,9 @@ mod peak_rss {
     use super::{PROMOTED, ScratchDir, pycc};
     use std::process::Command;
 
-    /// The child's `ru_maxrss` (bytes on macOS, kilobytes on Linux, so only
-    /// ever compared as a ratio). Follows `tests/issue_146_bigint_release.rs`.
-    #[allow(clippy::zombie_processes)]
-    fn peak_rss(mut command: Command) -> libc::c_long {
-        let child = command.spawn().expect("command must spawn");
-        let pid = child.id() as libc::pid_t;
-        let mut status = 0;
-        let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-        let waited = loop {
-            // SAFETY: `pid` is the live child spawned above, and both output
-            // pointers are valid for writes for the duration of the call.
-            let result = unsafe { libc::wait4(pid, &mut status, 0, usage.as_mut_ptr()) };
-            if result != -1 {
-                break result;
-            }
-            let error = std::io::Error::last_os_error();
-            assert_eq!(error.kind(), std::io::ErrorKind::Interrupted, "{error}");
-        };
-        assert_eq!(waited, pid);
-        // SAFETY: the successful `wait4` above initialized `usage`.
-        let usage = unsafe { usage.assume_init() };
-        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
-        usage.ru_maxrss
+    /// The probe's own peak resident set, in kilobytes (`tests/memory_support`).
+    fn peak_rss(command: Command) -> libc::c_long {
+        crate::memory_support::peak_kb(command)
     }
 
     /// Every `int`-typed operand shape a loop can strand a word through: a

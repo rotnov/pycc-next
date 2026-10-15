@@ -3,7 +3,7 @@
 //! and stored in a set), enum members (rendered, looked up by value, used as
 //! dict keys) and a `functools.lru_cache` table that evicts. Each probe runs
 //! its loop body `n` times for two `n`; the peak resident set may grow by at
-//! most [`GROWTH_LIMIT_KB`] (`tests/memory_leaks.rs` explains the bound),
+//! most [`GROWTH_LIMIT_KB`] (`tests/memory_support` explains the bound),
 //! and the output must equal CPython's.
 #![cfg(unix)]
 
@@ -15,7 +15,7 @@ use pycc_scratch::ScratchDir;
 
 const N_SMALL: u64 = 20_000;
 const N_LARGE: u64 = 220_000;
-const GROWTH_LIMIT_KB: i64 = 1024;
+use memory_support::GROWTH_LIMIT_KB;
 
 const PRELUDE: &str = r#"
 from dataclasses import dataclass, field

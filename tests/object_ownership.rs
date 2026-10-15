@@ -13,6 +13,9 @@
 //! which catch a release of freed memory and a refcount underflow.
 #![cfg(unix)]
 
+#[path = "memory_support/mod.rs"]
+mod memory_support;
+
 use pycc_scratch::ScratchDir;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -72,6 +75,8 @@ fn ext_dir(tag: &str) -> ScratchDir {
     std::fs::write(&source, MODULE).expect("write the module");
     std::fs::write(dir.join("oo_py.py"), MODULE).expect("write the oracle module");
     std::fs::write(dir.join("driver.py"), DRIVER).expect("write the driver");
+    std::fs::write(dir.join("peak_kb.py"), memory_support::PYTHON_PEAK_KB)
+        .expect("write the peak-RSS helper");
     build(&dir, &source, "pycc_oo", true);
     dir
 }
@@ -107,9 +112,8 @@ fn ext_object_probe_is_clean_under_the_debug_allocator() {
     assert_eq!(compiled, oracle);
 }
 
-const EMBEDDED: &str = "\
-import resource
-
+/// Run after `memory_support::PYTHON_PEAK_KB`, which defines `peak_kb()`.
+const EMBEDDED: &str = "
 
 def step(acc: object, x: object) -> object:
     y = acc + x * 2
@@ -127,20 +131,12 @@ def run(n: object) -> object:
     return acc
 
 
-before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+before = peak_kb()
 total = run(1000000)
-after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+after = peak_kb()
 print(total)
-print(after - before < RSS_LIMIT)
+print(after - before < 4096)
 ";
-
-/// `EMBEDDED`'s growth bound, 4 MiB in `ru_maxrss` units: KiB on Linux,
-/// bytes on macOS (getrusage(2) on each).
-const RSS_LIMIT: &str = if cfg!(target_os = "macos") {
-    "4194304"
-} else {
-    "4096"
-};
 
 /// A native embedded build doing object arithmetic a million times runs in
 /// constant memory and prints what CPython prints.
@@ -149,7 +145,7 @@ const RSS_LIMIT: &str = if cfg!(target_os = "macos") {
 fn embedded_object_arithmetic_runs_in_constant_memory() {
     let dir = ScratchDir::new("object_ownership_embedded").expect("scratch dir");
     let source = dir.join("loop.py");
-    let program = EMBEDDED.replace("RSS_LIMIT", RSS_LIMIT);
+    let program = format!("{}{EMBEDDED}", memory_support::PYTHON_PEAK_KB);
     std::fs::write(&source, program).expect("write the program");
     build(&dir, &source, "loop", false);
     let compiled = checked(

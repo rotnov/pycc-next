@@ -37,6 +37,10 @@
 //! convention (duplicated helpers, per that file's own stated rationale)
 //! rather than sharing a helper crate.
 
+#[cfg(unix)]
+#[path = "memory_support/mod.rs"]
+mod memory_support;
+
 use pycc_scratch::ScratchDir;
 use std::io::Write;
 use std::process::Command;
@@ -285,44 +289,9 @@ mod peak_rss {
         (leak_marginal as f64) < (control_marginal.max(0) as f64) * 1.15 + SLACK_KB as f64
     }
 
-    /// Duplicated from `tests/issue_146_bigint_release.rs::peak_rss::peak_rss`
-    /// per that file's own stated convention for this measurement.
-    #[allow(clippy::zombie_processes)]
-    fn peak_rss(mut command: Command) -> libc::c_long {
-        let child = command.spawn().expect("command must spawn");
-        let pid = child.id() as libc::pid_t;
-        let mut status = 0;
-        let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-        let waited = loop {
-            // SAFETY: `pid` identifies the live child spawned immediately
-            // above; both output pointers are valid for writes for the
-            // duration of the call, and a successful `wait4` initializes the
-            // complete `rusage` value.
-            let result = unsafe { libc::wait4(pid, &mut status, 0, usage.as_mut_ptr()) };
-            if result != -1 {
-                break result;
-            }
-            let error = std::io::Error::last_os_error();
-            assert_eq!(
-                error.kind(),
-                std::io::ErrorKind::Interrupted,
-                "wait failed for {command:?}: {error}"
-            );
-        };
-        assert_eq!(waited, pid, "wait4 reaped the wrong child for {command:?}");
-        // SAFETY: the successful `wait4` above initialized `usage`.
-        let usage = unsafe { usage.assume_init() };
-        assert!(
-            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
-            "command failed: {command:?}"
-        );
-        // `ru_maxrss` is in bytes on macOS and in kilobytes elsewhere;
-        // `SLACK_KB` is in kilobytes.
-        if cfg!(target_os = "macos") {
-            usage.ru_maxrss / 1024
-        } else {
-            usage.ru_maxrss
-        }
+    /// The probe's own peak resident set, in kilobytes (`tests/memory_support`).
+    fn peak_rss(command: Command) -> libc::c_long {
+        crate::memory_support::peak_kb(command)
     }
 
     fn built_program_peak_rss(case: &str, source: &str) -> libc::c_long {
