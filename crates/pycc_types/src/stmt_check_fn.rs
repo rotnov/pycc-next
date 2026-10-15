@@ -624,6 +624,15 @@ pub(crate) fn check_stmt_arm_in_function(
                 );
             }
             let list_ty = lookup_bound_name(env, local_names, list)?;
+            if list_ty == Ty::Object {
+                return foreign::for_loop::check_function_object_loop(
+                    env,
+                    local_names,
+                    var,
+                    body,
+                    return_ty.clone(),
+                );
+            }
             // See the module-scope `check_stmt` arm's own comment (PR-11
             // Task 3, D-123): `for k in d:` iterates a dict's keys. PR-11
             // Task 7 (D-123): `for x in s:` iterates a set's elements.

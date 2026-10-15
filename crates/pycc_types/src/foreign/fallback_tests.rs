@@ -63,13 +63,11 @@ fn a_read_only_handler_still_reports_unbound() {
 }
 
 /// A read before the handler's own rebinding may see the name bound by a
-/// partial import or not at all, so it is possibly unbound.
+/// partial import or not at all, so it is checked at run time.
 #[test]
-fn a_read_before_the_rebinding_is_possibly_unbound() {
-    refused(
+fn a_read_before_the_rebinding_is_checked_at_run_time() {
+    admitted(
         "try:\n    from itertools import product\nexcept ImportError:\n    \
          print(product)\n    product = None\n",
-        "T0041",
-        "`product` may not be bound",
     );
 }

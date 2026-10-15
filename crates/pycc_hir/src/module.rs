@@ -602,6 +602,10 @@ fn lower_top_level_item<'a>(
     resolved: &ResolvedImports<'_>,
     position: FuturePosition,
 ) -> Result<(), Diagnostic> {
+    // A module-level `pass` does nothing, as one in a block does.
+    if matches!(stmt, Stmt::Pass(_)) {
+        return Ok(());
+    }
     // #380 (PR-20): build the projected class slice `annotation_to_ty`
     // uses to resolve cross-class annotations; #693 (PEP 560) added the
     // per-class `__class_getitem__` return type it carries. #611's

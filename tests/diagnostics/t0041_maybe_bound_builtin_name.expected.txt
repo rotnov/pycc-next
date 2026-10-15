@@ -1,0 +1,5 @@
+error[T0041]: local name `max` may not be bound on every path reaching this use
+ --> tests/diagnostics/t0041_maybe_bound_builtin_name.py:4:7
+  |
+4 | print(max)
+  |       ^^^ may be unbound here

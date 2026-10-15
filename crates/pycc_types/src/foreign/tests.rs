@@ -375,15 +375,11 @@ fn a_non_import_object_global_is_read_in_a_function_body() {
             .expect("a non-import `object` global is admitted");
         assert_eq!(ty, Ty::Object, "{expr:?}");
     }
-    // A module-level `for` loop variable is maybe-bound: a function's read
-    // is checked at run time (`NameError` when unbound); the module body's
-    // own read stays refused.
-    assert_refused(
-        "a module-level `for` loop variable read by the module body",
-        "for x in numpy.pi:\n    pass\nlen(x)\n",
-        "T0041",
-        "may not be bound",
-    );
+    // A module-level `for` loop variable is maybe-bound: every read of it,
+    // the module body's own included, is checked at run time (`NameError`
+    // when unbound).
+    let source = "for x in numpy.pi:\n    pass\nlen(x)\n";
+    assert!(check_foreign(source).is_none(), "admitted: {source}");
 }
 
 /// A module-body read placed *above* its own `import` is an unbound name.
@@ -800,13 +796,9 @@ fn a_declared_but_unassigned_loop_target_is_refused() {
 /// name is otherwise admitted, so without the downgrade the read would
 /// compile against a slot the loop never wrote.
 #[test]
-fn the_loop_variable_is_maybe_bound_after_the_loop() {
-    assert_refused(
-        "a read of the loop variable after the loop",
-        "for x in numpy.pi:\n    pass\n\nprint(len(x))\n",
-        "T0041",
-        "may not be bound on every path",
-    );
+fn the_loop_variable_after_the_loop_is_checked_at_run_time() {
+    let source = "for x in numpy.pi:\n    pass\n\nprint(len(x))\n";
+    assert!(check_foreign(source).is_none(), "admitted: {source}");
 }
 
 /// The other side of that branch -- a loop variable already bound before the
@@ -1062,14 +1054,12 @@ fn a_read_inside_the_importing_arm_is_admitted() {
 /// behaviour (a `try` join does not yet treat the handler as the only
 /// other path), pinned so #1289 flips it deliberately.
 #[test]
-fn a_read_after_a_block_that_may_skip_the_import_is_t0041() {
+fn a_read_after_a_block_that_may_skip_the_import_is_checked_at_run_time() {
     for source in [
         "c = True\nif c:\n    import colorsys\ncolorsys.ONE_THIRD\n",
         "try:\n    import colorsys\nexcept Exception:\n    pass\ncolorsys.ONE_THIRD\n",
     ] {
-        let diagnostics = check_block(source).expect_err("the read may be unbound");
-        assert_eq!(diagnostics.len(), 1, "{source:?}: {diagnostics:#?}");
-        assert_eq!(diagnostics[0].code, "T0041", "{source:?}: {diagnostics:#?}");
+        check_block(source).unwrap_or_else(|diagnostics| panic!("{source:?}: {diagnostics:#?}"));
     }
 }
 

@@ -45,12 +45,29 @@ pub(super) fn lower_fstring(
                             ));
                         }
                     };
-                    if interp.format_spec.is_some() {
-                        return Err(unsupported(
-                            "f-string format spec ({x:...}) is not supported yet",
-                            interp.range,
-                        ));
-                    }
+                    // A constant spec (`{x:>8.3f}`) is `format(value, spec)`;
+                    // one with a nested field (`{x:{w}}`) is not compiled.
+                    let spec = match &interp.format_spec {
+                        None => None,
+                        Some(spec) => {
+                            let mut text = String::new();
+                            for element in &spec.elements {
+                                match element {
+                                    pycc_ast::InterpolatedStringElement::Literal(lit) => {
+                                        text.push_str(&lit.value);
+                                    }
+                                    pycc_ast::InterpolatedStringElement::Interpolation(_) => {
+                                        return Err(unsupported(
+                                            "an f-string format spec with a nested field \
+                                             ({x:{w}}) is not supported yet",
+                                            interp.range,
+                                        ));
+                                    }
+                                }
+                            }
+                            Some(text)
+                        }
+                    };
                     let value = lower_expr(
                         &interp.expression,
                         in_function,
@@ -58,10 +75,17 @@ pub(super) fn lower_fstring(
                         imports,
                         signatures,
                     )?;
-                    FStringPart::Interpolation(Box::new(match conversion {
+                    let value = match conversion {
                         Some(callee) => HirExpr::Call {
                             callee: callee.to_string(),
                             args: vec![value],
+                        },
+                        None => value,
+                    };
+                    FStringPart::Interpolation(Box::new(match spec {
+                        Some(spec) => HirExpr::Call {
+                            callee: "__pycc_format".to_string(),
+                            args: vec![value, HirExpr::StringLiteral(spec)],
                         },
                         None => value,
                     }))

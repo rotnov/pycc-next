@@ -596,37 +596,18 @@ fn d0041_value_less_annotation_later_assignment_mismatch() {
     assert_diagnostic_matches_fixture("d0041_value_less_annotation_later_assignment_mismatch");
 }
 
+// A read of a name bound on some paths only compiles and raises
+// `UnboundLocalError` at run time (`tests/maybe_unbound_runtime.rs`), except
+// for a name that shadows a builtin: CPython falls back to the builtin when
+// the module-level binding is missing, which a native read cannot do, so it
+// stays `T0041`.
 #[test]
-fn t0041_maybe_bound_if_no_else() {
-    assert_diagnostic_matches_fixture("t0041_maybe_bound_if_no_else");
+fn t0041_maybe_bound_builtin_name() {
+    assert_diagnostic_matches_fixture("t0041_maybe_bound_builtin_name");
 }
 
-#[test]
-fn t0041_maybe_bound_while() {
-    assert_diagnostic_matches_fixture("t0041_maybe_bound_while");
-}
-
-#[test]
-fn t0041_maybe_bound_for_range() {
-    assert_diagnostic_matches_fixture("t0041_maybe_bound_for_range");
-}
-
-// #1289: a `try` statement's fall-through join. A name the body binds but a
-// falling-through handler does not stays possibly unbound; `finally` is
-// checked against the conservative state because it also runs on the paths
-// that leave early; an `as` name is unbound after its handler (CPython's
-// implicit `del`); and every path's binding is type-checked, including a
-// handler that always terminates and the `else` path against a handler.
-#[test]
-fn t0041_maybe_bound_try_handler() {
-    assert_diagnostic_matches_fixture("t0041_maybe_bound_try_handler");
-}
-
-#[test]
-fn t0041_maybe_bound_try_finally_read() {
-    assert_diagnostic_matches_fixture("t0041_maybe_bound_try_finally_read");
-}
-
+// #1289: an `as` name is unbound after its handler (CPython's implicit
+// `del`), including after a handler that always terminates.
 #[test]
 fn t0041_try_as_name_after_handler() {
     assert_diagnostic_matches_fixture("t0041_try_as_name_after_handler");
@@ -1391,12 +1372,12 @@ fn t0003_unresolved_attribute_list() {
     assert_diagnostic_matches_fixture("t0003_unresolved_attribute_list");
 }
 
-/// #1265: the unannotated `self.d = {}` stays `C0001`, naming the annotated
-/// spelling, the class-body declaration spelling (#1266), and the #891
-/// producer it waits for.
+/// An unannotated `self.d = {}` whose slot no `self.d[k] = v` in the
+/// class's own methods types names the attribute, the class and both
+/// remedies.
 #[test]
-fn c0001_unannotated_attribute_empty_dict() {
-    assert_diagnostic_matches_fixture("c0001_unannotated_attribute_empty_dict");
+fn t0003_unresolved_attribute_dict() {
+    assert_diagnostic_matches_fixture("t0003_unresolved_attribute_dict");
 }
 
 /// #1266: a value-less class-body annotation is an instance attribute

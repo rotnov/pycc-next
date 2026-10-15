@@ -137,6 +137,12 @@ pub(crate) fn lower_bin_op_expr(
     let (HirExpr::BinOp { op, left, right } | HirExpr::AugBinOp { op, left, right }) = expr else {
         unreachable!()
     };
+    if *op == BinOpKind::Mod
+        && let HirExpr::StringLiteral(template) = left.as_ref()
+        && let Some(printf) = lower_printf(template, right, scopes, classes, current_class)
+    {
+        return printf;
+    }
     let left = {
         let lowered = lower_expr(left, scopes, classes, current_class);
         super::int_enum::as_int(left, lowered, scopes, classes, current_class)
@@ -207,6 +213,25 @@ pub(crate) fn lower_compare_expr(
     };
     let mut left_lowered = lower_expr(left, scopes, classes, current_class);
     let mut right_lowered = lower_expr(right, scopes, classes, current_class);
+    // `opt == None` of an `Optional[T]` is `opt is None`
+    // (`pycc_types::compare_chain::compare_link_ty`).
+    if matches!(op, CmpOpKind::Eq | CmpOpKind::NotEq)
+        && (matches!(left.as_ref(), HirExpr::NoneLiteral)
+            && matches!(right_lowered.ty(), Ty::Optional(_))
+            || matches!(right.as_ref(), HirExpr::NoneLiteral)
+                && matches!(left_lowered.ty(), Ty::Optional(_)))
+    {
+        let identity = HirExpr::Compare {
+            op: if *op == CmpOpKind::Eq {
+                CmpOpKind::Is
+            } else {
+                CmpOpKind::IsNot
+            },
+            left: left.clone(),
+            right: right.clone(),
+        };
+        return lower_compare_expr(&identity, scopes, classes, current_class);
+    }
     // An `IntEnum` member compared with a number, or tested for membership
     // in a container of `int`s, is its `int` value.
     if matches!(op, CmpOpKind::In | CmpOpKind::NotIn) {
@@ -429,4 +454,44 @@ pub(crate) fn lower_f_string_expr(
             })
             .collect(),
     )
+}
+
+/// `"template" % args` formatted natively (`pycc_hir::printf`): an
+/// f-string of the template's literal text and one `__pycc_printf(arg,
+/// conversion)` runtime call per conversion, the arguments evaluated left
+/// to right. `None` when the template or the arguments' types do not
+/// format natively.
+fn lower_printf(
+    template: &str,
+    args: &HirExpr,
+    scopes: &[HashMap<String, Ty>],
+    classes: &HashMap<String, HirClassDef>,
+    current_class: Option<&str>,
+) -> Option<MirExpr> {
+    let lowered: Vec<MirExpr> = pycc_hir::printf::printf_args(args)
+        .into_iter()
+        .map(|arg| lower_expr(arg, scopes, classes, current_class))
+        .collect();
+    let mut tys = lowered.iter().map(MirExpr::ty);
+    let pieces = pycc_hir::printf::native_printf(template, args, |_| tys.next())?;
+    let mut lowered = lowered.into_iter();
+    let parts = pieces
+        .into_iter()
+        .map(|piece| match piece {
+            pycc_hir::printf::PrintfPiece::Literal(text) => MirFStringPart::Literal(text),
+            pycc_hir::printf::PrintfPiece::Conversion { spec, .. } => {
+                let arg = lowered.next().expect("one argument per conversion");
+                let sig = pycc_hir::builtins::resolve_call("__pycc_printf", &[arg.ty(), Ty::Str])
+                    .and_then(Result::ok)
+                    .expect("pycc_hir::printf admits only the types `__pycc_printf` takes");
+                MirFStringPart::Interpolation(Box::new(MirExpr::RtCall(Box::new(
+                    crate::RtCallExpr {
+                        sig,
+                        args: vec![arg, MirExpr::StringLiteral(spec)],
+                    },
+                ))))
+            }
+        })
+        .collect();
+    Some(MirExpr::FString(parts))
 }

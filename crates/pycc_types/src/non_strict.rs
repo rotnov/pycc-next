@@ -127,22 +127,67 @@ pub(crate) fn request_attr_widen(
 }
 
 thread_local! {
-    /// The names some statement of the module being checked unbinds: a
+    /// The names some statement of the program being checked unbinds: a
     /// `del` target or an `except ... as` name (CPython deletes it when the
-    /// handler ends). See [`admits_maybe_read`].
-    static UNBOUND_BY_STATEMENT: RefCell<std::collections::HashSet<String>> =
-        RefCell::new(std::collections::HashSet::new());
+    /// handler ends); `None` outside a whole-program check
+    /// ([`with_widening`]). See [`admits_maybe_read`].
+    static UNBOUND_BY_STATEMENT: RefCell<Option<std::collections::HashSet<String>>> =
+        const { RefCell::new(None) };
 }
 
-/// Whether a read of `name`, bound on some paths reaching it only, is
-/// admitted: in non-strict mode it is, as every global and non-parameter
-/// local carries a run-time initialized flag (`pycc_codegen`'s
-/// `StorageSlot::initialized`) and an unbound read raises CPython's
-/// `NameError` / `UnboundLocalError`. A name some statement unbinds again
-/// (`del`, an `except ... as` name) keeps the static refusal: its flag
-/// stays set after the unbinding.
-pub(crate) fn admits_maybe_read(name: &str) -> bool {
-    is_non_strict() && !UNBOUND_BY_STATEMENT.with(|names| names.borrow().contains(name))
+/// Whether a read of `name` (of type `ty`), bound on some paths reaching it
+/// only, is admitted: in a program's check, in both modes, it is, as every
+/// global and non-parameter local carries a run-time initialized flag
+/// (`pycc_codegen`'s `StorageSlot::initialized`) and an unbound read raises
+/// CPython's `NameError` / `UnboundLocalError`. A name some statement
+/// unbinds again (`del`, an `except ... as` name) keeps the static refusal
+/// (`T0041`): its flag stays set after the unbinding. So does a buffer,
+/// whose ownership is tracked statically, and so does every read the
+/// definite-assignment analysis is asked about outside a program's check.
+pub(crate) fn admits_maybe_read(name: &str, ty: &Ty) -> bool {
+    !matches!(ty, Ty::MemoryView | Ty::NdArray(_))
+        && !falls_back_when_unbound(name)
+        && UNBOUND_BY_STATEMENT.with(|names| {
+            names
+                .borrow()
+                .as_ref()
+                .is_some_and(|names| !names.contains(name))
+        })
+}
+
+/// Whether CPython reads something else for `name` when the module leaves
+/// it unbound -- a builtin, or a module attribute such as `__name__` -- so a
+/// possibly-unbound read of it cannot raise `NameError` and keeps the
+/// static refusal ([`admits_maybe_read`]).
+fn falls_back_when_unbound(name: &str) -> bool {
+    const BUILTINS: &[&str] = &[
+        "ArithmeticError", "AssertionError", "AttributeError", "BaseException",
+        "BaseExceptionGroup", "BlockingIOError", "BrokenPipeError", "BufferError",
+        "BytesWarning", "ChildProcessError", "ConnectionAbortedError", "ConnectionError",
+        "ConnectionRefusedError", "ConnectionResetError", "DeprecationWarning", "EOFError",
+        "Ellipsis", "EncodingWarning", "EnvironmentError", "Exception", "ExceptionGroup",
+        "False", "FileExistsError", "FileNotFoundError", "FloatingPointError", "FutureWarning",
+        "GeneratorExit", "IOError", "ImportError", "ImportWarning", "IndentationError",
+        "IndexError", "InterruptedError", "IsADirectoryError", "KeyError", "KeyboardInterrupt",
+        "LookupError", "MemoryError", "ModuleNotFoundError", "NameError", "None",
+        "NotADirectoryError", "NotImplemented", "NotImplementedError", "OSError",
+        "OverflowError", "PendingDeprecationWarning", "PermissionError", "ProcessLookupError",
+        "PythonFinalizationError", "RecursionError", "ReferenceError", "ResourceWarning",
+        "RuntimeError", "RuntimeWarning", "StopAsyncIteration", "StopIteration", "SyntaxError",
+        "SyntaxWarning", "SystemError", "SystemExit", "TabError", "TimeoutError", "True",
+        "TypeError", "UnboundLocalError", "UnicodeDecodeError", "UnicodeEncodeError",
+        "UnicodeError", "UnicodeTranslateError", "UnicodeWarning", "UserWarning", "ValueError",
+        "Warning", "ZeroDivisionError", "abs", "aiter", "all", "anext", "any", "ascii", "bin",
+        "bool", "breakpoint", "bytearray", "bytes", "callable", "chr", "classmethod", "compile",
+        "complex", "copyright", "credits", "delattr", "dict", "dir", "divmod", "enumerate",
+        "eval", "exec", "exit", "filter", "float", "format", "frozenset", "getattr", "globals",
+        "hasattr", "hash", "help", "hex", "id", "input", "int", "isinstance", "issubclass",
+        "iter", "len", "license", "list", "locals", "map", "max", "memoryview", "min", "next",
+        "object", "oct", "open", "ord", "pow", "print", "property", "quit", "range", "repr",
+        "reversed", "round", "set", "setattr", "slice", "sorted", "staticmethod", "str", "sum",
+        "super", "tuple", "type", "vars", "zip",
+    ];
+    (name.starts_with("__") && name.ends_with("__")) || BUILTINS.binary_search(&name).is_ok()
 }
 
 /// Records the names `hir`'s statements unbind ([`admits_maybe_read`]).
@@ -200,7 +245,7 @@ fn record_unbinding_statements(hir: &HirModule) {
         names.extend(pycc_hir::deleted_names(body));
         handler_names(body, &mut names);
     }
-    UNBOUND_BY_STATEMENT.with(|cell| *cell.borrow_mut() = names);
+    UNBOUND_BY_STATEMENT.with(|cell| *cell.borrow_mut() = Some(names));
 }
 
 fn take_widen_requests() -> BTreeSet<WidenKey> {
@@ -298,10 +343,10 @@ pub(crate) fn with_widening<T, E>(
     check: impl Fn(&HirModule) -> Result<T, E>,
 ) -> Result<T, E> {
     pycc_hir::int_enum::set_int_enums(hir.class_defs.iter().map(|(_, class)| class));
+    record_unbinding_statements(hir);
     if !is_non_strict() {
         return check(hir);
     }
-    record_unbinding_statements(hir);
     // A name first bound to `None` and rebound to another value in the same
     // scope is widened up front: a read reached before any rebinding in
     // the checker's single pass (`last = None` before a loop that sets

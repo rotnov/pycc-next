@@ -258,6 +258,31 @@ pub fn homogeneous_tuple_element(items: &[Ty]) -> Option<&Ty> {
     (is_list_element_ty(first) && items.iter().all(|item| item == first)).then_some(first)
 }
 
+/// Non-strict mode: the CPython container an empty `set()` or `dict()`
+/// call builds when the empty-container pass left its element types
+/// unresolved, by callee and argument count.
+#[must_use]
+pub fn empty_object_constructor(callee: &str, arity: usize) -> Option<DisplayKind> {
+    match (callee, arity) {
+        ("set", 0) => Some(DisplayKind::Set),
+        ("dict", 0) => Some(DisplayKind::Dict),
+        _ => None,
+    }
+}
+
+/// Non-strict mode: whether a list comprehension over a CPython object
+/// whose element has type `elt` collects into a native `list[elt]` rather
+/// than a CPython `list`. A native container or tuple element has no
+/// CPython form (packing one would copy it and break aliasing), so the
+/// result stays native; every other element is packed into a CPython list.
+#[must_use]
+pub fn object_comp_collects_natively(elt: &Ty) -> bool {
+    matches!(
+        elt,
+        Ty::List(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Dict(_) | Ty::Tuple(_)
+    ) && is_list_element_ty(elt)
+}
+
 /// The `T0038` gate shared by `set[T]` and `frozenset[T]`: a hashable
 /// element ([`is_hashable_ty`]) and (#1343) a user-class instance element
 /// are compiled. Whether that class is actually hashable is checked where an

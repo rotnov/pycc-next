@@ -479,8 +479,10 @@ fn a_non_str_binding_nested_in_a_top_level_compound_statement_withholds_the_seed
 #[test]
 fn a_conditionally_bound_dunder_name_behaves_like_any_other_name() {
     // THE RULE's "resolves through the ordinary name path, exactly as before
-    // this change", made observable: the diagnostic is the same `T0041` a
-    // plain conditionally-bound name gets, not a seed-specific one.
+    // this change", made observable: the diagnostic is the ordinary `T0041`,
+    // not a seed-specific one. An unbound `__name__` would be the module's
+    // own attribute in CPython, not a `NameError`, so unlike a plain
+    // conditionally-bound name (checked at run time) its read stays refused.
     let (ok, rendered) = check(
         "dn_nested_if_unbound",
         "flag: bool = True\nif flag:\n    __name__ = 7\nprint(__name__)\n",
@@ -491,8 +493,7 @@ fn a_conditionally_bound_dunder_name_behaves_like_any_other_name() {
         "dn_nested_if_control",
         "flag: bool = True\nif flag:\n    other = 7\nprint(other)\n",
     );
-    assert!(!control_ok, "{control}");
-    assert!(control.contains("error[T0041]"), "{control}");
+    assert!(control_ok, "{control}");
 }
 
 // -- a function-local binding shadows only inside that function -----

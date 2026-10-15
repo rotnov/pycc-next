@@ -163,9 +163,9 @@ pub(crate) fn reject_unrenderable(
                 Span::new(0, 0),
             ))
         }
-        // `pycc_codegen`'s `to_str` has no `Optional` arm: before this
-        // refusal `print(x)` of an `int | None` passed `pycc check` and
-        // panicked in the backend.
+        // An `Optional[int|float|bool]` renders `None` or its payload
+        // (`pycc_rt_optional_*_to_str`); no other `Optional` exists.
+        Ty::Optional(inner) if matches!(inner.as_ref(), Ty::Int | Ty::Float | Ty::Bool) => Ok(()),
         Ty::Optional(_) => Err(Diagnostic::error(
             "C0001",
             format!(
@@ -284,8 +284,9 @@ pub(crate) fn instance_text_call(
     let Ty::Instance(class_name) = arg else {
         // `repr()` of a tuple, set, `None`, ...: its `str`, which `print`
         // renders (`pycc_mir` lowers it to an f-string of the value).
-        if want_repr
-            && pycc_hir::builtins::resolve_call("repr", arg_tys).is_none()
+        // So is `str()` of an `Optional[int|float|bool]`.
+        if (want_repr || matches!(arg, Ty::Optional(_)))
+            && pycc_hir::builtins::resolve_call(callee, arg_tys).is_none()
             && repr_is_str(arg)
             && reject_unrenderable(env, arg, StringConversionSite::ConversionCall).is_ok()
         {

@@ -88,16 +88,12 @@ fn a_type_change_is_refused_like_any_other() {
 }
 
 /// A binding on only one path leaves the name maybe-bound, which both a
-/// read and a loop over it refuse.
+/// read and a loop over it check at run time (`NameError`).
 #[test]
-fn a_maybe_bound_object_name_is_refused_by_a_read_and_a_loop() {
+fn a_maybe_bound_object_name_is_checked_at_run_time_by_a_read_and_a_loop() {
     let prefix = format!("{FROM_FORM}import sys\nif len(sys.argv) > 5:\n    x = product()\n");
     for tail in ["y = x\n", "for t in x:\n    pass\n"] {
-        refused(
-            &format!("{prefix}{tail}"),
-            "T0041",
-            "may not be bound on every path reaching this use",
-        );
+        admitted(&format!("{prefix}{tail}"));
     }
 }
 

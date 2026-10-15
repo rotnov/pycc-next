@@ -43,22 +43,6 @@ fn to_float_rejects_an_optional_operand() {
 }
 
 #[test]
-#[should_panic(
-    expected = "pycc_codegen: string conversion of an Optional[int] value is not supported yet"
-)]
-fn string_conversion_of_an_optional_value_panics_honestly() {
-    // A real, reachable feature gap (not defensive): `pycc_types` places
-    // no type restriction on `print`'s argument, so `print(x)` for an
-    // `Optional[int]` local type-checks today and lands in `to_str`. This
-    // PR ships no `str(Optional[int])` semantics -- see `to_str`'s own
-    // `Scalar::Optional` arm doc comment.
-    let context = Context::create();
-    let (_module, rt) = list_scalar_panic_fixture(&context);
-    let builder = context.create_builder();
-    to_str(&builder, &rt, optional_scalar(&context));
-}
-
-#[test]
 #[should_panic(expected = "range() start did not evaluate to int")]
 fn an_optional_operand_is_rejected_as_a_range_bound() {
     // `range()`'s own operand check folds `Optional` into its existing

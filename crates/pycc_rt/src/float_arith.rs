@@ -154,11 +154,16 @@ pub extern "C" fn pycc_rt_float_pow(a: f64, b: f64) -> f64 {
 /// own `Display` capitalizes `NaN`). Outside that range it prints
 /// CPython's scientific form (`1e+16`, `1.5e-05`).
 pub(crate) fn float_to_str(value: f64) -> *mut PyStrObj {
+    new_pystr(float_repr(value).as_bytes())
+}
+
+/// `repr(value)`: CPython's shortest round-tripping text.
+pub(crate) fn float_repr(value: f64) -> String {
     if value.is_nan() {
-        return new_pystr(b"nan");
+        return "nan".to_string();
     }
     if value.is_infinite() {
-        return new_pystr(if value > 0.0 { b"inf" } else { b"-inf" });
+        return if value > 0.0 { "inf" } else { "-inf" }.to_string();
     }
     let magnitude = value.abs();
     // clippy's `manual_range_contains`: `!(1e-4..1e16).contains(&magnitude)`
@@ -176,15 +181,14 @@ pub(crate) fn float_to_str(value: f64) -> *mut PyStrObj {
             Some(digits) => ('-', digits),
             None => ('+', exponent),
         };
-        return new_pystr(format!("{mantissa}e{sign}{digits:0>2}").as_bytes());
+        return format!("{mantissa}e{sign}{digits:0>2}");
     }
     let text = format!("{value}");
-    let text = if text.contains('.') {
+    if text.contains('.') {
         text
     } else {
         format!("{text}.0")
-    };
-    new_pystr(text.as_bytes())
+    }
 }
 
 /// `str(value)` as a new `str` (see `float_to_str`).

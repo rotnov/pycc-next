@@ -1,5 +1,0 @@
-error[T0041]: local name `x` may not be bound on every path reaching this use
- --> tests/diagnostics/t0041_maybe_bound_try_finally_read.py:7:15
-  |
-7 |         print(x)
-  |               ^ may be unbound here

@@ -233,10 +233,8 @@ fn the_solver_defers_an_operand_with_no_type_term() {
     // `v` is maybe-bound, so the solver has no term for it and the node
     // yields none either; the return is then typed from the body
     // (`return_fallback`), where the maybe-bound read is the refusal.
-    refused(
+    checks(
         "def _g(c: bool):\n    if c:\n        v = 1\n    return v or 2\n\nprint(_g(True))\n",
-        "T0041",
-        "may not be bound",
     );
 }
 

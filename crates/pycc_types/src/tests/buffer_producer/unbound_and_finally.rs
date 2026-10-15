@@ -219,7 +219,9 @@ fn a_definitely_assigned_owned_buffer_is_still_admitted_on_every_join_form() {
     }
 
     // A handler that falls through binding only another name leaves `a`
-    // possibly unbound: the same program with an `int` is refused too.
+    // possibly unbound: the same program with an `int` reads it checked at
+    // run time (`UnboundLocalError`), which a buffer's static ownership
+    // tracking cannot.
     let scalar = func(
         vec![("c".to_string(), Ty::Bool)],
         Ty::Int,
@@ -237,7 +239,7 @@ fn a_definitely_assigned_owned_buffer_is_still_admitted_on_every_join_form() {
             HirStmt::Return(Some(HirExpr::Name("a".to_string()))),
         ],
     );
-    assert_eq!(check(&scalar).unwrap_err().code, "T0041");
+    assert!(check(&scalar).is_ok());
 }
 
 /// The negative twin of `the_solver_admits_an_owned_buffer_return`: with the

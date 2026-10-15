@@ -70,6 +70,8 @@ pub(crate) fn resolve_comp_iter(
             }
             let base_ty = lookup_bound_name(env, local_names, name)?;
             match base_ty {
+                // A name bound on some paths only (`t` set in one branch).
+                Ty::Object if crate::non_strict::is_non_strict() => Ok(Ty::Object),
                 Ty::List(elem_ty) => Ok(*elem_ty),
                 Ty::Str => Ok(Ty::Str),
                 Ty::Dict(kv) => Ok(kv.0),
@@ -155,6 +157,14 @@ fn object_comp_container_ty(
         }
     };
     let elt_ty = infer_expr_in(env, local_names, elt)?;
+    // Non-strict mode: native container elements (`[f(x) for x in o]` with
+    // `f` returning a `list[int]`) collect into a native list instead.
+    if kind == "list"
+        && crate::non_strict::is_non_strict()
+        && pycc_hir::object_comp_collects_natively(&elt_ty)
+    {
+        return Ok(Ty::List(Box::new(elt_ty)));
+    }
     if !crate::foreign::is_packable_operand(&elt_ty) {
         return Err(crate::foreign::object_operation_unsupported(&format!(
             "collecting a `{}` element into a CPython {kind}",

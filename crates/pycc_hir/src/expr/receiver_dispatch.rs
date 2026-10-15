@@ -84,6 +84,22 @@ impl HirExpr {
                 value: Box::new(value.clone()),
             }),
             ("pop", []) => Some(HirExpr::ListPop { list: receiver }),
+            // `d.get(k)` (`container_call::lower_dict_get`).
+            ("get", [key]) => match &receiver {
+                ContainerReceiver::Name(name) if plain_hir_read(key) => Some(HirExpr::IfExp {
+                    test: Box::new(HirExpr::Compare {
+                        op: crate::CmpOpKind::In,
+                        left: Box::new(key.clone()),
+                        right: Box::new(HirExpr::Name(name.clone())),
+                    }),
+                    body: Box::new(HirExpr::Subscript {
+                        base: Box::new(HirExpr::Name(name.clone())),
+                        index: Box::new(key.clone()),
+                    }),
+                    orelse: Box::new(HirExpr::NoneLiteral),
+                }),
+                _ => None,
+            },
             ("get", [key, default]) => Some(HirExpr::DictGetOrDefault {
                 dict: receiver,
                 key: Box::new(key.clone()),
@@ -197,3 +213,16 @@ pub(crate) fn defined_container_method_names(body: &[pycc_ast::Stmt]) -> Vec<&'s
 #[cfg(test)]
 #[path = "receiver_dispatch_tests.rs"]
 mod tests;
+
+/// Whether evaluating `expr` twice is the same as once: a name, a literal,
+/// or a subscript of such reads.
+fn plain_hir_read(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Name(_)
+        | HirExpr::IntLiteral(_)
+        | HirExpr::StringLiteral(_)
+        | HirExpr::BoolLiteral(_) => true,
+        HirExpr::Subscript { base, index } => plain_hir_read(base) && plain_hir_read(index),
+        _ => false,
+    }
+}

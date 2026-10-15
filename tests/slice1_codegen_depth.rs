@@ -687,9 +687,19 @@ def read_value(flag: bool) -> int:
 
 captured = read_value(False)
 ";
-    // Issue #118 Part 1: the strict AOT frontend now rejects a maybe-unbound
-    // read at compile time (T0041) rather than leaving it for a runtime trap.
-    build_and_expect_compile_error("maybe_bound_integer_local", source, "T0041");
+    // A maybe-unbound read is checked at run time against the slot's
+    // initialized flag: CPython's `UnboundLocalError`, never a load of
+    // undefined storage.
+    let output = build_and_run("maybe_bound_integer_local", source);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(
+            "UnboundLocalError: cannot access local variable 'value' where it is not associated \
+             with a value"
+        ),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -702,9 +712,17 @@ def read_label(flag: bool) -> str:
 
 captured = read_label(False)
 ";
-    // Issue #118 Part 1: the strict AOT frontend now rejects a maybe-unbound
-    // read at compile time (T0041) rather than leaving it for a runtime trap.
-    build_and_expect_compile_error("maybe_bound_string_local", source, "T0041");
+    // Checked at run time: `UnboundLocalError`, never a null `str`.
+    let output = build_and_run("maybe_bound_string_local", source);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(
+            "UnboundLocalError: cannot access local variable 'label' where it is not associated \
+             with a value"
+        ),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -714,18 +732,24 @@ for item in range(0):
     print(item)
 print(item)
 ";
-    // Issue #118 Part 1: the for-loop variable is Maybe after the loop
-    // (the range may be empty), so reading it is T0041, rejected at compile time.
-    build_and_expect_compile_error("empty_range_target", source, "T0041");
+    // The for-loop variable is maybe-bound after the loop (the range may be
+    // empty), so its read is checked at run time: CPython's `NameError`.
+    let output = build_and_run("empty_range_target", source);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("NameError: name 'item' is not defined"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
 fn range_targets_keep_the_last_element_and_ignore_body_reassignment_for_iteration() {
-    // Issue #118 Part 1: reading a for-loop variable after the loop is now a
-    // compile-time error (T0041) when the variable was not definitely bound
-    // before the loop. `empty` was pre-bound, so reading it after the loop
-    // is fine. But `i` is a loop-only variable, so reading it after the loop
-    // is rejected.
+    // `empty` was bound before the loop, so its read after the empty loop
+    // sees that value; the loop-only `i` is maybe-bound after the loop, and
+    // its read is checked at run time -- here it is bound to the last
+    // element.
     let source_pre_bound = "\
 
 empty = 7
@@ -743,7 +767,9 @@ for i in range(3):
     print(i)
 print(i)
 ";
-    build_and_expect_compile_error("range_target_loop_only", source_loop_only, "T0041");
+    let output = build_and_run("range_target_loop_only", source_loop_only);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"0\n1\n2\n2\n");
 }
 
 #[test]
@@ -1116,10 +1142,8 @@ for v in xs:
 
 #[test]
 fn list_targets_keep_the_last_element_and_ignore_body_reassignment() {
-    // Issue #118 Part 1: reading a for-loop variable after the loop is now a
-    // compile-time error (T0041) when the variable was not definitely bound
-    // before the loop. `i` is a loop-only variable, so reading it after the
-    // loop is rejected.
+    // The loop-only `i` is maybe-bound after the loop; its read is checked at
+    // run time and sees the last element, as in CPython.
     let source = "\
 
 xs = [1, 2, 3]
@@ -1127,7 +1151,9 @@ for i in xs:
     print(i)
 print(i)
 ";
-    build_and_expect_compile_error("list_target_lifetime", source, "T0041");
+    let output = build_and_run("list_target_lifetime", source);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"1\n2\n3\n3\n");
 }
 
 #[test]

@@ -1242,52 +1242,24 @@ print(a.go())
 
 /// #1021 bot review round 14: `bind_local_types_in_body` records every target
 /// it walks as `Definitely` bound, including one bound only inside an `if`
-/// branch, while the checker joins such a name back as `Maybe` and reports
-/// `T0041` on a read of it. The producer source therefore resolved
-/// `list[str]` from a binding the checker refuses to read, and the resolved
-/// container then reported `T0034` -- masking the `T0041` the same program
-/// reports in its `xs = [v]` spelling, which is pinned below as the
-/// discriminator. Declining the producer restores the contract: a miss
-/// (`T0003`), never a resolution the checker would not have made.
+/// branch, while the checker joins such a name back as `Maybe`. A read of a
+/// maybe-bound name is checked at run time (`UnboundLocalError`), so the
+/// producer `xs.append(v)` and the `xs = [v]` spelling both resolve
+/// `list[str]` and run like CPython: the resolution is one the checker
+/// makes too.
 #[test]
-fn a_producer_reading_a_maybe_bound_name_is_declined_rather_than_resolved() {
-    let rendered = check_error(
-        "maybe_bound_producer",
-        "\
-def go(flag: bool) -> None:
-    if flag:
-        v = \"s\"
-    xs = []
-    xs.append(v)
-    print(xs[0])
-
-
-go(True)
-",
-    );
-    assert!(
-        rendered.contains("T0041"),
-        "a maybe-bound producer reports the possibly-unbound read, got: {rendered}",
-    );
-    // The same program written with a non-empty literal, which is the
-    // spelling whose diagnostic the resolution was masking.
-    let reference = check_error(
-        "maybe_bound_reference",
-        "\
-def go(flag: bool) -> None:
-    if flag:
-        v = \"s\"
-    xs = [v]
-    print(xs[0])
-
-
-go(True)
-",
-    );
-    assert!(
-        reference.contains("T0041"),
-        "the reference spelling must report the possibly-unbound read, got: {reference}",
-    );
+fn a_producer_reading_a_maybe_bound_name_resolves_like_the_display() {
+    for (label, line) in [
+        ("maybe_bound_producer", "xs = []\n    xs.append(v)"),
+        ("maybe_bound_reference", "xs = [v]"),
+    ] {
+        let source = format!(
+            "def go(flag: bool) -> None:\n    if flag:\n        v = \"s\"\n    {line}\n    print(xs[0])\n\n\ngo(True)\n"
+        );
+        let output = check_build_and_run(label, &source);
+        assert!(output.status.success(), "{label}");
+        assert_eq!(output.stdout, b"s\n", "{label}");
+    }
 }
 
 /// The other half of the same rule: a name bound inside an `if` branch *is*

@@ -110,7 +110,7 @@ pub(crate) fn infer_name_expr(
         }
         // Non-strict mode: checked at run time
         // (`crate::non_strict::admits_maybe_read`).
-        Some(BindingState::Maybe(ty)) if crate::non_strict::admits_maybe_read(name) => {
+        Some(BindingState::Maybe(ty)) if crate::non_strict::admits_maybe_read(name, ty) => {
             reject_memoryview_read(name, ty, env.owned_buffers.contains(name))?;
             Ok(ty.clone())
         }

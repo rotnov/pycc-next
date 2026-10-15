@@ -61,6 +61,9 @@ pub(super) fn emit_object_comprehension<'ctx>(
 ) -> Scalar<'ctx> {
     let (context, builder, module, rt) = (cx.context, cx.builder, cx.module, cx.rt);
     let (kind, elt) = match elts {
+        CompElts::List(elt) if pycc_hir::object_comp_collects_natively(&elt.ty()) => {
+            return emit_native_list_comprehension(cx, var_ptr, iterable, cond, elt);
+        }
         CompElts::List(elt) => (ObjCollectionKind::List, elt),
         CompElts::Set(elt, None) => (ObjCollectionKind::Set, elt),
         CompElts::Objects(elt, kind) => (kind, elt),
@@ -200,6 +203,77 @@ pub(super) fn emit_object_comprehension<'ctx>(
     // binds.
     held_collection.consumed(rt);
     Scalar::Object(collection)
+}
+
+/// Non-strict mode: `[elt for x in <object> if cond]` whose element is a
+/// native container or tuple (`pycc_hir::object_comp_collects_natively`)
+/// collects into a fresh native `list`, iterated exactly as
+/// [`emit_object_comprehension`] iterates; each element is stored as a
+/// native list comprehension stores one.
+fn emit_native_list_comprehension<'ctx>(
+    cx: &CompCx<'_, 'ctx>,
+    var_ptr: PointerValue<'ctx>,
+    iterable: &MirExpr,
+    cond: Option<&MirExpr>,
+    elt: &MirExpr,
+) -> Scalar<'ctx> {
+    let (context, builder, module, rt) = (cx.context, cx.builder, cx.module, cx.rt);
+    let emit = |expr: &MirExpr| {
+        emit_expr(
+            context,
+            builder,
+            module,
+            rt,
+            cx.user_functions,
+            cx.locals,
+            expr,
+        )
+    };
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+
+    let source = emit(iterable);
+    let held_source = crate::object_release::hold(context, module, rt, iterable, &source);
+    let iterator = foreign_call::emit_get_iter(context, builder, module, rt, source);
+    held_source.release(builder, rt);
+    let held_iterator = crate::object_release::hold_new_reference(context, module, rt, iterator);
+    let edge = ForeignFailEdge::for_current(builder);
+    let list = super::list::build_list_new(context, builder, rt, &elt.ty(), 0);
+
+    let lp = foreign_call::emit_iter_header(context, builder, module, rt, iterator);
+    let old = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
+    builder
+        .build_store(var_ptr, lp.item)
+        .expect("build_store should not fail for the loop variable's own slot");
+    crate::heap_rc::release_old(context, builder, rt, old);
+
+    if let Some(cond) = cond {
+        let scalar = emit(cond);
+        let held = crate::object_release::hold(context, module, rt, cond, &scalar);
+        let test = truthy(context, builder, module, rt, scalar);
+        held.release(builder, rt);
+        release_scalar_if_temporary(context, builder, rt, cond, &scalar);
+        let keep_bb = context.append_basic_block(edge.function(), "objcomp_keep");
+        builder
+            .build_conditional_branch(test, keep_bb, lp.header_bb)
+            .expect("build_conditional_branch should not fail for an i1 condition");
+        builder.position_at_end(keep_bb);
+    }
+
+    let scalar = emit(elt);
+    let word = super::list::element_word(context, builder, rt, &elt.ty(), elt, scalar);
+    super::list::build_list_append(builder, rt, list, word);
+    builder
+        .build_unconditional_branch(lp.header_bb)
+        .expect("build_unconditional_branch should not fail closing the loop body");
+
+    builder.position_at_end(lp.after_bb);
+    let last = crate::heap_rc::take_slot_old(context, builder, rt, &pycc_mir::Ty::Object, var_ptr);
+    builder
+        .build_store(var_ptr, ptr.const_null())
+        .expect("build_store should not fail for the loop variable's own slot");
+    crate::heap_rc::release_old(context, builder, rt, last);
+    held_iterator.release(builder, rt);
+    Scalar::List(list)
 }
 
 /// Creates the CPython collection a comprehension over a native source

@@ -30,6 +30,35 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   instances uses their `__repr__`; a strict `--ext` module publishes its native
   module-level variables (numbers, strings, tuples of them) as attributes, kept current
   when a function rebinds them with `global`.
+- Format specs and printf-style formatting compile natively: `f"{x:>10,.2f}"`,
+  `format(x, spec)` and `"%5d|%-8.3f|%s" % (...)` over `int`, `bool`, `float` and `str`
+  follow CPython's format-spec mini-language and `%` conversions exactly, errors
+  included (`pycc_rt::format`; `tests/format_spec.rs`). A conversion CPython refuses
+  for its argument's type (`'%x' % 1.5`) is a compile-time `T0021` in strict mode; a
+  spec with a nested field (`{x:{w}}`) is still `C0001`.
+- Strict mode admits a read of a name bound on some paths only: it is checked at run
+  time and raises CPython's `UnboundLocalError`/`NameError` where CPython does
+  (`tests/maybe_unbound_runtime.rs`). `T0041` stays for a name CPython would read
+  something else for when unbound (a builtin, `__name__`), a `del`/`except ... as`
+  name, and a buffer.
+- Non-strict: a comprehension over a CPython object whose elements are native lists,
+  sets, dicts or tuples collects a native list; `set(o)` of an object and an empty
+  `set()`/`dict()` the empty-container pass cannot type are CPython's own; a name
+  rebound from one container kind to another (`t = [..]`, then `t = {..}` on some
+  path) becomes an object; `t |= {..}` on such a name and a `for` over a maybe-bound
+  object run through CPython (`tests/non_strict_object_containers.rs`).
+- `d.get(k)` with no default compiles (as `d[k] if k in d else None`, for a key that is a
+  name, a literal or a subscript of those): an `Optional` of the value type. An
+  `Optional[int|float|bool]` compares with `== None`/`!= None` (narrowing like
+  `is None`) and renders with `print`, `str()` and f-strings
+  (`tests/dict_get_optional.rs`).
+- An unannotated `self.d = {}` is typed from the first `self.d[k] = v` in the class's
+  own methods (it was `C0001`; with no such store it is now `T0003`), and an empty
+  attribute container whose producer reads an unannotated method parameter is typed
+  once the solver has typed the parameter (`tests/attribute_dict_producer.rs`).
+- A module-level `pass` statement compiles; a bare `zip()` statement is dropped.
+- The empty-container pass reads `d.get(k, 0)` when the call is also readable as a
+  user or CPython method (non-strict), so `d = {}` filled that way stays native.
 
 ### Changed
 

@@ -151,16 +151,12 @@ fn a_function_local_type_change_is_refused_like_any_other() {
 }
 
 /// A function-local binding on only one path leaves the name maybe-bound,
-/// which a later read refuses at compile time.
+/// which a later read checks at run time (`UnboundLocalError`).
 #[test]
-fn a_maybe_bound_function_local_object_name_is_refused() {
-    refused(
-        &format!(
-            "{IMPORT}import sys\ndef g() -> None:\n    if len(sys.argv) > 5:\n        x = json.loads(\"1\")\n    y = x\n"
-        ),
-        "T0041",
-        "may not be bound on every path reaching this use",
-    );
+fn a_maybe_bound_function_local_object_name_is_checked_at_run_time() {
+    admitted(&format!(
+        "{IMPORT}import sys\ndef g() -> None:\n    if len(sys.argv) > 5:\n        x = json.loads(\"1\")\n    y = x\n"
+    ));
 }
 
 /// An unannotated private method may return the object itself, like a

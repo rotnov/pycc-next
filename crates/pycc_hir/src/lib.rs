@@ -21,6 +21,7 @@ mod module;
 pub mod ndarray;
 mod not_implemented;
 mod post_if;
+pub mod printf;
 mod program;
 mod return_coverage;
 mod stmt;
@@ -52,8 +53,8 @@ pub use class::{
 pub use compare_chain::{CompareLink, compare_chain_operands};
 pub use container::{
     DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object,
-    homogeneous_tuple_element, is_hashable_ty, is_list_element_ty, set_element_message,
-    tuple_is_boxed,
+    empty_object_constructor, homogeneous_tuple_element, is_hashable_ty, is_list_element_ty, object_comp_collects_natively,
+    set_element_message, tuple_is_boxed,
 };
 pub use dunder_name::DUNDER_NAME;
 pub use exception::{

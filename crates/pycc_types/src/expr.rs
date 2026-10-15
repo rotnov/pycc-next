@@ -215,6 +215,17 @@ fn infer_expr_here(
             if negative_literal_exponent(*op, &left_ty, right) {
                 return Ok(Ty::Float);
             }
+            // `"template" % args` of scalar arguments, one per conversion:
+            // native printf-style formatting (`pycc_hir::printf`).
+            if *op == BinOpKind::Mod
+                && let HirExpr::StringLiteral(template) = left.as_ref()
+                && pycc_hir::printf::native_printf(template, right, |arg| {
+                    infer_expr_in(env, local_names, arg).ok()
+                })
+                .is_some()
+            {
+                return Ok(Ty::Str);
+            }
             // Non-strict mode: `str % args` is CPython's own printf-style
             // formatting, on the `str` and the arguments boxed.
             if *op == BinOpKind::Mod
@@ -227,9 +238,13 @@ fn infer_expr_here(
             }
             // Non-strict mode: a fresh native list operand of an operator
             // on a CPython object crosses as a CPython copy.
-            if (left_ty == Ty::Object && crate::object_box::fresh_container(env, right, &right_ty))
-                || (right_ty == Ty::Object
-                    && crate::object_box::fresh_container(env, left, &left_ty))
+            let crosses = |operand: &HirExpr, ty: &Ty| {
+                crate::object_box::fresh_container(env, operand, ty)
+                    || (crate::non_strict::is_non_strict()
+                        && crate::object_box::display_boxable(operand, ty))
+            };
+            if (left_ty == Ty::Object && crosses(right, &right_ty))
+                || (right_ty == Ty::Object && crosses(left, &left_ty))
             {
                 return Ok(Ty::Object);
             }
@@ -238,7 +253,20 @@ fn infer_expr_here(
             {
                 return result;
             }
-            numeric_result_type(*op, left_ty, right_ty)
+            let result = numeric_result_type(*op, left_ty.clone(), right_ty.clone());
+            // Non-strict mode: `t |= {x}` on a name holding a native
+            // container of another kind (a list here, a set there): the
+            // name becomes an `object`, as a scalar rebound to another type
+            // does, and the operator is CPython's.
+            if result.is_err()
+                && let HirExpr::AugBinOp { left, .. } = expr
+                && let HirExpr::Name(name) = left.as_ref()
+                && crate::assign_check::is_container_ty(&left_ty)
+                && crate::assign_check::is_container_ty(&right_ty)
+            {
+                crate::non_strict::request_widen(name, &left_ty, &Ty::Object, |_| true);
+            }
+            result
         }
         HirExpr::Compare { op, left, right } => {
             let left_ty = infer_expr_in(env, local_names, left)?;

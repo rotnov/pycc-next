@@ -81,6 +81,8 @@ mod rc;
 mod round;
 pub mod set;
 mod str_hash;
+/// `format()`, f-string format specs and printf-style `%` formatting.
+mod format;
 /// `str` builtins and methods, and `input()`.
 mod str_ops;
 pub mod tuple;

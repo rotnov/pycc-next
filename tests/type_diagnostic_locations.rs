@@ -130,10 +130,10 @@ const CASES: &[Case] = &[
         label: "may be unbound here",
         ..case(
             "T0041",
-            "def f(c: bool) -> int:\n    if c:\n        y = 1\n    return y\n",
+            "def f(c: bool) -> int:\n    y = 1\n    if c:\n        del y\n    return y\n",
             "y",
         )
-        .with_occurrence(1)
+        .with_occurrence(2)
     },
     Case {
         label: "not a class instance",

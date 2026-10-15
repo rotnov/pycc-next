@@ -366,11 +366,10 @@ fn a_non_int_slice_bound_is_refused_by_the_check_phase() {
     }
 }
 
-/// ...and an unbound name in a bound propagates its own diagnostic rather
-/// than reaching `pycc_mir::lookup`'s "check should have rejected this HIR"
-/// panic.
+/// ...and a possibly-unbound `int` bound is checked at run time
+/// (`UnboundLocalError`) like any other read of one.
 #[test]
-fn a_possibly_unbound_slice_bound_is_refused() {
+fn a_possibly_unbound_slice_bound_is_checked_at_run_time() {
     let hir = func(
         vec![
             ("b".to_string(), Ty::MemoryView),
@@ -394,8 +393,7 @@ fn a_possibly_unbound_slice_bound_is_refused() {
             ))),
         ],
     );
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0041", "{}", err.message);
+    check(&hir).expect("a possibly-unbound `int` is checked at run time");
 }
 
 /// Artifact-owned storage is *not* widened by this part: `a = ndarray(4);

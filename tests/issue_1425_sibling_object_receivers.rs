@@ -186,17 +186,17 @@ fn native_containers_beside_a_sibling_import_keep_their_diagnostics() {
         "T0021",
         "cannot add `str` to a set of `int`",
     );
-    // The one-argument `get` refusal is byte for byte the one a module with
+    // The three-argument `get` refusal is byte for byte the one a module with
     // its own foreign import gets.
     let sibling = check(
         "obj_1425_get_sibling",
         &dep,
-        "from dep import g\n\nds = {\"a\": 1}\nds.get(\"a\")\n",
+        "from dep import g\n\nds = {\"a\": 1}\nds.get(\"a\", 0, 1)\n",
     );
     let own = check(
         "obj_1425_get_own",
         &[],
-        "import gc\n\nds = {\"a\": 1}\nds.get(\"a\")\n",
+        "import gc\n\nds = {\"a\": 1}\nds.get(\"a\", 0, 1)\n",
     );
     assert_eq!(sibling.status.code(), Some(1), "{}", rendered(&sibling));
     let message = |output: &Output| {

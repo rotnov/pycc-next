@@ -70,7 +70,7 @@ pub(crate) fn lookup_bound_name_inner(
         // (`crate::non_strict::admits_maybe_read`).
         Some(BindingState::Maybe(ty))
             if (env.in_function_body && !is_local(local_names, name))
-                || crate::non_strict::admits_maybe_read(name) =>
+                || crate::non_strict::admits_maybe_read(name, ty) =>
         {
             if !admit_buffer {
                 reject_memoryview_read(name, ty, env.owned_buffers.contains(name))?;

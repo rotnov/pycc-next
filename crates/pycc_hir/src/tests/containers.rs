@@ -673,14 +673,6 @@ fn get_with_zero_arguments_is_unsupported() {
 }
 
 #[test]
-fn get_with_one_argument_is_unsupported() {
-    assert_capability_error_message(
-        "d.get(\"a\")\n",
-        "`.get()` is only supported as `dict.get(key, default)` with exactly two arguments so far, got 1",
-    );
-}
-
-#[test]
 fn get_with_three_arguments_is_unsupported() {
     assert_capability_error_message(
         "d.get(\"a\", 0, 1)\n",

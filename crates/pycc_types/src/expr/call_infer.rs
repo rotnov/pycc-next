@@ -648,6 +648,15 @@ pub(crate) fn infer_call_expr(
         ) {
             return Ok(Ty::Object);
         }
+        // Non-strict mode: an empty `set()`/`dict()` the empty-container
+        // pass left unresolved is the CPython container (`pycc_mir`).
+        if crate::non_strict::is_non_strict()
+            && (pycc_hir::empty_object_constructor(callee, args.len()).is_some()
+                || (callee == "set" && arg_tys == [Ty::Object])
+                || pycc_hir::builtins::is_object_format(callee, arg_tys))
+        {
+            return Ok(Ty::Object);
+        }
         if is_known_callable_builtin(callee) {
             return Err(unsupported_callable_builtin(callee));
         }

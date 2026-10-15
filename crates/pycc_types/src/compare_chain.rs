@@ -31,6 +31,14 @@ pub(crate) fn compare_link_ty(
     // admits a single comparison or (Part 11 of #1371) a chain link
     // between two non-literal operands, and
     // `foreign::compare::general_identity_ty` admits only two objects.
+    // `opt == None` of an `Optional[T]`: `T`'s `__eq__` answers
+    // `NotImplemented` for `None`, so it is the identity test (`pycc_mir`).
+    if matches!(op, CmpOp::Eq | CmpOp::NotEq)
+        && (matches!(left, HirExpr::NoneLiteral) && matches!(right_ty, Ty::Optional(_))
+            || matches!(right, HirExpr::NoneLiteral) && matches!(left_ty, Ty::Optional(_)))
+    {
+        return Ok(Ty::Bool);
+    }
     if matches!(op, CmpOp::Is | CmpOp::IsNot) {
         // #1476: identity is the object's own, so a narrowed `object` name
         // is typed as the object it still is, never its narrowed native

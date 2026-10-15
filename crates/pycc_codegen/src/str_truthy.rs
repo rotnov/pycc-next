@@ -84,21 +84,34 @@ pub(crate) fn to_str<'ctx>(
                 "pycc_codegen: string conversion of a class instance without `__repr__` is not supported yet"
             )
         }
-        // A real, reachable feature gap, identical in kind to the `List`/
-        // `Dict`/`Set` arms above (D-197, #763, Part 1 of #747):
-        // `pycc_types` places no type restriction on `print`'s argument or
-        // an f-string interpolation other than the instance/protocol gate
-        // (#977, D-237), so `print(x)`/`f"{x}"` for an `Optional[int]`
-        // local type-checks today and lands here. This PR
-        // ships no `str(Optional[int])`/`Optional`-printing semantics (CPython's
-        // own `str(None)` is `"None"` and `str(5)` is `"5"`, which this
-        // representation *could* support, but doing so is out of this PR's
-        // scope -- see this PR's ADR), and there is no
-        // `pycc_rt_optional_int_to_str` to call -- so this panics honestly
-        // instead of reinterpreting the struct's first field as an `i64` or
-        // `PyStrObj` pointer.
-        Scalar::Optional(_) => {
-            panic!("pycc_codegen: string conversion of an Optional[int] value is not supported yet")
+        // `str()` of an `Optional[int|float|bool]`: `"None"` or the
+        // payload's text, by the payload's representation.
+        Scalar::Optional(v) => {
+            let payload = builder
+                .build_extract_value(v, 0, "opt_payload")
+                .expect("build_extract_value should not fail on an Optional's field 0");
+            let present = builder
+                .build_extract_value(v, 1, "opt_present")
+                .expect("build_extract_value should not fail on an Optional's field 1");
+            let which = match payload {
+                inkwell::values::BasicValueEnum::FloatValue(_) => 1,
+                inkwell::values::BasicValueEnum::IntValue(i)
+                    if i.get_type().get_bit_width() == 8 =>
+                {
+                    2
+                }
+                _ => 0,
+            };
+            return builder
+                .build_call(
+                    rt.optional_to_str[which],
+                    &[payload.into(), present.into()],
+                    "opt_str",
+                )
+                .expect("build_call should not fail for an Optional's str()")
+                .try_as_basic_value()
+                .expect_basic("pycc_rt_optional_*_to_str returns a pointer")
+                .into_pointer_value();
         }
         // Defensive rather than a reachable feature gap, unlike the
         // container arms above: since #1340 both callers convert a CPython

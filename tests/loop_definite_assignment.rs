@@ -4,7 +4,9 @@
 //! its `else:` clause, and by each `break` with the bindings in effect
 //! there; a branch or handler that ends in `continue` (or `return`/`raise`)
 //! does not reach the statement after its `if`/`try`. A name bound on every
-//! such edge is readable; one missing on any edge is still `T0041`.
+//! such edge is definitely bound; a read of one missing on any edge is
+//! checked at run time (`UnboundLocalError`, as in CPython), except an
+//! `except ... as` name, whose read after its handler stays `T0041`.
 //!
 //! `tests/fixtures/loop_definite_assignment.py` is compared byte-for-byte
 //! with the live CPython oracle (`PYCC_PYTHON`, default `python3`), built
@@ -107,6 +109,36 @@ fn loop_exits_bind_like_cpython_as_an_extension() {
     assert_eq!(text(&run.stdout), text(&cpython.stdout));
 }
 
+/// `source` compiles, and running it matches CPython: the same stdout, exit
+/// status `1` and final `UnboundLocalError`/`NameError` line naming `name`
+/// -- a read of a name bound on some paths only is checked at run time.
+fn assert_unbound_like_cpython(tag: &str, source: &str, name: &str) {
+    let dir = ScratchDir::new(tag).expect("scratch");
+    let src = dir.join("m.py");
+    std::fs::write(&src, source).expect("write the source");
+    let binary = dir.join("app");
+    let build = pycc()
+        .arg("build")
+        .arg(&src)
+        .arg("-o")
+        .arg(&binary)
+        .arg("--release")
+        .output()
+        .expect("pycc should spawn");
+    assert_success(&build, "pycc build");
+    let run = Command::new(&binary).output().expect("the binary runs");
+    let cpython = Command::new(oracle())
+        .arg(&src)
+        .output()
+        .expect("python3 should spawn");
+    let last = |bytes: &[u8]| text(bytes).trim_end().lines().last().unwrap_or("").to_string();
+    assert_eq!(text(&run.stdout), text(&cpython.stdout), "{tag}");
+    assert_eq!(run.status.code(), Some(1), "{tag}");
+    assert_eq!(cpython.status.code(), Some(1), "{tag}");
+    assert_eq!(last(&run.stderr), last(&cpython.stderr), "{tag}");
+    assert!(last(&run.stderr).contains(&format!("'{name}'")), "{tag}");
+}
+
 /// `pycc check` on `source` fails with `T0041` naming `name`.
 fn assert_maybe_unbound(tag: &str, source: &str, name: &str) {
     let dir = ScratchDir::new(tag).expect("scratch");
@@ -131,7 +163,7 @@ fn assert_maybe_unbound(tag: &str, source: &str, name: &str) {
 #[test]
 fn a_loop_target_after_a_loop_without_else_is_maybe_unbound() {
     // The normal exit is reached when `range(2, n)` is empty.
-    assert_maybe_unbound(
+    assert_unbound_like_cpython(
         "lda_no_else",
         "def f(n: int) -> int:\n    for d in range(2, n):\n        if n % d == 0:\n            break\n    return d\n\n\nprint(f(2))\n",
         "d",
@@ -140,7 +172,7 @@ fn a_loop_target_after_a_loop_without_else_is_maybe_unbound() {
 
 #[test]
 fn a_name_bound_only_before_break_is_maybe_unbound_when_else_skips_it() {
-    assert_maybe_unbound(
+    assert_unbound_like_cpython(
         "lda_else_skips",
         "def f(n: int) -> int:\n    i: int = 0\n    while i < n:\n        if i == 3:\n            x = i\n            break\n        i += 1\n    else:\n        i = -1\n    return x\n\n\nprint(f(1))\n",
         "x",
@@ -149,7 +181,7 @@ fn a_name_bound_only_before_break_is_maybe_unbound_when_else_skips_it() {
 
 #[test]
 fn a_break_before_the_binding_is_maybe_unbound() {
-    assert_maybe_unbound(
+    assert_unbound_like_cpython(
         "lda_break_first",
         "def f(n: int) -> int:\n    for i in range(n):\n        if i == 0:\n            break\n        x = i\n    else:\n        return 0\n    return x\n\n\nprint(f(5))\n",
         "x",
@@ -158,7 +190,7 @@ fn a_break_before_the_binding_is_maybe_unbound() {
 
 #[test]
 fn a_handler_that_falls_through_leaves_the_try_binding_maybe_unbound() {
-    assert_maybe_unbound(
+    assert_unbound_like_cpython(
         "lda_handler_pass",
         "def g(v: int) -> int:\n    if v < 0:\n        raise ValueError(\"negative\")\n    return v\n\n\ndef f(n: int) -> int:\n    total: int = 0\n    for v in range(-1, n):\n        try:\n            r = g(v)\n        except ValueError:\n            pass\n        total += r\n    return total\n\n\nprint(f(3))\n",
         "r",
@@ -167,7 +199,7 @@ fn a_handler_that_falls_through_leaves_the_try_binding_maybe_unbound() {
 
 #[test]
 fn an_inner_break_does_not_bind_for_the_outer_loop_exit() {
-    assert_maybe_unbound(
+    assert_unbound_like_cpython(
         "lda_inner_break",
         "def f(n: int) -> int:\n    while True:\n        for c in range(n):\n            if c == 2:\n                break\n        break\n    return c\n\n\nprint(f(0))\n",
         "c",
@@ -226,7 +258,7 @@ fn a_module_scope_handler_as_name_is_unbound_after_a_break() {
 
 #[test]
 fn a_continue_branch_does_not_bind_after_the_loop() {
-    assert_maybe_unbound(
+    assert_unbound_like_cpython(
         "lda_continue_after",
         "def f(n: int) -> int:\n    for i in range(n):\n        if i % 2 == 0:\n            y = i\n        else:\n            continue\n    return y\n\n\nprint(f(0))\n",
         "y",

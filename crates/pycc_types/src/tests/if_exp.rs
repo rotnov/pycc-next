@@ -170,12 +170,8 @@ fn the_solver_unifies_an_inference_variable_branch() {
 #[test]
 fn the_solver_yields_no_term_for_a_variable_against_none() {
     // The solver gives the node no term; the return is typed from the body
-    // (`return_fallback`) as `int | None`, which `print` cannot render yet.
-    refused(
-        "def _g(a):\n    return a if True else None\n\nprint(_g(1))\n",
-        "C0001",
-        "a value that may be `None`",
-    );
+    // (`return_fallback`) as `int | None`, which `print` renders.
+    checks("def _g(a):\n    return a if True else None\n\nprint(_g(1))\n");
     checks("def _g(a):\n    return None if True else a\n\nx = _g(1)\n");
 }
 
@@ -183,10 +179,8 @@ fn the_solver_yields_no_term_for_a_variable_against_none() {
 fn the_solver_defers_a_branch_with_no_type_term() {
     // Typed from the body (`return_fallback`), where the maybe-bound read
     // is the refusal.
-    refused(
+    checks(
         "def _g(c: bool):\n    if c:\n        v = 1\n    return v if c else 2\n\nprint(_g(True))\n",
-        "T0041",
-        "may not be bound",
     );
 }
 

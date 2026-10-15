@@ -419,8 +419,9 @@ const BOUND_REFUSALS: [(&str, &str, &str); 3] = [
     (
         "1179_bound_unbound",
         "def head(b: memoryview, flag: int) -> memoryview:
+    k = 1
     if flag == 0:
-        k = 1
+        del k
     return b[k:3]
 ",
         "T0041",

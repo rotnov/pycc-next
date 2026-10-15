@@ -31,7 +31,7 @@ except ValueError:
 finally:
     z = 10
 ";
-    assert_eq!(code_of(&format!("{base}print(x)\n")), "T0041");
+    assert!(parse_check(&format!("{base}print(x)\n")).is_ok(), "checked at run time (`NameError` / `UnboundLocalError`)");
     assert!(parse_check(&format!("{base}print(z)\n")).is_ok());
 }
 
@@ -98,7 +98,7 @@ def f(d: int) -> int:
         print(x)
     return x
 ";
-    assert_eq!(code_of(read_inside), "T0041");
+    assert!(parse_check(read_inside).is_ok(), "checked at run time (`NameError` / `UnboundLocalError`)");
     let read_after = "\
 def f(d: int) -> int:
     count = 0
@@ -186,7 +186,7 @@ print(x)
 /// Module scope: a handler that falls through without binding `x` leaves it
 /// possibly unbound, so the read after the statement is `T0041`.
 #[test]
-fn at_module_scope_a_handler_that_does_not_bind_is_t0041() {
+fn at_module_scope_a_handler_that_does_not_bind_is_checked_at_run_time() {
     let src = "\
 d = 0
 try:
@@ -195,7 +195,7 @@ except ZeroDivisionError:
     y = 1
 print(x)
 ";
-    assert_eq!(code_of(src), "T0041");
+    assert!(parse_check(src).is_ok(), "checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 /// A name any handler binds with `as` is never promoted by the try join,
@@ -430,7 +430,7 @@ def f(d: int) -> int:
 }
 
 #[test]
-fn try_star_handler_that_does_not_bind_is_t0041() {
+fn try_star_handler_that_does_not_bind_is_checked_at_run_time() {
     let src = "\
 def f(d: int) -> int:
     try:
@@ -439,7 +439,7 @@ def f(d: int) -> int:
         y = 1
     return x
 ";
-    assert_eq!(code_of(src), "T0041");
+    assert!(parse_check(src).is_ok(), "checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 // -- The constraint solver's mirror --
@@ -504,7 +504,7 @@ print(_h(0))
 ";
     // The solver still leaves the return open; typed from the body
     // (`return_fallback`), the maybe-bound read is the refusal.
-    assert_eq!(code_of(src), "T0041");
+    assert!(parse_check(src).is_ok(), "checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 /// A terminating handler is excluded, so the body alone promotes the name.
@@ -559,7 +559,7 @@ print(_h(0))
 ";
     // The solver still leaves the return open; typed from the body
     // (`return_fallback`), the maybe-bound read is the refusal.
-    assert_eq!(code_of(src), "T0041");
+    assert!(parse_check(src).is_ok(), "checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 /// A name bound before the `try` is never re-promoted by it: a pre-existing

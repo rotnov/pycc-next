@@ -251,6 +251,19 @@ pub(crate) fn check_assignment_of(
             non_strict::request_widen(target, &previous, &ty, |t| {
                 matches!(t, Ty::Object | Ty::None) || foreign::is_object_operand(env, t)
             });
+            // A native container rebound to a fresh container of another
+            // type (`t = list(...)` then `t = {x}`): the name becomes an
+            // `object` holding CPython copies, which no alias can observe
+            // -- the widened bindings must all box (`admits_value`), or the
+            // re-check refuses them as before.
+            if let Some(value) = boxed_value
+                && is_container_ty(&previous)
+                && is_container_ty(&ty)
+                && (object_box::display_boxable(value, &ty)
+                    || object_box::fresh_container(env, value, &ty))
+            {
+                non_strict::request_widen(target, &previous, &ty, |_| true);
+            }
             // #380 (PR-20): if the mismatch involves a protocol,
             // produce a detailed T0046 conformance error.
             let diag = if matches!(previous, Ty::Protocol(_)) || matches!(ty, Ty::Protocol(_)) {
@@ -490,4 +503,12 @@ pub(crate) fn collect_named_expr_bindings(
             Ok(())
         }
     }
+}
+
+/// A native list, set, frozenset, dict or tuple.
+pub(crate) fn is_container_ty(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::List(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Dict(_) | Ty::Tuple(_)
+    )
 }

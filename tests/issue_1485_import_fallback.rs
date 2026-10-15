@@ -192,29 +192,20 @@ fn a_handler_that_only_reads_the_name_is_unbound() {
 }
 
 /// A handler that does not mention the name forms no fallback, so a read
-/// after the `try` is the may-be-unbound `T0041` (the handler alone is
-/// pinned as compiling by `tests/issue_1383_block_from_import.rs`).
+/// after the `try` may be unbound, which is checked at run time (the handler
+/// alone is pinned as compiling by `tests/issue_1383_block_from_import.rs`).
 #[test]
 fn a_read_after_a_handler_that_does_not_rebind_is_may_be_unbound() {
-    let rendered = one_error(
+    // The read is checked at run time (`NameError` when the import failed).
+    assert_checks_clean(
         "fallback_read_after",
         "try:\n    from itertools import zip_longest\nexcept ImportError:\n    pass\nprint(zip_longest)\n",
-        "T0041",
     );
-    assert!(
-        rendered.contains("`zip_longest` may not be bound on every path"),
-        "{rendered}"
-    );
-    // A handler read before its own rebinding is the same `T0041`.
-    let rendered = one_error(
+    // So is a handler read before its own rebinding.
+    assert_checks_clean(
         "fallback_read_before",
         "try:\n    from itertools import zip_longest\nexcept ImportError:\n    print(zip_longest)\n    \
          zip_longest = None\n",
-        "T0041",
-    );
-    assert!(
-        rendered.contains("`zip_longest` may not be bound on every path"),
-        "{rendered}"
     );
 }
 

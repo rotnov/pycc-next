@@ -705,6 +705,16 @@ pub(crate) fn collect_call_constraints(
         {
             return Ok(Some(Ok(Ty::Object)));
         }
+        if crate::non_strict::is_non_strict()
+            && !env.shadowed_producers.contains(callee.as_str())
+            && (pycc_hir::empty_object_constructor(callee, args.len()).is_some()
+                || (callee == "set"
+                    && matches!(arg_terms.as_slice(), [Some(Ok(Ty::Object))]))
+                || matches!(arg_terms.as_slice(), [Some(Ok(first)), Some(Ok(second))]
+                    if pycc_hir::builtins::is_object_format(callee, &[first.clone(), second.clone()])))
+        {
+            return Ok(Some(Ok(Ty::Object)));
+        }
         if is_known_callable_builtin(callee) {
             return Err(unsupported_callable_builtin(callee));
         }

@@ -88,7 +88,7 @@ fn optional_none_test_rejects_non_compare_test() {
 #[test]
 fn optional_none_test_rejects_non_is_compare_op() {
     let test = HirExpr::Compare {
-        op: CmpOpKind::Eq,
+        op: CmpOpKind::Lt,
         left: Box::new(HirExpr::Name("x".to_string())),
         right: Box::new(HirExpr::NoneLiteral),
     };

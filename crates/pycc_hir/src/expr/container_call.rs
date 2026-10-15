@@ -203,6 +203,29 @@ fn lower_dict_get(
         imports,
         signatures,
     )?;
+    // `d.get(k)`: `d[k] if k in d else None` -- an `Optional` of the
+    // value type -- for a name `d` and a key whose second evaluation has no
+    // effect (a name, a literal, a subscript of those).
+    if let [key] = &*call.arguments.args
+        && call.arguments.keywords.is_empty()
+        && let ContainerReceiver::Name(name) = &dict
+        && plain_read(key)
+    {
+        let key = lower_expr(key, in_function, class_name, imports, signatures)?;
+        let base = || Box::new(HirExpr::Name(name.clone()));
+        return Ok(HirExpr::IfExp {
+            test: Box::new(HirExpr::Compare {
+                op: crate::CmpOpKind::In,
+                left: Box::new(key.clone()),
+                right: base(),
+            }),
+            body: Box::new(HirExpr::Subscript {
+                base: base(),
+                index: Box::new(key),
+            }),
+            orelse: Box::new(HirExpr::NoneLiteral),
+        });
+    }
     let [key, default] = &*call.arguments.args else {
         // Issue #890: this fast path cannot see the receiver's type, so
         // the message must not assert one. The receiver may be a real
@@ -261,4 +284,17 @@ fn lower_set_add(
         set: set_name.id.as_str().to_string(),
         value: Box::new(value),
     })
+}
+
+/// Whether evaluating `expr` twice is the same as once: a name, a literal,
+/// or a subscript of such reads.
+fn plain_read(expr: &Expr) -> bool {
+    match expr {
+        Expr::Name(_)
+        | Expr::NumberLiteral(_)
+        | Expr::StringLiteral(_)
+        | Expr::BooleanLiteral(_) => true,
+        Expr::Subscript(sub) => plain_read(&sub.value) && plain_read(&sub.slice),
+        _ => false,
+    }
 }

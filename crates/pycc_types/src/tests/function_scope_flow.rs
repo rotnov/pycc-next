@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn a_function_local_if_with_no_else_then_read_is_t0041() {
+fn a_function_local_if_with_no_else_then_read_is_checked_at_run_time() {
     // `def f(): if cond: x = 1; return x` -- T0041 (possibly-unbound
     // read in function body).
     let hir = HirModule {
@@ -28,12 +28,11 @@ fn a_function_local_if_with_no_else_then_read_is_t0041() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0041");
+    check(&hir).expect("checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 #[test]
-fn a_function_local_while_then_read_is_t0041() {
+fn a_function_local_while_then_read_is_checked_at_run_time() {
     // `def f(): while cond: x = 1; return x` -- T0041.
     let hir = HirModule {
         seeded_builtin_exception_classes: false,
@@ -56,8 +55,7 @@ fn a_function_local_while_then_read_is_t0041() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0041");
+    check(&hir).expect("checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 #[test]
@@ -92,7 +90,7 @@ fn a_function_local_both_branches_if_then_read_succeeds() {
 }
 
 #[test]
-fn a_function_local_for_range_then_read_is_t0041() {
+fn a_function_local_for_range_then_read_is_checked_at_run_time() {
     // `def f(): for i in range(3): x = i; return x` -- T0041 (the loop
     // body may execute zero times, so `x` is maybe-bound).
     let hir = HirModule {
@@ -119,12 +117,11 @@ fn a_function_local_for_range_then_read_is_t0041() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0041");
+    check(&hir).expect("checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 #[test]
-fn a_function_local_for_range_var_then_read_is_t0041() {
+fn a_function_local_for_range_var_then_read_is_checked_at_run_time() {
     // `def f(): for i in range(3): pass; return i` -- T0041 (the loop
     // variable is maybe-bound after the loop).
     let hir = HirModule {
@@ -148,8 +145,7 @@ fn a_function_local_for_range_var_then_read_is_t0041() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0041");
+    check(&hir).expect("checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 #[test]
@@ -185,7 +181,7 @@ fn a_function_local_pre_bound_then_for_range_var_read_succeeds() {
 }
 
 #[test]
-fn a_function_local_for_list_then_read_is_t0041() {
+fn a_function_local_for_list_then_read_is_checked_at_run_time() {
     // `def f(xs: list[int]): for i in xs: x = i; return x` -- T0041.
     let hir = HirModule {
         seeded_builtin_exception_classes: false,
@@ -209,8 +205,7 @@ fn a_function_local_for_list_then_read_is_t0041() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0041");
+    check(&hir).expect("checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 #[test]

@@ -94,7 +94,7 @@ fn an_object_receiver_takes_the_method_reading() {
 fn an_ext_module_dispatches_all_four_names_on_their_receiver() {
     let module = lower(
         "from typing import Any\n\n\ndef f(o: Any) -> None:\n    o.append(1)\n    o.pop()\n    \
-         o.get(1, 2)\n    o.add(1)\n    o.get(1)\n    o.pop(0)\n    o.extend(o)\n",
+         o.get(1, 2)\n    o.add(1)\n    o.get(1, 2, 3)\n    o.pop(0)\n    o.extend(o)\n",
         true,
     );
     let exprs = function_exprs(&module, "f");
@@ -117,7 +117,7 @@ fn an_ext_module_dispatches_all_four_names_on_their_receiver() {
 #[test]
 fn a_foreign_import_turns_the_gate_on_for_the_whole_module() {
     let module = lower(
-        "xs = [1]\nxs.append(2)\nimport gc\ngc.get(1)\nxs.append(3)\ngc.pop()\n",
+        "xs = [1]\nxs.append(2)\nimport gc\ngc.get(1, 2, 3)\nxs.append(3)\ngc.pop()\n",
         false,
     );
     let exprs = top_level_exprs(&module);
@@ -151,7 +151,7 @@ fn a_native_module_without_a_foreign_import_is_unchanged() {
 #[test]
 fn a_foreign_import_inside_a_module_level_block_turns_the_gate_on() {
     let module = lower(
-        "try:\n    import gc\nexcept ImportError:\n    pass\ngc.get(1)\n",
+        "try:\n    import gc\nexcept ImportError:\n    pass\ngc.get(1, 2, 3)\n",
         false,
     );
     let exprs = top_level_exprs(&module);

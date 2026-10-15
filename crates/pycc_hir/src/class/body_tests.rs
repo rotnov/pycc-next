@@ -128,8 +128,8 @@ fn a_method_named_get_lowers_and_its_call_keeps_both_readings() {
     // Issue #1188 retired the class-definition-time refusal of a method
     // named `get` (D-068 review finding on #385). The class lowers with the
     // method in its table, and `buf.get(5)` keeps the method reading next to
-    // the container reading's own refusal, for `pycc_types` to choose from
-    // by the receiver's type.
+    // the container reading (`d.get(k)`'s `Optional` form), for `pycc_types`
+    // to choose from by the receiver's type.
     let hir = lower_ok(
         "class Buf:\n    def __init__(self) -> None:\n        return\n    def get(self, k: int) -> int:\n        return k\n\nbuf = Buf()\nbuf.get(5)\n",
     );
@@ -137,13 +137,7 @@ fn a_method_named_get_lowers_and_its_call_keeps_both_readings() {
     assert!(class_def.methods.iter().any(|(name, _)| name == "get"));
     let (call, container) = dispatched_call(&hir, 1);
     assert!(matches!(call, HirExpr::MethodCall { method, .. } if method == "get"));
-    let ContainerFallback::Refused(diagnostic) = container else {
-        panic!("expected the container reading to be refused: {container:?}");
-    };
-    assert_eq!(
-        diagnostic.message,
-        "`.get()` is only supported as `dict.get(key, default)` with exactly two arguments so far, got 1"
-    );
+    assert_eq!(*container, ContainerFallback::Admitted);
 }
 
 #[test]

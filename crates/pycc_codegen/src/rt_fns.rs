@@ -122,6 +122,9 @@ pub(super) struct RtFns<'ctx> {
     pub(super) int_to_str: FunctionValue<'ctx>,
     pub(super) float_to_str: FunctionValue<'ctx>,
     pub(super) bool_to_str: FunctionValue<'ctx>,
+    /// `str()` of an `Optional[int|float|bool]`: the payload and the
+    /// present flag (`pycc_rt::format`).
+    pub(super) optional_to_str: [FunctionValue<'ctx>; 3],
     pub(super) print_write_str: FunctionValue<'ctx>,
     pub(super) print_space: FunctionValue<'ctx>,
     pub(super) print_newline: FunctionValue<'ctx>,
@@ -587,6 +590,20 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_bool_to_str",
             ptr_type.fn_type(&[context.i8_type().into()], false),
         ),
+        optional_to_str: [
+            declare(
+                "pycc_rt_optional_int_to_str",
+                ptr_type.fn_type(&[i64_type.into(), context.i8_type().into()], false),
+            ),
+            declare(
+                "pycc_rt_optional_float_to_str",
+                ptr_type.fn_type(&[f64_type.into(), context.i8_type().into()], false),
+            ),
+            declare(
+                "pycc_rt_optional_bool_to_str",
+                ptr_type.fn_type(&[context.i8_type().into(), context.i8_type().into()], false),
+            ),
+        ],
         print_write_str: declare(
             "pycc_rt_print_write_str",
             void_type.fn_type(&[ptr_type.into()], false),

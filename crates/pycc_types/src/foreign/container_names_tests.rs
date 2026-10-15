@@ -114,7 +114,7 @@ fn a_native_receiver_keeps_its_container_diagnostics() {
         "cannot append `str` to a list of `int`",
     );
     refused(
-        "import gc\n\nd = {\"a\": 1}\nprint(d.get(\"a\"))\n",
+        "import gc\n\nd = {\"a\": 1}\nprint(d.get(\"a\", 0, 1))\n",
         false,
         "C0001",
         "`.get()` is only supported as `dict.get(key, default)`",

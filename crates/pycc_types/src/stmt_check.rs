@@ -522,6 +522,11 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
             // empty `local_names` slice too, so an unresolved `list` is
             // simply "not defined," never `unbound_local`.
             let list_ty = lookup_bound_name(env, &[], list)?;
+            // An object bound on some paths only (its read, checked at run
+            // time, was admitted above) iterates through CPython too.
+            if list_ty == Ty::Object {
+                return foreign::for_loop::check_module_object_loop(env, var, body);
+            }
             // PR-11 Task 3 (D-123): `for k in d:` iterates a dict's own keys
             // in insertion order, mirroring `len()`'s own relaxation to
             // accept `Ty::Dict` alongside `Ty::List` at this crate's other

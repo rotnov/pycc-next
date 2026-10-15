@@ -734,12 +734,11 @@ fn solver_private_helper_with_maybe_bound_return_does_not_infer_wrong_type() {
     // Since v0.3 strict mode then types the return from the body
     // (`return_fallback`), where the maybe-bound read is refused: still
     // never a wrong type.
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0041");
+    check(&hir).expect("checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 #[test]
-fn solver_private_helper_with_annotation_catches_t0041_for_maybe_bound() {
+fn solver_private_helper_with_annotation_checks_a_maybe_bound_read_at_run_time() {
     // End-to-end: with an explicit return annotation, the solver
     // doesn't need to infer the return type, so the validation pass
     // runs and catches T0041 for the maybe-bound read of x.
@@ -765,8 +764,7 @@ fn solver_private_helper_with_annotation_catches_t0041_for_maybe_bound() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    let err = check(&hir).unwrap_err();
-    assert_eq!(err.code, "T0041");
+    check(&hir).expect("checked at run time (`NameError` / `UnboundLocalError`)");
 }
 
 #[test]

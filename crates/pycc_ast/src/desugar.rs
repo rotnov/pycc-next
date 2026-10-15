@@ -81,6 +81,7 @@ mod iter_alias;
 mod itertools;
 mod hoist;
 mod keys;
+mod pure_calls;
 mod ndarray_ndim;
 mod signatures;
 mod specialize;
@@ -185,6 +186,7 @@ pub fn desugar(module: &mut ModModule) {
         wildcard::expand_wildcards(&mut body);
         ndarray_ndim::close_ndims(&mut body);
         exit::sys_exit_calls(&mut body);
+        pure_calls::drop_effectless_calls(&mut body);
         aliases::builtin_aliases(&mut body);
         aliases::stream_aliases(&mut body);
         builtin_defaults::inline_builtin_defaults(&mut body);

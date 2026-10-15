@@ -327,6 +327,15 @@ impl Engine {
                 });
                 Some(result)
             }
+            // A container method also readable as a user method
+            // (`d.get(k, 0)`): its container reading is the evidence.
+            HirExpr::ReceiverDispatchedCall {
+                call,
+                container: pycc_hir::ContainerFallback::Admitted,
+            } if call.container_form().is_some() => {
+                let form = call.container_form().expect("checked by the guard");
+                self.term(scope, &form)
+            }
             HirExpr::DictGetOrDefault {
                 dict: pycc_hir::ContainerReceiver::Name(name),
                 key,
@@ -448,6 +457,19 @@ impl Engine {
                 if self.helpers.contains_key(callee) {
                     return self.helper_return(callee);
                 }
+                // A builtin whose result type is fixed whatever its
+                // argument (`len(o)` of a CPython object is still an `int`).
+                let fixed = match callee.as_str() {
+                    "len" | "ord" => Some(Ty::Int),
+                    "repr" | "chr" => Some(Ty::Str),
+                    _ => None,
+                };
+                if let Some(ty) = fixed
+                    && args.len() == 1
+                    && !scope.env.classes.contains_key(callee)
+                {
+                    return Some(self.store.known(ty));
+                }
                 // A `defaultdict` factory function's return type is its values'.
                 let factory = match args.get(1) {
                     Some(HirExpr::Name(f)) if callee == "__pycc_defaultdict_call" => scope
@@ -536,6 +558,12 @@ impl Engine {
             }
             HirStmt::Assign { target, value } => {
                 let var = self.name_var(scope, target);
+                // `x = None` beside `x = v` makes `x` optional, not a
+                // conflict: `None` carries no element evidence, and the
+                // check phase validates the optional binding itself.
+                if matches!(value, HirExpr::NoneLiteral) {
+                    return;
+                }
                 if let Some(t) = self.term(scope, value) {
                     // A name rebound with a different scalar type (`v =
                     // True` here, `v = 1` there) has no one type: the

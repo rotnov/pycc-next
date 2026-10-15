@@ -391,12 +391,10 @@ fn a_binding_named_like_the_class_or_a_maybe_bound_operand_does_not_narrow() {
         "T0021",
         "operator Add is not defined for `object` and `int`",
     );
-    // A maybe-bound operand is refused (`T0041`) at the guard's own read, so
-    // no narrowing can make the read inside it admissible.
-    refused(
+    // A maybe-bound operand is checked at run time at the guard's own read
+    // (`UnboundLocalError`), and is not narrowed.
+    still_object(
         "def f(p: object, b: bool) -> int:\n    if b:\n        o = p\n    if isinstance(o, int):\n        return o + 1\n    return 0\n",
-        "T0041",
-        "",
     );
 }
 

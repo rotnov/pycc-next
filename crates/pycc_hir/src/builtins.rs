@@ -221,6 +221,15 @@ pub fn str_iterable_arg(name: &str, index: usize) -> bool {
         || name.starts_with("__pycc_it_product_")
 }
 
+/// Non-strict mode: whether `callee(args)` is `format(value, spec)` (or an
+/// f-string's `{value:spec}`) of a CPython object, which is the object's
+/// own `value.__format__(spec)`.
+#[must_use]
+pub fn is_object_format(callee: &str, args: &[Ty]) -> bool {
+    matches!(callee, "format" | "__pycc_format")
+        && matches!(args, [Ty::Object, Ty::Str | Ty::Object])
+}
+
 /// Every builtin name [`resolve_call`] claims for some argument types.
 pub const CALL_NAMES: &[&str] = &[
     "__pycc_counter",
@@ -229,6 +238,7 @@ pub const CALL_NAMES: &[&str] = &[
     "__pycc_defaultdict_call",
     "__pycc_defaultdict_none",
     "__pycc_deque",
+    "__pycc_format",
     "__pycc_bisect_left",
     "__pycc_bisect_right",
     "__pycc_heapify",
@@ -242,6 +252,7 @@ pub const CALL_NAMES: &[&str] = &[
     "__pycc_max_keyed",
     "__pycc_min_keyed",
     "__pycc_print_str",
+    "__pycc_printf",
     "__pycc_setrecursionlimit",
     "__pycc_sort_keyed",
     "__pycc_sorted_keyed",
@@ -258,6 +269,7 @@ pub const CALL_NAMES: &[&str] = &[
     "dict",
     "enumerate",
     "float",
+    "format",
     "hex",
     "input",
     "int",
@@ -458,6 +470,37 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             sig("pycc_rt_int_from_str_base", &[str_, int.clone()], int)
         }
         ("float", [Ty::Str]) => sig("pycc_rt_float_from_str", &[str_], float),
+        // `format(value, spec)`; `__pycc_format` is an f-string's
+        // `{value:spec}` (`expr::fstring`), which no user `format` shadows.
+        ("format" | "__pycc_format", [Ty::Int, Ty::Str]) => {
+            sig("pycc_rt_format_int", &[int, str_.clone()], str_)
+        }
+        ("format" | "__pycc_format", [Ty::Bool, Ty::Str]) => {
+            sig("pycc_rt_format_bool", &[Ty::Bool, str_.clone()], str_)
+        }
+        ("format" | "__pycc_format", [Ty::Float, Ty::Str]) => {
+            sig("pycc_rt_format_float", &[float, str_.clone()], str_)
+        }
+        ("format" | "__pycc_format", [Ty::Str, Ty::Str]) => {
+            sig("pycc_rt_format_str", &[str_.clone(), str_.clone()], str_)
+        }
+        ("format", [Ty::Int]) => sig("pycc_rt_int_to_str", &[int], str_),
+        ("format", [Ty::Float]) => sig("pycc_rt_float_to_str", &[float], str_),
+        ("format", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),
+        ("format", [Ty::Str]) => sig("pycc_rt_str_copy", &[str_.clone()], str_),
+        // One conversion of `template % args` (`crate::printf`).
+        ("__pycc_printf", [Ty::Int, Ty::Str]) => {
+            sig("pycc_rt_printf_int", &[int, str_.clone()], str_)
+        }
+        ("__pycc_printf", [Ty::Bool, Ty::Str]) => {
+            sig("pycc_rt_printf_bool", &[Ty::Bool, str_.clone()], str_)
+        }
+        ("__pycc_printf", [Ty::Float, Ty::Str]) => {
+            sig("pycc_rt_printf_float", &[float, str_.clone()], str_)
+        }
+        ("__pycc_printf", [Ty::Str, Ty::Str]) => {
+            sig("pycc_rt_printf_str", &[str_.clone(), str_.clone()], str_)
+        }
         ("str", [Ty::Int]) => sig("pycc_rt_int_to_str", &[int], str_),
         ("str", [Ty::Float]) => sig("pycc_rt_float_to_str", &[float], str_),
         ("str", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),

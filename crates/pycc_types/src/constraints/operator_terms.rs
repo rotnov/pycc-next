@@ -178,8 +178,21 @@ pub(crate) fn collect_bin_op_constraints(
     };
     let negative_exponent =
         *op == BinOpKind::Pow && matches!(right.as_ref(), HirExpr::IntLiteral(e) if *e < 0);
+    // `"template" % args`: a `str` (`pycc_hir::printf`); the check phase
+    // decides whether the arguments format natively.
+    let printf = *op == BinOpKind::Mod
+        && matches!(left.as_ref(), HirExpr::StringLiteral(t)
+            if pycc_hir::printf::parse_template(t).is_some());
     let left = collect_expr_constraints(signatures, parents, concrete, deferred, env, left)?;
     let right = collect_expr_constraints(signatures, parents, concrete, deferred, env, right)?;
+    if printf {
+        let object_arg = right.clone().and_then(|term| resolved_term(term, parents, concrete)).is_some_and(|ty| {
+            ty == Ty::Object || matches!(&ty, Ty::Tuple(items) if items.contains(&Ty::Object))
+        });
+        if !object_arg {
+            return Ok(Some(Ok(Ty::Str)));
+        }
+    }
     // `int ** <negative int literal>` is a `float` (`expr.rs`).
     if negative_exponent
         && let Some(Ok(Ty::Int | Ty::Bool)) = left

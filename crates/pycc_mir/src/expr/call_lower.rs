@@ -171,6 +171,21 @@ pub(crate) fn lower_call_expr(
     } else {
         None
     };
+    // Non-strict mode: an empty `set()`/`dict()` whose element types the
+    // empty-container pass could not resolve (`pycc_types` admits it only
+    // there) is the CPython container.
+    if let Some(kind) = pycc_hir::empty_object_constructor(callee, args.len())
+        && !is_user_defined
+        && !classes.contains_key(callee.as_str())
+    {
+        return crate::obj_arith::object_display(
+            match kind {
+                pycc_hir::DisplayKind::Set => crate::ObjDisplayKind::Set,
+                _ => crate::ObjDisplayKind::Dict,
+            },
+            Vec::new(),
+        );
+    }
     let args: Vec<MirExpr> = args
         .iter()
         .enumerate()
@@ -209,6 +224,40 @@ pub(crate) fn lower_call_expr(
             }
         })
         .collect();
+    // Non-strict mode: `set(o)` of a CPython object is CPython's own
+    // `set().union(o)` (`pycc_types` admits it only there).
+    if callee == "set"
+        && !is_user_defined
+        && !classes.contains_key(callee.as_str())
+        && let [arg] = args.as_slice()
+        && arg.ty() == Ty::Object
+    {
+        return MirExpr::ObjMethodCall {
+            base: Box::new(crate::obj_arith::object_display(
+                crate::ObjDisplayKind::Set,
+                Vec::new(),
+            )),
+            method: "union".to_string(),
+            args,
+        };
+    }
+    // Non-strict mode: `format(o, spec)` of a CPython object is
+    // `o.__format__(spec)`.
+    if !is_user_defined
+        && !classes.contains_key(callee.as_str())
+        && pycc_hir::builtins::is_object_format(
+            callee,
+            &args.iter().map(MirExpr::ty).collect::<Vec<_>>(),
+        )
+    {
+        let mut args = args.into_iter();
+        let base = args.next().expect("format() of an object has two arguments");
+        return MirExpr::ObjMethodCall {
+            base: Box::new(base),
+            method: "__format__".to_string(),
+            args: args.collect(),
+        };
+    }
     // `str(x)` / `repr(x)` of an instance whose class defines `__str__` or
     // `__repr__` is that method's result
     // (`pycc_types::string_conversion::instance_text_call`).
@@ -227,12 +276,13 @@ pub(crate) fn lower_call_expr(
     // claims (a tuple, a set, `None`): the f-string rendering of `x`
     // (`pycc_types::string_conversion::repr_is_str`).
     if !is_user_defined
-        && callee == "repr"
         && let [arg] = args.as_slice()
-        && matches!(
-            arg.ty(),
-            Ty::Tuple(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::None | Ty::Optional(_)
-        )
+        && (callee == "repr"
+            && matches!(
+                arg.ty(),
+                Ty::Tuple(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::None | Ty::Optional(_)
+            )
+            || callee == "str" && matches!(arg.ty(), Ty::Optional(_)))
     {
         return MirExpr::FString(vec![MirFStringPart::Interpolation(Box::new(arg.clone()))]);
     }

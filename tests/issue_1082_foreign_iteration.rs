@@ -132,26 +132,19 @@ fn the_deferred_iterable_shapes_keep_their_own_refusals() {
 /// iterating it. Part 1 of #1333 admits a function-local `object`
 /// binding, but a function-body `for` over an object is Part 2 (#1363),
 /// so the loop stays refused there. And a loop that runs zero times never writes
-/// its variable's slot, so a read after the loop is `T0041` rather than a
-/// load of whatever the slot happened to hold.
+/// its variable's slot, so a read after the loop is checked at run time
+/// (`NameError`) rather than a load of whatever the slot happened to hold.
 #[test]
 fn the_loop_inherits_the_positional_bound_and_binds_only_maybe() {
     let dir = ScratchDir::new("foreign_iteration_bounds").expect("scratch");
-    for (body, code) in [
-        (
-            "import gc\n\n\ndef _n() -> int:\n    for x in gc.garbage:\n        print(len(x))\n    return 1\n\n\nprint(_n())\n",
-            "I0404",
-        ),
-        (
-            "import gc\n\nfor x in gc.garbage:\n    pass\n\nprint(len(x))\n",
-            "T0041",
-        ),
-    ] {
-        let out = check(&dir, body);
-        assert!(!out.status.success(), "{body}: {}", stdout_of(&out));
-        let text = format!("{}{}", stdout_of(&out), stderr_of(&out));
-        assert!(text.contains(code), "{body}: {text}");
-    }
+    let body = "import gc\n\n\ndef _n() -> int:\n    for x in gc.garbage:\n        print(len(x))\n    return 1\n\n\nprint(_n())\n";
+    let out = check(&dir, body);
+    assert!(!out.status.success(), "{body}: {}", stdout_of(&out));
+    let text = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    assert!(text.contains("I0404"), "{body}: {text}");
+    let body = "import gc\n\nfor x in gc.garbage:\n    pass\n\nprint(len(x))\n";
+    let out = check(&dir, body);
+    assert!(out.status.success(), "{body}: {}{}", stdout_of(&out), stderr_of(&out));
 }
 
 /// Builds `body` as an extension module named `module` inside `dir`.

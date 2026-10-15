@@ -136,7 +136,11 @@ fn the_accessors_answer_none_off_their_shape() {
     let wrong_arity = HirExpr::MethodCall {
         base: Box::new(HirExpr::Name("d".to_string())),
         method: "get".to_string(),
-        args: vec![HirExpr::IntLiteral(1)],
+        args: vec![
+            HirExpr::IntLiteral(1),
+            HirExpr::IntLiteral(2),
+            HirExpr::IntLiteral(3),
+        ],
     };
     assert_eq!(wrong_arity.container_form(), None);
     assert!(wrong_arity.clone().method_call_parts_mut().is_some());

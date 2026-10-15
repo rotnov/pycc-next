@@ -894,7 +894,13 @@ fn propagate_binop(
             let right = resolved_term(right_term.clone(), parents, concrete);
             let result = resolved_term(result_term.clone(), parents, concrete);
             if let (Some(left), Some(right)) = (left, right) {
-                let object_operand = left == Ty::Object || right == Ty::Object;
+                // Two native containers of different kinds (`t |= {x}` on
+                // a list) are left to the check phase too, which widens
+                // the name in non-strict mode.
+                let object_operand = left == Ty::Object
+                    || right == Ty::Object
+                    || (crate::assign_check::is_container_ty(&left)
+                        && crate::assign_check::is_container_ty(&right));
                 let result_ty = match numeric_result_type(op, left, right) {
                     Ok(ty) => ty,
                     // Non-strict mode: an operator on a CPython object is

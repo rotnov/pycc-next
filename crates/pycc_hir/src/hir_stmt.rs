@@ -411,9 +411,11 @@ pub fn optional_none_test(test: &HirExpr) -> Option<(&str, NoneTestPolarity)> {
     let HirExpr::Compare { op, left, right } = test else {
         return None;
     };
+    // `name == None` / `name != None` is the identity test on an `Optional`
+    // name, the only type a caller narrows.
     let polarity = match op {
-        CmpOpKind::Is => NoneTestPolarity::Is,
-        CmpOpKind::IsNot => NoneTestPolarity::IsNot,
+        CmpOpKind::Is | CmpOpKind::Eq => NoneTestPolarity::Is,
+        CmpOpKind::IsNot | CmpOpKind::NotEq => NoneTestPolarity::IsNot,
         _ => return None,
     };
     let name_side = match (left.as_ref(), right.as_ref()) {

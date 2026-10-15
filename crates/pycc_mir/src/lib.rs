@@ -204,6 +204,15 @@ impl MirComprehension {
         }
     }
 
+    /// Whether a list comprehension over a CPython object collects into a
+    /// native list (`pycc_hir::object_comp_collects_natively`): its element
+    /// is a native container or tuple, which has no CPython form.
+    pub fn collects_natively(&self) -> bool {
+        matches!(self.source, CompSource::Object(_))
+            && matches!(&self.elt, MirCompElt::List(elt)
+                if pycc_hir::object_comp_collects_natively(&elt.ty()))
+    }
+
     /// The produced container type, derived from the element types exactly
     /// as the statement form's binding of `target` is. A comprehension over
     /// a CPython object ([`CompSource::Object`], Part 1 of #1255) produces a
@@ -211,7 +220,10 @@ impl MirComprehension {
     /// its elements are.
     pub fn ty(&self) -> Ty {
         if let CompSource::Object(_) = self.source {
-            return Ty::Object;
+            return match &self.elt {
+                MirCompElt::List(elt) if self.collects_natively() => Ty::List(Box::new(elt.ty())),
+                _ => Ty::Object,
+            };
         }
         if self.collects_objects() {
             return Ty::Object;

@@ -42,7 +42,7 @@ pub(super) fn is_object_display(kind: pycc_hir::DisplayKind, elements: &[MirExpr
 
 /// A tuple, set or dict display with an object element, built as the
 /// CPython container; a narrowed element is read as the object it still is.
-pub(super) fn object_display(kind: crate::ObjDisplayKind, elements: Vec<MirExpr>) -> MirExpr {
+pub(crate) fn object_display(kind: crate::ObjDisplayKind, elements: Vec<MirExpr>) -> MirExpr {
     MirExpr::ObjDisplay {
         kind,
         elements: elements.into_iter().map(display_element).collect(),

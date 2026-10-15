@@ -371,8 +371,8 @@ fn lowers_an_f_string_with_only_literal_parts() {
 }
 
 #[test]
-fn an_f_string_with_a_format_spec_is_not_supported_yet() {
-    assert_capability_error_message("x = 1.5\ny = f\"{x:.2f}\"\n", "format spec");
+fn an_f_string_with_a_nested_format_spec_field_is_not_supported_yet() {
+    assert_capability_error_message("x = 1.5\nw = 4\ny = f\"{x:{w}}\"\n", "format spec");
 }
 
 #[test]
