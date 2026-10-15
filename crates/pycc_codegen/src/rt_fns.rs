@@ -535,8 +535,8 @@ pub(super) fn declare_rt_functions<'ctx>(
             f64_type.fn_type(&[f64_type.into(), f64_type.into()], false),
         ),
         str_from_literal: declare(
-            "pycc_rt_str_from_literal",
-            ptr_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+            "pycc_rt_str_from_literal_cached",
+            ptr_type.fn_type(&[ptr_type.into(), i64_type.into(), ptr_type.into()], false),
         ),
         str_concat: declare(
             "pycc_rt_str_concat",

@@ -59,10 +59,37 @@ pub(crate) fn emit_obj_raise_stmt<'ctx>(
     locals: &mut HashMap<String, StorageSlot<'ctx>>,
     stmt: &MirStmt,
 ) -> Result<(), String> {
-    let MirStmt::ObjRaise { value } = stmt else {
+    let MirStmt::ObjRaise { value, cause } = stmt else {
         unreachable!()
     };
-    foreign_raise::emit_obj_raise(context, builder, module, rt, user_functions, locals, value);
+    // `raise o from cause`: the cause is an object, passed as one, or a
+    // pycc exception, passed as the native exception object.
+    let cause = match cause {
+        None => None,
+        Some(pycc_mir::MirExceptionValue::Existing(expr)) if expr.ty() == pycc_mir::Ty::Object => {
+            Some(foreign_raise::Cause::Object(expr))
+        }
+        Some(cause) => Some(foreign_raise::Cause::Native(emit_exception_value(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            cause,
+            "cause",
+        )?)),
+    };
+    foreign_raise::emit_obj_raise(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        value,
+        cause,
+    );
     Ok(())
 }
 

@@ -360,7 +360,6 @@ fn a_membership_test_against_a_native_display_keeps_its_c0001() {
     for container in [
         "1",
         "(1,)",
-        "{1}",
         "{1: 2}",
         "[x for x in a]",
         "{x for x in a}",

@@ -162,13 +162,40 @@ std::thread_local! {
 #[allow(non_upper_case_globals)]
 pub static pycc_rt_exc_pending: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(0);
 
+/// How many threads have an exception pending: while none has, which is
+/// almost always, [`pycc_rt_exception_active`] answers without reaching the
+/// thread-local state (a `__tls_get_addr` call in a shared library). A
+/// thread's own updates are visible to itself, so a thread with an
+/// exception pending never reads zero here.
+static PENDING_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn set_state(state: ExceptionState) {
-    EXCEPTION_STATE.with(|cell| cell.set(state));
+    let was = EXCEPTION_STATE.with(|cell| cell.replace(state)).active;
+    match (was != 0, state.active != 0) {
+        (false, true) => {
+            PENDING_THREADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        (true, false) => {
+            PENDING_THREADS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        _ => {}
+    }
     pycc_rt_exc_pending.store(state.active, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_exception_active() -> i8 {
+    if PENDING_THREADS.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+        return 0;
+    }
+    thread_active()
+}
+
+/// The thread-local half of [`pycc_rt_exception_active`]: out of line, so
+/// the thread-local address is not computed on its fast path.
+#[inline(never)]
+#[cold]
+fn thread_active() -> i8 {
     EXCEPTION_STATE.with(|state| state.get().active)
 }
 

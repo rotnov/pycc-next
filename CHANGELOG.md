@@ -14,6 +14,42 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   own speed test now runs 8.3x faster than CPython (1.60 s vs 13.2 s) (v0.3: 1.7x), its suite passing
   (`python3 bench/package_check.py --time`). `--report-fallbacks` lists `specialized:`
   and `not specialized:` functions.
+- A second real package (v0.4 accept 4): `bench/package_check.py` is a table of pinned
+  packages and adds [tomli](https://pypi.org/project/tomli/) 2.5.0 (MIT, the TOML parser
+  `tomllib` comes from; GitHub tag archive pinned by the sha256 of the files used). Its
+  four modules build unchanged with `--ext --non-strict --foreign-relative-imports`, its
+  own test suite passes against them (CI) and 36 of 40 functions compile; `loads()` runs
+  at CPython's speed (0.92x-1.10x; was 0.40x), not faster yet, so the accept item stays
+  open. What typed packages written for mypyc needed:
+  - `from __future__ import annotations`: an annotation pycc cannot lower is erased
+    instead of making its statement fall back, and fallback code is compiled with the
+    flag; names imported under `if TYPE_CHECKING:` from a sibling module that are
+    aliases (`Pos = int`, `Key = tuple[str, ...]`) are read through to their definition.
+  - A function whose signature the `--ext` boundary cannot carry (`tuple[int, str]`
+    result, `frozenset` parameter) is compiled for the module's callers and runs as its
+    CPython *twin* when Python calls it (`twin:` in `--report-fallbacks`).
+  - Non-strict signature wrappers: defaults of unannotated or object parameters, and a
+    Python caller passing a value of another type than a scalar parameter's runs the
+    function's CPython twin, so its own error handling answers (`loads(b"")` raises
+    tomli's `TypeError`, not the boundary's).
+  - A module function with an `Iterable[T]` parameter gets a `frozenset[T]`
+    specialization that the module's own calls with a native frozenset run.
+  - Native `frozenset(str)`, `frozenset(chr(i) for i in range(n))` (a `chr` whose
+    argument is provably not a surrogate is native in non-strict mode too), set
+    displays in membership tests, `isdisjoint`/`issuperset`/`issubset` with a `str`,
+    `str.startswith(p, start)`, `find`/`index(sub, start)`.
+  - Non-strict: `isinstance(o, (A, B))` of an object, `repr(o)`, `raise o from cause`,
+    `type(native)`, an object rebinding an `int`/`float`/`bool` parameter (converted),
+    an object passed for a `frozenset[str]`/`frozenset[int]` parameter (copied), a
+    tuple display returned as `tuple[...]`, an object in a native frozenset, a `try`
+    and its handler binding a name with two types, `Callable[...]`, `Iterable[...]`
+    and `tuple[X, ...]` annotations as objects, `self.x = {}` as an object attribute.
+- Crossing to CPython is cheaper: a native `str` or frozenset converted to a CPython
+  object keeps that object and shares it on its next crossing (a `str` a Python caller
+  passed in shares the caller's); `str` literals are built once per site; attribute
+  names are interned once; the C shim is compiled with `-O2`; the pending-exception test
+  after each runtime call no longer reads thread-local storage while no thread has an
+  exception pending; `c in frozenset_of_str` for one ASCII character is a bit test.
 - Circular imports between project modules run as in CPython (v0.4 accept 5): a module
   imported back sees the partially initialized one -- the names it bound before the
   import -- and `from m import x` of a name `m` has not bound yet raises CPython's
@@ -87,6 +123,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- Implicit concatenation of plain string literals and f-strings
+  (`"allowed" f" {n} levels"`) dropped the plain parts.
+- A method call on an imported module (`m.set(...)`, `builtins.set()`) was bound to the
+  signature of a method of the same name a class of the module defines, filling in its
+  defaults.
 - A call of a module-level function before its `def` statement ran (from a function
   called earlier) raises CPython's catchable `NameError: name 'f' is not defined`, before
   any argument is evaluated, in native strict, `--non-strict` and `--ext` builds and

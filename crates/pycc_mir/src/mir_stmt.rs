@@ -387,6 +387,11 @@ pub enum MirStmt {
     /// traceback, unlike [`MirStmt::Raise`]'s pycc-rendered one.
     ObjRaise {
         value: MirExpr,
+        /// `raise o from cause`: the cause, a CPython object or a pycc
+        /// exception, which becomes the raised exception's `__cause__`
+        /// (`pycc_ext_obj_raise_from`). `None` for a plain `raise o` (and
+        /// for `raise o from None`, which `pycc_hir` records as no cause).
+        cause: Option<MirExceptionValue>,
     },
     /// A foreign (CPython-object) import nested in a module-level `if`/`try`
     /// block (#1291, #1383), the statement counterpart of

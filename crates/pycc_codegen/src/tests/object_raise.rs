@@ -4,7 +4,10 @@
 use super::*;
 
 fn obj_raise() -> MirStmt {
-    MirStmt::ObjRaise { value: numpy_pi() }
+    MirStmt::ObjRaise {
+        value: numpy_pi(),
+        cause: None,
+    }
 }
 
 /// In the module body the raise is one borrowed `void` helper call and

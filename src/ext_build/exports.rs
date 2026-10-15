@@ -251,11 +251,14 @@ pub(crate) fn collect_exports_with_hooks(
 
 /// [`collect_exports_with_hooks`], each `C0003` gap paired with the name of
 /// the function it refuses, for the non-strict fallback loop to place.
+/// The functions the active fallback rewrite twins
+/// (`crate::fallback::twinned_exports`) are not exported: Python code calls
+/// their CPython copy.
 pub(crate) fn collect_exports_naming_gaps(
     module: &HirModule,
     hooks: &BTreeSet<String>,
 ) -> Result<Vec<ExtExport>, Vec<(String, Diagnostic)>> {
-    collect_exports_excluding(module, hooks, &BTreeSet::new())
+    collect_exports_excluding(module, hooks, &crate::fallback::twinned_exports())
 }
 
 /// [`collect_exports_naming_gaps`] without the module-level functions named

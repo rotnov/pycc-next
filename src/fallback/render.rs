@@ -15,6 +15,11 @@ pub(crate) struct Rendered {
     /// Where each copy of a native global into the namespace was inserted
     /// (`Plan::native_globals`), and the global's name.
     pub(super) mirror_spans: Vec<(Range<u32>, String)>,
+    /// `(range in text, source offset)` of every edit's replacement text,
+    /// with the offset of the source text it replaced.
+    pub(super) edited: Vec<(Range<u32>, u32)>,
+    /// The names of the twinned functions (`Plan::twinned`).
+    pub(super) twinned: BTreeSet<String>,
 }
 
 impl Rendered {
@@ -25,6 +30,17 @@ impl Rendered {
             .iter()
             .find(|(start, _, len)| (*start..start + len).contains(&at))
             .map(|(start, source, _)| source + (at - start))
+    }
+
+    /// The source offset of `text` offset `at`: where it was copied from,
+    /// or the start of the source text an edit replaced there.
+    pub(super) fn source_or_edit_offset(&self, at: u32) -> Option<u32> {
+        self.source_offset(at).or_else(|| {
+            self.edited
+                .iter()
+                .find(|(range, _)| range.contains(&at))
+                .map(|(_, source)| *source)
+        })
     }
 }
 
@@ -38,6 +54,8 @@ impl Plan {
         let mut text = String::with_capacity(src.len() * 2);
         let mut ranges = Vec::with_capacity(self.stmts.len());
         let mut copied = Vec::new();
+        let mut edited = Vec::new();
+        let mut trailing: Vec<String> = Vec::new();
         let mut cursor = 0usize;
         let preamble_at = self.preamble_position();
         let mut preamble = 0..0;
@@ -68,9 +86,10 @@ impl Plan {
                 // line: a statement may follow it there after a `;`.
                 text.push_str(&"\n".repeat(chunk.matches('\n').count()));
                 text.push_str(&format!(
-                    "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"), {NS})",
+                    "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",
                     py_str(&padded),
-                    py_str(&self.display)
+                    py_str(&self.display),
+                    self.compile_flags()
                 ));
                 let end_at = text.len() as u32;
                 for _ in index..=last {
@@ -86,6 +105,16 @@ impl Plan {
             edits.extend(
                 self.object_builtins
                     .range(stmt.range.start..stmt.range.end)
+                    .map(|(at, (end, text))| names::Edit {
+                        range: *at..*end,
+                        text: text.clone(),
+                        mirror: None,
+                    }),
+            );
+            edits.extend(
+                self.erased
+                    .range(stmt.range.start..stmt.range.end)
+                    .chain(self.substituted.range(stmt.range.start..stmt.range.end))
                     .map(|(at, (end, text))| names::Edit {
                         range: *at..*end,
                         text: text.clone(),
@@ -112,31 +141,92 @@ impl Plan {
                     let at = text.len() as u32;
                     mirror_spans.push((at..at + edit.text.len() as u32, name));
                 }
+                let at = text.len() as u32;
                 text.push_str(&edit.text);
+                edited.push((at..text.len() as u32, edit_start as u32));
                 inner = edit_end;
             }
             let end = stmt.range.end as usize;
             copied.push((text.len() as u32, inner as u32, (end - inner) as u32));
             text.push_str(&src[inner..end]);
             if self.mirrored.contains(&index) {
-                // Same line, so later line numbers do not move.
-                text.push_str(&format!(
-                    "; {BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"), {NS})",
-                    py_str(&src[start..end]),
-                    py_str(&self.display)
-                ));
+                // Padded, so a traceback through the CPython copy names
+                // its lines.
+                let line = src[..start].matches('\n').count();
+                let run = format!(
+                    "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",
+                    py_str(&format!("{}{}", "\n".repeat(line), &src[start..end])),
+                    py_str(&self.display),
+                    self.compile_flags()
+                );
+                if !matches!(self.stmts[index].kind, Kind::Def(..)) {
+                    // Same line, so later line numbers do not move.
+                    text.push_str("; ");
+                    text.push_str(&run);
+                } else if let Some(blank) = blank_line_after(src, end) {
+                    // A `def`'s last line is in its body: the copy runs on
+                    // the blank line after it, so no line number moves.
+                    ranges.push(at..text.len() as u32);
+                    text.push_str(&src[end..blank]);
+                    text.push_str(&run);
+                    cursor = blank;
+                    index += 1;
+                    continue;
+                } else {
+                    trailing.push(run);
+                }
             }
             ranges.push(at..text.len() as u32);
             cursor = end;
             index += 1;
         }
         text.push_str(&src[cursor..]);
+        // The copies with no blank line after their `def`, after the last
+        // line, where no line number moves.
+        for run in trailing {
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push_str(&run);
+            text.push('\n');
+        }
         Rendered {
             text,
             ranges,
             preamble,
             copied,
             mirror_spans,
+            edited,
+            twinned: self
+                .twinned
+                .keys()
+                .filter_map(|index| match &self.stmts[*index].kind {
+                    Kind::Def(name, _) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The offset of the first line after the line `end` is on, when that
+/// line is blank (whitespace only), in `src`.
+fn blank_line_after(src: &str, end: usize) -> Option<usize> {
+    let line_end = end + src[end..].find('\n')?;
+    let next = line_end + 1;
+    let next_end = next + src[next..].find('\n')?;
+    src[next..next_end].trim().is_empty().then_some(next)
+}
+
+impl Plan {
+    /// The extra `compile()` arguments of fallback code: the module's
+    /// `from __future__ import annotations`, which `exec`'d source does not
+    /// inherit, so its annotations stay unevaluated there too.
+    fn compile_flags(&self) -> String {
+        if self.defers_annotations {
+            format!(", {BUILTINS}.__import__(\"__future__\").annotations.compiler_flag")
+        } else {
+            String::new()
         }
     }
 }

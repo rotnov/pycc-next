@@ -599,6 +599,7 @@ pub(super) fn walk_class_body(input: &ClassBodyInput<'_>) -> Result<ClassBodyOut
                     attrs: &declared,
                     class_name,
                     generic: type_param.is_some(),
+                    non_strict: crate::func::is_non_strict(aliases),
                 },
                 &|annotation| {
                     crate::annotation_to_ty(

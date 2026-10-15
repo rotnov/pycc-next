@@ -202,3 +202,12 @@ pub(crate) fn report() {
         eprintln!("not specialized: `{qualname}`: {reason}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// `pycc_mir` calls a specialization by the name `pycc_ast` gives it.
+    #[test]
+    fn the_two_crates_spell_a_specialization_alike() {
+        assert_eq!(pycc_ast::NATIVE_PREFIX, pycc_mir::NATIVE_PREFIX);
+    }
+}

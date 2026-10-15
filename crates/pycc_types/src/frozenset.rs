@@ -43,6 +43,8 @@ fn is_admitted_source(ty: &Ty) -> bool {
             pycc_hir::is_hashable_ty(element) || matches!(**element, Ty::Instance(_))
         }
         Ty::List(element) => pycc_hir::is_hashable_ty(element),
+        // The characters of a `str` (`frozenset("abc")`).
+        Ty::Str => true,
         _ => false,
     }
 }
@@ -55,13 +57,14 @@ fn frozenset_of(source: &Ty) -> Ty {
         Ty::Set(element) | Ty::FrozenSet(element) | Ty::List(element) => {
             Ty::FrozenSet(element.clone())
         }
+        Ty::Str => Ty::FrozenSet(Box::new(Ty::Str)),
         _ => frozenset_int(),
     }
 }
 
 /// The admitted sources, for both help lines.
 const SOURCES_HELP: &str = "a list, set or frozenset of int, float, bool, str or tuples of \
-                            those, or a set or frozenset of a hashable user class";
+                            those, a set or frozenset of a hashable user class, or a str";
 
 /// `T0021` for a call with more than one argument.
 fn wrong_arity(count: usize) -> Diagnostic {
@@ -78,8 +81,8 @@ fn wrong_source(ty: &Ty) -> Diagnostic {
     Diagnostic::error(
         "T0021",
         format!(
-            "`frozenset()` argument must be a list, set or frozenset of hashable elements here, \
-             got `{}`",
+            "`frozenset()` argument must be a str, or a list, set or frozenset of hashable \
+             elements here, got `{}`",
             ty.name()
         ),
         Span::new(0, 0),
@@ -159,7 +162,7 @@ mod tests {
 
     #[test]
     fn a_non_int_or_non_container_source_is_t0021() {
-        for source in [Ty::Int, Ty::Str, Ty::List(Box::new(Ty::Infer))] {
+        for source in [Ty::Int, Ty::Float, Ty::List(Box::new(Ty::Infer))] {
             let err = check_call(std::slice::from_ref(&source)).unwrap_err();
             assert_eq!(err.code, "T0021");
             assert!(err.message.contains(&format!("got `{}`", source.name())));

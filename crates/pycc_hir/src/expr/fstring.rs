@@ -6,6 +6,13 @@ use super::lower_expr;
 use crate::{FStringPart, HirExpr, ImportBinding, unsupported};
 use pycc_diag::Diagnostic;
 
+/// One element of an f-string expression's parts.
+enum Element<'a> {
+    /// A plain string literal part's text.
+    Text(String),
+    Of(&'a pycc_ast::InterpolatedStringElement),
+}
+
 pub(super) fn lower_fstring(
     fstring: &pycc_ast::ExprFString,
     in_function: bool,
@@ -13,10 +20,20 @@ pub(super) fn lower_fstring(
     imports: &[ImportBinding],
     signatures: &SignatureTable,
 ) -> Result<HirExpr, Diagnostic> {
-    let parts = fstring
-        .value
-        .elements()
+    // Every part of an implicit concatenation (`"a" f"{b}"`): a plain
+    // string literal's text, an f-string's elements.
+    let elements = fstring.value.iter().flat_map(|part| match part {
+        pycc_ast::FStringPart::Literal(lit) => {
+            vec![Element::Text(lit.value.to_string())]
+        }
+        pycc_ast::FStringPart::FString(f) => f.elements.iter().map(Element::Of).collect(),
+    });
+    let parts = elements
         .map(|element| -> Result<FStringPart, Diagnostic> {
+            let element = match element {
+                Element::Text(text) => return Ok(FStringPart::Literal(text)),
+                Element::Of(element) => element,
+            };
             Ok(match element {
                 pycc_ast::InterpolatedStringElement::Literal(lit) => {
                     FStringPart::Literal(lit.value.to_string())

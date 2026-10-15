@@ -770,18 +770,30 @@ impl Lift<'_> {
 /// read: a parameter never rebound, or a variable assigned by one top-level
 /// statement and nowhere else.
 fn stable_names(body: &[Stmt], names: &HashSet<String>, params: &HashSet<String>) -> HashSet<String> {
+    // A name target, or each name of a flat tuple target (`pos, key = ...`).
+    let names_of = |target: &Expr| -> Vec<String> {
+        match target {
+            Expr::Name(n) => vec![n.id.to_string()],
+            Expr::Tuple(t) if t.elts.iter().all(|e| matches!(e, Expr::Name(_))) => t
+                .elts
+                .iter()
+                .filter_map(|e| match e {
+                    Expr::Name(n) => Some(n.id.to_string()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
     let top_level: HashSet<String> = body
         .iter()
-        .filter_map(|s| match s {
-            Stmt::Assign(a) if a.targets.len() == 1 => match &a.targets[0] {
-                Expr::Name(n) => Some(n.id.to_string()),
-                _ => None,
-            },
+        .flat_map(|s| match s {
+            Stmt::Assign(a) if a.targets.len() == 1 => names_of(&a.targets[0]),
             Stmt::AnnAssign(a) if a.value.is_some() => match a.target.as_ref() {
-                Expr::Name(n) => Some(n.id.to_string()),
-                _ => None,
+                Expr::Name(n) => vec![n.id.to_string()],
+                _ => Vec::new(),
             },
-            _ => None,
+            _ => Vec::new(),
         })
         .collect();
     names

@@ -270,6 +270,11 @@ struct Sigs {
     methods: HashMap<String, (Sig, bool, String)>,
     /// Top-level class names.
     classes: HashSet<String>,
+    /// Names a module-level `import` binds (`import builtins as b`,
+    /// `from os import path`): a method call on one is a call on a foreign
+    /// object, never on an instance of the module's class that defines a
+    /// method of the same name.
+    imported: HashSet<String>,
 }
 
 impl Sigs {
@@ -295,6 +300,45 @@ fn method_kind(def: &StmtFunctionDef) -> Option<bool> {
     }
 }
 
+/// The names the module-level `import` statements of `body` bind, those
+/// under a module-level `if` or `try` included.
+fn imported_names(body: &[Stmt], out: &mut HashSet<String>) {
+    for stmt in body {
+        match stmt {
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    let name = match &alias.asname {
+                        Some(asname) => asname.as_str(),
+                        None => alias.name.as_str().split('.').next().unwrap_or_default(),
+                    };
+                    out.insert(name.to_string());
+                }
+            }
+            Stmt::ImportFrom(import) => {
+                for alias in &import.names {
+                    out.insert(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
+                }
+            }
+            Stmt::If(s) => {
+                imported_names(&s.body, out);
+                for clause in &s.elif_else_clauses {
+                    imported_names(&clause.body, out);
+                }
+            }
+            Stmt::Try(s) => {
+                imported_names(&s.body, out);
+                for handler in &s.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(h) = handler;
+                    imported_names(&h.body, out);
+                }
+                imported_names(&s.orelse, out);
+                imported_names(&s.finalbody, out);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Collects (and flattens) every bindable `def` of the module.
 fn collect(body: &mut Vec<Stmt>) -> Sigs {
     let mut sigs = Sigs::default();
@@ -306,6 +350,7 @@ fn collect(body: &mut Vec<Stmt>) -> Sigs {
         })
         .filter(|name| super::closures::count_uses(body, name).bindings == 1)
         .collect();
+    imported_names(body, &mut sigs.imported);
     let mut method_counts: HashMap<String, usize> = HashMap::new();
     for stmt in body.iter() {
         if let Stmt::ClassDef(class) = stmt {
@@ -445,6 +490,13 @@ impl Rewrite<'_> {
                 let (sig, is_static, class) = self.sigs.methods.get(a.attr.as_str())?;
                 let attr = a.attr.to_string();
                 match a.value.as_ref() {
+                    // `module.m(...)`: a foreign call (`Sigs::imported`).
+                    Expr::Name(n)
+                        if self.sigs.imported.contains(n.id.as_str())
+                            && !self.shadowed(n.id.as_str()) =>
+                    {
+                        None
+                    }
                     Expr::Name(n)
                         if self.sigs.classes.contains(n.id.as_str())
                             && !self.shadowed(n.id.as_str()) =>

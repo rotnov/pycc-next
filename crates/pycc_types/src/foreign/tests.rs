@@ -491,18 +491,19 @@ fn the_in_function_condition_sites_are_admitted() {
 ///
 /// The direct shape is a run-time `PyObject_IsInstance` since Part 1 of
 /// #1371 (`foreign::compare::check_object_isinstance`), so a builtin class
-/// is admitted and a tuple of classes is the refused shape. The helper
+/// and a tuple of them are admitted and an empty tuple is a refused shape. The helper
 /// shape never gets there: `isinstance` already refuses *any* call
 /// expression as its first argument with `C0001`, because evaluating one
 /// would lose its side effects.
 #[test]
 fn isinstance_admits_a_cpython_object_and_refuses_a_call_expression() {
     assert!(check_foreign("if isinstance(numpy.pi, int):\n    print(1)\n").is_none());
+    assert!(check_foreign("if isinstance(numpy.pi, (int, str)):\n    print(1)\n").is_none());
     assert_refused(
         "`numpy.pi`",
-        "if isinstance(numpy.pi, (int, str)):\n    print(1)\n",
+        "if isinstance(numpy.pi, ()):\n    print(1)\n",
         "I0404",
-        "against a tuple of classes",
+        "against an empty tuple",
     );
     assert_refused(
         "a private helper returning `object`",

@@ -134,6 +134,13 @@ pub(super) fn collect_init_attrs(
             }
             let ty = match declared.find(&attr_name) {
                 Some(decl) => declared_slot_ty(decl, declared, assign, params, receiver_name)?,
+                // Non-strict mode: `self.d = {}` with no key/value type
+                // source is the CPython `dict`.
+                None if declared.non_strict
+                    && matches!(&*assign.value, Expr::Dict(dict) if dict.items.is_empty()) =>
+                {
+                    Ty::Object
+                }
                 None => slot_ty_from_init_rhs(
                     &assign.value,
                     params,
@@ -158,6 +165,9 @@ pub(super) struct DeclaredAttrs<'a> {
     /// Whether the class is a PEP 695 generic class (`class C[T]:`), whose
     /// declarations keep the shape gate (#1388; see `declared_slot_ty`).
     pub(super) generic: bool,
+    /// Whether the module is lowered in non-strict mode, where an
+    /// attribute with no native type source is a CPython object.
+    pub(super) non_strict: bool,
 }
 
 impl DeclaredAttrs<'_> {

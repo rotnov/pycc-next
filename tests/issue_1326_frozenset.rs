@@ -311,15 +311,15 @@ fn a_wrong_argument_to_frozenset_is_t0021() {
         "e2e_1326_int_arg",
         "x = frozenset(1)\n",
         "T0021",
-        "`frozenset()` argument must be a list, set or frozenset of hashable elements \
-         here, got `int`",
+        "`frozenset()` argument must be a str, or a list, set or frozenset of hashable \
+         elements here, got `int`",
     );
     assert_one_error(
         "e2e_1326_str_list_arg",
         "x = frozenset([[1]])\n",
         "T0021",
-        "`frozenset()` argument must be a list, set or frozenset of hashable elements \
-         here, got `list[list[int]]`",
+        "`frozenset()` argument must be a str, or a list, set or frozenset of hashable \
+         elements here, got `list[list[int]]`",
     );
     assert_one_error(
         "e2e_1326_two_args",

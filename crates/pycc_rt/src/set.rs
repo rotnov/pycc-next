@@ -63,7 +63,38 @@ pub struct PySetObj {
     /// `(element index, slot)` of the last [`pycc_rt_set_get`], so an
     /// in-order walk is linear.
     cursor: Cell<(i64, usize)>,
+    /// A frozenset of `str`'s one-character ASCII members as a bitmap, once
+    /// [`PySetObj::contains_char`] built it, with the table address and
+    /// length it was built from: `ch in s` is then one bit test. Every
+    /// mutation drops it ([`PySetObj::invalidate`]).
+    ascii: Cell<Option<AsciiMembers>>,
+    /// A frozenset's CPython `frozenset` of the same elements, once one
+    /// exists (a strong reference): the one it was converted from, or the
+    /// one built the first time it crossed to CPython, which every later
+    /// crossing shares instead of copying the elements again
+    /// (`pycc_ext_obj_pack_frozenset`). Every mutation drops it.
+    foreign: Cell<*mut std::ffi::c_void>,
 }
+
+impl Drop for PySetObj {
+    fn drop(&mut self) {
+        let foreign = self.foreign.replace(std::ptr::null_mut());
+        if !foreign.is_null() {
+            crate::rc::release_object(foreign);
+        }
+    }
+}
+
+/// See [`PySetObj::ascii`].
+#[derive(Clone, Copy)]
+struct AsciiMembers {
+    table: *const Entry,
+    len: i64,
+    bits: u128,
+}
+
+mod chars;
+pub use chars::*;
 
 const _: () = assert!(std::mem::offset_of!(PySetObj, rc) == crate::rc::RC_OFFSET);
 
@@ -89,16 +120,29 @@ impl PySetObj {
             finger: 0,
             table: vec![Entry::default(); MINSIZE],
             cursor: Cell::new((-1, 0)),
+            ascii: Cell::new(None),
+            foreign: Cell::new(std::ptr::null_mut()),
         }
     }
 
     fn invalidate(&self) {
+        self.ascii.set(None);
+        let foreign = self.foreign.replace(std::ptr::null_mut());
+        if !foreign.is_null() {
+            crate::rc::release_object(foreign);
+        }
         self.cursor.set((-1, 0));
     }
 
     /// `set_lookkey`: the slot holding `key`, or the empty slot ending the
     /// probe sequence.
     fn lookkey(&self, key: i64, hash: i64) -> usize {
+        self.lookkey_by(hash, |entry| entry == key || value::eq(self.kind, entry, key))
+    }
+
+    /// [`Self::lookkey`] with `same` deciding whether an active entry of
+    /// the hash holds the key.
+    fn lookkey_by(&self, hash: i64, same: impl Fn(i64) -> bool) -> usize {
         let mask = self.mask;
         let mut perturb = hash as u64;
         let mut i = (hash as u64 as usize) & mask;
@@ -114,10 +158,7 @@ impl PySetObj {
                 if entry.state == EMPTY {
                     return j;
                 }
-                if entry.state == ACTIVE
-                    && entry.hash == hash
-                    && (entry.key == key || value::eq(self.kind, entry.key, key))
-                {
+                if entry.state == ACTIVE && entry.hash == hash && same(entry.key) {
                     return j;
                 }
                 if probes == 0 {
@@ -479,6 +520,15 @@ pub unsafe extern "C" fn pycc_rt_set_add(s: *mut PySetObj, word: i64) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_set_contains(s: *mut PySetObj, word: i64) -> i8 {
     let s = set(s);
+    // A one-character ASCII `str` in a frozenset of `str`: a bit test.
+    if s.frozen != 0 && s.kind == crate::list::LIST_KIND_STR {
+        // SAFETY: a word of a set of `str` is a live `PyStrObj`.
+        if let [byte] = unsafe { &*(word as *mut PyStrObj) }.bytes()
+            && byte.is_ascii()
+        {
+            return i8::from(s.ascii_members() & (1u128 << byte) != 0);
+        }
+    }
     match value::hash_or_raise(s.kind, word) {
         Some(hash) => i8::from(s.contains_entry(word, hash)),
         None => 0,

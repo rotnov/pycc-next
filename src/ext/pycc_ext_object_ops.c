@@ -108,12 +108,85 @@ int pycc_ext_obj_setitem(PyObject *o, PyObject *k, PyObject *v)
  * `OverflowError` (`docs/DEVIATIONS.md`). Kind 8 reads a slice bound,
  * which clamps instead of raising, as CPython's `_PyEval_SliceIndex` does.
  */
+extern void *pycc_rt_set_new(long long kind);
+extern void pycc_rt_set_add(void *set, long long word);
+extern void pycc_rt_set_decref(void *set);
+
 int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
 {
     static const char *const wanted_names[] = {"int", "float", "bool", "str"};
     PyObject *type_name;
     int admitted;
     double as_double;
+
+    /*
+     * Kinds 9 and 10: a `frozenset[str]` / `frozenset[int]` slot. A CPython
+     * `set` or `frozenset` of such elements becomes a fresh native set (a
+     * copy, which nothing can tell from the value: a frozenset is never
+     * mutated).
+     */
+    if (o != NULL && out != NULL && (kind == 9 || kind == 10)) {
+        PyObject *iter;
+        PyObject *item;
+        void *set;
+
+        if (!PyAnySet_Check(o)) {
+            type_name = PyType_GetName(Py_TYPE(o));
+            if (type_name != NULL) {
+                PyErr_Format(PyExc_TypeError, "%s must be frozenset, not %U", what, type_name);
+                Py_DECREF(type_name);
+            }
+            return -1;
+        }
+        iter = PyObject_GetIter(o);
+        if (iter == NULL) {
+            return -1;
+        }
+        set = pycc_rt_set_new(kind == 9 ? 3 : 0);
+        while ((item = PyIter_Next(iter)) != NULL) {
+            long long word = 0;
+            int status;
+
+            if (kind == 9) {
+                void *text = NULL;
+                status = PyUnicode_Check(item) ? pycc_ext_obj_unbox_str(item, &text) : -2;
+                word = (long long)(intptr_t)text;
+            } else {
+                status = PyLong_Check(item) && !PyBool_Check(item)
+                             ? pycc_ext_obj_unbox_int(item, &word)
+                             : -2;
+            }
+            if (status == -2) {
+                type_name = PyType_GetName(Py_TYPE(item));
+                if (type_name != NULL) {
+                    PyErr_Format(PyExc_TypeError, "%s must be a frozenset of %s, not one holding %U",
+                                 what, kind == 9 ? "str" : "int", type_name);
+                    Py_DECREF(type_name);
+                }
+            }
+            Py_DECREF(item);
+            if (status != 0) {
+                Py_DECREF(iter);
+                pycc_rt_set_decref(set);
+                return -1;
+            }
+            pycc_rt_set_add(set, word);
+        }
+        Py_DECREF(iter);
+        if (PyErr_Occurred()) {
+            pycc_rt_set_decref(set);
+            return -1;
+        }
+        /* The slot is a frozenset; an exact CPython `frozenset` is the one
+         * the copy shares when it crosses back (`pycc_ext_obj_pack_frozenset`). */
+        pycc_rt_set_freeze(set);
+        if (PyFrozenSet_CheckExact(o)) {
+            Py_INCREF(o);
+            pycc_rt_set_set_foreign(set, o);
+        }
+        *(void **)out = set;
+        return 0;
+    }
 
     if (o != NULL && out != NULL && kind >= 4 && kind <= 8) {
         PyObject *index;

@@ -108,6 +108,13 @@ pub enum MirExpr {
     /// (`pycc_codegen::object_box`'s identity peephole), so the original
     /// object, not an unbox-then-repack copy, reaches CPython.
     ObjectUnbox(Box<MirExpr>, Box<Ty>),
+    /// Non-strict mode: a CPython object converted to the native `Ty` (one
+    /// of the four scalars) with a run-time type check, raising
+    /// `TypeError` for an object of another type (`pycc_codegen`'s
+    /// `object_coerce`). Built for an object element of a tuple display
+    /// returned from a function declared to return a native tuple
+    /// (`return pos, text` where `text` is an object).
+    ObjectCoerce(Box<MirExpr>, Box<Ty>),
     /// Non-strict mode (#3): a CPython object used as an index -- a list,
     /// tuple or `str` subscript, a `range()` argument -- read through
     /// `__index__` as CPython does, with CPython's own `TypeError` for its

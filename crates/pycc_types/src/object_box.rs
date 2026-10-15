@@ -91,11 +91,15 @@ pub(crate) fn admits_value(
     // Non-strict mode (#3): a name holding a native container that flows
     // into an `object` slot becomes an `object` itself (widening), so the
     // container it builds is the CPython one from the start.
+    // A frozenset of scalars is not: it is immutable, so the CPython copy it
+    // crosses as (`pycc_ext_obj_pack_frozenset`, made once and shared) has
+    // no alias to break, and its native uses stay native.
     if let (Ty::Object, HirExpr::Name(name)) = (to, value)
         && matches!(
             from,
             Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_)
         )
+        && !foreign::is_packable_frozenset(from)
     {
         crate::non_strict::request_widen(name, from, &Ty::Object, |_| true);
     }
@@ -111,6 +115,7 @@ pub(crate) fn admits_value(
                     element_ty,
                     Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_)
                 )
+                && !foreign::is_packable_frozenset(element_ty)
             {
                 crate::non_strict::request_widen(name, element_ty, &Ty::Object, |_| true);
             }

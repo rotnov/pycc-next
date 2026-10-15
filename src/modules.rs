@@ -358,7 +358,7 @@ impl Loader {
         // An `--ext` module's public signatures the boundary cannot bind
         // alone get a compiled entry for a Python wrapper (#1194).
         if is_entry && self.ext_module {
-            pycc_ast::split_ext_signatures(&mut parsed, &source);
+            pycc_ast::split_ext_signatures(&mut parsed, &source, self.non_strict);
             // Untyped functions get guarded native specializations.
             if self.non_strict {
                 crate::specialize::specialize_entry(&mut parsed);

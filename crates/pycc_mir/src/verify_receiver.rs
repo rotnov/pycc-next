@@ -244,9 +244,20 @@ impl Verifier<'_> {
         match stmt {
             MirStmt::ExprStmt(value)
             | MirStmt::Assign { value, .. }
-            | MirStmt::ObjRaise { value }
+            | MirStmt::ObjRaise {
+                value, cause: None, ..
+            }
             | MirStmt::GenReturn(value)
             | MirStmt::Yield(value) => self.expr(value),
+            MirStmt::ObjRaise {
+                value,
+                cause: Some(cause),
+            } => {
+                self.expr(value);
+                for expr in cause.exprs() {
+                    self.expr(expr);
+                }
+            }
             MirStmt::ForGen { body, .. } => self.stmts(body),
             MirStmt::NoOp
             | MirStmt::ReleaseName(_)
@@ -415,6 +426,7 @@ impl Verifier<'_> {
             | MirExpr::ObjectBox(inner)
             | MirExpr::OptionalUnwrap(inner, _)
             | MirExpr::ObjectUnbox(inner, _)
+            | MirExpr::ObjectCoerce(inner, _)
             | MirExpr::ObjectIndex(inner, _)
             | MirExpr::Not(inner)
             | MirExpr::ExceptionMessage(inner)
@@ -455,7 +467,7 @@ impl Verifier<'_> {
             }
             MirExpr::ObjIsInstance { value, class } => {
                 self.expr(value);
-                if let crate::ObjIsInstanceClass::Object(class) = class {
+                for class in class.objects() {
                     self.expr(class);
                 }
             }

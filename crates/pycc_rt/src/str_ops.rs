@@ -707,6 +707,53 @@ fn index_or_raise(found: i64) -> i64 {
     found
 }
 
+/// The byte offset a `start` argument (`s.find(sub, start)`) selects, as
+/// a slice start: a negative one counts from the end, clamped to 0; `None`
+/// past the end. A bigint `start` is past the end when positive.
+fn start_offset(s: *mut PyStrObj, start: i64) -> Option<usize> {
+    let obj = unsafe { &*s };
+    let len = obj.char_count() as i64;
+    let index = match crate::int_encoding::inline_int_value(start) {
+        Some(index) if index < 0 => (index + len).max(0),
+        Some(index) => index,
+        None => i64::MAX,
+    };
+    (index <= len).then(|| obj.byte_offset(index as usize))
+}
+
+/// `s.find(sub, start)`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_str_find_from(s: *mut PyStrObj, sub: *mut PyStrObj, start: i64) -> i64 {
+    let Some(from) = start_offset(s, start) else {
+        return tag_smallint(-1);
+    };
+    let text = text_of(s);
+    tag_smallint(
+        text[from..]
+            .find(text_of(sub))
+            .map_or(-1, |b| unsafe { &*s }.char_index_of(from + b) as i64),
+    )
+}
+
+/// `s.index(sub, start)`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_str_index_from(s: *mut PyStrObj, sub: *mut PyStrObj, start: i64) -> i64 {
+    index_or_raise(pycc_rt_str_find_from(s, sub, start))
+}
+
+/// `s.startswith(prefix, start)`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_str_startswith_from(
+    s: *mut PyStrObj,
+    prefix: *mut PyStrObj,
+    start: i64,
+) -> i8 {
+    match start_offset(s, start) {
+        Some(from) => i8::from(bytes_of(s)[from..].starts_with(bytes_of(prefix))),
+        None => 0,
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_index(s: *mut PyStrObj, sub: *mut PyStrObj) -> i64 {
     index_or_raise(pycc_rt_str_find(s, sub))

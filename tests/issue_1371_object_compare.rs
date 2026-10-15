@@ -156,10 +156,10 @@ fn the_shapes_outside_part_1_are_refused() {
             "object",
         ),
         (
-            "obj_cmp_isinstance_tuple",
-            "print(isinstance(o, (int, str)))\n",
+            "obj_cmp_isinstance_empty_tuple",
+            "print(isinstance(o, ()))\n",
             "I0404",
-            "against a tuple of classes",
+            "against an empty tuple",
         ),
         (
             "obj_cmp_isinstance_pycc_class",

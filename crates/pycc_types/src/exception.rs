@@ -336,10 +336,12 @@ pub(super) fn check_raise_stmt(
     cause: &Option<HirExpr>,
 ) -> Result<(), Diagnostic> {
     let mut object_operand = false;
+    let mut object_exception = false;
     if let Some(exc) = exc {
-        object_operand |=
+        object_exception =
             check_raise_operand(env, local_names, exc, "can only raise exception instances")?
                 == RaiseOperand::Object;
+        object_operand |= object_exception;
     } else if !env.in_except_handler {
         return Err(Diagnostic::error(
             "T0021",
@@ -354,9 +356,12 @@ pub(super) fn check_raise_stmt(
             cause,
             "cause must be an exception instance",
         )? == RaiseOperand::Object;
-        if object_operand {
-            // Part 9 of #1371: `raise o` is admitted, but chaining a cause
-            // onto, or from, a CPython object is not built yet.
+        // `raise o from cause` with a CPython object `o` chains the cause,
+        // an object or a pycc exception, onto the CPython exception
+        // (`pycc_ext_obj_raise_from`).
+        if object_operand && !object_exception {
+            // Part 9 of #1371: chaining a CPython object cause onto a pycc
+            // exception is not built yet.
             return Err(Diagnostic::error(
                 "C0001",
                 "`raise ... from ...` with a CPython object as the exception or the cause is not supported yet",

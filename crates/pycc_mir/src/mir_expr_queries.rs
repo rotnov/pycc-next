@@ -12,7 +12,9 @@ impl MirExpr {
             MirExpr::NoneLiteral => Ty::None,
             MirExpr::NotImplemented | MirExpr::ObjectBox(_) => Ty::Object,
             MirExpr::OptionalWrap(_, inner) => Ty::Optional(inner.clone()),
-            MirExpr::OptionalUnwrap(_, inner) | MirExpr::ObjectUnbox(_, inner) => (**inner).clone(),
+            MirExpr::OptionalUnwrap(_, inner)
+            | MirExpr::ObjectUnbox(_, inner)
+            | MirExpr::ObjectCoerce(_, inner) => (**inner).clone(),
             MirExpr::ObjectIndex(..) => Ty::Int,
             MirExpr::Name { ty, .. }
             | MirExpr::Call { ty, .. }
@@ -334,6 +336,7 @@ impl MirExpr {
             // not silently skip whatever sub-expression this node wraps).
             MirExpr::OptionalUnwrap(inner, _)
             | MirExpr::ObjectUnbox(inner, _)
+            | MirExpr::ObjectCoerce(inner, _)
             | MirExpr::ObjectIndex(inner, _) => inner.collect_named_expr_bindings(out),
             MirExpr::Call { args, .. } => {
                 for arg in args {
@@ -515,7 +518,7 @@ impl MirExpr {
             }
             MirExpr::ObjIsInstance { value, class } => {
                 value.collect_named_expr_bindings(out);
-                if let ObjIsInstanceClass::Object(class) = class {
+                for class in class.objects() {
                     class.collect_named_expr_bindings(out);
                 }
             }

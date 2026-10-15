@@ -1552,7 +1552,7 @@ admitted when the iterable is written as an attribute load \
 name bound to such a value (`x = product(\"ab\")`, then `for t in x:`); \
 a bare imported module is iterated too, and raises CPython's own \
 `TypeError` at run time. Everything else is \
-still refused, including `isinstance` against a tuple of classes or a \
+still refused, including `isinstance` against an empty tuple or a \
 pycc exception class, protocol, enum or generic class, a comparison chain with an object link (`a < o < b`, `o is p is q`), any other `type(...)` shape, an \
 equality test against a bare `None`, a rich comparison with an operand \
 of any other type, a `match` subject, iterating over a subscript load \

@@ -476,11 +476,13 @@ pub(crate) fn emit_obj_is_instance_expr<'ctx>(
     };
     let value_scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
     let held_value = object_release::hold(context, module, rt, value, &value_scalar);
-    let mut held_class = None;
-    let class = match class {
+    let mut held_classes = Vec::new();
+    // Every class expression first (a tuple's, in order), as CPython
+    // evaluates the class argument before testing.
+    let mut evaluate = |class: &pycc_mir::ObjIsInstanceClass| match class {
         pycc_mir::ObjIsInstanceClass::Object(class) => {
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, class);
-            held_class = Some(object_release::hold(context, module, rt, class, &scalar));
+            held_classes.push(object_release::hold(context, module, rt, class, &scalar));
             foreign_compare::IsInstanceClass::Object(scalar)
         }
         pycc_mir::ObjIsInstanceClass::Builtin(builtin) => {
@@ -489,10 +491,17 @@ pub(crate) fn emit_obj_is_instance_expr<'ctx>(
         pycc_mir::ObjIsInstanceClass::Compiled(name) => {
             foreign_compare::IsInstanceClass::Compiled(name.clone())
         }
+        pycc_mir::ObjIsInstanceClass::AnyOf(_) => {
+            unreachable!("pycc_mir flattens a nested tuple of classes")
+        }
+    };
+    let classes: Vec<_> = match class {
+        pycc_mir::ObjIsInstanceClass::AnyOf(classes) => classes.iter().map(&mut evaluate).collect(),
+        class => vec![evaluate(class)],
     };
     let result =
-        foreign_compare::emit_isinstance(context, builder, module, rt, value_scalar, class);
-    if let Some(held) = held_class {
+        foreign_compare::emit_isinstance_any(context, builder, module, rt, value_scalar, classes);
+    for held in held_classes {
         held.release(builder, rt);
     }
     held_value.release(builder, rt);

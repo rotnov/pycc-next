@@ -43,6 +43,43 @@ pub struct PyStrObj {
     /// `crate::str_index::STRIDE`-th code point, built on the first index
     /// or slice, so `s[i]` and `s[i:j]` stay O(1) in the string's length.
     pub(crate) offsets: std::cell::OnceCell<Box<[usize]>>,
+    /// An `--ext` module's CPython `str` of the same text, once one exists
+    /// (a strong reference, released with this object): the one a Python
+    /// caller passed, or the one built the first time this `str` crossed to
+    /// CPython, which every later crossing then shares instead of copying
+    /// the text again (`pycc_ext_obj_pack_str`).
+    pub(crate) foreign: Cell<*mut std::ffi::c_void>,
+}
+
+impl Drop for PyStrObj {
+    fn drop(&mut self) {
+        let foreign = self.foreign.get();
+        if !foreign.is_null() {
+            crate::rc::release_object(foreign);
+        }
+    }
+}
+
+/// The CPython `str` `s` shares (borrowed), or null (`PyStrObj::foreign`).
+///
+/// # Safety
+/// `s` must be a live `str`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_foreign(s: *mut PyStrObj) -> *mut std::ffi::c_void {
+    unsafe { &*s }.foreign.get()
+}
+
+/// Makes `object` (a CPython `str` of `s`'s text, whose reference this
+/// adopts) the one `s` shares, releasing any earlier one.
+///
+/// # Safety
+/// `s` must be a live `str`, `object` a `PyObject *` of its text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_set_foreign(s: *mut PyStrObj, object: *mut std::ffi::c_void) {
+    let old = unsafe { &*s }.foreign.replace(object);
+    if !old.is_null() {
+        crate::rc::release_object(old);
+    }
 }
 
 impl PyStrObj {
@@ -102,6 +139,7 @@ pub(crate) fn new_pystr(bytes: &[u8]) -> *mut PyStrObj {
         hash: Cell::new(-1),
         chars: Cell::new(-1),
         offsets: std::cell::OnceCell::new(),
+        foreign: Cell::new(std::ptr::null_mut()),
     }))
 }
 
@@ -137,6 +175,32 @@ pub(crate) fn new_pystr(bytes: &[u8]) -> *mut PyStrObj {
 pub unsafe extern "C" fn pycc_rt_str_from_literal(ptr: *const u8, len: i64) -> *mut PyStrObj {
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     new_pystr(bytes)
+}
+
+/// A `str` literal's object: built from the literal's bytes on the first
+/// evaluation of its site, stored in the site's `slot` and never freed,
+/// and a new reference to that one object on every later evaluation (a
+/// `str` is immutable, and CPython shares a code object's constants the
+/// same way). Not counted by `STR_LIVE`, like the shared one-character
+/// strings (`crate::str_index::ascii_char`).
+///
+/// # Safety
+/// `ptr` must point to at least `len` readable UTF-8 bytes, and `slot` to
+/// the site's own pointer, null before the first call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_from_literal_cached(
+    ptr: *const u8,
+    len: i64,
+    slot: *mut *mut PyStrObj,
+) -> *mut PyStrObj {
+    let mut obj = unsafe { *slot };
+    if obj.is_null() {
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+        obj = new_pystr(bytes);
+        STR_LIVE.fetch_sub(1, Ordering::Relaxed);
+        unsafe { *slot = obj };
+    }
+    crate::str_index::retain_immortal(obj)
 }
 
 /// Concatenates two `str` objects into a brand-new one (Python's `+` on

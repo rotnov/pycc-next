@@ -440,6 +440,37 @@ pub(super) fn emit_to_str_pointer<'ctx>(
     emit_text_conversion(context, builder, module, rt, base, helper, "foreign_to_str")
 }
 
+/// Emits one `repr(o)` against a CPython object (`f"{o!r}"`): [`emit_to_str`]
+/// reaching `pycc_ext_obj_repr`, CPython's `PyObject_Repr`.
+pub(super) fn emit_repr<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    base: Scalar<'ctx>,
+) -> Scalar<'ctx> {
+    let helper = match module.get_function(EXT_OBJ_REPR_SYMBOL) {
+        Some(existing) => existing,
+        None => {
+            let ptr = context.ptr_type(inkwell::AddressSpace::default());
+            module.add_function(
+                EXT_OBJ_REPR_SYMBOL,
+                context.i32_type().fn_type(&[ptr.into(), ptr.into()], false),
+                None,
+            )
+        }
+    };
+    Scalar::Str(emit_text_conversion(
+        context,
+        builder,
+        module,
+        rt,
+        base,
+        helper,
+        "foreign_repr",
+    ))
+}
+
 /// Emits one f-string interpolation `f"{o}"` of a CPython object and yields
 /// the text as a bare `PyStrObj *` (#1340).
 ///

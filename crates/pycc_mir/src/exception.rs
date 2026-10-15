@@ -99,7 +99,7 @@ pub(super) fn lower_raise(
     };
     let Some(cause) = cause else {
         return match lower_raise_operand(exc, scopes, classes, current_class) {
-            RaiseOperand::Object(value) => MirStmt::ObjRaise { value },
+            RaiseOperand::Object(value) => MirStmt::ObjRaise { value, cause: None },
             // `frame_function` is filled in by `set_frame_function`'s
             // post-pass over the enclosing item's whole body, once
             // `frame_name` is known; `lower_raise` never sees it directly
@@ -110,6 +110,12 @@ pub(super) fn lower_raise(
             },
         };
     };
+    if let RaiseOperand::Object(value) = lower_raise_operand(exc, scopes, classes, current_class) {
+        return MirStmt::ObjRaise {
+            value,
+            cause: Some(lower_exception_value(cause, scopes, classes, current_class)),
+        };
+    }
     MirStmt::RaiseFrom {
         exception: lower_exception_value(exc, scopes, classes, current_class),
         cause: lower_exception_value(cause, scopes, classes, current_class),

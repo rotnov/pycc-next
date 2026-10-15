@@ -157,9 +157,10 @@ fn is_literal(expr: &Expr) -> bool {
 /// literal, and a list, tuple, set or dict display or comprehension, always
 /// builds a native value, so `x in [1, 2]` keeps its located `C0001` here.
 /// A membership test's container the checker may admit: anything that can
-/// be a CPython object, a `str` literal (substring test) or a list display.
+/// be a CPython object, a `str` literal (substring test), a list display
+/// or a set display (`c in {"a", "b"}`).
 fn membership_container(expr: &Expr) -> bool {
-    can_be_object(expr) || matches!(expr, Expr::StringLiteral(_) | Expr::List(_))
+    can_be_object(expr) || matches!(expr, Expr::StringLiteral(_) | Expr::List(_) | Expr::Set(_))
 }
 
 fn can_be_object(expr: &Expr) -> bool {

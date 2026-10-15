@@ -114,7 +114,7 @@ impl PyStrObj {
 
 /// A reference count no program reaches: a shared one-character string is
 /// never freed.
-const IMMORTAL: u32 = 1 << 30;
+pub(crate) const IMMORTAL: u32 = 1 << 30;
 
 static ASCII_CHARS: [AtomicPtr<PyStrObj>; 128] = [const { AtomicPtr::new(std::ptr::null_mut()) }; 128];
 
@@ -139,8 +139,13 @@ pub(crate) fn ascii_char(byte: u8) -> *mut PyStrObj {
             }
         }
     }
+    retain_immortal(obj)
+}
+
+/// A new reference to the immortal `obj`, which stays immortal however
+/// unbalanced a caller's counting is.
+pub(crate) fn retain_immortal(obj: *mut PyStrObj) -> *mut PyStrObj {
     let rc = &unsafe { &*obj }.rc;
-    // Keep it immortal however unbalanced a caller's counting is.
     rc.set(if rc.get() < IMMORTAL / 2 { IMMORTAL } else { rc.get() + 1 });
     obj
 }

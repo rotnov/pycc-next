@@ -59,6 +59,9 @@ pub(super) fn packer_for<'ctx>(scalar: Scalar<'ctx>) -> (&'static str, BasicValu
         Scalar::Instance(value) => (EXT_OBJ_PACK_INSTANCE_SYMBOL, value.into()),
         // Non-strict mode: a fresh native list copied into a CPython one.
         Scalar::List(value) => (EXT_OBJ_PACK_LIST_SYMBOL, value.into()),
+        // A frozenset of scalars (`pycc_types`' `is_packable_frozenset`;
+        // a mutable `set` is never admitted), copied into a CPython one.
+        Scalar::Set(value) => (EXT_OBJ_PACK_FROZENSET_SYMBOL, value.into()),
         _ => panic!(
             "pycc_codegen: internal error: an operand of a foreign object operation did not \
              evaluate to a marshallable scalar -- pycc_types admits only `int`, `float`, \
@@ -100,7 +103,8 @@ pub(super) fn emit_pack<'ctx>(
 /// `is_packable_tuple`) into a new CPython `tuple`: each field through its
 /// scalar packer, then `pycc_ext_obj_pack_tuple`, which consumes the packed
 /// elements. A field's kind is read off its LLVM type: `i64` is an `int`
-/// word, `double` a `float`, `i8` a `bool`.
+/// word, `double` a `float`, `i8` a `bool`, a pointer a `str` (the only
+/// pointer field `is_packable_tuple` admits).
 fn emit_pack_tuple<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -130,8 +134,11 @@ fn emit_pack_tuple<'ctx>(
                 Scalar::Int(value.into_int_value())
             }
             inkwell::types::BasicTypeEnum::IntType(_) => Scalar::Bool(value.into_int_value()),
+            inkwell::types::BasicTypeEnum::PointerType(_) => {
+                Scalar::Str(value.into_pointer_value())
+            }
             _ => panic!(
-                "pycc_codegen: internal error: a packed tuple holds only int, float and bool"
+                "pycc_codegen: internal error: a packed tuple holds only int, float, bool and str"
             ),
         };
         let packed = emit_pack(context, builder, module, scalar, "pack_tuple_item");

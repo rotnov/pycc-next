@@ -568,7 +568,7 @@ pub(crate) fn collect_call_constraints(
             return Ok(Some(Ok(Ty::Bool)));
         }
     }
-    if (callee == "int" || callee == "str") && !signatures.contains_key(callee) {
+    if (callee == "int" || callee == "str" || callee == "repr") && !signatures.contains_key(callee) {
         // Part 4 of #1026 (PR 4b of #1083): the solver-side mirrors of
         // `infer_expr_in`'s `int`/`str` arms, which own the reasoning
         // -- `Ty::Object` only, a user-defined `int`/`str` first.
@@ -743,6 +743,22 @@ pub(crate) fn collect_call_constraints(
         // reverse direction, even though `unify_terms` itself already
         // handles that case symmetrically (self-review finding,
         // pre-merge).
+        // Non-strict mode: an annotated `frozenset[str]` parameter takes a
+        // CPython object too (converted, `non_strict::admits_coercion`),
+        // so it does not type an argument still being inferred.
+        if matches!((&arg, parameter), (Some(Err(_)), Ok(ty))
+            if crate::non_strict::is_non_strict() && crate::non_strict::is_coercible_frozenset(ty))
+        {
+            continue;
+        }
+        // Nor does an `object` parameter, which takes any value it can box:
+        // an argument still being inferred (a module constant built from
+        // others) keeps the type its own uses give it.
+        if matches!((&arg, parameter), (Some(Err(_)), Ok(Ty::Object)))
+            && crate::non_strict::is_non_strict()
+        {
+            continue;
+        }
         if let Some(arg) = arg
             && matches!((&arg, parameter), (Err(_), _) | (_, Err(_)))
         {

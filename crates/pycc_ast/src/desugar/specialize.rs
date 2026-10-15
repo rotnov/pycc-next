@@ -36,6 +36,14 @@
 //! Only a function that loops (a `for`, a `while` or a comprehension) is
 //! specialized: converting a `str` argument copies it, which a body that
 //! does constant work would not win back.
+//!
+//! A module function with a parameter annotated `Iterable[T]` (`T` a
+//! scalar type) gets a second kind of specialization: Python may pass it
+//! any iterable, which only the object holds, but the module's own calls
+//! usually pass a `frozenset[T]` constant. Its copy takes `frozenset[T]`
+//! there and has no guard: `pycc_mir` calls it in place of the original
+//! from a compiled call whose arguments have exactly its parameter types,
+//! so the frozenset is never converted to a CPython object.
 
 use super::build::name;
 use ruff_python_ast::visitor::{self, Visitor};
@@ -82,6 +90,14 @@ pub fn specialize_untyped(module: &mut ModModule, skip: &dyn Fn(&str) -> bool) -
         match stmt {
             Stmt::FunctionDef(mut def) => {
                 let planned = plan(&def, None, skip);
+                if planned.is_none()
+                    && let Some((clone, spec)) = plan_iterable(&def, skip)
+                {
+                    body.push(Stmt::FunctionDef(def));
+                    body.push(Stmt::FunctionDef(clone));
+                    out.push(spec);
+                    continue;
+                }
                 match planned {
                     Some((clone, spec)) => {
                         add_guard(&mut def, None, &spec);
@@ -246,6 +262,82 @@ fn plan(
             qualname,
             range: def.range(),
             params: guessed,
+        },
+    ))
+}
+
+/// The scalar element type `Iterable[T]` annotates, as the specialization's
+/// `frozenset[T]` spelling.
+fn iterable_element(annotation: &Expr) -> Option<&'static str> {
+    let Expr::Subscript(sub) = annotation else {
+        return None;
+    };
+    if !matches!(sub.value.as_ref(), Expr::Name(base) if base.id.as_str() == "Iterable") {
+        return None;
+    }
+    let Expr::Name(element) = sub.slice.as_ref() else {
+        return None;
+    };
+    Some(match element.id.as_str() {
+        "str" => "frozenset[str]",
+        "int" => "frozenset[int]",
+        "float" => "frozenset[float]",
+        "bool" => "frozenset[bool]",
+        _ => return None,
+    })
+}
+
+/// The `frozenset[T]` copy of the module function `def` for its
+/// `Iterable[T]` parameters (module doc), or `None`.
+fn plan_iterable(
+    def: &StmtFunctionDef,
+    skip: &dyn Fn(&str) -> bool,
+) -> Option<(StmtFunctionDef, Specialized)> {
+    let fn_name = def.name.as_str();
+    let p = &def.parameters;
+    if fn_name.starts_with('_')
+        || def.is_async
+        || !def.decorator_list.is_empty()
+        || p.vararg.is_some()
+        || p.kwarg.is_some()
+        || !p.posonlyargs.is_empty()
+        || !p.kwonlyargs.is_empty()
+        || super::ext_generators::yields(&def.body)
+        || skip(fn_name)
+        || p.args.iter().any(|a| {
+            a.parameter.annotation.is_none() || a.parameter.name.as_str().starts_with("_pycc")
+        })
+    {
+        return None;
+    }
+    let mut clone = def.clone();
+    let mut specialized = Vec::new();
+    for arg in &mut clone.parameters.args {
+        arg.default = None;
+        let annotation = arg.parameter.annotation.as_deref()?;
+        if let Some(spelling) = iterable_element(annotation) {
+            let range = annotation.range();
+            let replacement = super::signatures::parse_helper(&format!("x: {spelling}\n"), range);
+            let Some(Stmt::AnnAssign(assign)) = replacement.into_iter().next() else {
+                return None;
+            };
+            arg.parameter.annotation = Some(assign.annotation);
+            specialized.push((arg.parameter.name.to_string(), spelling));
+        }
+    }
+    if specialized.is_empty() {
+        return None;
+    }
+    clone.name = Identifier::new(format!("{NATIVE_PREFIX}{fn_name}"), def.name.range());
+    if clone.returns.is_none() {
+        clone.returns = Some(Box::new(name("object", ExprContext::Load, def.name.range())));
+    }
+    Some((
+        clone,
+        Specialized {
+            qualname: fn_name.to_string(),
+            range: def.range(),
+            params: specialized,
         },
     ))
 }

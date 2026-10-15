@@ -37,6 +37,10 @@ use std::fmt::Write as _;
 /// The prefix of an entry's name.
 const ENTRY_PREFIX: &str = "_pycc_sig_";
 
+/// The non-strict fallback rewrite's alias of the `builtins` module
+/// (`src/fallback.rs`), which a rewritten default may read.
+const FALLBACK_BUILTINS: &str = "__pycc_fallback_builtins";
+
 /// One published signature: the function or method, its compiled entry and
 /// the source of its Python wrapper.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +71,10 @@ pub fn ext_entry_target(name: &str) -> Option<String> {
     qualname::decode(name.strip_prefix(ENTRY_PREFIX)?)
 }
 
-fn entry_name(qualname: &str) -> String {
+/// The name of the compiled entry of the function or method `qualname`
+/// ([`ext_entry_target`] reversed).
+#[must_use]
+pub fn ext_entry_name(qualname: &str) -> String {
     format!("{ENTRY_PREFIX}{}", qualname::encode(qualname))
 }
 
@@ -112,6 +119,14 @@ impl Element {
             Element::Str => format!("_pycc_isinstance({x}, _pycc_str)"),
             Element::Bool => format!("_pycc_isinstance({x}, _pycc_bool)"),
         }
+    }
+
+    /// The guard's test ([`guard`]) that `x` is exactly a value of this
+    /// type: anything else -- an `int` for a `float`, a `bool` for an
+    /// `int`, a subclass -- is a value the compiled function would not
+    /// treat as CPython does.
+    fn exact(self, x: &str) -> String {
+        format!("_pycc_type({x}) is _pycc_{}", self.name())
     }
 
     /// The message's description of the expected type, as the boundary's
@@ -179,6 +194,8 @@ struct Param {
     name: String,
     annotation: String,
     default: Default,
+    /// The scalar type the boundary converts the argument to, if any.
+    element: Option<Element>,
 }
 
 /// Declares `p` in the entry's `params`; the value the entry's call passes
@@ -245,7 +262,13 @@ fn wrapper_param(
 }
 
 /// Plans `def` (the method of `class` when given), or `None`.
-fn plan_def(def: &StmtFunctionDef, class: Option<&str>, source: &str) -> Option<Planned> {
+fn plan_def(
+    def: &StmtFunctionDef,
+    class: Option<&str>,
+    source: &str,
+    non_strict: bool,
+    defers_annotations: bool,
+) -> Option<Planned> {
     let name = def.name.as_str();
     if def.is_async
         || !def.decorator_list.is_empty()
@@ -266,9 +289,16 @@ fn plan_def(def: &StmtFunctionDef, class: Option<&str>, source: &str) -> Option<
             return None;
         }
         let annotation = p.parameter.annotation.as_deref();
+        // Non-strict mode: an unannotated parameter is a CPython object, so
+        // any default is too -- the wrapper evaluates it, in the module's
+        // namespace when its source runs, as CPython does at `def` time. So
+        // is a default of a parameter of no scalar type, which the entry
+        // receives as the object the wrapper passes, converted as any
+        // argument a Python caller passes.
+        let object = non_strict && Element::of(annotation).is_none();
         let default = match p.default.as_deref() {
             None => Default::None,
-            Some(d) if super::signatures::is_literal(d) => {
+            Some(d) if object || super::signatures::is_literal(d) => {
                 Default::Literal(text(source, d.range())?.to_string())
             }
             Some(_) => Default::Computed(
@@ -278,12 +308,14 @@ fn plan_def(def: &StmtFunctionDef, class: Option<&str>, source: &str) -> Option<
         };
         let annotation = match annotation {
             Some(annotation) => text(source, annotation.range())?.to_string(),
+            None if non_strict => "object".to_string(),
             // An unannotated parameter with a literal default has the
             // default's type (#1409), `None` an object's.
             None => literal_type(p.default.as_deref()?)?.to_string(),
         };
         Some(Param {
             name,
+            element: Element::of(p.parameter.annotation.as_deref()),
             annotation,
             default,
         })
@@ -311,7 +343,12 @@ fn plan_def(def: &StmtFunctionDef, class: Option<&str>, source: &str) -> Option<
         .iter()
         .map(&param)
         .collect::<Option<Vec<_>>>()?;
-    let returns = text(source, def.returns.as_deref()?.range())?.to_string();
+    let returns = match def.returns.as_deref() {
+        Some(returns) => text(source, returns.range())?.to_string(),
+        // Non-strict mode: an unannotated return is an object.
+        None if non_strict => "object".to_string(),
+        None => return None,
+    };
     let vararg = match &parameters.vararg {
         Some(v) => Some((v.name.to_string(), Element::of(v.annotation.as_deref())?)),
         None => None,
@@ -321,7 +358,7 @@ fn plan_def(def: &StmtFunctionDef, class: Option<&str>, source: &str) -> Option<
         None => None,
     };
     let positional: Vec<&Param> = posonly.iter().chain(&regular).collect();
-    let entry = entry_name(&qualname);
+    let entry = ext_entry_name(&qualname);
 
     // The entry: every parameter positional, `*args`/`**kwargs` and a
     // computed default's parameter as objects.
@@ -438,10 +475,50 @@ fn plan_def(def: &StmtFunctionDef, class: Option<&str>, source: &str) -> Option<
             wanted = element.wanted(),
         );
     }
+    // A default the non-strict fallback rewrite turned into a builtin read
+    // through its `builtins` alias (`parse_float=float`), which compiled code
+    // binds but the module's namespace does not: the factory binds it, and
+    // the declared signature's defaults are evaluated in its scope.
+    // Non-strict mode: a module function's scalar parameters are guarded
+    // ([`guard`]).
+    let guarded = if non_strict && receiver.is_none() {
+        let mut twin_args: Vec<String> = positional.iter().map(|p| p.name.clone()).collect();
+        if let Some((v, _)) = &vararg {
+            twin_args.push(format!("*{v}"));
+        }
+        twin_args.extend(kwonly.iter().map(|p| format!("{0}={0}", p.name)));
+        if let Some((k, _)) = &kwarg {
+            twin_args.push(format!("**{k}"));
+        }
+        let params: Vec<&Param> = positional.iter().copied().chain(&kwonly).collect();
+        // Every `*args` element and `**kwargs` value, too.
+        let every = |values: String, element: Element| {
+            format!(
+                "not [_pycc_x for _pycc_x in {values} if not ({})]",
+                element.exact("_pycc_x")
+            )
+        };
+        let variadic: Vec<String> = vararg
+            .iter()
+            .map(|(v, element)| every(v.clone(), *element))
+            .chain(kwarg.iter().map(|(k, element)| every(format!("{k}.values()"), *element)))
+            .collect();
+        guard(def, source, defers_annotations, &params, &variadic, &twin_args.join(", "))
+    } else {
+        None
+    };
+    let (guard_test, twin_builder) = guarded.unwrap_or_default();
+    let checks = format!("{guard_test}{checks}");
+    let fallback_builtins = if declared.iter().any(|d| d.contains(FALLBACK_BUILTINS)) {
+        format!(", {FALLBACK_BUILTINS}=__import__(\"builtins\")")
+    } else {
+        String::new()
+    };
     let wrapper = format!(
         "def _pycc_make(_pycc_entry, _pycc_missing=object(), _pycc_tuple=tuple, \
          _pycc_isinstance=isinstance, _pycc_type=type, _pycc_TypeError=TypeError, \
-         _pycc_int=int, _pycc_float=float, _pycc_str=str, _pycc_bool=bool):\n    \
+         _pycc_int=int, _pycc_float=float, _pycc_str=str, _pycc_bool=bool\
+         {fallback_builtins}):\n{twin_builder}    \
          def {name}({declared}):\n{checks}        \
          return _pycc_entry({passed})\n    \
          {name}.__qualname__ = \"{qualname}\"\n    \
@@ -458,6 +535,99 @@ fn plan_def(def: &StmtFunctionDef, class: Option<&str>, source: &str) -> Option<
         },
         entry_source,
     })
+}
+
+/// Whether `body` (a module) starts with `from __future__ import
+/// annotations`, which a twin's source must be compiled with too.
+fn defers_annotations(body: &[Stmt]) -> bool {
+    body.iter().any(|stmt| {
+        matches!(stmt, Stmt::ImportFrom(import)
+            if import.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
+                && import.names.iter().any(|alias| alias.name.as_str() == "annotations"))
+    })
+}
+
+/// `text` as a Python string literal.
+fn py_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+                let _ = write!(out, "\\x{:02x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The non-strict wrapper's *guard* of a module function with a scalar
+/// parameter: when a Python caller passes an argument of another type,
+/// which the boundary would refuse with its own `TypeError`, the function
+/// runs as CPython runs it -- its source, compiled once on first use in the
+/// module's namespace (the *twin*) -- so the call fails, or succeeds, as
+/// the uncompiled function would. Returns the wrapper's test and the
+/// factory's twin builder, or `None` when no parameter needs one (or one
+/// has a computed default, whose omission the twin cannot see).
+fn guard(
+    def: &StmtFunctionDef,
+    source: &str,
+    defers_annotations: bool,
+    params: &[&Param],
+    variadic: &[String],
+    call: &str,
+) -> Option<(String, String)> {
+    if params.iter().any(|p| matches!(p.default, Default::Computed(..))) {
+        return None;
+    }
+    let tests: Vec<String> = params
+        .iter()
+        .filter_map(|p| Some(p.element?.exact(&p.name)))
+        .chain(variadic.iter().cloned())
+        .collect();
+    if tests.is_empty() {
+        return None;
+    }
+    let start = def.range.start().to_usize();
+    let end = def.range.end().to_usize();
+    let text = source.get(start..end)?;
+    // Padded to its line, so a traceback through the twin names its lines.
+    let line = source[..start].matches('\n').count();
+    let padded = format!("{}{text}\n", "\n".repeat(line));
+    let flags = if defers_annotations {
+        "_pycc_b.__import__(\"__future__\").annotations.compiler_flag"
+    } else {
+        "0"
+    };
+    let name = def.name.as_str();
+    let test = format!(
+        "        if not ({}):\n            return _pycc_twin()({call})\n",
+        tests.join(" and ")
+    );
+    // The fallback rewrite's aliases a twin of rewritten source may read
+    // (`src/fallback.rs`), which the module's namespace does not bind.
+    let builder = format!(
+        "    _pycc_cell = []\n    \
+         def _pycc_twin(_pycc_g=globals()):\n        \
+         if not _pycc_cell:\n            \
+         _pycc_b = __import__(\"builtins\")\n            \
+         _pycc_g.setdefault(\"{FALLBACK_BUILTINS}\", _pycc_b)\n            \
+         _pycc_g.setdefault(\"__pycc_fallback_sys\", __import__(\"sys\"))\n            \
+         _pycc_g.setdefault(\"__pycc_fallback_ns\", _pycc_g)\n            \
+         _pycc_l = {{}}\n            \
+         _pycc_b.exec(_pycc_b.compile({src}, _pycc_g.get(\"__file__\") or \"<pycc>\", \"exec\", {flags}, True), _pycc_g, _pycc_l)\n            \
+         _pycc_cell.append(_pycc_l[\"{name}\"])\n        \
+         return _pycc_cell[0]\n",
+        src = py_literal(&padded),
+    );
+    Some((test, builder))
 }
 
 /// Every method name defined by more than one top-level class.
@@ -489,13 +659,14 @@ pub fn expand_dataclasses_in(module: &mut ModModule) {
 }
 
 /// Each planned top-level statement's index with what it plans.
-fn plan(module: &ModModule, source: &str) -> Vec<(usize, Planned)> {
+fn plan(module: &ModModule, source: &str, non_strict: bool) -> Vec<(usize, Planned)> {
     let shared = shared_method_names(&module.body);
+    let defers = defers_annotations(&module.body);
     let mut out = Vec::new();
     for (index, stmt) in module.body.iter().enumerate() {
         match stmt {
             Stmt::FunctionDef(def) => {
-                if let Some(planned) = plan_def(def, None, source) {
+                if let Some(planned) = plan_def(def, None, source, non_strict, defers) {
                     out.push((index, planned));
                 }
             }
@@ -505,7 +676,8 @@ fn plan(module: &ModModule, source: &str) -> Vec<(usize, Planned)> {
                 for item in &class.body {
                     if let Stmt::FunctionDef(def) = item
                         && !shared.iter().any(|name| name == def.name.as_str())
-                        && let Some(planned) = plan_def(def, Some(class.name.as_str()), source)
+                        && let Some(planned) =
+                            plan_def(def, Some(class.name.as_str()), source, non_strict, defers)
                     {
                         out.push((index, planned));
                     }
@@ -518,14 +690,16 @@ fn plan(module: &ModModule, source: &str) -> Vec<(usize, Planned)> {
 }
 
 /// The signatures `module` (parsed from `source`) publishes through a
-/// wrapper; [`split_ext_signatures`] adds their entries.
+/// wrapper; [`split_ext_signatures`] adds their entries. `non_strict` is
+/// whether the module is compiled in non-strict mode, where an unannotated
+/// parameter or return is a CPython object.
 #[must_use]
-pub fn ext_signatures(module: &ModModule, source: &str) -> Vec<ExtSignature> {
+pub fn ext_signatures(module: &ModModule, source: &str, non_strict: bool) -> Vec<ExtSignature> {
     // The `@dataclass` classes' generated methods are planned as written
     // out, as [`split_ext_signatures`] plans them.
     let mut module = module.clone();
     expand_dataclasses_in(&mut module);
-    plan(&module, source)
+    plan(&module, source, non_strict)
         .into_iter()
         .map(|(_, planned)| planned.signature)
         .collect()
@@ -534,9 +708,9 @@ pub fn ext_signatures(module: &ModModule, source: &str) -> Vec<ExtSignature> {
 /// Adds the entry of every signature [`ext_signatures`] plans to `module`,
 /// right after the `def` or class statement it belongs to. Runs on the
 /// parsed `--ext` entry module, before [`super::desugar`].
-pub fn split_ext_signatures(module: &mut ModModule, source: &str) {
+pub fn split_ext_signatures(module: &mut ModModule, source: &str, non_strict: bool) {
     expand_dataclasses_in(module);
-    let mut planned = plan(module, source);
+    let mut planned = plan(module, source, non_strict);
     if planned.is_empty() {
         return;
     }
@@ -565,7 +739,7 @@ mod tests {
     fn an_entry_name_round_trips_its_qualname() {
         for qualname in ["f", "Box.area", "a_b.c_d"] {
             assert_eq!(
-                ext_entry_target(&entry_name(qualname)).as_deref(),
+                ext_entry_target(&ext_entry_name(qualname)).as_deref(),
                 Some(qualname)
             );
         }
@@ -579,14 +753,14 @@ mod tests {
                       def _c(x: int = 1) -> int:\n    return x\n\n\
                       def d(*xs: list[int]) -> int:\n    return 0\n\n\
                       def e(x: int = 1):\n    return x\n";
-        assert!(ext_signatures(&parse(source), source).is_empty());
+        assert!(ext_signatures(&parse(source), source, false).is_empty());
     }
 
     #[test]
     fn a_function_publishes_its_declared_signature() {
         let source = "def f(a: int, /, b: int = 2 * 5, *rest: int, c: str = \"x\", **kw: float) -> int:\n    return a\n";
         let module = parse(source);
-        let signatures = ext_signatures(&module, source);
+        let signatures = ext_signatures(&module, source, false);
         let [signature] = signatures.as_slice() else {
             panic!("{signatures:?}")
         };
@@ -608,7 +782,7 @@ mod tests {
             signature.wrapper
         );
         let mut split = module.clone();
-        split_ext_signatures(&mut split, source);
+        split_ext_signatures(&mut split, source, false);
         assert_eq!(split.body.len(), 2);
     }
 
@@ -617,7 +791,7 @@ mod tests {
         let source = "class A:\n    def m(self, x: int = 1) -> int:\n        return x\n\n\
                       class B:\n    def m(self, x: int = 2) -> int:\n        return x\n\n\
                       class C:\n    def k(self, *, x: int = 3) -> int:\n        return x\n";
-        let signatures = ext_signatures(&parse(source), source);
+        let signatures = ext_signatures(&parse(source), source, false);
         let names: Vec<&str> = signatures.iter().map(|s| s.qualname.as_str()).collect();
         assert_eq!(names, ["C.k"]);
         assert_eq!(signatures[0].method(), Some(("C", "k")));

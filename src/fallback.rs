@@ -27,7 +27,9 @@
 //! Strict mode never falls back. Only the entry module falls back; a
 //! diagnostic in another module of the program is reported as before.
 
+mod annotations;
 mod builtins;
+mod function_values;
 mod names;
 mod render;
 
@@ -82,7 +84,34 @@ pub(crate) fn entry_source(path: &Path) -> String {
 }
 
 fn set_override(text: Option<String>) {
+    if text.is_none() {
+        TWINNED.with(|cell| cell.borrow_mut().clear());
+    }
     ENTRY_OVERRIDE.with(|cell| *cell.borrow_mut() = text);
+}
+
+thread_local! {
+    /// The functions of the active rewrite that also run in CPython for
+    /// Python callers (`Plan::twinned`): not exported compiled.
+    static TWINNED: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+}
+
+/// Makes `rendered` the entry source the frontend compiles.
+fn install(rendered: &Rendered) {
+    set_override(Some(rendered.text.clone()));
+    TWINNED.with(|cell| *cell.borrow_mut() = rendered.twinned.clone());
+}
+
+/// The compiled functions (and their `pycc_ast::ext_signatures` entries)
+/// an `--ext` module does not export, because Python code calls their
+/// CPython twin instead (`Plan::twinned`).
+pub(crate) fn twinned_exports() -> BTreeSet<String> {
+    TWINNED.with(|cell| {
+        cell.borrow()
+            .iter()
+            .flat_map(|name| [name.clone(), pycc_ast::ext_entry_name(name)])
+            .collect()
+    })
 }
 
 /// Which compiled definitions an artifact publishes to Python code.
@@ -174,6 +203,17 @@ pub(crate) struct Plan {
     /// `builtins` module (`min(a, b)` becomes `builtins.min(a, b)`): the
     /// builtin is valid Python pycc does not compile for these arguments.
     object_builtins: BTreeMap<u32, (u32, String)>,
+    /// Whether the module's annotations are never evaluated (`from
+    /// __future__ import annotations`), so an annotation pycc cannot lower
+    /// may be erased instead (`annotations`).
+    defers_annotations: bool,
+    /// The annotations of the module, at any depth (`annotations::sites`).
+    annotation_sites: Vec<annotations::Site>,
+    /// Erased annotations: source offset -> (end, replacement).
+    erased: BTreeMap<u32, (u32, String)>,
+    /// Alias reads substituted in annotations (`annotations`): source
+    /// offset -> (end, replacement).
+    substituted: BTreeMap<u32, (u32, String)>,
     /// Unannotated public functions fallback code calls: compiled with an
     /// object for every unannotated parameter and return (the signature
     /// Python callers need), and published, instead of inferred.
@@ -183,8 +223,13 @@ pub(crate) struct Plan {
     demoted: BTreeSet<String>,
     /// Compiled imports that fallback code reads a name of: they stay
     /// compiled and also run in CPython right after, so both sides see the
-    /// module (`cascade`).
+    /// module (`cascade`). Also every function in `twinned`.
     mirrored: BTreeSet<usize>,
+    /// Functions whose signature the `--ext` boundary cannot carry (an
+    /// export gap, `C0003`): compiled code calls the compiled function,
+    /// and its source also runs in CPython right after, binding the name
+    /// Python code reads (its *twin*). Index -> the gap.
+    twinned: BTreeMap<usize, String>,
     /// The entry file's directory: an import of a module found there is the
     /// program's own and is never mirrored (CPython would load a second copy).
     entry_dir: Option<std::path::PathBuf>,
@@ -204,10 +249,23 @@ impl Plan {
     /// parse (the syntax error is then reported as usual).
     pub(crate) fn new(source: &str, display: &str, publishes: Publishes) -> Option<Self> {
         let module = pycc_parser::parse_all(source).ok()?;
+        // An `--ext` module publishes a function with defaults through a
+        // Python wrapper of its signature (`pycc_ast::ext_signatures`), which
+        // applies them: Python code may call such a function compiled.
+        let wrapped: BTreeSet<String> = if publishes.variables {
+            pycc_ast::ext_signatures(&module, source, true)
+                .into_iter()
+                .filter(|signature| signature.method().is_none())
+                .map(|signature| signature.qualname)
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
         let stmts = module
             .body
             .iter()
-            .map(|stmt| TopStmt {
+            .map(|stmt| (stmt, is_future_import(stmt)))
+            .map(|(stmt, future)| TopStmt {
                 range: pycc_ast::stmt_range(stmt),
                 kind: match stmt {
                     Stmt::FunctionDef(def) => {
@@ -217,12 +275,24 @@ impl Plan {
                     Stmt::Import(_) | Stmt::ImportFrom(_) => Kind::Import,
                     _ => Kind::Other,
                 },
-                bound: names::bound_names(std::slice::from_ref(stmt)),
+                // A `from __future__` import is a compiler directive: no
+                // Python code reads the feature it binds, and it can be
+                // neither mirrored nor fall back (it must come first).
+                bound: if future {
+                    BTreeSet::new()
+                } else {
+                    names::bound_names(std::slice::from_ref(stmt))
+                },
                 mentions: names::module_references(stmt),
-                opaque: names::opaque_bound_names(stmt),
+                opaque: if future {
+                    BTreeSet::new()
+                } else {
+                    names::opaque_bound_names(stmt)
+                },
                 declares: names::all_global_declarations(stmt),
                 defaults: matches!(stmt, Stmt::FunctionDef(def)
-                    if def.parameters.iter_non_variadic_params().any(|p| p.default.is_some())),
+                    if def.parameters.iter_non_variadic_params().any(|p| p.default.is_some())
+                        && !wrapped.contains(def.name.as_str())),
             })
             .collect::<Vec<_>>();
         let external = if publishes.variables {
@@ -236,6 +306,8 @@ impl Plan {
         } else {
             BTreeSet::new()
         };
+        let defers_annotations = annotations::defers_annotations(&module.body);
+        let annotation_sites = annotations::sites(source, &module.body);
         Some(Self {
             source: source.to_string(),
             display: display.to_string(),
@@ -243,7 +315,12 @@ impl Plan {
             stmts,
             fallback: BTreeMap::new(),
             object_builtins: BTreeMap::new(),
+            defers_annotations,
+            annotation_sites,
+            erased: BTreeMap::new(),
+            substituted: BTreeMap::new(),
             mirrored: BTreeSet::new(),
+            twinned: BTreeMap::new(),
             demoted: BTreeSet::new(),
             objectified: BTreeSet::new(),
             entry_dir: None,
@@ -255,6 +332,8 @@ impl Plan {
     /// Records the entry file's directory (see `entry_dir`).
     pub(crate) fn set_entry_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.entry_dir = dir;
+        self.substituted.clear();
+        self.substitute_aliases();
     }
 
     /// Whether the compiled import `index` can run in CPython too: an
@@ -359,15 +438,24 @@ impl Plan {
             self.fallback.len(),
             self.object_builtins.len(),
             self.demoted.len(),
+            self.erased.len(),
+            self.twinned.len(),
         );
         // The docstring and `from __future__` imports stay compiled: the
         // preamble goes after them.
         let first = self.preamble_position();
         for failure in failures {
-            if self.rewrite_builtin_use(rendered, failure) || self.demote(rendered, failure) {
+            if self.erase_annotation(rendered, failure)
+                || self.functions_as_objects(rendered, failure)
+                || self.rewrite_builtin_use(rendered, failure)
+                || self.demote(rendered, failure)
+            {
                 continue;
             }
             let reason = describe(&failure.diagnostic);
+            if self.twin(rendered, failure, &reason) {
+                continue;
+            }
             match self.owner_of(rendered, failure) {
                 Some(index) if index >= first => {
                     // Name the line within a multi-line statement.
@@ -411,7 +499,26 @@ impl Plan {
             self.fallback.len(),
             self.object_builtins.len(),
             self.demoted.len(),
+            self.erased.len(),
+            self.twinned.len(),
         ) != before
+    }
+
+    /// Twins the function an export gap (`C0003`) of an `--ext` module
+    /// refuses, returning whether it did.
+    fn twin(&mut self, rendered: Option<&Rendered>, failure: &Failure, reason: &str) -> bool {
+        if failure.diagnostic.code != "C0003" || !self.publishes.variables {
+            return false;
+        }
+        let Some(index) = self.owner_of(rendered, failure) else {
+            return false;
+        };
+        if !matches!(self.stmts[index].kind, Kind::Def(..)) || self.fallback.contains_key(&index) {
+            return false;
+        }
+        self.mirrored.insert(index);
+        self.twinned.entry(index).or_insert_with(|| reason.to_string());
+        true
     }
 
     /// The source line a failure's span starts on, when it has one in
@@ -610,6 +717,9 @@ impl Plan {
             if self.fallback.contains_key(&index) {
                 fallback_bound.extend(stmt.bound.iter().cloned());
                 fallback_read.extend(stmt.mentions.iter().cloned());
+            } else if self.twinned.contains_key(&index) {
+                fallback_bound.extend(stmt.declares.iter().cloned());
+                fallback_read.extend(stmt.mentions.iter().cloned());
             } else if matches!(stmt.kind, Kind::Other | Kind::Import)
                 && !self.mirrored.contains(&index)
             {
@@ -652,6 +762,20 @@ impl Plan {
 
     /// One line per fallback statement, for `--report-fallbacks`.
     pub(crate) fn report_lines(&self) -> Vec<String> {
+        let twins = self.twinned.iter().map(|(index, reason)| {
+            let stmt = &self.stmts[*index];
+            let first = line_of(&self.source, stmt.range.start);
+            let last = line_of(&self.source, stmt.range.end.saturating_sub(1));
+            let name = match &stmt.kind {
+                Kind::Def(name, _) => name.as_str(),
+                _ => "?",
+            };
+            format!(
+                "twin: function `{name}` at {}:{first}-{last} is compiled, and runs in CPython \
+                 when Python code calls it: {reason}",
+                self.display
+            )
+        });
         self.fallback
             .iter()
             .map(|(index, reason)| {
@@ -674,6 +798,7 @@ impl Plan {
                     self.display
                 )
             })
+            .chain(twins)
             .collect()
     }
 }
@@ -688,6 +813,12 @@ fn line_of(source: &str, offset: u32) -> usize {
 fn describe(diagnostic: &Diagnostic) -> String {
     let message: String = diagnostic.message.chars().take(160).collect();
     format!("{} {message}", diagnostic.code)
+}
+
+/// Whether `stmt` is a `from __future__ import ...`.
+fn is_future_import(stmt: &Stmt) -> bool {
+    matches!(stmt, Stmt::ImportFrom(import)
+        if import.module.as_ref().map(|m| m.as_str()) == Some("__future__"))
 }
 
 /// Whether `expr` is a name or an attribute chain on one (`sys.stdin.readline`).
@@ -793,7 +924,7 @@ pub(crate) fn with_fallback<T, E>(
             if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
                 eprintln!("--- fallback rewrite ---\n{}", rendered.text);
             }
-            set_override(Some(rendered.text.clone()));
+            install(&rendered);
             let value = match attempt() {
                 Ok(value) => Some(value),
                 Err(failure) => split(&failure).and_then(|failures| {
@@ -840,7 +971,36 @@ pub(crate) fn with_fallback<T, E>(
         return first;
     };
     plan.set_entry_dir(path.parent().map(Path::to_path_buf));
-    let Some(mut value) = converge(&mut plan, None, failures, &attempt, &split) else {
+    // With annotation aliases substituted (`annotations`), the failures of
+    // the source as written may be ones the substitution removes: the loop
+    // starts from the rewrite's own.
+    let (rendered, failures) = if plan.substituted.is_empty() {
+        (None, failures)
+    } else {
+        let rendered = plan.render();
+        if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
+            eprintln!("--- fallback rewrite ---\n{}", rendered.text);
+        }
+        install(&rendered);
+        match attempt() {
+            Ok(value) => {
+                if REPORT.load(Ordering::Relaxed) {
+                    for line in plan.report_lines() {
+                        eprintln!("{line}");
+                    }
+                }
+                return Ok(value);
+            }
+            Err(failure) => match split(&failure) {
+                Some(failures) => (Some(rendered), failures),
+                None => {
+                    set_override(None);
+                    return first;
+                }
+            },
+        }
+    };
+    let Some(mut value) = converge(&mut plan, rendered, failures, &attempt, &split) else {
         set_override(None);
         return first;
     };
@@ -866,7 +1026,7 @@ pub(crate) fn with_fallback<T, E>(
     if retry.fallback.len() < plan.fallback.len() {
         let kept = entry_override();
         let rendered = retry.render();
-        set_override(Some(rendered.text.clone()));
+        install(&rendered);
         let retried = match attempt() {
             Ok(value) => Some(value),
             Err(failure) => split(&failure)
@@ -957,19 +1117,34 @@ fn converge<T, E>(
     attempt: &impl Fn() -> Result<T, E>,
     split: &impl Fn(&E) -> Option<Vec<Failure>>,
 ) -> Option<T> {
+    let dump = std::env::var_os("PYCC_FALLBACK_DUMP").is_some();
     loop {
         if !plan.absorb(rendered.as_ref(), &failures) {
+            if dump {
+                eprintln!("--- fallback loop stuck on ---");
+                for failure in &failures {
+                    eprintln!("{} {:?}", describe(&failure.diagnostic), failure.diagnostic.span);
+                }
+            }
             return None;
         }
         let next = plan.render();
-        if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
+        if dump {
             eprintln!("--- fallback rewrite ---\n{}", next.text);
         }
-        set_override(Some(next.text.clone()));
+        install(&next);
         rendered = Some(next);
         match attempt() {
             Ok(value) => return Some(value),
-            Err(failure) => failures = split(&failure)?,
+            Err(failure) => match split(&failure) {
+                Some(next) => failures = next,
+                None => {
+                    if dump {
+                        eprintln!("--- fallback loop cannot place a failure ---");
+                    }
+                    return None;
+                }
+            },
         }
     }
 }

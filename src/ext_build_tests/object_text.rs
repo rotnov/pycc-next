@@ -48,8 +48,17 @@ fn assert_copies_before_releasing(body: &str, conversion: &str, temporary: &str)
 
 #[test]
 fn the_str_helper_copies_before_releasing() {
-    let body = helper_body("int pycc_ext_obj_to_str(PyObject *o, void **out)");
-    assert_copies_before_releasing(&body, "converted = PyObject_Str(o);", "converted");
+    // `str(o)` and `repr(o)` share one helper.
+    let body = helper_body("static int pycc_ext_obj_text(PyObject *o, void **out, int repr)\n{");
+    assert_copies_before_releasing(
+        &body,
+        "converted = repr ? PyObject_Repr(o) : PyObject_Str(o);",
+        "converted",
+    );
+    let to_str = helper_body("int pycc_ext_obj_to_str(PyObject *o, void **out)");
+    assert!(to_str.contains("return pycc_ext_obj_text(o, out, 0);"), "{to_str}");
+    let repr = helper_body("int pycc_ext_obj_repr(PyObject *o, void **out)");
+    assert!(repr.contains("return pycc_ext_obj_text(o, out, 1);"), "{repr}");
 }
 
 /// `f"{o}"` is `format(o, '')`, so the helper passes a NULL spec -- the

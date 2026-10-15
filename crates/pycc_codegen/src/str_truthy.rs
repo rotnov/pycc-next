@@ -187,10 +187,16 @@ pub(crate) fn emit_string_literal<'ctx>(
     global.set_linkage(Linkage::Private);
     let ptr = global.as_pointer_value();
     let len = context.i64_type().const_int(bytes.len() as u64, false);
+    // The site's object, built on its first evaluation
+    // (`pycc_rt_str_from_literal_cached`).
+    let ptr_ty = context.ptr_type(inkwell::AddressSpace::default());
+    let slot = module.add_global(ptr_ty, None, "str_lit_cache");
+    slot.set_initializer(&ptr_ty.const_null());
+    slot.set_linkage(Linkage::Private);
     builder
         .build_call(
             rt.str_from_literal,
-            &[ptr.into(), len.into()],
+            &[ptr.into(), len.into(), slot.as_pointer_value().into()],
             "str_lit_obj",
         )
         .expect("build_call should not fail for a well-formed string literal construction")

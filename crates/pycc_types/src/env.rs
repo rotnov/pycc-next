@@ -301,6 +301,10 @@ pub struct Environment {
     /// the branch clones an `if`/`try`/`match` check makes, so a `break`
     /// inside any branch reaches its loop's exit join.
     pub(crate) loop_exits: crate::loop_flow::LoopExits,
+    /// The parameters of the function body being checked (empty at module
+    /// scope): non-strict mode converts an object rebinding a scalar one
+    /// (`crate::non_strict::admits_rebinding_coercion`).
+    pub(crate) params: HashSet<String>,
 }
 
 impl Environment {
@@ -496,6 +500,7 @@ impl Environment {
         // `binding_state` answer is the *final* module environment rather
         // than a point-in-time one -- see the field's own doc comment.
         child.in_function_body = true;
+        child.params.clear();
         for name in local_names {
             child.bindings.remove(*name);
             child.declared.remove(*name);

@@ -79,6 +79,14 @@ pub(super) fn container_annotation_to_ty(
         .iter()
         .any(|arg| matches!(arg, Expr::EllipsisLiteral(_)))
     {
+        // Non-strict mode: a runtime-length tuple is the CPython `tuple`.
+        if family == "tuple"
+            && args.len() == 2
+            && matches!(args[1], Expr::EllipsisLiteral(_))
+            && crate::func::is_non_strict(aliases)
+        {
+            return Ok(Ty::Object);
+        }
         // The advice is per family. `tuple[X, ...]` is the one spelling that
         // means something in Python -- a homogeneous variadic tuple -- so it
         // gets the length explanation and a fixed-arity `tuple`. For

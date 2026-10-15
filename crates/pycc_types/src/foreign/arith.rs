@@ -9,7 +9,8 @@
 //! ([`super::is_object_operand`]); the result is always `object`.
 
 use super::{
-    check_object_call_args, is_object_operand, is_packable_operand, object_operation_unsupported,
+    check_object_call_args, is_object_operand, is_packable_frozenset, is_packable_operand,
+    object_operation_unsupported,
 };
 use crate::{Environment, infer_expr_in};
 use pycc_diag::{Diagnostic, Span};
@@ -155,6 +156,7 @@ pub(crate) fn object_display_ty<'a>(
     for (element, ty) in elements.iter().zip(&tys) {
         if let HirExpr::Name(name) = element
             && matches!(ty, Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_))
+            && !is_packable_frozenset(ty)
         {
             crate::non_strict::request_widen(name, ty, &Ty::Object, |_| true);
         }

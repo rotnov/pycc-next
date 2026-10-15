@@ -247,6 +247,11 @@ pub(crate) fn check_assignment_of(
             Some(value) => object_box::admits_value(env, value, &ty, &previous)?,
             None => false,
         };
+        // Non-strict mode: an object rebinding a scalar parameter is
+        // converted (`pycc_codegen`'s `object_coerce`).
+        if non_strict::admits_rebinding_coercion(env, target, &ty, &previous) {
+            return Ok(());
+        }
         if !class::is_assignable_env(env, &ty, &previous) && !boxed {
             non_strict::request_widen(target, &previous, &ty, |t| {
                 matches!(t, Ty::Object | Ty::None) || foreign::is_object_operand(env, t)

@@ -2,8 +2,9 @@
 //!
 //! The one-argument `type` builtin applied to an `object` value is
 //! CPython's own `PyObject_Type`, whose result is the operand's class: one
-//! more opaque object. Every other `type(...)` shape keeps the
-//! known-builtin `C0001` it had: a native argument, the three-argument
+//! more opaque object. In non-strict mode a native `int`, `float`, `bool`
+//! or `str` argument is boxed first. Every other `type(...)` shape keeps
+//! the known-builtin `C0001` it had: another native argument, the three-argument
 //! class constructor and any arity other than one. Calling the result
 //! (`type(o)(...)`) stays refused in HIR, which reads only
 //! `type(self)(...)` as a call on a call (#1411).
@@ -40,7 +41,11 @@ pub(crate) fn is_object_type_call(
     arg_tys: &[Ty],
 ) -> bool {
     callee == TYPE
-        && matches!(arg_tys, [Ty::Object])
+        && (matches!(arg_tys, [Ty::Object])
+            // Non-strict mode: a native scalar is boxed first, and its
+            // class is CPython's (`type(text).__qualname__`).
+            || (crate::non_strict::is_non_strict()
+                && matches!(arg_tys, [Ty::Int | Ty::Float | Ty::Bool | Ty::Str])))
         && !std_module_aliases.iter().any(|(alias, _)| alias == callee)
 }
 

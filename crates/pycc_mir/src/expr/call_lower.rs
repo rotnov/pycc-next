@@ -421,8 +421,19 @@ pub(crate) fn lower_call_expr(
             .iter()
             .any(|scope| scope.contains_key(&format!("$fn:{callee}")))
     {
+        // A `str` source is the set of its characters, copied.
+        let source = args.into_iter().next().map(|source| {
+            if source.ty() == Ty::Str {
+                match builtin_call::lower_builtin_call("set", vec![source]) {
+                    Ok(set) => set,
+                    Err(_) => unreachable!("`set(str)` is a builtin call"),
+                }
+            } else {
+                source
+            }
+        });
         return MirExpr::FrozenSetFrom {
-            source: args.into_iter().next().map(Box::new),
+            source: source.map(Box::new),
         };
     }
     // #1335 (Part 1 of #1332): `hash(instance)`, under the same
@@ -450,13 +461,15 @@ pub(crate) fn lower_call_expr(
     if callee == "type"
         && let [base] = args.as_slice()
         && let base = super::super::object_narrow::object_operand(base.clone())
-        && base.ty() == Ty::Object
+        && matches!(base.ty(), Ty::Object | Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
         && !scopes
             .iter()
             .any(|scope| scope.contains_key(&format!("$fn:{callee}")))
     {
+        // Non-strict mode: a native scalar is boxed (`pycc_types`'
+        // `foreign::type_call`).
         return MirExpr::ObjType {
-            base: Box::new(base),
+            base: Box::new(crate::object_box::box_into(base, &Ty::Object)),
         };
     }
     let ty = if callee == "round"
@@ -534,6 +547,15 @@ pub(crate) fn lower_call_expr(
         // Without this branch `int(o)` falls to the `lookup` below,
         // finds no `$fn:int`, and panics.
         if callee == "int" { Ty::Int } else { Ty::Str }
+    } else if callee == "repr"
+        && matches!(args.as_slice(), [arg] if arg.ty() == Ty::Object)
+        && !scopes
+            .iter()
+            .any(|scope| scope.contains_key(&format!("$fn:{callee}")))
+    {
+        // `repr(o)` of a CPython object (an `f"{o!r}"` interpolation
+        // included), on `str(o)`'s terms: `pycc_types` types it `str`.
+        Ty::Str
     } else if (callee == "abs" || callee == "divmod")
         && !scopes
             .iter()
@@ -551,10 +573,37 @@ pub(crate) fn lower_call_expr(
         lookup(scopes, &format!("$fn:{callee}"))
     };
     MirExpr::Call {
-        callee: callee.clone(),
+        callee: native_specialization(callee, &args, scopes).unwrap_or_else(|| callee.clone()),
         args,
         ty,
     }
+}
+
+/// The native specialization of the module function `callee`
+/// (`pycc_ast`'s `specialize_untyped`) a call with `args` runs instead:
+/// one whose every parameter has exactly its argument's type, or the
+/// object type, so the call is the original's on values the original
+/// would hold as they are.
+fn native_specialization(
+    callee: &str,
+    args: &[MirExpr],
+    scopes: &[HashMap<String, Ty>],
+) -> Option<String> {
+    let native = format!("{}{callee}", crate::NATIVE_PREFIX);
+    let Some(Ty::Callable(sig)) = scopes
+        .iter()
+        .rev()
+        .find_map(|scope| scope.get(&format!("$callable:{native}")))
+    else {
+        return None;
+    };
+    let (params, _) = sig.as_ref();
+    (params.len() == args.len()
+        && params
+            .iter()
+            .zip(args)
+            .all(|(param, arg)| *param == Ty::Object || *param == arg.ty()))
+    .then_some(native)
 }
 
 // Part 2a of #1371: `table[k](args)`. `pycc_types` admits the node

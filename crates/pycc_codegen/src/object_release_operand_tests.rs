@@ -102,7 +102,7 @@ fn an_fstring_releases_a_produced_interpolation() {
 /// its own reference; `raise copy` does not.
 #[test]
 fn a_raise_releases_its_produced_operand() {
-    let raise = |value| MirStmt::ObjRaise { value };
+    let raise = |value| MirStmt::ObjRaise { value, cause: None };
     let ir = f_ir("release_raise", vec![raise(attr("a"))]);
     assert_eq!(releases(&ir), 1 + PINNED_LOAD, "{ir}");
     let raised = ir

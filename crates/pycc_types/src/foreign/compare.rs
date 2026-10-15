@@ -47,8 +47,9 @@
 //!   module-level `class int: ...` is the class tested, and refused when
 //!   its kind is (`pycc_mir`'s `obj_compare::lower_object_isinstance` and
 //!   `pycc_hir::isinstance_narrow_target` take the same order). A
-//!   module function spelled like a class shadows it and is refused, as
-//!   is a tuple of classes, which has no lowering yet.
+//!   module function spelled like a class shadows it and is refused. A
+//!   non-empty tuple of classes (nested tuples included) is admitted when
+//!   each of its classes is; the classes are tested in order.
 
 use super::object_operation_unsupported;
 use crate::Environment;
@@ -149,6 +150,10 @@ pub(crate) fn membership_ty(
         // `c in "aeiou"` for an object `c` (a character of untyped text):
         // the `str` crosses as a CPython `str`, which answers.
         (Ty::Object, Ty::Str) => Ok(Ty::Bool),
+        // So does a frozenset of scalars, as the CPython `frozenset` it is
+        // made once (`pycc_ext_obj_pack_frozenset`), which compares an
+        // item of any type as CPython does.
+        (Ty::Object, container) if super::is_packable_frozenset(container) => Ok(Ty::Bool),
         (Ty::Object, container) => Err(object_operation_unsupported(&format!(
             "testing membership of a CPython object in a `{}` value",
             container.name()
@@ -216,10 +221,18 @@ pub(crate) fn check_object_isinstance(
     local_names: &[&str],
     class_arg: &HirExpr,
 ) -> Result<Ty, Diagnostic> {
-    if let HirExpr::TupleLiteral(_) = class_arg {
-        return Err(object_operation_unsupported(
-            "testing a CPython object with `isinstance` against a tuple of classes",
-        ));
+    // A tuple of classes: each one admitted on its own (an empty tuple is
+    // CPython's constant `False`, which the guard's lowering does not fold).
+    if let HirExpr::TupleLiteral(elements) = class_arg {
+        if elements.is_empty() {
+            return Err(object_operation_unsupported(
+                "testing a CPython object with `isinstance` against an empty tuple",
+            ));
+        }
+        for element in elements {
+            check_object_isinstance(env, local_names, element)?;
+        }
+        return Ok(Ty::Bool);
     }
     // A local or parameter spelled like a builtin or a compiled class
     // shadows it, as in CPython: it is then the evaluated operand below.

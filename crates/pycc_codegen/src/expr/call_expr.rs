@@ -184,6 +184,7 @@ pub(crate) fn emit_call_expr<'ctx>(
     let object_conversion: Option<ObjectConversionEmitter> = match callee.as_str() {
         "int" => Some(foreign_len::emit_to_int),
         "str" => Some(foreign_len::emit_to_str),
+        "repr" => Some(foreign_len::emit_repr),
         _ => None,
     };
     if let Some(emit) = object_conversion

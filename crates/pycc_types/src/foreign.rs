@@ -367,17 +367,30 @@ pub(crate) fn is_packable_operand(ty: &Ty) -> bool {
 /// `object` does. Each site also refuses a class method's own `cls`
 /// ([`refuse_classmethod_cls`]), which this type-level test cannot see.
 pub(crate) fn is_object_operand(env: &Environment, ty: &Ty) -> bool {
-    is_packable_operand(ty) || is_packable_tuple(ty) || is_carriable_instance(env, ty)
+    is_packable_operand(ty)
+        || is_packable_tuple(ty)
+        || is_packable_frozenset(ty)
+        || is_carriable_instance(env, ty)
 }
 
-/// Whether `ty` is a non-empty tuple of `int`/`float`/`bool`, which crosses
-/// into CPython as a new `tuple` of the packed elements
+/// Whether `ty` is a `frozenset` of `int`, `float`, `bool` or `str`, which
+/// crosses into CPython as a new `frozenset` of the packed elements
+/// (`pycc_ext_obj_pack_frozenset`): the value is immutable, so the copy
+/// cannot break aliasing (non-strict mode publishes a module's frozenset
+/// constants this way).
+pub(crate) fn is_packable_frozenset(ty: &Ty) -> bool {
+    matches!(ty, Ty::FrozenSet(element)
+        if matches!(**element, Ty::Int | Ty::Float | Ty::Bool | Ty::Str))
+}
+
+/// Whether `ty` is a non-empty tuple of `int`/`float`/`bool`/`str`, which
+/// crosses into CPython as a new `tuple` of the packed elements
 /// (`pycc_ext_obj_pack_tuple`): a shape argument (`np.zeros((n, m))`), a
-/// multi-dimensional key (`o[i, j]`).
+/// multi-dimensional key (`o[i, j]`), a `(position, text)` result.
 pub(crate) fn is_packable_tuple(ty: &Ty) -> bool {
     matches!(ty, Ty::Tuple(elements)
         if !elements.is_empty()
-            && elements.iter().all(|e| matches!(e, Ty::Int | Ty::Float | Ty::Bool)))
+            && elements.iter().all(|e| matches!(e, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)))
 }
 
 /// `Err(I0404)` naming `operation` when `expr` is a class method's own
@@ -454,6 +467,7 @@ pub(crate) fn check_object_call_args<'a>(
             if crate::object_box::is_boxable_generator(env, arg_ty) || is_packable_tuple(&sig.0));
         if !is_packable_operand(arg_ty)
             && !is_packable_tuple(arg_ty)
+            && !is_packable_frozenset(arg_ty)
             && !matches!(arg_ty, Ty::None)
             && !is_carriable_instance(env, arg_ty)
             && !boxable_generator

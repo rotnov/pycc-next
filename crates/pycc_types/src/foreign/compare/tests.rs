@@ -366,9 +366,15 @@ fn isinstance_against_a_function_spelled_like_a_class_is_refused() {
 #[test]
 fn isinstance_with_an_object_first_argument_refuses_other_class_arguments() {
     assert_refused(
-        "b = isinstance(numpy.pi, (int, str))\n",
+        "b = isinstance(numpy.pi, ())\n",
         "I0404",
-        "against a tuple of classes",
+        "against an empty tuple",
+    );
+    // A tuple is refused when any of its classes is.
+    assert_refused(
+        "x = 3\nb = isinstance(numpy.pi, (int, x))\n",
+        "I0404",
+        "against a `int` value",
     );
     assert_refused(
         "x = 3\nb = isinstance(numpy.pi, x)\n",

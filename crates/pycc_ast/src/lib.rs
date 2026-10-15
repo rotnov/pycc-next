@@ -15,7 +15,7 @@ pub use unused_defs::drop_unused_defs;
 pub use desugar::{
     start_program,
     CLOSURE_MARKER, ExtSignature, INFER_MARKER, body_yields, desugar, expand_dataclasses,
-    ext_entry_target, fold_static_branches,
+    ext_entry_name, ext_entry_target, fold_static_branches,
     ext_signatures, find_yield, function_qualname, split_ext_generators, split_ext_signatures,
     NATIVE_PREFIX, Specialized, specialize_untyped,
 };
@@ -30,7 +30,7 @@ pub use ruff_python_ast::{
     ExceptHandler, ExceptHandlerExceptHandler, Expr, ExprAttribute, ExprBinOp, ExprBooleanLiteral,
     ExprCall, ExprCompare, ExprContext, ExprDictComp, ExprFString, ExprListComp, ExprName,
     ExprNamed, ExprNumberLiteral, ExprSetComp, ExprSlice, ExprStringLiteral, ExprSubscript,
-    ExprTuple, ExprUnaryOp, Identifier, Int, InterpolatedElement, InterpolatedStringElement,
+    ExprTuple, ExprUnaryOp, FStringPart, Identifier, Int, InterpolatedElement, InterpolatedStringElement,
     InterpolatedStringLiteralElement, MatchCase, ModModule, Number, Operator, ParameterWithDefault,
     Parameters, Pattern, PatternArguments, PatternKeyword, PatternMatchAs, PatternMatchClass,
     PatternMatchMapping, PatternMatchOr, PatternMatchSequence, PatternMatchSingleton,

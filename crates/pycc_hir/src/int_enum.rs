@@ -60,6 +60,7 @@ pub fn reads_int_args(callee: &str) -> bool {
             | "abs"
             | "range"
             | "chr"
+            | "__pycc_chr"
             | "hex"
             | "oct"
             | "bin"

@@ -63,6 +63,14 @@ extern void pycc_rt_bigint_release(long long word);
 extern void *pycc_rt_str_from_literal(const unsigned char *ptr, long long len);
 extern void pycc_rt_str_decref(void *s);
 extern const unsigned char *pycc_rt_ext_str_bytes(void *s, size_t *len);
+/* The CPython `str` a native `str` shares (`PyStrObj::foreign`): borrowed
+ * from the getter, adopted by the setter. */
+extern void *pycc_rt_str_foreign(void *s);
+extern void pycc_rt_str_set_foreign(void *s, void *object);
+/* The same for a frozenset (`PySetObj::foreign`). */
+extern void *pycc_rt_set_foreign(void *s);
+extern void pycc_rt_set_set_foreign(void *s, void *object);
+extern void *pycc_rt_set_freeze(void *s);
 /* The instance boundary (#1145). `pycc_rt_instance_new` allocates a
  * `PyInstanceObj` with `slot_count` unassigned attribute slots and returns
  * it as the opaque `void *` a compiled `Ty::Instance` parameter is. It is

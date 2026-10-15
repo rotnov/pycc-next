@@ -673,11 +673,11 @@ pub(super) fn lower_stmt(
                         .map(|bound| lower_expr(bound, scopes, classes, current_class)),
                 }
             } else {
-                MirStmt::Return(
-                    value
-                        .as_ref()
-                        .map(|v| lower_expr(v, scopes, classes, current_class)),
-                )
+                let value = value
+                    .as_ref()
+                    .map(|v| lower_expr(v, scopes, classes, current_class));
+                let declared = scopes.last().and_then(|frame| frame.get(RETURN_KEY)).cloned();
+                MirStmt::Return(value.map(|value| coerce_returned_tuple(value, declared)))
             }
         }
         // `<name>[k] = v`. Part 1 of #1142 splits this one HIR node on the
@@ -884,4 +884,43 @@ fn object_comp_assign(
         value: comp,
     };
     Some(lower_stmt(&assign, scopes, classes, current_class))
+}
+
+/// The frame entry recording a function's declared native tuple return
+/// type, for [`coerce_returned_tuple`]. Not an identifier, so no source
+/// name can collide with it.
+pub(crate) const RETURN_KEY: &str = "$return";
+
+/// Non-strict mode: a tuple display with an object element is the CPython
+/// tuple (`obj_arith::object_display`); returned from a function declared
+/// to return a native tuple of scalars, it is the native tuple instead,
+/// each object element converted with a run-time type check
+/// (`MirExpr::ObjectCoerce`, admitted by `pycc_types`'
+/// `non_strict::admits_tuple_display_return`).
+fn coerce_returned_tuple(value: MirExpr, declared: Option<Ty>) -> MirExpr {
+    let (Some(Ty::Tuple(tys)), MirExpr::ObjDisplay { kind, elements }) = (&declared, &value) else {
+        return value;
+    };
+    if *kind != crate::ObjDisplayKind::Tuple || elements.len() != tys.len() {
+        return value;
+    }
+    let MirExpr::ObjDisplay { elements, .. } = value else {
+        unreachable!("matched above")
+    };
+    let elements = elements
+        .into_iter()
+        .zip(tys.iter())
+        .map(|(element, ty)| {
+            let element = match element {
+                MirExpr::ObjectBox(inner) if inner.ty() == *ty => *inner,
+                other => other,
+            };
+            if element.ty() == Ty::Object && *ty != Ty::Object {
+                MirExpr::ObjectCoerce(Box::new(element), Box::new(ty.clone()))
+            } else {
+                element
+            }
+        })
+        .collect();
+    MirExpr::TupleLiteral(elements)
 }

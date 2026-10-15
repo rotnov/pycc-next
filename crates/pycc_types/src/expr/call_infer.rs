@@ -463,6 +463,16 @@ pub(crate) fn infer_call_expr(
             return Ok(Ty::Bool);
         }
     }
+    // `repr(o)`, on `str(o)`'s terms below: CPython's own `repr()`
+    // (`f"{o!r}"` is this call).
+    if callee == "repr"
+        && env.lookup_function(callee).is_none()
+        && env.lookup_class(callee).is_none()
+        && arg_tys.len() == 1
+        && matches!(arg_tys[0], Ty::Object)
+    {
+        return Ok(Ty::Str);
+    }
     if (callee == "int" || callee == "str")
         && env.lookup_function(callee).is_none()
         && env.lookup_class(callee).is_none()

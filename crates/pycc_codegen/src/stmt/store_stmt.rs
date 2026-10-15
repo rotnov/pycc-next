@@ -177,6 +177,28 @@ pub(crate) fn emit_assign_stmt<'ctx>(
     if emit_int_self_update(context, builder, module, rt, user_functions, locals, target, value) {
         return Ok(());
     }
+    // Non-strict mode: an object rebinding an `int`, `float` or `bool`
+    // parameter is converted with a run-time type check
+    // (`pycc_types::non_strict::admits_rebinding_coercion`). The converted
+    // value is fresh, so it is stored without a retain.
+    if let Some(slot_ty) = locals.get(target).map(|slot| slot.ty.clone())
+        && matches!(slot_ty, pycc_mir::Ty::Int | pycc_mir::Ty::Float | pycc_mir::Ty::Bool)
+        && crate::object_coerce::coerces_into(value, &slot_ty)
+    {
+        let scalar = crate::object_coerce::emit_coerced(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            value,
+            &slot_ty,
+            &format!("the value assigned to `{target}`"),
+        );
+        emit_assign(context, builder, rt, locals, target, scalar);
+        return Ok(());
+    }
     let ty = value.ty();
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
     // The slot owns one reference to a counted value: take it, and

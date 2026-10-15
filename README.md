@@ -155,13 +155,21 @@ each other (a circular import sees the partially initialized module, as in CPyth
 module used as a value, the entry module imported back by its own imports and a project
 import inside an `if`/`try` block are compile errors; the details are in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
-### A real package, unchanged
+### Real packages, unchanged
 
-`python3 bench/package_check.py` (CI-gated) downloads
-[diff-match-patch](https://pypi.org/project/diff-match-patch/) 20241021 (Apache-2.0,
-Google's diff/match/patch algorithms, pinned by sdist sha256), builds each of its three
-modules unchanged as its own extension, removes the `.py` files and runs the package's
-own unittest suite with CPython against the compiled modules:
+`python3 bench/package_check.py` (CI-gated) downloads two pinned, permissively licensed
+pure-Python packages, builds each of their modules unchanged as its own extension,
+removes the `.py` files and runs the package's own unittest suite with CPython against
+the compiled modules (`python3 bench/package_check.py tomli --time` checks one and times
+its hot path):
+
+- [diff-match-patch](https://pypi.org/project/diff-match-patch/) 20241021 (Apache-2.0,
+  Google's diff/match/patch algorithms, pinned by sdist sha256);
+- [tomli](https://pypi.org/project/tomli/) 2.5.0 (MIT, the TOML parser `tomllib` comes
+  from; its sdist has no tests, so the GitHub tag archive is used, pinned by the sha256
+  of the files used).
+
+For diff-match-patch:
 
 ```console
 $ pycc build diff_match_patch/__init__.py -o diff_match_patch/__init__ \
@@ -175,6 +183,22 @@ function and method of the package compiles (`--report-fallbacks` reports none; 
 functions run natively on `str` (guarded native specializations, see Modes): the
 package's own speed test (`diff_main` on two ~30 KB texts) takes 1.60 s compiled
 against 13.2 s in CPython (**8.3x faster**, best of 5; v0.3 was 1.7x).
+
+tomli is typed code written for mypyc (`from __future__ import annotations`, aliases
+imported only under `if TYPE_CHECKING:`, `Final` constants, frozenset tables,
+keyword-only parameters, `tuple[int, str]` results). Its four modules build unchanged
+and its own 18 tests pass (one is skipped by tomli itself). 36 of its 40
+functions compile; 4 run in CPython (`--report-fallbacks`: the exception class, whose
+`__init__` imports, `make_safe_parse_float()` and its closure, and an `lru_cache`d
+helper). A function whose
+signature the boundary cannot carry (a `tuple[int, str]` result, a `frozenset`
+parameter) is compiled for the module's own callers and runs in CPython only when Python
+calls it (`twin:` in the report). `loads()` of tomli's benchmark document runs at
+CPython's speed, not faster yet (0.92x-1.10x over repeated runs of 100 calls; it was
+0.40x before the work above): the parsing tables are native frozensets and the text is
+scanned natively, but its documents (`dict[str, Any]`), keys (`tuple[str, ...]`) and
+regular-expression matches are CPython objects that every step reaches through the C
+API, and each of its modules calls the others through CPython.
 
 ## Modes
 

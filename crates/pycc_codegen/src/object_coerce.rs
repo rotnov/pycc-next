@@ -25,9 +25,15 @@ pub const EXT_OBJ_COERCE_SYMBOL: &str = "pycc_ext_obj_coerce";
 /// `ObjSubscript`), so its `ty()` -- which panics on malformed hand-built
 /// MIR that `emit_expr` reports with its own message -- is not asked.
 pub(crate) fn coerces_into(value: &MirExpr, slot_ty: &Ty) -> bool {
-    matches!(slot_ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
+    (matches!(slot_ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str) || coercible_frozenset(slot_ty))
         && !matches!(value, MirExpr::Subscript { .. })
         && value.ty() == Ty::Object
+}
+
+/// A `frozenset[str]` or `frozenset[int]` slot, which an object reaches as
+/// a native copy (`pycc_types::non_strict::is_coercible_frozenset`).
+fn coercible_frozenset(ty: &Ty) -> bool {
+    matches!(ty, Ty::FrozenSet(element) if matches!(**element, Ty::Str | Ty::Int))
 }
 
 /// Evaluates `value` (an object) and converts it to `slot_ty`; `what` names
@@ -49,6 +55,8 @@ pub(crate) fn emit_coerced<'ctx>(
         Ty::Float => 1,
         Ty::Bool => 2,
         Ty::Str => 3,
+        Ty::FrozenSet(element) if **element == Ty::Str => 9,
+        Ty::FrozenSet(element) if **element == Ty::Int => 10,
         other => panic!(
             "pycc_codegen: internal error: no run-time conversion of an object to `{}`",
             other.name()
@@ -150,6 +158,7 @@ fn emit_conversion<'ctx>(
         Ty::Int => Scalar::Int(loaded.into_int_value()),
         Ty::Float => Scalar::Float(loaded.into_float_value()),
         Ty::Bool => Scalar::Bool(loaded.into_int_value()),
+        Ty::FrozenSet(_) => Scalar::Set(loaded.into_pointer_value()),
         _ => Scalar::Str(loaded.into_pointer_value()),
     }
 }

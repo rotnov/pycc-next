@@ -5,9 +5,7 @@
 //! Both matches are exhaustive with no wildcard arm, so a new variant is a
 //! compile error here rather than a node an analysis silently skips.
 
-use crate::{
-    CompSource, MirCompElt, MirExceptionValue, MirExpr, MirFStringPart, MirStmt, ObjIsInstanceClass,
-};
+use crate::{CompSource, MirCompElt, MirExceptionValue, MirExpr, MirFStringPart, MirStmt};
 
 impl MirExpr {
     /// The direct sub-expressions of `self`, in evaluation order.
@@ -37,6 +35,7 @@ impl MirExpr {
             | MirExpr::ObjectBox(inner)
             | MirExpr::OptionalUnwrap(inner, _)
             | MirExpr::ObjectUnbox(inner, _)
+            | MirExpr::ObjectCoerce(inner, _)
             | MirExpr::ObjectIndex(inner, _)
             | MirExpr::Not(inner)
             | MirExpr::ExceptionMessage(inner)
@@ -206,9 +205,7 @@ impl MirExpr {
             }
             MirExpr::ObjIsInstance { value, class } => {
                 out.push(value);
-                if let ObjIsInstanceClass::Object(class) = class {
-                    out.push(class);
-                }
+                out.extend(class.objects());
             }
             MirExpr::Comprehension(comp) => {
                 out.extend(comp_source_exprs(&comp.source));
@@ -260,7 +257,14 @@ impl MirStmt {
             | MirStmt::ForObject { iter: expr, .. }
             | MirStmt::Yield(expr)
             | MirStmt::GenReturn(expr)
-            | MirStmt::ObjRaise { value: expr } => vec![expr],
+            | MirStmt::ObjRaise {
+                value: expr,
+                cause: None,
+            } => vec![expr],
+            MirStmt::ObjRaise {
+                value,
+                cause: Some(cause),
+            } => std::iter::once(value).chain(cause.exprs()).collect(),
             MirStmt::Return(value) => value.iter().collect(),
             MirStmt::ReturnBufferSlice { start, stop, .. } => {
                 start.iter().chain(stop.iter()).collect()

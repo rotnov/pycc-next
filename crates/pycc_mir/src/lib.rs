@@ -33,6 +33,10 @@ mod obj_compare;
 mod object_box;
 mod object_narrow;
 pub use obj_compare::{ObjBuiltinClass, ObjIsInstanceClass};
+
+/// The prefix of a native specialization's name: `pycc_ast::NATIVE_PREFIX`,
+/// which this crate does not depend on (the driver checks they agree).
+pub const NATIVE_PREFIX: &str = "_pycc_native_";
 mod receiver_exact;
 mod set_ops;
 pub use set_ops::{SetElementOps, SetEqOp, SetHashOp};
@@ -518,6 +522,9 @@ fn lower_item(
             let mut frame: HashMap<String, Ty> = params.iter().cloned().collect();
             if matches!(return_ty, Ty::Generator(_)) {
                 frame.insert(generator::GENERATOR_KEY.to_string(), return_ty.clone());
+            }
+            if matches!(return_ty, Ty::Tuple(_)) {
+                frame.insert(stmt::RETURN_KEY.to_string(), return_ty.clone());
             }
             scopes.push(frame);
             let mut body = lower_stmt_sequence(body, scopes, classes, current_class);

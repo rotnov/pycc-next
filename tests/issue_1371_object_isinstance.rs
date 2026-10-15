@@ -71,7 +71,7 @@ fn assert_one_error(tag: &str, body: &str, code: &str, needle: &str) {
 }
 
 /// The compiled classes with no exported type object of their own kind are
-/// refused, each naming its kind, and a tuple of classes stays refused.
+/// refused, each naming its kind, also inside a tuple of classes.
 #[test]
 fn isinstance_against_a_special_compiled_class_or_a_tuple_is_refused() {
     const HEAD: &str = "import builtins\nfrom enum import Enum\nfrom typing import Protocol\n\n\n";
@@ -102,9 +102,9 @@ fn isinstance_against_a_special_compiled_class_or_a_tuple_is_refused() {
         ),
         (
             "obj_isinstance_tuple",
-            "class C:\n    pass\n",
-            "(C, int)",
-            "against a tuple of classes",
+            "class C:\n    pass\n\n\nclass X(Exception):\n    pass\n",
+            "(C, (int, X))",
+            "against the pycc exception class `X`",
         ),
     ] {
         let body = format!("{HEAD}{classes}\n\nb = isinstance(builtins.len, {class_arg})\n");

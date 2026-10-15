@@ -61,6 +61,7 @@ pub(crate) fn check_function_in(
         ));
     }
     let mut env = module_env.child_for_function(local_names);
+    env.params = params.iter().map(|(name, _)| name.clone()).collect();
     // PEP 695 (#387): record the function's own type-parameter name (if any)
     // so `check_stmt_in_function`'s `Return` arm can reject a generic
     // function returning its own `Ty::Param` as a concrete scalar. Errors
@@ -397,6 +398,7 @@ pub(crate) fn check_stmt_arm_in_function(
             if !class::is_assignable_env(env, &actual, &return_ty)
                 && !object_box::admits_value(env, expr, &actual, &return_ty)?
                 && !non_strict::admits_coercion(&actual, &return_ty)
+                && !non_strict::admits_tuple_display_return(env, local_names, expr, &return_ty)
             {
                 // #1344: an inferred `set[int]` return the solver could not
                 // widen to the `set[C]` the body builds is a compiler limit,

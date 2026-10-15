@@ -398,6 +398,12 @@ static int pycc_ext_unpack_str(PyObject *obj, const char *fn_name, Py_ssize_t in
         return -1;
     }
     *out = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
+    /* An exact `str` is the one the copy shares when it crosses back
+     * (`pycc_ext_obj_pack_str`); a subclass instance is not. */
+    if (PyUnicode_CheckExact(obj)) {
+        Py_INCREF(obj);
+        pycc_rt_str_set_foreign(*out, obj);
+    }
     return 0;
 }
 

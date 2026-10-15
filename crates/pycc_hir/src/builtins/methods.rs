@@ -56,6 +56,12 @@ pub fn resolve_method(
         (Ty::Str, "find", [Ty::Str]) => s("pycc_rt_str_find", &[str_], int),
         (Ty::Str, "rfind", [Ty::Str]) => s("pycc_rt_str_rfind", &[str_], int),
         (Ty::Str, "index", [Ty::Str]) => s("pycc_rt_str_index", &[str_], int),
+        (Ty::Str, "find", [Ty::Str, start]) if is_intlike(start) => {
+            s("pycc_rt_str_find_from", &[str_.clone(), int.clone()], int)
+        }
+        (Ty::Str, "index", [Ty::Str, start]) if is_intlike(start) => {
+            s("pycc_rt_str_index_from", &[str_.clone(), int.clone()], int)
+        }
         (Ty::Str, "rindex", [Ty::Str]) => s("pycc_rt_str_rindex", &[str_], int),
         (Ty::Str, "replace", [Ty::Str, Ty::Str]) => {
             s("pycc_rt_str_replace", &[str_.clone(), str_.clone()], str_)
@@ -64,6 +70,9 @@ pub fn resolve_method(
         (Ty::Str, "lower", []) => s("pycc_rt_str_lower", &[], str_),
         (Ty::Str, "swapcase", []) => s("pycc_rt_str_swapcase", &[], str_),
         (Ty::Str, "startswith", [Ty::Str]) => s("pycc_rt_str_startswith", &[str_], Ty::Bool),
+        (Ty::Str, "startswith", [Ty::Str, start]) if is_intlike(start) => {
+            s("pycc_rt_str_startswith_from", &[str_, int], Ty::Bool)
+        }
         (Ty::Str, "endswith", [Ty::Str]) => s("pycc_rt_str_endswith", &[str_], Ty::Bool),
         (Ty::Str, "isdigit", []) => s("pycc_rt_str_isdigit", &[], Ty::Bool),
         (Ty::Str, "isalpha", []) => s("pycc_rt_str_isalpha", &[], Ty::Bool),
@@ -262,6 +271,18 @@ pub fn resolve_method(
                 _ => "pycc_rt_set_symmetric_difference",
             };
             s(symbol, &[other.clone()], receiver.clone())
+        }
+        // A `str` argument is the iterable of its characters
+        // (`ILLEGAL_CHARS.isdisjoint(text)`).
+        (set, "issubset" | "issuperset" | "isdisjoint", [Ty::Str])
+            if hashed_set(set) == Some(&Ty::Str) =>
+        {
+            let symbol = match method {
+                "issubset" => "pycc_rt_set_issubset_str",
+                "issuperset" => "pycc_rt_set_issuperset_str",
+                _ => "pycc_rt_set_isdisjoint_str",
+            };
+            s(symbol, &[Ty::Str], Ty::Bool)
         }
         (set, "issubset" | "issuperset" | "isdisjoint", [other])
             if hashed_set(set).is_some() && hashed_set(other) == hashed_set(set) =>

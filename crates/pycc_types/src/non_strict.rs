@@ -75,9 +75,59 @@ pub(crate) fn empty_display_untyped() -> bool {
 
 /// Whether a value of type `from` reaches a parameter or return slot of type
 /// `to` through the run-time conversion: only in non-strict mode, and only
-/// from `object` to one of the four scalars.
+/// from `object` to one of the four scalars or a `frozenset` of `str` or
+/// `int` ([`is_coercible_frozenset`]).
 pub(crate) fn admits_coercion(from: &Ty, to: &Ty) -> bool {
-    is_non_strict() && *from == Ty::Object && matches!(to, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
+    is_non_strict()
+        && *from == Ty::Object
+        && (matches!(to, Ty::Int | Ty::Float | Ty::Bool | Ty::Str) || is_coercible_frozenset(to))
+}
+
+/// Whether an object reaches a slot of type `ty` through the run-time
+/// conversion as a copy: a `frozenset[str]` or `frozenset[int]`, whose
+/// immutability makes a native copy of a CPython `set` or `frozenset`
+/// indistinguishable from it.
+pub(crate) fn is_coercible_frozenset(ty: &Ty) -> bool {
+    matches!(ty, Ty::FrozenSet(element) if matches!(**element, Ty::Str | Ty::Int))
+}
+
+/// Whether `value`, a tuple display some element of which is a CPython
+/// object (so the display is the CPython tuple), is returned from a
+/// function declared to return the native tuple `to` of scalars: each
+/// object element is converted with a run-time type check, each other
+/// element must already have its slot's type (`pycc_mir`'s
+/// `coerce_returned_tuple`).
+pub(crate) fn admits_tuple_display_return(
+    env: &crate::Environment,
+    local_names: &[&str],
+    value: &pycc_hir::HirExpr,
+    to: &Ty,
+) -> bool {
+    let (pycc_hir::HirExpr::TupleLiteral(elements), Ty::Tuple(tys)) = (value, to) else {
+        return false;
+    };
+    is_non_strict()
+        && elements.len() == tys.len()
+        && elements.iter().zip(tys.iter()).all(|(element, ty)| {
+            match crate::infer_expr_in(env, local_names, element) {
+                Ok(Ty::Object) => matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Object),
+                Ok(actual) => actual == *ty,
+                Err(_) => false,
+            }
+        })
+}
+
+/// Whether an object rebinding the parameter `name` of scalar type `to`
+/// is converted with a run-time type check, as an object argument for
+/// that parameter is ([`admits_coercion`]): in non-strict mode, for an
+/// `int`, `float` or `bool` parameter (`pos = parse(src, pos)` where the
+/// callee returns an object). A local is widened instead, which keeps
+/// CPython's behaviour for any value; a parameter has no first binding to
+/// widen, and its annotation already promises the type.
+pub(crate) fn admits_rebinding_coercion(env: &crate::Environment, name: &str, from: &Ty, to: &Ty) -> bool {
+    admits_coercion(from, to)
+        && matches!(to, Ty::Int | Ty::Float | Ty::Bool)
+        && env.params.contains(name)
 }
 
 /// Whether an index (a list, tuple or `str` subscript, a `range()`

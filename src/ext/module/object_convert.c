@@ -198,7 +198,20 @@ int pycc_ext_obj_to_int(PyObject *o, long long *out)
  *
  * The NULL guard is the same defence in depth `pycc_ext_obj_len` documents.
  */
+static int pycc_ext_obj_text(PyObject *o, void **out, int repr);
+
 int pycc_ext_obj_to_str(PyObject *o, void **out)
+{
+    return pycc_ext_obj_text(o, out, 0);
+}
+
+/* `repr(o)`: `pycc_ext_obj_to_str`'s contract with `PyObject_Repr`. */
+int pycc_ext_obj_repr(PyObject *o, void **out)
+{
+    return pycc_ext_obj_text(o, out, 1);
+}
+
+static int pycc_ext_obj_text(PyObject *o, void **out, int repr)
 {
     PyObject *converted;
     const char *utf8;
@@ -208,7 +221,7 @@ int pycc_ext_obj_to_str(PyObject *o, void **out)
     if (o == NULL || out == NULL) {
         return -1;
     }
-    converted = PyObject_Str(o);
+    converted = repr ? PyObject_Repr(o) : PyObject_Str(o);
     if (converted == NULL) {
         return -1;
     }
@@ -678,6 +691,55 @@ extern long long pycc_rt_list_get(void *list, long long index);
 extern long long pycc_rt_list_elem_kind(void *list, long long index);
 extern long long pycc_rt_list_is_tuple(void *list);
 PyObject *pycc_ext_obj_pack_instance(void *inst);
+
+PyObject *pycc_ext_obj_pack_list(void *list);
+
+/*
+ * A native frozenset of `int`, `float`, `bool` or `str` copied into a CPython
+ * `frozenset` (`EXT_OBJ_PACK_FROZENSET_SYMBOL` in
+ * `crates/pycc_codegen/src/ext.rs`): its elements, in the set's order,
+ * packed as `pycc_ext_obj_pack_list` packs a list's. The front end admits
+ * only a frozenset, which no one can mutate, so the copy is
+ * indistinguishable from the value.
+ *
+ * `set` is a pycc `PySetObj`, borrowed. Returns a new reference, or `NULL`
+ * with the exception set.
+ */
+extern void *pycc_rt_set_list(void *set);
+extern void pycc_rt_list_decref(void *list);
+
+PyObject *pycc_ext_obj_pack_frozenset(void *set)
+{
+    void *items;
+    PyObject *list;
+    PyObject *out;
+    PyObject *shared;
+
+    if (set == NULL) {
+        PyErr_SetString(PyExc_SystemError, "pycc_ext_obj_pack_frozenset called with NULL");
+        return NULL;
+    }
+    /* The CPython `frozenset` this one already shares, if any: the
+     * elements are not copied again (`PySetObj::foreign`). */
+    shared = (PyObject *)pycc_rt_set_foreign(set);
+    if (shared != NULL) {
+        Py_INCREF(shared);
+        return shared;
+    }
+    items = pycc_rt_set_list(set);
+    list = pycc_ext_obj_pack_list(items);
+    pycc_rt_list_decref(items);
+    if (list == NULL) {
+        return NULL;
+    }
+    out = PyFrozenSet_New(list);
+    Py_DECREF(list);
+    if (out != NULL) {
+        Py_INCREF(out);
+        pycc_rt_set_set_foreign(set, out);
+    }
+    return out;
+}
 
 PyObject *pycc_ext_obj_pack_list(void *list)
 {

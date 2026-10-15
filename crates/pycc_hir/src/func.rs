@@ -301,6 +301,19 @@ pub(crate) fn lower_arg_list(
             }
             let name = param.parameter.name.as_str();
             let ty = match &param.parameter.annotation {
+                // An `--ext --non-strict` module's `Iterable[T]` parameter
+                // takes any iterable (a list, a set, a `str`, a generator),
+                // which only the object holds; elsewhere it is a generator.
+                Some(ann)
+                    if is_ext_module(aliases)
+                        && is_non_strict(aliases)
+                        && matches!(&**ann, Expr::Subscript(sub)
+                            if matches!(sub.value.as_ref(), Expr::Name(base)
+                                if base.id.as_str() == "Iterable"
+                                    && !class_defs.iter().any(|info| info.name == "Iterable"))) =>
+                {
+                    Ty::Object
+                }
                 Some(ann) => annotation_to_ty(ann, type_param, class_name, aliases, class_defs)
                     .map_err(|error| with_bare_container_advice(error, ann))?,
                 // #1409: in an `--ext` module an unannotated public
@@ -800,6 +813,12 @@ pub(crate) fn annotation_to_ty(
                 }
                 // A function value: `Callable[[A, B], R]`.
                 "Callable" if !class_defs.iter().any(|info| info.name == "Callable") => {
+                    // An `--ext --non-strict` module's callables come from
+                    // Python too (a builtin, a lambda, a bound method),
+                    // which no native function type can hold: the object.
+                    if is_ext_module(aliases) && is_non_strict(aliases) {
+                        return Ok(Ty::Object);
+                    }
                     let (Expr::Tuple(tuple), true) = (sub.slice.as_ref(), true) else {
                         return Err(callable_shape(annotation));
                     };

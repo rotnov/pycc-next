@@ -280,6 +280,12 @@ pub const EXT_OBJ_PACK_INSTANCE_SYMBOL: &str = "pycc_ext_obj_pack_instance";
 /// a fresh container nothing else holds (`object_box::fresh_container`).
 pub const EXT_OBJ_PACK_LIST_SYMBOL: &str = "pycc_ext_obj_pack_list";
 
+/// A borrowed native frozenset (`PySetObj *`) of scalars in, a new
+/// reference to the CPython `frozenset` copying it out
+/// (`src/ext/module/object_convert.c`). `pycc_types` admits only a
+/// frozenset, whose immutability makes the copy indistinguishable.
+pub const EXT_OBJ_PACK_FROZENSET_SYMBOL: &str = "pycc_ext_obj_pack_frozenset";
+
 /// The fixed C shim's `len` helper (Part 3 of #1026): it takes a borrowed
 /// `PyObject *` and an out-pointer, writes the D-141 encoded `int` word for
 /// `PyObject_Size(o)` through it and returns `0`, or returns `-1` with a
@@ -432,6 +438,12 @@ pub const EXT_OBJ_DELATTR_SYMBOL: &str = "pycc_ext_obj_delattr";
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_RAISE_SYMBOL: &str = "pycc_ext_obj_raise";
+
+/// `raise o from cause` with a CPython object `o` (`src/ext/module/object_ops.c`):
+/// `void pycc_ext_obj_raise_from(PyObject *o, void *native_cause, PyObject
+/// *object_cause)`, exactly one cause non-NULL, both borrowed. Raises as
+/// [`EXT_OBJ_RAISE_SYMBOL`] does, with the cause as `__cause__`.
+pub const EXT_OBJ_RAISE_FROM_SYMBOL: &str = "pycc_ext_obj_raise_from";
 
 /// The fixed C shim's `None` accessor (Part 1 of #1371): a *borrowed*
 /// pointer to CPython's immortal `None`, the right-hand side of `o is None`
@@ -623,6 +635,10 @@ pub const EXT_OBJ_TO_INT_SYMBOL: &str = "pycc_ext_obj_to_int";
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_TO_STR_SYMBOL: &str = "pycc_ext_obj_to_str";
+
+/// `repr(o)` of a CPython object: [`EXT_OBJ_TO_STR_SYMBOL`]'s contract with
+/// `PyObject_Repr` (`src/ext/module/object_convert.c`).
+pub const EXT_OBJ_REPR_SYMBOL: &str = "pycc_ext_obj_repr";
 
 /// The fixed C shim's f-string interpolation helper (#1340): it takes a
 /// borrowed `PyObject *` and a `void **` out-parameter, writes a pycc

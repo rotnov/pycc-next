@@ -720,7 +720,8 @@ fn exception_classes_c(classes: &[UserExceptionClass]) -> String {
     out
 }
 
-/// The `-I`, code-model and source arguments for the shim, in driver order.
+/// The optimization, `-I`, code-model and source arguments for the shim, in
+/// driver order.
 /// Split out from [`ext_link_args`] so the platform arms there stay purely
 /// about what makes the output loadable.
 ///
@@ -740,7 +741,14 @@ pub(crate) fn ext_compile_args(
     include: &Path,
     shim: &Path,
 ) -> Vec<OsString> {
-    let mut args = vec![OsString::from("-I"), include.as_os_str().to_os_string()];
+    // Optimized: the shim's helpers run on every crossing between compiled
+    // code and CPython objects, and unoptimized C keeps even CPython's
+    // inline reference counting as calls.
+    let mut args = vec![
+        OsString::from("-O2"),
+        OsString::from("-I"),
+        include.as_os_str().to_os_string(),
+    ];
     if matches!(platform, ExtLinkPlatform::Linux | ExtLinkPlatform::MacOs) {
         args.push(OsString::from("-fPIC"));
     }

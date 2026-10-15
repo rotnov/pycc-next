@@ -200,6 +200,9 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // inline range is `OverflowError`), and `object_unbox::emit_unboxed`
         // owns the status check.
         | MirExpr::ObjectUnbox(_, _)
+        // Non-strict mode: a converted object may be of another type
+        // (`TypeError`), and `object_coerce::emit_coerced` owns the check.
+        | MirExpr::ObjectCoerce(_, _)
         // Non-strict mode: an object index may fail (`TypeError`), and
         // `object_coerce::emit_index` owns the status check.
         | MirExpr::ObjectIndex(..)

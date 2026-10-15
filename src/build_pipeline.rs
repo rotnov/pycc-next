@@ -496,7 +496,13 @@ fn plan_ext(
     // alone, planned from the entry source exactly as the loader planned
     // their compiled entries (`pycc_ast::split_ext_signatures`).
     let published_signatures = pycc_parser::parse_all(&entry_source)
-        .map(|parsed| pycc_ast::ext_signatures(&parsed, &entry_source))
+        .map(|parsed| {
+            pycc_ast::ext_signatures(
+                &parsed,
+                &entry_source,
+                crate::mode::non_strict_for(source_path),
+            )
+        })
         .unwrap_or_default();
     let inc_body = ext_build::install_signatures(inc_body, &published_signatures);
     let inc_body = ext_build::with_module_doc(inc_body, &entry_source);

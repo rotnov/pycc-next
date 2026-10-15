@@ -136,6 +136,12 @@ fn object_hook(cell: &AtomicPtr<()>, word: i64) {
     }
 }
 
+/// Releases one reference to the CPython object `object` through the
+/// installed hook (`Py_XDECREF`).
+pub(crate) fn release_object(object: *mut std::ffi::c_void) {
+    object_hook(&OBJECT_RELEASE, object as i64);
+}
+
 /// Takes one more reference to the word `word` of kind `kind`.
 pub(crate) fn retain_word(kind: u8, word: i64) {
     match kind {

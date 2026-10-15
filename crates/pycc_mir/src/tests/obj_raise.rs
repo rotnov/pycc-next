@@ -65,7 +65,7 @@ fn raising_a_foreign_call_lowers_to_obj_raise_of_the_obj_call() {
         &["Boom"],
     );
     let stmts = top_level_stmts(&hir);
-    let [MirStmt::ObjRaise { value }] = stmts.as_slice() else {
+    let [MirStmt::ObjRaise { value, .. }] = stmts.as_slice() else {
         panic!("expected one `ObjRaise`, got {stmts:?}");
     };
     assert!(matches!(value, MirExpr::ObjCall { .. }), "{value:?}");
@@ -82,7 +82,7 @@ fn raising_a_foreign_name_lowers_to_obj_raise_of_the_name() {
         &["Boom"],
     );
     let stmts = top_level_stmts(&hir);
-    let [MirStmt::ObjRaise { value }] = stmts.as_slice() else {
+    let [MirStmt::ObjRaise { value, .. }] = stmts.as_slice() else {
         panic!("expected one `ObjRaise`, got {stmts:?}");
     };
     assert!(

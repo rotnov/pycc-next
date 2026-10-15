@@ -159,19 +159,12 @@ fn check_accepts_the_success_program() {
     );
 }
 
-/// A cause next to an object is the deferred `raise ... from`, a native
-/// non-exception keeps its `T0021`, and an `except` naming a foreign class
+/// A native non-exception keeps its `T0021`, and an `except` naming a foreign class
 /// is out of scope and keeps its `T0021`.
 #[test]
 fn the_shapes_outside_part_9_are_refused() {
     const HEAD: &str = "from errs import Boom\n\n";
     for (tag, tail, code, needle) in [
-        (
-            "obj_raise_from",
-            "raise Boom(1, 2) from ValueError(\"c\")\n",
-            "C0001",
-            "`raise ... from ...` with a CPython object as the exception or the cause is not supported yet",
-        ),
         (
             "obj_raise_native_int",
             "raise 1\n",

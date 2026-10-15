@@ -500,14 +500,19 @@ fn export_gaps_as_failures(
     } else {
         crate::fallback::inferred_functions(&source)
     };
-    let Err(gaps) = crate::ext_build::collect_exports_excluding(typed, &hooks, &inferred) else {
+    let mut excluded = inferred;
+    excluded.extend(crate::fallback::twinned_exports());
+    let Err(gaps) = crate::ext_build::collect_exports_excluding(typed, &hooks, &excluded) else {
         return Ok(());
     };
     let Ok(module) = pycc_parser::parse_all(&source) else {
         return Ok(());
     };
     let origin_of = |name: &str| {
-        // A method's mangled name is `Class.method`: its class statement.
+        // A signature entry's gap is its function's (`_pycc_sig_f`), and a
+        // method's mangled name is `Class.method`: its class statement.
+        let target = pycc_ast::ext_entry_target(name);
+        let name = target.as_deref().unwrap_or(name);
         let owner = name.split('.').next().unwrap_or(name);
         module.body.iter().find_map(|stmt| {
             let defines = match stmt {
@@ -521,6 +526,11 @@ fn export_gaps_as_failures(
             defines.then(|| pycc_ast::stmt_range(stmt).start)
         })
     };
+    if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
+        for (name, _gap) in &gaps {
+            eprintln!("export gap: {name} -> {:?}: {}", origin_of(name), _gap.message);
+        }
+    }
     let (diagnostics, origins): (Vec<_>, Vec<_>) =
         gaps.into_iter().map(|(name, gap)| (gap, origin_of(&name))).unzip();
     Err(FrontendFailure::Compile {

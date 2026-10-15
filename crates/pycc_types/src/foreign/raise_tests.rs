@@ -2,8 +2,8 @@
 //!
 //! Whether `o` is an exception at all is CPython's to decide at run time,
 //! exactly as for CPython's own `raise`, so the checker admits every
-//! `Ty::Object` operand. Chaining a cause onto, or from, an object is not
-//! built yet and is refused with `C0001`. The fixture helpers are copied
+//! `Ty::Object` operand. Chaining a CPython object cause onto a pycc
+//! exception is not built yet and is refused with `C0001`. The fixture helpers are copied
 //! from `foreign/call_tests.rs` because a sibling module cannot reach them.
 
 fn lower_all_foreign(source: &str) -> pycc_hir::HirModule {
@@ -66,22 +66,20 @@ fn an_object_raise_is_admitted_in_functions_methods_and_nested_blocks() {
     ));
 }
 
-/// A cause on either side of an object is the deferred `raise ... from`.
-/// `from None` is not a cause: `pycc_hir` collapses `raise X from None`
-/// into `raise X` for every operand (PEP 409, #540), so it is admitted.
+/// A CPython object raised `from` a cause of either kind is admitted
+/// (`pycc_ext_obj_raise_from`); a CPython object cause chained onto a pycc
+/// exception is not built yet. `from None` is not a cause: `pycc_hir`
+/// collapses `raise X from None` into `raise X` for every operand (PEP 409,
+/// #540), so it is admitted.
 #[test]
-fn chaining_a_cause_onto_or_from_an_object_is_refused() {
-    for source in [
-        format!("{IMPORT}raise Boom(1) from ValueError(\"c\")\n"),
-        format!("{IMPORT}raise ValueError(\"e\") from Boom(1)\n"),
-        format!("{IMPORT}raise Boom(1) from Boom(2)\n"),
-    ] {
-        refused(
-            &source,
-            "C0001",
-            "`raise ... from ...` with a CPython object",
-        );
-    }
+fn chaining_a_cause_onto_an_object_is_admitted_and_from_an_object_refused() {
+    admitted(&format!("{IMPORT}raise Boom(1) from ValueError(\"c\")\n"));
+    admitted(&format!("{IMPORT}raise Boom(1) from Boom(2)\n"));
+    refused(
+        &format!("{IMPORT}raise ValueError(\"e\") from Boom(1)\n"),
+        "C0001",
+        "`raise ... from ...` with a CPython object",
+    );
     admitted(&format!("{IMPORT}raise Boom(1) from None\n"));
 }
 

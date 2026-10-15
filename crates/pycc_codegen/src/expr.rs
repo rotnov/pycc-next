@@ -255,6 +255,17 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             let object = emit_expr(context, builder, module, rt, user_functions, locals, object);
             object_unbox::emit_unboxed(context, builder, module, rt, object, inner)
         }
+        MirExpr::ObjectCoerce(object, ty) => crate::object_coerce::emit_coerced(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            object,
+            ty,
+            "the returned tuple's element",
+        ),
         MirExpr::OptionalUnwrap(..) => object_expr::emit_optional_unwrap_expr(
             context,
             builder,

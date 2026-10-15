@@ -292,6 +292,7 @@ fn the_elf_compile_args_name_the_include_directory_the_shim_and_fpic() {
     assert_eq!(
         args,
         vec![
+            OsString::from("-O2"),
             OsString::from("-I"),
             include.as_os_str().to_os_string(),
             OsString::from("-fPIC"),
@@ -311,6 +312,7 @@ fn the_mach_o_compile_args_state_fpic_rather_than_inherit_it() {
     assert_eq!(
         args,
         vec![
+            OsString::from("-O2"),
             OsString::from("-I"),
             include.as_os_str().to_os_string(),
             OsString::from("-fPIC"),
@@ -329,6 +331,7 @@ fn the_windows_compile_args_omit_fpic() {
     assert_eq!(
         args,
         vec![
+            OsString::from("-O2"),
             OsString::from("-I"),
             include.as_os_str().to_os_string(),
             shim.as_os_str().to_os_string(),

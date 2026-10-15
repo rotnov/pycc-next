@@ -257,6 +257,7 @@ pub const CALL_NAMES: &[&str] = &[
     "__pycc_min_keyed",
     "__pycc_print_str",
     "__pycc_printf",
+    "__pycc_chr",
     "__pycc_setrecursionlimit",
     "__pycc_sort_keyed",
     "__pycc_sorted_keyed",
@@ -346,6 +347,7 @@ pub fn fixed_return(name: &str) -> Option<Ty> {
         | "str"
         | "repr"
         | "chr"
+        | "__pycc_chr"
         | "bin"
         | "hex"
         | "oct"
@@ -536,7 +538,9 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("repr", [g @ Ty::Generator(_)]) => sig("pycc_rt_gen_repr", &[g.clone()], str_),
         ("len", [Ty::Str]) => sig("pycc_rt_str_len", &[str_], int),
         ("ord", [Ty::Str]) => sig("pycc_rt_str_ord", &[str_], int),
-        ("chr", [a]) if is_intlike(a) => sig("pycc_rt_str_chr", &[int], str_),
+        // `__pycc_chr`: a `chr` call whose argument is a code point pycc's
+        // `str` holds (`pycc_ast`'s `chr_ranges`).
+        ("chr" | "__pycc_chr", [a]) if is_intlike(a) => sig("pycc_rt_str_chr", &[int], str_),
         ("bin", [a]) if is_intlike(a) => sig("pycc_rt_int_bin", &[int], str_),
         ("hex", [a]) if is_intlike(a) => sig("pycc_rt_int_hex", &[int], str_),
         ("oct", [a]) if is_intlike(a) => sig("pycc_rt_int_oct", &[int], str_),

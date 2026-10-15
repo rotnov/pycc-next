@@ -137,6 +137,11 @@ Accept:
 4. **A second real package:** another pinned, permissively licensed pure-Python PyPI
    package from a different domain builds unchanged with `--ext --non-strict`, passes its
    own test suite (CI-gated) and is measurably faster than CPython on its hot path.
+   **Partly met 2026-10-15:** tomli 2.5.0 (MIT, the TOML parser) builds unchanged and its
+   own suite passes against the compiled modules (`python3 bench/package_check.py tomli`,
+   CI-gated with diff-match-patch); 36 of its 40 functions compile. Open: `loads()` of its
+   benchmark document runs at CPython's speed (0.92x-1.10x, was 0.40x), not measurably
+   faster -- its documents, keys and regular-expression matches are CPython objects.
 5. **Language gaps from v0.3:** circular imports behave as in CPython; strict `--ext`
    modules expose module-level variables; `IntEnum` members are usable as `int`;
    `sorted()`/`min()`/`max()`/`.sort()` and set membership of class instances;

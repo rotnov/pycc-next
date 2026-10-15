@@ -62,6 +62,7 @@
 mod aliases;
 mod build;
 mod builtin_defaults;
+mod chr_ranges;
 mod closures;
 mod collections;
 mod displays;
@@ -110,7 +111,7 @@ pub fn fold_static_branches(module: &mut ModModule) {
 pub use ext_generators::split_ext_generators;
 pub use specialize::{NATIVE_PREFIX, Specialized, specialize_untyped};
 pub use ext_signatures::{
-    ExtSignature, expand_dataclasses_in as expand_dataclasses, ext_entry_target, ext_signatures,
+    ExtSignature, expand_dataclasses_in as expand_dataclasses, ext_entry_name, ext_entry_target, ext_signatures,
     split_ext_signatures,
 };
 
@@ -177,6 +178,7 @@ pub fn desugar(module: &mut ModModule) {
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
         static_branches::fold_static_branches(&mut body);
+        chr_ranges::native_chr_calls(&mut body);
         dataclasses::expand_dataclasses(&mut body);
         enums::enum_lookups(&mut body);
         functools::expand_caches(&mut body);

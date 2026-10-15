@@ -36,12 +36,56 @@
  * leaves exactly one exception set. Overwriting it with a second, synthetic
  * error would be worse.
  */
+/*
+ * The interned `str` of an attribute name the compiled code spells, by the
+ * spelling's address (a constant of the generated code), so a lookup in a
+ * loop neither decodes nor hashes the name again. A slot holds one name;
+ * a colliding name replaces it. Borrowed; NULL with an exception set when
+ * the name cannot be created.
+ */
+#define PYCC_EXT_NAME_SLOTS 256
+static struct {
+    const char *spelling;
+    PyObject *name;
+} pycc_ext_names[PYCC_EXT_NAME_SLOTS];
+
+static PyObject *pycc_ext_attr_name(const char *spelling)
+{
+    size_t slot = ((size_t)(uintptr_t)spelling >> 3) & (PYCC_EXT_NAME_SLOTS - 1);
+    PyObject *name;
+    const char *cached;
+
+    if (pycc_ext_names[slot].spelling == spelling) {
+        /* The same address with the same text: a constant's, not a buffer
+         * reused for another name. */
+        cached = PyUnicode_AsUTF8AndSize(pycc_ext_names[slot].name, NULL);
+        if (cached != NULL && strcmp(cached, spelling) == 0) {
+            return pycc_ext_names[slot].name;
+        }
+        PyErr_Clear();
+    }
+    name = PyUnicode_InternFromString(spelling);
+    if (name == NULL) {
+        return NULL;
+    }
+    Py_XDECREF(pycc_ext_names[slot].name);
+    pycc_ext_names[slot].spelling = spelling;
+    pycc_ext_names[slot].name = name;
+    return name;
+}
+
 PyObject *pycc_ext_obj_getattr(PyObject *obj, const char *name)
 {
+    PyObject *attr_name;
+
     if (obj == NULL) {
         return NULL;
     }
-    return PyObject_GetAttrString(obj, name);
+    attr_name = pycc_ext_attr_name(name);
+    if (attr_name == NULL) {
+        return NULL;
+    }
+    return PyObject_GetAttr(obj, attr_name);
 }
 
 /*
@@ -110,14 +154,28 @@ PyObject *pycc_ext_obj_pack_str(void *value)
 {
     const unsigned char *bytes;
     size_t len = 0;
+    PyObject *shared;
+    PyObject *packed;
 
     if (value == NULL) {
         PyErr_SetString(PyExc_SystemError,
                         "a str argument to a CPython object's method was NULL");
         return NULL;
     }
+    /* The CPython `str` this one already shares, if any: the text is not
+     * copied again (`PyStrObj::foreign`). */
+    shared = (PyObject *)pycc_rt_str_foreign(value);
+    if (shared != NULL) {
+        Py_INCREF(shared);
+        return shared;
+    }
     bytes = pycc_rt_ext_str_bytes(value, &len);
-    return PyUnicode_FromStringAndSize((const char *)bytes, (Py_ssize_t)len);
+    packed = PyUnicode_FromStringAndSize((const char *)bytes, (Py_ssize_t)len);
+    if (packed != NULL) {
+        Py_INCREF(packed);
+        pycc_rt_str_set_foreign(value, packed);
+    }
+    return packed;
 }
 
 /*
@@ -920,6 +978,82 @@ void pycc_ext_obj_raise(PyObject *o)
     } else {
         PyErr_SetString(PyExc_TypeError, "exceptions must derive from BaseException");
     }
+    (void)pycc_ext_obj_error_bridge();
+}
+
+/*
+ * `raise o from cause` with a CPython object `o`
+ * (`EXT_OBJ_RAISE_FROM_SYMBOL` in `crates/pycc_codegen/src/ext.rs`): what
+ * `pycc_ext_obj_raise` raises, with `__cause__` set as CPython's own
+ * `raise ... from ...` sets it. The cause is either a CPython object
+ * (`object_cause`) or a pycc exception (`native_cause`), which crosses as
+ * the CPython exception it was bridged from, or else as the one the bridge
+ * builds for it when it escapes. Both are borrowed.
+ */
+extern void pycc_rt_exception_incref(void *obj);
+
+void pycc_ext_obj_raise_from(PyObject *o, void *native_cause, PyObject *object_cause)
+{
+    PyObject *cause = NULL;
+    PyObject *instance = NULL;
+    PyObject *foreign;
+
+    if (object_cause != NULL) {
+        cause = Py_NewRef(object_cause);
+    } else if (native_cause != NULL) {
+        foreign = pycc_rt_exception_foreign(native_cause);
+        if (foreign != NULL) {
+            cause = Py_NewRef(foreign);
+        } else {
+            /* The pending state takes its own reference, which raising it
+             * through the bridge then releases. */
+            pycc_rt_exception_incref(native_cause);
+            pycc_rt_exception_raise(native_cause);
+            if (pycc_ext_raise_pending()) {
+                cause = PyErr_GetRaisedException();
+            }
+        }
+    }
+    if (o == NULL) {
+        PyErr_SetString(PyExc_SystemError, "pycc: raise of a missing CPython object");
+    } else if (PyExceptionClass_Check(o)) {
+        instance = PyObject_CallNoArgs(o);
+        if (instance != NULL && !PyExceptionInstance_Check(instance)) {
+            PyErr_Format(PyExc_TypeError,
+                         "calling %R should have returned an instance of BaseException, not %R",
+                         o, (PyObject *)Py_TYPE(instance));
+            Py_CLEAR(instance);
+        }
+    } else if (PyExceptionInstance_Check(o)) {
+        instance = Py_NewRef(o);
+    } else {
+        PyErr_SetString(PyExc_TypeError, "exceptions must derive from BaseException");
+    }
+    if (instance != NULL) {
+        if (cause != NULL && cause != Py_None && !PyExceptionInstance_Check(cause)) {
+            if (PyExceptionClass_Check(cause)) {
+                PyObject *made = PyObject_CallNoArgs(cause);
+                Py_DECREF(cause);
+                cause = made;
+                if (cause == NULL) {
+                    Py_CLEAR(instance);
+                }
+            } else {
+                PyErr_SetString(PyExc_TypeError,
+                                "exception causes must derive from BaseException");
+                Py_CLEAR(cause);
+                Py_CLEAR(instance);
+            }
+        }
+    }
+    if (instance != NULL) {
+        /* Steals `cause`; a NULL cause still suppresses the context. */
+        PyException_SetCause(instance, cause);
+        cause = NULL;
+        PyErr_SetObject((PyObject *)Py_TYPE(instance), instance);
+        Py_DECREF(instance);
+    }
+    Py_XDECREF(cause);
     (void)pycc_ext_obj_error_bridge();
 }
 

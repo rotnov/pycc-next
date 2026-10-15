@@ -74,6 +74,22 @@ pub enum ObjIsInstanceClass {
     /// `pycc_ext_compiled_class_isinstance` answers it against the host type
     /// object of every published class whose MRO contains it.
     Compiled(String),
+    /// A tuple of classes (`isinstance(o, (dict, list))`), nested tuples
+    /// flattened: every class expression is evaluated first, as CPython
+    /// builds the tuple, then the classes are tested in order until one
+    /// answers `True`.
+    AnyOf(Vec<ObjIsInstanceClass>),
+}
+
+impl ObjIsInstanceClass {
+    /// The class expressions it evaluates, in order.
+    pub fn objects(&self) -> Vec<&MirExpr> {
+        match self {
+            Self::Object(class) => vec![class],
+            Self::AnyOf(classes) => classes.iter().flat_map(Self::objects).collect(),
+            Self::Builtin(_) | Self::Compiled(_) => Vec::new(),
+        }
+    }
 }
 
 /// `Ok(ObjContains)` for `left in right` / `left not in right` whose
@@ -92,10 +108,13 @@ pub(super) fn lower_object_compare(
             container: Box::new(right),
         });
     }
-    // An object in a native `str`: the `str` is boxed into a CPython one.
+    // An object in a native `str`, or in a native frozenset of scalars: the
+    // container is boxed into a CPython one.
     if matches!(op, CmpOpKind::In | CmpOpKind::NotIn)
         && left.ty() == Ty::Object
-        && right.ty() == Ty::Str
+        && (right.ty() == Ty::Str
+            || matches!(right.ty(), Ty::FrozenSet(element)
+                if matches!(*element, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)))
     {
         return Ok(MirExpr::ObjContains {
             negate: op == CmpOpKind::NotIn,
@@ -133,6 +152,29 @@ pub(super) fn lower_object_isinstance(
     classes: &HashMap<String, HirClassDef>,
     current_class: Option<&str>,
 ) -> MirExpr {
+    MirExpr::ObjIsInstance {
+        value: Box::new(value),
+        class: isinstance_class(class_arg, scopes, classes, current_class),
+    }
+}
+
+/// The class operand `class_arg` of an object `isinstance` denotes.
+fn isinstance_class(
+    class_arg: &HirExpr,
+    scopes: &[HashMap<String, Ty>],
+    classes: &HashMap<String, HirClassDef>,
+    current_class: Option<&str>,
+) -> ObjIsInstanceClass {
+    if let HirExpr::TupleLiteral(elements) = class_arg {
+        let mut flat = Vec::new();
+        for element in elements {
+            match isinstance_class(element, scopes, classes, current_class) {
+                ObjIsInstanceClass::AnyOf(inner) => flat.extend(inner),
+                class => flat.push(class),
+            }
+        }
+        return ObjIsInstanceClass::AnyOf(flat);
+    }
     // A local or parameter spelled like a builtin or a compiled class
     // shadows it, as in CPython: it is then the evaluated class argument.
     // A module function spelled like one shadows it as well; the checker
@@ -154,7 +196,7 @@ pub(super) fn lower_object_isinstance(
     // order, so a guard and the narrowing it licenses name one class).
     let compiled = unshadowed.filter(|name| classes.contains_key(*name));
     let builtin = unshadowed.and_then(|name| ObjBuiltinClass::from_name(name));
-    let class = match (compiled, builtin) {
+    match (compiled, builtin) {
         (Some(name), _) => ObjIsInstanceClass::Compiled(name.clone()),
         (None, Some(builtin)) => ObjIsInstanceClass::Builtin(builtin),
         (None, None) => ObjIsInstanceClass::Object(Box::new(lower_expr(
@@ -163,10 +205,6 @@ pub(super) fn lower_object_isinstance(
             classes,
             current_class,
         ))),
-    };
-    MirExpr::ObjIsInstance {
-        value: Box::new(value),
-        class,
     }
 }
 

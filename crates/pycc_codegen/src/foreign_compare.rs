@@ -273,6 +273,66 @@ pub(super) fn emit_isinstance<'ctx>(
     finish_isinstance(context, builder, module, rt, edge, status)
 }
 
+/// Emits `isinstance(value, (c1, c2, ...))` once every operand is
+/// evaluated: each class tested in order, the first `True` answering
+/// (CPython's `PyObject_IsInstance` over a tuple). One class is
+/// [`emit_isinstance`] itself.
+pub(super) fn emit_isinstance_any<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    value: Scalar<'ctx>,
+    classes: Vec<IsInstanceClass<'ctx>>,
+) -> Scalar<'ctx> {
+    let count = classes.len();
+    if count == 1 {
+        let class = classes.into_iter().next().expect("one class");
+        return emit_isinstance(context, builder, module, rt, value, class);
+    }
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("an isinstance is emitted inside a function");
+    let done = context.append_basic_block(function, "isinstance_any_done");
+    let mut incoming = Vec::with_capacity(count);
+    for (index, class) in classes.into_iter().enumerate() {
+        let Scalar::Bool(answer) = emit_isinstance(context, builder, module, rt, value, class)
+        else {
+            unreachable!("emit_isinstance answers a bool")
+        };
+        let at = builder.get_insert_block().expect("a block");
+        incoming.push((answer, at));
+        if index + 1 == count {
+            builder
+                .build_unconditional_branch(done)
+                .expect("build_unconditional_branch should not fail");
+        } else {
+            let next = context.append_basic_block(function, "isinstance_any_next");
+            let hit = builder
+                .build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    answer,
+                    context.i8_type().const_zero(),
+                    "isinstance_any_hit",
+                )
+                .expect("build_int_compare should not fail");
+            builder
+                .build_conditional_branch(hit, done, next)
+                .expect("build_conditional_branch should not fail");
+            builder.position_at_end(next);
+        }
+    }
+    builder.position_at_end(done);
+    let phi = builder
+        .build_phi(context.i8_type(), "isinstance_any")
+        .expect("build_phi should not fail");
+    for (answer, at) in &incoming {
+        phi.add_incoming(&[(answer, *at)]);
+    }
+    Scalar::Bool(phi.as_basic_value().into_int_value())
+}
+
 /// Routes an `isinstance` helper's `-1` to the operation's failure edge and
 /// narrows its `1`/`0` to the `bool` result.
 fn finish_isinstance<'ctx>(

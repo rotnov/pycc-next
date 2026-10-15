@@ -213,6 +213,21 @@ fn first_established_types(
                 continue;
             };
             if !crate::class::is_assignable_env(env, ty, previous) {
+                // Non-strict mode: a name the paths bind with two boxable
+                // types becomes an `object`, as at any other rebinding; once
+                // one path binds the object, the other's value boxes into it.
+                let boxable = |t: &Ty| {
+                    matches!(t, Ty::Object | Ty::None) || crate::foreign::is_object_operand(env, t)
+                };
+                if crate::non_strict::is_non_strict()
+                    && (*previous == Ty::Object || *ty == Ty::Object)
+                    && boxable(previous)
+                    && boxable(ty)
+                {
+                    first.insert(name.clone(), Ty::Object);
+                    continue;
+                }
+                crate::non_strict::request_widen(name, previous, ty, boxable);
                 return Err(Diagnostic::error(
                     "T0023",
                     format!(
