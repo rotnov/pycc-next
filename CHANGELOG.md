@@ -4,6 +4,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-15
+
+Fast untyped code, no leaks. `--non-strict` keeps untyped code native: strings index in
+O(1), names widen per function, and public untyped `--ext` functions get guarded native
+copies, so diff-match-patch's own speed test runs 11.5x faster than CPython (v0.3:
+1.7x). A second real package, tomli (the parser behind `tomllib`), builds unchanged and
+passes its own suite, 1.67x faster than CPython. Exceptions are reference counted and
+freed. Strict mode compiles 171/200 real-world programs unchanged (v0.3: 161), and
+`--non-strict` runs all but 8 of their 1191 top-level statements natively (v0.3: 23).
+Circular imports, `IntEnum` as `int`, sorting class instances and `dataclasses.fields`
+/ `asdict` work as in CPython.
+
+Benchmarks (`python3 bench/run.py`, best of 7, shared 4-core box): fib 18.9x faster than
+CPython / 2.2x of Rust, mandelbrot 35.2x / 0.98x, nbody 32.8x / 2.6x, sieve 21.3x /
+2.5x, spectral_norm 47.5x / 1.8x, collections_bfs 6.5x / 2.7x, numpy kernels stencil2d
+459x / 2.8x and prefix_sum_np 95x / 2.1x.
+
 ### Added
 
 - Untyped code runs native (v0.4 accept 1): an `--ext --non-strict` module's unannotated
@@ -190,6 +207,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   builds (`tests/memory_leaks_exceptions.rs`, `tests/memory_leaks_ext.rs`). A CPython
   exception bridged into compiled code now carries its original object, which is
   released with it, instead of a per-call table of originals.
+
+### Known gaps
+- See `docs/DEVIATIONS.md` for every known difference from CPython 3.13.
 
 ## [0.3.0] - 2026-10-14
 
