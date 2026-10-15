@@ -300,7 +300,8 @@ fn an_if_block_foreign_import_bridges_to_the_top_exception_exit() {
 }
 
 /// An import in a handler body is past the dispatch: its failure goes to
-/// the `try`'s finally target.
+/// the handler's cleanup block (which releases the caught exception) and
+/// on to the `try`'s finally target.
 #[test]
 fn a_handler_body_foreign_import_bridges_to_the_finally_target() {
     let ir = entry_ir(
@@ -308,7 +309,7 @@ fn a_handler_body_foreign_import_bridges_to_the_finally_target() {
         vec![try_stmt(vec![MirStmt::NoOp], vec![import_stmt("colorsys")])],
     );
     let (raised, _) = bridge_branch_labels(&ir);
-    assert_eq!(raised, "try_finally", "{ir}");
+    assert_eq!(raised, "handler_exc_cleanup", "{ir}");
 }
 
 /// Two bridged imports share one lazy declaration of the bridge helper

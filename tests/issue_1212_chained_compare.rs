@@ -197,10 +197,11 @@ fn in_and_general_identity_links_keep_their_c0001() {
 // ---------------------------------------------------------------------------
 // A peak-RSS gate on the exception edge a pending heap bigint operand
 // reaches when the next operand raises. It follows
-// `tests/issue_638_bigint_exception_release.rs`: a caught-exception loop
-// grows by itself on this tree, so the gate compares the leak shape's
-// *marginal* growth between 250k and 500k trips with a control that raises
-// the same exception at the same rate without the operand under test. The
+// `tests/issue_638_bigint_exception_release.rs`: the gate compares the leak
+// shape's *marginal* growth between 250k and 500k trips with a control that
+// raises the same exception at the same rate without the operand under
+// test, allowing 15% plus `SLACK_KB` of allocator noise now that a caught
+// exception is freed and both marginals are near zero. The
 // control reads its bigint by name, allocating nothing per trip; a call-
 // based control (`lt(small(), big())`) would itself leak `big()` on this
 // edge and mask a leaking chain. Measured on this change: a chain that
@@ -277,6 +278,10 @@ mod peak_rss {
         )
     }
 
+    /// Allocator noise a flat marginal may show (kB); one leaked
+    /// `BigIntObj` per trip is several megabytes over 250k trips.
+    const SLACK_KB: i64 = 1024;
+
     fn assert_tracks_control(case: &str, leak: &str, control: &str, exception: &str) {
         let leak_marginal = marginal_rss(
             &format!("rss_1212_{case}"),
@@ -289,7 +294,7 @@ mod peak_rss {
             250_000,
         );
         assert!(
-            (leak_marginal as f64) < (control_marginal as f64) * 1.15,
+            (leak_marginal as f64) < (control_marginal.max(0) as f64) * 1.15 + SLACK_KB as f64,
             "`{leak}`'s marginal RSS growth must track the same-exception-rate \
              control `{control}`, not add a `BigIntObj` per trip: \
              leak_marginal={leak_marginal} control_marginal={control_marginal}"

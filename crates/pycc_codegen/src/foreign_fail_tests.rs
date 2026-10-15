@@ -491,7 +491,8 @@ fn a_module_try_body_foreign_failure_bridges_to_the_handler_dispatch() {
     assert_eq!(bridged_target(&ir, "foreign_attr"), "try_handler_dispatch");
 }
 
-/// In a handler body the innermost target is the `try`'s finally block.
+/// In a handler body the innermost target is the handler's cleanup block,
+/// which releases the caught exception and goes on to the finally block.
 #[test]
 fn a_module_handler_body_foreign_failure_bridges_to_the_finally_block() {
     let ir = entry_ir(
@@ -503,7 +504,7 @@ fn a_module_handler_body_foreign_failure_bridges_to_the_finally_block() {
             Vec::new(),
         )],
     );
-    assert_eq!(bridged_target(&ir, "foreign_attr"), "try_finally");
+    assert_eq!(bridged_target(&ir, "foreign_attr"), "handler_exc_cleanup");
 }
 
 /// The `else` body is a distinct push site: it skips the same `try`'s
@@ -522,7 +523,8 @@ fn a_module_else_body_foreign_failure_bridges_to_the_finally_block() {
     assert_eq!(bridged_target(&ir, "foreign_attr"), "try_finally");
 }
 
-/// A `finally` body's failure goes to the finally-exception target.
+/// A `finally` body's failure goes to the cleanup block that releases the
+/// exception `finally` set aside, then to the finally-exception target.
 #[test]
 fn a_module_finally_body_foreign_failure_bridges_to_the_finally_exception_target() {
     let ir = entry_ir(
@@ -534,7 +536,7 @@ fn a_module_finally_body_foreign_failure_bridges_to_the_finally_exception_target
             vec![missing_attr()],
         )],
     );
-    assert_eq!(bridged_target(&ir, "foreign_attr"), "try_finally_exception");
+    assert_eq!(bridged_target(&ir, "foreign_attr"), "try_finally_cleanup");
 }
 
 /// With no enclosing `try` -- here inside a top-level `if` -- the edge is

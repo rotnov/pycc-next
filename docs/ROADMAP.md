@@ -104,6 +104,16 @@ Accept:
 2. **Exceptions are freed:** raised and caught exception objects and their messages are
    reference counted; a loop that raises and catches (native exceptions and exceptions
    from CPython calls) runs in constant memory (leak probes); the DEVIATIONS row goes.
+   **Met 2026-10-15:** `tests/memory_leaks_exceptions.rs` runs 18 raise-and-catch loops
+   (native and user exceptions, `as` bindings, causes, bare `raise`, `finally`,
+   `return`/`break`/`continue` out of handlers, lists and slots holding exceptions,
+   `StopIteration` values, generator `throw`/close, `except*`, `KeyError`, a failing
+   `json.loads`) in strict and `--non-strict` builds, 2.2M iterations growing < 1.5 MB
+   (was ~220 B per `ZeroDivisionError`, ~1.9 kB per `json.loads` failure);
+   `tests/memory_leaks_ext.rs` keeps the runtime's live exception and `str` counts flat
+   across the `--ext` boundary; `tests/fixtures/exception_lifetime.py` matches CPython
+   and is memcheck-clean. The row is gone; what remains (cause cycles, exception classes
+   with their own `__init__`) is listed in `docs/DEVIATIONS.md`.
 3. **Real-world corpus:** strict passes >= 170/200; `--non-strict` keeps 200/200, 0 wrong,
    with <= 8 top-level statements in CPython fallback (v0.3: 23).
 4. **A second real package:** another pinned, permissively licensed pure-Python PyPI

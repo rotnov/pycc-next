@@ -4,6 +4,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Fixed
+
+- Exception objects are freed (v0.4 accept 2): a raised or caught exception, its
+  message, `__cause__`, group members and a `StopIteration`'s value are reference counted
+  and released with the last reference -- the end of an `except` handler (its `as`
+  binding is unbound then, as in CPython), a `return`/`break`/`continue` out of it, a
+  `finally` clause that replaces it, or whatever list, attribute or local kept it. A
+  loop catching `ZeroDivisionError` no longer grows by ~220 bytes per iteration, nor one
+  catching a failing `json.loads` by ~1.9 kB, in strict, `--non-strict` and `--ext`
+  builds (`tests/memory_leaks_exceptions.rs`, `tests/memory_leaks_ext.rs`). A CPython
+  exception bridged into compiled code now carries its original object, which is
+  released with it, instead of a per-call table of originals.
+
 ## [0.3.0] - 2026-10-14
 
 Packages, stdlib, everyday code. Programs of several modules and packages compile as
