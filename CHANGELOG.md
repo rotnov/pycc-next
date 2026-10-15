@@ -4,6 +4,27 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- Untyped code runs native (v0.4 accept 1): an `--ext --non-strict` module's unannotated
+  function or method that loops gets a guarded native specialization -- a copy whose
+  parameters are typed `str` or `int` from how its body uses them, called when the
+  arguments are exactly those types (any other call runs on the CPython objects as
+  before; a copy the checker refuses is dropped, never fallen back). diff-match-patch's
+  own speed test now runs 8.3x faster than CPython (1.60 s vs 13.2 s) (v0.3: 1.7x), its suite passing
+  (`python3 bench/package_check.py --time`). `--report-fallbacks` lists `specialized:`
+  and `not specialized:` functions.
+
+### Changed
+
+- Native `str` indexing, slicing and `len()` are O(1) in the string's length: a string
+  caches its code-point count and, when not ASCII, the byte offset of every 32nd code
+  point; one-character ASCII strings are shared. `in` on `str` uses a substring search.
+- Non-strict widening is per function: a name one function rebinds with another type
+  becomes a CPython object in that function only, not in every function of the module.
+- Non-strict: an object tested for membership in a native `str` (`c in "aeiou"`) is
+  CPython's own test (was a fallback).
+
 ### Fixed
 
 - Exception objects are freed (v0.4 accept 2): a raised or caught exception, its

@@ -170,9 +170,9 @@ $ python3 -m unittest diff_match_patch.tests                    # 28 tests, OK
 A package `__init__.py` builds to `pkg/__init__.abi3.so`, imported as the package. Every
 function and method of the package compiles (`--report-fallbacks` reports none; the
 `__init__`'s re-exporting imports also run as CPython imports). Its untyped text
-parameters are CPython `str` objects, so the speed-up is modest: the package's own speed
-test (`diff_main` on two ~30 KB texts) takes 6.4 s compiled against 10.9 s in CPython
-(1.7x, best of 5, same machine as the table above).
+functions run natively on `str` (guarded native specializations, see Modes): the
+package's own speed test (`diff_main` on two ~30 KB texts) takes 1.60 s compiled
+against 13.2 s in CPython (**8.3x faster**, best of 5; v0.3 was 1.7x).
 
 ## Modes
 
@@ -191,7 +191,12 @@ test (`diff_main` on two ~30 KB texts) takes 6.4 s compiled against 10.9 s in CP
   unchanged, and a name rebound with a different type becomes an object. In a
   native build an unannotated function's signature is inferred from its call sites
   (a parameter or return nothing pins is an object); an `--ext` module's stays an
-  object, since Python may call it with anything. A native
+  object, since Python may call it with anything -- but one that loops gets a *guarded
+  native specialization* when its body implies `str` or `int` for parameters (indexed,
+  sliced, `len()`, `str` methods; indices, slice bounds, `range()` arguments): called
+  with exactly those types it runs natively, otherwise on the objects; one the checker
+  refuses is simply not specialized (`--report-fallbacks` lists both). A name one
+  function rebinds with another type becomes an object in that function only. A native
   build of such a program embeds CPython (as a foreign import does); `--ext` just
   works, and publishes the module's variables and imports as module attributes and
   its classes' constants as class attributes. Known gaps are listed in

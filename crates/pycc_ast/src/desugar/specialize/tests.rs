@@ -41,9 +41,11 @@ fn an_indexed_parameter_is_text_and_a_bound_an_int() {
     );
     let (module, _) = plan_of(source);
     assert_eq!(def_names(&module.body), ["f", "_pycc_native_f"]);
-    let Stmt::FunctionDef(original) = &module.body[0] else { unreachable!() };
+    // The guards read `builtins` through a hidden import, first.
+    assert!(matches!(&module.body[0], Stmt::Import(i) if i.names[0].name.as_str() == "builtins"));
+    let Stmt::FunctionDef(original) = &module.body[1] else { unreachable!() };
     assert!(matches!(original.body[0], Stmt::If(_)), "the guard comes first");
-    let Stmt::FunctionDef(clone) = &module.body[1] else { unreachable!() };
+    let Stmt::FunctionDef(clone) = &module.body[2] else { unreachable!() };
     let annotation = |i: usize| match clone.parameters.args[i].parameter.annotation.as_deref() {
         Some(Expr::Name(n)) => n.id.to_string(),
         other => panic!("{other:?}"),
@@ -60,7 +62,7 @@ fn a_method_guard_calls_through_the_receiver_after_the_docstring() {
     let (module, planned) = plan_of(source);
     assert_eq!(planned.len(), 1);
     assert_eq!(planned[0].qualname, "C.m");
-    let Stmt::ClassDef(class) = &module.body[0] else { unreachable!() };
+    let Stmt::ClassDef(class) = &module.body[1] else { unreachable!() };
     assert_eq!(def_names(&class.body), ["m", "_pycc_native_m"]);
     let Stmt::FunctionDef(m) = &class.body[0] else { unreachable!() };
     assert!(matches!(m.body[0], Stmt::Expr(_)), "the docstring stays first");

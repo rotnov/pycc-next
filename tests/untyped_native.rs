@@ -121,7 +121,7 @@ fn specialized_calls_leak_nothing() {
 #[ignore = "requires a CPython 3.13+ oracle and Python.h (PYCC_PYTHON, default python3)"]
 fn a_refused_specialization_is_dropped_not_fallen_back() {
     let dir = ScratchDir::new("untyped_native_dropped").expect("scratch");
-    let source = "def f(s, k):\n    out = []\n    for i in range(k):\n        out.append(s[i])\n    s.missing_method()\n    return out\n\n\
+    let source = "def f(s, k):\n    out = []\n    for i in range(k):\n        out.append(s[i])\n    print(s + 1)\n    return out\n\n\
                   def g(s):\n    n = 0\n    for c in s:\n        n += len(s[0:1])\n    return n\n";
     let (ext, src) = (dir.join("ext"), dir.join("src"));
     std::fs::create_dir_all(&ext).expect("dir");
@@ -132,9 +132,9 @@ fn a_refused_specialization_is_dropped_not_fallen_back() {
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
     assert!(!report.contains("fallback:"), "{report}");
-    assert!(!report.contains("`f` runs natively"), "{report}");
+    assert!(report.contains("not specialized: `f`"), "{report}");
     assert!(report.contains("specialized: `g` runs natively when called with s: str"), "{report}");
-    let script = "import m\nprint(m.g('abc'), m.g([[1]]))\ntry:\n    m.f('ab', 2)\nexcept AttributeError as e:\n    print(e)\n";
+    let script = "import m\nprint(m.g('abc'), m.g([[1]]))\ntry:\n    m.f('ab', 2)\nexcept TypeError as e:\n    print(e)\n";
     let run = |d: &Path| {
         Command::new(python())
             .args(["-c", script])

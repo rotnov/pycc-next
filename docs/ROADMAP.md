@@ -101,6 +101,16 @@ Accept:
    literals and returns), so untyped code stops round-tripping through CPython objects.
    Evidence: `python3 bench/package_check.py --time` shows diff-match-patch's own speed
    test >= 5x faster than CPython (v0.3: 1.7x) with its suite still passing.
+   **Met 2026-10-15:** `python3 bench/package_check.py --time`: CPython 13.2 s, compiled
+   1.60 s (8.3x; 10.5x on a quieter run), suite 28/28 passing, every function native.
+   An `--ext --non-strict` module's unannotated functions and methods that loop get
+   guarded native specializations (`str`/`int` parameters guessed from their uses, exact
+   type tests at entry, the object path otherwise; `tests/untyped_native.rs` calls them
+   from CPython with expected and unexpected types against the source module, and probes
+   leaks); native `str` indexing/slicing/`len` are O(1); widening is per function.
+   Scope: containers (`list`, `dict`, `set`, `tuple`) do not cross the boundary natively
+   (a copy would break aliasing), see `docs/DEVIATIONS.md`. Corpus unchanged: non-strict
+   200/200, 0 wrong; strict 161.
 2. **Exceptions are freed:** raised and caught exception objects and their messages are
    reference counted; a loop that raises and catches (native exceptions and exceptions
    from CPython calls) runs in constant memory (leak probes); the DEVIATIONS row goes.
