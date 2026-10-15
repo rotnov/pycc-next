@@ -232,17 +232,22 @@ fn a_static_method_named_self_parameter_is_not_a_producer() {
     );
 }
 
-/// The unannotated `{}` stays `C0001`, naming the annotated spelling.
+/// An unannotated `{}` nothing stores into is `T0003`, naming the attribute
+/// and the class.
 #[test]
-fn an_unannotated_empty_dict_stays_refused() {
+fn an_unannotated_empty_dict_with_no_producer_is_refused() {
     let text = fails(
         "e2e_1265_dict",
         "check",
         "class Index:\n    def __init__(self) -> None:\n        self.d = {}\n\n\nprint(Index())\n",
     );
-    assert!(text.contains("error[C0001]"), "{text}");
-    assert!(text.contains("`self.d: dict[str, int] = {}`"), "{text}");
-    assert!(text.contains("#891"), "{text}");
+    assert!(
+        text.contains(
+            "error[T0003]: an empty dict literal has no inferable key/value types for `self.d` \
+             in class `Index`"
+        ),
+        "{text}"
+    );
 }
 
 const SLOT: &str = "class B:\n    def __init__(self) -> None:\n        self.xs = []\n\n";

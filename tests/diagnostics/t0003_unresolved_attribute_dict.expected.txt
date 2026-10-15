@@ -1,0 +1,5 @@
+error[T0003]: an empty dict literal has no inferable key/value types for `self.d` in class `Index`
+ --> tests/diagnostics/t0003_unresolved_attribute_dict.py:1:1
+  |
+1 | class Index:
+  | ^ an empty dict literal has no inferable key/value types for `self.d` in class `Index`

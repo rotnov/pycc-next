@@ -26,7 +26,7 @@ pub(crate) fn resolve_with_solved_signatures(hir: &HirModule) -> Option<HirModul
     let pending = hir.items.iter().any(|item| match item {
         HirItem::Function { body, .. } => body_has_empty_literal(body),
         HirItem::TopLevelStmt(stmt) => body_has_empty_literal(std::slice::from_ref(stmt)),
-    });
+    }) || has_provisional_slot(hir);
     if !pending {
         return None;
     }
@@ -89,6 +89,15 @@ pub(crate) fn resolve_with_solved_signatures(hir: &HirModule) -> Option<HirModul
         }
     }
     (rewritten != *hir).then_some(rewritten)
+}
+
+/// Whether some class still carries a provisional attribute slot: its
+/// producer (`self.xs.append(v)`, `self.d[k] = v`) may read an unannotated
+/// method parameter the solver pins.
+fn has_provisional_slot(hir: &HirModule) -> bool {
+    hir.class_defs
+        .iter()
+        .any(|(_, class)| class.attrs.iter().any(|(_, ty)| contains_infer(ty)))
 }
 
 /// Whether a solved type may stand in for an unannotated position.

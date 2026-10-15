@@ -1,5 +1,0 @@
-error[C0001]: an unannotated `self.<attr> = {}` has no key/value type source yet -- annotate it (`self.d: dict[str, int] = {}`) or declare it in the class body (`d: dict[str, int]`); inferring it from `self.d[k] = v` needs a subscript store on an attribute receiver (#891)
- --> tests/diagnostics/c0001_unannotated_attribute_empty_dict.py:3:18
-  |
-3 |         self.d = {}
-  |                  ^^ an unannotated `self.<attr> = {}` has no key/value type source yet -- annotate it (`self.d: dict[str, int] = {}`) or declare it in the class body (`d: dict[str, int]`); inferring it from `self.d[k] = v` needs a subscript store on an attribute receiver (#891)

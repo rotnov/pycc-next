@@ -13,7 +13,8 @@
 //! `list[<Ty::Infer>]` slot: `pycc_types`' empty-container pass resolves its
 //! element type class-wide, and its gate refuses any provisional slot it
 //! could not resolve (D-245's 2026-09-24 amendment for #1265). The
-//! unannotated `{}` stays `C0001` until its producer exists (#891).
+//! unannotated `{}` is the provisional `dict[<Ty::Infer>, <Ty::Infer>]`,
+//! typed from the first `<receiver>.<attr>[k] = v` the same way.
 //!
 //! #1266 (Part 5) lets a class-body declaration (`n: int`,
 //! `d: dict[str, int]`, see `super::declared_attrs`) supply the slot type:
@@ -263,11 +264,11 @@ fn receiver_attr(target: &Expr, receiver_name: &str) -> Option<String> {
 /// reaches `pycc_mir`: `pycc_types::empty_container` replaces it with the
 /// element type of an inherited declaration or of the first
 /// `self.<attr>.append(v)` in the class's own methods, and refuses the
-/// program with `T0003` when neither exists. An empty dict display has no
-/// such producer yet (`self.d[k] = v` is #891), so it gets its own `C0001`
-/// naming the two spellings that work: the annotated assignment and a
-/// class-body declaration, whose type `declared_slot_ty` supplies without
-/// calling this function for an empty literal. Every other RHS shape --
+/// program with `T0003` when neither exists. `{}` likewise yields the
+/// provisional `dict[<Ty::Infer>, <Ty::Infer>]`, typed from the first
+/// `<receiver>.<attr>[k] = v`; inside a PEP 695 generic class it keeps its
+/// own `C0001` naming the annotated assignment and a class-body
+/// declaration. Every other RHS shape --
 /// an arithmetic expression, a call, a non-empty display, a name that is
 /// not a parameter -- yields the provisional slot `Ty::Infer`, which
 /// `pycc_types`' class phase types from the value itself in `__init__`'s
@@ -417,6 +418,13 @@ fn slot_ty_from_init_rhs(
         // #1265 (Part 4 of #1218): the provisional slot -- see this
         // function's doc comment.
         Expr::List(list) if list.elts.is_empty() => Ok(Ty::List(Box::new(Ty::Infer))),
+        // The dict half of the provisional slot: `pycc_types`' class phase
+        // types it from the first `<receiver>.<attr>[k] = v` in the class's
+        // own methods. A PEP 695 generic class keeps the refusal, whose
+        // slots must be declared.
+        Expr::Dict(dict) if dict.items.is_empty() && declaration_hint.is_some() => {
+            Ok(Ty::Dict(Box::new((Ty::Infer, Ty::Infer))))
+        }
         Expr::Dict(dict) if dict.items.is_empty() => Err(unsupported(
             format!(
                 "an unannotated `{receiver_name}.<attr> = {{}}` has no key/value type source \
@@ -558,18 +566,25 @@ mod tests {
     }
 
     #[test]
-    fn an_init_attr_assigned_an_empty_dict_literal_names_the_annotated_spelling() {
-        // The dict half has no producer yet: `self.d[k] = v` is #891. The
-        // message names both spellings that do supply a type: the annotated
-        // assignment (#1264) and a class-body declaration (#1266).
-        let message =
-            c0001_message("class C:\n    def __init__(this) -> None:\n        this.d = {}\n");
+    fn an_init_attr_assigned_an_empty_dict_literal_establishes_a_provisional_slot() {
+        // `pycc_types::empty_container` types it from `this.d[k] = v`.
+        let hir = lower_ok("class C:\n    def __init__(this) -> None:\n        this.d = {}\n");
         assert_eq!(
-            message,
-            "an unannotated `this.<attr> = {}` has no key/value type source yet -- annotate \
-             it (`this.d: dict[str, int] = {}`) or declare it in the class body (`d: dict[str, \
-             int]`); inferring it from `this.d[k] = v` needs a subscript store on an attribute \
-             receiver (#891)"
+            hir.class_defs[0].1.attrs,
+            vec![("d".to_string(), Ty::Dict(Box::new((Ty::Infer, Ty::Infer))))]
+        );
+    }
+
+    #[test]
+    fn an_empty_dict_attr_of_a_generic_class_names_the_annotated_spelling() {
+        let message =
+            c0001_message("class C[T]:\n    def __init__(this) -> None:\n        this.d = {}\n");
+        assert!(
+            message.starts_with(
+                "an unannotated `this.<attr> = {}` has no key/value type source yet -- annotate \
+                 it (`this.d: dict[str, int] = {}`)"
+            ),
+            "{message}"
         );
     }
 

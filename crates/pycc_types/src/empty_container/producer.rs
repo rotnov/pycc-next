@@ -96,7 +96,47 @@ pub(super) fn scan_body(
 ) -> ProducerScan {
     let mut sites: Vec<&str> = Vec::new();
     collect_binding_sites(body, &mut sites);
-    scan_for_producer(body, target, env, local_names, &sites)
+    let mut aliases: Vec<&str> = Vec::new();
+    if let ProducerTarget::SelfAttr { receivers, attr } = target {
+        collect_attr_aliases(body, receivers, attr, &mut aliases);
+    }
+    scan_for_producer(body, target, env, local_names, &sites, &aliases)
+}
+
+/// Every desugaring temporary bound to the receiver's `attr` in `body` at
+/// any depth: `self.d[k] = v` reaches HIR as `_pycc_N = self.d; _pycc_N[k]
+/// = v` (`pycc_ast`'s computed-base subscript store). A `_pycc_` name is
+/// bound exactly once, so a store through it is a store into the attribute.
+fn collect_attr_aliases<'a>(
+    body: &'a [HirStmt],
+    receivers: &[&str],
+    attr: &str,
+    aliases: &mut Vec<&'a str>,
+) {
+    for stmt in body {
+        if let HirStmt::Assign {
+            target,
+            value: HirExpr::AttrGet { base, attr: read },
+        } = stmt
+            && target.starts_with("_pycc_")
+            && read == attr
+            && matches!(base.as_ref(), HirExpr::Name(base) if receivers.contains(&base.as_str()))
+        {
+            aliases.push(target);
+        }
+        for nested in nested_bodies(stmt) {
+            collect_attr_aliases(nested, receivers, attr, aliases);
+        }
+    }
+}
+
+/// Whether `dict` is the dict `target` names: the local itself, or for an
+/// attribute target one of its desugaring aliases.
+fn dict_matches(dict: &str, target: ProducerTarget<'_>, aliases: &[&str]) -> bool {
+    match target {
+        ProducerTarget::Name(wanted) => dict == wanted,
+        ProducerTarget::SelfAttr { .. } => aliases.contains(&dict),
+    }
 }
 
 /// The outcome of scanning one statement list for `target`'s first producer.
@@ -124,6 +164,7 @@ fn scan_for_producer<'a>(
     env: &Environment,
     local_names: &[&str],
     sites: &[&'a str],
+    aliases: &[&str],
 ) -> ProducerScan {
     for stmt in body {
         // Issue #1188: an admitted container reading of a receiver-dispatched
@@ -156,18 +197,15 @@ fn scan_for_producer<'a>(
                     Err(_) => ProducerScan::Matched,
                 };
             }
-            // A dict producer is keyed by a bare name only: a subscript
-            // store on an attribute receiver (`self.d[k] = v`) is refused in
-            // `pycc_hir` until #891, so no attribute dict producer exists.
+            // A dict producer is `d[k] = v` on the local, or a store through
+            // one of an attribute's desugaring aliases (`self.d[k] = v`).
             // An augmented update `d[k] += v` reads the element it stores,
             // so its value's type is the element type itself: it is a
             // consumer, and the scan moves on to the next producer (the
             // `d[k] = 1` of `try: d[k] += 1 except KeyError: d[k] = 1`).
             HirStmt::DictSet { dict, value, .. }
-                if matches!(target, ProducerTarget::Name(wanted) if dict == wanted)
-                    && reads_own_element(value, dict) => {}
-            HirStmt::DictSet { dict, key, value } if matches!(target, ProducerTarget::Name(wanted) if dict == wanted) =>
-            {
+                if dict_matches(dict, target, aliases) && reads_own_element(value, dict) => {}
+            HirStmt::DictSet { dict, key, value } if dict_matches(dict, target, aliases) => {
                 return match (
                     crate::infer_expr_in(env, local_names, key),
                     crate::infer_expr_in(env, local_names, value),
@@ -183,7 +221,7 @@ fn scan_for_producer<'a>(
         for nested in nested_bodies(stmt) {
             let scoped = scoped_for_body(stmt, nested, env, sites);
             let inner = scoped.as_ref().unwrap_or(env);
-            match scan_for_producer(nested, target, inner, local_names, sites) {
+            match scan_for_producer(nested, target, inner, local_names, sites, aliases) {
                 ProducerScan::NotFound => {}
                 outcome => return outcome,
             }

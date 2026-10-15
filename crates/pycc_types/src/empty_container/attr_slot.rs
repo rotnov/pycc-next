@@ -14,7 +14,8 @@
 //!    - **(a)** the first concrete slot type *of the same shape* that one of
 //!      the class's MRO ancestors declares for the same attribute name;
 //!    - **(b)** the element type of the first *syntactic*
-//!      `self.<attr>.append(v)` in statement position across the class's own
+//!      `self.<attr>.append(v)` (for a dict slot, the key/value types of the
+//!      first `self.<attr>[k] = v`) in statement position across the class's own
 //!      methods, in source order. "Own methods" is the class table
 //!      (`HirClassDef::methods` plus every property getter and setter), never
 //!      `static_methods` or `class_methods`, whose first parameter is not the
@@ -211,8 +212,10 @@ fn inherited_slot(
     })
 }
 
-/// Source (b): the first syntactic `self.<attr>.append(v)` across the
-/// class's own methods, in source order.
+/// Source (b): the first syntactic producer across the class's own
+/// methods, in source order: `self.<attr>.append(v)` for a list slot, and
+/// for a dict slot `self.<attr>[k] = v`, which desugaring spells as a store
+/// through a fresh alias (`_pycc_N = self.<attr>; _pycc_N[k] = v`).
 fn produced_slot(
     methods: &[(&[HirStmt], crate::Environment)],
     local_names: &[Vec<&str>],
@@ -237,8 +240,7 @@ fn produced_slot(
 }
 
 /// The slot type a resolution stands for -- the inverse of
-/// `from_container_ty`. An attribute scan only ever resolves a list today
-/// (no attribute dict producer exists until #891), but the mapping is total.
+/// `from_container_ty`.
 fn container_ty(resolution: Resolution) -> Ty {
     match resolution {
         Resolution::List(element) => Ty::List(Box::new(element)),
@@ -426,14 +428,31 @@ pub(crate) fn reject_unresolved_attr_slots(hir: &HirModule) -> Result<(), KeyedD
         ));
         return Err(vec![(key, diagnostic)]);
     }
-    let message = format!(
-        "an empty list literal has no inferable element type for `{receiver}.{attr}` in class \
-         `{class_name}`"
-    );
-    let diagnostic = Diagnostic::error("T0003", message, Span::new(0, 0)).with_help(format!(
-        "annotate the attribute (`{receiver}.{attr}: list[int] = []`) or append a value to it \
-         in one of `{class_name}`'s own methods (`{receiver}.{attr}.append(...)`)"
-    ));
+    let (message, help) = if matches!(slot, Ty::Dict(_)) {
+        (
+            format!(
+                "an empty dict literal has no inferable key/value types for `{receiver}.{attr}` \
+                 in class `{class_name}`"
+            ),
+            format!(
+                "annotate the attribute (`{receiver}.{attr}: dict[str, int] = {{}}`) or store an \
+                 item into it in one of `{class_name}`'s own methods \
+                 (`{receiver}.{attr}[key] = value`)"
+            ),
+        )
+    } else {
+        (
+            format!(
+                "an empty list literal has no inferable element type for `{receiver}.{attr}` in \
+                 class `{class_name}`"
+            ),
+            format!(
+                "annotate the attribute (`{receiver}.{attr}: list[int] = []`) or append a value \
+                 to it in one of `{class_name}`'s own methods (`{receiver}.{attr}.append(...)`)"
+            ),
+        )
+    };
+    let diagnostic = Diagnostic::error("T0003", message, Span::new(0, 0)).with_help(help);
     Err(vec![(key, diagnostic)])
 }
 
