@@ -2,6 +2,7 @@ mod build_pipeline;
 mod cli;
 mod embed;
 mod ext_build;
+mod ext_globals;
 mod ext_output;
 mod fallback;
 mod foreign_import;

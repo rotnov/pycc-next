@@ -815,6 +815,11 @@ pub(crate) fn with_fallback<T, E>(
                 }
             };
         }
+        // Strict mode: Python code reads the module's variables, which a
+        // rewrite copies onto the module object (`crate::ext_globals`).
+        Ok(_) if publishes.variables && !crate::mode::non_strict_for(path) => {
+            return publish_strict(path, first, &attempt, &split);
+        }
         Ok(_) => return first,
         Err(failure) => match split(failure) {
             Some(failures) if mode_allows(path) =>
@@ -878,6 +883,50 @@ pub(crate) fn with_fallback<T, E>(
         }
     }
     Ok(value)
+}
+
+/// Compiles the strict `--ext` rewrite publishing the entry module's
+/// variables (`crate::ext_globals`), dropping each name whose copy fails to
+/// compile; `first` (nothing published) when a failure is not one of the
+/// copies.
+fn publish_strict<T, E>(
+    path: &Path,
+    first: Result<T, E>,
+    attempt: &impl Fn() -> Result<T, E>,
+    split: &impl Fn(&E) -> Option<Vec<Failure>>,
+) -> Result<T, E> {
+    let Some(source) = read_entry(path) else {
+        return first;
+    };
+    let mut dropped = BTreeSet::new();
+    loop {
+        let Some(rewrite) = crate::ext_globals::rewrite(&source, &dropped) else {
+            set_override(None);
+            return first;
+        };
+        if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
+            eprintln!("--- ext globals rewrite ---\n{}", rewrite.text);
+        }
+        set_override(Some(rewrite.text.clone()));
+        let failure = match attempt() {
+            Ok(value) => return Ok(value),
+            Err(failure) => failure,
+        };
+        let failures = split(&failure).unwrap_or_default();
+        let mut progress = false;
+        let mut attributed = !failures.is_empty();
+        for failure in &failures {
+            let at = failure.diagnostic.span.map(|s| s.start).or(failure.origin);
+            match at.and_then(|at| rewrite.copies.iter().find(|(range, _)| range.contains(&at))) {
+                Some((_, name)) => progress |= dropped.insert(name.clone()),
+                None => attributed = false,
+            }
+        }
+        if !attributed || !progress {
+            set_override(None);
+            return first;
+        }
+    }
 }
 
 /// Whether the fallback loop runs for `path`: non-strict mode, and not
