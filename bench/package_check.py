@@ -16,9 +16,8 @@ Packages:
     PyPI sdist ships the module and its unittest suite.
   tomli 2.5.0 (MIT): a TOML parser (the source of the standard library's `tomllib`). Its
     sdist has no tests, so the tagged GitHub source archive is used: package, unittest
-    suite with the toml-test data, and the benchmark document. GitHub regenerates its
-    archives, whose compression is not byte-stable, so the files used are pinned by a
-    sha256 over their paths and contents instead.
+    suite with the toml-test data, and the benchmark document. It is pinned by its
+    sha256, and the files used also by a sha256 over their paths and contents.
 
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
@@ -49,8 +48,8 @@ class Package:
     url: str
     # The cached archive's file name.
     archive: str
-    # Either the archive's sha256, or (`tree_sha256`) the sha256 of the files under
-    # `layout`'s sources (see `tree_digest`).
+    # The archive's sha256, and optionally (`tree_sha256`) the sha256 of the files
+    # under `layout`'s sources (see `tree_digest`).
     sha256: str | None
     tree_sha256: str | None
     # Tree path -> path inside the extracted archive. The first entry is the package.
@@ -120,7 +119,9 @@ print(f"{best:.4f}")
             version="2.5.0",
             url="https://github.com/hukkin/tomli/archive/refs/tags/2.5.0.tar.gz",
             archive="tomli-2.5.0-source.tar.gz",
-            sha256=None,
+            # GitHub's archive as CI downloaded it; the tree digest also pins the
+            # files used, should GitHub ever regenerate the archive.
+            sha256="8d4b735554696bf2b7e3d4505e069f6750b80e4c035fe5f1566f2a241d34dcc3",
             tree_sha256="8bbb6589d151200e8aef88b32e66b46ffcfbd0606a25964bdac68299d987a506",
             layout=(
                 ("tomli", "tomli-2.5.0/src/tomli"),

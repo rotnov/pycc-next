@@ -49,8 +49,8 @@ jobs:
       # print exactly what CPython prints (wrong output = miscompilation).
       - run: python3 bench/corpus.py -j 4 --flags=--non-strict --require-correct
       # Real-package gates (v0.3 accept 4, v0.4 accept 4): diff-match-patch
-      # (sdist sha256) and tomli (GitHub tag archive, sha256 of the files
-      # used), each built module by module with --ext --non-strict, and each
+      # (sdist sha256) and tomli (GitHub tag archive sha256, and that of the
+      # files used), each built module by module with --ext --non-strict, and each
       # package's own test suite run by CPython against the compiled modules.
       - name: Real packages (diff-match-patch, tomli) against their own tests
         if: matrix.os == 'ubuntu-24.04'

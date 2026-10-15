@@ -16,10 +16,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   and `not specialized:` functions.
 - A second real package (v0.4 accept 4): `bench/package_check.py` is a table of pinned
   packages and adds [tomli](https://pypi.org/project/tomli/) 2.5.0 (MIT, the TOML parser
-  `tomllib` comes from; GitHub tag archive pinned by the sha256 of the files used). Its
+  `tomllib` comes from; GitHub tag archive pinned by its sha256 and that of the files used). Its
   four modules build unchanged with `--ext --non-strict --foreign-relative-imports`, its
   own test suite passes against them (CI) and 36 of 40 functions compile; `loads()` runs
-  at CPython's speed (0.92x-1.10x; was 0.40x), not faster yet, so the accept item stays
+  at CPython's speed (0.87x-1.10x; was 0.40x), not faster yet, so the accept item stays
   open. What typed packages written for mypyc needed:
   - `from __future__ import annotations`: an annotation pycc cannot lower is erased
     instead of making its statement fall back, and fallback code is compiled with the

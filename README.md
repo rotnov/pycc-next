@@ -166,8 +166,9 @@ its hot path):
 - [diff-match-patch](https://pypi.org/project/diff-match-patch/) 20241021 (Apache-2.0,
   Google's diff/match/patch algorithms, pinned by sdist sha256);
 - [tomli](https://pypi.org/project/tomli/) 2.5.0 (MIT, the TOML parser `tomllib` comes
-  from; its sdist has no tests, so the GitHub tag archive is used, pinned by the sha256
-  of the files used).
+  from; its sdist has no tests, so the GitHub tag archive is used, pinned by its sha256
+  and by that of the files used). An archive member that is not a regular file or a
+  directory (a link, a device) is refused before extraction.
 
 For diff-match-patch:
 
@@ -194,7 +195,7 @@ helper). A function whose
 signature the boundary cannot carry (a `tuple[int, str]` result, a `frozenset`
 parameter) is compiled for the module's own callers and runs in CPython only when Python
 calls it (`twin:` in the report). `loads()` of tomli's benchmark document runs at
-CPython's speed, not faster yet (0.92x-1.10x over repeated runs of 100 calls; it was
+CPython's speed, not faster yet (0.87x-1.10x over repeated runs of 100 calls; it was
 0.40x before the work above): the parsing tables are native frozensets and the text is
 scanned natively, but its documents (`dict[str, Any]`), keys (`tuple[str, ...]`) and
 regular-expression matches are CPython objects that every step reaches through the C
