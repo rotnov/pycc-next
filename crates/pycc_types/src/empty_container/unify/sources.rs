@@ -16,6 +16,16 @@ impl Engine {
     ) -> Option<usize> {
         let base = (*args.first()?)?;
         let elem = self.store.fresh();
+        // `frozenset(x)`: the frozenset of `x`'s elements (a `str`'s are
+        // `str`s), so `frozenset("") == frozenset()` types the empty one.
+        if (callee, args.len()) == ("frozenset", 1) {
+            self.deferred.push(Deferred::Element {
+                base,
+                result: elem,
+                iterate: true,
+            });
+            return Some(self.store.with_shape(Shape::FrozenSet(elem)));
+        }
         let result = match (callee, args.len()) {
             ("sorted" | "list", 1) => elem,
             ("__pycc_sorted_keyed", 2) => {

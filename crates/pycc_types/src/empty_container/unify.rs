@@ -290,6 +290,20 @@ impl Engine {
                             return Some(l);
                         }
                     }
+                    // `a | b`, `a & b`, `a - b`, `a ^ b` of sets: the
+                    // operands' elements are one type (`frozenset("x") |
+                    // frozenset()`), and so is the result's.
+                    pycc_hir::BinOpKind::BitOr
+                    | pycc_hir::BinOpKind::BitAnd
+                    | pycc_hir::BinOpKind::Sub
+                    | pycc_hir::BinOpKind::BitXor => {
+                        if let (Some(l), Some(r)) = (l, r)
+                            && (self.is_set(l) || self.is_set(r))
+                        {
+                            self.store.unify(l, r);
+                            return Some(l);
+                        }
+                    }
                     pycc_hir::BinOpKind::Mul => {
                         if let Some(l) = l
                             && self.is_list(l)
@@ -424,6 +438,14 @@ impl Engine {
                 {
                     self.store.unify(l, r);
                 }
+                // `x in s` of a set: `x` has the set's element type
+                // (`"x" in frozenset()`).
+                if matches!(op, pycc_hir::CmpOpKind::In | pycc_hir::CmpOpKind::NotIn)
+                    && let (Some(l), Some(r)) = (l, r)
+                    && let Some(Shape::Set(element) | Shape::FrozenSet(element)) = self.store.open(r)
+                {
+                    self.store.unify(element, l);
+                }
                 Some(self.store.known(Ty::Bool))
             }
             HirExpr::IfExp { test, body, orelse } => {
@@ -518,8 +540,12 @@ impl Engine {
     fn is_container(&mut self, var: usize) -> bool {
         matches!(
             self.store.open(var),
-            Some(Shape::List(_) | Shape::Set(_) | Shape::Dict(..))
+            Some(Shape::List(_) | Shape::Set(_) | Shape::FrozenSet(_) | Shape::Dict(..))
         )
+    }
+
+    fn is_set(&mut self, var: usize) -> bool {
+        matches!(self.store.open(var), Some(Shape::Set(_) | Shape::FrozenSet(_)))
     }
 
     fn is_list(&mut self, var: usize) -> bool {
