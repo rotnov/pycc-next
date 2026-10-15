@@ -267,7 +267,7 @@ fn a_call_argument_borrowed_value_survives_the_calls_own_raising_argument() {
 // per trip. When exception objects were leak-only both marginals grew by
 // one exception per iteration and the control calibrated that; now that
 // they are freed both marginals are near zero. The leak shape may exceed
-// the control by at most 15% plus [`peak_rss::SLACK_BYTES`] of allocator
+// the control by at most 15% plus [`peak_rss::SLACK_KB`] of allocator
 // noise: one leaked `BigIntObj` per trip is several megabytes over 250k
 // trips, far past either bound.
 // ---------------------------------------------------------------------------
@@ -277,12 +277,12 @@ mod peak_rss {
     use super::{PROMOTED, pycc_bin, write_case};
     use std::process::Command;
 
-    /// Allocator noise a flat marginal may show (bytes).
-    pub(super) const SLACK_BYTES: i64 = 1 << 20;
+    /// Allocator noise a flat marginal may show (kB).
+    pub(super) const SLACK_KB: i64 = 1024;
 
     /// Whether `leak_marginal` tracks `control_marginal` (module docs).
     fn tracks(leak_marginal: i64, control_marginal: i64) -> bool {
-        (leak_marginal as f64) < (control_marginal.max(0) as f64) * 1.15 + SLACK_BYTES as f64
+        (leak_marginal as f64) < (control_marginal.max(0) as f64) * 1.15 + SLACK_KB as f64
     }
 
     /// Duplicated from `tests/issue_146_bigint_release.rs::peak_rss::peak_rss`
@@ -316,7 +316,13 @@ mod peak_rss {
             libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
             "command failed: {command:?}"
         );
-        usage.ru_maxrss
+        // `ru_maxrss` is in bytes on macOS and in kilobytes elsewhere;
+        // `SLACK_KB` is in kilobytes.
+        if cfg!(target_os = "macos") {
+            usage.ru_maxrss / 1024
+        } else {
+            usage.ru_maxrss
+        }
     }
 
     fn built_program_peak_rss(case: &str, source: &str) -> libc::c_long {

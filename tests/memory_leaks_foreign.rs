@@ -42,15 +42,15 @@ fn program(body: &str, n: u64) -> String {
     )
 }
 
-fn assert_constant_memory(name: &str, body: &str) {
-    assert_constant_memory_in(name, body, "strict", &[]);
-    assert_constant_memory_in(name, body, "nonstrict", &["--non-strict"]);
+fn assert_constant_memory(name: &str, body: &str, sizes: [u64; 2]) {
+    assert_constant_memory_in(name, body, "strict", &[], sizes);
+    assert_constant_memory_in(name, body, "nonstrict", &["--non-strict"], sizes);
 }
 
-fn assert_constant_memory_in(name: &str, body: &str, mode: &str, flags: &[&str]) {
+fn assert_constant_memory_in(name: &str, body: &str, mode: &str, flags: &[&str], sizes: [u64; 2]) {
     let dir = ScratchDir::new(&format!("memory_foreign_{name}_{mode}")).expect("scratch dir");
     let mut peaks = Vec::new();
-    for n in [N_SMALL, N_LARGE] {
+    for n in sizes {
         let probe = format!("{name}_{n}");
         let bin = build_with(&dir, &probe, &program(body, n), flags);
         let (out, peak) = run_measured(&bin);
@@ -64,8 +64,10 @@ fn assert_constant_memory_in(name: &str, body: &str, mode: &str, flags: &[&str])
     let growth = peaks[1] - peaks[0];
     assert!(
         growth <= GROWTH_LIMIT_KB,
-        "{name} ({mode}): peak RSS grew by {growth} kB from {N_SMALL} to {N_LARGE} \
+        "{name} ({mode}): peak RSS grew by {growth} kB from {} to {} \
          iterations ({} -> {} kB): a value leaks every iteration",
+        sizes[0],
+        sizes[1],
         peaks[0],
         peaks[1]
     );
@@ -73,10 +75,13 @@ fn assert_constant_memory_in(name: &str, body: &str, mode: &str, flags: &[&str])
 
 macro_rules! probe {
     ($name:ident, $body:expr) => {
+        probe!($name, $body, [N_SMALL, N_LARGE]);
+    };
+    ($name:ident, $body:expr, $sizes:expr) => {
         #[test]
         #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
         fn $name() {
-            assert_constant_memory(stringify!($name), $body);
+            assert_constant_memory(stringify!($name), $body, $sizes);
         }
     };
 }
@@ -106,9 +111,14 @@ probe!(
     fresh_str_subscript_key,
     "d = json.loads(\"{\\\"1\\\": 2}\")\ntotal += len(str(d[str(i % 1 + 1)]))"
 );
+// Measured from `N_LARGE` on: CPython's own caches for `json.dumps` of a
+// large `int` keep growing past `N_SMALL` (about 1 MB more by `N_LARGE`, and
+// under 100 kB more from `N_LARGE` to ten times it), while a leaked object
+// per iteration would grow by tens of megabytes over that span.
 probe!(
     bigint_argument_of_a_cpython_function,
-    "total += len(json.dumps(i * 100000000000000000000))"
+    "total += len(json.dumps(i * 100000000000000000000))",
+    [N_LARGE, 10 * N_LARGE]
 );
 probe!(
     tuple_argument_of_a_cpython_function,
@@ -130,5 +140,6 @@ fn fresh_list_arguments_non_strict() {
         "total += len(json.dumps([str(i), \"x\"])) + len(json.dumps([i, i]))",
         "nonstrict",
         &["--non-strict"],
+        [N_SMALL, N_LARGE],
     );
 }

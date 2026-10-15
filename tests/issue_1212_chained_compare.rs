@@ -214,7 +214,7 @@ mod peak_rss {
     use super::{PROMOTED, ScratchDir, pycc};
     use std::process::Command;
 
-    /// The child's `ru_maxrss`, only ever compared as a difference against
+    /// The child's `ru_maxrss` in kilobytes, only ever compared as a difference against
     /// a control measured the same way. Follows
     /// `tests/issue_146_bigint_release.rs`.
     #[allow(clippy::zombie_processes)]
@@ -237,7 +237,13 @@ mod peak_rss {
         // SAFETY: the successful `wait4` above initialized `usage`.
         let usage = unsafe { usage.assume_init() };
         assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
-        usage.ru_maxrss
+        // `ru_maxrss` is in bytes on macOS and in kilobytes elsewhere; the
+        // caller's slack is in kilobytes.
+        if cfg!(target_os = "macos") {
+            usage.ru_maxrss / 1024
+        } else {
+            usage.ru_maxrss
+        }
     }
 
     fn built_program_peak_rss(case: &str, source: &str) -> libc::c_long {
