@@ -383,6 +383,17 @@ pub const EXT_OBJ_RICHCOMPARE_SYMBOL: &str = "pycc_ext_obj_richcompare";
 /// operands make no result object (`src/ext/module/object_ops.c`).
 pub const EXT_OBJ_COMPARE_BOOL_SYMBOL: &str = "pycc_ext_obj_compare_bool";
 
+/// `bool(o == "lit")` / `bool(o != "lit")` for an object and a string
+/// literal in a truth context: an exact `str` is compared by its UTF-8
+/// bytes with no `str` made for the literal; `1`/`0`, or `-1` with the
+/// exception set (`src/ext/module/object_text.c`).
+pub const EXT_OBJ_EQ_TEXT_SYMBOL: &str = "pycc_ext_obj_eq_text";
+
+/// `item in fs` for an object item and a native frozenset of `str`: an
+/// exact `str` is looked up by its UTF-8 bytes in the native table; `1`/`0`,
+/// or `-1` with the exception set (`src/ext/module/object_text.c`).
+pub const EXT_OBJ_IN_TEXT_SET_SYMBOL: &str = "pycc_ext_obj_in_text_set";
+
 /// The fixed C shim's membership helper (Part 2b of #1371): it takes a
 /// borrowed container and a *packed* item, and returns
 /// `PySequence_Contains(container, item)`'s `1`/`0`, or `-1` with the

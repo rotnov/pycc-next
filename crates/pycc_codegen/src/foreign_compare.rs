@@ -208,6 +208,123 @@ pub(super) fn emit_compare_truth<'ctx>(
         .expect("build_int_truncate should not fail")
 }
 
+/// The truth of `object == text` / `object != text` (`op`) for an evaluated
+/// object operand (borrowed) and a string literal, `text_first` when the
+/// literal is the left operand: [`crate::ext::EXT_OBJ_EQ_TEXT_SYMBOL`] with
+/// the literal's bytes as a private constant, so no `str` is made for it.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn emit_eq_text_truth<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    op: CmpOpKind,
+    object: Scalar<'ctx>,
+    text: &str,
+    text_first: bool,
+) -> inkwell::values::IntValue<'ctx> {
+    let selector = rich_compare_selector(op)
+        .expect("pycc_codegen: internal error: an identity test has no rich comparison");
+    let edge = ForeignFailEdge::for_current(builder);
+    let object = expect_object_pointer(object);
+    let bytes = text.as_bytes();
+    let global = module.add_global(
+        context.i8_type().array_type(bytes.len() as u32),
+        None,
+        "eq_text_lit",
+    );
+    global.set_initializer(&context.const_string(bytes, false));
+    global.set_constant(true);
+    global.set_linkage(inkwell::module::Linkage::Private);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i32_type = context.i32_type();
+    let i64_type = context.i64_type();
+    let eq_text = shim_fn(
+        module,
+        crate::ext::EXT_OBJ_EQ_TEXT_SYMBOL,
+        i32_type.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                i64_type.into(),
+                i32_type.into(),
+                i32_type.into(),
+            ],
+            false,
+        ),
+    );
+    let status = builder
+        .build_call(
+            eq_text,
+            &[
+                object.into(),
+                global.as_pointer_value().into(),
+                i64_type.const_int(bytes.len() as u64, false).into(),
+                i32_type.const_int(selector, false).into(),
+                i32_type.const_int(u64::from(text_first), false).into(),
+            ],
+            "foreign_eq_text",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_eq_text")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_eq_text returns int")
+        .into_int_value();
+    route_negative(context, builder, module, rt, edge, status, "foreign_eq_text");
+    builder
+        .build_int_truncate(status, context.bool_type(), "foreign_eq_text_bit")
+        .expect("build_int_truncate should not fail")
+}
+
+/// `item in set` (`item not in set` when `negate`) for an evaluated object
+/// item and a native frozenset of `str`, both borrowed:
+/// [`crate::ext::EXT_OBJ_IN_TEXT_SET_SYMBOL`], which looks an exact `str`
+/// up by its bytes with no CPython copy of the set.
+pub(super) fn emit_in_text_set<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    negate: bool,
+    item: Scalar<'ctx>,
+    set: PointerValue<'ctx>,
+) -> Scalar<'ctx> {
+    let edge = ForeignFailEdge::for_current(builder);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i32_type = context.i32_type();
+    let item = expect_object_pointer(item);
+    let in_set = shim_fn(
+        module,
+        crate::ext::EXT_OBJ_IN_TEXT_SET_SYMBOL,
+        i32_type.fn_type(&[ptr.into(), ptr.into()], false),
+    );
+    let status = builder
+        .build_call(in_set, &[item.into(), set.into()], "foreign_in_text_set")
+        .expect("build_call should not fail for pycc_ext_obj_in_text_set")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_in_text_set returns int")
+        .into_int_value();
+    route_negative(
+        context,
+        builder,
+        module,
+        rt,
+        edge,
+        status,
+        "foreign_in_text_set",
+    );
+    let found = builder
+        .build_int_truncate(status, context.i8_type(), "foreign_in_text_set_bool")
+        .expect("build_int_truncate should not fail");
+    let answer = builder
+        .build_xor(
+            found,
+            context.i8_type().const_int(u64::from(negate), false),
+            "foreign_in_text_set_answer",
+        )
+        .expect("build_xor should not fail on an i8");
+    Scalar::Bool(answer)
+}
+
 /// Emits `item in container` (or `item not in container` when `negate`)
 /// once both operands are evaluated.
 pub(super) fn emit_contains<'ctx>(

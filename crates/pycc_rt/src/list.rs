@@ -288,8 +288,9 @@ pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
     // SAFETY: the count reached zero, so nothing else names the list.
     let mut list = unsafe { Box::from_raw(list) };
     if list.kind == crate::value::TUPLE_OBJECT {
-        for (kind, word) in list.kinded_items() {
-            release_word_into(crate::value::rc_kind(kind), word, dead);
+        let kinds = crate::tuple::kinds_of(&list);
+        for (word, kind) in list.typed::<i64>().iter().zip(kinds) {
+            release_word_into(crate::value::rc_kind(i64::from(*kind)), *word, dead);
         }
         crate::tuple::free_kinds(&mut list);
     } else {

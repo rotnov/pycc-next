@@ -196,13 +196,26 @@ pub(crate) fn release_word(kind: u8, word: i64) {
 /// Frees every object on `dead` and everything its releases kill.
 pub(crate) fn free_all(mut dead: Worklist) {
     while let Some(object) = dead.pop() {
-        match object {
-            Dead::List(list) => crate::list::free_list(list, &mut dead),
-            Dead::Instance(instance) => crate::instance::free_instance(instance, &mut dead),
-            Dead::Dict(dict) => crate::dict::free_dict(dict, &mut dead),
-            Dead::Set(set) => crate::set::free_set_into(set, &mut dead),
-        }
+        free_into(object, &mut dead);
     }
+}
+
+/// Frees `object`, pushing what its releases kill onto `dead`.
+fn free_into(object: Dead, dead: &mut Worklist) {
+    match object {
+        Dead::List(list) => crate::list::free_list(list, dead),
+        Dead::Instance(instance) => crate::instance::free_instance(instance, dead),
+        Dead::Dict(dict) => crate::dict::free_dict(dict, dead),
+        Dead::Set(set) => crate::set::free_set_into(set, dead),
+    }
+}
+
+/// Frees `object` and everything its releases kill. The worklist allocates
+/// only when a release kills another object.
+fn free_one(object: Dead) {
+    let mut dead = Worklist::new();
+    free_into(object, &mut dead);
+    free_all(dead);
 }
 
 /// `pycc_rt_list_incref`: one more reference to `list` (null is a no-op).
@@ -229,7 +242,7 @@ pub unsafe extern "C" fn pycc_rt_list_decref(list: *mut PyListObj) {
 /// `list` must be a list with a count of zero that nothing references.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_free(list: *mut PyListObj) {
-    free_all(vec![Dead::List(list)]);
+    free_one(Dead::List(list));
 }
 
 /// One more reference to `instance` (null is a no-op).
@@ -258,7 +271,7 @@ pub unsafe extern "C" fn pycc_rt_instance_decref(instance: *mut PyInstanceObj) {
 /// references.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_instance_free(instance: *mut PyInstanceObj) {
-    free_all(vec![Dead::Instance(instance)]);
+    free_one(Dead::Instance(instance));
 }
 
 /// The current count of a list or instance, for tests.

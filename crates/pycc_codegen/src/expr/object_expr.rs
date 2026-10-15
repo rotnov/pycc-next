@@ -288,6 +288,26 @@ pub(crate) fn emit_obj_compare_condition<'ctx>(
     if matches!(op, pycc_mir::CmpOpKind::Is | pycc_mir::CmpOpKind::IsNot) {
         return None;
     }
+    if let Some((text, other, text_first)) = text_equality(*op, left, right) {
+        // The literal has no effect to order: only the object operand is
+        // evaluated, and no `str` is made for the literal.
+        let scalar = object_unbox::emit_pack_operand(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            other,
+        );
+        let held = object_release::hold(context, module, rt, other, &scalar);
+        let truth = foreign_compare::emit_eq_text_truth(
+            context, builder, module, rt, *op, scalar, text, text_first,
+        );
+        held.release(builder, rt);
+        release_scalar_if_temporary(context, builder, rt, other, &scalar);
+        return Some(truth);
+    }
     Some(with_compare_operands(
         context,
         builder,
@@ -406,6 +426,27 @@ pub(crate) fn emit_obj_contains_expr<'ctx>(
     let item_scalar =
         object_unbox::emit_pack_operand(context, builder, module, rt, user_functions, locals, item);
     let held_item = object_release::hold(context, module, rt, item, &item_scalar);
+    if let Some(set_name) = boxed_text_set_name(item, container) {
+        // `o in fs` for a frozenset of `str` read from a name: the native
+        // set itself, borrowed (a name read has no effect to order and
+        // nothing to release), with no CPython copy for an exact `str`.
+        let set = emit_expr(context, builder, module, rt, user_functions, locals, set_name);
+        let Scalar::Set(set) = set else {
+            unreachable!("a frozenset name reads as a set")
+        };
+        let result = foreign_compare::emit_in_text_set(
+            context,
+            builder,
+            module,
+            rt,
+            *negate,
+            item_scalar,
+            set,
+        );
+        held_item.release(builder, rt);
+        release_scalar_if_temporary(context, builder, rt, item, &item_scalar);
+        return result;
+    }
     let pending = push_pending_int_release_if_scalar_temporary(rt, item, &item_scalar);
     let container_scalar = emit_expr(
         context,
@@ -431,6 +472,38 @@ pub(crate) fn emit_obj_contains_expr<'ctx>(
     held_item.release(builder, rt);
     release_scalar_if_temporary(context, builder, rt, item, &item_scalar);
     result
+}
+
+/// The name read inside `container` when an `ObjContains` tests an object
+/// `item` against `ObjectBox(name)` of a `frozenset[str]` name.
+fn boxed_text_set_name<'e>(item: &MirExpr, container: &'e MirExpr) -> Option<&'e MirExpr> {
+    let MirExpr::ObjectBox(inner) = container else {
+        return None;
+    };
+    let is_text_set = matches!(inner.ty(), pycc_mir::Ty::FrozenSet(element) if *element == pycc_mir::Ty::Str);
+    (item.ty() == pycc_mir::Ty::Object && is_text_set && matches!(**inner, MirExpr::Name { .. }))
+        .then_some(&**inner)
+}
+
+/// The string literal operand of an `==`/`!=` between it and an object
+/// operand: `(text, the object operand, whether the literal is on the left)`.
+fn text_equality<'e>(
+    op: pycc_mir::CmpOpKind,
+    left: &'e MirExpr,
+    right: &'e MirExpr,
+) -> Option<(&'e str, &'e MirExpr, bool)> {
+    if !matches!(op, pycc_mir::CmpOpKind::Eq | pycc_mir::CmpOpKind::NotEq) {
+        return None;
+    }
+    match (left, right) {
+        (MirExpr::StringLiteral(text), other) if other.ty() == pycc_mir::Ty::Object => {
+            Some((text, other, true))
+        }
+        (other, MirExpr::StringLiteral(text)) if other.ty() == pycc_mir::Ty::Object => {
+            Some((text, other, false))
+        }
+        _ => None,
+    }
 }
 
 // Part 2b of #1371: `o[a:b:c]`. `foreign_slice` owns the operand

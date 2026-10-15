@@ -176,3 +176,43 @@ pub unsafe extern "C" fn pycc_rt_str_index_in_set(
     unsafe { crate::pycc_rt_str_decref(ch) };
     found
 }
+
+/// `text in s` for a set of `str` and a text given by its UTF-8 bytes
+/// (`bytes`, `len`), with no `str` made for it: `1` or `0`, or `-1` when
+/// `s` is not known to hold `str` keys (an instance set, or a non-empty set
+/// of another kind), which the caller then answers another way. A
+/// one-character ASCII text in a frozenset is a bit test.
+///
+/// # Safety
+/// `s` must be a live set and `bytes` point at `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_set_contains_utf8(
+    s: *mut PySetObj,
+    bytes: *const u8,
+    len: usize,
+) -> i8 {
+    if is_instance_set(s) {
+        return -1;
+    }
+    let st = set(s);
+    if st.len == 0 {
+        return 0;
+    }
+    if st.kind != crate::list::LIST_KIND_STR {
+        return -1;
+    }
+    // SAFETY: the caller passes `len` readable bytes.
+    let text = unsafe { std::slice::from_raw_parts(bytes, len) };
+    if let [byte] = text
+        && byte.is_ascii()
+        && st.frozen != 0
+    {
+        return i8::from(st.ascii_members() & (1u128 << byte) != 0);
+    }
+    let hash = crate::str_hash::hash_str(text);
+    let slot = st.lookkey_by(hash, |entry| {
+        // SAFETY: a set of `str` holds live `PyStrObj` keys.
+        unsafe { &*(entry as *mut PyStrObj) }.bytes() == text
+    });
+    i8::from(st.table[slot].state == ACTIVE)
+}
