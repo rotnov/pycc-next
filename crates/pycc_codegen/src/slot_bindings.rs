@@ -363,11 +363,22 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
         // forbids a walrus in, and it binds no name of its own.
         MirStmt::Return(_)
         | MirStmt::ReturnBufferSlice { .. }
+        | MirStmt::SetOut { .. }
         | MirStmt::NoOp
         | MirStmt::ReleaseName(_)
         | MirStmt::Unreachable => {}
         MirStmt::Seq(stmts) => {
             for stmt in stmts {
+                collect_stmt_bindings(stmt, bindings);
+            }
+        }
+        // A twin call's temporaries, with the twin's result types, and the
+        // tuple temporary and items its fallback binds.
+        MirStmt::AssignMulti(multi) => {
+            for (temp, ty) in &multi.temps {
+                bindings.entry(temp.clone()).or_insert_with(|| ty.clone());
+            }
+            for stmt in &multi.fallback {
                 collect_stmt_bindings(stmt, bindings);
             }
         }

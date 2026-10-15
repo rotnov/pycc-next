@@ -269,6 +269,8 @@ impl MirStmt {
             MirStmt::ReturnBufferSlice { start, stop, .. } => {
                 start.iter().chain(stop.iter()).collect()
             }
+            MirStmt::AssignMulti(multi) => multi.args.iter().collect(),
+            MirStmt::SetOut { value, .. } => vec![value],
             MirStmt::ForRange {
                 start, stop, step, ..
             } => vec![start, stop, step],
@@ -350,6 +352,74 @@ impl MirStmt {
         }
     }
 
+    /// [`MirStmt::bodies`], mutably: every statement list nested in `self`,
+    /// in the same order (a loop-else's loop statement is reached through
+    /// its own bodies, as it is not itself held in a list).
+    pub fn bodies_mut(&mut self) -> Vec<&mut Vec<MirStmt>> {
+        match self {
+            MirStmt::If { body, orelse, .. } => vec![body, orelse],
+            MirStmt::While { body, .. }
+            | MirStmt::ForRange { body, .. }
+            | MirStmt::ForList { body, .. }
+            | MirStmt::ForObject { body, .. }
+            | MirStmt::ForDict { body, .. }
+            | MirStmt::ForSet { body, .. }
+            | MirStmt::ForGen { body, .. } => vec![body],
+            MirStmt::Seq(stmts) => vec![stmts],
+            MirStmt::AssignMulti(multi) => vec![&mut multi.fallback],
+            MirStmt::LoopElse { loop_stmt, orelse } => {
+                let mut out = loop_stmt.bodies_mut();
+                out.push(orelse);
+                out
+            }
+            MirStmt::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            }
+            | MirStmt::TryStar {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => std::iter::once(body)
+                .chain(handlers.iter_mut().map(|h| &mut h.body))
+                .chain([orelse, finalbody])
+                .collect(),
+            MirStmt::ExprStmt(_)
+            | MirStmt::Assign { .. }
+            | MirStmt::NoOp
+            | MirStmt::ReleaseName(_)
+            | MirStmt::Unreachable
+            | MirStmt::DictSet { .. }
+            | MirStmt::BufferSet { .. }
+            | MirStmt::ListSet { .. }
+            | MirStmt::ListCompAssign { .. }
+            | MirStmt::DictCompAssign { .. }
+            | MirStmt::SetCompAssign { .. }
+            | MirStmt::Return(_)
+            | MirStmt::ReturnBufferSlice { .. }
+            | MirStmt::SetOut { .. }
+            | MirStmt::AttrSet { .. }
+            | MirStmt::ObjDelSlice { .. }
+            | MirStmt::ObjSetSlice { .. }
+            | MirStmt::ObjAttrSet { .. }
+            | MirStmt::ObjDelAttr { .. }
+            | MirStmt::ObjSetItem { .. }
+            | MirStmt::ObjDelItem { .. }
+            | MirStmt::Break
+            | MirStmt::Continue
+            | MirStmt::Raise { .. }
+            | MirStmt::RaiseFrom { .. }
+            | MirStmt::Reraise
+            | MirStmt::ObjRaise { .. }
+            | MirStmt::Yield(_)
+            | MirStmt::GenReturn(_)
+            | MirStmt::ForeignImport { .. } => Vec::new(),
+        }
+    }
+
     /// The statement bodies nested in `self` (a loop's body, both arms of
     /// an `if`, every part of a `try`, a `Seq`'s statements, a loop-else's
     /// loop and `else`).
@@ -365,6 +435,7 @@ impl MirStmt {
             | MirStmt::ForSet { body, .. }
             | MirStmt::ForGen { body, .. } => vec![body],
             MirStmt::Seq(stmts) => vec![stmts],
+            MirStmt::AssignMulti(multi) => vec![&multi.fallback],
             MirStmt::LoopElse { loop_stmt, orelse } => {
                 vec![std::slice::from_ref(&**loop_stmt), orelse]
             }
@@ -396,6 +467,7 @@ impl MirStmt {
             | MirStmt::SetCompAssign { .. }
             | MirStmt::Return(_)
             | MirStmt::ReturnBufferSlice { .. }
+            | MirStmt::SetOut { .. }
             | MirStmt::AttrSet { .. }
             | MirStmt::ObjDelSlice { .. }
             | MirStmt::ObjSetSlice { .. }

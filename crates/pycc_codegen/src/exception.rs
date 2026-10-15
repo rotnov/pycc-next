@@ -81,6 +81,9 @@ impl ExceptionCodegenState<'_> {
 /// operations converted to catchable Python exceptions remain fail-closed.
 pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
     match expr {
+        // A native `str | None` local's tests (`pycc_mir::optional_str`)
+        // read a pointer and compare bytes; none of them raises.
+        MirExpr::RtCall(call) if call.sig.symbol.starts_with("pycc_rt_optional_str_") => false,
         // `AttrGet` is *not* in this group although it raises
         // `AttributeError` for a slot read before its assignment (#1388):
         // `attr_slot::emit_slot_load_checked` emits the guard itself, on the

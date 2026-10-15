@@ -1085,6 +1085,7 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::ForSet { body, .. }
         | MirStmt::ForGen { body, .. } => body_returns_buffer_slice(body),
         MirStmt::Seq(stmts) => body_returns_buffer_slice(stmts),
+        MirStmt::AssignMulti(multi) => body_returns_buffer_slice(&multi.fallback),
         MirStmt::LoopElse { loop_stmt, orelse } => {
             body_returns_buffer_slice(std::slice::from_ref(loop_stmt.as_ref()))
                 || body_returns_buffer_slice(orelse)
@@ -1120,6 +1121,7 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::DictCompAssign { .. }
         | MirStmt::SetCompAssign { .. }
         | MirStmt::Return(_)
+        | MirStmt::SetOut { .. }
         | MirStmt::AttrSet { .. }
         | MirStmt::ObjDelSlice { .. }
         | MirStmt::ObjSetSlice { .. }

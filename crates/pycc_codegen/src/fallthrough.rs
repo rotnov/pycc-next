@@ -101,7 +101,11 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
             | MirStmt::ObjDelAttr { .. }
             | MirStmt::ObjSetItem { .. }
             | MirStmt::ObjDelItem { .. }
-            | MirStmt::AttrSet { .. } => false,
+            | MirStmt::AttrSet { .. }
+            // A twin call binds temporaries and falls through; a result
+            // store is followed by the `return` that ends the block.
+            | MirStmt::AssignMulti(_)
+            | MirStmt::SetOut { .. } => false,
         };
         if terminates {
             return true;

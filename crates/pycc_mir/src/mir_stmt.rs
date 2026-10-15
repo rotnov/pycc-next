@@ -206,6 +206,18 @@ pub enum MirStmt {
         start: Option<MirExpr>,
         stop: Option<MirExpr>,
     },
+    /// Binds the results of a call of a multi-value twin
+    /// (`crate::multi_return`) to fresh temporaries; see [`AssignMulti`].
+    AssignMulti(Box<AssignMulti>),
+    /// In a multi-value twin (`crate::multi_return`): stores a reference of
+    /// its own to `value` through the twin's out-pointer `index` (from 1:
+    /// result 0 is the twin's returned value). Only ever directly before
+    /// the `Return` that hands back result 0, after every conversion, so
+    /// nothing between the store and the return can raise.
+    SetOut {
+        index: usize,
+        value: MirExpr,
+    },
     /// `base.attr = value` (D-154, Part 1 of #375), resolved to a
     /// compile-time slot index by `lower_stmt` against the class's
     /// `HirClassDef` -- mirrors `MirExpr::AttrGet`'s own resolution

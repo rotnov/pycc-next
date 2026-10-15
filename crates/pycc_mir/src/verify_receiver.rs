@@ -361,6 +361,11 @@ impl Verifier<'_> {
             }
             MirStmt::Return(value) => self.exprs(value),
             MirStmt::ReturnBufferSlice { start, stop, .. } => self.exprs(start.iter().chain(stop)),
+            MirStmt::AssignMulti(multi) => {
+                self.exprs(&multi.args);
+                self.stmts(&multi.fallback);
+            }
+            MirStmt::SetOut { value, .. } => self.expr(value),
             MirStmt::Try {
                 body,
                 handlers,

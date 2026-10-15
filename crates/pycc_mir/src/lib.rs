@@ -42,6 +42,10 @@ mod set_ops;
 pub use set_ops::{SetElementOps, SetEqOp, SetHashOp};
 mod comp_source;
 mod stmt;
+mod unpack_display;
+pub mod multi_return;
+mod optional_str;
+mod visit_mut;
 pub(crate) use comp_source::{resolve_comp_source, str_to_list, tuple_to_list};
 #[cfg(debug_assertions)]
 mod verify_receiver;
@@ -100,6 +104,24 @@ impl MirContainerReceiver {
             MirContainerReceiver::Attr(receiver) => Some(receiver),
         }
     }
+}
+
+/// [`MirStmt::AssignMulti`]'s payload: `t0, ..., tn = original(args)` where
+/// `original` returns a tuple of `n + 1` values, through `twin`, its
+/// multi-value twin (`crate::multi_return`), which returns result 0 and
+/// stores the others through trailing out-pointers. Each temporary in
+/// `temps` (with the twin's type for that result) receives a reference it
+/// owns. `fallback` binds the same temporaries by calling `original` and
+/// unpacking its tuple; codegen emits it instead of the twin call when
+/// `original`'s name is not bound to its one definition, so the call
+/// always reaches what CPython would call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignMulti {
+    pub original: String,
+    pub twin: String,
+    pub args: Vec<MirExpr>,
+    pub temps: Vec<(String, Ty)>,
+    pub fallback: Vec<MirStmt>,
 }
 
 /// See [`MirExpr::RtCall`].
@@ -439,10 +461,13 @@ pub fn build(hir: &HirModule) -> MirModule {
         .map(|item| item.expect("every HIR item is either a function or a top-level statement"))
         .collect();
     splice_foreign_imports(&mut items, &hir.imports);
-    let module = MirModule {
+    let mut module = MirModule {
         items,
         class_defs: hir.class_defs.clone(),
     };
+    unpack_display::rewrite(&mut module);
+    optional_str::rewrite(&mut module);
+    multi_return::rewrite(&mut module);
     // #1337 (D-254): every user-method call runs the body its static
     // receiver class resolves to; re-derived independently of the routing
     // sites and checked on every debug (so every test) build.
@@ -585,6 +610,7 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::ForSet { body, .. }
             | MirStmt::ForGen { body, .. } => set_frame_function(body, frame_name),
             MirStmt::Seq(stmts) => set_frame_function(stmts, frame_name),
+            MirStmt::AssignMulti(multi) => set_frame_function(&mut multi.fallback, frame_name),
             MirStmt::LoopElse { loop_stmt, orelse } => {
                 set_frame_function(std::slice::from_mut(loop_stmt.as_mut()), frame_name);
                 set_frame_function(orelse, frame_name);
@@ -623,6 +649,7 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::SetCompAssign { .. }
             | MirStmt::Return(_)
             | MirStmt::ReturnBufferSlice { .. }
+            | MirStmt::SetOut { .. }
             | MirStmt::AttrSet { .. }
             | MirStmt::ObjDelSlice { .. }
             | MirStmt::ObjSetSlice { .. }

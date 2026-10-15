@@ -153,6 +153,12 @@ pub(crate) fn compile_to_object_with_observer(
                     param_types.push(ptr_type.into());
                 }
             }
+            // A multi-value twin (`pycc_mir::multi_return`) stores its
+            // results after the first through one trailing out-pointer
+            // each (`MirStmt::SetOut`).
+            for _ in pycc_mir::multi_return::out_tys(body) {
+                param_types.push(context.ptr_type(inkwell::AddressSpace::default()).into());
+            }
             let fn_type = match return_ty {
                 pycc_mir::Ty::None => context.void_type().fn_type(&param_types, false),
                 other => ty_to_basic_type(&context, other.clone()).fn_type(&param_types, false),
@@ -665,6 +671,22 @@ pub(crate) fn compile_to_object_with_observer(
             // and `MirStmt::ReturnBufferSlice` reach them by name instead
             // of by `count_params()` arithmetic, and so a bare `return`
             // can tell that it owes the wrapper a `has_slice = 0`.
+            // A multi-value twin's out-pointers, by result index
+            // (`multi_out::out_key`), after its parameters.
+            for (offset, ty) in pycc_mir::multi_return::out_tys(body).into_iter().enumerate() {
+                let ptr = f
+                    .get_nth_param((params.len() + offset) as u32)
+                    .expect("the declaration pass widened a twin's signature by its out-pointers")
+                    .into_pointer_value();
+                fn_locals.insert(
+                    crate::multi_out::out_key(offset + 1),
+                    StorageSlot {
+                        ptr,
+                        ty,
+                        initialized: None,
+                    },
+                );
+            }
             if slice_widened.contains(name.as_str()) {
                 let out_base = f.count_params() - 3;
                 for (offset, key) in [

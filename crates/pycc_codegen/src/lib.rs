@@ -179,6 +179,7 @@ mod scalar;
 mod stmt;
 mod str_truthy;
 mod user_call;
+mod multi_out;
 use coerce::*;
 use compile::*;
 pub use compile::{compile_to_object, compile_to_object_with_options};
