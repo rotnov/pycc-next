@@ -77,7 +77,16 @@ pub(crate) fn lower_subscript_expr(
         );
     }
     let base = lower_expr(base, scopes, classes, current_class);
-    let index = lower_expr(index, scopes, classes, current_class);
+    let index = {
+        let hir = index;
+        let index = lower_expr(hir, scopes, classes, current_class);
+        // A sequence index reads an `IntEnum` member as its `int` value.
+        if matches!(base.ty(), Ty::Dict(_)) {
+            index
+        } else {
+            super::int_enum::as_int(hir, index, scopes, classes, current_class)
+        }
+    };
     match base.ty() {
         Ty::Str => {
             builtin_call::lower_str_getitem(base, crate::index_operand(index, crate::IndexUse::Str))

@@ -52,6 +52,8 @@ pub(crate) fn numeric_result_type(op: BinOpKind, left: Ty, right: Ty) -> Result<
     if let Some(result) = crate::foreign::arith::object_binop_ty(None, &left, &right) {
         return result;
     }
+    // An `IntEnum` member is its `int` value (`pycc_hir::int_enum`).
+    let (left, right) = (pycc_hir::int_enum::as_int(&left), pycc_hir::int_enum::as_int(&right));
     // Non-strict mode: `str % args` is CPython's formatting (`expr.rs`
     // admits the exact operand shapes).
     if op == BinOpKind::Mod && left == Ty::Str && crate::non_strict::is_non_strict() {

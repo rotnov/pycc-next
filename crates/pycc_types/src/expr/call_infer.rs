@@ -182,6 +182,18 @@ pub(crate) fn infer_call_expr(
         } else {
             arg_tys
         };
+    // An `IntEnum` member passed to a builtin reading an `int` is its value
+    // (`pycc_hir::int_enum`).
+    let read_ints: Vec<Ty>;
+    let arg_tys: &[Ty] = if !user_callee
+        && pycc_hir::int_enum::reads_int_args(callee)
+        && arg_tys.iter().any(pycc_hir::int_enum::is_int_enum)
+    {
+        read_ints = arg_tys.iter().map(pycc_hir::int_enum::as_int).collect();
+        &read_ints
+    } else {
+        arg_tys
+    };
     // A stdlib function the builtin table types (`math.log`) is still
     // refused when a local shadows its module's spelling.
     if let Some(symbol) = std_qualified_symbol(callee)
@@ -668,6 +680,15 @@ pub(crate) fn infer_call_expr(
         .with_help(format!("pass exactly {} argument(s)", param_tys.len())));
     }
     for (i, (arg_ty, param_ty)) in arg_tys.iter().zip(param_tys.iter()).enumerate() {
+        // An `IntEnum` member passed for an `int` parameter is its value
+        // (`pycc_hir::int_enum`; `pycc_mir` passes `member.value`).
+        let read_int;
+        let arg_ty = if *param_ty == Ty::Int {
+            read_int = pycc_hir::int_enum::as_int(arg_ty);
+            &read_int
+        } else {
+            arg_ty
+        };
         if !class::is_assignable_env(env, arg_ty, param_ty)
             && !crate::object_box::admits_value(env, &args[i], arg_ty, param_ty)?
             && !crate::non_strict::admits_coercion(arg_ty, param_ty)

@@ -819,7 +819,7 @@ pub(crate) fn check_stmt_arm_in_function(
                     None => infer_expr_in(env, local_names, value)
                         .map_err(|d| empty_container::name_binding(d, target, value))?,
                 };
-                if !class::is_assignable_env(env, &inferred, annotation)
+                if !class::is_assignable_env(env, &crate::int_enum_slot(&inferred, annotation), annotation)
                     && !object_box::admits_value(env, value, &inferred, annotation)?
                 {
                     // #380 (PR-20): if the mismatch involves a protocol,

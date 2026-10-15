@@ -339,6 +339,13 @@ pub(crate) fn infer_subscript_expr(
     }
     let base_ty = infer_expr_in(env, local_names, base)?;
     let index_ty = infer_expr_in(env, local_names, index)?;
+    // A sequence index reads an `IntEnum` member as its `int` value
+    // (`pycc_hir::int_enum`); a dict key is the member itself.
+    let index_ty = if matches!(base_ty, Ty::Dict(_)) {
+        index_ty
+    } else {
+        pycc_hir::int_enum::as_int(&index_ty)
+    };
     match base_ty {
         Ty::List(elem_ty) => {
             // Reuses T0021 (an unconstrained/conflicting-constraint

@@ -7,6 +7,16 @@ use pycc_hir::Ty;
 /// with `min`/`max` over three or more arguments folded pairwise.
 pub(crate) fn resolve_builtin_call(callee: &str, arg_tys: &[Ty]) -> Option<Result<Ty, Diagnostic>> {
     let to_diag = |message: String| Diagnostic::error("T0021", message, Span::new(0, 0));
+    // An `IntEnum` member is its `int` value (`pycc_hir::int_enum`).
+    let read_ints: Vec<Ty>;
+    let arg_tys = if pycc_hir::int_enum::reads_int_args(callee)
+        && arg_tys.iter().any(pycc_hir::int_enum::is_int_enum)
+    {
+        read_ints = arg_tys.iter().map(pycc_hir::int_enum::as_int).collect();
+        &read_ints[..]
+    } else {
+        arg_tys
+    };
     if pycc_hir::builtins::is_pairwise_variadic(callee) && arg_tys.len() > 2 {
         let mut acc = arg_tys[0].clone();
         for next in &arg_tys[1..] {

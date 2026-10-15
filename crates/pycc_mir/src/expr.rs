@@ -19,6 +19,7 @@ use std::collections::HashMap;
 
 pub(crate) mod builtin_call;
 mod foreign_static;
+pub(crate) mod int_enum;
 mod instance_hash;
 mod receiver_dispatch;
 mod regular_method;

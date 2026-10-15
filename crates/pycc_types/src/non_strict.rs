@@ -297,6 +297,7 @@ pub(crate) fn with_widening<T, E>(
     hir: &HirModule,
     check: impl Fn(&HirModule) -> Result<T, E>,
 ) -> Result<T, E> {
+    pycc_hir::int_enum::set_int_enums(hir.class_defs.iter().map(|(_, class)| class));
     if !is_non_strict() {
         return check(hir);
     }

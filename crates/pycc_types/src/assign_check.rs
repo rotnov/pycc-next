@@ -108,7 +108,8 @@ pub(crate) fn check_range_operand_in(
     position: &str,
     expr: &HirExpr,
 ) -> Result<(), Diagnostic> {
-    let actual = infer_expr_in(env, local_names, expr)?;
+    // An `IntEnum` member is its `int` value (`pycc_hir::int_enum`).
+    let actual = pycc_hir::int_enum::as_int(&infer_expr_in(env, local_names, expr)?);
     // Non-strict mode (#3): an object is read through `__index__`, as
     // `range()` reads it (`pycc_mir::MirExpr::ObjectIndex`).
     if is_assignable(actual.clone(), Ty::Int) || crate::non_strict::admits_index(&actual) {

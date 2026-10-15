@@ -116,3 +116,23 @@ pub use stmt_check::check_stmt;
 use stmt_check::*;
 pub use stmt_check_fn::check_function;
 use stmt_check_fn::*;
+
+/// `inferred` as stored into an `annotation` slot: an `IntEnum` member
+/// stored in an `int` name is its value (`pycc_hir::int_enum`).
+pub(crate) fn int_enum_slot(inferred: &Ty, annotation: &Ty) -> Ty {
+    if *annotation == Ty::Int {
+        pycc_hir::int_enum::as_int(inferred)
+    } else {
+        inferred.clone()
+    }
+}
+
+/// Whether `container` holds `int`s (list and set elements, dict keys): an
+/// `IntEnum` member tested for membership in it is its value.
+pub(crate) fn int_enum_needle(container: &Ty) -> bool {
+    match container {
+        Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => **elem == Ty::Int,
+        Ty::Dict(kv) => kv.0 == Ty::Int,
+        _ => false,
+    }
+}

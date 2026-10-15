@@ -96,6 +96,15 @@ pub(crate) fn compare_link_ty(
     // Part 2b of #1371: membership answers for every pair, so a native
     // pair never falls through to the numeric rule below.
     if matches!(op, CmpOp::In | CmpOp::NotIn) {
+        // An `IntEnum` needle in a container of `int`s is its value
+        // (`pycc_hir::int_enum`).
+        let read_int;
+        let left_ty = if crate::int_enum_needle(right_ty) {
+            read_int = pycc_hir::int_enum::as_int(left_ty);
+            &read_int
+        } else {
+            left_ty
+        };
         // Substring membership (`pycc_rt_str_contains`).
         if (left_ty, right_ty) == (&Ty::Str, &Ty::Str) {
             return Ok(Ty::Bool);
@@ -143,7 +152,12 @@ pub(crate) fn compare_link_ty(
     if let Some(result) = container_compare_ty(op, left_ty, right_ty) {
         return result;
     }
-    if numeric_or_bool_compatible(left_ty.clone(), right_ty.clone()) {
+    // An `IntEnum` member compares with a number as its `int` value
+    // (`pycc_hir::int_enum`).
+    if numeric_or_bool_compatible(
+        pycc_hir::int_enum::as_int(left_ty),
+        pycc_hir::int_enum::as_int(right_ty),
+    ) {
         Ok(Ty::Bool)
     } else {
         Err(Diagnostic::error(

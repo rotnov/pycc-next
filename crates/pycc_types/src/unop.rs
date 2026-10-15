@@ -52,6 +52,8 @@ use pycc_hir::{Ty, UnaryOpKind};
 
 /// Types a unary expression from its operator and its operand type.
 pub(crate) fn unary_result_type(op: UnaryOpKind, operand: Ty) -> Result<Ty, Diagnostic> {
+    // An `IntEnum` member is its `int` value (`pycc_hir::int_enum`).
+    let operand = pycc_hir::int_enum::as_int(&operand);
     match op {
         // Non-strict mode (#3): `-o`, `+o` and `~o` are CPython's own
         // `PyNumber_Negative`/`_Positive`/`_Invert`, whose result is an object.

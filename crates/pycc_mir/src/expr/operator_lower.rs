@@ -52,7 +52,8 @@ pub(crate) fn lower_unary_op_expr(
     let HirExpr::UnaryOp { op, operand } = expr else {
         unreachable!()
     };
-    let operand = lower_expr(operand, scopes, classes, current_class);
+    let lowered = lower_expr(operand, scopes, classes, current_class);
+    let operand = super::int_enum::as_int(operand, lowered, scopes, classes, current_class);
     // Non-strict mode (#3): `-o`, `+o`, `~o` run CPython's own operator.
     if let Some(object_unary) = super::super::obj_arith::lower_object_unary(*op, &operand) {
         return object_unary;
@@ -136,8 +137,14 @@ pub(crate) fn lower_bin_op_expr(
     let (HirExpr::BinOp { op, left, right } | HirExpr::AugBinOp { op, left, right }) = expr else {
         unreachable!()
     };
-    let left = lower_expr(left, scopes, classes, current_class);
-    let right = lower_expr(right, scopes, classes, current_class);
+    let left = {
+        let lowered = lower_expr(left, scopes, classes, current_class);
+        super::int_enum::as_int(left, lowered, scopes, classes, current_class)
+    };
+    let right = {
+        let lowered = lower_expr(right, scopes, classes, current_class);
+        super::int_enum::as_int(right, lowered, scopes, classes, current_class)
+    };
     // `int ** <negative int literal>` is `float(int) ** float(literal)`,
     // as CPython's `long_pow` defers to `float_pow`.
     let (left, right) = match (&right, left.ty()) {
@@ -200,6 +207,25 @@ pub(crate) fn lower_compare_expr(
     };
     let mut left_lowered = lower_expr(left, scopes, classes, current_class);
     let mut right_lowered = lower_expr(right, scopes, classes, current_class);
+    // An `IntEnum` member compared with a number, or tested for membership
+    // in a container of `int`s, is its `int` value.
+    if matches!(op, CmpOpKind::In | CmpOpKind::NotIn) {
+        let ints = match right_lowered.ty() {
+            Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => *elem == Ty::Int,
+            Ty::Dict(kv) => kv.0 == Ty::Int,
+            _ => false,
+        };
+        if ints {
+            left_lowered =
+                super::int_enum::as_int(left, left_lowered, scopes, classes, current_class);
+        }
+    } else if !matches!(op, CmpOpKind::Is | CmpOpKind::IsNot)
+        && super::int_enum::compares_as_ints(&left_lowered.ty(), &right_lowered.ty(), classes)
+    {
+        left_lowered = super::int_enum::as_int(left, left_lowered, scopes, classes, current_class);
+        right_lowered =
+            super::int_enum::as_int(right, right_lowered, scopes, classes, current_class);
+    }
     // #1476: an identity test compares the objects themselves, never
     // a narrowed native copy, so both narrowed operands are read raw.
     if matches!(op, CmpOpKind::Is | CmpOpKind::IsNot) {
@@ -323,17 +349,38 @@ pub(crate) fn lower_compare_chain_expr(
     let HirExpr::CompareChain { first, links } = expr else {
         unreachable!()
     };
+    // An `IntEnum` operand compared (by an ordering or equality link) with
+    // a number is its `int` value.
+    let hirs: Vec<&HirExpr> = std::iter::once(first.as_ref())
+        .chain(links.iter().map(|link| &link.right))
+        .collect();
+    let mut lowered: Vec<MirExpr> = hirs
+        .iter()
+        .map(|hir| lower_expr(hir, scopes, classes, current_class))
+        .collect();
+    let tys: Vec<Ty> = lowered.iter().map(MirExpr::ty).collect();
+    let as_int: Vec<bool> = (0..lowered.len())
+        .map(|i| {
+            let link = |l: usize| {
+                links.get(l).is_some_and(|link| {
+                    !matches!(link.op, CmpOpKind::Is | CmpOpKind::IsNot)
+                        && super::int_enum::compares_as_ints(&tys[l], &tys[l + 1], classes)
+                })
+            };
+            (i > 0 && link(i - 1)) || link(i)
+        })
+        .collect();
+    for (i, coerce) in as_int.into_iter().enumerate() {
+        if coerce {
+            let value = std::mem::replace(&mut lowered[i], MirExpr::NoneLiteral);
+            lowered[i] = super::int_enum::as_int(hirs[i], value, scopes, classes, current_class);
+        }
+    }
+    let mut lowered = lowered.into_iter();
+    let first = lowered.next().expect("a chain has a first operand");
     super::super::compare_chain::lower_compare_chain(
-        lower_expr(first, scopes, classes, current_class),
-        links
-            .iter()
-            .map(|link| {
-                (
-                    link.op,
-                    lower_expr(&link.right, scopes, classes, current_class),
-                )
-            })
-            .collect(),
+        first,
+        links.iter().map(|link| link.op).zip(lowered).collect(),
         classes,
         scopes,
     )

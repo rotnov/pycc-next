@@ -41,9 +41,9 @@ pub(crate) fn resolve_comp_source(
     match iter {
         CompIter::Range { start, stop, step } => {
             let range_operand = |e| index_operand(e, IndexUse::Range);
-            let start = range_operand(lower_expr(start, scopes, classes, current_class));
-            let stop = range_operand(lower_expr(stop, scopes, classes, current_class));
-            let step = range_operand(lower_expr(step, scopes, classes, current_class));
+            let start = range_operand(crate::expr::int_enum::lower_as_int(start, scopes, classes, current_class));
+            let stop = range_operand(crate::expr::int_enum::lower_as_int(stop, scopes, classes, current_class));
+            let step = range_operand(crate::expr::int_enum::lower_as_int(step, scopes, classes, current_class));
             bind_variable(scopes, var.to_string(), Ty::Int);
             // D-068 re-review of #780 (sixth round): a comprehension's own
             // loop variable is a rebinding exactly like `ForRange`'s

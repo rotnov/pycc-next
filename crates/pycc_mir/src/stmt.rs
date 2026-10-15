@@ -183,7 +183,12 @@ pub(super) fn lower_stmt(
             value: Some(value),
             is_final: _,
         } => {
-            let value = lower_expr(value, scopes, classes, current_class);
+            let value = if *annotation == Ty::Int {
+                // An `IntEnum` member stored in an `int` name is its value.
+                crate::expr::int_enum::lower_as_int(value, scopes, classes, current_class)
+            } else {
+                lower_expr(value, scopes, classes, current_class)
+            };
             // `pycc_types::is_assignable` accepts an annotated initializer
             // in exactly two shapes: an exact type match, or a `bool`
             // initializer under an `int` annotation (`bool` is an `int`
@@ -469,9 +474,9 @@ pub(super) fn lower_stmt(
             body,
         } => {
             let range_operand = |e| crate::index_operand(e, crate::IndexUse::Range);
-            let start = range_operand(lower_expr(start, scopes, classes, current_class));
-            let stop = range_operand(lower_expr(stop, scopes, classes, current_class));
-            let step = range_operand(lower_expr(step, scopes, classes, current_class));
+            let start = range_operand(crate::expr::int_enum::lower_as_int(start, scopes, classes, current_class));
+            let stop = range_operand(crate::expr::int_enum::lower_as_int(stop, scopes, classes, current_class));
+            let step = range_operand(crate::expr::int_enum::lower_as_int(step, scopes, classes, current_class));
             bind_variable(scopes, var.clone(), Ty::Int);
             // D-068 re-review of #780 (sixth round): the loop's own
             // induction variable is a rebinding exactly like `Assign`, but

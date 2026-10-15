@@ -157,9 +157,24 @@ pub(crate) fn lower_call_expr(
     if callee == "cast" && !is_user_defined {
         return lower_expr(&args[1], scopes, classes, current_class);
     }
+    // A user function's parameter types: an `IntEnum` member passed for an
+    // `int` parameter is its value.
+    let param_tys = if is_user_defined {
+        scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(&format!("$callable:{callee}")))
+            .and_then(|ty| match ty {
+                Ty::Callable(signature) => Some(signature.0.clone()),
+                _ => None,
+            })
+    } else {
+        None
+    };
     let args: Vec<MirExpr> = args
         .iter()
-        .map(|a| {
+        .enumerate()
+        .map(|(index, a)| {
             let lowered = lower_expr(a, scopes, classes, current_class);
             // #378 (PR-18): for `print(instance)`, rewrite an
             // instance-typed argument to a `__repr__` call so the
@@ -182,6 +197,13 @@ pub(crate) fn lower_call_expr(
                 // dataclass `__repr__` run on an exception object.
                 let lowered = rewrite_exception_to_message(&lowered, classes);
                 rewrite_instance_to_text(&lowered, classes, scopes, false)
+            } else if (!is_user_defined && pycc_hir::int_enum::reads_int_args(callee))
+                || param_tys
+                    .as_ref()
+                    .is_some_and(|params| params.get(index) == Some(&Ty::Int))
+            {
+                // An `IntEnum` member is its `int` value (`int(m)`).
+                super::int_enum::as_int(a, lowered, scopes, classes, current_class)
             } else {
                 lowered
             }

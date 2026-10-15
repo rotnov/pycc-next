@@ -49,7 +49,9 @@ pub(crate) fn result_ty(callee: &str, arg_tys: &[Ty]) -> Option<Result<Ty, Diagn
             if arity == 1 { "" } else { "s" }
         ))));
     }
-    let ty = match (callee, arg_tys) {
+    // An `IntEnum` member is its `int` value (`pycc_hir::int_enum`).
+    let arg_tys: Vec<Ty> = arg_tys.iter().map(pycc_hir::int_enum::as_int).collect();
+    let ty = match (callee, arg_tys.as_slice()) {
         ("abs", [x]) if int_like(x) => Ty::Int,
         ("abs", [Ty::Float]) => Ty::Float,
         ("divmod", [a, b]) if int_like(a) && int_like(b) => {

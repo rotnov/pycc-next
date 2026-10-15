@@ -272,7 +272,7 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
                 let unpacks_into_float_tuple = matches!(inferred, Ty::Object)
                     && foreign::is_object_float_tuple_annotation(annotation);
                 if !unpacks_into_float_tuple
-                    && !class::is_assignable_env(env, &inferred, annotation)
+                    && !class::is_assignable_env(env, &crate::int_enum_slot(&inferred, annotation), annotation)
                     && !object_box::admits_value(env, value, &inferred, annotation)?
                 {
                     // #380 (PR-20): if the mismatch involves a protocol,
