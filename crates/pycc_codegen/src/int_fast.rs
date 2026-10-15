@@ -802,9 +802,10 @@ pub(super) fn emit_exception_pending_test<'ctx>(
     let function = entry_bb.get_parent().expect("a function");
     let slow_bb = context.append_basic_block(function, &format!("{name}_slow"));
     let join_bb = context.append_basic_block(function, &format!("{name}_join"));
-    builder
+    let branch = builder
         .build_conditional_branch(any, slow_bb, join_bb)
         .expect("branch");
+    crate::int_fast::weight_branch(context, branch, false);
     builder.position_at_end(slow_bb);
     let active = builder
         .build_call(rt.exception_active, &[], name)

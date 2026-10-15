@@ -161,9 +161,10 @@ fn route<'ctx>(
     let function = edge.function();
     let fail_bb = context.append_basic_block(function, &format!("{label}_fail"));
     let cont_bb = context.append_basic_block(function, &format!("{label}_cont"));
-    builder
+    let branch = builder
         .build_conditional_branch(failed, fail_bb, cont_bb)
         .expect("build_conditional_branch should not fail");
+    crate::int_fast::weight_branch(context, branch, false);
     builder.position_at_end(fail_bb);
     emit_failure(context, builder, module, rt, edge);
     builder.position_at_end(cont_bb);

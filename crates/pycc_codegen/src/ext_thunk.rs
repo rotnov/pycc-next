@@ -77,9 +77,10 @@ pub(super) fn emit_fnptr_dispatch_guard<'ctx>(
         .expect("every block has a parent function");
     let not_null_block = context.append_basic_block(current_fn, "fnptr_not_null");
     let is_null_block = context.append_basic_block(current_fn, "fnptr_is_null");
-    builder
+    let branch = builder
         .build_conditional_branch(is_null, is_null_block, not_null_block)
         .expect("build_conditional_branch should not fail for a null-check dispatch");
+    crate::int_fast::weight_branch(context, branch, false);
     // The name global was created once per function name in the
     // declaration pass and is reused at every call site.
     builder.position_at_end(is_null_block);

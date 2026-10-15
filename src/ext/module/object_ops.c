@@ -38,10 +38,14 @@
  */
 /*
  * The interned `str` of an attribute name the compiled code spells, by the
- * spelling's address (a constant of the generated code), so a lookup in a
- * loop neither decodes nor hashes the name again. A slot holds one name;
- * a colliding name replaces it. Borrowed; NULL with an exception set when
- * the name cannot be created.
+ * spelling's address, so a lookup in a loop neither decodes nor hashes the
+ * name again. Every spelling is a constant of the generated code (callers
+ * are `pycc_ext_obj_getattr` and `pycc_ext_obj_call_method`, whose name
+ * arguments codegen emits as private string constants), which lives as long
+ * as the module and is never reused for another text: one address names one
+ * text, so a hit is decided by the address alone. A slot holds one name; a
+ * colliding name replaces it. Borrowed; NULL with an exception set when the
+ * name cannot be created.
  */
 #define PYCC_EXT_NAME_SLOTS 256
 static struct {
@@ -51,18 +55,14 @@ static struct {
 
 static PyObject *pycc_ext_attr_name(const char *spelling)
 {
-    size_t slot = ((size_t)(uintptr_t)spelling >> 3) & (PYCC_EXT_NAME_SLOTS - 1);
+    /* Constants are byte-aligned and often adjacent: mix every address bit
+     * into the slot index (Fibonacci hashing). */
+    size_t slot = (size_t)(((uint64_t)(uintptr_t)spelling * 0x9E3779B97F4A7C15ull) >> 56)
+                  & (PYCC_EXT_NAME_SLOTS - 1);
     PyObject *name;
-    const char *cached;
 
     if (pycc_ext_names[slot].spelling == spelling) {
-        /* The same address with the same text: a constant's, not a buffer
-         * reused for another name. */
-        cached = PyUnicode_AsUTF8AndSize(pycc_ext_names[slot].name, NULL);
-        if (cached != NULL && strcmp(cached, spelling) == 0) {
-            return pycc_ext_names[slot].name;
-        }
-        PyErr_Clear();
+        return pycc_ext_names[slot].name;
     }
     name = PyUnicode_InternFromString(spelling);
     if (name == NULL) {

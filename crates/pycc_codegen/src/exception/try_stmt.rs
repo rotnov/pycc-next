@@ -103,9 +103,10 @@ pub(crate) fn emit_try<'ctx>(
             rt,
             "try_body_has_exc",
         );
-        builder
+        let branch = builder
             .build_conditional_branch(has_exc, handler_dispatch_bb, else_bb)
             .expect("build_conditional_branch should not fail");
+        crate::int_fast::weight_branch(context, branch, false);
     }
 
     // Handler dispatch: check each handler in order.

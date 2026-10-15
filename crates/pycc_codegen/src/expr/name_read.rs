@@ -41,9 +41,10 @@ pub(crate) fn emit_name_expr<'ctx>(
             .expect("the current basic block always belongs to a function");
         let ready = context.append_basic_block(function, "global_ready");
         let unbound = context.append_basic_block(function, "global_unbound");
-        builder
+        let branch = builder
             .build_conditional_branch(is_initialized, ready, unbound)
             .expect("build_conditional_branch should not fail for an i1 condition");
+        crate::int_fast::weight_branch(context, branch, true);
         builder.position_at_end(unbound);
         // #1316 / Part 1 of #1333: an `object` global read in a
         // function body before its import or assignment ran raises

@@ -478,16 +478,18 @@ pub(super) fn guard_statement_effects<'ctx>(
         && rt.exceptions.pending_object_releases.borrow().is_empty()
         && rt.exceptions.pending_heap_releases.borrow().is_empty();
     if nothing_pending {
-        builder
+        let branch = builder
             .build_conditional_branch(has_exc, exception_target, continuation)
             .expect("build_conditional_branch should guard a statement effect");
+        crate::int_fast::weight_branch(context, branch, false);
         builder.position_at_end(continuation);
         return;
     }
     let unwind_bb = context.append_basic_block(function, "effect_exc_unwind");
-    builder
+    let branch = builder
         .build_conditional_branch(has_exc, unwind_bb, continuation)
         .expect("build_conditional_branch should guard a statement effect");
+    crate::int_fast::weight_branch(context, branch, false);
     builder.position_at_end(unwind_bb);
     jump_to_exception_target(context, builder, rt);
     builder.position_at_end(continuation);
