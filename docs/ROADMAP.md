@@ -92,3 +92,24 @@ Accept:
    ships `pycc-v0.3.0-aarch64-linux.tar.gz` next to the x86_64 Linux and arm64 macOS
    archives, each smoke-tested by release run 38584309286; CI also runs the full suite on
    `ubuntu-24.04-arm`.
+
+## v0.4 — Fast untyped code, no leaks
+
+Accept:
+1. **Untyped code runs native:** `--non-strict` infers native `str`, `list`, `dict`, `set`
+   and tuple types through unannotated functions and methods (from call sites, defaults,
+   literals and returns), so untyped code stops round-tripping through CPython objects.
+   Evidence: `python3 bench/package_check.py --time` shows diff-match-patch's own speed
+   test >= 5x faster than CPython (v0.3: 1.7x) with its suite still passing.
+2. **Exceptions are freed:** raised and caught exception objects and their messages are
+   reference counted; a loop that raises and catches (native exceptions and exceptions
+   from CPython calls) runs in constant memory (leak probes); the DEVIATIONS row goes.
+3. **Real-world corpus:** strict passes >= 170/200; `--non-strict` keeps 200/200, 0 wrong,
+   with <= 8 top-level statements in CPython fallback (v0.3: 23).
+4. **A second real package:** another pinned, permissively licensed pure-Python PyPI
+   package from a different domain builds unchanged with `--ext --non-strict`, passes its
+   own test suite (CI-gated) and is measurably faster than CPython on its hot path.
+5. **Language gaps from v0.3:** circular imports behave as in CPython; strict `--ext`
+   modules expose module-level variables; `IntEnum` members are usable as `int`;
+   `sorted()`/`min()`/`max()`/`.sort()` and set membership of class instances;
+   `dataclasses.fields()`/`asdict()`. Oracle fixtures; matching DEVIATIONS rows removed.
