@@ -21,10 +21,17 @@
 //! A keyed ordering (`pycc_ast::desugar::keys`) is given the list of
 //! `(key, element)` pairs: it compares the keys and yields the elements.
 //!
-//! The snapshot holds a reference to every element (to the pairs list, for
-//! a keyed one), so a comparison that changes the list cannot free one; a
-//! list whose length changed while it was sorted in place raises CPython's
-//! `ValueError: list modified during sort`.
+//! `sorted`/`min`/`max` take a reference to every element (to the pairs
+//! list, for a keyed one), so a comparison that changes the list cannot
+//! free one. `xs.sort()` does what CPython's `list.sort` does: the list's
+//! storage is detached when the sort starts (the list reads as empty to the
+//! comparisons, and the snapshot owns its references), and moved back at
+//! the end; a list that is no longer empty then was modified during the
+//! sort, so what it holds is released and CPython's `ValueError: list
+//! modified during sort` raised. A comparison that raises leaves the list
+//! holding its elements in the order of the last completed merge pass (the
+//! original order when the first comparison raises). The list itself is
+//! kept alive across the comparisons.
 
 use super::*;
 
@@ -58,6 +65,10 @@ pub struct OrderState {
     kind: i64,
     /// The pairs list a keyed ordering keeps alive, or null.
     pairs: *mut PyListObj,
+    /// The list sorted in place (`sort`), its storage detached, or null.
+    target: *mut PyListObj,
+    /// The detached words of `target`, whose references the snapshot owns.
+    detached: Vec<i64>,
     /// The positions in order so far, and the merge's destination.
     perm: Vec<usize>,
     buf: Vec<usize>,
@@ -173,30 +184,63 @@ impl OrderState {
         out
     }
 
-    /// Drops the snapshot's references.
+    /// Drops the snapshot's references (for `sort`, the target's elements
+    /// are handed back by [`Self::restore`] instead).
     fn release(&self) {
         if self.pairs.is_null() {
-            for word in &self.elems {
-                crate::value::release(self.kind, *word);
+            if self.target.is_null() {
+                for word in &self.elems {
+                    crate::value::release(self.kind, *word);
+                }
             }
         } else {
             unsafe { crate::rc::pycc_rt_list_decref(self.pairs) };
         }
     }
+
+    /// Moves `words` (the detached elements, reordered) back into the
+    /// sorted list, releasing whatever a comparison stored there meanwhile;
+    /// `true` when the list had been modified. Drops the list's reference.
+    fn restore(&self, words: Vec<i64>) -> bool {
+        let target = unsafe { &mut *self.target };
+        let modified = target.len() != 0;
+        if modified {
+            let stored = target.items().into_owned();
+            super::ops::edit_words(target, Vec::clear);
+            for word in stored {
+                target.release(word);
+            }
+        }
+        super::ops::edit_words(target, |items| *items = words);
+        unsafe { crate::rc::pycc_rt_list_decref(self.target) };
+        modified
+    }
+
+    /// The detached elements in `perm` order (the keyed elements are the
+    /// same objects as the detached ones, which own the references).
+    fn reordered(&self) -> Vec<i64> {
+        let ordered = self.ordered();
+        debug_assert_eq!(ordered.len(), self.detached.len());
+        ordered
+    }
 }
 
 /// Starts ordering `list` (`mode`: 0 `sorted`, 1 `sort`, 2 `min`, 3
 /// `max`, plus [`KEYED`] when `list` holds `(key, element)` pairs and
-/// [`REVERSE`]); `kind` is the kind of the elements yielded. For `min`/`max`
-/// of an empty list, raises CPython's `ValueError` and returns null.
+/// [`REVERSE`]); `kind` is the kind of the elements yielded; `target` is
+/// the list a `sort` reorders (`list` itself unless keyed), null otherwise.
+/// For `min`/`max` of an empty list, raises CPython's `ValueError` and
+/// returns null.
 ///
 /// # Safety
-/// `list` must be a live list (of 2-tuples when keyed).
+/// `list` must be a live list (of 2-tuples when keyed), `target` a live
+/// list or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_order_begin(
     list: *mut PyListObj,
     mode: i64,
     kind: i64,
+    target: *mut PyListObj,
 ) -> *mut OrderState {
     let keyed = mode & KEYED != 0;
     let reverse = mode & REVERSE != 0;
@@ -216,6 +260,17 @@ pub unsafe extern "C" fn pycc_rt_order_begin(
         );
         return std::ptr::null_mut();
     }
+    // `xs.sort()`: the list is kept alive and its storage detached.
+    let target = if mode == Mode::Sort { target } else { std::ptr::null_mut() };
+    let detached = if target.is_null() {
+        Vec::new()
+    } else {
+        unsafe { crate::rc::pycc_rt_list_incref(target) };
+        let list = unsafe { &mut *target };
+        let words = list.items().into_owned();
+        super::ops::edit_words(list, Vec::clear);
+        words
+    };
     let (keys, elems, pairs) = if keyed {
         let mut keys = Vec::new();
         let mut elems = Vec::new();
@@ -226,6 +281,8 @@ pub unsafe extern "C" fn pycc_rt_order_begin(
         }
         unsafe { crate::rc::pycc_rt_list_incref(list) };
         (keys, elems, list)
+    } else if !target.is_null() {
+        (detached.clone(), detached.clone(), std::ptr::null_mut())
     } else {
         let items = source.items().into_owned();
         for word in &items {
@@ -245,6 +302,8 @@ pub unsafe extern "C" fn pycc_rt_order_begin(
         elems,
         kind,
         pairs,
+        target,
+        detached,
         buf: perm.clone(),
         perm,
         width: 1,
@@ -303,18 +362,13 @@ pub unsafe extern "C" fn pycc_rt_order_right(state: *mut OrderState) -> i64 {
 }
 
 /// Ends the ordering and frees `state`: the new list (`sorted`), `0` after
-/// reordering `target` in place (`sort`; `ValueError` when its length
-/// changed meanwhile), or the extreme element, a new reference (`min`,
-/// `max`).
+/// reordering the list in place (`sort`; `ValueError` when it was modified
+/// meanwhile), or the extreme element, a new reference (`min`, `max`).
 ///
 /// # Safety
-/// `state` must come from [`pycc_rt_order_begin`]; `target` is the list
-/// sorted in place (for `sort`).
+/// `state` must come from [`pycc_rt_order_begin`] and not be finished.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pycc_rt_order_finish(
-    state: *mut OrderState,
-    target: *mut PyListObj,
-) -> i64 {
+pub unsafe extern "C" fn pycc_rt_order_finish(state: *mut OrderState) -> i64 {
     let state = unsafe { Box::from_raw(state) };
     match state.mode {
         Mode::Sorted => {
@@ -329,21 +383,15 @@ pub unsafe extern "C" fn pycc_rt_order_finish(
             new_list(state.kind, ordered) as i64
         }
         Mode::Sort => {
-            let target = unsafe { &mut *target };
-            if target.len() as usize != state.elems.len() {
-                state.release();
+            let modified = state.restore(state.reordered());
+            state.release();
+            if modified {
                 crate::exception::raise_builtin(
                     crate::exception::EXCEPTION_TYPE_VALUE_ERROR,
                     "ValueError",
                     "list modified during sort",
                 );
-                return 0;
             }
-            // The list keeps one reference per element, which the sorted
-            // order holds too; the snapshot's own are dropped.
-            let ordered = state.ordered();
-            super::ops::edit_words(target, |words| *words = ordered);
-            state.release();
             0
         }
         Mode::Min | Mode::Max => {
@@ -362,6 +410,14 @@ pub unsafe extern "C" fn pycc_rt_order_finish(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_order_abort(state: *mut OrderState) {
     let state = unsafe { Box::from_raw(state) };
+    if !state.target.is_null() {
+        // The order of the last completed merge pass.
+        let mut words: Vec<i64> = state.perm.iter().map(|i| state.elems[*i]).collect();
+        if state.reverse {
+            words.reverse();
+        }
+        state.restore(words);
+    }
     state.release();
 }
 
@@ -375,14 +431,15 @@ mod tests {
         let list = new_list(LIST_KIND_FLOAT, words.to_vec());
         let mut compares = 0;
         unsafe {
-            let state = pycc_rt_order_begin(list, mode, LIST_KIND_FLOAT);
+            let target = if mode & 3 == 1 { list } else { std::ptr::null_mut() };
+            let state = pycc_rt_order_begin(list, mode, LIST_KIND_FLOAT, target);
             let mut less = 0;
             while pycc_rt_order_step(state, less) == 1 {
                 compares += 1;
                 let (l, r) = (pycc_rt_order_left(state), pycc_rt_order_right(state));
                 less = i8::from(if mode & 3 == 3 { l > r } else { l < r });
             }
-            let result = pycc_rt_order_finish(state, list);
+            let result = pycc_rt_order_finish(state);
             let out = match mode & 3 {
                 0 => crate::list::list_words(result as *mut PyListObj),
                 1 => crate::list::list_words(list),

@@ -113,7 +113,7 @@ pub(super) fn emit_instance_order<'ctx>(
         module,
         "pycc_rt_order_begin",
         Some(ptr_type.into()),
-        &[ptr_type.into(), i64_type.into(), i64_type.into()],
+        &[ptr_type.into(), i64_type.into(), i64_type.into(), ptr_type.into()],
     );
     let step = runtime(
         context,
@@ -129,7 +129,7 @@ pub(super) fn emit_instance_order<'ctx>(
         module,
         "pycc_rt_order_finish",
         Some(i64_type.into()),
-        &[ptr_type.into(), ptr_type.into()],
+        &[ptr_type.into()],
     );
     let abort = runtime(context, module, "pycc_rt_order_abort", None, &[ptr_type.into()]);
 
@@ -142,6 +142,12 @@ pub(super) fn emit_instance_order<'ctx>(
             i64_type
                 .const_int(crate::list::list_kind(rt, &order.elem), false)
                 .into(),
+            if order.kind == pycc_mir::OrderKind::Sort {
+                target_list
+            } else {
+                ptr_type.const_null()
+            }
+            .into(),
         ],
     )
     .expect("pycc_rt_order_begin returns a pointer")
@@ -245,7 +251,7 @@ pub(super) fn emit_instance_order<'ctx>(
         .expect("build_unconditional_branch should not fail");
 
     builder.position_at_end(done_bb);
-    let word = call(builder, finish, &[state.into(), target_list.into()])
+    let word = call(builder, finish, &[state.into()])
         .expect("pycc_rt_order_finish returns an i64")
         .into_int_value();
     heap_rc::truncate_pending(rt, mark);

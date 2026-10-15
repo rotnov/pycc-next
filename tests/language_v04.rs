@@ -96,3 +96,9 @@ fn ordering_instances_without_an_ordering_method_is_refused() {
         "{rendered}"
     );
 }
+
+#[test]
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn a_list_changed_or_raising_while_sorted_behaves_as_in_cpython() {
+    assert_native_matches("v04_sort_mutation.py");
+}

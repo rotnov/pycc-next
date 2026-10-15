@@ -51,6 +51,20 @@ class Card:
     suit: str
 
 
+class Grow:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def __lt__(self, other: "Grow") -> bool:
+        SINK[0].append(Grow(0))
+        if self.n == 7:
+            raise ValueError("seven")
+        return self.n < other.n
+
+
+SINK: list[list[Grow]] = [[]]
+
+
 @dataclass(eq=False)
 class Path:
     start: P
@@ -132,4 +146,8 @@ probe!(
 probe!(
     a_tuple_of_instances_rendered,
     "t = (P(i, 1), \"x\")\ntotal += len(str(t)) + len(repr([t]))"
+);
+probe!(
+    a_list_changed_or_raising_while_sorted,
+    "gs = [Grow(i % 9), Grow(3), Grow(5)]\nSINK[0] = gs\ntry:\n    gs.sort()\nexcept ValueError:\n    total += len(gs)\nSINK[0] = []"
 );
