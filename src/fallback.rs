@@ -60,6 +60,11 @@ pub(crate) fn set_report(report: bool) {
     REPORT.store(report, Ordering::Relaxed);
 }
 
+/// Whether `--report-fallbacks` was given.
+pub(crate) fn reporting() -> bool {
+    REPORT.load(Ordering::Relaxed)
+}
+
 /// Whether the program being built has fallback code.
 pub(crate) fn active() -> bool {
     ENTRY_OVERRIDE.with(|cell| cell.borrow().is_some())

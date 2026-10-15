@@ -444,9 +444,15 @@ pub(crate) fn resolve_frontend_with(
         variables: true,
         foreign_relative_imports: relative_imports == RelativeImports::ForeignFromEntry,
     };
-    with_fallback(path, publishes, || {
-        resolve_linked(path, module_name, relative_imports, true)
-    })
+    let display = path.to_string_lossy().into_owned();
+    crate::specialize::reset();
+    let typed = with_fallback(path, publishes, || {
+        crate::specialize::with_specialization(&display, || {
+            resolve_linked(path, module_name, relative_imports, true)
+        })
+    })?;
+    crate::specialize::report();
+    Ok(typed)
 }
 
 /// Links and type-checks the entry file's program; `ext_module` is

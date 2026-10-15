@@ -339,6 +339,10 @@ impl Loader {
         // alone get a compiled entry for a Python wrapper (#1194).
         if is_entry && self.ext_module {
             pycc_ast::split_ext_signatures(&mut parsed, &source);
+            // Untyped functions get guarded native specializations.
+            if self.non_strict {
+                crate::specialize::specialize_entry(&mut parsed);
+            }
         }
         // A native program's entry module is closed, so a dead unannotated
         // definition there can never run and is not compiled: no call site

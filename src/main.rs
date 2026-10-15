@@ -14,6 +14,7 @@ mod mode;
 mod modules;
 mod project_config;
 mod source;
+mod specialize;
 
 use build_pipeline::try_build;
 use clap::Parser;

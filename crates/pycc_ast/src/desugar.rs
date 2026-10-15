@@ -83,6 +83,7 @@ mod hoist;
 mod keys;
 mod ndarray_ndim;
 mod signatures;
+mod specialize;
 mod starred;
 mod static_branches;
 mod stdin_bytes;
@@ -105,6 +106,7 @@ pub fn fold_static_branches(module: &mut ModModule) {
     module.body = body.into();
 }
 pub use ext_generators::split_ext_generators;
+pub use specialize::{NATIVE_PREFIX, Specialized, specialize_untyped};
 pub use ext_signatures::{
     ExtSignature, expand_dataclasses_in as expand_dataclasses, ext_entry_target, ext_signatures,
     split_ext_signatures,

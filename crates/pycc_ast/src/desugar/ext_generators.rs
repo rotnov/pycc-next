@@ -185,7 +185,7 @@ fn split(def: StmtFunctionDef, receiver: Option<&str>) -> (StmtFunctionDef, Stmt
 
 /// How many times `body` binds `name` at any depth (a `def`, a class, an
 /// assignment target, a parameter).
-fn bindings(body: &[Stmt], name: &str) -> usize {
+pub(super) fn bindings(body: &[Stmt], name: &str) -> usize {
     struct Count<'n> {
         name: &'n str,
         count: usize,
