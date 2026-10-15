@@ -21,13 +21,12 @@ use crate::{MirExpr, MirItem, MirModule, MirStmt, ObjDisplayKind, Ty};
 /// Rewrites every recognized `a, b = x, y` in the function bodies of
 /// `module`.
 pub(crate) fn rewrite(module: &mut MirModule) {
-    let mut fresh = 0usize;
     for item in &mut module.items {
         match item {
-            MirItem::Function { body, .. } => rewrite_body(body, &mut fresh),
+            MirItem::Function { body, .. } => rewrite_body(body),
             MirItem::TopLevelStmt(stmt) => {
                 for body in stmt.bodies_mut() {
-                    rewrite_body(body, &mut fresh);
+                    rewrite_body(body);
                 }
             }
             MirItem::ForeignImport { .. } => {}
@@ -35,10 +34,10 @@ pub(crate) fn rewrite(module: &mut MirModule) {
     }
 }
 
-fn rewrite_body(body: &mut Vec<MirStmt>, fresh: &mut usize) {
+fn rewrite_body(body: &mut Vec<MirStmt>) {
     for stmt in body.iter_mut() {
         for inner in stmt.bodies_mut() {
-            rewrite_body(inner, fresh);
+            rewrite_body(inner);
         }
     }
     let mut at = 0;
@@ -46,8 +45,7 @@ fn rewrite_body(body: &mut Vec<MirStmt>, fresh: &mut usize) {
         match recognize(&body[at..]) {
             Some(replacement) => {
                 let arity = replacement.len();
-                let stmts = build(replacement, *fresh);
-                *fresh += 1;
+                let stmts = build(replacement);
                 let added = stmts.len();
                 body.splice(at..=at + arity, stmts);
                 at += added;
@@ -166,11 +164,14 @@ fn expr_reads(expr: &MirExpr, name: &str) -> bool {
 /// The statements replacing a recognized unpacking: every element into
 /// its temporary, every target from its temporary, every counted
 /// temporary released.
-fn build(binds: Vec<Bind>, fresh: usize) -> Vec<MirStmt> {
+fn build(binds: Vec<Bind>) -> Vec<MirStmt> {
     let temps: Vec<(String, Ty)> = binds
         .iter()
         .enumerate()
-        .map(|(index, bind)| (format!("0swap_{fresh}_{index}"), bind.element.ty()))
+        .map(|(index, bind)| {
+            let ty = bind.element.ty();
+            (crate::multi_return::temp_name("0swap", index, &ty), ty)
+        })
         .collect();
     let mut out = Vec::with_capacity(binds.len() * 3);
     for (bind, (temp, _)) in binds.iter().zip(&temps) {
@@ -194,8 +195,7 @@ fn build(binds: Vec<Bind>, fresh: usize) -> Vec<MirStmt> {
             target: bind.target,
             value,
         });
-    }
-    for (temp, ty) in &temps {
+        // Right after its only read, so codegen can move the reference.
         if is_counted(ty) {
             out.push(MirStmt::ReleaseName(temp.clone()));
         }

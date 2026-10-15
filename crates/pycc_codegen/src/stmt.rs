@@ -45,7 +45,16 @@ pub(crate) fn emit_body<'ctx>(
     expected_return_ty: pycc_mir::Ty,
     finally_stack: &mut Vec<FinallyTarget<'ctx>>,
 ) -> Result<(), String> {
-    for stmt in body {
+    let mut stmts = body.iter().peekable();
+    while let Some(stmt) = stmts.next() {
+        // A compiler temporary bound to a name and released at once
+        // (`MirStmt::ReleaseName`) hands its reference over instead.
+        if let Some(next) = stmts.peek()
+            && crate::multi_out::emit_move(context, builder, rt, locals, stmt, next)
+        {
+            stmts.next();
+            continue;
+        }
         emit_stmt(
             context,
             builder,

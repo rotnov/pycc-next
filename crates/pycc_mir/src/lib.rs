@@ -45,6 +45,7 @@ mod stmt;
 mod unpack_display;
 pub mod multi_return;
 mod optional_str;
+mod str_scan;
 mod visit_mut;
 pub(crate) use comp_source::{resolve_comp_source, str_to_list, tuple_to_list};
 #[cfg(debug_assertions)]
@@ -465,6 +466,7 @@ pub fn build(hir: &HirModule) -> MirModule {
         items,
         class_defs: hir.class_defs.clone(),
     };
+    str_scan::rewrite(&mut module);
     unpack_display::rewrite(&mut module);
     optional_str::rewrite(&mut module);
     multi_return::rewrite(&mut module);

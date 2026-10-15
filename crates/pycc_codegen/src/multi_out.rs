@@ -130,6 +130,58 @@ pub(crate) fn emit_assign_multi_stmt<'ctx>(
     Ok(())
 }
 
+/// `target = temp` followed by `ReleaseName(temp)`, for a compiler
+/// temporary `temp` (a `0`-prefixed name) holding an `object` or a `str`
+/// of the same type as `target`'s slot: the temporary's reference moves to
+/// `target` and the temporary is left null, with no count traffic. `false`
+/// (nothing emitted) for any other pair.
+pub(crate) fn emit_move<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    stmt: &MirStmt,
+    next: &MirStmt,
+) -> bool {
+    let (
+        MirStmt::Assign {
+            target,
+            value: MirExpr::Name { name: temp, .. },
+        },
+        MirStmt::ReleaseName(released),
+    ) = (stmt, next)
+    else {
+        return false;
+    };
+    if released != temp || !temp.starts_with('0') || target == temp {
+        return false;
+    }
+    let (Some(source), Some(destination)) = (locals.get(temp), locals.get(target)) else {
+        return false;
+    };
+    let counted = matches!(source.ty, pycc_mir::Ty::Object | pycc_mir::Ty::Str);
+    if source.ty != destination.ty || !counted || rt.borrowed_locals.borrow().contains(target) {
+        return false;
+    }
+    let pointer = context.ptr_type(inkwell::AddressSpace::default());
+    let value = builder
+        .build_load(pointer, source.ptr, "moved")
+        .expect("build_load should not fail for a temporary's slot")
+        .into_pointer_value();
+    let scalar = if source.ty == pycc_mir::Ty::Str {
+        Scalar::Str(value)
+    } else {
+        Scalar::Object(value)
+    };
+    let old = heap_rc::take_slot_old(context, builder, rt, &destination.ty, destination.ptr);
+    emit_assign(context, builder, rt, locals, target, scalar);
+    heap_rc::release_old(context, builder, rt, old);
+    builder
+        .build_store(source.ptr, pointer.const_null())
+        .expect("build_store should not fail for a temporary's slot");
+    true
+}
+
 /// The LLVM value of a twin result.
 fn basic_value(scalar: Scalar<'_>) -> inkwell::values::BasicValueEnum<'_> {
     match scalar {

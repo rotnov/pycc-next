@@ -64,6 +64,23 @@ fn collect_out_tys(body: &[MirStmt], found: &mut Vec<Option<Ty>>) {
 /// through (`stmt::lower_stmt`).
 pub(crate) const UNPACK_TEMP: &str = "0unpack_";
 
+/// The temporary `prefix` names for result `index` of type `ty`. One per
+/// position and type, shared by every site in a function: a site binds its
+/// temporaries and reads them before the next site runs, and a frame keeps
+/// one slot per temporary however many sites use it.
+pub(crate) fn temp_name(prefix: &str, index: usize, ty: &Ty) -> String {
+    let key = match ty {
+        Ty::Int => "i".to_string(),
+        Ty::Float => "f".to_string(),
+        Ty::Bool => "b".to_string(),
+        Ty::Str => "s".to_string(),
+        Ty::Object => "o".to_string(),
+        Ty::None => "n".to_string(),
+        other => format!("{other:?}").replace(|c: char| !c.is_ascii_alphanumeric(), "_"),
+    };
+    format!("{prefix}_{index}_{key}")
+}
+
 /// Builtins codegen claims by name before any user function of that name.
 const INTERCEPTED: &[&str] = &[
     "print", "len", "round", "abs", "divmod", "int", "float", "hash", "bool", "str", "repr",
@@ -76,7 +93,6 @@ pub(crate) fn rewrite(module: &mut MirModule) {
     if candidates.is_empty() {
         return;
     }
-    let mut fresh = 0usize;
     let mut twins = Vec::new();
     for item in &module.items {
         if let MirItem::Function {
@@ -88,7 +104,7 @@ pub(crate) fn rewrite(module: &mut MirModule) {
             && let Some(abi) = candidates.get(name)
         {
             let mut body = body.clone();
-            twin_returns(&mut body, abi, &candidates, &mut fresh);
+            twin_returns(&mut body, abi, &candidates);
             twins.push(MirItem::Function {
                 name: twin_name(name),
                 params: params.clone(),
@@ -100,10 +116,10 @@ pub(crate) fn rewrite(module: &mut MirModule) {
     module.items.extend(twins);
     for item in &mut module.items {
         match item {
-            MirItem::Function { body, .. } => call_sites(body, &candidates, &mut fresh),
+            MirItem::Function { body, .. } => call_sites(body, &candidates),
             MirItem::TopLevelStmt(stmt) => {
                 for body in stmt.bodies_mut() {
-                    call_sites(body, &candidates, &mut fresh);
+                    call_sites(body, &candidates);
                 }
             }
             MirItem::ForeignImport { .. } => {}
@@ -363,21 +379,14 @@ fn has_closure(expr: &MirExpr) -> bool {
 }
 
 /// Rewrites every `return` of a twin's body.
-fn twin_returns(
-    body: &mut Vec<MirStmt>,
-    abi: &Abi,
-    candidates: &HashMap<String, Abi>,
-    fresh: &mut usize,
-) {
+fn twin_returns(body: &mut Vec<MirStmt>, abi: &Abi, candidates: &HashMap<String, Abi>) {
     for stmt in body.iter_mut() {
         for inner in stmt.bodies_mut() {
-            twin_returns(inner, abi, candidates, fresh);
+            twin_returns(inner, abi, candidates);
         }
         let MirStmt::Return(Some(value)) = stmt else {
             continue;
         };
-        let k = *fresh;
-        *fresh += 1;
         let mut out = Vec::new();
         // Each result in a temporary of its own type, in display order.
         let results: Vec<(String, Ty)> = match value {
@@ -389,7 +398,7 @@ fn twin_returns(
                 .iter()
                 .enumerate()
                 .map(|(i, element)| {
-                    let temp = format!("0mr_{k}_{i}");
+                    let temp = temp_name("0mr", i, &element.ty());
                     out.push(MirStmt::Assign {
                         target: temp.clone(),
                         value: element.clone(),
@@ -403,8 +412,9 @@ fn twin_returns(
                     .tys
                     .iter()
                     .enumerate()
-                    .map(|(i, ty)| (format!("0mr_{k}_{i}"), ty.clone()))
+                    .map(|(i, ty)| (temp_name("0mr", i, ty), ty.clone()))
                     .collect();
+                let tuple = temp_name("0mt", 0, ty);
                 let call = MirExpr::Call {
                     callee: callee.clone(),
                     args: args.clone(),
@@ -415,7 +425,7 @@ fn twin_returns(
                     twin: twin_name(callee),
                     args: args.clone(),
                     temps: temps.clone(),
-                    fallback: unpack_fallback(call, callee_abi, &temps, &format!("0mt_{k}")),
+                    fallback: unpack_fallback(call, callee_abi, &temps, &tuple),
                 })));
                 temps
             }
@@ -432,7 +442,7 @@ fn twin_returns(
             if ty == want {
                 converted.push(read);
             } else {
-                let boxed = format!("0mc_{k}_{i}");
+                let boxed = temp_name("0mc", i, want);
                 out.push(MirStmt::Assign {
                     target: boxed.clone(),
                     value: MirExpr::ObjectBox(Box::new(read)),
@@ -517,10 +527,10 @@ fn is_counted(ty: &Ty) -> bool {
 }
 
 /// Routes every recognized unpacking call in `body` through a twin.
-fn call_sites(body: &mut Vec<MirStmt>, candidates: &HashMap<String, Abi>, fresh: &mut usize) {
+fn call_sites(body: &mut Vec<MirStmt>, candidates: &HashMap<String, Abi>) {
     for stmt in body.iter_mut() {
         for inner in stmt.bodies_mut() {
-            call_sites(inner, candidates, fresh);
+            call_sites(inner, candidates);
         }
     }
     let mut at = 0;
@@ -528,8 +538,7 @@ fn call_sites(body: &mut Vec<MirStmt>, candidates: &HashMap<String, Abi>, fresh:
         match unpacking(&body[at..], candidates) {
             Some(site) => {
                 let consumed = site.targets.len() + 1;
-                let stmts = route(site, candidates, *fresh);
-                *fresh += 1;
+                let stmts = route(site, candidates);
                 let added = stmts.len();
                 body.splice(at..at + consumed, stmts);
                 at += added;
@@ -627,13 +636,13 @@ fn is_item(value: &MirExpr, tuple: &str, i: usize, object: bool) -> bool {
 /// The statements replacing a recognized unpacking call: the twin call
 /// into temporaries, each target bound from its temporary as it was from
 /// the tuple, and every counted temporary released.
-fn route(site: Site, candidates: &HashMap<String, Abi>, k: usize) -> Vec<MirStmt> {
+fn route(site: Site, candidates: &HashMap<String, Abi>) -> Vec<MirStmt> {
     let abi = &candidates[site.callee.as_str()];
     let temps: Vec<(String, Ty)> = abi
         .tys
         .iter()
         .enumerate()
-        .map(|(i, ty)| (format!("0mr_{k}_{i}"), ty.clone()))
+        .map(|(i, ty)| (temp_name("0mr", i, ty), ty.clone()))
         .collect();
     let mut out = vec![MirStmt::AssignMulti(Box::new(AssignMulti {
         original: site.callee.clone(),
@@ -647,8 +656,7 @@ fn route(site: Site, candidates: &HashMap<String, Abi>, k: usize) -> Vec<MirStmt
             target,
             value: retarget(value, temp, ty),
         });
-    }
-    for (temp, ty) in &temps {
+        // Right after its only read, so codegen can move the reference.
         if is_counted(ty) {
             out.push(MirStmt::ReleaseName(temp.clone()));
         }

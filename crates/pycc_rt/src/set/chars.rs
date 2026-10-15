@@ -177,6 +177,95 @@ pub unsafe extern "C" fn pycc_rt_str_index_in_set(
     found
 }
 
+/// `while text[index] in s: index += 1` (`not in` when `negate`) for a set
+/// of `str`, with no character made (`index` an encoded `int`, `text` and
+/// `s` borrowed): the index the loop stops at, encoded. A loop that would
+/// stop on an `IndexError` stops at the index that raises it, without
+/// raising: the caller reads `text[index]` once more to raise it. A
+/// bigint index (borrowed) is returned unchanged for the same reason, with
+/// the reference the caller owns in the result.
+///
+/// # Safety
+/// `text` must be a live `str` and `s` a live set of `str`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_skip_in_set(
+    text: *mut PyStrObj,
+    index: i64,
+    s: *mut PySetObj,
+    negate: i8,
+) -> i64 {
+    if index & 1 == 0 {
+        crate::pycc_rt_bigint_retain(index);
+        return index;
+    }
+    // SAFETY: the caller passes a live `str`.
+    let obj = unsafe { &*text };
+    let bytes = obj.bytes();
+    let count = obj.char_count() as i64;
+    let ascii_set = !is_instance_set(s)
+        && set(s).frozen != 0
+        && set(s).kind == crate::list::LIST_KIND_STR;
+    let bits = if ascii_set { set(s).ascii_members() } else { 0 };
+    let ascii = ascii_set && count == bytes.len() as i64;
+    let stop_on = negate == 0;
+    let mut i = index >> 1;
+    // ASCII text from a non-negative index: a run of bit tests.
+    if ascii && i >= 0 {
+        let (low, high) = (bits as u64, (bits >> 64) as u64);
+        let mut at = i as usize;
+        while let Some(&byte) = bytes.get(at) {
+            let word = if byte < 64 { low >> byte } else { high >> (byte - 64) };
+            if (word & 1 == 0) == stop_on {
+                break;
+            }
+            at += 1;
+        }
+        return ((at as i64) << 1) | 1;
+    }
+    loop {
+        let at = if i < 0 { i + count } else { i };
+        if !(0..count).contains(&at) {
+            break;
+        }
+        let member = if ascii {
+            bits & (1u128 << bytes[at as usize]) != 0
+        } else {
+            let ch = crate::str_index::char_at(obj, at as usize);
+            // SAFETY: `s` is live; the character is a live `str`.
+            let found = unsafe { super::pycc_rt_set_contains(s, ch as i64) } != 0;
+            unsafe { crate::pycc_rt_str_decref(ch) };
+            found
+        };
+        if member != stop_on {
+            break;
+        }
+        i += 1;
+    }
+    (i << 1) | 1
+}
+
+/// Raises the `IndexError` `text[index]` raises, if any, without making the
+/// character (`index` an encoded `int`, borrowed): what follows a
+/// [`pycc_rt_str_skip_in_set`] scan. Answers whether `index` is in range.
+///
+/// # Safety
+/// `text` must be a live `str`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_check_index(text: *mut PyStrObj, index: i64) -> i8 {
+    if index & 1 == 1 {
+        // SAFETY: the caller passes a live `str`.
+        let count = unsafe { &*text }.char_count() as i64;
+        let i = index >> 1;
+        let at = if i < 0 { i + count } else { i };
+        if (0..count).contains(&at) {
+            return 1;
+        }
+    }
+    let ch = crate::str_ops::pycc_rt_str_getitem(text, index);
+    unsafe { crate::pycc_rt_str_decref(ch) };
+    0
+}
+
 /// `text in s` for a set of `str` and a text given by its UTF-8 bytes
 /// (`bytes`, `len`), with no `str` made for it: `1` or `0`, or `-1` when
 /// `s` is not known to hold `str` keys (an instance set, or a non-empty set
