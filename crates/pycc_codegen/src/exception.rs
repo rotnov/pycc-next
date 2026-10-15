@@ -288,6 +288,9 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // `xs.pop()` raises on an empty list or a bad index, and a slice on
         // a zero step.
         MirExpr::ListPop { .. } | MirExpr::Slice { .. } => true,
+        // An ordering or a membership test of instances calls user methods
+        // (each guarded), and `xs.sort()` raises when the list changed.
+        MirExpr::InstanceOrder(_) | MirExpr::InstanceSetContains { .. } => true,
         // #1343: an instance set insertion that calls a user `__hash__` or
         // `__eq__` guards each call itself, but the raise can still be
         // pending when the statement ends. An `int` or identity-only

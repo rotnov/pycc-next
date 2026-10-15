@@ -212,6 +212,13 @@ pub(crate) fn infer_call_expr(
     {
         return resolved;
     }
+    // `sorted`/`min`/`max` of instances (`crate::instance_order`).
+    if env.lookup_function(callee).is_none()
+        && env.lookup_class(callee).is_none()
+        && let Some(resolved) = crate::instance_order::call_ty(env, callee, arg_tys)
+    {
+        return resolved;
+    }
     if env.lookup_function(callee).is_none()
         && env.lookup_class(callee).is_none()
         && env.lookup_generic(callee).is_none()

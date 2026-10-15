@@ -202,6 +202,12 @@ impl MirExpr {
             },
             // #1335: `hash()` always yields an `int`.
             MirExpr::InstanceHash { .. } => Ty::Int,
+            MirExpr::InstanceOrder(order) => match order.kind {
+                crate::OrderKind::Sorted => Ty::List(Box::new(order.elem.clone())),
+                crate::OrderKind::Sort => Ty::None,
+                crate::OrderKind::Min | crate::OrderKind::Max => order.elem.clone(),
+            },
+            MirExpr::InstanceSetContains { .. } => Ty::Bool,
             // Rebuilt from `arity` rather than read from a field: the
             // annotation this node exists for is a fixed-arity tuple whose
             // every element is `float`, so the arity is the whole type.
@@ -426,6 +432,15 @@ impl MirExpr {
             }
             // #1335: the operand is the only child (`hash((r := R()))`).
             MirExpr::InstanceHash { operand, .. } => operand.collect_named_expr_bindings(out),
+            MirExpr::InstanceOrder(order) => {
+                for operand in order.operands() {
+                    operand.collect_named_expr_bindings(out);
+                }
+            }
+            MirExpr::InstanceSetContains { element, set, .. } => {
+                element.collect_named_expr_bindings(out);
+                set.collect_named_expr_bindings(out);
+            }
             MirExpr::ObjUnaryOp { operand, .. } => operand.collect_named_expr_bindings(out),
             MirExpr::AttrGet { base, .. }
             | MirExpr::ObjAttrGet { base, .. }

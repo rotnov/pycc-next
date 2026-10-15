@@ -216,7 +216,7 @@ pub(crate) fn lower_call_expr(
         && !classes.contains_key(callee.as_str())
         && matches!(callee.as_str(), "str" | "repr")
         && let [arg] = args.as_slice()
-        && matches!(arg.ty(), Ty::Instance(_))
+        && matches!(arg.ty(), Ty::Instance(_) | Ty::List(_) | Ty::Tuple(_))
     {
         let rewritten = rewrite_instance_to_text(arg, classes, scopes, callee == "repr");
         if rewritten.ty() == Ty::Str {
@@ -236,6 +236,15 @@ pub(crate) fn lower_call_expr(
     {
         return MirExpr::FString(vec![MirFStringPart::Interpolation(Box::new(arg.clone()))]);
     }
+    // `sorted`/`min`/`max` of instances (`pycc_types::instance_order`).
+    let args = if is_user_defined || classes.contains_key(callee.as_str()) {
+        args
+    } else {
+        match super::instance_order::lower_order_call(callee, args, classes, scopes) {
+            Ok(order) => return order,
+            Err(args) => args,
+        }
+    };
     // A generator argument of a builtin that consumes it (`pycc_types`
     // types it as the list of its values).
     let args = if is_user_defined {

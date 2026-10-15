@@ -382,6 +382,149 @@ impl<'ctx> SetEmitter<'_, 'ctx> {
         set
     }
 
+    /// `element in set` (an `i1`): the probe [`Self::insert`] runs, without
+    /// the insertion -- for each stored entry with an equal hash, an
+    /// identity check and then `stored.__eq__(element)` for a user
+    /// `__eq__`.
+    pub(super) fn contains(
+        &self,
+        set: PointerValue<'ctx>,
+        element: PointerValue<'ctx>,
+        ops: &pycc_mir::SetElementOps,
+    ) -> IntValue<'ctx> {
+        let (context, builder, rt) = (self.context, self.builder, self.rt);
+        let i64_type = context.i64_type();
+        let i8_type = context.i8_type();
+        let hash = self.element_hash(element, &ops.hash);
+        let word = builder
+            .build_ptr_to_int(element, i64_type, "set_needle_word")
+            .expect("build_ptr_to_int should not fail for an instance pointer");
+        let function = builder
+            .get_insert_block()
+            .and_then(|block| block.get_parent())
+            .expect("a set membership test is emitted inside a function");
+        let (index_slot, found_slot) = build_at_entry_block(builder, function, |b| {
+            (
+                b.build_alloca(i64_type, "set_find_index")
+                    .expect("build_alloca should not fail"),
+                b.build_alloca(i8_type, "set_find_found")
+                    .expect("build_alloca should not fail"),
+            )
+        });
+        let candidate = |from: IntValue<'ctx>| {
+            builder
+                .build_call(
+                    rt.obj_set_candidate,
+                    &[set.into(), hash.into(), from.into()],
+                    "set_candidate",
+                )
+                .expect("build_call should not fail for pycc_rt_obj_set_candidate")
+                .try_as_basic_value()
+                .expect_basic("pycc_rt_obj_set_candidate returns an i64")
+                .into_int_value()
+        };
+        builder
+            .build_store(found_slot, i8_type.const_zero())
+            .expect("build_store should not fail");
+        builder
+            .build_store(index_slot, candidate(i64_type.const_zero()))
+            .expect("build_store should not fail");
+        let test_bb = context.append_basic_block(function, "set_find_test");
+        let probe_bb = context.append_basic_block(function, "set_find_probe");
+        let next_bb = context.append_basic_block(function, "set_find_next");
+        let found_bb = context.append_basic_block(function, "set_find_found");
+        let done_bb = context.append_basic_block(function, "set_find_done");
+        builder
+            .build_unconditional_branch(test_bb)
+            .expect("build_unconditional_branch should not fail");
+
+        builder.position_at_end(test_bb);
+        let index = builder
+            .build_load(i64_type, index_slot, "set_find_i")
+            .expect("build_load should not fail")
+            .into_int_value();
+        let exhausted = builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                index,
+                i64_type.const_all_ones(),
+                "set_find_exhausted",
+            )
+            .expect("build_int_compare should not fail");
+        builder
+            .build_conditional_branch(exhausted, done_bb, probe_bb)
+            .expect("build_conditional_branch should not fail");
+
+        builder.position_at_end(probe_bb);
+        let stored = build_int_set_get(builder, rt, set, index);
+        let same = builder
+            .build_int_compare(IntPredicate::EQ, stored, word, "set_find_same")
+            .expect("build_int_compare should not fail");
+        match &ops.eq {
+            pycc_mir::SetEqOp::Identity => {
+                builder
+                    .build_conditional_branch(same, found_bb, next_bb)
+                    .expect("build_conditional_branch should not fail");
+            }
+            pycc_mir::SetEqOp::Method { callee } => {
+                let call_bb = context.append_basic_block(function, "set_find_eq");
+                builder
+                    .build_conditional_branch(same, found_bb, call_bb)
+                    .expect("build_conditional_branch should not fail");
+                builder.position_at_end(call_bb);
+                let stored_ptr = builder
+                    .build_int_to_ptr(
+                        stored,
+                        context.ptr_type(inkwell::AddressSpace::default()),
+                        "set_find_stored",
+                    )
+                    .expect("build_int_to_ptr should not fail");
+                let equal = self
+                    .call_user_method(callee, &[stored_ptr.into(), element.into()])
+                    .into_int_value();
+                let is_equal = builder
+                    .build_int_compare(
+                        IntPredicate::NE,
+                        equal,
+                        equal.get_type().const_zero(),
+                        "set_find_equal",
+                    )
+                    .expect("build_int_compare should not fail");
+                builder
+                    .build_conditional_branch(is_equal, found_bb, next_bb)
+                    .expect("build_conditional_branch should not fail");
+            }
+        }
+
+        builder.position_at_end(next_bb);
+        let from = builder
+            .build_int_add(index, i64_type.const_int(1, false), "set_find_from")
+            .expect("build_int_add should not fail");
+        builder
+            .build_store(index_slot, candidate(from))
+            .expect("build_store should not fail");
+        builder
+            .build_unconditional_branch(test_bb)
+            .expect("build_unconditional_branch should not fail");
+
+        builder.position_at_end(found_bb);
+        builder
+            .build_store(found_slot, i8_type.const_int(1, false))
+            .expect("build_store should not fail");
+        builder
+            .build_unconditional_branch(done_bb)
+            .expect("build_unconditional_branch should not fail");
+
+        builder.position_at_end(done_bb);
+        let found = builder
+            .build_load(i8_type, found_slot, "set_find_result")
+            .expect("build_load should not fail")
+            .into_int_value();
+        builder
+            .build_int_compare(IntPredicate::NE, found, i8_type.const_zero(), "set_find_bit")
+            .expect("build_int_compare should not fail")
+    }
+
     /// `s.add(value)` of an instance: evaluate, then insert.
     pub(super) fn add(
         &self,

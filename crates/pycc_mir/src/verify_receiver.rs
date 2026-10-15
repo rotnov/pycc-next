@@ -437,6 +437,16 @@ impl Verifier<'_> {
                 self.expr(&nd.base);
                 self.exprs(&nd.args);
             }
+            MirExpr::InstanceOrder(order) => {
+                self.exprs(order.operands());
+            }
+            MirExpr::InstanceSetContains {
+                element, set, ops, ..
+            } => {
+                self.check_set_ops(ops, &element.ty());
+                self.expr(element);
+                self.expr(set);
+            }
             MirExpr::SetAdd { value, ops, .. } => {
                 if let Some(ops) = ops {
                     self.check_set_ops(ops, &value.ty());

@@ -15,6 +15,10 @@
 //!   (`dataclasses.FrozenInstanceError: cannot assign to field 'x'`), an
 //!   `AttributeError` subclass declared once as [`FROZEN_ERROR`].
 //!
+//! * `dataclasses.fields()`/`asdict()`/`astuple()`/`replace()` calls become
+//!   calls of methods each dataclass gets when the program calls them (see
+//!   [`functions`]).
+//!
 //! A method the class body defines itself is kept and not generated, as
 //! in CPython. A non-dataclass subclass of a dataclass (in the same module)
 //! that defines no `__repr__` gets one naming its own class, as CPython's
@@ -25,6 +29,9 @@
 //! after one with a default -- is left decorated, and HIR lowering reports
 //! it (`C0001`).
 
+mod functions;
+
+pub use functions::start_program;
 use super::signatures::parse_helper;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{Expr, ExprContext, Stmt, StmtClassDef};
@@ -72,15 +79,21 @@ struct Options {
 }
 
 /// What the module knows of each class written out so far: its fields
-/// and options (a non-dataclass subclass of a dataclass inherits both).
+/// and options (a non-dataclass subclass of a dataclass inherits both), and
+/// whether its `__init__` is the generated one.
 #[derive(Clone)]
 struct Known {
     fields: Vec<Field>,
     options: Options,
+    generated_init: bool,
 }
 
 /// Rewrites every top-level `@dataclass` class of `body` (module doc).
 pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
+    let uses = functions::record_uses(body);
+    let enums = enum_classes(body);
+    // Each written-out class's `asdict`/`astuple` result types.
+    let mut converted: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
     let mut known: HashMap<String, Known> = HashMap::new();
     // Every class's class-level names, its bases' included.
     let mut class_attrs: HashMap<String, HashSet<String>> = HashMap::new();
@@ -134,10 +147,19 @@ pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
                 if !defaults_in_order(&fields) || (has_dataclass_base && options.frozen != base_frozen) {
                     continue;
                 }
+                let generated_init = options.init && !defines(class, "__init__");
                 write_out(class, &fields, &options);
+                add_functions(class, &fields, generated_init, &uses, &enums, &mut converted);
                 factories.push((index, helpers));
                 any_frozen |= options.frozen;
-                known.insert(class.name.to_string(), Known { fields, options });
+                known.insert(
+                    class.name.to_string(),
+                    Known {
+                        fields,
+                        options,
+                        generated_init,
+                    },
+                );
             }
             Some(Err(())) => {}
             None => {
@@ -145,13 +167,17 @@ pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
                     .iter()
                     .any(|f| own_attrs.contains(&f.name) || inherited_attrs.contains(&f.name));
                 if let Some(options) = base_options.filter(|_| !clashes) {
+                    let generated_init = !defines(class, "__init__")
+                        && bases.iter().find_map(|b| known.get(b)).is_some_and(|k| k.generated_init);
                     let generated = dunders(class, &inherited, &options);
                     class.body.extend(generated);
+                    add_functions(class, &inherited, generated_init, &uses, &enums, &mut converted);
                     known.insert(
                         class.name.to_string(),
                         Known {
                             fields: inherited,
                             options,
+                            generated_init,
                         },
                     );
                 }
@@ -161,6 +187,16 @@ pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
     for (index, helpers) in factories.into_iter().rev() {
         body.splice(index..index, helpers);
     }
+    if uses.fields && !known.is_empty() {
+        let at = body
+            .iter()
+            .position(|s| !matches!(s, Stmt::Import(_) | Stmt::ImportFrom(_)) && !is_docstring(s))
+            .unwrap_or(body.len());
+        let range = body.get(at).map_or_else(TextRange::default, Ranged::range);
+        let class = parse_helper(&functions::field_class_source(), range);
+        body.splice(at..at, class);
+    }
+    functions::rewrite_calls(body);
     let imports_error = drop_dataclasses_imports(body);
     if any_frozen || imports_error {
         let at = body
@@ -180,6 +216,51 @@ pub(super) fn expand_dataclasses(body: &mut Vec<Stmt>) {
             }
         }
     }
+}
+
+/// Adds the `dataclasses` function methods the program's `uses` ask for
+/// to `class` (see [`functions`]), recording its converted types.
+fn add_functions(
+    class: &mut StmtClassDef,
+    fields: &[Field],
+    generated_init: bool,
+    uses: &functions::Uses,
+    enums: &HashSet<String>,
+    converted: &mut HashMap<String, (Option<String>, Option<String>)>,
+) {
+    let generated = functions::methods(
+        class.name.as_str(),
+        fields,
+        generated_init,
+        uses,
+        &functions::Context { converted, enums },
+    );
+    if !generated.source.is_empty() {
+        let mut stmts = methods(&generated.source, &Holes { exprs: Vec::new() }, class.range);
+        functions::fill_holes(&mut stmts, &generated.holes);
+        class.body.extend(stmts);
+    }
+    converted.insert(
+        class.name.to_string(),
+        (generated.as_dict_ty, generated.as_tuple_ty),
+    );
+}
+
+/// The module's top-level enum classes (one `Enum`/`IntEnum`/`StrEnum`
+/// base): their members convert as themselves in `asdict()`.
+fn enum_classes(body: &[Stmt]) -> HashSet<String> {
+    body.iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::ClassDef(class)
+                if base_names(class)
+                    .iter()
+                    .any(|b| matches!(b.as_str(), "Enum" | "IntEnum" | "StrEnum")) =>
+            {
+                Some(class.name.to_string())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The names `class`'s body binds as class attributes: a bare assignment,

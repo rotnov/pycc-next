@@ -40,6 +40,9 @@ pub(super) fn rewrite_instance_to_text(
     scopes: &[HashMap<String, Ty>],
     want_repr: bool,
 ) -> MirExpr {
+    if matches!(expr.ty(), Ty::List(_) | Ty::Tuple(_)) {
+        return container_of_instances_to_text(expr, classes, scopes);
+    }
     let Ty::Instance(class_name) = expr.ty() else {
         return expr.clone();
     };
@@ -77,6 +80,145 @@ pub(super) fn rewrite_instance_to_text(
         }
     }
     expr.clone()
+}
+
+/// Whether a value of `ty` holds a class instance its runtime rendering
+/// cannot show (inside a list or tuple).
+fn holds_instance(ty: &Ty) -> bool {
+    match ty {
+        Ty::Instance(_) => true,
+        Ty::List(elem) => holds_instance(elem),
+        Ty::Tuple(items) => items.iter().any(holds_instance),
+        _ => false,
+    }
+}
+
+/// A fresh comprehension variable name.
+fn fresh_var() -> String {
+    thread_local! {
+        static NEXT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+    NEXT.with(|next| {
+        let n = next.get();
+        next.set(n + 1);
+        format!("0repr_{n}")
+    })
+}
+
+/// `sep.join(strings)`.
+fn join(sep: &str, strings: MirExpr) -> MirExpr {
+    let join = pycc_hir::builtins::resolve_method(&Ty::Str, "join", &[Ty::List(Box::new(Ty::Str))])
+        .and_then(Result::ok)
+        .expect("`str.join` of a `list[str]` is a builtin");
+    MirExpr::RtCall(Box::new(crate::RtCallExpr {
+        sig: join,
+        args: vec![MirExpr::StringLiteral(sep.to_string()), strings],
+    }))
+}
+
+/// `[repr(v) for v in source]`.
+fn rendered_list(
+    source: MirExpr,
+    elem: &Ty,
+    classes: &HashMap<String, HirClassDef>,
+    scopes: &[HashMap<String, Ty>],
+) -> Option<MirExpr> {
+    let var = fresh_var();
+    let item = MirExpr::Name {
+        name: var.clone(),
+        ty: elem.clone(),
+    };
+    let text = repr_text(&item, classes, scopes)?;
+    Some(MirExpr::Comprehension(Box::new(crate::MirComprehension {
+        var,
+        var_ty: elem.clone(),
+        source: crate::CompSource::ListExpr(source),
+        cond: None,
+        elt: crate::MirCompElt::List(text),
+    })))
+}
+
+/// `repr(expr)` as a `str` expression, calling `__repr__` for every
+/// instance a list or tuple holds, as `list.__repr__`/`tuple.__repr__` do
+/// (`pycc_types::string_conversion::renders_by_repr`); `None` when an
+/// instance's class has no `__repr__` to call.
+fn repr_text(
+    expr: &MirExpr,
+    classes: &HashMap<String, HirClassDef>,
+    scopes: &[HashMap<String, Ty>],
+) -> Option<MirExpr> {
+    let ty = expr.ty();
+    match &ty {
+        Ty::Instance(_) => {
+            let text = rewrite_instance_to_text(expr, classes, scopes, true);
+            (text.ty() == Ty::Str).then_some(text)
+        }
+        Ty::List(elem) if holds_instance(elem) => {
+            let strings = rendered_list(expr.clone(), elem, classes, scopes)?;
+            Some(MirExpr::FString(vec![
+                crate::MirFStringPart::Literal("[".to_string()),
+                crate::MirFStringPart::Interpolation(Box::new(join(", ", strings))),
+                crate::MirFStringPart::Literal("]".to_string()),
+            ]))
+        }
+        Ty::Tuple(items) if items.iter().any(holds_instance) => {
+            // A tuple read once: its elements are subscripts of a name, so
+            // any other expression is rendered through a one-element list.
+            if !matches!(expr, MirExpr::Name { .. }) {
+                let one = MirExpr::ListLiteral(vec![expr.clone()]);
+                let strings = rendered_list(one, &ty, classes, scopes)?;
+                return Some(join("", strings));
+            }
+            let mut parts = vec![crate::MirFStringPart::Literal("(".to_string())];
+            for i in 0..items.len() {
+                if i > 0 {
+                    parts.push(crate::MirFStringPart::Literal(", ".to_string()));
+                }
+                let element = MirExpr::Subscript {
+                    base: Box::new(expr.clone()),
+                    index: Box::new(crate::index_operand(
+                        MirExpr::IntLiteral(i as i64),
+                        crate::IndexUse::Tuple,
+                    )),
+                };
+                let text = repr_text(&element, classes, scopes)?;
+                parts.push(crate::MirFStringPart::Interpolation(Box::new(text)));
+            }
+            if items.len() == 1 {
+                parts.push(crate::MirFStringPart::Literal(",".to_string()));
+            }
+            parts.push(crate::MirFStringPart::Literal(")".to_string()));
+            Some(MirExpr::FString(parts))
+        }
+        // A value the runtime renders: `repr()` of a `str` quotes it; any
+        // other value's `str` is its `repr`.
+        Ty::Str => {
+            let sig = pycc_hir::builtins::resolve_call("repr", &[Ty::Str])
+                .and_then(Result::ok)
+                .expect("`repr` of a `str` is a builtin");
+            Some(MirExpr::RtCall(Box::new(crate::RtCallExpr {
+                sig,
+                args: vec![expr.clone()],
+            })))
+        }
+        _ => Some(MirExpr::FString(vec![crate::MirFStringPart::Interpolation(
+            Box::new(expr.clone()),
+        )])),
+    }
+}
+
+/// The text of a list or tuple `expr` holding instances (see
+/// [`repr_text`]); any other value is returned unchanged (the runtime
+/// renders it).
+fn container_of_instances_to_text(
+    expr: &MirExpr,
+    classes: &HashMap<String, HirClassDef>,
+    scopes: &[HashMap<String, Ty>],
+) -> MirExpr {
+    if !holds_instance(&expr.ty()) {
+        return expr.clone();
+    }
+    repr_text(expr, classes, scopes).unwrap_or_else(|| expr.clone())
 }
 
 /// Part 3A of #541 (#736): if `expr` is typed as a registered exception

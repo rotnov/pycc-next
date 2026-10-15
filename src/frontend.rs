@@ -256,6 +256,7 @@ fn link_frontend(
     // The checker's one mode-dependent rule reads this (#3); set for every
     // program this thread links, so a previous program's mode never leaks.
     pycc_types::set_non_strict(non_strict);
+    pycc_ast::start_program(non_strict);
     let program: LoadedProgram =
         modules::load_with(path, module_name, relative_imports, ext_module, non_strict)?;
     // The entry module is lowered last, after its dependencies.

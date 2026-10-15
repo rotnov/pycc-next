@@ -257,6 +257,10 @@ pub(crate) fn infer_method_call_expr(
         crate::foreign::check_object_call_args(env, args, &arg_tys, "method")?;
         return Ok(Ty::Object);
     }
+    // `xs.sort()` of instances (`crate::instance_order`).
+    if let Some(resolved) = crate::instance_order::method_ty(env, &base_ty, method, &arg_tys) {
+        return resolved;
+    }
     let arg_tys = pycc_hir::builtins::materialized_method_args(&base_ty, method, &arg_tys)
         .unwrap_or(arg_tys);
     if let Some(resolved) = pycc_hir::builtins::resolve_method(&base_ty, method, &arg_tys) {

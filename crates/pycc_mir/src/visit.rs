@@ -169,6 +169,11 @@ impl MirExpr {
                 out.push(default);
             }
             MirExpr::SetAdd { value, .. } => out.push(value),
+            MirExpr::InstanceOrder(order) => out.extend(order.operands()),
+            MirExpr::InstanceSetContains { element, set, .. } => {
+                out.push(element);
+                out.push(set);
+            }
             MirExpr::DictLiteral(pairs) => {
                 for (key, value) in pairs {
                     out.push(key);

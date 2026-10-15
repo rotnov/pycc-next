@@ -468,6 +468,11 @@ pub(crate) fn lower_method_call_expr(
     // a distinct HIR node, and the class-name guard requires a name
     // that is *not* in `scopes`, which a foreign import's local name
     // always is.
+    // `xs.sort()` of instances (`pycc_types::instance_order`).
+    let base = match super::instance_order::lower_sort_method(base, method, args, classes, scopes) {
+        Ok(sort) => return sort,
+        Err(base) => base,
+    };
     let lowered_args: Vec<MirExpr> = args
         .iter()
         .map(|a| lower_expr(a, scopes, classes, current_class))

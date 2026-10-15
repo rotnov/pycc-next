@@ -283,6 +283,17 @@ pub(crate) fn lower_compare_expr(
             };
         }
     }
+    // `x in s` for a set of instances.
+    let (left_lowered, right_lowered) = match super::instance_order::lower_set_contains(
+        *op,
+        left_lowered,
+        right_lowered,
+        classes,
+        scopes,
+    ) {
+        Ok(contains) => return contains,
+        Err(operands) => operands,
+    };
     if matches!(op, CmpOpKind::In | CmpOpKind::NotIn)
         && left_lowered.ty() == Ty::Str
         && right_lowered.ty() == Ty::Str

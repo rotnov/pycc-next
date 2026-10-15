@@ -127,6 +127,15 @@ pub(crate) fn compare_link_ty(
         {
             return crate::list_ops::membership_ty(env, left_ty, elem);
         }
+        // An instance in a set of instances of its class: the set's own
+        // hash and `__eq__` probe (`pycc_mir::expr::instance_order`).
+        if let Ty::Set(elem) | Ty::FrozenSet(elem) = right_ty
+            && matches!(**elem, Ty::Instance(_))
+            && left_ty == &**elem
+        {
+            crate::set_element::check_set_element(elem, env)?;
+            return Ok(Ty::Bool);
+        }
         return crate::foreign::compare::membership_ty(op, left_ty, right_ty);
     }
     // Part 1 of #1371: a rich comparison with a CPython object operand is

@@ -137,6 +137,18 @@ pub(crate) fn reject_unrenderable(
         // (`pycc_rt::set`); an instance set has no `repr` for its elements.
         Ty::Set(elem) | Ty::FrozenSet(elem) if pycc_hir::is_hashable_ty(elem) => Ok(()),
         Ty::Set(_) | Ty::FrozenSet(_) => Err(crate::frozenset::unrenderable_set(ty)),
+        // A list of instances renders each element by its `__repr__`
+        // (`pycc_mir::class::rewrite_instance_to_text`).
+        Ty::List(_) | Ty::Tuple(_) if renders_by_repr(env, ty) => Ok(()),
+        Ty::Tuple(_) if instances_render(env, ty) == Some(false) => Err(Diagnostic::error(
+            "C0001",
+            format!(
+                "rendering `{}` (a tuple holding instances of a class without `__repr__`) as a \
+                 string is not supported yet",
+                ty.name()
+            ),
+            Span::new(0, 0),
+        )),
         Ty::List(_) => crate::list_ops::check_list_renderable(ty),
         // The runtime renders a dict's words itself, with no `__repr__` call
         // for an instance key or value.
@@ -169,6 +181,32 @@ pub(crate) fn reject_unrenderable(
         // variant `to_str` cannot render needs its own arm above.
         _ => Ok(()),
     }
+}
+
+/// Whether a value of `ty` holds a class instance inside a list or tuple
+/// (`None` when it holds none) and, if so, whether every such instance's
+/// class renders through `__repr__` (a dataclass, an enum or a class
+/// defining it), which `pycc_mir::class::rewrite_instance_to_text` calls as
+/// `list.__repr__`/`tuple.__repr__` do.
+fn instances_render(env: &Environment, ty: &Ty) -> Option<bool> {
+    match ty {
+        Ty::Instance(name) => Some(
+            !pycc_hir::is_builtin_exception_class(name)
+                && instance_text_dunder(env, name, true).is_some(),
+        ),
+        Ty::List(elem) => instances_render(env, elem),
+        Ty::Tuple(items) => items
+            .iter()
+            .filter_map(|item| instances_render(env, item))
+            .reduce(|a, b| a && b),
+        _ => None,
+    }
+}
+
+/// Whether `ty` is a list or tuple holding instances that all render by
+/// their `__repr__`.
+pub(crate) fn renders_by_repr(env: &Environment, ty: &Ty) -> bool {
+    matches!(ty, Ty::List(_) | Ty::Tuple(_)) && instances_render(env, ty) == Some(true)
 }
 
 /// The method a class instance's text conversion calls, when its class
@@ -233,6 +271,10 @@ pub(crate) fn instance_text_call(
     let [arg] = arg_tys else {
         return None;
     };
+    // A list of instances renders each by its `__repr__`.
+    if renders_by_repr(env, arg) {
+        return Some(Ok(Ty::Str));
+    }
     // A dict holding instances: the runtime cannot render them.
     if let Ty::Dict(_) = arg
         && let Err(err) = reject_unrenderable(env, arg, StringConversionSite::ConversionCall)

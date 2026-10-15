@@ -95,6 +95,7 @@ mod wildcard;
 use ruff_python_ast::{Expr, ModModule, Stmt};
 
 pub use closures::qualname::function_qualname;
+pub use dataclasses::start_program;
 
 /// Replaces each module-level `if` whose test is known before the program
 /// runs by the branch that runs (see [`static_branches`]). [`desugar`] runs

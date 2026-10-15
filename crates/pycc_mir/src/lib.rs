@@ -224,6 +224,57 @@ impl MirComprehension {
     }
 }
 
+/// [`MirExpr::InstanceOrder`]'s payload.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstanceOrderExpr {
+    pub kind: OrderKind,
+    /// The list ordered (a list display for `min(a, b, ...)`), or with
+    /// `keyed` its `(key, element)` pairs (`pycc_ast::desugar::keys`).
+    pub list: MirExpr,
+    /// `xs` of a keyed `xs.sort(key=...)`, evaluated before `list`.
+    pub target: Option<MirExpr>,
+    /// The `reverse=` flag (a `bool`) of a sort.
+    pub reverse: Option<MirExpr>,
+    pub keyed: bool,
+    /// The mangled comparison method: `__lt__` (a sort, `min`) or `__gt__`
+    /// (`max`), or the other one with `swap` (`a < b` as `b.__gt__(a)`).
+    pub callee: String,
+    pub swap: bool,
+    /// The element type (of the elements yielded; the keys are instances).
+    pub elem: Ty,
+}
+
+impl InstanceOrderExpr {
+    /// The sub-expressions, in evaluation order.
+    pub fn operands(&self) -> Vec<&MirExpr> {
+        let mut out: Vec<&MirExpr> = self.target.iter().collect();
+        out.push(&self.list);
+        out.extend(self.reverse.iter());
+        out
+    }
+}
+
+/// What an [`InstanceOrderExpr`] computes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderKind {
+    Sorted,
+    Sort,
+    Min,
+    Max,
+}
+
+impl OrderKind {
+    /// The mode `pycc_rt_order_begin` takes.
+    pub fn mode(self) -> i64 {
+        match self {
+            OrderKind::Sorted => 0,
+            OrderKind::Sort => 1,
+            OrderKind::Min => 2,
+            OrderKind::Max => 3,
+        }
+    }
+}
+
 /// How a [`MirExpr::InstanceHash`] hashes its instance (#1335).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstanceHashVia {

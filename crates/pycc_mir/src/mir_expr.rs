@@ -916,6 +916,20 @@ pub enum MirExpr {
     /// A builtin function or builtin-type method lowered to a direct call
     /// into `pycc_rt` (`pycc_hir::builtins`, whose module doc states the ABI).
     RtCall(Box<RtCallExpr>),
+    /// `sorted(xs)`, `xs.sort()`, `min(xs)` or `max(xs)` over a list of class
+    /// instances ordering through a user dunder (ROADMAP v0.4 accept 5;
+    /// `pycc_types::instance_order`). `pycc_codegen::instance_order` drives
+    /// `pycc_rt::list::order` with calls of the dunder.
+    InstanceOrder(Box<crate::InstanceOrderExpr>),
+    /// `element in set` (`negate`: `not in`) for a `set[C]` of class
+    /// instances: the element is hashed and each stored element with an
+    /// equal hash compared as a set insertion does (`ops`).
+    InstanceSetContains {
+        element: Box<MirExpr>,
+        set: Box<MirExpr>,
+        ops: Box<crate::SetElementOps>,
+        negate: bool,
+    },
     /// A typed numpy array operation (`pycc_hir::ndarray`): `base` is the
     /// array's object, `args` the indices (and, for a store, the value
     /// last). `pycc_codegen::ndarray` emits element access inline from the

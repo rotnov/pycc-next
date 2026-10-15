@@ -247,9 +247,8 @@ pub(super) fn emit_comprehension<'ctx>(
 /// After the loop the `int` variable's last value is released and the slot
 /// zeroed again, so the next run of the same comprehension (inside a loop,
 /// or after a caught exception) starts from the same invariant: the slot
-/// holds `0` or one word it owns. A `str` variable (a dict source's keys)
-/// keeps `MirStmt::ForDict`'s own leak-only binding, like the statement
-/// form.
+/// holds `0` or one word it owns. A counted variable (a `str`, an instance,
+/// a container) is released and nulled the same way.
 pub(super) fn emit_comprehension_expr<'ctx>(
     cx: &CompCx<'_, 'ctx>,
     comp: &MirComprehension,
@@ -320,6 +319,19 @@ pub(super) fn emit_comprehension_expr<'ctx>(
         emit_bigint_refcount_call(cx.context, cx.builder, cx.rt, last, BigIntRefcount::Release);
         cx.builder
             .build_store(ptr, cx.context.i64_type().const_zero())
+            .expect("build_store should not fail for this function's own alloca");
+    } else if crate::heap_rc::heap_kind(cx.rt, &comp.var_ty).is_some() {
+        // Every container source binds a counted element with its own
+        // reference (`bind_borrowed`): the last one is released here, as
+        // the statement form's function-scope slot is when its scope ends.
+        crate::heap_rc::release_slot(cx.context, cx.builder, cx.rt, &comp.var_ty, ptr);
+        cx.builder
+            .build_store(
+                ptr,
+                cx.context
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .const_null(),
+            )
             .expect("build_store should not fail for this function's own alloca");
     }
     container

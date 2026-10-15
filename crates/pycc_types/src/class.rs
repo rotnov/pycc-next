@@ -215,6 +215,39 @@ fn t0043_not_an_instance(action: &str, ty: &Ty) -> Diagnostic {
 }
 
 fn t0044_unknown_member(kind: &str, class_name: &str, member: &str) -> Diagnostic {
+    // The methods `pycc_ast::desugar::dataclasses` gives a dataclass for
+    // `dataclasses.asdict()` and friends: missing when the class is not a
+    // dataclass or its fields cannot be converted.
+    let function = [
+        ("_pycc_asdict_", "asdict"),
+        ("_pycc_astuple_", "astuple"),
+        ("_pycc_fields_", "fields"),
+        ("_pycc_replace_", "replace"),
+    ]
+    .into_iter()
+    .find(|(prefix, _)| member.starts_with(prefix));
+    if let Some((_, function)) = function {
+        let mut diagnostic = Diagnostic::error(
+            "C0001",
+            format!(
+                "`dataclasses.{function}()` of a `{class_name}` is valid Python but not \
+                 implemented yet"
+            ),
+            Span::new(0, 0),
+        );
+        diagnostic = diagnostic.with_help(match function {
+            "asdict" => "compiled for a dataclass whose fields are scalars, enums, dataclasses \
+                         defined before it, or lists, dicts, sets, tuples or optionals of those, \
+                         and in strict mode only when every converted value has one type \
+                         (`--non-strict` builds a dict of objects)",
+            "astuple" => "compiled for a dataclass whose fields are scalars, enums, dataclasses \
+                          defined before it, or lists, dicts, sets, tuples or optionals of those",
+            "replace" => "compiled for a dataclass with its generated `__init__`, given keyword \
+                          arguments naming `init` fields",
+            _ => "compiled for a dataclass instance or class",
+        });
+        return diagnostic;
+    }
     Diagnostic::error(
         "T0044",
         format!("class `{class_name}` has no {kind} named `{member}`"),

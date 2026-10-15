@@ -87,6 +87,7 @@ mod foreign_type;
 mod foreign_unpack;
 /// `frozenset(...)` construction and set truthiness (Part 1 of #1319).
 mod frozenset;
+mod instance_order;
 mod generator;
 mod generator_box;
 mod hash;

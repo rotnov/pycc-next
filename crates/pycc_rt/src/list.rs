@@ -798,6 +798,7 @@ pub(crate) fn list_words(list: *mut PyListObj) -> Vec<i64> {
 pub(crate) mod deque;
 pub(crate) mod heap;
 pub(crate) mod ops;
+pub(crate) mod order;
 
 #[cfg(test)]
 mod tests;
