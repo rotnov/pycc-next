@@ -271,18 +271,12 @@ fn a_numbers_only_stdin_buffer_alias_reads_natively() {
     matches_cpython("stdin_buffer_numbers.py", &[]);
 }
 
-/// Anything else of `sys.stdin.buffer` is `bytes`: refused in strict mode,
-/// CPython's own in non-strict mode (it used to read as `str`).
+/// Anything else of `sys.stdin.buffer` is `bytes`, CPython's own binary
+/// stream read through the `sys` module (it used to read as `str`).
 #[test]
 fn stdin_buffer_reads_bytes() {
     matches_cpython("stdin_buffer_bytes.py", &["--non-strict"]);
-    refused(
-        "stdin_buffer_strict",
-        "import sys\ns = sys.stdin.buffer.readline().strip()\nprint(s)\n",
-        &[],
-        "T0043",
-        "cannot read an attribute",
-    );
+    matches_cpython("stdin_buffer_strict.py", &[]);
 }
 
 #[test]

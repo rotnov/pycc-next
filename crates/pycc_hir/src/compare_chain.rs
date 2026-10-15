@@ -41,6 +41,52 @@ pub fn compare_chain_operands<'a>(
     std::iter::once(first).chain(links.iter().map(|link| &link.right))
 }
 
+/// `a op1 b op2 c` as the conjunction `a op1 b and b op2 c` CPython defines
+/// it to be, when every middle operand is a name or a literal: evaluating
+/// one of those twice is indistinguishable from evaluating it once, so the
+/// conjunction is the chain exactly, value included (the first false link's
+/// result, or the last link's). `None` when a middle operand is any other
+/// expression.
+///
+/// `pycc_types` and `pycc_mir` read a chain with a CPython object operand
+/// this way: each link is then an ordinary object comparison.
+pub fn chain_as_conjunction(first: &HirExpr, links: &[CompareLink]) -> Option<HirExpr> {
+    let middles = &links[..links.len().saturating_sub(1)];
+    if !middles.iter().all(|link| {
+        matches!(
+            link.right,
+            HirExpr::Name(_)
+                | HirExpr::IntLiteral(_)
+                | HirExpr::FloatLiteral(_)
+                | HirExpr::BoolLiteral(_)
+                | HirExpr::StringLiteral(_)
+                | HirExpr::NoneLiteral
+        )
+    }) {
+        return None;
+    }
+    let mut left = first.clone();
+    let mut conjunction: Option<HirExpr> = None;
+    for link in links {
+        let compare = HirExpr::Compare {
+            op: link.op,
+            left: Box::new(left),
+            right: Box::new(link.right.clone()),
+        };
+        conjunction = Some(match conjunction {
+            None => compare,
+            Some(previous) => HirExpr::BoolOp {
+                op: crate::BoolOpKind::And,
+                left: Box::new(previous),
+                right: Box::new(compare),
+                truth_only: false,
+            },
+        });
+        left = link.right.clone();
+    }
+    conjunction
+}
+
 /// Maps one AST comparison operator to its HIR kind, applying the D-197
 /// syntactic gate to `is`/`is not`: one of `left` and `right` -- the two
 /// operands of this link -- must be the `None` literal. `range` is the

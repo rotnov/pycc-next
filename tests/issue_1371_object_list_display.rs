@@ -264,9 +264,9 @@ fn the_shapes_outside_part_2d_are_refused() {
     for (tag, tail, code, needle) in [
         (
             "obj_list_nested",
-            "def f() -> object:\n    x: object = [[1]]\n    return x\n",
+            "def f() -> object:\n    x: object = [{1: 2}]\n    return x\n",
             "I0404",
-            "a `list[int]` element in a list display bound to a CPython object",
+            "a `dict[int, int]` element in a list display bound to a CPython object",
         ),
         (
             "obj_list_none",

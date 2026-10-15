@@ -101,9 +101,18 @@ pub(crate) fn rich_compare_ty(
     ) {
         return Some(Err(diagnostic));
     }
-    // `None` crosses as CPython's own `Py_None` (`o == None`).
+    // `None` crosses as CPython's own `Py_None` (`o == None`); in non-strict
+    // mode a fresh native container (`o != []`) crosses as its CPython copy,
+    // which nothing else can observe, and a name holding one may become an
+    // object (`non_strict::request_container_widen`).
+    crate::non_strict::request_container_widen(other_expr, other);
     Some(
-        if super::is_object_operand(env, other) || *other == Ty::None {
+        if super::is_object_operand(env, other)
+            || *other == Ty::None
+            || crate::object_box::fresh_container(env, other_expr, other)
+            || (crate::non_strict::is_non_strict()
+                && crate::object_box::display_boxable(other_expr, other))
+        {
             Ok(Ty::Object)
         } else {
             Err(object_operation_unsupported(&format!(

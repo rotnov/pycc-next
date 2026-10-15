@@ -131,7 +131,11 @@ fn lower_list_append(
     };
     let value_span = pycc_ast::expr_range(value);
     let value = lower_expr(value, in_function, class_name, imports, signatures)?;
-    check_boundary_literal(&value, value_span, "`list.append()` value")?;
+    // Non-strict mode: the receiver may be a CPython list, which holds any
+    // `int`; `pycc_types` checks a native receiver instead.
+    if !signatures.non_strict() {
+        check_boundary_literal(&value, value_span, "`list.append()` value")?;
+    }
     Ok(HirExpr::ListAppend {
         list,
         value: Box::new(value),

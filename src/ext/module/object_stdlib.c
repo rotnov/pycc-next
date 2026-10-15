@@ -259,3 +259,48 @@ PyObject *pycc_ext_obj_insort_right(PyObject *a, PyObject *x)
 {
     return pycc_ext_stdlib_call("bisect", "insort_right", a, x);
 }
+
+/* Non-strict mode: `collections.defaultdict(<factory>)`, the factory given as
+ * Python source (`pycc_hir::builtins::object_defaultdict_source`): a builtin
+ * type name, a `lambda` returning a literal, or `None`. */
+PyObject *pycc_ext_obj_defaultdict(PyObject *factory_source)
+{
+    PyObject *collections;
+    PyObject *defaultdict;
+    PyObject *builtins;
+    PyObject *eval;
+    PyObject *globals;
+    PyObject *factory;
+    PyObject *result;
+
+    collections = PyImport_ImportModule("collections");
+    if (collections == NULL) {
+        return pycc_ext_stdlib_failed();
+    }
+    defaultdict = PyObject_GetAttrString(collections, "defaultdict");
+    Py_DECREF(collections);
+    if (defaultdict == NULL) {
+        return pycc_ext_stdlib_failed();
+    }
+    /* `eval(source, {"__builtins__": builtins})`: the factory as CPython
+     * builds it from the source, a lambda included. The source is generated
+     * by the compiler from a fixed set of shapes (a builtin type name, or
+     * `lambda: <int, bool, None or plain ASCII str literal>`), never from
+     * program input. */
+    builtins = PyImport_ImportModule("builtins");
+    eval = builtins == NULL ? NULL : PyObject_GetAttrString(builtins, "eval");
+    globals = eval == NULL ? NULL : Py_BuildValue("{s:O}", "__builtins__", builtins);
+    factory = globals == NULL ? NULL
+        : PyObject_CallFunctionObjArgs(eval, factory_source, globals, NULL);
+    Py_XDECREF(globals);
+    Py_XDECREF(eval);
+    Py_XDECREF(builtins);
+    result = factory == NULL ? NULL
+        : PyObject_CallFunctionObjArgs(defaultdict, factory, NULL);
+    Py_XDECREF(factory);
+    Py_DECREF(defaultdict);
+    if (result == NULL) {
+        return pycc_ext_stdlib_failed();
+    }
+    return result;
+}

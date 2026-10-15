@@ -341,11 +341,18 @@ fn identity_and_a_nested_guard_see_the_object() {
     );
 }
 
-/// A chain cannot carry an object, so an `is` link on a narrowed read is
-/// refused as it is without the guard; an ordered link stays native.
+/// A chain whose middle operands are names or literals is the conjunction
+/// of its links, so an `is` link on a narrowed read compares the object
+/// itself; with a computed middle operand it is refused as it is without
+/// the guard. An ordered link stays native.
 #[test]
 fn a_chained_identity_link_on_a_narrowed_read_is_refused() {
     for test in ["o is not None is not None", "0 < o is not None"] {
+        checks(&format!(
+            "def f(o: object) -> bool:\n    if isinstance(o, int):\n        return {test}\n    return False\n"
+        ));
+    }
+    for test in ["o is not (o or o) is not None"] {
         refused(
             &format!(
                 "def f(o: object) -> bool:\n    if isinstance(o, int):\n        return {test}\n    return False\n"

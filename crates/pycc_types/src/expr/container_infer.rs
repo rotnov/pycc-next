@@ -647,6 +647,17 @@ pub(crate) fn infer_list_append_expr(
             Span::new(0, 0),
         ).with_help(format!("change the value to `{}` (the expected/declared type), or the declaration/annotation to `{}` (the actual type)", elem_ty.name(), value_ty.name())));
     }
+    // Non-strict mode: `pycc_hir` leaves an out-of-range literal to this
+    // check, made once the receiver is known to be native; a list that
+    // holds one becomes CPython's own list.
+    if let Some(diagnostic) =
+        pycc_hir::boundary_literal_diagnostic(value, "`list.append()` value")
+    {
+        if let pycc_hir::ContainerReceiver::Name(name) = list {
+            crate::non_strict::request_container_widen(&HirExpr::Name(name.clone()), &list_ty);
+        }
+        return Err(diagnostic);
+    }
     Ok(Ty::None)
 }
 
@@ -751,6 +762,9 @@ pub(crate) fn infer_set_add_expr(
     };
     let value_ty = infer_expr_in(env, local_names, value)?;
     if !is_assignable(value_ty.clone(), (**elem_ty).clone()) {
+        // Non-strict mode: a set holding values of two types is CPython's
+        // own set, as every Python set is.
+        crate::non_strict::request_container_widen(&HirExpr::Name(set.clone()), &set_ty);
         return Err(Diagnostic::error(
             "T0021",
             format!(

@@ -14,6 +14,7 @@ mod hir_module;
 mod if_exp;
 mod import;
 mod int_boundary;
+pub use int_boundary::boundary_literal_diagnostic;
 pub mod int_enum;
 mod isinstance_narrow;
 pub mod locate;
@@ -50,7 +51,7 @@ pub use class::{
     resolve_instance_hash, slot_behind_foreign_static_meets_property, slot_rc_kind,
     subclass_divergence,
 };
-pub use compare_chain::{CompareLink, compare_chain_operands};
+pub use compare_chain::{CompareLink, chain_as_conjunction, compare_chain_operands};
 pub use container::{
     DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object,
     empty_object_constructor, homogeneous_tuple_element, is_hashable_ty, is_list_element_ty, object_comp_collects_natively,

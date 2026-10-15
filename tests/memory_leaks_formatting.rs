@@ -1,7 +1,9 @@
 //! Constant memory for the v0.4 corpus paths: format specs and printf-style
 //! `%` formatting (`pycc_rt::format`), and in `--non-strict` builds a native
 //! list collected from a comprehension over a CPython object, `set(o)` of an
-//! object and an empty `set()`/`dict()` built as the CPython container. Each
+//! object and an empty `set()`/`dict()` built as the CPython container, a
+//! CPython `collections.defaultdict`, a chained comparison over objects, a
+//! name widened to an object and a big `int` literal in a widened list. Each
 //! probe runs its loop body `n` times for two `n`; the peak resident set may
 //! grow by at most [`GROWTH_LIMIT_KB`] (`tests/memory_leaks.rs` explains the
 //! bound), and the output must equal CPython's.
@@ -94,4 +96,19 @@ probe!(
     set_of_an_object_and_empty_object_containers,
     &["--non-strict"],
     "s = set(d)\ne = set()\nfor k in d:\n    e.add(k)\ntotal += len(s) + len(e) + len(dict())"
+);
+probe!(
+    an_object_defaultdict,
+    &["--non-strict"],
+    "g = collections.defaultdict(list)\nfor k in d:\n    g[k].append(i)\ntotal += len(g) + len(g[1])"
+);
+probe!(
+    a_chained_comparison_over_objects,
+    &["--non-strict"],
+    "for k in d:\n    if 0 < k < 10 > i % 7:\n        total += 1"
+);
+probe!(
+    widened_names_and_a_big_literal,
+    &["--non-strict"],
+    "row = pair(i)\nd[5] = row\nrow.append(1)\nbig = [1]\nbig.append(1012809128301279797787789798789798798)\nif d != big:\n    total += len(d[5]) + len(big)"
 );

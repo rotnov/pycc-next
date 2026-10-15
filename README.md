@@ -64,10 +64,10 @@ their inputs, like the Python programs' inputs are opaque to pycc-next):
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
-wrong outputs (CI-gated), 98% of top-level statements native (1168 of 1191) and the rest
-per-statement CPython fallback; strict mode compiles and passes 161/200 unchanged — most of
+wrong outputs (CI-gated), 99.3% of top-level statements native (1183 of 1191) and the rest
+per-statement CPython fallback; strict mode compiles and passes 170/200 unchanged — most of
 the rest use dynamic values (mixed-type containers, `None` in a list or as one of several
-return types) that strict mode refuses.
+return types, an `int` that may be `float('inf')`) that strict mode refuses.
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 

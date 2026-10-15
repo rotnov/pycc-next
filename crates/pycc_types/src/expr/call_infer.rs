@@ -653,7 +653,8 @@ pub(crate) fn infer_call_expr(
         if crate::non_strict::is_non_strict()
             && (pycc_hir::empty_object_constructor(callee, args.len()).is_some()
                 || (callee == "set" && arg_tys == [Ty::Object])
-                || pycc_hir::builtins::is_object_format(callee, arg_tys))
+                || pycc_hir::builtins::is_object_format(callee, arg_tys)
+                || pycc_hir::builtins::object_defaultdict_source(callee, args).is_some())
         {
             return Ok(Ty::Object);
         }

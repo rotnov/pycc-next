@@ -113,22 +113,26 @@ fn a_user_type_function_is_not_the_builtin() {
     );
 }
 
-/// An `is`/`is not` chain with an object operand reaches the checker and
-/// is refused with the object chain's own `I0404`, whichever link holds
-/// the object.
+/// An `is`/`is not` chain with an object operand is the conjunction of its
+/// links when every middle operand is a name or a literal
+/// (`pycc_hir::chain_as_conjunction`); a computed middle operand is refused
+/// with the object chain's own `I0404`.
 #[test]
 fn an_identity_chain_over_an_object_is_refused_with_i0404() {
     let phrase = "a chained comparison with a CPython object operand";
-    refused(&format!("{IMPORT}print(k is k is k)\n"), "I0404", phrase);
+    admitted(&format!("{IMPORT}print(k is k is k)\n"));
+    admitted(&format!("{IMPORT}print(k is not j is k)\n"));
     refused(
-        &format!("{IMPORT}print(k is not j is k)\n"),
+        &format!("{IMPORT}print(k is (j or k) is k)\n"),
         "I0404",
         phrase,
     );
+    // Each link of the conjunction is then checked on its own: an identity
+    // test between an `int` and an object stays refused.
     refused(
         &format!("{IMPORT}def f(a: int) -> bool:\n    return a is k is a\n"),
         "I0404",
-        phrase,
+        "testing a CPython object's identity against a `int` value",
     );
 }
 

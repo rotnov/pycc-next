@@ -174,6 +174,13 @@ pub(crate) fn lower_call_expr(
     // Non-strict mode: an empty `set()`/`dict()` whose element types the
     // empty-container pass could not resolve (`pycc_types` admits it only
     // there) is the CPython container.
+    // Non-strict mode: a `defaultdict` the native dict cannot type is
+    // CPython's own (`pycc_hir::builtins::object_defaultdict_source`).
+    if !is_user_defined
+        && let Some(call) = object_defaultdict(callee, args, scopes, classes, current_class)
+    {
+        return call;
+    }
     if let Some(kind) = pycc_hir::empty_object_constructor(callee, args.len())
         && !is_user_defined
         && !classes.contains_key(callee.as_str())
@@ -621,4 +628,31 @@ pub(crate) fn lower_keyword_call_expr(
         names,
         values,
     }))
+}
+
+/// `__pycc_defaultdict(...)` as CPython's `collections.defaultdict`, when the
+/// native dict row does not take its arguments (`pycc_types` admits the call
+/// as an object only then).
+fn object_defaultdict(
+    callee: &str,
+    args: &[HirExpr],
+    scopes: &[HashMap<String, Ty>],
+    classes: &HashMap<String, HirClassDef>,
+    current_class: Option<&str>,
+) -> Option<MirExpr> {
+    let source = pycc_hir::builtins::object_defaultdict_source(callee, args)?;
+    let tys: Vec<Ty> = args
+        .iter()
+        .map(|a| lower_expr(a, scopes, classes, current_class).ty())
+        .collect();
+    if matches!(pycc_hir::builtins::resolve_call(callee, &tys), Some(Ok(_))) {
+        return None;
+    }
+    let Some(Ok(sig)) = pycc_hir::builtins::resolve_call("__pycc_obj_defaultdict", &[Ty::Str]) else {
+        unreachable!("the object defaultdict row takes a `str`")
+    };
+    Some(MirExpr::RtCall(Box::new(crate::RtCallExpr {
+        sig,
+        args: vec![MirExpr::ObjectBox(Box::new(MirExpr::StringLiteral(source)))],
+    })))
 }

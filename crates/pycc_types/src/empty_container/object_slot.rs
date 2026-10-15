@@ -86,10 +86,17 @@ pub(super) fn rewrite_object_slot(
 /// itself, both operands of a value-context `and`/`or`, both branches of a
 /// conditional expression, recursively -- into [`HirExpr::ObjectList`],
 /// returning whether any was rewritten. A display's own elements are not
-/// value positions of the slot and are left alone.
+/// value positions of the slot, except a list display nested in it
+/// (`[[1, 2], [3]]`): that is a fresh list only the outer one holds, built
+/// as a CPython list too.
 pub(super) fn rewrite_value_displays(value: &mut HirExpr) -> bool {
     match value {
         HirExpr::ListLiteral(elements) => {
+            for element in elements.iter_mut() {
+                if matches!(element, HirExpr::ListLiteral(_)) {
+                    rewrite_value_displays(element);
+                }
+            }
             *value = HirExpr::ObjectList(std::mem::take(elements));
             true
         }

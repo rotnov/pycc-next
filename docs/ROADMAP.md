@@ -126,6 +126,14 @@ Accept:
    with their own `__init__`) is listed in `docs/DEVIATIONS.md`.
 3. **Real-world corpus:** strict passes >= 170/200; `--non-strict` keeps 200/200, 0 wrong,
    with <= 8 top-level statements in CPython fallback (v0.3: 23).
+   **Met 2026-10-15:** `python3 bench/corpus.py` passes 170/200 strict (0 wrong);
+   `python3 bench/corpus.py --flags=--non-strict --require-correct` passes 200/200, 0 wrong,
+   8/1191 top-level statements in CPython fallback (99.3% native). Oracle fixtures against
+   CPython 3.13 in `tests/format_spec.rs`, `tests/maybe_unbound_runtime.rs`,
+   `tests/dict_get_optional.rs`, `tests/attribute_dict_producer.rs`,
+   `tests/solver_typed_containers.rs`, `tests/non_strict_object_containers.rs` and
+   `tests/non_strict_widened_containers.rs`; leak probes in
+   `tests/memory_leaks_formatting.rs`.
 4. **A second real package:** another pinned, permissively licensed pure-Python PyPI
    package from a different domain builds unchanged with `--ext --non-strict`, passes its
    own test suite (CI-gated) and is measurably faster than CPython on its hot path.

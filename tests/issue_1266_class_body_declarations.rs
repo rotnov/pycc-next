@@ -358,16 +358,15 @@ fn existing_refusals_keep_their_own_diagnostics() {
     assert!(text.contains("error[T0034]"), "{text}");
 }
 
-/// An unannotated `self.d = {}` stays refused, now naming both spellings
-/// that type it.
+/// An unannotated `self.d = {}` with no declaration and no `self.d[k] = v`
+/// to type it is refused, naming the attribute and the class.
 #[test]
-fn an_unannotated_empty_dict_names_both_spellings() {
+fn an_unannotated_empty_dict_with_no_source_is_refused() {
     let text = fails(
         "e2e_1266_dict",
         "check",
         "class C:\n    def __init__(self) -> None:\n        self.d = {}\n",
     );
-    assert!(text.contains("error[C0001]"), "{text}");
-    assert!(text.contains("`self.d: dict[str, int] = {}`"), "{text}");
-    assert!(text.contains("(`d: dict[str, int]`)"), "{text}");
+    assert!(text.contains("error[T0003]"), "{text}");
+    assert!(text.contains("`self.d` in class `C`"), "{text}");
 }

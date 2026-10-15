@@ -159,9 +159,9 @@ fn the_shapes_outside_the_object_slot_keep_their_diagnostics() {
         "an empty dict literal",
     );
     assert_refused(
-        &format!("{class}def m(self) -> None:\n        self.s = self.s or [[1]]\n"),
+        &format!("{class}def m(self) -> None:\n        self.s = self.s or [{{1: 2}}]\n"),
         "I0404",
-        "a `list[int]` element in a list display bound to a CPython object",
+        "a `dict[int, int]` element in a list display bound to a CPython object",
     );
     assert_refused(
         &format!("{class}def m(self, n: int) -> None:\n        self.s = [None] if n else []\n"),
@@ -246,7 +246,7 @@ fn only_value_positions_are_rewritten() {
     let mut nested = list(vec![list(Vec::new())]);
     assert!(has_value_display(&nested));
     assert!(rewrite_value_displays(&mut nested));
-    assert_eq!(nested, HirExpr::ObjectList(vec![list(Vec::new())]));
+    assert_eq!(nested, HirExpr::ObjectList(vec![HirExpr::ObjectList(Vec::new())]));
 
     let mut truth = bool_op(list(Vec::new()), list(Vec::new()), true);
     let before = truth.clone();

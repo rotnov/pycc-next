@@ -342,6 +342,16 @@ impl Transformer for Rewriter<'_> {
             *expr = stdin_lines(expr.range());
             return;
         }
+        // `sys.stdin.buffer` that does not read as text
+        // (`stdin_bytes::buffer_reads_as_text`) is CPython's binary stream,
+        // read through the `sys` module itself: its `sys.stdin` is not the
+        // list of lines.
+        if let Expr::Attribute(attribute) = expr
+            && attribute.attr.as_str() == "buffer"
+            && self.sys.is_stdin(&attribute.value)
+        {
+            return;
+        }
         transformer::walk_expr(self, expr);
         super::comps::flatten_tuple_targets(expr, self.fresh);
         if let Expr::Call(call_expr) = expr {

@@ -145,7 +145,7 @@ fn the_shapes_outside_part_1_are_refused() {
         ),
         (
             "obj_cmp_chain",
-            "print(0 < o < 2)\n",
+            "print(0 < (o or 1) < 2)\n",
             "I0404",
             "a chained comparison with a CPython object operand",
         ),

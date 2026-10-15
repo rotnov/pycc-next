@@ -23,6 +23,9 @@ use crate::Ty;
 
 mod itertools;
 mod methods;
+mod object_defaultdict;
+
+pub use object_defaultdict::object_defaultdict_source;
 
 pub use itertools::{is_itertools_call, itertools_call};
 pub use methods::{materialized_method_args, resolve_method};
@@ -232,6 +235,7 @@ pub fn is_object_format(callee: &str, args: &[Ty]) -> bool {
 
 /// Every builtin name [`resolve_call`] claims for some argument types.
 pub const CALL_NAMES: &[&str] = &[
+    "__pycc_obj_defaultdict",
     "__pycc_counter",
     "__pycc_counter_of",
     "__pycc_defaultdict",
@@ -453,6 +457,11 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         }
         ("__pycc_defaultdict_none", [d @ Ty::Dict(_)]) => {
             sig("pycc_rt_defaultdict_none_new", &[d.clone()], d.clone())
+        }
+        // Non-strict mode: CPython's own `collections.defaultdict`, from its
+        // factory's source (`object_defaultdict_source`).
+        ("__pycc_obj_defaultdict", [Ty::Str]) => {
+            sig("pycc_ext_obj_defaultdict", &[Ty::Object], Ty::Object)
         }
         // `collections.deque(items, maxlen, has_maxlen)`
         // (`pycc_ast::desugar::collections`).

@@ -130,7 +130,8 @@ pub(crate) fn admits_value(
 /// Non-strict mode: whether `value` is a native list of type `ty` that
 /// nothing else holds yet, whose CPython copy (`pycc_ext_obj_pack_list`)
 /// therefore cannot break aliasing: a display, a comprehension, a
-/// `list(...)`/`sorted(...)`/`reversed(...)` result, a `str.split()`, a
+/// `list(...)`/`sorted(...)`/`reversed(...)` result or a call of a function
+/// returning a fresh list (`non_strict::fresh_returns`), a `str.split()`, a
 /// `.copy()`, a concatenation, repetition or slice -- of elements that are
 /// immutable or carry their identity across (a scalar, a `str`, a tuple of
 /// those, a compiled instance), or, for a display or comprehension, of
@@ -153,8 +154,13 @@ fn fresh_list(env: &Environment, value: &HirExpr, ty: &Ty) -> bool {
         }
         HirExpr::EmptyList(_) => true,
         HirExpr::Call { callee, .. } => {
-            flat && matches!(callee.as_str(), "list" | "sorted" | "reversed")
-                && env.lookup_function(callee).is_none()
+            flat && if env.lookup_function(callee).is_none() {
+                matches!(callee.as_str(), "list" | "sorted" | "reversed")
+            } else {
+                // A function every return of which is a list nothing else
+                // holds (`non_strict::fresh_returns`).
+                crate::non_strict::is_fresh_returning(callee)
+            }
         }
         HirExpr::MethodCall { method, .. } => {
             flat && matches!(method.as_str(), "split" | "rsplit" | "splitlines" | "copy")

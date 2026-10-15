@@ -56,6 +56,21 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   own methods (it was `C0001`; with no such store it is now `T0003`), and an empty
   attribute container whose producer reads an unannotated method parameter is typed
   once the solver has typed the parameter (`tests/attribute_dict_producer.rs`).
+- An empty `set()`/`dict()`/`list()` or attribute container whose producer reads an
+  unannotated function's result (`s.add(dsu.find(i))`) is typed once the solver has
+  typed the function; `s.update(it)`/`xs.extend(it)` type an empty container from any
+  iterable; `sorted((a, b))` (and `min`, `max`, `sum`) of a tuple display compiles
+  (`tests/solver_typed_containers.rs`).
+- Non-strict: a name holding a native container that meets a CPython object (a call
+  argument, an item store, a comparison) becomes an object when every binding of it is a
+  fresh container -- a display, a comprehension, an empty constructor, or the result of a
+  function that only returns lists nothing else holds -- so aliasing is kept; a list
+  display nested in an object list, a list holding a big `int` literal, a
+  `collections.defaultdict` the native dict cannot hold (built by CPython from its
+  factory) and `sys.stdin.buffer` read as bytes are CPython's own; a chained comparison
+  over objects whose middle operands are names or literals is the conjunction of its
+  links (`tests/non_strict_widened_containers.rs`). The corpus meets v0.4 accept 3:
+  strict 170/200, non-strict 200/200 with 8/1191 statements in CPython fallback.
 - A module-level `pass` statement compiles; a bare `zip()` statement is dropped.
 - The empty-container pass reads `d.get(k, 0)` when the call is also readable as a
   user or CPython method (non-strict), so `d = {}` filled that way stays native.

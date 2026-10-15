@@ -116,6 +116,10 @@ pub(crate) struct SignatureTable {
     /// narrower meaning "a class defines this method"; importers inherit the
     /// two separately (#1188, #1425).
     object_receivers: bool,
+    /// Non-strict mode (#3): a value's container may turn out to be a CPython
+    /// object, so a check that depends on the native container (an
+    /// out-of-range `.append()` literal) waits for `pycc_types`.
+    non_strict: bool,
     /// Part 2a of #1371: the *class-like* names of the module -- each bound
     /// exactly once in module scope (the same [`rebound::binding_counts`]
     /// rule `by_name` uses), by either a top-level `class` statement or a
@@ -189,6 +193,7 @@ impl SignatureTable {
             rebound,
             class_like_names,
             object_receivers: false,
+            non_strict: false,
             container_method_names: crate::expr::receiver_dispatch::defined_container_method_names(
                 body,
             )
@@ -235,6 +240,16 @@ impl SignatureTable {
     /// whole module (#1425, #1482; see the `object_receivers` field).
     pub(crate) fn admit_object_receivers(&mut self) {
         self.object_receivers = true;
+    }
+
+    /// Records non-strict mode (see the `non_strict` field).
+    pub(crate) fn admit_non_strict(&mut self) {
+        self.non_strict = true;
+    }
+
+    /// Whether the module is compiled in non-strict mode.
+    pub(crate) fn non_strict(&self) -> bool {
+        self.non_strict
     }
 
     /// Issue #1425: whether the module can hold a CPython object (see the

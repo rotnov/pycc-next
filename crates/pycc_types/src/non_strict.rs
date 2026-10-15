@@ -95,6 +95,11 @@ pub(crate) fn admits_index(ty: &Ty) -> bool {
 /// function that binds it once.
 type WidenKey = (Option<usize>, String);
 
+mod container_widen;
+mod fresh_returns;
+pub(crate) use container_widen::request as request_container_widen;
+pub(crate) use fresh_returns::is_fresh_returning;
+
 /// Records that `name` was rebound with a value of another type, when both
 /// types fit an `object` slot (`boxable`). The caller still reports its
 /// diagnostic; [`with_widening`] decides whether a retry removes it.
@@ -352,13 +357,19 @@ pub(crate) fn with_widening<T, E>(
     // the checker's single pass (`last = None` before a loop that sets
     // `last = s` in one branch and reads `len(last)` in another) would
     // otherwise see `None` and never request the widening.
+    fresh_returns::record(hir);
     let mut widened = none_first_names(hir);
     let mut widened_attrs = BTreeSet::new();
     let mut current = (!widened.is_empty()).then(|| widen(hir, &widened, &widened_attrs));
     loop {
         take_widen_requests();
+        container_widen::take();
         let result = check(current.as_ref().unwrap_or(hir));
-        let requested = retarget_temporaries(hir, scope_keys(hir, take_widen_requests()));
+        let mut requested = retarget_temporaries(hir, scope_keys(hir, take_widen_requests()));
+        requested.extend(container_widen::granted(
+            hir,
+            scope_keys(hir, container_widen::take()),
+        ));
         let requested_attrs = WIDEN_ATTRS.with(|widen| std::mem::take(&mut *widen.borrow_mut()));
         if result.is_ok()
             || (requested.is_subset(&widened) && requested_attrs.is_subset(&widened_attrs))

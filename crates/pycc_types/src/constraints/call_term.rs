@@ -715,6 +715,17 @@ pub(crate) fn collect_call_constraints(
         {
             return Ok(Some(Ok(Ty::Object)));
         }
+        // An empty `set()`/`dict()`/`list()` the empty-container pass has
+        // not typed yet gives no term while a partial table is collected
+        // (`return_fallback::partial_signatures`): the table that pass
+        // reruns with may be what types it (`s.add(c.find(i))`).
+        if super::return_fallback::collecting_partial()
+            && args.is_empty()
+            && matches!(callee.as_str(), "set" | "dict" | "list")
+            && !env.shadowed_producers.contains(callee.as_str())
+        {
+            return Ok(None);
+        }
         if is_known_callable_builtin(callee) {
             return Err(unsupported_callable_builtin(callee));
         }

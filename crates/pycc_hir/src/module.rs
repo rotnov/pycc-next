@@ -260,6 +260,7 @@ pub fn lower_module(
     // parameter lowering to produce `Ty::Object` where strict mode refuses.
     if resolved.non_strict() {
         state.signatures.admit_object_receivers();
+        state.signatures.admit_non_strict();
         state.imported_alias_indices.push(state.aliases.len());
         state
             .aliases

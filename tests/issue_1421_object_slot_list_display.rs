@@ -275,9 +275,9 @@ fn the_shapes_outside_the_object_slot_are_refused() {
     for (tag, tail, code, needle) in [
         (
             "obj_slot_nested",
-            "def m(self) -> None:\n        self.s = self.s or [[1]]\n",
+            "def m(self) -> None:\n        self.s = self.s or [{1: 2}]\n",
             "I0404",
-            "a `list[int]` element in a list display bound to a CPython object",
+            "a `dict[int, int]` element in a list display bound to a CPython object",
         ),
         (
             "obj_slot_dict",

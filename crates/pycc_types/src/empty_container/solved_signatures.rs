@@ -16,16 +16,21 @@
 //! (non-strict mode), is not handed over: the producer then reads what it
 //! read before.
 
-use super::{body_has_empty_literal, contains_infer, resolve_empty_containers};
-use pycc_hir::{HirItem, HirModule, Ty};
+use super::{any_stmt, body_has_empty_literal, contains_infer, resolve_empty_containers};
+use pycc_hir::{HirExpr, HirItem, HirModule, HirStmt, Ty};
 
 /// `hir` with the empty containers its solved signatures type rewritten;
 /// `None` when no function body keeps an empty literal, the solver does not
 /// succeed, or nothing more resolves.
 pub(crate) fn resolve_with_solved_signatures(hir: &HirModule) -> Option<HirModule> {
     let pending = hir.items.iter().any(|item| match item {
-        HirItem::Function { body, .. } => body_has_empty_literal(body),
-        HirItem::TopLevelStmt(stmt) => body_has_empty_literal(std::slice::from_ref(stmt)),
+        HirItem::Function { body, .. } => {
+            body_has_empty_literal(body) || has_empty_constructor(body)
+        }
+        HirItem::TopLevelStmt(stmt) => {
+            let body = std::slice::from_ref(stmt);
+            body_has_empty_literal(body) || has_empty_constructor(body)
+        }
     }) || has_provisional_slot(hir);
     if !pending {
         return None;
@@ -89,6 +94,18 @@ pub(crate) fn resolve_with_solved_signatures(hir: &HirModule) -> Option<HirModul
         }
     }
     (rewritten != *hir).then_some(rewritten)
+}
+
+/// Whether `body` binds a name to an empty `set()`/`dict()`/`list()` call,
+/// which the unification engine types from its uses (`empty_container::unify`)
+/// and a use may read an unannotated function's return (`s.add(c.find(i))`).
+fn has_empty_constructor(body: &[HirStmt]) -> bool {
+    any_stmt(body, &|stmt| {
+        matches!(stmt, HirStmt::Assign {
+            value: HirExpr::Call { callee, args },
+            ..
+        } if args.is_empty() && matches!(callee.as_str(), "set" | "dict" | "list"))
+    })
 }
 
 /// Whether some class still carries a provisional attribute slot: its

@@ -437,6 +437,9 @@ pub(crate) fn check_object_call_args<'a>(
         refuse_classmethod_cls(env, arg, &operation)?;
     }
     for (index, arg_ty) in arg_tys.iter().enumerate() {
+        if let Some(arg) = args.get(index) {
+            crate::non_strict::request_container_widen(arg, arg_ty);
+        }
         if let Some(arg) = args.get(index)
             && (crate::object_box::fresh_container(env, arg, arg_ty)
                 || (crate::non_strict::is_non_strict()

@@ -113,16 +113,16 @@ fn every_later_pass_walks_the_display_elements() {
 fn an_unpackable_element_is_refused() {
     for (source, ty) in [
         (
-            "def f() -> object:\n    x: object = [[1]]\n    return x\n",
-            "list[int]",
+            "def f() -> object:\n    x: object = [{1: 2}]\n    return x\n",
+            "dict[int, int]",
         ),
         (
             "def f() -> object:\n    x: object = [1, None]\n    return x\n",
             "None",
         ),
         (
-            "class A:\n    pass\n\n\ndef f() -> object:\n    x: object = [A(), [1]]\n    return x\n",
-            "list[int]",
+            "class A:\n    pass\n\n\ndef f() -> object:\n    x: object = [A(), {1: 2}]\n    return x\n",
+            "dict[int, int]",
         ),
         (
             "from enum import Enum\n\n\nclass Color(Enum):\n    RED = 1\n\n\n\

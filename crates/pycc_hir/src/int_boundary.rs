@@ -199,6 +199,13 @@ fn int_literal_boundary_diagnostic(
     )
 }
 
+/// The `T0051` [`check_boundary_literal`] reports for `lowered` in
+/// `position`, without a source span: for a check `pycc_types` makes once
+/// it knows the position is native (a non-strict `.append()` value).
+pub fn boundary_literal_diagnostic(lowered: &HirExpr, position: &'static str) -> Option<Diagnostic> {
+    check_boundary_literal(lowered, 0..0, position).err()
+}
+
 /// Checks one already-lowered boundary-position sub-expression: if it is an
 /// out-of-range `HirExpr::IntLiteral`, returns `Err` with a spanned `T0051`
 /// diagnostic naming `position`; otherwise (not a literal at all, or a
