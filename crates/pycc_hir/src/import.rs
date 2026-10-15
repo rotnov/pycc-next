@@ -228,6 +228,17 @@ pub enum ResolvedImport<'a> {
     /// numpy.typing import NDArray`, #1380) binds its name under a hidden
     /// local name instead, so the spelling keeps its annotation meaning.
     Foreign,
+    /// A synthesized import (`by_module_key`) of a project module whose
+    /// body is still running: the importer was loaded by a circular import
+    /// while that module waited at its own import. Its HIR does not exist
+    /// yet, so the driver names the kind of each top-level name the
+    /// importer reaches; a function or variable binds as a project one, and
+    /// a class or type alias (whose definition the importer would copy) is
+    /// refused.
+    Provisional {
+        display_path: String,
+        kinds: Vec<(String, crate::ProjectBindingKind)>,
+    },
 }
 
 /// The driver's answers for every [`ProjectImportRequest`] of one module,
@@ -384,7 +395,10 @@ impl<'a> ResolvedImports<'a> {
     /// project module (Part 2a of #1371, `SignatureTable`'s class-like
     /// names).
     pub(crate) fn resolves_to_project_module(&self, import: &StmtImportFrom) -> bool {
-        matches!(self.get_from(import), Some(ResolvedImport::Module(_)))
+        matches!(
+            self.get_from(import),
+            Some(ResolvedImport::Module(_) | ResolvedImport::Provisional { .. })
+        )
     }
 
     /// The module a `Project` binding's `module_path` names. Every such
@@ -495,6 +509,13 @@ pub(crate) fn lower_import_stmt(
             match resolved.get_from(import) {
                 Some(ResolvedImport::Module(module)) => {
                     return project::lower_project_from_import(import, module, resolved).map(Some);
+                }
+                Some(ResolvedImport::Provisional {
+                    display_path,
+                    kinds,
+                }) => {
+                    return project::lower_provisional_from_import(import, display_path, kinds)
+                        .map(Some);
                 }
                 Some(ResolvedImport::NotFound { code, message }) => {
                     return Err(Diagnostic::error(

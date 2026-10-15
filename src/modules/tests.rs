@@ -14,6 +14,8 @@ use super::probe::submodule_names;
 use super::*;
 use pycc_scratch::ScratchDir;
 
+mod cycle;
+
 /// Writes `contents` to `root/relative`, creating parent directories.
 fn write(root: &Path, relative: &str, contents: &str) -> PathBuf {
     let path = root.join(relative);
@@ -540,36 +542,6 @@ fn a_bare_relative_import_binds_the_package_itself() {
 }
 
 #[test]
-fn an_import_cycle_is_reported_with_its_chain() {
-    let scratch = ScratchDir::new("modules_tests").expect("scratch");
-    write(
-        &scratch,
-        "a.py",
-        "from b import second\n\n\ndef first(x: int) -> int:\n    return second(x)\n",
-    );
-    write(
-        &scratch,
-        "b.py",
-        "from a import first\n\n\ndef second(x: int) -> int:\n    return first(x)\n",
-    );
-    let entry = write(
-        &scratch,
-        "main.py",
-        "from a import first\n\n\ndef main() -> None:\n    print(first(1))\n",
-    );
-    let (path, code, message) = first_diagnostic(&entry);
-    assert!(
-        path.ends_with("b.py"),
-        "reported in the importing file: {path}"
-    );
-    assert_eq!(code, "E0108");
-    assert!(
-        message.starts_with("import cycle: ") && message.matches("a.py").count() == 2,
-        "unexpected message: {message}"
-    );
-}
-
-#[test]
 fn one_file_reached_by_two_spellings_is_one_module() {
     // `pkg` is a symlink to `real`, so `pkg.mod` and `real.mod` canonicalize
     // to the same file and must be loaded once.
@@ -837,6 +809,7 @@ fn a_bare_file_name_importer_renders_its_directory_as_a_single_dot() {
         placements: Vec::new(),
         memo: HashMap::new(),
         in_progress: Vec::new(),
+        provisional: Vec::new(),
         entry_dir: PathBuf::new(),
         entry_display_dir: PathBuf::new(),
         root: None,

@@ -27,14 +27,14 @@ mod scope;
 
 pub use scope::{
     ChainRewrite, GlobalRewrite, ModuleBindings, NameRewrite, RewriteError, module_bindings,
-    rewrite_module_globals,
+    rewrite_module_globals, statement_bindings,
 };
 
 use ruff_python_ast::name::Name;
 use ruff_python_ast::{
-    Alias, AtomicNodeIndex, Expr, ExprContext, ExprName, ExprNumberLiteral, ExprStringLiteral,
-    ExprSubscript, Identifier, Int, Number, Stmt, StmtAssign, StmtImportFrom, StringLiteral,
-    StringLiteralFlags, StringLiteralValue,
+    Alias, Arguments, AtomicNodeIndex, Expr, ExprCall, ExprContext, ExprName, ExprNumberLiteral,
+    ExprStringLiteral, ExprSubscript, Identifier, Int, Number, Stmt, StmtAssign, StmtImportFrom,
+    StmtRaise, StringLiteral, StringLiteralFlags, StringLiteralValue,
 };
 use ruff_text_size::TextRange;
 
@@ -234,6 +234,44 @@ pub fn string_assign(target: &str, value: &str, range: TextRange) -> Stmt {
                 flags: StringLiteralFlags::empty(),
             }),
         })),
+    })
+}
+
+/// `raise <class>("<message>")` at `range`: what a `from m import x`
+/// runs when the partially initialized module `m` (a circular import) has
+/// not bound `x` yet.
+pub fn raise_with_message(class: &str, message: &str, range: TextRange) -> Stmt {
+    let name = Expr::Name(ExprName {
+        node_index: AtomicNodeIndex::default(),
+        range,
+        id: Name::new(class),
+        ctx: ExprContext::Load,
+    });
+    let message = Expr::StringLiteral(ExprStringLiteral {
+        node_index: AtomicNodeIndex::default(),
+        range,
+        value: StringLiteralValue::single(StringLiteral {
+            range,
+            node_index: AtomicNodeIndex::default(),
+            value: message.into(),
+            flags: StringLiteralFlags::empty(),
+        }),
+    });
+    Stmt::Raise(StmtRaise {
+        node_index: AtomicNodeIndex::default(),
+        range,
+        exc: Some(Box::new(Expr::Call(ExprCall {
+            node_index: AtomicNodeIndex::default(),
+            range,
+            func: Box::new(name),
+            arguments: Arguments {
+                range,
+                node_index: AtomicNodeIndex::default(),
+                args: vec![message].into_boxed_slice(),
+                keywords: Default::default(),
+            },
+        }))),
+        cause: None,
     })
 }
 

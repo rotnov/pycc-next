@@ -58,6 +58,45 @@ pub(super) fn lower_project_from_import(
     Ok(lowered)
 }
 
+/// The provisional arm of [`lower_import_stmt`]: binds the names of a
+/// synthesized `from <key> import a, b` against a module still running its
+/// body (a circular import), by the kinds the driver read from its source.
+pub(super) fn lower_provisional_from_import(
+    import: &StmtImportFrom,
+    display_path: &str,
+    kinds: &[(String, ProjectBindingKind)],
+) -> Result<LoweredImport, Diagnostic> {
+    let mut lowered = LoweredImport::default();
+    for alias in &import.names {
+        let name = alias.name.as_str();
+        let kind = kinds
+            .iter()
+            .find(|(known, _)| known == name)
+            .map(|(_, kind)| *kind)
+            .expect("the driver names the kind of every name it synthesizes an import of");
+        if matches!(
+            kind,
+            ProjectBindingKind::Class | ProjectBindingKind::TypeAlias
+        ) {
+            return Err(unsupported(
+                format!(
+                    "`{}` is defined by `{display_path}`, which is still running its body here \
+                     (a circular import); reaching its classes and type aliases from a module \
+                     it is importing is not supported yet",
+                    pycc_ast::namespace::display_name(name)
+                ),
+                import.range,
+            ));
+        }
+        lowered.bindings.push(ImportBinding::Project {
+            local_name: name.to_string(),
+            module_path: display_path.to_string(),
+            kind,
+        });
+    }
+    Ok(lowered)
+}
+
 /// Looks `name` up in `module`'s top level in the documented order and,
 /// when found, records the binding (and any class/alias copies it needs)
 /// into `lowered`. Returns `Ok(false)` when the module has no such name,

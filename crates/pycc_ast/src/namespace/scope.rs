@@ -102,6 +102,18 @@ pub fn module_bindings(module: &ModModule) -> ModuleBindings {
     }
 }
 
+/// The names the module-scope statement `stmt` binds when it runs (an
+/// import's names included), not the names a function it defines declares
+/// `global`: those are bound only when the function runs.
+pub fn statement_bindings(stmt: &Stmt) -> BTreeSet<String> {
+    let collected = collect_scope(std::slice::from_ref(stmt));
+    collected
+        .bound
+        .into_iter()
+        .chain(collected.imported)
+        .collect()
+}
+
 /// Rewrites every reference in `module` that resolves to its global scope
 /// as `rewrite` decides, returning the refusals in source order.
 pub fn rewrite_module_globals(

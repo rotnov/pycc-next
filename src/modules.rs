@@ -18,12 +18,14 @@
 //! touches the filesystem beyond its own read, which is what keeps the
 //! `check_frontend_throughput.rb` gate honest.
 
+mod cycle;
 mod namespace;
 mod probe;
 
 use crate::frontend::FrontendFailure;
 use crate::project_config;
 use crate::source;
+use cycle::{PROVISIONAL, Provisional};
 use namespace::{Imported, ModuleInfo};
 
 use pycc_diag::{Diagnostic, Span};
@@ -216,6 +218,7 @@ pub(crate) fn load_with(
         placements: Vec::new(),
         memo: HashMap::new(),
         in_progress: Vec::new(),
+        provisional: Vec::new(),
         entry_dir,
         entry_display_dir,
         root: None,
@@ -267,9 +270,12 @@ struct Loader {
     /// Canonical path -> index in `modules`, so two spellings of one file
     /// (a symlink, a `./` prefix) are one module.
     memo: HashMap<PathBuf, usize>,
-    /// The canonical paths currently being loaded, innermost last, with
-    /// their display spellings: the import-cycle chain.
-    in_progress: Vec<(PathBuf, String)>,
+    /// The modules currently being loaded, innermost last: the import
+    /// chain a circular import closes.
+    in_progress: Vec<InProgress>,
+    /// The modules still running their bodies that a circular import
+    /// reached, in the order first reached (`cycle`).
+    provisional: Vec<Provisional>,
     entry_dir: PathBuf,
     entry_display_dir: PathBuf,
     root: Option<RootInfo>,
@@ -290,6 +296,20 @@ struct Loader {
     ext_module: bool,
     /// Whether every module is lowered in non-strict mode (#3).
     non_strict: bool,
+}
+
+/// A module being loaded: waiting at one of its imports while that import
+/// loads.
+struct InProgress {
+    path: PathBuf,
+    display: String,
+    /// Its dotted name; `None` for the entry module.
+    qual: Option<String>,
+    /// Its desugared source (a dependency's only), which a circular import
+    /// reads as its [`Provisional`].
+    parsed: Option<pycc_ast::ModModule>,
+    /// The start of the import it waits at.
+    offset: u32,
 }
 
 impl Loader {
@@ -361,11 +381,19 @@ impl Loader {
             ));
         }
 
-        self.in_progress
-            .push((canonical.to_path_buf(), display.clone()));
+        self.in_progress.push(InProgress {
+            path: canonical.to_path_buf(),
+            display: display.clone(),
+            qual: qual.clone(),
+            parsed: qual.is_some().then(|| parsed.clone()),
+            offset: 0,
+        });
         let requests = pycc_hir::project_import_requests(&parsed);
         let mut answers = Vec::with_capacity(requests.len());
         for request in &requests {
+            if let Some(waiting) = self.in_progress.last_mut() {
+                waiting.offset = request.span.start;
+            }
             answers.push((
                 request.span,
                 self.resolve(request, &display, canonical, is_entry)?,
@@ -427,11 +455,23 @@ impl Loader {
                 .iter()
                 .map(|loaded| loaded.display_path.as_str())
                 .collect(),
+            provisional: &self.provisional,
         };
         let scan = namespace::scan_exports(&parsed, index, &imported, &program);
         let rewritten = namespace::rewrite(&mut parsed, qual.as_deref(), &imported, &program)
             .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
         for (origin, key) in rewritten.synthesized {
+            if let Some(slot) = origin.checked_sub(PROVISIONAL) {
+                let module = &self.provisional[slot];
+                resolved.insert_synthesized(
+                    key,
+                    ResolvedImport::Provisional {
+                        display_path: module.display_path.clone(),
+                        kinds: module.binding_kinds(),
+                    },
+                );
+                continue;
+            }
             let origin = &self.modules[origin];
             resolved.insert_synthesized(
                 key,
@@ -464,6 +504,7 @@ impl Loader {
         });
         if let Some(qual) = &qual {
             self.by_qual.insert(qual.clone(), index);
+            self.finish_provisional(qual, index);
         }
         self.infos.push(ModuleInfo { qual, exports });
         self.placements.push(placement);
@@ -528,25 +569,30 @@ impl Loader {
         let in_progress = self
             .in_progress
             .iter()
-            .position(|(path, _)| *path == canonical);
+            .position(|waiting| waiting.path == canonical);
         if let Some(position) = in_progress {
             // `from . import sub` inside the package being initialized (or a
             // module it is importing) loads the submodules alone; anything
-            // else would read the partially initialized module: a cycle.
+            // else reads the partially initialized module: a circular
+            // import (`cycle`). The entry module importing itself back
+            // would be a second copy of it in CPython.
             let only_submodules = !request.names.is_empty()
                 && request
                     .names
                     .iter()
                     .all(|name| target.submodules.iter().any(|sub| sub == name));
-            if !only_submodules {
+            if !only_submodules && !self.reach_partially_initialized(position) {
                 let mut chain: Vec<String> = self.in_progress[position..]
                     .iter()
-                    .map(|(_, display)| format!("`{}`", pycc_diag::display_path(display)))
+                    .map(|waiting| format!("`{}`", pycc_diag::display_path(&waiting.display)))
                     .collect();
                 chain.push(format!("`{}`", pycc_diag::display_path(&target.display)));
                 return Ok(Resolution::NotFound {
                     code: "E0108",
-                    message: format!("import cycle: {}", chain.join(" -> ")),
+                    message: format!(
+                        "import cycle through the entry module: {}",
+                        chain.join(" -> ")
+                    ),
                 });
             }
         }
@@ -560,7 +606,7 @@ impl Loader {
             if self
                 .in_progress
                 .iter()
-                .any(|(path, _)| *path == init_canonical)
+                .any(|waiting| waiting.path == init_canonical)
             {
                 continue;
             }
@@ -622,7 +668,7 @@ impl Loader {
             if self
                 .in_progress
                 .iter()
-                .any(|(path, _)| *path == sub_canonical)
+                .any(|waiting| waiting.path == sub_canonical)
             {
                 continue;
             }

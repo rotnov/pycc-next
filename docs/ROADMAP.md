@@ -133,3 +133,15 @@ Accept:
    modules expose module-level variables; `IntEnum` members are usable as `int`;
    `sorted()`/`min()`/`max()`/`.sort()` and set membership of class instances;
    `dataclasses.fields()`/`asdict()`. Oracle fixtures; matching DEVIATIONS rows removed.
+   **Met 2026-10-15:** `tests/multi_module.rs` (`cycle`, `cycle_error`, `cycle_error_pkg`:
+   two modules importing each other, and `from m import x` of a name the partially
+   initialized `m` has not bound raising CPython's `ImportError` with its message, native,
+   `--non-strict` and `--ext`); `tests/language_v04.rs` (IntEnum members as `int`,
+   `sorted`/`min`/`max`/`.sort()` with `key=`/`reverse=` and a list changed while sorted,
+   `x in` a set of instances, `dataclasses.fields`/`asdict`/`astuple`/`replace`, lists and
+   tuples of instances printed by `__repr__`, a strict `--ext` module's native globals as
+   attributes) against CPython, with leak probes in `tests/memory_leaks_v04.rs`. The
+   matching DEVIATIONS rows are gone or narrowed to what remains: a circular import
+   through the entry module (`E0108`), classes reached through a circular import, a
+   strict `--ext` module's CPython-object globals (a second reference would show), and
+   instances as `dict` keys.

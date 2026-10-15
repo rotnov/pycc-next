@@ -603,14 +603,40 @@ fn alloc_exception_message(msg: &str) -> *mut PyStrObj {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_raise_name_error(name: *const u8, len: usize) {
     let name = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(name, len) });
-    // A global some function rebinds lives in the cell `_pycc_global_<name>`
-    // (`pycc_ast::desugar`): the user's name is the variable's.
-    let name = name.strip_prefix("_pycc_global_").unwrap_or(&name);
+    // A dependency module's global is spelled `0m<len><segment>..._<name>`
+    // (`pycc_ast::namespace::module_global`), and a global some function
+    // rebinds lives in the cell `_pycc_global_<name>` (`pycc_ast::desugar`):
+    // the user's name is the plain one.
+    let name = plain_global_name(&name);
+    let name = name.strip_prefix("_pycc_global_").unwrap_or(name);
     raise_builtin(
         EXCEPTION_TYPE_NAME_ERROR,
         "NameError",
         &format!("name '{name}' is not defined"),
     );
+}
+
+/// The plain name of a qualified module-global spelling
+/// (`pycc_ast::namespace::module_global`: `0m`, length-prefixed dotted
+/// segments, `_`, the name), or `name` itself.
+fn plain_global_name(name: &str) -> &str {
+    let Some(mut rest) = name.strip_prefix("0m") else {
+        return name;
+    };
+    loop {
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            break;
+        }
+        let Some(len) = rest[..digits].parse::<usize>().ok() else {
+            return name;
+        };
+        match rest.get(digits + len..) {
+            Some(after) => rest = after,
+            None => return name,
+        }
+    }
+    rest.strip_prefix('_').unwrap_or(name)
 }
 
 /// Raises CPython's `UnboundLocalError` for a read of the function local

@@ -24,6 +24,8 @@ use pycc_ast::{Expr, ExprContext, ModModule, Stmt};
 use pycc_diag::{Diagnostic, Span};
 use pycc_hir::HirModule;
 
+use super::cycle::{PROVISIONAL, Provisional, module_level_names, module_level_reads};
+
 /// What kind of top-level definition an export names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -81,13 +83,35 @@ pub(crate) struct Program<'a> {
     pub(crate) infos: &'a [ModuleInfo],
     pub(crate) by_qual: &'a HashMap<String, usize>,
     pub(crate) display_paths: Vec<&'a str>,
+    /// The modules still running their bodies that a circular import
+    /// reached (`super::cycle`).
+    pub(crate) provisional: &'a [Provisional],
 }
 
 impl Program<'_> {
     fn exports(&self, qual: &str) -> Option<&HashMap<String, Export>> {
-        self.by_qual
-            .get(qual)
-            .map(|index| &self.infos[*index].exports)
+        match self.by_qual.get(qual) {
+            Some(index) => Some(&self.infos[*index].exports),
+            None => self.provisional_of(qual).map(|module| &module.exports),
+        }
+    }
+
+    /// The module `qual` when it is still running its body.
+    fn provisional_of(&self, qual: &str) -> Option<&Provisional> {
+        self.provisional
+            .iter()
+            .find(|module| !module.done && module.qual == qual)
+    }
+
+    /// The dotted name of the module `origin` names.
+    fn qual_of(&self, origin: usize) -> String {
+        match origin.checked_sub(PROVISIONAL) {
+            Some(slot) => self.provisional[slot].qual.clone(),
+            None => self.infos[origin]
+                .qual
+                .clone()
+                .expect("a definition another module reaches is in a dependency"),
+        }
     }
 }
 
@@ -137,6 +161,12 @@ pub(crate) fn rewrite(
     let mut bindings: HashMap<String, Binding> = HashMap::new();
     let mut snapshots: HashMap<usize, Vec<Snapshot>> = HashMap::new();
     let mut project_statements: BTreeSet<usize> = BTreeSet::new();
+    // A from-import of a name a partially initialized module (a circular
+    // import) has not bound yet: how many of its value copies run first,
+    // and CPython's `ImportError` message.
+    let mut raises: HashMap<usize, (usize, String)> = HashMap::new();
+    // The variables such an import names from the point it raises.
+    let mut failed: BTreeSet<String> = BTreeSet::new();
     for (position, stmt) in parsed.body.iter().enumerate() {
         match stmt {
             Stmt::Import(import) => {
@@ -174,6 +204,14 @@ pub(crate) fn rewrite(
                     let export = program
                         .exports(&answer.target)
                         .and_then(|exports| exports.get(name));
+                    if let Some(module) = program.provisional_of(&answer.target)
+                        && export.is_some()
+                        && !module.bound.contains(name)
+                        && !raises.contains_key(&position)
+                    {
+                        let copies = snapshots.get(&position).map_or(0, Vec::len);
+                        raises.insert(position, (copies, module.import_error(name)));
+                    }
                     match (export, answer.submodules.get(name)) {
                         (
                             Some(Export::Def {
@@ -184,7 +222,21 @@ pub(crate) fn rewrite(
                             }),
                             _,
                         ) => {
-                            if *kind == Kind::Variable {
+                            if *kind == Kind::Variable && raises.contains_key(&position) {
+                                // Never copied: the import raises first.
+                                // Functions reading the name (never run
+                                // either) reach the partial module's own.
+                                failed.insert(local.clone());
+                                if !*cell {
+                                    bindings.insert(
+                                        local,
+                                        Binding::Def {
+                                            name: name.clone(),
+                                            origin: *origin,
+                                        },
+                                    );
+                                }
+                            } else if *kind == Kind::Variable {
                                 snapshots.entry(position).or_default().push(Snapshot {
                                     local: local.clone(),
                                     source: name.clone(),
@@ -229,6 +281,53 @@ pub(crate) fn rewrite(
                 }
             }
             _ => {}
+        }
+    }
+    // `a.x` read while the module body runs, `a` partially initialized and
+    // `x` not bound yet: CPython's `AttributeError`, not supported.
+    let partial: BTreeSet<String> = bindings
+        .iter()
+        .filter_map(|(local, binding)| match binding {
+            Binding::Module(module) if program.provisional_of(module).is_some() => {
+                Some(local.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    // A module-level read of a variable such an import names: never run
+    // (the import raised), and it reads a global the partial module has
+    // not bound, which the checker refuses.
+    for (range, name) in module_level_names(&parsed.body, &failed) {
+        diagnostics.push(Diagnostic::error(
+            "C0001",
+            format!(
+                "`{name}` is read after the circular import that binds it, which raises \
+                 `ImportError` (the module it comes from is still running its body and has not \
+                 bound `{name}` yet); a module-level read of it is not supported"
+            ),
+            Span::new(range.start, range.end),
+        ));
+    }
+    if !partial.is_empty() {
+        for (range, root, attr) in module_level_reads(&parsed.body, &partial) {
+            let Some(Binding::Module(module)) = bindings.get(&root) else {
+                continue;
+            };
+            let module = program
+                .provisional_of(module)
+                .expect("a partial root names a provisional module");
+            if module.exports.contains_key(&attr) && !module.bound.contains(&attr) {
+                diagnostics.push(Diagnostic::error(
+                    "C0001",
+                    format!(
+                        "`{root}.{attr}` is read while `{}` is still running its body (a \
+                         circular import) and has not bound `{attr}` yet: CPython raises \
+                         `AttributeError` here, which is not supported",
+                        module.qual
+                    ),
+                    Span::new(range.start, range.end),
+                ));
+            }
         }
     }
     if !diagnostics.is_empty() {
@@ -297,7 +396,13 @@ pub(crate) fn rewrite(
             continue;
         }
         let range = ruff_range(pycc_ast::stmt_range(&stmt));
-        for copy in snapshots.remove(&position).unwrap_or_default() {
+        let copies = snapshots.remove(&position).unwrap_or_default();
+        // The copies of the names before the one not bound yet run, then
+        // the `ImportError`; the rest would never run, and would read
+        // globals the partial module has not bound: they are left out.
+        let raise = raises.remove(&position);
+        let before = raise.as_ref().map_or(copies.len(), |(before, _)| *before);
+        for copy in copies.into_iter().take(before) {
             let target = match qual {
                 Some(qual) => namespace::module_global(qual, &copy.local),
                 None => copy.local,
@@ -306,6 +411,13 @@ pub(crate) fn rewrite(
                 &target,
                 &copy.source,
                 copy.cell,
+                range,
+            ));
+        }
+        if let Some((_, message)) = raise {
+            rebuilt.push(namespace::raise_with_message(
+                "ImportError",
+                &message,
                 range,
             ));
         }
@@ -323,10 +435,7 @@ pub(crate) fn rewrite(
     }
     let mut imports = Vec::new();
     for (origin, names) in uses {
-        let origin_qual = program.infos[origin]
-            .qual
-            .clone()
-            .expect("a definition another module reaches is in a dependency");
+        let origin_qual = program.qual_of(origin);
         let key = namespace::module_key(&origin_qual);
         let names: Vec<String> = names.into_iter().collect();
         imports.push(namespace::synthesized_import(&key, &names, anchor));

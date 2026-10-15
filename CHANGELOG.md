@@ -14,7 +14,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   own speed test now runs 8.3x faster than CPython (1.60 s vs 13.2 s) (v0.3: 1.7x), its suite passing
   (`python3 bench/package_check.py --time`). `--report-fallbacks` lists `specialized:`
   and `not specialized:` functions.
-- Language gaps from v0.3 (v0.4 accept 5, in part): `IntEnum` members are usable where
+- Circular imports between project modules run as in CPython (v0.4 accept 5): a module
+  imported back sees the partially initialized one -- the names it bound before the
+  import -- and `from m import x` of a name `m` has not bound yet raises CPython's
+  `ImportError` with its message. Only the entry module imported back is still refused
+  (`E0108`, now "import cycle through the entry module").
+- Language gaps from v0.3 (v0.4 accept 5): `IntEnum` members are usable where
   an `int` is needed (arithmetic, comparisons, `range()`, indexing, `int` parameters);
   `sorted()`, `min()`, `max()` and `list.sort()` of class instances order by `__lt__`
   (or `__gt__`, or `@dataclass(order=True)`), also with `key=` returning instances and
@@ -38,6 +43,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- A `NameError` for a global of an imported project module read before it is bound
+  names it as written (`name 'LATE' is not defined`), not by the compiler's qualified
+  spelling.
 - Exception objects are freed (v0.4 accept 2): a raised or caught exception, its
   message, `__cause__`, group members and a `StopIteration`'s value are reference counted
   and released with the last reference -- the end of an `except` handler (its `as`

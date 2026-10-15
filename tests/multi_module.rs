@@ -287,14 +287,79 @@ fn rebinding_an_imported_name_is_refused() {
 }
 
 #[test]
-fn a_circular_import_is_refused_with_the_cycle() {
+fn a_circular_import_through_the_entry_module_is_refused_with_the_cycle() {
+    let text = check_fails(&[("a.py", "import main\n"), ("main.py", "import a\n")]);
+    assert!(
+        text.contains("error[E0108]: import cycle through the entry module:"),
+        "{text}"
+    );
+    assert!(text.contains("main.py` -> `"), "{text}");
+}
+
+/// Two modules importing each other (v0.4 accept 5): the second reads the
+/// names the first bound before importing it, at module level and through
+/// `from ... import`, and the rest from its functions, once both finished.
+#[test]
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn a_circular_import_matches_cpython() {
+    native_matches_cpython("cycle", &[]);
+    native_matches_cpython("cycle", &["--non-strict"]);
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_circular_import_matches_cpython_as_an_extension() {
+    ext_matches_cpython("cycle");
+}
+
+/// `from m import x` while the partially initialized `m` has not bound `x`
+/// raises CPython's `ImportError`: for a module next to the entry script
+/// with its "consider renaming" hint, in a package with its "partially
+/// initialized module" message.
+#[test]
+#[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
+fn a_from_import_of_a_name_not_bound_yet_raises_cpython_s_import_error() {
+    for case in ["cycle_error", "cycle_error_pkg"] {
+        native_matches_cpython(case, &[]);
+        native_matches_cpython(case, &["--non-strict"]);
+    }
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_from_import_of_a_name_not_bound_yet_raises_cpython_s_import_error_as_an_extension() {
+    ext_matches_cpython("cycle_error");
+    ext_matches_cpython("cycle_error_pkg");
+}
+
+#[test]
+fn a_module_level_read_of_a_name_a_partial_module_has_not_bound_is_refused() {
     let text = check_fails(&[
-        ("a.py", "import b\n"),
-        ("b.py", "import a\n"),
+        ("a.py", "import b\n\nLATE = 1\n"),
+        ("b.py", "import a\n\nprint(a.LATE)\n"),
         ("main.py", "import a\n"),
     ]);
-    assert!(text.contains("error[E0108]: import cycle:"), "{text}");
-    assert!(text.contains("a.py` -> `"), "{text}");
+    assert!(
+        text.contains(
+            "error[C0001]: `a.LATE` is read while `a` is still running its body (a circular \
+             import) and has not bound `LATE` yet"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_class_of_a_partial_module_is_refused() {
+    let text = check_fails(&[
+        ("a.py", "class Node:\n    pass\n\n\nimport b\n"),
+        (
+            "b.py",
+            "import a\n\n\ndef make() -> int:\n    a.Node()\n    return 1\n",
+        ),
+        ("main.py", "import a\n"),
+    ]);
+    assert!(text.contains("`a.Node` is defined by `"), "{text}");
+    assert!(text.contains("(a circular import)"), "{text}");
 }
 
 #[test]

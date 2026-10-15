@@ -49,7 +49,9 @@ impl Module {
         match annotation {
             Expr::Name(name) => SCALARS.contains(&name.id.as_str()),
             Expr::NoneLiteral(_) => true,
-            Expr::BinOp(op) => self.native_annotation(&op.left) && self.native_annotation(&op.right),
+            Expr::BinOp(op) => {
+                self.native_annotation(&op.left) && self.native_annotation(&op.right)
+            }
             Expr::Subscript(sub) => {
                 matches!(&*sub.value, Expr::Name(name) if matches!(name.id.as_str(), "tuple" | "Optional"))
                     && match &*sub.slice {
@@ -78,7 +80,10 @@ impl Module {
             Expr::BinOp(op) => {
                 self.native_value(&op.left, known) && self.native_value(&op.right, known)
             }
-            Expr::BoolOp(op) => op.values.iter().all(|value| self.native_value(value, known)),
+            Expr::BoolOp(op) => op
+                .values
+                .iter()
+                .all(|value| self.native_value(value, known)),
             Expr::Compare(compare) => {
                 self.native_value(&compare.left, known)
                     && compare
@@ -220,7 +225,10 @@ mod tests {
                       A = 1\nB: float = json.loads('1')\nC = (A + 2, 'x')\n\
                       F = make()\nG = str(json)\nH = A if A else 2\nI, J = 1, 'j'\n\
                       K = J\nL: tuple[int, str | None] = (1, None)\n";
-        assert_eq!(names(source), ["A", "B", "C", "F", "G", "H", "I", "J", "K", "L"]);
+        assert_eq!(
+            names(source),
+            ["A", "B", "C", "F", "G", "H", "I", "J", "K", "L"]
+        );
     }
 
     #[test]

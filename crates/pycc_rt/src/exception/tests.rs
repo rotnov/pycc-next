@@ -566,3 +566,13 @@ fn partition_of_a_non_group_exception_that_does_not_match_leaves_it_in_rest() {
         assert_eq!(std::slice::from_raw_parts((*rest).exceptions, 1), [plain]);
     }
 }
+
+/// A `NameError` names a dependency module's global by its plain name.
+#[test]
+fn a_qualified_global_is_named_by_its_plain_name() {
+    assert_eq!(plain_global_name("0m6config_READY"), "READY");
+    assert_eq!(plain_global_name("0m3pkg3sub_X"), "X");
+    assert_eq!(plain_global_name("0m1a__pycc_global_N"), "_pycc_global_N");
+    assert_eq!(plain_global_name("count"), "count");
+    assert_eq!(plain_global_name("0m9short_X"), "0m9short_X");
+}

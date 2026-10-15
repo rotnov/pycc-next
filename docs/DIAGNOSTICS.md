@@ -69,7 +69,7 @@ Every code: stable forever, documented via `pycc explain`, covered by at least o
 | `E0105` | error | metaclass with non-static side effects |
 | `E0106` | warning→error | `__del__` relies on refcount timing |
 | `E0107` | error | `sys.getrefcount` unavailable |
-| `E0108` | error | import cycle in top-level init, reported as the chain of files that closes it (`import cycle: `a.py` -> `b.py` -> `a.py``), emitted by the driver's project-module loader since #898/D-222 |
+| `E0108` | error | an import cycle through the entry module (a module importing the entry back, which CPython runs as a second copy), reported as the chain of files that closes it (`import cycle through the entry module: `main.py` -> `a.py` -> `main.py``), emitted by the driver's project-module loader; cycles between other modules are supported since v0.4 |
 | `E0109` | error | a name reserved for the compiler's own rewrites -- `__pycc_closure__` or any `_pycc_`-prefixed name -- bound or read in user source, reported by the driver's module loader before desugaring (non-strict mode runs the statements naming one in CPython) |
 | `I0401` | error | untyped value leaks across interop boundary |
 | `I0402` | error | CPython-backed direct import root rejected by the effective `allowlist` or `deny` interop policy (`--pure`, `--interop-policy`, or `[interop]` in `pycc.toml`), reported by `check`, `build` and `run` on every host since #1224 |

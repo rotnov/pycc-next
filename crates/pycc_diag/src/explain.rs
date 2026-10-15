@@ -1389,23 +1389,23 @@ def f(x: object) -> int:
     DiagnosticExplanation {
         code: "E0108",
         severity: Severity::Error,
-        summary: "import cycle in top-level init",
+        summary: "import cycle through the entry module",
         explanation: "\
-E0108 reports a cycle in module-level (top-level) initialization order \
-reached through `import` statements -- two or more modules whose top-level \
-code each depends on the other having already run. Since #898 (D-222) the \
-driver loads a project's whole import closure, so it detects such a cycle \
-while walking it and reports the chain (`import cycle: `a.py` -> `b.py` -> \
-`a.py``) at the import statement that closes it. pycc links the closure \
-into one program and runs every dependency's top level before its \
-importer's, so a cycle has no valid order at all -- unlike CPython, which \
-tolerates some cycles by binding a partially initialized module.",
+E0108 reports a module that imports the program's entry module (the file \
+pycc builds) back, directly or through other modules. CPython runs the \
+entry script as `__main__`, so such an import loads a second copy of it \
+under its own name, running its top level twice; pycc links every module \
+to run once and does not support that. The driver reports the chain \
+(`import cycle through the entry module: `main.py` -> `a.py` -> \
+`main.py``) at the import statement that closes it. A cycle between other \
+modules is supported since v0.4: the module imported back is seen \
+partially initialized, as in CPython.",
         example: "\
-# a.py
-import b
+# main.py (the entry)
+import a
 
-# b.py
-import a  # cycle: a's top level needs b, b's top level needs a
+# a.py
+import main  # a second copy of the entry module in CPython
 ",
     },
     DiagnosticExplanation {

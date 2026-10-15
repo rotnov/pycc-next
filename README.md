@@ -150,9 +150,10 @@ the extension (not attributes of it, and not in `sys.modules`); only the entry m
 own definitions are exported. To ship each module of a package as its own extension,
 build them one by one with `pycc build pkg/mod.py --ext --foreign-relative-imports`:
 their relative imports then bind the other modules through CPython. Imports of anything
-else (the standard library, third-party packages) work as in a single file. A module used
-as a value, an import cycle and a project import inside an `if`/`try` block are compile
-errors; the details are in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
+else (the standard library, third-party packages) work as in a single file. Modules may import
+each other (a circular import sees the partially initialized module, as in CPython). A
+module used as a value, the entry module imported back by its own imports and a project
+import inside an `if`/`try` block are compile errors; the details are in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
 ### A real package, unchanged
 
