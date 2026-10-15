@@ -92,6 +92,7 @@ mod buffer;
 mod float_arith;
 mod range;
 mod str_core;
+mod str_index;
 pub use buffer::*;
 pub use float_arith::*;
 pub use print::{

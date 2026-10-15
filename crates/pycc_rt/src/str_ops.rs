@@ -374,7 +374,7 @@ pub extern "C" fn pycc_rt_str_empty() -> *mut PyStrObj {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_len(s: *mut PyStrObj) -> i64 {
-    tag_smallint(char_len(text_of(s)) as i64)
+    tag_smallint(unsafe { &*s }.char_count() as i64)
 }
 
 #[unsafe(no_mangle)]
@@ -473,9 +473,25 @@ pub extern "C" fn pycc_rt_str_max2(a: *mut PyStrObj, b: *mut PyStrObj) -> *mut P
 /// `s[i]`, raising CPython's `IndexError` out of range.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_getitem(s: *mut PyStrObj, index: i64) -> *mut PyStrObj {
-    let text = text_of(s);
-    let len = char_len(text) as i64;
-    let i = inline_int_value(index).unwrap_or(i64::MAX);
+    let obj = unsafe { &*s };
+    let len = obj.char_count() as i64;
+    // An index beyond `isize` is CPython's own `IndexError`; any other
+    // bigint is out of range of every string.
+    let i = match inline_int_value(index) {
+        Some(i) => i,
+        None => {
+            let (_, magnitude) = to_sign_and_magnitude(index);
+            if magnitude.len() > 2 || (magnitude.len() == 2 && magnitude[1] >= 1 << 31) {
+                raise_builtin(
+                    EXCEPTION_TYPE_INDEX_ERROR,
+                    "IndexError",
+                    "cannot fit 'int' into an index-sized integer",
+                );
+                return new_str("");
+            }
+            i64::MAX
+        }
+    };
     let i = if i < 0 { i + len } else { i };
     if !(0..len).contains(&i) {
         raise_builtin(
@@ -485,11 +501,7 @@ pub extern "C" fn pycc_rt_str_getitem(s: *mut PyStrObj, index: i64) -> *mut PySt
         );
         return new_str("");
     }
-    if text.is_ascii() {
-        return new_pystr(&text.as_bytes()[i as usize..i as usize + 1]);
-    }
-    let c = text.chars().nth(i as usize).expect("index checked in range");
-    new_str(c.encode_utf8(&mut [0; 4]))
+    crate::str_index::char_at(obj, i as usize)
 }
 
 /// Decodes an encoded slice bound, saturating a bigint-valued one.
@@ -515,26 +527,34 @@ pub extern "C" fn pycc_rt_str_slice(
 ) -> *mut PyStrObj {
     let (start, stop, step) = (slice_bound(start), slice_bound(stop), slice_bound(step));
     let present = slice_bound(present);
-    let text = text_of(s);
-    let chars: Vec<char>;
-    let ascii = text.is_ascii();
-    let len = if ascii {
-        text.len()
-    } else {
-        chars = text.chars().collect();
-        chars.len()
-    } as i64;
+    let obj = unsafe { &*s };
+    let len = obj.char_count() as i64;
     let Some(indices) = crate::list::slice_indices(len, start, stop, step, present) else {
         return new_str("");
     };
-    if ascii {
-        let bytes = text.as_bytes();
-        let out: Vec<u8> = indices.map(|i| bytes[i]).collect();
-        return new_pystr(&out);
+    let bytes = obj.bytes();
+    if step == 1 || present & crate::list::SLICE_HAS_STEP == 0 {
+        // A contiguous run of code points: one copy of its bytes.
+        let mut indices = indices;
+        let Some(first) = indices.next() else {
+            return new_str("");
+        };
+        let count = 1 + indices.count();
+        if obj.is_ascii_text() {
+            let out = new_pystr(&bytes[first..first + count]);
+            unsafe { &*out }.chars.set(count as i64);
+            return out;
+        }
+        let (from, to) = (obj.byte_offset(first), obj.byte_offset(first + count));
+        let out = new_pystr(&bytes[from..to]);
+        unsafe { &*out }.chars.set(count as i64);
+        return out;
     }
-    let all: Vec<char> = text.chars().collect();
-    let out: String = indices.map(|i| all[i]).collect();
-    new_str(&out)
+    let mut out: Vec<u8> = Vec::new();
+    for i in indices {
+        out.extend_from_slice(obj.char_bytes(i));
+    }
+    new_pystr(&out)
 }
 
 // ---------------------------------------------------------- split / strip
@@ -671,13 +691,13 @@ pub extern "C" fn pycc_rt_str_count(s: *mut PyStrObj, sub: *mut PyStrObj) -> i64
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_find(s: *mut PyStrObj, sub: *mut PyStrObj) -> i64 {
     let text = text_of(s);
-    tag_smallint(text.find(text_of(sub)).map_or(-1, |b| char_index(text, b)))
+    tag_smallint(text.find(text_of(sub)).map_or(-1, |b| unsafe { &*s }.char_index_of(b) as i64))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_rfind(s: *mut PyStrObj, sub: *mut PyStrObj) -> i64 {
     let text = text_of(s);
-    tag_smallint(text.rfind(text_of(sub)).map_or(-1, |b| char_index(text, b)))
+    tag_smallint(text.rfind(text_of(sub)).map_or(-1, |b| unsafe { &*s }.char_index_of(b) as i64))
 }
 
 fn index_or_raise(found: i64) -> i64 {
@@ -718,8 +738,7 @@ pub extern "C" fn pycc_rt_str_replace(
 /// `needle in haystack`.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_contains(needle: *mut PyStrObj, haystack: *mut PyStrObj) -> i8 {
-    let (needle, haystack) = (bytes_of(needle), bytes_of(haystack));
-    i8::from(needle.is_empty() || haystack.windows(needle.len()).any(|w| w == needle))
+    i8::from(text_of(haystack).contains(text_of(needle)))
 }
 
 #[unsafe(no_mangle)]

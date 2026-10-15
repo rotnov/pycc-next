@@ -35,6 +35,14 @@ pub struct PyStrObj {
     /// caches it the same way, so a dict or set keyed by `str` hashes each
     /// key object once.
     pub(crate) hash: Cell<i64>,
+    /// The number of code points once counted, `-1` before
+    /// (`crate::str_index`): `len(s)`, and whether `s` is all ASCII, are
+    /// then O(1).
+    pub(crate) chars: Cell<i64>,
+    /// For a non-ASCII `str`, the byte offset of every
+    /// `crate::str_index::STRIDE`-th code point, built on the first index
+    /// or slice, so `s[i]` and `s[i:j]` stay O(1) in the string's length.
+    pub(crate) offsets: std::cell::OnceCell<Box<[usize]>>,
 }
 
 impl PyStrObj {
@@ -92,6 +100,8 @@ pub(crate) fn new_pystr(bytes: &[u8]) -> *mut PyStrObj {
         rc: Cell::new(1),
         payload,
         hash: Cell::new(-1),
+        chars: Cell::new(-1),
+        offsets: std::cell::OnceCell::new(),
     }))
 }
 
