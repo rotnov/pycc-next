@@ -1,4 +1,4 @@
-//! A strict `--ext` module's module-level variables and imports as module
+//! A strict `--ext` module's native module-level variables as module
 //! attributes (ROADMAP v0.4 accept 5).
 //!
 //! CPython binds every module global in the module's `__dict__`, so
@@ -8,7 +8,7 @@
 //! `--ext` build does (`crate::fallback`'s mirrors):
 //!
 //! ```text
-//! import sys as __pycc_ext_sys; __pycc_ext_module = __pycc_ext_sys.modules[__name__]
+//! """Doc."""; import sys as __pycc_ext_sys; __pycc_ext_module = __pycc_ext_sys.modules[__name__]
 //! LIMIT = 10; __pycc_ext_module.LIMIT = LIMIT
 //! def grow() -> None:
 //!     global LIMIT
@@ -17,19 +17,32 @@
 //!
 //! CPython puts the extension module in `sys.modules` before its body runs
 //! (PEP 489), so the copy is visible to Python code as soon as the store
-//! runs. A name (other than the compiler's own) bound at module scope by an
-//! assignment, an augmented or annotated assignment or an `import` is
-//! copied, at module scope and in a function declaring it `global`. A name
-//! also bound another way (a `for` or `with` target, `del`, a walrus, a
-//! `match` capture), or whose value the boundary cannot carry (a native
-//! `list`, `dict` or `set`: a copy would not share the object), is left
+//! runs. A name (other than the compiler's own and the module attributes
+//! CPython itself manages) bound at module scope by an assignment, an
+//! augmented or annotated assignment is copied, at module scope and in a
+//! function declaring it `global`, when its value is a native one: the
+//! annotation or one module-level value says so (literals, arithmetic on
+//! them, a call of a function annotated to return one, `str()`/`int()`/
+//! `len()`, ...). A CPython object (an import, a foreign call's result, an
+//! instance or enum member, which cross the boundary as one) is not
+//! copied: CPython's module holds the only reference to a global, and a
+//! second one would be visible (`sys.getrefcount`, when the object is freed). A name also
+//! bound another way (a `for` or `with` target, `del`, a walrus, a `match`
+//! capture), or whose value the boundary cannot carry (a native `list`,
+//! `dict` or `set`: a copy would not share the object), is left
 //! unpublished: the rewrite is compiled, and a name whose copy fails to
 //! compile is dropped and the rewrite compiled again.
+//!
+//! The rewrite adds no line, so every diagnostic keeps its position: the
+//! preamble follows the docstring or `from __future__` imports, or else the
+//! first simple statement, on its line.
 
 use pycc_ast::visitor::{self, Visitor};
 use pycc_ast::{Expr, ExprContext, Stmt};
 use std::collections::BTreeSet;
 use std::ops::Range;
+
+mod native;
 
 /// The `sys` module's name in the rewritten source.
 const SYS: &str = "__pycc_ext_sys";
@@ -42,17 +55,41 @@ pub(crate) struct Rewrite {
     pub(crate) copies: Vec<(Range<u32>, String)>,
 }
 
-/// The public module globals `body` binds with a copyable store, minus
-/// those also bound another way.
+/// Module attributes CPython manages itself, and the PEP 562 hooks the
+/// shim publishes after the body (#1467): never copied.
+const MANAGED: &[&str] = &[
+    "__getattr__",
+    "__dir__",
+    "__name__",
+    "__doc__",
+    "__file__",
+    "__spec__",
+    "__loader__",
+    "__package__",
+    "__path__",
+    "__builtins__",
+    "__dict__",
+    "__class__",
+    "__all__",
+];
+
+/// The public module globals `body` binds with a copyable store and a
+/// native value, minus those also bound another way.
 fn published_names(body: &[Stmt]) -> BTreeSet<String> {
     let mut finder = Bindings::default();
     for stmt in body {
         finder.module_stmt(stmt);
     }
+    let native = native::native_names(body);
     finder
         .simple
         .difference(&finder.other)
-        .filter(|name| !(name.starts_with("__pycc") || pycc_ast::is_reserved_name(name)))
+        .filter(|name| native.contains(*name))
+        .filter(|name| {
+            !(name.starts_with("__pycc")
+                || pycc_ast::is_reserved_name(name)
+                || MANAGED.contains(&name.as_str()))
+        })
         .cloned()
         .collect()
 }
@@ -318,12 +355,13 @@ impl<'a> Visitor<'a> for StoreNames {
 /// The insertion points of the copies: after every simple statement, at
 /// module scope or in a function declaring the name `global`, that binds a
 /// published name.
-fn copy_points(body: &[Stmt], published: &BTreeSet<String>) -> Vec<(u32, String)> {
+/// Each copy's offset and name, and whether it is in a function.
+fn copy_points(body: &[Stmt], published: &BTreeSet<String>) -> Vec<(u32, String, bool)> {
     fn walk(
         stmts: &[Stmt],
         published: &BTreeSet<String>,
         globals: Option<&BTreeSet<String>>,
-        out: &mut Vec<(u32, String)>,
+        out: &mut Vec<(u32, String, bool)>,
     ) {
         for stmt in stmts {
             match stmt {
@@ -346,7 +384,7 @@ fn copy_points(body: &[Stmt], published: &BTreeSet<String>) -> Vec<(u32, String)
                                 None => published.contains(&name),
                             };
                             if visible && seen.insert(name.clone()) {
-                                out.push((end, name));
+                                out.push((end, name, globals.is_some()));
                             }
                         }
                     } else {
@@ -363,6 +401,50 @@ fn copy_points(body: &[Stmt], published: &BTreeSet<String>) -> Vec<(u32, String)
     out
 }
 
+/// Where the preamble goes: the end of the last docstring or `from
+/// __future__` statement, or else of the first simple statement. Only
+/// `def` and `class` statements may precede that one, unless no copy can
+/// run before it (none precedes it, and no function copies); `None` when
+/// there is no such place.
+fn anchor(body: &[Stmt], points: &[(u32, String, bool)]) -> Option<usize> {
+    let prologue = body
+        .iter()
+        .take_while(|stmt| {
+            matches!(stmt, Stmt::Expr(e) if matches!(*e.value, Expr::StringLiteral(_)))
+                || matches!(stmt, Stmt::ImportFrom(i) if i.module.as_deref() == Some("__future__"))
+        })
+        .count();
+    let (position, stmt) = if prologue > 0 {
+        (prologue - 1, &body[prologue - 1])
+    } else {
+        body.iter().enumerate().find(|(_, stmt)| simple_statement(stmt))?
+    };
+    let end = pycc_ast::stmt_range(stmt).end;
+    let only_definitions = body[..position]
+        .iter()
+        .all(|stmt| matches!(stmt, Stmt::FunctionDef(_) | Stmt::ClassDef(_)));
+    let nothing_runs_first = points
+        .iter()
+        .all(|(at, _, in_function)| !in_function && *at >= end);
+    (only_definitions || nothing_runs_first).then_some(end as usize)
+}
+
+/// Whether `stmt` is a simple statement (a preamble can follow it on its
+/// line).
+fn simple_statement(stmt: &Stmt) -> bool {
+    !matches!(
+        stmt,
+        Stmt::FunctionDef(_)
+            | Stmt::ClassDef(_)
+            | Stmt::If(_)
+            | Stmt::While(_)
+            | Stmt::For(_)
+            | Stmt::With(_)
+            | Stmt::Try(_)
+            | Stmt::Match(_)
+    )
+}
+
 /// The rewrite of `source` copying every published global but `dropped`;
 /// `None` when nothing is published (or the source does not parse).
 pub(crate) fn rewrite(source: &str, dropped: &BTreeSet<String>) -> Option<Rewrite> {
@@ -376,23 +458,10 @@ pub(crate) fn rewrite(source: &str, dropped: &BTreeSet<String>) -> Option<Rewrit
         return None;
     }
     let points = copy_points(&body, &published);
-    // The preamble goes before the first statement that is neither the
-    // docstring nor a `from __future__` import, at the start of its line.
-    let first = body
-        .iter()
-        .position(|stmt| {
-            let docstring = matches!(stmt, Stmt::Expr(e) if matches!(*e.value, Expr::StringLiteral(_)));
-            let future = matches!(stmt, Stmt::ImportFrom(i) if i.module.as_deref() == Some("__future__"));
-            !docstring && !future
-        })?;
-    let first_start = pycc_ast::stmt_range(&body[first]).start as usize;
-    let line_start = source[..first_start].rfind('\n').map_or(0, |i| i + 1);
-    let preamble = format!(
-        "import sys as {SYS}; {MODULE} = {SYS}.modules[__name__]\n"
-    );
-    let mut inserts: Vec<(usize, String, Option<String>)> =
-        vec![(line_start, preamble, None)];
-    for (at, name) in points {
+    let anchor = anchor(&body, &points)?;
+    let preamble = format!("; import sys as {SYS}; {MODULE} = {SYS}.modules[__name__]");
+    let mut inserts: Vec<(usize, String, Option<String>)> = vec![(anchor, preamble, None)];
+    for (at, name, _) in points {
         inserts.push((at as usize, format!("; {MODULE}.{name} = {name}"), Some(name)));
     }
     inserts.sort_by_key(|(at, _, _)| *at);
@@ -423,14 +492,36 @@ mod tests {
         let out = super::rewrite(source, &BTreeSet::new()).expect("published");
         assert_eq!(
             out.text,
-            "\"\"\"Doc.\"\"\"\nimport sys as __pycc_ext_sys; __pycc_ext_module = \
-             __pycc_ext_sys.modules[__name__]\nimport json; __pycc_ext_module.json = json\nLIMIT = 10; \
+            "\"\"\"Doc.\"\"\"; import sys as __pycc_ext_sys; __pycc_ext_module = \
+             __pycc_ext_sys.modules[__name__]\nimport json\nLIMIT = 10; \
              __pycc_ext_module.LIMIT = LIMIT\n__version__ = '1'; __pycc_ext_module.__version__ = \
              __version__\nfor i in range(3):\n    pass\n\ndef grow() -> \
              None:\n    global LIMIT\n    LIMIT += 1; __pycc_ext_module.LIMIT = LIMIT\n"
         );
+        assert_eq!(out.text.lines().count(), source.lines().count());
         let names: Vec<&str> = out.copies.iter().map(|(_, n)| n.as_str()).collect();
-        assert_eq!(names, ["json", "LIMIT", "__version__", "LIMIT"]);
+        assert_eq!(names, ["LIMIT", "__version__", "LIMIT"]);
+    }
+
+    #[test]
+    fn the_preamble_follows_the_first_simple_statement_or_nothing_is_published() {
+        let source = "def f() -> int:\n    return 1\n\nX = 1\n";
+        let out = super::rewrite(source, &BTreeSet::new()).expect("published");
+        assert!(
+            out.text.ends_with(
+                "X = 1; import sys as __pycc_ext_sys; __pycc_ext_module = \
+                 __pycc_ext_sys.modules[__name__]; __pycc_ext_module.X = X\n"
+            ),
+            "{}",
+            out.text
+        );
+        // A store inside an `if` before any simple statement could run
+        // before the preamble.
+        let source = "if True:\n    X = 1\nY = 2\n";
+        assert!(super::rewrite(source, &BTreeSet::new()).is_none());
+        // A hook name and a CPython object are never copied.
+        let source = "import m\n__getattr__ = 5\nT = m.Thing()\n";
+        assert!(super::rewrite(source, &BTreeSet::new()).is_none());
     }
 
     #[test]

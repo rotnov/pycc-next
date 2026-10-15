@@ -111,10 +111,10 @@ fn a_strict_ext_module_publishes_its_module_variables() {
         "import v04_ext_globals as m\n\
          from v04_ext_globals import LIMIT, NAME\n\
          print(m.LIMIT, m.RATE, m.NAME, m.FLAGS, m.ENABLED, m.counter, m.pair_a, m.pair_b, m.MODE)\n\
-         print(LIMIT, NAME, m.DEFAULT_BOX.n, m.json.dumps([1]), m._PRIVATE)\n\
+         print(LIMIT, NAME, m._PRIVATE, m.SIZE, m.LEVEL)\n\
          print(m.bump(5), m.counter, m.bump(1), m.counter)\n\
          m.rename('meter')\n\
          print(m.NAME, NAME, m.encoded())\n\
-         print(sorted(k for k in vars(m) if not k.startswith('__') and k not in ('history', 'step', 'Color', 'Enum')))\n",
+         print(sorted(k for k in vars(m) if not k.startswith('__') and k not in ('history', 'step', 'Color', 'Enum', 'json', 'Box', 'DEFAULT_BOX', 'SHADE')))\n",
     );
 }

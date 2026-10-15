@@ -1,4 +1,8 @@
-"""Module-level variables of a strict `--ext` module are attributes."""
+"""Module-level variables of a strict `--ext` module are attributes.
+
+`json`, a CPython module, and `DEFAULT_BOX`/`SHADE`, which cross the boundary
+as CPython objects, are not published: see `docs/DEVIATIONS.md`.
+"""
 
 import json
 from enum import Enum
@@ -18,12 +22,19 @@ class Color(Enum):
     RED = 1
 
 
+def level() -> int:
+    return LIMIT // 3
+
+
 class Box:
     def __init__(self, n: int) -> None:
         self.n = n
 
 
 DEFAULT_BOX = Box(5)
+SHADE = Color.RED
+SIZE = len(NAME) * 2
+LEVEL = level()
 if LIMIT > 5:
     MODE = "wide"
 else:

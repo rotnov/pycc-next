@@ -817,7 +817,13 @@ pub(crate) fn with_fallback<T, E>(
         }
         // Strict mode: Python code reads the module's variables, which a
         // rewrite copies onto the module object (`crate::ext_globals`).
-        Ok(_) if publishes.variables && !crate::mode::non_strict_for(path) => {
+        // Not under `--foreign-relative-imports`: the artifact is imported
+        // under a dotted name its `__name__` may not spell.
+        Ok(_)
+            if publishes.variables
+                && !publishes.foreign_relative_imports
+                && !crate::mode::non_strict_for(path) =>
+        {
             return publish_strict(path, first, &attempt, &split);
         }
         Ok(_) => return first,
