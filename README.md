@@ -182,8 +182,9 @@ A package `__init__.py` builds to `pkg/__init__.abi3.so`, imported as the packag
 function and method of the package compiles (`--report-fallbacks` reports none; the
 `__init__`'s re-exporting imports also run as CPython imports). Its untyped text
 functions run natively on `str` (guarded native specializations, see Modes): the
-package's own speed test (`diff_main` on two ~30 KB texts) takes 1.60 s compiled
-against 13.2 s in CPython (**8.3x faster**, best of 5; v0.3 was 1.7x).
+package's own speed test (`diff_main` on two ~30 KB texts) takes 1.03 s compiled
+against 12.3 s in CPython (**12x faster**, best of 5; 11x-13x over repeated runs;
+v0.3 was 1.7x).
 
 tomli is typed code written for mypyc (`from __future__ import annotations`, aliases
 imported only under `if TYPE_CHECKING:`, `Final` constants, frozenset tables,
@@ -194,12 +195,19 @@ functions compile; 4 run in CPython (`--report-fallbacks`: the exception class, 
 helper). A function whose
 signature the boundary cannot carry (a `tuple[int, str]` result, a `frozenset`
 parameter) is compiled for the module's own callers and runs in CPython only when Python
-calls it (`twin:` in the report). `loads()` of tomli's benchmark document runs at
-CPython's speed, not faster yet (0.87x-1.10x over repeated runs of 100 calls; it was
-0.40x before the work above): the parsing tables are native frozensets and the text is
-scanned natively, but its documents (`dict[str, Any]`), keys (`tuple[str, ...]`) and
-regular-expression matches are CPython objects that every step reaches through the C
-API, and each of its modules calls the others through CPython.
+calls it (`twin:` in the report). `loads()` of tomli's benchmark document runs
+**1.6x faster** than in CPython: `python3 bench/package_check.py tomli --time --runs 15`
+times 100 calls, best of 15 runs for each side on the same machine, and measured
+0.036 s compiled against 0.059 s (1.52x-1.75x over seven such runs; 2.60M against
+4.51M instructions per call under callgrind; it was 0.40x before the work above).
+What it takes: the parsing tables are native frozensets and the text is scanned
+natively (`while src[pos] in chars: pos += 1` is one scan); a function returning
+`pos, value` hands both back without a tuple, its callers unpacking them directly
+(multi-value returns); a `str | None` local stays a native `str`; an object compared
+with a `str` literal, or tested against a frozenset of `str`, is compared by its
+bytes. Its documents (`dict[str, Any]`), keys (`tuple[str, ...]`) and
+regular-expression matches are still CPython objects that every step reaches through
+the C API, and each of its modules calls the others through CPython.
 
 ## Modes
 

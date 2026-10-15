@@ -11,7 +11,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   parameters are typed `str` or `int` from how its body uses them, called when the
   arguments are exactly those types (any other call runs on the CPython objects as
   before; a copy the checker refuses is dropped, never fallen back). diff-match-patch's
-  own speed test now runs 8.3x faster than CPython (1.60 s vs 13.2 s) (v0.3: 1.7x), its suite passing
+  own speed test now runs 12x faster than CPython (1.03 s vs 12.3 s) (v0.3: 1.7x), its suite passing
   (`python3 bench/package_check.py --time`). `--report-fallbacks` lists `specialized:`
   and `not specialized:` functions.
 - A second real package (v0.4 accept 4): `bench/package_check.py` is a table of pinned
@@ -19,8 +19,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `tomllib` comes from; GitHub tag archive pinned by its sha256 and that of the files used). Its
   four modules build unchanged with `--ext --non-strict --foreign-relative-imports`, its
   own test suite passes against them (CI) and 36 of 40 functions compile; `loads()` runs
-  at CPython's speed (0.87x-1.10x; was 0.40x), not faster yet, so the accept item stays
-  open. What typed packages written for mypyc needed:
+  1.6x faster than in CPython (`python3 bench/package_check.py tomli --time --runs 15`,
+  best of 15 runs of 100 calls on one machine: 0.036 s vs 0.059 s, 1.52x-1.75x over seven
+  runs; was 0.40x). What typed packages written for mypyc needed:
   - `from __future__ import annotations`: an annotation pycc cannot lower is erased
     instead of making its statement fall back, and fallback code is compiled with the
     flag; names imported under `if TYPE_CHECKING:` from a sibling module that are
@@ -44,6 +45,38 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
     tuple display returned as `tuple[...]`, an object in a native frozenset, a `try`
     and its handler binding a name with two types, `Callable[...]`, `Iterable[...]`
     and `tuple[X, ...]` annotations as objects, `self.x = {}` as an object attribute.
+- Faster code around CPython objects and tuples (v0.4 accept 4):
+  - Multi-value returns: a function whose every `return` is a tuple display of one
+    arity, or forwards another such function, gets a compiled twin that returns the
+    values without a tuple, and a caller that unpacks the call (`pos, value = f(...)`)
+    calls it -- no CPython tuple (nor pycc tuple, for a native `tuple[int, str]`) is
+    built, unpacked and freed. Result types are what the returns agree on, an object
+    where they differ; the function itself serves every other use, and a call whose
+    name may be rebound runs it (`tests/multi_return.rs`).
+  - `a, b = x, y` with object values binds the targets without building two tuples
+    (`tests/object_swap_unpack.rs`).
+  - Non-strict: a `str | None` local bound only to native `str` values and `None`
+    (`char: str | None = src[pos]` under postponed annotations) stays a native `str`,
+    null standing for `None`; its literal comparisons, `frozenset[str]` membership and
+    `is None` tests are native and any other use sees the object it stands for
+    (`tests/optional_str_local.rs`).
+  - `while s[i] in chars: i += 1` (or `not in`) over a set of `str` is one scan of the
+    text, the `IndexError` of running off either end raised as the loop raises it
+    (`tests/str_scan_loop.rs`).
+  - In a condition, an object compared with a `str` literal, or tested against a native
+    frozenset of `str`, is compared by its UTF-8 bytes when it is an exact `str`, with
+    no `str` made for the literal and no CPython copy of the set; anything else takes
+    CPython's own operation (`tests/object_text_compare.rs`).
+  - Non-strict object operations take shorter paths: `o[i]` and `o[a:b]` with native
+    `int` keys read an exact tuple or list directly, a tuple display of objects is
+    built as a tuple, `o.m(args)` with literal or parameter arguments is one
+    `PyObject_VectorcallMethod`, a rich comparison in an `if`/`while` answers a native
+    `bool` (two exact `str` operands are compared without a result object), and
+    `isinstance` of a plain built-in value skips the `__class__` lookup
+    (`tests/object_fast_paths.rs`).
+  - A string literal reads its site's cached, immortal `str` with no call; freeing a
+    list or an instance no longer allocates; error paths are laid out of line; the
+    runtime builds as one codegen unit.
 - Crossing to CPython is cheaper: a native `str` or frozenset converted to a CPython
   object keeps that object and shares it on its next crossing (a `str` a Python caller
   passed in shares the caller's); `str` literals are built once per site; attribute
@@ -123,6 +156,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- An empty `frozenset()` was always `frozenset[int]`, so `frozenset("") == frozenset()`
+  answered `False`: it is now typed by its uses, like `set()` (an equality, a set
+  operator or a membership test with a typed set, or `frozenset(x)`'s argument)
+  (`tests/empty_frozenset.rs`).
 - Implicit concatenation of plain string literals and f-strings
   (`"allowed" f" {n} levels"`) dropped the plain parts.
 - A method call on an imported module (`m.set(...)`, `builtins.set()`) was bound to the

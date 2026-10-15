@@ -137,11 +137,20 @@ Accept:
 4. **A second real package:** another pinned, permissively licensed pure-Python PyPI
    package from a different domain builds unchanged with `--ext --non-strict`, passes its
    own test suite (CI-gated) and is measurably faster than CPython on its hot path.
-   **Partly met 2026-10-15:** tomli 2.5.0 (MIT, the TOML parser) builds unchanged and its
-   own suite passes against the compiled modules (`python3 bench/package_check.py tomli`,
-   CI-gated with diff-match-patch); 36 of its 40 functions compile. Open: `loads()` of its
-   benchmark document runs at CPython's speed (0.87x-1.10x, was 0.40x), not measurably
-   faster -- its documents, keys and regular-expression matches are CPython objects.
+   **Met 2026-10-15:** tomli 2.5.0 (MIT, the TOML parser) builds unchanged and its own
+   suite passes against the compiled modules (`python3 bench/package_check.py tomli`,
+   CI-gated with diff-match-patch); 36 of its 40 functions compile. `loads()` of its
+   benchmark document runs 1.6x faster than CPython: `python3 bench/package_check.py
+   tomli --time --runs 15` (100 calls, best of 15 runs for each side, on one machine)
+   measured 0.036 s against 0.059 s, 1.52x-1.75x over seven runs; callgrind counts 2.60M
+   against 4.51M instructions per call (was 0.40x). The work: multi-value returns
+   (`tests/multi_return.rs`), tuple-free `a, b = x, y` (`tests/object_swap_unpack.rs`),
+   native `str | None` locals (`tests/optional_str_local.rs`), one-call scans
+   (`tests/str_scan_loop.rs`), byte comparisons of objects with `str` literals and str
+   sets (`tests/object_text_compare.rs`) and shorter object paths
+   (`tests/object_fast_paths.rs`), each oracle-tested native and `--ext` with a leak
+   probe; diff-match-patch stays 11x-13x. Its documents, keys and regular-expression
+   matches are still CPython objects.
 5. **Language gaps from v0.3:** circular imports behave as in CPython; strict `--ext`
    modules expose module-level variables; `IntEnum` members are usable as `int`;
    `sorted()`/`min()`/`max()`/`.sort()` and set membership of class instances;
