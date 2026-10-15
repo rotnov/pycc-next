@@ -350,8 +350,8 @@ fn a_method_call_holds_its_bound_method_and_its_produced_argument() {
     );
 }
 
-/// `copy.a.m()`: a produced receiver is released once the lookup is done
-/// and on the lookup's own failure edge.
+/// `copy.a.m(1 + 2)`: a produced receiver is released once the lookup is
+/// done and on the lookup's own failure edge.
 #[test]
 fn a_method_call_releases_a_produced_receiver_after_the_lookup() {
     let ir = discard_ir(
@@ -359,13 +359,36 @@ fn a_method_call_releases_a_produced_receiver_after_the_lookup() {
         MirExpr::ObjMethodCall {
             base: boxed(attr("a")),
             method: "m".to_string(),
-            args: Vec::new(),
+            args: vec![MirExpr::BinOp {
+                op: pycc_mir::BinOpKind::Add,
+                left: Box::new(MirExpr::IntLiteral(1)),
+                right: Box::new(MirExpr::IntLiteral(2)),
+                ty: Ty::Int,
+            }],
         },
     );
     let lookup = blocks(&ir, "foreign_call_lookup_fail");
     assert_eq!(releases(lookup[0]), 1, "{ir}");
     let call = blocks(&ir, "foreign_call_fail");
     assert_eq!(releases(call[0]), 0, "the receiver is gone already: {ir}");
+}
+
+/// `copy.a.m()`: with no argument to evaluate the method is called in one
+/// step, so the produced receiver is held across that call and released on
+/// its failure edge, and no lookup edge exists.
+#[test]
+fn an_inert_method_call_holds_a_produced_receiver_across_the_call() {
+    let ir = discard_ir(
+        "release_method_receiver_inert",
+        MirExpr::ObjMethodCall {
+            base: boxed(attr("a")),
+            method: "m".to_string(),
+            args: Vec::new(),
+        },
+    );
+    assert!(blocks(&ir, "foreign_call_lookup_fail").is_empty(), "{ir}");
+    let call = blocks(&ir, "foreign_call_fail");
+    assert_eq!(releases(call[0]), 1, "the held receiver: {ir}");
 }
 
 /// Module-global operands only: the receiver is pinned across the lookup

@@ -2,6 +2,41 @@
 
 use super::*;
 
+/// The `i1` an `if`/`while` branches on: the test's truth. A rich
+/// comparison with an object operand answers it in one call
+/// (`object_expr::emit_obj_compare_condition`); anything else is evaluated
+/// and tested.
+fn emit_condition<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    test: &MirExpr,
+) -> inkwell::values::IntValue<'ctx> {
+    if let Some(cond) = crate::expr::object_expr::emit_obj_compare_condition(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        test,
+    ) {
+        return cond;
+    }
+    let scalar = emit_expr(context, builder, module, rt, user_functions, locals, test);
+    let held = object_release::hold(context, module, rt, test, &scalar);
+    let cond = truthy(context, builder, module, rt, scalar);
+    held.release(builder, rt);
+    // #146 Part 2 (D-181): released *after* `truthy`, which
+    // reads a bigint operand's limbs -- releasing first could
+    // free the very word being tested.
+    release_scalar_if_temporary(context, builder, rt, test, &scalar);
+    cond
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_if_stmt<'ctx>(
     context: &'ctx Context,
@@ -18,17 +53,7 @@ pub(crate) fn emit_if_stmt<'ctx>(
         unreachable!()
     };
     let function = builder.get_insert_block().unwrap().get_parent().unwrap();
-    let cond = {
-        let scalar = emit_expr(context, builder, module, rt, user_functions, locals, test);
-        let held = object_release::hold(context, module, rt, test, &scalar);
-        let cond = truthy(context, builder, module, rt, scalar);
-        held.release(builder, rt);
-        // #146 Part 2 (D-181): released *after* `truthy`, which
-        // reads a bigint operand's limbs -- releasing first could
-        // free the very word being tested.
-        release_scalar_if_temporary(context, builder, rt, test, &scalar);
-        cond
-    };
+    let cond = emit_condition(context, builder, module, rt, user_functions, locals, test);
     let then_bb = context.append_basic_block(function, "if_then");
     let merge_bb = context.append_basic_block(function, "if_merge");
     let else_bb = if orelse.is_empty() {
@@ -105,17 +130,7 @@ pub(crate) fn emit_while_stmt<'ctx>(
         .build_unconditional_branch(test_bb)
         .expect("build_unconditional_branch should not fail entering the loop test");
     builder.position_at_end(test_bb);
-    let cond = {
-        let scalar = emit_expr(context, builder, module, rt, user_functions, locals, test);
-        let held = object_release::hold(context, module, rt, test, &scalar);
-        let cond = truthy(context, builder, module, rt, scalar);
-        held.release(builder, rt);
-        // #146 Part 2 (D-181): released *after* `truthy`, which
-        // reads a bigint operand's limbs -- releasing first could
-        // free the very word being tested.
-        release_scalar_if_temporary(context, builder, rt, test, &scalar);
-        cond
-    };
+    let cond = emit_condition(context, builder, module, rt, user_functions, locals, test);
     builder
         .build_conditional_branch(cond, body_bb, after_bb)
         .expect("build_conditional_branch should not fail for a well-formed i1 condition");

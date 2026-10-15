@@ -158,6 +158,13 @@ pub(super) fn emit_slice<'ctx>(
     bounds: [Option<Scalar<'ctx>>; 3],
 ) -> Scalar<'ctx> {
     let edge = ForeignFailEdge::for_current(builder);
+    if bounds[2].is_none()
+        && bounds[..2]
+            .iter()
+            .all(|bound| matches!(bound, None | Some(Scalar::Int(_))))
+    {
+        return emit_int_slice(context, builder, module, rt, edge, base, bounds);
+    }
     let args = slice_arguments(context, builder, module, base, bounds);
     let getslice = slice_helper(context, module, EXT_OBJ_GETSLICE_SYMBOL, false);
     let result = builder
@@ -165,6 +172,54 @@ pub(super) fn emit_slice<'ctx>(
         .expect("build_call should not fail for pycc_ext_obj_getslice")
         .try_as_basic_value()
         .expect_basic("pycc_ext_obj_getslice returns PyObject *")
+        .into_pointer_value();
+    route_null(context, builder, module, rt, edge, result, "foreign_slice");
+    Scalar::Object(result)
+}
+
+/// [`emit_slice`] when every present bound is a native `int` and there is no
+/// step: the words go to `pycc_ext_obj_getslice_int` unpacked.
+fn emit_int_slice<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    edge: ForeignFailEdge<'ctx>,
+    base: Scalar<'ctx>,
+    bounds: [Option<Scalar<'ctx>>; 3],
+) -> Scalar<'ctx> {
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_type = context.i64_type();
+    let mut present = 0u64;
+    let mut args: Vec<BasicMetadataValueEnum<'ctx>> = vec![expect_object_pointer(base).into()];
+    for (bit, bound) in bounds[..2].iter().enumerate() {
+        match bound {
+            Some(Scalar::Int(word)) => {
+                present |= 1 << bit;
+                args.push((*word).into());
+            }
+            _ => args.push(i64_type.const_zero().into()),
+        }
+    }
+    args.push(context.i32_type().const_int(present, false).into());
+    let getslice = shim_fn(
+        module,
+        crate::ext::EXT_OBJ_GETSLICE_INT_SYMBOL,
+        ptr.fn_type(
+            &[
+                ptr.into(),
+                i64_type.into(),
+                i64_type.into(),
+                context.i32_type().into(),
+            ],
+            false,
+        ),
+    );
+    let result = builder
+        .build_call(getslice, &args, "foreign_slice")
+        .expect("build_call should not fail for pycc_ext_obj_getslice_int")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_getslice_int returns PyObject *")
         .into_pointer_value();
     route_null(context, builder, module, rt, edge, result, "foreign_slice");
     Scalar::Object(result)

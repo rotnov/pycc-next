@@ -468,15 +468,8 @@ pub(super) fn guard_statement_effects<'ctx>(
         .last()
         .copied()
         .expect("expression emission always has an installed exception target");
-    let active = crate::int_fast::emit_exception_pending(context, builder, rt, "effect_exc_active");
-    let has_exc = builder
-        .build_int_compare(
-            inkwell::IntPredicate::NE,
-            active,
-            context.i8_type().const_zero(),
-            "effect_has_exc",
-        )
-        .expect("build_int_compare should not fail");
+    let has_exc =
+        crate::int_fast::emit_exception_pending_test(context, builder, rt, "effect_has_exc");
     let function = builder.get_insert_block().unwrap().get_parent().unwrap();
     let continuation = context.append_basic_block(function, "effect_exc_cont");
     // Part 1 of #1092: a held object temporary needs the unwind block

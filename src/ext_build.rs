@@ -50,6 +50,7 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/boundary.c"),
     include_str!("ext/module/import_io.c"),
     include_str!("ext/module/object_ops.c"),
+    include_str!("ext/module/object_index.c"),
     include_str!("ext/module/object_convert.c"),
     include_str!("ext/module/object_stdlib.c"),
     include_str!("ext/module/ndarray.c"),

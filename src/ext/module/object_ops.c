@@ -89,6 +89,58 @@ PyObject *pycc_ext_obj_getattr(PyObject *obj, const char *name)
 }
 
 /*
+ * `self.name(args)` as one call (`EXT_OBJ_CALL_METHOD_SYMBOL` in
+ * `crates/pycc_codegen/src/ext.rs`): `PyObject_VectorcallMethod`, which
+ * finds a method on the type and calls it with `self` without making a
+ * bound method -- what CPython's own `LOAD_ATTR`/`CALL` pair does -- and
+ * otherwise calls whatever attribute the lookup finds. The lookup runs
+ * after the arguments were evaluated, so compiled code uses this only when
+ * evaluating them can neither raise nor run code (literals and parameter
+ * reads), where the two orders cannot be told apart.
+ *
+ * `self` is borrowed; every `args[i]` is consumed on every path, as for
+ * `pycc_ext_obj_call`. Returns a new reference or `NULL` with the exception
+ * set.
+ */
+#define PYCC_EXT_METHOD_STACK 8
+PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **args,
+                                   long long nargs)
+{
+    PyObject *stack[PYCC_EXT_METHOD_STACK + 1];
+    PyObject *attr_name;
+    PyObject *bound;
+    PyObject *result = NULL;
+    long long i;
+    int packed = 1;
+
+    for (i = 0; i < nargs; i++) {
+        if (args[i] == NULL) {
+            packed = 0;
+        }
+    }
+    if (self != NULL && packed) {
+        attr_name = pycc_ext_attr_name(name);
+        if (attr_name != NULL && nargs <= PYCC_EXT_METHOD_STACK) {
+            stack[0] = self;
+            for (i = 0; i < nargs; i++) {
+                stack[i + 1] = args[i];
+            }
+            result = PyObject_VectorcallMethod(attr_name, stack, (size_t)(nargs + 1), NULL);
+        } else if (attr_name != NULL) {
+            bound = PyObject_GetAttr(self, attr_name);
+            if (bound != NULL) {
+                result = PyObject_Vectorcall(bound, args, (size_t)nargs, NULL);
+                Py_DECREF(bound);
+            }
+        }
+    }
+    for (i = 0; i < nargs; i++) {
+        Py_XDECREF(args[i]);
+    }
+    return result;
+}
+
+/*
  * Part 2 of #1026, PR 2b of #1081: argument marshalling for
  * `pycc_ext_obj_call` below.
  *
@@ -527,44 +579,6 @@ static void pycc_ext_obj_release_hook(void *o)
 }
 
 /*
- * Part 3 of #1026 (PR 3b of #1082): `o[k]` on a CPython object value
- * (`EXT_OBJ_GETITEM_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
- *
- * `o` is borrowed, exactly as `pycc_ext_obj_getattr` borrows its own base.
- * `k` is an *owned* reference produced by one of the `pycc_ext_obj_pack_*`
- * helpers above, and this function releases it on every path -- the same
- * arg-slot contract `pycc_ext_obj_call` imposes on the values those helpers
- * produce. Keeping one rule for every packed value is the point: generated
- * code creates a packed reference and hands it to a shim helper, and the
- * shim helper is what releases it, so codegen never has to.
- *
- * The result is a *new* reference, owned as `pycc_ext_obj_call`'s result
- * is (released when an unbound temporary, Part 1 of #1092) --
- * `PyObject_GetItem` hands back a new reference exactly as
- * `PyObject_GetAttrString` does, and the result is the only thing that
- * escapes into compiled code as an `object` value.
- *
- * A NULL `k` means the packer already failed with a CPython exception set.
- * Testing for that here rather than in LLVM
- * keeps the emitted code one straight line for the key and leaves the whole
- * operation with one failure edge instead of two, which is the identical
- * argument `pycc_ext_obj_call`'s own NULL scan records. A NULL `o` is
- * defence in depth: `PyObject_GetItem` dereferences `Py_TYPE(o)` with no
- * guard of its own, and the caller's own NULL check already routed a failed
- * producer to the foreign failure edge with its exception set, so
- * returning NULL without setting a second one leaves exactly one exception
- * pending.
- */
-PyObject *pycc_ext_obj_getitem(PyObject *o, PyObject *k)
-{
-    PyObject *result;
-
-    result = (o == NULL || k == NULL) ? NULL : PyObject_GetItem(o, k);
-    Py_XDECREF(k);
-    return result;
-}
-
-/*
  * Part 1 of #1371: `l op r` where at least one operand is a CPython object
  * (`EXT_OBJ_RICHCOMPARE_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
  *
@@ -594,6 +608,62 @@ PyObject *pycc_ext_obj_richcompare(PyObject *l, PyObject *r, int op, int owned)
         Py_XDECREF(r);
     }
     return result;
+}
+
+/*
+ * `bool(l op r)` for a rich comparison in a truth context, `if o == "x":`
+ * (`EXT_OBJ_COMPARE_BOOL_SYMBOL` in `crates/pycc_codegen/src/ext.rs`):
+ * `pycc_ext_obj_richcompare` followed by `PyObject_IsTrue` of its result,
+ * in one call. Two exact `str` operands are compared by
+ * `PyUnicode_Compare`, which orders code points as `str`'s own comparison
+ * does, so no result object is made. The operands follow
+ * `pycc_ext_obj_richcompare`'s `owned` contract. Returns 1 or 0, or -1 with
+ * the exception set.
+ */
+int pycc_ext_obj_compare_bool(PyObject *l, PyObject *r, int op, int owned)
+{
+    PyObject *result;
+    int status = -1;
+    int order;
+
+    if (l != NULL && r != NULL) {
+        if (PyUnicode_CheckExact(l) && PyUnicode_CheckExact(r)) {
+            order = (l == r) ? 0 : PyUnicode_Compare(l, r);
+            switch (op) {
+            case Py_LT:
+                status = order < 0;
+                break;
+            case Py_LE:
+                status = order <= 0;
+                break;
+            case Py_EQ:
+                status = order == 0;
+                break;
+            case Py_NE:
+                status = order != 0;
+                break;
+            case Py_GT:
+                status = order > 0;
+                break;
+            default:
+                status = order >= 0;
+                break;
+            }
+        } else {
+            result = PyObject_RichCompare(l, r, op);
+            if (result != NULL) {
+                status = PyObject_IsTrue(result);
+                Py_DECREF(result);
+            }
+        }
+    }
+    if (owned & 1) {
+        Py_XDECREF(l);
+    }
+    if (owned & 2) {
+        Py_XDECREF(r);
+    }
+    return status;
 }
 
 /*
@@ -629,6 +699,56 @@ PyObject *pycc_ext_obj_not_implemented(void)
  * `cls` that is not a class, and propagates a raising
  * `__instancecheck__`).
  */
+/*
+ * Whether `type` is one of the built-in types whose instances' `__class__`
+ * is their type and cannot be overridden: an exact `dict`, `list`, `tuple`,
+ * `str`, `int`, `float`, `bool`, `set`, `frozenset` or `None`.
+ */
+static int pycc_ext_plain_builtin(PyTypeObject *type)
+{
+    return type == &PyDict_Type || type == &PyList_Type || type == &PyTuple_Type
+           || type == &PyUnicode_Type || type == &PyLong_Type || type == &PyFloat_Type
+           || type == &PyBool_Type || type == &PySet_Type || type == &PyFrozenSet_Type
+           || (PyObject *)type == (PyObject *)Py_TYPE(Py_None);
+}
+
+/*
+ * `isinstance(o, cls)`: `PyObject_IsInstance`, answered directly when `o` is
+ * an instance of a plain built-in type and `cls` is a class whose own type
+ * is `type` (no `__instancecheck__` of a metaclass), or a tuple of such
+ * classes. That is the answer `PyObject_IsInstance` reaches too: the type
+ * test, and for a miss a `__class__` lookup that for these objects names
+ * the same type again.
+ */
+static int pycc_ext_isinstance(PyObject *o, PyObject *cls)
+{
+    Py_ssize_t i;
+    Py_ssize_t n;
+    PyObject *item;
+
+    if (pycc_ext_plain_builtin(Py_TYPE(o))) {
+        if (PyType_CheckExact(cls)) {
+            return PyType_IsSubtype(Py_TYPE(o), (PyTypeObject *)cls);
+        }
+        if (PyTuple_CheckExact(cls)) {
+            n = PyTuple_Size(cls);
+            for (i = 0; i < n; i++) {
+                item = PyTuple_GetItem(cls, i);
+                if (item == NULL || !PyType_CheckExact(item)) {
+                    break;
+                }
+                if (PyType_IsSubtype(Py_TYPE(o), (PyTypeObject *)item)) {
+                    return 1;
+                }
+            }
+            if (i == n) {
+                return 0;
+            }
+        }
+    }
+    return PyObject_IsInstance(o, cls);
+}
+
 int pycc_ext_obj_isinstance(PyObject *o, PyObject *cls, int builtin)
 {
     if (cls == NULL) {
@@ -664,7 +784,7 @@ int pycc_ext_obj_isinstance(PyObject *o, PyObject *cls, int builtin)
         PyErr_SetString(PyExc_SystemError, "pycc_ext_obj_isinstance: NULL operand");
         return -1;
     }
-    return PyObject_IsInstance(o, cls);
+    return pycc_ext_isinstance(o, cls);
 }
 
 /*
@@ -688,94 +808,6 @@ static int pycc_ext_unpublished_class_isinstance(PyObject *o)
     }
     Py_XDECREF(cls);
     return 0;
-}
-
-/*
- * Part 2b of #1371: `item in container` with a CPython object container
- * (`EXT_OBJ_CONTAINS_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
- *
- * `PySequence_Contains` is CPython's own `in`: `__contains__`, then
- * iteration, then the old `__getitem__` protocol, raising `TypeError` when
- * the container supports none of them. Returns 1, 0, or -1 with the
- * exception set; compiled code flips the answer for `not in`.
- *
- * The container is borrowed. The item is always a packed value -- an
- * object item too, through `pycc_ext_obj_pack_object`'s new reference -- and
- * is consumed on every path, a `NULL` one included, exactly as
- * `pycc_ext_obj_getitem` consumes its packed key: a `NULL` item is a failed
- * packer whose exception is already set. A `NULL` container is defence in
- * depth for the reason `pycc_ext_obj_getitem` records.
- */
-int pycc_ext_obj_contains(PyObject *container, PyObject *item)
-{
-    int result;
-
-    result = (container == NULL || item == NULL) ? -1 : PySequence_Contains(container, item);
-    Py_XDECREF(item);
-    return result;
-}
-
-/*
- * Parts 2b and 2c of #1371: builds the `slice` object for `o[start:stop:step]`
- * and `del o[start:stop:step]`, the shared half of `pycc_ext_obj_getslice`
- * and `pycc_ext_obj_delslice`.
- *
- * `present` says which bounds the source spelled (bit 0 start, bit 1 stop,
- * bit 2 step). A present bound is a packed value, consumed here on every
- * path -- a `NULL` one included, which is a failed packer whose exception is
- * already set -- and an absent bound's pointer is ignored
- * and handed to `PySlice_New` as `NULL`, which it reads as `None`, the
- * value CPython's own `o[:b]` builds. A `NULL` base is defence in depth for
- * the reason `pycc_ext_obj_getitem` records. Returns a new reference to the
- * slice, or `NULL` with the exception set (or, for a `NULL` base, with
- * whatever exception produced it).
- */
-static PyObject *pycc_ext_obj_slice_of(PyObject *o, PyObject *start, PyObject *stop,
-                                       PyObject *step, int present)
-{
-    PyObject *bounds[3];
-    PyObject *slice = NULL;
-    int failed = (o == NULL);
-    int i;
-
-    bounds[0] = (present & 1) ? start : NULL;
-    bounds[1] = (present & 2) ? stop : NULL;
-    bounds[2] = (present & 4) ? step : NULL;
-    for (i = 0; i < 3; i++) {
-        if ((present & (1 << i)) && bounds[i] == NULL) {
-            failed = 1;
-        }
-    }
-    if (!failed) {
-        slice = PySlice_New(bounds[0], bounds[1], bounds[2]);
-    }
-    for (i = 0; i < 3; i++) {
-        Py_XDECREF(bounds[i]);
-    }
-    return slice;
-}
-
-/*
- * Part 2b of #1371: `o[start:stop:step]` with a CPython object `o`
- * (`EXT_OBJ_GETSLICE_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
- *
- * The bounds follow `pycc_ext_obj_slice_of`'s contract, and the base is
- * borrowed. The `slice` object is released after the load. The result is a
- * *new* reference, owned as `pycc_ext_obj_call`'s result is (released when
- * an unbound temporary, Part 1 of #1092), or `NULL` with the exception set.
- */
-PyObject *pycc_ext_obj_getslice(PyObject *o, PyObject *start, PyObject *stop, PyObject *step,
-                                int present)
-{
-    PyObject *slice = pycc_ext_obj_slice_of(o, start, stop, step, present);
-    PyObject *result;
-
-    if (slice == NULL) {
-        return NULL;
-    }
-    result = PyObject_GetItem(o, slice);
-    Py_DECREF(slice);
-    return result;
 }
 
 /*
@@ -825,60 +857,6 @@ PyObject *pycc_ext_obj_build_list(PyObject **items, long long n)
         }
     }
     return list;
-}
-
-/*
- * Part 2c of #1371: `del o[start:stop:step]` with a CPython object `o`
- * (`EXT_OBJ_DELSLICE_SYMBOL` in `crates/pycc_codegen/src/ext.rs`), the
- * statement twin of `pycc_ext_obj_getslice`.
- *
- * The bounds follow `pycc_ext_obj_slice_of`'s contract, and the base is
- * borrowed. `PyObject_DelItem` runs the base's own `__delitem__` with the
- * `slice`, which is released afterwards; nothing else outlives the call.
- * Returns `0`, or `-1` with the exception set: a `tuple` raises
- * `TypeError`, and a `dict` raises `KeyError` for the (hashable since
- * 3.12) slice key, exactly as CPython's own `del` does.
- */
-int pycc_ext_obj_delslice(PyObject *o, PyObject *start, PyObject *stop, PyObject *step,
-                          int present)
-{
-    PyObject *slice = pycc_ext_obj_slice_of(o, start, stop, step, present);
-    int status;
-
-    if (slice == NULL) {
-        return -1;
-    }
-    status = PyObject_DelItem(o, slice);
-    Py_DECREF(slice);
-    return status;
-}
-
-/*
- * Non-strict mode (#3): `o[start:stop:step] = value` with a CPython object
- * `o` (`EXT_OBJ_SETSLICE_SYMBOL` in `crates/pycc_codegen/src/ext.rs`), the
- * store twin of `pycc_ext_obj_delslice`.
- *
- * The bounds follow `pycc_ext_obj_slice_of`'s contract and the base is
- * borrowed. `value` is a packer's new reference, consumed on every path; a
- * NULL `value` is a failed packer whose exception is already set, and must
- * not reach `PyObject_SetItem`. Returns `0`, or `-1` with the exception
- * set -- whatever the base's own `__setitem__` raises for the `slice` key.
- */
-int pycc_ext_obj_setslice(PyObject *o, PyObject *start, PyObject *stop, PyObject *step,
-                          int present, PyObject *value)
-{
-    PyObject *slice = pycc_ext_obj_slice_of(o, start, stop, step, present);
-    int status;
-
-    if (slice == NULL || value == NULL) {
-        Py_XDECREF(slice);
-        Py_XDECREF(value);
-        return -1;
-    }
-    status = PyObject_SetItem(o, slice, value);
-    Py_DECREF(slice);
-    Py_DECREF(value);
-    return status;
 }
 
 /*

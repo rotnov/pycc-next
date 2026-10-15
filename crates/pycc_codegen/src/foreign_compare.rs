@@ -149,6 +149,65 @@ pub(super) fn emit_compare<'ctx>(
     Scalar::Object(result)
 }
 
+/// Emits the truth of `left op right` for a rich comparison (not an
+/// identity test) once both operands are evaluated, as an `i1`: what
+/// [`emit_compare`] followed by `foreign_len::emit_truthy` answers, in one
+/// shim call and without a result object for two `str` operands. A `-1`
+/// takes the failure edge.
+pub(super) fn emit_compare_truth<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    op: CmpOpKind,
+    left: Option<Scalar<'ctx>>,
+    right: Option<Scalar<'ctx>>,
+) -> inkwell::values::IntValue<'ctx> {
+    let selector = rich_compare_selector(op)
+        .expect("pycc_codegen: internal error: an identity test has no rich comparison");
+    let edge = ForeignFailEdge::for_current(builder);
+    let (l, l_owned) = operand_pointer(context, builder, module, left);
+    let (r, r_owned) = operand_pointer(context, builder, module, right);
+    let owned = u64::from(l_owned) | (u64::from(r_owned) << 1);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i32_type = context.i32_type();
+    let compare = shim_fn(
+        module,
+        crate::ext::EXT_OBJ_COMPARE_BOOL_SYMBOL,
+        i32_type.fn_type(
+            &[ptr.into(), ptr.into(), i32_type.into(), i32_type.into()],
+            false,
+        ),
+    );
+    let status = builder
+        .build_call(
+            compare,
+            &[
+                l.into(),
+                r.into(),
+                i32_type.const_int(selector, false).into(),
+                i32_type.const_int(owned, false).into(),
+            ],
+            "foreign_compare_truth",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_compare_bool")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_compare_bool returns int")
+        .into_int_value();
+    route_negative(
+        context,
+        builder,
+        module,
+        rt,
+        edge,
+        status,
+        "foreign_compare_truth",
+    );
+    builder
+        .build_int_truncate(status, context.bool_type(), "foreign_compare_bit")
+        .expect("build_int_truncate should not fail")
+}
+
 /// Emits `item in container` (or `item not in container` when `negate`)
 /// once both operands are evaluated.
 pub(super) fn emit_contains<'ctx>(

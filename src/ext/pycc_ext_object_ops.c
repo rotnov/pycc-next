@@ -294,10 +294,32 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
  */
 PyObject *pycc_ext_obj_build_display(PyObject **items, long long n, int kind)
 {
-    PyObject *list = pycc_ext_obj_build_list(items, n);
+    PyObject *list;
     PyObject *result = NULL;
     Py_ssize_t i;
+    int failed = 0;
 
+    if (kind == 0) {
+        /* A tuple is built directly: `PyTuple_SetItem` steals each item,
+         * as `PyList_SetItem` does in `pycc_ext_obj_build_list`. */
+        for (i = 0; i < (Py_ssize_t)n; i++) {
+            if (items[i] == NULL) {
+                failed = 1;
+            }
+        }
+        result = failed ? NULL : PyTuple_New((Py_ssize_t)n);
+        if (result == NULL) {
+            for (i = 0; i < (Py_ssize_t)n; i++) {
+                Py_XDECREF(items[i]);
+            }
+            return NULL;
+        }
+        for (i = 0; i < (Py_ssize_t)n; i++) {
+            PyTuple_SetItem(result, i, items[i]);
+        }
+        return result;
+    }
+    list = pycc_ext_obj_build_list(items, n);
     if (list == NULL) {
         return NULL;
     }

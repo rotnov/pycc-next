@@ -134,3 +134,45 @@ unsafe fn with_char_set(text: *mut PyStrObj, f: impl FnOnce(*mut PySetObj) -> i8
     unsafe { pycc_rt_set_decref(chars) };
     answer
 }
+
+/// `text[index] in s` for a set of `str`, without making the character
+/// (`index` an encoded `int`, `text` and `s` borrowed): what
+/// `pycc_rt_str_getitem` followed by [`pycc_rt_set_contains`] answers,
+/// `IndexError` included (made pending, answering `0`). An ASCII character
+/// of ASCII text in a frozenset is a bit test.
+///
+/// # Safety
+/// `text` must be a live `str` and `s` a live set of `str`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_index_in_set(
+    text: *mut PyStrObj,
+    index: i64,
+    s: *mut PySetObj,
+) -> i8 {
+    if index & 1 == 1 {
+        // SAFETY: the caller passes a live `str`.
+        let obj = unsafe { &*text };
+        let bytes = obj.bytes();
+        let count = obj.chars.get();
+        if count == bytes.len() as i64 {
+            let i = index >> 1;
+            let i = if i < 0 { i + count } else { i };
+            if (0..count).contains(&i) {
+                let byte = bytes[i as usize];
+                let st = set(s);
+                if st.frozen != 0 && st.kind == crate::list::LIST_KIND_STR {
+                    return i8::from(st.ascii_members() & (1u128 << byte) != 0);
+                }
+            }
+        }
+    }
+    let ch = crate::str_ops::pycc_rt_str_getitem(text, index);
+    if crate::exception::pycc_rt_exception_active() != 0 {
+        unsafe { crate::pycc_rt_str_decref(ch) };
+        return 0;
+    }
+    // SAFETY: `s` is live; the character is a live `str`.
+    let found = unsafe { super::pycc_rt_set_contains(s, ch as i64) };
+    unsafe { crate::pycc_rt_str_decref(ch) };
+    found
+}

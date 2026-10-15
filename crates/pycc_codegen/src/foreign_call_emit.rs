@@ -121,6 +121,25 @@ pub(super) fn emit_method_call<'ctx>(
     method: &str,
     args: &[MirExpr],
 ) -> Scalar<'ctx> {
+    if args.iter().all(|arg| is_inert_argument(arg, locals)) {
+        // Evaluating the arguments can neither raise nor run code, so the
+        // lookup may follow them: one call, and no bound method.
+        let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
+        let held_base = object_release::hold(context, module, rt, base, &base_scalar);
+        let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
+        let result = foreign_call::emit_method_call_fused(
+            context,
+            builder,
+            module,
+            rt,
+            base_scalar,
+            method,
+            &args.scalars,
+        );
+        args.release(context, builder, rt);
+        held_base.release(builder, rt);
+        return result;
+    }
     let bound = emit_bound_method(
         context,
         builder,
@@ -137,6 +156,25 @@ pub(super) fn emit_method_call<'ctx>(
     let result = foreign_call::emit_call(context, builder, module, rt, bound, &args.scalars);
     args.release(context, builder, rt);
     result
+}
+
+/// Whether evaluating `arg` can neither raise nor run code: a literal, or a
+/// read of a parameter (a slot with no initialized flag, bound on entry).
+/// A method call whose arguments are all inert may look the method up after
+/// them ([`emit_method_call`]).
+fn is_inert_argument(arg: &MirExpr, locals: &HashMap<String, StorageSlot<'_>>) -> bool {
+    match arg {
+        MirExpr::IntLiteral(_)
+        | MirExpr::FloatLiteral(_)
+        | MirExpr::BoolLiteral(_)
+        | MirExpr::StringLiteral(_)
+        | MirExpr::NoneLiteral => true,
+        MirExpr::Name { name, .. } => locals
+            .get(name.as_str())
+            .is_some_and(|slot| slot.initialized.is_none()),
+        MirExpr::ObjectBox(inner) => is_inert_argument(inner, locals),
+        _ => false,
+    }
 }
 
 /// Emits `callee(args)` where `callee` is a CPython object (#1313): the

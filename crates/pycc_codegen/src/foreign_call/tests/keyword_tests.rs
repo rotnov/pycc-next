@@ -104,7 +104,8 @@ fn a_none_argument_packs_cpythons_none() {
         call("gc", "collect", vec![MirExpr::NoneLiteral]),
     );
     assert!(ir.contains(EXT_OBJ_NONE_SYMBOL), "{ir}");
-    assert!(ir.contains(&format!("@{EXT_OBJ_CALL_SYMBOL}(")), "{ir}");
+    let method = crate::ext::EXT_OBJ_CALL_METHOD_SYMBOL;
+    assert!(ir.contains(&format!("@{method}(")), "{ir}");
     assert!(!ir.contains(EXT_OBJ_CALL_KW_SYMBOL), "{ir}");
 }
 

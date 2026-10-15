@@ -486,6 +486,56 @@ pub(super) fn emit_lookup<'ctx>(
     bound
 }
 
+/// `base.method(args)` as one `pycc_ext_obj_call_method` call: no bound
+/// method is made. `base` is borrowed and `args` already evaluated; the
+/// caller guarantees evaluating them could neither raise nor run code
+/// (`foreign_call_emit::emit_method_call`), so the lookup may follow them.
+pub(super) fn emit_method_call_fused<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    base: Scalar<'ctx>,
+    method: &str,
+    args: &[Scalar<'ctx>],
+) -> Scalar<'ctx> {
+    let edge = ForeignFailEdge::for_current(builder);
+    let entry_fn = edge.function();
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_type = context.i64_type();
+    let base_ptr = expect_object_pointer(base);
+    let name = builder
+        .build_global_string_ptr(method, &format!("pycc_foreign_method_{method}"))
+        .expect("build_global_string_ptr should not fail")
+        .as_pointer_value();
+    let arg_array = emit_packed_array(context, builder, module, entry_fn, args);
+    let call = shim_fn(
+        module,
+        crate::ext::EXT_OBJ_CALL_METHOD_SYMBOL,
+        ptr.fn_type(
+            &[ptr.into(), ptr.into(), ptr.into(), i64_type.into()],
+            false,
+        ),
+    );
+    let result = builder
+        .build_call(
+            call,
+            &[
+                base_ptr.into(),
+                name.into(),
+                arg_array.into(),
+                i64_type.const_int(args.len() as u64, false).into(),
+            ],
+            "foreign_call",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_call_method")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_call_method returns PyObject *")
+        .into_pointer_value();
+    route_null(context, builder, module, rt, edge, result, "foreign_call");
+    Scalar::Object(result)
+}
+
 /// Marshals `args` and calls `bound`, yielding the call's result as an
 /// opaque [`Scalar::Object`].
 ///
@@ -742,6 +792,30 @@ pub(super) fn emit_subscript<'ctx>(
     let base_ptr = expect_object_pointer(base);
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
 
+    if let Scalar::Int(word) = index {
+        // A native `int` key needs no packing for a `tuple` or `list`.
+        let getitem = shim_fn(
+            module,
+            crate::ext::EXT_OBJ_GETITEM_INT_SYMBOL,
+            ptr.fn_type(&[ptr.into(), context.i64_type().into()], false),
+        );
+        let result = builder
+            .build_call(getitem, &[base_ptr.into(), word.into()], "foreign_subscript")
+            .expect("build_call should not fail for pycc_ext_obj_getitem_int")
+            .try_as_basic_value()
+            .expect_basic("pycc_ext_obj_getitem_int returns PyObject *")
+            .into_pointer_value();
+        route_null(
+            context,
+            builder,
+            module,
+            rt,
+            edge,
+            result,
+            "foreign_subscript",
+        );
+        return Scalar::Object(result);
+    }
     let key = emit_pack(context, builder, module, index, "foreign_subscript_key");
 
     let getitem = shim_fn(

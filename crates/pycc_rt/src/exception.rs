@@ -166,8 +166,14 @@ pub static pycc_rt_exc_pending: std::sync::atomic::AtomicI8 = std::sync::atomic:
 /// almost always, [`pycc_rt_exception_active`] answers without reaching the
 /// thread-local state (a `__tls_get_addr` call in a shared library). A
 /// thread's own updates are visible to itself, so a thread with an
-/// exception pending never reads zero here.
-static PENDING_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// exception pending never reads zero here. An `ext` module's generated
+/// code loads it inline and calls [`pycc_rt_exception_active`] only when it
+/// is non-zero.
+#[unsafe(no_mangle)]
+#[allow(non_upper_case_globals)]
+pub static pycc_rt_exc_pending_threads: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+use pycc_rt_exc_pending_threads as PENDING_THREADS;
 
 fn set_state(state: ExceptionState) {
     let was = EXCEPTION_STATE.with(|cell| cell.replace(state)).active;

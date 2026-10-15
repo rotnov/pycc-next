@@ -147,7 +147,7 @@ fn a_failed_foreign_method_call_returns_on_the_module_exec_failure_edge() {
 fn a_failed_method_lookup_returns_on_the_module_exec_failure_edge() {
     let ir = entry_ir(
         "foreign_call_lookup_fail_edge",
-        call("gc", "definitely_not_there", vec![MirExpr::IntLiteral(1)]),
+        call("gc", "definitely_not_there", vec![computed_argument()]),
     );
     assert!(ir.contains("foreign_call_lookup_failed"), "{ir}");
     assert!(ir.contains("foreign_call_lookup_fail:"), "{ir}");
@@ -156,6 +156,18 @@ fn a_failed_method_lookup_returns_on_the_module_exec_failure_edge() {
         ir.contains(&format!("ret i64 {EXT_MODULE_EXEC_FAILED}")),
         "{ir}"
     );
+}
+
+/// An argument whose evaluation is real work (`1 + 2`), so the call keeps
+/// CPython's lookup-first order rather than the one-call form inert
+/// arguments get.
+fn computed_argument() -> MirExpr {
+    MirExpr::BinOp {
+        op: pycc_mir::BinOpKind::Add,
+        left: Box::new(MirExpr::IntLiteral(1)),
+        right: Box::new(MirExpr::IntLiteral(2)),
+        ty: Ty::Int,
+    }
 }
 
 /// CPython resolves a call's callable before it evaluates the
@@ -167,7 +179,7 @@ fn a_failed_method_lookup_returns_on_the_module_exec_failure_edge() {
 fn the_callable_is_resolved_before_any_argument_is_packed() {
     let ir = entry_ir(
         "foreign_call_lookup_order",
-        call("gc", "set_threshold", vec![MirExpr::IntLiteral(1)]),
+        call("gc", "set_threshold", vec![computed_argument()]),
     );
     let lookup_at = ir
         .find(EXT_OBJ_GETATTR_SYMBOL)
@@ -176,6 +188,26 @@ fn the_callable_is_resolved_before_any_argument_is_packed() {
         .find(EXT_OBJ_PACK_INT_SYMBOL)
         .unwrap_or_else(|| panic!("no argument packer was emitted: {ir}"));
     assert!(lookup_at < pack_at, "{ir}");
+}
+
+/// A call whose arguments are all inert (literals, parameter reads) is one
+/// `pycc_ext_obj_call_method` call: their evaluation can neither raise nor
+/// run code, so the lookup may follow it and no bound method is made.
+#[test]
+fn inert_arguments_make_one_method_call_without_a_lookup() {
+    let ir = entry_ir(
+        "foreign_call_inert",
+        call(
+            "gc",
+            "set_threshold",
+            vec![MirExpr::IntLiteral(1), MirExpr::StringLiteral("x".to_string())],
+        ),
+    );
+    let method = crate::ext::EXT_OBJ_CALL_METHOD_SYMBOL;
+    assert!(ir.contains(&format!("@{method}(")), "{ir}");
+    assert!(!ir.contains(EXT_OBJ_GETATTR_SYMBOL), "{ir}");
+    assert!(!ir.contains(&format!("@{EXT_OBJ_CALL_SYMBOL}(")), "{ir}");
+    assert!(ir.contains("pycc_foreign_method_set_threshold"), "{ir}");
 }
 
 /// Two calls in one module share one extern declaration per symbol.
@@ -264,12 +296,26 @@ fn subscript(module: &str, index: MirExpr) -> Vec<MirItem> {
 fn a_foreign_subscript_reaches_the_shim_by_its_shared_symbol() {
     let ir = entry_ir(
         "foreign_subscript_symbol",
-        subscript("gc", MirExpr::IntLiteral(0)),
+        subscript("gc", MirExpr::StringLiteral("k".to_string())),
     );
-    assert!(ir.contains(EXT_OBJ_GETITEM_SYMBOL), "{ir}");
-    assert!(ir.contains(EXT_OBJ_PACK_INT_SYMBOL), "{ir}");
+    assert!(ir.contains(&format!("@{EXT_OBJ_GETITEM_SYMBOL}(")), "{ir}");
+    assert!(ir.contains(EXT_OBJ_PACK_STR_SYMBOL), "{ir}");
     assert!(!ir.contains(EXT_OBJ_GETATTR_SYMBOL), "{ir}");
     assert!(!ir.contains(EXT_OBJ_CALL_SYMBOL), "{ir}");
+}
+
+/// A native `int` key goes to `pycc_ext_obj_getitem_int` unpacked: no
+/// `int` object is made for it.
+#[test]
+fn a_native_int_key_reaches_the_unboxed_subscript() {
+    let ir = entry_ir(
+        "foreign_subscript_int_key",
+        subscript("gc", MirExpr::IntLiteral(0)),
+    );
+    let getitem_int = crate::ext::EXT_OBJ_GETITEM_INT_SYMBOL;
+    assert!(ir.contains(&format!("@{getitem_int}(")), "{ir}");
+    assert!(!ir.contains(EXT_OBJ_PACK_INT_SYMBOL), "{ir}");
+    assert!(!ir.contains(&format!("@{EXT_OBJ_GETITEM_SYMBOL}(")), "{ir}");
 }
 
 /// One packer per admitted key type, each exercised through its own
@@ -283,7 +329,6 @@ fn a_foreign_subscript_reaches_the_shim_by_its_shared_symbol() {
 #[test]
 fn each_admitted_key_type_reaches_its_own_packer() {
     for (label, key, symbol) in [
-        ("int", MirExpr::IntLiteral(7), EXT_OBJ_PACK_INT_SYMBOL),
         (
             "float",
             MirExpr::FloatLiteral(1.5),

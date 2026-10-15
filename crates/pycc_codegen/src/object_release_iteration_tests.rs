@@ -143,8 +143,9 @@ fn a_for_loop_releases_its_produced_iterable_and_its_iterator() {
             body: Vec::new(),
         }],
     );
+    // The two slot stores' replaced values (`%old_heap`, `%old_heap<n>`).
     assert_eq!(releases_of(&ir, "old_heap"), 1, "{ir}");
-    assert_eq!(releases_of(&ir, "old_heap1"), 1, "{ir}");
+    assert_eq!(ir.matches(&format!("{RELEASE}ptr %old_heap")).count(), 2, "{ir}");
     assert_eq!(releases(&ir), 7 + PINNED_LOAD, "{ir}");
     let get_iter_fail = blocks(&ir, "foreign_iter_get_fail");
     assert_eq!(get_iter_fail.len(), 1, "{ir}");

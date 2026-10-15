@@ -255,6 +255,66 @@ pub(crate) fn emit_obj_compare_expr<'ctx>(
     let MirExpr::ObjCompare { op, left, right } = expr else {
         unreachable!()
     };
+    with_compare_operands(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        left,
+        right,
+        |l, r| foreign_compare::emit_compare(context, builder, module, rt, *op, l, r),
+    )
+}
+
+/// The truth of an `ObjCompare` rich comparison in a condition, as an `i1`
+/// (`if o == "x":`): the operands as [`emit_obj_compare_expr`] evaluates
+/// them, then `foreign_compare::emit_compare_truth`, so no result object
+/// is made and tested. `None` for any other expression, or an identity
+/// test, which is already a native `bool`.
+pub(crate) fn emit_obj_compare_condition<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    expr: &MirExpr,
+) -> Option<inkwell::values::IntValue<'ctx>> {
+    let MirExpr::ObjCompare { op, left, right } = expr else {
+        return None;
+    };
+    if matches!(op, pycc_mir::CmpOpKind::Is | pycc_mir::CmpOpKind::IsNot) {
+        return None;
+    }
+    Some(with_compare_operands(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        left,
+        right,
+        |l, r| foreign_compare::emit_compare_truth(context, builder, module, rt, *op, l, r),
+    ))
+}
+
+/// Evaluates an `ObjCompare`'s operands, left then right, hands them to
+/// `compare`, and releases them after it.
+#[allow(clippy::too_many_arguments)]
+fn with_compare_operands<'ctx, T>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    left: &MirExpr,
+    right: &MirExpr,
+    compare: impl FnOnce(Option<Scalar<'ctx>>, Option<Scalar<'ctx>>) -> T,
+) -> T {
     let operand = |expr: &MirExpr| {
         (!matches!(expr, MirExpr::NoneLiteral)).then(|| {
             object_unbox::emit_pack_operand(
@@ -277,7 +337,7 @@ pub(crate) fn emit_obj_compare_expr<'ctx>(
     let r = operand(right);
     let held_r = hold(right, r);
     pop_pending_int_release(rt, pending_l);
-    let result = foreign_compare::emit_compare(context, builder, module, rt, *op, l, r);
+    let result = compare(l, r);
     for held in [held_r, held_l].into_iter().flatten() {
         held.release(builder, rt);
     }

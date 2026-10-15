@@ -97,16 +97,12 @@ pub(crate) fn emit_try<'ctx>(
         .get_terminator()
         .is_none();
     if body_falls_through {
-        let active =
-            crate::int_fast::emit_exception_pending(context, builder, rt, "try_body_exc_active");
-        let has_exc = builder
-            .build_int_compare(
-                inkwell::IntPredicate::NE,
-                active,
-                context.i8_type().const_zero(),
-                "try_body_has_exc",
-            )
-            .expect("build_int_compare should not fail");
+        let has_exc = crate::int_fast::emit_exception_pending_test(
+            context,
+            builder,
+            rt,
+            "try_body_has_exc",
+        );
         builder
             .build_conditional_branch(has_exc, handler_dispatch_bb, else_bb)
             .expect("build_conditional_branch should not fail");

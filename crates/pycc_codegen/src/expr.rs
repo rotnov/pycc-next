@@ -9,7 +9,7 @@ mod buffer_expr;
 mod call_expr;
 mod container_expr;
 mod name_read;
-mod object_expr;
+pub(crate) mod object_expr;
 
 pub(crate) fn emit_expr<'ctx>(
     context: &'ctx Context,

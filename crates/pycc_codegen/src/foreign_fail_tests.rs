@@ -143,7 +143,8 @@ fn a_foreign_method_call_in_a_function_bridges_both_of_its_failure_points() {
         discarding(MirExpr::ObjMethodCall {
             base: copy_boxed(),
             method: "copy".to_string(),
-            args: vec![MirExpr::IntLiteral(1)],
+            // Not inert, so the lookup keeps its own step and edge.
+            args: vec![MirExpr::Not(Box::new(MirExpr::BoolLiteral(false)))],
         }),
     );
     assert_bridged_to_exit(&ir, "foreign_call_lookup");

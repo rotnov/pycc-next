@@ -759,6 +759,72 @@ pub(super) fn emit_exception_pending<'ctx>(
     flag.into_int_value()
 }
 
+/// [`emit_exception_pending`] for a site that branches on the result
+/// right away (a statement's effect guard, the end of a `try` body), as an
+/// `i1`. In an `ext` module the common case -- no thread has an exception
+/// pending -- is one inline load of `pycc_rt_exc_pending_threads`; only a
+/// non-zero count calls `pycc_rt_exception_active` for the calling thread's
+/// own state. The builder is left in a new block, so a caller must not
+/// name the block it was in before as a predecessor afterwards.
+pub(super) fn emit_exception_pending_test<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    name: &str,
+) -> IntValue<'ctx> {
+    if !rt.thread_safe_exception_check.get() {
+        let active = emit_exception_pending(context, builder, rt, name);
+        return builder
+            .build_int_compare(IntPredicate::NE, active, context.i8_type().const_zero(), name)
+            .expect("icmp");
+    }
+    let i64_type = context.i64_type();
+    let threads = builder
+        .build_load(
+            i64_type,
+            rt.exc_pending_threads.as_pointer_value(),
+            &format!("{name}_threads"),
+        )
+        .expect("build_load should not fail for the pending-thread count");
+    let load = threads.as_instruction_value().expect("a load is an instruction");
+    load.set_alignment(8).expect("an i64 load takes alignment 8");
+    load.set_atomic_ordering(inkwell::AtomicOrdering::Monotonic)
+        .expect("an i64 load can be atomic");
+    let any = builder
+        .build_int_compare(
+            IntPredicate::NE,
+            threads.into_int_value(),
+            i64_type.const_zero(),
+            &format!("{name}_any"),
+        )
+        .expect("icmp");
+    let entry_bb = builder.get_insert_block().expect("an insert block");
+    let function = entry_bb.get_parent().expect("a function");
+    let slow_bb = context.append_basic_block(function, &format!("{name}_slow"));
+    let join_bb = context.append_basic_block(function, &format!("{name}_join"));
+    builder
+        .build_conditional_branch(any, slow_bb, join_bb)
+        .expect("branch");
+    builder.position_at_end(slow_bb);
+    let active = builder
+        .build_call(rt.exception_active, &[], name)
+        .expect("build_call should not fail for exception_active")
+        .try_as_basic_value()
+        .expect_basic("pycc_rt_exception_active returns i8")
+        .into_int_value();
+    let slow_has = builder
+        .build_int_compare(IntPredicate::NE, active, context.i8_type().const_zero(), name)
+        .expect("icmp");
+    builder.build_unconditional_branch(join_bb).expect("branch");
+    builder.position_at_end(join_bb);
+    let phi = builder.build_phi(context.bool_type(), name).expect("phi");
+    phi.add_incoming(&[
+        (&context.bool_type().const_zero(), entry_bb),
+        (&slow_has, slow_bb),
+    ]);
+    phi.as_basic_value().into_int_value()
+}
+
 /// `int op float`, exactly (CPython does not round the int). A smallint
 /// within +/-2**53 converts exactly, so `float_predicate` decides it inline;
 /// anything else asks `pycc_rt_int_float_cmp` for an ordering (`-1`/`0`/`1`,

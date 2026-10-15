@@ -75,8 +75,10 @@ fn membership_is_one_contains_call_per_test_with_a_packed_item() {
 }
 
 /// Each bound shape passes its own `present` mask -- bit 0 start, bit 1
-/// stop, bit 2 step -- with `ptr null` for an absent bound, and a `NULL`
-/// result takes the failure edge.
+/// stop, bit 2 step -- and a `NULL` result takes the failure edge. A slice
+/// with no step whose bounds are native `int`s (or absent) passes the words
+/// to `pycc_ext_obj_getslice_int` unpacked; any other shape packs its
+/// bounds for `pycc_ext_obj_getslice`, with `ptr null` for an absent one.
 #[test]
 fn a_slice_is_one_getslice_call_with_a_present_mask_per_bound_shape() {
     module_ir(
@@ -97,19 +99,30 @@ fn a_slice_is_one_getslice_call_with_a_present_mask_per_bound_shape() {
             ),
         ],
         |ir| {
-            for present in [0, 1, 2, 5, 7] {
+            for (symbol, present) in [
+                ("@pycc_ext_obj_getslice_int(", 0),
+                ("@pycc_ext_obj_getslice_int(", 1),
+                ("@pycc_ext_obj_getslice_int(", 2),
+                ("@pycc_ext_obj_getslice(", 5),
+                ("@pycc_ext_obj_getslice(", 7),
+            ] {
                 let needle = format!("i32 {present})");
                 assert!(
                     ir.lines()
-                        .any(|line| line.contains("@pycc_ext_obj_getslice(")
-                            && line.contains(&needle)),
-                    "{needle}: {ir}"
+                        .any(|line| line.contains(symbol) && line.contains(&needle)),
+                    "{symbol} {needle}: {ir}"
                 );
             }
             assert!(
                 ir.lines()
+                    .any(|line| line.contains("@pycc_ext_obj_getslice_int(")
+                        && line.contains("i64 0, i64 0, i32 0)")),
+                "{ir}"
+            );
+            assert!(
+                ir.lines()
                     .any(|line| line.contains("@pycc_ext_obj_getslice(")
-                        && line.contains("ptr null, ptr null, ptr null, i32 0)")),
+                        && line.contains("ptr null")),
                 "{ir}"
             );
             assert!(ir.contains("foreign_slice_failed"), "{ir}");
@@ -143,7 +156,7 @@ fn a_function_body_membership_or_slice_bridges_its_failure_with_int_temporaries(
         }]),
         |ir| {
             assert!(ir.contains("@pycc_ext_obj_contains("), "{ir}");
-            assert!(ir.contains("@pycc_ext_obj_getslice("), "{ir}");
+            assert!(ir.contains("@pycc_ext_obj_getslice_int("), "{ir}");
             assert!(ir.contains("@pycc_ext_obj_error_bridge("), "{ir}");
         },
     );

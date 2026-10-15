@@ -54,10 +54,12 @@ fn a_local_retains_a_borrowed_value_and_releases_the_replaced_one_after_the_stor
     let stored = ir
         .find("store ptr %foreign_attr")
         .unwrap_or_else(|| panic!("{ir}"));
-    let replaced = ir
-        .find(&format!("{RELEASE}ptr %old_heap2)"))
-        .unwrap_or_else(|| panic!("{ir}"));
-    assert!(stored < replaced, "released before the store: {ir}");
+    // The replaced value is the second slot load's (`%old_heap<n>`), and
+    // its release follows the store of the new one.
+    let replaced = ir[stored..]
+        .find(&format!("{RELEASE}ptr %old_heap"))
+        .unwrap_or_else(|| panic!("released before the store: {ir}"));
+    assert!(replaced > 0, "{ir}");
     // The first store's (null) predecessor, the second's, and `o` and `x`
     // in the epilogue.
     assert!(releases(&ir) >= 4, "{ir}");

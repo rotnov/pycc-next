@@ -474,6 +474,20 @@ pub extern "C" fn pycc_rt_str_max2(a: *mut PyStrObj, b: *mut PyStrObj) -> *mut P
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_getitem(s: *mut PyStrObj, index: i64) -> *mut PyStrObj {
     let obj = unsafe { &*s };
+    // The common case first: a smallint index into text already known to
+    // be ASCII (its code-point count, once counted, equals its byte length)
+    // is a byte load and a shared one-character string.
+    if index & 1 == 1 {
+        let bytes = obj.bytes();
+        let count = obj.chars.get();
+        if count == bytes.len() as i64 {
+            let i = index >> 1;
+            let i = if i < 0 { i + count } else { i };
+            if (0..count).contains(&i) {
+                return crate::str_index::ascii_char(bytes[i as usize]);
+            }
+        }
+    }
     let len = obj.char_count() as i64;
     // An index beyond `isize` is CPython's own `IndexError`; any other
     // bigint is out of range of every string.

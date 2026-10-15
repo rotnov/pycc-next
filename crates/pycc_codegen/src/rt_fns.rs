@@ -277,6 +277,11 @@ pub(super) struct RtFns<'ctx> {
     /// The runtime's `pycc_rt_exc_pending` `i8` global, the pending-exception
     /// flag a native program loads inline (`int_fast::emit_exception_pending`).
     pub(super) exc_pending: inkwell::values::GlobalValue<'ctx>,
+    /// The runtime's `pycc_rt_exc_pending_threads` (`usize`): how many
+    /// threads have an exception pending. An `ext` module loads it inline
+    /// and calls `exception_active` only when it is non-zero
+    /// (`int_fast::emit_exception_pending`).
+    pub(super) exc_pending_threads: inkwell::values::GlobalValue<'ctx>,
     /// `pycc_rt_exception_active() -> i8`, the thread-local pending state.
     /// An `ext` module checks through it instead of `exc_pending`, because
     /// CPython may call into the module from several threads.
@@ -823,6 +828,12 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         exc_pending: {
             let global = module.add_global(context.i8_type(), None, "pycc_rt_exc_pending");
+            global.set_linkage(Linkage::External);
+            global
+        },
+        exc_pending_threads: {
+            let global =
+                module.add_global(context.i64_type(), None, "pycc_rt_exc_pending_threads");
             global.set_linkage(Linkage::External);
             global
         },

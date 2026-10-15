@@ -296,6 +296,11 @@ pub(crate) fn emit_compare_expr<'ctx>(
     {
         return result;
     }
+    if let Some(result) =
+        emit_str_index_in_set(context, builder, module, rt, user_functions, locals, *op, left, right)
+    {
+        return result;
+    }
     let l = emit_expr(context, builder, module, rt, user_functions, locals, left);
     // #638 (D-208): same protection as `BinOp`'s `Ty::Int` arm --
     // `l` must survive `right`'s evaluation intact so its release
@@ -327,6 +332,80 @@ pub(crate) fn emit_compare_expr<'ctx>(
     release_scalar_if_temporary(context, builder, rt, left, &l);
     release_scalar_if_temporary(context, builder, rt, right, &r);
     Scalar::Bool(as_bool)
+}
+
+/// `s[i] in chars` / `s[i] not in chars` for a `str` `s` and a set of `str`
+/// `chars` that is a parameter: one `pycc_rt_str_index_in_set` call, which
+/// answers without making the character (`None`, emitting nothing, for any
+/// other comparison).
+///
+/// The operands are evaluated `s`, `i`, `chars` and the subscript happens
+/// in the call, after `chars` is read. CPython subscripts before reading
+/// `chars`; the two orders are indistinguishable because a parameter's read
+/// can neither raise nor run code, which is why `chars` must be one.
+#[allow(clippy::too_many_arguments)]
+fn emit_str_index_in_set<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    op: pycc_mir::CmpOpKind,
+    left: &MirExpr,
+    right: &MirExpr,
+) -> Option<Scalar<'ctx>> {
+    if !matches!(op, pycc_mir::CmpOpKind::In | pycc_mir::CmpOpKind::NotIn) {
+        return None;
+    }
+    let set_ty = right.ty();
+    if !matches!(&set_ty, pycc_mir::Ty::Set(elem) | pycc_mir::Ty::FrozenSet(elem) if **elem == pycc_mir::Ty::Str)
+    {
+        return None;
+    }
+    let MirExpr::Name { name, .. } = right else {
+        return None;
+    };
+    if !locals
+        .get(name.as_str())
+        .is_some_and(|slot| slot.initialized.is_none() && slot.ty == set_ty)
+    {
+        return None;
+    }
+    let MirExpr::RtCall(call) = left else {
+        return None;
+    };
+    if call.sig.symbol != "pycc_rt_str_getitem" || call.args.len() != 2 {
+        return None;
+    }
+    let fused = pycc_mir::RtCallExpr {
+        sig: pycc_hir::builtins::BuiltinSig {
+            symbol: "pycc_rt_str_index_in_set",
+            params: vec![pycc_mir::Ty::Str, pycc_mir::Ty::Int, set_ty],
+            ret: pycc_mir::Ty::Bool,
+            ret_word: false,
+            word_args: vec![false; 3],
+            kind_args: Vec::new(),
+            desc_args: Vec::new(),
+        },
+        args: vec![call.args[0].clone(), call.args[1].clone(), right.clone()],
+    };
+    let found =
+        crate::rt_call::emit_rt_call(context, builder, module, rt, user_functions, locals, &fused);
+    // The subscript's `IndexError` is pending exactly as after the
+    // subscript's own call.
+    crate::exception::guard_statement_effects(context, builder, rt);
+    let Scalar::Bool(found) = found else {
+        panic!("pycc_codegen: internal error: pycc_rt_str_index_in_set returns a bool")
+    };
+    if op == pycc_mir::CmpOpKind::NotIn {
+        return Some(Scalar::Bool(
+            builder
+                .build_xor(found, context.i8_type().const_int(1, false), "not_in")
+                .expect("build_xor should not fail for two i8 operands"),
+        ));
+    }
+    Some(Scalar::Bool(found))
 }
 
 /// `a[i] op y` or `y op a[i]` for an element of an `int64` array and an

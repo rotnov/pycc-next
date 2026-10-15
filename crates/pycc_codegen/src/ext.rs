@@ -208,6 +208,13 @@ pub const EXT_OBJ_GETATTR_SYMBOL: &str = "pycc_ext_obj_getattr";
 /// exactly the reason [`EXT_OBJ_IMPORT_SYMBOL`] is.
 pub const EXT_OBJ_CALL_SYMBOL: &str = "pycc_ext_obj_call";
 
+/// `self.name(args)` without a bound method (`PyObject_VectorcallMethod`):
+/// `self` borrowed, the packed arguments consumed, a new reference or
+/// `NULL` with the exception set (`src/ext/module/object_ops.c`). The lookup
+/// follows the arguments, so `foreign_call_emit` uses it only for
+/// arguments whose evaluation can neither raise nor run code.
+pub const EXT_OBJ_CALL_METHOD_SYMBOL: &str = "pycc_ext_obj_call_method";
+
 /// The fixed C shim's direct-call helper (#1313): `f(args)` where `f` is
 /// any name typed `object` -- a foreign binding, such as `from itertools
 /// import product` followed by `product("ab", "cd")`, or a `for` loop
@@ -350,6 +357,15 @@ pub const EXT_OBJ_RETAIN_SYMBOL: &str = "pycc_ext_obj_retain";
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_GETITEM_SYMBOL: &str = "pycc_ext_obj_getitem";
 
+/// `o[i]` with a native `int` key: [`EXT_OBJ_GETITEM_SYMBOL`] without boxing
+/// the key for an exact `tuple` or `list` (`src/ext/module/object_ops.c`).
+/// The word is borrowed, as the int packer borrows it.
+pub const EXT_OBJ_GETITEM_INT_SYMBOL: &str = "pycc_ext_obj_getitem_int";
+
+/// `o[a:b]` with native `int` bounds and no step: [`EXT_OBJ_GETSLICE_SYMBOL`]
+/// without building a `slice` for an exact `tuple` or `list`.
+pub const EXT_OBJ_GETSLICE_INT_SYMBOL: &str = "pycc_ext_obj_getslice_int";
+
 /// The fixed C shim's rich-comparison helper (Part 1 of #1371): it takes two
 /// `PyObject *` operands, CPython's `Py_LT`..`Py_GE` selector and an
 /// ownership mask (bit 0 the left operand, bit 1 the right) naming which
@@ -360,6 +376,12 @@ pub const EXT_OBJ_GETITEM_SYMBOL: &str = "pycc_ext_obj_getitem";
 ///
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_RICHCOMPARE_SYMBOL: &str = "pycc_ext_obj_richcompare";
+
+/// `bool(l op r)` for a rich comparison with an object operand in a truth
+/// context: [`EXT_OBJ_RICHCOMPARE_SYMBOL`] and the truth test in one call,
+/// answering `1`/`0`, or `-1` with the exception set; two exact `str`
+/// operands make no result object (`src/ext/module/object_ops.c`).
+pub const EXT_OBJ_COMPARE_BOOL_SYMBOL: &str = "pycc_ext_obj_compare_bool";
 
 /// The fixed C shim's membership helper (Part 2b of #1371): it takes a
 /// borrowed container and a *packed* item, and returns
