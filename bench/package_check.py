@@ -4,9 +4,12 @@ Each package in PACKAGES is pinned by version and by the sha256 of what is downl
 modules are built unchanged, each as its own `--ext --non-strict` extension module; the
 `.py` files are removed from the tree, and the package's own unittest suite runs in
 CPython against the compiled modules (and, first, against the sources). The downloaded
-archive is untrusted data: it is extracted with tarfile's `data` filter into a fresh
-directory, and every Python process that imports from it runs isolated (`-I`), from a
-directory of its own.
+archive is untrusted data: every member must be a regular file or a directory (a
+symlink, hard link or special file fails the check before anything is extracted, so
+what is hashed is what is built and run), it is extracted with tarfile's `data` filter
+into a fresh directory, the trees it is copied into are walked without following links,
+and every Python process that imports from it runs isolated (`-I`), from a directory of
+its own.
 
 Packages:
   diff-match-patch 20241021 (Apache-2.0): Google's diff/match/patch text algorithms. The
@@ -155,13 +158,43 @@ print(f"{best:.4f}")
 }
 
 
+class UnsafeArchive(Exception):
+    """An archive member, or a file under a path used, that is not a plain file or
+    directory (a symlink, a hard link, a device, a FIFO)."""
+
+
+def check_members(tar: tarfile.TarFile) -> None:
+    """Refuses any member of `tar` that is not a regular file or a directory."""
+    for member in tar.getmembers():
+        if not (member.isreg() or member.isdir()):
+            raise UnsafeArchive(f"archive member {member.name!r} is not a regular file "
+                                "or a directory")
+
+
+def regular_files(path: pathlib.Path) -> list[pathlib.Path]:
+    """`path` itself when it is a file, else every file under it, walked without
+    following links; anything that is not a regular file or a directory is refused."""
+    if path.is_symlink() or not (path.is_file() or path.is_dir()):
+        raise UnsafeArchive(f"{path} is not a regular file or a directory")
+    if path.is_file():
+        return [path]
+    files = []
+    for root, dirs, names in os.walk(path, followlinks=False):
+        for name in dirs + names:
+            q = pathlib.Path(root) / name
+            if q.is_symlink() or not (q.is_file() or q.is_dir()):
+                raise UnsafeArchive(f"{q} is not a regular file or a directory")
+            if q.is_file():
+                files.append(q)
+    return files
+
+
 def tree_digest(base: pathlib.Path, paths: list[str]) -> str:
     """sha256 over the relative path and contents of every file under `paths`."""
     h = hashlib.sha256()
     files = []
     for rel in paths:
-        p = base / rel
-        files.extend([p] if p.is_file() else sorted(q for q in p.rglob("*") if q.is_file()))
+        files.extend(regular_files(base / rel))
     for f in sorted(files, key=lambda q: q.relative_to(base).as_posix()):
         h.update(f.relative_to(base).as_posix().encode() + b"\0")
         h.update(hashlib.sha256(f.read_bytes()).digest())
@@ -177,10 +210,11 @@ def fetch(pkg: Package, cache: pathlib.Path) -> pathlib.Path:
     if not path.exists():
         with urllib.request.urlopen(pkg.url, timeout=60) as r:
             data = r.read()
-        if pkg.sha256 is not None:
-            got = hashlib.sha256(data).hexdigest()
-            if got != pkg.sha256:
-                sys.exit(f"sha256 mismatch for {pkg.url}: got {got}, want {pkg.sha256}")
+        got = hashlib.sha256(data).hexdigest()
+        if pkg.sha256 is not None and got != pkg.sha256:
+            sys.exit(f"sha256 mismatch for {pkg.url}: got {got}, want {pkg.sha256}")
+        if pkg.sha256 is None:
+            print(f"  archive sha256 (not pinned): {got}")
         path.write_bytes(data)
     return path
 
@@ -188,6 +222,7 @@ def fetch(pkg: Package, cache: pathlib.Path) -> pathlib.Path:
 def unpack(pkg: Package, archive: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
     """Extracts `archive` and checks its tree digest; returns the extracted root."""
     with tarfile.open(archive) as tar:
+        check_members(tar)
         tar.extractall(dest, filter="data")
     if pkg.tree_sha256 is not None:
         got = tree_digest(dest, [src for _, src in pkg.layout])
@@ -209,14 +244,23 @@ def count_defs(src: str) -> int:
 def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     print(f"{pkg.name} {pkg.version}")
     archive = fetch(pkg, pathlib.Path(a.cache))
-    src = unpack(pkg, archive, tmp / "archive")
+    try:
+        src = unpack(pkg, archive, tmp / "archive")
+    except UnsafeArchive as e:
+        archive.unlink()
+        print(f"FAIL: {pkg.url}: {e}")
+        return False
     plain = tmp / "cpython"
     built = tmp / "compiled"
     for tree in (plain, built):
         for dst, rel in pkg.layout:
             (tree / dst).parent.mkdir(parents=True, exist_ok=True)
-            copy = shutil.copytree if (src / rel).is_dir() else shutil.copyfile
-            copy(src / rel, tree / dst)
+            regular_files(src / rel)  # refuses links and special files
+            if (src / rel).is_dir():
+                shutil.copytree(src / rel, tree / dst, symlinks=True)
+            else:
+                shutil.copyfile(src / rel, tree / dst, follow_symlinks=False)
+            regular_files(tree / dst)
     cwd = tmp / "cwd"
     cwd.mkdir()
     pkg_dir = built / pkg.layout[0][0]
