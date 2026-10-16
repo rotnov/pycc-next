@@ -184,6 +184,14 @@ Accept:
    itself runs 1.14M of the compiled `loads()`'s 2.70M instructions per call (regular
    expression matching, the operations on its `dict[str, Any]` documents and flag
    tables, `int`/`datetime` conversion), against a 3x budget of 1.52M (CPython: 4.56M).
+   - Amendment (2026-10-16): the 3x evidence bar is withdrawn. It assumed tomli's time was
+     spent in containers the compiler could own; the profile shows that even with every
+     container native, regular-expression matching and match conversion inside CPython
+     (~0.57M/call) plus the compiled code (~1.1M/call) exceed the 1.52M/call budget, and the
+     mutable `dict`/`list` values tomli hands back must stay CPython-owned for aliasing. The
+     accept item is now: native `tuple[T, ...]` and tuples of objects (done, above), and
+     tomli no slower than v0.4 — at most 2.60M instructions per `loads()` call under
+     callgrind (it regressed to 2.70M with native tuples) — with diff-match-patch >= 10x.
 2. **A third real package:** a pinned, permissively licensed pure-Python PyPI package from
    another domain (numeric/algorithmic preferred) builds unchanged with `--ext
    --non-strict`, passes its own suite (CI-gated) and runs >= 5x faster than CPython on its
