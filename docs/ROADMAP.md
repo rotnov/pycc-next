@@ -192,5 +192,12 @@ Accept:
 4. **Compile speed:** building each `bench/package_check.py` package takes <= 10 s on the
    CI Linux runner (v0.4: diff-match-patch ~25 s); `pycc build` of every `bench/py`
    program takes <= 2 s. Measured in CI and reported by the script.
+   **Met 2026-10-16:** CI run 38875730578 (Linux x86_64): diff-match-patch 5.2 s (its
+   main module 4.1 s), tomli 2.8 s, pypng 1.0 s; the slowest `bench/py` build 0.71 s
+   (prefix_sum_np). CI now fails a package over 10 s
+   (`bench/package_check.py --max-build-seconds 10`) and a benchmark build over 2 s
+   (`bench/run.py --build-only --max-build-seconds 2`). Fewer, parallel frontend
+   attempts (the specialization loop's), a cheaper type checker, LLVM's backend on
+   several threads and the C shim compiled meanwhile; `PYCC_TIME=1` prints the phases.
 5. **Correctness backlog:** every open issue in this milestone is fixed or closed with
    evidence (starting with #1, non-strict rebinding of a function by compiled callers).

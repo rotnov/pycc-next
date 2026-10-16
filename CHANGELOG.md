@@ -6,6 +6,18 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Added
 
+- Compile speed (v0.5 accept 4): building diff-match-patch takes 5.2 s on the CI Linux
+  runner (v0.4: ~25 s), tomli 2.8 s and pypng 1.0 s, and every `bench/py` program
+  builds in under 1 s; CI fails a package over 10 s or a benchmark build over 2 s
+  (`bench/package_check.py` prints each module's build time, `bench/run.py
+  --build-only` each program's). The non-strict specialization loop runs independent
+  attempts on threads (the program without specializations beside the first attempt,
+  every suspect of a span-less failure alone at once) and a failing check runs once,
+  not twice; the type checker hashes with FxHash and the compiler allocates with
+  mimalloc; a large optimized module is emitted as several objects by LLVM's backend
+  on several threads; the `--ext` shim and an embedded build's launcher and sidecar
+  are compiled and assembled while LLVM runs. `PYCC_TIME=1` prints per-phase timings.
+
 - A third real package (v0.5 accept 2): `bench/package_check.py` adds
   [pypng](https://pypi.org/project/pypng/) 0.20220715.0 (MIT, a pure-Python PNG codec,
   sdist pinned by sha256), a single module (the table now takes one as well as a
@@ -25,6 +37,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- Compiled callers see every rebinding of a module-level function (#1): a
+  module-scope binding of a name a `def` also binds (`f = g`, a loop or `with`
+  target, ...) is refused with `C0001` (in non-strict mode it runs in CPython, with the
+  `def`s of the name, so compiled code reads the name from the module's namespace); a
+  `def` or lambda that runs in CPython fallback and rebinds a compiled function's name
+  (in a block, through `global`) makes its `def`s run there too; a value of a
+  function defined more than once (`g = f`, then another `def f`) keeps the
+  definition of that moment. Before, compiled callers kept calling the old function or
+  raised `NameError`.
 - A guarded specialization calls a builtin its original reaches through CPython (`abs`
   of an object) natively when its typed arguments allow (and as the original does when
   they do not), instead of always through CPython.
