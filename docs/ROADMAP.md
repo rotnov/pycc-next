@@ -242,3 +242,28 @@ Accept:
    several threads and the C shim compiled meanwhile; `PYCC_TIME=1` prints the phases.
 5. **Correctness backlog:** every open issue in this milestone is fixed or closed with
    evidence (starting with #1, non-strict rebinding of a function by compiled callers).
+
+## v0.6 — Drop-in for real projects
+
+Accept:
+1. **`pip install` builds with pycc:** a PEP 517 build backend (`pycc.build`, shipped in the
+   release archive and installable) lets a project set `build-backend = "pycc.build"` in
+   `pyproject.toml`; `pip install .` and `pip wheel .` compile its pure-Python modules to
+   abi3 extensions (`--ext`, strict or `--non-strict` per `[tool.pycc]`), keep a module in
+   pure Python when told to, and produce a valid wheel. Evidence: a CI job builds a wheel
+   for each `bench/package_check.py` package through pip and runs its suite against the
+   installed wheel.
+2. **Classes in untyped code:** `--non-strict` compiles untyped classes natively — `bytes`
+   literals and native `bytes` values, calls with `*args`/`**kwargs`, classes with methods
+   that take or return CPython objects, generators in methods. Evidence: pypng compiles
+   >= 60 of its 85 functions natively (v0.5: 15) and decodes the PngSuite images it tests
+   >= 3x faster than CPython (v0.5: ~1.6x).
+3. **A real `int | float` type:** strict mode types a variable that holds an `int` or a
+   `float` as `int | float` with CPython semantics for every operation, replacing the v0.5
+   int-infinity rewrite; its DEVIATIONS rows are removed.
+4. **No hidden differences:** a differential fuzzer generates typed Python programs, runs
+   them under CPython 3.13 and as native strict, `--non-strict` and `--ext` builds, and
+   compares output and exceptions; a nightly CI job runs it for >= 30 minutes; every
+   mismatch it found is fixed (with a regression fixture) or documented in DEVIATIONS.
+5. **Real-world corpus:** strict >= 190/200; `--non-strict` 200/200, 0 wrong, with no
+   top-level statement in CPython fallback.
