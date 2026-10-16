@@ -23,6 +23,7 @@ Exit status 1 when there is any finding.
 from __future__ import annotations
 
 import argparse
+import ast
 import collections
 import concurrent.futures
 import dataclasses
@@ -73,6 +74,7 @@ class Stats:
         self.codes = collections.Counter()  # (mode, feature, code: message) -> count
         self.compared = collections.Counter()  # mode -> programs compared
         self.reductions = 0
+        self.pruned = collections.Counter()  # mode -> refused statements dropped
         self.known = collections.Counter()  # documented deviation -> mismatches it explains
         self.findings: list[Finding] = []
         self.signatures: dict[str, str] = {}
@@ -149,13 +151,14 @@ class Case:
 
     def run_mode(self, mode: str) -> None:
         st = self.stats
-        drop: set[int] = set()
+        src, spans = self.prog.render()
+        refused_blocks: set[int] = set()
         with st.lock:
             for b in self.prog.blocks:
                 st.tried[(mode, b.feature)] += 1
-        for _ in range(len(self.prog.blocks) + 1):
-            src, spans = self.prog.render(frozenset(drop))
-            if not spans:
+        for _ in range(MAX_PRUNES):
+            text = src.split("\n")
+            if not any(ln.strip() for lo, hi, _ in spans for ln in text[lo - 1:hi]):
                 return
             b, out = self.build(src, mode)
             if b.crash:
@@ -173,13 +176,24 @@ class Case:
                             st.codes[(mode, "header", f"{code}: {msg[:70]}")] += 1
                     return
                 with st.lock:
-                    for i in hit:
+                    for i in hit - refused_blocks:
                         st.refused[(mode, self.prog.blocks[i].feature)] += 1
                     for code, msg, ln in b.codes:
                         feat = next((self.prog.blocks[i].feature for lo, hi, i in spans if lo <= ln <= hi), "header")
                         st.codes[(mode, feat.split("+")[0], f"{code}: {re.sub(r'`[^`]{24,}`', '`...`', msg)[:90]}")] += 1
-                drop |= hit
-                self.log(f"{mode}: refused blocks {sorted(hit)}: {b.codes[:2]}")
+                refused_blocks |= hit
+                # First drop only the statements the diagnostics point at, so
+                # the rest of the block is still compared; when that leaves a
+                # program CPython rejects, drop the whole blocks.
+                pruned = prune_statements(src, lines)
+                if pruned is not None and not harness.generator_bug(self.cpython(pruned)):
+                    with st.lock:
+                        st.pruned[mode] += 1
+                    self.log(f"{mode}: pruned statements at {lines}: {[(c, m[:100], ln) for c, m, ln in b.codes[:2]]}")
+                    src = pruned
+                    continue
+                src = blank_lines(src, [(lo, hi) for lo, hi, i in spans if i in hit])
+                self.log(f"{mode}: refused blocks {sorted(hit)}: {[(c, m[:100], ln) for c, m, ln in b.codes[:2]]}")
                 continue
             want = self.cpython(src)
             if harness.generator_bug(want):
@@ -267,6 +281,49 @@ class Case:
         return still_fails
 
 
+# Refusals pruned (statements or blocks) before a mode gives up on a program.
+MAX_PRUNES = 16
+
+
+def blank_lines(src: str, ranges: list[tuple[int, int]]) -> str:
+    """`src` with the 1-based inclusive line `ranges` emptied (line numbers kept)."""
+    lines = src.split("\n")
+    for lo, hi in ranges:
+        for k in range(lo - 1, min(hi, len(lines))):
+            lines[k] = ""
+    return "\n".join(lines)
+
+
+def prune_statements(src: str, lines: list[int]) -> str | None:
+    """`src` with the innermost statement holding each of `lines` replaced by
+    `pass` (and blank lines, so line numbers stay put); None when a line is
+    in no statement but the module itself or nothing changes."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+    stmts = [n for n in ast.walk(tree) if isinstance(n, ast.stmt)]
+    text = src.split("\n")
+    out = list(text)
+    for line in lines:
+        best = None
+        for s in stmts:
+            first = min([s.lineno] + [d.lineno for d in getattr(s, "decorator_list", [])])
+            if first <= line <= (s.end_lineno or s.lineno):
+                if best is None or (s.end_lineno or 0) - first < (best[1] - best[0]):
+                    best = (first, s.end_lineno or s.lineno, s.col_offset)
+        if best is None:
+            return None
+        lo, hi, col = best
+        if all(not out[k].strip() for k in range(lo - 1, hi)):
+            continue
+        out[lo - 1] = " " * col + "pass"
+        for k in range(lo, hi):
+            out[k] = ""
+    pruned = "\n".join(out)
+    return pruned if pruned != src else None
+
+
 def write_finding(root: pathlib.Path, f: Finding) -> None:
     d = root / (f.case.replace(":", "-") + "-" + f.mode)
     d.mkdir(parents=True, exist_ok=True)
@@ -288,7 +345,9 @@ def summary(st: Stats, cfg: argparse.Namespace, elapsed: float) -> str:
            f"{st.raising} raise an uncaught exception; discarded {sum(st.discarded.values())} {dict(st.discarded)}"]
     out.append("compared per mode: " + ", ".join(f"{m} {st.compared[m]}" for m in cfg.modes))
     feats = sorted({f.split("+")[0] for _, f in st.tried})
-    out.append("refusal rate per feature (refused/tried blocks):")
+    out.append("refused statements dropped (the rest of the block still compared): "
+               + ", ".join(f"{m} {st.pruned[m]}" for m in cfg.modes))
+    out.append("refusal rate per feature (blocks with a refusal / tried blocks):")
     out.append(f"  {'feature':16}" + "".join(f"{m:>16}" for m in cfg.modes))
     for feat in feats:
         row = f"  {feat:16}"

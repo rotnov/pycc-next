@@ -158,11 +158,9 @@ class Reducer:
                     lst = get(cand, path)
                     lst[idx:idx + 1] = copy.deepcopy(inner)  # type: ignore[index]
                     if self.attempt(cand):
-                        changed = True
-                        break
-                else:
-                    continue
-                break
+                        # The tree changed under the remaining paths: let the
+                        # caller start the passes again.
+                        return True
         return changed
 
     def pass_expressions(self) -> bool:
@@ -192,9 +190,14 @@ class Reducer:
 
     def run(self) -> str:
         while not self.out_of_time():
-            changed = self.pass_statements()
-            changed |= self.pass_unwrap()
-            changed |= self.pass_expressions()
+            changed = False
+            for step in (self.pass_statements, self.pass_unwrap, self.pass_expressions):
+                try:
+                    changed |= step()
+                except (AttributeError, IndexError, TypeError, ValueError, RecursionError):
+                    # A path gone stale after an accepted change: start over.
+                    changed = True
+                    break
             if not changed:
                 break
         return self.best

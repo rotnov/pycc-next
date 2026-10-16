@@ -71,7 +71,7 @@ class Blocks:
         if op == "divmod":
             # `print(divmod(big, d))` boxes a tuple holding a bigint, a
             # documented deviation (docs/DEVIATIONS.md): unpack it instead.
-            body = f"{p}q, {p}r = divmod({v}, {d})\n{IND}print({v}, {d}, {p}q, {p}r)"
+            body = f"{p}q, {p}r = divmod({v}, {d})\nprint({v}, {d}, {p}q, {p}r)"
         elif op == "**":
             body = f"print({v} ** {r.randint(0, 9)}, {d} ** 2)"
         elif op in ("<<", ">>"):
@@ -319,7 +319,9 @@ class Blocks:
         body = {
             "repr": [f"def __repr__(self) -> str:", f"{IND}return f'{B}({{self.v!r}}, {{self.tag!r}})'"],
             "str": [f"def __str__(self) -> str:", f"{IND}return '<' + self.tag + '>'"],
-            "eq": [f"def __eq__(self, other: object) -> bool:", f"{IND}return isinstance(other, {B}) and self.v == other.v"],
+            "eq": ([f"def __eq__(self, other: object) -> bool:", f"{IND}return isinstance(other, {B}) and self.v == other.v"]
+                   if r.random() < 0.4 else
+                   [f"def __eq__(self, other: '{B}') -> bool:", f"{IND}return self.v == other.v"]),
             "lt": [f"def __lt__(self, other: '{B}') -> bool:", f"{IND}return self.v < other.v"],
             "len": [f"def __len__(self) -> int:", f"{IND}return len(self.tag)"],
             "add": [f"def __add__(self, other: '{B}') -> '{B}':", f"{IND}return {B}(self.v + other.v, self.tag + other.tag)"],
