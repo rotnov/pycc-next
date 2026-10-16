@@ -252,7 +252,13 @@ Accept:
    abi3 extensions (`--ext`, strict or `--non-strict` per `[tool.pycc]`), keep a module in
    pure Python when told to, and produce a valid wheel. Evidence: a CI job builds a wheel
    for each `bench/package_check.py` package through pip and runs its suite against the
-   installed wheel.
+   installed wheel. **Met 2026-10-16** (CI run 38976843855, commit 86a0eeb):
+   `bench/wheel_check.py` built `cp313-abi3-manylinux_2_39_{x86_64,aarch64}` wheels of
+   diff-match-patch, tomli and pypng with `pip wheel` and the packaged archive's backend
+   on both Linux legs, and each package's own suite passed against the installed wheel
+   (pypng's 6 numpy tests skip: numpy is not in the fresh venv); `scripts/smoke.sh`
+   built, installed and ran a project's wheel through pip on Linux x86_64, aarch64 and
+   macOS arm64.
 2. **Classes in untyped code:** `--non-strict` compiles untyped classes natively — `bytes`
    literals and native `bytes` values, calls with `*args`/`**kwargs`, classes with methods
    that take or return CPython objects, generators in methods. Evidence: pypng compiles
