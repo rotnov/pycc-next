@@ -214,6 +214,13 @@ Accept:
    tiny images is only ~1.6x faster.
 3. **Real-world corpus:** strict passes >= 180/200; `--non-strict` 200/200, 0 wrong, with
    at most 2 top-level statements in CPython fallback (v0.4: 8), each documented.
+   **Met 2026-10-16:** `python3 bench/corpus.py` passes 181/200 strict (0 wrong);
+   `python3 bench/corpus.py --flags=--non-strict --require-correct` passes 200/200, 0
+   wrong, with 2 of 1191 top-level statements in CPython fallback (`--show-fallbacks`:
+   problems 134 and 188, both explained in the README's corpus note); CI run 38913979902.
+   Oracle fixtures in `tests/corpus_v05.rs`, leak probes in
+   `tests/memory_leaks_corpus_v05.rs`, the `int` infinity's differences in
+   `docs/DEVIATIONS.md`.
 4. **Compile speed:** building each `bench/package_check.py` package takes <= 10 s on the
    CI Linux runner (v0.4: diff-match-patch ~25 s); `pycc build` of every `bench/py`
    program takes <= 2 s. Measured in CI and reported by the script.
