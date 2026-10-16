@@ -55,6 +55,7 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/object_text.c"),
     include_str!("ext/module/object_stdlib.c"),
     include_str!("ext/module/ndarray.c"),
+    include_str!("ext/module/bytearray.c"),
     include_str!("ext/module/instances.c"),
     include_str!("ext/module/buffers.c"),
     include_str!("ext/module/module_init.c"),

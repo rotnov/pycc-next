@@ -32,6 +32,13 @@
 //! count, canonical dtype pointer, all read from `pycc_ext_nd_canon`, which
 //! the shim fills once it has validated the layout); anything else calls
 //! `pycc_ext_nd_check`.
+//!
+//! A byte buffer (`NdDtype::Byte`, a CPython `bytearray`) is read through
+//! the same snapshot, but never from the object's own fields: its check,
+//! the shim's `pycc_ext_ba_check`, answers the buffer pointer and size
+//! (`PyByteArray_AsString`, `PyByteArray_Size`) into a snapshot, so no
+//! `bytearray` layout is assumed. An operation on a base that is not a
+//! cache-safe local checks into a snapshot of its own, used once.
 
 use super::*;
 use crate::foreign_fail::{ForeignFailEdge, emit_failure, route_negative};
@@ -46,7 +53,7 @@ mod element;
 mod fresh;
 mod index;
 
-use element::{emit_writeable_check, load_element, store_element};
+use element::{byte_value, emit_writeable_check, load_element, store_element};
 pub(crate) use fresh::clear_fresh_after_calls;
 pub(crate) use index::is_simple_index;
 use index::{PendingIndex, decode_index, element_address, evaluate_index};
@@ -70,6 +77,10 @@ const ND_INDEX_ERROR_SYMBOL: &str = "pycc_ext_nd_index_error";
 const ND_INDEX_WORD_SYMBOL: &str = "pycc_ext_nd_index_word";
 const ND_INT_WORD_SYMBOL: &str = "pycc_ext_nd_int_word";
 const ND_READONLY_SYMBOL: &str = "pycc_ext_nd_readonly";
+const BA_CHECK_SYMBOL: &str = "pycc_ext_ba_check";
+const BA_INDEX_ERROR_SYMBOL: &str = "pycc_ext_ba_index_error";
+const BA_INDEX_WORD_SYMBOL: &str = "pycc_ext_ba_index_word";
+const BA_BYTE_ERROR_SYMBOL: &str = "pycc_ext_ba_byte_error";
 
 /// The header snapshot of one cache-safe typed array local: entry-block
 /// slots holding its data pointer, shape and strides as of its last check,
@@ -250,10 +261,10 @@ pub(crate) fn emit_nd<'ctx>(
     )
 }
 
-/// Whether `nd` reads an element of an `int64` array, which
-/// [`emit_nd_raw_i64`] can load as a machine integer.
+/// Whether `nd` reads an element of an `int64` array or a byte buffer,
+/// which [`emit_nd_raw_i64`] can load as a machine integer.
 pub(crate) fn is_i64_element(nd: &MirNdExpr) -> bool {
-    matches!(nd.op, NdOp::Get { .. }) && nd.nd.dtype == NdDtype::I64
+    matches!(nd.op, NdOp::Get { .. }) && matches!(nd.nd.dtype, NdDtype::I64 | NdDtype::Byte)
 }
 
 /// Emits an `int64` element read ([`is_i64_element`]) and returns the
@@ -330,12 +341,13 @@ fn emit_nd_value<'ctx>(
             .map(|f| (f.get_name().to_string_lossy().into_owned(), name.clone())),
         _ => None,
     };
-    let header = Header {
+    let mut header = Header {
         object,
         cache: cache_key
             .as_ref()
             .and_then(|key| rt.nd_caches.0.borrow().get(key).copied()),
     };
+    let byte = nd.nd.dtype == NdDtype::Byte;
     // The indices are evaluated before the array is checked: evaluating one
     // may run CPython code (`a[f()]`) that resizes, reshapes or retypes the
     // array, so a check made before them would vouch for a header that no
@@ -369,10 +381,23 @@ fn emit_nd_value<'ctx>(
             // Anything but a cache-safe local is checked at each use: CPython
             // code can rebind a global or an attribute, or change any array
             // in place, without passing a compiled binding's check.
+            None if byte => {
+                let scratch = new_cache(context, builder);
+                emit_byte_check(context, builder, module, rt, object, scratch);
+                header.cache = Some(scratch);
+            }
             None => emit_check(context, builder, module, rt, object, nd.nd),
         }
     }
     let result = match nd.op {
+        NdOp::Check if byte => {
+            let cache = match cache_key {
+                Some(key) => cache_slots(context, builder, rt, &header, key),
+                None => new_cache(context, builder),
+            };
+            emit_byte_check(context, builder, module, rt, object, cache);
+            none_value(context)
+        }
         NdOp::Check => {
             emit_check(context, builder, module, rt, object, nd.nd);
             if let Some(key) = cache_key {
@@ -421,11 +446,25 @@ fn emit_nd_value<'ctx>(
             let mut raw = Vec::with_capacity(pending.len());
             let mut words = Vec::with_capacity(pending.len());
             for index in pending {
-                let (value, word) = decode_index(context, builder, module, rt, index);
+                let symbol = if byte {
+                    BA_INDEX_WORD_SYMBOL
+                } else {
+                    ND_INDEX_WORD_SYMBOL
+                };
+                let (value, word) = decode_index(context, builder, module, rt, index, symbol);
                 raw.push(value);
                 words.extend(word);
             }
-            let address = element_address(context, builder, module, rt, &header, &raw, chained);
+            let stored = match stored {
+                Some((value_expr, value)) if byte => Some((
+                    value_expr,
+                    byte_value(context, builder, module, rt, value_expr, value),
+                )),
+                other => other,
+            };
+            let address = element_address(
+                context, builder, module, rt, &header, &raw, chained, byte,
+            );
             let value = match (nd.op, stored) {
                 (NdOp::Set { .. }, Some((value_expr, value))) => {
                     emit_writeable_check(context, builder, module, rt, &header);
@@ -478,8 +517,12 @@ fn refresh_if_stale<'ctx>(
         .build_conditional_branch(fresh, cont, stale)
         .expect("build_conditional_branch should not fail");
     builder.position_at_end(stale);
-    emit_check(context, builder, module, rt, header.object, nd);
-    write_cache(context, builder, header.object, cache, nd.ndim);
+    if nd.dtype == NdDtype::Byte {
+        emit_byte_check(context, builder, module, rt, header.object, cache);
+    } else {
+        emit_check(context, builder, module, rt, header.object, nd);
+        write_cache(context, builder, header.object, cache, nd.ndim);
+    }
     builder
         .build_unconditional_branch(cont)
         .expect("build_unconditional_branch should not fail");
@@ -496,14 +539,36 @@ fn store_cache<'ctx>(
     key: (String, String),
     ndim: u8,
 ) {
+    let cache = cache_slots(context, builder, rt, header, key);
+    write_cache(context, builder, header.object, cache, ndim);
+}
+
+/// The local's [`NdCache`] slots, created in the entry block (stale) on
+/// first use.
+fn cache_slots<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    header: &Header<'ctx>,
+    key: (String, String),
+) -> NdCache<'ctx> {
+    header.cache.unwrap_or_else(|| {
+        let cache = new_cache(context, builder);
+        rt.nd_caches.0.borrow_mut().insert(key, cache);
+        cache
+    })
+}
+
+/// A new, stale snapshot's entry-block slots.
+fn new_cache<'ctx>(context: &'ctx Context, builder: &Builder<'ctx>) -> NdCache<'ctx> {
     let function = builder
         .get_insert_block()
         .and_then(|b| b.get_parent())
         .expect("inside a function");
-    let cache = header.cache.unwrap_or_else(|| {
+    {
         let ptr_ty = context.ptr_type(inkwell::AddressSpace::default());
         let i64_type = context.i64_type();
-        let cache = crate::build_at_entry_block(builder, function, |b| {
+        crate::build_at_entry_block(builder, function, |b| {
             let cache = NdCache {
                 data: b.build_alloca(ptr_ty, "nd_cache_data").expect("alloca"),
                 dims: [
@@ -526,11 +591,74 @@ fn store_cache<'ctx>(
             b.build_store(cache.fresh, context.bool_type().const_zero())
                 .expect("build_store should not fail");
             cache
-        });
-        rt.nd_caches.0.borrow_mut().insert(key, cache);
-        cache
+        })
+    }
+}
+
+/// Checks that `object` is exactly a `bytearray` (`pycc_ext_ba_check`,
+/// raising `TypeError` otherwise) and snapshots its buffer and size into
+/// `cache`, marking it fresh. The shim writes through two scratch slots of
+/// its own, so `cache`'s slots stay unaddressed (promotable).
+fn emit_byte_check<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    object: PointerValue<'ctx>,
+    cache: NdCache<'ctx>,
+) {
+    let function = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .expect("inside a function");
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_type = context.i64_type();
+    let (data_out, size_out) = crate::build_at_entry_block(builder, function, |b| {
+        (
+            b.build_alloca(ptr, "ba_data_out").expect("alloca"),
+            b.build_alloca(i64_type, "ba_size_out").expect("alloca"),
+        )
     });
-    write_cache(context, builder, header.object, cache, ndim);
+    let edge = ForeignFailEdge::for_current(builder);
+    let check = shim_fn(
+        module,
+        BA_CHECK_SYMBOL,
+        context
+            .i32_type()
+            .fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
+    );
+    let status = builder
+        .build_call(
+            check,
+            &[object.into(), data_out.into(), size_out.into()],
+            "ba_check",
+        )
+        .expect("build_call should not fail")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_ba_check returns int")
+        .into_int_value();
+    route_negative(context, builder, module, rt, edge, status, "ba_check");
+    let data = builder
+        .build_load(ptr, data_out, "ba_data")
+        .expect("build_load should not fail");
+    let size = builder
+        .build_load(i64_type, size_out, "ba_size")
+        .expect("build_load should not fail");
+    let stores = [
+        (cache.data, data),
+        (cache.dims[0], size),
+        (cache.strides[0], i64_type.const_int(1, false).into()),
+        (
+            cache.flags,
+            context.i32_type().const_int(WRITEABLE, false).into(),
+        ),
+        (cache.fresh, context.bool_type().const_int(1, false).into()),
+    ];
+    for (slot, value) in stores {
+        builder
+            .build_store(slot, value)
+            .expect("build_store should not fail");
+    }
 }
 
 /// Stores `object`'s header fields into `cache` and marks it fresh.

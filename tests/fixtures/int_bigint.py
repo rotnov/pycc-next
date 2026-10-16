@@ -49,6 +49,7 @@ print(small_max + 1, small_min - 1, small_max * 2, small_min * 2)
 print(i64_max + 1, i64_min - 1, -i64_min, i64_max * i64_max)
 print(small_max + 1 - 1, small_min - 1 + 1, (small_max + 1) // 2)
 print(-small_min, small_min // -1, small_min % -1, abs(small_min))
+print(abs(small_min + 1), abs(small_max), abs(-small_max), abs(0), abs(-1), abs(small_min) - 1)
 print(small_max + 1 == 4611686018427387904, small_min - 1 < small_min)
 print(doubling(61), doubling(62), doubling(63), doubling(64), doubling(200))
 

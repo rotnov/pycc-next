@@ -85,7 +85,7 @@ pub(super) fn load_element<'ctx>(
     let element_ty: inkwell::types::BasicTypeEnum<'ctx> = match dtype {
         NdDtype::F64 => context.f64_type().into(),
         NdDtype::I64 => context.i64_type().into(),
-        NdDtype::Bool => context.i8_type().into(),
+        NdDtype::Bool | NdDtype::Byte => context.i8_type().into(),
     };
     let load = builder
         .build_load(element_ty, address, "nd_load")
@@ -100,6 +100,24 @@ pub(super) fn load_element<'ctx>(
         NdDtype::F64 => Scalar::Float(load.into_float_value()),
         NdDtype::I64 if !tag_int => Scalar::Int(load.into_int_value()),
         NdDtype::I64 => Scalar::Int(tag_i64(context, builder, rt, load.into_int_value())),
+        NdDtype::Byte => {
+            let value = builder
+                .build_int_z_extend(load.into_int_value(), context.i64_type(), "ba_item")
+                .expect("build_int_z_extend should not fail");
+            if !tag_int {
+                return Scalar::Int(value);
+            }
+            // A byte is always a smallint: `value << 1 | 1`.
+            let one = context.i64_type().const_int(1, false);
+            let shifted = builder
+                .build_left_shift(value, one, "ba_shl")
+                .expect("build_left_shift should not fail");
+            Scalar::Int(
+                builder
+                    .build_or(shifted, one, "ba_tagged")
+                    .expect("build_or should not fail"),
+            )
+        }
         NdDtype::Bool => {
             let nonzero = builder
                 .build_int_compare(
@@ -158,6 +176,105 @@ pub(super) fn tag_i64<'ctx>(
     let phi = builder.build_phi(i64_type, "nd_int").expect("phi");
     phi.add_incoming(&[(&small, small_bb), (&big, big_bb)]);
     phi.as_basic_value().into_int_value()
+}
+
+/// The byte a value stored into a byte buffer is, as `Scalar::Bool`'s `i8`
+/// (which [`store_element`] stores as it is), raising `ValueError` when it
+/// is not in `range(0, 256)`. `bytearray` converts the value before it
+/// bounds-checks the index, so this runs before the element's address.
+pub(super) fn byte_value<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    value_expr: &MirExpr,
+    value: Scalar<'ctx>,
+) -> Scalar<'ctx> {
+    if let Scalar::Bool(byte) = value {
+        return Scalar::Bool(byte);
+    }
+    let word = to_numeric_encoded_int(context, builder, value);
+    let (byte, in_range) = byte_of_word(context, builder, word);
+    // A bigint word is released before the range error can leave: it is
+    // never a byte.
+    release_if_int_temporary(context, builder, rt, value_expr, word);
+    cold_raise(
+        context,
+        builder,
+        module,
+        rt,
+        builder
+            .build_not(in_range, "ba_out_of_range")
+            .expect("build_not should not fail"),
+        "ba_byte",
+        |b| {
+            let raise = shim_fn(
+                module,
+                BA_BYTE_ERROR_SYMBOL,
+                context.i32_type().fn_type(&[], false),
+            );
+            b.build_call(raise, &[], "ba_byte_error")
+                .expect("build_call should not fail");
+        },
+    );
+    Scalar::Bool(
+        builder
+            .build_int_truncate(byte, context.i8_type(), "ba_byte")
+            .expect("build_int_truncate should not fail"),
+    )
+}
+
+/// The value of an `int` word stored into a byte buffer, and whether it is
+/// one (`range(0, 256)`): a smallint by a shift, a bool marker 0 or 1, and
+/// a bigint never. Branch-free.
+fn byte_of_word<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    word: IntValue<'ctx>,
+) -> (IntValue<'ctx>, IntValue<'ctx>) {
+    let i64_type = context.i64_type();
+    let one = i64_type.const_int(1, false);
+    let low = builder.build_and(word, one, "ba_low").expect("and");
+    let is_small = builder
+        .build_int_compare(IntPredicate::NE, low, i64_type.const_zero(), "ba_is_small")
+        .expect("build_int_compare should not fail");
+    let folded = builder
+        .build_or(word, i64_type.const_int(4, false), "ba_marker_fold")
+        .expect("or");
+    let is_marker = builder
+        .build_int_compare(
+            IntPredicate::EQ,
+            folded,
+            i64_type.const_int(6, false),
+            "ba_is_marker",
+        )
+        .expect("build_int_compare should not fail");
+    let small = builder
+        .build_right_shift(word, one, true, "ba_untag")
+        .expect("ashr");
+    let marker = builder
+        .build_right_shift(word, i64_type.const_int(2, false), false, "ba_marker")
+        .expect("lshr");
+    let value = builder
+        .build_select(is_small, small, marker, "ba_value")
+        .expect("build_select should not fail")
+        .into_int_value();
+    let decodable = builder
+        .build_or(is_small, is_marker, "ba_decodable")
+        .expect("or");
+    // One unsigned compare also refuses a negative value.
+    let fits = builder
+        .build_int_compare(
+            IntPredicate::ULT,
+            value,
+            i64_type.const_int(256, false),
+            "ba_fits",
+        )
+        .expect("build_int_compare should not fail");
+    let ok = builder
+        .build_and(decodable, fits, "ba_in_range")
+        .expect("and");
+    (value, ok)
 }
 
 pub(super) fn emit_writeable_check<'ctx>(
@@ -236,6 +353,11 @@ pub(super) fn store_element<'ctx>(
         NdDtype::Bool => match value {
             Scalar::Bool(byte) => byte.into(),
             _ => panic!("pycc_codegen: internal error: a bool array stores a non-bool value"),
+        },
+        // Converted, and checked, before the index ([`byte_value`]).
+        NdDtype::Byte => match value {
+            Scalar::Bool(byte) => byte.into(),
+            _ => panic!("pycc_codegen: internal error: a byte store's value is not converted"),
         },
     };
     let store = builder

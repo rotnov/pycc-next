@@ -12,7 +12,11 @@
 //! diagnostic only the specialized program has drops the specialization
 //! whose `def` holds it; one no `def` holds (a span-less solver
 //! diagnostic) is narrowed down to one specialization by halving
-//! ([`culprit`]); and the attempt is repeated. What fails without
+//! ([`culprit`]); and the attempt is repeated. A specialization that calls
+//! a builtin its original calls through CPython
+//! (`Specialized::restored_builtins`) is not dropped at its first failure
+//! but planned again calling builtins as the original does
+//! ([`KEEP_BUILTINS`]). What fails without
 //! specializations too is the program's own failure, which the caller (the
 //! fallback loop) handles as before.
 
@@ -26,6 +30,9 @@ thread_local! {
     static ACTIVE: Cell<bool> = const { Cell::new(false) };
     /// The qualnames whose specialization the checker refused, and why.
     static DROPPED: RefCell<BTreeMap<String, String>> = const { RefCell::new(BTreeMap::new()) };
+    /// The qualnames whose specialization calls builtins as its original
+    /// does, having failed calling them itself.
+    static KEEP_BUILTINS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
     /// What the loader specialized in the current attempt.
     static PLANNED: RefCell<Vec<Specialized>> = const { RefCell::new(Vec::new()) };
     /// What the last attempt that passed specialized, for the report.
@@ -38,6 +45,7 @@ thread_local! {
 /// Forgets every dropped specialization, before a new program is built.
 pub(crate) fn reset() {
     DROPPED.with(|dropped| dropped.borrow_mut().clear());
+    KEEP_BUILTINS.with(|keep| keep.borrow_mut().clear());
     PLANNED.with(|planned| planned.borrow_mut().clear());
     PASSED.with(|passed| passed.borrow_mut().clear());
 }
@@ -49,12 +57,17 @@ pub(crate) fn specialize_entry(parsed: &mut pycc_ast::ModModule) {
         return;
     }
     let only = ONLY.with(|only| only.borrow().clone());
+    let keep = KEEP_BUILTINS.with(|keep| keep.borrow().clone());
     let planned = DROPPED.with(|dropped| {
         let dropped = dropped.borrow();
-        pycc_ast::specialize_untyped(parsed, &|qualname| {
-            dropped.contains_key(qualname)
-                || only.as_ref().is_some_and(|only| !only.contains(qualname))
-        })
+        pycc_ast::specialize_untyped(
+            parsed,
+            &|qualname| {
+                dropped.contains_key(qualname)
+                    || only.as_ref().is_some_and(|only| !only.contains(qualname))
+            },
+            &|qualname| keep.contains(qualname),
+        )
     });
     PLANNED.with(|cell| *cell.borrow_mut() = planned);
 }
@@ -84,6 +97,18 @@ fn keys(failure: &FrontendFailure) -> Vec<Key> {
             })
         })
         .collect()
+}
+
+/// Whether `key` is one of the program's own failures (`known`): the same
+/// diagnostic, or the same one without its span. A specialized attempt can
+/// report an original's diagnostic without a span (both copies hold its
+/// source range, so locating it is ambiguous); it is not the copy's.
+fn is_known(known: &BTreeSet<Key>, key: &Key) -> bool {
+    known.contains(key)
+        || (key.3.is_none()
+            && known
+                .iter()
+                .any(|k| (&k.0, k.1, &k.2) == (&key.0, key.1, &key.2)))
 }
 
 /// A dropped specialization's reason, from the diagnostic that dropped it.
@@ -133,7 +158,7 @@ pub(crate) fn with_specialization<T>(
         });
         let new: Vec<Key> = keys(&failure)
             .into_iter()
-            .filter(|key| !known.contains(key))
+            .filter(|key| !is_known(known, key))
             .collect();
         if new.is_empty() {
             // The program's own failure, reported as the program alone
@@ -153,7 +178,16 @@ pub(crate) fn with_specialization<T>(
             let suspects = planned.iter().map(|spec| spec.qualname.clone()).collect();
             blamed.insert(culprit(suspects, known, &attempt), reason(&new[0]));
         }
-        DROPPED.with(|dropped| dropped.borrow_mut().extend(blamed));
+        for (qualname, reason) in blamed {
+            let restored = planned
+                .iter()
+                .any(|spec| spec.qualname == qualname && spec.restored_builtins);
+            if restored {
+                KEEP_BUILTINS.with(|keep| keep.borrow_mut().insert(qualname));
+            } else {
+                DROPPED.with(|dropped| dropped.borrow_mut().insert(qualname, reason));
+            }
+        }
     }
 }
 
@@ -170,7 +204,7 @@ fn culprit<T>(
         let (result, _) = specialized(attempt, Some(suspects.iter().cloned().collect()));
         let fails = match &result {
             Ok(_) => false,
-            Err(failure) => keys(failure).iter().any(|key| !known.contains(key)),
+            Err(failure) => keys(failure).iter().any(|key| !is_known(known, key)),
         };
         if !fails {
             suspects = second;

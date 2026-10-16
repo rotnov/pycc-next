@@ -656,6 +656,12 @@ pub(crate) fn annotation_to_ty(
             // body. `crates/pycc_types`'s `reject_memoryview_declaration`
             // owns that position, in both modes.
             "memoryview" => Ok(Ty::MemoryView),
+            // The byte buffer a guarded specialization of an untyped
+            // function types an exact-`bytearray` argument as
+            // (`crate::ndarray`'s module doc); only that pass spells it.
+            pycc_ast::BYTEARRAY_ANNOTATION if is_ext_module(aliases) => {
+                Ok(Ty::NdArray(crate::ndarray::NdTy::bytearray()))
+            }
             // D-258 rule 2 (#1397): in an `ext` module `Any` is the opaque
             // CPython object a foreign import binds. Everywhere else it keeps
             // `T0002`, with the same code, message and span.

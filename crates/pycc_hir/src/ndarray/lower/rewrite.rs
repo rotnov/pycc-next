@@ -152,6 +152,10 @@ impl Scope<'_, '_> {
                 }
             }
             HirExpr::AttrGet { base, attr } => self.nd(base).and_then(|nd| {
+                // A `bytearray` has none of these attributes.
+                if nd.dtype == NdDtype::Byte {
+                    return None;
+                }
                 let op = match attr.as_str() {
                     "shape" => NdOp::Shape,
                     "size" => NdOp::Size,
@@ -427,6 +431,7 @@ impl Scope<'_, '_> {
             HirStmt::ForList { var, list, body } => {
                 if let Some(nd) = nd_of_name(self.ctx, self.facts, &list)
                     && nd.ndim == 1
+                    && nd.dtype != NdDtype::Byte
                 {
                     let index = self.fresh();
                     let mut new_body = vec![HirStmt::Assign {

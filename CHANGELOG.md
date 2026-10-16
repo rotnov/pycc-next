@@ -4,6 +4,34 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- A third real package (v0.5 accept 2): `bench/package_check.py` adds
+  [pypng](https://pypi.org/project/pypng/) 0.20220715.0 (MIT, a pure-Python PNG codec,
+  sdist pinned by sha256), a single module (the table now takes one as well as a
+  package). `png` builds unchanged with `--ext --non-strict`, its own 103 tests pass
+  against it (CI) and reading a 256x256 RGB image that uses all five PNG filters runs
+  10x faster than in CPython (`python3 bench/package_check.py pypng --time --runs 5`:
+  0.015 s vs 0.157 s); 15 of its 85 functions compile, its `Reader`/`Writer` classes
+  still run in CPython.
+- Untyped byte loops run native: a guarded specialization also guesses `bytearray` for a
+  parameter whose items are used as numbers (`(x + a) & 0xff` with `x = s[i]`, an index
+  local computed from an `int` parameter counts as its use too) and takes the caller's
+  `bytearray` as it is: items are read and stored in its own buffer, its size and buffer
+  pointer held in registers until something may run CPython code (then re-read), with
+  `bytearray`'s own `IndexError`/`ValueError`s (the stored byte is checked before the
+  index, as CPython does). pypng's `undo_filter_*` loops run 25x-50x faster per byte.
+- `abs()` of a small `int` is computed inline instead of calling the runtime.
+
+### Fixed
+
+- A guarded specialization calls a builtin its original reaches through CPython (`abs`
+  of an object) natively when its typed arguments allow (and as the original does when
+  they do not), instead of always through CPython.
+- A function was not specialized when its original failed to compile in a way reported
+  without a source span in the specialized attempt (a module with no imports and an
+  `abs()` of an object): such a failure is the original's, not the copy's.
+
 ## [0.4.0] - 2026-10-15
 
 Fast untyped code, no leaks. `--non-strict` keeps untyped code native: strings index in

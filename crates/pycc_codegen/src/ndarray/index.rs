@@ -6,7 +6,8 @@ use super::*;
 /// Decodes an `int` index word to a machine integer: a smallint (odd
 /// word) by a shift, a bool marker (`0b0010`/`0b0110`) to 0 or 1, and a
 /// bigint -- which numpy refuses as an index -- by raising its `IndexError`
-/// on the foreign failure edge.
+/// on the foreign failure edge (`bytearray`'s own, for a byte buffer's
+/// `word_symbol`).
 ///
 /// Branch-free but for that exit: the two decodings are selected, and the
 /// only branch leaves the loop around the access. So a loop-invariant index
@@ -19,6 +20,7 @@ pub(super) fn untag_index<'ctx>(
     module: &inkwell::module::Module<'ctx>,
     rt: &RtFns<'ctx>,
     word: IntValue<'ctx>,
+    word_symbol: &str,
 ) -> IntValue<'ctx> {
     let i64_type = context.i64_type();
     if let Some(constant) = word.get_sign_extended_constant()
@@ -51,7 +53,7 @@ pub(super) fn untag_index<'ctx>(
         let ptr = context.ptr_type(inkwell::AddressSpace::default());
         let raise = shim_fn(
             module,
-            ND_INDEX_WORD_SYMBOL,
+            word_symbol,
             context
                 .i32_type()
                 .fn_type(&[i64_type.into(), ptr.into()], false),
@@ -163,19 +165,20 @@ pub(super) fn evaluate_index<'ctx, 'm>(
     }
 }
 
-/// The machine value of an evaluated index ([`untag_index`]); the second
-/// element of the pair is an evaluated `int` word for the caller to
-/// release.
+/// The machine value of an evaluated index ([`untag_index`], raising
+/// through `word_symbol`); the second element of the pair is an evaluated
+/// `int` word for the caller to release.
 pub(super) fn decode_index<'ctx, 'm>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
     module: &inkwell::module::Module<'ctx>,
     rt: &RtFns<'ctx>,
     index: PendingIndex<'ctx, 'm>,
+    word_symbol: &str,
 ) -> (IntValue<'ctx>, Option<(&'m MirExpr, IntValue<'ctx>)>) {
     let leaf = |l: PendingLeaf<'ctx>| match l {
         PendingLeaf::Raw(value) => value,
-        PendingLeaf::Word(word) => untag_index(context, builder, module, rt, word),
+        PendingLeaf::Word(word) => untag_index(context, builder, module, rt, word, word_symbol),
     };
     match index {
         PendingIndex::Leaves { left, right: None } => (leaf(left), None),
@@ -194,7 +197,7 @@ pub(super) fn decode_index<'ctx, 'm>(
             (value, None)
         }
         PendingIndex::Word(expr, word) => (
-            untag_index(context, builder, module, rt, word),
+            untag_index(context, builder, module, rt, word, word_symbol),
             Some((expr, word)),
         ),
     }
@@ -204,7 +207,9 @@ pub(super) fn decode_index<'ctx, 'm>(
 /// against its axis (a negative index counts from the end).
 ///
 /// `chained` is `a[i][j]`: the second index indexes a row, a 1-D array, so
-/// numpy reports it against axis 0.
+/// numpy reports it against axis 0. `byte` is a byte buffer's access, whose
+/// error is `bytearray`'s own.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn element_address<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -213,6 +218,7 @@ pub(super) fn element_address<'ctx>(
     header: &Header<'ctx>,
     indices: &[IntValue<'ctx>],
     chained: bool,
+    byte: bool,
 ) -> PointerValue<'ctx> {
     let i64_type = context.i64_type();
     let mut offset = i64_type.const_zero();
@@ -243,6 +249,16 @@ pub(super) fn element_address<'ctx>(
             out_of_range,
             "nd_bounds",
             |b| {
+                if byte {
+                    let raise = shim_fn(
+                        module,
+                        BA_INDEX_ERROR_SYMBOL,
+                        context.i32_type().fn_type(&[], false),
+                    );
+                    b.build_call(raise, &[], "ba_index_error")
+                        .expect("build_call should not fail");
+                    return;
+                }
                 let raise = shim_fn(
                     module,
                     ND_INDEX_ERROR_SYMBOL,

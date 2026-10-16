@@ -32,6 +32,71 @@ fn call_int<'ctx>(
         .into_int_value()
 }
 
+/// `abs` of the `int` word `word`: inline for a smallint (`2v + 1`, whose
+/// absolute value is `2 - word` when negative), except the most negative
+/// one, whose absolute value leaves the smallint range; through
+/// `pycc_rt_int_abs` for that, a bigint or a bool marker.
+fn emit_int_abs<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    word: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    use inkwell::IntPredicate;
+    let i64_type = context.i64_type();
+    let function = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .expect("inside a function");
+    let odd = builder
+        .build_and(word, i64_type.const_int(1, false), "abs_low")
+        .expect("build_and should not fail");
+    let small = builder
+        .build_int_compare(IntPredicate::NE, odd, i64_type.const_zero(), "abs_small")
+        .expect("build_int_compare should not fail");
+    let not_min = builder
+        .build_int_compare(
+            IntPredicate::NE,
+            word,
+            i64_type.const_int((i64::MIN + 1) as u64, true),
+            "abs_not_min",
+        )
+        .expect("build_int_compare should not fail");
+    let fast = builder
+        .build_and(small, not_min, "abs_fast")
+        .expect("build_and should not fail");
+    let fast_bb = context.append_basic_block(function, "abs_inline");
+    let slow_bb = context.append_basic_block(function, "abs_call");
+    let join_bb = context.append_basic_block(function, "abs_join");
+    crate::int_fast::likely_branch(context, builder, fast, fast_bb, slow_bb);
+    builder.position_at_end(fast_bb);
+    let negative = builder
+        .build_int_compare(IntPredicate::SLT, word, i64_type.const_zero(), "abs_neg")
+        .expect("build_int_compare should not fail");
+    let flipped = builder
+        .build_int_sub(i64_type.const_int(2, false), word, "abs_flip")
+        .expect("build_int_sub should not fail");
+    let inline = builder
+        .build_select(negative, flipped, word, "abs_inline_value")
+        .expect("build_select should not fail")
+        .into_int_value();
+    builder
+        .build_unconditional_branch(join_bb)
+        .expect("br should not fail");
+    builder.position_at_end(slow_bb);
+    let called = call_int(builder, rt.int_abs, &[word.into()], "int_abs");
+    let slow_end = builder.get_insert_block().expect("positioned");
+    builder
+        .build_unconditional_branch(join_bb)
+        .expect("br should not fail");
+    builder.position_at_end(join_bb);
+    let phi = builder
+        .build_phi(i64_type, "abs")
+        .expect("build_phi should not fail");
+    phi.add_incoming(&[(&inline, fast_bb), (&called, slow_end)]);
+    phi.as_basic_value().into_int_value()
+}
+
 /// Emits the call when `callee` is one of the three builtins over native
 /// operands, `None` otherwise (including `int(o)` of a CPython object).
 #[allow(clippy::too_many_arguments)]
@@ -69,7 +134,7 @@ pub(super) fn emit_call<'ctx>(
         ("abs", [x]) if matches!(x.ty(), Ty::Int | Ty::Bool) => {
             let scalar = emit(x);
             let word = to_numeric_encoded_int(context, builder, scalar);
-            let result = call_int(builder, rt.int_abs, &[word.into()], "int_abs");
+            let result = emit_int_abs(context, builder, rt, word);
             release_if_int_temporary(context, builder, rt, x, word);
             Some(Scalar::Int(result))
         }

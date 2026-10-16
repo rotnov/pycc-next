@@ -82,6 +82,12 @@ pub(crate) fn clear_fresh_after_calls<'ctx>(
 ///   `repr`), but every failure leaves through the foreign failure edge,
 ///   whose `pycc_ext_obj_error_bridge` call is not listed here and so
 ///   marks every snapshot stale before anything else runs.
+/// - `pycc_ext_ba_check`: `PyByteArray_CheckExact`, `PyByteArray_AsString`
+///   and `PyByteArray_Size` on success, none of which runs Python code;
+///   its failure formats the type's name and leaves through the failure
+///   edge, as above.
+/// - `pycc_ext_ba_index_error`, `pycc_ext_ba_index_word`,
+///   `pycc_ext_ba_byte_error`: `PyErr_SetString` with a literal only.
 pub(super) const PYTHON_FREE_CALLS: &[&str] = &[
     "pycc_rt_int_add",
     "pycc_rt_int_sub",
@@ -122,6 +128,10 @@ pub(super) const PYTHON_FREE_CALLS: &[&str] = &[
     ND_INDEX_WORD_SYMBOL,
     ND_INT_WORD_SYMBOL,
     ND_READONLY_SYMBOL,
+    BA_CHECK_SYMBOL,
+    BA_INDEX_ERROR_SYMBOL,
+    BA_INDEX_WORD_SYMBOL,
+    BA_BYTE_ERROR_SYMBOL,
 ];
 
 /// Whether `call` may run CPython code ([`clear_fresh_after_calls`]).
@@ -158,6 +168,10 @@ mod tests {
             "pycc_ext_nd_index_word",
             "pycc_ext_nd_int_word",
             "pycc_ext_nd_readonly",
+            "pycc_ext_ba_check",
+            "pycc_ext_ba_index_error",
+            "pycc_ext_ba_index_word",
+            "pycc_ext_ba_byte_error",
             "llvm.sadd.with.overflow.i64",
         ] {
             assert!(!callee_may_run_python(name), "{name}");

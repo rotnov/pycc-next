@@ -307,15 +307,18 @@ pub(super) fn is_int(ctx: &Ctx, facts: &Facts, expr: &HirExpr) -> bool {
         },
         HirExpr::Nd(nd) => {
             matches!(nd.op, NdOp::Size | NdOp::Ndim | NdOp::Dim(_))
-                || (matches!(nd.op, NdOp::Get { .. }) && nd.nd.dtype == NdDtype::I64)
+                || (matches!(nd.op, NdOp::Get { .. })
+                    && matches!(nd.nd.dtype, NdDtype::I64 | NdDtype::Byte))
         }
         HirExpr::Subscript { base, index } => match base.as_ref() {
             HirExpr::AttrGet { base, attr } if attr == "shape" => {
-                nd_of_value(ctx, facts, base).is_some()
+                nd_of_value(ctx, facts, base).is_some_and(|nd| nd.dtype != NdDtype::Byte)
                     && matches!(index.as_ref(), HirExpr::IntLiteral(_))
             }
+            _ if matches!(index.as_ref(), HirExpr::Slice { .. }) => false,
             other => {
-                nd_of_value(ctx, facts, other).is_some_and(|nd| nd.dtype == NdDtype::I64)
+                nd_of_value(ctx, facts, other)
+                    .is_some_and(|nd| matches!(nd.dtype, NdDtype::I64 | NdDtype::Byte))
                     && match index.as_ref() {
                         HirExpr::TupleLiteral(t) => {
                             t.len()
@@ -326,7 +329,8 @@ pub(super) fn is_int(ctx: &Ctx, facts: &Facts, expr: &HirExpr) -> bool {
             }
         },
         HirExpr::AttrGet { base, attr } => {
-            matches!(attr.as_str(), "size" | "ndim") && nd_of_value(ctx, facts, base).is_some()
+            matches!(attr.as_str(), "size" | "ndim")
+                && nd_of_value(ctx, facts, base).is_some_and(|nd| nd.dtype != NdDtype::Byte)
         }
         _ => false,
     }

@@ -24,6 +24,17 @@
 //! A bare `ndarray`/`NDArray` without a numpy dtype argument (or with a
 //! builtin one, `NDArray[float]`) keeps meaning the `memoryview` buffer
 //! carrier of a `pycc build --ext` parameter (`Ty::MemoryView`, #1129).
+//!
+//! **Byte buffers.** The same machinery types a CPython `bytearray`
+//! ([`NdDtype::Byte`], always one-dimensional): its items read as `int`
+//! and store an `int` in `range(0, 256)`, straight in the object's buffer,
+//! and `len()` reads its size. Only the guarded specializations of
+//! untyped functions (`pycc_ast::specialize_untyped`) spell the type, as
+//! `pycc_ast::BYTEARRAY_ANNOTATION`: their guard has already established
+//! that the argument is exactly a `bytearray`, so the check at entry never
+//! fails there. Nothing else numpy-shaped (`.shape`, `.size`, `.ndim`, a
+//! `for` over it) is lowered for one: those stay object operations, as a
+//! `for` must (a `bytearray` iterator re-reads the size at each step).
 
 use pycc_ast::Expr;
 
@@ -100,6 +111,8 @@ pub enum NdDtype {
     I64,
     /// `numpy.bool_`: one byte holding 0 or 1; elements read as `bool`.
     Bool,
+    /// A CPython `bytearray` (module doc): unsigned bytes read as `int`.
+    Byte,
 }
 
 impl NdDtype {
@@ -110,16 +123,20 @@ impl NdDtype {
             NdDtype::F64 => "float64",
             NdDtype::I64 => "int64",
             NdDtype::Bool => "bool",
+            NdDtype::Byte => "uint8",
         }
     }
 
     /// The code the run-time check (`pycc_ext_nd_check`) takes.
+    /// A byte buffer has its own check (`pycc_ext_ba_check`); its code is
+    /// never passed to numpy's.
     #[must_use]
     pub fn code(self) -> u8 {
         match self {
             NdDtype::F64 => 0,
             NdDtype::I64 => 1,
             NdDtype::Bool => 2,
+            NdDtype::Byte => 3,
         }
     }
 
@@ -128,7 +145,7 @@ impl NdDtype {
     pub fn itemsize(self) -> u64 {
         match self {
             NdDtype::F64 | NdDtype::I64 => 8,
-            NdDtype::Bool => 1,
+            NdDtype::Bool | NdDtype::Byte => 1,
         }
     }
 
@@ -160,8 +177,17 @@ impl NdTy {
     pub fn elem_ty(self) -> crate::Ty {
         match self.dtype {
             NdDtype::F64 => crate::Ty::Float,
-            NdDtype::I64 => crate::Ty::Int,
+            NdDtype::I64 | NdDtype::Byte => crate::Ty::Int,
             NdDtype::Bool => crate::Ty::Bool,
+        }
+    }
+
+    /// The byte buffer type ([`NdDtype::Byte`]).
+    #[must_use]
+    pub fn bytearray() -> NdTy {
+        NdTy {
+            dtype: NdDtype::Byte,
+            ndim: 1,
         }
     }
 
@@ -178,9 +204,13 @@ impl NdTy {
         }
     }
 
-    /// How diagnostics render the type: `ndarray[float64, 2-D]`.
+    /// How diagnostics render the type: `ndarray[float64, 2-D]`, or
+    /// `bytearray`.
     #[must_use]
     pub fn name(self) -> String {
+        if self.dtype == NdDtype::Byte {
+            return "bytearray".to_string();
+        }
         format!("ndarray[{}, {}-D]", self.dtype.numpy_name(), self.ndim)
     }
 }

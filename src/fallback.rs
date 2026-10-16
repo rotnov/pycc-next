@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// The namespace dictionary's name in rewritten code.
 const NS: &str = "__pycc_fallback_ns";
 /// The `builtins` module's name in rewritten code.
-const BUILTINS: &str = "__pycc_fallback_builtins";
+const BUILTINS: &str = pycc_ast::FALLBACK_BUILTINS;
 /// The `sys` module's name in rewritten code.
 const SYS: &str = "__pycc_fallback_sys";
 

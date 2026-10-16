@@ -8,7 +8,7 @@ fn parse(source: &str) -> ModModule {
 
 fn plan_of(source: &str) -> (ModModule, Vec<Specialized>) {
     let mut module = parse(source);
-    let planned = specialize_untyped(&mut module, &|_| false);
+    let planned = specialize_untyped(&mut module, &|_| false, &|_| false);
     (module, planned)
 }
 
@@ -112,7 +112,7 @@ fn a_module_that_rebinds_a_name_the_guard_spells_is_left_alone() {
 #[test]
 fn a_skipped_specialization_is_not_planned() {
     let mut module = parse("def f(s):\n    for c in s:\n        print(s[0])\n");
-    assert!(specialize_untyped(&mut module, &|q| q == "f").is_empty());
+    assert!(specialize_untyped(&mut module, &|q| q == "f", &|_| false).is_empty());
     assert_eq!(def_names(&module.body), ["f"]);
 }
 
@@ -122,5 +122,47 @@ fn text_evidence_wins_over_sequence_counter_evidence_only_when_consistent() {
     assert_eq!(
         guesses("def f(a, b):\n    while a != 'x':\n        a = a[1:]\n    return b.startswith(a)\n"),
         vec![("f".to_string(), vec![("a".to_string(), "str"), ("b".to_string(), "str")])]
+    );
+}
+
+#[test]
+fn a_parameter_whose_items_are_numbers_is_a_bytearray() {
+    let paeth = "def f(fu, scanline, previous, result):\n    ai = -fu\n    for i in range(len(result)):\n        x = scanline[i]\n        if ai < 0:\n            a = c = 0\n        else:\n            a = result[ai]\n            c = previous[ai]\n        b = previous[i]\n        p = a + b - c\n        pa = abs(p - a)\n        result[i] = (x + pa) & 0xff\n        ai += 1\n";
+    assert_eq!(
+        guesses(paeth),
+        vec![(
+            "f".to_string(),
+            vec![
+                ("fu".to_string(), "int"),
+                ("scanline".to_string(), "bytearray"),
+                ("previous".to_string(), "bytearray"),
+                ("result".to_string(), "bytearray"),
+            ]
+        )]
+    );
+    // The copy spells the byte buffer annotation; the guard tests the
+    // builtin type.
+    let (module, _) = plan_of(paeth);
+    let Stmt::FunctionDef(clone) = &module.body[2] else { unreachable!() };
+    assert!(matches!(clone.parameters.args[1].parameter.annotation.as_deref(),
+        Some(Expr::Name(n)) if n.id.as_str() == BYTEARRAY_ANNOTATION));
+    // An item stored a number, with no item read, is one too; a list
+    // stored a literal, or whose items are only concatenated, is not.
+    assert_eq!(
+        guesses("def f(s, out):\n    for i in range(len(s)):\n        out[i] = s[i] ^ 1\n"),
+        vec![("f".to_string(), vec![("s".to_string(), "bytearray"), ("out".to_string(), "bytearray")])]
+    );
+    assert_eq!(
+        guesses("def f(s, t):\n    r = ''\n    for i in range(len(s)):\n        r = r + s[i] + t[i]\n    return r\n"),
+        vec![("f".to_string(), vec![("s".to_string(), "str"), ("t".to_string(), "str")])]
+    );
+    // A parameter the body binds again is not (its binding would be
+    // checked to be a `bytearray`).
+    let rebound = guesses("def f(s, k):\n    for i in range(k):\n        x = s[i] ^ 1\n        s = bytes(s)\n    return x\n");
+    assert!(!rebound.iter().any(|(_, ps)| ps.iter().any(|(_, t)| *t == "bytearray")), "{rebound:?}");
+    // An item local rebound to something else is not an item.
+    assert_eq!(
+        guesses("def f(s):\n    for i in range(len(s)):\n        x = s[i]\n        x = str(x)\n        print(x - 1)\n"),
+        vec![("f".to_string(), vec![("s".to_string(), "str")])]
     );
 }

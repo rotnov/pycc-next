@@ -18,6 +18,10 @@ Packages:
     sdist has no tests, so the tagged GitHub source archive is used: package, unittest
     suite with the toml-test data, and the benchmark document. It is pinned by its
     sha256, and the files used also by a sha256 over their paths and contents.
+  pypng 0.20220715.0 (MIT): a PNG encoder and decoder in one module, `png`. The PyPI
+    sdist ships it with its unittest suite and the PngSuite test images (`pngsuite`,
+    which stays Python with the tests). Its hot path is undoing the scanline filters
+    when decoding.
 
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
@@ -52,9 +56,11 @@ class Package:
     # under `layout`'s sources (see `tree_digest`).
     sha256: str | None
     tree_sha256: str | None
-    # Tree path -> path inside the extracted archive. The first entry is the package.
+    # Tree path -> path inside the extracted archive. The first entry is the package
+    # (a directory), or a single top-level module (a `.py` file).
     layout: tuple[tuple[str, str], ...]
-    # The import package, and its modules (the tests stay Python: they are the oracle).
+    # The import package (or module), and its modules (the tests stay Python: they are
+    # the oracle).
     import_name: str
     modules: tuple[str, ...]
     # Code run in the isolated interpreter, with the tree as argv[1]: runs the suite.
@@ -154,6 +160,70 @@ for _ in range(int(sys.argv[2])):
 print(f"{best:.4f}")
 """,
             speed_label="loads() of the benchmark document x100",
+        ),
+        Package(
+            name="pypng",
+            version="0.20220715.0",
+            url="https://files.pythonhosted.org/packages/source/p/pypng/"
+            "pypng-0.20220715.0.tar.gz",
+            archive="pypng-0.20220715.0.tar.gz",
+            sha256="739c433ba96f078315de54c0db975aee537cbc3e1d0ae4ed9aab0ca1e427e2c1",
+            tree_sha256=None,
+            layout=(
+                ("png.py", "pypng-0.20220715.0/code/png.py"),
+                ("test_png.py", "pypng-0.20220715.0/code/test_png.py"),
+                ("pngsuite.py", "pypng-0.20220715.0/code/pngsuite.py"),
+            ),
+            import_name="png",
+            modules=("png.py",),
+            # `test_test_dir` runs the sdist's shell scripts, which are not copied:
+            # it skips itself.
+            tests="""
+import test_png
+r = unittest.main(module=test_png, argv=["package_check"], exit=False, verbosity=1).result
+sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
+""",
+            speed="""
+import gc, io, struct, sys, time, zlib
+sys.path.insert(0, sys.argv[1])
+import png
+# A 256x256 RGB image whose rows cycle through the five PNG filter types, so
+# that decoding undoes every filter (pypng itself writes unfiltered rows).
+w = h = 256
+rows = [bytes((x * 7 + y * 3 + (x * y >> 5)) & 0xFF for x in range(w * 3))
+        for y in range(h)]
+def paeth(a, b, c):
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    return a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+raw = bytearray()
+prev = bytes(w * 3)
+for y, row in enumerate(rows):
+    kind = y % 5
+    raw.append(kind)
+    for i, x in enumerate(row):
+        a = row[i - 3] if i >= 3 else 0
+        c = prev[i - 3] if i >= 3 else 0
+        p = (0, a, prev[i], (a + prev[i]) >> 1, paeth(a, prev[i], c))[kind]
+        raw.append((x - p) & 0xFF)
+    prev = row
+out = io.BytesIO()
+png.write_chunks(out, [(b"IHDR", struct.pack("!2I5B", w, h, 8, 2, 0, 0, 0)),
+                       (b"IDAT", zlib.compress(bytes(raw))), (b"IEND", b"")])
+data = out.getvalue()
+def decode():
+    return [bytes(r) for r in png.Reader(bytes=data).read()[2]]
+assert decode() == rows
+best = float("inf")
+for _ in range(int(sys.argv[2])):
+    gc.collect()
+    t = time.perf_counter()
+    for _ in range(5):
+        decode()
+    best = min(best, time.perf_counter() - t)
+print(f"{best:.4f}")
+""",
+            speed_label="read() of a 256x256 RGB image using all five filters x5",
         ),
     ]
 }
@@ -264,7 +334,9 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             regular_files(tree / dst)
     cwd = tmp / "cwd"
     cwd.mkdir()
-    pkg_dir = built / pkg.layout[0][0]
+    # A single-module package's module sits at the root of the tree.
+    single = pkg.layout[0][0].endswith(".py")
+    pkg_dir = built if single else built / pkg.layout[0][0]
 
     defs = fell = 0
     for mod in pkg.modules:
@@ -298,7 +370,7 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     print(f"  {len(pkg.modules)} modules built; {native}/{defs} functions native")
 
     names = ",".join(
-        pkg.import_name if m == "__init__.py" else f"{pkg.import_name}.{m[:-3]}"
+        pkg.import_name if single or m == "__init__.py" else f"{pkg.import_name}.{m[:-3]}"
         for m in pkg.modules
     )
     for label, tree in (("cpython", plain), ("compiled", built)):

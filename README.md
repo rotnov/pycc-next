@@ -157,7 +157,7 @@ import inside an `if`/`try` block are compile errors; the details are in [`docs/
 
 ### Real packages, unchanged
 
-`python3 bench/package_check.py` (CI-gated) downloads two pinned, permissively licensed
+`python3 bench/package_check.py` (CI-gated) downloads three pinned, permissively licensed
 pure-Python packages, builds each of their modules unchanged as its own extension,
 removes the `.py` files and runs the package's own unittest suite with CPython against
 the compiled modules (`python3 bench/package_check.py tomli --time` checks one and times
@@ -167,8 +167,12 @@ its hot path):
   Google's diff/match/patch algorithms, pinned by sdist sha256);
 - [tomli](https://pypi.org/project/tomli/) 2.5.0 (MIT, the TOML parser `tomllib` comes
   from; its sdist has no tests, so the GitHub tag archive is used, pinned by its sha256
-  and by that of the files used). An archive member that is not a regular file or a
-  directory (a link, a device) is refused before extraction.
+  and by that of the files used);
+- [pypng](https://pypi.org/project/pypng/) 0.20220715.0 (MIT, a PNG encoder and decoder
+  in one module, `png`, pinned by sdist sha256).
+
+An archive member that is not a regular file or a directory (a link, a device) is
+refused before extraction.
 
 For diff-match-patch:
 
@@ -209,6 +213,21 @@ bytes. Its documents (`dict[str, Any]`), keys (`tuple[str, ...]`) and
 regular-expression matches are still CPython objects that every step reaches through
 the C API, and each of its modules calls the others through CPython.
 
+pypng is untyped, byte-crunching code: its `png` module builds unchanged and its own 103
+tests pass against it (one skips itself: it runs the sdist's shell scripts). Decoding
+undoes a filter on every scanline in pure-Python loops over `bytearray`s
+(`undo_filter_paeth(filter_unit, scanline, previous, result)`); those loops get guarded
+native specializations taking the `bytearray`s as they are, reading and writing their
+buffers in place (`--report-fallbacks`: `specialized: undo_filter_paeth ... scanline:
+bytearray, previous: bytearray, result: bytearray`). Reading a 256x256 RGB image whose rows
+use all five filter types runs **10x faster** than in CPython: `python3
+bench/package_check.py pypng --time --runs 5` measured 0.015 s against 0.157 s for five
+`Reader.read()`s. Only 15 of its 85 functions compile so far (`--report-fallbacks`): the
+`Reader` and `Writer` classes run in CPython (bytes literals and `*args` calls are not
+compiled yet), as do the generators and the `bytearray()`/`dict()`-building helpers, so
+code dominated by those -- decoding the tiny PngSuite images, say -- gains much less
+(1.6x).
+
 ## Modes
 
 - **Strict** (default): `Any` is refused (`T0002`) and a type mismatch is a compile
@@ -227,10 +246,11 @@ the C API, and each of its modules calls the others through CPython.
   native build an unannotated function's signature is inferred from its call sites
   (a parameter or return nothing pins is an object); an `--ext` module's stays an
   object, since Python may call it with anything -- but one that loops gets a *guarded
-  native specialization* when its body implies `str` or `int` for parameters (indexed,
-  sliced, `len()`, `str` methods; indices, slice bounds, `range()` arguments): called
-  with exactly those types it runs natively, otherwise on the objects; one the checker
-  refuses is simply not specialized (`--report-fallbacks` lists both). A name one
+  native specialization* when its body implies `str`, `int` or `bytearray` for
+  parameters (indexed, sliced, `len()`, `str` methods; indices, slice bounds, `range()`
+  arguments; items used as numbers, `s[i] ^ 0xff`): called with exactly those types it
+  runs natively (a `bytearray` in place, not copied), otherwise on the objects; one the
+  checker refuses is simply not specialized (`--report-fallbacks` lists both). A name one
   function rebinds with another type becomes an object in that function only. A native
   build of such a program embeds CPython (as a foreign import does); `--ext` just
   works, and publishes the module's variables and imports as module attributes and

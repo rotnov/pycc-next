@@ -19,7 +19,7 @@ use pycc_hir::ndarray::{NdDtype, NdExpr, NdOp};
 fn storable(value: &Ty, dtype: NdDtype) -> bool {
     match dtype {
         NdDtype::F64 => matches!(value, Ty::Float | Ty::Int | Ty::Bool),
-        NdDtype::I64 => matches!(value, Ty::Int | Ty::Bool),
+        NdDtype::I64 | NdDtype::Byte => matches!(value, Ty::Int | Ty::Bool),
         NdDtype::Bool => matches!(value, Ty::Bool),
     }
 }
