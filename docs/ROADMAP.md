@@ -168,7 +168,7 @@ Accept:
    strict `--ext` module's CPython-object globals (a second reference would show), and
    instances as `dict` keys.
 
-## v0.5 — Typed packages at native speed
+## v0.5 — Typed packages at native speed (released 2026-10-16)
 
 Accept:
 1. **Native containers of objects:** `tuple[T, ...]`, `dict[str, Any]`/`dict[K, object]`,
