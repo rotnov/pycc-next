@@ -202,6 +202,14 @@ Accept:
    lists (`crates/pycc_rt/src/pool.rs`), so libc `malloc`/`free` fell from 0.38M to 0.22M
    per call. diff-match-patch 11.0x, pypng 14.5x, all three suites pass (`--time`, local,
    best of 5); CI run 38892307241 green (Linux x86_64, Linux arm64, macOS).
+   - Re-check (2026-10-16, after the corpus round): tomli had risen to 2.95M instructions
+     per call (its `frozenset` constants were widened into CPython objects) and
+     diff-match-patch to 9.0x-9.9x (identical code for `diff_bisect`, placed where its loop
+     jumps cross 32-byte boundaries, which a Skylake-derived Xeon's SKX102 microcode
+     penalizes). Both fixed: tomli 2.53M; diff-match-patch 12.4x-13.2x against 10.7x-11.5x
+     at de4aace and 9.0x-9.9x at 11ab665, interleaved on one machine (best of 5, three
+     rounds). CI now gates the instruction count of each package's hot path
+     (`bench/package_check.py --instructions`: tomli at most 2.60M per `loads()`).
 2. **A third real package:** a pinned, permissively licensed pure-Python PyPI package from
    another domain (numeric/algorithmic preferred) builds unchanged with `--ext
    --non-strict`, passes its own suite (CI-gated) and runs >= 5x faster than CPython on its

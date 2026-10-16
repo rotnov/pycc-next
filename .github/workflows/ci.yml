@@ -57,6 +57,15 @@ jobs:
       - name: Real packages (diff-match-patch, tomli, pypng) against their own tests
         if: matrix.os == 'ubuntu-24.04'
         run: python3 bench/package_check.py diff-match-patch tomli pypng --time --runs 1 --max-build-seconds 10
+      # Hot-path instruction counts under callgrind (stable on a shared runner,
+      # unlike wall time): each package's hot path executes at most its
+      # documented bound per call (`max_instructions` in bench/package_check.py;
+      # tomli's is v0.5 accept 1's 2.60M).
+      - name: Real packages' hot-path instruction counts
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get install -y -q valgrind
+          python3 bench/package_check.py diff-match-patch tomli pypng --instructions
       # Compile speed (v0.5 accept 4): `pycc build` of every bench/py program
       # takes 2 s at most.
       - name: Benchmark programs build in 2 s

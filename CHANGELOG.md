@@ -36,6 +36,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
     makes only that container CPython's, not the classes of the values flowing into it.
 - `bench/corpus.py --only 017,077` runs a subset; `--show-fallbacks` lists the
   problems with statements in CPython.
+- `bench/package_check.py --instructions` counts, under callgrind, the instructions one
+  call of each real package's hot path executes against the compiled modules and fails
+  a package over its documented bound: diff-match-patch's `diff_main` of 2000
+  characters 132M (125.6M now), tomli's `loads()` 2.60M (v0.5 accept 1; 2.53M now),
+  pypng's `read()` 21.7M (20.7M now). CI runs it on Linux x86_64: unlike wall time, the
+  count does not vary between runs of a shared runner.
 - Compile speed (v0.5 accept 4): building diff-match-patch takes 5.2 s on the CI Linux
   runner (v0.4: ~25 s), tomli 2.8 s and pypng 1.0 s, and every `bench/py` program
   builds in under 1 s; CI fails a package over 10 s or a benchmark build over 2 s
@@ -115,6 +121,22 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   benchmark document takes 2.54M instructions per call under callgrind (v0.4: 2.60M;
   2.70M with native tuples before the pools; CPython: 4.56M), meeting v0.5 accept 1 as
   amended (see `docs/ROADMAP.md`).
+- Objects keep every jump within a 32-byte boundary on x86 (LLVM's
+  `-x86-branches-within-32B-boundaries`, padding with instruction prefixes where it
+  can): Skylake-derived Intel cores (through Cascade Lake, common among cloud and CI
+  machines) run a microcode update for erratum SKX102 that slows a loop whose jump
+  crosses or ends on such a boundary, so a hot loop's speed depended on the size of the
+  unrelated code placed before it. diff-match-patch's `diff_bisect` lost 7-13% between
+  two commits that generated identical code for it; with the padding its `diff_main`
+  speed test runs ~15% faster than at either commit on such a core, for ~2% more
+  executed instructions (`nop`s) where nothing stalls.
+- Non-strict mode no longer widens a module's `frozenset` constant of scalars into a
+  CPython object (a frozenset crosses into CPython as an immutable copy, which aliasing
+  cannot tell apart): since `set(xs)`/`frozenset(xs)` count as fresh containers,
+  tomli's `TOML_WS = frozenset(" \t")` and its siblings had become objects, its
+  `skip_chars(src, pos, TOML_WS)` calls lost their native `frozenset[str]`
+  specialization and `loads()` rose from 2.53M to 2.95M instructions per call; it is
+  2.53M again (`tests/frozenset_constants_native.rs`).
 
 ## [0.4.0] - 2026-10-15
 

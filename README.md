@@ -166,7 +166,8 @@ import inside an `if`/`try` block are compile errors; the details are in [`docs/
 pure-Python packages, builds each of their modules unchanged as its own extension,
 removes the `.py` files and runs the package's own unittest suite with CPython against
 the compiled modules (`python3 bench/package_check.py tomli --time` checks one and times
-its hot path):
+its hot path; `--instructions` counts the instructions one call of the hot path executes
+under callgrind and fails over a documented bound, which CI also gates):
 
 - [diff-match-patch](https://pypi.org/project/diff-match-patch/) 20241021 (Apache-2.0,
   Google's diff/match/patch algorithms, pinned by sdist sha256);

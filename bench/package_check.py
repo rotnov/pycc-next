@@ -25,9 +25,17 @@ Packages:
 
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
-                                      [--max-build-seconds S]
+                                      [--max-build-seconds S] [--instructions]
   PACKAGE  names from PACKAGES (default: all of them).
   --time   also time each package's hot path compiled and in CPython.
+  --instructions
+           also count, under valgrind's callgrind, the instructions one call
+           of each package's hot path executes against the compiled modules
+           (with N = 1 and N = 1 + K calls; per call = the difference / K),
+           and fail a package over its bound (`max_instructions`). Unlike
+           wall time, the count is the same on every run of a shared CI
+           runner, so it gates the code the compiler generates for the hot
+           path; it cannot see what only changes speed (code placement).
   --max-build-seconds S
            fail a package whose modules take more than S seconds to build in
            all (v0.5 accept 4: 10 on the CI Linux runner). Each module's build
@@ -76,6 +84,12 @@ class Package:
     # prints the best time in seconds.
     speed: str
     speed_label: str
+    # Code calling the hot path argv[2] times, with the tree as argv[1], for
+    # `--instructions`; the bound on the instructions per call, and K.
+    instructions: str
+    instructions_label: str
+    max_instructions: int
+    instruction_calls: int
 
 
 # Prefixed to `Package.tests`: puts the tree on the path, imports every module and checks
@@ -87,6 +101,40 @@ for name in sys.argv[3].split(","):
     m = importlib.import_module(name)
     if sys.argv[2] == "compiled" and not m.__file__.endswith((".so", ".pyd")):
         sys.exit(f"{m.__name__} was imported from {m.__file__}, not a compiled module")
+"""
+
+# pypng's hot path: a 256x256 RGB image whose rows cycle through the five PNG
+# filter types, so that decoding undoes every filter (pypng itself writes
+# unfiltered rows), and `decode()`, which reads it back.
+PYPNG_IMAGE = """
+import gc, io, struct, sys, time, zlib
+sys.path.insert(0, sys.argv[1])
+import png
+w = h = 256
+rows = [bytes((x * 7 + y * 3 + (x * y >> 5)) & 0xFF for x in range(w * 3))
+        for y in range(h)]
+def paeth(a, b, c):
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    return a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+raw = bytearray()
+prev = bytes(w * 3)
+for y, row in enumerate(rows):
+    kind = y % 5
+    raw.append(kind)
+    for i, x in enumerate(row):
+        a = row[i - 3] if i >= 3 else 0
+        c = prev[i - 3] if i >= 3 else 0
+        p = (0, a, prev[i], (a + prev[i]) >> 1, paeth(a, prev[i], c))[kind]
+        raw.append((x - p) & 0xFF)
+    prev = row
+out = io.BytesIO()
+png.write_chunks(out, [(b"IHDR", struct.pack("!2I5B", w, h, 8, 2, 0, 0, 0)),
+                       (b"IDAT", zlib.compress(bytes(raw))), (b"IEND", b"")])
+data = out.getvalue()
+def decode():
+    return [bytes(r) for r in png.Reader(bytes=data).read()[2]]
+assert decode() == rows
 """
 
 PACKAGES = {
@@ -126,6 +174,24 @@ for _ in range(int(sys.argv[2])):
 print(f"{best:.4f}")
 """,
             speed_label="diff_main speed test (two ~30 KB texts)",
+            # The first 2000 characters of the speed test's texts: almost all
+            # of a call is `diff_bisect`'s native loop (with the runtime's
+            # `str` indexing). 125.6M instructions per call at 0.5.0 (CPython
+            # 3.13, x86_64 Linux); the bound is 5% above.
+            instructions="""
+import sys, pkgutil
+sys.path.insert(0, sys.argv[1])
+import diff_match_patch as d
+a = pkgutil.get_data("diff_match_patch.tests", "speedtest1.txt").decode()[:2000]
+b = pkgutil.get_data("diff_match_patch.tests", "speedtest2.txt").decode()[:2000]
+dmp = d.diff_match_patch()
+dmp.Diff_Timeout = 0.0
+for _ in range(int(sys.argv[2])):
+    dmp.diff_main(a, b, False)
+""",
+            instructions_label="diff_main of the speed test's first 2000 characters",
+            max_instructions=132_000_000,
+            instruction_calls=2,
         ),
         Package(
             name="tomli",
@@ -167,6 +233,20 @@ for _ in range(int(sys.argv[2])):
 print(f"{best:.4f}")
 """,
             speed_label="loads() of the benchmark document x100",
+            # ROADMAP v0.5 accept 1 (as amended): at most 2.60M per call
+            # (2.53M at 0.5.0).
+            instructions="""
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import tomli
+with open(os.path.join(sys.argv[1], "benchmark", "data.toml"), "rb") as f:
+    doc = f.read().decode()
+for _ in range(int(sys.argv[2])):
+    tomli.loads(doc)
+""",
+            instructions_label="loads() of the benchmark document",
+            max_instructions=2_600_000,
+            instruction_calls=20,
         ),
         Package(
             name="pypng",
@@ -190,37 +270,7 @@ import test_png
 r = unittest.main(module=test_png, argv=["package_check"], exit=False, verbosity=1).result
 sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
-            speed="""
-import gc, io, struct, sys, time, zlib
-sys.path.insert(0, sys.argv[1])
-import png
-# A 256x256 RGB image whose rows cycle through the five PNG filter types, so
-# that decoding undoes every filter (pypng itself writes unfiltered rows).
-w = h = 256
-rows = [bytes((x * 7 + y * 3 + (x * y >> 5)) & 0xFF for x in range(w * 3))
-        for y in range(h)]
-def paeth(a, b, c):
-    p = a + b - c
-    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-    return a if pa <= pb and pa <= pc else (b if pb <= pc else c)
-raw = bytearray()
-prev = bytes(w * 3)
-for y, row in enumerate(rows):
-    kind = y % 5
-    raw.append(kind)
-    for i, x in enumerate(row):
-        a = row[i - 3] if i >= 3 else 0
-        c = prev[i - 3] if i >= 3 else 0
-        p = (0, a, prev[i], (a + prev[i]) >> 1, paeth(a, prev[i], c))[kind]
-        raw.append((x - p) & 0xFF)
-    prev = row
-out = io.BytesIO()
-png.write_chunks(out, [(b"IHDR", struct.pack("!2I5B", w, h, 8, 2, 0, 0, 0)),
-                       (b"IDAT", zlib.compress(bytes(raw))), (b"IEND", b"")])
-data = out.getvalue()
-def decode():
-    return [bytes(r) for r in png.Reader(bytes=data).read()[2]]
-assert decode() == rows
+            speed=PYPNG_IMAGE + """
 best = float("inf")
 for _ in range(int(sys.argv[2])):
     gc.collect()
@@ -231,6 +281,14 @@ for _ in range(int(sys.argv[2])):
 print(f"{best:.4f}")
 """,
             speed_label="read() of a 256x256 RGB image using all five filters x5",
+            instructions=PYPNG_IMAGE + """
+for _ in range(int(sys.argv[2])):
+    decode()
+""",
+            instructions_label="read() of the 256x256 RGB image",
+            # 20.7M instructions per call at 0.5.0; the bound is 5% above.
+            max_instructions=21_700_000,
+            instruction_calls=2,
         ),
     ]
 }
@@ -410,7 +468,39 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
         print(f"  {pkg.speed_label}: CPython {times['cpython']:.3f}s, "
               f"compiled {times['compiled']:.3f}s "
               f"({times['cpython'] / times['compiled']:.2f}x)")
+    if a.instructions:
+        per_call = instructions_per_call(pkg, built, cwd)
+        if per_call is None:
+            return False
+        print(f"  {pkg.instructions_label}: {per_call / 1e6:.2f}M instructions per call "
+              f"(at most {pkg.max_instructions / 1e6:.2f}M)")
+        if per_call > pkg.max_instructions:
+            print(f"FAIL: {pkg.name}'s hot path executes more instructions than its bound")
+            return False
     return True
+
+
+def instructions_per_call(pkg: Package, tree: pathlib.Path, cwd: pathlib.Path) -> float | None:
+    """The instructions one call of `pkg`'s hot path executes against `tree`, under
+    callgrind: the count with 1 + K calls less the count with 1, over K. A fixed hash
+    seed keeps CPython's own dict and set probing, and so the count, the same per run;
+    `-I` would ignore it, so the process is isolated as `-I` isolates (`-P -s`, and no
+    other `PYTHON*` variable in its environment)."""
+    totals = []
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+    env["PYTHONHASHSEED"] = "0"
+    for calls in (1, 1 + pkg.instruction_calls):
+        r = subprocess.run(["valgrind", "--tool=callgrind", "--callgrind-out-file=/dev/null",
+                            sys.executable, "-P", "-s", "-c", pkg.instructions, str(tree),
+                            str(calls)],
+                           cwd=cwd, env=env, capture_output=True, text=True, timeout=1800)
+        m = re.search(r"Collected : (\d+)", r.stderr)
+        if r.returncode != 0 or m is None:
+            print(r.stdout + r.stderr)
+            print(f"FAIL: could not count {pkg.name}'s instructions under callgrind")
+            return None
+        totals.append(int(m[1]))
+    return (totals[1] - totals[0]) / pkg.instruction_calls
 
 
 def main() -> int:
@@ -423,6 +513,7 @@ def main() -> int:
     ap.add_argument("--time", action="store_true")
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--max-build-seconds", type=float)
+    ap.add_argument("--instructions", action="store_true")
     a = ap.parse_args()
     for name in a.packages:
         if name not in PACKAGES:
