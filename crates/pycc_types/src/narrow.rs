@@ -86,7 +86,7 @@ use pycc_hir::{
     HirStmt, IsInstancePolarity, NoneTestPolarity, Ty, isinstance_narrow_target, isinstance_test,
     optional_none_test,
 };
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 /// Which branch of an `if` a recognized test narrows: the `body` (`x is
 /// not None`, `isinstance(x, C)`) or the `orelse` (`x is None`, `not

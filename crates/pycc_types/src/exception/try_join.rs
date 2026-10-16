@@ -7,7 +7,7 @@
 
 use super::*;
 use pycc_hir::block_never_completes;
-use std::collections::HashSet;
+use crate::fx::HashSet;
 
 /// A checked `try`/`try*` statement's parts together with the environment
 /// each of its paths ended in, which is everything [`join_try_outcome`]
@@ -198,7 +198,7 @@ fn first_established_types(
     let walk = std::iter::once(paths.body_env)
         .chain(paths.handler_envs)
         .chain(std::iter::once(paths.else_env));
-    let mut first: HashMap<String, Ty> = HashMap::new();
+    let mut first: HashMap<String, Ty> = HashMap::default();
     for path_env in walk {
         let mut names: Vec<&String> = path_env
             .bindings

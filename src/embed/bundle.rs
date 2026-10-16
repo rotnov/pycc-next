@@ -269,23 +269,29 @@ fn walk_kept(
 
 /// Copies what [`kept_entries`] keeps under `from` into `to`. Files are
 /// copied by reading and writing their bytes, so every copy is writable by
-/// the build for the relocation step regardless of the source's mode.
+/// the build for the relocation step regardless of the source's mode. The
+/// directories are made first, in walk order; the files are then copied on
+/// every core (`super::parallel`), and the first failure in walk order is
+/// reported.
 fn copy_stdlib(from: &Path, to: &Path, skip: fn(&Path) -> bool) -> Result<(), String> {
+    let mut files = Vec::new();
     for entry in kept_entries(from, skip)? {
         match entry {
             Kept::Dir(rel) => {
                 let dest = to.join(rel);
                 std::fs::create_dir(&dest).map_err(|e| io_error("create", &dest, &e))?;
             }
-            Kept::File(rel) => {
-                let path = from.join(&rel);
-                let bytes = std::fs::read(&path).map_err(|e| io_error("read", &path, &e))?;
-                let out = to.join(rel);
-                std::fs::write(&out, bytes).map_err(|e| io_error("write", &out, &e))?;
-            }
+            Kept::File(rel) => files.push(rel),
         }
     }
-    Ok(())
+    let copied = super::parallel::map_indexed(files.len(), |index| {
+        let rel = &files[index];
+        let path = from.join(rel);
+        let bytes = std::fs::read(&path).map_err(|e| io_error("read", &path, &e))?;
+        let out = to.join(rel);
+        std::fs::write(&out, bytes).map_err(|e| io_error("write", &out, &e))
+    });
+    copied.into_iter().collect()
 }
 
 /// Runs one tool, mapping a spawn failure or an unsuccessful exit to an

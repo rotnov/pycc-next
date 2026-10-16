@@ -9,12 +9,12 @@ fn constraint_collection_len_call_returns_int_for_a_concretely_bound_list() {
     // `Ok(None)` in this solver, per its own comment in `lib.rs`) -- this is
     // the only way to get a concrete `Ty::List` term to validate against
     // at constraint-collection time.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
     let env = ConstraintEnvironment {
-        bindings: HashMap::from([("lst".to_string(), Ok(Ty::List(Box::new(Ty::Int))))]),
+        bindings: HashMap::from_iter([("lst".to_string(), Ok(Ty::List(Box::new(Ty::Int))))]),
         ..ConstraintEnvironment::empty(&[])
     };
     let expr = HirExpr::Call {
@@ -41,13 +41,13 @@ fn constraint_collection_len_call_defers_an_unresolved_argument_to_the_real_chec
     // tell yet whether it's a list, so it must not reject it here; the
     // real check pass (`infer_expr_in`) validates it once its type is
     // actually known.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
     let unresolved = fresh_term(&mut parents, &mut concrete);
     let env = ConstraintEnvironment {
-        bindings: HashMap::from([("lst".to_string(), unresolved)]),
+        bindings: HashMap::from_iter([("lst".to_string(), unresolved)]),
         ..ConstraintEnvironment::empty(&[])
     };
     let expr = HirExpr::Call {
@@ -69,7 +69,7 @@ fn constraint_collection_len_call_defers_an_unresolved_argument_to_the_real_chec
 }
 #[test]
 fn constraint_collection_len_call_rejects_the_wrong_arity() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -94,7 +94,7 @@ fn constraint_collection_len_call_rejects_the_wrong_arity() {
 }
 #[test]
 fn constraint_collection_len_call_rejects_a_concretely_known_non_list_argument() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -125,12 +125,12 @@ fn constraint_collection_float_call_returns_float_regardless_of_argument_resolut
     // Mirrors `constraint_collection_len_call_returns_int_for_a_
     // concretely_bound_list`: a directly concrete `TypeTerm`
     // (`Ok(Ty::Int)`) validates cleanly and produces `Ty::Float`.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
     let env = ConstraintEnvironment {
-        bindings: HashMap::from([("x".to_string(), Ok(Ty::Int))]),
+        bindings: HashMap::from_iter([("x".to_string(), Ok(Ty::Int))]),
         ..ConstraintEnvironment::empty(&[])
     };
     let expr = HirExpr::Call {
@@ -156,13 +156,13 @@ fn constraint_collection_float_call_defers_an_unresolved_argument_to_the_real_ch
     // argument_to_the_real_check_pass`: a genuinely unresolved
     // inference variable is left to `infer_expr_in`, but the call's
     // own return type (`Ty::Float`) is still produced unconditionally.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
     let unresolved = fresh_term(&mut parents, &mut concrete);
     let env = ConstraintEnvironment {
-        bindings: HashMap::from([("x".to_string(), unresolved)]),
+        bindings: HashMap::from_iter([("x".to_string(), unresolved)]),
         ..ConstraintEnvironment::empty(&[])
     };
     let expr = HirExpr::Call {
@@ -184,7 +184,7 @@ fn constraint_collection_float_call_defers_an_unresolved_argument_to_the_real_ch
 }
 #[test]
 fn constraint_collection_float_call_rejects_the_wrong_arity() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -209,7 +209,7 @@ fn constraint_collection_float_call_rejects_the_wrong_arity() {
 }
 #[test]
 fn constraint_collection_float_call_rejects_a_concretely_known_non_numeric_argument() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -242,7 +242,7 @@ fn constraint_collection_honors_a_user_defined_float_signature_over_the_builtin(
     // a registered `float` signature (e.g. one accepting `str`, which
     // the builtin itself would reject) must resolve through the normal
     // signature lookup, not the hand-recognized builtin arm.
-    let signatures = HashMap::from([(
+    let signatures = HashMap::from_iter([(
         "float".to_string(),
         (vec!["x".to_string()], vec![Ok(Ty::Str)], Ok(Ty::Str)),
     )]);
@@ -273,7 +273,7 @@ fn constraint_collection_classifies_value_error_as_c0001() {
     // must apply the same C0001 classification for a known callable
     // builtin, rather than deferring with `Ok(None)` -- a private
     // helper calling `ValueError` gets C0001 directly.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -296,7 +296,7 @@ fn constraint_collection_classifies_value_error_as_c0001() {
 }
 #[test]
 fn constraint_collection_classifies_exception_as_c0001() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -322,7 +322,7 @@ fn constraint_collection_defers_unknown_callees_to_final_validation() {
     // A genuinely unknown callee still returns `Ok(None)` and defers to
     // final validation's T0021 -- the C0001 classification only applies
     // to known callable builtins.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -347,7 +347,7 @@ fn constraint_collection_honors_user_defined_value_error_over_c0001() {
     // A registered `ValueError` signature resolves through normal
     // signature lookup, not the C0001 builtin classification -- user
     // definitions take priority in the private-helper path too.
-    let signatures = HashMap::from([(
+    let signatures = HashMap::from_iter([(
         "ValueError".to_string(),
         (vec!["x".to_string()], vec![Ok(Ty::Str)], Ok(Ty::Int)),
     )]);
@@ -375,12 +375,15 @@ fn constraint_collection_len_call_returns_int_for_a_concretely_bound_dict() {
     // Mirrors `constraint_collection_len_call_returns_int_for_a_concretely_bound_list`
     // above, proving the solver's own relaxed `len()` arm (PR-11 Task 3)
     // also accepts a concretely-bound `Ty::Dict` term.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
     let env = ConstraintEnvironment {
-        bindings: HashMap::from([("d".to_string(), Ok(Ty::Dict(Box::new((Ty::Str, Ty::Int)))))]),
+        bindings: HashMap::from_iter([(
+            "d".to_string(),
+            Ok(Ty::Dict(Box::new((Ty::Str, Ty::Int)))),
+        )]),
         ..ConstraintEnvironment::empty(&[])
     };
     let expr = HirExpr::Call {
@@ -405,12 +408,12 @@ fn constraint_collection_len_call_returns_int_for_a_concretely_bound_set() {
     // Mirrors `constraint_collection_len_call_returns_int_for_a_concretely_bound_dict`
     // above, proving the solver's own relaxed `len()` arm (PR-11 Task 7)
     // also accepts a concretely-bound `Ty::Set` term.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
     let env = ConstraintEnvironment {
-        bindings: HashMap::from([("s".to_string(), Ok(Ty::Set(Box::new(Ty::Int))))]),
+        bindings: HashMap::from_iter([("s".to_string(), Ok(Ty::Set(Box::new(Ty::Int))))]),
         ..ConstraintEnvironment::empty(&[])
     };
     let expr = HirExpr::Call {
@@ -449,7 +452,7 @@ fn foreign_object_env<'scope, 'hir>() -> ConstraintEnvironment<'scope, 'hir> {
 fn collect_conversion_of_a_foreign_object(
     callee: &str,
 ) -> Result<Option<Result<Ty, usize>>, Diagnostic> {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -486,7 +489,7 @@ fn constraint_collection_bool_call_admits_a_foreign_object_argument() {
 
 #[test]
 fn constraint_collection_bool_call_keeps_c0001_for_a_non_object_argument() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -512,7 +515,7 @@ fn constraint_collection_honors_a_user_defined_bool_signature_over_the_builtin()
     // The C4 guard, mirrored: a registered `bool` signature must resolve
     // through the ordinary signature lookup rather than through the
     // hand-recognized builtin arm -- `float`'s own case immediately above.
-    let signatures = HashMap::from([(
+    let signatures = HashMap::from_iter([(
         "bool".to_string(),
         (vec!["x".to_string()], vec![Ok(Ty::Int)], Ok(Ty::Int)),
     )]);
@@ -558,7 +561,7 @@ fn constraint_collection_honors_a_user_defined_int_or_str_signature_over_the_bui
     // must resolve through the ordinary lookup rather than through the
     // hand-recognized builtin arm.
     for callee in ["int", "str"] {
-        let signatures = HashMap::from([(
+        let signatures = HashMap::from_iter([(
             callee.to_string(),
             (vec!["x".to_string()], vec![Ok(Ty::Int)], Ok(Ty::Float)),
         )]);

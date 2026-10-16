@@ -16,6 +16,15 @@ mod modules;
 mod project_config;
 mod source;
 mod specialize;
+mod timing;
+
+/// The frontend allocates and frees small strings and syntax nodes at a
+/// high rate, and a non-strict build runs it many times over (v0.5
+/// accept 4); mimalloc serves that pattern markedly faster than the
+/// system allocator. Only the compiler's own Rust allocations use it: the
+/// programs it builds never link it.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use build_pipeline::try_build;
 use clap::Parser;
@@ -86,7 +95,8 @@ fn main() -> ExitCode {
             // without setting a process-wide environment variable, which
             // would race every other test in this binary.
             let toolchain = ext.then(ext_build::ExtToolchain::from_env);
-            match try_build(
+            let started = std::time::Instant::now();
+            let result = try_build(
                 &path,
                 &out,
                 target.as_deref(),
@@ -96,7 +106,9 @@ fn main() -> ExitCode {
                 &embed::EmbedToolchain::from_env().with_link(link),
                 interop.into_cli(),
                 foreign_relative_imports,
-            ) {
+            );
+            timing::print(started);
+            match result {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(code) => code,
             }

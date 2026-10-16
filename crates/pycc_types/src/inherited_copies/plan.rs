@@ -26,7 +26,8 @@
 //! The arms only ever turn `false` into `true`, so the iteration is a
 //! monotone least fixpoint over a finite set and terminates.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+use crate::fx::HashMap;
 
 use pycc_hir::{HirClassDef, first_definer};
 

@@ -20,7 +20,7 @@ use super::contains_infer;
 use crate::infer_expr_in;
 use crate::module::{DiagnosticKey, KeyedDiagnostics};
 use pycc_hir::{HirItem, HirModule, Ty};
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 /// `hir` with every unannotated `__init__` parameter typed; `Ok(None)` when
 /// there is none.
@@ -48,7 +48,7 @@ pub(crate) fn resolve_init_params(hir: &HirModule) -> Result<Option<HirModule>, 
     let constructors: HashMap<&str, &str> = inits.iter().map(|(m, c)| (*c, *m)).collect();
     // (mangled `__init__`, parameter index) -> `Some(ty)` while every
     // typable argument agrees on `ty`.
-    let mut observed: HashMap<(String, usize), Option<Ty>> = HashMap::new();
+    let mut observed: HashMap<(String, usize), Option<Ty>> = HashMap::default();
     for_each_call(hir, &mut |env, names, callee, args| {
         let Some(mangled) = constructors.get(callee) else {
             return;

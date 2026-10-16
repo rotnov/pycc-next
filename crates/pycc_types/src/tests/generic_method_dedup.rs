@@ -111,7 +111,7 @@ fn rewrite_generic_calls_in_expr_rejects_undefined_class_in_gci() {
         args: vec![HirExpr::IntLiteral(1)],
     };
     let mut instantiations = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let err =
         rewrite_generic_calls_in_expr(&mut env, &[], &mut expr, &mut instantiations, &mut seen)
             .unwrap_err();
@@ -135,7 +135,7 @@ fn rewrite_generic_calls_in_expr_propagates_arg_error_in_gci() {
         }],
     };
     let mut instantiations = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let err =
         rewrite_generic_calls_in_expr(&mut env, &[], &mut expr, &mut instantiations, &mut seen)
             .unwrap_err();
@@ -165,7 +165,7 @@ fn instantiate_generic_class_methods_skips_class_not_in_class_defs() {
     };
     let mut env = Environment::new();
     let mut instantiations = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut new_class_defs = Vec::new();
     // Should not panic — just continues past the Ghost pair.
     instantiate_generic_class_methods(

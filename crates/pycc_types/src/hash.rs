@@ -33,7 +33,7 @@ use crate::env::Environment;
 use crate::set_element::check_hash_method;
 use pycc_diag::{Diagnostic, Span};
 use pycc_hir::{HirClassDef, InstanceHash, Ty, resolve_instance_hash};
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 /// The builtin's spelling.
 pub(crate) const HASH: &str = "hash";
@@ -356,7 +356,7 @@ mod tests {
         let hir = pycc_hir::lower_checked(&module).expect("lowers");
         let classes: HashMap<String, HirClassDef> = hir.class_defs.into_iter().collect();
         let instance = Ty::Instance(Box::new("R".to_string()));
-        let mut functions = HashMap::new();
+        let mut functions = HashMap::default();
         functions.insert("R.__hash__".to_string(), (vec![instance.clone()], returns));
         check_instance(&instance, "R", &classes, &functions).unwrap_err()
     }

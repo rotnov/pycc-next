@@ -19,6 +19,8 @@ use crate::{ext_build, ext_output, memoryview_mode};
 use std::path::Path;
 use std::process::ExitCode;
 
+mod c_objects;
+
 /// `Ok(())` on success, `Err(code)` carrying the exit code to use on
 /// failure. `?` inside this function needs a `Result`, not an `ExitCode`
 /// directly -- `run` then just propagates whatever `Err` it gets.
@@ -115,7 +117,7 @@ pub(crate) fn try_build(
         None => None,
     };
     let host = EmbedHost::resolve(target);
-    let (typed_hir, NeedsInterpreter(embedded)) = match ext {
+    let frontend = || match ext {
         Some(_) => resolve_frontend_with(
             path,
             ext_module_name.as_deref(),
@@ -127,8 +129,10 @@ pub(crate) fn try_build(
         )
         .map(|hir| (hir, NeedsInterpreter(false))),
         None => resolve_frontend_native(path, host, interop),
-    }
-    .map_err(|failure| ExitCode::from(report_build_failure(failure)))?;
+    };
+    let (typed_hir, NeedsInterpreter(embedded)) =
+        crate::timing::span("frontend (all attempts)", frontend)
+            .map_err(|failure| ExitCode::from(report_build_failure(failure)))?;
     // Everything `--ext` needs that can fail on the program itself or on
     // the host toolchain is resolved here, before codegen runs: a `C0003`
     // capability gap and a missing `Python.h` are both cheaper to report
@@ -142,36 +146,103 @@ pub(crate) fn try_build(
     // An embedded build's sidecar is assembled here, before codegen and
     // before the link, so every embedded-only line runs ahead of the shared
     // link site below (§4.6 of the #1028 plan).
-    let mir = pycc_mir::build(&typed_hir);
+    let mir = crate::timing::span("mir", || pycc_mir::build(&typed_hir));
     // Non-strict code can hold CPython objects without any foreign import
     // (an untyped `[]`, a fallback-free module whose values are objects);
     // such a program needs the interpreter too.
     let embedded = embedded
         || (ext.is_none() && crate::mode::non_strict_for(path) && mir_uses_objects(&mir));
-    let embed_plan = match embedded {
-        true => Some(embed_plan_or_exit(out, path, &typed_hir, embed, obj_path)?),
+    // What an embedded build publishes is read here, on this thread (the
+    // fallback state is the frontend's, per thread).
+    let embed_exports = match embedded {
+        true => Some(embed_exports_or_exit(path, &typed_hir)?),
         false => None,
     };
 
-    pycc_codegen::compile_to_object_with_options(
-        &mir,
-        obj_path,
-        &pycc_codegen::CompileOptions {
-            target_triple: target.map(str::to_string),
-            release,
-            // An embedded executable compiles its entry module as the
-            // `__main__` extension module the launcher executes, but with no
-            // export thunks: nothing checked its functions against the
-            // `--ext` boundary (`collect_exports` does not run here).
-            ext: ext.is_some() || embedded,
-            suppress_export_thunks: embedded && !crate::fallback::active(),
-        },
-    )
-    .map_err(|e| {
+    // The plans' C sources compile while LLVM compiles the program.
+    let scratch_dir = obj_path.parent().unwrap_or(Path::new("."));
+    let c_compile = |plan_args: &[std::ffi::OsString]| {
+        c_objects::CObjects::spawn(plan_args, scratch_dir, || {
+            let mut cmd = linker_command(target);
+            if let Some(triple) = effective_link_target(target) {
+                cmd.arg("-target").arg(triple);
+            }
+            cmd
+        })
+    };
+    let ext_objects = ext_plan
+        .as_ref()
+        .map(|plan| c_compile(&plan.compile_args))
+        .transpose()?;
+
+    // An embedded build's sidecar (copies of the interpreter, its standard
+    // library and a locked closure) is assembled on a thread of its own
+    // while LLVM compiles the program (v0.5 accept 4); neither reads what
+    // the other writes, and both finish before the shared link site below
+    // (§4.6 of the #1028 plan). A failure of the sidecar is reported first,
+    // as when it ran before codegen.
+    let (objects, embed_result) = std::thread::scope(|scope| {
+        let embed_job = embed_exports.map(|exports| {
+            let (typed_hir, c_compile) = (&typed_hir, &c_compile);
+            scope.spawn(move || {
+                let plan = crate::timing::span("embed: plan and sidecar", || {
+                    let host = (std::env::consts::ARCH, std::env::consts::OS);
+                    embed::plan_embed(
+                        out, path, typed_hir, &exports, embed, EmbedPlatform::HOST, host,
+                        obj_path,
+                    )
+                })
+                .map_err(|e| {
+                    eprintln!("error: {e}");
+                    ExitCode::from(2)
+                })?;
+                let objects = c_compile(&plan.compile_args)?;
+                Ok::<_, ExitCode>((plan, objects))
+            })
+        });
+        let objects = crate::timing::span("codegen", || {
+            pycc_codegen::compile_to_objects_with_options(
+                &mir,
+                obj_path,
+                &pycc_codegen::CompileOptions {
+                    target_triple: target.map(str::to_string),
+                    release,
+                    // An embedded executable compiles its entry module as
+                    // the `__main__` extension module the launcher
+                    // executes, but with no export thunks: nothing checked
+                    // its functions against the `--ext` boundary
+                    // (`collect_exports` does not run here).
+                    ext: ext.is_some() || embedded,
+                    suppress_export_thunks: embedded && !crate::fallback::active(),
+                },
+            )
+        });
+        let embed_result = embed_job.map(|job| job.join().expect("the sidecar thread panicked"));
+        (objects, embed_result)
+    });
+    let (embed_plan, embed_objects) = match embed_result.transpose() {
+        Ok(Some((plan, objects))) => (Some(plan), Some(objects)),
+        Ok(None) => (None, None),
+        Err(code) => {
+            // As when the sidecar was assembled first: a build that fails
+            // there leaves no object behind.
+            for object in objects.iter().flatten() {
+                let _ = std::fs::remove_file(object);
+            }
+            return Err(code);
+        }
+    };
+    let objects = objects.map_err(|e| {
         eprintln!("error: codegen failed: {e}");
         ExitCode::from(1)
     })?;
 
+    let (ext_objects, embed_objects) = crate::timing::span("C compile (wait)", || {
+        Ok::<_, ExitCode>((
+            ext_objects.map(c_objects::CObjects::wait).transpose()?,
+            embed_objects.map(c_objects::CObjects::wait).transpose()?,
+        ))
+    })?;
     let rt_lib_dir = find_pycc_rt_lib_dir(target, release).map_err(|e| {
         eprintln!("error: {e}");
         ExitCode::from(2)
@@ -193,12 +264,10 @@ pub(crate) fn try_build(
         cmd.arg("-target").arg(triple);
     }
     if let Some(plan) = &ext_plan {
-        cmd.args(&plan.compile_args).args(&plan.link_args);
+        cmd.args(ext_objects.iter().flatten()).args(&plan.link_args);
     }
-    if let Some(plan) = &embed_plan {
-        cmd.args(&plan.compile_args);
-    }
-    cmd.arg(obj_path)
+    cmd.args(embed_objects.iter().flatten());
+    cmd.args(&objects)
         .arg("-L")
         .arg(&rt_lib_dir)
         .arg("-lpycc_rt");
@@ -218,7 +287,7 @@ pub(crate) fn try_build(
     // panicking with a raw backtrace. Every cfg-gated `linker_command`
     // variant funnels into this one spawn site, so the message names the
     // exact driver that failed on this host.
-    let status = cmd.status().map_err(|e| {
+    let status = crate::timing::span("link (cc)", || cmd.status()).map_err(|e| {
         // `to_string_lossy` without `pycc_diag::display_path`'s terminal
         // escaping, unlike the file-path diagnostics above: the program is
         // always one of `linker_command`'s compile-time-fixed values
@@ -298,13 +367,10 @@ fn link_windows_stub(stub: &embed::StubLink, target: Option<&str>) -> Result<(),
 /// as an environment failure at exit 2. Before it, a comparison or hash
 /// dunder the embedded executable cannot install (#1470) is a compile
 /// diagnostic (`C0003`) at exit 1, answered before the interpreter probe.
-fn embed_plan_or_exit(
-    out: &Path,
+fn embed_exports_or_exit(
     entry: &Path,
     typed_hir: &pycc_hir::HirModule,
-    toolchain: &embed::EmbedToolchain,
-    obj_path: &Path,
-) -> Result<embed::EmbedPlan, ExitCode> {
+) -> Result<Vec<ext_build::ExtExport>, ExitCode> {
     // #1470: an uninstallable comparison or hash dunder is a span-less
     // `C0003`, reported as `plan_ext` reports one, before the probe.
     let report = |gaps| {
@@ -318,32 +384,22 @@ fn embed_plan_or_exit(
     // A program with non-strict fallback code (#12) publishes its compiled
     // module-level functions in `__main__`, so the fallback code can call
     // them, as an `--ext` module's code can.
-    let exports = if crate::fallback::active() {
-        let source = crate::fallback::entry_source(entry);
-        // Inferred functions are not published (`crate::fallback`).
-        let inferred = crate::fallback::inferred_functions(&source);
-        let mut exports = ext_build::collect_exports_excluding(
-            typed_hir,
-            &std::collections::BTreeSet::new(),
-            &inferred,
-        )
-        .map_err(|gaps| ExitCode::from(report(gaps.into_iter().map(|(_, d)| d).collect())))?;
-        exports.retain(|export| export.class.is_none());
-        let signatures = ext_build::SourceSignatures::from_source(&source);
-        ext_build::bind_keyword_names(typed_hir, &signatures, &mut exports);
-        exports
-    } else {
-        Vec::new()
-    };
-    let host = (std::env::consts::ARCH, std::env::consts::OS);
-    let platform = EmbedPlatform::HOST;
-    let plan = embed::plan_embed(
-        out, entry, typed_hir, &exports, toolchain, platform, host, obj_path,
-    );
-    plan.map_err(|e| {
-        eprintln!("error: {e}");
-        ExitCode::from(2)
-    })
+    if !crate::fallback::active() {
+        return Ok(Vec::new());
+    }
+    let source = crate::fallback::entry_source(entry);
+    // Inferred functions are not published (`crate::fallback`).
+    let inferred = crate::fallback::inferred_functions(&source);
+    let mut exports = ext_build::collect_exports_excluding(
+        typed_hir,
+        &std::collections::BTreeSet::new(),
+        &inferred,
+    )
+    .map_err(|gaps| ExitCode::from(report(gaps.into_iter().map(|(_, d)| d).collect())))?;
+    exports.retain(|export| export.class.is_none());
+    let signatures = ext_build::SourceSignatures::from_source(&source);
+    ext_build::bind_keyword_names(typed_hir, &signatures, &mut exports);
+    Ok(exports)
 }
 
 /// Everything `try_build`'s link step needs that is specific to `--ext`.

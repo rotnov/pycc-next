@@ -125,8 +125,7 @@ struct ProgramSources {
 
 impl ProgramSources {
     /// The source spans of every item of the linked program `hir` (#10),
-    /// recovered from each file's lowered AST (`pycc_hir::locate`). Called
-    /// only once a check has failed.
+    /// recovered from each file's lowered AST (`pycc_hir::locate`).
     fn item_spans(&self, hir: &HirModule) -> Vec<Option<pycc_hir::locate::ItemSpans>> {
         let mut spans: Vec<Option<pycc_hir::locate::ItemSpans>> =
             (0..hir.items.len()).map(|_| None).collect();
@@ -446,9 +445,10 @@ pub(crate) fn resolve_frontend_with(
         foreign_relative_imports: relative_imports == RelativeImports::ForeignFromEntry,
     };
     let display = path.to_string_lossy().into_owned();
+    let non_strict = crate::mode::non_strict_for(path);
     crate::specialize::reset();
     let typed = with_fallback(path, publishes, || {
-        crate::specialize::with_specialization(&display, || {
+        crate::specialize::with_specialization(&display, non_strict, || {
             resolve_linked(path, module_name, relative_imports, true)
         })
     })?;
@@ -464,8 +464,12 @@ fn resolve_linked(
     relative_imports: RelativeImports,
     ext_module: bool,
 ) -> Result<HirModule, FrontendFailure> {
-    let (hir, sources, _manifest) = link_frontend(path, module_name, relative_imports, ext_module)?;
-    let typed = located(&sources, &hir, || pycc_types::check_and_resolve_all_keyed(&hir))
+    let (hir, sources, _manifest) = crate::timing::span("frontend: load+lower+link", || {
+        link_frontend(path, module_name, relative_imports, ext_module)
+    })?;
+    let typed = crate::timing::span("frontend: type check", || {
+        located(&sources, &hir, || pycc_types::check_and_resolve_all_keyed(&hir))
+    })
         .map_err(|keyed| sources.group_owned(attribute(&sources, keyed)))?;
     export_gaps_as_failures(path, &typed, ext_module)?;
     Ok(typed)
@@ -796,19 +800,19 @@ fn resolve_frontend_native_once(
     Err(sources.group(keyed))
 }
 
-/// Runs `check`; when it fails, runs it again with every item's source
-/// spans (#10), so its diagnostics point at the offending code. The check
-/// is deterministic, so the second run reports the same diagnostics, now
-/// placed; a program that checks is never re-parsed.
+/// Runs `check` with every item's source spans (#10), so a diagnostic
+/// points at the offending code. The spans are recovered up front: a
+/// failing check used to be run a second time with them, which doubled the
+/// cost of every failing attempt of the non-strict fallback and
+/// specialization loops (v0.5 accept 4); recovering them costs a walk of
+/// the parsed sources, far less than one check.
 fn located<T>(
     sources: &ProgramSources,
     hir: &HirModule,
     check: impl Fn() -> Result<T, pycc_types::KeyedDiagnostics>,
 ) -> Result<T, pycc_types::KeyedDiagnostics> {
-    match check() {
-        Err(_) => pycc_types::with_item_spans(sources.item_spans(hir), check),
-        checked => checked,
-    }
+    let spans = crate::timing::span("frontend: item spans", || sources.item_spans(hir));
+    pycc_types::with_item_spans(spans, check)
 }
 
 fn attribute(

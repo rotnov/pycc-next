@@ -2,7 +2,7 @@
 //! `monomorphize.rs` under `AGENTS.md`'s decomposability rule when #1337
 //! routed its callee through the receiver-exact resolver (D-254).
 
-use std::collections::{HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
 
 use pycc_hir::{HirExpr, HirItem, Ty, inherited_copy_name};
 

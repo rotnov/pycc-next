@@ -131,7 +131,7 @@ fn the_generic_rewrite_types_an_object_comprehension_as_an_object() {
     let mut env = crate::Environment::new();
     let mut expr = object_comprehension(pycc_hir::HirExpr::IntLiteral(1));
     let mut instantiations = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = crate::fx::HashSet::default();
     let ty = crate::rewrite_generic_calls_in_expr(
         &mut env,
         &[],
@@ -159,11 +159,11 @@ fn the_protocol_rewrite_walks_an_object_comprehension() {
         ))],
     };
     let mut specializations = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = crate::fx::HashSet::default();
     crate::rewrite_protocol_calls_in_specialization(
         &env,
         &mut item,
-        &std::collections::HashMap::new(),
+        &crate::fx::HashMap::default(),
         &mut specializations,
         &mut seen,
     );

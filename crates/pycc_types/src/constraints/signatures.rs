@@ -16,7 +16,7 @@ use crate::module::first_keyed;
 use crate::module::{DiagnosticKey, FunctionSignatures, KeyedDiagnostics, module_level, top_level};
 
 pub(crate) fn concrete_function_signatures(hir: &HirModule) -> Option<FunctionSignatures> {
-    let mut signatures = HashMap::new();
+    let mut signatures = HashMap::default();
     for item in &hir.items {
         let HirItem::Function {
             name,
@@ -105,8 +105,8 @@ pub(crate) fn concrete_function_environment(hir: &HirModule) -> Option<Environme
 /// caller returns `None` for any module carrying a `Ty::Infer` signature, so
 /// every entry it reaches here is already concrete.
 pub(crate) fn annotated_function_environment(hir: &HirModule) -> Environment {
-    let mut functions = HashMap::new();
-    let mut generics = HashMap::new();
+    let mut functions = HashMap::default();
+    let mut generics = HashMap::default();
     for item in &hir.items {
         let HirItem::Function {
             name,
@@ -139,23 +139,23 @@ pub(crate) fn annotated_function_environment(hir: &HirModule) -> Environment {
         );
     }
     let mut env = Environment {
-        bindings: HashMap::new(),
+        bindings: HashMap::default(),
         // Part 2a of #1142 (#1165): a module-level environment owns no
         // buffers; the producer is refused at module scope.
-        owned_buffers: HashSet::new(),
-        declared: HashMap::new(),
+        owned_buffers: HashSet::default(),
+        declared: HashMap::default(),
         functions: Arc::new(functions),
-        def_rebound: HashSet::new(),
-        defined_functions: HashSet::new(),
+        def_rebound: HashSet::default(),
+        defined_functions: HashSet::default(),
         generics: Arc::new(generics),
-        classes: Arc::new(HashMap::new()),
-        synthetic_classes: Arc::new(HashSet::new()),
+        classes: Arc::new(HashMap::default()),
+        synthetic_classes: Arc::new(HashSet::default()),
         own_type_param: None,
         generator_sig: None,
-        stop_values: HashMap::new(),
-        stop_value_errors: HashMap::new(),
+        stop_values: HashMap::default(),
+        stop_value_errors: HashMap::default(),
         current_class: None,
-        finals: HashSet::new(),
+        finals: HashSet::default(),
         in_except_handler: false,
         // A module-level environment: `child_for_function` is what flips
         // this, and this constructor's result is that same module scope.
@@ -165,14 +165,14 @@ pub(crate) fn annotated_function_environment(hir: &HirModule) -> Environment {
         returns_inside_finally: false,
         return_inferred: false,
         in_classmethod: false,
-        narrowed: HashMap::new(),
+        narrowed: HashMap::default(),
         // Overwritten at `check_with_environment_all`'s entry, the common
         // sink of both `Environment` constructors (#962).
         std_module_aliases: Vec::new(),
         // Seeded at the same sink for the same reason (#1316).
-        foreign_globals: HashSet::new(),
+        foreign_globals: HashSet::default(),
         loop_exits: Default::default(),
-        params: HashSet::new(),
+        params: HashSet::default(),
     };
     // Part 1 of #541: register the class table through `bind_class` (via
     // `bind_classes`) rather than by populating `classes` directly, so this
@@ -227,7 +227,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
 ) -> Result<FunctionSignatures, KeyedDiagnostics> {
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
-    let mut signatures = HashMap::new();
+    let mut signatures = HashMap::default();
     for item in &hir.items {
         if let HirItem::Function {
             name,
@@ -253,10 +253,10 @@ pub(crate) fn infer_function_signatures_with_solver_all(
     // A generator function's element type: the term its `yield`s unify
     // with while its body is walked (its signature's own return term is the
     // generator type, which a call site sees as unresolved until then).
-    let mut generator_elements: HashMap<String, TypeTerm> = HashMap::new();
+    let mut generator_elements: HashMap<String, TypeTerm> = HashMap::default();
     // Each generator's declared send and return types, which inference
     // keeps as written.
-    let mut generator_rest: HashMap<String, (Ty, Ty)> = HashMap::new();
+    let mut generator_rest: HashMap<String, (Ty, Ty)> = HashMap::default();
     for item in &hir.items {
         if let HirItem::Function {
             name,
@@ -274,12 +274,12 @@ pub(crate) fn infer_function_signatures_with_solver_all(
 
     let mut constraints = SolverConstraints::default();
     let mut globals = ConstraintEnvironment {
-        bindings: HashMap::new(),
+        bindings: HashMap::default(),
         local_names: &[],
-        defs_rebound: HashSet::new(),
-        maybe_bindings: HashSet::new(),
-        opaque_bindings: HashSet::new(),
-        foreign_objects: HashSet::new(),
+        defs_rebound: HashSet::default(),
+        maybe_bindings: HashSet::default(),
+        opaque_bindings: HashSet::default(),
+        foreign_objects: HashSet::default(),
         // #962: the module's alias table, read by the stdlib receiver
         // shadow check; copied field-by-field into every per-function
         // environment below.
@@ -287,7 +287,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         // Part 2a of #1142 (#1165): module-level code is not a function
         // body, and nothing at module scope can own a buffer -- the
         // producer is refused there outright.
-        owned_buffers: HashSet::new(),
+        owned_buffers: HashSet::default(),
         in_function_body: false,
         in_generator: false,
         generator_sig: None,
@@ -315,11 +315,11 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         // solver consults -- the set is read only at the buffer producer's
         // seam, which module scope refuses outright. See the field's own
         // doc comment for why each body starts empty too.
-        finals: HashSet::new(),
+        finals: HashSet::default(),
         // #1420: the `MethodCall` arm resolves a method on a user-class
         // instance through the module's own class table.
         class_defs: &hir.class_defs,
-        narrowed: HashMap::new(),
+        narrowed: HashMap::default(),
     };
     // Part 1 of #1026: a foreign import binds a definite name whose type is
     // `Ty::Object`. It is recorded in `opaque_bindings` so that every piece
@@ -408,7 +408,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             // variable (`all(q % p for p in primes)` in `for q in ...`)
             // types the helper.
             maybe_bindings: if name.starts_with("_pycc_") {
-                HashSet::new()
+                HashSet::default()
             } else {
                 globals.maybe_bindings.clone()
             },
@@ -421,7 +421,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             // Part 2a of #1142 (#1165): a fresh body starts with no owned
             // buffers -- module scope cannot produce one -- and this is the
             // one place the function-body flag is set.
-            owned_buffers: HashSet::new(),
+            owned_buffers: HashSet::default(),
             in_function_body: true,
             in_generator: generator_elements.contains_key(name),
             generator_sig,
@@ -430,10 +430,10 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             // `pycc_hir` walk, so the two admissions cannot drift.
             returns_inside_finally: pycc_hir::body_returns_inside_finally(body),
             shadowed_producers: globals.shadowed_producers.clone(),
-            finals: HashSet::new(),
+            finals: HashSet::default(),
             class_defs: globals.class_defs,
             // #1476: a module-scope narrowing never reaches a function body.
-            narrowed: HashMap::new(),
+            narrowed: HashMap::default(),
         };
         for local_name in local_names.iter().copied() {
             env.bindings.remove(local_name);
@@ -578,7 +578,7 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         .map(|&var| root(&mut parents, var))
         .collect::<HashSet<_>>();
 
-    let mut resolved = HashMap::new();
+    let mut resolved = HashMap::default();
     let mut open_generators: Vec<(String, Vec<Ty>)> = Vec::new();
     for (name, signature) in &signatures {
         let param_tys = signature

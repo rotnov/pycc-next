@@ -35,7 +35,7 @@ use pycc_hir::{
     HirStmt, block_never_completes, body_breaks_loop, loop_body, loop_else_as_if,
     loop_never_ends_normally,
 };
-use std::collections::HashMap;
+use crate::fx::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 type Bindings = HashMap<String, BindingState>;

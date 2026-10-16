@@ -4,7 +4,7 @@
 use super::store::Shape;
 use super::{Engine, SiteKind};
 use pycc_hir::Ty;
-use std::collections::HashSet;
+use crate::fx::HashSet;
 
 impl Engine {
     /// An empty list bound to a name, whose element nothing ever reads,

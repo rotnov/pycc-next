@@ -18,7 +18,7 @@
 use crate::is_assignable;
 use pycc_diag::{Diagnostic, Span};
 use pycc_hir::{HirClassDef, HirItem, Ty};
-use std::collections::{HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Issue #118 Part 1: tracks whether a name is *definitely* assigned on

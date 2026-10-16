@@ -4,7 +4,7 @@
 //! when #1344 (Part 2 of #1336) taught the set arms to type a `set[C]` of
 //! user-class instances.
 
-use std::collections::HashSet;
+use crate::fx::HashSet;
 
 use pycc_diag::Diagnostic;
 use pycc_hir::{CompElt, CompIter, HirComprehension, HirExpr, Ty};

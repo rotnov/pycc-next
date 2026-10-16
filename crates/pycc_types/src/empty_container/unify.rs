@@ -33,7 +33,7 @@
 //! a CPython container in non-strict mode).
 
 use super::*;
-use std::collections::{HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
 
 mod effects;
 mod settle;
@@ -882,7 +882,7 @@ fn site_kind_in(expr: &HirExpr, functions: &HashMap<String, (Vec<Ty>, Ty)>) -> O
 /// Whether `hir` has an empty container anywhere this pass looks.
 pub(super) fn has_sites(hir: &HirModule) -> bool {
     let mut copy = hir.clone();
-    !number_sites(&mut copy, &HashMap::new()).is_empty()
+    !number_sites(&mut copy, &HashMap::default()).is_empty()
 }
 
 /// Types every empty container of `hir` that unification resolves (see the
@@ -904,8 +904,8 @@ pub(super) fn infer(
         store: Store::default(),
         sites: vec![None; sites.len()],
         site_kinds: sites.iter().map(|(kind, _)| *kind).collect(),
-        names: HashMap::new(),
-        returns: HashMap::new(),
+        names: HashMap::default(),
+        returns: HashMap::default(),
         helpers: hir
             .items
             .iter()
@@ -917,7 +917,7 @@ pub(super) fn infer(
             })
             .collect(),
         deferred: Vec::new(),
-        list_elements: HashSet::new(),
+        list_elements: HashSet::default(),
     };
     // Two rounds: the second sees, through the environments' bindings, the
     // names the first round resolved only partially.

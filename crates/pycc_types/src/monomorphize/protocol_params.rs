@@ -40,7 +40,7 @@ pub(crate) fn monomorphize_protocol_params(
     let mut kept = Vec::with_capacity(items.len());
     let mut new_items = Vec::new();
     let mut specializations: Vec<HirItem> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::default();
     // #953: a module-level statement's own bindings have to accumulate as
     // the loop walks them, exactly as `bind_local_types_in_body` does for
     // a function body. Without this, a module-level `p: P = C()` leaves

@@ -23,7 +23,7 @@ use pycc_diag::{Diagnostic, Span};
 use pycc_hir::locate::{ItemSpans, Located, locate_item};
 use pycc_hir::{HirExpr, HirModule, HirStmt};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use crate::fx::HashMap;
 use std::rc::Rc;
 
 thread_local! {

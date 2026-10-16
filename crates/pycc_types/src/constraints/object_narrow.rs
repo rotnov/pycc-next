@@ -114,12 +114,18 @@ pub(super) fn before_statement(env: &mut ConstraintEnvironment<'_, '_>, stmt: &H
 /// Drops every name in `names` from the overlay: a `try` handler can run
 /// after any rebinding in the body, and a `finally` after any rebinding on
 /// any path, so those names are not narrowed there.
-pub(super) fn kill_names(env: &mut ConstraintEnvironment<'_, '_>, names: &HashSet<String>) {
+pub(super) fn kill_names(
+    env: &mut ConstraintEnvironment<'_, '_>,
+    names: &std::collections::HashSet<String>,
+) {
     kill_names_in(&mut env.narrowed, names);
 }
 
 /// [`kill_names`] on an overlay held apart from its environment.
-pub(super) fn kill_names_in(narrowed: &mut HashMap<String, Ty>, names: &HashSet<String>) {
+pub(super) fn kill_names_in(
+    narrowed: &mut HashMap<String, Ty>,
+    names: &std::collections::HashSet<String>,
+) {
     narrowed.retain(|name, _| !names.contains(name));
 }
 

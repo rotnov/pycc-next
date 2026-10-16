@@ -13,7 +13,7 @@ pub(crate) fn join_match_branches(
     case_envs: &[Environment],
     exhaustive: bool,
 ) {
-    let mut joined: HashMap<String, BindingState> = HashMap::new();
+    let mut joined: HashMap<String, BindingState> = HashMap::default();
     let all_names: HashSet<&String> = case_envs.iter().flat_map(|ce| ce.bindings.keys()).collect();
     for name in all_names {
         let states: Vec<&BindingState> = case_envs
@@ -406,7 +406,7 @@ pub(crate) fn check_exhaustive(env: &Environment, subject_ty: &Ty, cases: &[HirM
             if let Some(class_def) = env.lookup_class(name)
                 && !class_def.enum_members.is_empty()
             {
-                let mut covered: HashSet<&str> = HashSet::new();
+                let mut covered: HashSet<&str> = HashSet::default();
                 for case in cases {
                     if case.guard.is_some() {
                         continue;

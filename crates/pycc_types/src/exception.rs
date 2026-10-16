@@ -1,6 +1,6 @@
 //! Type checking for builtin exceptions (#382).
 
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 use super::env::BindingState;
 use super::{

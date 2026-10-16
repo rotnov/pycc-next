@@ -9,7 +9,7 @@
 
 use pycc_diag::{Diagnostic, Span};
 use pycc_hir::{HirClassDef, HirItem, HirModule, Ty};
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 /// Issue #22: reject a redefinition of the same function name with an
 /// incompatible signature. The codegen uses the first definition's LLVM
@@ -46,7 +46,7 @@ use std::collections::HashMap;
 /// same concrete signature too. A post-resolution recheck would therefore
 /// never observe a case this pre-resolution check didn't already reject.
 pub(crate) fn check_incompatible_redefinitions(hir: &HirModule) -> Result<(), Diagnostic> {
-    let mut seen: HashMap<String, (Vec<Ty>, Ty)> = HashMap::new();
+    let mut seen: HashMap<String, (Vec<Ty>, Ty)> = HashMap::default();
     for item in &hir.items {
         let HirItem::Function {
             name,

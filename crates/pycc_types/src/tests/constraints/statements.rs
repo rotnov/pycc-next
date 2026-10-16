@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn collect_block_constraints_gives_a_for_list_loop_variable_a_fresh_term_when_unbound() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -30,12 +30,12 @@ fn collect_block_constraints_gives_a_for_list_loop_variable_a_fresh_term_when_un
 }
 #[test]
 fn collect_block_constraints_keeps_a_for_list_loop_variable_s_existing_term() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("i".to_string(), Ok(Ty::Int))]),
+        bindings: HashMap::from_iter([("i".to_string(), Ok(Ty::Int))]),
         ..ConstraintEnvironment::empty(&["i"])
     };
     let body = vec![HirStmt::ForList {
@@ -59,7 +59,7 @@ fn collect_block_constraints_keeps_a_for_list_loop_variable_s_existing_term() {
 }
 #[test]
 fn collect_block_constraints_propagates_an_error_from_a_for_list_loop_body() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -105,7 +105,7 @@ fn constraint_collection_leaves_top_level_return_to_validation() {
 }
 #[test]
 fn constraint_collection_treats_a_dict_literal_as_unconstrained_but_recurses_into_pairs() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -129,7 +129,7 @@ fn constraint_collection_treats_a_dict_literal_as_unconstrained_but_recurses_int
 }
 #[test]
 fn constraint_collection_propagates_an_error_from_a_dict_literal_key() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -153,7 +153,7 @@ fn constraint_collection_propagates_an_error_from_a_dict_literal_key() {
 }
 #[test]
 fn constraint_collection_propagates_an_error_from_a_dict_literal_value() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -177,7 +177,7 @@ fn constraint_collection_propagates_an_error_from_a_dict_literal_value() {
 }
 #[test]
 fn collect_block_constraints_recurses_into_a_dict_set_s_key_and_value() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -201,7 +201,7 @@ fn collect_block_constraints_recurses_into_a_dict_set_s_key_and_value() {
 }
 #[test]
 fn collect_block_constraints_propagates_an_error_from_a_dict_set_key() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -227,7 +227,7 @@ fn collect_block_constraints_propagates_an_error_from_a_dict_set_key() {
 }
 #[test]
 fn collect_block_constraints_propagates_an_error_from_a_dict_set_value() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -261,7 +261,7 @@ fn collect_block_constraints_propagates_an_error_from_a_dict_set_value() {
 /// -- including the named-handler-binding branch -- goes unexercised.
 #[test]
 fn collect_block_constraints_recurses_into_every_try_star_block_and_binds_a_named_handler() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -297,7 +297,7 @@ fn collect_block_constraints_recurses_into_every_try_star_block_and_binds_a_name
 /// instead of only ever seeing `Ok` there.
 #[test]
 fn collect_block_constraints_propagates_an_error_from_a_try_star_body_block() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -331,7 +331,7 @@ fn collect_block_constraints_propagates_an_error_from_a_try_star_body_block() {
 /// `collect_block_constraints(...)?` call site (the per-handler loop).
 #[test]
 fn collect_block_constraints_propagates_an_error_from_a_try_star_handler_block() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -368,7 +368,7 @@ fn collect_block_constraints_propagates_an_error_from_a_try_star_handler_block()
 /// arm's third `collect_block_constraints(...)?` call site.
 #[test]
 fn collect_block_constraints_propagates_an_error_from_a_try_star_else_block() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -413,12 +413,12 @@ fn collect_block_constraints_propagates_an_error_from_a_try_star_else_block() {
 /// bound beforehand.
 #[test]
 fn collect_block_constraints_try_star_body_reassigns_pre_existing_opaque_binding() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        opaque_bindings: HashSet::from(["y".to_string()]),
+        opaque_bindings: HashSet::from_iter(["y".to_string()]),
         ..ConstraintEnvironment::empty(&["y"])
     };
     let body = vec![HirStmt::TryStar {
@@ -451,7 +451,7 @@ fn collect_block_constraints_try_star_body_reassigns_pre_existing_opaque_binding
 /// arm's fourth and last `collect_block_constraints(...)?` call site.
 #[test]
 fn collect_block_constraints_propagates_an_error_from_a_try_star_finally_block() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -482,7 +482,7 @@ fn collect_block_constraints_propagates_an_error_from_a_try_star_finally_block()
 }
 #[test]
 fn constraint_collection_treats_a_set_literal_as_unconstrained_but_recurses_into_elements() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -503,7 +503,7 @@ fn constraint_collection_treats_a_set_literal_as_unconstrained_but_recurses_into
 }
 #[test]
 fn constraint_collection_propagates_an_error_from_a_set_literal_element() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -524,7 +524,7 @@ fn constraint_collection_propagates_an_error_from_a_set_literal_element() {
 }
 #[test]
 fn constraint_collection_types_a_tuple_literal_of_concrete_scalars_and_recurses_into_elements() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -557,7 +557,7 @@ fn constraint_collection_types_a_tuple_literal_of_concrete_scalars_and_recurses_
 }
 #[test]
 fn constraint_collection_propagates_an_error_from_a_tuple_literal_element() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
@@ -669,7 +669,7 @@ fn collect_expr_constraints_propagates_error_from_generic_class_instantiate_arg(
 }
 #[test]
 fn collect_block_constraints_propagates_error_from_match_subject() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -696,7 +696,7 @@ fn collect_block_constraints_propagates_error_from_match_subject() {
 }
 #[test]
 fn collect_block_constraints_propagates_error_from_match_case_body() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -739,7 +739,7 @@ fn collect_block_constraints_propagates_an_error_from_a_logical_not_operand() {
     // local but never bound, so wrapping it in `not z` fails with
     // `unbound_local` (T0021) from the recursive call, and the `?` here
     // must propagate that unchanged.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();

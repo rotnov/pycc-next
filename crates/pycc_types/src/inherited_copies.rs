@@ -27,7 +27,8 @@
 mod facts;
 mod plan;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::BTreeSet;
+use crate::fx::{HashMap, HashSet};
 
 use pycc_diag::{Diagnostic, Span};
 
@@ -61,7 +62,7 @@ impl CopiedModule {
     }
 
     pub(crate) fn rekey(&self, diagnostics: KeyedDiagnostics) -> KeyedDiagnostics {
-        let mut seen: HashSet<(DiagnosticKey, &'static str, Option<Span>)> = HashSet::new();
+        let mut seen: HashSet<(DiagnosticKey, &'static str, Option<Span>)> = HashSet::default();
         let mut out = Vec::with_capacity(diagnostics.len());
         for (key, mut diagnostic) in diagnostics {
             let copied = match key {
@@ -112,7 +113,7 @@ pub(crate) fn add_inherited_copies(hir: &HirModule) -> Option<CopiedModule> {
         return None;
     }
     let mut module = hir.clone();
-    let mut origins = HashMap::new();
+    let mut origins = HashMap::default();
     for copy in &planned {
         let receiver = class_of(&copy.receiver).expect("planned receiver is a class");
         let name = inherited_copy_name(receiver, &copy.origin_class, &copy.origin_name, &class_of)
@@ -167,7 +168,7 @@ fn plan_copies(hir: &HirModule) -> Vec<PlannedCopy> {
             })
             .map(|m| (m, ()))
             .collect();
-    let mut facts: HashMap<String, BodyFacts> = HashMap::new();
+    let mut facts: HashMap<String, BodyFacts> = HashMap::default();
     let mut observers: BTreeSet<String> = BTreeSet::new();
     for item in &hir.items {
         match item {

@@ -47,10 +47,48 @@ const IMPLICIT_METHODS: &[&str] = &["keys", "read", "readline", "write", "flush"
 /// Drops the entry module's dead unannotated definitions (module doc).
 pub fn drop_unused_defs(module: &mut ModModule) {
     let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
-    if !mentions(body.iter()).reflective {
-        while drop_one(&mut body) {}
+    let mut counted = Counted::new(&body);
+    if !counted.all.reflective {
+        while drop_one(&mut body, &mut counted) {}
     }
     module.body = body.into();
+}
+
+/// The mentions of the module body, kept in step with it as definitions
+/// are dropped: each statement's and each class method's are counted once,
+/// and a drop subtracts what it removes from the total, where recounting
+/// the whole module for every drop made the pass quadratic in the module
+/// (v0.5 accept 4).
+struct Counted {
+    /// The whole body's.
+    all: Mentions,
+    /// Each top-level statement's, in body order.
+    own: Vec<Mentions>,
+    /// For each top-level statement, each of its class body's statements'
+    /// (empty for a statement that is not a class).
+    methods: Vec<Vec<Mentions>>,
+}
+
+impl Counted {
+    fn new(body: &[Stmt]) -> Self {
+        let own: Vec<Mentions> = body.iter().map(|stmt| mentions(std::iter::once(stmt))).collect();
+        let methods = body
+            .iter()
+            .map(|stmt| match stmt {
+                Stmt::ClassDef(class) => class
+                    .body
+                    .iter()
+                    .map(|stmt| mentions(std::iter::once(stmt)))
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        let mut all = Mentions::default();
+        for found in &own {
+            all.add(found);
+        }
+        Self { all, own, methods }
+    }
 }
 
 #[derive(Default)]
@@ -70,6 +108,31 @@ impl Mentions {
 
     fn attr(&mut self, name: &str) {
         *self.attrs.entry(name.to_string()).or_default() += 1;
+    }
+
+    /// Adds `other`'s counts (and reflection) to these.
+    fn add(&mut self, other: &Mentions) {
+        for (name, n) in &other.names {
+            *self.names.entry(name.clone()).or_default() += n;
+        }
+        for (name, n) in &other.attrs {
+            *self.attrs.entry(name.clone()).or_default() += n;
+        }
+        self.reflective |= other.reflective;
+    }
+
+    /// Takes `other`'s counts, a part of these, out of these.
+    fn subtract(&mut self, other: &Mentions) {
+        for (name, n) in &other.names {
+            if let Some(count) = self.names.get_mut(name) {
+                *count -= n;
+            }
+        }
+        for (name, n) in &other.attrs {
+            if let Some(count) = self.attrs.get_mut(name) {
+                *count -= n;
+            }
+        }
     }
 
     /// The mentions of a fallback rewrite's `exec`uted source
@@ -198,15 +261,15 @@ fn count(map: &HashMap<String, usize>, name: &str) -> usize {
 }
 
 /// Removes one dead definition; `false` when there is none.
-fn drop_one(body: &mut Vec<Stmt>) -> bool {
-    let all = mentions(body.iter());
+fn drop_one(body: &mut Vec<Stmt>, counted: &mut Counted) -> bool {
+    let all = &counted.all;
     for index in 0..body.len() {
-        let own = mentions(std::iter::once(&body[index]));
+        let own = &counted.own[index];
         match &body[index] {
             Stmt::FunctionDef(def) if unannotated(def, false) => {
                 let name = def.name.as_str();
                 if count(&all.names, name) == count(&own.names, name) {
-                    body.remove(index);
+                    remove_stmt(body, counted, index);
                     return true;
                 }
             }
@@ -216,7 +279,7 @@ fn drop_one(body: &mut Vec<Stmt>) -> bool {
             {
                 let name = target.id.as_str();
                 if count(&all.names, name) == count(&own.names, name) {
-                    body.remove(index);
+                    remove_stmt(body, counted, index);
                     return true;
                 }
             }
@@ -227,19 +290,24 @@ fn drop_one(body: &mut Vec<Stmt>) -> bool {
                     if name.starts_with("__") || IMPLICIT_METHODS.contains(&name) || !unannotated(def, true) {
                         continue;
                     }
-                    let method = mentions(std::iter::once(stmt));
+                    let method = &counted.methods[index][position];
                     let other_attrs = count(&all.attrs, name) - count(&method.attrs, name);
                     // The `def` itself is one name mention.
                     let other_names = count(&all.names, name) - count(&method.names, name);
                     if other_attrs == 0 && other_names == 0 {
+                        let method = counted.methods[index].remove(position);
+                        counted.all.subtract(&method);
+                        counted.own[index].subtract(&method);
                         let Stmt::ClassDef(class) = &mut body[index] else { unreachable!() };
                         let range = ruff_text_size::Ranged::range(&class.body[position]);
                         class.body.remove(position);
                         if class.body.is_empty() {
-                            class.body.push(Stmt::Pass(ruff_python_ast::StmtPass {
+                            let pass = Stmt::Pass(ruff_python_ast::StmtPass {
                                 range,
                                 node_index: ruff_python_ast::AtomicNodeIndex::default(),
-                            }));
+                            });
+                            counted.methods[index].push(mentions(std::iter::once(&pass)));
+                            class.body.push(pass);
                         }
                         return true;
                     }
@@ -249,4 +317,12 @@ fn drop_one(body: &mut Vec<Stmt>) -> bool {
         }
     }
     false
+}
+
+/// Removes top-level statement `index` and its counts.
+fn remove_stmt(body: &mut Vec<Stmt>, counted: &mut Counted, index: usize) {
+    body.remove(index);
+    let own = counted.own.remove(index);
+    counted.methods.remove(index);
+    counted.all.subtract(&own);
 }

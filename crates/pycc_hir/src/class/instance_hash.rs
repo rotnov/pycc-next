@@ -22,6 +22,7 @@
 use super::HirClassDef;
 use crate::exception::is_builtin_exception_class;
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 /// The two dunder names the walk looks for.
 const HASH: &str = "__hash__";
@@ -123,13 +124,19 @@ impl HashRefusal {
 /// The class definition `name`, which is always registered: the C3 MRO is
 /// built from already-lowered class definitions. `.expect`'s panic path
 /// lives in libcore, outside this crate's instrumented regions.
-fn class_def<'c>(classes: &'c HashMap<String, HirClassDef>, name: &str) -> &'c HirClassDef {
+fn class_def<'c, S: BuildHasher>(
+    classes: &'c HashMap<String, HirClassDef, S>,
+    name: &str,
+) -> &'c HirClassDef {
     classes.get(name).expect("MRO class must be registered")
 }
 
 /// The refusal for a class kind whose hash pycc does not compile yet, if
 /// any class of `def`'s MRO is one.
-fn precheck(def: &HirClassDef, classes: &HashMap<String, HirClassDef>) -> Option<HashRefusal> {
+fn precheck<S: BuildHasher>(
+    def: &HirClassDef,
+    classes: &HashMap<String, HirClassDef, S>,
+) -> Option<HashRefusal> {
     def.mro.iter().find_map(|name| {
         let mro_def = class_def(classes, name);
         let class = name.clone();
@@ -158,7 +165,7 @@ fn binds(def: &HirClassDef, name: &str) -> bool {
 }
 
 /// The verdict of `class` alone, ignoring its subclasses.
-fn own(class: &str, classes: &HashMap<String, HirClassDef>) -> InstanceHash {
+fn own<S: BuildHasher>(class: &str, classes: &HashMap<String, HirClassDef, S>) -> InstanceHash {
     let def = class_def(classes, class);
     if let Some(refusal) = precheck(def, classes) {
         return InstanceHash::Unsupported(refusal);
@@ -197,9 +204,9 @@ fn agrees(a: &InstanceHash, b: &InstanceHash) -> bool {
 
 /// Every class deriving from `class`, sorted, so the subclass a refusal
 /// names does not depend on the table's iteration order.
-fn sorted_subclasses<'c>(
+fn sorted_subclasses<'c, S: BuildHasher>(
     class: &str,
-    classes: &'c HashMap<String, HirClassDef>,
+    classes: &'c HashMap<String, HirClassDef, S>,
 ) -> Vec<&'c String> {
     let mut subclasses: Vec<&String> = classes
         .iter()
@@ -220,7 +227,10 @@ fn sorted_subclasses<'c>(
 /// When `class` or a class of an MRO is not in `classes`; every caller
 /// passes a class the type checker resolved from the same table.
 #[must_use]
-pub fn resolve_instance_hash(class: &str, classes: &HashMap<String, HirClassDef>) -> InstanceHash {
+pub fn resolve_instance_hash<S: BuildHasher>(
+    class: &str,
+    classes: &HashMap<String, HirClassDef, S>,
+) -> InstanceHash {
     let verdict = own(class, classes);
     if matches!(verdict, InstanceHash::Unsupported(_)) {
         return verdict;
@@ -294,7 +304,10 @@ impl EqRefusal {
 /// # Panics
 /// When `class` or a class of an MRO is not in `classes`.
 #[must_use]
-pub fn resolve_instance_eq(class: &str, classes: &HashMap<String, HirClassDef>) -> InstanceEq {
+pub fn resolve_instance_eq<S: BuildHasher>(
+    class: &str,
+    classes: &HashMap<String, HirClassDef, S>,
+) -> InstanceEq {
     let def = class_def(classes, class);
     let Some(owner) = def
         .mro

@@ -21,7 +21,7 @@ pub(crate) fn join_if_branches(
     body_env: &Environment,
     orelse_env: &Environment,
 ) -> Result<(), Diagnostic> {
-    let mut joined: HashMap<String, BindingState> = HashMap::new();
+    let mut joined: HashMap<String, BindingState> = HashMap::default();
     // Pass 1: process every name bound in the body branch. For each, look
     // up the orelse branch's state (if any) and join. This pass covers all
     // names in `body_env`; the `(None, None)` case never arises because we

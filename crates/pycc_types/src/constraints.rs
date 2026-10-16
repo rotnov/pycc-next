@@ -95,7 +95,7 @@ pub(crate) use set_comp::ContainerDefault;
 pub(crate) use set_comp::{DeferredConstraints, deferred_frozenset};
 pub(crate) use signatures::*;
 
-use std::collections::{HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::binop::numeric_result_type;
@@ -338,22 +338,22 @@ impl<'scope, 'hir> ConstraintEnvironment<'scope, 'hir> {
     #[cfg(test)]
     pub(crate) fn empty(local_names: &'scope [&'hir str]) -> Self {
         Self {
-            bindings: HashMap::new(),
+            bindings: HashMap::default(),
             local_names,
-            defs_rebound: HashSet::new(),
-            maybe_bindings: HashSet::new(),
-            opaque_bindings: HashSet::new(),
-            foreign_objects: HashSet::new(),
+            defs_rebound: HashSet::default(),
+            maybe_bindings: HashSet::default(),
+            opaque_bindings: HashSet::default(),
+            foreign_objects: HashSet::default(),
             std_module_aliases: Vec::new(),
-            owned_buffers: HashSet::new(),
+            owned_buffers: HashSet::default(),
             in_function_body: false,
             in_generator: false,
             generator_sig: None,
             returns_inside_finally: false,
-            shadowed_producers: HashSet::new(),
-            finals: HashSet::new(),
+            shadowed_producers: HashSet::default(),
+            finals: HashSet::default(),
             class_defs: &[],
-            narrowed: HashMap::new(),
+            narrowed: HashMap::default(),
         }
     }
 

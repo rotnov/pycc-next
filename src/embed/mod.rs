@@ -21,6 +21,7 @@ pub(crate) mod native;
 pub(crate) mod native_linux;
 mod native_windows;
 mod native_windows_closure;
+mod parallel;
 mod pe;
 pub(crate) mod sha256;
 pub(crate) mod static_lib;

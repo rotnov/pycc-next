@@ -29,7 +29,7 @@
 //!
 //! [D-185]: https://github.com/rotnov/pycc/blob/main/docs/decisions/D-185-permit-a-dedicated-tracking-issue-per-oversized.md
 
-use std::collections::{HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
 
 use crate::{
     BindingState, Environment, bind_local_types_in_body, bind_local_types_in_stmt,
@@ -403,7 +403,7 @@ pub(crate) fn monomorphize(hir: &HirModule) -> Result<HirModule, Diagnostic> {
 
     let function_local_names = module_function_local_names(hir);
     let mut instantiations: Vec<GenericInstantiation> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::default();
 
     // PEP 695 (#387): pre-scan for generic class instantiations
     // (`C[type_arg](args)`) and monomorphize each unique `(class, type_arg)`

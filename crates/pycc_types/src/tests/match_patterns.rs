@@ -439,7 +439,7 @@ fn collect_enum_member_patterns_with_non_class_pattern_is_noop() {
         ("RED".to_string(), pycc_hir::EnumMemberValue::Int(1)),
         ("GREEN".to_string(), pycc_hir::EnumMemberValue::Int(2)),
     ];
-    let mut covered: HashSet<&str> = HashSet::new();
+    let mut covered: HashSet<&str> = HashSet::default();
     collect_enum_member_patterns(&HirPattern::Wildcard, "Color", &members, &mut covered);
     collect_enum_member_patterns(
         &HirPattern::Literal(HirExpr::IntLiteral(1)),

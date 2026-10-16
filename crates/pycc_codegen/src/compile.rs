@@ -57,14 +57,38 @@ pub fn compile_to_object_with_options(
     compile_to_object_with_observer(mir, output_path, options, None)
 }
 
+/// [`compile_to_object_with_options`] for a build that links whatever
+/// objects it is given: a large optimized module is emitted as several
+/// objects, compiled by LLVM's backend in parallel (`crate::emit`). The
+/// first is `output_path`; the rest sit beside it. All of them are
+/// returned, in link order.
+pub fn compile_to_objects_with_options(
+    mir: &MirModule,
+    output_path: &Path,
+    options: &CompileOptions,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    compile_module(mir, output_path, options, None, true)
+}
+
 pub(crate) fn compile_to_object_with_observer(
     mir: &MirModule,
     output_path: &Path,
     options: &CompileOptions,
-    mut observer: Option<&mut CodegenObserver<'_>>,
+    observer: Option<&mut CodegenObserver<'_>>,
 ) -> Result<(), String> {
+    compile_module(mir, output_path, options, observer, false).map(|_| ())
+}
+
+/// Lowers `mir` and emits it: one object at `output_path`, or with `split`
+/// possibly several (`crate::emit`).
+fn compile_module(
+    mir: &MirModule,
+    output_path: &Path,
+    options: &CompileOptions,
+    observer: Option<&mut CodegenObserver<'_>>,
+    split: bool,
+) -> Result<Vec<std::path::PathBuf>, String> {
     let target_triple = options.target_triple.as_deref();
-    let release = options.release;
     let context = Context::create();
     let module = context.create_module("pycc_module");
     let builder = context.create_builder();
@@ -1210,83 +1234,7 @@ pub(crate) fn compile_to_object_with_observer(
     crate::ndarray::clear_fresh_after_calls(&context, &module, &builder, &rt);
     verify_module(&module);
 
-    // See `target_machine::target_machine_for` for the LLVM target-registry
-    // initialization contract this call satisfies, and for the D-029 and
-    // D-073 reasoning behind the triple and relocation-model choices.
-    let target_machine = target_machine::target_machine_for(target_triple, release)?;
-    crate::store_width::check(&module, &target_machine.get_target_data());
-    // `--release`'s whole-module optimization pipeline (D-094). This is
-    // "maximum whole-module optimization," not literal cross-translation-
-    // unit LTO: pycc emits exactly one LLVM module per compilation today
-    // (single-file only until v0.4's multi-file support), so there is only
-    // ever one module for `"default<O3>"` to optimize.
-    //
-    // Deliberately `.expect(..)`, not `.map_err(llvm_string_to_owned)?` like
-    // `Target::from_triple` (in `target_machine`)/`write_to_file` below:
-    // those two are genuine,
-    // externally-triggerable failure modes with their own dedicated tests
-    // and reachable `Err` paths this crate's 100% region-coverage gate
-    // (D-014) can actually exercise. `run_passes` here runs a fixed,
-    // always-valid pipeline string against a module `verify_module` has
-    // already accepted (skipped only on Windows per D-029's own "no
-    // Windows-specific IR-building path exists" reasoning, which applies
-    // here too) -- there is no way to make this fail that a test could
-    // construct, so this stays infallible given how this function always
-    // calls it, the same treatment `create_target_machine` gets in
-    // `target_machine` and `module.verify()` gets in `verify_module` below.
-    // On the
-    // vanishingly narrow chance this ever legitimately panics on Windows,
-    // the `LLVMString`'s `Drop` would run during unwinding (D-029's crash)
-    // -- an accepted, currently unreachable risk, not a silently ignored one.
-    // A generator is an LLVM coroutine, which only LLVM's coroutine passes
-    // lower: a debug build of a module with one runs the `O0` pipeline,
-    // which includes them.
-    let has_coroutines = mir.items.iter().any(|item| {
-        matches!(
-            item,
-            MirItem::Function {
-                return_ty: pycc_mir::Ty::Generator(_),
-                ..
-            }
-        )
-    });
-    if !release && has_coroutines {
-        module
-            .run_passes("default<O0>", &target_machine, PassBuilderOptions::create())
-            .expect("LLVM's \"default<O0>\" pipeline lowers a verified module's coroutines");
-    }
-    // Developer hook for performance work: `PYCC_DUMP_LLVM=<path>` writes the
-    // module's IR before (`<path>.pre.ll`) and after (`<path>`) the pipeline.
-    let dump_path = std::env::var_os("PYCC_DUMP_LLVM").map(std::path::PathBuf::from);
-    if let Some(path) = &dump_path {
-        let mut pre = path.clone().into_os_string();
-        pre.push(".pre.ll");
-        let _ = module.print_to_file(std::path::Path::new(&pre));
-    }
-    let applied_pipeline = if release {
-        module
-            .run_passes(
-                RELEASE_PASS_PIPELINE,
-                &target_machine,
-                PassBuilderOptions::create(),
-            )
-            .expect(
-                "LLVM's \"default<O3>\" pipeline should never fail against a module this \
-                 function has already verified, using a fixed, always-valid pipeline string",
-            );
-        Some(RELEASE_PASS_PIPELINE)
-    } else {
-        None
-    };
-    if let Some(path) = &dump_path {
-        let _ = module.print_to_file(path);
-    }
-    if let Some(observer) = observer.as_mut() {
-        observer(&module, applied_pipeline);
-    }
-    target_machine
-        .write_to_file(&module, FileType::Object, output_path)
-        .map_err(llvm_string_to_owned)
+    crate::emit::optimize_and_emit(&module, mir, options, observer, output_path, split)
 }
 
 /// See D-029: every message inkwell hands back as an `LLVMString` --

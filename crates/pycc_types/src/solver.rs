@@ -10,7 +10,7 @@
 //! because they are deeply intertwined with the rest of the type-inference solver
 //! (`collect_expr_constraints`, `unify_terms`, `fresh_term`, etc.).
 
-use std::collections::HashSet;
+use crate::fx::HashSet;
 
 use crate::ConstraintEnvironment;
 

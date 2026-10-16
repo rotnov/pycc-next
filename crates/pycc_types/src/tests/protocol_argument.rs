@@ -20,7 +20,7 @@ use super::check_source;
 use crate::monomorphize::specialize_protocol_method_call;
 use crate::{Environment, check_and_resolve};
 use pycc_hir::{HirClassDef, HirExpr, HirItem, HirModule, Ty};
-use std::collections::{HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
 
 /// A protocol whose member takes the protocol itself, and a conforming
 /// class spelling the parameter the same way (#948's accepted shape).
@@ -213,7 +213,7 @@ fn call(
     protocol_funcs: &HashMap<String, HirItem>,
 ) -> Option<HirExpr> {
     let mut specializations: Vec<HirItem> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::default();
     specialize_protocol_method_call(
         &HirExpr::Name("c".to_string()),
         method,
@@ -230,13 +230,13 @@ fn call(
 fn a_receiver_whose_class_is_not_registered_is_left_alone() {
     let mut env = Environment::new();
     env.bind("c".to_string(), Ty::Instance(Box::new("Ghost".to_string())));
-    assert!(call(&env, "same", Vec::new(), &HashMap::new()).is_none());
+    assert!(call(&env, "same", Vec::new(), &HashMap::default()).is_none());
 }
 
 #[test]
 fn a_method_missing_from_the_mro_is_left_alone() {
     let env = env_with_class("C", Vec::new());
-    assert!(call(&env, "same", Vec::new(), &HashMap::new()).is_none());
+    assert!(call(&env, "same", Vec::new(), &HashMap::default()).is_none());
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn a_protocol_parameter_with_no_concrete_argument_is_left_alone() {
     // argument's type is not a class instance, so the substitution list
     // stays empty and the call is left as a `MethodCall`.
     let env = env_with_class("C", vec![("same".to_string(), "C.same".to_string())]);
-    let mut protocol_funcs = HashMap::new();
+    let mut protocol_funcs = HashMap::default();
     protocol_funcs.insert(
         "C.same".to_string(),
         HirItem::Function {
@@ -266,7 +266,7 @@ fn a_non_function_protocol_entry_is_left_alone() {
     // Defense in depth: `protocol_funcs` only ever holds
     // `HirItem::Function`s, so this arm is unreachable from any module.
     let env = env_with_class("C", vec![("same".to_string(), "C.same".to_string())]);
-    let mut protocol_funcs = HashMap::new();
+    let mut protocol_funcs = HashMap::default();
     protocol_funcs.insert(
         "C.same".to_string(),
         HirItem::TopLevelStmt(pycc_hir::HirStmt::ExprStmt(HirExpr::IntLiteral(0))),
@@ -294,7 +294,7 @@ fn a_non_protocol_parameter_and_a_missing_argument_are_both_skipped() {
     // checker rejects separately, so monomorphization must not index
     // past the argument list).
     let env = env_with_class("C", vec![("same".to_string(), "C.same".to_string())]);
-    let mut protocol_funcs = HashMap::new();
+    let mut protocol_funcs = HashMap::default();
     protocol_funcs.insert(
         "C.same".to_string(),
         HirItem::Function {

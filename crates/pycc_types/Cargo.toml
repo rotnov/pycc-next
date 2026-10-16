@@ -8,6 +8,7 @@ rust-version.workspace = true
 pycc_hir = { path = "../pycc_hir" }
 pycc_diag = { path = "../pycc_diag" }
 pycc_std = { path = "../pycc_std" }
+rustc-hash = "2"
 
 [dev-dependencies]
 pycc_mir = { path = "../pycc_mir" }

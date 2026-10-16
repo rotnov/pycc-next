@@ -9,12 +9,12 @@ fn solver_if_no_else_marks_body_only_binding_as_maybe() {
     // `def _f(cond: bool):` with `if cond: x = 1` (no else) — x is
     // maybe-bound. The solver should track x in `maybe_bindings` so
     // `return x` does not unify the return type with x's type.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("cond".to_string(), Ok(Ty::Bool))]),
+        bindings: HashMap::from_iter([("cond".to_string(), Ok(Ty::Bool))]),
         ..ConstraintEnvironment::empty(&["cond", "x"])
     };
     let body = vec![HirStmt::If {
@@ -45,12 +45,12 @@ fn solver_if_no_else_marks_body_only_binding_as_maybe() {
 fn solver_if_with_else_marks_both_branch_binding_as_definite() {
     // `if cond: x = 1` + `else: x = 2` — both branches bind x, so x
     // is definitely bound (not in `maybe_bindings`).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("cond".to_string(), Ok(Ty::Bool))]),
+        bindings: HashMap::from_iter([("cond".to_string(), Ok(Ty::Bool))]),
         ..ConstraintEnvironment::empty(&["cond", "x"])
     };
     let body = vec![HirStmt::If {
@@ -85,12 +85,12 @@ fn solver_if_no_else_does_not_leak_binding_into_orelse() {
     // Before #359, both branches shared the same env, so a binding
     // from the body leaked into the orelse. With cloning, the orelse
     // branch should NOT see x from the body.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("cond".to_string(), Ok(Ty::Bool))]),
+        bindings: HashMap::from_iter([("cond".to_string(), Ok(Ty::Bool))]),
         ..ConstraintEnvironment::empty(&["cond", "x", "y"])
     };
     // Body assigns x; orelse assigns y. After the if, both x and y
@@ -136,12 +136,12 @@ fn solver_if_no_else_marks_opaque_body_only_binding_as_maybe() {
     // is textually right above it. It must now be maybe-bound: present in
     // `env.opaque_bindings` and `env.maybe_bindings`, absent from
     // `env.bindings` (the solver still has no term for it).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([
+        bindings: HashMap::from_iter([
             ("cond".to_string(), Ok(Ty::Bool)),
             ("d".to_string(), Ok(Ty::Dict(Box::new((Ty::Str, Ty::Int))))),
         ]),
@@ -187,12 +187,12 @@ fn solver_if_with_else_marks_both_branch_opaque_binding_as_definite() {
     // flagged as not actually branch-conditional in the definite-
     // assignment sense: it reproduced the exact #771 misdiagnosis even
     // though every path through the `if` assigns `y`.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([
+        bindings: HashMap::from_iter([
             ("cond".to_string(), Ok(Ty::Bool)),
             ("d".to_string(), Ok(Ty::Dict(Box::new((Ty::Str, Ty::Int))))),
         ]),
@@ -254,13 +254,13 @@ fn solver_if_reassigns_pre_existing_opaque_binding_in_one_branch_only() {
     // was already populated before the `if`; this test's assertions confirm
     // the analogous protection now holds when the pre-existing entry lives
     // in `opaque_bindings` instead of `bindings`).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("cond".to_string(), Ok(Ty::Bool))]),
-        opaque_bindings: HashSet::from(["y".to_string()]),
+        bindings: HashMap::from_iter([("cond".to_string(), Ok(Ty::Bool))]),
+        opaque_bindings: HashSet::from_iter(["y".to_string()]),
         ..ConstraintEnvironment::empty(&["cond", "y"])
     };
     let body = vec![HirStmt::If {
@@ -303,13 +303,13 @@ fn solver_if_reassigns_pre_existing_opaque_binding_in_orelse_branch_only() {
     // `continue` unexercised. Here `y` is again pre-existing-opaque before
     // the `if`, but this time only the `orelse` branch reassigns it to a
     // real term; `body` is empty.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("cond".to_string(), Ok(Ty::Bool))]),
-        opaque_bindings: HashSet::from(["y".to_string()]),
+        bindings: HashMap::from_iter([("cond".to_string(), Ok(Ty::Bool))]),
+        opaque_bindings: HashSet::from_iter(["y".to_string()]),
         ..ConstraintEnvironment::empty(&["cond", "y"])
     };
     let body = vec![HirStmt::If {
@@ -358,13 +358,13 @@ fn solver_if_reassigns_pre_existing_opaque_binding_in_both_branches_to_real_term
     // `env.bindings`'s own mutation state, so this case correctly falls
     // through to the ordinary first-wins merge and `y` ends up with a real,
     // solver-representable term as it should.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("cond".to_string(), Ok(Ty::Bool))]),
-        opaque_bindings: HashSet::from(["y".to_string()]),
+        bindings: HashMap::from_iter([("cond".to_string(), Ok(Ty::Bool))]),
+        opaque_bindings: HashSet::from_iter(["y".to_string()]),
         ..ConstraintEnvironment::empty(&["cond", "y"])
     };
     let body = vec![HirStmt::If {
@@ -417,12 +417,12 @@ fn solver_while_loop_marks_opaque_body_only_binding_as_maybe() {
     // is maybe-bound after the loop, exactly like a real-term binding
     // introduced there (`solver_while_loop_marks_body_only_binding_as_maybe`
     // above). Exercises `join_loop_body_solver`'s `opaque_bindings` merge.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([
+        bindings: HashMap::from_iter([
             ("cond".to_string(), Ok(Ty::Bool)),
             ("d".to_string(), Ok(Ty::Dict(Box::new((Ty::Str, Ty::Int))))),
         ]),
@@ -460,12 +460,12 @@ fn solver_while_loop_marks_opaque_body_only_binding_as_maybe() {
 fn solver_while_loop_marks_body_only_binding_as_maybe() {
     // A `while` body may execute zero times, so x assigned only in
     // the body is maybe-bound after the loop.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("cond".to_string(), Ok(Ty::Bool))]),
+        bindings: HashMap::from_iter([("cond".to_string(), Ok(Ty::Bool))]),
         ..ConstraintEnvironment::empty(&["cond", "x"])
     };
     let body = vec![HirStmt::While {
@@ -495,7 +495,7 @@ fn solver_while_loop_marks_body_only_binding_as_maybe() {
 fn solver_for_range_marks_loop_variable_as_maybe() {
     // A `for` loop may execute zero times, so the loop variable is
     // maybe-bound after the loop (if newly introduced).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -527,7 +527,7 @@ fn solver_for_range_marks_loop_variable_as_maybe() {
 fn solver_for_range_body_only_binding_is_maybe() {
     // A binding introduced only in the for-loop body is maybe-bound
     // after the loop (the loop may not execute).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -562,12 +562,12 @@ fn solver_for_range_body_only_binding_is_maybe() {
 fn solver_for_range_pre_existing_binding_stays_definite() {
     // A binding that existed before the loop stays definite (not in
     // maybe_bindings) after the loop.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("x".to_string(), Ok(Ty::Int))]),
+        bindings: HashMap::from_iter([("x".to_string(), Ok(Ty::Int))]),
         ..ConstraintEnvironment::empty(&["i", "x"])
     };
     let body = vec![HirStmt::ForRange {
@@ -602,13 +602,13 @@ fn solver_for_range_pre_existing_binding_stays_definite() {
 fn solver_maybe_bound_name_skips_unification_in_name_arm() {
     // A maybe-bound name returns Ok(None) from the Name arm, so
     // `return x` does not unify the return type with x's type.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
     let env = ConstraintEnvironment {
-        bindings: HashMap::from([("x".to_string(), Ok(Ty::Int))]),
-        maybe_bindings: HashSet::from(["x".to_string()]),
+        bindings: HashMap::from_iter([("x".to_string(), Ok(Ty::Int))]),
+        maybe_bindings: HashSet::from_iter(["x".to_string()]),
         ..ConstraintEnvironment::empty(&["x"])
     };
 
@@ -632,12 +632,12 @@ fn solver_unconditional_assignment_upgrades_maybe_to_definite() {
     // join upgrades the name back to definitely bound, mirroring the
     // validation pass's contract: `if c: x = 1; x = 2; return x` is
     // valid because `x = 2` makes `x` definitely bound.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("cond".to_string(), Ok(Ty::Bool))]),
+        bindings: HashMap::from_iter([("cond".to_string(), Ok(Ty::Bool))]),
         ..ConstraintEnvironment::empty(&["cond", "x"])
     };
     let body = vec![
@@ -676,12 +676,12 @@ fn solver_unconditional_assignment_upgrades_maybe_to_definite() {
 fn solver_definitely_bound_name_returns_its_term() {
     // A definitely-bound name (not in maybe_bindings) returns its
     // type term as before.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut binops = DeferredConstraints::default();
     let env = ConstraintEnvironment {
-        bindings: HashMap::from([("x".to_string(), Ok(Ty::Int))]),
+        bindings: HashMap::from_iter([("x".to_string(), Ok(Ty::Int))]),
         ..ConstraintEnvironment::empty(&["x"])
     };
 

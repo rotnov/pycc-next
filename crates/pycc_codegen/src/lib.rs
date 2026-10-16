@@ -171,6 +171,8 @@ type CodegenObserver<'observer> =
 // `super::x` paths keep resolving.
 mod coerce;
 mod compile;
+mod emit;
+mod split_emit;
 mod container_access;
 mod entry_slots;
 mod expr;
@@ -182,7 +184,9 @@ mod user_call;
 mod multi_out;
 use coerce::*;
 use compile::*;
-pub use compile::{compile_to_object, compile_to_object_with_options};
+pub use compile::{
+    compile_to_object, compile_to_object_with_options, compile_to_objects_with_options,
+};
 use container_access::*;
 use entry_slots::*;
 use expr::*;

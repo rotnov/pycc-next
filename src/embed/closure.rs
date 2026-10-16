@@ -23,57 +23,115 @@ pub(crate) const CLOSURE_DIR: &str = "closure";
 /// are kept, plus owner-write for the relocation step. Last, each
 /// distribution's copied files must add up to its locked `files` and
 /// `tree-sha256`. Returns the copied Mach-O images' `rel` paths, in order.
+///
+/// The files are copied on every core (`super::parallel`), except those
+/// whose path another payload path matches but for case: those are copied
+/// afterwards, in order, so which of them is refused, and the message
+/// naming the other, is what copying all of them in order gives. The first
+/// failure in file order is reported.
 pub(crate) fn copy_closure(closure: &LockedClosure, staging: &Path) -> Result<Vec<String>, String> {
     let root = staging.join(CLOSURE_DIR);
-    let mut copied: BTreeMap<String, String> = BTreeMap::new();
-    let mut owners: BTreeMap<String, (&str, &str)> = BTreeMap::new();
-    let mut images = Vec::new();
-    for file in &closure.files {
-        let source = &file.source;
-        let bytes = std::fs::read(source).map_err(|e| io_error("read", source, &e))?;
-        let digest = sha256_hex(&bytes);
-        if digest != file.digest {
-            return Err(closure.stale(&format!(
-                "`{}` of distribution `{}` does not match its RECORD hash, so it changed after \
-                 it was installed -- reinstall the distribution",
-                source.display(),
-                file.package
-            )));
+    let files = &closure.files;
+    let folded: Vec<String> = files.iter().map(|file| file.rel.to_lowercase()).collect();
+    let mut first_with: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut shared = vec![false; files.len()];
+    for (index, name) in folded.iter().enumerate() {
+        if let Some(first) = first_with.insert(name, index) {
+            shared[first] = true;
+            shared[index] = true;
         }
-        let dest = root.join(&file.rel);
-        let parent = dest.parent().unwrap_or(&root);
-        std::fs::create_dir_all(parent).map_err(|e| io_error("create", parent, &e))?;
-        let folded = file.rel.to_lowercase();
-        let created = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&dest);
-        let mut out = created.map_err(|e| {
-            let collided = e.kind() == std::io::ErrorKind::AlreadyExists;
-            let other = owners.get(&folded).filter(|_| collided);
-            other.map_or_else(
-                || io_error("create", &dest, &e),
-                |(other, other_package)| {
-                    closure.stale(&format!(
-                        "`{}` of distribution `{}` and `{other}` of distribution \
-                         `{other_package}` name the same file on this case-insensitive file \
-                         system",
-                        file.rel, file.package
-                    ))
-                },
-            )
-        })?;
-        out.write_all(&bytes)
-            .map_err(|e| io_error("write", &dest, &e))?;
-        keep_mode(source, &dest)?;
-        owners.insert(folded, (&file.rel, &file.package));
-        if macho::is_macho_header(&bytes) {
+    }
+    let mut copied: Vec<Option<Result<(String, bool), CopyError>>> =
+        super::parallel::map_indexed(files.len(), |index| {
+            (!shared[index]).then(|| copy_file(closure, &files[index], &root))
+        });
+    let mut owners: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+    for index in (0..files.len()).filter(|index| shared[*index]) {
+        let file = &files[index];
+        let result = copy_file(closure, file, &root).map_err(|e| match e {
+            CopyError::Collided(e) => match owners.get(folded[index].as_str()) {
+                Some((other, other_package)) => closure.stale(&format!(
+                    "`{}` of distribution `{}` and `{other}` of distribution \
+                     `{other_package}` name the same file on this case-insensitive file \
+                     system",
+                    file.rel, file.package
+                )),
+                None => e,
+            },
+            CopyError::Other(e) => e,
+        });
+        if result.is_ok() {
+            owners.insert(folded[index].as_str(), (&file.rel, &file.package));
+        }
+        copied[index] = Some(result.map_err(CopyError::Other));
+    }
+    let mut digests: BTreeMap<String, String> = BTreeMap::new();
+    let mut images = Vec::new();
+    for (file, result) in files.iter().zip(copied) {
+        let (digest, image) = result.expect("every file copied").map_err(CopyError::message)?;
+        if image {
             images.push(file.rel.clone());
         }
-        copied.insert(file.rel.clone(), digest);
+        digests.insert(file.rel.clone(), digest);
     }
-    closure.verify_copied(&copied)?;
+    closure.verify_copied(&digests)?;
     Ok(images)
+}
+
+/// Why one payload file was not copied.
+enum CopyError {
+    /// Its destination exists already (another payload path that differs
+    /// only in case, on a case-insensitive file system): the message to
+    /// report when no earlier file explains it.
+    Collided(String),
+    Other(String),
+}
+
+impl CopyError {
+    fn message(self) -> String {
+        match self {
+            CopyError::Collided(message) | CopyError::Other(message) => message,
+        }
+    }
+}
+
+/// Copies one payload file (see [`copy_closure`]); its digest, and whether
+/// it is a Mach-O image.
+fn copy_file(
+    closure: &LockedClosure,
+    file: &crate::lock::build::ClosureFile,
+    root: &Path,
+) -> Result<(String, bool), CopyError> {
+    let source = &file.source;
+    let bytes = std::fs::read(source).map_err(|e| CopyError::Other(io_error("read", source, &e)))?;
+    let digest = sha256_hex(&bytes);
+    if digest != file.digest {
+        return Err(CopyError::Other(closure.stale(&format!(
+            "`{}` of distribution `{}` does not match its RECORD hash, so it changed after \
+             it was installed -- reinstall the distribution",
+            source.display(),
+            file.package
+        ))));
+    }
+    let dest = root.join(&file.rel);
+    let parent = dest.parent().unwrap_or(root);
+    std::fs::create_dir_all(parent).map_err(|e| CopyError::Other(io_error("create", parent, &e)))?;
+    let created = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&dest);
+    let mut out = created.map_err(|e| {
+        let message = io_error("create", &dest, &e);
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            CopyError::Collided(message)
+        } else {
+            CopyError::Other(message)
+        }
+    })?;
+    out.write_all(&bytes)
+        .map_err(|e| CopyError::Other(io_error("write", &dest, &e)))?;
+    keep_mode(source, &dest).map_err(CopyError::Other)?;
+    Ok((digest, macho::is_macho_header(&bytes)))
 }
 
 /// Gives `dest` the permission bits of `source`, plus owner-write, so a

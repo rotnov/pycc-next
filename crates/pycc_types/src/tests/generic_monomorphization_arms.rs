@@ -414,7 +414,7 @@ fn rewrite_generic_calls_in_instantiation_skips_a_non_function_item() {
         specialized: HirItem::TopLevelStmt(HirStmt::ExprStmt(HirExpr::IntLiteral(1))),
         return_ty: Ty::None,
     }];
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let result =
         rewrite_generic_calls_in_instantiation(&mut env, 0, &mut instantiations, &mut seen);
     assert!(result.is_ok());
@@ -438,9 +438,9 @@ fn rewrite_protocol_calls_in_specialization_skips_a_non_function_item() {
     // `HirItem::TopLevelStmt` covers the arm without affecting the
     // monomorphization pipeline.
     let env = Environment::new();
-    let protocol_funcs = HashMap::new();
+    let protocol_funcs = HashMap::default();
     let mut specializations = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut item = HirItem::TopLevelStmt(HirStmt::ExprStmt(HirExpr::IntLiteral(1)));
     rewrite_protocol_calls_in_specialization(
         &env,

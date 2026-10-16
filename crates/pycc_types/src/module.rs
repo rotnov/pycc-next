@@ -24,7 +24,7 @@
 //! byte-identical to what `check` reported before this part (D-217 rule 2).
 
 use super::*;
-use std::collections::HashSet;
+use crate::fx::HashSet;
 
 /// The private-helper signature table: function name to `(parameter
 /// types, return type)`.

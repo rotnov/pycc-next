@@ -26,7 +26,7 @@ use super::module_environment;
 use super::unify::concrete_ty;
 use crate::infer_expr_in;
 use pycc_hir::{HirExpr, HirItem, HirModule, HirStmt, Ty};
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 /// The number of rounds after which the pass stops even if a later round
 /// could still resolve more (each round resolves at least one parameter, so
@@ -93,7 +93,7 @@ fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
             HirItem::TopLevelStmt(_) => None,
         })
         .collect();
-    let mut observed: HashMap<(String, usize), Option<Ty>> = HashMap::new();
+    let mut observed: HashMap<(String, usize), Option<Ty>> = HashMap::default();
     for_each_call(hir, &mut |env, names, callee, args| {
         // A nested function used as a value: its captured values are its
         // lifted function's leading arguments.

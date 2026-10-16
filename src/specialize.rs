@@ -11,14 +11,16 @@
 //! a failing attempt with the same attempt without specializations: a
 //! diagnostic only the specialized program has drops the specialization
 //! whose `def` holds it; one no `def` holds (a span-less solver
-//! diagnostic) is narrowed down to one specialization by halving
+//! diagnostic) drops every specialization that fails alone with it, or
+//! when none does is narrowed down to one specialization by halving
 //! ([`culprit`]); and the attempt is repeated. A specialization that calls
 //! a builtin its original calls through CPython
 //! (`Specialized::restored_builtins`) is not dropped at its first failure
 //! but planned again calling builtins as the original does
 //! ([`KEEP_BUILTINS`]). What fails without
 //! specializations too is the program's own failure, which the caller (the
-//! fallback loop) handles as before.
+//! fallback loop) handles as before. Attempts that do not depend on each
+//! other run in parallel ([`run_all`], v0.5 accept 4).
 
 use crate::frontend::FrontendFailure;
 use pycc_ast::Specialized;
@@ -131,16 +133,114 @@ fn specialized<T>(
     (result, planned)
 }
 
+/// One attempt of the loop: the program as written (`Plain`), or with the
+/// loader specializing (`Specialized`, `Some` limiting to those qualnames).
+#[derive(Clone)]
+enum Job {
+    Plain,
+    Specialized(Option<BTreeSet<String>>),
+}
+
+/// Runs one job on the current thread.
+fn run<T>(
+    job: Job,
+    attempt: &impl Fn() -> Result<T, FrontendFailure>,
+) -> (Result<T, FrontendFailure>, Vec<Specialized>) {
+    match job {
+        Job::Plain => (attempt(), Vec::new()),
+        Job::Specialized(only) => specialized(attempt, only),
+    }
+}
+
+/// The stack of a thread running an attempt: the frontend recurses over
+/// the program's syntax, as deep as on the main thread.
+const ATTEMPT_STACK: usize = 64 * 1024 * 1024;
+
+/// Runs `jobs`, as many at once as the host has cores (v0.5 accept 4):
+/// each attempt is a whole frontend run, independent of the others, so
+/// guesses the loop would try one by one cost one attempt's time per wave
+/// rather than per guess. A job runs on a thread of its own with this
+/// thread's loop state (dropped specializations, the fallback rewrite)
+/// installed; the first job of a wave, and any job no thread could be
+/// started for, runs here. Results come back in job order.
+fn run_all<T: Send>(
+    jobs: Vec<Job>,
+    attempt: &(impl Fn() -> Result<T, FrontendFailure> + Sync),
+) -> Vec<(Result<T, FrontendFailure>, Vec<Specialized>)> {
+    let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    let mut results = Vec::with_capacity(jobs.len());
+    let mut jobs = jobs.into_iter().peekable();
+    while jobs.peek().is_some() {
+        let mut wave = jobs.by_ref().take(threads.max(1)).collect::<Vec<_>>().into_iter();
+        let here = wave.next();
+        let dropped = DROPPED.with(|dropped| dropped.borrow().clone());
+        let keep = KEEP_BUILTINS.with(|keep| keep.borrow().clone());
+        let fallback = crate::fallback::Snapshot::take();
+        crate::timing::span("frontend: attempt wave", || std::thread::scope(|scope| {
+            let workers: Vec<_> = wave
+                .map(|job| {
+                    let (dropped, keep) = (dropped.clone(), keep.clone());
+                    let fallback = fallback.clone();
+                    let moved = job.clone();
+                    let worker = std::thread::Builder::new()
+                        .stack_size(ATTEMPT_STACK)
+                        .spawn_scoped(scope, move || {
+                            DROPPED.with(|cell| *cell.borrow_mut() = dropped);
+                            KEEP_BUILTINS.with(|cell| *cell.borrow_mut() = keep);
+                            fallback.install();
+                            run(moved, attempt)
+                        });
+                    (job, worker.ok())
+                })
+                .collect();
+            if let Some(job) = here {
+                results.push(run(job, attempt));
+            }
+            for (job, worker) in workers {
+                let joined = worker.and_then(|handle| handle.join().ok());
+                results.push(joined.unwrap_or_else(|| run(job, attempt)));
+            }
+        }));
+    }
+    results
+}
+
 /// Runs `attempt` with the entry module specialized, dropping each
 /// specialization the attempt fails on until it passes or fails only as it
 /// does without specializations.
-pub(crate) fn with_specialization<T>(
+///
+/// With `speculate` (a non-strict build, where specializations are
+/// planned), the first round also runs the program without
+/// specializations, in parallel ([`run_all`]): its diagnostics are what
+/// every later failure is compared with, and its result is the answer when
+/// the program fails on its own. A failure no specialization's `def` holds
+/// is pinned on every specialization that fails alone with it, all tried
+/// at once ([`alone`]); only when none does (it takes two of them together)
+/// is one found by halving ([`culprit`]).
+pub(crate) fn with_specialization<T: Send>(
     entry: &str,
-    attempt: impl Fn() -> Result<T, FrontendFailure>,
+    speculate: bool,
+    attempt: impl Fn() -> Result<T, FrontendFailure> + Sync,
 ) -> Result<T, FrontendFailure> {
-    let mut known: Option<BTreeSet<Key>> = None;
+    // The program's result without specializations, and its keys.
+    let mut known: Option<(Result<T, FrontendFailure>, BTreeSet<Key>)> = None;
+    let with_keys = |plain: Result<T, FrontendFailure>| {
+        let keys = match &plain {
+            Ok(_) => BTreeSet::new(),
+            Err(failure) => keys(failure).into_iter().collect(),
+        };
+        (plain, keys)
+    };
     loop {
-        let (result, planned) = specialized(&attempt, None);
+        let mut jobs = vec![Job::Specialized(None)];
+        if known.is_none() && speculate {
+            jobs.push(Job::Plain);
+        }
+        let mut results = run_all(jobs, &attempt).into_iter();
+        let (result, planned) = results.next().expect("one result per job");
+        if let Some((plain, _)) = results.next() {
+            known = Some(with_keys(plain));
+        }
         let failure = match result {
             Err(failure @ FrontendFailure::Compile { .. }) if !planned.is_empty() => failure,
             result => {
@@ -150,20 +250,21 @@ pub(crate) fn with_specialization<T>(
                 return result;
             }
         };
-        // What fails without specializations does not depend on which
-        // were dropped: computed once.
-        let known = known.get_or_insert_with(|| match attempt() {
-            Ok(_) => BTreeSet::new(),
-            Err(failure) => keys(&failure).into_iter().collect(),
-        });
+        let (_, known_keys) = known.get_or_insert_with(|| with_keys(attempt()));
         let new: Vec<Key> = keys(&failure)
             .into_iter()
-            .filter(|key| !is_known(known, key))
+            .filter(|key| !is_known(known_keys, key))
             .collect();
         if new.is_empty() {
             // The program's own failure, reported as the program alone
             // fails (a copy would repeat each diagnostic of its original).
-            return attempt();
+            // A plain result is reused only as a failure: a program that
+            // passes is compiled by the main thread's own attempt, whose
+            // thread-local state codegen reads.
+            return match known.expect("computed above").0 {
+                Err(failure) => Err(failure),
+                Ok(_) => attempt(),
+            };
         }
         let mut blamed: BTreeMap<String, String> = BTreeMap::new();
         for spec in &planned {
@@ -175,8 +276,11 @@ pub(crate) fn with_specialization<T>(
             }
         }
         if blamed.is_empty() {
+            blamed = alone(&planned, known_keys, &attempt);
+        }
+        if blamed.is_empty() {
             let suspects = planned.iter().map(|spec| spec.qualname.clone()).collect();
-            blamed.insert(culprit(suspects, known, &attempt), reason(&new[0]));
+            blamed.insert(culprit(suspects, known_keys, &attempt), reason(&new[0]));
         }
         for (qualname, reason) in blamed {
             let restored = planned
@@ -189,6 +293,29 @@ pub(crate) fn with_specialization<T>(
             }
         }
     }
+}
+
+/// Every specialization among `planned` that fails alone with a diagnostic
+/// `known` lacks, with that diagnostic as the reason: all of them tried at
+/// once ([`run_all`]).
+fn alone<T: Send>(
+    planned: &[Specialized],
+    known: &BTreeSet<Key>,
+    attempt: &(impl Fn() -> Result<T, FrontendFailure> + Sync),
+) -> BTreeMap<String, String> {
+    let jobs = planned
+        .iter()
+        .map(|spec| Job::Specialized(Some(BTreeSet::from([spec.qualname.clone()]))))
+        .collect();
+    let mut blamed = BTreeMap::new();
+    for (spec, (result, _)) in planned.iter().zip(run_all(jobs, attempt)) {
+        if let Err(failure) = &result
+            && let Some(key) = keys(failure).iter().find(|key| !is_known(known, key))
+        {
+            blamed.insert(spec.qualname.clone(), reason(key));
+        }
+    }
+    blamed
 }
 
 /// One specialization among `suspects` (which together fail with a

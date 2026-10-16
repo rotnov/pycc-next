@@ -145,7 +145,7 @@ pub(crate) fn cast_compatibility(
     let Some(to_def) = env.lookup_class(to_name) else {
         return Err(CastMismatch::Layout);
     };
-    let target_methods: std::collections::HashSet<&str> = to_def
+    let target_methods: crate::fx::HashSet<&str> = to_def
         .mro
         .iter()
         .filter_map(|name| env.lookup_class(name))

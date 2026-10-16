@@ -186,7 +186,7 @@ thread_local! {
     /// `del` target or an `except ... as` name (CPython deletes it when the
     /// handler ends); `None` outside a whole-program check
     /// ([`with_widening`]). See [`admits_maybe_read`].
-    static UNBOUND_BY_STATEMENT: RefCell<Option<std::collections::HashSet<String>>> =
+    static UNBOUND_BY_STATEMENT: RefCell<Option<crate::fx::HashSet<String>>> =
         const { RefCell::new(None) };
 }
 
@@ -247,7 +247,7 @@ fn falls_back_when_unbound(name: &str) -> bool {
 
 /// Records the names `hir`'s statements unbind ([`admits_maybe_read`]).
 fn record_unbinding_statements(hir: &HirModule) {
-    fn handler_names(body: &[HirStmt], out: &mut std::collections::HashSet<String>) {
+    fn handler_names(body: &[HirStmt], out: &mut crate::fx::HashSet<String>) {
         for stmt in body {
             match stmt {
                 HirStmt::If { body, orelse, .. } => {
@@ -291,7 +291,7 @@ fn record_unbinding_statements(hir: &HirModule) {
             }
         }
     }
-    let mut names = std::collections::HashSet::new();
+    let mut names = crate::fx::HashSet::default();
     for item in &hir.items {
         let body = match item {
             HirItem::Function { body, .. } => body.as_slice(),

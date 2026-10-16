@@ -238,6 +238,6 @@ fn the_generic_call_rewrite_refuses_a_malformed_keyword_call() {
         &[],
         &mut expr,
         &mut Vec::new(),
-        &mut std::collections::HashSet::new(),
+        &mut crate::fx::HashSet::default(),
     );
 }

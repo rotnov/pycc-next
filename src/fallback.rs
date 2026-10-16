@@ -37,11 +37,10 @@ pub(crate) use render::Rendered;
 
 use pycc_ast::Stmt;
 use pycc_diag::Diagnostic;
-use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 /// The namespace dictionary's name in rewritten code.
 const NS: &str = "__pycc_fallback_ns";
@@ -50,69 +49,12 @@ const BUILTINS: &str = pycc_ast::FALLBACK_BUILTINS;
 /// The `sys` module's name in rewritten code.
 const SYS: &str = "__pycc_fallback_sys";
 
-static REPORT: AtomicBool = AtomicBool::new(false);
+mod state;
 
-thread_local! {
-    /// The rewritten entry source the loader reads instead of the file.
-    static ENTRY_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-/// Records `--report-fallbacks`.
-pub(crate) fn set_report(report: bool) {
-    REPORT.store(report, Ordering::Relaxed);
-}
-
-/// Whether `--report-fallbacks` was given.
-pub(crate) fn reporting() -> bool {
-    REPORT.load(Ordering::Relaxed)
-}
-
-/// Whether the program being built has fallback code.
-pub(crate) fn active() -> bool {
-    ENTRY_OVERRIDE.with(|cell| cell.borrow().is_some())
-}
-
-/// The rewritten entry source, when a fallback plan is active.
-pub(crate) fn entry_override() -> Option<String> {
-    ENTRY_OVERRIDE.with(|cell| cell.borrow().clone())
-}
-
-/// The entry module's source as the frontend compiles it: the fallback
-/// rewrite when one is active, else the file itself.
-pub(crate) fn entry_source(path: &Path) -> String {
-    entry_override().unwrap_or_else(|| std::fs::read_to_string(path).unwrap_or_default())
-}
-
-fn set_override(text: Option<String>) {
-    if text.is_none() {
-        TWINNED.with(|cell| cell.borrow_mut().clear());
-    }
-    ENTRY_OVERRIDE.with(|cell| *cell.borrow_mut() = text);
-}
-
-thread_local! {
-    /// The functions of the active rewrite that also run in CPython for
-    /// Python callers (`Plan::twinned`): not exported compiled.
-    static TWINNED: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
-}
-
-/// Makes `rendered` the entry source the frontend compiles.
-fn install(rendered: &Rendered) {
-    set_override(Some(rendered.text.clone()));
-    TWINNED.with(|cell| *cell.borrow_mut() = rendered.twinned.clone());
-}
-
-/// The compiled functions (and their `pycc_ast::ext_signatures` entries)
-/// an `--ext` module does not export, because Python code calls their
-/// CPython twin instead (`Plan::twinned`).
-pub(crate) fn twinned_exports() -> BTreeSet<String> {
-    TWINNED.with(|cell| {
-        cell.borrow()
-            .iter()
-            .flat_map(|name| [name.clone(), pycc_ast::ext_entry_name(name)])
-            .collect()
-    })
-}
+pub(crate) use state::{
+    Snapshot, active, entry_override, entry_source, reporting, set_report, twinned_exports,
+};
+use state::{REPORT, install, set_override};
 
 /// Which compiled definitions an artifact publishes to Python code.
 #[derive(Debug, Clone, Copy)]

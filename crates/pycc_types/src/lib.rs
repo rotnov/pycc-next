@@ -1,3 +1,14 @@
+
+/// The checker's hash maps and sets: keyed by names, built and probed
+/// many times per check, and a non-strict build checks a program many
+/// times over (v0.5 accept 4). FxHash is several times cheaper than the
+/// standard library's DoS-resistant SipHash for such short keys, and a
+/// compiler's input is not adversarial in that sense. Nothing depends on
+/// iteration order: it was already random per process.
+pub(crate) mod fx {
+    pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
+    pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHasher>;
+}
 mod binop;
 mod boolop;
 mod buffer;
@@ -92,7 +103,7 @@ use pycc_hir::{
     CompIter, FStringPart, HirClassDef, HirExpr, HirItem, HirMatchCase, HirModule, HirPattern,
     HirStmt,
 };
-use std::collections::{HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
 #[cfg(test)]
 use std::sync::Arc;
 

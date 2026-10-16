@@ -573,7 +573,7 @@ fn rewrite_generic_calls_in_expr_walks_an_object_list_display() {
     let mut env = Environment::new();
     let mut expr = HirExpr::ObjectList(vec![HirExpr::IntLiteral(1)]);
     let mut instantiations = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let ty =
         rewrite_generic_calls_in_expr(&mut env, &[], &mut expr, &mut instantiations, &mut seen)
             .unwrap();

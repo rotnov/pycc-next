@@ -43,7 +43,7 @@ use crate::narrow;
 use crate::{BindingState, Environment};
 use pycc_diag::Diagnostic;
 use pycc_hir::{ForeignImportSite, HirExpr, HirItem, HirModule, HirStmt, ImportBinding, Ty};
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 use super::{check_assignment, join_loop_body};
 

@@ -173,7 +173,7 @@ fn walrus_nested_inside_another_walrus_value_on_the_solver_path_propagates_a_for
     // Exercises `NamedExpr`'s own recursive `bind_named_expr_targets(value)?`
     // call (source line 974): the outer walrus's value is itself a walrus
     // whose own value forward-references `m`.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -204,7 +204,7 @@ fn walrus_nested_inside_another_walrus_value_on_the_solver_path_propagates_a_for
 fn walrus_nested_inside_a_call_arg_on_the_solver_path_propagates_a_forward_reference_error() {
     // Exercises `Call`'s own `bind_named_expr_targets(arg)?` call inside its
     // argument loop (source line 994).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -236,7 +236,7 @@ fn walrus_nested_inside_an_fstring_interpolation_on_the_solver_path_propagates_a
  {
     // Exercises `FString`'s own `bind_named_expr_targets(inner)?` call
     // inside its interpolation-part loop (source line 1008).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -268,7 +268,7 @@ fn walrus_nested_inside_a_list_literal_element_on_the_solver_path_propagates_a_f
     // Exercises the shared `ListLiteral`/`SetLiteral`/`TupleLiteral` arm's
     // own `bind_named_expr_targets(e)?` call inside its element loop
     // (source line 1015).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -299,7 +299,7 @@ fn walrus_nested_inside_an_object_list_element_on_the_solver_path_propagates_a_f
  {
     // Part 2d of #1371: the same shared element-loop arm, entered through
     // its `ObjectList` alternative (an object-slot list display).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -330,7 +330,7 @@ fn walrus_nested_inside_a_subscript_base_on_the_solver_path_propagates_a_forward
     // Exercises `Subscript`'s own `bind_named_expr_targets(base)?` call
     // (source line 1020). The index is a harmless literal that is never
     // reached because the base's error propagates first.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -361,7 +361,7 @@ fn walrus_nested_inside_a_subscript_base_on_the_solver_path_propagates_a_forward
 fn walrus_nested_inside_a_slice_base_on_the_solver_path_propagates_a_forward_reference_error() {
     // Exercises `Slice`'s own `bind_named_expr_targets(base)?` call (source
     // line 1029).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -398,7 +398,7 @@ fn walrus_nested_inside_a_slice_bound_on_the_solver_path_propagates_a_forward_re
     // `Name` arm never looks the name up, so it always succeeds regardless
     // of binding state -- so the base's own recursion (line 1029) succeeds
     // and the loop is reached.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -432,7 +432,7 @@ fn walrus_nested_inside_a_dict_literal_key_on_the_solver_path_propagates_a_forwa
 {
     // Exercises `DictLiteral`'s own `bind_named_expr_targets(k)?` call
     // (source line 1040).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -465,7 +465,7 @@ fn walrus_nested_inside_a_dict_literal_value_on_the_solver_path_propagates_a_for
     // Exercises `DictLiteral`'s own `bind_named_expr_targets(v)?` call
     // (source line 1041). The key is a harmless bare name so the key's own
     // recursion (line 1040) succeeds and the value is reached.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -497,7 +497,7 @@ fn walrus_nested_inside_a_dict_get_or_default_key_on_the_solver_path_propagates_
  {
     // Exercises `DictGetOrDefault`'s own `bind_named_expr_targets(key)?`
     // call (source line 1046).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -530,7 +530,7 @@ fn walrus_nested_inside_a_method_call_base_on_the_solver_path_propagates_a_forwa
 {
     // Exercises `MethodCall`'s own `bind_named_expr_targets(base)?` call
     // (source line 1053).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -565,7 +565,7 @@ fn walrus_nested_inside_a_method_call_arg_on_the_solver_path_propagates_a_forwar
     // inside its argument loop (source line 1055). The base is a harmless
     // bare name so the base's own recursion (line 1053) succeeds and the
     // argument loop is reached.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -598,7 +598,7 @@ fn walrus_nested_inside_a_generic_class_instantiate_arg_on_the_solver_path_propa
  {
     // Exercises `GenericClassInstantiate`'s own `bind_named_expr_targets(arg)?`
     // call inside its argument loop (source line 1061).
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();

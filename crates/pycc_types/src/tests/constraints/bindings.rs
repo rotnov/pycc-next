@@ -138,7 +138,7 @@ fn constraint_collection_rejects_a_non_integer_top_level_for_binding() {
 }
 #[test]
 fn collect_block_constraints_binds_the_annotation_and_records_the_initializer_default() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -172,12 +172,12 @@ fn collect_block_constraints_binds_the_annotation_and_records_the_initializer_de
 }
 #[test]
 fn collect_block_constraints_preserves_an_existing_annotated_target_binding() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
     let mut env = ConstraintEnvironment {
-        bindings: HashMap::from([("y".to_string(), Ok(Ty::Str))]),
+        bindings: HashMap::from_iter([("y".to_string(), Ok(Ty::Str))]),
         ..ConstraintEnvironment::empty(&["y"])
     };
     let body = vec![HirStmt::AnnAssign {
@@ -208,7 +208,7 @@ fn collect_block_constraints_binds_the_annotation_when_the_initializer_has_no_te
     // unresolved global would hit). The new `AnnAssign` arm cannot record
     // an initializer default without a term, but the annotation still
     // gives `y` a concrete solver binding.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -236,7 +236,7 @@ fn collect_block_constraints_binds_the_annotation_when_the_initializer_has_no_te
 }
 #[test]
 fn collect_block_constraints_ignores_a_value_less_annotated_assignment() {
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();
@@ -268,7 +268,7 @@ fn collect_block_constraints_propagates_an_error_from_the_initializer_expression
     // `collect_expr_constraints` returns `Err(unbound_local)` for it --
     // the `?` inside the new arm must propagate that error rather than
     // being reachable only via the `Some`/`None` term paths above.
-    let signatures = HashMap::new();
+    let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut constraints = SolverConstraints::default();

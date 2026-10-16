@@ -22,7 +22,7 @@
 use crate::env::Environment;
 use pycc_diag::{Diagnostic, Span};
 use pycc_hir::{InstanceEq, InstanceHash, Ty, resolve_instance_eq, resolve_instance_hash};
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 /// Why a user `__hash__` method is not compiled, with the `help` line. Each
 /// caller wraps it in its own headline ([`HashMethodRefusal::into_diagnostic`]).
