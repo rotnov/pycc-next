@@ -121,7 +121,11 @@ pub(crate) fn collect_subscript_constraints(
     }
     match base_term {
         Some(Ok(Ty::List(element_ty) | Ty::VarTuple(element_ty))) => Ok(Some(Ok(*element_ty))),
-        _ => Ok(None),
+        // `d[k]` reads a value of a dict whose type is already known.
+        _ => match resolved_base {
+            Some(Ty::Dict(kv)) if !crate::empty_container::contains_infer(&kv.1) => Ok(Some(Ok(kv.1))),
+            _ => Ok(None),
+        },
     }
 }
 
@@ -234,4 +238,47 @@ pub(crate) fn collect_comprehension_constraints(
         ))),
         CompElt::Set(_) => unreachable!("handled above"),
     }
+}
+
+/// A tuple display (`ListLiteral`/`DictLiteral`/`SetLiteral`'s reasoning,
+/// PR-11b Task 3, D-116: the per-element membership gate is
+/// `infer_expr_in`'s job, not this solver's; every element is recursed into
+/// only to keep propagating genuine errors).
+pub(crate) fn collect_tuple_literal_constraints(
+    signatures: &HashMap<String, SignatureTerms>,
+    parents: &mut Vec<usize>,
+    concrete: &mut Vec<Option<Ty>>,
+    deferred: &mut DeferredConstraints,
+    env: &ConstraintEnvironment<'_, '_>,
+    expr: &HirExpr,
+) -> Result<Option<TypeTerm>, Diagnostic> {
+    let HirExpr::TupleLiteral(elements) = expr else {
+        unreachable!()
+    };
+    // Every element already concrete: the tuple's type (`a, b = 1,
+    // 2` reads its items back); otherwise no term, as before.
+    let mut items = Some(Vec::with_capacity(elements.len()));
+    for element in elements {
+        let term =
+            collect_expr_constraints(signatures, parents, concrete, deferred, env, element)?;
+        let item = term.and_then(|term| resolved_term(term, parents, concrete));
+        items = items.zip(item).map(|(mut items, item)| {
+            items.push(item);
+            items
+        });
+    }
+    Ok(items
+        .filter(|items| !items.is_empty() && items.iter().all(is_private_solver_scalar))
+        .map(|items| {
+            // Non-strict mode: a display the check phase builds as
+            // CPython's own tuple (`(n, None)`) is an object here too
+            // (`crate::foreign::arith::object_display_ty`).
+            if crate::non_strict::is_non_strict()
+                && pycc_hir::display_is_object(pycc_hir::DisplayKind::Tuple, &items)
+            {
+                Ok(Ty::Object)
+            } else {
+                Ok(Ty::Tuple(Box::new(items)))
+            }
+        }))
 }

@@ -248,6 +248,21 @@ fn infer_expr_here(
             {
                 return Ok(Ty::Object);
             }
+            // Non-strict mode: a fresh native set of scalars (a set display
+            // or comprehension) as the right operand of a set operator on a
+            // CPython object crosses as a CPython `frozenset` copy; the
+            // left operand decides the result's type (`set | frozenset` is
+            // a `set`), so the copy is unobservable.
+            if left_ty == Ty::Object
+                && crate::non_strict::is_non_strict()
+                && matches!(
+                    op,
+                    BinOpKind::BitOr | BinOpKind::BitAnd | BinOpKind::BitXor | BinOpKind::Sub
+                )
+                && crate::object_box::fresh_scalar_set(right, &right_ty)
+            {
+                return Ok(Ty::Object);
+            }
             if let Some(result) =
                 crate::foreign::arith::object_binop_ty(Some(env), &left_ty, &right_ty)
             {

@@ -402,16 +402,13 @@ pub(crate) fn infer_function_signatures_with_solver_all(
             bindings: globals.bindings.clone(),
             local_names,
             defs_rebound: globals.defs_rebound.clone(),
-            // A helper `pycc_ast::desugar` lifted out of an expression
-            // (`_pycc_genexpr_N`, ...) runs only where that expression is,
-            // so a global it reads is bound there: a module-level loop
-            // variable (`all(q % p for p in primes)` in `for q in ...`)
-            // types the helper.
-            maybe_bindings: if name.starts_with("_pycc_") {
-                HashSet::default()
-            } else {
-                globals.maybe_bindings.clone()
-            },
+            // A function body runs only when it is called, so a global it
+            // reads that the module binds on some paths only (a
+            // module-level loop variable, `n` bound in `for _ in
+            // range(t)`) holds a value of its one type there, or the read
+            // raises `NameError`: its term types the function. The check
+            // phase still decides whether the read is admitted.
+            maybe_bindings: HashSet::default(),
             opaque_bindings: globals.opaque_bindings.clone(),
             foreign_objects: globals.foreign_objects.clone(),
             // #962: this literal copies field by field on purpose (it is
@@ -570,6 +567,19 @@ pub(crate) fn infer_function_signatures_with_solver_all(
         if concrete[return_root] == Some(Ty::None) {
             concrete[return_root] = Some(Ty::Object);
         }
+    }
+    let valued_roots: HashSet<usize> = constraints
+        .valued_returns
+        .iter()
+        .map(|var| root(&mut parents, *var))
+        .collect();
+    for var in &constraints.object_returns {
+        let return_root = root(&mut parents, *var);
+        concrete[return_root] = match &concrete[return_root] {
+            Some(Ty::None) => Some(Ty::None),
+            None if !valued_roots.contains(&return_root) => Some(Ty::None),
+            _ => Some(Ty::Object),
+        };
     }
 
     let non_scalar_local_roots = constraints

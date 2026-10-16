@@ -1,0 +1,114 @@
+//! Non-strict mode: builtins over CPython objects that run CPython's own
+//! implementation (`src/ext/module/object_stdlib.c`): `min`/`max`, `list`,
+//! `sorted`, `sum`, `next`, `tuple`, `iter`, `enumerate`, `range` as a
+//! value, and `itertools.accumulate`/`chain` with an object argument.
+//! `pycc_types` admits the ones that take a native argument in non-strict
+//! mode only (`builtin_call`, `expr::call_infer`).
+
+use super::{BuiltinSig, boxes_as_object, is_intlike, sig};
+use crate::Ty;
+
+/// The CPython-backed signature of builtin `name` over `args`, when one of
+/// the arms below claims the call.
+pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String>> {
+    // Non-strict mode: `itertools.accumulate(xs)` over a CPython object runs
+    // CPython's own, its result a CPython iterator.
+    if let ("__pycc_it_accumulate_add", [Ty::Object, code]) = (name, args)
+        && is_intlike(code)
+    {
+        return Some(Ok(sig(
+            "pycc_ext_obj_accumulate",
+            &[Ty::Object, Ty::Object],
+            Ty::Object,
+        )));
+    }
+    // Non-strict mode: `min`/`max` of a CPython object, or of a generator
+    // of objects (crossing as a CPython iterator), run CPython's own.
+    if let ("min" | "max", [arg]) = (name, args)
+        && (*arg == Ty::Object || matches!(arg, Ty::Generator(g) if g.0 == Ty::Object))
+    {
+        let symbol = if name == "min" { "pycc_ext_obj_min" } else { "pycc_ext_obj_max" };
+        return Some(Ok(sig(symbol, &[Ty::Object], Ty::Object)));
+    }
+    // Non-strict mode: `tuple(xs)` of a CPython object or of a list of
+    // scalars (copied, which nothing can observe: the tuple is immutable
+    // and its items are) is CPython's own tuple, and `iter(xs)` CPython's
+    // own iterator (over a list display only: `pycc_types`); both are
+    // refused in strict mode.
+    if let ("tuple" | "iter", [arg]) = (name, args)
+        && (*arg == Ty::Object
+            || matches!(arg, Ty::List(e) if packs_immutably(e)))
+    {
+        let symbol = if name == "tuple" { "pycc_ext_obj_tuple" } else { "pycc_ext_obj_iter" };
+        return Some(Ok(sig(symbol, &[Ty::Object], Ty::Object)));
+    }
+    // Non-strict mode: `list`, `sorted`, `sum` and `next` of a CPython object run
+    // CPython's own, the result a CPython object.
+    if let ("list" | "sorted" | "sum" | "next", [Ty::Object]) = (name, args) {
+        let symbol = match name {
+            "list" => "pycc_ext_obj_list",
+            "sorted" => "pycc_ext_obj_sorted",
+            "next" => "pycc_ext_obj_next",
+            _ => "pycc_ext_obj_sum",
+        };
+        return Some(Ok(sig(symbol, &[Ty::Object], Ty::Object)));
+    }
+    // Non-strict mode: a `range` used as a value (not a loop's iterable,
+    // which every loop and comprehension compiles natively) is CPython's
+    // own range object; `pycc_types` refuses it in strict mode.
+    if name == "range" && (1..=3).contains(&args.len()) && args.iter().all(is_intlike) {
+        let symbol = match args.len() {
+            1 => "pycc_ext_obj_range1",
+            2 => "pycc_ext_obj_range2",
+            _ => "pycc_ext_obj_range3",
+        };
+        return Some(Ok(sig(symbol, &vec![Ty::Object; args.len()], Ty::Object)));
+    }
+    // `enumerate(o[, start])` of a CPython object: CPython's own iterator.
+    match (name, args) {
+        ("enumerate", [Ty::Object]) => {
+            return Some(Ok(sig("pycc_ext_obj_enumerate", &[Ty::Object], Ty::Object)));
+        }
+        ("enumerate", [Ty::Object, start]) if is_intlike(start) => {
+            return Some(Ok(sig(
+                "pycc_ext_obj_enumerate_from",
+                &[Ty::Object, Ty::Object],
+                Ty::Object,
+            )));
+        }
+        _ => {}
+    }
+    // Non-strict mode: `itertools.chain(a, b)` with a CPython object
+    // argument runs CPython's own over it and a list of immutable values
+    // (copied: `pycc_types` admits only a list display or comprehension
+    // there, which nothing else holds).
+    if let ("__pycc_it_chain2", [a, b]) = (name, args)
+        && (*a == Ty::Object || *b == Ty::Object)
+        && [a, b]
+            .iter()
+            .all(|t| **t == Ty::Object || matches!(t, Ty::List(e) if packs_immutably(e)))
+    {
+        return Some(Ok(sig("pycc_ext_obj_chain2", &[Ty::Object, Ty::Object], Ty::Object)));
+    }
+    // ... and `min(a, b)` / `max(a, b)` with a CPython object operand
+    // (the other one boxed).
+    if let ("min" | "max", [a, b]) = (name, args)
+        && (*a == Ty::Object || *b == Ty::Object)
+        && boxes_as_object(a)
+        && boxes_as_object(b)
+    {
+        let symbol = if name == "min" { "pycc_ext_obj_min2" } else { "pycc_ext_obj_max2" };
+        return Some(Ok(sig(symbol, &[Ty::Object, Ty::Object], Ty::Object)));
+    }
+    None
+}
+
+/// Whether a list element of type `ty` is copied into CPython with nothing
+/// to alias: a scalar, or a tuple of scalars.
+fn packs_immutably(ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+        Ty::Tuple(items) => !items.is_empty() && items.iter().all(packs_immutably),
+        _ => false,
+    }
+}

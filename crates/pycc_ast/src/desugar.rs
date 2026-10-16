@@ -91,6 +91,7 @@ mod static_branches;
 mod stdin_bytes;
 mod stdlib;
 mod stmts;
+mod str_format;
 mod webs;
 mod wildcard;
 

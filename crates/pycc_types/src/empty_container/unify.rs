@@ -37,12 +37,15 @@ use crate::fx::{HashMap, HashSet};
 
 mod effects;
 mod settle;
+mod sites;
 mod sources;
 mod store;
 mod unread_default;
 mod walk;
 use store::{Shape, Store};
 use walk::all_stmts_mut;
+use sites::{number_sites, restore_sites, site_number};
+pub(super) use sites::has_sites;
 pub(super) use walk::{stmt_exprs_mut, walk_expr_mut};
 
 /// Which empty container a site is.
@@ -221,6 +224,13 @@ impl Engine {
             HirExpr::ListLiteral(elements) => {
                 let elem = self.store.fresh();
                 for element in elements {
+                    // Non-strict mode: a display of `None`s (`[None] * n`) is
+                    // CPython's own list, whatever is stored into it later.
+                    if matches!(element, HirExpr::NoneLiteral) && crate::non_strict::is_non_strict() {
+                        let none = self.store.known(Ty::None);
+                        self.store.unify(elem, none);
+                        continue;
+                    }
                     if let Some(t) = self.term(scope, element) {
                         self.store.unify(elem, t);
                     }
@@ -601,7 +611,14 @@ impl Engine {
                     {
                         self.store.conflict(var);
                     }
-                    self.store.unify(var, t);
+                    // Non-strict mode: a name bound to values of two types
+                    // is a CPython object; its conflict stays its own
+                    // (`Store::flow`).
+                    if crate::non_strict::is_non_strict() {
+                        self.store.flow(var, t);
+                    } else {
+                        self.store.unify(var, t);
+                    }
                 }
             }
             HirStmt::AnnAssign {
@@ -769,120 +786,6 @@ fn direct_children(expr: &HirExpr) -> Vec<&HirExpr> {
             .collect(),
         _ => Vec::new(),
     }
-}
-
-/// The prefix of a numbered site's placeholder name: it starts with a
-/// digit, so no source name can equal it.
-const SITE_PREFIX: &str = "0site";
-
-/// The site number a placeholder name carries.
-fn site_number(name: &str) -> Option<usize> {
-    name.strip_prefix(SITE_PREFIX)?.parse().ok()
-}
-
-/// Replaces every empty container of `hir` with a numbered placeholder
-/// name, returning the originals by number.
-fn number_sites(
-    hir: &mut HirModule,
-    functions: &HashMap<String, (Vec<Ty>, Ty)>,
-) -> Vec<(SiteKind, HirExpr)> {
-    let mut sites: Vec<(SiteKind, HirExpr)> = Vec::new();
-    let mut visit_stmt = |stmt: &mut HirStmt| {
-        stmt_exprs_mut(stmt, &mut |expr| {
-            walk_expr_mut(expr, &mut |node| {
-                let Some(kind) = site_kind_in(node, functions) else {
-                    return false;
-                };
-                let placeholder = HirExpr::Name(format!("{SITE_PREFIX}{}", sites.len()));
-                sites.push((kind, std::mem::replace(node, placeholder)));
-                true
-            });
-        });
-    };
-    for item in &mut hir.items {
-        match item {
-            HirItem::Function { body, .. } => all_stmts_mut(body, &mut visit_stmt),
-            HirItem::TopLevelStmt(stmt) => {
-                all_stmts_mut(std::slice::from_mut(stmt), &mut visit_stmt)
-            }
-        }
-    }
-    sites
-}
-
-/// Puts each numbered site back: its resolved typed node, or the original.
-fn restore_sites(hir: &mut HirModule, sites: Vec<(SiteKind, HirExpr)>, types: &[Option<Ty>]) {
-    let mut originals: Vec<Option<(SiteKind, HirExpr)>> = sites.into_iter().map(Some).collect();
-    let mut visit_stmt = |stmt: &mut HirStmt| {
-        stmt_exprs_mut(stmt, &mut |expr| {
-            walk_expr_mut(expr, &mut |node| {
-                let HirExpr::Name(name) = node else {
-                    return false;
-                };
-                let Some(number) = site_number(name) else {
-                    return false;
-                };
-                let Some((kind, original)) = originals.get_mut(number).and_then(Option::take)
-                else {
-                    return true;
-                };
-                *node = match (kind, types.get(number).cloned().flatten()) {
-                    // Non-strict mode (#3): a list of objects is a CPython list.
-                    (SiteKind::List, Some(Ty::List(elem)))
-                        if *elem == Ty::Object && crate::non_strict::is_non_strict() =>
-                    {
-                        HirExpr::ObjectList(Vec::new())
-                    }
-                    (SiteKind::List, Some(Ty::List(elem))) => HirExpr::EmptyList(*elem),
-                    (SiteKind::Dict, Some(Ty::Dict(pair))) => HirExpr::EmptyDict(pair),
-                    (SiteKind::Set, Some(Ty::Set(elem))) => HirExpr::EmptySet(*elem),
-                    // `frozenset()` of the resolved element type: the
-                    // frozenset of an empty set of it.
-                    (SiteKind::FrozenSet, Some(Ty::FrozenSet(elem))) => HirExpr::Call {
-                        callee: "frozenset".to_string(),
-                        args: vec![HirExpr::EmptySet(*elem)],
-                    },
-                    _ => original,
-                };
-                true
-            });
-        });
-    };
-    for item in &mut hir.items {
-        match item {
-            HirItem::Function { body, .. } => all_stmts_mut(body, &mut visit_stmt),
-            HirItem::TopLevelStmt(stmt) => {
-                all_stmts_mut(std::slice::from_mut(stmt), &mut visit_stmt)
-            }
-        }
-    }
-}
-
-/// The empty container `expr` is, when it is one: a display, or a
-/// zero-argument `list()`/`dict()`/`set()` call of the builtin (not of a
-/// module function of that name).
-fn site_kind_in(expr: &HirExpr, functions: &HashMap<String, (Vec<Ty>, Ty)>) -> Option<SiteKind> {
-    match expr {
-        HirExpr::ListLiteral(elements) if elements.is_empty() => Some(SiteKind::List),
-        HirExpr::DictLiteral(pairs) if pairs.is_empty() => Some(SiteKind::Dict),
-        HirExpr::SetLiteral(elements) if elements.is_empty() => Some(SiteKind::Set),
-        HirExpr::Call { callee, args } if args.is_empty() && !functions.contains_key(callee) => {
-            match callee.as_str() {
-                "list" => Some(SiteKind::List),
-                "dict" => Some(SiteKind::Dict),
-                "set" => Some(SiteKind::Set),
-                "frozenset" => Some(SiteKind::FrozenSet),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Whether `hir` has an empty container anywhere this pass looks.
-pub(super) fn has_sites(hir: &HirModule) -> bool {
-    let mut copy = hir.clone();
-    !number_sites(&mut copy, &HashMap::default()).is_empty()
 }
 
 /// Types every empty container of `hir` that unification resolves (see the

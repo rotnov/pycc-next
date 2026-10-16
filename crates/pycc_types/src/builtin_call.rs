@@ -27,6 +27,18 @@ pub(crate) fn resolve_builtin_call(callee: &str, arg_tys: &[Ty]) -> Option<Resul
         }
         return Some(Ok(acc));
     }
+    // A `range` object as a value is CPython's own, in non-strict mode only
+    // (`pycc_hir::builtins::resolve_call`).
+    if callee == "range" && !crate::non_strict::is_non_strict() {
+        return None;
+    }
+    // So is `tuple(xs)` of a list (`pycc_hir::builtins::resolve_call`).
+    if matches!(callee, "tuple" | "iter")
+        && !crate::non_strict::is_non_strict()
+        && matches!(arg_tys, [Ty::List(_) | Ty::Object])
+    {
+        return None;
+    }
     // Non-strict mode: `chr` runs in CPython (the fallback loop calls it
     // through `builtins`), whose `str` holds a lone surrogate (`chr(0xD800)`)
     // that pycc's UTF-8 `str` cannot (`docs/DEVIATIONS.md`).

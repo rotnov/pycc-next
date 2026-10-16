@@ -133,3 +133,32 @@ fn contains_object(ty: &Ty) -> bool {
         _ => false,
     }
 }
+
+/// A copy of `hir` whose unannotated function returns carry the types the
+/// solver pins for them, for typing call arguments that read such a return
+/// (`init_params`); `None` when the solver pins nothing more. The copy is
+/// only read, never checked or lowered.
+pub(crate) fn with_solved_returns(hir: &HirModule) -> Option<HirModule> {
+    let names = crate::module::module_function_local_names(hir);
+    let signatures = crate::constraints::infer_function_signatures_with_solver_all(hir, &names)
+        .ok()
+        .or_else(|| crate::constraints::return_fallback::partial_signatures(hir, &names))?;
+    let mut typed = hir.clone();
+    let mut changed = false;
+    for item in &mut typed.items {
+        let HirItem::Function {
+            name, return_ty, ..
+        } = item
+        else {
+            continue;
+        };
+        if let Some((_, solved_return)) = signatures.get(name.as_str())
+            && contains_infer(return_ty)
+            && usable(solved_return)
+        {
+            *return_ty = solved_return.clone();
+            changed = true;
+        }
+    }
+    changed.then_some(typed)
+}

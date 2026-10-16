@@ -19,6 +19,9 @@ pub(super) struct Store {
     pub(super) parent: Vec<usize>,
     pub(super) shape: Vec<Option<Shape>>,
     pub(super) conflicted: Vec<bool>,
+    /// Non-strict mode: `(slot, value)` flows whose slot is typed but whose
+    /// value is not yet: decided once the value is ([`Store::flow`]).
+    pub(super) pending_flows: Vec<(usize, usize)>,
 }
 
 impl Store {
@@ -89,6 +92,122 @@ impl Store {
     pub(super) fn conflict(&mut self, var: usize) {
         let root = self.find(var);
         self.conflicted[root] = true;
+    }
+
+    /// A value `value` stored into the container slot `slot`: [`Self::unify`],
+    /// except that in non-strict mode a value of another concrete type
+    /// conflicts only the slot (the container becomes CPython's own, which
+    /// takes the value boxed), not the value's own class.
+    pub(super) fn flow(&mut self, slot: usize, value: usize) {
+        if crate::non_strict::is_non_strict() {
+            // A slot already in conflict is CPython's own container: it
+            // takes the value boxed and tells nothing about its type.
+            let slot_root = self.find(slot);
+            if self.conflicted[slot_root] {
+                return;
+            }
+            // A value already in conflict is a CPython object: the slot
+            // holds it boxed, and becomes one too.
+            let value_root = self.find(value);
+            if self.conflicted[value_root] {
+                self.conflict(slot);
+                return;
+            }
+            let held = self.resolve(slot, 0);
+            let stored = self.resolve(value, 0);
+            let mismatch = match (&held, &stored) {
+                // A slot of `None`s (`[None] * n`) takes no value of
+                // another type natively, whatever the value turns out to
+                // be.
+                (Some(Ty::None), stored) => *stored != Some(Ty::None),
+                (Some(held), Some(stored)) => {
+                    held != stored && !matches!((held, stored), (Ty::Int, Ty::Bool))
+                }
+                _ => false,
+            };
+            if mismatch {
+                self.conflict(slot);
+                return;
+            }
+            // Both already known and compatible: nothing to learn, and
+            // keeping the classes apart keeps a later conflict of the
+            // slot (`xs[i] = None`) from reaching the value's own uses.
+            if held.is_some() && stored.is_some() {
+                return;
+            }
+            // A typed slot meeting a value not typed yet (the result of a
+            // read still deferred): decided when the value is, so a value
+            // that turns out to be an object does not join the slot.
+            if held.is_some() {
+                self.pending_flows.push((slot, value));
+                return;
+            }
+        }
+        self.unify(slot, value);
+    }
+
+    /// Re-decides every pending flow; whether one was decided.
+    pub(super) fn retry_flows(&mut self) -> bool {
+        let pending = std::mem::take(&mut self.pending_flows);
+        let before = pending.len();
+        for (slot, value) in pending {
+            self.flow(slot, value);
+        }
+        self.pending_flows.len() < before
+    }
+
+    /// A value `result` read out of the container slot `slot`:
+    /// [`Self::unify`], except that in non-strict mode a slot of `None`s,
+    /// of CPython objects or already in conflict makes the value a CPython
+    /// object without joining the two classes.
+    pub(super) fn read(&mut self, slot: usize, result: usize) {
+        if crate::non_strict::is_non_strict() {
+            let slot_root = self.find(slot);
+            if self.conflicted[slot_root]
+                || matches!(
+                    self.shape[slot_root],
+                    Some(Shape::Known(Ty::None | Ty::Object))
+                )
+            {
+                // A value already typed by its other uses keeps its class
+                // (the check phase decides that read); an untyped one is
+                // the object the slot holds.
+                let result_root = self.find(result);
+                if self.shape[result_root].is_none() {
+                    self.conflict(result);
+                }
+                return;
+            }
+        }
+        self.unify(slot, result);
+    }
+
+    /// Whether `var`'s class is in conflict.
+    pub(super) fn is_conflicted(&mut self, var: usize) -> bool {
+        let root = self.find(var);
+        self.conflicted[root]
+    }
+
+    /// A key `key` looked up in a dict whose key slot is `slot`:
+    /// [`Self::unify`], except that in non-strict mode a lookup only
+    /// types a key slot nothing else typed yet, and a key that is a CPython
+    /// object, or already in conflict, makes the dict CPython's own (its
+    /// key slot conflicted) without joining the key's class to it.
+    pub(super) fn probe(&mut self, slot: usize, key: usize) {
+        if crate::non_strict::is_non_strict() {
+            let key_root = self.find(key);
+            if self.conflicted[key_root]
+                || matches!(self.shape[key_root], Some(Shape::Known(Ty::Object)))
+            {
+                // CPython's own dict: the key decides nothing natively.
+                self.conflict(slot);
+                return;
+            }
+            if self.resolve(slot, 0).is_some() {
+                return;
+            }
+        }
+        self.unify(slot, key);
     }
 
     /// Unifies `a` and `b`; a mismatch marks the class conflicted.

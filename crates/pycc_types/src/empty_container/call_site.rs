@@ -54,21 +54,14 @@ pub(crate) fn resolve_call_site_params(hir: &HirModule) -> Option<HirModule> {
     let mut resolved = hir.clone();
     let mut changed_any = false;
     for _ in 0..MAX_ROUNDS {
-        let observed = observe_calls(&resolved);
-        let mut changed = false;
-        for item in &mut resolved.items {
-            let HirItem::Function { name, params, .. } = item else {
-                continue;
-            };
-            for (index, (_, ty)) in params.iter_mut().enumerate() {
-                if *ty != Ty::Infer {
-                    continue;
-                }
-                if let Some(Some(found)) = observed.get(&(name.clone(), index)) {
-                    *ty = found.clone();
-                    changed = true;
-                }
-            }
+        let (observed, incomplete) = observe_calls(&resolved);
+        // A parameter some call site cannot type yet (its argument reads a
+        // parameter still unresolved) waits for a later round, which may
+        // type that site too and find it disagreeing; it is written from
+        // the sites it has only once nothing else resolves.
+        let mut changed = apply_observed(&mut resolved, &observed, &|key| !incomplete.contains(key));
+        if !changed {
+            changed = apply_observed(&mut resolved, &observed, &|_| true);
         }
         if !changed {
             break;
@@ -78,10 +71,43 @@ pub(crate) fn resolve_call_site_params(hir: &HirModule) -> Option<HirModule> {
     changed_any.then_some(resolved)
 }
 
+/// Writes every still-unannotated parameter of `hir` that `observed` types
+/// and `ready` admits; whether one was written.
+fn apply_observed(
+    hir: &mut HirModule,
+    observed: &HashMap<(String, usize), Option<Ty>>,
+    ready: &dyn Fn(&(String, usize)) -> bool,
+) -> bool {
+    let mut changed = false;
+    for item in &mut hir.items {
+        let HirItem::Function { name, params, .. } = item else {
+            continue;
+        };
+        for (index, (_, ty)) in params.iter_mut().enumerate() {
+            if *ty != Ty::Infer {
+                continue;
+            }
+            let key = (name.clone(), index);
+            if let Some(Some(found)) = observed.get(&key)
+                && ready(&key)
+            {
+                *ty = found.clone();
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// The parameters some call site passes an argument to that does not type
+/// yet.
+type Incomplete = crate::fx::HashSet<(String, usize)>;
+
 /// For every `(function, parameter index)` some call site passes a typable
 /// argument to: `Some(ty)` when every typable argument has container type
-/// `ty`, `None` when they disagree or one is not a container.
-fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
+/// `ty`, `None` when they disagree or one is not a container; and the
+/// parameters some call site passes an untypable argument to.
+fn observe_calls(hir: &HirModule) -> (HashMap<(String, usize), Option<Ty>>, Incomplete) {
     let infer_params: HashMap<&str, Vec<bool>> = hir
         .items
         .iter()
@@ -94,6 +120,7 @@ fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
         })
         .collect();
     let mut observed: HashMap<(String, usize), Option<Ty>> = HashMap::default();
+    let mut incomplete = Incomplete::default();
     for_each_call(hir, &mut |env, names, callee, args| {
         // A nested function used as a value: its captured values are its
         // lifted function's leading arguments.
@@ -116,9 +143,11 @@ fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
             // An argument still typed by an unresolved parameter (a
             // recursive call) is not evidence either way.
             let Ok(ty) = infer_expr_in(env, names, arg) else {
+                incomplete.insert((callee.to_string(), index));
                 continue;
             };
             if super::contains_infer(&ty) {
+                incomplete.insert((callee.to_string(), index));
                 continue;
             }
             let entry = observed
@@ -132,7 +161,7 @@ fn observe_calls(hir: &HirModule) -> HashMap<(String, usize), Option<Ty>> {
             }
         }
     });
-    observed
+    (observed, incomplete)
 }
 
 /// Calls `visit` with every call `callee(args)` of `hir` -- in the module
@@ -147,6 +176,10 @@ pub(super) fn for_each_call(
     let mut record = |env: &crate::Environment, names: &[&str], body: &[HirStmt]| {
         let mut body = body.to_vec();
         super::for_each_stmt_mut(&mut body, &mut |stmt| {
+            // A comprehension's element and condition read its loop
+            // variable (`[Node(i) for i in range(n)]`).
+            let scoped = comprehension_scope(env, names, stmt);
+            let env = scoped.as_ref().unwrap_or(env);
             super::unify::stmt_exprs_mut(stmt, &mut |expr| {
                 super::unify::walk_expr_mut(expr, &mut |expr| {
                     if let HirExpr::Call { callee, args } = expr {
@@ -191,6 +224,25 @@ pub(super) fn for_each_call(
         bind_comprehension_targets(&mut env, names, body);
         record(&env, names, body);
     }
+}
+
+/// `env` with the loop variable of comprehension statement `stmt` bound,
+/// when `stmt` is one and its iterable types.
+fn comprehension_scope(
+    env: &crate::Environment,
+    names: &[&str],
+    stmt: &HirStmt,
+) -> Option<crate::Environment> {
+    let (var, iter) = match stmt {
+        HirStmt::ListCompAssign { var, iter, .. }
+        | HirStmt::SetCompAssign { var, iter, .. }
+        | HirStmt::DictCompAssign { var, iter, .. } => (var, iter),
+        _ => return None,
+    };
+    let var_ty = crate::comprehension::resolve_comp_iter(env, names, iter).ok()?;
+    let mut scoped = env.clone();
+    scoped.bind(var.clone(), var_ty);
+    Some(scoped)
 }
 
 /// Binds the target of every comprehension statement (`xs = [... for ...]`)

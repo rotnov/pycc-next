@@ -178,6 +178,14 @@ pub(super) fn collect_return_constraints(
             (Ok(declared), Some(Ok(actual_ty)))
                 if crate::non_strict::admits_coercion(actual_ty, declared)
         )
+        // A tuple display returned into a declared tuple (`return pos,
+        // None` under `-> tuple[int, Any]`) the solver sees as a CPython
+        // tuple: the check phase types it slot by slot.
+        || (matches!(value, Some(HirExpr::TupleLiteral(_)))
+            && matches!(
+                (&return_term, &actual),
+                (Ok(Ty::Tuple(_)), Some(Ok(Ty::Object)))
+            ))
         // A tuple whose elements box into the declared tuple's
         // `object` slots: the check phase's `tuple_reboxes`.
         || matches!(
@@ -195,6 +203,7 @@ pub(super) fn collect_return_constraints(
         && let Err(var) = &return_term
     {
         constraints.opaque_returns.push(*var);
+        constraints.valued_returns.push(*var);
     }
     if let Some(actual) = actual {
         // #949: this solver runs over *every* module-level
@@ -221,6 +230,20 @@ pub(super) fn collect_return_constraints(
         } else {
             "private helper return type"
         };
+        // Non-strict mode: a `return None` of an inferred return is not
+        // unified: the return is `None` when nothing else types it, and a
+        // CPython object (which holds both) when another `return` gives a
+        // value of another type (`object_returns`).
+        if crate::non_strict::is_non_strict()
+            && let Err(var) = &return_term
+            && super::unify::resolved_term(actual.clone(), parents, concrete) == Some(Ty::None)
+        {
+            constraints.object_returns.push(*var);
+            return Ok(());
+        }
+        if let Err(var) = &return_term {
+            constraints.valued_returns.push(*var);
+        }
         unify_terms_with_declared(
             return_term,
             actual,

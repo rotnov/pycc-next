@@ -67,6 +67,13 @@ pub(crate) fn consumer_arg_tys(callee: &str, arg_tys: &[Ty]) -> Option<Vec<Ty>> 
     if !is_generator_consumer(callee) || !arg_tys.iter().any(|t| matches!(t, Ty::Generator(_))) {
         return None;
     }
+    // `min`/`max` of a generator of CPython objects run CPython's own over
+    // it (`pycc_hir::builtins::resolve_call`).
+    if matches!(callee, "min" | "max")
+        && matches!(arg_tys, [Ty::Generator(sig)] if sig.0 == Ty::Object)
+    {
+        return None;
+    }
     Some(
         arg_tys
             .iter()

@@ -23,14 +23,55 @@ pub(super) fn infer_yield_from_body(
     params: &[Ty],
     resolved: &FunctionSignatures,
 ) -> Option<Ty> {
-    first_value_from_body(hir, name, params, resolved, &|stmt| match stmt {
+    let first = first_value_from_body(hir, name, params, resolved, &yielded)?;
+    // Non-strict mode: a generator that also yields CPython objects (`yield
+    // INF` beside `yield data[i]` over a CPython list) yields objects, the
+    // native values boxed.
+    if crate::non_strict::is_non_strict()
+        && first != Ty::Object
+        && mixes_objects(hir, name, params, resolved, &yielded)
+    {
+        return Some(Ty::Object);
+    }
+    Some(first)
+}
+
+/// The value a `yield` statement yields.
+fn yielded(stmt: &HirStmt) -> Option<&HirExpr> {
+    match stmt {
         HirStmt::ExprStmt(HirExpr::Call { callee, args })
             if callee == pycc_hir::YIELD_MARKER && args.len() == 1 =>
         {
             Some(&args[0])
         }
         _ => None,
+    }
+}
+
+/// Whether some value `pick` finds in the body of `name` is a CPython
+/// object and every other one infers to a value an `object` slot boxes.
+fn mixes_objects(
+    hir: &HirModule,
+    name: &str,
+    params: &[Ty],
+    resolved: &FunctionSignatures,
+    pick: &dyn Fn(&HirStmt) -> Option<&HirExpr>,
+) -> bool {
+    with_body_env(hir, name, params, resolved, &mut |env, local_names, body| {
+        let mut values = Vec::new();
+        collect_values(body, pick, &mut values);
+        let types: Vec<Option<Ty>> = values
+            .iter()
+            .map(|value| infer_expr_in(env, local_names, value).ok())
+            .collect();
+        types.iter().any(|ty| *ty == Some(Ty::Object))
+            && types.iter().all(|ty| match ty {
+                Some(Ty::Object) => true,
+                Some(ty) => crate::object_box::admits(env, ty, &Ty::Object),
+                None => false,
+            })
     })
+    .unwrap_or(false)
 }
 
 /// The type of the first value `pick` finds in the body of `name` (in

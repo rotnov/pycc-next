@@ -23,6 +23,7 @@ use crate::Ty;
 
 mod itertools;
 mod methods;
+mod object_calls;
 mod object_defaultdict;
 mod operators;
 
@@ -404,6 +405,9 @@ pub fn is_pairwise_variadic(name: &str) -> bool {
 /// with arguments of the wrong type.
 #[must_use]
 pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String>> {
+    if let Some(found) = object_calls::object_call(name, args) {
+        return Some(found);
+    }
     if is_itertools_call(name) {
         return itertools_call(name, args);
     }
@@ -929,7 +933,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
 /// Whether a native value of type `ty` crosses into a CPython call as the
 /// object CPython would hold (`pycc_codegen::object_box`): a scalar, `None`,
 /// a CPython object, or a tuple of `int`/`float`/`bool`.
-fn boxes_as_object(ty: &Ty) -> bool {
+pub(super) fn boxes_as_object(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::None | Ty::Object => true,
         Ty::Tuple(elements) => {

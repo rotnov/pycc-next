@@ -74,10 +74,15 @@ def main() -> int:
     ap.add_argument("--flags", default="")
     ap.add_argument("-j", type=int, default=4)
     ap.add_argument("--show-errors", action="store_true")
+    ap.add_argument("--show-fallbacks", action="store_true",
+                    help="list the problems with statements in CPython fallback")
+    ap.add_argument("--only", default="", help="comma-separated problem number prefixes (e.g. 017,077)")
     ap.add_argument("--require-correct", action="store_true",
                     help="exit 1 on any wrong output, compile error, timeout or harness error")
     a = ap.parse_args()
     probs = sorted(p for p in CORPUS.iterdir() if p.is_dir())
+    if a.only:
+        probs = [p for p in probs if p.name.split("-")[0] in a.only.split(",")]
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="pycc-corpus-"))
     results = {}
     with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
@@ -103,6 +108,10 @@ def main() -> int:
         whole = sum(1 for total, fb in FALLBACKS.values() if fb >= total)
         print(f"fallback: {built} built, {none} with no fallback ({pure} of them pass), "
               f"{whole} entirely in CPython; {fell}/{stmts} top-level statements ran in CPython")
+    if a.show_fallbacks:
+        for name, (_, fb) in sorted(FALLBACKS.items()):
+            if fb:
+                print(f"  fallback {name}: {fb}")
     reasons = collections.Counter(d for s, d in results.values() if s == "compile")
     print("top compile errors:")
     for r, c in reasons.most_common(15):

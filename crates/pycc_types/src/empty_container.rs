@@ -162,6 +162,27 @@ pub(crate) use call_site::resolve_call_site_params;
 pub(crate) use init_params::resolve_init_params;
 use producer::find_producer;
 
+/// Non-strict mode: whether a list of `element`s is a CPython list -- an
+/// element that is a CPython object, or a native container no native list
+/// holds (`tuple[int, object]`).
+pub(crate) fn holds_objects(element: &Ty) -> bool {
+    *element == Ty::Object
+        || (!pycc_hir::is_list_element_ty(element) && contains_object(element))
+}
+
+/// Whether `ty` mentions the CPython object anywhere.
+fn contains_object(ty: &Ty) -> bool {
+    match ty {
+        Ty::Object => true,
+        Ty::List(e) | Ty::Set(e) | Ty::FrozenSet(e) | Ty::VarTuple(e) | Ty::Optional(e) => {
+            contains_object(e)
+        }
+        Ty::Dict(pair) => contains_object(&pair.0) || contains_object(&pair.1),
+        Ty::Tuple(items) => items.iter().any(contains_object),
+        _ => false,
+    }
+}
+
 /// What a resolution produced: the *element* type of a list, or the
 /// key/value pair of a dict.
 enum Resolution {
@@ -174,10 +195,22 @@ impl Resolution {
     fn into_expr(self) -> HirExpr {
         match self {
             // Non-strict mode (#3): a list of objects is a CPython list.
-            Resolution::List(Ty::Object) if crate::non_strict::is_non_strict() => {
+            Resolution::List(element)
+                if crate::non_strict::is_non_strict() && holds_objects(&element) =>
+            {
                 HirExpr::ObjectList(Vec::new())
             }
             Resolution::List(element) => HirExpr::EmptyList(element),
+            // ... and a dict of objects a CPython dict.
+            Resolution::Dict(key, value)
+                if (key == Ty::Object || value == Ty::Object)
+                    && crate::non_strict::is_non_strict() =>
+            {
+                HirExpr::Call {
+                    callee: "dict".to_string(),
+                    args: Vec::new(),
+                }
+            }
             Resolution::Dict(key, value) => HirExpr::EmptyDict(Box::new((key, value))),
         }
     }

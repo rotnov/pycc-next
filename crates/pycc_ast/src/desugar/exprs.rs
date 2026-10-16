@@ -60,6 +60,20 @@ impl Rewriter<'_> {
             return None;
         }
         let range = call_expr.range;
+        // A tuple display is iterated as the list of its items.
+        let listed;
+        let xs = match xs {
+            Expr::Tuple(tuple) if !tuple.elts.iter().any(|e| matches!(e, Expr::Starred(_))) => {
+                listed = Expr::List(ruff_python_ast::ExprList {
+                    node_index: Default::default(),
+                    range: tuple.range,
+                    elts: tuple.elts.clone(),
+                    ctx: ExprContext::Load,
+                });
+                &listed
+            }
+            other => other,
+        };
         match func.id.as_str() {
             "map" if self.builtin("map") => {
                 let (var, elt) = self.apply(f, range)?;
@@ -362,6 +376,7 @@ impl Transformer for Rewriter<'_> {
             Expr::Call(call_expr) => {
                 super::keys::rewrite_key_call(call_expr, self.fresh, &|name| !self.builtin(name))
                     .or_else(|| self.map_or_filter(call_expr))
+                    .or_else(|| super::str_format::rewrite(call_expr, &|name| self.builtin(name)))
                     .or_else(|| {
                         let starred = self.starred_print(call_expr);
                         match &starred {

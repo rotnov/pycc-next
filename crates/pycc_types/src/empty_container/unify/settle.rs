@@ -71,7 +71,7 @@ impl Engine {
                             ..
                         },
                     ) => {
-                        self.store.unify(e, result);
+                        self.store.read(e, result);
                         progressed = true;
                     }
                     (
@@ -80,20 +80,31 @@ impl Engine {
                             result, iterate, ..
                         },
                     ) => {
-                        self.store.unify(if iterate { k } else { v }, result);
+                        // A dict CPython owns (its key slot in conflict)
+                        // hands out objects.
+                        let slot = if !iterate && crate::non_strict::is_non_strict()
+                            && self.store.is_conflicted(k)
+                        {
+                            k
+                        } else if iterate {
+                            k
+                        } else {
+                            v
+                        };
+                        self.store.read(slot, result);
                         progressed = true;
                     }
                     (Some(Shape::List(e)), Deferred::Store { value, .. }) => {
-                        self.store.unify(e, value);
+                        self.store.flow(e, value);
                         progressed = true;
                     }
                     (Some(Shape::Dict(k, _)), Deferred::Key { key, .. }) => {
-                        self.store.unify(k, key);
+                        self.store.probe(k, key);
                         progressed = true;
                     }
                     (Some(Shape::Dict(k, v)), Deferred::Store { key, value, .. }) => {
-                        self.store.unify(k, key);
-                        self.store.unify(v, value);
+                        self.store.flow(k, key);
+                        self.store.flow(v, value);
                         progressed = true;
                     }
                     // A loop over a generator binds its element type.
@@ -117,6 +128,9 @@ impl Engine {
                     (Some(_), _) => {}
                     (None, constraint) => self.deferred.push(constraint),
                 }
+            }
+            if self.store.retry_flows() {
+                progressed = true;
             }
             if !progressed {
                 return;

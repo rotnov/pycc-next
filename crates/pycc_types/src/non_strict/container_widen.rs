@@ -149,6 +149,9 @@ pub(super) fn fresh(value: &HirExpr) -> bool {
         // `set()`, `dict()`, `list()`: an empty container (the boxing check
         // at the binding refuses one a module function shadows).
         HirExpr::Call { callee, args } if args.is_empty() && matches!(callee.as_str(), "set" | "dict" | "list") => true,
+        // `set(xs)`: a new set, whose elements (hashable, so immutable or
+        // carried by identity) no copy can tell apart from the originals.
+        HirExpr::Call { callee, args } if args.len() == 1 && matches!(callee.as_str(), "set" | "frozenset") => true,
         HirExpr::Call { callee, .. } => super::fresh_returns::is_fresh_returning(callee),
         HirExpr::BinOp {
             op: pycc_hir::BinOpKind::Add | pycc_hir::BinOpKind::Mul,

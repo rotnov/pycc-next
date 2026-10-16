@@ -332,6 +332,9 @@ fn expand_assign(s: &mut ruff_python_ast::StmtAssign, fresh: &Fresh) -> Option<V
                 Expr::List(l) => &mut l.elts,
                 _ => unreachable!(),
             };
+            if let Some(split) = split_inert_tuple_assign(elts, &s.value, range) {
+                return Some(split);
+            }
             if elts.iter().all(is_name) || elts.iter().any(|e| matches!(e, Expr::Starred(_))) {
                 return None;
             }
@@ -349,6 +352,70 @@ fn expand_assign(s: &mut ruff_python_ast::StmtAssign, fresh: &Fresh) -> Option<V
             Some(out)
         }
         _ => None,
+    }
+}
+
+/// `a, b = [], set()` -> `a = []` / `b = set()` when every value is inert
+/// (it can observe no target, and nothing the program can catch tells
+/// the orders apart): each name then gets its
+/// own binding, so an empty container is typed by its own later uses as
+/// a plain `a = []` is. Evaluating all values before storing any is
+/// unobservable for inert values.
+fn split_inert_tuple_assign(targets: &[Expr], value: &Expr, range: TextRange) -> Option<Vec<Stmt>> {
+    let values = tuple_elts(value)?;
+    if values.len() != targets.len() || targets.len() < 2 || !targets.iter().all(is_name) {
+        return None;
+    }
+    let names: Vec<&str> = targets
+        .iter()
+        .filter_map(|t| t.as_name_expr().map(|n| n.id.as_str()))
+        .collect();
+    if !values.iter().all(|v| is_inert(v, &names)) {
+        return None;
+    }
+    Some(
+        targets
+            .iter()
+            .zip(values)
+            .map(|(t, v)| assign(t.clone(), v.clone(), range))
+            .collect(),
+    )
+}
+
+/// A literal, a name other than `targets`, a display or comprehension of
+/// inert values, or a call of `set`, `dict`, `list` or `range` with inert
+/// arguments.
+fn is_inert(expr: &Expr, targets: &[&str]) -> bool {
+    let all = |exprs: &[Expr]| exprs.iter().all(|e| is_inert(e, targets));
+    let generators = |generators: &[ruff_python_ast::Comprehension]| {
+        generators
+            .iter()
+            .all(|g| !g.is_async && is_inert(&g.iter, targets) && all(&g.ifs))
+    };
+    match expr {
+        Expr::Name(n) => !targets.contains(&n.id.as_str()),
+        Expr::NumberLiteral(_)
+        | Expr::StringLiteral(_)
+        | Expr::BooleanLiteral(_)
+        | Expr::NoneLiteral(_) => true,
+        Expr::UnaryOp(u) => matches!(*u.operand, Expr::NumberLiteral(_)),
+        Expr::List(l) => all(&l.elts),
+        Expr::Tuple(t) => all(&t.elts),
+        Expr::Set(s) => all(&s.elts),
+        Expr::Dict(d) => d
+            .items
+            .iter()
+            .all(|item| item.key.as_ref().is_some_and(|k| is_inert(k, targets)) && is_inert(&item.value, targets)),
+        Expr::ListComp(c) => is_inert(&c.elt, targets) && generators(&c.generators),
+        Expr::SetComp(c) => is_inert(&c.elt, targets) && generators(&c.generators),
+        Expr::Call(call) => {
+            call.arguments.keywords.is_empty()
+                && all(&call.arguments.args)
+                && matches!(call.func.as_ref(), Expr::Name(f)
+                    if matches!(f.id.as_str(), "set" | "dict" | "list" | "range")
+                        && !targets.contains(&f.id.as_str()))
+        }
+        _ => false,
     }
 }
 

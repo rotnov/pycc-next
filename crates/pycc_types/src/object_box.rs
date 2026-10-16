@@ -225,6 +225,24 @@ fn shareable_element(env: &Environment, ty: &Ty) -> bool {
     }
 }
 
+/// Whether `value` is a set display or comprehension of `int`, `float`,
+/// `bool` or `str` elements, or a call of a function returning a fresh
+/// container: a native set nothing else holds.
+pub(crate) fn fresh_scalar_set(value: &HirExpr, ty: &Ty) -> bool {
+    let Ty::Set(element) = ty else {
+        return false;
+    };
+    matches!(**element, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
+        && match value {
+            HirExpr::SetLiteral(_) | HirExpr::EmptySet(_) => true,
+            HirExpr::Comprehension(comp) => matches!(comp.elt, pycc_hir::CompElt::Set(_)),
+            // A function every return of which is such a set (a lifted
+            // nested comprehension, `non_strict::fresh_returns`).
+            HirExpr::Call { callee, .. } => crate::non_strict::is_fresh_returning(callee),
+            _ => false,
+        }
+}
+
 /// Whether `value` is a list, tuple, set or dict display of type `ty` whose
 /// every element is a packable scalar or object, or itself such a display.
 pub(crate) fn display_boxable(value: &HirExpr, ty: &Ty) -> bool {

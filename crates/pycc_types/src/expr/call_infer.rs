@@ -219,6 +219,26 @@ pub(crate) fn infer_call_expr(
     {
         return resolved;
     }
+    // Non-strict mode: `iter(xs)` of a list display crosses as CPython's
+    // iterator over a copy no one else holds; of any other native list it
+    // would iterate a copy its later mutations do not reach.
+    if callee == "iter"
+        && matches!(arg_tys, [Ty::List(_)])
+        && !matches!(&args[..], [arg] if crate::object_box::display_boxable(arg, &arg_tys[0]))
+    {
+        return Err(crate::name_diagnostics::unsupported_callable_builtin(callee));
+    }
+    // So does a list beside a CPython object in `itertools.chain`.
+    if callee == "__pycc_it_chain2"
+        && arg_tys.contains(&Ty::Object)
+        && args.iter().zip(arg_tys).any(|(arg, ty)| {
+            matches!(ty, Ty::List(_))
+                && !crate::object_box::display_boxable(arg, ty)
+                && !matches!(arg, HirExpr::Comprehension(_))
+        })
+    {
+        return Err(crate::name_diagnostics::unsupported_callable_builtin("itertools.chain"));
+    }
     if env.lookup_function(callee).is_none()
         && env.lookup_class(callee).is_none()
         && env.lookup_generic(callee).is_none()

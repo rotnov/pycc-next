@@ -42,6 +42,13 @@ pub(crate) fn lower_generator_consumer(
         _ if is_consumer(callee) => Err(args
             .into_iter()
             .map(|arg| match arg.ty() {
+                // `min`/`max` of a generator of CPython objects take it as
+                // a CPython iterator (`pycc_hir::builtins::resolve_call`).
+                Ty::Generator(element)
+                    if matches!(callee, "min" | "max") && element.0 == Ty::Object =>
+                {
+                    arg
+                }
                 Ty::Generator(element) => MirExpr::GenToList {
                     generator: Box::new(arg),
                     ty: Ty::List(Box::new(element.0)),

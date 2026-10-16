@@ -711,6 +711,11 @@ pub(crate) fn collect_call_constraints(
             && (pycc_hir::empty_object_constructor(callee, args.len()).is_some()
                 || (callee == "set"
                     && matches!(arg_terms.as_slice(), [Some(Ok(Ty::Object))]))
+                // `iter(xs)` / `tuple(xs)` of an argument the solver cannot
+                // type yet (a list display of tuples): CPython's own, which
+                // the check phase re-types (`pycc_hir::builtins`).
+                || (matches!(callee.as_str(), "iter" | "tuple")
+                    && matches!(arg_terms.as_slice(), [None | Some(Ok(Ty::Object))]))
                 || matches!(arg_terms.as_slice(), [Some(Ok(first)), Some(Ok(second))]
                     if pycc_hir::builtins::is_object_format(callee, &[first.clone(), second.clone()])))
         {

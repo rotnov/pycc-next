@@ -209,7 +209,7 @@ static PyObject *pycc_ext_stdlib_call(const char *module_name, const char *funct
     if (module == NULL) {
         return pycc_ext_stdlib_failed();
     }
-    result = b == NULL ? PyObject_CallMethod(module, function, "O", a)
+    result = b == NULL ? PyObject_CallMethod(module, function, "(O)", a)
                        : PyObject_CallMethod(module, function, "OO", a, b);
     Py_DECREF(module);
     return result == NULL ? pycc_ext_stdlib_failed() : result;
@@ -258,6 +258,111 @@ PyObject *pycc_ext_obj_insort_left(PyObject *a, PyObject *x)
 PyObject *pycc_ext_obj_insort_right(PyObject *a, PyObject *x)
 {
     return pycc_ext_stdlib_call("bisect", "insort_right", a, x);
+}
+
+/* `tuple(a)`, `list(a)`, `sorted(a)` and `sum(a)` of a CPython iterable. */
+PyObject *pycc_ext_obj_tuple(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "tuple", a, NULL);
+}
+
+PyObject *pycc_ext_obj_iter(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "iter", a, NULL);
+}
+
+PyObject *pycc_ext_obj_next(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "next", a, NULL);
+}
+
+PyObject *pycc_ext_obj_list(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "list", a, NULL);
+}
+
+PyObject *pycc_ext_obj_sorted(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "sorted", a, NULL);
+}
+
+PyObject *pycc_ext_obj_sum(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "sum", a, NULL);
+}
+
+/* `range(...)` as a value: CPython's range object. */
+static PyObject *pycc_ext_range_call(PyObject *args)
+{
+    PyObject *result;
+
+    if (args == NULL) {
+        return pycc_ext_stdlib_failed();
+    }
+    result = PyObject_CallObject((PyObject *)&PyRange_Type, args);
+    Py_DECREF(args);
+    return result == NULL ? pycc_ext_stdlib_failed() : result;
+}
+
+PyObject *pycc_ext_obj_range1(PyObject *stop)
+{
+    return pycc_ext_range_call(PyTuple_Pack(1, stop));
+}
+
+PyObject *pycc_ext_obj_range2(PyObject *start, PyObject *stop)
+{
+    return pycc_ext_range_call(PyTuple_Pack(2, start, stop));
+}
+
+PyObject *pycc_ext_obj_range3(PyObject *start, PyObject *stop, PyObject *step)
+{
+    return pycc_ext_range_call(PyTuple_Pack(3, start, stop, step));
+}
+
+/* `enumerate(a)` / `enumerate(a, start)` over a CPython iterable. */
+PyObject *pycc_ext_obj_enumerate(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "enumerate", a, NULL);
+}
+
+PyObject *pycc_ext_obj_enumerate_from(PyObject *a, PyObject *start)
+{
+    return pycc_ext_stdlib_call("builtins", "enumerate", a, start);
+}
+
+/* `min(a)` / `max(a)` over a CPython iterable. */
+PyObject *pycc_ext_obj_min(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "min", a, NULL);
+}
+
+PyObject *pycc_ext_obj_max(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "max", a, NULL);
+}
+
+PyObject *pycc_ext_obj_min2(PyObject *a, PyObject *b)
+{
+    return pycc_ext_stdlib_call("builtins", "min", a, b);
+}
+
+PyObject *pycc_ext_obj_max2(PyObject *a, PyObject *b)
+{
+    return pycc_ext_stdlib_call("builtins", "max", a, b);
+}
+
+/* `itertools.chain(a, b)`. */
+PyObject *pycc_ext_obj_chain2(PyObject *a, PyObject *b)
+{
+    return pycc_ext_stdlib_call("itertools", "chain", a, b);
+}
+
+/* `itertools.accumulate(a)` (the default addition: `code` is always the
+ * native code of `add`). */
+PyObject *pycc_ext_obj_accumulate(PyObject *a, PyObject *code)
+{
+    (void)code;
+    return pycc_ext_stdlib_call("itertools", "accumulate", a, NULL);
 }
 
 /* Non-strict mode: `collections.defaultdict(<factory>)`, the factory given as
