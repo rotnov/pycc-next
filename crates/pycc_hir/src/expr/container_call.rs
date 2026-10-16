@@ -239,9 +239,20 @@ fn lower_dict_get(
         // `T0033` only for the two-argument shape, because every other
         // arity is rejected here first. The wording is receiver-neutral
         // on purpose.
+        // `d.get(k)` with a receiver or key the one-argument form above
+        // does not take.
+        if call.arguments.args.len() == 1 && call.arguments.keywords.is_empty() {
+            return Err(unsupported(
+                "`.get(key)` is only supported on a name, with a key that is a name, a literal \
+                 or a subscript of those, so far; `dict.get(key, default)` takes any"
+                    .to_string(),
+                call.range,
+            ));
+        }
         return Err(unsupported(
             format!(
-                "`.get()` is only supported as `dict.get(key, default)` with exactly two arguments so far, got {}",
+                "`.get()` takes a key and an optional default (`dict.get(key)`, \
+                 `dict.get(key, default)`), got {} arguments",
                 call.arguments.args.len()
             ),
             call.range,

@@ -714,8 +714,8 @@ fn container_diagnostics_are_unchanged_through_check_and_run() {
         (
             "get_arity",
             "d = {'a': 1}\nprint(d.get('a', 0, 1))\n",
-            "error[C0001]: `.get()` is only supported as `dict.get(key, default)` with exactly \
-             two arguments so far, got 3\n --> main.py:16:7",
+            "error[C0001]: `.get()` takes a key and an optional default (`dict.get(key)`, \
+             `dict.get(key, default)`), got 3 arguments\n --> main.py:16:7",
         ),
         (
             "non_name",

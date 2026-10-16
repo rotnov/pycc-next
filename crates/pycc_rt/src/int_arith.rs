@@ -54,6 +54,17 @@ pub(crate) fn decode_big(word: i64) -> BigInt {
         Some(v) => BigInt::from(v),
         None => {
             let b = unsafe { bigint_ref(word) };
+            // `float('inf')` in an `int` slot (`crate::int_inf`): every
+            // operation not defined on it exactly is CPython's conversion
+            // error.
+            if b.limbs.is_empty() {
+                raise_builtin(
+                    EXCEPTION_TYPE_OVERFLOW_ERROR,
+                    "OverflowError",
+                    "cannot convert float infinity to integer",
+                );
+                return BigInt::zero();
+            }
             let sign = if b.negative { Sign::Minus } else { Sign::Plus };
             BigInt::from_slice(sign, &b.limbs)
         }
@@ -101,6 +112,9 @@ pub(crate) fn int_add(a: i64, b: i64) -> i64 {
     if let (Some(x), Some(y)) = (inline_int_value(a), inline_int_value(b)) {
         return encode_i128(i128::from(x) + i128::from(y));
     }
+    if let Some(word) = crate::int_inf::add(a, b, false) {
+        return word;
+    }
     encode_big(decode_big(a) + decode_big(b))
 }
 
@@ -112,6 +126,9 @@ pub extern "C" fn pycc_rt_int_add(a: i64, b: i64) -> i64 {
 pub(crate) fn int_sub(a: i64, b: i64) -> i64 {
     if let (Some(x), Some(y)) = (inline_int_value(a), inline_int_value(b)) {
         return encode_i128(i128::from(x) - i128::from(y));
+    }
+    if let Some(word) = crate::int_inf::add(a, b, true) {
+        return word;
     }
     encode_big(decode_big(a) - decode_big(b))
 }
@@ -125,6 +142,9 @@ pub(crate) fn int_mul(a: i64, b: i64) -> i64 {
     if let (Some(x), Some(y)) = (inline_int_value(a), inline_int_value(b)) {
         // Two 63-bit values multiply exactly in `i128`.
         return encode_i128(i128::from(x) * i128::from(y));
+    }
+    if let Some(word) = crate::int_inf::mul(a, b) {
+        return word;
     }
     encode_big(decode_big(a) * decode_big(b))
 }
@@ -251,6 +271,9 @@ pub(crate) fn int_abs(a: i64) -> i64 {
     if let Some(x) = inline_int_value(a) {
         return encode_i128(i128::from(x).abs());
     }
+    if crate::int_inf::inf_sign(a).is_some() {
+        return crate::int_inf::make_inf(false);
+    }
     encode_big(decode_big(a).abs())
 }
 
@@ -273,6 +296,9 @@ pub extern "C" fn pycc_rt_int_cmp(a: i64, b: i64) -> i32 {
 pub(crate) fn int_to_float(tagged: i64) -> f64 {
     if let Some(v) = inline_int_value(tagged) {
         return v as f64;
+    }
+    if let Some(f) = crate::int_inf::as_float(tagged) {
+        return f;
     }
     match decode_big(tagged).to_f64() {
         Some(f) if f.is_finite() => f,
@@ -320,6 +346,9 @@ pub(crate) fn int_truediv(a: i64, b: i64) -> f64 {
     {
         // Both convert exactly, so one IEEE division rounds correctly.
         return x as f64 / y as f64;
+    }
+    if let Some(quotient) = crate::int_inf::truediv(a, b) {
+        return quotient;
     }
     let numerator = decode_big(a);
     let denominator = decode_big(b);
@@ -392,6 +421,15 @@ pub extern "C" fn pycc_rt_int_truediv(a: i64, b: i64) -> f64 {
 pub(crate) fn int_float_cmp(a: i64, f: f64) -> i32 {
     if f.is_nan() {
         return 2;
+    }
+    if let Some(x) = crate::int_inf::as_float(a) {
+        return if x < f {
+            -1
+        } else if x > f {
+            1
+        } else {
+            0
+        };
     }
     if f.is_infinite() {
         return if f > 0.0 { -1 } else { 1 };
@@ -518,6 +556,9 @@ pub extern "C" fn pycc_rt_int_truthy(tagged: i64) -> i8 {
     if let Some(value) = inline_int_value(tagged) {
         return i8::from(value != 0);
     }
+    if crate::int_inf::inf_sign(tagged).is_some() {
+        return 1;
+    }
     i8::from(!decode_big(tagged).is_zero())
 }
 
@@ -530,6 +571,9 @@ pub(crate) fn int_decimal(tagged: i64) -> Option<String> {
         EncodedIntKind::BoolFalse => Some("False".to_string()),
         EncodedIntKind::BoolTrue => Some("True".to_string()),
         EncodedIntKind::BigInt => {
+            if let Some(negative) = crate::int_inf::inf_sign(tagged) {
+                return Some(if negative { "-inf" } else { "inf" }.to_string());
+            }
             let value = decode_big(tagged);
             // A cheap lower bound on the digit count first, so a huge value
             // is refused before the quadratic conversion runs.

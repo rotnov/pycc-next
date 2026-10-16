@@ -807,7 +807,7 @@ fn rewrite_body(
 /// `attr_slot`. `visit` only ever rewrites an expression inside the
 /// statement, never its nested bodies, so recursing after the visit sees the
 /// same statement list it would have seen before.
-fn for_each_stmt_mut(body: &mut [HirStmt], visit: &mut dyn FnMut(&mut HirStmt)) {
+pub(crate) fn for_each_stmt_mut(body: &mut [HirStmt], visit: &mut dyn FnMut(&mut HirStmt)) {
     for stmt in body.iter_mut() {
         visit(stmt);
         match stmt {

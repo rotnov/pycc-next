@@ -9,6 +9,12 @@ use pycc_hir::builtins::{BuiltinSig, is_pairwise_variadic, resolve_call, resolve
 /// claim the call. `min`/`max` over three or more arguments fold left,
 /// which keeps CPython's evaluation order and its first-wins tie rule.
 pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirExpr, Vec<MirExpr>> {
+    // `min(s)` / `max(s)` of one `str`: of its characters.
+    let args = if matches!(name, "min" | "max") && args.len() == 1 && args[0].ty() == Ty::Str {
+        args.into_iter().map(crate::str_to_list).collect()
+    } else {
+        args
+    };
     let args = if pycc_hir::builtins::iterates_str_as_list(name) {
         args.into_iter()
             .enumerate()

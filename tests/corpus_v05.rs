@@ -9,6 +9,9 @@
 //!   or a comprehension's loop variable (`[Node(i) for i in range(n)]`).
 //! * `"literal".format(args)` with `{}`/`{0}` fields, `!r`/`!s` and a
 //!   constant spec compiles natively.
+//! * `float('inf')` in a variable an `int` later replaces is an `int`
+//!   infinity (`pycc_types::int_inf`, `pycc_rt::int_inf`); `min`/`max` of a
+//!   `str` are of its characters.
 //! * Non-strict mode: `itertools.accumulate`, `min` and `max` over a
 //!   CPython object run CPython's own; a generator yielding a native value
 //!   beside CPython objects yields objects; a function returning `None` on
@@ -171,5 +174,51 @@ fn strict_mode_keeps_refusing_the_object_builtins() {
         &[],
         "C0001",
         "call to builtin `tuple`",
+    );
+}
+
+#[test]
+fn an_infinity_an_int_replaces_matches_cpython() {
+    matches_cpython("corpus_v05_int_inf.py", &[]);
+    let report = matches_cpython("corpus_v05_int_inf.py", &["--non-strict", "--report-fallbacks"]);
+    assert!(!report.contains("fallback:"), "{report}");
+}
+
+/// Builds `source` (strict) and returns the last line its run prints to
+/// stderr, which must exit with status 1.
+fn raised(tag: &str, source: &str) -> String {
+    let dir = ScratchDir::new(tag).expect("scratch");
+    let path = dir.join("m.py");
+    std::fs::write(&path, source).expect("write");
+    let out = dir.join("prog");
+    let build = pycc()
+        .arg("build")
+        .arg(&path)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{tag}: {}", text(&build.stdout));
+    let run = Command::new(&out).output().expect("the program runs");
+    assert_eq!(run.status.code(), Some(1), "{tag}");
+    last_line(&run.stderr)
+}
+
+/// `docs/DEVIATIONS.md`: an operation on an `int` infinity whose CPython
+/// result is a float other than an infinity (`nan`, a floor division)
+/// raises CPython's conversion error, and a container does not hold one.
+#[test]
+fn an_int_infinity_outside_its_exact_operations_raises() {
+    let prelude = "x = float('inf')\nif len('ab') > 5:\n    x = 1\n";
+    assert_eq!(
+        raised("int_inf_floordiv", &format!("{prelude}print(x // 2)\n")),
+        "OverflowError: cannot convert float infinity to integer"
+    );
+    assert_eq!(
+        raised("int_inf_cancel", &format!("{prelude}print(x - x)\n")),
+        "OverflowError: cannot convert float infinity to integer"
+    );
+    assert!(
+        raised("int_inf_list", &format!("{prelude}print([x])\n")).starts_with("OverflowError:")
     );
 }

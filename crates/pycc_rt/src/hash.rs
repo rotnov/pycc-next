@@ -55,6 +55,9 @@ fn reduce_magnitude(limbs: &[u32]) -> u64 {
 /// `word`: it neither retains nor releases a heap bigint.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_hash_int(word: i64) -> i64 {
+    if let Some(f) = crate::int_inf::as_float(word) {
+        return crate::value::hash_float(f);
+    }
     let (negative, residue) = match inline_int_value(word) {
         Some(value) => (value < 0, value.unsigned_abs() % MODULUS),
         None => {

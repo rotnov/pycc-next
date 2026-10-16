@@ -64,10 +64,15 @@ their inputs, like the Python programs' inputs are opaque to pycc-next):
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
-wrong outputs (CI-gated), 99.3% of top-level statements native (1183 of 1191) and the rest
-per-statement CPython fallback; strict mode compiles and passes 170/200 unchanged — most of
+wrong outputs (CI-gated), 99.8% of top-level statements native (1189 of 1191) and the rest
+per-statement CPython fallback; strict mode compiles and passes 181/200 unchanged — most of
 the rest use dynamic values (mixed-type containers, `None` in a list or as one of several
-return types, an `int` that may be `float('inf')`) that strict mode refuses.
+return types, a parameter rebound to another type) that strict mode refuses. The two
+statements that still fall back (`python3 bench/corpus.py --flags=--non-strict
+--show-fallbacks`): problem 134's `graph = {i: [] for i in range(n)}`, whose lists the
+program later reads through keys from a CPython list of `None`s and `int`s (the dict
+comprehension would have to build a CPython dict), and problem 188's `mat_pow`, whose nested
+helper rebinds its list parameter to a list of lists (`A = [A]`) and is called with both.
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 

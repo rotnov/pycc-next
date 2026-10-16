@@ -6,6 +6,36 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Added
 
+- Real-world corpus (v0.5 accept 3): `python3 bench/corpus.py --flags=--non-strict`
+  passes 200/200 with 0 wrong outputs and 2 of 1191 top-level statements in CPython
+  fallback (v0.4: 8), both listed by `bench/corpus.py --show-fallbacks` and explained in
+  the README's corpus note; strict mode passes 181/200 (171 before). What it took:
+  - strict inference: a tuple assignment of values that can observe none of its targets
+    (`a, b = [], set()`, `m, seen = 0, {0: None}`) binds each name on its own, so its
+    empty containers are typed by their own uses; `f(d[k])` types an unannotated parameter
+    from the dict's value type; an unannotated `__init__` parameter is typed from an
+    argument read from an unannotated function's return (`N, K = MAP()`) or from a
+    comprehension's loop variable (`[Node(i) for i in range(n)]`); a call-site
+    parameter some call cannot type yet waits until it can (a later call may disagree);
+    a global the module binds only inside a loop types the functions reading it;
+  - `"literal".format(...)` with `{}`/`{0}` fields, `!r`/`!s` and a constant spec
+    compiles natively (`str()`/`repr()`/`format()` concatenated);
+  - `float('inf')` held by a variable an `int` later replaces (`best = float('inf')`
+    ... `best = min(best, cost)`) is an `int` infinity: ordering, equality, `min`/`max`,
+    printing, `hash`, `float()`, `+`/`-`/`*` by an `int` and `/` answer as CPython's
+    float infinity does;
+  - `min(s)` / `max(s)` of a `str`;
+  - non-strict: CPython's own builtins over CPython objects -- `range(...)` as a value,
+    `tuple(xs)`, `iter` of a list display, `next`, `list`, `sorted`, `sum`, `min`/`max`
+    of one object or of two values, `enumerate`, `itertools.accumulate`/`chain`; a
+    generator that yields native values beside objects yields objects; `return None`
+    beside a value of another type returns an object; a tuple display holding `None` is
+    an object to the solver as to the checker; a fresh set on the right of `|`, `&`,
+    `-`, `^` on an object crosses as a copy; `set(xs)` is a fresh container; a value of
+    another type stored into a list of `None`s (or a dict looked up with an object key)
+    makes only that container CPython's, not the classes of the values flowing into it.
+- `bench/corpus.py --only 017,077` runs a subset; `--show-fallbacks` lists the
+  problems with statements in CPython.
 - Compile speed (v0.5 accept 4): building diff-match-patch takes 5.2 s on the CI Linux
   runner (v0.4: ~25 s), tomli 2.8 s and pypng 1.0 s, and every `bench/py` program
   builds in under 1 s; CI fails a package over 10 s or a benchmark build over 2 s
@@ -50,6 +80,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- The non-strict object stdlib shim passed a one-argument call's tuple argument as the
+  argument tuple (`heapq.heapify(t)` of a CPython tuple raised `TypeError`).
+- The `C0001` for an unsupported `.get()` call no longer says it needs exactly two
+  arguments: it names both `dict.get(key)` and `dict.get(key, default)`, and what the
+  one-argument form takes.
 - Compiled callers see every rebinding of a module-level function (#1): a
   module-scope binding of a name a `def` also binds (`f = g`, a loop or `with`
   target, ...) is refused with `C0001` (in non-strict mode it runs in CPython, with the

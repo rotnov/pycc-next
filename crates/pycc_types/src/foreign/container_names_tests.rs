@@ -117,7 +117,7 @@ fn a_native_receiver_keeps_its_container_diagnostics() {
         "import gc\n\nd = {\"a\": 1}\nprint(d.get(\"a\", 0, 1))\n",
         false,
         "C0001",
-        "`.get()` is only supported as `dict.get(key, default)`",
+        "`.get()` takes a key and an optional default",
     );
 }
 

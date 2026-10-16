@@ -122,6 +122,14 @@ fn a_none_or_list_return() {
 }
 
 #[test]
+fn an_int_infinity_replaced_by_an_int() {
+    assert_constant_memory(
+        "int_inf",
+        "best = float('inf')\nfor v in (i % 7, 3):\n    best = min(best, v)\nlo = -float('inf')\nlo = max(lo, i)\ntotal += best + lo",
+    );
+}
+
+#[test]
 fn cpython_builtins_over_objects() {
     assert_constant_memory(
         "builtins",

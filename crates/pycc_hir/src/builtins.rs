@@ -405,6 +405,11 @@ pub fn is_pairwise_variadic(name: &str) -> bool {
 /// with arguments of the wrong type.
 #[must_use]
 pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String>> {
+    // `min(s)` / `max(s)` of one `str`: of its characters (`pycc_mir`
+    // converts the argument to the list of them).
+    if let ("min" | "max", [Ty::Str]) = (name, args) {
+        return resolve_call(name, &[list_of(Ty::Str)]);
+    }
     if let Some(found) = object_calls::object_call(name, args) {
         return Some(found);
     }

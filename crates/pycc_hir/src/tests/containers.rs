@@ -668,7 +668,16 @@ fn getting_from_a_non_bare_name_base_is_unsupported() {
 fn get_with_zero_arguments_is_unsupported() {
     assert_capability_error_message(
         "d.get()\n",
-        "`.get()` is only supported as `dict.get(key, default)` with exactly two arguments so far, got 0",
+        "`.get()` takes a key and an optional default (`dict.get(key)`, `dict.get(key, default)`), got 0 arguments",
+    );
+}
+
+#[test]
+fn get_with_one_computed_key_names_what_the_one_argument_form_takes() {
+    assert_capability_error_message(
+        "d.get(f())\n",
+        "`.get(key)` is only supported on a name, with a key that is a name, a literal or a \
+         subscript of those, so far; `dict.get(key, default)` takes any",
     );
 }
 
@@ -676,7 +685,7 @@ fn get_with_zero_arguments_is_unsupported() {
 fn get_with_three_arguments_is_unsupported() {
     assert_capability_error_message(
         "d.get(\"a\", 0, 1)\n",
-        "`.get()` is only supported as `dict.get(key, default)` with exactly two arguments so far, got 3",
+        "`.get()` takes a key and an optional default (`dict.get(key)`, `dict.get(key, default)`), got 3 arguments",
     );
 }
 

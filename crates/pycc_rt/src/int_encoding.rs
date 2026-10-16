@@ -309,6 +309,9 @@ pub(crate) fn encoded_int_cmp(a: i64, b: i64) -> std::cmp::Ordering {
     if let (Some(a), Some(b)) = (inline_int_value(a), inline_int_value(b)) {
         return a.cmp(&b);
     }
+    if let Some(ordering) = crate::int_inf::cmp(a, b) {
+        return ordering;
+    }
     let (a_negative, a_magnitude) = to_sign_and_magnitude(a);
     let (b_negative, b_magnitude) = to_sign_and_magnitude(b);
     let a_sign = magnitude_sign(a_negative, &a_magnitude);

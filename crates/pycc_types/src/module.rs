@@ -177,12 +177,14 @@ pub fn check_and_resolve_all_keyed(hir: &HirModule) -> Result<HirModule, KeyedDi
     // `MirExpr::ty()`. The rewritten module is what everything downstream
     // (checker, solver, `monomorphize`, MIR lowering, codegen) consumes.
     crate::non_strict::with_widening(hir, |hir| {
-        let prepared = Prepared::new(hir)?;
-        let module = prepared.module(hir);
-        crate::locate::with_locator(module, |index| prepared.origin(index), || {
-            resolve_prepared(module)
+        crate::int_inf::with_int_inf(hir, |hir| {
+            let prepared = Prepared::new(hir)?;
+            let module = prepared.module(hir);
+            crate::locate::with_locator(module, |index| prepared.origin(index), || {
+                resolve_prepared(module)
+            })
+            .map_err(|d| prepared.rekey(d))
         })
-        .map_err(|d| prepared.rekey(d))
     })
 }
 
@@ -554,12 +556,14 @@ pub fn check_all_keyed(hir: &HirModule) -> Result<(), KeyedDiagnostics> {
     // checking, so the check path and the build path see the identical
     // module (see [`Prepared`]).
     crate::non_strict::with_widening(hir, |hir| {
-        let prepared = Prepared::new(hir)?;
-        let module = prepared.module(hir);
-        crate::locate::with_locator(module, |index| prepared.origin(index), || {
-            check_prepared(module)
+        crate::int_inf::with_int_inf(hir, |hir| {
+            let prepared = Prepared::new(hir)?;
+            let module = prepared.module(hir);
+            crate::locate::with_locator(module, |index| prepared.origin(index), || {
+                check_prepared(module)
+            })
+            .map_err(|d| prepared.rekey(d))
         })
-        .map_err(|d| prepared.rekey(d))
     })
 }
 
