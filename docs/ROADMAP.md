@@ -177,7 +177,7 @@ Accept:
    structures stops round-tripping through the C API. Evidence: tomli's `loads()` >= 3x
    faster than CPython (v0.4: 1.67x) via `bench/package_check.py --time`, suite passing;
    diff-match-patch stays >= 10x.
-   *Status: not met.* Native `tuple[T, ...]` and tuples of objects (`tuple[int, Any]`)
+   Native `tuple[T, ...]` and tuples of objects (`tuple[int, Any]`)
    are in (`tests/native_object_tuples.rs`); mutable containers of objects stay
    CPython-owned by design (CPython code may hold and mutate the same object; see
    `crates/pycc_rt/src/tuple.rs`). tomli stays at 1.4x-1.7x: under callgrind, CPython
@@ -192,6 +192,16 @@ Accept:
      accept item is now: native `tuple[T, ...]` and tuples of objects (done, above), and
      tomli no slower than v0.4 — at most 2.60M instructions per `loads()` call under
      callgrind (it regressed to 2.70M with native tuples) — with diff-match-patch >= 10x.
+   **Met 2026-10-16** (as amended): tomli `loads()` takes 2.54M instructions per call
+   (2.53M-2.54M over repeated runs; 2.69M-2.70M before). Method: build with `python3
+   bench/package_check.py tomli --keep DIR` (DIR absolute), then run `valgrind
+   --tool=callgrind python3 -I cg.py DIR/tomli/compiled N` for N = 1 and N = 21, where
+   `cg.py` puts its argument on `sys.path`, imports `tomli`, reads `benchmark/data.toml`
+   and calls `tomli.loads()` N times; per call = (total(21) - total(1)) / 20. The lever:
+   list/tuple headers, small tuple data blocks and `str` objects come from bounded free
+   lists (`crates/pycc_rt/src/pool.rs`), so libc `malloc`/`free` fell from 0.38M to 0.22M
+   per call. diff-match-patch 11.0x, pypng 14.5x, all three suites pass (`--time`, local,
+   best of 5); CI run 38892307241 green (Linux x86_64, Linux arm64, macOS).
 2. **A third real package:** a pinned, permissively licensed pure-Python PyPI package from
    another domain (numeric/algorithmic preferred) builds unchanged with `--ext
    --non-strict`, passes its own suite (CI-gated) and runs >= 5x faster than CPython on its
