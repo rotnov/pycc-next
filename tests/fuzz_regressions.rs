@@ -182,6 +182,13 @@ fn str_repr_escapes_unprintable_unicode() {
     assert_matches_cpython("fuzz_str_repr_unicode");
 }
 
+/// `repr()` of a float with two shortest round-tripping strings is the one
+/// nearest its exact value, ties to even (`137931034482758.62`).
+#[test]
+fn float_repr_breaks_ties_like_cpython() {
+    assert_matches_cpython("fuzz_float_repr_ties");
+}
+
 /// A set display of constants iterates in CPython's order (its folded
 /// frozenset constant's), not in the order of one-by-one insertion.
 #[test]

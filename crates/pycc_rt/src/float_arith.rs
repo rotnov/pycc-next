@@ -181,30 +181,58 @@ pub(crate) fn float_repr(value: f64) -> String {
     if value.is_infinite() {
         return if value > 0.0 { "inf" } else { "-inf" }.to_string();
     }
-    let magnitude = value.abs();
-    // clippy's `manual_range_contains`: `!(1e-4..1e16).contains(&magnitude)`
-    // is `magnitude < 1e-4 || magnitude >= 1e16` (a `Range` is
-    // start-inclusive, end-exclusive) -- the same condition as the task
-    // brief's own `magnitude >= 1e16 || magnitude < 1e-4`, just reordered.
-    if magnitude != 0.0 && !(1e-4..1e16).contains(&magnitude) {
-        // CPython's `repr`: the shortest round-tripping digits in
-        // scientific notation, with a signed exponent of at least two
-        // digits (`1e+16`, `1.5e-05`). Rust's `{:e}` prints the same
-        // shortest digits as `1e16` / `1.5e-5`.
-        let text = format!("{value:e}");
-        let (mantissa, exponent) = text.split_once('e').expect("`{:e}` always has an exponent");
-        let (sign, digits) = match exponent.strip_prefix('-') {
-            Some(digits) => ('-', digits),
-            None => ('+', exponent),
-        };
-        return format!("{mantissa}e{sign}{digits:0>2}");
+    if value == 0.0 {
+        return if value.is_sign_negative() { "-0.0" } else { "0.0" }.to_string();
     }
-    let text = format!("{value}");
-    if text.contains('.') {
-        text
+    let (digits, exponent) = shortest_digits(value);
+    let sign = if value < 0.0 { "-" } else { "" };
+    // CPython's `repr` switches to scientific notation below 1e-4 and from
+    // 1e16 on, with a signed exponent of at least two digits (`1e+16`,
+    // `1.5e-05`); between, it always shows a digit after the point.
+    if !(-4..16).contains(&exponent) {
+        let (first, rest) = digits.split_at(1);
+        let mantissa = if rest.is_empty() { first.to_string() } else { format!("{first}.{rest}") };
+        let exp_sign = if exponent < 0 { '-' } else { '+' };
+        return format!("{sign}{mantissa}e{exp_sign}{:0>2}", exponent.unsigned_abs());
+    }
+    if exponent < 0 {
+        let zeros = "0".repeat((-exponent - 1) as usize);
+        return format!("{sign}0.{zeros}{digits}");
+    }
+    let point = exponent as usize + 1;
+    if digits.len() <= point {
+        let zeros = "0".repeat(point - digits.len());
+        format!("{sign}{digits}{zeros}.0")
     } else {
-        format!("{text}.0")
+        format!("{sign}{}.{}", &digits[..point], &digits[point..])
     }
+}
+
+/// The shortest round-tripping significant digits of finite, nonzero
+/// `value` and the decimal exponent of the first one, as CPython's
+/// `repr` (David Gay's mode 0) chooses them: when two strings of that
+/// length round-trip, the one nearest the exact binary value, ties to even
+/// (`137931034482758.625` is `...758.62`, where Rust's `{}` says `.63`).
+fn shortest_digits(value: f64) -> (String, i32) {
+    let shortest = format!("{:e}", value.abs());
+    let count = shortest
+        .split_once('e')
+        .map_or(0, |(mantissa, _)| mantissa.bytes().filter(u8::is_ascii_digit).count());
+    // Rust's fixed-precision formatting rounds the exact value, ties to even.
+    let exact = format!("{:.*e}", count.saturating_sub(1), value.abs());
+    let (mantissa, exponent) = exact.split_once('e').expect("`{:e}` always has an exponent");
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let digits = digits.trim_end_matches('0');
+    let digits = if digits.is_empty() { "0" } else { digits };
+    let exponent: i32 = exponent.parse().expect("an integer exponent");
+    // Next to a power of two the interval below a float is half the one
+    // above it: should the nearest string fall outside, keep the shortest.
+    if format!("{digits}e{}", exponent - digits.len() as i32 + 1).parse::<f64>() != Ok(value.abs()) {
+        let (mantissa, exponent) = shortest.split_once('e').expect("`{:e}` always has an exponent");
+        let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+        return (digits, exponent.parse().expect("an integer exponent"));
+    }
+    (digits.to_string(), exponent)
 }
 
 /// `str(value)` as a new `str` (see `float_to_str`).
