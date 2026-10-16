@@ -38,6 +38,18 @@ jobs:
           tar -C "$smoke" -xzf dist/$name.tar.gz
           file "$smoke/$name/bin/pycc"
           scripts/smoke.sh "$smoke/$name"
+      # `pip install` builds with pycc (v0.6 accept 1): each real package's wheel
+      # is built by `pip wheel` through the archive's PEP 517 backend
+      # (python/pycc_build-*.whl, installed into pip's isolated build
+      # environment with no index) and its bin/pycc, installed into a fresh
+      # venv, checked to hold extension modules, and the package's own test
+      # suite runs against the installed wheel. The pyproject.toml selecting
+      # pycc.build is injected by the harness (the packages use other backends).
+      - name: Real packages built into wheels by pip with pycc.build
+        run: |
+          name=pycc-ci-$(uname -m)-linux
+          python3 bench/wheel_check.py diff-match-patch tomli pypng \
+            --pycc "dist/$name/bin/pycc" --backend "dist/$name/python"
       # Includes the hosted tests that build against and compare with the
       # CPython found as `python3` (the oracle). Skipped: the static-libpython
       # tests (need a relocatable CPython with a PIC `libpython3.X.a`) and the

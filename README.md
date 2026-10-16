@@ -240,6 +240,73 @@ compiled yet), as do the generators and the `bytearray()`/`dict()`-building help
 code dominated by those -- decoding the tiny PngSuite images, say -- gains much less
 (1.6x).
 
+## Use pycc in your project
+
+`pycc.build` is a PEP 517 build backend: with it, `pip install .` and `pip wheel .`
+compile your project's modules to abi3 CPython extension modules (one `--ext` module
+per `.py` file, `--foreign-relative-imports`, `--release`), keep the modules you name in
+Python, and write a wheel tagged `cp313-abi3-<platform>` (CPython 3.13 and newer):
+`manylinux_<glibc>_<arch>` on Linux (the build machine's glibc; `linux_<arch>` if a
+module links a library manylinux does not allow) and `macosx_<N>_0_arm64` on macOS (the
+minimum macOS the modules record). Select it in `pyproject.toml`:
+
+```toml
+[build-system]
+requires = ["pycc-build"]
+build-backend = "pycc.build"
+
+[project]                          # static PEP 621 metadata (no `dynamic`)
+name = "geo"
+version = "1.0"
+requires-python = ">=3.13"
+
+[tool.pycc]
+strict = true                      # default; false builds every module --non-strict
+pure-python = ["geo.cli"]          # modules (a package name covers its subpackages) kept as .py
+fallback-to-python = false         # true, or a list of modules: ship as .py if pycc refuses them
+extra-args = []                    # more `pycc build` flags for every module
+# packages = ["geo"], py-modules = ["m"], source-dir = "src": what ships, when the
+# default discovery does not find it (a src/ layout, else the package or module named
+# after the project, else the flat layout's packages and modules but tests, docs, ...).
+
+[tool.pycc.overrides."geo.__init__"]   # per module, or per package and its subpackages
+strict = false
+```
+
+The backend ships in the release archive as `python/pycc_build-X.Y.Z-py3-none-any.whl`
+(no PyPI download): either let pip's isolated build environment install it from there,
+or install it into your environment once and build without isolation. It finds the
+compiler as `$PYCC` (the `pycc` executable or the unpacked archive's directory), else
+`pycc` on `PATH`; it runs it with `PYCC_PYTHON` set to the interpreter pip runs, unless
+you set it.
+
+```console
+$ export PYCC=$HOME/pycc-vX.Y.Z-x86_64-linux
+$ pip wheel . --no-index --find-links $PYCC/python -w dist   # isolated build, offline
+$ pip install $PYCC/python/pycc_build-*.whl                    # or: install the backend,
+$ pip install . --no-build-isolation                           # then build in place
+```
+
+A module pycc cannot compile fails the build with pycc's diagnostics (and says which
+setting keeps it in Python); `pip -v` also shows each module's build time and, for a
+`--non-strict` module, what runs in CPython (`--report-fallbacks`). The build runs no
+project code: metadata is read from `pyproject.toml`, sources are only copied and
+compiled, symbolic links in the sources are refused, and everything is written under
+the directory pip hands the backend. `pip install -e .` (PEP 660) installs the sources
+uncompiled, for development; `python -m build --sdist` (or pip) makes an sdist of the
+sources, `pyproject.toml`, readme and license files (`sdist-include` adds more globs).
+
+In strict mode a compiled module publishes its functions, classes and evidently native
+constants, but not what it imports (`docs/DEVIATIONS.md`): a package `__init__.py` that
+re-exports names (`from .core import f`) should build `--non-strict`, as in the
+override above, or stay Python.
+
+CI builds the three packages above this way (`python3 bench/wheel_check.py`): `pip
+wheel` with the archive's backend and compiler, a fresh venv, a check that each module
+is an extension module, and each package's own test suite against the installed wheel.
+Their `pyproject.toml` is replaced by one selecting `pycc.build` (they use flit_core
+and setuptools): that is the test harness, not a change to the packages.
+
 ## Modes
 
 - **Strict** (default): `Any` is refused (`T0002`) and a type mismatch is a compile
@@ -321,8 +388,9 @@ $ tar xzf pycc-vX.Y.Z-x86_64-linux.tar.gz
 $ pycc-vX.Y.Z-x86_64-linux/bin/pycc build fib.py -o fib --release && ./fib
 ```
 
-The archive holds `bin/pycc`, its runtime library `lib/pycc/libpycc_rt.a`, and
-this README, `LICENSE` and `CHANGELOG.md`. Keep `bin/` and `lib/` together; the
+The archive holds `bin/pycc`, its runtime library `lib/pycc/libpycc_rt.a`, the
+build backend's wheel `python/pycc_build-X.Y.Z-py3-none-any.whl` (see "Use pycc in
+your project"), and this README, `LICENSE` and `CHANGELOG.md`. Keep `bin/` and `lib/` together; the
 directory itself can live anywhere (or symlink `bin/pycc` into your `PATH`). LLVM
 is linked in. What you need on the machine:
 

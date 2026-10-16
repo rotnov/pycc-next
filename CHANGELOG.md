@@ -4,6 +4,26 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- `pip install` builds with pycc (v0.6 accept 1): `pycc.build`, a PEP 517 (and PEP 660)
+  build backend in `python/`, shipped in the release archive as
+  `python/pycc_build-X.Y.Z-py3-none-any.whl`. A project selecting it compiles each of
+  its modules with `pycc build --ext` (strict by default; `[tool.pycc]` sets
+  `--non-strict`, per-module overrides, modules kept in Python, modules allowed to fall
+  back to Python, package discovery for `src/` and flat layouts, extra pycc flags) and
+  gets a `cp313-abi3-<platform>` wheel (`manylinux_<glibc>_<arch>`, or `linux_<arch>` when
+  a module links a library manylinux does not allow; `macosx_<N>_0_arm64`) with METADATA
+  from static PEP 621 metadata, entry points and a sha256 RECORD; also sdists and
+  editable installs (uncompiled). A module pycc refuses fails the build with pycc's
+  diagnostics. It finds the compiler as `$PYCC` or `pycc` on `PATH`, needs no network,
+  and runs no project code. README: "Use pycc in your project".
+- CI builds diff-match-patch, tomli and pypng into wheels with `pip wheel` and the
+  release archive's backend (`bench/wheel_check.py`, Linux x86_64 and aarch64), installs
+  each into a fresh venv and runs the package's own test suite against it; the release
+  smoke test (`scripts/smoke.sh`, all three platforms) builds and runs a small project's
+  wheel the same way.
+
 ## [0.5.0] - 2026-10-16
 
 Typed packages at native speed. Tuples of any element type, including CPython objects,

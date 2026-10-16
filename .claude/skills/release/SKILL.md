@@ -7,7 +7,9 @@ description: Use when cutting a pycc-next release (version bump, changelog, tag,
 
 1. `main` is green in CI and `cargo test --release --workspace` passes locally.
 2. Run the `bench` skill; put the table in the release notes.
-3. Bump `version` in the root `Cargo.toml`; `cargo build --release` to refresh `Cargo.lock`.
+3. Bump `version` in the root `Cargo.toml`, in `python/pyproject.toml` and in
+   `python/pycc/__init__.py` (the `pycc.build` backend ships with the same version;
+   `python/tests` fails on a mismatch); `cargo build --release` to refresh `Cargo.lock`.
 4. Add `## [X.Y.Z] - YYYY-MM-DD` to `CHANGELOG.md` (Added / Changed / Fixed / Known gaps -
    copy open rows from `docs/DEVIATIONS.md` into Known gaps). The release workflow uses
    this section as the release notes.
@@ -18,9 +20,11 @@ description: Use when cutting a pycc-next release (version bump, changelog, tag,
    `pycc-vX.Y.Z-x86_64-linux.tar.gz` (ubuntu-24.04), `pycc-vX.Y.Z-aarch64-linux.tar.gz`
    (ubuntu-24.04-arm) and `pycc-vX.Y.Z-aarch64-macos.tar.gz` (macos-26,
    `MACOSX_DEPLOYMENT_TARGET=26.0`), each + sha256, with `scripts/package.sh`
-   (`bin/pycc`, `lib/pycc/libpycc_rt.a`, README, LICENSE, CHANGELOG), and smoke-tests each
-   unpacked tarball with `scripts/smoke.sh` (native, `--ext`, `--non-strict` vs CPython,
-   cleared environment). Only then the write-scoped `publish` job verifies all three
+   (`bin/pycc`, `lib/pycc/libpycc_rt.a`, `python/pycc_build-X.Y.Z-py3-none-any.whl`,
+   README, LICENSE, CHANGELOG), and smoke-tests each unpacked tarball with
+   `scripts/smoke.sh` (native, `--ext`, `--non-strict` vs CPython, and a small project's
+   wheel built by `pip wheel` through the archive's `pycc.build` backend; cleared
+   environment). Only then the write-scoped `publish` job verifies all three
    archives and creates one GitHub Release holding them. Verify the release exists and a tarball
    runs on a machine without the checkout: download, unpack,
    `scripts/smoke.sh pycc-vX.Y.Z-<platform>`.
