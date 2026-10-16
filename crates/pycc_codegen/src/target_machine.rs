@@ -62,6 +62,7 @@ pub(crate) fn target_machine_for(
         // not match the host's own architecture, and LLVM only has codegen
         // support for a target's backend if that backend was initialized.
         Target::initialize_all(&InitializationConfig::default());
+        set_backend_options();
     });
     // ManuallyDrop, not a plain value: see D-029. TargetTriple wraps an
     // LLVMString (inkwell's own message wrapper around LLVMCreateMessage /
@@ -119,6 +120,45 @@ pub(crate) fn target_machine_for(
             "creating a target machine with generic CPU/features should never fail for a \
              triple Target::from_triple has already accepted",
         ))
+}
+
+/// The LLVM backend options every object pycc emits is built with, set once
+/// per process before the first target machine exists (`cl::opt`s are
+/// process-global and `LLVMParseCommandLineOptions` may run only once).
+///
+/// `-x86-branches-within-32B-boundaries`: the x86 assembler pads so that no
+/// jump crosses or ends on a 32-byte boundary. Skylake-derived Intel cores
+/// (Skylake through Cascade Lake, including the Xeons of shared CI and cloud
+/// machines) run a microcode update for erratum SKX102 that keeps such a
+/// jump's code window out of the decoded-instruction cache, so a hot loop
+/// whose branch lands on a boundary runs measurably slower. Without the
+/// padding, where a loop lands depends on the size of every function placed
+/// before it: diff-match-patch's `diff_bisect` became 7-13% slower between
+/// two commits whose code for it was identical, instruction for instruction,
+/// because unrelated functions grew (v0.5, `CHANGELOG.md`). With it,
+/// the hot loops run as fast at every placement as at the best one.
+/// `-x86-pad-max-prefix-size=5`: pad with instruction prefixes where it can
+/// instead of executed `nop`s, which keeps the cost of the padding on other
+/// x86 cores to a few executed instructions. Both options belong to the x86
+/// backend and change nothing for other targets.
+fn set_backend_options() {
+    let args: [&std::ffi::CStr; 3] = [
+        c"pycc",
+        c"-x86-branches-within-32B-boundaries",
+        c"-x86-pad-max-prefix-size=5",
+    ];
+    let argv: Vec<*const std::ffi::c_char> = args.iter().map(|arg| arg.as_ptr()).collect();
+    // SAFETY: `argv` holds `args.len()` pointers to NUL-terminated strings
+    // that outlive the call, and `TARGET_INIT` runs this once per process,
+    // before any target machine reads the options. Both options are
+    // registered by the x86 backend `initialize_all` linked in.
+    unsafe {
+        inkwell::llvm_sys::support::LLVMParseCommandLineOptions(
+            argv.len() as i32,
+            argv.as_ptr(),
+            std::ptr::null(),
+        );
+    }
 }
 
 /// The host triple for a native macOS build pinned to the deployment target

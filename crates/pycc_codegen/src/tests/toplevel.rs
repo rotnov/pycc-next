@@ -531,3 +531,47 @@ fn target_initialization_happens_once_across_concurrent_compiles() {
         "LLVM's target registry must be initialized exactly once per process"
     );
 }
+
+/// The largest alignment of an ELF64 object's `.text` sections.
+fn elf64_text_alignment(object: &[u8]) -> u64 {
+    let u16_at = |at: usize| u64::from(u16::from_le_bytes([object[at], object[at + 1]]));
+    let u64_at = |at: usize| u64::from_le_bytes(object[at..at + 8].try_into().expect("8 bytes"));
+    let u32_at = |at: usize| {
+        u64::from(u32::from_le_bytes(
+            object[at..at + 4].try_into().expect("4 bytes"),
+        ))
+    };
+    assert_eq!(&object[..4], b"\x7fELF", "an ELF object");
+    let (shoff, shentsize, shnum, shstrndx) =
+        (u64_at(0x28), u16_at(0x3A), u16_at(0x3C), u16_at(0x3E));
+    let header = |index: u64| (shoff + index * shentsize) as usize;
+    let names = u64_at(header(shstrndx) + 0x18) as usize;
+    (0..shnum)
+        .filter(|&index| {
+            let name = &object[names + u32_at(header(index)) as usize..];
+            name.starts_with(b".text\0") || name.starts_with(b".text.")
+        })
+        .map(|index| u64_at(header(index) + 0x30))
+        .max()
+        .expect("a .text section")
+}
+
+#[test]
+fn x86_objects_keep_jumps_within_32_byte_boundaries() {
+    // `target_machine::set_backend_options`: the x86 assembler pads so that
+    // no jump crosses or ends on a 32-byte boundary, which it can only
+    // guarantee in a code section aligned to 32 bytes (LLVM's default is 16).
+    // Without it, diff-match-patch's `diff_bisect` ran 7-13% slower on a
+    // Skylake-derived Xeon when unrelated functions moved its loops.
+    let mir = MirModule {
+        items: vec![MirItem::TopLevelStmt(call_print(42))],
+        class_defs: Vec::new(),
+    };
+    let dir = pycc_scratch::ScratchDir::new("x86_branch_alignment")
+        .expect("failed to create scratch dir");
+    let obj_path = dir.join("aligned.o");
+    compile_to_object(&mir, &obj_path, Some("x86_64-unknown-linux-gnu"), true)
+        .expect("an x86_64 Linux object should compile on any host");
+    let object = std::fs::read(&obj_path).expect("the object file");
+    assert!(elf64_text_alignment(&object) >= 32);
+}
