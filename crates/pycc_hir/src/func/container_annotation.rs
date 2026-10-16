@@ -79,13 +79,22 @@ pub(super) fn container_annotation_to_ty(
         .iter()
         .any(|arg| matches!(arg, Expr::EllipsisLiteral(_)))
     {
-        // Non-strict mode: a runtime-length tuple is the CPython `tuple`.
+        // `tuple[T, ...]`: the homogeneous variadic tuple, native when a
+        // list can hold `T` (`Ty::VarTuple`). In an `ext` or non-strict
+        // module any other element (an object) makes it the CPython
+        // `tuple`, as an object element makes any container one.
         if family == "tuple"
             && args.len() == 2
             && matches!(args[1], Expr::EllipsisLiteral(_))
-            && crate::func::is_non_strict(aliases)
+            && !matches!(args[0], Expr::EllipsisLiteral(_))
         {
-            return Ok(Ty::Object);
+            let element = annotation_to_ty(args[0], type_param, class_name, aliases, class_defs)?;
+            if crate::container::is_var_tuple_element_ty(&element) {
+                return Ok(Ty::VarTuple(Box::new(element)));
+            }
+            if super::objects_spellable(aliases) {
+                return Ok(Ty::Object);
+            }
         }
         // The advice is per family. `tuple[X, ...]` is the one spelling that
         // means something in Python -- a homogeneous variadic tuple -- so it
@@ -175,8 +184,23 @@ pub(super) fn container_annotation_to_ty(
     // Checked before the D-105/D-122 capability gate, which governs native
     // containers only; a container whose arguments are all native is
     // unaffected and still reaches that gate.
+    //
+    // A fixed-arity `tuple` is the exception (v0.5, native containers of
+    // objects): `tuple[int, Any]` is a native tuple object one element of
+    // which is a CPython object (`pycc_rt::list::LIST_KIND_OBJECT`). A tuple
+    // is immutable, so it crosses into CPython as a copy (the same one each
+    // time) and nothing can observe that it was not CPython's own.
     if super::objects_spellable(aliases) && elements.contains(&Ty::Object) {
-        return Ok(Ty::Object);
+        let tuple_of_elements = family == "tuple"
+            && elements
+                .iter()
+                .all(|e| *e == Ty::Object || crate::container::check_tuple_element_ty(e, span).is_ok());
+        if !tuple_of_elements {
+            return Ok(Ty::Object);
+        }
+        // The native elements are checked as any tuple's are; the object
+        // ones are held as the objects themselves (`LIST_KIND_OBJECT`).
+        return Ok(Ty::Tuple(Box::new(elements)));
     }
     let mut elements = elements.into_iter();
     let ty = match family {

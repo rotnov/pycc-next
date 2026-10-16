@@ -84,11 +84,13 @@ pub(crate) fn admits_coercion(from: &Ty, to: &Ty) -> bool {
 }
 
 /// Whether an object reaches a slot of type `ty` through the run-time
-/// conversion as a copy: a `frozenset[str]` or `frozenset[int]`, whose
-/// immutability makes a native copy of a CPython `set` or `frozenset`
-/// indistinguishable from it.
+/// conversion as a copy: a `frozenset[str]` or `frozenset[int]`, or a
+/// `tuple[str, ...]`, whose immutability makes a native copy of a CPython
+/// `set`/`frozenset` or `tuple` indistinguishable from it (the tuple copy
+/// even crosses back as the same object, `pycc_rt_tuple_foreign`).
 pub(crate) fn is_coercible_frozenset(ty: &Ty) -> bool {
     matches!(ty, Ty::FrozenSet(element) if matches!(**element, Ty::Str | Ty::Int))
+        || matches!(ty, Ty::VarTuple(element) if **element == Ty::Str)
 }
 
 /// Whether `value`, a tuple display some element of which is a CPython
@@ -111,7 +113,13 @@ pub(crate) fn admits_tuple_display_return(
         && elements.iter().zip(tys.iter()).all(|(element, ty)| {
             match crate::infer_expr_in(env, local_names, element) {
                 Ok(Ty::Object) => matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Object),
-                Ok(actual) => actual == *ty,
+                // A native element of its slot's type (a fixed-arity tuple
+                // of `T`s is a `tuple[T, ...]`), or boxed into an `object`
+                // slot.
+                Ok(actual) => {
+                    crate::is_assignable(actual.clone(), ty.clone())
+                        || crate::object_box::admits(env, &actual, ty)
+                }
                 Err(_) => false,
             }
         })

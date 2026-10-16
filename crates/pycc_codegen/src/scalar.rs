@@ -371,7 +371,9 @@ pub(crate) fn ty_to_basic_type(
         // `list[T]`'s runtime object is heap-allocated and always
         // referenced by pointer -- exactly the same storage/parameter
         // representation `Str` already gets above, whatever `T` is.
-        pycc_mir::Ty::List(_) => context.ptr_type(inkwell::AddressSpace::default()).into(),
+        pycc_mir::Ty::List(_) | pycc_mir::Ty::VarTuple(_) => {
+            context.ptr_type(inkwell::AddressSpace::default()).into()
+        }
         // `dict[K, V]`'s runtime object (PR-11 Task 5) is heap-allocated
         // and always referenced by pointer -- exactly the same
         // storage/parameter representation `List(_)` gets immediately
@@ -511,6 +513,7 @@ pub(crate) fn default_value_for_type<'ctx>(
         pycc_mir::Ty::Float => context.f64_type().const_zero().into(),
         pycc_mir::Ty::Str
         | pycc_mir::Ty::List(_)
+        | pycc_mir::Ty::VarTuple(_)
         | pycc_mir::Ty::Dict(_)
         | pycc_mir::Ty::Set(_)
         | pycc_mir::Ty::FrozenSet(_)

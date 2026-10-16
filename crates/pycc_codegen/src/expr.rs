@@ -255,6 +255,16 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             let object = emit_expr(context, builder, module, rt, user_functions, locals, object);
             object_unbox::emit_unboxed(context, builder, module, rt, object, inner)
         }
+        MirExpr::TupleRebox(value, ty) => crate::tuple_rebox::emit(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            value,
+            ty,
+        ),
         MirExpr::ObjectCoerce(object, ty) => crate::object_coerce::emit_coerced(
             context,
             builder,

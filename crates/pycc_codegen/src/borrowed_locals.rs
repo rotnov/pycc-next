@@ -48,7 +48,7 @@ pub(super) fn borrowed_locals<'a>(
     let stable_params: HashSet<&str> = params
         .iter()
         .filter(|(name, ty)| {
-            matches!(ty, Ty::List(_)) && !bindings.iter().any(|binding| binding.target == name)
+            matches!(ty, Ty::List(_) | Ty::VarTuple(_)) && !bindings.iter().any(|binding| binding.target == name)
         })
         .map(|(name, _)| name.as_str())
         .collect();
@@ -110,7 +110,7 @@ fn element_source(value: &MirExpr) -> Option<&str> {
     match base.as_ref() {
         MirExpr::Name {
             name,
-            ty: Ty::List(_),
+            ty: Ty::List(_) | Ty::VarTuple(_),
         } => Some(name),
         _ => None,
     }
@@ -160,7 +160,9 @@ fn expr_is_admitted(expr: &MirExpr) -> bool {
         | MirExpr::IntBoundary(_) => true,
         // A plain slot read: a property getter lowers to a call instead.
         MirExpr::AttrGet { .. } => true,
-        MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_) | Ty::Tuple(_)),
+        MirExpr::Subscript { base, .. } => {
+            matches!(base.ty(), Ty::List(_) | Ty::VarTuple(_) | Ty::Tuple(_))
+        }
         MirExpr::BinOp { left, right, .. }
         | MirExpr::Compare { left, right, .. }
         | MirExpr::BoolOp { left, right, .. } => {

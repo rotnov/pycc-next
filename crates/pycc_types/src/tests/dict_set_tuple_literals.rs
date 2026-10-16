@@ -563,11 +563,14 @@ fn a_tuple_literal_of_int_bool_float_infers_ty_tuple() {
 }
 
 #[test]
-fn an_empty_tuple_literal_is_rejected_as_t0021() {
+fn an_empty_tuple_literal_is_the_empty_tuple() {
+    // v0.5: `()` is the native empty tuple, assignable to any
+    // `tuple[T, ...]`.
     let env = Environment::new();
-    let err = infer_expr(&env, &HirExpr::TupleLiteral(vec![])).unwrap_err();
-    assert_eq!(err.code, "T0021");
-    assert!(err.message.contains("empty tuple literal"));
+    assert_eq!(
+        infer_expr(&env, &HirExpr::TupleLiteral(vec![])),
+        Ok(Ty::Tuple(Box::new(vec![])))
+    );
 }
 
 #[test]

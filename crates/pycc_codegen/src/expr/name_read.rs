@@ -158,7 +158,7 @@ pub(crate) fn emit_name_expr<'ctx>(
         // `List` arm at all, since its `if let Scalar::Str(..)
         // else { scalar }` shape already passes a list through
         // untouched, which is exactly D-107's leak-only policy.
-        Ty::List(_) => {
+        Ty::List(_) | Ty::VarTuple(_) => {
             let loaded = builder
                 .build_load(
                     context.ptr_type(inkwell::AddressSpace::default()),

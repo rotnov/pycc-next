@@ -409,7 +409,7 @@ pub unsafe extern "C" fn pycc_rt_counter_most_common(d: *mut PyDictObj, n: i64) 
         .map(|(k, v)| {
             value::retain(d.key_kind, k);
             crate::itertools::retain(LIST_KIND_INT, v);
-            crate::tuple::tuple_from(vec![k, v], kinds.into()) as i64
+            crate::tuple::tuple_from(vec![k, v], &kinds) as i64
         })
         .collect();
     crate::list::new_raw_words(LIST_KIND_TUPLE, tuples)

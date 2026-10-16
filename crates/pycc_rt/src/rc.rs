@@ -124,6 +124,33 @@ pub extern "C" fn pycc_rt_object_install(retain: ObjectHook, release: ObjectHook
     OBJECT_RELEASE.store(release as *mut (), Ordering::Relaxed);
 }
 
+/// `repr(o)` of a `PyObject *` as a new `str`, or null with the CPython
+/// error bridged into the pending exception.
+type ObjectReprHook = unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut crate::PyStrObj;
+
+static OBJECT_REPR: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Installs how an `o` word renders inside a native container (a tuple
+/// element of `tuple[int, Any]`), called by the C shim next to
+/// [`pycc_rt_object_install`].
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_object_repr_install(repr: ObjectReprHook) {
+    OBJECT_REPR.store(repr as *mut (), Ordering::Relaxed);
+}
+
+/// `repr()` of the CPython object `word` as a new `str`; null when it
+/// raised (the exception is pending) or no hook is installed.
+pub(crate) fn object_repr(word: i64) -> *mut crate::PyStrObj {
+    let hook = OBJECT_REPR.load(Ordering::Relaxed);
+    if hook.is_null() {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: only `pycc_rt_object_repr_install` stores here, and it
+    // stores an `ObjectReprHook`.
+    let hook = unsafe { std::mem::transmute::<*mut (), ObjectReprHook>(hook) };
+    unsafe { hook(word as *mut std::ffi::c_void) }
+}
+
 /// Calls the installed object hook in `cell` on `word`. Without a hook
 /// there is no CPython, hence no `o` word to count.
 fn object_hook(cell: &AtomicPtr<()>, word: i64) {

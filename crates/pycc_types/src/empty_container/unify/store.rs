@@ -117,12 +117,28 @@ impl Store {
                     self.unify(x, y);
                 }
             }
+            // A fixed-arity tuple flows into a `tuple[T, ...]` slot
+            // (`Ty::VarTuple`): each element unifies with `T`.
+            (Some(Shape::Known(Ty::VarTuple(elem))), Some(Shape::Tuple(xs)))
+            | (Some(Shape::Tuple(xs)), Some(Shape::Known(Ty::VarTuple(elem)))) => {
+                self.shape[ra] = Some(Shape::Known(Ty::VarTuple(elem.clone())));
+                for x in xs {
+                    let e = self.known((*elem).clone());
+                    self.unify(e, x);
+                }
+            }
             (Some(Shape::Known(x)), Some(Shape::Known(y))) => {
                 if x != y {
                     // `bool` flows into an `int` slot (`xs.append(True)` on a
-                    // `list[int]`); any other pair is a conflict.
+                    // `list[int]`), and a fixed-arity tuple of `T`s into a
+                    // `tuple[T, ...]` one; any other pair is a conflict.
                     let joined = match (&x, &y) {
                         (Ty::Int, Ty::Bool) | (Ty::Bool, Ty::Int) => Some(Ty::Int),
+                        (Ty::VarTuple(e), Ty::Tuple(items)) | (Ty::Tuple(items), Ty::VarTuple(e))
+                            if pycc_hir::tuple_fits_var_tuple(items, e) =>
+                        {
+                            Some(Ty::VarTuple(e.clone()))
+                        }
                         _ => None,
                     };
                     match joined {

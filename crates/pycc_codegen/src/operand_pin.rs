@@ -187,7 +187,7 @@ impl Planner<'_, '_> {
             MirExpr::Sequence { value, .. } => return self.pins_across_operation(value),
             MirExpr::Name { name, .. } => self.globals.contains(name),
             MirExpr::AttrGet { .. } => true,
-            MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_)),
+            MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_) | Ty::VarTuple(_)),
             _ => false,
         };
         rebindable && operand.ty() == Ty::Object && heap_rc::is_borrowed_read(operand)
@@ -288,7 +288,7 @@ fn is_pinnable_read(rt: &RtFns<'_>, expr: &MirExpr) -> bool {
         MirExpr::Name { ty: Ty::Object, .. } => true,
         // A tuple element is never counted (and `ty()` of a malformed
         // tuple subscript is codegen's error to report, not this pass's).
-        MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_)),
+        MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_) | Ty::VarTuple(_)),
         _ => false,
     };
     through_storage
@@ -323,7 +323,9 @@ pub(crate) fn may_release(expr: &MirExpr) -> bool {
         // A typed array operation reads or writes the array's own memory
         // and runs no user code (`ndarray`).
         | MirExpr::Nd(_) => true,
-        MirExpr::Subscript { base, .. } => matches!(base.ty(), Ty::List(_) | Ty::Tuple(_)),
+        MirExpr::Subscript { base, .. } => {
+            matches!(base.ty(), Ty::List(_) | Ty::VarTuple(_) | Ty::Tuple(_))
+        }
         MirExpr::BinOp { left, right, .. }
         | MirExpr::Compare { left, right, .. }
         | MirExpr::BoolOp { left, right, .. } => {

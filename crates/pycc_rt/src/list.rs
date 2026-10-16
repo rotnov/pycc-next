@@ -56,13 +56,19 @@ pub const LIST_KIND_SET: i64 = 9;
 /// Element kind of a list of function values (`PyClosureObj` pointers,
 /// `closure.rs`).
 pub const LIST_KIND_CLOSURE: i64 = 10;
+/// Element kind of a CPython object (an owned `PyObject *`, counted through
+/// the shim's hooks, `crate::rc`): a tuple element typed `object` (`Any`)
+/// in an `--ext` or non-strict module. Only tuple objects hold it; the
+/// compiler compares, hashes and renders such a tuple through CPython (it
+/// boxes it first), never through `crate::value`.
+pub const LIST_KIND_OBJECT: i64 = 11;
 
 /// See the module doc comment for the layout and ownership contract.
 #[repr(C)]
 pub struct PyListObj {
     len: i64,
     /// `len` elements of `i64`, or of `u8` for `LIST_KIND_BOOL`.
-    data: *mut u8,
+    pub(crate) data: *mut u8,
     cap: i64,
     kind: i64,
     /// The reference count (`crate::rc`).
@@ -83,6 +89,13 @@ pub struct PyListObj {
     /// `cap` counts from there. Every operation other than the deque's own
     /// end operations first moves the elements back to the start.
     pub(crate) head: i64,
+    /// A tuple object's CPython `tuple` of the same elements, once one was
+    /// made for it (`pycc_ext_obj_pack_list`) or it was copied from one
+    /// (`pycc_ext_obj_coerce`): the tuple crosses into CPython as that one
+    /// object every time, so its identity survives repeated crossings. Its
+    /// reference is released with the tuple. Null for a list, and for a
+    /// tuple not yet crossed.
+    pub(crate) foreign: *mut std::ffi::c_void,
 }
 
 const _: () = assert!(std::mem::offset_of!(PyListObj, rc) == crate::rc::RC_OFFSET);
@@ -253,6 +266,7 @@ fn new_typed_list<T: Elem>(kind: i64, items: Vec<T>) -> *mut PyListObj {
         flavor: 0,
         maxlen: -1,
         head: 0,
+        foreign: std::ptr::null_mut(),
     }))
 }
 
@@ -287,6 +301,9 @@ pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
     LIST_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     // SAFETY: the count reached zero, so nothing else names the list.
     let mut list = unsafe { Box::from_raw(list) };
+    if !list.foreign.is_null() {
+        crate::rc::release_object(list.foreign);
+    }
     if list.kind == crate::value::TUPLE_OBJECT {
         let kinds = crate::tuple::kinds_of(&list);
         for (word, kind) in list.typed::<i64>().iter().zip(kinds) {
@@ -575,8 +592,9 @@ fn adjust_slice(len: i64, start: Option<i64>, stop: Option<i64>, step: i64) -> (
 
 /// `xs[start:stop:step]` as a new list, CPython's semantics exactly
 /// (negative bounds and steps included). `present` says which bounds were
-/// written (`SLICE_HAS_*`). A zero step raises `ValueError` and returns an
-/// empty list.
+/// written (`SLICE_HAS_*`). A zero step raises `ValueError` and returns
+/// null: generated code tests for the pending exception before it uses
+/// the result, so nothing is left to free on that path.
 ///
 /// # Safety
 /// `list` must be a live `PyListObj` pointer.
@@ -589,6 +607,10 @@ pub unsafe extern "C" fn pycc_rt_list_slice(
     present: i64,
 ) -> *mut PyListObj {
     let list = unsafe { &*list };
+    // A `tuple[T, ...]` (`pycc_hir::Ty::VarTuple`) is a tuple object.
+    if list.kind == crate::value::TUPLE_OBJECT {
+        return crate::tuple::slice(list, start, stop, step, present);
+    }
     let step = if present & SLICE_HAS_STEP != 0 {
         step
     } else {
@@ -600,7 +622,7 @@ pub unsafe extern "C" fn pycc_rt_list_slice(
             "ValueError",
             "slice step cannot be zero",
         );
-        return new_list(list.kind, Vec::new());
+        return std::ptr::null_mut();
     }
     let start = (present & SLICE_HAS_START != 0).then_some(start);
     let stop = (present & SLICE_HAS_STOP != 0).then_some(stop);
@@ -659,6 +681,9 @@ pub unsafe extern "C" fn pycc_rt_list_concat(
     b: *mut PyListObj,
 ) -> *mut PyListObj {
     let (a, b) = unsafe { (&*a, &*b) };
+    if a.kind == crate::value::TUPLE_OBJECT || b.kind == crate::value::TUPLE_OBJECT {
+        return crate::tuple::concat(a, b);
+    }
     if !deque::concat_compatible(a, b) {
         return new_list(a.kind, Vec::new());
     }
@@ -681,6 +706,9 @@ pub unsafe extern "C" fn pycc_rt_list_concat(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_repeat(list: *mut PyListObj, count: i64) -> *mut PyListObj {
     let list = unsafe { &*list };
+    if list.kind == crate::value::TUPLE_OBJECT {
+        return crate::tuple::repeat(list, count);
+    }
     let count = count.max(0) as usize;
     if list.kind == LIST_KIND_BOOL {
         // Bytes repeat directly: `[True] * n` is the flag-array idiom.
@@ -707,6 +735,9 @@ pub(crate) fn words_equal(kind: i64, a: i64, b: i64) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_contains(list: *mut PyListObj, word: i64) -> i8 {
     let list = unsafe { &*list };
+    if list.kind == crate::value::TUPLE_OBJECT {
+        return i8::from(crate::tuple::contains(list, word));
+    }
     i8::from(
         list.items()
             .iter()

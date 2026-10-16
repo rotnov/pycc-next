@@ -132,7 +132,7 @@ impl Item {
     pub(crate) fn into_word(self, desc: &Desc) -> i64 {
         match self {
             Item::Word(word) => word,
-            Item::Fields(words) => crate::tuple::tuple_from(words, desc.elem_kinds()) as i64,
+            Item::Fields(words) => crate::tuple::tuple_from(words, &desc.elem_kinds()) as i64,
         }
     }
 

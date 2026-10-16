@@ -111,6 +111,70 @@ int pycc_ext_obj_setitem(PyObject *o, PyObject *k, PyObject *v)
 extern void *pycc_rt_set_new(long long kind);
 extern void pycc_rt_set_add(void *set, long long word);
 extern void pycc_rt_set_decref(void *set);
+extern void *pycc_rt_tuple_new(long long len, const unsigned char *kinds);
+extern void pycc_rt_tuple_set_word(void *tuple, long long index, long long word);
+extern void pycc_rt_tuple_set_foreign(void *tuple, void *object);
+extern void pycc_rt_list_decref(void *list);
+
+/*
+ * Kind 11 of `pycc_ext_obj_coerce`: a `tuple[str, ...]` slot. A CPython
+ * `tuple` of `str`s becomes a native tuple object of the same strings (each
+ * sharing its CPython `str`), which shares the tuple itself when it crosses
+ * back, so a copy nothing can tell from the value: a tuple is never
+ * mutated. Returns 0 with the tuple in `*out`, or -1 with `TypeError`
+ * (`what` names the slot) for anything else.
+ */
+int pycc_ext_coerce_str_tuple(PyObject *o, const char *what, void **out)
+{
+    PyObject *type_name;
+    Py_ssize_t n;
+    Py_ssize_t i;
+    unsigned char *kinds;
+    void *tuple;
+
+    if (!PyTuple_Check(o)) {
+        type_name = PyType_GetName(Py_TYPE(o));
+        if (type_name != NULL) {
+            PyErr_Format(PyExc_TypeError, "%s must be tuple, not %U", what, type_name);
+            Py_DECREF(type_name);
+        }
+        return -1;
+    }
+    n = PyTuple_Size(o);
+    kinds = (unsigned char *)PyMem_Malloc(n > 0 ? (size_t)n : 1);
+    if (kinds == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    memset(kinds, 3, n > 0 ? (size_t)n : 1); /* LIST_KIND_STR */
+    tuple = pycc_rt_tuple_new((long long)n, kinds);
+    PyMem_Free(kinds);
+    for (i = 0; i < n; i++) {
+        PyObject *item = PyTuple_GetItem(o, i);
+        void *text = NULL;
+
+        if (!PyUnicode_Check(item)) {
+            type_name = PyType_GetName(Py_TYPE(item));
+            if (type_name != NULL) {
+                PyErr_Format(PyExc_TypeError,
+                             "%s must be a tuple of str, not one holding %U", what, type_name);
+                Py_DECREF(type_name);
+            }
+        } else if (pycc_ext_obj_unbox_str(item, &text) == 0) {
+            pycc_rt_tuple_set_word(tuple, (long long)i, (long long)(intptr_t)text);
+            continue;
+        }
+        /* The words not yet written are zero, which releasing skips. */
+        pycc_rt_list_decref(tuple);
+        return -1;
+    }
+    if (PyTuple_CheckExact(o)) {
+        Py_INCREF(o);
+        pycc_rt_tuple_set_foreign(tuple, o);
+    }
+    *out = tuple;
+    return 0;
+}
 
 int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
 {
@@ -186,6 +250,10 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
         }
         *(void **)out = set;
         return 0;
+    }
+
+    if (o != NULL && out != NULL && kind == 11) {
+        return pycc_ext_coerce_str_tuple(o, what, (void **)out);
     }
 
     if (o != NULL && out != NULL && kind >= 4 && kind <= 8) {

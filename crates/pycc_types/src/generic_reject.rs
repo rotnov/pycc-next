@@ -13,9 +13,11 @@ use super::*;
 pub(crate) fn ty_contains_param(ty: &Ty) -> bool {
     match ty {
         Ty::Param(_) => true,
-        Ty::List(inner) | Ty::Set(inner) | Ty::FrozenSet(inner) | Ty::Optional(inner) => {
-            ty_contains_param(inner)
-        }
+        Ty::List(inner)
+        | Ty::Set(inner)
+        | Ty::FrozenSet(inner)
+        | Ty::VarTuple(inner)
+        | Ty::Optional(inner) => ty_contains_param(inner),
         Ty::Generator(sig) => {
             ty_contains_param(&sig.0) || ty_contains_param(&sig.1) || ty_contains_param(&sig.2)
         }
@@ -99,9 +101,11 @@ pub(crate) fn scan_signature_ty_for_param(
             }
             Ok(())
         }
-        Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) | Ty::Optional(elem) => {
-            scan_signature_ty_for_param(elem, false, found)
-        }
+        Ty::List(elem)
+        | Ty::Set(elem)
+        | Ty::FrozenSet(elem)
+        | Ty::VarTuple(elem)
+        | Ty::Optional(elem) => scan_signature_ty_for_param(elem, false, found),
         Ty::Generator(sig) => scan_signature_ty_for_param(&sig.0, false, found),
         Ty::Dict(kv) => {
             scan_signature_ty_for_param(&kv.0, false, found)?;

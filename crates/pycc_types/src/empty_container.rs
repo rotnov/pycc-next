@@ -151,6 +151,12 @@ mod object_slot;
 mod producer;
 mod solved_signatures;
 mod unify;
+mod diagnostics;
+mod ty_queries;
+
+pub(crate) use diagnostics::{name_binding, unresolved_dict, unresolved_list};
+pub(crate) use ty_queries::contains_infer;
+use ty_queries::contains_optional;
 
 pub(crate) use call_site::resolve_call_site_params;
 pub(crate) use init_params::resolve_init_params;
@@ -919,131 +925,12 @@ fn free_of(resolution: Resolution, rejected: fn(&Ty) -> bool) -> Option<Resoluti
     accepted.then_some(resolution)
 }
 
-/// Whether `ty` is `Ty::Infer` or contains one anywhere inside it.
-///
-/// The recursion matters: a producer can yield a nested container whose
-/// *element* is the placeholder (`xs.append(ys)` where `ys` is an
-/// unannotated helper parameter's list), and a `list[list[<inferred>]]`
-/// stored in the node is the same wrong resolution a bare
-/// `list[<inferred>]` is.
-pub(crate) fn contains_infer(ty: &Ty) -> bool {
-    match ty {
-        Ty::Infer => true,
-        Ty::List(element) | Ty::Set(element) | Ty::FrozenSet(element) | Ty::Optional(element) => {
-            contains_infer(element)
-        }
-        Ty::Generator(sig) => {
-            contains_infer(&sig.0) || contains_infer(&sig.1) || contains_infer(&sig.2)
-        }
-        Ty::Dict(pair) => contains_infer(&pair.0) || contains_infer(&pair.1),
-        Ty::Tuple(elements) => elements.iter().any(contains_infer),
-        Ty::Callable(sig) => sig.0.iter().any(contains_infer) || contains_infer(&sig.1),
-        Ty::Int
-        | Ty::Float
-        | Ty::Bool
-        | Ty::Str
-        | Ty::None
-        | Ty::Param(_)
-        | Ty::Instance(_)
-        | Ty::Protocol(_)
-        | Ty::Object
-        | Ty::MemoryView
-        | Ty::NdArray(_) => false,
-    }
-}
-
-/// Whether `ty` is `Ty::Optional` or contains one anywhere inside it.
-///
-/// The node itself answers `true` without recursing: it is the `Optional`
-/// *wrapper* the check phase may have narrowed away, not anything inside it.
-/// The recursion still matters for the nested shapes -- a producer can yield
-/// `list[int | None]`, and freezing that into an element position is the same
-/// wrong resolution a bare `int | None` is.
-fn contains_optional(ty: &Ty) -> bool {
-    match ty {
-        Ty::Optional(_) => true,
-        Ty::List(element) | Ty::Set(element) | Ty::FrozenSet(element) => contains_optional(element),
-        Ty::Generator(sig) => contains_optional(&sig.0),
-        Ty::Dict(pair) => contains_optional(&pair.0) || contains_optional(&pair.1),
-        Ty::Tuple(elements) => elements.iter().any(contains_optional),
-        Ty::Callable(_) => false,
-        Ty::Int
-        | Ty::Float
-        | Ty::Bool
-        | Ty::Str
-        | Ty::None
-        | Ty::Infer
-        | Ty::Param(_)
-        | Ty::Instance(_)
-        | Ty::Protocol(_)
-        | Ty::Object
-        | Ty::MemoryView
-        | Ty::NdArray(_) => false,
-    }
-}
-
 fn from_container_ty(ty: &Ty) -> Option<Resolution> {
     match ty {
         Ty::List(element) => Some(Resolution::List((**element).clone())),
         Ty::Dict(pair) => Some(Resolution::Dict(pair.0.clone(), pair.1.clone())),
         _ => None,
     }
-}
-
-/// `T0003` for an empty list literal no source of evidence could type. Both
-/// remedies are real in every position: the annotation source is purely
-/// syntactic and the producer scan runs over a function body and over the
-/// module body alike.
-pub(crate) fn unresolved_list() -> Diagnostic {
-    Diagnostic::error(
-        "T0003",
-        "an empty list literal has no inferable element type here".to_string(),
-        Span::new(0, 0),
-    )
-    .with_help("annotate the assignment target (`xs: list[int] = []`) or append a value to it")
-}
-
-/// `T0003` for an empty dict literal no source of evidence could type.
-pub(crate) fn unresolved_dict() -> Diagnostic {
-    Diagnostic::error(
-        "T0003",
-        "an empty dict literal has no inferable key/value types here".to_string(),
-        Span::new(0, 0),
-    )
-    .with_help(
-        "annotate the assignment target (`d: dict[str, int] = {}`) or assign an entry into it",
-    )
-}
-
-/// Names the binding in a `T0003` raised while checking `target`'s assigned
-/// `value`. `T0003`'s span is the `Span::new(0, 0)` every container diagnostic
-/// in this crate uses (`HirStmt::Assign` carries no span at all), so the
-/// binding's name in the message is the only locator a user gets.
-///
-/// The substitution is gated on `value` *itself* being the empty literal that
-/// failed (#1021 review round 1). A `T0003` also propagates out of a nested
-/// element position -- `xs: list[int] = [[]]` fails on the inner `[]` while
-/// `xs` is validly annotated -- and naming `xs` there points the user at the
-/// wrong node. Such a diagnostic keeps `unresolved_list`/`unresolved_dict`'s
-/// generic `" here"` wording, which is the only honest locator available when
-/// the failing node is not the assigned value.
-pub(crate) fn name_binding(
-    mut diagnostic: Diagnostic,
-    target: &str,
-    value: &HirExpr,
-) -> Diagnostic {
-    if diagnostic.code == "T0003" && empty_literal(value).is_some() {
-        // A placed diagnostic carries its own short label (#10); only the
-        // headline repeated as the label follows the new headline.
-        let repeats_headline = diagnostic.label.as_deref() == Some(diagnostic.message.as_str());
-        diagnostic.message = diagnostic
-            .message
-            .replace(" here", &format!(" for `{target}`"));
-        if repeats_headline {
-            diagnostic.label = Some(diagnostic.message.clone());
-        }
-    }
-    diagnostic
 }
 
 #[cfg(test)]

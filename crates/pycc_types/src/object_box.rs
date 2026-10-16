@@ -56,6 +56,25 @@ pub(crate) fn admits(env: &Environment, from: &Ty, to: &Ty) -> bool {
             || is_boxable_generator(env, from))
 }
 
+/// Whether a native tuple of type `from` reaches a slot of the tuple type
+/// `to` by boxing some of its elements: the same arity, and each element
+/// either of its slot's type or a native value its `object` slot boxes
+/// ([`admits`]) -- `return parse_str(...)`, a `tuple[int, str]`, from a
+/// function declared `-> tuple[int, Any]`. `pycc_mir` converts the value
+/// (`MirExpr::TupleRebox`); a tuple is immutable, so the new tuple object
+/// is indistinguishable from the old one plus the boxing.
+pub(crate) fn tuple_reboxes(env: &Environment, from: &Ty, to: &Ty) -> bool {
+    let (Ty::Tuple(items), Ty::Tuple(slots)) = (from, to) else {
+        return false;
+    };
+    from != to
+        && items.len() == slots.len()
+        && items
+            .iter()
+            .zip(slots.iter())
+            .all(|(item, slot)| item == slot || (*slot == Ty::Object && admits(env, item, slot)))
+}
+
 /// Whether `ty` is a generator whose values box (`admits`): it crosses as
 /// a CPython iterator sharing the native generator (`pycc_ext_gen_wrap`),
 /// so, unlike a container, no copy breaks aliasing.
@@ -94,12 +113,19 @@ pub(crate) fn admits_value(
     // A frozenset of scalars is not: it is immutable, so the CPython copy it
     // crosses as (`pycc_ext_obj_pack_frozenset`, made once and shared) has
     // no alias to break, and its native uses stay native.
+    // Neither is a tuple of immutable elements (`foreign::is_packable_tuple`).
     if let (Ty::Object, HirExpr::Name(name)) = (to, value)
         && matches!(
             from,
-            Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_)
+            Ty::List(_)
+                | Ty::Dict(_)
+                | Ty::Set(_)
+                | Ty::FrozenSet(_)
+                | Ty::Tuple(_)
+                | Ty::VarTuple(_)
         )
         && !foreign::is_packable_frozenset(from)
+        && !foreign::is_packable_tuple(from)
     {
         crate::non_strict::request_widen(name, from, &Ty::Object, |_| true);
     }
@@ -113,9 +139,15 @@ pub(crate) fn admits_value(
             if let HirExpr::Name(name) = element
                 && matches!(
                     element_ty,
-                    Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Tuple(_)
+                    Ty::List(_)
+                        | Ty::Dict(_)
+                        | Ty::Set(_)
+                        | Ty::FrozenSet(_)
+                        | Ty::Tuple(_)
+                        | Ty::VarTuple(_)
                 )
                 && !foreign::is_packable_frozenset(element_ty)
+                && !foreign::is_packable_tuple(element_ty)
             {
                 crate::non_strict::request_widen(name, element_ty, &Ty::Object, |_| true);
             }

@@ -137,6 +137,9 @@ fn the_shim_declares_exactly_the_unpack_helpers_the_boundary_refuses_through() {
         "ndarray",
         "object",
         "str",
+        // A `tuple[str, ...]` parameter: a native copy of the CPython
+        // tuple (v0.5, native containers of objects).
+        "str_tuple",
         "tuple",
     ]
     .iter()
@@ -265,6 +268,12 @@ fn expected_to_carry(ty: &Ty) -> bool {
         // table, which this type-only predicate deliberately does not
         // model -- see `an_instance_is_admitted_only_for_a_regular_class_of_the_module`.
         Ty::Instance(_) => true,
+        // v0.5 (native containers of objects): `tuple[str, ...]` crosses as
+        // a native copy of the CPython tuple, which it remembers so the
+        // same tuple crosses back (`pycc_ext_unpack_str_tuple`); a variadic
+        // tuple of mutable elements is refused (a copy would break their
+        // aliasing).
+        Ty::VarTuple(element) => matches!(**element, Ty::Str),
     }
 }
 
@@ -301,6 +310,9 @@ fn no_type_outside_the_admitted_set_is_carried_at_a_parameter_position() {
         // because `T0039` refuses the annotation first.
         Ty::Tuple(Box::new(vec![Ty::Str])),
         Ty::Tuple(Box::new(vec![Ty::Tuple(Box::new(vec![Ty::Int]))])),
+        Ty::VarTuple(Box::new(Ty::Str)),
+        Ty::VarTuple(Box::new(Ty::List(Box::new(Ty::Int)))),
+        Ty::VarTuple(Box::new(Ty::Instance(name()))),
     ];
     for ty in samples {
         assert_eq!(carries_param(&ty), expected_to_carry(&ty), "{ty:?}");

@@ -14,7 +14,8 @@ impl MirExpr {
             MirExpr::OptionalWrap(_, inner) => Ty::Optional(inner.clone()),
             MirExpr::OptionalUnwrap(_, inner)
             | MirExpr::ObjectUnbox(_, inner)
-            | MirExpr::ObjectCoerce(_, inner) => (**inner).clone(),
+            | MirExpr::ObjectCoerce(_, inner)
+            | MirExpr::TupleRebox(_, inner) => (**inner).clone(),
             MirExpr::ObjectIndex(..) => Ty::Int,
             MirExpr::Name { ty, .. }
             | MirExpr::Call { ty, .. }
@@ -53,7 +54,7 @@ impl MirExpr {
             // hand-built `MirExpr` that bypasses both of those guarantees,
             // e.g. this file's own `a_subscript_over_a_non_list_bases_ty_panics_with_an_internal_error` test.
             MirExpr::Subscript { base, index } => match base.ty() {
-                Ty::List(elem_ty) => *elem_ty,
+                Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => *elem_ty,
                 // PR-11b Task 4 (D-116): the literal-index extraction and
                 // bounds check already happened in `pycc_types::infer_expr_in`
                 // -- this re-derives the same positional element type from
@@ -115,11 +116,7 @@ impl MirExpr {
                 Ty::Set(Box::new(first.ty()))
             }
             MirExpr::TupleLiteral(elements) => {
-                if elements.is_empty() {
-                    panic!(
-                        "pycc_mir: internal error: an empty tuple literal has no element types to derive -- pycc_types::check should have rejected this HIR before it reached pycc_mir"
-                    )
-                }
+                // `()` is `tuple[()]`: the empty boxed tuple object.
                 Ty::Tuple(Box::new(elements.iter().map(MirExpr::ty).collect()))
             }
             // A slice of a `list[int]` is still a `list[int]` -- `ty()`
@@ -337,6 +334,7 @@ impl MirExpr {
             MirExpr::OptionalUnwrap(inner, _)
             | MirExpr::ObjectUnbox(inner, _)
             | MirExpr::ObjectCoerce(inner, _)
+            | MirExpr::TupleRebox(inner, _)
             | MirExpr::ObjectIndex(inner, _) => inner.collect_named_expr_bindings(out),
             MirExpr::Call { args, .. } => {
                 for arg in args {

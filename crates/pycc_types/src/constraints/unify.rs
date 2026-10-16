@@ -209,3 +209,33 @@ pub(crate) fn unify_terms_with_declared(
         }
     }
 }
+
+/// The one type two inferred types of a term agree on, or `None` when they
+/// conflict: equal types, `bool` with `int` (`int`), a fixed tuple of `T`s
+/// with `tuple[T, ...]` (the variadic tuple) and, in non-strict mode, a
+/// scalar with a CPython object (the object).
+pub(super) fn merge_inferred_types(left: Ty, right: Ty) -> Option<Ty> {
+    if left == right {
+        Some(left)
+    } else if matches!((&left, &right), (Ty::Bool, Ty::Int) | (Ty::Int, Ty::Bool)) {
+        Some(Ty::Int)
+    } else if let (Ty::VarTuple(element), Ty::Tuple(items)) | (Ty::Tuple(items), Ty::VarTuple(element)) =
+        (&left, &right)
+        && pycc_hir::tuple_fits_var_tuple(items, element)
+    {
+        // A fixed-arity tuple of `T`s is a `tuple[T, ...]`.
+        Some(Ty::VarTuple(element.clone()))
+    } else if crate::non_strict::is_non_strict()
+        && [&left, &right].contains(&&Ty::Object)
+        && [&left, &right].iter().all(|ty| {
+            matches!(ty, Ty::Object | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::None)
+        })
+    {
+        // Non-strict mode (#3): a term inferred both as a CPython object
+        // and as a scalar (a helper called with an object and with an
+        // `int`) is the object, which holds either.
+        Some(Ty::Object)
+    } else {
+        None
+    }
+}

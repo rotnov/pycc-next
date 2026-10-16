@@ -151,7 +151,7 @@ pub(super) fn rc_class_kinds(
 pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
     match ty {
         Ty::Str => Some(HeapKind::Str),
-        Ty::List(_) => Some(HeapKind::List),
+        Ty::List(_) | Ty::VarTuple(_) => Some(HeapKind::List),
         Ty::Dict(_) => Some(HeapKind::Dict),
         Ty::Set(_) | Ty::FrozenSet(_) => Some(HeapKind::Set),
         Ty::Object => Some(HeapKind::Object),

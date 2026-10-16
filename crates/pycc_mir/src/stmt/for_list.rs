@@ -44,7 +44,7 @@ pub(super) fn lower_for_list(
     // reads (subscripting a set is rejected earlier, by
     // `pycc_types`' own T0033, so there is no set counterpart there).
     match lookup(scopes, list) {
-        Ty::List(elem_ty) => {
+        Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => {
             bind_variable(scopes, var.clone(), (*elem_ty).clone());
             // D-068 re-review of #780 (sixth round): see the
             // `ForRange` arm's identical comment above -- the loop

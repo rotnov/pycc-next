@@ -114,6 +114,7 @@ pub(crate) fn storage_slot_at_entry<'ctx>(
         pycc_mir::Ty::Str
             | pycc_mir::Ty::MemoryView
             | pycc_mir::Ty::List(_)
+            | pycc_mir::Ty::VarTuple(_)
             | pycc_mir::Ty::Instance(_)
             | pycc_mir::Ty::Dict(_)
             | pycc_mir::Ty::Set(_)

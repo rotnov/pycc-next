@@ -383,14 +383,25 @@ pub(crate) fn is_packable_frozenset(ty: &Ty) -> bool {
         if matches!(**element, Ty::Int | Ty::Float | Ty::Bool | Ty::Str))
 }
 
-/// Whether `ty` is a non-empty tuple of `int`/`float`/`bool`/`str`, which
-/// crosses into CPython as a new `tuple` of the packed elements
-/// (`pycc_ext_obj_pack_tuple`): a shape argument (`np.zeros((n, m))`), a
-/// multi-dimensional key (`o[i, j]`), a `(position, text)` result.
+/// Whether `ty` is a tuple -- fixed-arity or `tuple[T, ...]` -- whose
+/// elements are, recursively, `int`/`float`/`bool`/`str`, CPython objects or
+/// such tuples, which crosses into CPython as a `tuple` of the packed
+/// elements (`pycc_ext_obj_pack_tuple`, `pycc_ext_obj_pack_list`): a shape
+/// argument (`np.zeros((n, m))`), a multi-dimensional key (`o[i, j]`), a
+/// `(position, text)` result, a key path. Nothing in it is mutable, so the
+/// copy cannot break aliasing; an object element is the object itself, and
+/// a boxed tuple crosses as the same CPython `tuple` every time
+/// (`pycc_rt_tuple_foreign`).
 pub(crate) fn is_packable_tuple(ty: &Ty) -> bool {
-    matches!(ty, Ty::Tuple(elements)
-        if !elements.is_empty()
-            && elements.iter().all(|e| matches!(e, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)))
+    fn immutable(ty: &Ty) -> bool {
+        match ty {
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Object => true,
+            Ty::Tuple(elements) => elements.iter().all(immutable),
+            Ty::VarTuple(element) => immutable(element),
+            _ => false,
+        }
+    }
+    matches!(ty, Ty::Tuple(_) | Ty::VarTuple(_)) && immutable(ty)
 }
 
 /// `Err(I0404)` naming `operation` when `expr` is a class method's own

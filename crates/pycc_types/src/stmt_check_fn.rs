@@ -399,6 +399,7 @@ pub(crate) fn check_stmt_arm_in_function(
                 && !object_box::admits_value(env, expr, &actual, &return_ty)?
                 && !non_strict::admits_coercion(&actual, &return_ty)
                 && !non_strict::admits_tuple_display_return(env, local_names, expr, &return_ty)
+                && !object_box::tuple_reboxes(env, &actual, &return_ty)
             {
                 // #1344: an inferred `set[int]` return the solver could not
                 // widen to the `set[C]` the body builds is a compiler limit,
@@ -639,7 +640,7 @@ pub(crate) fn check_stmt_arm_in_function(
             // Task 3, D-123): `for k in d:` iterates a dict's keys. PR-11
             // Task 7 (D-123): `for x in s:` iterates a set's elements.
             let var_ty = match list_ty {
-                Ty::List(elem_ty) => *elem_ty,
+                Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => *elem_ty,
                 Ty::Str => Ty::Str,
                 Ty::Dict(kv) => kv.0,
                 Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,

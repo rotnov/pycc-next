@@ -507,6 +507,7 @@ int pycc_ext_obj_error_bridge(void)
  * is bridged into pycc's pending exception like any foreign operation.
  */
 extern void pycc_rt_object_install(void (*retain)(void *), void (*release)(void *));
+extern void pycc_rt_object_repr_install(void *(*repr)(void *));
 extern void pycc_rt_io_install(int (*write)(const unsigned char *, size_t),
                                void *(*read)(int), int (*flush)(void));
 

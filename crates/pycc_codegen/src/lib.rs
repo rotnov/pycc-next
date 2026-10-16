@@ -93,6 +93,7 @@ mod generator_box;
 mod hash;
 mod object_box;
 mod object_coerce;
+mod tuple_rebox;
 mod object_comprehension;
 mod native_operand;
 mod object_release;

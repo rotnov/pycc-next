@@ -178,6 +178,8 @@ static int pycc_ext_exec_module(PyObject *module)
     pycc_rt_io_install(pycc_ext_io_write, pycc_ext_io_read, pycc_ext_io_flush);
     /* An instance's `o` slots are counted with CPython's own counts. */
     pycc_rt_object_install(pycc_ext_obj_retain_hook, pycc_ext_obj_release_hook);
+    /* An `o` element of a native tuple renders with CPython's `repr`. */
+    pycc_rt_object_repr_install(pycc_ext_obj_repr_hook);
 
     /*
      * The synthesized user exception classes are created and published as

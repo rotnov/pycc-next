@@ -22,7 +22,7 @@
 //!   which appear anywhere in the annotation-driven checker;
 //! * the union-find over inference variables ([`fresh_variable`],
 //!   [`fresh_term`], [`root`], [`resolved_term`], [`unify_terms`],
-//!   [`merge_inferred_types`], [`term_for_type`]);
+//!   [`unify::merge_inferred_types`], [`term_for_type`]);
 //! * constraint collection ([`collect_expr_constraints`],
 //!   [`bind_comp_loop_var`], [`collect_block_constraints`], whose shared
 //!   `try`/`except`/`except*` walk lives in the [`try_stmt`] submodule);
@@ -75,6 +75,8 @@ mod yield_fallback;
 mod attr_terms;
 mod bindings;
 mod block;
+mod block_comp;
+mod block_return;
 mod block_stmt;
 mod call_term;
 mod container_terms;
@@ -85,6 +87,8 @@ mod public_inference;
 pub(crate) mod return_fallback;
 pub(crate) use public_inference::parameter_needs_annotation;
 mod unify;
+mod body_queries;
+pub(crate) use body_queries::{contains_return, introduces_bindings};
 pub(crate) use bindings::*;
 pub(crate) use block::*;
 pub(crate) use producer_checks::*;
@@ -417,26 +421,6 @@ pub(crate) fn fresh_term(parents: &mut Vec<usize>, concrete: &mut Vec<Option<Ty>
     Err(fresh_variable(parents, concrete))
 }
 
-fn merge_inferred_types(left: Ty, right: Ty) -> Option<Ty> {
-    if left == right {
-        Some(left)
-    } else if matches!((&left, &right), (Ty::Bool, Ty::Int) | (Ty::Int, Ty::Bool)) {
-        Some(Ty::Int)
-    } else if crate::non_strict::is_non_strict()
-        && [&left, &right].contains(&&Ty::Object)
-        && [&left, &right].iter().all(|ty| {
-            matches!(ty, Ty::Object | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::None)
-        })
-    {
-        // Non-strict mode (#3): a term inferred both as a CPython object
-        // and as a scalar (a helper called with an object and with an
-        // `int`) is the object, which holds either.
-        Some(Ty::Object)
-    } else {
-        None
-    }
-}
-
 fn term_for_type(ty: Ty, parents: &mut Vec<usize>, concrete: &mut Vec<Option<Ty>>) -> TypeTerm {
     if ty == Ty::Infer {
         fresh_term(parents, concrete)
@@ -608,7 +592,7 @@ fn collect_expr_constraints_here(
         HirExpr::EmptyList(element_ty) => {
             if is_private_solver_scalar(element_ty)
                 || (!crate::empty_container::contains_infer(element_ty)
-                    && !contains_param(element_ty)
+                    && !ty_contains_param(element_ty)
                     && matches!(
                         element_ty,
                         Ty::List(_) | Ty::Tuple(_) | Ty::Dict(_) | Ty::Set(_)
@@ -623,13 +607,13 @@ fn collect_expr_constraints_here(
         HirExpr::EmptyDict(kv)
             if !crate::empty_container::contains_infer(&kv.0)
                 && !crate::empty_container::contains_infer(&kv.1)
-                && !contains_param(&kv.0)
-                && !contains_param(&kv.1) =>
+                && !ty_contains_param(&kv.0)
+                && !ty_contains_param(&kv.1) =>
         {
             Ok(Some(Ok(Ty::Dict(kv.clone()))))
         }
         HirExpr::EmptySet(element)
-            if !crate::empty_container::contains_infer(element) && !contains_param(element) =>
+            if !crate::empty_container::contains_infer(element) && !ty_contains_param(element) =>
         {
             Ok(Some(Ok(Ty::Set(Box::new(element.clone())))))
         }
@@ -1003,127 +987,4 @@ fn apply_annotation_defaults(
         concrete[root] = Some(fallback.clone());
     }
     Ok(())
-}
-
-pub(crate) fn contains_return(body: &[HirStmt]) -> bool {
-    body.iter().any(|stmt| match stmt {
-        HirStmt::Return(_) => true,
-        HirStmt::If { body, orelse, .. } => contains_return(body) || contains_return(orelse),
-        HirStmt::While { body, .. }
-        | HirStmt::ForRange { body, .. }
-        | HirStmt::ForList { body, .. }
-        | HirStmt::ForObject { body, .. } => contains_return(body),
-        HirStmt::LoopElse { loop_stmt, orelse } => {
-            contains_return(std::slice::from_ref(loop_stmt.as_ref())) || contains_return(orelse)
-        }
-        HirStmt::Match { cases, .. } => cases.iter().any(|case| contains_return(&case.body)),
-        HirStmt::ExprStmt(_)
-        | HirStmt::Assign { .. }
-        | HirStmt::AnnAssign { .. }
-        | HirStmt::DictSet { .. }
-        | HirStmt::AttrSet { .. }
-        | HirStmt::ListCompAssign { .. }
-        | HirStmt::SetCompAssign { .. }
-        | HirStmt::DictCompAssign { .. }
-        | HirStmt::Delete { .. }
-        | HirStmt::DeleteSlice { .. }
-        | HirStmt::SetSlice { .. }
-        | HirStmt::DeleteAttr { .. }
-        | HirStmt::DeleteItem { .. }
-        | HirStmt::ForeignImport { .. }
-        | HirStmt::Break
-        | HirStmt::Continue
-        | HirStmt::Raise { .. } => false,
-        HirStmt::Try {
-            body,
-            handlers,
-            orelse,
-            finalbody,
-        }
-        | HirStmt::TryStar {
-            body,
-            handlers,
-            orelse,
-            finalbody,
-        } => {
-            contains_return(body)
-                || handlers.iter().any(|h| contains_return(&h.body))
-                || contains_return(orelse)
-                || contains_return(finalbody)
-        }
-    })
-}
-
-/// Issue #118 Part 1: returns true if any statement in `body` introduces
-/// a new binding (assignment, annotated assignment, comprehension assignment,
-/// or dict/set item assignment, including nested inside if/while/for). Used
-/// to skip the expensive `env.clone()` + `join_if_branches` path when neither
-/// branch of an `if` assigns anything -- the common case for guard-only ifs.
-pub(crate) fn introduces_bindings(body: &[HirStmt]) -> bool {
-    body.iter().any(|stmt| match stmt {
-        HirStmt::Assign { .. }
-        | HirStmt::AnnAssign { .. }
-        | HirStmt::DictSet { .. }
-        | HirStmt::AttrSet { .. }
-        | HirStmt::ListCompAssign { .. }
-        | HirStmt::SetCompAssign { .. }
-        // #1244: a `del` changes a binding state, so the in-place fast
-        // paths that assume an unchanged environment must not be taken.
-        | HirStmt::Delete { .. }
-        // #1291: a nested foreign import binds its names.
-        | HirStmt::ForeignImport { .. }
-        | HirStmt::DictCompAssign { .. } => true,
-        HirStmt::If { body, orelse, .. } => {
-            introduces_bindings(body) || introduces_bindings(orelse)
-        }
-        HirStmt::While { body, .. } => introduces_bindings(body),
-        HirStmt::ForRange { body, .. } => introduces_bindings(body),
-        HirStmt::ForList { body, .. } | HirStmt::ForObject { body, .. } => {
-            introduces_bindings(body)
-        }
-        HirStmt::LoopElse { loop_stmt, orelse } => {
-            introduces_bindings(std::slice::from_ref(loop_stmt.as_ref()))
-                || introduces_bindings(orelse)
-        }
-        HirStmt::Match { cases, .. } => cases.iter().any(|case| introduces_bindings(&case.body)),
-        // A slice or attribute `del` (Part 2c of #1371, #1457) changes no
-        // binding.
-        HirStmt::Return(_)
-        | HirStmt::ExprStmt(_)
-        | HirStmt::DeleteSlice { .. }
-        | HirStmt::SetSlice { .. }
-        | HirStmt::DeleteAttr { .. }
-        | HirStmt::DeleteItem { .. }
-        | HirStmt::Break
-        | HirStmt::Continue => false,
-        HirStmt::Try {
-            body,
-            handlers,
-            orelse,
-            finalbody,
-        }
-        | HirStmt::TryStar {
-            body,
-            handlers,
-            orelse,
-            finalbody,
-        } => {
-            introduces_bindings(body)
-                || handlers.iter().any(|h| introduces_bindings(&h.body))
-                || introduces_bindings(orelse)
-                || introduces_bindings(finalbody)
-        }
-        HirStmt::Raise { .. } => false,
-    })
-}
-
-/// Whether `ty` mentions a PEP 695 type parameter anywhere.
-fn contains_param(ty: &Ty) -> bool {
-    match ty {
-        Ty::Param(_) => true,
-        Ty::List(e) | Ty::Set(e) | Ty::FrozenSet(e) | Ty::Optional(e) => contains_param(e),
-        Ty::Dict(kv) => contains_param(&kv.0) || contains_param(&kv.1),
-        Ty::Tuple(es) => es.iter().any(contains_param),
-        _ => false,
-    }
 }

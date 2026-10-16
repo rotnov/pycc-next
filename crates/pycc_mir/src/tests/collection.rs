@@ -691,13 +691,10 @@ fn tuple_literal_ty_derives_positionally_from_every_element() {
 }
 
 #[test]
-#[should_panic(expected = "an empty tuple literal has no element types to derive")]
-fn an_empty_tuple_literal_ty_panics_with_an_internal_error() {
-    // By construction, `pycc_types::check` already rejects an empty
-    // tuple literal (T0039, mirroring the empty-list/empty-dict-literal
-    // cases above) before any HIR reaches `pycc_mir` -- but the panic
-    // path itself still needs direct coverage.
-    MirExpr::TupleLiteral(vec![]).ty();
+fn an_empty_tuple_literal_is_the_empty_tuple_type() {
+    // `()` is the native empty tuple object (v0.5): a `tuple[T, ...]` of
+    // any `T` with no conversion.
+    assert_eq!(MirExpr::TupleLiteral(vec![]).ty(), Ty::Tuple(Box::new(vec![])));
 }
 
 #[test]

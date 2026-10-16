@@ -2,6 +2,9 @@
 
 use super::*;
 
+mod declare_functions;
+mod top_level;
+
 /// `target_triple`: `None` compiles for the host's own default target (the
 /// common case). `Some(triple)` cross-compiles for a different Tier-1
 /// target -- LLVM's codegen backend is inherently multi-target, so this
@@ -128,153 +131,11 @@ fn compile_module(
     // LLVM symbol declaration (this pass, needed for the compiler to
     // generate call instructions) from Python name binding (the store,
     // which happens at the def's source position in top-level execution).
-    let mut user_functions: HashMap<&str, UserFunction> = HashMap::new();
-    // Maps function name to the number of definitions seen so far, for
-    // unique mangled-name generation on redefinition.
-    let mut def_counts: HashMap<&str, usize> = HashMap::new();
-    // List of (function name, LLVM function value) in source order, for
-    // the top-level binding pass.
-    let mut function_defs_in_order: Vec<(&str, FunctionValue)> = Vec::new();
-    // Part 2 of #1175 (#1179), review round 2: the buffer-sub-range
-    // out-slot fact is resolved **per name, over every definition of it**,
-    // not per `def`. Two `def f`s share one `fnptr_f` slot and one
-    // `UserFunction::fn_type`, so giving them two arities makes the
-    // indirect call ill-typed for whichever definition the slot does not
-    // describe -- which is the `verify()` abort a redefinition used to hit
-    // when only the slicing definition was widened. See
-    // `crate::ext::buffer_slice_out_names` for why the union is the safe
-    // direction and for the driver-side half that unions with it.
+    // Part 2 of #1175 (#1179): see `declare_functions` for why the
+    // buffer-sub-range out-slot fact is resolved per name.
     let slice_widened = crate::ext::buffer_slice_out_names(&mir.items);
-    for item in &mir.items {
-        if let MirItem::Function {
-            name,
-            params,
-            return_ty,
-            body,
-        } = item
-        {
-            let mut param_types: Vec<inkwell::types::BasicMetadataTypeEnum> = params
-                .iter()
-                .map(|(_, ty)| ty_to_basic_type(&context, ty.clone()).into())
-                .collect();
-            // Part 2 of #1175 (#1179): a function whose body returns a
-            // sub-range of a buffer parameter hands the sub-range's
-            // `has_slice`/`start`/`stop` back through three trailing
-            // out-pointers, because the bounds are produced inside this
-            // frame while the returned value stays the parameter's own view
-            // pointer -- which is what keeps the generated wrapper's
-            // `result == &a{index}` identity test exact.
-            //
-            // The predicate is the body fact alone, deliberately not gated
-            // on `options.ext` or on `ext_thunk_required`'s own
-            // exportability test: this declaration and `emit_stmt`'s own
-            // `MirStmt::ReturnBufferSlice` arm must never disagree about
-            // the arity, and `pycc_types` already refuses the shape
-            // everywhere a wrapper cannot exist.
-            if slice_widened.contains(name.as_str()) {
-                let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
-                for _ in crate::ext::ext_thunk_out_tys(return_ty, true) {
-                    param_types.push(ptr_type.into());
-                }
-            }
-            // A multi-value twin (`pycc_mir::multi_return`) stores its
-            // results after the first through one trailing out-pointer
-            // each (`MirStmt::SetOut`).
-            for _ in pycc_mir::multi_return::out_tys(body) {
-                param_types.push(context.ptr_type(inkwell::AddressSpace::default()).into());
-            }
-            let fn_type = match return_ty {
-                pycc_mir::Ty::None => context.void_type().fn_type(&param_types, false),
-                other => ty_to_basic_type(&context, other.clone()).fn_type(&param_types, false),
-            };
-            let count = def_counts.entry(name.as_str()).or_insert(0);
-            let mangled = if *count == 0 {
-                format!("pyfn_{name}")
-            } else {
-                format!("pyfn_{name}__redef_{count}")
-            };
-            *count += 1;
-            let f = module.add_function(&mangled, fn_type, None);
-            if leaf_inline::is_tiny_leaf(body) {
-                leaf_inline::mark(&context, f);
-            }
-            function_defs_in_order.push((name.as_str(), f));
-            // Only insert into user_functions on the first definition;
-            // subsequent definitions update fn_ptr_global at their source
-            // position but share the same slot and type info. The param_tys
-            // and fn_type come from the first definition (the type checker
-            // resolves one signature per name).
-            user_functions.entry(name.as_str()).or_insert_with(|| {
-                // Monomorphized generic specializations (`0gen_...` names)
-                // are compiler-generated, not user-defined: they have no
-                // top-level `def` whose execution order matters, so they
-                // dispatch directly through `direct_value` instead of
-                // through the indirect function-pointer slot.
-                let is_monomorphized = name.starts_with("0gen_");
-                if is_monomorphized {
-                    UserFunction {
-                        param_tys: params.iter().map(|(_, ty)| ty.clone()).collect(),
-                        fn_ptr_global: None,
-                        fn_type,
-                        name_global: None,
-                        direct_value: Some(f),
-                        single_def: None,
-                        bound_before_code: false,
-                    }
-                } else {
-                    let fn_ptr_type = context.ptr_type(inkwell::AddressSpace::default());
-                    // A method's `name` is dotted (`Grid.scale.static`), and
-                    // this global is the one codegen emits that the generated
-                    // C *declares* -- `extern void *fnptr_<name>;` in
-                    // `pycc::ext_build`'s `wrapper_for`. A dotted C identifier
-                    // is not accepted by any compiler, so the symbol carries
-                    // the mangled spelling. inkwell 0.9 exposes no alias API
-                    // and the workspace has no `llvm-sys` dependency, so this
-                    // is a rename and not a C-safe alias beside the dotted
-                    // one; nothing outside this workspace consumes the
-                    // spelling. `mangle_ext_name` is the identity for a
-                    // dot-free name, so every module-level function's global
-                    // is byte-identical to what it was.
-                    //
-                    // This path is not gated on `CompileOptions::ext`, so a
-                    // native build renames a method's global too, where no C
-                    // ever declares it. That is deliberate: one spelling per
-                    // symbol is cheaper to reason about than a mode-dependent
-                    // one, and nothing outside this workspace reads it.
-                    let fn_ptr_global = module.add_global(
-                        fn_ptr_type,
-                        None,
-                        &format!("fnptr_{}", mangle_ext_name(name)),
-                    );
-                    fn_ptr_global.set_initializer(&fn_ptr_type.const_null());
-                    // Deliberately *not* mangled, on both counts. The symbol
-                    // is internal-linkage and never declared from C, so it
-                    // needs no C-legal spelling; and its contents are the
-                    // name `pycc_rt_raise_name_error` reports, so the array size
-                    // and initializer stay on the source dotted name --
-                    // mangling them would make a method's `NameError` read
-                    // `0m4_Grid5_scale6_static`.
-                    let name_global = module.add_global(
-                        context.i8_type().array_type(name.len() as u32 + 1),
-                        None,
-                        &format!("fnname_{name}"),
-                    );
-                    name_global.set_linkage(Linkage::Internal);
-                    name_global.set_constant(true);
-                    name_global.set_initializer(&context.const_string(name.as_bytes(), true));
-                    UserFunction {
-                        param_tys: params.iter().map(|(_, ty)| ty.clone()).collect(),
-                        fn_ptr_global: Some(fn_ptr_global),
-                        fn_type,
-                        name_global: Some(name_global),
-                        direct_value: None,
-                        single_def: None,
-                        bound_before_code: false,
-                    }
-                }
-            });
-        }
-    }
+    let (mut user_functions, function_defs_in_order, def_counts) =
+        declare_functions::declare_user_functions(&context, &module, mir, &slice_widened);
 
     // A name defined once and never bound as a variable can only ever hold
     // that one definition (see `UserFunction::single_def`). The ext
@@ -364,37 +225,13 @@ fn compile_module(
                     pycc_mir::Ty::None,
                     &mut Vec::new(),
                 )?;
-                // #382: After each top-level statement, check for an active
-                // exception. A `raise` (or a converted runtime failure like
-                // division by zero) sets the pending exception state and
-                // terminates the block with `unreachable`. Erase the
-                // `unreachable` so the exception check can run here. This
-                // check intercepts it at the top level: if an exception is
-                // active, print it and exit. Inside a `try`, the try's own
-                // post-body check intercepts first. `emit_stmt` rejects a
-                // `Return` whose parent is this synthetic `main`, so after
-                // erasing an exception's `unreachable` the current block is
-                // guaranteed to accept this check.
-                erase_unreachable_if_present(&builder);
-                let active = crate::int_fast::emit_exception_pending(
+                top_level::emit_exception_check(
                     &context,
                     &builder,
                     &rt,
-                    "top_exc_active",
+                    entry_fn,
+                    top_exception_exit,
                 );
-                let has_exc = builder
-                    .build_int_compare(
-                        inkwell::IntPredicate::NE,
-                        active,
-                        context.i8_type().const_zero(),
-                        "top_has_exc",
-                    )
-                    .expect("build_int_compare should not fail");
-                let cont_bb = context.append_basic_block(entry_fn, "top_exc_cont");
-                builder
-                    .build_conditional_branch(has_exc, top_exception_exit, cont_bb)
-                    .expect("build_conditional_branch should not fail");
-                builder.position_at_end(cont_bb);
             }
             // Part 1 of #1026: emit the import call here, at the item's
             // own position in the source-order loop, rather than as a
@@ -420,55 +257,26 @@ fn compile_module(
                 },
             ),
             MirItem::Function { name, .. } => {
-                // Store this definition's function pointer into the
-                // global slot, representing the `def`'s runtime binding.
                 // `def_iter` is in the same source order as `mir.items`,
                 // so the next entry matches this function definition.
-                // Monomorphized generic specializations (`0gen_...` names)
-                // have no `fn_ptr_global` (they dispatch directly), so
-                // skip the store for them.
                 let &(_, f) = def_iter.next().expect(
-                    "def_iter should have an entry for every MirItem::Function                      (the declaration pass populates function_defs_in_order                      from the same mir.items in the same order)",
+                    "def_iter should have an entry for every MirItem::Function \
+                     (the declaration pass populates function_defs_in_order \
+                     from the same mir.items in the same order)",
                 );
                 let ordinal = fn_ordinal;
                 fn_ordinal += 1;
-                // #1337 (D-254): an inherited-method copy is bound with the
-                // origin `def` it copies, not at its own (appended)
-                // position -- see `copy_slots`.
-                if copy_slots.is_copy(ordinal) {
-                    continue;
-                }
-                let bound = std::iter::once((name.as_str(), f)).chain(
-                    copy_slots
-                        .bound_with(ordinal)
-                        .iter()
-                        .map(|&copy| function_defs_in_order[copy]),
-                );
-                for (name, f) in bound {
-                    let uf = &user_functions[name];
-                    if let Some(ref fn_ptr_global) = uf.fn_ptr_global {
-                        let _ = builder.build_store(
-                            fn_ptr_global.as_pointer_value(),
-                            f.as_global_value().as_pointer_value(),
-                        );
-                    }
-                }
-                // #1199: publish what this `def` (and its copies) made
-                // callable -- see `ext_publish`. A `def` is refused inside
-                // any module-level block, so no module-level `try` encloses
-                // this point, and a failed publish takes the direct
-                // module-exec `-1` edge, as a foreign failure here does
-                // (Part 1 of #1096).
-                debug_assert_eq!(
-                    rt.exceptions.targets.borrow().last(),
-                    Some(&top_exception_exit)
-                );
-                ext_publish::emit(
+                top_level::bind_def(
                     &context,
                     &builder,
                     &module,
-                    entry_fn,
-                    publish_plan.names_at(ordinal),
+                    &rt,
+                    &user_functions,
+                    &function_defs_in_order,
+                    &copy_slots,
+                    &publish_plan,
+                    (name.as_str(), f, ordinal),
+                    (entry_fn, top_exception_exit),
                 );
             }
         }
@@ -748,7 +556,12 @@ fn compile_module(
                 local_bindings
                     .iter()
                     .filter(|(_, ty)| {
-                        matches!(ty, pycc_mir::Ty::List(_) | pycc_mir::Ty::Instance(_))
+                        matches!(
+                            ty,
+                            pycc_mir::Ty::List(_)
+                                | pycc_mir::Ty::VarTuple(_)
+                                | pycc_mir::Ty::Instance(_)
+                        )
                     })
                     .map(|(name, _)| name),
             );

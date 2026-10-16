@@ -159,7 +159,10 @@ pub(crate) fn emit_move<'ctx>(
     let (Some(source), Some(destination)) = (locals.get(temp), locals.get(target)) else {
         return false;
     };
-    let counted = matches!(source.ty, pycc_mir::Ty::Object | pycc_mir::Ty::Str);
+    let counted = matches!(
+        source.ty,
+        pycc_mir::Ty::Object | pycc_mir::Ty::Str | pycc_mir::Ty::VarTuple(_)
+    );
     if source.ty != destination.ty || !counted || rt.borrowed_locals.borrow().contains(target) {
         return false;
     }
@@ -168,10 +171,10 @@ pub(crate) fn emit_move<'ctx>(
         .build_load(pointer, source.ptr, "moved")
         .expect("build_load should not fail for a temporary's slot")
         .into_pointer_value();
-    let scalar = if source.ty == pycc_mir::Ty::Str {
-        Scalar::Str(value)
-    } else {
-        Scalar::Object(value)
+    let scalar = match source.ty {
+        pycc_mir::Ty::Str => Scalar::Str(value),
+        pycc_mir::Ty::VarTuple(_) => Scalar::List(value),
+        _ => Scalar::Object(value),
     };
     let old = heap_rc::take_slot_old(context, builder, rt, &destination.ty, destination.ptr);
     emit_assign(context, builder, rt, locals, target, scalar);
@@ -187,7 +190,8 @@ fn basic_value(scalar: Scalar<'_>) -> inkwell::values::BasicValueEnum<'_> {
     match scalar {
         Scalar::Int(value) | Scalar::Bool(value) => value.into(),
         Scalar::Float(value) => value.into(),
-        Scalar::Str(value) | Scalar::Object(value) => value.into(),
+        // A `tuple[T, ...]` result (v0.5) is its tuple object's pointer.
+        Scalar::Str(value) | Scalar::Object(value) | Scalar::List(value) => value.into(),
         _ => panic!(
             "pycc_codegen: internal error: a multi-value twin result is not an int, float, \
              bool, str or object -- pycc_mir::multi_return admits no other"
@@ -206,6 +210,7 @@ fn scalar_of<'ctx>(
         pycc_mir::Ty::Float => Scalar::Float(value.into_float_value()),
         pycc_mir::Ty::Str => Scalar::Str(value.into_pointer_value()),
         pycc_mir::Ty::Object => Scalar::Object(value.into_pointer_value()),
+        pycc_mir::Ty::VarTuple(_) => Scalar::List(value.into_pointer_value()),
         other => panic!(
             "pycc_codegen: internal error: a multi-value twin result of type {other:?} -- \
              pycc_mir::multi_return admits only int, float, bool, str and object"

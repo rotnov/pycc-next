@@ -35,6 +35,7 @@ pub(super) fn collect_expr_bindings(expr: &MirExpr, bindings: &mut BTreeMap<Stri
                 | pycc_mir::Ty::Str
                 | pycc_mir::Ty::None
                 | pycc_mir::Ty::List(_)
+                | pycc_mir::Ty::VarTuple(_)
                 | pycc_mir::Ty::Dict(_)
                 | pycc_mir::Ty::Set(_)
                 | pycc_mir::Ty::FrozenSet(_)
@@ -72,6 +73,7 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
                     | pycc_mir::Ty::Str
                     | pycc_mir::Ty::None
                     | pycc_mir::Ty::List(_)
+                    | pycc_mir::Ty::VarTuple(_)
                     | pycc_mir::Ty::Dict(_)
                     | pycc_mir::Ty::Set(_)
                     | pycc_mir::Ty::FrozenSet(_)

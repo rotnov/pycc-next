@@ -37,7 +37,8 @@ pub(crate) fn infer_unpack(
         Ty::Tuple(elems) => Err(arity_mismatch(elems.len(), arity)),
         Ty::Object => Ok(Ty::Object),
         // A list's length is checked at run time (`pycc_rt_list_unpack`).
-        list @ Ty::List(_) => Ok(list),
+        // So is a `tuple[T, ...]`'s, the same run-time object.
+        list @ (Ty::List(_) | Ty::VarTuple(_)) => Ok(list),
         other => Err(Diagnostic::error(
             "C0001",
             format!(

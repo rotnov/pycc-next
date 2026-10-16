@@ -24,8 +24,10 @@ use crate::Ty;
 mod itertools;
 mod methods;
 mod object_defaultdict;
+mod operators;
 
 pub use object_defaultdict::object_defaultdict_source;
+pub use operators::{list_inplace_operator, set_inplace_index, set_operator};
 
 pub use itertools::{is_itertools_call, itertools_call};
 pub use methods::{materialized_method_args, resolve_method};
@@ -106,7 +108,9 @@ fn hashed_set(ty: &Ty) -> Option<&Ty> {
 fn renders_natively(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
-        Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => renders_natively(elem),
+        Ty::List(elem) | Ty::VarTuple(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => {
+            renders_natively(elem)
+        }
         Ty::Tuple(elements) => elements.iter().all(renders_natively),
         Ty::Dict(kv) => renders_natively(&kv.0) && renders_natively(&kv.1),
         _ => false,
@@ -161,7 +165,7 @@ fn math_log(name: &str, arg: &Ty) -> Option<BuiltinSig> {
 fn orderable(elem: &Ty) -> bool {
     match elem {
         Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
-        Ty::List(inner) => orderable(inner),
+        Ty::List(inner) | Ty::VarTuple(inner) => orderable(inner),
         Ty::Tuple(elements) => elements.iter().all(orderable),
         _ => false,
     }
@@ -173,8 +177,12 @@ fn orderable(elem: &Ty) -> bool {
 #[must_use]
 pub fn value_comparable(elem: &Ty) -> bool {
     match elem {
-        Ty::Instance(_) => false,
-        Ty::List(inner) | Ty::Set(inner) | Ty::FrozenSet(inner) => value_comparable(inner),
+        // A CPython object element compares through CPython, which the
+        // runtime's word equality cannot call.
+        Ty::Instance(_) | Ty::Object => false,
+        Ty::List(inner) | Ty::VarTuple(inner) | Ty::Set(inner) | Ty::FrozenSet(inner) => {
+            value_comparable(inner)
+        }
         Ty::Tuple(elements) => elements.iter().all(value_comparable),
         Ty::Dict(kv) => value_comparable(&kv.1),
         _ => true,
@@ -517,6 +525,9 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("str", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),
         ("str", [Ty::Str]) => sig("pycc_rt_str_copy", &[str_.clone()], str_),
         ("str", []) => sig("pycc_rt_str_empty", &[], str_),
+        ("str" | "repr", [t @ Ty::VarTuple(_)]) if renders_natively(t) => {
+            sig("pycc_rt_list_repr", &[t.clone()], str_)
+        }
         ("str", [list @ Ty::List(_)]) if renders_natively(list) => {
             sig("pycc_rt_list_repr", &[list.clone()], str_)
         }
@@ -913,81 +924,6 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         _ => return None,
     };
     Some(Ok(found))
-}
-
-/// `left <op> right` between two sets (or frozensets) of one hashable
-/// element type, for `|`, `&`, `-` and `^`: the runtime call, whose result
-/// has the left operand's type as in CPython. `in_place` (`a |= b`) on a
-/// `set` updates `left` itself (`pycc_rt_set_inplace` with the operator's
-/// index as a trailing int).
-#[must_use]
-pub fn set_operator(op: &str, in_place: bool, left: &Ty, right: &Ty) -> Option<BuiltinSig> {
-    // `Counter` arithmetic (`+`, `-`, `|`, `&`) and the dict union `|`
-    // (`pycc_rt::dict::flavor`): the runtime picks by flavor.
-    if let (Ty::Dict(a), Ty::Dict(b)) = (left, right)
-        && a == b
-        && (op == "|" || (a.1 == Ty::Int && matches!(op, "&" | "-" | "+")))
-    {
-        return Some(sig(
-            "pycc_rt_counter_binop",
-            &[left.clone(), right.clone(), Ty::Int],
-            left.clone(),
-        ));
-    }
-    if hashed_set(left).is_none() || hashed_set(left) != hashed_set(right) {
-        return None;
-    }
-    let symbol = match op {
-        "|" => "pycc_rt_set_union",
-        "&" => "pycc_rt_set_intersection",
-        "-" => "pycc_rt_set_difference",
-        "^" => "pycc_rt_set_symmetric_difference",
-        _ => return None,
-    };
-    if in_place && matches!(left, Ty::Set(_)) {
-        let found = sig(
-            "pycc_rt_set_inplace",
-            &[left.clone(), right.clone(), Ty::Int],
-            left.clone(),
-        );
-        return Some(found);
-    }
-    Some(sig(symbol, &[left.clone(), right.clone()], left.clone()))
-}
-
-/// `list += other` / `list *= n` (an augmented assignment): CPython
-/// mutates the list in place, so the runtime extends or repeats `left`
-/// itself and returns it as the value stored back.
-#[must_use]
-pub fn list_inplace_operator(op: &str, left: &Ty, right: &Ty) -> Option<BuiltinSig> {
-    let Ty::List(_) = left else {
-        return None;
-    };
-    match op {
-        "+" if right == left => Some(sig(
-            "pycc_rt_list_iadd",
-            &[left.clone(), left.clone()],
-            left.clone(),
-        )),
-        "*" if is_intlike(right) => Some(sig(
-            "pycc_rt_list_imul",
-            &[left.clone(), Ty::Int],
-            left.clone(),
-        )),
-        _ => None,
-    }
-}
-
-/// The operator index `pycc_rt_set_inplace` takes for `op`.
-#[must_use]
-pub fn set_inplace_index(op: &str) -> i64 {
-    match op {
-        "|" => 0,
-        "&" => 1,
-        "-" => 2,
-        // `^` of sets, `+` of counters.
-        _ => 3,
-    }
 }
 
 /// Whether a native value of type `ty` crosses into a CPython call as the

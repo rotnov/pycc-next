@@ -36,6 +36,7 @@ impl MirExpr {
             | MirExpr::OptionalUnwrap(inner, _)
             | MirExpr::ObjectUnbox(inner, _)
             | MirExpr::ObjectCoerce(inner, _)
+            | MirExpr::TupleRebox(inner, _)
             | MirExpr::ObjectIndex(inner, _)
             | MirExpr::Not(inner)
             | MirExpr::ExceptionMessage(inner)

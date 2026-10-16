@@ -89,6 +89,9 @@ pub(crate) enum SlotCleanup {
     /// The strong reference `pycc_ext_unpack_object` took for the compiled
     /// parameter slot, which owns it.
     ObjectDecref,
+    /// The fresh native tuple `pycc_ext_unpack_str_tuple` built for the
+    /// compiled parameter slot (v0.5).
+    TupleDecref,
 }
 
 impl BoundaryCarrier {
@@ -130,6 +133,7 @@ impl BoundaryCarrier {
         match self {
             BoundaryCarrier::Scalar(_, "str") => Some(SlotCleanup::StrDecref),
             BoundaryCarrier::Scalar(_, "object") => Some(SlotCleanup::ObjectDecref),
+            BoundaryCarrier::Scalar(_, "str_tuple") => Some(SlotCleanup::TupleDecref),
             // Every numeric scalar is a copied machine word, and a `tuple`'s
             // elements are copied out by value, so neither owes anything.
             BoundaryCarrier::Scalar(..) | BoundaryCarrier::Tuple(_) => None,
@@ -206,6 +210,13 @@ pub(crate) fn boundary_carrier(ty: &Ty) -> Option<BoundaryCarrier> {
         // returned -- the very pointer, so identity survives the round trip
         // (`f(x) is x`).
         Ty::Object | Ty::NdArray(_) => Some(BoundaryCarrier::Scalar("void *", "object")),
+        // v0.5: a `tuple[str, ...]` crosses as a native tuple object -- a
+        // copy of the CPython `tuple` of `str`s sharing each string and,
+        // when it crosses back, the tuple itself (`pycc_ext_unpack_str_tuple`,
+        // `pycc_ext_pack_str_tuple`); the compiled body owns the copy.
+        Ty::VarTuple(element) if **element == Ty::Str => {
+            Some(BoundaryCarrier::Scalar("void *", "str_tuple"))
+        }
         Ty::Tuple(elements) => elements
             .iter()
             .map(|element| match element {
@@ -232,6 +243,10 @@ pub(crate) fn boundary_carrier(ty: &Ty) -> Option<BoundaryCarrier> {
                 // itself before a `Ty::Tuple` is ever built -- so stated
                 // rather than left to the recursion.
                 Ty::Object => None,
+                // Nor for a variadic tuple (v0.5): a tuple holding one is a
+                // boxed tuple object, which a return carries as one packed
+                // object (`return_c_type`), never as flattened out-slots.
+                Ty::VarTuple(_) => None,
                 // Every other element goes through this same function,
                 // so its width comes from the table above rather than a
                 // parallel one, and a `list` element (no carrier at all)
@@ -310,6 +325,15 @@ pub(crate) fn return_c_type(ty: &Ty) -> Option<&'static str> {
         // the top-level return position for the reason the buffer arm above
         // gives -- `into_scalar` answering it would admit `tuple[C]`.
         Ty::Instance(_) => Some("void *"),
+        // v0.5: a tuple object result -- a tuple holding a `str`, a CPython
+        // object or a nested tuple, or a variadic `tuple[T, ...]` -- is one
+        // pointer, which `pycc_ext_pack_tuple_object` copies into the
+        // CPython `tuple` it crosses as. Only immutable elements: a copy of a
+        // tuple holding a list would break aliasing.
+        Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) && packable_tuple(ty) => {
+            Some("void *")
+        }
+        Ty::VarTuple(_) if packable_tuple(ty) => Some("void *"),
         // Still asked of `boundary_carrier`: `tuple[list[int]]` is a tuple
         // whose element the boundary cannot carry, and answering `void`
         // for it unconditionally would admit a signature no wrapper can
@@ -318,6 +342,19 @@ pub(crate) fn return_c_type(ty: &Ty) -> Option<&'static str> {
         _ => boundary_carrier(ty)
             .and_then(BoundaryCarrier::into_scalar)
             .map(|(c_type, _)| c_type),
+    }
+}
+
+/// Whether a tuple type's elements are, recursively, `int`, `float`,
+/// `bool`, `str`, CPython objects or such tuples: what
+/// `pycc_ext_obj_pack_list` copies without breaking aliasing (the same rule
+/// as `pycc_types`' `foreign::is_packable_tuple`).
+pub(crate) fn packable_tuple(ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Object => true,
+        Ty::Tuple(elements) => elements.iter().all(packable_tuple),
+        Ty::VarTuple(element) => packable_tuple(element),
+        _ => false,
     }
 }
 
@@ -392,7 +429,7 @@ pub(crate) fn render_ty(ty: &Ty) -> &'static str {
         Ty::Dict(_) => "dict",
         Ty::Set(_) => "set",
         Ty::FrozenSet(_) => "frozenset",
-        Ty::Tuple(_) => "tuple",
+        Ty::Tuple(_) | Ty::VarTuple(_) => "tuple",
         // Part 1 of #1026: the spelling `Ty::name()` uses, so the gap
         // message names the same thing a `T0023` about the binding would.
         Ty::Object => "object",
@@ -415,8 +452,9 @@ pub(crate) fn render_ty(ty: &Ty) -> &'static str {
 pub(crate) const CARRIABLE_TYPES: &str = "a parameter must be `int`, `float`, `bool`, `str`, `memoryview` \
      (or its other spellings `ndarray` and `NDArray`), a CPython object (`Any`, `object`, a \
      foreign class, or a container of objects), an instance of a class compiled in this module \
-     (not an enum or an exception class), or a `tuple` of `int`/`float`/`bool`, and a return \
-     type must be one of those, or `None`";
+     (not an enum or an exception class), a `tuple` of `int`/`float`/`bool`, or a \
+     `tuple[str, ...]`, and a return type must be one of those, an immutable tuple of them, \
+     or `None`";
 
 /// Builds the `C0003` diagnostic for one unexportable public function or
 /// method.

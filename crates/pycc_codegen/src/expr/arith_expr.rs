@@ -55,7 +55,7 @@ pub(crate) fn emit_bin_op_expr<'ctx>(
     let r = emit_expr(context, builder, module, rt, user_functions, locals, right);
     heap_rc::truncate_pending(rt, mark);
     pop_pending_int_release(rt, pending_l);
-    if let Ty::List(_) = ty {
+    if let Ty::List(_) | Ty::VarTuple(_) = ty {
         let result = list::emit_list_binop(context, builder, rt, *op, l, r);
         release_scalar_if_temporary(context, builder, rt, left, &l);
         release_scalar_if_temporary(context, builder, rt, right, &r);

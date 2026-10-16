@@ -582,7 +582,7 @@ pub unsafe extern "C" fn pycc_rt_dict_items(d: *mut PyDictObj) -> *mut PyListObj
         .map(|(k, v)| {
             value::retain(d.key_kind, k);
             value::retain(d.value_kind, v);
-            crate::tuple::tuple_from(vec![k, v], kinds.into()) as i64
+            crate::tuple::tuple_from(vec![k, v], &kinds) as i64
         })
         .collect();
     crate::list::new_raw_words(LIST_KIND_TUPLE, tuples)
@@ -606,11 +606,11 @@ pub unsafe extern "C" fn pycc_rt_dict_popitem(d: *mut PyDictObj) -> *mut PyListO
         );
         return crate::tuple::tuple_from(
             vec![sentinel(d.key_kind), sentinel(d.value_kind)],
-            kinds.into(),
+            &kinds,
         );
     };
     let (k, v) = d.remove(k).expect("present");
-    crate::tuple::tuple_from(vec![k, v], kinds.into())
+    crate::tuple::tuple_from(vec![k, v], &kinds)
 }
 
 /// A dict built from a list of `(key, value)` tuples (`dict(pairs)`).

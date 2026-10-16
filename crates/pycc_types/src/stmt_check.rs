@@ -540,7 +540,7 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
             // D-123's own iteration-order caveat), so `Ty::Set` is accepted
             // here too, binding the loop variable as the set's element type.
             let var_ty = match list_ty {
-                Ty::List(elem_ty) => *elem_ty,
+                Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => *elem_ty,
                 Ty::Str => Ty::Str,
                 Ty::Dict(kv) => kv.0,
                 Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => *elem_ty,
@@ -782,7 +782,7 @@ pub(crate) fn check_dict_set(
     // Exact `Ty` equality on the key, not `is_assignable` -- same reasoning
     // as `Subscript`'s own `Ty::Dict` read arm.
     let key_expr_ty = infer_expr_in(env, local_names, key)?;
-    if key_expr_ty != *key_ty {
+    if !crate::assign_check::is_key_of(&key_expr_ty, key_ty) {
         // Non-strict mode: a key of another type (a CPython object, say)
         // makes the dict CPython's own, which hashes it as CPython does.
         non_strict::request_widen(dict, &dict_ty, &Ty::Object, |_| true);

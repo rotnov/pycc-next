@@ -211,6 +211,23 @@ int pycc_ext_obj_repr(PyObject *o, void **out)
     return pycc_ext_obj_text(o, out, 1);
 }
 
+/*
+ * `pycc_rt`'s object repr hook (`pycc_rt_object_repr_install`): `repr(o)`
+ * as a new native `str`, or NULL with the CPython error bridged into the
+ * pending exception, so the native tuple's rendering stops and the
+ * compiled caller takes its exception edge.
+ */
+extern int pycc_ext_obj_error_bridge(void);
+void *pycc_ext_obj_repr_hook(void *o)
+{
+    void *out = NULL;
+    if (pycc_ext_obj_repr((PyObject *)o, &out) != 0) {
+        pycc_ext_obj_error_bridge();
+        return NULL;
+    }
+    return out;
+}
+
 static int pycc_ext_obj_text(PyObject *o, void **out, int repr)
 {
     PyObject *converted;
@@ -693,6 +710,8 @@ extern long long pycc_rt_list_is_tuple(void *list);
 PyObject *pycc_ext_obj_pack_instance(void *inst);
 
 PyObject *pycc_ext_obj_pack_list(void *list);
+extern void *pycc_rt_tuple_foreign(void *tuple);
+extern void pycc_rt_tuple_set_foreign(void *tuple, void *object);
 
 /*
  * A native frozenset of `int`, `float`, `bool` or `str` copied into a CPython
@@ -741,6 +760,44 @@ PyObject *pycc_ext_obj_pack_frozenset(void *set)
     return out;
 }
 
+/*
+ * One container word of element kind `kind` (`pycc_rt::list::LIST_KIND_*`)
+ * packed as a new `PyObject *` reference, or `NULL` with the exception set:
+ * a scalar is converted, a `str` shares its CPython `str`, a list or tuple
+ * is copied (`pycc_ext_obj_pack_list`), and a CPython object element
+ * (kind 11) is the object itself. The word is borrowed.
+ */
+static PyObject *pycc_ext_pack_word(long long kind, long long word)
+{
+    PyObject *object;
+    double value;
+
+    switch (kind) {
+    case 0:
+        return pycc_ext_obj_pack_int(word);
+    case 1:
+        memcpy(&value, &word, sizeof value);
+        return pycc_ext_obj_pack_float(value);
+    case 2:
+        return pycc_ext_obj_pack_bool((char)(word != 0));
+    case 3:
+        return pycc_ext_obj_pack_str((void *)(intptr_t)word);
+    case 4:
+        return pycc_ext_obj_pack_instance((void *)(intptr_t)word);
+    case 5:
+    case 7:
+        return pycc_ext_obj_pack_list((void *)(intptr_t)word);
+    case 11:
+        object = (PyObject *)(intptr_t)word;
+        Py_INCREF(object);
+        return object;
+    default:
+        PyErr_SetString(PyExc_SystemError,
+                        "pycc_ext_obj_pack_list met an element kind it cannot copy");
+        return NULL;
+    }
+}
+
 PyObject *pycc_ext_obj_pack_list(void *list)
 {
     long long len;
@@ -754,6 +811,16 @@ PyObject *pycc_ext_obj_pack_list(void *list)
     }
     len = pycc_rt_list_len(list);
     is_tuple = pycc_rt_list_is_tuple(list) != 0;
+    /* A tuple is immutable: the CPython `tuple` made for it the first time
+     * (or the one it was copied from) is the one it crosses as every time,
+     * so `f(t) is g(t)` holds for a native `t` as it does in CPython. */
+    if (is_tuple) {
+        out = (PyObject *)pycc_rt_tuple_foreign(list);
+        if (out != NULL) {
+            Py_INCREF(out);
+            return out;
+        }
+    }
     out = is_tuple ? PyTuple_New((Py_ssize_t)len) : PyList_New((Py_ssize_t)len);
     if (out == NULL) {
         return NULL;
@@ -761,35 +828,8 @@ PyObject *pycc_ext_obj_pack_list(void *list)
     for (i = 0; i < len; i++) {
         long long word = pycc_rt_list_get(list, i);
         PyObject *item;
-        double value;
 
-        switch (pycc_rt_list_elem_kind(list, i)) {
-        case 0:
-            item = pycc_ext_obj_pack_int(word);
-            break;
-        case 1:
-            memcpy(&value, &word, sizeof value);
-            item = pycc_ext_obj_pack_float(value);
-            break;
-        case 2:
-            item = pycc_ext_obj_pack_bool((char)(word != 0));
-            break;
-        case 3:
-            item = pycc_ext_obj_pack_str((void *)(intptr_t)word);
-            break;
-        case 4:
-            item = pycc_ext_obj_pack_instance((void *)(intptr_t)word);
-            break;
-        case 5:
-        case 7:
-            item = pycc_ext_obj_pack_list((void *)(intptr_t)word);
-            break;
-        default:
-            PyErr_SetString(PyExc_SystemError,
-                            "pycc_ext_obj_pack_list met an element kind it cannot copy");
-            item = NULL;
-            break;
-        }
+        item = pycc_ext_pack_word(pycc_rt_list_elem_kind(list, i), word);
         if (item == NULL) {
             Py_DECREF(out);
             return NULL;
@@ -799,6 +839,53 @@ PyObject *pycc_ext_obj_pack_list(void *list)
         } else {
             PyList_SetItem(out, (Py_ssize_t)i, item);
         }
+    }
+    if (is_tuple) {
+        Py_INCREF(out);
+        pycc_rt_tuple_set_foreign(list, out);
+    }
+    return out;
+}
+
+extern void *pycc_rt_tuple_new(long long len, const unsigned char *kinds);
+extern void pycc_rt_tuple_set_word(void *tuple, long long index, long long word);
+extern void pycc_rt_word_retain(long long kind, long long word);
+extern void pycc_rt_list_decref(void *list);
+
+/*
+ * v0.5 (`pycc_codegen`'s `tuple_rebox`): a new tuple object of `n`
+ * elements of the kinds `kinds`, from the tuple object `tuple` of the same
+ * length. An element whose target kind is the object one (11) and whose
+ * own kind is not is packed (`pycc_ext_pack_word`); every other word is
+ * shared, with a new reference. `tuple` is borrowed. Returns the new tuple,
+ * or `NULL` with the exception set when a packer fails.
+ */
+void *pycc_ext_obj_tuple_rebox(void *tuple, const unsigned char *kinds, long long n)
+{
+    void *out;
+    long long i;
+
+    if (tuple == NULL || pycc_rt_list_len(tuple) != n) {
+        PyErr_SetString(PyExc_SystemError, "pycc_ext_obj_tuple_rebox called with a bad tuple");
+        return NULL;
+    }
+    out = pycc_rt_tuple_new(n, kinds);
+    for (i = 0; i < n; i++) {
+        long long word = pycc_rt_list_get(tuple, i);
+        long long kind = pycc_rt_list_elem_kind(tuple, i);
+
+        if (kinds[i] == 11 && kind != 11) {
+            PyObject *item = pycc_ext_pack_word(kind, word);
+            if (item == NULL) {
+                /* Words not yet written are zero, which releasing skips. */
+                pycc_rt_list_decref(out);
+                return NULL;
+            }
+            word = (long long)(intptr_t)item;
+        } else {
+            pycc_rt_word_retain(kind, word);
+        }
+        pycc_rt_tuple_set_word(out, i, word);
     }
     return out;
 }

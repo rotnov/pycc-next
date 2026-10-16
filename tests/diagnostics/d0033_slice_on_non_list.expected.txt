@@ -1,4 +1,4 @@
-error[T0033]: `dict[str, int]` does not support slicing (only a list or a str does)
+error[T0033]: `dict[str, int]` does not support slicing (only a list, a `tuple[T, ...]` or a str does)
  --> tests/diagnostics/d0033_slice_on_non_list.py:2:5
   |
 2 | y = x[0:1]

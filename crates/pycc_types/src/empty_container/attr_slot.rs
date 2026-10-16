@@ -188,6 +188,7 @@ fn established_slot(
             | Ty::Bool
             | Ty::Str
             | Ty::List(_)
+            | Ty::VarTuple(_)
             | Ty::Dict(..)
             | Ty::Object
             | Ty::Instance(_)

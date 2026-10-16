@@ -27,7 +27,7 @@ pub(crate) fn list_kind(rt: &RtFns<'_>, elem: &Ty) -> u64 {
 
 /// The element type of a `list[T]`-typed MIR value.
 pub(crate) fn element_ty(list_ty: &Ty) -> &Ty {
-    let Ty::List(elem) = list_ty else {
+    let (Ty::List(elem) | Ty::VarTuple(elem)) = list_ty else {
         panic!(
             "pycc_codegen: internal error: expected a list, got `{}`",
             list_ty.name()

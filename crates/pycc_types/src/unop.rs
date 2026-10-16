@@ -105,6 +105,7 @@ pub(crate) fn is_truth_testable(ty: &Ty) -> bool {
             | Ty::Optional(_)
             | Ty::Instance(_)
             | Ty::List(_)
+            | Ty::VarTuple(_)
     )
 }
 

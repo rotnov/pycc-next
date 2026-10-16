@@ -369,7 +369,7 @@ fn slicing_a_dict_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`dict[str, int]` does not support slicing (only a list or a str does)"
+        "`dict[str, int]` does not support slicing (only a list, a `tuple[T, ...]` or a str does)"
     );
 }
 
@@ -388,7 +388,7 @@ fn slicing_a_set_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`set[int]` does not support slicing (only a list or a str does)"
+        "`set[int]` does not support slicing (only a list, a `tuple[T, ...]` or a str does)"
     );
 }
 
@@ -409,7 +409,7 @@ fn slicing_a_tuple_is_rejected_as_t0033_as_an_explicit_deferral() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`tuple[int, int]` does not support slicing (only a list or a str does)"
+        "`tuple[int, int]` does not support slicing (only a list, a `tuple[T, ...]` or a str does)"
     );
 }
 
@@ -427,7 +427,7 @@ fn slicing_a_scalar_is_rejected_as_t0033() {
     assert_eq!(err.code, "T0033");
     assert_eq!(
         err.message,
-        "`int` does not support slicing (only a list or a str does)"
+        "`int` does not support slicing (only a list, a `tuple[T, ...]` or a str does)"
     );
 }
 

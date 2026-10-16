@@ -152,8 +152,9 @@ pub(crate) fn marshal_args<'ctx>(
                     Scalar::Int(v) | Scalar::Bool(v) => v.into(),
                     Scalar::Float(v) => v.into(),
                     Scalar::Str(v) => v.into(),
-                    // A `frozenset` copy, fresh: the parameter slot owns it.
-                    Scalar::Set(v) => v.into(),
+                    // A `frozenset` or `tuple[str, ...]` copy, fresh: the
+                    // parameter slot owns it.
+                    Scalar::Set(v) | Scalar::List(v) => v.into(),
                     _ => unreachable!("object_coerce yields a scalar"),
                 };
             }

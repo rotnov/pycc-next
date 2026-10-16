@@ -72,7 +72,7 @@ pub(crate) fn resolve_comp_iter(
             match base_ty {
                 // A name bound on some paths only (`t` set in one branch).
                 Ty::Object if crate::non_strict::is_non_strict() => Ok(Ty::Object),
-                Ty::List(elem_ty) => Ok(*elem_ty),
+                Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => Ok(*elem_ty),
                 Ty::Str => Ok(Ty::Str),
                 Ty::Dict(kv) => Ok(kv.0),
                 Ty::Set(elem_ty) | Ty::FrozenSet(elem_ty) => Ok(*elem_ty),
@@ -95,7 +95,7 @@ pub(crate) fn resolve_comp_iter(
         }
         CompIter::Iterable(iterable) => match infer_expr_in(env, local_names, iterable)? {
             Ty::Object => Ok(Ty::Object),
-            Ty::List(elem_ty) => Ok(*elem_ty),
+            Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => Ok(*elem_ty),
             Ty::Str => Ok(Ty::Str),
             Ty::Generator(sig) => Ok(sig.0),
             // A tuple read by name or by subscripts over names and

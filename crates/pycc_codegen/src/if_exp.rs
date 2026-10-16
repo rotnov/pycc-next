@@ -95,7 +95,7 @@ fn scalar_of<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
             Scalar::List(value.into_pointer_value())
         }
         Ty::Tuple(_) => Scalar::Tuple(value.into_struct_value()),
-        Ty::List(_) => Scalar::List(value.into_pointer_value()),
+        Ty::List(_) | Ty::VarTuple(_) => Scalar::List(value.into_pointer_value()),
         Ty::Dict(_) => Scalar::Dict(value.into_pointer_value()),
         Ty::Set(_) | Ty::FrozenSet(_) => Scalar::Set(value.into_pointer_value()),
         Ty::Instance(_) => Scalar::Instance(value.into_pointer_value()),

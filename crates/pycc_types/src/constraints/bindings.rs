@@ -268,7 +268,9 @@ pub(crate) fn bind_comp_loop_var(
                 .cloned()
                 .and_then(|t| resolved_term(t, parents, concrete))
                 .and_then(|ty| match ty {
-                    Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => Some(*elem),
+                    Ty::List(elem) | Ty::VarTuple(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => {
+                        Some(*elem)
+                    }
                     Ty::Dict(kv) => Some(kv.0),
                     Ty::Str => Some(Ty::Str),
                     Ty::Generator(sig) => Some(sig.0),

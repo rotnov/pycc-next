@@ -123,6 +123,7 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
         // shares it too. `pycc_rt` never frees an instance, so the read
         // aliases the stored one with no refcount traffic.
         pycc_mir::Ty::List(_)
+        | pycc_mir::Ty::VarTuple(_)
         | pycc_mir::Ty::Dict(..)
         | pycc_mir::Ty::Set(_)
         | pycc_mir::Ty::FrozenSet(_)
@@ -137,7 +138,7 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
                 )
                 .expect("build_int_to_ptr should not fail reinterpreting an i64 as a pointer");
             match ty {
-                pycc_mir::Ty::List(_) => Scalar::List(ptr),
+                pycc_mir::Ty::List(_) | pycc_mir::Ty::VarTuple(_) => Scalar::List(ptr),
                 pycc_mir::Ty::Dict(..) => Scalar::Dict(ptr),
                 pycc_mir::Ty::Set(_) | pycc_mir::Ty::FrozenSet(_) => Scalar::Set(ptr),
                 pycc_mir::Ty::Instance(_) => Scalar::Instance(ptr),

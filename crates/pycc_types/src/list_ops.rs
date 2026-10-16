@@ -25,6 +25,27 @@ pub(crate) fn list_binop_ty(
     right: &Ty,
 ) -> Option<Result<Ty, Diagnostic>> {
     let is_count = |t: &Ty| matches!(t, Ty::Int | Ty::Bool);
+    // `tuple[T, ...]` (`Ty::VarTuple`): `+` with another one, or with a
+    // fixed-arity tuple of `T`s (`key + (part,)`), and repetition.
+    let var_like = |var: &Ty, other: &Ty| match (var, other) {
+        (Ty::VarTuple(_), _) if other == var => true,
+        (Ty::VarTuple(element), Ty::Tuple(items)) => pycc_hir::tuple_fits_var_tuple(items, element),
+        _ => false,
+    };
+    match (op, left, right) {
+        (BinOpKind::Mul, Ty::VarTuple(_), count) if is_count(count) => return Some(Ok(left.clone())),
+        (BinOpKind::Mul, count, Ty::VarTuple(_)) if is_count(count) => return Some(Ok(right.clone())),
+        (BinOpKind::Add, Ty::VarTuple(_), _) if var_like(left, right) => return Some(Ok(left.clone())),
+        (BinOpKind::Add, _, Ty::VarTuple(_)) if var_like(right, left) => return Some(Ok(right.clone())),
+        (_, Ty::VarTuple(_), _) | (_, _, Ty::VarTuple(_)) => {
+            return Some(Err(mismatch(format!(
+                "operator {op:?} is not defined for `{}` and `{}`",
+                left.name(),
+                right.name()
+            ))));
+        }
+        _ => {}
+    }
     match (op, left, right) {
         (BinOpKind::Mul, Ty::List(_), count) if is_count(count) => Some(Ok(left.clone())),
         (BinOpKind::Mul, count, Ty::List(_)) if is_count(count) => Some(Ok(right.clone())),

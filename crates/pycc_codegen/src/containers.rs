@@ -113,10 +113,13 @@ pub(crate) fn word_kind(rt: &RtFns<'_>, ty: &Ty) -> u64 {
         }
         Ty::Instance(_) => 6,
         Ty::List(_) => 5,
-        Ty::Tuple(_) => 7,
+        // A `tuple[T, ...]` is a tuple object (`pycc_rt::tuple`).
+        Ty::Tuple(_) | Ty::VarTuple(_) => 7,
         Ty::Dict(_) => 8,
         Ty::Set(_) | Ty::FrozenSet(_) => 9,
         Ty::Callable(_) => 10,
+        // A CPython object tuple element (`pycc_rt::list::LIST_KIND_OBJECT`).
+        Ty::Object => 11,
         other => panic!(
             "pycc_codegen: internal error: `{}` is not a container element type -- \
              pycc_hir::is_list_element_ty should have rejected it before codegen",
@@ -445,7 +448,7 @@ pub(crate) fn release_boxed<'ctx>(
 /// container of type `ty`: a list, a dict, or a set of hashable elements.
 pub(crate) fn has_native_contains(ty: &Ty) -> bool {
     match ty {
-        Ty::List(_) | Ty::Dict(_) => true,
+        Ty::List(_) | Ty::VarTuple(_) | Ty::Dict(_) => true,
         Ty::Set(elem) | Ty::FrozenSet(elem) => !matches!(**elem, Ty::Instance(_)),
         _ => false,
     }
@@ -464,7 +467,9 @@ pub(crate) fn emit_contains<'ctx>(
     negate: bool,
 ) -> Scalar<'ctx> {
     let (function, pointer, elem) = match (container_ty, container) {
-        (Ty::List(elem), Scalar::List(ptr)) => (rt.list_contains, ptr, (**elem).clone()),
+        (Ty::List(elem) | Ty::VarTuple(elem), Scalar::List(ptr)) => {
+            (rt.list_contains, ptr, (**elem).clone())
+        }
         (Ty::Dict(kv), Scalar::Dict(ptr)) => (rt.containers.dict_contains, ptr, kv.0.clone()),
         (Ty::Set(elem) | Ty::FrozenSet(elem), Scalar::Set(ptr)) => {
             (rt.containers.set_contains, ptr, (**elem).clone())
@@ -494,7 +499,7 @@ pub(crate) fn emit_contains<'ctx>(
 pub(crate) fn is_container_ty(ty: &Ty) -> bool {
     matches!(
         ty,
-        Ty::List(_) | Ty::Tuple(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_)
+        Ty::List(_) | Ty::Tuple(_) | Ty::VarTuple(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_)
     )
 }
 

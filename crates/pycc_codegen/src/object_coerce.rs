@@ -34,6 +34,7 @@ pub(crate) fn coerces_into(value: &MirExpr, slot_ty: &Ty) -> bool {
 /// a native copy (`pycc_types::non_strict::is_coercible_frozenset`).
 fn coercible_frozenset(ty: &Ty) -> bool {
     matches!(ty, Ty::FrozenSet(element) if matches!(**element, Ty::Str | Ty::Int))
+        || matches!(ty, Ty::VarTuple(element) if **element == Ty::Str)
 }
 
 /// Evaluates `value` (an object) and converts it to `slot_ty`; `what` names
@@ -57,6 +58,8 @@ pub(crate) fn emit_coerced<'ctx>(
         Ty::Str => 3,
         Ty::FrozenSet(element) if **element == Ty::Str => 9,
         Ty::FrozenSet(element) if **element == Ty::Int => 10,
+        // `tuple[str, ...]`: a native copy sharing the CPython tuple.
+        Ty::VarTuple(element) if **element == Ty::Str => 11,
         other => panic!(
             "pycc_codegen: internal error: no run-time conversion of an object to `{}`",
             other.name()
@@ -159,6 +162,7 @@ fn emit_conversion<'ctx>(
         Ty::Float => Scalar::Float(loaded.into_float_value()),
         Ty::Bool => Scalar::Bool(loaded.into_int_value()),
         Ty::FrozenSet(_) => Scalar::Set(loaded.into_pointer_value()),
+        Ty::VarTuple(_) => Scalar::List(loaded.into_pointer_value()),
         _ => Scalar::Str(loaded.into_pointer_value()),
     }
 }

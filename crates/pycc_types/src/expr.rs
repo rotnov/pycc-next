@@ -395,6 +395,7 @@ fn is_walrus_value_ty_supported(ty: &Ty) -> bool {
         | Ty::Set(_)
         | Ty::FrozenSet(_)
         | Ty::Tuple(_)
+        | Ty::VarTuple(_)
         | Ty::Instance(_)
         | Ty::Protocol(_)
         | Ty::Object

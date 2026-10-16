@@ -93,7 +93,7 @@ pub(crate) fn copy_kind(ty: &Ty, instance_kind: &dyn Fn(&str) -> u8) -> Option<u
         Ty::Str => Some(b's'),
         Ty::Int => Some(b'i'),
         Ty::Object | Ty::NdArray(_) => Some(b'o'),
-        Ty::List(_) => Some(b'l'),
+        Ty::List(_) | Ty::VarTuple(_) => Some(b'l'),
         Ty::Dict(_) => Some(b'd'),
         Ty::Instance(class) => Some(instance_kind(class)),
         Ty::Float | Ty::Bool => Some(b'w'),

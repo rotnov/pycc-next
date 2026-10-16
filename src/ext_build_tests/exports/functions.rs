@@ -362,9 +362,9 @@ fn a_tuple_of_something_uncarriable_is_a_capability_gap_naming_the_tuple() {
             "a parameter must be `int`, `float`, `bool`, `str`, `memoryview` (or its \
              other spellings `ndarray` and `NDArray`), a CPython object (`Any`, `object`, \
              a foreign class, or a container of objects), an instance of a class compiled \
-             in this module (not an enum or an exception class), or a `tuple` of \
-             `int`/`float`/`bool`, and a \
-             return type must be one of those, or `None`"
+             in this module (not an enum or an exception class), a `tuple` of \
+             `int`/`float`/`bool`, or a `tuple[str, ...]`, and a return type must be one \
+             of those, an immutable tuple of them, or `None`"
         ),
         "{message}"
     );
@@ -396,22 +396,39 @@ fn a_str_element_is_a_capability_gap_even_though_str_itself_is_carried() {
 }
 
 #[test]
-fn a_nested_tuple_return_is_a_capability_gap_rather_than_a_flattening() {
-    // The one arm that would be silently wrong if it were admitted: a
-    // nested tuple has no single scalar slot, and flattening it would make
+fn a_nested_tuple_return_crosses_as_one_packed_object_rather_than_a_flattening() {
+    // The arm that would be silently wrong if it were flattened: a nested
+    // tuple has no single scalar slot, and flattening it would make
     // `tuple[tuple[int, int], int]` and `tuple[int, int, int]` indis-
-    // tinguishable at the seam -- the wrapper would then re-pack three
-    // elements into a two-element Python tuple. D-116 gives a tuple type a
-    // fixed arity of scalar elements, and the boundary carries exactly that.
+    // tinguishable at the seam. Since v0.5 such a tuple is a boxed tuple
+    // object, returned as one pointer and packed recursively into a CPython
+    // tuple of the same shape (`pycc_ext_pack_tuple_object`), never through
+    // the scalar thunk's flattened slots.
     let hir = module(vec![func(
         "nest",
         &[("x", Ty::Int)],
         Ty::Tuple(Box::new(vec![Ty::Tuple(Box::new(vec![Ty::Int])), Ty::Int])),
     )]);
-    let gaps = collect_exports(&hir).expect_err("a nested tuple is not carriable");
-    assert_eq!(gaps.len(), 1);
-    let message = &gaps[0].message;
-    assert!(message.contains("`-> tuple`"), "{message}");
+    let exports = collect_exports(&hir).expect("an immutable nested tuple is carriable");
+    assert_eq!(exports.len(), 1);
+    assert_eq!(
+        crate::ext_build::carrier::return_c_type(&exports[0].return_ty),
+        Some("void *")
+    );
+}
+
+#[test]
+fn a_tuple_holding_a_variadic_tuple_returns_one_packed_object() {
+    // `-> tuple[int, tuple[str, ...]]` (tomli's `parse_key`): the result is
+    // a boxed tuple object. Treating the variadic element as a flattened
+    // out-slot (it has a scalar carrier of its own as a parameter) made the
+    // wrapper read the tuple object's words as the out-slots and crash.
+    let ty = Ty::Tuple(Box::new(vec![Ty::Int, Ty::VarTuple(Box::new(Ty::Str))]));
+    assert!(!matches!(
+        crate::ext_build::carrier::boundary_carrier(&ty),
+        Some(crate::ext_build::carrier::BoundaryCarrier::Tuple(_))
+    ));
+    assert_eq!(crate::ext_build::carrier::return_c_type(&ty), Some("void *"));
 }
 
 #[test]

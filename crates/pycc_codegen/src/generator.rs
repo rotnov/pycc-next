@@ -806,7 +806,7 @@ pub(super) fn basic_scalar<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar
         Ty::Bool | Ty::None => Scalar::Bool(value.into_int_value()),
         Ty::Float => Scalar::Float(value.into_float_value()),
         Ty::Str => Scalar::Str(value.into_pointer_value()),
-        Ty::List(_) => Scalar::List(value.into_pointer_value()),
+        Ty::List(_) | Ty::VarTuple(_) => Scalar::List(value.into_pointer_value()),
         Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements) => {
             Scalar::List(value.into_pointer_value())
         }

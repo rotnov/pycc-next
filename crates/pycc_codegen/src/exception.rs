@@ -206,6 +206,9 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // Non-strict mode: a converted object may be of another type
         // (`TypeError`), and `object_coerce::emit_coerced` owns the check.
         | MirExpr::ObjectCoerce(_, _)
+        // Boxing an element of a reboxed tuple may fail (a bigint outside
+        // the inline range), and `tuple_rebox::emit` owns the `NULL` check.
+        | MirExpr::TupleRebox(_, _)
         // Non-strict mode: an object index may fail (`TypeError`), and
         // `object_coerce::emit_index` owns the status check.
         | MirExpr::ObjectIndex(..)

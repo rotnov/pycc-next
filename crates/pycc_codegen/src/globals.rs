@@ -60,7 +60,7 @@ pub(crate) fn declare_module_globals<'ctx>(
                 // internal compiler panic. No exit-time decref accompanies
                 // it (contrast the `Ty::Str` loop in `compile_to_object`):
                 // D-107 keeps `list[T]` leak-only for v0.2.
-                pycc_mir::Ty::List(_) => (
+                pycc_mir::Ty::List(_) | pycc_mir::Ty::VarTuple(_) => (
                     context.ptr_type(inkwell::AddressSpace::default()).into(),
                     context
                         .ptr_type(inkwell::AddressSpace::default())

@@ -2,8 +2,20 @@
 
 use super::*;
 
+/// Whether a value of type `found` is a dict key of type `key`: the same
+/// type (keys compare exactly, so `bool` is no `int` key here), or a
+/// fixed-arity tuple of `T`s for a `tuple[T, ...]` key -- the same tuple
+/// object, hashed and compared by value.
+pub(crate) fn is_key_of(found: &Ty, key: &Ty) -> bool {
+    found == key
+        || matches!((found, key), (Ty::Tuple(items), Ty::VarTuple(element)) if pycc_hir::tuple_fits_var_tuple(items, element))
+}
+
 pub(crate) fn is_assignable(from: Ty, to: Ty) -> bool {
     from == to
+    // A fixed-arity tuple of `T`s is a `tuple[T, ...]` (`Ty::VarTuple`):
+    // the same boxed tuple object at run time.
+    || matches!((&from, &to), (Ty::Tuple(items), Ty::VarTuple(element)) if pycc_hir::tuple_fits_var_tuple(items, element))
     || (from == Ty::Bool && to == Ty::Int) // bool is a subtype of int, TYPE_SYSTEM.md's representation table
     // PEP 695 (#387): a `Ty::Param` in a generic class's method signature
     // is accepted as matching any concrete scalar type during type checking,
@@ -514,6 +526,6 @@ pub(crate) fn collect_named_expr_bindings(
 pub(crate) fn is_container_ty(ty: &Ty) -> bool {
     matches!(
         ty,
-        Ty::List(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Dict(_) | Ty::Tuple(_)
+        Ty::List(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Dict(_) | Ty::Tuple(_) | Ty::VarTuple(_)
     )
 }

@@ -486,6 +486,54 @@ static PyObject *pycc_ext_pack_object(void *result)
     return (PyObject *)result;
 }
 
+/* Defined later in the translation unit (`object_convert.c`,
+ * `pycc_ext_object_ops.c`). */
+PyObject *pycc_ext_obj_pack_list(void *list);
+int pycc_ext_coerce_str_tuple(PyObject *o, const char *what, void **out);
+extern void pycc_rt_list_decref(void *list);
+
+/*
+ * A `tuple[str, ...]` parameter (v0.5): a CPython `tuple` of `str`s copied
+ * into a native tuple object sharing each string and the tuple itself
+ * (`pycc_ext_coerce_str_tuple`), so it crosses back as the same object. The
+ * fresh reference becomes the compiled function's parameter slot. Anything
+ * else is `TypeError`, naming the argument.
+ */
+static int pycc_ext_unpack_str_tuple(PyObject *obj, const char *fn_name, Py_ssize_t index,
+                                     void **out)
+{
+    char what[256];
+
+    PyOS_snprintf(what, sizeof what, "%s() argument %zd", fn_name, index + 1);
+    return pycc_ext_coerce_str_tuple(obj, what, out);
+}
+
+/*
+ * A native tuple object result -- a `tuple[str, ...]`, or a fixed-arity or
+ * variadic tuple of `str`s, scalars, CPython objects and such tuples (v0.5)
+ * -- as the CPython `tuple` it crosses as (`pycc_ext_obj_pack_list`: the
+ * same object every time it crosses). Consumes the compiled body's owned
+ * reference, as `pycc_ext_pack_str` consumes its string.
+ */
+static PyObject *pycc_ext_pack_tuple_object(void *result)
+{
+    PyObject *packed;
+
+    if (result == NULL) {
+        PyErr_SetString(PyExc_SystemError, "tuple result was NULL");
+        return NULL;
+    }
+    packed = pycc_ext_obj_pack_list(result);
+    pycc_rt_list_decref(result);
+    return packed;
+}
+
+/* The `tuple[str, ...]` carrier's egress (`pycc_ext_unpack_str_tuple`). */
+static PyObject *pycc_ext_pack_str_tuple(void *result)
+{
+    return pycc_ext_pack_tuple_object(result);
+}
+
 /*
  * The `{ ptr, len }` pair a `memoryview` parameter crosses into compiled
  * code as (Part 1 of #1027, D-244). Declared here rather than derived from

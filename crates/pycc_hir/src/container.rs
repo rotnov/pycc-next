@@ -40,6 +40,10 @@ use pycc_diag::{Diagnostic, Span};
 /// This is deliberately *element*-shaped rather than a whole-`Ty` postcheck:
 /// `pycc_types`' tuple-literal inference gates the elements in source order.
 pub fn check_tuple_element_ty(element: &Ty, span: Span) -> Result<(), Diagnostic> {
+    // A CPython object element (an `ext` or non-strict `tuple[int, Any]`)
+    // is admitted by the annotation that spells it
+    // (`func::container_annotation`), not here: plain strict code builds a
+    // tuple display holding an object as the CPython tuple.
     if is_list_element_ty(element) {
         return Ok(());
     }
@@ -60,9 +64,44 @@ pub fn check_tuple_element_ty(element: &Ty, span: Span) -> Result<(), Diagnostic
 /// and `float` makes it boxed.
 #[must_use]
 pub fn tuple_is_boxed(elements: &[Ty]) -> bool {
-    !elements
-        .iter()
-        .all(|element| matches!(element, Ty::Int | Ty::Bool | Ty::Float))
+    // The empty tuple is boxed: it is then a `tuple[T, ...]` of any `T`
+    // with no conversion (`Ty::VarTuple`).
+    elements.is_empty()
+        || !elements
+            .iter()
+            .all(|element| matches!(element, Ty::Int | Ty::Bool | Ty::Float))
+}
+
+/// Whether `tuple[element, ...]` is compiled natively (`Ty::VarTuple`): an
+/// element a list can hold that is itself counted -- a `str`, an instance,
+/// a container or a function value -- so every fixed-arity tuple of it is a
+/// boxed tuple object already and flows into a `tuple[T, ...]` slot with
+/// no conversion. A tuple of `int`/`float`/`bool` is an SSA struct, so
+/// `tuple[int, ...]` is not compiled yet (the CPython `tuple` in an `ext`
+/// or non-strict module, `T0053` otherwise).
+#[must_use]
+pub fn is_var_tuple_element_ty(element: &Ty) -> bool {
+    is_list_element_ty(element) && !matches!(element, Ty::Int | Ty::Float | Ty::Bool)
+}
+
+/// Whether a fixed-arity tuple of type `tuple[elements]` is, as it is
+/// represented, also a `tuple[element, ...]` (`Ty::VarTuple`): a boxed
+/// tuple object whose elements all have type `element`, or `()`.
+#[must_use]
+pub fn tuple_fits_var_tuple(elements: &[Ty], element: &Ty) -> bool {
+    tuple_is_boxed(elements) && elements.iter().all(|e| e == element)
+}
+
+/// The element type of a `list[T]` or a `tuple[T, ...]`: the two share a
+/// run-time object (a `pycc_rt` list; the tuple is marked frozen), so
+/// every read -- `len`, indexing, slicing, iteration, membership -- is the
+/// same operation on either.
+#[must_use]
+pub fn sequence_element(ty: &Ty) -> Option<&Ty> {
+    match ty {
+        Ty::List(element) | Ty::VarTuple(element) => Some(element),
+        _ => None,
+    }
 }
 
 /// Whether `ty` can be a dict key or a set element with a natively computed
@@ -72,6 +111,7 @@ pub fn is_hashable_ty(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
         Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_hashable_ty),
+        Ty::VarTuple(element) => is_hashable_ty(element),
         _ => false,
     }
 }
@@ -98,7 +138,8 @@ pub fn display_is_object(kind: DisplayKind, elements: &[Ty]) -> bool {
     // pre-pass found no native element type for it (`pycc_types` refuses it
     // with `T0003` in strict mode).
     if elements.is_empty() {
-        return true;
+        // `()` is the native empty tuple object.
+        return kind != DisplayKind::Tuple;
     }
     if elements.contains(&Ty::Object) {
         return true;
@@ -216,6 +257,16 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
             }
             Ok(())
         }
+        Ty::VarTuple(element) if is_var_tuple_element_ty(element) => Ok(()),
+        Ty::VarTuple(element) => check_tuple_element_ty(element, span).and(Err(Diagnostic::error(
+            "T0053",
+            format!(
+                "`{}` is not compiled yet -- a variadic tuple's element must be str, a \
+                 user-class instance, or a list, tuple, dict or set",
+                ty.name()
+            ),
+            span,
+        ))),
         Ty::Int
         | Ty::Float
         | Ty::Bool
@@ -243,6 +294,7 @@ pub fn is_list_element_ty(element: &Ty) -> bool {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Instance(_) | Ty::Callable(_) => true,
         Ty::List(inner) => is_list_element_ty(inner),
         Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_list_element_ty),
+        Ty::VarTuple(element) => is_var_tuple_element_ty(element),
         Ty::Dict(pair) => is_hashable_ty(&pair.0) && is_list_element_ty(&pair.1),
         Ty::Set(inner) | Ty::FrozenSet(inner) => is_hashable_ty(inner),
         _ => false,
@@ -279,7 +331,7 @@ pub fn empty_object_constructor(callee: &str, arity: usize) -> Option<DisplayKin
 pub fn object_comp_collects_natively(elt: &Ty) -> bool {
     matches!(
         elt,
-        Ty::List(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Dict(_) | Ty::Tuple(_)
+        Ty::List(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Dict(_) | Ty::Tuple(_) | Ty::VarTuple(_)
     ) && is_list_element_ty(elt)
 }
 

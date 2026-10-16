@@ -37,7 +37,7 @@ pub unsafe extern "C" fn pycc_rt_list_enumerate(xs: *mut PyListObj, start: i64) 
             let index = crate::tag_smallint(start + i as i64);
             crate::tuple::tuple_from(
                 vec![index, word],
-                vec![LIST_KIND_INT as u8, kind as u8].into(),
+                &[LIST_KIND_INT as u8, kind as u8],
             ) as i64
         })
         .collect();
@@ -59,7 +59,7 @@ fn zip(lists: &[*mut PyListObj]) -> *mut PyListObj {
                 words.push(word);
                 kinds.push(kind as u8);
             }
-            crate::tuple::tuple_from(words, kinds.into()) as i64
+            crate::tuple::tuple_from(words, &kinds) as i64
         })
         .collect();
     new_raw_words(LIST_KIND_TUPLE, tuples)

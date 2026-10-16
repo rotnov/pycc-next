@@ -34,6 +34,13 @@ pub(crate) fn binop_result_ty(op: BinOpKind, left: Ty, right: Ty) -> Ty {
     // #575.
     // `list * int`, `int * list` and `list + list` keep the list's type
     // (`pycc_types::list_ops::list_binop_ty` admits nothing else).
+    // `tuple[T, ...]` `+`/`*` (`pycc_types::list_ops::list_binop_ty`).
+    if let Ty::VarTuple(_) = left {
+        return left;
+    }
+    if let Ty::VarTuple(_) = right {
+        return right;
+    }
     if let Ty::List(_) = left {
         return left;
     }

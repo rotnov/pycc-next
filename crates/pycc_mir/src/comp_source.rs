@@ -56,7 +56,7 @@ pub(crate) fn resolve_comp_source(
             (CompSource::Range { start, stop, step }, Ty::Int)
         }
         CompIter::Name(name) => match lookup(scopes, name) {
-            Ty::List(elem_ty) => {
+            Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => {
                 bind_variable(scopes, var.to_string(), (*elem_ty).clone());
                 kill_narrowing(scopes, var);
                 (CompSource::List(name.clone()), *elem_ty)
@@ -124,7 +124,7 @@ pub(crate) fn resolve_comp_source(
         CompIter::Iterable(iterable) => {
             let iterable = lower_expr(iterable, scopes, classes, current_class);
             let (source, elem) = match iterable.ty() {
-                Ty::List(elem) => (CompSource::ListExpr(iterable), *elem),
+                Ty::List(elem) | Ty::VarTuple(elem) => (CompSource::ListExpr(iterable), *elem),
                 Ty::Str => (CompSource::ListExpr(str_to_list(iterable)), Ty::Str),
                 // `tuple_to_list` reads the tuple once per element: a
                 // subscript or attribute read has no side effect.

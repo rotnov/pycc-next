@@ -412,7 +412,9 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
     out.push_str(&release);
     match &export.return_ty {
         Ty::None => out.push_str("    return Py_NewRef(Py_None);\n}\n\n"),
-        Ty::Tuple(_) => out.push_str(&pack_tuple_return(source_name, &out_slots)),
+        Ty::Tuple(_) if !out_slots.is_empty() => {
+            out.push_str(&pack_tuple_return(source_name, &out_slots))
+        }
         // `pack_int` is the one packer whose failure is a property of the
         // *value*, and the only one whose message therefore names the
         // function: D-141's bigint egress (#1040). `PyFloat_FromDouble` and
@@ -466,6 +468,12 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
         // still holds) is that very object.
         Ty::Instance(_) => {
             out.push_str("    return pycc_ext_pack_instance(result);\n}\n\n");
+        }
+        // v0.5: a tuple object result other than a `tuple[str, ...]`, which
+        // has a carrier of its own (`carrier::return_c_type`).
+        Ty::Tuple(_) | Ty::VarTuple(_) if boundary_carrier(&export.return_ty).is_none() =>
+        {
+            out.push_str("    return pycc_ext_pack_tuple_object(result);\n}\n\n");
         }
         ty => {
             let (_, helper) = boundary_carrier(ty)
@@ -560,6 +568,7 @@ pub(crate) fn unpack_args(
                 SlotCleanup::ObjectDecref => {
                     format!("        Py_DECREF((PyObject *)a{earlier});\n")
                 }
+                SlotCleanup::TupleDecref => format!("        pycc_rt_list_decref(a{earlier});\n"),
             })
             .collect();
         let arg = arg_expr(index);

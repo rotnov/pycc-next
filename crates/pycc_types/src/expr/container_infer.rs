@@ -226,13 +226,8 @@ pub(crate) fn infer_tuple_literal_expr(
     ) {
         return result;
     }
-    if elements.is_empty() {
-        return Err(Diagnostic::error(
-            "T0021",
-            "an empty tuple literal's element types cannot be inferred from the literal alone -- inferring them from a `tuple[...]` annotation is not supported yet (issue #927)".to_string(),
-            Span::new(0, 0),
-        ));
-    }
+    // `()`: the empty tuple, a boxed tuple object of no elements, which
+    // is also a `tuple[T, ...]` of any `T` (`is_assignable`).
     let mut elem_tys = Vec::with_capacity(elements.len());
     for element in elements {
         let this_ty = infer_expr_in(env, local_names, element)?;
@@ -341,13 +336,14 @@ pub(crate) fn infer_subscript_expr(
     let index_ty = infer_expr_in(env, local_names, index)?;
     // A sequence index reads an `IntEnum` member as its `int` value
     // (`pycc_hir::int_enum`); a dict key is the member itself.
+    let base_is_list = matches!(base_ty, Ty::List(_));
     let index_ty = if matches!(base_ty, Ty::Dict(_)) {
         index_ty
     } else {
         pycc_hir::int_enum::as_int(&index_ty)
     };
     match base_ty {
-        Ty::List(elem_ty) => {
+        Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => {
             // Reuses T0021 (an unconstrained/conflicting-constraint
             // shape), not a new code -- a non-int-compatible index is
             // that same "operand type mismatch" failure, not a
@@ -369,7 +365,11 @@ pub(crate) fn infer_subscript_expr(
             {
                 return Err(Diagnostic::error(
                     "T0021",
-                    format!("list index must be `int`, found `{}`", index_ty.name()),
+                    format!(
+                        "{} index must be `int`, found `{}`",
+                        if base_is_list { "list" } else { "tuple" },
+                        index_ty.name()
+                    ),
                     Span::new(0, 0),
                 )
                 .with_help("use an `int` value"));
@@ -386,7 +386,7 @@ pub(crate) fn infer_subscript_expr(
         // the list-index case above.
         Ty::Dict(kv) => {
             let (key_ty, val_ty) = *kv;
-            if index_ty != key_ty {
+            if !crate::assign_check::is_key_of(&index_ty, &key_ty) {
                 // Non-strict mode: as for a store (`stmt_check`), a key of
                 // another type makes the dict CPython's own.
                 if let HirExpr::Name(dict) = base.as_ref() {
@@ -562,11 +562,11 @@ pub(crate) fn infer_slice_expr(
             [start.as_deref(), stop.as_deref(), step.as_deref()],
         );
     }
-    let (Ty::List(_) | Ty::Str) = &base_ty else {
+    let (Ty::List(_) | Ty::VarTuple(_) | Ty::Str) = &base_ty else {
         return Err(Diagnostic::error(
             "T0033",
             format!(
-                "`{}` does not support slicing (only a list or a str does)",
+                "`{}` does not support slicing (only a list, a `tuple[T, ...]` or a str does)",
                 base_ty.name()
             ),
             Span::new(0, 0),
@@ -715,7 +715,7 @@ pub(crate) fn infer_dict_get_or_default_expr(
         ));
     };
     let key_ty = infer_expr_in(env, local_names, key)?;
-    if key_ty != kv.0 {
+    if !crate::assign_check::is_key_of(&key_ty, &kv.0) {
         return Err(Diagnostic::error(
             "T0021",
             format!(

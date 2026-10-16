@@ -55,7 +55,8 @@ pub use compare_chain::{CompareLink, chain_as_conjunction, compare_chain_operand
 pub use container::{
     DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object,
     empty_object_constructor, homogeneous_tuple_element, is_hashable_ty, is_list_element_ty, object_comp_collects_natively,
-    set_element_message, tuple_is_boxed,
+    is_var_tuple_element_ty, sequence_element, set_element_message, tuple_fits_var_tuple,
+    tuple_is_boxed,
 };
 pub use dunder_name::DUNDER_NAME;
 pub use exception::{
@@ -227,6 +228,20 @@ pub enum Ty {
     /// variant keeps `size_of::<Ty>()` at 16 bytes, inside the D-109
     /// ceiling (measured, and pinned by `ty_size_stays_within_d109_ceiling`).
     FrozenSet(Box<Ty>),
+    /// `tuple[T, ...]`, the homogeneous variadic tuple (v0.5), for a
+    /// counted `T` ([`is_var_tuple_element_ty`]: `str`, an instance, a
+    /// container). Its run-time object is the boxed tuple object every
+    /// tuple of counted elements already is (`pycc_rt::tuple`), so a
+    /// fixed-arity `tuple[T, T]` *is* a `tuple[T, ...]` with no conversion
+    /// ([`tuple_fits_var_tuple`]). It reads like a list -- `len`, `t[i]`,
+    /// iteration are the list's inline paths over the shared `{len, data}`
+    /// prefix, and the list runtime's slice, `+`, `*` and `in` handle a
+    /// tuple object -- and renders, compares and hashes as a tuple;
+    /// `pycc_types` admits no operation that mutates it. It crosses into
+    /// CPython as a `tuple` copy, which immutability makes unobservable
+    /// except through `is`. `Box<Ty>`, a thin pointer, keeps
+    /// `size_of::<Ty>()` at 16 bytes.
+    VarTuple(Box<Ty>),
     /// `tuple[A, B, ...]`. Same status as `Dict` above -- PR-11's own
     /// scope. Boxed (D-109) as `Box<Vec<Ty>>` -- a second indirection: a
     /// thin (8-byte) pointer to a heap-allocated `Vec<Ty>` -- not as
@@ -373,6 +388,7 @@ impl Ty {
             Ty::Dict(kv) => format!("dict[{}, {}]", kv.0.name(), kv.1.name()),
             Ty::Set(elem) => format!("set[{}]", elem.name()),
             Ty::FrozenSet(elem) => format!("frozenset[{}]", elem.name()),
+            Ty::VarTuple(elem) => format!("tuple[{}, ...]", elem.name()),
             Ty::Tuple(elems) => format!(
                 "tuple[{}]",
                 elems.iter().map(Ty::name).collect::<Vec<_>>().join(", ")

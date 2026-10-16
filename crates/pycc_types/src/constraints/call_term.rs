@@ -334,6 +334,7 @@ pub(crate) fn collect_call_constraints(
             && !matches!(
                 arg_ty,
                 Ty::List(_)
+                    | Ty::VarTuple(_)
                     | Ty::Dict(_)
                     | Ty::Set(_)
                     | Ty::FrozenSet(_)

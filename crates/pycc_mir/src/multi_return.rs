@@ -172,7 +172,12 @@ fn candidates(module: &MirModule) -> HashMap<String, Abi> {
         }
         let declared = match return_ty {
             Ty::Object => None,
-            Ty::Tuple(elements) if elements.len() >= 2 && elements.iter().all(is_abi_ty) => {
+            // A native tuple, an `object` element of which (v0.5) every
+            // return's value in that position boxes into.
+            Ty::Tuple(elements)
+                if elements.len() >= 2
+                    && elements.iter().all(|e| is_abi_ty(e) || *e == Ty::Object) =>
+            {
                 Some((**elements).clone())
             }
             _ => continue,
@@ -281,9 +286,13 @@ fn abi_of(
             return None;
         }
         // A native tuple's twin carries exactly its element types, which
-        // every return must already have.
+        // every return must already have, but for an `object` slot, which a
+        // native value boxes into (`twin_returns`).
         if let Some(declared) = declared {
-            if elements != *declared {
+            let fits = elements.iter().zip(declared).all(|(ty, slot)| {
+                ty == slot || (*slot == Ty::Object && abi_element(ty.clone()).is_some())
+            });
+            if !fits {
                 return None;
             }
             continue;
@@ -328,7 +337,7 @@ fn abi_element(ty: Ty) -> Option<Ty> {
 /// A native result type a twin carries (and an object unpacking converts
 /// to with `ObjectCoerce`).
 fn is_abi_ty(ty: &Ty) -> bool {
-    matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
+    matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::VarTuple(_))
 }
 
 /// Collects every `return` of `body` into `out`; `false` when one is not a
@@ -344,6 +353,14 @@ fn body_returns(body: &[MirStmt], out: &mut Vec<Returned>) -> bool {
                     elements,
                 } => out.push(Returned::Values(elements.iter().map(MirExpr::ty).collect())),
                 MirExpr::Call { callee, .. } => out.push(Returned::Forward(callee.clone())),
+                // A forward whose result boxes into the declared tuple's
+                // `object` slots (`stmt::coerce_returned_tuple`).
+                MirExpr::TupleRebox(inner, _) if matches!(**inner, MirExpr::Call { .. }) => {
+                    let MirExpr::Call { callee, .. } = &**inner else {
+                        unreachable!("matched above")
+                    };
+                    out.push(Returned::Forward(callee.clone()));
+                }
                 _ => return false,
             },
             MirStmt::Return(None)
@@ -388,6 +405,12 @@ fn twin_returns(body: &mut Vec<MirStmt>, abi: &Abi, candidates: &HashMap<String,
             continue;
         };
         let mut out = Vec::new();
+        // A rebox of a forward is the forward: `converted` below boxes each
+        // result its slot wants as an object.
+        let value: &MirExpr = match &*value {
+            MirExpr::TupleRebox(inner, _) if matches!(**inner, MirExpr::Call { .. }) => inner,
+            other => other,
+        };
         // Each result in a temporary of its own type, in display order.
         let results: Vec<(String, Ty)> = match value {
             MirExpr::TupleLiteral(elements)
@@ -520,7 +543,7 @@ fn unpack_fallback(call: MirExpr, abi: &Abi, temps: &[(String, Ty)], tuple: &str
 /// releases.
 fn is_counted(ty: &Ty) -> bool {
     match ty {
-        Ty::Object | Ty::Str | Ty::Instance(_) => true,
+        Ty::Object | Ty::Str | Ty::Instance(_) | Ty::VarTuple(_) => true,
         Ty::Tuple(elements) => pycc_hir::tuple_is_boxed(elements),
         _ => false,
     }

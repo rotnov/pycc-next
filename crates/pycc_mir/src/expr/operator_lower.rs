@@ -121,7 +121,7 @@ pub(crate) fn lower_unpack_expr(
             value: Box::new(value),
             arity: *arity,
         }
-    } else if let Ty::List(_) = value.ty() {
+    } else if let Ty::List(_) | Ty::VarTuple(_) = value.ty() {
         builtin_call::lower_list_unpack(value, *arity)
     } else {
         value
@@ -236,7 +236,9 @@ pub(crate) fn lower_compare_expr(
     // in a container of `int`s, is its `int` value.
     if matches!(op, CmpOpKind::In | CmpOpKind::NotIn) {
         let ints = match right_lowered.ty() {
-            Ty::List(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => *elem == Ty::Int,
+            Ty::List(elem) | Ty::VarTuple(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => {
+                *elem == Ty::Int
+            }
             Ty::Dict(kv) => kv.0 == Ty::Int,
             _ => false,
         };

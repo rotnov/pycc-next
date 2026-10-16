@@ -150,6 +150,17 @@ pub(crate) fn reject_unrenderable(
             Span::new(0, 0),
         )),
         Ty::List(_) => crate::list_ops::check_list_renderable(ty),
+        // The runtime renders a `tuple[T, ...]` itself (`pycc_rt_list_repr`),
+        // with no `__repr__` call for an instance element.
+        Ty::VarTuple(elem) if matches!(**elem, Ty::Instance(_)) => Err(Diagnostic::error(
+            "C0001",
+            format!(
+                "rendering `{}` (a tuple holding class instances) as a string is not \
+                 supported yet",
+                ty.name()
+            ),
+            Span::new(0, 0),
+        )),
         // The runtime renders a dict's words itself, with no `__repr__` call
         // for an instance key or value.
         Ty::Dict(pair) if matches!(pair.0, Ty::Instance(_)) || matches!(pair.1, Ty::Instance(_)) => {

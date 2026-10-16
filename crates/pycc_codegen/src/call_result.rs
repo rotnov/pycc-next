@@ -122,7 +122,7 @@ pub(super) fn call_result_scalar<'ctx>(
         // container is a genuine pointer transfer -- the callee's value
         // and the caller's binding name the same allocation -- which
         // adds no new free site and no new release obligation.
-        Ty::List(_) => Scalar::List(
+        Ty::List(_) | Ty::VarTuple(_) => Scalar::List(
             call_site
                 .try_as_basic_value()
                 .expect_basic("this function is declared to return list")

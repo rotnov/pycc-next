@@ -118,7 +118,7 @@ pub(crate) fn compare_link_ty(
             return Ok(Ty::Bool);
         }
         // A CPython object needle keeps the foreign refusal below.
-        if let Ty::List(elem) = right_ty
+        if let Ty::List(elem) | Ty::VarTuple(elem) = right_ty
             && *left_ty != Ty::Object
         {
             return crate::list_ops::membership_ty(env, left_ty, elem);
@@ -302,12 +302,25 @@ fn container_compare_ty(op: CmpOp, left: &Ty, right: &Ty) -> Option<Result<Ty, D
     let container = |ty: &Ty| {
         matches!(
             ty,
-            Ty::List(_) | Ty::Tuple(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_)
+            Ty::List(_) | Ty::Tuple(_) | Ty::VarTuple(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_)
         )
     };
     if !container(left) || !container(right) {
         return None;
     }
+    // A fixed-arity tuple compares with a `tuple[T, ...]` as the tuple
+    // it is.
+    let fixed_as_var = |fixed: &Ty, var: &Ty| match (fixed, var) {
+        (Ty::Tuple(items), Ty::VarTuple(element)) => pycc_hir::tuple_fits_var_tuple(items, element),
+        _ => false,
+    };
+    let (left, right) = if fixed_as_var(left, right) {
+        (right, right)
+    } else if fixed_as_var(right, left) {
+        (left, left)
+    } else {
+        (left, right)
+    };
     let refuse = || {
         Err(Diagnostic::error(
             "T0021",
@@ -345,7 +358,7 @@ fn container_compare_ty(op: CmpOp, left: &Ty, right: &Ty) -> Option<Result<Ty, D
 fn ordered(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
-        Ty::List(elem) => ordered(elem),
+        Ty::List(elem) | Ty::VarTuple(elem) => ordered(elem),
         Ty::Tuple(elements) => elements.iter().all(ordered),
         _ => false,
     }

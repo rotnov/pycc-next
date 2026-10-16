@@ -134,6 +134,7 @@ pub(super) fn collect_declared_attrs(
                 | Ty::Str
                 | Ty::Param(_)
                 | Ty::List(_)
+                | Ty::VarTuple(_)
                 | Ty::Dict(..)
                 // Part 1 of #1367: a class a foreign import binds, stored as
                 // its `PyObject*` pointer word (D-154's pointer rule).

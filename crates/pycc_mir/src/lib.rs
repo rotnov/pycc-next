@@ -54,9 +54,11 @@ mod visit;
 pub use visit::comp_source_exprs;
 // MIR node definitions split out of the crate root (mechanical move).
 mod mir_expr;
+mod mir_expr_payloads;
 mod mir_expr_queries;
 mod mir_stmt;
 pub use mir_expr::*;
+pub use mir_expr_payloads::*;
 pub use mir_stmt::*;
 use pycc_hir::{ForeignImportSite, HirItem, HirModule, HirStmt, ImportBinding};
 #[cfg(test)]

@@ -305,7 +305,7 @@ pub fn slot_rc_kind(ty: &Ty, instance_kind: &dyn Fn(&str) -> u8) -> u8 {
     match ty {
         Ty::Str => b's',
         Ty::Int => b'i',
-        Ty::List(_) => b'l',
+        Ty::List(_) | Ty::VarTuple(_) => b'l',
         Ty::Tuple(elements) if crate::tuple_is_boxed(elements) => b'l',
         Ty::Instance(class) => instance_kind(class),
         Ty::Dict(_) => b'd',

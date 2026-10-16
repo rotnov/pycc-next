@@ -136,11 +136,12 @@ pub(crate) fn lower_yield_from_stmt(
             sub: Box::new(value),
             ty: sig.2,
         }),
-        Ty::List(element) => {
+        list_ty @ (Ty::List(_) | Ty::VarTuple(_)) => {
+            let element = Box::new(pycc_hir::sequence_element(&list_ty).cloned().expect("a sequence"));
             let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let list = format!("0yieldfrom_list{n}");
             let var = format!("0yieldfrom_item{n}");
-            crate::bind_variable(scopes, list.clone(), Ty::List(element.clone()));
+            crate::bind_variable(scopes, list.clone(), list_ty.clone());
             crate::bind_variable(scopes, var.clone(), (*element).clone());
             MirStmt::Seq(vec![
                 MirStmt::Assign {

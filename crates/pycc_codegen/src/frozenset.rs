@@ -35,7 +35,7 @@ pub(super) fn emit_frozenset_from<'ctx>(
         Some(source) => {
             let scalar = emit_expr(context, builder, module, rt, user_functions, locals, source);
             match source.ty() {
-                pycc_mir::Ty::List(_) => (
+                pycc_mir::Ty::List(_) | pycc_mir::Ty::VarTuple(_) => (
                     rt.containers.set_from_list,
                     vec![
                         expect_list_pointer(scalar, "`frozenset`'s argument").into(),

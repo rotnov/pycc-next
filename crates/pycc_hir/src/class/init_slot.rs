@@ -389,6 +389,7 @@ fn slot_ty_from_init_rhs(
                     | Ty::Str
                     | Ty::Param(_)
                     | Ty::List(_)
+                    | Ty::VarTuple(_)
                     | Ty::Dict(..)
                     | Ty::Object
                     | Ty::Instance(_)

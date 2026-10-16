@@ -102,7 +102,18 @@ fn a_container_with_an_object_argument_collapses_to_the_object() {
          d: dict[str, Dict[str, tuple]], e: set[object]) -> List[Any]:\n    return a\n"
     ));
     let (params, return_ty) = signature(&module, "_f");
-    assert_eq!(params, vec![Ty::Object; 5]);
+    // A fixed-arity tuple is the exception (v0.5): a native tuple one of
+    // whose elements is the CPython object.
+    assert_eq!(
+        params,
+        vec![
+            Ty::Object,
+            Ty::Object,
+            Ty::Tuple(Box::new(vec![Ty::Int, Ty::Object])),
+            Ty::Object,
+            Ty::Object
+        ]
+    );
     assert_eq!(return_ty, Ty::Object);
 }
 

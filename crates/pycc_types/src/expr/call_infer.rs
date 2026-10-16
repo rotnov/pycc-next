@@ -277,7 +277,12 @@ pub(crate) fn infer_call_expr(
         if !named_tuple
             && !matches!(
                 arg_tys[0],
-                Ty::List(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::Object
+                Ty::List(_)
+                    | Ty::VarTuple(_)
+                    | Ty::Dict(_)
+                    | Ty::Set(_)
+                    | Ty::FrozenSet(_)
+                    | Ty::Object
             )
         {
             return Err(Diagnostic::error(

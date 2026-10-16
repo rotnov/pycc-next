@@ -37,6 +37,7 @@ pub(crate) fn rc_kind(kind: i64) -> u8 {
         LIST_KIND_SET => b'e',
         LIST_KIND_CLOSURE => b'f',
         crate::list::LIST_KIND_EXCEPTION => b'x',
+        crate::list::LIST_KIND_OBJECT => b'o',
         _ => b'w',
     }
 }
@@ -44,6 +45,14 @@ pub(crate) fn rc_kind(kind: i64) -> u8 {
 /// Takes one more reference to `word`.
 pub(crate) fn retain(kind: i64, word: i64) {
     crate::rc::retain_word(rc_kind(kind), word);
+}
+
+/// Takes one more reference to the container word `word` of kind `kind`
+/// (`LIST_KIND_*`), for the `--ext` shim, which copies words between
+/// containers (`pycc_ext_obj_tuple_rebox`).
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_word_retain(kind: i64, word: i64) {
+    retain(kind, word);
 }
 
 /// Drops one reference to `word`.
@@ -276,6 +285,13 @@ pub(crate) fn repr(kind: i64, word: i64, out: &mut String) -> bool {
         }
         LIST_KIND_DICT => return crate::dict::dict_repr_into(word as *mut PyDictObj, out),
         LIST_KIND_SET => return crate::set::set_repr_into(word as *mut PySetObj, out),
+        crate::list::LIST_KIND_OBJECT => {
+            let rendered = crate::rc::object_repr(word);
+            if rendered.is_null() {
+                return false;
+            }
+            rendered
+        }
         LIST_KIND_CLOSURE => {
             out.push_str(&crate::closure::closure_repr(
                 word as *mut crate::closure::PyClosureObj,

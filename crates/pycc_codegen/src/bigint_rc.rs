@@ -628,6 +628,8 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         | MirExpr::ObjectUnbox(_, _)
         // A converted object's word, encoded by the same shim helper.
         | MirExpr::ObjectCoerce(_, _)
+        // A new tuple object, never an `int`.
+        | MirExpr::TupleRebox(_, _)
         // An object read as an index: the shim encodes an inline word (it
         // clamps or refuses anything beyond the inline range,
         // `pycc_ext_obj_coerce` kinds 4..7), so owning it releases nothing.

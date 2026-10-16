@@ -33,6 +33,7 @@ pub fn if_exp_result_ty(body: &Ty, orelse: &Ty) -> Option<Ty> {
             | Ty::Object
             | Ty::Optional(_)
             | Ty::List(_)
+            | Ty::VarTuple(_)
             | Ty::Dict(_)
             | Ty::Set(_)
             | Ty::FrozenSet(_)

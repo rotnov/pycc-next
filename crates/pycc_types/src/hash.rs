@@ -53,6 +53,8 @@ fn is_admitted(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Bool | Ty::Str | Ty::Float => true,
         Ty::Tuple(elements) => elements.iter().all(|e| matches!(e, Ty::Int | Ty::Bool | Ty::Str | Ty::Float)),
+        // A `tuple[T, ...]` is a tuple object: `pycc_rt_hash_tuple_object`.
+        Ty::VarTuple(element) => pycc_hir::is_hashable_ty(element),
         _ => false,
     }
 }

@@ -119,10 +119,9 @@ pub(crate) fn collect_subscript_constraints(
     {
         return Ok(Some(Ok(first.clone())));
     }
-    if let Some(Ok(Ty::List(element_ty))) = base_term {
-        Ok(Some(Ok(*element_ty)))
-    } else {
-        Ok(None)
+    match base_term {
+        Some(Ok(Ty::List(element_ty) | Ty::VarTuple(element_ty))) => Ok(Some(Ok(*element_ty))),
+        _ => Ok(None),
     }
 }
 
@@ -162,6 +161,12 @@ pub(crate) fn collect_slice_constraints(
     // must not ask for an annotation.
     if matches!(base_term, Some(Ok(Ty::Object))) {
         return Ok(Some(Ok(Ty::Object)));
+    }
+    // A slice of a list or of a `tuple[T, ...]` is another of the same
+    // type (`infer_expr_in` still owns every bound's gate).
+    let resolved = base_term.and_then(|term| resolved_term(term, parents, concrete));
+    if let Some(ty @ (Ty::List(_) | Ty::VarTuple(_))) = resolved {
+        return Ok(Some(Ok(ty)));
     }
     Ok(None)
 }
