@@ -181,6 +181,12 @@ Accept:
    another domain (numeric/algorithmic preferred) builds unchanged with `--ext
    --non-strict`, passes its own suite (CI-gated) and runs >= 5x faster than CPython on its
    own hot path.
+   **Met 2026-10-16:** pypng 0.20220715.0 (MIT, PNG codec) via `bench/package_check.py
+   pypng`: its suite passes compiled (CI run 38863464378, all three jobs); `read()` of a
+   256x256 RGB image using all five PNG filters runs 10-13x faster than CPython (11.7x on a
+   local re-run, best of 5). Only 15/85 functions compile natively (the scanline filters,
+   via guarded `bytearray` specializations); `Reader`/`Writer` stay in CPython, so decoding
+   tiny images is only ~1.6x faster.
 3. **Real-world corpus:** strict passes >= 180/200; `--non-strict` 200/200, 0 wrong, with
    at most 2 top-level statements in CPython fallback (v0.4: 8), each documented.
 4. **Compile speed:** building each `bench/package_check.py` package takes <= 10 s on the
