@@ -167,3 +167,24 @@ Accept:
    through the entry module (`E0108`), classes reached through a circular import, a
    strict `--ext` module's CPython-object globals (a second reference would show), and
    instances as `dict` keys.
+
+## v0.5 — Typed packages at native speed
+
+Accept:
+1. **Native containers of objects:** `tuple[T, ...]`, `dict[str, Any]`/`dict[K, object]`,
+   `list[object]` and regex match results stay native containers whose elements may be
+   CPython objects (boxed lazily at the boundary), so typed code that builds such
+   structures stops round-tripping through the C API. Evidence: tomli's `loads()` >= 3x
+   faster than CPython (v0.4: 1.67x) via `bench/package_check.py --time`, suite passing;
+   diff-match-patch stays >= 10x.
+2. **A third real package:** a pinned, permissively licensed pure-Python PyPI package from
+   another domain (numeric/algorithmic preferred) builds unchanged with `--ext
+   --non-strict`, passes its own suite (CI-gated) and runs >= 5x faster than CPython on its
+   own hot path.
+3. **Real-world corpus:** strict passes >= 180/200; `--non-strict` 200/200, 0 wrong, with
+   at most 2 top-level statements in CPython fallback (v0.4: 8), each documented.
+4. **Compile speed:** building each `bench/package_check.py` package takes <= 10 s on the
+   CI Linux runner (v0.4: diff-match-patch ~25 s); `pycc build` of every `bench/py`
+   program takes <= 2 s. Measured in CI and reported by the script.
+5. **Correctness backlog:** every open issue in this milestone is fixed or closed with
+   evidence (starting with #1, non-strict rebinding of a function by compiled callers).
