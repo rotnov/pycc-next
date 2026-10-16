@@ -31,6 +31,7 @@ pub(crate) struct ContainerFns<'ctx> {
     pub(crate) set_from_list: FunctionValue<'ctx>,
     pub(crate) set_repr: FunctionValue<'ctx>,
     pub(crate) set_freeze: FunctionValue<'ctx>,
+    pub(crate) set_constant_display: FunctionValue<'ctx>,
 }
 
 impl<'ctx> ContainerFns<'ctx> {
@@ -84,6 +85,10 @@ impl<'ctx> ContainerFns<'ctx> {
             set_freeze: declare(
                 "pycc_rt_set_freeze",
                 ptr_type.fn_type(&[ptr_type.into()], false),
+            ),
+            set_constant_display: declare(
+                "pycc_rt_set_constant_display",
+                void_type.fn_type(&[ptr_type.into()], false),
             ),
             set_from_list: declare(
                 "pycc_rt_set_from_list",

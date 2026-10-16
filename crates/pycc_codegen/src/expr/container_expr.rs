@@ -432,8 +432,32 @@ pub(crate) fn emit_set_literal_expr_2<'ctx>(
         let word = list::element_word(context, builder, rt, &elem, element, scalar);
         containers::build_set_add(builder, rt, set_ptr, word);
     }
+    // CPython folds a display of three or more constants into a frozenset
+    // constant (built twice: in source order, then again from its own
+    // order when the compiler merges constants) and copies it into a new
+    // set, so the set's iteration order is that of those three steps.
+    if elements.len() >= 3 && elements.iter().all(is_folded_constant) {
+        builder
+            .build_call(rt.containers.set_constant_display, &[set_ptr.into()], "")
+            .expect("build_call should not fail for a set pointer");
+    }
     heap_rc::truncate_pending(rt, mark);
     Scalar::Set(set_ptr)
+}
+
+/// Whether CPython's compiler sees `expr` as a constant (after its AST
+/// optimizer folds `-9`): a literal, or a tuple of them.
+fn is_folded_constant(expr: &MirExpr) -> bool {
+    match expr {
+        MirExpr::IntLiteral(_)
+        | MirExpr::FloatLiteral(_)
+        | MirExpr::BoolLiteral(_)
+        | MirExpr::StringLiteral(_)
+        | MirExpr::NoneLiteral => true,
+        MirExpr::IntBoundary(inner) => is_folded_constant(inner),
+        MirExpr::TupleLiteral(items) => items.iter().all(is_folded_constant),
+        _ => false,
+    }
 }
 
 pub(crate) fn emit_tuple_literal_expr<'ctx>(

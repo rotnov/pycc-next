@@ -262,7 +262,7 @@ fn a_built_ext_module_raises_the_right_cpython_class_from_every_converted_pow_pa
          \x20   m.overflow(2.0, 1024.0)\n\
          \x20   raise AssertionError('expected OverflowError')\n\
          except OverflowError as e:\n\
-         \x20   assert 'too large' in str(e), str(e)\n\
+         \x20   assert str(e).startswith('(34, '), str(e)\n\
          try:\n\
          \x20   m.overflow(0.0, -1.0)\n\
          \x20   raise AssertionError('expected ZeroDivisionError')\n\

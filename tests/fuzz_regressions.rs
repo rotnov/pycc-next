@@ -182,6 +182,13 @@ fn str_repr_escapes_unprintable_unicode() {
     assert_matches_cpython("fuzz_str_repr_unicode");
 }
 
+/// A set display of constants iterates in CPython's order (its folded
+/// frozenset constant's), not in the order of one-by-one insertion.
+#[test]
+fn a_constant_set_display_iterates_in_cpythons_order() {
+    assert_matches_cpython("fuzz_constant_set_display");
+}
+
 /// `crates/pycc_rt/src/unicode_printable.rs` matches the oracle's own
 /// `str.isprintable()` (its generator's `--check`).
 #[test]

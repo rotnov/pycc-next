@@ -94,6 +94,7 @@ struct AsciiMembers {
 }
 
 mod chars;
+mod constant;
 pub use chars::*;
 
 const _: () = assert!(std::mem::offset_of!(PySetObj, rc) == crate::rc::RC_OFFSET);
