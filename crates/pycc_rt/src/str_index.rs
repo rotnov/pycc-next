@@ -142,6 +142,31 @@ pub(crate) fn ascii_char(byte: u8) -> *mut PyStrObj {
     retain_immortal(obj)
 }
 
+static EMPTY: AtomicPtr<PyStrObj> = AtomicPtr::new(std::ptr::null_mut());
+
+/// A reference to the shared immortal empty `str`.
+///
+/// Returned by a runtime function that raised instead of producing its
+/// `str`: the caller's exception path may skip releasing the placeholder,
+/// so it must not be a fresh allocation (it would leak). Like the shared
+/// characters it is never freed nor counted by `STR_LIVE`.
+pub(crate) fn empty_str() -> *mut PyStrObj {
+    let mut obj = EMPTY.load(Ordering::Acquire);
+    if obj.is_null() {
+        let fresh = new_pystr(&[]);
+        STR_LIVE.fetch_sub(1, Ordering::Relaxed);
+        unsafe { &*fresh }.rc.set(IMMORTAL);
+        match EMPTY.compare_exchange(std::ptr::null_mut(), fresh, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => obj = fresh,
+            Err(existing) => {
+                drop(unsafe { Box::from_raw(fresh) });
+                obj = existing;
+            }
+        }
+    }
+    retain_immortal(obj)
+}
+
 /// A reference to `obj`, made immortal: from then on its count never
 /// changes (`pycc_rt_str_incref`/`pycc_rt_str_decref` leave a count at or
 /// above `IMMORTAL / 2` alone) and it is never freed.
