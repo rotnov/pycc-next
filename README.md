@@ -200,18 +200,23 @@ helper). A function whose
 signature the boundary cannot carry (a `tuple[int, str]` result, a `frozenset`
 parameter) is compiled for the module's own callers and runs in CPython only when Python
 calls it (`twin:` in the report). `loads()` of tomli's benchmark document runs
-**1.6x faster** than in CPython: `python3 bench/package_check.py tomli --time --runs 15`
-times 100 calls, best of 15 runs for each side on the same machine, and measured
-0.036 s compiled against 0.059 s (1.52x-1.75x over seven such runs; 2.60M against
-4.51M instructions per call under callgrind; it was 0.40x before the work above).
+**1.4x-1.7x faster** than in CPython: `python3 bench/package_check.py tomli --time --runs 15`
+times 100 calls, best of 15 runs for each side on the same machine; v0.4 measured
+0.036 s compiled against 0.059 s, and the current tree 0.052 s against 0.074 s on a
+busier box (2.70M against 4.56M instructions per call under callgrind, the stable
+measure; v0.4: 2.60M; it was 0.40x before the work above).
 What it takes: the parsing tables are native frozensets and the text is scanned
 natively (`while src[pos] in chars: pos += 1` is one scan); a function returning
 `pos, value` hands both back without a tuple, its callers unpacking them directly
 (multi-value returns); a `str | None` local stays a native `str`; an object compared
 with a `str` literal, or tested against a frozenset of `str`, is compared by its
-bytes. Its documents (`dict[str, Any]`), keys (`tuple[str, ...]`) and
-regular-expression matches are still CPython objects that every step reaches through
-the C API, and each of its modules calls the others through CPython.
+bytes; its keys (`tuple[str, ...]`) are native tuples, and `tuple[int, Any]` results
+keep the position native. Its documents and flag tables (`dict[str, Any]`, mutable and
+returned to the caller, so they stay CPython objects) and regular-expression matches
+are still reached through the C API, and each of its modules calls the others through
+CPython: under callgrind, CPython itself (the regular expression engine, the dict
+operations, the `int`/`datetime` conversions) is 1.14M of the 2.70M instructions per
+call, the reason the v0.5 goal of 3x (1.5M) is not met.
 
 pypng is untyped, byte-crunching code: its `png` module builds unchanged and its own 103
 tests pass against it (one skips itself: it runs the sdist's shell scripts). Decoding

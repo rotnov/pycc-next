@@ -34,6 +34,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `bytearray`'s own `IndexError`/`ValueError`s (the stored byte is checked before the
   index, as CPython does). pypng's `undo_filter_*` loops run 25x-50x faster per byte.
 - `abs()` of a small `int` is computed inline instead of calling the runtime.
+- Native variadic tuples (v0.5 accept 1, partly): `tuple[T, ...]` of `str`, class
+  instances or containers is a native tuple -- indexing, slicing, `+`, `*`, `in`,
+  comparison, hashing, iteration, unpacking, dict keys and set elements without the C
+  API -- and a fixed tuple of matching elements is one with no conversion. It crosses
+  into CPython as a copy made once and remembered, so `f(t) is t` holds for a tuple that
+  came from CPython; a strict `--ext` `tuple[str, ...]` parameter takes a `tuple` of
+  `str` (anything else raises `TypeError`), and a variadic tuple of mutable elements is
+  refused at the boundary (`C0003`) rather than copied. `tuple[int, ...]` and the other
+  scalar ones are `T0053` in strict mode (not implemented yet).
+- Native tuples of objects: under `--non-strict` and at the `--ext` boundary,
+  `tuple[int, Any]` keeps its position native and its value the CPython object itself,
+  and a native tuple returned where a tuple with object slots is declared is converted
+  element by element (`return pos, True` from `-> tuple[int, Any]`).
 
 ### Fixed
 
@@ -52,6 +65,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - A function was not specialized when its original failed to compile in a way reported
   without a source span in the specialized attempt (a module with no imports and an
   `abs()` of an object): such a failure is the original's, not the copy's.
+- A string index or slice that raised (`s[0]` of `""`, `s[::0]`) leaked its 72-byte
+  placeholder result; a list or variadic tuple sliced with a zero step leaked an empty
+  list.
+
+### Performance
+
+- tomli's keys are native `tuple[str, ...]` values. `loads()` stays at 1.4x-1.7x
+  CPython (2.70M against 4.56M instructions per call under callgrind; v0.4: 2.60M): the
+  object reference traffic halved, and native tuple allocation took its place. The v0.5
+  accept 1 target (>= 3x) is not met; see `docs/ROADMAP.md`.
 
 ## [0.4.0] - 2026-10-15
 

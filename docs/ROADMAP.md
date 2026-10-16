@@ -177,6 +177,13 @@ Accept:
    structures stops round-tripping through the C API. Evidence: tomli's `loads()` >= 3x
    faster than CPython (v0.4: 1.67x) via `bench/package_check.py --time`, suite passing;
    diff-match-patch stays >= 10x.
+   *Status: not met.* Native `tuple[T, ...]` and tuples of objects (`tuple[int, Any]`)
+   are in (`tests/native_object_tuples.rs`); mutable containers of objects stay
+   CPython-owned by design (CPython code may hold and mutate the same object; see
+   `crates/pycc_rt/src/tuple.rs`). tomli stays at 1.4x-1.7x: under callgrind, CPython
+   itself runs 1.14M of the compiled `loads()`'s 2.70M instructions per call (regular
+   expression matching, the operations on its `dict[str, Any]` documents and flag
+   tables, `int`/`datetime` conversion), against a 3x budget of 1.52M (CPython: 4.56M).
 2. **A third real package:** a pinned, permissively licensed pure-Python PyPI package from
    another domain (numeric/algorithmic preferred) builds unchanged with `--ext
    --non-strict`, passes its own suite (CI-gated) and runs >= 5x faster than CPython on its
