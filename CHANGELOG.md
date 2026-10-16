@@ -38,10 +38,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   problems with statements in CPython.
 - `bench/package_check.py --instructions` counts, under callgrind, the instructions one
   call of each real package's hot path executes against the compiled modules and fails
-  a package over its documented bound: diff-match-patch's `diff_main` of 2000
-  characters 132M (125.6M now), tomli's `loads()` 2.60M (v0.5 accept 1; 2.53M now),
-  pypng's `read()` 21.7M (20.7M now). CI runs it on Linux x86_64: unlike wall time, the
-  count does not vary between runs of a shared runner.
+  a package over its documented bound, 5% above its count on CI's Linux x86_64 runner:
+  diff-match-patch's `diff_main` of 2000 characters 133.3M (126.9M), tomli's `loads()`
+  2.93M (2.79M; 2.53M with Ubuntu's python3.13, v0.5 accept 1's method), pypng's
+  `read()` 22.2M (21.2M). CI runs it there: unlike wall time, the count does not vary
+  between runs of a shared runner.
 - Compile speed (v0.5 accept 4): building diff-match-patch takes 5.2 s on the CI Linux
   runner (v0.4: ~25 s), tomli 2.8 s and pypng 1.0 s, and every `bench/py` program
   builds in under 1 s; CI fails a package over 10 s or a benchmark build over 2 s

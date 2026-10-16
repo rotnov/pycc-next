@@ -209,7 +209,8 @@ Accept:
      penalizes). Both fixed: tomli 2.53M; diff-match-patch 12.4x-13.2x against 10.7x-11.5x
      at de4aace and 9.0x-9.9x at 11ab665, interleaved on one machine (best of 5, three
      rounds). CI now gates the instruction count of each package's hot path
-     (`bench/package_check.py --instructions`: tomli at most 2.60M per `loads()`).
+     (`bench/package_check.py --instructions`, bounds 5% above the counts on CI's runner,
+     whose CPython executes more instructions: tomli 2.79M there, bound 2.93M).
 2. **A third real package:** a pinned, permissively licensed pure-Python PyPI package from
    another domain (numeric/algorithmic preferred) builds unchanged with `--ext
    --non-strict`, passes its own suite (CI-gated) and runs >= 5x faster than CPython on its

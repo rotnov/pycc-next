@@ -36,6 +36,10 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            wall time, the count is the same on every run of a shared CI
            runner, so it gates the code the compiler generates for the hot
            path; it cannot see what only changes speed (code placement).
+           The bounds are for CI's Linux x86_64 runner and its CPython
+           (actions/setup-python 3.13), which itself executes more
+           instructions than Ubuntu's own python3.13: the counts there are
+           1-10% lower (for tomli, half of whose `loads()` is CPython's).
   --max-build-seconds S
            fail a package whose modules take more than S seconds to build in
            all (v0.5 accept 4: 10 on the CI Linux runner). Each module's build
@@ -176,8 +180,8 @@ print(f"{best:.4f}")
             speed_label="diff_main speed test (two ~30 KB texts)",
             # The first 2000 characters of the speed test's texts: almost all
             # of a call is `diff_bisect`'s native loop (with the runtime's
-            # `str` indexing). 125.6M instructions per call at 0.5.0 (CPython
-            # 3.13, x86_64 Linux); the bound is 5% above.
+            # `str` indexing). 126.9M instructions per call at 0.5.0 on CI
+            # (125.6M with Ubuntu's python3.13); the bound is 5% above.
             instructions="""
 import sys, pkgutil
 sys.path.insert(0, sys.argv[1])
@@ -190,7 +194,7 @@ for _ in range(int(sys.argv[2])):
     dmp.diff_main(a, b, False)
 """,
             instructions_label="diff_main of the speed test's first 2000 characters",
-            max_instructions=132_000_000,
+            max_instructions=133_300_000,
             instruction_calls=2,
         ),
         Package(
@@ -233,8 +237,10 @@ for _ in range(int(sys.argv[2])):
 print(f"{best:.4f}")
 """,
             speed_label="loads() of the benchmark document x100",
-            # ROADMAP v0.5 accept 1 (as amended): at most 2.60M per call
-            # (2.53M at 0.5.0).
+            # 2.79M instructions per call at 0.5.0 on CI; the bound is 5%
+            # above. With Ubuntu's python3.13 (ROADMAP v0.5 accept 1's
+            # method, at most 2.60M): 2.53M; 2.95M when its frozenset
+            # constants had become CPython objects.
             instructions="""
 import os, sys
 sys.path.insert(0, sys.argv[1])
@@ -245,7 +251,7 @@ for _ in range(int(sys.argv[2])):
     tomli.loads(doc)
 """,
             instructions_label="loads() of the benchmark document",
-            max_instructions=2_600_000,
+            max_instructions=2_930_000,
             instruction_calls=20,
         ),
         Package(
@@ -286,8 +292,9 @@ for _ in range(int(sys.argv[2])):
     decode()
 """,
             instructions_label="read() of the 256x256 RGB image",
-            # 20.7M instructions per call at 0.5.0; the bound is 5% above.
-            max_instructions=21_700_000,
+            # 21.2M instructions per call at 0.5.0 on CI (20.7M with
+            # Ubuntu's python3.13); the bound is 5% above.
+            max_instructions=22_200_000,
             instruction_calls=2,
         ),
     ]

@@ -59,8 +59,8 @@ jobs:
         run: python3 bench/package_check.py diff-match-patch tomli pypng --time --runs 1 --max-build-seconds 10
       # Hot-path instruction counts under callgrind (stable on a shared runner,
       # unlike wall time): each package's hot path executes at most its
-      # documented bound per call (`max_instructions` in bench/package_check.py;
-      # tomli's is v0.5 accept 1's 2.60M).
+      # documented bound per call (`max_instructions` in bench/package_check.py,
+      # 5% above the count on this runner with this CPython).
       - name: Real packages' hot-path instruction counts
         if: matrix.os == 'ubuntu-24.04'
         run: |
