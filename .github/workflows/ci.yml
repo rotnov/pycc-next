@@ -60,6 +60,18 @@ jobs:
       # Real-world gate: every corpus program must compile in non-strict mode and
       # print exactly what CPython prints (wrong output = miscompilation).
       - run: python3 bench/corpus.py -j 4 --flags=--non-strict --require-correct
+      # Differential fuzzing smoke (v0.6 accept 4; .github/workflows/fuzz.yml runs
+      # 30 minutes nightly): two minutes of generated programs, each compared with
+      # CPython in every build mode; any mismatch or compiler crash fails the job.
+      - name: Differential fuzzing smoke
+        if: matrix.os == 'ubuntu-24.04'
+        run: python3 fuzz/fuzz.py --seconds 120 -j 4 --seed 1 --reduce-seconds 120 --findings fuzz-findings
+      - uses: actions/upload-artifact@v4
+        if: failure() && matrix.os == 'ubuntu-24.04'
+        with:
+          name: fuzz-smoke-findings
+          path: fuzz-findings
+          if-no-files-found: ignore
       # Real-package gates (v0.3 accept 4, v0.4 accept 4, v0.5 accept 2):
       # diff-match-patch and pypng (sdist sha256) and tomli (GitHub tag archive
       # sha256, and that of the files used), each built module by module with

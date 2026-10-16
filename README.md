@@ -429,6 +429,33 @@ $ scripts/package.sh dist/pycc   # the release layout, from target/release
 On macOS `package.sh` refuses a `pycc` that links Homebrew's `libzstd.dylib`;
 the release build links `libzstd.a` instead (`scripts/macos_llvm.sh`).
 
+### Testing against CPython
+
+CPython 3.13 is the oracle everywhere: `cargo test --release --workspace --
+--include-ignored` builds every fixture natively and as an extension module and compares
+it with `python3`; `python3 bench/corpus.py --flags=--non-strict --require-correct` does
+the same for 200 real-world programs.
+
+The differential fuzzer (`fuzz/`) looks for the differences nobody wrote a test for. It
+generates typed programs (boundary values, big ints, `nan`/`-0.0`, non-ASCII strings,
+format specs, containers, classes, dataclasses, generators with `send`/`throw`,
+exceptions, `match`, `*args`/`**kwargs`, `collections`, `itertools`, ...), runs each
+under CPython and as native strict, `--non-strict`, `--ext` and `--ext --non-strict`
+builds, and compares stdout, the uncaught exception and the exit status. A refusal is
+not a mismatch, but every refusal is counted per feature and mode; a compiler crash is
+a finding. Each finding is reduced (delta debugging over the AST) to a minimal program:
+
+```console
+$ python3 fuzz/fuzz.py --seconds 600 -j 4 --seed 7      # findings in fuzz/findings/
+$ python3 fuzz/fuzz.py --replay 7:123                   # one case, verbosely
+$ python3 fuzz/gen.py 7 123                             # print that case's program
+```
+
+CI runs it for 2 minutes on every push and for 30 minutes nightly
+(`.github/workflows/fuzz.yml`), failing on any finding. A difference
+`docs/DEVIATIONS.md` documents is recognized and counted, not reported; every program
+behind a finding fixed so far is a regression test (`tests/fuzz_regressions.rs`).
+
 ## License
 
 MIT

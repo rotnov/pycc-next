@@ -23,6 +23,33 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   each into a fresh venv and runs the package's own test suite against it; the release
   smoke test (`scripts/smoke.sh`, all three platforms) builds and runs a small project's
   wheel the same way.
+- A differential fuzzer (v0.6 accept 4, `fuzz/`): generated typed programs run under
+  CPython 3.13 and as native strict, `--non-strict`, `--ext` and `--ext --non-strict`
+  builds; stdout, the uncaught exception and the exit status must agree. Refusals are
+  counted per feature and mode, compiler crashes and mismatches are findings, each
+  reduced to a minimal program. CI runs it for 2 minutes per push and 30 minutes
+  nightly (`.github/workflows/fuzz.yml`, findings uploaded as an artifact).
+
+### Fixed
+
+Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
+
+- A `--non-strict` native program under the C/POSIX locale: code running in the
+  embedded CPython printed non-ASCII text as `UnicodeEncodeError` (its locale is now
+  configured as `python3`'s, with UTF-8 Mode).
+- `deque.extend`, `deque += ...` and `deque.insert` ignored `maxlen`.
+- A `KeyError` for an `int` or tuple key leaving an `--ext` module (or the native
+  program embedding CPython) printed `KeyError: '0'` instead of `KeyError: 0`.
+- `repr()` of a `str` left characters `str.isprintable()` rejects beyond Latin-1
+  unescaped (`'\xa0'`, `'​'`, `'\U000e0001'`).
+- `pow(a, b, m)` with a bigint operand and `round()` of a float beyond 63 bits raised
+  "not supported yet".
+- `float ** float` overflow raised `OverflowError` with pycc's own text instead of
+  CPython's `(34, 'Numerical result out of range')`.
+- A refused `f(**mapping)` call near the end of a file panicked the diagnostic renderer.
+- `--ext --non-strict`: a public exception class with its own `__init__`, methods or
+  class attributes was published without them (`SubErr(5)` from Python skipped
+  `__init__`); it now runs in CPython.
 
 ## [0.5.0] - 2026-10-16
 
