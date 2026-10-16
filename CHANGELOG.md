@@ -4,6 +4,24 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-16
+
+Typed packages at native speed. Tuples of any element type, including CPython objects,
+are native (`tuple[T, ...]`, `tuple[int, Any]`); runtime free lists cut allocations; a
+third real package, pypng, decodes PNGs 12-15x faster than CPython with its own suite
+passing; builds are 5x faster (diff-match-patch 25 s -> 5 s on CI); strict mode compiles
+181/200 real-world programs unchanged and `--non-strict` runs all but 2 of their 1191
+top-level statements natively. CI now gates package build time and hot-path instruction
+counts. tomli stays at ~1.5x CPython: half of its `loads()` runs inside CPython's regex
+engine and dict operations, which a compiler cannot take over without breaking aliasing
+(see ROADMAP v0.5 accept 1).
+
+Benchmarks (`python3 bench/run.py`, best of 7, shared 4-core box): fib 26.5x faster than
+CPython / 1.7x of Rust, mandelbrot 34.6x / 1.0x, nbody 32.8x / 2.5x, sieve 37.5x / 2.0x,
+spectral_norm ~66x / 2.0x, collections_bfs 6.9x / 3.0x, numpy kernels stencil2d 590x /
+2.3x and prefix_sum_np 135x / 1.6x. Real packages (`bench/package_check.py --time`):
+diff-match-patch 12.4x, pypng 15.2x, tomli 1.56x.
+
 ### Added
 
 - Real-world corpus (v0.5 accept 3): `python3 bench/corpus.py --flags=--non-strict`
@@ -138,6 +156,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `skip_chars(src, pos, TOML_WS)` calls lost their native `frozenset[str]`
   specialization and `loads()` rose from 2.53M to 2.95M instructions per call; it is
   2.53M again (`tests/frozenset_constants_native.rs`).
+
+### Known gaps
+- See `docs/DEVIATIONS.md` for every known difference from CPython 3.13.
 
 ## [0.4.0] - 2026-10-15
 
