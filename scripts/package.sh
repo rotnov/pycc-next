@@ -6,6 +6,9 @@
 # DEST becomes:
 #   DEST/bin/pycc
 #   DEST/lib/pycc/libpycc_rt.a     (the runtime every compiled program links)
+#   DEST/python/pycc_build-X.Y.Z-py3-none-any.whl
+#                                  (the PEP 517 backend `pycc.build`, built from
+#                                  python/ by itself with ${PYCC_PYTHON:-python3})
 #   DEST/README.md DEST/LICENSE DEST/CHANGELOG.md
 #
 # PROFILE_DIR is the Cargo profile directory holding `pycc` and
@@ -28,6 +31,11 @@ mkdir -p "$dest/bin" "$dest/lib/pycc"
 cp "$profile/pycc" "$dest/bin/pycc"
 cp "$profile/libpycc_rt.a" "$dest/lib/pycc/libpycc_rt.a"
 cp "$root/README.md" "$root/LICENSE" "$root/CHANGELOG.md" "$dest/"
+mkdir "$dest/python"
+wheel_dir=$(cd "$dest/python" && pwd)
+(cd "$root/python" && "${PYCC_PYTHON:-python3}" -I -B -c \
+    'import sys; sys.path.insert(0, "."); from pycc import build; build.build_wheel(sys.argv[1])' \
+    "$wheel_dir")
 # Debug info only: keeps symbols and every archive member intact. Apple's
 # strip spells it -S and has no --strip-debug.
 if command -v strip >/dev/null 2>&1; then

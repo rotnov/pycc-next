@@ -38,6 +38,11 @@ fn packaged(scratch: &Path) -> PathBuf {
     ] {
         assert!(moved.join(file).is_file(), "the archive lacks {file}");
     }
+    let backend = format!("pycc_build-{}-py3-none-any.whl", env!("CARGO_PKG_VERSION"));
+    assert!(
+        moved.join("python").join(&backend).is_file(),
+        "the archive lacks python/{backend}"
+    );
     moved
 }
 

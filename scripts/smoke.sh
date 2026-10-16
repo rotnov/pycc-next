@@ -6,7 +6,10 @@
 # Copies PKG_DIR into a fresh temp directory, then -- with a cleared
 # environment (PATH and an empty HOME only, no CARGO_* variables) -- builds
 # and runs a native program, an --ext module and a --non-strict program, and
-# compares each with CPython (`${PYCC_PYTHON:-python3}`). The release
+# compares each with CPython (`${PYCC_PYTHON:-python3}`). Last, it installs
+# the archive's PEP 517 backend (python/pycc_build-*.whl) into a fresh venv,
+# builds a small project's wheel with `pip wheel` (no network, the archive's
+# bin/ on PATH), installs it and runs its compiled modules against CPython. The release
 # workflow runs it on the tarball before publishing; tests/relocatable_release.rs
 # checks the same things from `cargo test`.
 set -eu
@@ -65,5 +68,41 @@ EOF
 cd "$work/ns"
 clean "$pycc" build prog.py -o prog --non-strict
 same "$(clean ./prog)" "$("$python" prog.py)" non-strict
+
+# The PEP 517 backend: `pip wheel` of a project selecting `pycc.build`.
+mkdir -p "$work/proj/src/hello" "$work/wheels"
+cat > "$work/proj/pyproject.toml" <<'EOF2'
+[build-system]
+requires = ["pycc-build"]
+build-backend = "pycc.build"
+
+[project]
+name = "hello-pycc"
+version = "1.0"
+requires-python = ">=3.13"
+
+[tool.pycc]
+packages = ["hello"]
+pure-python = ["hello.__init__"]
+EOF2
+printf '' > "$work/proj/src/hello/__init__.py"
+cp "$work/ext_src/m.py" "$work/proj/src/hello/fast.py"
+clean "$python" -m venv "$work/venv"
+vpy="$work/venv/bin/python"
+clean "$vpy" -I -m pip install -q --no-index --no-deps "$work"/pkg/python/pycc_build-*.whl
+cd "$work"
+env -i PATH="$work/pkg/bin:$PATH" HOME="$work/home" ${PYCC_PYTHON:+PYCC_PYTHON="$PYCC_PYTHON"} \
+    "$vpy" -I -m pip wheel -q --no-build-isolation --no-index --no-deps -w "$work/wheels" "$work/proj"
+for whl in "$work"/wheels/*.whl; do
+    case $whl in
+        *-cp313-abi3-*.whl) ;;
+        *) echo "smoke: unexpected wheel $whl" >&2; exit 1 ;;
+    esac
+    clean "$vpy" -I -m pip install -q --no-index --no-deps "$whl"
+done
+driver="import hello.fast as m; print(m.__file__.endswith('.abi3.so'), m.add(2, 40), m.greet('pycc'))"
+got=$(cd "$work/home" && clean "$vpy" -I -c "$driver")
+want=$(cd "$work/proj/src" && clean "$python" -c "$driver")
+same "$got" "True${want#False}" pep517
 
 echo "smoke: ok"

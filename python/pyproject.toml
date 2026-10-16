@@ -1,0 +1,21 @@
+# pycc.build, the PEP 517 build backend for projects compiled with pycc. It
+# builds itself (backend-path): a pure-Python wheel, `py3-none-any`, since
+# `[tool.pycc] pure-python` keeps every module in Python. scripts/package.sh
+# puts that wheel in the release archive's python/ directory.
+[build-system]
+requires = []
+build-backend = "pycc.build"
+backend-path = ["."]
+
+[project]
+name = "pycc-build"
+version = "0.5.0"
+description = "PEP 517 build backend that compiles a project's modules with pycc-next"
+requires-python = ">=3.13"
+license = "MIT"
+authors = [{ name = "pycc-next contributors" }]
+urls = { Homepage = "https://github.com/rotnov/pycc-next" }
+
+[tool.pycc]
+packages = ["pycc"]
+pure-python = ["pycc"]
