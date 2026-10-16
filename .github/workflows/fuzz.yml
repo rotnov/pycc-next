@@ -1,0 +1,52 @@
+name: fuzz
+# Nightly differential fuzzing (v0.6 accept 4, `fuzz/`): generated typed
+# programs run under CPython 3.13 and as native strict, `--non-strict`,
+# `--ext` and `--ext --non-strict` builds; any difference in stdout, the
+# uncaught exception or the exit status, and any compiler crash, is a finding.
+# Findings are reduced to minimal programs and uploaded as an artifact; the
+# job fails on any finding.
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "How long to generate new cases (seconds)"
+        default: "1800"
+      seed:
+        description: "Run seed (default: the run id)"
+        default: ""
+permissions: { contents: read }
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    # 30 minutes of cases, up to 15 more of reductions, plus the build.
+    timeout-minutes: 90
+    env: { LLVM_SYS_221_PREFIX: /usr/lib/llvm-22 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - name: Install LLVM 22
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo 'deb https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -q && sudo apt-get install -y -q llvm-22-dev libpolly-22-dev clang-22 libzstd-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Differential fuzzing
+        env:
+          SECONDS_INPUT: ${{ inputs.seconds }}
+          SEED_INPUT: ${{ inputs.seed }}
+        run: >-
+          python3 fuzz/fuzz.py -j 4
+          --seconds "${SECONDS_INPUT:-1800}"
+          --seed "${SEED_INPUT:-${{ github.run_id }}}"
+          --findings fuzz-findings
+          --summary-json fuzz-findings/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-findings
+          path: fuzz-findings
+          if-no-files-found: ignore

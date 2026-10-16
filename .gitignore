@@ -49,3 +49,7 @@ Thumbs.db
 # Built GitHub Pages output (scripts/build_site.py)
 /_site/
 /.claude/worktrees/
+
+# Differential fuzzer (fuzz/fuzz.py): its work directory and default findings
+/fuzz/.work/
+/fuzz/findings/
