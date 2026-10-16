@@ -23,10 +23,18 @@ thread_local! {
 
 /// Records a request to widen `expr` when it is a name holding a native
 /// container of type `ty` (module doc).
+///
+/// A `frozenset` of scalars is not one: it crosses into CPython as an
+/// immutable copy (`foreign::is_packable_frozenset`), which no aliasing can
+/// tell apart, so widening it would only make a module's frozenset constant
+/// (`TOML_WS = frozenset(" \t")`) an object everywhere -- every `in` on it a
+/// C API call, and the module's calls no longer able to take a native
+/// `Iterable[str]` specialization (`pycc_ast::desugar::specialize`).
 pub(crate) fn request(expr: &HirExpr, ty: &Ty) {
     if super::is_non_strict()
         && let HirExpr::Name(name) = expr
         && matches!(ty, Ty::List(_) | Ty::Set(_) | Ty::Dict(_) | Ty::FrozenSet(_))
+        && !crate::foreign::is_packable_frozenset(ty)
     {
         let item = crate::locate::current_item();
         REQUESTS.with(|requests| requests.borrow_mut().insert((item, name.clone())));
