@@ -260,8 +260,9 @@ fn every_del_refusal_is_named() {
             "error[C0001]: a `del` of `f` is not supported yet: it names a function",
         ),
         (
+            // Refused at the rebinding first (issue #1).
             "def helper() -> int:\n    return 1\n\n\nhelper = 2\ndel helper\n",
-            "error[C0001]: a `del` of `helper` is not supported yet: it names a function",
+            "error[C0001]: rebinding `helper`, which a module-level `def` also binds",
         ),
         (
             "class C:\n    pass\n\n\ndel C\n",

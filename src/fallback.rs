@@ -545,6 +545,53 @@ impl Plan {
                 self.objectified.extend(objectify);
                 continue;
             }
+            // Issue #1: a compiled `def` whose name fallback code binds
+            // too (a redefinition in a block, `f = lambda ...`, a function
+            // declaring it `global`) runs in CPython as well, so the name
+            // has one home, the namespace, which compiled callers read.
+            let fallback_binds: BTreeSet<&String> = self
+                .fallback
+                .keys()
+                .flat_map(|index| {
+                    let stmt = &self.stmts[*index];
+                    stmt.bound.iter().chain(&stmt.declares)
+                })
+                .collect();
+            // So does a function defined more than once that fallback code
+            // reads: the module publishes a redefined function only once
+            // its last `def` has run (`pycc_codegen::ext_publish`), so
+            // Python code reading an earlier one would find no name.
+            let mut compiled_defs: BTreeMap<&String, usize> = BTreeMap::new();
+            for (index, stmt) in self.stmts.iter().enumerate() {
+                if let Kind::Def(name, _) = &stmt.kind
+                    && !self.fallback.contains_key(&index)
+                {
+                    *compiled_defs.entry(name).or_default() += 1;
+                }
+            }
+            let rebound: Vec<(usize, String)> = (0..self.stmts.len())
+                .filter(|index| !self.fallback.contains_key(index))
+                .filter_map(|index| match &self.stmts[index].kind {
+                    Kind::Def(name, _) if fallback_binds.contains(name) => Some((
+                        index,
+                        format!(
+                            "fallback code rebinds `{name}`, which compiled code calls natively"
+                        ),
+                    )),
+                    Kind::Def(name, _) if read.contains(name) && compiled_defs[name] > 1 => Some((
+                        index,
+                        format!(
+                            "fallback code uses `{name}`, which Python code cannot see compiled \
+                             before its last definition"
+                        ),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            if !rebound.is_empty() {
+                self.fallback.extend(rebound);
+                continue;
+            }
             let forced: Vec<(usize, String)> = self
                 .stmts
                 .iter()

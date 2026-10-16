@@ -16,6 +16,11 @@
 //!   whatever it captured.
 //! * `pycc_closure_drop.F.N(obj)` releases the captured values; the runtime
 //!   calls it when the last reference to the object goes.
+//!
+//! A value of a function the module defines more than once also holds,
+//! after its captured values, the definition its name held when the value
+//! was made, which its call function (`pycc_closure_call.pinned.F.N`)
+//! calls rather than the name's current one.
 
 use super::*;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, IntValue};
@@ -186,6 +191,7 @@ fn closure_functions<'ctx>(
     user_function: &UserFunction<'ctx>,
     function: &str,
     captures: usize,
+    pinned: bool,
 ) -> (FunctionValue<'ctx>, FunctionValue<'ctx>) {
     let params = user_function.fn_type.get_param_types();
     assert!(
@@ -196,8 +202,9 @@ fn closure_functions<'ctx>(
     // Keyed by the capture count too: the layout of the object and the
     // parameters the call function receives both depend on it (the
     // captured types are `function`'s first `captures` parameter types).
-    let call_name = format!("pycc_closure_call.{function}.{captures}");
-    let drop_name = format!("pycc_closure_drop.{function}.{captures}");
+    let pin = if pinned { "pinned." } else { "" };
+    let call_name = format!("pycc_closure_call.{pin}{function}.{captures}");
+    let drop_name = format!("pycc_closure_drop.{pin}{function}.{captures}");
     if let (Some(call), Some(drop)) = (
         module.get_function(&call_name),
         module.get_function(&drop_name),
@@ -244,7 +251,29 @@ fn closure_functions<'ctx>(
                 .into(),
         );
     }
-    let result = crate::user_call::dispatch(context, &builder, rt, user_function, &args);
+    let result = if pinned {
+        // The definition the name held when the value was made (word
+        // `captures`, after the captured values; [`emit_make_closure`]).
+        let word = builder
+            .build_load(
+                context.i64_type(),
+                capture_slot(context, &builder, obj, captures),
+                "pinned_word",
+            )
+            .expect("build_load should not fail for the pinned definition")
+            .into_int_value();
+        let target = builder
+            .build_int_to_ptr(word, ptr_type, "pinned_def")
+            .expect("build_int_to_ptr should not fail for an i64");
+        crate::user_call::call_resolved(
+            &builder,
+            user_function,
+            crate::user_call::Callee::Indirect(target),
+            &args,
+        )
+    } else {
+        crate::user_call::dispatch(context, &builder, rt, user_function, &args)
+    };
     match result.try_as_basic_value().basic() {
         Some(value) => builder.build_return(Some(&value)),
         None => builder.build_return(None),
@@ -312,6 +341,19 @@ pub(crate) fn emit_make_closure<'ctx>(
     captures: &[MirExpr],
 ) -> Scalar<'ctx> {
     let user_function = &user_functions[function];
+    // A function value is the function its name holds when the value is
+    // made, as in CPython: `g = f` and then another `def f` leaves `g` the
+    // first. One `def` of a name can only ever be the one its slot holds,
+    // and a call through the slot finds it; a redefined name's value pins
+    // the slot's current definition instead (issue #1), read -- and a
+    // `NameError` raised when the `def` has not run -- before anything
+    // else, as CPython reads the name.
+    let pinned = user_function.single_def.is_none()
+        && user_function.direct_value.is_none()
+        && user_function.fn_ptr_global.is_some();
+    let pinned_def = pinned.then(|| {
+        crate::ext_thunk::emit_fnptr_dispatch_guard(context, builder, rt, user_function)
+    });
     // Each captured value as a reference the object owns.
     let values = crate::user_call::marshal_args(
         context,
@@ -324,18 +366,23 @@ pub(crate) fn emit_make_closure<'ctx>(
         function,
         captures,
     );
-    let (call, drop) =
-        closure_functions(context, module, rt, user_function, function, captures.len());
+    let (call, drop) = closure_functions(
+        context,
+        module,
+        rt,
+        user_function,
+        function,
+        captures.len(),
+        pinned,
+    );
+    let words = captures.len() + usize::from(pinned);
     let obj = builder
         .build_call(
             rt.closures.new,
             &[
                 call.as_global_value().as_pointer_value().into(),
                 drop.as_global_value().as_pointer_value().into(),
-                context
-                    .i64_type()
-                    .const_int(captures.len() as u64, false)
-                    .into(),
+                context.i64_type().const_int(words as u64, false).into(),
                 qualname_ptr(module, function).into(),
             ],
             "closure",
@@ -351,6 +398,12 @@ pub(crate) fn emit_make_closure<'ctx>(
         builder
             .build_store(capture_slot(context, builder, obj, index), word)
             .expect("build_store should not fail for a captured word");
+    }
+    if let Some(target) = pinned_def {
+        let word = to_word(context, builder, target.into());
+        builder
+            .build_store(capture_slot(context, builder, obj, captures.len()), word)
+            .expect("build_store should not fail for the pinned definition");
     }
     Scalar::Closure(obj)
 }

@@ -1,5 +1,5 @@
-error[T0021]: name `helper` is bound to a non-callable value
- --> tests/diagnostics/d0029_function_body_calls_shadowed_name.py:7:12
+error[C0001]: rebinding `helper`, which a module-level `def` also binds, is not supported yet
+ --> tests/diagnostics/d0029_function_body_calls_shadowed_name.py:4:1
   |
-7 |     return helper()
-  |            ^^^^^^^^ not callable
+4 | helper = 2
+  | ^^^^^^ rebinding `helper`, which a module-level `def` also binds, is not supported yet

@@ -355,6 +355,27 @@ impl Loader {
         if !reserved.is_empty() {
             return Err(FrontendFailure::compile(&display, &source, reserved));
         }
+        // Issue #1: a module-level name bound both by a `def` and by another
+        // binding has two homes compiled code does not keep in step
+        // (`pycc_ast::rebound_def_names`); refused before anything else
+        // looks at the module, so in non-strict mode those bindings, and
+        // then the `def`s, run in CPython.
+        let rebound: Vec<Diagnostic> = pycc_ast::rebound_def_names(&parsed)
+            .into_iter()
+            .map(|(name, range)| {
+                Diagnostic::error(
+                    "C0001",
+                    format!(
+                        "rebinding `{name}`, which a module-level `def` also binds, is not \
+                         supported yet"
+                    ),
+                    Span::new(range.start, range.end),
+                )
+            })
+            .collect();
+        if !rebound.is_empty() {
+            return Err(FrontendFailure::compile(&display, &source, rebound));
+        }
         // An `--ext` module's public signatures the boundary cannot bind
         // alone get a compiled entry for a Python wrapper (#1194).
         if is_entry && self.ext_module {

@@ -706,17 +706,14 @@ print(f())
 }
 
 /// Review round 5, third finding: a `def` that shadows an earlier value of
-/// the same name is callable from its own position onward (D-110), and the
-/// pre-pass's module-scope walk must record that in `def_rebound` as well as
-/// `defined_functions`. Seeding only the latter left the pre-pass's own
-/// callee gate treating `helper` as value-shadowed, so the producer's call
-/// did not infer and the container fell through to a spurious `T0003` -- for
-/// a program the checker itself accepts, as the non-empty spelling shows.
+/// the same name is callable from its own position onward (D-110). Since
+/// issue #1 strict mode refuses the value binding of the `def`'s name
+/// (`C0001`): a compiled function could not tell which of the two homes the
+/// name had when it ran. In non-strict mode the binding and the `def` run in
+/// CPython, and the producer's call still infers its container.
 #[test]
 fn a_def_shadowing_an_earlier_value_binding_resolves_a_producer_call() {
-    let output = check_build_and_run(
-        "def_rebound_producer_empty_list",
-        "\
+    let source = "\
 helper = 1
 
 
@@ -730,8 +727,26 @@ def f() -> int:
     return xs.pop()
 
 print(f())
-",
+";
+    let (dir, path) = write_source("def_rebound_producer_empty_list", source);
+    let checked = Command::new(pycc_bin())
+        .args(["check", path.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(checked.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&checked.stdout)
+            .contains("error[C0001]: rebinding `helper`, which a module-level `def` also binds"),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
     );
+    let out = dir.join("prog");
+    let status = Command::new(pycc_bin())
+        .args(["build", path.to_str().unwrap(), "-o", out.to_str().unwrap(), "--non-strict"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let output = Command::new(&out).output().unwrap();
     assert!(output.status.success());
     assert_eq!(output.stdout, b"2\n");
 }

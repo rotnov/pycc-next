@@ -290,10 +290,11 @@ fn build_rejects_a_module_value_binding_that_shadows_a_function_call() {
     assert_eq!(output.status.code(), Some(1));
     // `report_build_failure` renders compile diagnostics to stderr
     // (`eprint!`), unlike `pycc check`'s stdout rendering.
+    // Since issue #1 the rebinding itself is refused, before the call.
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("error[T0021]: name `helper` is bound to a non-callable value"),
-        "build must fail with the shadowing diagnostic, got: {stderr}"
+        stderr.contains("error[C0001]: rebinding `helper`, which a module-level `def` also binds"),
+        "build must fail with the rebinding diagnostic, got: {stderr}"
     );
     assert!(
         !out.exists(),

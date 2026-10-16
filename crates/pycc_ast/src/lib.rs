@@ -8,6 +8,7 @@ pub use ruff_python_ast::visitor;
 
 mod desugar;
 pub mod namespace;
+mod rebound_defs;
 mod reserved;
 mod string_annotation;
 mod unused_defs;
@@ -19,6 +20,7 @@ pub use desugar::{
     ext_signatures, find_yield, function_qualname, split_ext_generators, split_ext_signatures,
     BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, Specialized, specialize_untyped,
 };
+pub use rebound_defs::rebound_def_names;
 pub use reserved::{is_reserved_name, reserved_name_uses};
 pub use ruff_text_size::TextRange;
 pub use string_annotation::{

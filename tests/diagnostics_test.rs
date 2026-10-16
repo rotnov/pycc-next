@@ -501,7 +501,9 @@ fn d0026_annotation_only_unbound() {
 // completion criteria through the public `pycc check` path: a user-function
 // shadow, a builtin shadow, a call inside an annotated function body (checked
 // against the final module environment, D-041), and the private-helper
-// inference path.
+// inference path. Since issue #1 the three that rebind a `def`'s name are
+// refused at the rebinding itself (`C0001`, `pycc_ast::rebound_def_names`),
+// before the shadowed call is checked.
 #[test]
 fn d0027_module_value_shadows_function() {
     assert_diagnostic_matches_fixture("d0027_module_value_shadows_function");
