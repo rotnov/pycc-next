@@ -93,7 +93,7 @@ Accept:
    archives, each smoke-tested by release run 38584309286; CI also runs the full suite on
    `ubuntu-24.04-arm`.
 
-## v0.4 — Fast untyped code, no leaks
+## v0.4 — Fast untyped code, no leaks (released 2026-10-16)
 
 Accept:
 1. **Untyped code runs native:** `--non-strict` infers native `str`, `list`, `dict`, `set`
