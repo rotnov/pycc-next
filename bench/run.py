@@ -1,7 +1,11 @@
 """Benchmark pycc-next against CPython and hand-written Rust.
 
 Usage: python3 bench/run.py [--pycc target/release/pycc] [--runs 7]
+       python3 bench/run.py --build-only [--max-build-seconds S] [NAME ...]
 Prints a markdown table; every program's output is checked against CPython.
+With --build-only, only builds each program and prints how long `pycc build`
+took; with --max-build-seconds, a build slower than S seconds fails (v0.5
+accept 4: 2 on the CI Linux runner).
 
 The Rust twins build with `rustc -O` for the default target CPU, exactly like
 pycc-next's own `--release` output: `-C target-cpu=native` would let rustc use
@@ -42,25 +46,51 @@ def best(cmd: list[str], runs: int, cwd: pathlib.Path | None = None) -> tuple[fl
     return min(times), out, (min(kernels) if kernels and len(kernels) == runs else None)
 
 
-def build(pycc: str, src: pathlib.Path, tmp: pathlib.Path, name: str) -> tuple[pathlib.Path | None, str]:
-    """Compiles `src`, returning the executable (or None) and the build log."""
+def build(pycc: str, src: pathlib.Path, tmp: pathlib.Path, name: str,
+          warm: bool = True) -> tuple[pathlib.Path | None, str, float]:
+    """Compiles `src`, returning the executable (or None), the build log and
+    how long `pycc build` took. An embedded build is run once (`warm`) to
+    warm the file cache."""
     if "import numpy" not in src.read_text():
         exe = tmp / name
+        t = time.perf_counter()
         b = subprocess.run([pycc, "build", str(src), "-o", str(exe), "--release"], capture_output=True, text=True)
-        return (exe if b.returncode == 0 else None), b.stderr
+        return (exe if b.returncode == 0 else None), b.stderr, time.perf_counter() - t
     work = tmp / f"{name}.src"
     work.mkdir()
     copy = work / src.name
     shutil.copy(src, copy)
     lock = subprocess.run([pycc, "lock", str(copy)], capture_output=True, text=True)
     if lock.returncode != 0:
-        return None, lock.stderr
+        return None, lock.stderr, 0.0
     exe = work / name
+    t = time.perf_counter()
     b = subprocess.run([pycc, "build", str(copy), "-o", str(exe), "--release"], capture_output=True, text=True)
+    seconds = time.perf_counter() - t
     if b.returncode != 0:
-        return None, b.stderr
-    subprocess.run([str(exe)], check=True, capture_output=True)
-    return exe, b.stderr
+        return None, b.stderr, seconds
+    if warm:
+        subprocess.run([str(exe)], check=True, capture_output=True)
+    return exe, b.stderr, seconds
+
+
+def build_times(args: argparse.Namespace, names: list[str], tmp: pathlib.Path) -> int:
+    """Builds each program once, printing how long the build took."""
+    failed = False
+    print("| program | pycc build |")
+    print("|---|---|")
+    for name in names:
+        exe, log, seconds = build(args.pycc, HERE / "py" / f"{name}.py", tmp, name, warm=False)
+        if exe is None:
+            print(f"| {name} | compile error |")
+            print(log, file=sys.stderr)
+            failed = True
+            continue
+        slow = args.max_build_seconds is not None and seconds > args.max_build_seconds
+        failed |= slow
+        mark = f" (over {args.max_build_seconds:g}s)" if slow else ""
+        print(f"| {name} | {seconds:.2f}s{mark} |")
+    return 1 if failed else 0
 
 
 def main() -> int:
@@ -68,9 +98,16 @@ def main() -> int:
     ap.add_argument("--pycc", default=str(HERE.parent / "target/release/pycc"))
     ap.add_argument("--runs", type=int, default=7)
     ap.add_argument("names", nargs="*")
+    ap.add_argument("--build-only", action="store_true")
+    ap.add_argument("--max-build-seconds", type=float)
     args = ap.parse_args()
     names = args.names or sorted(p.stem for p in (HERE / "py").glob("*.py"))
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="pycc-bench-"))
+    if args.build_only:
+        try:
+            return build_times(args, names, tmp)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
     print("| program | CPython | pycc-next | Rust | pycc vs CPython | pycc vs Rust |")
     print("|---|---|---|---|---|---|")
     failed = False
@@ -78,7 +115,7 @@ def main() -> int:
         for name in names:
             src = HERE / "py" / f"{name}.py"
             t_py, ref, k_py = best([sys.executable, str(src)], args.runs)
-            exe, log = build(args.pycc, src, tmp, name)
+            exe, log, _ = build(args.pycc, src, tmp, name)
             if exe is None:
                 print(f"| {name} | {t_py:.3f}s | compile error | | | |")
                 print(log, file=sys.stderr)

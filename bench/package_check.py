@@ -25,9 +25,15 @@ Packages:
 
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
+                                      [--max-build-seconds S]
   PACKAGE  names from PACKAGES (default: all of them).
   --time   also time each package's hot path compiled and in CPython.
-Exit status 0 only when every module of every package builds and every suite passes.
+  --max-build-seconds S
+           fail a package whose modules take more than S seconds to build in
+           all (v0.5 accept 4: 10 on the CI Linux runner). Each module's build
+           time and the package's total are always printed.
+Exit status 0 only when every module of every package builds (within the bound,
+when one is given) and every suite passes.
 """
 import argparse
 import dataclasses
@@ -40,6 +46,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -339,12 +346,17 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     pkg_dir = built if single else built / pkg.layout[0][0]
 
     defs = fell = 0
+    build_seconds = 0.0
     for mod in pkg.modules:
         py = pkg_dir / mod
         out = py.with_suffix("") if mod != "__init__.py" else py.parent / "__init__"
+        started = time.perf_counter()
         b = subprocess.run([a.pycc, "build", str(py), "-o", str(out), "--ext", "--non-strict",
                             "--release", "--foreign-relative-imports", "--report-fallbacks"],
                            capture_output=True, text=True, timeout=900)
+        seconds = time.perf_counter() - started
+        build_seconds += seconds
+        print(f"  {mod}: built in {seconds:.2f}s")
         if b.returncode != 0:
             print(b.stdout + b.stderr)
             print(f"FAIL: pycc could not build {pkg.import_name}/{mod}")
@@ -367,7 +379,12 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     for mod in pkg.modules:
         (pkg_dir / mod).unlink()
     native = defs - fell
-    print(f"  {len(pkg.modules)} modules built; {native}/{defs} functions native")
+    print(f"  {len(pkg.modules)} modules built in {build_seconds:.2f}s; "
+          f"{native}/{defs} functions native")
+    if a.max_build_seconds is not None and build_seconds > a.max_build_seconds:
+        print(f"FAIL: {pkg.name} took {build_seconds:.2f}s to build, more than "
+              f"{a.max_build_seconds:g}s")
+        return False
 
     names = ",".join(
         pkg.import_name if single or m == "__init__.py" else f"{pkg.import_name}.{m[:-3]}"
@@ -405,6 +422,7 @@ def main() -> int:
     ap.add_argument("--keep", help="build in this (new) directory and keep it")
     ap.add_argument("--time", action="store_true")
     ap.add_argument("--runs", type=int, default=5)
+    ap.add_argument("--max-build-seconds", type=float)
     a = ap.parse_args()
     for name in a.packages:
         if name not in PACKAGES:

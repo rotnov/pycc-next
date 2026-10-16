@@ -52,10 +52,16 @@ jobs:
       # diff-match-patch and pypng (sdist sha256) and tomli (GitHub tag archive
       # sha256, and that of the files used), each built module by module with
       # --ext --non-strict, and each package's own test suite run by CPython
-      # against the compiled modules.
+      # against the compiled modules. Compile speed (v0.5 accept 4): the build
+      # time of each module and package is printed.
       - name: Real packages (diff-match-patch, tomli, pypng) against their own tests
         if: matrix.os == 'ubuntu-24.04'
         run: python3 bench/package_check.py diff-match-patch tomli pypng --time --runs 1
+      # Compile speed (v0.5 accept 4): how long `pycc build` of every bench/py
+      # program takes.
+      - name: Benchmark programs build time
+        if: matrix.os == 'ubuntu-24.04'
+        run: python3 bench/run.py --build-only
   macos:
     # Apple silicon, macOS 26 -- the newest arm64 image GitHub hosts; macOS 26
     # is also the minimum the binaries target (README).
