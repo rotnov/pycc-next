@@ -71,10 +71,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Performance
 
-- tomli's keys are native `tuple[str, ...]` values. `loads()` stays at 1.4x-1.7x
-  CPython (2.70M against 4.56M instructions per call under callgrind; v0.4: 2.60M): the
-  object reference traffic halved, and native tuple allocation took its place. The v0.5
-  accept 1 target (>= 3x) is not met; see `docs/ROADMAP.md`.
+- Small runtime objects are recycled through free lists, as CPython does for tuples:
+  `list`/`tuple` headers, the data blocks of tuples of 1 to 8 elements (one list per
+  length) and `str` objects are taken from and returned to bounded pools
+  (`crates/pycc_rt/src/pool.rs`) instead of `malloc`/`free`, and slicing or extending a
+  tuple writes its words and kinds straight into its data block (no temporary
+  vectors). tomli's keys are native `tuple[str, ...]` values; `loads()` of its
+  benchmark document takes 2.54M instructions per call under callgrind (v0.4: 2.60M;
+  2.70M with native tuples before the pools; CPython: 4.56M), meeting v0.5 accept 1 as
+  amended (see `docs/ROADMAP.md`).
 
 ## [0.4.0] - 2026-10-15
 

@@ -133,15 +133,26 @@ pub(crate) fn new_pystr(bytes: &[u8]) -> *mut PyStrObj {
         PyStrPayload::Heap(bytes.to_vec().into_boxed_slice())
     };
     STR_LIVE.fetch_add(1, Ordering::Relaxed);
-    Box::into_raw(Box::new(PyStrObj {
-        rc: Cell::new(1),
-        payload,
-        hash: Cell::new(-1),
-        chars: Cell::new(-1),
-        offsets: std::cell::OnceCell::new(),
-        foreign: Cell::new(std::ptr::null_mut()),
-    }))
+    let block = STRS.take(STR_LAYOUT).cast::<PyStrObj>();
+    // SAFETY: a fresh block of `PyStrObj`'s layout (`crate::pool`); a
+    // `Box<PyStrObj>` may free it as well (the ASCII and empty strings).
+    unsafe {
+        block.write(PyStrObj {
+            rc: Cell::new(1),
+            payload,
+            hash: Cell::new(-1),
+            chars: Cell::new(-1),
+            offsets: std::cell::OnceCell::new(),
+            foreign: Cell::new(std::ptr::null_mut()),
+        })
+    };
+    block
 }
+
+/// Recycled `PyStrObj` blocks (`crate::pool`): string slices are made and
+/// dropped at a high rate.
+static STRS: crate::pool::Pool<256> = crate::pool::Pool::new();
+const STR_LAYOUT: std::alloc::Layout = std::alloc::Layout::new::<PyStrObj>();
 
 /// Builds a `str` object from UTF-8 bytes the caller already holds.
 ///
@@ -320,7 +331,12 @@ pub unsafe extern "C" fn pycc_rt_str_decref(s: *mut PyStrObj) {
     let new_rc = rc - 1;
     if new_rc == 0 {
         STR_LIVE.fetch_sub(1, Ordering::Relaxed);
-        drop(unsafe { Box::from_raw(s) });
+        // SAFETY: the last reference is gone; the block is `PyStrObj`'s
+        // layout from the global allocator.
+        unsafe {
+            std::ptr::drop_in_place(s);
+            STRS.give(s.cast::<u8>(), STR_LAYOUT);
+        }
     } else {
         unsafe { &*s }.rc.set(new_rc);
     }

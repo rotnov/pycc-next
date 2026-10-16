@@ -145,6 +145,17 @@ impl PyListObj {
         self.len
     }
 
+    /// The allocated element capacity.
+    pub(crate) fn capacity(&self) -> usize {
+        self.cap as usize
+    }
+
+    /// Forgets the elements and the allocation, which the caller took.
+    pub(crate) fn set_empty(&mut self) {
+        self.len = 0;
+        self.cap = 0;
+    }
+
     /// The element kind (`LIST_KIND_*`, or `value::TUPLE_OBJECT`).
     pub(crate) fn kind(&self) -> i64 {
         self.kind
@@ -255,7 +266,8 @@ fn element_rc_kind(kind: i64) -> u8 {
 fn new_typed_list<T: Elem>(kind: i64, items: Vec<T>) -> *mut PyListObj {
     let mut items = std::mem::ManuallyDrop::new(items);
     LIST_LIVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    Box::into_raw(Box::new(PyListObj {
+    let header = HEADERS.take(HEADER_LAYOUT).cast::<PyListObj>();
+    let list = PyListObj {
         len: items.len() as i64,
         data: items.as_mut_ptr().cast::<u8>(),
         cap: items.capacity() as i64,
@@ -267,8 +279,16 @@ fn new_typed_list<T: Elem>(kind: i64, items: Vec<T>) -> *mut PyListObj {
         maxlen: -1,
         head: 0,
         foreign: std::ptr::null_mut(),
-    }))
+    };
+    // SAFETY: a fresh block of `PyListObj`'s layout.
+    unsafe { header.write(list) };
+    header
 }
+
+/// Recycled `PyListObj` headers (`crate::pool`): tuples and lists are made
+/// and dropped at a high rate.
+static HEADERS: crate::pool::Pool<256> = crate::pool::Pool::new();
+const HEADER_LAYOUT: std::alloc::Layout = std::alloc::Layout::new::<PyListObj>();
 
 /// Marks `list` -- a function's `*args`, built for the call -- a tuple
 /// (`frozen`). A `list[bool]` keeps its byte storage and stays a list
@@ -299,8 +319,9 @@ fn frozen_like(source: &PyListObj, result: *mut PyListObj) -> *mut PyListObj {
 /// release brings to zero onto `dead`.
 pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
     LIST_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    let header = list;
     // SAFETY: the count reached zero, so nothing else names the list.
-    let mut list = unsafe { Box::from_raw(list) };
+    let list = unsafe { &mut *header };
     if !list.foreign.is_null() {
         crate::rc::release_object(list.foreign);
     }
@@ -309,7 +330,7 @@ pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
         for (word, kind) in list.typed::<i64>().iter().zip(kinds) {
             release_word_into(crate::value::rc_kind(i64::from(*kind)), *word, dead);
         }
-        crate::tuple::free_kinds(&mut list);
+        crate::tuple::free_data(list);
     } else {
         let kind = list.element_rc_kind();
         if kind != b'w' {
@@ -319,6 +340,9 @@ pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
         }
     }
     with_vec!(list, |items| drop(std::mem::take(items)));
+    // SAFETY: a `PyListObj` owns nothing once its data is gone; the block
+    // came from `new_typed_list`.
+    unsafe { HEADERS.give(header.cast::<u8>(), HEADER_LAYOUT) };
 }
 
 /// A new object of kind `kind` (not `LIST_KIND_BOOL`) owning `words`.

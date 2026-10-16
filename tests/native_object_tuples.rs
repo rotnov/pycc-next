@@ -113,6 +113,16 @@ fn tuples_holding_objects_match_cpython_in_non_strict_mode() {
     assert_native_matches_cpython("object_tuples.py", &["--non-strict"]);
 }
 
+/// Tuples of every pooled length and longer, more of them (and of strings)
+/// alive at once than a free list holds, freed and rebuilt in place: the
+/// recycled blocks (`crates/pycc_rt/src/pool.rs`) never disturb a live value,
+/// and memcheck sees no invalid access and no lost block.
+#[test]
+fn recycled_tuple_and_str_blocks_match_cpython() {
+    assert_native_matches_cpython("tuple_pools.py", &[]);
+    assert_native_matches_cpython("tuple_pools.py", &["--non-strict"]);
+}
+
 /// Builds `module` as an `--ext` extension module into one directory and
 /// copies its source into another, then runs `driver` against each: the
 /// two outputs must be the same.

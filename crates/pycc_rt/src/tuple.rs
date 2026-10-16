@@ -53,10 +53,37 @@ pub(crate) fn kinds_of(tuple: &PyListObj) -> &[u8] {
     unsafe { std::slice::from_raw_parts(tuple.kinds, tuple.len() as usize) }
 }
 
-/// Detaches a dying tuple object's kinds, which live in its data
-/// allocation's spare capacity ([`tuple_from`]) and go with it.
-pub(crate) fn free_kinds(tuple: &mut PyListObj) {
+/// Releases a dying tuple object's data allocation (its words and, in the
+/// spare capacity, its kinds: [`tuple_from`]) once its elements are
+/// released, leaving it empty: a small tuple's block goes back to the pool
+/// of its length ([`tuple_words`]).
+pub(crate) fn free_data(tuple: &mut PyListObj) {
     tuple.kinds = std::ptr::null_mut();
+    let len = tuple.len() as usize;
+    if (1..=POOLED_LEN).contains(&len) && tuple.capacity() == words_and_kinds(len) && tuple.head == 0 {
+        let block = std::mem::replace(&mut tuple.data, std::ptr::NonNull::<i64>::dangling().as_ptr().cast());
+        tuple.set_empty();
+        // SAFETY: a tuple's data is a `Vec<i64>` allocation of exactly
+        // `words_and_kinds(len)` words, which nothing reads any more.
+        unsafe { DATA[len - 1].give(block, data_layout(len)) };
+    }
+}
+
+/// The longest tuple whose data blocks are pooled.
+const POOLED_LEN: usize = 8;
+
+/// Recycled data blocks of tuples of 1..=[`POOLED_LEN`] elements, one pool
+/// per length (`crate::pool`; CPython keeps its tuple free lists by size
+/// the same way).
+static DATA: [crate::pool::Pool<64>; POOLED_LEN] = [const { crate::pool::Pool::new() }; POOLED_LEN];
+
+/// The words a tuple of `len` elements needs: its elements and its kinds.
+fn words_and_kinds(len: usize) -> usize {
+    len + kinds_words(len)
+}
+
+fn data_layout(len: usize) -> std::alloc::Layout {
+    std::alloc::Layout::array::<i64>(words_and_kinds(len)).expect("a small tuple's layout")
 }
 
 /// A new tuple object of `len` elements whose kinds are `kinds[..len]`,
@@ -83,19 +110,26 @@ fn item(seq: &PyListObj, i: usize) -> (i64, i64) {
     }
 }
 
-/// A new tuple object of the elements of `seqs` at `positions` (each a
-/// (sequence, index) pair), taking one more reference to each. Builds the
-/// words and kinds directly: a tuple object costs its three allocations
-/// and nothing more (tomli's keys are sliced and extended in its hot loop).
-fn tuple_of(len: usize, positions: impl Iterator<Item = (i64, i64)>) -> *mut PyListObj {
+/// A new tuple object of the `len` (kind, word) elements `elements`
+/// yields, taking one more reference to each. Writes the words and the
+/// kinds straight into the tuple's one data block: a tuple object costs
+/// its two (pooled) allocations and nothing more (tomli's keys are sliced
+/// and extended in its hot loop).
+fn tuple_of(len: usize, elements: impl Iterator<Item = (i64, i64)>) -> *mut PyListObj {
     let mut words = tuple_words(len);
-    let mut kinds = Vec::with_capacity(len);
-    for (kind, word) in positions {
+    // The kinds go after the `len` words ([`tuple_from`]).
+    let kinds = words.spare_capacity_mut()[len..].as_mut_ptr().cast::<u8>();
+    for (k, (kind, word)) in elements.take(len).enumerate() {
         crate::value::retain(kind, word);
+        // SAFETY: `k < len` and the block has room for `len` kinds there;
+        // pushing at most `len` words never reallocates it.
+        unsafe { kinds.add(k).write(kind as u8) };
         words.push(word);
-        kinds.push(kind as u8);
     }
-    tuple_from(words, &kinds)
+    assert_eq!(words.len(), len, "a tuple's element count");
+    let tuple = crate::list::new_raw(TUPLE_OBJECT, words);
+    unsafe { (*tuple).kinds = kinds };
+    tuple
 }
 
 /// `t[start:stop:step]` of a tuple object (`pycc_rt_list_slice` routes a
@@ -103,8 +137,9 @@ fn tuple_of(len: usize, positions: impl Iterator<Item = (i64, i64)>) -> *mut PyL
 pub(crate) fn slice(t: &PyListObj, start: i64, stop: i64, step: i64, present: i64) -> *mut PyListObj {
     match crate::list::slice_indices(t.len(), start, stop, step, present) {
         Some(positions) => {
-            let positions: Vec<usize> = positions.collect();
-            tuple_of(positions.len(), positions.into_iter().map(|i| item(t, i)))
+            let (len, exact) = positions.size_hint();
+            debug_assert_eq!(Some(len), exact);
+            tuple_of(len, positions.map(|i| item(t, i)))
         }
         // A zero step raised `ValueError`; see `pycc_rt_list_slice`.
         None => std::ptr::null_mut(),
@@ -191,7 +226,13 @@ fn kinds_words(len: usize) -> usize {
 /// An empty word vector with capacity for `len` words and their kinds
 /// ([`tuple_from`] then needs no reallocation).
 pub(crate) fn tuple_words(len: usize) -> Vec<i64> {
-    Vec::with_capacity(len + kinds_words(len))
+    if (1..=POOLED_LEN).contains(&len) {
+        let block = DATA[len - 1].take(data_layout(len));
+        // SAFETY: a block of exactly `words_and_kinds(len)` words from the
+        // global allocator (`free_data`), holding nothing.
+        return unsafe { Vec::from_raw_parts(block.cast::<i64>(), 0, words_and_kinds(len)) };
+    }
+    Vec::with_capacity(words_and_kinds(len))
 }
 
 /// A tuple object owning `words` (one reference each) of the given kinds.
