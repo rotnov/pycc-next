@@ -33,12 +33,32 @@ fn truncated_garbage_or_empty_output_is_refused() {
     assert!(parse_lock_probe("garbage").is_none());
 }
 
+/// Writes an executable shell script standing in for an interpreter.
+///
+/// The script is written by a child `sh`, never opened by this process:
+/// a file this (multi-threaded) test process holds open for writing is
+/// inherited by every child another test thread forks meanwhile, until
+/// that child execs, and executing the script then fails with "Text file
+/// busy" (`ETXTBSY`). The text goes through a pipe; once the child exits,
+/// no process holds the script open.
 #[cfg(unix)]
 pub(crate) fn fake_interpreter(dir: &std::path::Path, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
+    use std::io::Write;
     let script = dir.join("fake-python");
-    std::fs::write(&script, format!("#!/bin/sh\n{body}")).unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut writer = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("cat > \"$1\" && chmod 755 \"$1\"")
+        .arg("sh")
+        .arg(&script)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn sh to write the script");
+    let mut stdin = writer.stdin.take().expect("the writer's stdin");
+    stdin
+        .write_all(format!("#!/bin/sh\n{body}").as_bytes())
+        .expect("write the script");
+    drop(stdin);
+    assert!(writer.wait().expect("the writer exits").success(), "writing {script:?}");
     script
 }
 

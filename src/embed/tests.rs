@@ -140,14 +140,11 @@ fn an_interpreter_that_cannot_start_is_an_environment_failure() {
     assert!(message.contains("PYCC_PYTHON"), "{message}");
 }
 
-/// Writes an executable shell script standing in for an interpreter.
+/// Writes an executable shell script standing in for an interpreter
+/// (without ever holding it open: see the lock probe's helper).
 #[cfg(unix)]
 fn fake_interpreter(dir: &Path, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-    let script = dir.join("fake-python");
-    std::fs::write(&script, format!("#!/bin/sh\n{body}")).expect("write the script");
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-    script
+    crate::lock::probe::tests::fake_interpreter(dir, body)
 }
 
 /// The probe's success path through a real spawn: `with_probe` skips the
