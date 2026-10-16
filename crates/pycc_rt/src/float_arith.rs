@@ -126,15 +126,31 @@ pub(crate) fn float_pow(a: f64, b: f64) -> f64 {
     }
     let result = a.powf(b);
     if result.is_infinite() && a.is_finite() && b.is_finite() {
-        // Conformant: CPython raises `OverflowError` here.
+        // Conformant: CPython raises `OverflowError` from `errno` here, so
+        // its text is `(34, strerror(ERANGE))`.
         raise_builtin(
             EXCEPTION_TYPE_OVERFLOW_ERROR,
             "OverflowError",
-            "float power overflowed (result too large to represent)",
+            &range_error_text(),
         );
         return 0.0;
     }
     result
+}
+
+/// `str()` of the `OverflowError` CPython raises from `errno == ERANGE`
+/// (`PyErr_SetFromErrno`): `(34, 'Numerical result out of range')` with
+/// glibc, `(34, 'Result too large')` on macOS and Windows.
+pub(crate) fn range_error_text() -> String {
+    const ERANGE: i32 = 34;
+    let text = if cfg!(windows) {
+        "Result too large".to_string()
+    } else {
+        let full = std::io::Error::from_raw_os_error(ERANGE).to_string();
+        let suffix = format!(" (os error {ERANGE})");
+        full.strip_suffix(&suffix).unwrap_or(&full).to_string()
+    };
+    format!("({ERANGE}, '{text}')")
 }
 
 #[unsafe(no_mangle)]

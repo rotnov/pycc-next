@@ -168,6 +168,14 @@ pub unsafe extern "C" fn pycc_rt_list_extend(list: *mut PyListObj, other: *mut P
     for word in &added {
         list.retain(*word);
     }
+    if list.flavor == super::deque::DEQUE {
+        // One append at a time, so a `maxlen` deque drops from the left as
+        // CPython's `deque.extend` (and `d += ys`) does.
+        for word in added {
+            super::deque::append(list, word);
+        }
+        return;
+    }
     edit_words(list, |items| items.extend_from_slice(&added));
 }
 

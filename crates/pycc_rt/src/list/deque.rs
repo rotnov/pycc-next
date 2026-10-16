@@ -130,6 +130,20 @@ pub(crate) fn append(list: &mut PyListObj, word: i64) {
     });
 }
 
+/// Whether a bounded deque is at its `maxlen`, raising CPython's
+/// `IndexError` for `d.insert(...)`, which cannot drop an element.
+pub(crate) fn is_full(list: &PyListObj) -> bool {
+    if list.maxlen >= 0 && list.len >= list.maxlen {
+        raise(
+            EXCEPTION_TYPE_INDEX_ERROR,
+            "IndexError",
+            "deque already at its maximum size",
+        );
+        return true;
+    }
+    false
+}
+
 /// `d.pop()` on a deque: the element's reference to the caller.
 pub(crate) fn pop_right(list: &mut PyListObj) -> i64 {
     if list.len == 0 {

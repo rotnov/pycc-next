@@ -907,7 +907,35 @@ pub extern "C" fn pycc_rt_float_max2(a: f64, b: f64) -> f64 {
     if b > a { b } else { a }
 }
 
-/// `pow(base, exp, mod)` over machine-sized ints.
+/// `pow(base, exp, mod)` when an operand is a bigint.
+fn powmod_big(base: i64, exp: i64, modulus: i64) -> i64 {
+    use num_traits::{Signed, Zero};
+    let (b, e, m) = (
+        crate::int_arith::decode_big(base),
+        crate::int_arith::decode_big(exp),
+        crate::int_arith::decode_big(modulus),
+    );
+    if m.is_zero() {
+        value_error("pow() 3rd argument cannot be 0");
+        return tag_smallint(0);
+    }
+    let (b, e) = if e.is_negative() {
+        match b.modinv(&m.abs()) {
+            Some(inverse) => (inverse, -e),
+            None => {
+                value_error("base is not invertible for the given modulus");
+                return tag_smallint(0);
+            }
+        }
+    } else {
+        (b, e)
+    };
+    // `modpow` rounds like `mod_floor`: the result takes the modulus's sign,
+    // as CPython's does.
+    crate::int_arith::encode_big(b.modpow(&e, &m))
+}
+
+/// `pow(base, exp, mod)`: machine-sized ints inline, bigints by `num-bigint`.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_int_powmod(base: i64, exp: i64, modulus: i64) -> i64 {
     let (Some(b), Some(e), Some(m)) = (
@@ -915,12 +943,7 @@ pub extern "C" fn pycc_rt_int_powmod(base: i64, exp: i64, modulus: i64) -> i64 {
         inline_int_value(exp),
         inline_int_value(modulus),
     ) else {
-        raise_builtin(
-            EXCEPTION_TYPE_OVERFLOW_ERROR,
-            "OverflowError",
-            "three-argument pow() of a bigint-valued int is not supported yet",
-        );
-        return tag_smallint(0);
+        return powmod_big(base, exp, modulus);
     };
     if m == 0 {
         value_error("pow() 3rd argument cannot be 0");

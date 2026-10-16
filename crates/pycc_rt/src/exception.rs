@@ -272,6 +272,28 @@ pub extern "C" fn pycc_rt_ext_pending_is_unbound_local() -> i32 {
     })
 }
 
+/// 1 when the pending exception is a `KeyError` for a key that is not a
+/// `str` ([`raise_key_error`]), whose message is the key's `repr` (`0`,
+/// `(1, 'a')`) rather than the key's own text; 0 otherwise. The shim rebuilds
+/// the key from that `repr`, so CPython's `KeyError` holds the key itself and
+/// prints `KeyError: 0`, not `KeyError: '0'`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_ext_pending_key_is_repr() -> i32 {
+    EXCEPTION_STATE.with(|state| {
+        let pending = state.get();
+        if pending.active == 0 || pending.value.is_null() {
+            return 0;
+        }
+        let value = unsafe { &*pending.value };
+        let form = value.str_form.get();
+        if value.type_tag != EXCEPTION_TYPE_KEY_ERROR || value.message.is_null() || form.is_null() {
+            return 0;
+        }
+        // A `str` key's cached form is its quoted `repr`, never equal to it.
+        i32::from(unsafe { (*form).bytes() == (*value.message).bytes() })
+    })
+}
+
 /// The pending exception's message as UTF-8 bytes, writing its length through
 /// `len`. Null (with `*len == 0`) when nothing is pending.
 ///

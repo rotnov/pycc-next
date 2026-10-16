@@ -29,6 +29,7 @@
 
 mod annotations;
 mod builtins;
+mod exceptions;
 mod function_values;
 mod names;
 mod render;
@@ -121,6 +122,9 @@ struct TopStmt {
     /// A function with a parameter default: the published callable cannot
     /// apply defaults yet (#1194), so Python code never calls it compiled.
     defaults: bool,
+    /// An exception class the artifact would publish without its own
+    /// members (`exceptions`): Python code never sees it compiled.
+    hidden_members: bool,
 }
 
 /// A diagnostic of the compiled rewrite, as the fallback loop sees it.
@@ -203,6 +207,11 @@ impl Plan {
         } else {
             BTreeSet::new()
         };
+        let hidden_members = if publishes.classes {
+            exceptions::with_hidden_members(&module.body)
+        } else {
+            BTreeSet::new()
+        };
         let stmts = module
             .body
             .iter()
@@ -235,6 +244,8 @@ impl Plan {
                 defaults: matches!(stmt, Stmt::FunctionDef(def)
                     if def.parameters.iter_non_variadic_params().any(|p| p.default.is_some())
                         && !wrapped.contains(def.name.as_str())),
+                hidden_members: matches!(stmt, Stmt::ClassDef(class)
+                    if hidden_members.contains(class.name.as_str())),
             })
             .collect::<Vec<_>>();
         let external = if publishes.variables {
@@ -620,6 +631,16 @@ impl Plan {
                         {
                             name
                         }
+                        // Python code importing the module reads a public
+                        // class too: one published without its members
+                        // runs in CPython for it.
+                        Kind::Class(name)
+                            if stmt.hidden_members
+                                && (read.contains(name)
+                                    || self.publishes.variables && !name.starts_with('_')) =>
+                        {
+                            name
+                        }
                         // An instance of a compiled class may reach fallback
                         // code through any value without its name being
                         // read, and an unpublished class's instances have no
@@ -901,7 +922,7 @@ pub(crate) fn with_fallback<T, E>(
             else {
                 return first;
             };
-            if plan.external.is_empty() {
+            if plan.external.is_empty() && !plan.stmts.iter().any(|stmt| stmt.hidden_members) {
                 return first;
             }
             plan.set_entry_dir(path.parent().map(Path::to_path_buf));

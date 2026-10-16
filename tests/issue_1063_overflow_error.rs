@@ -139,10 +139,15 @@ fn a_float_power_that_overflows_raises_before_the_next_statement() {
          main()\n",
     );
     assert!(ok, "program failed: {stderr}");
-    assert_eq!(
-        stdout,
-        "float power overflowed (result too large to represent)\n"
-    );
+    // CPython's text: `(34, strerror(ERANGE))`, which is platform text.
+    let oracle = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
+        .args([
+            "-c",
+            "try:\n    2.0 ** 1024.0\nexcept OverflowError as e:\n    print(e)\n",
+        ])
+        .output()
+        .expect("python3 runs");
+    assert_eq!(stdout, String::from_utf8_lossy(&oracle.stdout));
 }
 
 /// The converted `float_pow` zero-base arm, which is `ZeroDivisionError` and

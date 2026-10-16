@@ -190,6 +190,21 @@ int main(int argc, char **argv) {
                 PYCC_EMBED_SIDECAR);
         return 1;
     }
+    /* The isolated pre-configuration leaves LC_CTYPE at "C" and the UTF-8
+     * Mode off, so `sys.stdout` would encode ASCII and a fallback `print` of
+     * non-ASCII text would raise UnicodeEncodeError. Configure the locale as
+     * `python3` does: the user's LC_CTYPE, and the UTF-8 Mode under the C or
+     * POSIX locale (PEP 540), so Python-side text is written as UTF-8 like
+     * pycc_rt's own output. The environment (PYTHONUTF8 and so on) is still
+     * ignored. */
+    PyPreConfig preconfig;
+    PyPreConfig_InitIsolatedConfig(&preconfig);
+    preconfig.configure_locale = 1;
+    preconfig.utf8_mode = -1;
+    PyStatus prestatus = Py_PreInitialize(&preconfig);
+    if (PyStatus_Exception(prestatus)) {
+        Py_ExitStatusException(prestatus);
+    }
     PyConfig config;
     PyConfig_InitIsolatedConfig(&config);
     config.site_import = 0;

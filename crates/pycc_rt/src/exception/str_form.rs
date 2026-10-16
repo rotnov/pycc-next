@@ -26,34 +26,10 @@ pub(super) fn exception_str(exc: &PyExceptionObj) -> *mut PyStrObj {
     rendered
 }
 
-/// CPython's `repr` of a `str`: single quotes unless the text holds a single
-/// quote and no double quote; backslash, the chosen quote, `\t`, `\n` and
-/// `\r` escaped; any other control character as `\xNN`.
+/// CPython's `repr` of a `str` ([`crate::list::str_repr`]).
 fn str_repr(text: &str) -> String {
-    let quote = if text.contains('\'') && !text.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
     let mut out = String::with_capacity(text.len() + 2);
-    out.push(quote);
-    for c in text.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push_str("\\t"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            c if c == quote => {
-                out.push('\\');
-                out.push(c);
-            }
-            c if (c as u32) < 0x20 || (0x7f..0xa0).contains(&(c as u32)) => {
-                out.push_str(&format!("\\x{:02x}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out.push(quote);
+    crate::list::str_repr(text, &mut out);
     out
 }
 
@@ -71,6 +47,11 @@ mod tests {
         assert_eq!(str_repr("q\""), "'q\"'");
         assert_eq!(str_repr("t\tn\nr\r\\"), "'t\\tn\\nr\\r\\\\'");
         assert_eq!(str_repr("\u{1}\u{7f}\u{85}é"), "'\\x01\\x7f\\x85é'");
+        // Not printable beyond ASCII: \xNN, \uNNNN, \UNNNNNNNN (fuzzer finding).
+        assert_eq!(
+            str_repr("\u{a0}\u{ad}\u{200b}\u{2028}\u{e0001}\u{10ffff} 日😀"),
+            "'\\xa0\\xad\\u200b\\u2028\\U000e0001\\U0010ffff 日😀'"
+        );
     }
 
     fn alloc(type_tag: u8, name: &'static str, msg: &str) -> PyExceptionObj {

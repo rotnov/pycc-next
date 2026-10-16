@@ -164,16 +164,19 @@ fn float_pow_raises_runtime_error_for_a_negative_base_and_a_non_integer_power() 
 #[test]
 fn float_pow_raises_overflow_error_for_a_finite_result_outside_float_range() {
     // Verified against `python3.13`: `2.0 ** 1024.0` raises
-    // `OverflowError: (34, 'Result too large')`, while `f64::powf` alone
-    // silently returns `inf`. This is the arm the new tag exists for.
+    // `OverflowError: (34, 'Numerical result out of range')` (glibc's
+    // `strerror(ERANGE)`; `'Result too large'` on macOS), while `f64::powf`
+    // alone silently returns `inf`.
     pycc_rt_exception_clear();
     let result = float_pow(2.0, 1024.0);
     let (tag, message) = pending_tag_and_message();
     assert_eq!(tag, EXCEPTION_TYPE_OVERFLOW_ERROR);
-    assert_eq!(
-        message,
-        "float power overflowed (result too large to represent)"
-    );
+    let expected = if cfg!(target_os = "linux") {
+        "(34, 'Numerical result out of range')"
+    } else {
+        "(34, 'Result too large')"
+    };
+    assert_eq!(message, expected);
     assert_eq!(result, 0.0);
     pycc_rt_exception_clear();
 }

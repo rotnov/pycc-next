@@ -46,6 +46,7 @@ extern int pycc_rt_ext_int_classify(long long encoded);
 extern long long pycc_rt_ext_int_decode(long long encoded);
 extern int pycc_rt_ext_pending_type(void);
 extern int pycc_rt_ext_pending_is_unbound_local(void);
+extern int pycc_rt_ext_pending_key_is_repr(void);
 extern const unsigned char *pycc_rt_ext_pending_message(size_t *len);
 extern void pycc_rt_exception_clear(void);
 /* D-180 rule 6: a compiled function's scalar return value arrives retained,
@@ -330,6 +331,26 @@ static int pycc_ext_bridge_store(PyObject *exc, unsigned char tag, const char *c
  * `every_exception_tag_the_c_shim_switches_on_still_names_that_class` for
  * the full array.
  */
+/*
+ * `KeyError(ast.literal_eval(text))` as a new exception object, or NULL (no
+ * Python error set) when `text` is not a literal: the caller then keeps the
+ * text itself as the argument.
+ */
+static PyObject *pycc_ext_key_error_from_repr(PyObject *text)
+{
+    PyObject *ast = PyImport_ImportModule("ast");
+    PyObject *literal_eval = (ast == NULL) ? NULL : PyObject_GetAttrString(ast, "literal_eval");
+    PyObject *key = (literal_eval == NULL) ? NULL : PyObject_CallFunctionObjArgs(literal_eval, text, NULL);
+    PyObject *raised = (key == NULL) ? NULL : PyObject_CallFunctionObjArgs(PyExc_KeyError, key, NULL);
+    Py_XDECREF(key);
+    Py_XDECREF(literal_eval);
+    Py_XDECREF(ast);
+    if (raised == NULL) {
+        PyErr_Clear();
+    }
+    return raised;
+}
+
 static int pycc_ext_raise_pending(void)
 {
     int tag = pycc_rt_ext_pending_type();
@@ -531,6 +552,19 @@ static int pycc_ext_raise_pending(void)
         /* A MemoryError is already set; keep it and drop the pycc-side one. */
         pycc_rt_exception_clear();
         return 1;
+    }
+    if (tag == 3 && pycc_rt_ext_pending_key_is_repr()) {
+        /* A `KeyError` for a key that is not a `str` carries the key's
+         * `repr` (an `int`, `float`, `bool` or a tuple of those): rebuild the
+         * key so CPython's exception holds it (`KeyError: 0`, `e.args ==
+         * (0,)`), not its text (`KeyError: '0'`). */
+        PyObject *raised = pycc_ext_key_error_from_repr(message);
+        if (raised != NULL) {
+            Py_DECREF(message);
+            PyErr_SetRaisedException(raised);
+            pycc_rt_exception_clear();
+            return 1;
+        }
     }
     PyErr_SetObject(exc_type, message);
     Py_DECREF(message);

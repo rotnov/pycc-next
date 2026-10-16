@@ -86,8 +86,7 @@ pub extern "C" fn pycc_rt_float_round(x: f64, ndigits: i64) -> f64 {
 
 /// `round(x)` for a `float` `x`: the nearest integer, ties to even, as an
 /// encoded `int`. A NaN raises `ValueError`, an infinity `OverflowError`,
-/// exactly as CPython; an integer past the inline range raises the bigint
-/// gap's `OverflowError`.
+/// exactly as CPython; an integer past the inline range is a bigint.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_float_round_to_int(x: f64) -> i64 {
     if x.is_nan() {
@@ -108,12 +107,8 @@ pub extern "C" fn pycc_rt_float_round_to_int(x: f64) -> i64 {
     }
     let rounded = x.round_ties_even();
     if rounded.abs() >= 9.2e18 {
-        raise_builtin(
-            EXCEPTION_TYPE_OVERFLOW_ERROR,
-            "OverflowError",
-            "rounding to a bigint-valued `int` is not supported yet",
-        );
-        return tag_smallint(0);
+        // Exact: a float this large is already an integer.
+        return crate::int_arith::int_from_float(rounded);
     }
     pycc_rt_int_from_i64(rounded as i64)
 }

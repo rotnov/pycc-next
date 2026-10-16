@@ -562,6 +562,10 @@ pub unsafe extern "C" fn pycc_rt_list_pop(list: *mut PyListObj, has_index: i64, 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_insert(list: *mut PyListObj, index: i64, word: i64) {
     let list = unsafe { &mut *list };
+    if list.flavor == deque::DEQUE && deque::is_full(list) {
+        list.release(word);
+        return;
+    }
     let len = list.len;
     let at = if index < 0 {
         (index + len).max(0)
@@ -770,7 +774,9 @@ pub unsafe extern "C" fn pycc_rt_list_contains(list: *mut PyListObj, word: i64) 
 }
 
 /// Python's `repr()` of a `str`: single quotes unless the text contains a
-/// single quote and no double quote, with CPython's escapes.
+/// single quote and no double quote, with CPython's escapes (`unicode_repr`):
+/// a control character or DEL as `\xNN`, any other character
+/// `str.isprintable()` rejects as `\xNN`, `\uNNNN` or `\UNNNNNNNN`.
 pub(crate) fn str_repr(text: &str, out: &mut String) {
     let quote = if text.contains('\'') && !text.contains('"') {
         '"'
@@ -788,14 +794,13 @@ pub(crate) fn str_repr(text: &str, out: &mut String) {
                 out.push('\\');
                 out.push(c);
             }
-            c if (c as u32) < 0x20
-                || c as u32 == 0x7f
-                || (0x80..0xa0).contains(&(c as u32))
-                || c as u32 == 0xad =>
-            {
+            c if c.is_ascii() && (c < ' ' || c == '\x7f') => {
                 out.push_str(&format!("\\x{:02x}", c as u32));
             }
-            c => out.push(c),
+            c if c.is_ascii() || crate::unicode_printable::is_printable(c) => out.push(c),
+            c if (c as u32) <= 0xff => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c if (c as u32) <= 0xffff => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push_str(&format!("\\U{:08x}", c as u32)),
         }
     }
     out.push(quote);

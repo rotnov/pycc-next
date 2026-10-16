@@ -76,8 +76,19 @@ pub struct LineCol {
     pub column: u32,
 }
 
+/// `offset` as a byte index into `source`: a span of compiler-generated
+/// code may point past the source (or into a character), which is clamped
+/// rather than allowed to panic while an error is being reported.
+fn clamp_offset(source: &str, offset: u32) -> usize {
+    let mut offset = (offset as usize).min(source.len());
+    while !source.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
 pub fn byte_offset_to_line_col(source: &str, offset: u32) -> LineCol {
-    let offset = offset as usize;
+    let offset = clamp_offset(source, offset);
     let mut line = 1u32;
     let mut last_newline_end = 0usize;
     for (i, b) in source.bytes().enumerate() {
@@ -120,8 +131,8 @@ pub fn render_human(diag: &Diagnostic, file_path: &str, source: &str) -> String 
     let gutter_pad = " ".repeat(start.line.to_string().len());
     out.push_str(&gutter_pad);
     out.push_str(" |\n");
-    let start_offset = span.start as usize;
-    let end_offset = span.end as usize;
+    let start_offset = clamp_offset(source, span.start);
+    let end_offset = clamp_offset(source, span.end);
     let line_start = source[..start_offset]
         .rfind('\n')
         .map_or(0, |newline| newline + 1);
@@ -164,7 +175,8 @@ pub fn render_json(diag: &Diagnostic, file_path: &str, source: &str) -> String {
     };
     let spans = if let Some(span) = diag.span {
         let start = byte_offset_to_line_col(source, span.start);
-        let scalar_len = source[span.start as usize..span.end.max(span.start) as usize]
+        let scalar_len = source
+            [clamp_offset(source, span.start)..clamp_offset(source, span.end.max(span.start))]
             .chars()
             .count() as u32;
         let file_path = display_path(file_path);
@@ -384,6 +396,20 @@ mod tests {
             warning_with_help.help.as_deref(),
             Some("remove the dead code")
         );
+    }
+
+    /// A span past the end of the source (or inside a character) is clamped,
+    /// not a panic: found by the differential fuzzer, where a generated
+    /// call-binding helper's parameter kept an offset beyond the file.
+    #[test]
+    fn a_span_past_the_source_renders_without_panicking() {
+        let source = "x = 'é'\nf(**y)\n";
+        let d = Diagnostic::error("T0021", "cannot infer", Span::new(148, 160));
+        let human = render_human(&d, "m.py", source);
+        assert!(human.contains(" --> m.py:3:1"), "{human}");
+        assert!(render_json(&d, "m.py", source).contains("\"len\":0"));
+        let inside = Diagnostic::error("T0021", "cannot infer", Span::new(6, 7));
+        assert!(render_human(&inside, "m.py", source).contains(" --> m.py:1:6"));
     }
 
     #[test]

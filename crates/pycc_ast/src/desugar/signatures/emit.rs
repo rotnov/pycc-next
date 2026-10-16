@@ -894,7 +894,7 @@ fn py_str(text: &str) -> String {
 }
 
 /// Parses a generated helper, placing it at `range` (its expressions take
-/// the call's range; its statements start at the call).
+/// the call's range; so do its statements and parameters).
 pub(crate) fn parse_helper(source: &str, range: TextRange) -> Vec<Stmt> {
     let padding = "\n".repeat(range.start().to_usize());
     let text = format!("{padding}{source}");
@@ -905,6 +905,44 @@ pub(crate) fn parse_helper(source: &str, range: TextRange) -> Vec<Stmt> {
     impl ruff_python_ast::visitor::transformer::Transformer for Relocate {
         fn visit_expr(&self, expr: &mut Expr) {
             ruff_python_ast::relocate::relocate_expr(expr, self.0);
+        }
+        // A diagnostic about a helper parameter (`_pycc_a0`) points at the
+        // call too: its parsed range lies in the padded text, past the end
+        // of the real source when the call is near it.
+        fn visit_stmt(&self, stmt: &mut Stmt) {
+            match stmt {
+                Stmt::FunctionDef(s) => s.range = self.0,
+                Stmt::ClassDef(s) => s.range = self.0,
+                Stmt::Return(s) => s.range = self.0,
+                Stmt::Delete(s) => s.range = self.0,
+                Stmt::Assign(s) => s.range = self.0,
+                Stmt::AugAssign(s) => s.range = self.0,
+                Stmt::AnnAssign(s) => s.range = self.0,
+                Stmt::TypeAlias(s) => s.range = self.0,
+                Stmt::For(s) => s.range = self.0,
+                Stmt::While(s) => s.range = self.0,
+                Stmt::If(s) => s.range = self.0,
+                Stmt::With(s) => s.range = self.0,
+                Stmt::Match(s) => s.range = self.0,
+                Stmt::Raise(s) => s.range = self.0,
+                Stmt::Try(s) => s.range = self.0,
+                Stmt::Assert(s) => s.range = self.0,
+                Stmt::Import(s) => s.range = self.0,
+                Stmt::ImportFrom(s) => s.range = self.0,
+                Stmt::Global(s) => s.range = self.0,
+                Stmt::Nonlocal(s) => s.range = self.0,
+                Stmt::Expr(s) => s.range = self.0,
+                Stmt::Pass(s) => s.range = self.0,
+                Stmt::Break(s) => s.range = self.0,
+                Stmt::Continue(s) => s.range = self.0,
+                Stmt::IpyEscapeCommand(s) => s.range = self.0,
+            }
+            ruff_python_ast::visitor::transformer::walk_stmt(self, stmt);
+        }
+        fn visit_parameter(&self, parameter: &mut ruff_python_ast::Parameter) {
+            parameter.range = self.0;
+            parameter.name.range = self.0;
+            ruff_python_ast::visitor::transformer::walk_parameter(self, parameter);
         }
     }
     let relocate = Relocate(range);
