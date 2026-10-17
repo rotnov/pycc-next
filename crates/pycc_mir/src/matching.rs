@@ -284,7 +284,16 @@ fn lower_sequence_conds(
     current_class: Option<&str>,
 ) -> (Vec<Vec<MirExpr>>, Vec<(String, MirExpr)>) {
     let fixed = sub_pats.len();
-    let len_cond = MirExpr::Compare {
+    // A fixed tuple's length is its type's: the test is a constant (a
+    // tuple of scalars is a struct, which has no run-time length).
+    let arity = match subj.ty() {
+        Ty::Tuple(elems) => Some(elems.len()),
+        _ => None,
+    };
+    let len_cond = if let Some(arity) = arity {
+        MirExpr::BoolLiteral(if rest.is_some() { arity >= fixed } else { arity == fixed })
+    } else {
+        MirExpr::Compare {
         op: if rest.is_some() {
             CmpOpKind::GtE
         } else {
@@ -297,6 +306,7 @@ fn lower_sequence_conds(
         }),
         right: Box::new(MirExpr::IntLiteral(fixed as i64)),
         ty: Ty::Bool,
+        }
     };
     let mut alternatives = vec![vec![len_cond]];
     let mut bindings = Vec::new();
@@ -309,7 +319,23 @@ fn lower_sequence_conds(
         alternatives = conjoin(alternatives, alts);
         bindings.extend(b);
     }
-    if let Some(rest_name) = rest {
+    if let Some(rest_name) = rest
+        && let Some(arity) = arity
+    {
+        // A fixed tuple's starred capture: the list of its remaining
+        // elements (`pycc_types` admits it when they share one type).
+        bindings.push((
+            rest_name.clone(),
+            MirExpr::ListLiteral(
+                (fixed..arity)
+                    .map(|i| MirExpr::Subscript {
+                        base: Box::new(subj.clone()),
+                        index: Box::new(MirExpr::IntLiteral(i as i64)),
+                    })
+                    .collect(),
+            ),
+        ));
+    } else if let Some(rest_name) = rest {
         // `[a, *rest]`: the elements after the fixed ones (a star anywhere
         // else is refused when the pattern is lowered to HIR).
         bindings.push((

@@ -33,3 +33,11 @@ fn fstring_debug_specifier() {
 fn takewhile_and_dropwhile() {
     matches_cpython("itertools_while");
 }
+
+/// A `match` on a tuple subject checks each sequence-pattern position
+/// against its own element type, and a starred capture of a tuple of one
+/// element type is a list.
+#[test]
+fn match_on_a_tuple_subject() {
+    matches_cpython("match_tuple_subject");
+}

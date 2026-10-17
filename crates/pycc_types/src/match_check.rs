@@ -181,20 +181,38 @@ pub(crate) fn check_pattern(
             Ok(vec![])
         }
         HirPattern::Sequence(subs) => {
-            let elt_ty = check_sequence_subject(subject_ty)?;
             let mut bindings = Vec::new();
-            for sub in subs {
+            for (index, sub) in subs.iter().enumerate() {
+                let elt_ty = sequence_element(subject_ty, index, Some(subs.len()))?;
                 bindings.extend(check_pattern(env, local_names, sub, &elt_ty)?);
+            }
+            if subs.is_empty() {
+                check_sequence_subject(subject_ty)?;
             }
             Ok(bindings)
         }
         HirPattern::SequenceStar(subs, rest) => {
             let elt_ty = check_sequence_subject(subject_ty)?;
             let mut bindings = Vec::new();
-            for sub in subs {
+            for (index, sub) in subs.iter().enumerate() {
+                let elt_ty = sequence_element(subject_ty, index, None)?;
                 bindings.extend(check_pattern(env, local_names, sub, &elt_ty)?);
             }
             if let Some(rest) = rest {
+                // The starred capture of a tuple with elements of several
+                // types would be a list of several types.
+                if let Ty::Tuple(elems) = subject_ty
+                    && elems.iter().any(|elem| *elem != elt_ty)
+                {
+                    return Err(Diagnostic::error(
+                        "C0001",
+                        format!(
+                            "a starred capture of a `{}` subject is not supported yet",
+                            subject_ty.name()
+                        ),
+                        Span::new(0, 0),
+                    ));
+                }
                 bindings.push((rest.clone(), Ty::List(Box::new(elt_ty))));
             }
             Ok(bindings)
@@ -273,6 +291,30 @@ pub(crate) fn check_pattern(
             bindings.push((name.clone(), subject_ty.clone()));
             Ok(bindings)
         }
+    }
+}
+
+/// The type of element `index` of a sequence pattern's subject: a list's
+/// element type, or a fixed tuple's element at that position. `arity` is
+/// the pattern's element count when it has no starred element: a fixed
+/// tuple of another length never matches it, which is refused.
+fn sequence_element(subject_ty: &Ty, index: usize, arity: Option<usize>) -> Result<Ty, Diagnostic> {
+    match subject_ty {
+        Ty::Tuple(elems) => {
+            if arity.is_some_and(|arity| arity != elems.len()) || index >= elems.len() {
+                return Err(Diagnostic::error(
+                    "T0021",
+                    format!(
+                        "a sequence pattern of {} elements never matches the `{}` subject",
+                        arity.unwrap_or(index + 1),
+                        subject_ty.name()
+                    ),
+                    Span::new(0, 0),
+                ));
+            }
+            Ok(elems[index].clone())
+        }
+        _ => check_sequence_subject(subject_ty),
     }
 }
 
@@ -386,7 +428,7 @@ pub(crate) fn check_exhaustive(env: &Environment, subject_ty: &Ty, cases: &[HirM
         if case.guard.is_some() {
             continue;
         }
-        if is_irrefutable_pattern(&case.pattern) {
+        if is_irrefutable_pattern(&case.pattern) || covers_tuple(subject_ty, &case.pattern) {
             return true;
         }
     }
@@ -426,6 +468,20 @@ pub(crate) fn check_exhaustive(env: &Environment, subject_ty: &Ty, cases: &[HirM
                 false
             }
         }
+        _ => false,
+    }
+}
+
+/// Whether `pattern` matches every value of the fixed tuple type
+/// `subject_ty`: a sequence pattern of its arity whose every element is
+/// irrefutable (`case (n, s):` over a `tuple[int, str]`).
+fn covers_tuple(subject_ty: &Ty, pattern: &HirPattern) -> bool {
+    match (subject_ty, pattern) {
+        (Ty::Tuple(elems), HirPattern::Sequence(subs)) => {
+            subs.len() == elems.len() && subs.iter().all(is_irrefutable_pattern)
+        }
+        (_, HirPattern::As(inner, _)) => covers_tuple(subject_ty, inner),
+        (_, HirPattern::Or(subs)) => subs.iter().any(|sub| covers_tuple(subject_ty, sub)),
         _ => false,
     }
 }
