@@ -153,11 +153,18 @@ fn variable_declaration(line: &str) -> Option<String> {
     Some(format!("extern {head};"))
 }
 
+/// `text` with `\n` line ends: a checkout with `core.autocrlf` (Windows)
+/// gives the fixed sources `\r\n` ones, which [`INCLUDE_COMPANION`] and the
+/// column-0 matching of [`declarations`] would not see.
+fn unix_lines(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
 /// The runtime unit: the same text for every module of one pycc version.
 pub(crate) fn runtime_unit() -> &'static str {
     static UNIT: OnceLock<String> = OnceLock::new();
     UNIT.get_or_init(|| {
-        let fixed = FIXED_C.replace(INCLUDE_COMPANION, "");
+        let fixed = unix_lines(FIXED_C).replace(INCLUDE_COMPANION, "");
         format!(
             "{LINKAGE}extern const char pycc_ext_module_name_str[];\n\
              #define PYCC_EXT_MODULE_NAME_STR pycc_ext_module_name_str\n{}",
@@ -172,12 +179,12 @@ pub(crate) fn runtime_unit() -> &'static str {
 pub(crate) fn module_unit() -> &'static str {
     static UNIT: OnceLock<String> = OnceLock::new();
     UNIT.get_or_init(|| {
-        let fixed = FIXED_C.replace(INCLUDE_COMPANION, "");
+        let fixed = unix_lines(FIXED_C).replace(INCLUDE_COMPANION, "");
         format!(
             "{LINKAGE}{}\n{INCLUDE_COMPANION}\n\
              PYCC_SHIM const char pycc_ext_module_name_str[] = PYCC_EXT_MODULE_NAME_STR;\n\n{}",
             declarations(&relink(&fixed)),
-            relink(MODULE_INIT_C)
+            relink(&unix_lines(MODULE_INIT_C))
         )
     })
 }
@@ -213,6 +220,15 @@ mod tests {
     }
 
     #[test]
+    fn sources_with_windows_line_ends_split_the_same() {
+        let crlf = "#include \"pycc_ext_exports.inc\"\r\nstatic int f(void)\r\n{\r\n    \
+                    return 0;\r\n}\r\n";
+        let fixed = unix_lines(crlf).replace(INCLUDE_COMPANION, "");
+        assert_eq!(fixed, "static int f(void)\n{\n    return 0;\n}\n");
+        assert_eq!(declarations(&relink(&fixed)), "PYCC_SHIM int f(void);\n");
+    }
+
+    #[test]
     fn the_fixed_sources_keep_the_style_the_split_relies_on() {
         // Every body opens and closes at column 0, once each.
         let opens = FIXED_C.lines().filter(|l| *l == "{").count();
@@ -220,7 +236,7 @@ mod tests {
         assert_eq!(opens, closes);
         // No `static` function-local variable would be relinked (they are
         // indented), and the companion is included exactly once.
-        assert_eq!(FIXED_C.matches(INCLUDE_COMPANION).count(), 1);
+        assert_eq!(unix_lines(FIXED_C).matches(INCLUDE_COMPANION).count(), 1);
         assert!(!runtime_unit().contains(INCLUDE_COMPANION));
         assert_eq!(module_unit().matches(INCLUDE_COMPANION).count(), 1);
         assert!(!runtime_unit().lines().any(|l| l.starts_with("static ")));
