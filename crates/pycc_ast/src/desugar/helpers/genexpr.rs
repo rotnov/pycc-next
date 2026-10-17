@@ -124,7 +124,7 @@ impl Lift<'_> {
                     let receiver = carry(&a.value);
                     let mut rebuilt = c.clone();
                     if let Expr::Attribute(a) = rebuilt.func.as_mut() {
-                        a.value = Box::new(receiver);
+                        *a.value = receiver;
                     }
                     return (carried, Expr::Call(rebuilt));
                 }

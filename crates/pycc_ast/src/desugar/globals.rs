@@ -319,7 +319,7 @@ fn creation_index(body: &[Stmt], name: &str) -> Option<usize> {
 
 /// Rewrites `global` declarations in `body` (a module) into cells (see the
 /// module documentation).
-pub(crate) fn cell_globals(body: &mut Vec<Stmt>, fresh: &Fresh) {
+pub(crate) fn cell_globals(body: &mut [Stmt], fresh: &Fresh) {
     let mut defs = Vec::new();
     functions(body, &mut defs);
     // Names some function declares `global` and binds.
@@ -396,7 +396,7 @@ fn create_cell(stmt: &mut Stmt, name: &str) {
             *a.value = wrap(value);
         }
         Stmt::AnnAssign(a) => {
-            a.target = Box::new(store(&cell_name(name), range));
+            *a.target = store(&cell_name(name), range);
             let annotation = std::mem::replace(a.annotation.as_mut(), load("_", range));
             *a.annotation = subscript(load("list", range), annotation, ExprContext::Load, range);
             if let Some(v) = a.value.as_mut() {

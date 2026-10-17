@@ -146,7 +146,6 @@ pub(super) fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fres
                 fresh.name().trim_start_matches("_pycc_"),
             );
             let lift = Lift {
-                name: name.clone(),
                 lifted,
                 captures: captures[&name].iter().cloned().collect(),
             };
@@ -199,7 +198,6 @@ pub(super) fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fres
     // The enclosing function: drop the lifted defs, then rewrite calls and
     // cells; a celled parameter starts in a cell.
     let lifted_names: HashSet<String> = chosen_names;
-    let _ = lifts.values().map(|lift| &lift.name).count();
     remove_defs(&mut body, &lifted_names);
     let rewrite = Rewrite {
         in_lifted: false,

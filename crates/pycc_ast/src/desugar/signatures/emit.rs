@@ -728,10 +728,7 @@ impl Emitter<'_> {
                     format!("_pycc_kw[{}]", py_str(&p.name)),
                 ));
             }
-            let fallback = match &p.default {
-                Some(_) => Some(format!("_pycc_default{s}")),
-                None => None,
-            };
+            let fallback = p.default.as_ref().map(|_| format!("_pycc_default{s}"));
             if !write_branches(&mut out, &var, &branches, fallback.as_deref()) {
                 return (self.with_defaults(out), true);
             }

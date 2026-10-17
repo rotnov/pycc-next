@@ -452,10 +452,9 @@ pub(super) fn liftable_shape(def: &StmtFunctionDef) -> bool {
             .all(|p| p.default.as_deref().is_none_or(literal_default))
 }
 
-/// One nested function chosen for lifting.
+/// One nested function chosen for lifting (keyed by its name).
 struct Lift {
-    /// The nested function's name and its module-level name.
-    name: String,
+    /// The nested function's module-level name.
     lifted: String,
     /// The enclosing variables it receives, in order; a celled one is
     /// passed as its cell.
@@ -545,7 +544,7 @@ impl Transformer for Rewrite<'_> {
                 .collect();
             args.extend(call.arguments.args.iter().cloned());
             call.arguments.args = args.into_boxed_slice();
-            call.func = Box::new(load(&lift.lifted, range));
+            *call.func = load(&lift.lifted, range);
             return;
         }
         // A nested function read as a value: its function value, with its
@@ -700,7 +699,7 @@ fn nested_defs_mut(body: &mut [Stmt], out: &mut Vec<*mut StmtFunctionDef>) {
 fn remove_defs(body: &mut Vec<Stmt>, lifted: &HashSet<String>) {
     let range = body
         .first()
-        .map(|s| ruff_text_size::Ranged::range(s))
+        .map(ruff_text_size::Ranged::range)
         .unwrap_or_default();
     body.retain(
         |stmt| !matches!(stmt, Stmt::FunctionDef(def) if lifted.contains(def.name.as_str())),

@@ -82,7 +82,7 @@ fn reader(stmt: &Stmt, rebound: &std::collections::HashMap<String, usize>) -> Op
         at.visit_stmt(stmt);
     }
     if let Stmt::Assign(first) = &mut stmts[0] {
-        first.value = Box::new(items.clone());
+        *first.value = items.clone();
     }
     if let Stmt::FunctionDef(def) = &mut stmts[2] {
         def.returns = Some(Box::new(load(INFER_MARKER, range)));

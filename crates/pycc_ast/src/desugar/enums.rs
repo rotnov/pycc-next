@@ -97,6 +97,6 @@ impl Transformer for Rewrite {
         }
         let range = call.func.as_ref().range();
         let callee = super::build::attribute((*call.func).clone(), LOOKUP, range);
-        call.func = Box::new(callee);
+        *call.func = callee;
     }
 }

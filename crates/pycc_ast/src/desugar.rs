@@ -223,7 +223,7 @@ pub fn desugar(module: &mut ModModule) {
     let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
     signatures::bind_signatures(&mut body, &fresh);
     helpers::lift_helpers(&mut body, &fresh);
-    stmts::expand_body(&mut body, &fresh, true);
+    stmts::expand_body(&mut body, &fresh);
     aliases::drop_unused_sys_imports(&mut body, &sys);
     module.body = body.into();
 }

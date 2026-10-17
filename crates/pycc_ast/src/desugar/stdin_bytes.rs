@@ -102,7 +102,7 @@ impl Scan<'_> {
         let Expr::Name(name) = call.func.as_ref() else {
             return None;
         };
-        (self.aliases.contains(name.id.as_str()) && call.arguments.is_empty()).then(|| name.range)
+        (self.aliases.contains(name.id.as_str()) && call.arguments.is_empty()).then_some(name.range)
     }
 
     /// The alias call `expr` splits without a separator (`input().split()`).

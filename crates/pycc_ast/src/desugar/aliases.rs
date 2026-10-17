@@ -504,10 +504,13 @@ pub(crate) fn stream_aliases(body: &mut Vec<Stmt>) {
     let sys_names: Vec<String> = body
         .iter()
         .filter_map(|stmt| match stmt {
-            Stmt::Import(import) => Some(import.names.iter().filter_map(|alias| {
-                (alias.name.as_str() == "sys")
-                    .then(|| alias.asname.as_ref().unwrap_or(&alias.name).to_string())
-            })),
+            Stmt::Import(import) => Some(
+                import
+                    .names
+                    .iter()
+                    .filter(|&alias| alias.name.as_str() == "sys")
+                    .map(|alias| alias.asname.as_ref().unwrap_or(&alias.name).to_string()),
+            ),
             _ => None,
         })
         .flatten()

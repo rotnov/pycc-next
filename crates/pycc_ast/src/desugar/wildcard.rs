@@ -145,7 +145,7 @@ pub(crate) fn expand_wildcards(body: &mut Vec<Stmt>) {
             && import.names.len() == 1
             && import.names[0].name.as_str() == "*";
         let Some(names) = wildcard
-            .then(|| import.module.as_ref())
+            .then_some(import.module.as_ref())
             .flatten()
             .and_then(|module| exports(module.as_str()))
         else {

@@ -11,22 +11,20 @@ use ruff_python_ast::{Expr, ExprContext, Operator, Stmt};
 use ruff_text_size::TextRange;
 
 /// Rewrites every statement of `body`, recursing into nested bodies.
-/// `module_level` is true for the module body itself (class bodies are
-/// left as written).
-pub(crate) fn expand_body(body: &mut Vec<Stmt>, fresh: &Fresh, module_level: bool) {
+pub(crate) fn expand_body(body: &mut Vec<Stmt>, fresh: &Fresh) {
     let old = std::mem::take(body);
     for stmt in old {
-        expand_stmt(stmt, fresh, body, module_level);
+        expand_stmt(stmt, fresh, body);
     }
 }
 
 fn expand_thin(body: &mut thin_vec::ThinVec<Stmt>, fresh: &Fresh) {
     let mut v: Vec<Stmt> = std::mem::take(body).into_iter().collect();
-    expand_body(&mut v, fresh, false);
+    expand_body(&mut v, fresh);
     *body = v.into();
 }
 
-fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>, module_level: bool) {
+fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>) {
     let stmt = match stmt {
         Stmt::For(s) if !s.is_async => {
             expand_for(s, fresh, out);
@@ -57,7 +55,7 @@ fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>, module_level: boo
                     body: vec![expr_stmt(*if_exp.orelse)].into(),
                 }],
             });
-            expand_stmt(rewritten, fresh, out, module_level);
+            expand_stmt(rewritten, fresh, out);
             return;
         }
         other => other,
@@ -118,13 +116,13 @@ fn expand_stmt(stmt: Stmt, fresh: &Fresh, out: &mut Vec<Stmt>, module_level: boo
         Stmt::Assign(s) => {
             if let Some(stmts) = super::starred::expand_starred(s, fresh) {
                 for stmt in stmts {
-                    expand_stmt(stmt, fresh, out, module_level);
+                    expand_stmt(stmt, fresh, out);
                 }
                 return;
             }
             if let Some(stmts) = expand_assign(s, fresh) {
                 for stmt in stmts {
-                    expand_stmt(stmt, fresh, out, module_level);
+                    expand_stmt(stmt, fresh, out);
                 }
                 return;
             }
@@ -172,7 +170,7 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
     let range = s.range;
     let mut body: Vec<Stmt> = std::mem::take(&mut s.body).into_iter().collect();
     let mut orelse: Vec<Stmt> = std::mem::take(&mut s.orelse).into_iter().collect();
-    expand_body(&mut orelse, fresh, false);
+    expand_body(&mut orelse, fresh);
     let target = *s.target;
     let iter = *s.iter;
     let mut pre: Vec<Stmt> = Vec::new();
@@ -233,9 +231,9 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
         head.push(aug_assign(store(&index, range), Operator::Add, int(1, range), range));
         head.append(&mut body);
         let mut body = head;
-        expand_body(&mut body, fresh, false);
+        expand_body(&mut body, fresh);
         for stmt in pre {
-            expand_stmt(stmt, fresh, out, false);
+            expand_stmt(stmt, fresh, out);
         }
         out.push(while_loop(test, body, orelse, range));
         return;
@@ -291,12 +289,12 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
     // The rewritten head and the original body may themselves need
     // rewriting (an unpacking assignment, a nested loop).
     let mut loop_stmt = for_loop(target, iter, Vec::new(), orelse, range);
-    expand_body(&mut body, fresh, false);
+    expand_body(&mut body, fresh);
     if let Stmt::For(f) = &mut loop_stmt {
         f.body = body.into();
     }
     for stmt in pre {
-        expand_stmt(stmt, fresh, out, false);
+        expand_stmt(stmt, fresh, out);
     }
     out.push(loop_stmt);
 }

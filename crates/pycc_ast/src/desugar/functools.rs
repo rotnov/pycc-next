@@ -214,11 +214,11 @@ impl Transformer for CacheClear<'_> {
         }
         let Some(table) = self.0.get(base.id.as_str()) else { return };
         let range = call.func.range();
-        call.func = Box::new(super::build::attribute(
+        *call.func = super::build::attribute(
             super::build::load(table, range),
             "clear",
             range,
-        ));
+        );
     }
 }
 

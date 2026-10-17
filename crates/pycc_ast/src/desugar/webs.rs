@@ -934,7 +934,8 @@ fn analyze_scope<'a>(
             [] => {
                 // The last binding keeps the name: at module scope it is
                 // the module attribute's final value.
-                let last = groups
+                
+                groups
                     .iter()
                     .max_by_key(|(_, defs)| {
                         defs.iter()
@@ -942,8 +943,7 @@ fn analyze_scope<'a>(
                             .max()
                     })
                     .map(|(root, _)| *root)
-                    .expect("two groups");
-                last
+                    .expect("two groups")
             }
             _ => continue,
         };
