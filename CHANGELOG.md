@@ -27,6 +27,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   are objects or immutable values (`str`, `int`, `float`, `bool`, optional or not) is an
   attribute of the module (`from m import _helper`), as a Python module's is.
 
+- `--ext` builds compile the C shim in two translation units: a small module unit per
+  module and the fixed runtime unit, the same for every module, whose object is compiled
+  once and then taken from a build cache (`PYCC_CACHE_DIR`, else the user cache directory;
+  README, "Which CPython"). An `--ext` build of a small module took about 1.4 s, most of
+  it compiling the 8,000-line shim; it now takes about 0.4 s.
+
 ### Fixed
 
 - A string annotation (`x: "State"`) naming a `TYPE_CHECKING`-only import, under

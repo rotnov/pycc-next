@@ -340,6 +340,17 @@ static void pycc_ext_unhashable_slots(PyType_Slot *slots)
     }
 }
 
+/*
+ * Defined in the generated companion (`CARRIER_CLASS_ISINSTANCE_DECL` and
+ * `CARRIER_CLASS_COPY_KINDS_DECL` in `src/ext_build/`), and called below it.
+ * Declared here for the shim's runtime unit, which is compiled without the
+ * companion (`src/ext_build/shim_split.rs`).
+ */
+static int pycc_ext_carrier_class_isinstance(const unsigned char *cls, size_t len, const char *name);
+static int pycc_ext_carrier_class_copy_kinds(const unsigned char *cls, size_t len,
+                                             const char **kinds, size_t *nkinds,
+                                             const char **refused);
+
 #include "pycc_ext_exports.inc"
 
 /*

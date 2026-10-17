@@ -204,6 +204,7 @@ static int pycc_ext_exec_module(PyObject *module)
      * a host that reached it anyway could do nothing with it.
      */
     if (pycc_ext_buffer_type == NULL) {
+        pycc_ext_buffer_type_spec.name = PYCC_EXT_MODULE_NAME_STR "._buffer";
         pycc_ext_buffer_type = PyType_FromSpec(&pycc_ext_buffer_type_spec);
         if (pycc_ext_buffer_type == NULL) {
             return -1;

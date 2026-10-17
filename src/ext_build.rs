@@ -45,6 +45,9 @@ use std::path::{Path, PathBuf};
 /// `#include "pycc_ext_exports.inc"`); `ext/pycc_ext_object_ops.c`
 /// (non-strict mode's object operators, #3) is appended so the shim stays
 /// one translation unit.
+/// Only the tests read it whole; a build compiles the two units
+/// [`shim_sources`] derives from these fragments (`shim_split`).
+#[cfg(test)]
 pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/bridge.c"),
     include_str!("ext/module/boundary.c"),
@@ -550,6 +553,34 @@ use publication::namespace_owner;
 pub(crate) use publication::{ExtPublishedClass, collect_class_publications};
 mod wrappers;
 pub(crate) use wrappers::*;
+mod shim_split;
+
+/// The runtime unit of the shim (`shim_split`), written beside
+/// [`SHIM_C_NAME`]: the same text for every module, so its object is
+/// compiled once and taken from the build cache afterwards.
+pub(crate) const SHIM_RUNTIME_C_NAME: &str = "pycc_ext_runtime.c";
+
+/// The C sources of an artifact whose generated companion is `inc_body`,
+/// beside `obj_path`, with their contents: the module unit (at
+/// [`SHIM_C_NAME`]), the companion it includes (at [`EXPORTS_INC_NAME`])
+/// and the runtime unit (at [`SHIM_RUNTIME_C_NAME`]). The two `.c` files
+/// are what is compiled, module unit first.
+pub(crate) fn shim_sources(obj_path: &Path, inc_body: &str) -> [(PathBuf, String); 3] {
+    [
+        (
+            obj_path.with_file_name(SHIM_C_NAME),
+            shim_split::module_unit().to_string(),
+        ),
+        (
+            obj_path.with_file_name(EXPORTS_INC_NAME),
+            shim_split::relink(inc_body),
+        ),
+        (
+            obj_path.with_file_name(SHIM_RUNTIME_C_NAME),
+            shim_split::runtime_unit().to_string(),
+        ),
+    ]
+}
 
 /// The exact C declaration of the generated tag-to-class lookup.
 ///

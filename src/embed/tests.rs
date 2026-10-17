@@ -346,10 +346,11 @@ fn a_linux_bundle_copies_the_filtered_stdlib_and_the_soname_library() {
         ]
     );
     let shim = obj.with_file_name(ext_build::SHIM_C_NAME);
+    let runtime = obj.with_file_name(ext_build::SHIM_RUNTIME_C_NAME);
     let launcher = obj.with_file_name(LAUNCHER_C_NAME);
     assert_eq!(
         plan.compile_args[3..],
-        [shim.into_os_string(), launcher.into_os_string()]
+        [shim.into_os_string(), runtime.into_os_string(), launcher.into_os_string()]
     );
     let config = std::fs::read_to_string(obj.with_file_name(EMBED_CONFIG_INC_NAME)).expect("inc");
     assert!(

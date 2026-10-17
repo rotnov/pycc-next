@@ -17,9 +17,19 @@ use std::process::{Child, Command, ExitCode};
 /// The object file extension the platform's linker expects.
 const OBJECT_EXTENSION: &str = if cfg!(windows) { "obj" } else { "o" };
 
-/// One `cc -c` per C source of a plan, running.
+/// One `cc -c` per C source of a plan, running -- or, for the shim's
+/// runtime unit when the build cache holds its object, that object
+/// (`super::object_cache`).
 pub(super) struct CObjects {
-    children: Vec<(Child, PathBuf)>,
+    children: Vec<Compile>,
+}
+
+/// One source's object: compiled by `child` into `object` (and then stored
+/// under `store`'s key), or taken from the cache (`child` is `None`).
+struct Compile {
+    child: Option<Child>,
+    object: PathBuf,
+    store: Option<(PathBuf, String)>,
 }
 
 /// Splits a plan's `compile_args` into flags and C sources.
@@ -39,6 +49,7 @@ impl CObjects {
     ) -> Result<Self, ExitCode> {
         let (flags, sources) = split(compile_args);
         let mut children = Vec::with_capacity(sources.len());
+        let cache = super::object_cache::cache_dir();
         for source in sources {
             let stem = Path::new(source)
                 .file_stem()
@@ -46,6 +57,24 @@ impl CObjects {
                 .to_string_lossy()
                 .into_owned();
             let object = dir.join(format!("{stem}.{OBJECT_EXTENSION}"));
+            // The shim's runtime unit is the same for every module: its
+            // object comes from the build cache once compiled.
+            let cached = cache.as_ref().filter(|_| {
+                Path::new(source).file_name()
+                    == Some(std::ffi::OsStr::new(crate::ext_build::SHIM_RUNTIME_C_NAME))
+            });
+            let key = cached
+                .and_then(|dir| Some((dir, super::object_cache::key(command(), &flags, Path::new(source))?)));
+            if let Some((cache_dir, key)) = &key
+                && let Some(hit) = super::object_cache::lookup(cache_dir, key, OBJECT_EXTENSION)
+            {
+                children.push(Compile {
+                    child: None,
+                    object: hit,
+                    store: None,
+                });
+                continue;
+            }
             let mut cmd = command();
             cmd.arg("-c")
                 .args(&flags)
@@ -56,7 +85,11 @@ impl CObjects {
                 eprintln!("error: {}", super::linker_spawn_error(&cmd, &e));
                 ExitCode::from(2)
             })?;
-            children.push((child, object));
+            children.push(Compile {
+                child: Some(child),
+                object,
+                store: key.map(|(dir, key)| (dir.clone(), key)),
+            });
         }
         Ok(Self { children })
     }
@@ -67,9 +100,18 @@ impl CObjects {
         let children = std::mem::take(&mut self.children);
         let mut objects = Vec::with_capacity(children.len());
         let mut failed = false;
-        for (mut child, object) in children {
+        for compile in children {
+            let Some(mut child) = compile.child else {
+                objects.push(compile.object);
+                continue;
+            };
             match child.wait() {
-                Ok(status) if status.success() => objects.push(object),
+                Ok(status) if status.success() => {
+                    if let Some((dir, key)) = &compile.store {
+                        super::object_cache::store(dir, key, OBJECT_EXTENSION, &compile.object);
+                    }
+                    objects.push(compile.object);
+                }
                 Ok(_) => failed = true,
                 Err(e) => {
                     eprintln!("error: waiting for the C compiler failed: {e}");
@@ -90,7 +132,7 @@ impl CObjects {
 /// reports on stderr after `pycc` has exited.
 impl Drop for CObjects {
     fn drop(&mut self) {
-        for (child, _) in &mut self.children {
+        for child in self.children.iter_mut().filter_map(|c| c.child.as_mut()) {
             let _ = child.kill();
             let _ = child.wait();
         }

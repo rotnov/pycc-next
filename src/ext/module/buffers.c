@@ -104,7 +104,10 @@ static PyType_Slot pycc_ext_buffer_type_slots[] = {
  * module attribute in any case.
  */
 static PyType_Spec pycc_ext_buffer_type_spec = {
-    PYCC_EXT_MODULE_NAME_STR "._buffer",
+    /* `PYCC_EXT_MODULE_NAME_STR "._buffer"`, set by `pycc_ext_exec_module`
+     * before the type is made: the runtime unit of a split shim
+     * (`src/ext_build/shim_split.rs`) has no module-name literal. */
+    NULL,
     sizeof(PyccExtBufferObj),
     0,
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION | Py_TPFLAGS_IMMUTABLETYPE,

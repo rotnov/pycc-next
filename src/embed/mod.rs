@@ -548,7 +548,6 @@ pub(crate) fn plan_embed(
     let has_closure = locked
         .as_ref()
         .is_some_and(|locked| !locked.files.is_empty());
-    let shim = obj_path.with_file_name(ext_build::SHIM_C_NAME);
     let launcher = obj_path.with_file_name(LAUNCHER_C_NAME);
     let classes = ext_build::collect_user_exception_classes(typed_hir);
     let carriers = ext_build::collect_carrier_classes(typed_hir);
@@ -569,9 +568,10 @@ pub(crate) fn plan_embed(
         &getsets,
         &slots,
     );
-    write_source(&shim, ext_build::SHIM_C)?;
-    let exports_path = obj_path.with_file_name(ext_build::EXPORTS_INC_NAME);
-    write_source(&exports_path, &exports_inc)?;
+    let sources = ext_build::shim_sources(obj_path, &exports_inc);
+    for (path, text) in &sources {
+        write_source(path, text)?;
+    }
     write_source(&launcher, LAUNCHER_C)?;
     let config_path = obj_path.with_file_name(EMBED_CONFIG_INC_NAME);
     let has_natives = platform == EmbedPlatform::Windows && !natives.natives.is_empty();
@@ -589,7 +589,8 @@ pub(crate) fn plan_embed(
     )?;
     let mut compile_args = vec![OsString::from("-I"), probe.include.clone().into_os_string()];
     compile_args.extend(layout::pic_args(platform));
-    compile_args.extend([shim.into(), launcher.into()]);
+    let [(shim, _), _, (runtime, _)] = sources;
+    compile_args.extend([shim.into(), runtime.into(), launcher.into()]);
     let is_windows = platform == EmbedPlatform::Windows;
     let mut link_args = match &static_lib {
         Some(archive) => layout::static_link_args(platform, &archive.archive, &archive.libs),

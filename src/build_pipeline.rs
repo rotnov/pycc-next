@@ -20,6 +20,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 mod c_objects;
+mod object_cache;
 #[cfg(any(windows, test))]
 mod windows_clang;
 
@@ -526,8 +527,6 @@ fn plan_ext(
         eprintln!("error: {e}");
         ExitCode::from(2)
     })?;
-    let shim = obj_path.with_file_name(ext_build::SHIM_C_NAME);
-    let inc = obj_path.with_file_name(ext_build::EXPORTS_INC_NAME);
     // Rendered into a binding first so the call below fits one line: a
     // multi-line `foo(\n  ..\n)?;` puts the `?`'s early-return arm on a
     // line of its own, which no passing build ever executes and which
@@ -576,8 +575,10 @@ fn plan_ext(
         .and_then(|python| ext_build::precompile(python, &chunks));
     let inc_body = ext_build::install_precompiled(inc_body, &chunks, compiled.as_ref());
     let inc_body = ext_build::with_module_doc(inc_body, &entry_source);
-    write_ext_source(&shim, ext_build::SHIM_C)?;
-    write_ext_source(&inc, &inc_body)?;
+    let sources = ext_build::shim_sources(obj_path, &inc_body);
+    for (path, text) in &sources {
+        write_ext_source(path, text)?;
+    }
     let map = obj_path.with_file_name(ext_build::EXPORT_MAP_NAME);
     let mut link_args = ext_build::ext_link_args(platform, &probe.libs);
     let export_args = ext_build::ext_export_args(platform, &map);
@@ -585,8 +586,10 @@ fn plan_ext(
         write_ext_source(&map, &ext_build::export_map())?;
         link_args.extend(export_args);
     }
+    let mut compile_args = ext_build::ext_compile_args(platform, &probe.include, &sources[0].0);
+    compile_args.push(sources[2].0.clone().into_os_string());
     Ok(ExtPlan {
-        compile_args: ext_build::ext_compile_args(platform, &probe.include, &shim),
+        compile_args,
         link_args,
         artifact: output.artifact,
     })

@@ -70,9 +70,16 @@ fn a_planned_ext_build_writes_both_c_files_beside_the_object() {
         "{inc}"
     );
     assert!(inc.contains("fnptr_square"), "{inc}");
+    // The shim's two units (`ext_build::shim_split`): the module unit
+    // including the companion, and the runtime unit, both compiled.
     let shim = std::fs::read_to_string(dir.join(ext_build::SHIM_C_NAME))
-        .expect("the fixed shim is written next to the object");
-    assert_eq!(shim, ext_build::SHIM_C);
+        .expect("the module unit is written next to the object");
+    assert!(shim.contains("#include \"pycc_ext_exports.inc\""));
+    let runtime = dir.join(ext_build::SHIM_RUNTIME_C_NAME);
+    let runtime_text = std::fs::read_to_string(&runtime).expect("the runtime unit is written");
+    assert!(!runtime_text.contains("pycc_ext_exports.inc\""));
+    assert!(plan.compile_args.contains(&runtime.into_os_string()));
+    assert!(plan.compile_args.contains(&dir.join(ext_build::SHIM_C_NAME).into_os_string()));
 
     // The artifact is the resolved output, not `OUT` as given: comparing
     // `PathBuf`s built with `Path::join`, never rendered strings. This

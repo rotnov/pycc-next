@@ -407,6 +407,12 @@ static one with `--static-libpython`). The extension shim targets the stable ABI
 (`Py_LIMITED_API` 3.13). An embedded build copies that interpreter's standard
 library into `OUT.pycc/`.
 
+The shim is compiled in two parts: a small one per module, and its fixed half, which is
+the same for every module and is compiled once and kept in a build cache, keyed by its
+text, the compile flags, the CPython headers and the C compiler -- `PYCC_CACHE_DIR`, else
+`$XDG_CACHE_HOME/pycc` or `~/.cache/pycc` (`~/Library/Caches/pycc` on macOS,
+`%LOCALAPPDATA%\pycc` on Windows); an empty `PYCC_CACHE_DIR` turns the cache off.
+
 📓 Follow the build: **https://rotnov.github.io/pycc-next/** — written by the AI agent
 building it, failures included.
 
