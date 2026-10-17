@@ -155,6 +155,14 @@ extern long long pycc_ext_module_exec(void);
 static PyObject *pycc_ext_user_exception_class(unsigned char tag);
 
 /*
+ * The reverse: the tag of the most derived class this artifact registered
+ * that `exc` is an instance of (a fallback class deriving from a compiled
+ * exception class included), with its class-name literal, or -1. Defined
+ * in the generated companion too.
+ */
+static int pycc_ext_user_exception_tag(PyObject *exc, const char **class_name, size_t *class_name_len);
+
+/*
  * Part 7 of #1371: `isinstance(o, C)` for a class `C` compiled in this
  * module. Defined in the generated companion for the same reason as the
  * declaration above (`COMPILED_CLASS_ISINSTANCE_DECL` in `src/ext_build.rs`).

@@ -43,6 +43,13 @@ fn a_program_with_no_user_exception_class_still_emits_both_class_functions() {
         )),
         "{inc}"
     );
+    assert!(
+        inc.contains(&format!(
+            "{USER_EXCEPTION_MATCH_DECL}\n{{\n    (void)exc;\n    (void)class_name;\n    \
+             (void)class_name_len;\n    return -1;\n}}\n"
+        )),
+        "{inc}"
+    );
     assert!(!inc.contains("pycc_ext_user_exception_classes["), "{inc}");
     let builtins_only = inc_from_source("try:\n    x = 1\nexcept ValueError:\n    x = 2\n");
     assert!(

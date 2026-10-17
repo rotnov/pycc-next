@@ -143,6 +143,10 @@ Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
   embedded CPython printed non-ASCII text as `UnicodeEncodeError` (its locale is now
   configured as `python3`'s, with UTF-8 Mode).
 - `deque.extend`, `deque += ...` and `deque.insert` ignored `maxlen`.
+- An `--ext --non-strict` module's compiled `except AppError:` missed an exception of
+  a subclass running in CPython (one defining its own `__init__`): the bridge into
+  compiled code now maps a CPython exception to the most derived exception class the
+  module publishes.
 - A `KeyError` for an `int` or tuple key leaving an `--ext` module (or the native
   program embedding CPython) printed `KeyError: '0'` instead of `KeyError: 0`.
 - `repr()` of a `str` left characters `str.isprintable()` rejects beyond Latin-1

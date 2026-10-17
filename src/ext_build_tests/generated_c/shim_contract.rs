@@ -51,6 +51,10 @@ fn the_embedded_shim_is_the_tracked_c_file_and_declares_the_limited_api_floor() 
         shim_c().contains(&format!("{USER_EXCEPTION_LOOKUP_DECL};")),
         "{USER_EXCEPTION_LOOKUP_DECL}"
     );
+    assert!(
+        shim_c().contains(&format!("{USER_EXCEPTION_MATCH_DECL};")),
+        "{USER_EXCEPTION_MATCH_DECL}"
+    );
     // Part 7 of #1371: the compiled-class `isinstance` is the same
     // forward-declared-above, defined-in-the-companion arrangement.
     assert!(

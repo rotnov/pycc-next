@@ -312,10 +312,23 @@ fn a_fallback_str_method_inside_a_method_call() {
 /// it can call it.
 #[test]
 fn a_twin_is_defined_before_the_next_statement() {
-    let name = "fuzz_twin_before_use";
+    assert_ext_non_strict_matches("fuzz_twin_before_use");
+}
+
+/// An `--ext --non-strict` module's compiled `except AppError:` catches an
+/// exception of a subclass that runs in CPython (one defining `__init__`):
+/// the bridge maps it to the compiled class's tag.
+#[test]
+fn a_compiled_handler_catches_a_fallback_exception_subclass() {
+    assert_ext_non_strict_matches("fuzz_ext_exception_subclass");
+}
+
+/// Builds `tests/fixtures/<name>.py` as an `--ext --non-strict` module and
+/// compares importing it with running the source under CPython.
+fn assert_ext_non_strict_matches(name: &str) {
     let source = fixture(&format!("{name}.py"));
     let expected = observed(&Command::new(python()).arg(&source).output().expect("runs"), "__main__");
-    let dir = ScratchDir::new("fuzz_twin_before_use").expect("scratch");
+    let dir = ScratchDir::new(&format!("fuzz_{name}")).expect("scratch");
     let build = pycc()
         .arg("build")
         .arg(&source)

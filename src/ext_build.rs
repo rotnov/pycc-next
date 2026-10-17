@@ -475,6 +475,13 @@ pub(crate) use wrappers::*;
 pub(crate) const USER_EXCEPTION_LOOKUP_DECL: &str =
     "static PyObject *pycc_ext_user_exception_class(unsigned char tag)";
 
+/// The exact C declaration of the generated reverse lookup: the tag of the
+/// most derived registered user exception class a CPython exception is an
+/// instance of, or -1. Shared with the hand-written forward declaration in
+/// [`SHIM_C`] for the same reason as [`USER_EXCEPTION_LOOKUP_DECL`].
+pub(crate) const USER_EXCEPTION_MATCH_DECL: &str = "static int pycc_ext_user_exception_tag(\
+     PyObject *exc, const char **class_name, size_t *class_name_len)";
+
 /// The exact C declaration of the generated eager-registration entry point,
 /// called from `pycc_ext_exec_module` after the `.inc` is included (so it
 /// needs no forward declaration, unlike [`USER_EXCEPTION_LOOKUP_DECL`]).
@@ -697,6 +704,10 @@ fn exception_classes_c(classes: &[UserExceptionClass]) -> String {
             "{USER_EXCEPTION_LOOKUP_DECL}\n{{\n    (void)tag;\n    return NULL;\n}}\n\n"
         ));
         out.push_str(&format!(
+            "{USER_EXCEPTION_MATCH_DECL}\n{{\n    (void)exc;\n    (void)class_name;\n    \
+             (void)class_name_len;\n    return -1;\n}}\n\n"
+        ));
+        out.push_str(&format!(
             "{USER_EXCEPTION_REGISTER_DECL}\n{{\n    (void)module;\n    return 0;\n}}\n\n"
         ));
         return out;
@@ -718,6 +729,20 @@ fn exception_classes_c(classes: &[UserExceptionClass]) -> String {
         ));
     }
     out.push_str("    default:\n        return NULL;\n    }\n}\n\n");
+    // A class is defined after each of its bases, so the last match in
+    // program order is the most derived one.
+    out.push_str(&format!("{USER_EXCEPTION_MATCH_DECL}\n{{\n"));
+    for (slot, class) in classes.iter().enumerate().rev() {
+        let name = c_string_literal(&class.name);
+        out.push_str(&format!(
+            "    if (pycc_ext_user_exception_classes[{slot}] != NULL\n        \
+             && PyErr_GivenExceptionMatches(exc, pycc_ext_user_exception_classes[{slot}])) {{\n        \
+             *class_name = {name};\n        *class_name_len = sizeof({name}) - 1;\n        \
+             return {};\n    }}\n",
+            class.tag
+        ));
+    }
+    out.push_str("    return -1;\n}\n\n");
     out.push_str(&format!("{USER_EXCEPTION_REGISTER_DECL}\n{{\n"));
     for (slot, class) in classes.iter().enumerate() {
         out.push_str(&register_class_c(slot, class));

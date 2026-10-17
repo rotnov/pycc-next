@@ -398,6 +398,13 @@ int pycc_ext_import_error_bridge(void)
 static unsigned char pycc_ext_obj_error_tag(PyObject *exc, const char **class_name,
                                             size_t *class_name_len)
 {
+    /* A user exception class this artifact published, or a CPython class
+     * deriving from one (a subclass that runs in fallback code): compiled
+     * `except` clauses test the class's own tag. */
+    int user_tag = pycc_ext_user_exception_tag(exc, class_name, class_name_len);
+    if (user_tag >= 0) {
+        return (unsigned char)user_tag;
+    }
     PYCC_EXT_OBJ_TAG(PyExc_ModuleNotFoundError, 27, "ModuleNotFoundError")
     PYCC_EXT_OBJ_TAG(PyExc_ImportError, 26, "ImportError")
     PYCC_EXT_OBJ_TAG(PyExc_OverflowError, 25, "OverflowError")
