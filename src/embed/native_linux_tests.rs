@@ -19,7 +19,7 @@ struct Fixture {
 impl Fixture {
     fn new(tag: &str) -> Self {
         let dir = ScratchDir::new(tag).expect("scratch");
-        let root = std::fs::canonicalize(&*dir).expect("canonical");
+        let root = crate::canonical::canonicalize(&dir).expect("canonical");
         let layout = fake_layout(&root);
         let env = LinuxEnv {
             system_dirs: vec![root.join("sys")],

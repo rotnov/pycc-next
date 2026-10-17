@@ -54,7 +54,7 @@ fn write(path: &Path, contents: impl AsRef<[u8]>) {
 /// every kind the copy filter keeps or skips. The library is a plain file
 /// unless [`macho_library`] replaces it.
 pub(crate) fn fake_layout(root: &Path) -> FakeLayout {
-    let root = std::fs::canonicalize(root).expect("canonicalize the scratch root");
+    let root = crate::canonical::canonicalize(root).expect("canonicalize the scratch root");
     let prefix = root.join("prefix");
     let include = prefix.join("include").join("python3.14");
     write(
@@ -152,7 +152,7 @@ pub(crate) fn macho_library(layout: &FakeLayout) {
 /// Every kept DLL is a PE32+ image whose imports resolve, with the case
 /// mismatches (`VCRUNTIME140.dll`) and API sets a real install has.
 pub(crate) fn fake_windows_layout(root: &Path) -> FakeLayout {
-    let root = std::fs::canonicalize(root).expect("canonicalize the scratch root");
+    let root = crate::canonical::canonicalize(root).expect("canonicalize the scratch root");
     let prefix = root.join("base");
     let include = prefix.join("Include");
     write(

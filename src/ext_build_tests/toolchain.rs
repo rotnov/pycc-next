@@ -337,6 +337,7 @@ fn the_windows_compile_args_omit_fpic() {
             OsString::from("-O2"),
             OsString::from("-I"),
             include.as_os_str().to_os_string(),
+            OsString::from("-fms-runtime-lib=dll"),
             shim.as_os_str().to_os_string(),
         ]
     );

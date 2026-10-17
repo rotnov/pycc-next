@@ -116,7 +116,7 @@ fn a_dependency_outside_the_prefix_is_refused() {
     let dir = ScratchDir::new("embed_macos_refuse").expect("scratch");
     let layout = fake_layout(&dir);
     macho_library(&layout);
-    let outside = std::fs::canonicalize(&*dir)
+    let outside = crate::canonical::canonicalize(&dir)
         .expect("canonical")
         .join("outside")
         .join("libout.dylib");

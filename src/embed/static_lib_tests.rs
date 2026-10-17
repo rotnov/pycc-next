@@ -42,7 +42,7 @@ fn refusal(archive: &Path) -> String {
 #[test]
 fn only_a_regular_ar_archive_passes_the_archive_check() {
     let dir = ScratchDir::new("static_lib_check").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     let archive = root.join("libpython3.14.a");
     std::fs::write(&archive, b"!<arch>\nmembers").expect("write");
     assert_eq!(
@@ -82,7 +82,7 @@ fn only_a_regular_ar_archive_passes_the_archive_check() {
 #[test]
 fn the_identity_check_words_its_refusals_for_pycc_lock() {
     let dir = ScratchDir::new("static_lib_identify").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     let usage = ArchiveUse::Identify {
         described: "Py_ENABLE_SHARED=0".to_string(),
     };
@@ -181,7 +181,7 @@ fn the_windows_identity_library_is_the_interpreter_dll() {
 #[test]
 fn a_symlink_to_a_shared_library_is_refused_by_its_resolved_bytes() {
     let dir = ScratchDir::new("static_lib_symlink").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     let dylib = root.join("libpython3.14.dylib");
     std::fs::write(&dylib, [0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0, 0, 1, 0]).expect("write");
     let link = root.join("libpython3.14.a");
@@ -348,7 +348,7 @@ mod negative_control {
     #[test]
     fn the_module_resolves_only_with_the_whole_archive_and_the_export() {
         let dir = ScratchDir::new("static_lib_negative").expect("scratch");
-        let dir = std::fs::canonicalize(&*dir).expect("canonicalize");
+        let dir = crate::canonical::canonicalize(&dir).expect("canonicalize");
         write(&dir, "main.c", MAIN_C);
         let (archive, module) = fixture(&dir);
         let full = layout::static_link_args(HOST, &archive, &[]);

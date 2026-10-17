@@ -21,7 +21,7 @@ const WINDOWS: (&str, &str) = ("x86_64", "windows");
 /// `tinypkg`'s RECORD and `dep_extra` in `tinydep`'s.
 fn windows_env(tag: &str, body: &str, extra: &[(&str, &[u8])], dep_extra: &[(&str, &[u8])]) -> Env {
     let dir = ScratchDir::new(tag).unwrap();
-    let root = std::fs::canonicalize(&*dir).unwrap();
+    let root = crate::canonical::canonicalize(&dir).unwrap();
     let layout_root = root.join("layout");
     std::fs::create_dir_all(&layout_root).unwrap();
     let layout = fake_windows_layout(&layout_root);

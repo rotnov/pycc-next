@@ -803,6 +803,10 @@ fn exception_classes_c(classes: &[UserExceptionClass]) -> String {
 /// reason this module takes its platform from the target triple and never
 /// from `cfg!`. The Windows arm omits it: a PE/COFF target is position
 /// independent by construction and its drivers warn the flag is ignored.
+/// The C runtime flag every C object pycc links into a Windows image
+/// compiles with (see [`ext_compile_args`]).
+pub(crate) const WINDOWS_CRT_FLAG: &str = "-fms-runtime-lib=dll";
+
 pub(crate) fn ext_compile_args(
     platform: ExtLinkPlatform,
     include: &Path,
@@ -816,8 +820,14 @@ pub(crate) fn ext_compile_args(
         OsString::from("-I"),
         include.as_os_str().to_os_string(),
     ];
-    if matches!(platform, ExtLinkPlatform::Linux | ExtLinkPlatform::MacOs) {
-        args.push(OsString::from("-fPIC"));
+    match platform {
+        ExtLinkPlatform::Linux | ExtLinkPlatform::MacOs => args.push(OsString::from("-fPIC")),
+        // A PE/COFF image is position-independent by construction. The DLL
+        // C runtime: `pycc_rt.lib` is built with Rust's default, the DLL
+        // runtime, and the link puts `ucrt.lib` first
+        // (`add_windows_crt_math` in `src/build_pipeline.rs`), so every
+        // object of the module agrees on one runtime.
+        ExtLinkPlatform::Windows => args.push(OsString::from(WINDOWS_CRT_FLAG)),
     }
     args.push(shim.as_os_str().to_os_string());
     args

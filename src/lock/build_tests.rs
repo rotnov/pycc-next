@@ -25,7 +25,7 @@ struct Env {
 impl Env {
     fn new(tag: &str, body: &str) -> Self {
         let dir = ScratchDir::new(tag).unwrap();
-        let root = std::fs::canonicalize(&*dir).unwrap();
+        let root = crate::canonical::canonicalize(&dir).unwrap();
         let layout_root = root.join("layout");
         std::fs::create_dir_all(&layout_root).unwrap();
         let layout = fake_layout(&layout_root);
@@ -370,7 +370,7 @@ fn the_payload_plans_every_locked_file_once() {
     assert_eq!(data.digest, crate::embed::sha256::sha256_hex(b"d"));
     assert_eq!(closure.owner_of("tinydep/data.txt"), "tinydep");
     assert_eq!(closure.owner_of("absent"), "");
-    let canonical = |path: &PathBuf| std::fs::canonicalize(path).unwrap();
+    let canonical = |path: &PathBuf| crate::canonical::canonicalize(path).unwrap();
     assert_eq!(closure.sites, [canonical(&env.pure), canonical(&env.plat)]);
     assert_eq!(closure.libpython_sha256, check.section.libpython_sha256);
     let copied: BTreeMap<String, String> = closure

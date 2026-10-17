@@ -53,7 +53,7 @@ fn embed(
 #[test]
 fn a_static_linux_build_bundles_no_libpython_and_links_the_whole_archive() {
     let dir = ScratchDir::new("embed_static_linux").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     let mut layout = fake_layout(&root);
     static_only(&mut layout);
     let archive = archive(&root);
@@ -96,7 +96,7 @@ fn a_static_linux_build_bundles_no_libpython_and_links_the_whole_archive() {
 #[test]
 fn a_static_build_refuses_a_missing_archive_and_a_vanished_one() {
     let dir = ScratchDir::new("embed_static_missing").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     let mut layout = fake_layout(&root);
     static_only(&mut layout);
     let missing = root.join("config").join("libpython3.14.a");
@@ -137,7 +137,7 @@ fn static_interpreter(dir: &Path, body: &str) -> PathBuf {
 #[test]
 fn a_spawned_static_probe_finds_checks_or_refuses_the_archive() {
     let dir = ScratchDir::new("embed_static_spawn").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     let archive = archive(&root);
     let config = archive.parent().expect("a parent").display().to_string();
     let answer = format!(
@@ -181,7 +181,7 @@ mod macos {
     #[test]
     fn a_static_macos_build_bundles_no_libpython() {
         let dir = ScratchDir::new("embed_static_macos").expect("scratch");
-        let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+        let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
         let layout = fake_layout(&root);
         mach_bundle(
             &layout.dynload().join("_plain.cpython-314-darwin.so"),
@@ -209,7 +209,7 @@ mod macos {
     #[test]
     fn a_static_macos_build_refuses_an_extension_that_needs_the_shared_library() {
         let dir = ScratchDir::new("embed_static_macos_refused").expect("scratch");
-        let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+        let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
         let layout = fake_layout(&root);
         macho_library(&layout);
         let archive = archive(&root);

@@ -12,8 +12,8 @@ struct Env {
 impl Env {
     fn new(tag: &str) -> Self {
         let dir = ScratchDir::new(tag).unwrap();
-        let pure = std::fs::canonicalize(&*dir).unwrap().join("pure");
-        let plat = std::fs::canonicalize(&*dir).unwrap().join("plat");
+        let pure = crate::canonical::canonicalize(&dir).unwrap().join("pure");
+        let plat = crate::canonical::canonicalize(&dir).unwrap().join("plat");
         std::fs::create_dir_all(&pure).unwrap();
         std::fs::create_dir_all(&plat).unwrap();
         Self {

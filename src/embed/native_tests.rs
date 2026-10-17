@@ -77,7 +77,7 @@ fn the_small_helpers_read_heads_resolve_paths_and_name_files() {
     assert!(err.contains("could not read"), "{err}");
     let gone = dir.join("gone");
     assert_eq!(resolved(&gone), gone);
-    assert_eq!(resolved(&long), std::fs::canonicalize(&long).unwrap());
+    assert_eq!(resolved(&long), crate::canonical::canonicalize(&long).unwrap());
     assert_eq!(file_name(Path::new("/a/libx.dylib")), "libx.dylib");
     assert_eq!(file_name(Path::new("/")), "");
 }
@@ -147,7 +147,7 @@ fn a_macos_closure_without_images_has_no_natives() {
 fn the_host_probe_finds_files_and_the_dyld_shared_cache() {
     let dir = ScratchDir::new("native_on_host").expect("scratch");
     let lib = file(&dir, "libx.dylib", "x");
-    assert_eq!(on_host(&lib), Some(std::fs::canonicalize(&lib).unwrap()));
+    assert_eq!(on_host(&lib), Some(crate::canonical::canonicalize(&lib).unwrap()));
     assert_eq!(on_host(&dir.join("absent.dylib")), None);
     let cached = Path::new("/usr/lib/libz.1.dylib");
     assert!(on_host(cached).is_some());

@@ -62,7 +62,7 @@ impl Env {
 
     fn with_sites(tag: &str, body: &str, in_prefix: bool) -> Self {
         let dir = ScratchDir::new(tag).unwrap();
-        let root = std::fs::canonicalize(&*dir).unwrap();
+        let root = crate::canonical::canonicalize(&dir).unwrap();
         let layout_root = root.join("layout");
         std::fs::create_dir_all(&layout_root).unwrap();
         let layout = fake_layout(&layout_root);

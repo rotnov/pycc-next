@@ -228,7 +228,7 @@ fn a_static_windows_build_is_refused_with_no_interpreter() {
 #[test]
 fn a_windows_plan_bundles_the_dlls_and_links_a_program_dll_and_a_stub() {
     let dir = ScratchDir::new("embed_windows_plan").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     std::fs::create_dir(root.join("py")).expect("layout root");
     let layout = layout(&root.join("py"));
     let (out, obj) = (root.join("app"), root.join("main.o"));
@@ -300,7 +300,7 @@ fn a_windows_plan_bundles_the_dlls_and_links_a_program_dll_and_a_stub() {
 #[test]
 fn a_windows_plan_refuses_an_unrelocatable_interpreter_image_before_staging() {
     let dir = ScratchDir::new("embed_windows_scan_refusal").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     std::fs::create_dir(root.join("py")).expect("layout root");
     let layout = layout(&root.join("py"));
     let ssl = PeSpec::dll(&["python314.dll", "libcrypto-3.dll"]).bytes();
@@ -362,7 +362,7 @@ fn a_windows_build_plans_no_native_libraries() {
 #[test]
 fn a_windows_build_under_a_plain_file_fails_at_staging() {
     let dir = ScratchDir::new("embed_windows_not_a_dir").expect("scratch");
-    let root = std::fs::canonicalize(&*dir).expect("canonicalize");
+    let root = crate::canonical::canonicalize(&dir).expect("canonicalize");
     std::fs::create_dir(root.join("py")).expect("layout root");
     let layout = layout(&root.join("py"));
     let file = root.join("file");

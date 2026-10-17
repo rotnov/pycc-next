@@ -235,14 +235,14 @@ pub(crate) fn bundled_library_path(
     }
 }
 
-/// The position-independence flag the C sources compile with: `-fPIC` for
-/// an ELF or Mach-O image, nothing on Windows, where a PE/COFF image is
-/// position-independent by construction (the same fact
-/// `ext_build::ext_compile_args` encodes for `--ext`).
+/// The code-generation flag the C sources compile with: `-fPIC` for an ELF
+/// or Mach-O image; on Windows, where a PE/COFF image is
+/// position-independent by construction, the C runtime the program DLL
+/// links (the same facts `ext_build::ext_compile_args` encodes for `--ext`).
 pub(crate) fn pic_args(platform: EmbedPlatform) -> Vec<OsString> {
     match platform {
         EmbedPlatform::MacOs | EmbedPlatform::Linux => vec![OsString::from("-fPIC")],
-        EmbedPlatform::Windows => Vec::new(),
+        EmbedPlatform::Windows => vec![OsString::from(crate::ext_build::WINDOWS_CRT_FLAG)],
     }
 }
 

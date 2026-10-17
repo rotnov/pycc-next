@@ -383,7 +383,7 @@ fn the_windows_link_helpers_add_no_rpath_preload_pic_or_static_arguments() {
     let names = ["libz.so.1".to_string()];
     assert!(rpath_args(EmbedPlatform::Windows, "app.pycc").is_empty());
     assert!(preload_args(EmbedPlatform::Windows, Path::new("lib"), &names).is_empty());
-    assert!(pic_args(EmbedPlatform::Windows).is_empty());
+    assert_eq!(pic_args(EmbedPlatform::Windows), ["-fms-runtime-lib=dll"]);
     assert_eq!(pic_args(EmbedPlatform::MacOs), ["-fPIC"]);
     assert_eq!(pic_args(EmbedPlatform::Linux), ["-fPIC"]);
     assert!(archive_load_args(EmbedPlatform::Windows, Path::new("python314.lib")).is_empty());
