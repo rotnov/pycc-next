@@ -102,8 +102,9 @@ mod tests {
         false
     }
 
+    /// `pycc_rt.lib` on Windows; compared as paths, so either separator.
     fn only_dev_release(path: &Path) -> bool {
-        path == Path::new("/w/tgt/release/libpycc_rt.a")
+        path == Path::new("/w/tgt/release").join(pycc_rt_lib_filename(None))
     }
 
     #[test]
@@ -164,8 +165,12 @@ mod tests {
     fn a_missing_runtime_names_the_installed_path_first() {
         let exe = Path::new("/opt/p/bin/pycc");
         let err = find_runtime_dir_for(Some(exe), None, None, true, never).unwrap_err();
+        let installed = Path::new("/opt/p")
+            .join("lib")
+            .join("pycc")
+            .join(pycc_rt_lib_filename(None));
         assert!(
-            err.contains("expected /opt/p/lib/pycc/libpycc_rt.a beside this pycc"),
+            err.contains(&format!("expected {} beside this pycc", installed.display())),
             "{err}"
         );
         assert!(err.contains("no pycc_rt build found"), "{err}");

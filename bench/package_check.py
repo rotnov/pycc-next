@@ -455,7 +455,7 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             print(b.stdout + b.stderr)
             print(f"FAIL: pycc could not build {pkg.import_name}/{mod}")
             return False
-        source = py.read_text()
+        source = py.read_text(encoding="utf-8")
         defs += count_defs(source)
         lines = source.splitlines()
         for m in re.finditer(r"^fallback: .*? at .*?:(\d+)(?:-(\d+))? runs in CPython: (.*)$",

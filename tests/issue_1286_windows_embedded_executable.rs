@@ -185,6 +185,16 @@ fn names(dir: &Path) -> BTreeSet<String> {
         .collect()
 }
 
+/// The interpreter's versioned DLL stem, `python3XY` (`python313`).
+fn versioned() -> String {
+    let output = Command::new(interpreter())
+        .args(["-c", "import sys; print('python%d%d' % sys.version_info[:2])"])
+        .output()
+        .expect("the interpreter runs");
+    assert!(output.status.success(), "{}", stderr_of(&output));
+    stdout_of(&output).trim().to_string()
+}
+
 /// The interpreter's `sys.base_prefix`.
 fn base_prefix() -> PathBuf {
     let output = Command::new(interpreter())
@@ -330,7 +340,8 @@ fn a_windows_embedded_executable_without_its_interpreter_dll_fails_loudly() {
     }
     let dir = ScratchDir::new("win_embed_no_dll").expect("scratch");
     let sidecar = build_embedded(&dir, "import json\n\nprint(str(json.dumps(1)))\n");
-    std::fs::remove_file(sidecar.join("python314.dll")).expect("remove python314.dll");
+    let dll = format!("{}.dll", versioned());
+    std::fs::remove_file(sidecar.join(&dll)).expect("remove the interpreter DLL");
     let run = scrubbed(&mut Command::new(dir.join("app")))
         .output()
         .expect("the stub runs");
@@ -352,10 +363,11 @@ fn a_windows_embedded_build_bundles_the_interpreter_dlls() {
     let sidecar = build_embedded(&dir, "import json\n\nprint(str(json.dumps(1)))\n");
     let base = base_prefix();
     let runtime = ["vcruntime140.dll", "vcruntime140_1.dll"];
+    let dll = format!("{}.dll", versioned());
     let mut expected: BTreeSet<String> = [
         "PYCC-BUNDLE",
         "pycc_program.dll",
-        "python314.dll",
+        dll.as_str(),
         "python3.dll",
         "Lib",
         "DLLs",
@@ -471,7 +483,7 @@ fn the_windows_stub_imports_only_system_dlls() {
     assert!(
         program
             .iter()
-            .any(|name| name.eq_ignore_ascii_case("python314.dll")),
+            .any(|name| name.eq_ignore_ascii_case(&format!("{}.dll", versioned()))),
         "{program:?}"
     );
 }

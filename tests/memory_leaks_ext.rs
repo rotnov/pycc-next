@@ -36,7 +36,7 @@ fn a_hosted_loop_calling_compiled_functions_runs_in_constant_memory() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && run.stdout == b"ok\n",
+        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
@@ -80,7 +80,7 @@ fn a_local_read_from_an_object_slot_outlives_the_instance() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && run.stdout == b"ok\n",
+        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
@@ -116,7 +116,7 @@ fn temporaries_live_when_an_exception_unwinds_are_released() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && run.stdout == b"ok\n",
+        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
@@ -259,7 +259,7 @@ fn generator_throw_paths_release_their_frames() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && run.stdout == b"ok\n",
+        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
@@ -337,7 +337,7 @@ def delegated_close(i: int) -> int:
 /// The values are CPython's for the same module.
 const GENERATOR_THROW_DRIVER: &str = r#"import ctypes, gc
 import pycc_memory_gen as m
-assert m.__file__.endswith('.so')
+assert m.__file__.endswith(('.so', '.pyd'))
 lib = ctypes.CDLL(m.__file__)
 def counter(name):
     f = getattr(lib, name)
@@ -469,7 +469,7 @@ fn exceptions_crossing_the_boundary_are_freed() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && run.stdout == b"ok\n",
+        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)

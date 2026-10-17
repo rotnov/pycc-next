@@ -44,7 +44,9 @@ fn build_and_run(dir: &ScratchDir, release: bool) -> (Output, String) {
     let compiled = Command::new(&binary).output().expect("the program should spawn");
     let mut pre = ir.into_os_string();
     pre.push(".pre.ll");
-    let ir = std::fs::read_to_string(&pre).expect("PYCC_DUMP_LLVM writes the unoptimized IR");
+    let ir = std::fs::read_to_string(&pre)
+        .expect("PYCC_DUMP_LLVM writes the unoptimized IR")
+        .replace("\r\n", "\n");
     (compiled, ir)
 }
 

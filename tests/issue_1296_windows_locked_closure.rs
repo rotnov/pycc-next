@@ -228,6 +228,16 @@ fn clang() -> Option<PathBuf> {
     found
 }
 
+/// The interpreter's versioned DLL stem, `python3XY` (`python313`).
+fn versioned() -> String {
+    let output = Command::new(interpreter())
+        .args(["-c", "import sys; print('python%d%d' % sys.version_info[:2])"])
+        .output()
+        .expect("the interpreter runs");
+    assert!(output.status.success(), "{}", stderr_of(&output));
+    stdout_of(&output).trim().to_string()
+}
+
 /// The base interpreter's prefix, which holds `include\` and `libs\`.
 fn base_prefix() -> PathBuf {
     let output = Command::new(interpreter())
@@ -286,7 +296,8 @@ fn extension(module: &str, imports: &[&str], body: &str) -> String {
 fn extension_args(out: &Path, libs: &[&str]) -> Vec<OsString> {
     let base = base_prefix();
     let mut args: Vec<OsString> = vec!["-I".into(), base.join("include").into()];
-    args.extend(["-L".into(), base.join("libs").into(), "-lpython314".into()]);
+    let python = format!("-l{}", versioned());
+    args.extend(["-L".into(), base.join("libs").into(), python.into()]);
     args.extend(["-L".into(), out.as_os_str().to_owned()]);
     args.extend(libs.iter().map(|lib| OsString::from(format!("-l{lib}"))));
     args
@@ -563,5 +574,5 @@ fn the_forwarder_reader_reads_the_real_python3_dll() {
     let bytes = read(&base_prefix().join("python3.dll"));
     let modules = pe::parse_forwarders(&bytes).expect("python3.dll's exports read");
     let folded: Vec<String> = modules.iter().map(|m| m.to_ascii_lowercase()).collect();
-    assert_eq!(folded, ["python314.dll"]);
+    assert_eq!(folded, [format!("{}.dll", versioned())]);
 }

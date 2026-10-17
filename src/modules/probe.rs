@@ -101,8 +101,7 @@ impl Loader {
             // whose `entry` locates no source root (the fall-through below) still
             // governs the interop policy (#1224).
             self.manifest = Some(DiscoveredManifest { display, config });
-            let resolved = root
-                .canonicalize()
+            let resolved = crate::canonical::canonicalize(&root)
                 .ok()
                 .and_then(|root| climbs_between(&self.entry_dir, &root).map(|c| (root, c)));
             if let Some((canonical, climbs)) = resolved {

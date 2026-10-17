@@ -62,7 +62,7 @@ fn a_crafted_archive_with_a_link_is_refused() {
         .args(["-I", "-B", "-c", SCRIPT, env!("CARGO_MANIFEST_DIR")])
         .output()
         .expect("python");
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
     assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(
         stdout,

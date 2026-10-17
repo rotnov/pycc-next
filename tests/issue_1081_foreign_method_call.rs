@@ -460,7 +460,7 @@ fn a_bigint_int_argument_reaches_the_host_as_its_true_value() {
         "try:\n\
          \x20   import pycc_bigint_arg_mod\n\
          except OverflowError as e:\n\
-         \x20   assert str(e) == 'signed integer is greater than maximum', str(e)\n\
+         \x20   assert str(e) in ('signed integer is greater than maximum', 'Python int too large to convert to C long'), str(e)\n\
          else:\n\
          \x20   raise AssertionError('gc.set_threshold(2**62) should have raised')\n",
     );

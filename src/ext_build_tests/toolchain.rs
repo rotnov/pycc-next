@@ -164,7 +164,7 @@ fn the_environment_constructor_defaults_to_python3_and_no_override() {
     // line under the D-014/D-242 diff-coverage gate.
     let toolchain = ExtToolchain::from_env();
     let expected =
-        std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| std::ffi::OsString::from("python3"));
+        std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| std::ffi::OsString::from(DEFAULT_PYTHON));
     assert_eq!(toolchain.interpreter(), expected);
 }
 
@@ -261,7 +261,7 @@ fn only_the_elf_arm_asks_the_linker_to_bind_its_own_symbols_first() {
         assert!(
             !args
                 .iter()
-                .any(|arg| arg.to_string_lossy().contains("-Wl,")),
+                .any(|arg| arg.to_string_lossy().contains("Bsymbolic")),
             "{args:?}"
         );
     }
@@ -274,14 +274,17 @@ fn windows_links_against_the_stable_abi_import_library_in_the_probed_directory()
     // Compared as an `OsString` built from `Path::join`, never a rendered
     // path: the separator is the host's, not the target's.
     assert_eq!(
-        args,
-        vec![
+        args[..5],
+        [
             OsString::from("-shared"),
             OsString::from("-L"),
             libs.as_os_str().to_os_string(),
             OsString::from("-lpython3"),
+            OsString::from("-Wl,/NOIMPLIB"),
         ]
     );
+    assert_eq!(args[5], "-Wl,/EXPORT:pycc_rt_str_live_objects");
+    assert_eq!(args.len(), 5 + RUNTIME_COUNTERS.len());
 }
 
 #[test]

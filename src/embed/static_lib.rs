@@ -103,7 +103,7 @@ pub(crate) fn check_archive(
     usage: &ArchiveUse,
 ) -> Result<PathBuf, String> {
     let wanted = usage.wanted(name);
-    let resolved = std::fs::canonicalize(archive).map_err(|e| {
+    let resolved = crate::canonical::canonicalize(archive).map_err(|e| {
         format!(
             "{wanted}, but `{}` does not exist ({e}); use a CPython 3.14 whose `LIBPL` holds \
              its static library, {}",

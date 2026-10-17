@@ -1,4 +1,5 @@
 mod build_pipeline;
+mod canonical;
 mod cli;
 mod embed;
 mod ext_build;

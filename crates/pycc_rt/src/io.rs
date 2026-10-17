@@ -62,32 +62,12 @@ pub(crate) fn out(bytes: &[u8]) {
             unsafe { write(bytes.as_ptr(), bytes.len()) };
         }
         None => {
-            let bytes = if cfg!(windows) {
-                to_crlf(bytes)
-            } else {
-                bytes.into()
-            };
-            let _ = std::io::stdout().lock().write_all(&bytes);
+            // On Windows too the bytes are written as they are: a native
+            // program's `\n` stays `\n`, where CPython's text-mode stdout
+            // writes `\r\n` (docs/DEVIATIONS.md).
+            let _ = std::io::stdout().lock().write_all(bytes);
         }
     }
-}
-
-/// `bytes` with every `\n` written as `\r\n`: on Windows CPython's
-/// `sys.stdout` is a text stream that translates each `\n` to `os.linesep`
-/// (an existing `\r` before it is kept, so `"\r\n"` becomes `"\r\r\n"`), and
-/// a native program writes the same bytes. Pure, so every host tests it.
-fn to_crlf(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
-    if !bytes.contains(&b'\n') {
-        return bytes.into();
-    }
-    let mut out = Vec::with_capacity(bytes.len() + 8);
-    for &b in bytes {
-        if b == b'\n' {
-            out.push(b'\r');
-        }
-        out.push(b);
-    }
-    out.into()
 }
 
 /// What CPython's universal-newline stdin reads for the bytes `buf`: on
@@ -173,14 +153,7 @@ pub(crate) fn read_all() -> Option<*mut PyStrObj> {
 
 #[cfg(test)]
 mod newline_tests {
-    use super::{from_crlf, to_crlf};
-
-    #[test]
-    fn writes_translate_every_newline_to_crlf() {
-        assert_eq!(&*to_crlf(b"abc"), b"abc");
-        assert_eq!(&*to_crlf(b"a\nb\n"), b"a\r\nb\r\n");
-        assert_eq!(&*to_crlf(b"\r\n"), b"\r\r\n");
-    }
+    use super::from_crlf;
 
     #[test]
     fn reads_translate_crlf_and_lone_cr_to_newline() {

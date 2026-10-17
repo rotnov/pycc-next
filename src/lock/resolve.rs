@@ -40,7 +40,7 @@ const EXCLUDED_DIST_INFO_FILES: [&str; 6] = [
 /// `lib64 -> lib` venv makes them one directory under two spellings.
 pub(crate) fn scanned_sites(purelib: &Path, platlib: &Path) -> Result<Vec<Site>, String> {
     let canonical = |path: &Path, kind: SiteKind| {
-        std::fs::canonicalize(path)
+        crate::canonical::canonicalize(path)
             .map(|path| Site { path, kind })
             .map_err(|e| {
                 format!(

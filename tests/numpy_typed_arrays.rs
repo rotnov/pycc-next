@@ -420,7 +420,9 @@ fn int64_elements_join_int_arithmetic_unencoded() {
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", rendered(&build));
-    let pre = std::fs::read_to_string(dir.join("ndraw.ll.pre.ll")).expect("unoptimized IR");
+    let pre = std::fs::read_to_string(dir.join("ndraw.ll.pre.ll"))
+        .expect("unoptimized IR")
+        .replace("\r\n", "\n");
     let start = pre.find("@pyfn_run(").expect("the function's IR");
     let body = &pre[start..start + pre[start..].find("\n}\n").expect("function end")];
     // `tag_i64` names its blocks `nd_tag_*` and its runtime call `nd_bigint`.

@@ -166,7 +166,7 @@ impl Located {
 
 /// Locates the lock for the entry script at `path`.
 pub(crate) fn locate(path: &Path) -> Result<Located, String> {
-    let entry = std::fs::canonicalize(path)
+    let entry = crate::canonical::canonicalize(path)
         .map_err(|e| format!("cannot resolve `{}`: {e}", path.display()))?;
     let entry_dir = entry.parent().unwrap_or(&entry);
     let lock_dir = crate::modules::nearest_manifest(entry_dir)

@@ -47,7 +47,13 @@ clean() {
     fi
     env -i PATH="$PATH" HOME="$work/home" ${PYCC_PYTHON:+PYCC_PYTHON="$PYCC_PYTHON"} "$@"
 }
-same() { [ "$1" = "$2" ] || { printf 'MISMATCH %s\n--- pycc\n%s\n--- cpython\n%s\n' "$3" "$1" "$2" >&2; exit 1; }; }
+# Line endings aside: on Windows CPython writes \r\n, a native program \n
+# (docs/DEVIATIONS.md).
+same() {
+    a=$(printf '%s' "$1" | tr -d '\r')
+    b=$(printf '%s' "$2" | tr -d '\r')
+    [ "$a" = "$b" ] || { printf 'MISMATCH %s\n--- pycc\n%s\n--- cpython\n%s\n' "$3" "$1" "$2" >&2; exit 1; }
+}
 
 clean "$pycc" version
 

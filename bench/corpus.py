@@ -45,9 +45,9 @@ def run_one(pdir: pathlib.Path, pycc: str, flags: list[str], tmp: pathlib.Path) 
 def build_and_run(pdir: pathlib.Path, pycc: str, flags: list[str], exe: pathlib.Path) -> tuple[str, str]:
     report = ["--report-fallbacks"] if "--non-strict" in flags else []
     b = subprocess.run([pycc, "build", str(pdir / "solution.py"), "-o", str(exe), "--release", *flags, *report],
-                       capture_output=True, text=True, timeout=300)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     if report and b.returncode == 0:
-        source = (pdir / "solution.py").read_text()
+        source = (pdir / "solution.py").read_text(encoding="utf-8")
         fell_back = 0
         for m in re.finditer(r"^fallback: .* at \S+:(\d+)(?:-(\d+))? runs in CPython", b.stderr, re.M):
             fell_back += 1
@@ -55,12 +55,12 @@ def build_and_run(pdir: pathlib.Path, pycc: str, flags: list[str], exe: pathlib.
     if b.returncode != 0:
         m = re.search(r"error\[(\w+)\]: ([^\n]{0,90})", b.stdout + b.stderr)
         return "compile", (f"{m.group(1)}: {m.group(2)}" if m else (b.stderr or b.stdout).strip()[:120])
-    cases = json.loads((pdir / "tests.json").read_text())["cases"]
+    cases = json.loads((pdir / "tests.json").read_text(encoding="utf-8"))["cases"]
     for c in cases:
         try:
             # `str` hashes are randomized per process, as in CPython; a fixed
             # seed keeps the gate reproducible.
-            r = subprocess.run([str(exe)], input=c["input"], capture_output=True, text=True, timeout=20,
+            r = subprocess.run([str(exe)], input=c["input"], capture_output=True, text=True, encoding="utf-8", timeout=20,
                                env={**os.environ, "PYTHONHASHSEED": "0"})
         except subprocess.TimeoutExpired:
             return "timeout", ""

@@ -32,6 +32,9 @@ jobs:
     env:
       PLATFORM: "${{ matrix.platform }}"
       MACOSX_DEPLOYMENT_TARGET: "${{ matrix.macos_target }}"
+      # CPython in UTF-8 mode (on Windows its piped stdout would otherwise
+      # use the ANSI code page; see ci.yml's Windows job).
+      PYTHONUTF8: "1"
     # Git Bash on Windows, so every platform runs the same scripts.
     defaults: { run: { shell: bash } }
     steps:

@@ -166,7 +166,9 @@ fn widening_a_rebound_name_is_per_function() {
     let ours = Command::new(dir.join("w")).output().expect("run");
     let oracle = Command::new(python()).arg(&source).output().expect("python");
     assert_same(&ours, &oracle);
-    let ir = std::fs::read_to_string(dir.join("w.ll.pre.ll")).expect("IR");
+    let ir = std::fs::read_to_string(dir.join("w.ll.pre.ll"))
+        .expect("IR")
+        .replace("\r\n", "\n");
     let body = |name: &str| -> String {
         let start = ir
             .find(&format!("@pyfn_{name}("))

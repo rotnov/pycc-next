@@ -160,7 +160,7 @@ pub(crate) fn source_library(probe: &EmbedProbe) -> PathBuf {
         return root.join(&probe.framework);
     }
     let path = probe.libdir.join(&probe.ldlibrary);
-    std::fs::canonicalize(&path).unwrap_or(path)
+    crate::canonical::canonicalize(&path).unwrap_or(path)
 }
 
 /// The interpreter's DLL on a Windows host: `<base_prefix>\<LDLIBRARY>`,

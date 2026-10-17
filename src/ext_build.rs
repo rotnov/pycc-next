@@ -426,14 +426,40 @@ pub(crate) fn ext_link_args(platform: ExtLinkPlatform, libs: &Path) -> Vec<OsStr
         // stable-ABI one, deliberately not the version-tagged
         // `python313.lib` -- the whole point of the artifact is that it
         // outlives one interpreter minor version.
+        //
+        // `/NOIMPLIB`: nothing links against the module, so `link.exe`
+        // writes no `m.lib`/`m.exp` beside it. The runtime's live-object
+        // counters are exported as an ELF or Mach-O module exports every
+        // global: a PE exports only what it names.
         ExtLinkPlatform::Windows => {
             let mut args = vec![OsString::from("-shared"), OsString::from("-L")];
             args.push(libs.as_os_str().to_os_string());
             args.push(OsString::from("-lpython3"));
+            args.push(OsString::from("-Wl,/NOIMPLIB"));
+            args.extend(
+                RUNTIME_COUNTERS
+                    .iter()
+                    .map(|name| OsString::from(format!("-Wl,/EXPORT:{name}"))),
+            );
             args
         }
     }
 }
+
+/// The runtime's live-object counters, which a host (and the leak tests)
+/// reads from an extension module with `ctypes`.
+pub(crate) const RUNTIME_COUNTERS: [&str; 10] = [
+    "pycc_rt_str_live_objects",
+    "pycc_rt_list_live_objects",
+    "pycc_rt_dict_live_objects",
+    "pycc_rt_set_live_objects",
+    "pycc_rt_instance_live_objects",
+    "pycc_rt_exception_live_objects",
+    "pycc_rt_closure_live_objects",
+    "pycc_rt_gen_live_objects",
+    "pycc_rt_num_box_live_objects",
+    "pycc_rt_buffer_live_views",
+];
 
 mod carrier;
 mod constructors;

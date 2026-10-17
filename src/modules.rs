@@ -832,7 +832,7 @@ fn spelled_path(entry: &Path, canonical: &Path) -> PathBuf {
         return absolute;
     };
     let prefix: PathBuf = components[..=last_parent].iter().collect();
-    match prefix.canonicalize() {
+    match crate::canonical::canonicalize(&prefix) {
         Ok(mut resolved) => {
             resolved.extend(&components[last_parent + 1..]);
             resolved
@@ -918,7 +918,7 @@ fn display_root(dir: &Path, climbs: usize) -> PathBuf {
 }
 
 fn canonicalize(path: &Path, display: &str) -> Result<PathBuf, FrontendFailure> {
-    path.canonicalize()
+    crate::canonical::canonicalize(path)
         .map_err(|error| FrontendFailure::input(display.to_string(), error.to_string()))
 }
 
@@ -930,7 +930,7 @@ fn canonicalize(path: &Path, display: &str) -> Result<PathBuf, FrontendFailure> 
 /// cost of the fallback is that two spellings of one unreadable file
 /// memoize separately.
 fn identity_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    crate::canonical::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

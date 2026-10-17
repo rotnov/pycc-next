@@ -234,7 +234,7 @@ pub(crate) fn read_head(path: &Path) -> Result<Vec<u8>, String> {
 /// `path` with symlinks resolved, or `path` itself when it does not
 /// resolve.
 pub(crate) fn resolved(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    crate::canonical::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// The names a dependency can reach the source libpython by: the original
@@ -295,7 +295,7 @@ pub(crate) fn host_context(
 /// where most system libraries live only since macOS 11.
 pub(crate) fn on_host(path: &Path) -> Option<PathBuf> {
     if std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
-        return std::fs::canonicalize(path).ok();
+        return crate::canonical::canonicalize(path).ok();
     }
     let system = macho::is_system(&path.to_string_lossy());
     (system && in_shared_cache(path)).then(|| path.to_path_buf())

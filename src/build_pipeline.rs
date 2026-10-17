@@ -269,10 +269,9 @@ pub(crate) fn try_build(
         cmd.args(ext_objects.iter().flatten()).args(&plan.link_args);
     }
     cmd.args(embed_objects.iter().flatten());
-    cmd.args(&objects)
-        .arg("-L")
-        .arg(&rt_lib_dir)
-        .arg("-lpycc_rt");
+    cmd.args(&objects).arg("-L").arg(&rt_lib_dir);
+    add_windows_crt_math(&mut cmd);
+    cmd.arg("-lpycc_rt");
     // The bundled libpython goes after every object that references it: a
     // GNU `ld` that defaults to `--as-needed` drops a shared library named
     // before its users.
@@ -692,6 +691,19 @@ fn add_windows_system_libs(cmd: &mut std::process::Command) {
 
 #[cfg(not(windows))]
 fn add_windows_system_libs(_cmd: &mut std::process::Command) {}
+
+/// The C runtime's import library ahead of `pycc_rt.lib`, so `pow`, `exp`,
+/// `sin` and the rest of libm bind to the UCRT functions CPython itself
+/// calls: `pycc_rt.lib` also carries Rust's `compiler_builtins`, whose own
+/// (musl-derived) libm definitions would otherwise win the link and round
+/// differently from CPython (`x ** 0.5` in `tests/speed_proofs.rs`).
+#[cfg(windows)]
+fn add_windows_crt_math(cmd: &mut std::process::Command) {
+    cmd.arg("-lucrt");
+}
+
+#[cfg(not(windows))]
+fn add_windows_crt_math(_cmd: &mut std::process::Command) {}
 
 /// `pycc_rt`'s `f64::powf` (used by `float ** float`, see D-001/RUNTIME.md's
 /// float support) lowers to a call to the C library's `pow` -- part of

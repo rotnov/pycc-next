@@ -176,6 +176,10 @@ jobs:
     timeout-minutes: 240
     # Git Bash, so the same scripts as on Linux and macOS run here.
     defaults: { run: { shell: bash } }
+    # The CPython oracle in UTF-8 mode: piped, it would otherwise encode
+    # stdout in the ANSI code page, where pycc's programs write UTF-8
+    # (docs/DEVIATIONS.md).
+    env: { PYTHONUTF8: "1" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
