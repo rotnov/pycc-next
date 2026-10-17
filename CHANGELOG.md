@@ -6,6 +6,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Added
 
+- Windows x86_64 (v0.7 accept 1): `pycc-vX.Y.Z-x86_64-windows.zip` (`bin\pycc.exe`,
+  `lib\pycc\pycc_rt.lib`, the backend's wheel) built, packaged and smoke-tested by the
+  release workflow on `windows-2025` with the MSVC toolchain, and verified by its publish
+  job with the other archives. Native programs, abi3 `.pyd` extension modules (linked
+  against `python3.lib`, CPython 3.13+) and programs embedding CPython; `pycc.build`
+  tags wheels `cp313-abi3-win_amd64`. pycc drives `link.exe` through `clang.exe`
+  (`PYCC_CLANG`, `PATH`, Visual Studio's clang component, or the LLVM installer's);
+  `PYCC_PYTHON` defaults to `python.exe`. CI runs the test suite, the non-strict corpus
+  gate and the real-package checks (`bench/package_check.py`, `bench/wheel_check.py`) on
+  `windows-2025`; LLVM is LLVM's own 22.1.8 Windows release, pinned by sha256
+  (`scripts/windows_llvm.sh`). The memory tests measure the peak working set there.
+- macOS CI also builds the real packages into wheels with `pip wheel`
+  (`bench/wheel_check.py`).
 - Method-level fallback (v0.7 accept 3): under `--non-strict`, a construct pycc cannot
   compile sends only the smallest enclosing function or method to CPython, not its
   whole class or module statement. A class statement CPython runs keeps each method's

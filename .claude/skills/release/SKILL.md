@@ -18,13 +18,16 @@ description: Use when cutting a pycc-next release (version bump, changelog, tag,
    is blocked by its git proxy). `git push origin vX.Y.Z` from a normal checkout also works.
 6. The `release` workflow's read-only build matrix tests and packages
    `pycc-vX.Y.Z-x86_64-linux.tar.gz` (ubuntu-24.04), `pycc-vX.Y.Z-aarch64-linux.tar.gz`
-   (ubuntu-24.04-arm) and `pycc-vX.Y.Z-aarch64-macos.tar.gz` (macos-26,
-   `MACOSX_DEPLOYMENT_TARGET=26.0`), each + sha256, with `scripts/package.sh`
-   (`bin/pycc`, `lib/pycc/libpycc_rt.a`, `python/pycc_build-X.Y.Z-py3-none-any.whl`,
-   README, LICENSE, CHANGELOG), and smoke-tests each unpacked tarball with
+   (ubuntu-24.04-arm), `pycc-vX.Y.Z-aarch64-macos.tar.gz` (macos-26,
+   `MACOSX_DEPLOYMENT_TARGET=26.0`) and `pycc-vX.Y.Z-x86_64-windows.zip` (windows-2025,
+   MSVC developer environment, LLVM's own 22.1.8 release from `scripts/windows_llvm.sh`,
+   all steps under Git Bash), each + sha256, with `scripts/package.sh`
+   (`bin/pycc`, `lib/pycc/libpycc_rt.a` -- `bin\pycc.exe`, `lib\pycc\pycc_rt.lib` on
+   Windows -- `python/pycc_build-X.Y.Z-py3-none-any.whl`,
+   README, LICENSE, CHANGELOG), and smoke-tests each unpacked archive with
    `scripts/smoke.sh` (native, `--ext`, `--non-strict` vs CPython, and a small project's
    wheel built by `pip wheel` through the archive's `pycc.build` backend; cleared
-   environment). Only then the write-scoped `publish` job verifies all three
+   environment). Only then the write-scoped `publish` job verifies all four
    archives and creates one GitHub Release holding them. Verify the release exists and a tarball
    runs on a machine without the checkout: download, unpack,
    `scripts/smoke.sh pycc-vX.Y.Z-<platform>`.

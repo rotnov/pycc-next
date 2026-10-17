@@ -63,7 +63,7 @@ fn tuples_of_lists_do_not_leak() {
         .output()
         .expect("python3 runs");
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
         "ok\n",
         "{}",
         String::from_utf8_lossy(&run.stderr)

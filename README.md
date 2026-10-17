@@ -258,8 +258,8 @@ compile your project's modules to abi3 CPython extension modules (one `--ext` mo
 per `.py` file, `--foreign-relative-imports`, `--release`), keep the modules you name in
 Python, and write a wheel tagged `cp313-abi3-<platform>` (CPython 3.13 and newer):
 `manylinux_<glibc>_<arch>` on Linux (the build machine's glibc; `linux_<arch>` if a
-module links a library manylinux does not allow) and `macosx_<N>_0_arm64` on macOS (the
-minimum macOS the modules record). Select it in `pyproject.toml`:
+module links a library manylinux does not allow), `macosx_<N>_0_arm64` on macOS (the
+minimum macOS the modules record) and `win_amd64` on Windows. Select it in `pyproject.toml`:
 
 ```toml
 [build-system]
@@ -405,13 +405,13 @@ building it, failures included.
 
 ## Try it
 
-### From a release (x86_64 and aarch64 Linux, arm64 macOS)
+### From a release (x86_64 and aarch64 Linux, arm64 macOS, x86_64 Windows)
 
 Download the archive for your machine from
 [Releases](https://github.com/rotnov/pycc-next/releases) --
 `pycc-vX.Y.Z-x86_64-linux.tar.gz`, `pycc-vX.Y.Z-aarch64-linux.tar.gz` (arm64
-Linux) or `pycc-vX.Y.Z-aarch64-macos.tar.gz` (Apple silicon) -- and unpack it
-anywhere:
+Linux), `pycc-vX.Y.Z-aarch64-macos.tar.gz` (Apple silicon) or
+`pycc-vX.Y.Z-x86_64-windows.zip` -- and unpack it anywhere:
 
 ```console
 $ tar xzf pycc-vX.Y.Z-x86_64-linux.tar.gz
@@ -440,6 +440,23 @@ is linked in. What you need on the machine:
   (`--non-strict` code, standard-library imports). Named by `PYCC_PYTHON`,
   default `python3`. A plain typed program needs no Python at all.
 
+**Windows (x86_64):** the zip holds `bin\pycc.exe` and `lib\pycc\pycc_rt.lib`. It
+needs Windows 10 or newer and, at build time:
+
+- **the MSVC toolchain** -- Visual Studio 2022 or newer, or its Build Tools, with
+  "Desktop development with C++" (MSVC's `link.exe`, the Windows SDK and the C
+  runtime libraries); run pycc from a "Developer PowerShell" / "Developer Command
+  Prompt", which sets `LIB`, `INCLUDE` and `VCToolsInstallDir`;
+- **clang** -- pycc compiles its C sources and drives `link.exe` with it: `PYCC_CLANG`,
+  else `clang.exe` on `PATH`, else Visual Studio's "C++ Clang Compiler for Windows"
+  component, else `%ProgramFiles%\LLVM\bin\clang.exe` (the LLVM installer);
+- **CPython 3.13+ from python.org** (its installer ships `libs\python3.lib`, which
+  `--ext` modules link) for `--ext` modules and programs that need CPython at run
+  time; `PYCC_PYTHON`, default `python.exe`. Extension modules are abi3 `.pyd` files
+  (`pycc build m.py -o m --ext` writes `m.pyd`), loaded by CPython 3.13 and newer. A
+  program that embeds CPython is an `OUT.exe` stub with its interpreter in `OUT.pycc\`
+  (`docs/DEVIATIONS.md` lists the Windows gaps).
+
 On macOS a browser download is quarantined by Gatekeeper; clear the flag once
 after unpacking (`xattr -dr com.apple.quarantine pycc-vX.Y.Z-aarch64-macos`) or
 download with `curl -LO`, which sets no quarantine flag.
@@ -458,6 +475,13 @@ $ scripts/package.sh dist/pycc   # the release layout, from target/release
 
 On macOS `package.sh` refuses a `pycc` that links Homebrew's `libzstd.dylib`;
 the release build links `libzstd.a` instead (`scripts/macos_llvm.sh`).
+
+On Windows, from Git Bash in a developer environment: LLVM's own release
+`clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar.xz` (it carries `llvm-config.exe` and the
+static libraries; `scripts/windows_llvm.sh` downloads it pinned by sha256, as CI does),
+`LLVM_SYS_221_PREFIX` naming it, and `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER`
+naming MSVC's `link.exe` (Git Bash's own `link` shadows it on `PATH`); then
+`cargo build --release` and `scripts/package.sh` as above.
 
 ### Testing against CPython
 
