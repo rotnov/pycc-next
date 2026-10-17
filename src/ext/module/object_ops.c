@@ -47,7 +47,8 @@
  * colliding name replaces it. Borrowed; NULL with an exception set when the
  * name cannot be created.
  */
-#define PYCC_EXT_NAME_SLOTS 256
+#define PYCC_EXT_NAME_SLOTS 4096
+#define PYCC_EXT_NAME_SLOT_BITS 12
 static struct {
     const char *spelling;
     PyObject *name;
@@ -57,7 +58,7 @@ static PyObject *pycc_ext_attr_name(const char *spelling)
 {
     /* Constants are byte-aligned and often adjacent: mix every address bit
      * into the slot index (Fibonacci hashing). */
-    size_t slot = (size_t)(((uint64_t)(uintptr_t)spelling * 0x9E3779B97F4A7C15ull) >> 56)
+    size_t slot = (size_t)(((uint64_t)(uintptr_t)spelling * 0x9E3779B97F4A7C15ull) >> (64 - PYCC_EXT_NAME_SLOT_BITS))
                   & (PYCC_EXT_NAME_SLOTS - 1);
     PyObject *name;
 
@@ -404,6 +405,60 @@ PyObject *pycc_ext_obj_call_borrowed(PyObject *callee, PyObject **args,
  * `kwnames`. Returns a new reference (owned as #1092 records) or NULL with
  * a Python exception set.
  */
+/*
+ * The `kwnames` tuple of a call site's keyword names (a new reference), so
+ * a keyword call builds and interns it once rather than on every call.
+ * The names are constants of the generated code, one address per text
+ * (`pycc_ext_attr_name`), so a site is recognized by its name addresses;
+ * a slot holds one site, and a colliding site replaces it. A call with
+ * more names than a slot records builds its tuple every time. NULL with
+ * an exception set when the tuple cannot be made.
+ */
+#define PYCC_EXT_KWNAMES_SLOTS 1024
+#define PYCC_EXT_KWNAMES_SLOT_BITS 10
+#define PYCC_EXT_KWNAMES_MAX 8
+static struct {
+    const char *names[PYCC_EXT_KWNAMES_MAX];
+    long long nkw;
+    PyObject *tuple;
+} pycc_ext_kwnames_cache[PYCC_EXT_KWNAMES_SLOTS];
+
+static PyObject *pycc_ext_kwnames(const char **names, long long nkw)
+{
+    size_t slot = nkw <= 0 ? 0 : (size_t)(((uint64_t)(uintptr_t)names[0] * 0x9E3779B97F4A7C15ull)
+                           >> (64 - PYCC_EXT_KWNAMES_SLOT_BITS))
+                  & (PYCC_EXT_KWNAMES_SLOTS - 1);
+    PyObject *tuple;
+    long long i;
+
+    if (nkw <= 0) {
+        return PyTuple_New(0);
+    }
+    if (nkw <= PYCC_EXT_KWNAMES_MAX && pycc_ext_kwnames_cache[slot].nkw == nkw) {
+        for (i = 0; i < nkw && pycc_ext_kwnames_cache[slot].names[i] == names[i]; i++) {
+        }
+        if (i == nkw) {
+            return Py_NewRef(pycc_ext_kwnames_cache[slot].tuple);
+        }
+    }
+    tuple = PyTuple_New((Py_ssize_t)nkw);
+    for (i = 0; tuple != NULL && i < nkw; i++) {
+        PyObject *name = pycc_ext_attr_name(names[i]);
+        if (name == NULL || PyTuple_SetItem(tuple, (Py_ssize_t)i, Py_NewRef(name)) < 0) {
+            Py_CLEAR(tuple);
+        }
+    }
+    if (tuple != NULL && nkw <= PYCC_EXT_KWNAMES_MAX) {
+        Py_XDECREF(pycc_ext_kwnames_cache[slot].tuple);
+        for (i = 0; i < nkw; i++) {
+            pycc_ext_kwnames_cache[slot].names[i] = names[i];
+        }
+        pycc_ext_kwnames_cache[slot].nkw = nkw;
+        pycc_ext_kwnames_cache[slot].tuple = Py_NewRef(tuple);
+    }
+    return tuple;
+}
+
 PyObject *pycc_ext_obj_call_kw(PyObject *callable, PyObject **args,
                                long long nargs, const char **names,
                                long long nkw)
@@ -428,13 +483,7 @@ PyObject *pycc_ext_obj_call_kw(PyObject *callable, PyObject **args,
     if (callable != NULL && packed && unpacking) {
         result = pycc_ext_call_unpacking(callable, args, nargs, names, nkw);
     } else if (callable != NULL && packed) {
-        kwnames = PyTuple_New((Py_ssize_t)nkw);
-        for (i = 0; kwnames != NULL && i < nkw; i++) {
-            PyObject *name = PyUnicode_InternFromString(names[i]);
-            if (name == NULL || PyTuple_SetItem(kwnames, (Py_ssize_t)i, name) < 0) {
-                Py_CLEAR(kwnames);
-            }
-        }
+        kwnames = pycc_ext_kwnames(names, nkw);
         if (kwnames != NULL) {
             result = PyObject_Vectorcall(callable, args, (size_t)nargs, kwnames);
         }
@@ -765,6 +814,11 @@ static int pycc_ext_isinstance(PyObject *o, PyObject *cls)
     Py_ssize_t n;
     PyObject *item;
 
+    /* `PyObject_IsInstance`'s own first test: an object of exactly that
+     * class, which no `__instancecheck__` can overrule. */
+    if ((PyObject *)Py_TYPE(o) == cls) {
+        return 1;
+    }
     if (pycc_ext_plain_builtin(Py_TYPE(o))) {
         if (PyType_CheckExact(cls)) {
             return PyType_IsSubtype(Py_TYPE(o), (PyTypeObject *)cls);
