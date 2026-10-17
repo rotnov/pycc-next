@@ -284,3 +284,26 @@ Accept:
    filtered by the harness. A 120 s smoke run is part of regular CI.
 5. **Real-world corpus:** strict >= 190/200; `--non-strict` 200/200, 0 wrong, with no
    top-level statement in CPython fallback.
+
+## v0.7 — Real-world Python: frameworks, Windows
+
+Accept:
+1. **Windows:** a `pycc-vX.Y.Z-x86_64-windows.zip` release archive (MSVC toolchain, CPython
+   3.13+ for `--ext`), built and smoke-tested in the release workflow; CI runs the test
+   suite, the corpus gate and the real-package checks on `windows-2025`; the PEP 517 backend
+   produces `win_amd64` wheels. macOS also runs the real-package wheel checks.
+2. **Classes from libraries:** `--non-strict` compiles classes that inherit from CPython
+   classes (bases written as names or attributes, `class M(lib.Base)`), with metaclasses,
+   descriptors, class attributes of any type, decorated methods and properties; annotations
+   naming library types (`mod.Type`), general unions and `X | None` of object types; the
+   `with` statement (sync and async context managers), and starred expressions in every
+   position. Oracle fixtures per feature.
+3. **Method-level fallback:** a construct `--non-strict` cannot compile sends only the
+   smallest enclosing function or method to CPython, never the whole class or module.
+4. **pydantic v2, measured once:** the Python part of pydantic v2 (pinned; pydantic-core
+   unchanged) builds with `--ext --non-strict`, passes its own test suite against the
+   compiled modules, and its model-definition / schema-building time is measured against
+   CPython; the result (speed-up or not) and the remaining fallbacks are recorded here.
+   This is a one-off evaluation, not a CI gate.
+5. **Real-world corpus:** strict >= 190/200; `--non-strict` 200/200, 0 wrong, with no
+   top-level statement in CPython fallback (carried over from v0.6 if not met there).
