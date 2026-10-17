@@ -210,16 +210,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - id: build
         run: cargo build --release
-      # TEMPORARY (Windows port): which libraries an embedded build's link searches.
-      - name: Debug embedded link
-        continue-on-error: true
-        run: |
-          which -a clang || true
-          printf 'import json\nprint(json.dumps(1))\n' > dbg.py
-          real=$(cygpath -w "$(command -v clang)")
-          printf '@"%s" -v -Wl,/VERBOSE:LIB %%*\r\n' "$real" > clangv.bat
-          PYCC_CLANG=$(cygpath -w "$PWD/clangv.bat") target/release/pycc.exe build dbg.py -o dbg > dbg.log 2>&1 || true
-          grep -iE 'libucrt|libcmt|defaultlib|Searching|link.exe|clang.*-cc1|error' dbg.log | cut -c1-600 | head -150
       # The release archive as release.yml builds it (no tag here), unpacked
       # and smoke-tested.
       - name: Package and smoke-test the release archive

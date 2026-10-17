@@ -698,12 +698,14 @@ fn add_windows_system_libs(_cmd: &mut std::process::Command) {}
 /// (musl-derived) libm definitions would otherwise win the link and round
 /// differently from CPython (`x ** 0.5` in `tests/speed_proofs.rs`).
 ///
-/// The driver flag says the same to clang itself: without it, clang's MSVC
-/// link adds `-defaultlib:libcmt`, the static runtime, beside the DLL one
-/// `pycc_rt.lib` and the C objects (`ext_build::WINDOWS_CRT_FLAG`) name.
+/// clang's (non-`cl`) driver always adds `-defaultlib:libcmt`, the static
+/// runtime, to an MSVC link, beside the DLL one `pycc_rt.lib` and the C
+/// objects (`ext_build::WINDOWS_CRT_FLAG`) name; `libcmt.lib` would pull in
+/// the static UCRT (`libucrt.lib`), whose stdio collides with `ucrt.lib`'s
+/// (LNK2005), so it is excluded.
 #[cfg(windows)]
 fn add_windows_crt_math(cmd: &mut std::process::Command) {
-    cmd.arg(crate::ext_build::WINDOWS_CRT_FLAG).arg("-lucrt");
+    cmd.arg("-Wl,/NODEFAULTLIB:libcmt").arg("-lucrt");
 }
 
 #[cfg(not(windows))]
