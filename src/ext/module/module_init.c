@@ -279,16 +279,30 @@ static int pycc_ext_exec_module(PyObject *module)
      * this thread (see `pycc_ext_exec_target_key`) hands the outer one's
      * target back.
      */
+#ifdef PYCC_EXT_HAS_PRECOMPILED
+    /* The fallback source's code objects, for the body only
+     * (`src/ext_build/precompiled.rs`). */
+    if (pycc_ext_code_install(module) != 0) {
+        Py_DECREF(classes);
+        return -1;
+    }
+#endif
     saved_target = PyThread_tss_get(pycc_ext_exec_target_key);
     saved_classes = PyThread_tss_get(pycc_ext_exec_classes_key);
     if (PyThread_tss_set(pycc_ext_exec_target_key, module) != 0
         || PyThread_tss_set(pycc_ext_exec_classes_key, classes) != 0) {
         (void)PyThread_tss_set(pycc_ext_exec_target_key, saved_target);
         Py_DECREF(classes);
+#ifdef PYCC_EXT_HAS_PRECOMPILED
+        pycc_ext_code_remove(module);
+#endif
         PyErr_SetString(PyExc_RuntimeError, "pycc: cannot record the executing module");
         return -1;
     }
     exec_status = pycc_ext_module_exec();
+#ifdef PYCC_EXT_HAS_PRECOMPILED
+    pycc_ext_code_remove(module);
+#endif
     (void)PyThread_tss_set(pycc_ext_exec_target_key, saved_target);
     (void)PyThread_tss_set(pycc_ext_exec_classes_key, saved_classes);
     if (exec_status != 0) {

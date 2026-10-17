@@ -18,7 +18,9 @@
 //!    consecutive fallback statements becomes one
 //!    `builtins.exec(builtins.compile(<source>, <file>, "exec"), ns)`,
 //!    the source padded with newlines so tracebacks keep their line
-//!    numbers; and every compiled reference to a module global that
+//!    numbers (in an `--ext` module `builtins.exec(ns["__pycc_code__"](k),
+//!    ns)`: chunk `k`'s code object, compiled when the module was built,
+//!    `render::CodeChunk`); and every compiled reference to a module global that
 //!    fallback code reads or binds becomes `ns['name']`, so both sides see
 //!    one value (a *dict global*);
 //! 3. repeat until the rewrite compiles, or no diagnostic names a statement
@@ -54,7 +56,7 @@ mod report;
 
 pub(crate) use lift::LIFT_PREFIX;
 pub(crate) use driver::{can_fall_back, with_fallback};
-pub(crate) use render::Rendered;
+pub(crate) use render::{CodeChunk, Rendered};
 
 use pycc_ast::Stmt;
 use pycc_diag::Diagnostic;
@@ -73,7 +75,7 @@ const SYS: &str = "__pycc_fallback_sys";
 mod state;
 
 pub(crate) use state::{
-    Snapshot, active, attached_methods, entry_override, entry_source, reporting, set_report,
+    Snapshot, active, attached_methods, code_chunks, entry_override, entry_source, reporting, set_report,
     twinned_exports,
 };
 use state::{REPORT, install, set_override};

@@ -4,6 +4,7 @@
 //! specialization loop runs attempts on (`crate::specialize`).
 
 use super::Rendered;
+use super::render::CodeChunk;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -47,6 +48,9 @@ pub(super) fn set_override(text: Option<String>) {
         TWINNED.with(|cell| cell.borrow_mut().clear());
         ATTACHED.with(|cell| cell.borrow_mut().clear());
     }
+    // A chunk belongs to the rewrite that numbers it: any other text
+    // (`install` sets the rewrite's own right after) has none.
+    CHUNKS.with(|cell| cell.borrow_mut().clear());
     ENTRY_OVERRIDE.with(|cell| *cell.borrow_mut() = text);
 }
 
@@ -62,6 +66,17 @@ thread_local! {
     static ATTACHED: RefCell<Vec<Attached>> = const { RefCell::new(Vec::new()) };
 }
 
+thread_local! {
+    /// The CPython source chunks of the active rewrite (`Rendered::chunks`).
+    static CHUNKS: RefCell<Vec<CodeChunk>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The CPython source chunks the active rewrite runs (`Rendered::chunks`):
+/// what an `--ext` module embeds compiled.
+pub(crate) fn code_chunks() -> Vec<CodeChunk> {
+    CHUNKS.with(|cell| cell.borrow().clone())
+}
+
 /// A class with methods attached to it, where its statement starts in the
 /// rewrite, and the attributes of `self` those methods use.
 pub(crate) type Attached = (String, u32, BTreeSet<String>);
@@ -71,6 +86,7 @@ pub(super) fn install(rendered: &Rendered) {
     set_override(Some(rendered.text.clone()));
     TWINNED.with(|cell| *cell.borrow_mut() = rendered.twinned.clone());
     ATTACHED.with(|cell| *cell.borrow_mut() = rendered.attached.clone());
+    CHUNKS.with(|cell| *cell.borrow_mut() = rendered.chunks.clone());
 }
 
 /// The active rewrite's attached methods (`Rendered::attached`).
@@ -97,6 +113,7 @@ pub(crate) struct Snapshot {
     entry: Option<String>,
     twinned: BTreeSet<String>,
     attached: Vec<Attached>,
+    chunks: Vec<CodeChunk>,
 }
 
 impl Snapshot {
@@ -106,6 +123,7 @@ impl Snapshot {
             entry: entry_override(),
             twinned: TWINNED.with(|cell| cell.borrow().clone()),
             attached: attached_methods(),
+            chunks: code_chunks(),
         }
     }
 
@@ -114,5 +132,6 @@ impl Snapshot {
         ENTRY_OVERRIDE.with(|cell| *cell.borrow_mut() = self.entry);
         TWINNED.with(|cell| *cell.borrow_mut() = self.twinned);
         ATTACHED.with(|cell| *cell.borrow_mut() = self.attached);
+        CHUNKS.with(|cell| *cell.borrow_mut() = self.chunks);
     }
 }

@@ -198,9 +198,10 @@ fn each_exec_publishes_classes_from_its_own_snapshot() {
         exec.contains("saved_classes = PyThread_tss_get(pycc_ext_exec_classes_key);"),
         "{exec}"
     );
-    // Released if it cannot be installed, on the failing body's path, and
-    // after the safety net.
-    assert_eq!(exec.matches("Py_DECREF(classes);").count(), 3, "{exec}");
+    // Released if the pre-compiled code hook cannot be bound
+    // (`src/ext_build/precompiled.rs`), if it cannot be installed, on the
+    // failing body's path, and after the safety net.
+    assert_eq!(exec.matches("Py_DECREF(classes);").count(), 4, "{exec}");
 }
 
 #[test]

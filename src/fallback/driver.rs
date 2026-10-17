@@ -155,7 +155,7 @@ pub(crate) fn with_fallback<T, E>(
     // What fallback code that stays forces is forced again.
     retry.cascade();
     if retry.fallback.len() < plan.fallback.len() {
-        let kept = entry_override();
+        let kept = Snapshot::take();
         let rendered = retry.render();
         install(&rendered);
         let retried = match attempt() {
@@ -171,7 +171,7 @@ pub(crate) fn with_fallback<T, E>(
                 plan = retry;
                 value = better;
             }
-            _ => set_override(kept),
+            _ => kept.install(),
         }
     }
     if REPORT.load(Ordering::Relaxed) {

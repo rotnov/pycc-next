@@ -24,7 +24,33 @@ pub(crate) struct Rendered {
     /// class statement's offset in `text`, and the attributes of `self`
     /// the method uses, which the frontend checks the carrier exposes.
     pub(super) attached: Vec<(String, u32, BTreeSet<String>)>,
+    /// The CPython source `text` runs, in an `--ext` module: chunk `k` is
+    /// what `__pycc_fallback_ns["__pycc_code__"](k)` returns the code
+    /// object of (`CodeChunk`). Empty elsewhere, where `text` calls
+    /// `compile()` itself.
+    pub(super) chunks: Vec<CodeChunk>,
 }
+
+/// One piece of CPython source an `--ext` module runs with `exec`. The
+/// build compiles it ahead of time with the target interpreter and embeds
+/// the marshalled code object (`crate::ext_build::precompiled`), so an
+/// import unmarshals it as CPython loads a `.pyc` instead of compiling the
+/// source; the source is embedded too, compiled at run time when the
+/// running interpreter's bytecode differs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CodeChunk {
+    /// The source, padded with newlines so its line numbers are the
+    /// entry file's.
+    pub(crate) source: String,
+    /// The `co_filename` (the entry file's display path).
+    pub(crate) filename: String,
+    /// Compiled with `from __future__ import annotations`.
+    pub(crate) future_annotations: bool,
+}
+
+/// The name, in an `--ext` module's namespace while its body runs, of the
+/// function returning a fallback chunk's code object (`CodeChunk`).
+const CODE_HOOK: &str = "__pycc_code__";
 
 impl Rendered {
     /// The source offset of `text` offset `at`, when it lies in copied
@@ -55,6 +81,7 @@ struct Out {
     copied: Vec<(u32, u32, u32)>,
     mirror_spans: Vec<(Range<u32>, String)>,
     edited: Vec<(Range<u32>, u32)>,
+    chunks: Vec<CodeChunk>,
 }
 
 /// The range of a unit with no text of its own in the rewrite (a lift whose
@@ -73,6 +100,7 @@ impl Plan {
             copied: Vec::new(),
             mirror_spans: Vec::new(),
             edited: Vec::new(),
+            chunks: Vec::new(),
         };
         let mut trailing: Vec<String> = Vec::new();
         let mut cursor = 0usize;
@@ -100,7 +128,7 @@ impl Plan {
                 for unit in self.attached() {
                     if let Some(source) = self.attached_source(unit) {
                         out.text.push_str("; ");
-                        out.text.push_str(&self.exec_text(&source));
+                        out.text.push_str(&self.exec_text(&mut out.chunks, &source));
                     }
                 }
                 out.text.push('\n');
@@ -127,7 +155,7 @@ impl Plan {
                 // line: a statement may follow it there after a `;`.
                 out.text.push_str(&"\n".repeat(chunk.matches('\n').count()));
                 let at = out.text.len() as u32;
-                out.text.push_str(&self.exec_text(&padded));
+                out.text.push_str(&self.exec_text(&mut out.chunks, &padded));
                 let end_at = out.text.len() as u32;
                 for unit in index..=last {
                     out.ranges[unit] = at..end_at;
@@ -143,7 +171,10 @@ impl Plan {
                 // Padded, so a traceback through the CPython copy names
                 // its lines.
                 let line = src[..start].matches('\n').count();
-                let run = self.exec_text(&format!("{}{}", "\n".repeat(line), &src[start..end]));
+                let run = self.exec_text(
+                    &mut out.chunks,
+                    &format!("{}{}", "\n".repeat(line), &src[start..end]),
+                );
                 if !matches!(self.stmts[index].kind, Kind::Def(..)) {
                     // Same line, so later line numbers do not move.
                     out.text.push_str("; ");
@@ -196,6 +227,7 @@ impl Plan {
             .collect();
         Rendered {
             attached,
+            chunks: out.chunks,
             text,
             ranges: out.ranges,
             preamble,
@@ -213,8 +245,21 @@ impl Plan {
         }
     }
 
-    /// `exec`s the (padded) CPython source `source` in the namespace.
-    fn exec_text(&self, source: &str) -> String {
+    /// `exec`s the (padded) CPython source `source` in the namespace: in
+    /// an `--ext` module the code object of a new chunk of `chunks`
+    /// (`CodeChunk`), elsewhere `compile()`d where it runs.
+    fn exec_text(&self, chunks: &mut Vec<CodeChunk>, source: &str) -> String {
+        if self.publishes.variables {
+            chunks.push(CodeChunk {
+                source: source.to_string(),
+                filename: self.display.clone(),
+                future_annotations: self.defers_annotations,
+            });
+            return format!(
+                "{BUILTINS}.exec({NS}[\"{CODE_HOOK}\"]({}), {NS})",
+                chunks.len() - 1
+            );
+        }
         format!(
             "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",
             py_str(source),
@@ -339,7 +384,10 @@ impl Plan {
         let rest = src[pos..end].matches('\n').count();
         out.text.push_str(&"\n".repeat(rest));
         let line = src[..start].matches('\n').count();
-        let run = self.exec_text(&format!("{}{}\n", "\n".repeat(line), self.split_source(index)));
+        let run = self.exec_text(
+            &mut out.chunks,
+            &format!("{}{}\n", "\n".repeat(line), self.split_source(index)),
+        );
         if !compiled || rest > 0 {
             // The statement's last line holds no compiled code.
             let at = out.text.len() as u32;

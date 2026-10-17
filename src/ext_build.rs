@@ -230,6 +230,16 @@ impl ExtToolchain {
         Ok(probe)
     }
 
+    /// The interpreter that compiles the module's CPython source ahead of
+    /// time (`precompiled`): the probed one, or none when the headers come
+    /// from `PYCC_PYTHON_INCLUDE` (or a test's probe), where no interpreter
+    /// need run on this host.
+    pub(crate) fn precompile_interpreter(&self) -> Option<&OsStr> {
+        self.probe_override
+            .is_none()
+            .then_some(self.interpreter.as_os_str())
+    }
+
     fn run_probe(&self) -> Result<ExtProbe, String> {
         let output = probe_command(&self.interpreter, PROBE_SCRIPT)
             .output()
@@ -488,6 +498,7 @@ mod method_types;
 mod module_hooks;
 pub(crate) use method_types::*;
 pub(crate) use module_hooks::{EntryHooks, is_module_hook};
+mod precompiled;
 mod publication;
 mod richcompare;
 mod signatures;
@@ -495,6 +506,7 @@ pub(crate) use richcompare::{ExtSlotDunders, SlotArtifact, collect_slot_dunders}
 #[cfg(test)]
 pub(crate) use richcompare::{SLOT_DUNDERS, is_slot_dunder_method};
 pub(crate) use signatures::install as install_signatures;
+pub(crate) use precompiled::{install as install_precompiled, precompile};
 
 use publication::namespace_owner;
 pub(crate) use publication::{ExtPublishedClass, collect_class_publications};

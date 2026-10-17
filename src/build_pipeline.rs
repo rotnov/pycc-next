@@ -567,6 +567,14 @@ fn plan_ext(
         })
         .unwrap_or_default();
     let inc_body = ext_build::install_signatures(inc_body, &published_signatures);
+    // The fallback rewrite's CPython source, compiled by the target
+    // interpreter now instead of by `compile()` at every import.
+    let chunks = crate::fallback::code_chunks();
+    let compiled = toolchain
+        .precompile_interpreter()
+        .filter(|_| !chunks.is_empty())
+        .and_then(|python| ext_build::precompile(python, &chunks));
+    let inc_body = ext_build::install_precompiled(inc_body, &chunks, compiled.as_ref());
     let inc_body = ext_build::with_module_doc(inc_body, &entry_source);
     write_ext_source(&shim, ext_build::SHIM_C)?;
     write_ext_source(&inc, &inc_body)?;
