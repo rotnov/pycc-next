@@ -30,7 +30,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions: { contents: read }
     env:
-      PLATFORM: "${{ matrix.platform }}"
+      # Not PLATFORM: the MSVC developer environment sets `Platform=x64`, and
+      # Windows environment names are case-insensitive, so it would be replaced.
+      PYCC_PLATFORM: "${{ matrix.platform }}"
       MACOSX_DEPLOYMENT_TARGET: "${{ matrix.macos_target }}"
       # CPython in UTF-8 mode (on Windows its piped stdout would otherwise
       # use the ANSI code page; see ci.yml's Windows job).
@@ -80,7 +82,7 @@ jobs:
       # A .tar.gz, or a .zip on Windows; each with its sha256.
       - name: Package
         run: |
-          name=pycc-${TAG}-${PLATFORM}
+          name=pycc-${TAG}-${PYCC_PLATFORM}
           scripts/package.sh dist/$name
           if [ "$RUNNER_OS" = Windows ]; then
             (cd dist && python3 -m zipfile -c $name.zip $name && sha256sum $name.zip > $name.zip.sha256)
@@ -93,7 +95,7 @@ jobs:
       # builds must match CPython before anything is published.
       - name: Smoke-test the archive
         run: |
-          name=pycc-${TAG}-${PLATFORM}
+          name=pycc-${TAG}-${PYCC_PLATFORM}
           smoke=$(mktemp -d)
           if [ "$RUNNER_OS" = Windows ]; then
             (cd dist && sha256sum -c $name.zip.sha256)
