@@ -165,10 +165,16 @@ fn the_shims_str_egress_releases_the_reference_unconditionally() {
     let pack = body
         .find("packed = PyUnicode_FromStringAndSize(")
         .expect("the CPython copy");
-    let release = body
-        .find("pycc_rt_str_decref(result);")
-        .expect("the release");
+    let release = pack
+        + body[pack..]
+            .find("pycc_rt_str_decref(result);")
+            .expect("the release");
     let ret = body.find("return packed;").expect("the return");
+    // A result that shares a CPython `str` returns that object, and also
+    // releases the native string first.
+    let shared = body.find("return shared;").expect("the shared return");
+    let shared_release = body.find("pycc_rt_str_decref(result);").expect("the release");
+    assert!(shared_release < shared && shared < pack, "{body}");
     assert!(
         pack < release && release < ret,
         "the reference must be released after the copy and before the return, on \

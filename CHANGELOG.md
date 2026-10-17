@@ -18,6 +18,29 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   its `ImportError`/`ModuleNotFoundError` is catchable in compiled code; an import of a
   module pycc compiles natively (`math`, `typing`, ...) or of a project module there stays
   `C0001`. pydantic 2.13.5: 955 of 1249 functions native (from 809).
+- v0.8 accept 4 (a text-processing package): `typing.Optional[X]` and
+  `typing.Union[...]` annotations are the unions `X | None` and `X | ...` they spell, in
+  strict and non-strict mode; in non-strict mode a `typing` name pycc does not model
+  (`Match`, `Pattern`, `MutableMapping`, ...) is imported as the CPython object it names,
+  so annotations naming it compile instead of sending the import statement to CPython. A
+  private module-level function or method of a non-strict `--ext` module whose parameters
+  are objects or immutable values (`str`, `int`, `float`, `bool`, optional or not) is an
+  attribute of the module (`from m import _helper`), as a Python module's is.
+
+### Fixed
+
+- A string annotation (`x: "State"`) naming a `TYPE_CHECKING`-only import, under
+  `from __future__ import annotations`, no longer fails the build: the fallback's
+  annotation erasure removed the annotation's text but left its closing quote.
+
+### Changed
+
+- `str` crossing the `--ext` boundary: an argument is no longer copied (the native string
+  borrows the CPython `str`'s UTF-8 text and keeps it alive), and a result that is a string
+  which came from CPython is that same object, not a copy -- so `f(s) is s` for a function
+  returning its argument, as in CPython. `str.replace` and `strip`/`lstrip`/`rstrip`
+  return the string itself when they change nothing (CPython does too), and `find`,
+  `rfind`, `in`, `replace`, `count` and `split` search with SIMD `memchr`/`memmem`.
 
 ## [0.7.0] - 2026-10-17
 

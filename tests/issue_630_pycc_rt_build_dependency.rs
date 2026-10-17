@@ -117,7 +117,10 @@ fn pycc_rt_declares_only_the_bigint_dependencies() {
     // deliberately added the three pure-Rust `num` crates: `--locked` still
     // holds because the workspace lockfile describes them, and the nested
     // build reads them from the same `$CARGO_HOME` cache the outer build
-    // fills. Any further dependency must be just as deliberate.
+    // fills. `str`'s searches (`find`, `in`, `replace`, `split`) added
+    // `memchr` (v0.8 accept 4): pure Rust, no dependencies of its own, and
+    // already in the workspace lockfile. Any further dependency must be just
+    // as deliberate.
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates")
         .join("pycc_rt")
@@ -139,7 +142,7 @@ fn pycc_rt_declares_only_the_bigint_dependencies() {
     }
     assert_eq!(
         names,
-        ["num-bigint", "num-integer", "num-traits"],
+        ["memchr", "num-bigint", "num-integer", "num-traits"],
         "pycc_rt's dependencies changed; see the comment in {}",
         file!()
     );

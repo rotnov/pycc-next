@@ -261,6 +261,19 @@ pub(crate) fn collect_exports_naming_gaps(
     collect_exports_excluding(module, hooks, &crate::fallback::twinned_exports())
 }
 
+/// Whether a private function's parameter of type `ty` lets CPython code
+/// call it as it calls a Python function: an `object`, or an immutable value
+/// (`int`, `float`, `bool`, `str`, possibly `None`) the boundary copies with
+/// no observable difference. A native container would hand the function a
+/// copy of the caller's container, which mutating it would not change.
+fn shares_no_container(ty: &Ty) -> bool {
+    match ty {
+        Ty::Object | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Num => true,
+        Ty::Optional(inner) => shares_no_container(inner),
+        _ => false,
+    }
+}
+
 /// [`collect_exports_naming_gaps`] without the module-level functions named
 /// in `excluded` (an embedded build's inferred functions,
 /// `crate::fallback::inferred_functions`), which are neither exported nor
@@ -401,7 +414,8 @@ pub(crate) fn collect_exports_excluding(
         // A private instance method is published in non-strict mode only,
         // so CPython code (`getattr(self, "_process_" + kind)`) finds it as
         // it finds the method of a Python class, and only when every
-        // parameter is an `object`: a native container parameter would
+        // parameter is an `object` or an immutable value
+        // ([`shares_no_container`]): a native container parameter would
         // hand the method a copy of the caller's container. Anything else
         // stays unpublished, as before, rather than a gap.
         // So is a private module-level function, which CPython code
@@ -410,7 +424,7 @@ pub(crate) fn collect_exports_excluding(
             && is_private_method_name(name)
             && !pycc_ast::is_reserved_name(name)
             && !(pycc_types::non_strict_checked()
-                && carried_params.iter().all(|(_, ty)| *ty == Ty::Object)
+                && carried_params.iter().all(|(_, ty)| shares_no_container(ty))
                 && unsupported_boundary_ty(carried_params, return_ty, &carrier_classes).is_none())
         {
             continue;
@@ -419,7 +433,7 @@ pub(crate) fn collect_exports_excluding(
             && is_private_method_name(method)
             && !(pycc_types::non_strict_checked()
                 && receiver == ExtReceiver::SelfInstance
-                && carried_params.iter().all(|(_, ty)| *ty == Ty::Object)
+                && carried_params.iter().all(|(_, ty)| shares_no_container(ty))
                 && unsupported_boundary_ty(carried_params, return_ty, &carrier_classes).is_none())
         {
             continue;

@@ -22,6 +22,7 @@ pub(crate) mod params;
 #[cfg(test)]
 mod params_tests;
 mod string_annotation;
+mod union;
 #[cfg(test)]
 mod string_annotation_tests;
 
@@ -584,13 +585,13 @@ fn enclosing_class_ty(class_name: &str, class_defs: &[ClassAnnotationInfo]) -> T
 /// class name in the enclosing namespace).
 /// Whether a `|` annotation is `int | float` or `float | int`: the one
 /// general union compiled natively (`Ty::Num`).
-fn is_int_float_union(bin_op: &pycc_ast::ExprBinOp) -> bool {
+fn is_int_float_union_names(left: &Expr, right: &Expr) -> bool {
     let name = |expr: &Expr| match expr {
         Expr::Name(name) => Some(name.id.to_string()),
         _ => None,
     };
     matches!(
-        (name(&bin_op.left).as_deref(), name(&bin_op.right).as_deref()),
+        (name(left).as_deref(), name(right).as_deref()),
         (Some("int"), Some("float")) | (Some("float"), Some("int"))
     )
 }
@@ -856,6 +857,32 @@ pub(crate) fn annotation_to_ty(
                         .collect::<Result<Vec<_>, _>>()?;
                     let ret = annotation_to_ty(ret, type_param, class_name, aliases, class_defs)?;
                     Ok(Ty::Callable(Box::new((params, ret))))
+                }
+                // `typing.Optional[X]` and `typing.Union[X, ...]`: the
+                // unions `X | None` and `X | ...` spell (`func::union`),
+                // unless a class, an alias or a type parameter shadows the
+                // name.
+                "Optional" | "Union"
+                    if Some(base_name.id.as_str()) != type_param
+                        && !class_defs.iter().any(|info| info.name == base_name.id.as_str())
+                        && !aliases.iter().any(|(name, _)| name == base_name.id.as_str()) =>
+                {
+                    let members = union::subscript_members(&sub.slice);
+                    let range = pycc_ast::expr_range(annotation);
+                    let optional = base_name.id.as_str() == "Optional";
+                    if optional && members.len() != 1 {
+                        return Err(unsupported(
+                            "`Optional[...]` takes exactly one type argument",
+                            range,
+                        ));
+                    }
+                    let scope = union::Scope {
+                        type_param,
+                        class_name,
+                        aliases,
+                        class_defs,
+                    };
+                    union::union_to_ty(&members, optional, range, &scope)
                 }
                 // #911: see the bare-`ClassVar` arm above -- `ClassVar[T]`
                 // is legal only on a class-body attribute declaration, where
@@ -1223,57 +1250,15 @@ pub(crate) fn annotation_to_ty(
         // union: explicitly out of scope for this PR (Part 2+), rejected
         // with `T0048` rather than silently misparsed or falling through to
         // the generic catch-all below.
-        Expr::BinOp(bin_op) if bin_op.op == Operator::BitOr && is_int_float_union(bin_op) => {
-            Ok(Ty::Num)
-        }
-        Expr::BinOp(bin_op) if bin_op.op == Operator::BitOr => {
-            let other_side = match (bin_op.left.as_ref(), bin_op.right.as_ref()) {
-                (Expr::NoneLiteral(_), other) => other,
-                (other, Expr::NoneLiteral(_)) => other,
-                // Non-strict mode (v0.7 accept 2): a general union is an
-                // object, as CPython's value is whichever member it is.
-                _ if is_non_strict(aliases) => return Ok(Ty::Object),
-                _ => {
-                    let range = std::ops::Range::<u32>::from(bin_op.range);
-                    return Err(Diagnostic::error(
-                        "T0048",
-                        "general union annotations (`X | Y` where neither side is `None`) are not supported yet -- only `T | None` (PEP 604 Optional) is",
-                        Span::new(range.start, range.end),
-                    ));
-                }
-            };
-            let inner = match annotation_to_ty(other_side, type_param, class_name, aliases, class_defs)
-            {
-                Ok(inner) => inner,
-                // Non-strict mode: `T | None` of what is an object anyway
-                // (`mod.Type | None`) is an object too.
-                Err(_) if is_non_strict(aliases) => return Ok(Ty::Object),
-                Err(error) => return Err(error),
-            };
-            // `Optional[T]` is supported for `T` in `{int, float, bool}`
-            // (D-197; codegen's `{ inner, i8 }` struct) and, in strict mode,
-            // for every pointer-represented `T` (`is_pointer_optional_inner`:
-            // a null pointer is `None`). Gated here, at the one place a
-            // `Ty::Optional` is constructed from source.
-            if !matches!(inner, Ty::Int | Ty::Float | Ty::Bool) && is_non_strict(aliases) {
-                // Non-strict mode: an optional value of any other type is an
-                // object (`None` or the value), as in CPython.
-                return Ok(Ty::Object);
-            }
-            if !matches!(inner, Ty::Int | Ty::Float | Ty::Bool) && !crate::is_pointer_optional_inner(&inner) {
-                let range = std::ops::Range::<u32>::from(bin_op.range);
-                return Err(Diagnostic::error(
-                    "T0049",
-                    format!(
-                        "`Optional[{}]` is not supported yet -- only `int`, `float`, `bool`, `str`, a list, dict or set, a class instance, \
-                         or a tuple with a non-number element can be optional (`T | None`)",
-                        inner.name()
-                    ),
-                    Span::new(range.start, range.end),
-                ));
-            }
-            Ok(Ty::Optional(Box::new(inner)))
-        }
+        Expr::BinOp(bin_op) if bin_op.op == Operator::BitOr => union::bitor_to_ty(
+            bin_op,
+            &union::Scope {
+                type_param,
+                class_name,
+                aliases,
+                class_defs,
+            },
+        ),
         // Part 1 of #889: a string the parser did not already unquote --
         // one nested in an annotation (`list["C"]`) or one that does not
         // parse -- resolves like its unquoted spelling, in this same scope.

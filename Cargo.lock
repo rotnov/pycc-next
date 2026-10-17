@@ -901,6 +901,7 @@ dependencies = [
 name = "pycc_rt"
 version = "0.1.0"
 dependencies = [
+ "memchr",
  "num-bigint",
  "num-integer",
  "num-traits",

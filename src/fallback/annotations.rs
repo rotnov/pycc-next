@@ -85,6 +85,28 @@ pub(super) fn sites(source: &str, body: &[Stmt]) -> Vec<Site> {
     collector.sites
 }
 
+/// Where the annotation spanning `annotation` ends in `source`, its closing
+/// quotes included: a string annotation (`x: "P"`) is unquoted when the
+/// module parses, its expression keeping the span of the text inside the
+/// quotes (`pycc_ast::normalize_string_annotations`).
+fn quoted_end(source: &str, annotation: &Range<u32>) -> u32 {
+    let bytes = source.as_bytes();
+    let (start, end) = (annotation.start as usize, annotation.end as usize);
+    let Some(&quote) = start.checked_sub(1).and_then(|i| bytes.get(i)) else {
+        return annotation.end;
+    };
+    if quote != b'"' && quote != b'\'' {
+        return annotation.end;
+    }
+    let opening = bytes[..start].iter().rev().take(3).take_while(|&&b| b == quote).count();
+    // A triple-quoted string closes with three quotes, any other with one.
+    let closing = if opening == 3 { 3 } else { 1 };
+    let closes = bytes
+        .get(end..end + closing)
+        .is_some_and(|after| after.iter().all(|&b| b == quote));
+    if closes { (end + closing) as u32 } else { annotation.end }
+}
+
 struct Sites<'s> {
     source: &'s str,
     sites: Vec<Site>,
@@ -99,7 +121,8 @@ impl<'a> Visitor<'a> for Sites<'_> {
                     if let Some(expr) = param.annotation() {
                         let annotation = pycc_ast::expr_range(expr);
                         self.sites.push(Site {
-                            erase: param.name().range.end().to_u32()..annotation.end,
+                            erase: param.name().range.end().to_u32()
+                                ..quoted_end(self.source, &annotation),
                             annotation,
                             def: Some(range.clone()),
                             names: names_in(expr),
@@ -116,7 +139,7 @@ impl<'a> Visitor<'a> for Sites<'_> {
                         .and_then(|between| between.find("->"));
                     if let Some(arrow) = arrow {
                         self.sites.push(Site {
-                            erase: from + arrow as u32..annotation.end,
+                            erase: from + arrow as u32..quoted_end(self.source, &annotation),
                             annotation,
                             def: Some(range),
                             names: names_in(returns),
@@ -133,7 +156,7 @@ impl<'a> Visitor<'a> for Sites<'_> {
                 let annotation = pycc_ast::expr_range(&ann.annotation);
                 let target = pycc_ast::expr_range(&ann.target);
                 self.sites.push(Site {
-                    erase: target.end..annotation.end,
+                    erase: target.end..quoted_end(self.source, &annotation),
                     annotation,
                     def: None,
                     names: names_in(&ann.annotation),

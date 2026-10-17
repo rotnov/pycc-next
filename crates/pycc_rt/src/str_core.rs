@@ -16,6 +16,10 @@ pub(crate) enum PyStrPayload {
     /// meaningful; the rest is unused padding.
     Inline([u8; 22], u8),
     Heap(Box<[u8]>),
+    /// `(ptr, len)`: the UTF-8 buffer of the CPython `str` held in
+    /// `PyStrObj::foreign`, which keeps it alive (`pycc_rt_str_adopt_foreign`):
+    /// a `str` crossing from CPython into an `--ext` module is not copied.
+    Borrowed(*const u8, usize),
 }
 
 // `pub`, not private: every `pycc_rt_str_*` function below is a public
@@ -76,6 +80,14 @@ pub unsafe extern "C" fn pycc_rt_str_foreign(s: *mut PyStrObj) -> *mut std::ffi:
 /// `s` must be a live `str`, `object` a `PyObject *` of its text.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_str_set_foreign(s: *mut PyStrObj, object: *mut std::ffi::c_void) {
+    // A borrowed payload's bytes live in the shared object: it is never
+    // replaced (the new one, of the same text, is released instead).
+    if matches!(unsafe { &*s }.payload, PyStrPayload::Borrowed(..)) {
+        if !object.is_null() {
+            crate::rc::release_object(object);
+        }
+        return;
+    }
     let old = unsafe { &*s }.foreign.replace(object);
     if !old.is_null() {
         crate::rc::release_object(old);
@@ -87,6 +99,8 @@ impl PyStrObj {
         match &self.payload {
             PyStrPayload::Inline(buf, len) => &buf[..*len as usize],
             PyStrPayload::Heap(b) => b,
+            // SAFETY: the buffer belongs to `foreign`, held as long as `self`.
+            PyStrPayload::Borrowed(ptr, len) => unsafe { std::slice::from_raw_parts(*ptr, *len) },
         }
     }
 }
@@ -132,6 +146,19 @@ pub(crate) fn new_pystr(bytes: &[u8]) -> *mut PyStrObj {
     } else {
         PyStrPayload::Heap(bytes.to_vec().into_boxed_slice())
     };
+    new_pystr_with(payload)
+}
+
+/// [`new_pystr`] of bytes the caller built: a long text keeps the buffer
+/// instead of being copied again.
+pub(crate) fn new_pystr_vec(bytes: Vec<u8>) -> *mut PyStrObj {
+    if bytes.len() <= 22 {
+        return new_pystr(&bytes);
+    }
+    new_pystr_with(PyStrPayload::Heap(bytes.into_boxed_slice()))
+}
+
+fn new_pystr_with(payload: PyStrPayload) -> *mut PyStrObj {
     STR_LIVE.fetch_add(1, Ordering::Relaxed);
     let block = STRS.take(STR_LAYOUT).cast::<PyStrObj>();
     // SAFETY: a fresh block of `PyStrObj`'s layout (`crate::pool`); a
@@ -147,6 +174,46 @@ pub(crate) fn new_pystr(bytes: &[u8]) -> *mut PyStrObj {
         })
     };
     block
+}
+
+/// A `str` of the UTF-8 text `ptr[..len]` of the CPython `str` `object`,
+/// adopting the caller's reference to `object` as the one it shares
+/// (`PyStrObj::foreign`): crossing into compiled code copies no text. A text
+/// longer than the inline payload is borrowed from `object` (which then
+/// stays alive with the new `str`); a short one is copied inline, as any
+/// `str` of its length is.
+///
+/// # Safety
+/// `ptr[..len]` must be valid UTF-8 that stays valid while `object` lives
+/// (what `PyUnicode_AsUTF8AndSize` returns for it), and `object` a `str`
+/// whose reference the caller hands over.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_adopt_foreign(
+    ptr: *const u8,
+    len: i64,
+    object: *mut std::ffi::c_void,
+) -> *mut PyStrObj {
+    let len = len as usize;
+    let s = if len <= 22 {
+        new_pystr(unsafe { std::slice::from_raw_parts(ptr, len) })
+    } else {
+        STR_LIVE.fetch_add(1, Ordering::Relaxed);
+        let block = STRS.take(STR_LAYOUT).cast::<PyStrObj>();
+        // SAFETY: a fresh block of `PyStrObj`'s layout, as in `new_pystr`.
+        unsafe {
+            block.write(PyStrObj {
+                rc: Cell::new(1),
+                payload: PyStrPayload::Borrowed(ptr, len),
+                hash: Cell::new(-1),
+                chars: Cell::new(-1),
+                offsets: std::cell::OnceCell::new(),
+                foreign: Cell::new(std::ptr::null_mut()),
+            })
+        };
+        block
+    };
+    unsafe { &*s }.foreign.set(object);
+    s
 }
 
 /// Recycled `PyStrObj` blocks (`crate::pool`): string slices are made and
@@ -228,7 +295,7 @@ pub unsafe extern "C" fn pycc_rt_str_concat(a: *mut PyStrObj, b: *mut PyStrObj) 
     let mut combined = Vec::with_capacity(a_bytes.len() + b_bytes.len());
     combined.extend_from_slice(a_bytes);
     combined.extend_from_slice(b_bytes);
-    new_pystr(&combined)
+    new_pystr_vec(combined)
 }
 
 /// Repeats a `str` object `count` times into a brand-new one (Python's `*`

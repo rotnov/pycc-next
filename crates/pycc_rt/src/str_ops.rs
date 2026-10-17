@@ -27,6 +27,44 @@ fn new_str(text: &str) -> *mut PyStrObj {
     new_pystr(text.as_bytes())
 }
 
+/// The byte offset of the first `needle` in `hay` (SIMD `memchr` for one
+/// byte, `memmem` otherwise): what `str.find`, `in`, `replace`, `count` and
+/// `split` search with. A match of valid UTF-8 in valid UTF-8 always starts
+/// at a char boundary.
+fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    match needle {
+        [] => Some(0),
+        [b] => memchr::memchr(*b, hay),
+        _ => memchr::memmem::find(hay, needle),
+    }
+}
+
+/// The byte offset of the last `needle` in `hay`.
+fn rfind_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    match needle {
+        [] => Some(hay.len()),
+        [b] => memchr::memrchr(*b, hay),
+        _ => memchr::memmem::rfind(hay, needle),
+    }
+}
+
+/// A new reference to `s` itself: what a method returns when it leaves an
+/// exact `str` unchanged (CPython's `replace`, `strip`, ... do the same).
+fn same(s: *mut PyStrObj) -> *mut PyStrObj {
+    unsafe { pycc_rt_str_incref(s) };
+    s
+}
+
+/// `s` itself when `part` is all of it, else a new `str` of `part` (a
+/// subslice of `s`'s text).
+fn same_or_new(s: *mut PyStrObj, part: &str) -> *mut PyStrObj {
+    if part.len() == bytes_of(s).len() {
+        same(s)
+    } else {
+        new_str(part)
+    }
+}
+
 fn value_error(msg: &str) {
     raise_builtin(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", msg);
 }
@@ -508,10 +546,18 @@ fn split_by(text: &str, sep: &str, max: Option<usize>) -> Option<*mut PyListObj>
         value_error("empty separator");
         return None;
     }
-    Some(match max {
-        Some(n) => str_list_of(text.splitn(n + 1, sep)),
-        None => str_list_of(text.split(sep)),
-    })
+    let (hay, pat) = (text.as_bytes(), sep.as_bytes());
+    let mut parts = Vec::new();
+    let mut from = 0;
+    while max.is_none_or(|n| parts.len() < n) {
+        let Some(at) = find_bytes(&hay[from..], pat) else {
+            break;
+        };
+        parts.push(&text[from..from + at]);
+        from += at + pat.len();
+    }
+    parts.push(&text[from..]);
+    Some(str_list_of(parts))
 }
 
 #[unsafe(no_mangle)]
@@ -556,35 +602,35 @@ pub extern "C" fn pycc_rt_str_splitlines(s: *mut PyStrObj) -> *mut PyListObj {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_strip(s: *mut PyStrObj) -> *mut PyStrObj {
-    new_str(text_of(s).trim_matches(is_py_space))
+    same_or_new(s, text_of(s).trim_matches(is_py_space))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_lstrip(s: *mut PyStrObj) -> *mut PyStrObj {
-    new_str(text_of(s).trim_start_matches(is_py_space))
+    same_or_new(s, text_of(s).trim_start_matches(is_py_space))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_rstrip(s: *mut PyStrObj) -> *mut PyStrObj {
-    new_str(text_of(s).trim_end_matches(is_py_space))
+    same_or_new(s, text_of(s).trim_end_matches(is_py_space))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_strip_chars(s: *mut PyStrObj, chars: *mut PyStrObj) -> *mut PyStrObj {
     let set: Vec<char> = text_of(chars).chars().collect();
-    new_str(text_of(s).trim_matches(|c| set.contains(&c)))
+    same_or_new(s, text_of(s).trim_matches(|c| set.contains(&c)))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_lstrip_chars(s: *mut PyStrObj, chars: *mut PyStrObj) -> *mut PyStrObj {
     let set: Vec<char> = text_of(chars).chars().collect();
-    new_str(text_of(s).trim_start_matches(|c| set.contains(&c)))
+    same_or_new(s, text_of(s).trim_start_matches(|c| set.contains(&c)))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_rstrip_chars(s: *mut PyStrObj, chars: *mut PyStrObj) -> *mut PyStrObj {
     let set: Vec<char> = text_of(chars).chars().collect();
-    new_str(text_of(s).trim_end_matches(|c| set.contains(&c)))
+    same_or_new(s, text_of(s).trim_end_matches(|c| set.contains(&c)))
 }
 
 // ------------------------------------------------------------------ join
@@ -600,7 +646,7 @@ pub extern "C" fn pycc_rt_str_join(sep: *mut PyStrObj, items: *mut PyListObj) ->
         }
         out.extend_from_slice(bytes_of(*w as *mut PyStrObj));
     }
-    new_pystr(&out)
+    new_pystr_vec(out)
 }
 
 #[unsafe(no_mangle)]
@@ -624,19 +670,31 @@ pub extern "C" fn pycc_rt_str_count(s: *mut PyStrObj, sub: *mut PyStrObj) -> i64
     if sub.is_empty() {
         return tag_smallint(char_len(text) as i64 + 1);
     }
-    tag_smallint(text.matches(sub).count() as i64)
+    let (mut hay, pat) = (text.as_bytes(), sub.as_bytes());
+    let mut count = 0;
+    while let Some(at) = find_bytes(hay, pat) {
+        count += 1;
+        hay = &hay[at + pat.len()..];
+    }
+    tag_smallint(count)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_find(s: *mut PyStrObj, sub: *mut PyStrObj) -> i64 {
     let text = text_of(s);
-    tag_smallint(text.find(text_of(sub)).map_or(-1, |b| unsafe { &*s }.char_index_of(b) as i64))
+    tag_smallint(
+        find_bytes(text.as_bytes(), bytes_of(sub))
+            .map_or(-1, |b| unsafe { &*s }.char_index_of(b) as i64),
+    )
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_rfind(s: *mut PyStrObj, sub: *mut PyStrObj) -> i64 {
     let text = text_of(s);
-    tag_smallint(text.rfind(text_of(sub)).map_or(-1, |b| unsafe { &*s }.char_index_of(b) as i64))
+    tag_smallint(
+        rfind_bytes(text.as_bytes(), bytes_of(sub))
+            .map_or(-1, |b| unsafe { &*s }.char_index_of(b) as i64),
+    )
 }
 
 fn index_or_raise(found: i64) -> i64 {
@@ -668,8 +726,7 @@ pub extern "C" fn pycc_rt_str_find_from(s: *mut PyStrObj, sub: *mut PyStrObj, st
     };
     let text = text_of(s);
     tag_smallint(
-        text[from..]
-            .find(text_of(sub))
+        find_bytes(&text.as_bytes()[from..], bytes_of(sub))
             .map_or(-1, |b| unsafe { &*s }.char_index_of(from + b) as i64),
     )
 }
@@ -718,13 +775,30 @@ pub extern "C" fn pycc_rt_str_replace(
         }
         return new_str(&out);
     }
-    new_str(&text.replace(old, new))
+    let (hay, pat) = (text.as_bytes(), old.as_bytes());
+    // Nothing to replace: the same object, as CPython returns it.
+    let Some(mut at) = find_bytes(hay, pat) else {
+        return same(s);
+    };
+    let mut out: Vec<u8> = Vec::with_capacity(hay.len() + new.len().saturating_sub(pat.len()) * 4);
+    let mut from = 0;
+    loop {
+        out.extend_from_slice(&hay[from..from + at]);
+        out.extend_from_slice(new.as_bytes());
+        from += at + pat.len();
+        match find_bytes(&hay[from..], pat) {
+            Some(next) => at = next,
+            None => break,
+        }
+    }
+    out.extend_from_slice(&hay[from..]);
+    new_pystr_vec(out)
 }
 
 /// `needle in haystack`.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_str_contains(needle: *mut PyStrObj, haystack: *mut PyStrObj) -> i8 {
-    i8::from(text_of(haystack).contains(text_of(needle)))
+    i8::from(find_bytes(bytes_of(haystack), bytes_of(needle)).is_some())
 }
 
 #[unsafe(no_mangle)]

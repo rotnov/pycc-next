@@ -8,6 +8,7 @@ rust-version.workspace = true
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+memchr = "2"
 num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"

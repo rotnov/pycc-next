@@ -416,8 +416,11 @@ static PyObject *pycc_ext_pack_bool(char value)
  * The length is carried explicitly, never re-derived with `strlen`, because
  * a Python `str` may contain embedded NUL bytes.
  *
- * The bytes belong to `obj` and are copied by `pycc_rt_str_from_literal`, so
- * the caller need not keep them alive. That call hands back a fresh
+ * An exact `str` is not copied: the native `str` borrows its UTF-8 buffer
+ * and holds a reference to it (`pycc_rt_str_adopt_foreign`), which is also
+ * the object it shares when it crosses back (`pycc_ext_pack_str`). A
+ * subclass instance's bytes are copied by `pycc_rt_str_from_literal`, so
+ * the caller need not keep them alive. Either call hands back a fresh
  * reference with refcount 1, which becomes the compiled function's own
  * parameter slot.
  */
@@ -444,12 +447,11 @@ static int pycc_ext_unpack_str(PyObject *obj, const char *fn_name, Py_ssize_t in
     if (utf8 == NULL) {
         return -1;
     }
-    *out = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
-    /* An exact `str` is the one the copy shares when it crosses back
-     * (`pycc_ext_obj_pack_str`); a subclass instance is not. */
     if (PyUnicode_CheckExact(obj)) {
         Py_INCREF(obj);
-        pycc_rt_str_set_foreign(*out, obj);
+        *out = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size, obj);
+    } else {
+        *out = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
     }
     return 0;
 }
@@ -475,11 +477,20 @@ static PyObject *pycc_ext_pack_str(void *result)
 {
     const unsigned char *bytes;
     size_t len = 0;
+    PyObject *shared;
     PyObject *packed;
 
     if (result == NULL) {
         PyErr_SetString(PyExc_SystemError, "str result was NULL");
         return NULL;
+    }
+    /* The CPython `str` the result already shares, if any (a parameter
+     * returned unchanged, a `str` that crossed before): not copied again. */
+    shared = (PyObject *)pycc_rt_str_foreign(result);
+    if (shared != NULL) {
+        Py_INCREF(shared);
+        pycc_rt_str_decref(result);
+        return shared;
     }
     bytes = pycc_rt_ext_str_bytes(result, &len);
     packed = PyUnicode_FromStringAndSize((const char *)bytes, (Py_ssize_t)len);

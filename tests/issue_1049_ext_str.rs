@@ -98,14 +98,14 @@ fn a_built_ext_module_round_trips_str_through_both_payload_representations() {
     );
 }
 
-/// The boundary carries `str` *values*, not objects, so identity does not
-/// survive a crossing even for an exact `str` -- a stronger statement than
-/// the `int`/`float` subclass case #1043 was opened for, and one CPython's
-/// own `def echo(s): return s` does not share. A `str` subclass is accepted
-/// and flattened for the same reason.
+/// An exact `str` keeps its identity across a round trip (v0.8 accept 4):
+/// the native string shares the CPython object it came from, so
+/// `def echo(s): return s` returns `s` itself, as in CPython. A `str`
+/// subclass is accepted and flattened to a plain `str` (its value is
+/// copied, so the subclass identity does not survive).
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn the_str_boundary_copies_rather_than_preserving_identity() {
+fn the_str_boundary_keeps_an_exact_strs_identity() {
     let dir = ScratchDir::new("ext_str_identity").expect("scratch");
     build_ext(
         &dir,
@@ -117,7 +117,7 @@ fn the_str_boundary_copies_rather_than_preserving_identity() {
         "import pycc_str_identity as m\n\
          s = 'a moderately long string that no interpreter interns'\n\
          assert m.echo(s) == s\n\
-         assert m.echo(s) is not s, 'identity is documented not to survive (#1043)'\n\
+         assert m.echo(s) is s\n\
          class S(str):\n    pass\n\
          sub = S('subclassed')\n\
          out = m.echo(sub)\n\

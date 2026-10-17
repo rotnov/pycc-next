@@ -456,6 +456,18 @@ const REGISTRY: &[StdSymbol] = &[
         name: "Callable",
         kind: StdSymbolKind::TypingFormMarker,
     },
+    // `Optional[T]` and `Union[A, B, ...]`, the unions `T | None` and
+    // `A | B | ...` spell (`pycc_hir::func::union`).
+    StdSymbol {
+        module: StdModule::Typing,
+        name: "Optional",
+        kind: StdSymbolKind::TypingFormMarker,
+    },
+    StdSymbol {
+        module: StdModule::Typing,
+        name: "Union",
+        kind: StdSymbolKind::TypingFormMarker,
+    },
     StdSymbol {
         module: StdModule::Typing,
         name: "Generic",
@@ -693,7 +705,9 @@ mod tests {
         assert_eq!(resolve_symbol(StdModule::Typing, "AnyStr"), None);
     }
 
-    const TYPING_FORM_NAMES: [&str; 8] = [
+    const TYPING_FORM_NAMES: [&str; 10] = [
+        "Optional",
+        "Union",
         "Dict",
         "List",
         "Set",

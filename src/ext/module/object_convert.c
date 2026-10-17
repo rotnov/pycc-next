@@ -286,8 +286,14 @@ static int pycc_ext_obj_text(PyObject *o, void **out, int repr)
         Py_DECREF(converted);
         return -1;
     }
-    copied = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
-    Py_DECREF(converted);
+    if (PyUnicode_CheckExact(converted)) {
+        /* Adopts the reference: the text is not copied. */
+        copied = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size,
+                                           converted);
+    } else {
+        copied = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
+        Py_DECREF(converted);
+    }
     *out = copied;
     return 0;
 }
@@ -387,7 +393,13 @@ int pycc_ext_obj_unbox_str(PyObject *o, void **out)
     if (utf8 == NULL) {
         return -1;
     }
-    *out = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
+    if (PyUnicode_CheckExact(o)) {
+        /* Shares `o` and its UTF-8 text: nothing is copied. */
+        Py_INCREF(o);
+        *out = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size, o);
+    } else {
+        *out = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
+    }
     return 0;
 }
 
@@ -431,8 +443,14 @@ int pycc_ext_obj_format(PyObject *o, void **out)
         Py_DECREF(formatted);
         return -1;
     }
-    copied = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
-    Py_DECREF(formatted);
+    if (PyUnicode_CheckExact(formatted)) {
+        /* Adopts the reference: the text is not copied. */
+        copied = pycc_rt_str_adopt_foreign((const unsigned char *)utf8, (long long)size,
+                                           formatted);
+    } else {
+        copied = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)size);
+        Py_DECREF(formatted);
+    }
     *out = copied;
     return 0;
 }

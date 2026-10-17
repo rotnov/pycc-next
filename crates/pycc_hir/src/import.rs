@@ -570,8 +570,26 @@ pub(crate) fn lower_import_stmt(
             };
             check_from_import_shape(import)?;
             let mut bound = Vec::with_capacity(import.names.len());
+            // Non-strict mode: a name pycc does not model (`typing.Match`,
+            // `typing.MutableMapping`) is the module's CPython object, as an
+            // import of any other module's name is.
+            let unmodeled: Vec<&pycc_ast::Alias> = import
+                .names
+                .iter()
+                .filter(|alias| pycc_std::resolve_symbol(module, alias.name.as_str()).is_none())
+                .collect();
+            if resolved.non_strict() && !unmodeled.is_empty() {
+                let mut foreign = import.clone();
+                foreign
+                    .names
+                    .retain(|alias| pycc_std::resolve_symbol(module, alias.name.as_str()).is_none());
+                bound.extend(lower_foreign_from_import(&foreign, site)?.bindings);
+            }
             for alias in &import.names {
                 let symbol_name = alias.name.as_str();
+                if resolved.non_strict() && unmodeled.iter().any(|a| a.name == alias.name) {
+                    continue;
+                }
                 let Some(symbol) = pycc_std::resolve_symbol(module, symbol_name) else {
                     return Err(unresolved_symbol(
                         format!(

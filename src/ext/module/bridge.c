@@ -75,6 +75,9 @@ extern const unsigned char *pycc_rt_ext_str_bytes(void *s, size_t *len);
  * from the getter, adopted by the setter. */
 extern void *pycc_rt_str_foreign(void *s);
 extern void pycc_rt_str_set_foreign(void *s, void *object);
+/* A native `str` of an exact CPython `str`'s UTF-8 text, adopting the
+ * reference passed (`pycc_rt_str_adopt_foreign`): no text is copied. */
+extern void *pycc_rt_str_adopt_foreign(const unsigned char *ptr, long long len, void *object);
 /* The same for a frozenset (`PySetObj::foreign`). */
 extern void *pycc_rt_set_foreign(void *s);
 extern void pycc_rt_set_set_foreign(void *s, void *object);

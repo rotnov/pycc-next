@@ -222,13 +222,13 @@ fn a_failed_from_import_of_a_marker_base_does_not_silence_the_class_using_it() {
 
 #[test]
 fn a_failed_from_import_of_final_does_not_silence_a_final_annotation() {
-    let source = "from typing import Final, Optional\ny: Final[int] = 1\n";
+    let source = "from typing import Final, AnyStr\ny: Final[int] = 1\n";
     let diagnostics = lower_all_err(source);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
     assert_eq!(diagnostics[0].code, "C0002");
     assert_eq!(
         diagnostics[0].message,
-        "module `typing` has no importable symbol named `Optional`"
+        "module `typing` has no importable symbol named `AnyStr`"
     );
 }
 
