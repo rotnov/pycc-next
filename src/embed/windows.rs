@@ -116,6 +116,7 @@ pub(crate) fn program_link_args(probe: &EmbedProbe) -> Vec<OsString> {
         probe.libdir.clone().into_os_string(),
         OsString::from(format!("-lpython{major}{minor}")),
         OsString::from("-Wl,/NOIMPLIB"),
+        OsString::from("-Wl,/NOEXP"),
     ]
 }
 

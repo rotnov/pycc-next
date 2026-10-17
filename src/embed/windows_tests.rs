@@ -274,7 +274,7 @@ fn a_windows_plan_bundles_the_dlls_and_links_a_program_dll_and_a_stub() {
     let libs = layout.prefix.join("libs").display().to_string();
     assert_eq!(
         strings(&plan.link_args),
-        ["-shared", "-L", &libs, "-lpython314", "-Wl,/NOIMPLIB"]
+        ["-shared", "-L", &libs, "-lpython314", "-Wl,/NOIMPLIB", "-Wl,/NOEXP"]
     );
     assert_eq!(plan.artifact, Some(sidecar.join(layout::PROGRAM_DLL_NAME)));
     let stub = plan.stub.as_ref().expect("a Windows plan links a stub");

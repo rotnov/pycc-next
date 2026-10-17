@@ -463,7 +463,7 @@ pub(crate) struct EmbedPlan {
     pub(crate) compile_args: Vec<OsString>,
     /// The bundled library by path (or, for a static build, the archive
     /// and its system libraries), then the rpath, after the runtime. On
-    /// Windows: `-shared`, the import library and `/NOIMPLIB` (D-253).
+    /// Windows: `-shared`, the import library, `/NOIMPLIB` and `/NOEXP` (D-253).
     pub(crate) link_args: Vec<OsString>,
     /// What the shared link writes instead of `OUT`: on Windows the program
     /// DLL `OUT.pycc\pycc_program.dll` (D-253); `None` elsewhere.

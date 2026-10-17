@@ -427,8 +427,8 @@ pub(crate) fn ext_link_args(platform: ExtLinkPlatform, libs: &Path) -> Vec<OsStr
         // `python313.lib` -- the whole point of the artifact is that it
         // outlives one interpreter minor version.
         //
-        // `/NOIMPLIB`: nothing links against the module, so `link.exe`
-        // writes no `m.lib`/`m.exp` beside it. The runtime's live-object
+        // `/NOIMPLIB`, `/NOEXP`: nothing links against the module, so `link.exe`
+        // writes no `m.lib` or `m.exp` beside it. The runtime's live-object
         // counters are exported as an ELF or Mach-O module exports every
         // global: a PE exports only what it names.
         ExtLinkPlatform::Windows => {
@@ -436,6 +436,7 @@ pub(crate) fn ext_link_args(platform: ExtLinkPlatform, libs: &Path) -> Vec<OsStr
             args.push(libs.as_os_str().to_os_string());
             args.push(OsString::from("-lpython3"));
             args.push(OsString::from("-Wl,/NOIMPLIB"));
+            args.push(OsString::from("-Wl,/NOEXP"));
             args.extend(
                 RUNTIME_COUNTERS
                     .iter()

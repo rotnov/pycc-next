@@ -274,17 +274,18 @@ fn windows_links_against_the_stable_abi_import_library_in_the_probed_directory()
     // Compared as an `OsString` built from `Path::join`, never a rendered
     // path: the separator is the host's, not the target's.
     assert_eq!(
-        args[..5],
+        args[..6],
         [
             OsString::from("-shared"),
             OsString::from("-L"),
             libs.as_os_str().to_os_string(),
             OsString::from("-lpython3"),
             OsString::from("-Wl,/NOIMPLIB"),
+            OsString::from("-Wl,/NOEXP"),
         ]
     );
-    assert_eq!(args[5], "-Wl,/EXPORT:pycc_rt_str_live_objects");
-    assert_eq!(args.len(), 5 + RUNTIME_COUNTERS.len());
+    assert_eq!(args[6], "-Wl,/EXPORT:pycc_rt_str_live_objects");
+    assert_eq!(args.len(), 6 + RUNTIME_COUNTERS.len());
 }
 
 #[test]

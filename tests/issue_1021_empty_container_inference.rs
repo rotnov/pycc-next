@@ -119,7 +119,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
 }
 
 /// The dict half of the same path, with a `d[k] = v` producer that is a
@@ -139,7 +139,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
 }
 
 /// No annotation anywhere: the element type comes from a forward scan of the
@@ -748,7 +748,7 @@ print(f())
     assert!(status.success());
     let output = Command::new(&out).output().unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
 }
 
 /// Review round 6, first finding: an annotated assignment records the
@@ -908,7 +908,7 @@ print(_f(1))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
 }
 
 /// Round 8. The two inferred sources read the flat whole-function
@@ -1253,7 +1253,7 @@ print(a.go())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
 }
 
 /// #1021 bot review round 14: `bind_local_types_in_body` records every target
@@ -1413,7 +1413,7 @@ print(go())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
 }
 
 /// #1445: the flat binder walks every `try` suite, so the round-15 program
@@ -1464,7 +1464,7 @@ print(go())
     ] {
         let output = check_build_and_run(label, source);
         assert!(output.status.success());
-        assert_eq!(output.stdout, b"2\n");
+        assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
     }
 }
 
