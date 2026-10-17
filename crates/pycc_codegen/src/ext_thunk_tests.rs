@@ -580,9 +580,9 @@ fn a_boxed_tuple_is_one_pointer_slot_and_needs_no_thunk() {
     let boxed = tuple(vec![Ty::Str, Ty::Int]);
     assert!(!crate::ext::is_flat_tuple(&boxed));
     assert!(crate::ext::is_flat_tuple(&tuple(vec![Ty::Int, Ty::Float])));
-    assert_eq!(crate::ext::ext_boundary_slots(&boxed), &[boxed.clone()]);
+    assert_eq!(crate::ext::ext_boundary_slots(&boxed), std::slice::from_ref(&boxed));
     assert!(crate::ext::ext_thunk_out_tys(&boxed, false).is_empty());
-    assert!(!ext_thunk_required("f", &[boxed.clone()], &boxed, false));
+    assert!(!ext_thunk_required("f", std::slice::from_ref(&boxed), &boxed, false));
     let alone = thunks_of(
         "ext_thunk_boxed_alone",
         &module(vec![func("f", &[("t", boxed.clone())], boxed.clone())]),

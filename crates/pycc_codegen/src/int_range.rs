@@ -56,7 +56,7 @@ pub(crate) struct Range {
 
 impl Range {
     fn new(lo: i128, hi: i128) -> Option<Range> {
-        (lo <= hi && lo >= SMALL_MIN && hi <= SMALL_MAX).then(|| Range {
+        (lo <= hi && lo >= SMALL_MIN && hi <= SMALL_MAX).then_some(Range {
             lo: lo as i64,
             hi: hi as i64,
         })

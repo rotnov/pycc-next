@@ -208,8 +208,7 @@ impl Planner<'_, '_> {
 /// it borrows. A keyword call's positional half is a node of its own.
 fn borrowed_while_running_code(expr: &MirExpr) -> Vec<&MirExpr> {
     match expr {
-        MirExpr::ObjCompare { op, .. }
-            if matches!(op, pycc_mir::CmpOpKind::Is | pycc_mir::CmpOpKind::IsNot) =>
+        MirExpr::ObjCompare { op: pycc_mir::CmpOpKind::Is | pycc_mir::CmpOpKind::IsNot, .. } =>
         {
             Vec::new()
         }

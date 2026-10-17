@@ -15,6 +15,8 @@ use super::*;
 /// builds one with `pycc_rt_int_set_from_list`, whose dedup keeps each
 /// value's first occurrence exactly as a set literal does. `pycc_types`
 /// admits no other source type, so every non-list source is a set.
+// The codegen context (LLVM context, builder, runtime) plus the operands.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_frozenset_from<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,

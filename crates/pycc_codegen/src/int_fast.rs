@@ -147,6 +147,8 @@ pub(crate) fn with_overflow<'ctx>(
 /// `owned` lists the operand words whose birth reference the caller hands
 /// over for release. They are released only after the slow call: on the
 /// fast path both operands are smallints, which own nothing.
+// The codegen context (LLVM context, builder, runtime) plus the operands.
+#[allow(clippy::too_many_arguments)]
 fn emit_guarded<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,

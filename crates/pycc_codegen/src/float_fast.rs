@@ -52,6 +52,8 @@ fn current_function<'ctx>(builder: &Builder<'ctx>) -> FunctionValue<'ctx> {
 /// Branches on `fast_ok`: the `fast` block's value, or the runtime
 /// function `slow_fn(l, r)` followed by the pending-exception guard. `fast`
 /// may return a second `i1` that sends the fast path to the runtime too.
+// The codegen context (LLVM context, builder, runtime) plus the operands.
+#[allow(clippy::too_many_arguments)]
 fn emit_guarded<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,

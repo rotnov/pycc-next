@@ -43,7 +43,7 @@ pub(super) fn versionable_step(
     let MirExpr::IntLiteral(k) = step else {
         return None;
     };
-    let k = i64::try_from(*k).ok()?;
+    let k = *k;
     (k != 0 && k.abs() <= MAX_STEP && body.iter().all(|stmt| is_flat(stmt, 1)) && !rt.loops.has_pending_else_flag(stmt))
         .then_some(k)
 }

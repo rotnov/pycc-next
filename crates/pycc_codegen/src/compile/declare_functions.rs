@@ -86,7 +86,7 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
             *count += 1;
             let f = module.add_function(&mangled, fn_type, None);
             if leaf_inline::is_tiny_leaf(body) {
-                leaf_inline::mark(&context, f);
+                leaf_inline::mark(context, f);
             }
             function_defs_in_order.push((name.as_str(), f));
             // Only insert into user_functions on the first definition;

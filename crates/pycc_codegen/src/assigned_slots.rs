@@ -34,6 +34,9 @@ use pycc_hir::HirClassDef;
 use pycc_mir::{MirExpr, MirItem, MirModule, MirStmt, Ty};
 use std::collections::{HashMap, HashSet};
 
+/// A function's parameters and body.
+type FunctionBody<'a> = (&'a [(String, Ty)], &'a [MirStmt]);
+
 /// The proof's result: the `(class, slot)` pairs always assigned, and the
 /// constructors (which must keep storing the flag their prefix sets).
 #[derive(Default)]
@@ -58,7 +61,7 @@ impl AssignedSlots {
             .iter()
             .filter_map(|(name, def)| Some((*name, layout(def, &classes)?)))
             .collect();
-        let mut functions: HashMap<&str, Vec<(&[(String, Ty)], &[MirStmt])>> = HashMap::new();
+        let mut functions: HashMap<&str, Vec<FunctionBody<'_>>> = HashMap::new();
         for item in &mir.items {
             if let MirItem::Function {
                 name, params, body, ..

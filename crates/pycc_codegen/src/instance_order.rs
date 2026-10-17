@@ -80,7 +80,7 @@ pub(super) fn emit_instance_order<'ctx>(
         (target, scalar)
     });
     let list_scalar = emit_expr(context, builder, module, rt, user_functions, locals, &order.list);
-    let list = crate::container_access::expect_list_pointer(list_scalar.clone(), "an ordered list");
+    let list = crate::container_access::expect_list_pointer(list_scalar, "an ordered list");
     heap_rc::hold_temporary(rt, &order.list, &list_scalar);
     let mut mode = i64_type.const_int(
         order.kind.mode() as u64 + if order.keyed { 4 } else { 0 },
@@ -103,7 +103,7 @@ pub(super) fn emit_instance_order<'ctx>(
     }
     let target_list = match &target {
         Some((_, scalar)) => {
-            crate::container_access::expect_list_pointer(scalar.clone(), "a sorted list")
+            crate::container_access::expect_list_pointer(*scalar, "a sorted list")
         }
         None => list,
     };
@@ -296,8 +296,8 @@ pub(super) fn emit_instance_set_contains<'ctx>(
     let set_scalar = emit_expr(context, builder, module, rt, user_functions, locals, set);
     heap_rc::hold_temporary(rt, set, &set_scalar);
     let element_ptr =
-        crate::container_access::expect_instance_pointer(element_scalar.clone(), "a set needle");
-    let set_ptr = crate::set_instance::expect_set_pointer(set_scalar.clone(), "a searched set");
+        crate::container_access::expect_instance_pointer(element_scalar, "a set needle");
+    let set_ptr = crate::set_instance::expect_set_pointer(set_scalar, "a searched set");
     let emitter = crate::set_instance::SetEmitter {
         context,
         builder,
