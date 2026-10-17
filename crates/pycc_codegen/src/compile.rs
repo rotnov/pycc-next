@@ -406,7 +406,9 @@ fn compile_module(
             // first, and its body is emitted as if it returned `None`
             // (`generator`).
             let generator_element = match return_ty {
-                pycc_mir::Ty::Generator(sig) => Some((**sig).clone()),
+                pycc_mir::Ty::Generator(sig) if pycc_mir::body_yields(body) => {
+                    Some((**sig).clone())
+                }
                 _ => None,
             };
             let generator_begin = generator_element

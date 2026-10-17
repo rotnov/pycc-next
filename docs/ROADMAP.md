@@ -264,6 +264,12 @@ Accept:
    that take or return CPython objects, generators in methods. Evidence: pypng compiles
    >= 60 of its 85 functions natively (v0.5: 15) and decodes the PngSuite images it tests
    >= 3x faster than CPython (v0.5: ~1.6x).
+   Status 2026-10-17: in progress. 64/85 functions compile, `Reader` included; decoding
+   every PngSuite image (`bench/package_check.py pypng --time`) is 2.5x faster than
+   CPython (3.4x fewer instructions under callgrind). The gap: per-row and per-chunk
+   operations on attributes that hold CPython objects (`self.row_bytes`), the interlaced
+   images' `_deinterlace`, and the native code of the filter loops themselves (~240
+   instructions per byte of `undo_filter_paeth`, from tagged-`int` checks).
 3. **A real `int | float` type:** strict mode types a variable that holds an `int` or a
    `float` as `int | float` with CPython semantics for every operation, replacing the v0.5
    int-infinity rewrite; its DEVIATIONS rows are removed.

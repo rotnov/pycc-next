@@ -83,6 +83,18 @@ pub(super) fn method_call_nd(
     if is_numpy_module(ctx, facts, base) {
         return creation_nd(ctx, facts, method, args, keywords);
     }
+    // `bytearray(...)`, called through the CPython `builtins` module the
+    // non-strict fallback planner binds (`pycc_ast::FALLBACK_BUILTINS`): a
+    // new, exact `bytearray`, a byte buffer (`super`'s module doc).
+    if ctx.byte_buffers
+        && method == "bytearray"
+        && args.len() <= 1
+        && keywords.is_empty()
+        && matches!(base, HirExpr::Name(name)
+            if name == pycc_ast::FALLBACK_BUILTINS && !facts.locals.contains(name))
+    {
+        return Some(NdTy::bytearray());
+    }
     if let Some(nd) = nd_of_value(ctx, facts, base) {
         return (method == "copy" && args.is_empty() && keywords.is_empty()).then_some(nd);
     }

@@ -8,7 +8,7 @@ use pycc_diag::Diagnostic;
 /// The return type of a generator function (a body containing `yield`):
 /// its annotation (`Iterator[T]`, `Iterable[T]`, `Generator[T, None,
 /// None]`), or `Generator[<inferred>]` when its signature is inferred.
-pub(super) fn generator_return_ty(
+pub(crate) fn generator_return_ty(
     return_ty: Ty,
     aliases: &[(String, Ty)],
     def: &pycc_ast::StmtFunctionDef,
@@ -41,7 +41,7 @@ pub(super) fn generator_return_ty(
 /// are kept as a bare `return`; `return value` becomes the
 /// [`crate::GEN_RETURN_MARKER`] statement (the value for
 /// `StopIteration.value`) followed by a bare `return`.
-pub(super) fn generator_returns(
+pub(crate) fn generator_returns(
     body: &mut Vec<HirStmt>,
     def: &pycc_ast::StmtFunctionDef,
 ) -> Result<(), Diagnostic> {

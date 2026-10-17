@@ -10,6 +10,20 @@ pub(crate) fn infer_call_expr(
     let HirExpr::Call { callee, args } = expr else {
         unreachable!()
     };
+    // A byte buffer's `append`/`extend` of a value not stored natively is
+    // the `bytearray` method call it was written as.
+    if matches!(
+        callee.as_str(),
+        pycc_hir::builtins::BYTEARRAY_APPEND | pycc_hir::builtins::BYTEARRAY_EXTEND
+    ) {
+        let tys = args
+            .iter()
+            .map(|arg| infer_expr_in(env, local_names, arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(call) = pycc_hir::builtins::byte_buffer_method_call(callee, args, &tys) {
+            return infer_expr_in(env, local_names, &call);
+        }
+    }
     // D-110 (#133): a call target resolves through the active value
     // binding before any builtin or function-registry fallback -- a
     // module `helper = 1` shadows both a same-named `def` and a
@@ -364,6 +378,11 @@ pub(crate) fn infer_call_expr(
                 "pass exactly {} argument(s)",
                 expected_arg_tys.len()
             )));
+        }
+        // Non-strict mode: called with a CPython object, the function is
+        // CPython's own (`pycc_mir`'s module call), its result an object.
+        if crate::non_strict::is_non_strict() && arg_tys.contains(&Ty::Object) {
+            return Ok(Ty::Object);
         }
         for (arg_ty, expected) in arg_tys.iter().zip(expected_arg_tys) {
             if *arg_ty != std_scalar_to_ty(*expected) {

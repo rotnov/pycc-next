@@ -165,11 +165,12 @@ fn the_shapes_outside_part_2a_are_refused() {
         ),
         (
             // A plain keyword argument is admitted since Part 8 of #1371
-            // (`tests/issue_1371_object_call_kwargs.rs`); `**` is not.
+            // (`tests/issue_1371_object_call_kwargs.rs`) and `**` since
+            // v0.6; a native dict is not a CPython mapping.
             "obj_calls_keyword",
             "d = {\"obj\": 1}\ncallbacks[\"len\"](**d)\n",
-            "C0001",
-            "keyword call arguments are not supported yet",
+            "I0404",
+            "passing a `dict[str, int]` argument to a CPython object's call",
         ),
     ] {
         assert_one_error(tag, &format!("{HEAD}{tail}"), code, needle);

@@ -217,7 +217,7 @@ fn first_established_types(
                 // types becomes an `object`, as at any other rebinding; once
                 // one path binds the object, the other's value boxes into it.
                 let boxable = |t: &Ty| {
-                    matches!(t, Ty::Object | Ty::None) || crate::foreign::is_object_operand(env, t)
+                    crate::non_strict::widens_to_object(env, t)
                 };
                 if crate::non_strict::is_non_strict()
                     && (*previous == Ty::Object || *ty == Ty::Object)

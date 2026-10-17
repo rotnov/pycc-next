@@ -158,8 +158,8 @@ fn builtin_calls_pycc_does_not_compile_run_through_cpython_builtins() {
     // Ends in CPython's `TypeError` from `min(1, "a")`, raised in compiled
     // code through `builtins.min`.
     let report = matches_cpython("non_strict_builtins.py");
-    // Only the keyword call falls back; `min`, `chr`, `set()`, `divmod`,
-    // three-argument `pow`, `bin`, `hex` and a mixed `max` stay compiled.
-    assert_eq!(report.matches("fallback:").count(), 1, "{report}");
-    assert!(report.contains(":18 runs"), "{report}");
+    // Nothing falls back: `min`, `chr`, `set()`, `divmod`, three-argument
+    // `pow`, `bin`, `hex` and a mixed `max` stay compiled, and the keyword
+    // call `max([], default=-1)` is CPython's own `builtins.max`.
+    assert_eq!(report.matches("fallback:").count(), 0, "{report}");
 }

@@ -105,14 +105,16 @@ pub(crate) fn rich_compare_ty(
     // `None` crosses as CPython's own `Py_None` (`o == None`); in non-strict
     // mode a fresh native container (`o != []`) crosses as its CPython copy,
     // which nothing else can observe, and a name holding one may become an
-    // object (`non_strict::request_container_widen`).
+    // object (`non_strict::request_container_widen`); so does any list,
+    // tuple or set of scalars, which a comparison cannot tell from its copy.
     crate::non_strict::request_container_widen(other_expr, other);
     Some(
         if super::is_object_operand(env, other)
             || *other == Ty::None
             || crate::object_box::fresh_container(env, other_expr, other)
             || (crate::non_strict::is_non_strict()
-                && crate::object_box::display_boxable(other_expr, other))
+                && (crate::object_box::display_boxable(other_expr, other)
+                    || scalar_collection(other)))
         {
             Ok(Ty::Object)
         } else {
@@ -154,6 +156,14 @@ pub(crate) fn membership_ty(
         // made once (`pycc_ext_obj_pack_frozenset`), which compares an
         // item of any type as CPython does.
         (Ty::Object, container) if super::is_packable_frozenset(container) => Ok(Ty::Bool),
+        // Non-strict mode: so does a native list, tuple or set of scalars
+        // (`filter_type in (1, 2, 3, 4)`), as a CPython copy of it, which
+        // a membership test cannot tell from the original.
+        (Ty::Object, container)
+            if crate::non_strict::is_non_strict() && scalar_collection(container) =>
+        {
+            Ok(Ty::Bool)
+        }
         (Ty::Object, container) => Err(object_operation_unsupported(&format!(
             "testing membership of a CPython object in a `{}` value",
             container.name()
@@ -164,6 +174,19 @@ pub(crate) fn membership_ty(
             format!("comparison operator not supported yet: {op:?}"),
             Span::new(0, 0),
         )),
+    }
+}
+
+/// Whether `ty` is a list, tuple or set whose elements are `int`, `float`,
+/// `bool` or `str`: a container an object membership test boxes into its
+/// CPython copy (`pycc_mir::obj_compare`).
+#[must_use]
+pub(crate) fn scalar_collection(ty: &Ty) -> bool {
+    let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Str);
+    match ty {
+        Ty::List(e) | Ty::VarTuple(e) | Ty::Set(e) => scalar(e),
+        Ty::Tuple(es) => es.iter().all(scalar),
+        _ => false,
     }
 }
 

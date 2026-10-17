@@ -841,8 +841,8 @@ mod tests {
                 "class C[T]:\n    def __init__(self, a: int) -> None:\n        self.a = a\n\nc = C[int](a=1)\n",
                 true,
             ),
-            // `**` unpacking.
-            ("d = {}\nundefined_callee(**d)\n", true),
+            // `**` unpacking into a callee that may be an object is deferred.
+            ("d = {}\nundefined_callee(**d)\n", false),
         ] {
             assert_eq!(
                 keyword_call_refused_here(source),

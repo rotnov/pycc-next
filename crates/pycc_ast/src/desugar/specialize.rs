@@ -69,6 +69,11 @@ pub const NATIVE_PREFIX: &str = "_pycc_native_";
 /// type object, which compiled code reaches as an attribute of the module.
 const BUILTINS: &str = "__pycc_specialize_builtins";
 
+/// The types a guard tests for, and the prefix of the module globals that
+/// hold them (`__pycc_specialize_int = builtins.int`).
+const GUARD_TYPES: [&str; 3] = ["int", "str", "bytearray"];
+const GUARD_TYPE_PREFIX: &str = "__pycc_specialize_";
+
 /// The annotation a `bytearray` guess writes into the copy: the byte
 /// buffer type, which only the specializer spells (a program's own
 /// `bytearray` annotation keeps meaning what it did).
@@ -101,21 +106,33 @@ pub fn specialize_untyped(
     skip: &dyn Fn(&str) -> bool,
     keep_builtins: &dyn Fn(&str) -> bool,
 ) -> Vec<Specialized> {
-    // The guard spells `type`: a module that binds it (or the names the
-    // guard's types are read as) anywhere is left alone.
-    if ["type", "str", "int", "bytearray", "builtins"]
+    // The guard spells `type` (its types are attributes of the `builtins`
+    // module it imports under its own name) and a copy's annotations spell
+    // the guessed types: a module that binds one of them at module level is
+    // left alone, and so is a function that binds `type` itself (`plan`).
+    // A function binding `type` locally (`type, data = chunk`) shadows it
+    // only there.
+    if ["type", "str", "int", "bytearray"]
         .iter()
-        .any(|builtin| super::ext_generators::bindings(&module.body, builtin) > 0)
+        .any(|builtin| binds_at_module_level(&module.body, builtin))
     {
         return Vec::new();
     }
+    // The builtins the attribute snapshots' analysis takes as native
+    // (`attrs`) the module does not rebind.
+    let module_bound: std::collections::HashSet<&str> = attrs::BUILTINS_READ
+        .iter()
+        .copied()
+        .filter(|builtin| binds_at_module_level(&module.body, builtin))
+        .collect();
+    let module_binds = |name: &str| module_bound.contains(name);
     let mut out = Vec::new();
     let old = std::mem::take(&mut module.body);
     let mut body = Vec::with_capacity(old.len());
     for stmt in old {
         match stmt {
             Stmt::FunctionDef(mut def) => {
-                let planned = plan(&def, None, skip, keep_builtins);
+                let planned = plan(&def, None, skip, keep_builtins, &module_binds);
                 if planned.is_none()
                     && let Some((clone, spec)) = plan_iterable(&def, skip)
                 {
@@ -136,12 +153,19 @@ pub fn specialize_untyped(
             }
             Stmt::ClassDef(mut class) => {
                 let class_name = class.name.to_string();
+                let facts = attrs::ClassFacts::of(&class);
                 let old = std::mem::take(&mut class.body);
                 let mut members = Vec::with_capacity(old.len());
                 for item in old {
                     match item {
                         Stmt::FunctionDef(mut def) => {
-                            match plan(&def, Some(&class_name), skip, keep_builtins) {
+                            match plan(
+                                &def,
+                                Some((&class_name, &facts)),
+                                skip,
+                                keep_builtins,
+                                &module_binds,
+                            ) {
                                 Some((clone, spec)) => {
                                     add_guard(&mut def, Some(&class_name), &spec);
                                     members.push(Stmt::FunctionDef(def));
@@ -169,16 +193,31 @@ pub fn specialize_untyped(
         {
             at += 1;
         }
-        let import = super::signatures::parse_helper(
-            &format!("import builtins as {BUILTINS}\n"),
-            TextRange::default(),
-        );
+        // The guards' types are read once, into globals of their own: an
+        // attribute of the `builtins` module read at every call cost more
+        // than the rest of the guard.
+        let mut source = format!("import builtins as {BUILTINS}\n");
+        for ty in GUARD_TYPES {
+            source.push_str(&format!("{GUARD_TYPE_PREFIX}{ty} = {BUILTINS}.{ty}\n"));
+        }
+        let import = super::signatures::parse_helper(&source, TextRange::default());
         for (offset, stmt) in import.into_iter().enumerate() {
             body.insert(at + offset, stmt);
         }
     }
     module.body = body.into();
     out
+}
+
+/// Whether `body`, a module's statements, binds `name` in the module's own
+/// scope: a top-level `def` or `class` of that name, or any binding by
+/// another statement (counted conservatively, nested scopes included).
+fn binds_at_module_level(body: &[Stmt], name: &str) -> bool {
+    body.iter().any(|stmt| match stmt {
+        Stmt::FunctionDef(def) => def.name.as_str() == name,
+        Stmt::ClassDef(class) => class.name.as_str() == name,
+        other => super::ext_generators::bindings(std::slice::from_ref(other), name) > 0,
+    })
 }
 
 /// The type an unannotated parameter with literal default `default` has
@@ -202,13 +241,16 @@ fn literal_type(default: &Expr) -> Option<&'static str> {
 /// covers, or `None` when it is not specialized.
 fn plan(
     def: &StmtFunctionDef,
-    class: Option<&str>,
+    class: Option<(&str, &attrs::ClassFacts)>,
     skip: &dyn Fn(&str) -> bool,
     keep_builtins: &dyn Fn(&str) -> bool,
+    module_binds: &dyn Fn(&str) -> bool,
 ) -> Option<(StmtFunctionDef, Specialized)> {
+    let class_facts = class.map(|(_, facts)| facts);
+    let class = class.map(|(name, _)| name);
     let fn_name = def.name.as_str();
     let p = &def.parameters;
-    if fn_name.starts_with('_')
+    if fn_name.starts_with("__") || fn_name.starts_with("_pycc")
         || def.is_async
         || !def.decorator_list.is_empty()
         || p.vararg.is_some()
@@ -217,6 +259,8 @@ fn plan(
         || !p.kwonlyargs.is_empty()
         || super::ext_generators::yields(&def.body)
         || !loops(&def.body)
+        || p.iter().any(|param| param.name().as_str() == "type")
+        || super::ext_generators::bindings(&def.body, "type") > 0
     {
         return None;
     }
@@ -269,6 +313,20 @@ fn plan(
         };
         annotations.push(annotation);
     }
+    // A method's integer attributes it may take as snapshots (`attrs`).
+    let snapshots = match (receiver, class_facts) {
+        (Some(receiver), Some(facts)) => {
+            let known: std::collections::HashMap<String, &'static str> =
+                guessed.iter().cloned().collect();
+            attrs::snapshot_attrs(def, receiver.parameter.name.as_str(), facts, &known, module_binds)
+        }
+        _ => Vec::new(),
+    };
+    if let Some(receiver) = receiver {
+        for attr in &snapshots {
+            guessed.push((format!("{}.{attr}", receiver.parameter.name), "int"));
+        }
+    }
     if guessed.is_empty() {
         return None;
     }
@@ -287,6 +345,11 @@ fn plan(
     }
     if clone.returns.is_none() {
         clone.returns = Some(Box::new(name("object", ExprContext::Load, def.name.range())));
+    }
+    if let Some(receiver) = receiver
+        && !snapshots.is_empty()
+    {
+        attrs::take_snapshots(&mut clone, receiver.parameter.name.as_str(), &snapshots);
     }
     let restored_builtins = !keep_builtins(&qualname) && restore_builtins(&mut clone.body);
     Some((
@@ -360,7 +423,7 @@ fn plan_iterable(
 ) -> Option<(StmtFunctionDef, Specialized)> {
     let fn_name = def.name.as_str();
     let p = &def.parameters;
-    if fn_name.starts_with('_')
+    if fn_name.starts_with("__") || fn_name.starts_with("_pycc")
         || def.is_async
         || !def.decorator_list.is_empty()
         || p.vararg.is_some()
@@ -417,17 +480,24 @@ fn add_guard(def: &mut StmtFunctionDef, class: Option<&str>, spec: &Specialized)
         .iter()
         .map(|a| a.parameter.name.to_string())
         .collect();
+    // An attribute snapshot (`attrs`, spelled `self.name`) is passed last.
+    let snapshots: Vec<&str> = spec
+        .params
+        .iter()
+        .map(|(param, _)| param.as_str())
+        .filter(|param| param.contains('.'))
+        .collect();
     let (callee, args) = match class {
         Some(_) => (
             format!("{}.{NATIVE_PREFIX}{}", names[0], def.name),
-            names[1..].join(", "),
+            names[1..].iter().map(String::as_str).chain(snapshots.iter().copied()).collect::<Vec<_>>().join(", "),
         ),
         None => (format!("{NATIVE_PREFIX}{}", def.name), names.join(", ")),
     };
     let test = spec
         .params
         .iter()
-        .map(|(param, ty)| format!("type({param}) is {BUILTINS}.{ty}"))
+        .map(|(param, ty)| format!("type({param}) is {GUARD_TYPE_PREFIX}{ty}"))
         .collect::<Vec<_>>()
         .join(" and ");
     let source = format!("if {test}:\n    return {callee}({args})\n");
@@ -467,6 +537,7 @@ fn loops(body: &[Stmt]) -> bool {
     find.0
 }
 
+mod attrs;
 mod evidence;
 use evidence::Evidence;
 

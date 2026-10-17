@@ -66,7 +66,9 @@ pub use exception::{
     builtin_exception_parent, except_handler_binding_type_name, is_builtin_exception_class,
     is_flat_builtin_exception_class,
 };
-pub use expr::object_keyword_call::KEYWORD_CALL_UNSUPPORTED;
+pub use expr::object_keyword_call::{
+    KEYWORD_CALL_UNSUPPORTED, STAR_ARG, STAR_ARGS, STAR_KWARGS, is_unpacking,
+};
 pub use expr::receiver_takes_method_path;
 pub(crate) use func::{
     annotation_to_ty, lower_arg_list, lower_function, lower_return_annotation, type_param_name,

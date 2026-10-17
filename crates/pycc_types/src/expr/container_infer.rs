@@ -419,9 +419,11 @@ pub(crate) fn infer_subscript_expr(
         Ty::Tuple(elems) => {
             // A computed `int` index into a tuple whose elements share one
             // `int`/`bool`/`float` type (`t[k]` over `(True, False, True)`):
-            // every position has that type.
+            // every position has that type. Non-strict mode: so does an
+            // object index, read through `__index__`.
             if !matches!(index.as_ref(), HirExpr::IntLiteral(_))
-                && matches!(index_ty, Ty::Int | Ty::Bool)
+                && (matches!(index_ty, Ty::Int | Ty::Bool)
+                    || crate::non_strict::admits_index(&index_ty))
                 && let Some(first) = elems.first()
                 && matches!(first, Ty::Int | Ty::Bool | Ty::Float)
                 && elems.iter().all(|elem| elem == first)

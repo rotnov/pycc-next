@@ -500,8 +500,9 @@ pub(crate) fn lower_expr(
             // longer refused outright -- `object_keyword_call` keeps it as a
             // `KeywordCall` for the shapes whose callee can be a CPython
             // object, and refuses every other shape with the same `C0001`.
-            if !call.arguments.keywords.is_empty()
-                && !keyword_bind::is_bindable_call(signatures, call)
+            if object_keyword_call::unpacks(call)
+                || (!call.arguments.keywords.is_empty()
+                    && !keyword_bind::is_bindable_call(signatures, call))
             {
                 return object_keyword_call::lower(
                     call,
@@ -820,6 +821,16 @@ pub(crate) fn lower_expr(
         }
         Expr::BooleanLiteral(lit) => HirExpr::BoolLiteral(lit.value),
         Expr::StringLiteral(lit) => HirExpr::StringLiteral(lit.value.to_str().to_string()),
+        // Non-strict mode: a `bytes` literal is CPython's own `bytes` object,
+        // built from its bytes carried as Latin-1 text (one code point per
+        // byte, `crate::builtins::BYTES_LITERAL`).
+        Expr::BytesLiteral(lit) if signatures.non_strict() => {
+            let text: String = lit.value.bytes().map(char::from).collect();
+            HirExpr::Call {
+                callee: crate::builtins::BYTES_LITERAL.to_string(),
+                args: vec![HirExpr::StringLiteral(text)],
+            }
+        }
         Expr::NoneLiteral(_) => HirExpr::NoneLiteral,
         Expr::FString(fstring) => {
             fstring::lower_fstring(fstring, in_function, class_name, imports, signatures)?

@@ -3,6 +3,7 @@
 
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{CmpOp, Expr, ExprContext, Number, Operator, Stmt};
+use ruff_text_size::Ranged;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// `str` methods a `list`, `dict`, `set` or `tuple` does not have.
@@ -214,7 +215,24 @@ impl<'a> Visitor<'a> for Locals<'_> {
             }
             Stmt::AugAssign(aug) => self.bind(&aug.target, Some(&aug.value), true),
             Stmt::AnnAssign(ann) => self.bind(&ann.target, None, false),
-            Stmt::For(f) => self.bind(&f.target, None, false),
+            // `for x in s:` binds `x` to an item of `s`, as `x = s[i]` does.
+            Stmt::For(f) => match (f.target.as_ref(), f.iter.as_ref()) {
+                (Expr::Name(_), Expr::Name(base)) if self.params.contains(base.id.as_str()) => {
+                    let item = Expr::Subscript(ruff_python_ast::ExprSubscript {
+                        node_index: Default::default(),
+                        range: f.iter.range(),
+                        value: f.iter.clone(),
+                        slice: Box::new(Expr::NumberLiteral(ruff_python_ast::ExprNumberLiteral {
+                            node_index: Default::default(),
+                            range: f.iter.range(),
+                            value: Number::Int(ruff_python_ast::Int::ZERO),
+                        })),
+                        ctx: ExprContext::Load,
+                    });
+                    self.bind(&f.target, Some(&item), false);
+                }
+                _ => self.bind(&f.target, None, false),
+            },
             Stmt::With(w) => {
                 for item in &w.items {
                     if let Some(var) = &item.optional_vars {

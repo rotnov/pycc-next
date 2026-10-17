@@ -71,3 +71,87 @@ int pycc_ext_ba_byte_error(void)
     PyErr_SetString(PyExc_ValueError, "byte must be in range(0, 256)");
     return -1;
 }
+
+/*
+ * The byte an `int` word stores into a `bytearray`, as `bytearray.append`
+ * and `bytearray.extend` take it: 0 with `*out` set, or -1 with CPython's
+ * `ValueError` set when the value is outside `range(0, 256)` (every
+ * big int is).
+ */
+static int pycc_ext_ba_byte_of_word(long long encoded, char *out)
+{
+    long long value;
+
+    switch (pycc_rt_ext_int_classify(encoded)) {
+    case PYCC_EXT_INT_SMALLINT:
+        value = pycc_rt_ext_int_decode(encoded);
+        break;
+    case PYCC_EXT_INT_FALSE:
+        value = 0;
+        break;
+    case PYCC_EXT_INT_TRUE:
+        value = 1;
+        break;
+    default:
+        value = -1;
+        break;
+    }
+    if (value < 0 || value > 255) {
+        return pycc_ext_ba_byte_error();
+    }
+    *out = (char)value;
+    return 0;
+}
+
+/*
+ * `b.append(x)` on a byte buffer (`pycc_hir::builtins::BYTEARRAY_APPEND`):
+ * the `int` word `encoded` stored at the end of the `bytearray` `ba`
+ * (borrowed). `None`, after bridging the exception on a failure.
+ */
+PyObject *pycc_ext_obj_ba_append(PyObject *ba, long long encoded)
+{
+    char byte;
+    Py_ssize_t size;
+
+    if (pycc_ext_ba_byte_of_word(encoded, &byte) != 0) {
+        return pycc_ext_stdlib_failed();
+    }
+    size = PyByteArray_Size(ba);
+    if (size < 0 || PyByteArray_Resize(ba, size + 1) != 0) {
+        return pycc_ext_stdlib_failed();
+    }
+    PyByteArray_AsString(ba)[size] = byte;
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+/*
+ * `b.extend(xs)` on a byte buffer (`pycc_hir::builtins::BYTEARRAY_EXTEND`)
+ * with a native list of `int`s (borrowed): every item is checked before
+ * the `bytearray` grows, so a failing item leaves it unchanged, as
+ * CPython's own `extend` does.
+ */
+PyObject *pycc_ext_obj_ba_extend(PyObject *ba, void *list)
+{
+    long long len = pycc_rt_list_len(list);
+    long long i;
+    Py_ssize_t size;
+    char *data;
+    char byte;
+
+    for (i = 0; i < len; i++) {
+        if (pycc_ext_ba_byte_of_word(pycc_rt_list_get(list, i), &byte) != 0) {
+            return pycc_ext_stdlib_failed();
+        }
+    }
+    size = PyByteArray_Size(ba);
+    if (size < 0 || PyByteArray_Resize(ba, size + (Py_ssize_t)len) != 0) {
+        return pycc_ext_stdlib_failed();
+    }
+    data = PyByteArray_AsString(ba) + size;
+    for (i = 0; i < len; i++) {
+        (void)pycc_ext_ba_byte_of_word(pycc_rt_list_get(list, i), &data[i]);
+    }
+    Py_INCREF(Py_None);
+    return Py_None;
+}

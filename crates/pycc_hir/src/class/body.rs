@@ -902,6 +902,18 @@ pub(super) fn walk_class_body(input: &ClassBodyInput<'_>) -> Result<ClassBodyOut
         }
         items.push(item);
     }
+    // Non-strict mode: an attribute a method assigns elsewhere is an
+    // `object` slot (`super::method_attrs`).
+    if crate::func::is_non_strict(aliases) && !is_dataclass && type_param.is_none() {
+        super::method_attrs::add_method_attrs(body, &mut attrs, &|name| {
+            methods.iter().any(|(held, _)| held == name)
+                || properties.iter().any(|p| p.name == name)
+                || static_methods.iter().any(|(held, _)| held == name)
+                || class_methods.iter().any(|(held, _)| held == name)
+                || class_attrs.iter().any(|(held, ..)| held == name)
+                || declared.iter().any(|d| d.name == name)
+        });
+    }
     // #1266: every declaration must be established by the own `__init__`
     // (an empty `attrs` when there is none) and must not name a method.
     reject_unestablished_or_colliding(

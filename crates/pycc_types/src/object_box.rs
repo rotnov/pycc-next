@@ -213,10 +213,11 @@ fn fresh_list(env: &Environment, value: &HirExpr, ty: &Ty) -> bool {
 
 /// Whether a list element of type `ty` may be shared between a native list
 /// and its CPython copy: immutable, or an instance whose carrier keeps its
-/// identity.
+/// identity (a CPython object is the same object in both).
 fn shareable_element(env: &Environment, ty: &Ty) -> bool {
     match ty {
-        Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+        // A CPython object element is the same object in the copy.
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Object => true,
         Ty::Tuple(elements) => elements
             .iter()
             .all(|e| matches!(e, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)),

@@ -229,13 +229,41 @@ pub(super) fn merge_inferred_types(left: Ty, right: Ty) -> Option<Ty> {
         && [&left, &right].contains(&&Ty::Object)
         && [&left, &right].iter().all(|ty| {
             matches!(ty, Ty::Object | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::None)
+                || optional_join(ty, &Ty::None).is_some()
         })
     {
         // Non-strict mode (#3): a term inferred both as a CPython object
         // and as a scalar (a helper called with an object and with an
         // `int`) is the object, which holds either.
         Some(Ty::Object)
+    } else if crate::non_strict::is_non_strict()
+        && let Some(inner) = optional_join(&left, &right)
+    {
+        // Non-strict mode: a term inferred both as `None` and as a scalar
+        // (a helper parameter defaulting to `None` and called with an
+        // `int`) is the optional scalar.
+        Some(Ty::Optional(Box::new(inner)))
     } else {
         None
+    }
+}
+
+/// The scalar `T` when `left` and `right` are `None`, `T` or `T | None`
+/// with at least one `None` side and one `T` side.
+fn optional_join(left: &Ty, right: &Ty) -> Option<Ty> {
+    let scalar = |ty: &Ty| match ty {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str => Some(ty.clone()),
+        Ty::Optional(inner) if matches!(**inner, Ty::Int | Ty::Float | Ty::Bool | Ty::Str) => {
+            Some((**inner).clone())
+        }
+        _ => None,
+    };
+    match (left, right) {
+        (Ty::None, other) | (other, Ty::None) => scalar(other),
+        (Ty::Optional(_), other) | (other, Ty::Optional(_)) => {
+            let (a, b) = (scalar(left)?, scalar(other)?);
+            (a == b).then_some(a)
+        }
+        _ => None,
     }
 }

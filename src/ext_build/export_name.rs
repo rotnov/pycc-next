@@ -141,7 +141,15 @@ pub(crate) fn classify_export_name(name: &str) -> Option<ExportName> {
     let Some(method) = segments.next() else {
         return Some(ExportName::ModuleLevel);
     };
-    if method.is_empty() || !is_public_name(method) {
+    // A private instance method (`Reader._process_IHDR`) is admitted
+    // lexically too, so a non-strict module's instances answer CPython's
+    // `getattr(self, name)` for it; `collect_exports` publishes it only in
+    // non-strict mode ([`is_private_method_name`]).
+    let private = is_private_method_name(method);
+    if method.is_empty() || !(is_public_name(method) || private) {
+        return None;
+    }
+    if private && segments.clone().next().is_some() {
         return None;
     }
     match segments.next() {
@@ -183,6 +191,12 @@ pub(crate) fn classify_export_name(name: &str) -> Option<ExportName> {
             }
         }
     }
+}
+
+/// Whether `method` names a private method: one leading underscore, not a
+/// dunder and not a class-private (`__x`, name-mangled) name.
+pub(crate) fn is_private_method_name(method: &str) -> bool {
+    method.starts_with('_') && !method.starts_with("__")
 }
 
 /// The source-level spelling of a compiled function name: the name the user

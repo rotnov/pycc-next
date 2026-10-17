@@ -278,10 +278,35 @@ pub(super) fn lower_method(
     } else {
         return_ty
     };
+    let mut body = body;
+    // A generator method (a body containing `yield`) returns its generator,
+    // as a generator function does (`crate::func::generator`). Non-strict
+    // mode: an unannotated one infers what it yields, unless Python calls
+    // it (a public method of an `--ext` module, whose split wrapper
+    // `pycc_ast::split_ext_generators` publishes it otherwise).
+    let return_ty = if !matches!(kind, MethodKind::AbstractMethod)
+        && (crate::body_yields(&body) || pycc_ast::body_yields(&def.body))
+    {
+        let return_ty = match return_ty {
+            Ty::Object
+                if crate::func::is_non_strict(aliases)
+                    && def.returns.is_none()
+                    && !(crate::func::is_ext_module(aliases)
+                        && crate::is_public_name(method_name)) =>
+            {
+                Ty::generator(Ty::Infer)
+            }
+            other => other,
+        };
+        let return_ty = crate::func::generator::generator_return_ty(return_ty, aliases, def)?;
+        crate::func::generator::generator_returns(&mut body, def)?;
+        return_ty
+    } else {
+        return_ty
+    };
     // Non-strict mode (#3): a method returning an object that can run off
     // its end returns `None` there, as a module-level function does
     // (`crate::func`).
-    let mut body = body;
     if return_ty == Ty::Object
         && crate::func::is_non_strict(aliases)
         && !matches!(kind, MethodKind::AbstractMethod)

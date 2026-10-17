@@ -514,6 +514,17 @@ pub(crate) fn lower_stmt(
             signatures,
         )?,
         Stmt::Try(try_stmt) => {
+            // Non-strict mode: clauses whose type is a CPython object
+            // (`except struct.error:`) test the caught exception at run
+            // time (`pycc_ast::object_except_handlers`).
+            let rewritten;
+            let try_stmt = match pycc_ast::object_except_handlers(try_stmt) {
+                Some(stmt) if signatures.non_strict() => {
+                    rewritten = stmt;
+                    &rewritten
+                }
+                _ => try_stmt,
+            };
             let body = lower_body(
                 &try_stmt.body,
                 aliases,

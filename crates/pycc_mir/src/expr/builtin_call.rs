@@ -9,6 +9,26 @@ use pycc_hir::builtins::{BuiltinSig, is_pairwise_variadic, resolve_call, resolve
 /// claim the call. `min`/`max` over three or more arguments fold left,
 /// which keeps CPython's evaluation order and its first-wins tie rule.
 pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirExpr, Vec<MirExpr>> {
+    // Non-strict mode: a standard-library function called with a CPython
+    // object is CPython's own (`pycc_types` typed the call `object`).
+    if let Some((module, function)) = name.split_once('.')
+        && args.iter().any(|arg| arg.ty() == Ty::Object)
+        && let Some(symbol) = MODULE_CALLS.get(args.len().wrapping_sub(1))
+    {
+        let mut all = vec![
+            MirExpr::ObjectBox(Box::new(MirExpr::StringLiteral(module.to_string()))),
+            MirExpr::ObjectBox(Box::new(MirExpr::StringLiteral(function.to_string()))),
+        ];
+        all.extend(args.into_iter().map(|arg| {
+            if arg.ty() == Ty::Object {
+                arg
+            } else {
+                MirExpr::ObjectBox(Box::new(arg))
+            }
+        }));
+        let params = vec![Ty::Object; all.len()];
+        return Ok(rt(symbol, params, Ty::Object, all));
+    }
     // `min(s)` / `max(s)` of one `str`: of its characters.
     let args = if matches!(name, "min" | "max") && args.len() == 1 && args[0].ty() == Ty::Str {
         args.into_iter().map(crate::str_to_list).collect()
@@ -79,6 +99,14 @@ pub(super) fn lower_builtin_call(name: &str, args: Vec<MirExpr>) -> Result<MirEx
         _ => Err(args),
     }
 }
+
+/// `module.function(a[, b[, c]])` of CPython's own module, by argument
+/// count (`src/ext/module/object_stdlib.c`).
+const MODULE_CALLS: [&str; 3] = [
+    "pycc_ext_obj_module_call1",
+    "pycc_ext_obj_module_call2",
+    "pycc_ext_obj_module_call3",
+];
 
 /// `base.method(args)` as a runtime call with `base` as the first argument.
 pub(crate) fn lower_builtin_method(

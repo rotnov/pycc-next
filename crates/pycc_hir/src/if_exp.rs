@@ -39,6 +39,7 @@ pub fn if_exp_result_ty(body: &Ty, orelse: &Ty) -> Option<Ty> {
             | Ty::FrozenSet(_)
             | Ty::Tuple(_)
             | Ty::Instance(_)
+            | Ty::Generator(_)
             | Ty::Param(_),
             _,
         ) if body == orelse => Some(body.clone()),

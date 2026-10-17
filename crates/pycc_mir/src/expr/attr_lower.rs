@@ -280,6 +280,26 @@ pub(crate) fn lower_attr_get_expr(
             return folded;
         }
     }
+    // Non-strict mode: a method read as a value (`get = self.as_rgb`) is
+    // the function value of the method with the receiver bound
+    // (`pycc_types`' `bound_method_ty`).
+    if let Some((owner, mangled)) = class_def.mro.iter().find_map(|mro_class| {
+        mro_class_def(mro_class, classes)
+            .methods
+            .iter()
+            .find(|(name, _)| name == attr)
+            .map(|(_, mangled)| (mro_class, mangled.clone()))
+    }) {
+        let mangled = exact_callee(&class_def.name, owner, mangled, scopes, classes);
+        let Ty::Callable(sig) = lookup(scopes, &format!("$callable:{mangled}")) else {
+            unreachable!("`$callable:` keys hold function value types")
+        };
+        return MirExpr::MakeClosure {
+            function: mangled,
+            captures: vec![base],
+            ty: Ty::Callable(Box::new((sig.0[1..].to_vec(), sig.1))),
+        };
+    }
     panic!(
         "pycc_mir: internal error: attribute `{attr}` not declared on class `{}` \
          or any base in its MRO -- pycc_types::check should have rejected this \
@@ -480,10 +500,9 @@ pub(crate) fn lower_method_call_expr(
     let base = match builtin_call::lower_builtin_method(base, method, lowered_args) {
         Ok(call) => return call,
         // Non-strict mode: a `str` method given a CPython object argument,
-        // which `pycc_types` admitted as CPython's own method.
-        Err((base, lowered_args))
-            if base.ty() == Ty::Str && lowered_args.iter().any(|a| a.ty() == Ty::Object) =>
-        {
+        // or one pycc does not compile, which `pycc_types` admitted as
+        // CPython's own method.
+        Err((base, lowered_args)) if base.ty() == Ty::Str => {
             return MirExpr::ObjMethodCall {
                 base: Box::new(MirExpr::ObjectBox(Box::new(base))),
                 method: method.clone(),

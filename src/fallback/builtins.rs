@@ -32,10 +32,28 @@ const FRAME_BUILTINS: &[&str] = &[
 /// The builtin values a bare name may be rewritten to, when pycc reports
 /// the name undefined.
 const VALUE_BUILTINS: &[&str] = &[
-    "abs", "all", "any", "bin", "bool", "chr", "dict", "divmod", "enumerate", "filter", "float",
-    "frozenset", "hash", "hex", "id", "input", "int", "isinstance", "iter", "len", "list", "map",
-    "max", "min", "next", "oct", "open", "ord", "pow", "print", "range", "repr", "reversed",
-    "round", "set", "sorted", "str", "sum", "tuple", "type", "zip",
+    "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes", "callable", "chr", "dict",
+    "divmod", "enumerate", "filter", "float", "format", "frozenset", "getattr", "hasattr", "hash",
+    "hex", "id", "input", "int", "isinstance", "issubclass", "iter", "len", "list", "map", "max",
+    "memoryview", "min", "next", "object", "oct", "open", "ord", "pow", "print", "range", "repr",
+    "reversed", "round", "set", "setattr", "slice", "sorted", "str", "sum", "tuple", "type", "zip",
+    // The builtin exception and warning classes (`warnings.warn(m,
+    // RuntimeWarning)`, `except (KeyError, mod.Error)`).
+    "ArithmeticError", "AssertionError", "AttributeError", "BaseException", "BaseExceptionGroup",
+    "BlockingIOError", "BrokenPipeError", "BufferError", "BytesWarning", "ChildProcessError",
+    "ConnectionAbortedError", "ConnectionError", "ConnectionRefusedError", "ConnectionResetError",
+    "DeprecationWarning", "EOFError", "EncodingWarning", "EnvironmentError", "Exception",
+    "ExceptionGroup", "FileExistsError", "FileNotFoundError", "FloatingPointError",
+    "FutureWarning", "GeneratorExit", "IOError", "ImportError", "ImportWarning",
+    "IndentationError", "IndexError", "InterruptedError", "IsADirectoryError", "KeyError",
+    "KeyboardInterrupt", "LookupError", "MemoryError", "ModuleNotFoundError", "NameError",
+    "NotADirectoryError", "NotImplementedError", "OSError", "OverflowError",
+    "PendingDeprecationWarning", "PermissionError", "ProcessLookupError", "RecursionError",
+    "ReferenceError", "ResourceWarning", "RuntimeError", "RuntimeWarning", "StopAsyncIteration",
+    "StopIteration", "SyntaxError", "SyntaxWarning", "SystemError", "SystemExit", "TabError",
+    "TimeoutError", "TypeError", "UnboundLocalError", "UnicodeDecodeError", "UnicodeEncodeError",
+    "UnicodeError", "UnicodeTranslateError", "UnicodeWarning", "UserWarning", "ValueError",
+    "Warning", "ZeroDivisionError",
 ];
 
 impl Plan {
@@ -64,12 +82,22 @@ impl Plan {
             // in a nested function): the first call of `name` inside it that
             // is not rewritten yet.
             let end = at + (span.end - span.start);
-            (at..end.max(at + 1))
-                .map(|start| self.builtin_call(start, name))
-                .find(|edits| {
-                    edits
-                        .first()
-                        .is_some_and(|(start, ..)| !self.object_builtins.contains_key(start))
+            let first_unrewritten = |range: std::ops::Range<u32>| {
+                range
+                    .map(|start| self.builtin_call(start, name))
+                    .find(|edits| {
+                        edits
+                            .first()
+                            .is_some_and(|(start, ..)| !self.object_builtins.contains_key(start))
+                    })
+            };
+            // Every call of `name` there is rewritten already (the
+            // diagnostic was placed at the first of several, as a desugared
+            // call can be): the next one in the same statement.
+            first_unrewritten(at..end.max(at + 1))
+                .or_else(|| {
+                    let stmt = self.stmts.iter().find(|s| s.range.contains(&at))?;
+                    first_unrewritten(stmt.range.clone())
                 })
                 .unwrap_or_default()
         } else if let Some(name) = between(message, "name `", "` is not defined") {

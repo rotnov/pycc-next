@@ -234,11 +234,19 @@ buffers in place (`--report-fallbacks`: `specialized: undo_filter_paeth ... scan
 bytearray, previous: bytearray, result: bytearray`). Reading a 256x256 RGB image whose rows
 use all five filter types runs **10x faster** than in CPython: `python3
 bench/package_check.py pypng --time --runs 5` measured 0.015 s against 0.157 s for five
-`Reader.read()`s. Only 15 of its 85 functions compile so far (`--report-fallbacks`): the
-`Reader` and `Writer` classes run in CPython (bytes literals and `*args` calls are not
-compiled yet), as do the generators and the `bytearray()`/`dict()`-building helpers, so
-code dominated by those -- decoding the tiny PngSuite images, say -- gains much less
-(1.6x).
+`Reader.read()`s. 64 of its 85 functions compile (15 in v0.5; `--report-fallbacks`),
+`Reader` among them: its chunk handlers, which it looks up by name
+(`getattr(self, "_process_" + kind)`), its generator methods feeding each other, the
+nested `def convert()` each branch defines, and `bytes` literals, `*args` calls and
+`except struct.error:`. Its sub-byte rows are unpacked by a specialization taking
+`self.bitdepth` as a native `int` into a native `bytearray`. Still in CPython: the
+`Writer` class (a class used as a default value), `Image` (a `with` statement), the
+exception classes (a custom `__str__`, attribute bases), and helpers using generator
+expressions or `dict()`. Decoding every PngSuite image its tests use (`--time`'s second
+measurement) runs **2.5x faster** than CPython (3.4x fewer instructions under
+callgrind): the tiny palette and 1-to-4-bit images spend their time in per-row and
+per-chunk object operations (`self.row_bytes` is a CPython object) and in CPython
+itself (`zlib`, `struct`, `array`), not in the filters.
 
 ## Use pycc in your project
 

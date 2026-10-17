@@ -34,7 +34,7 @@ pub(crate) fn join_if_branches(
             (BindingState::Definitely(bt), Some(BindingState::Definitely(ot))) => {
                 if bt != ot && !is_assignable(bt.clone(), ot.clone()) {
                     non_strict::request_widen(name, bt, ot, |t| {
-                        matches!(t, Ty::Object | Ty::None) || foreign::is_object_operand(env, t)
+                        non_strict::widens_to_object(env, t)
                     });
                     return Err(Diagnostic::error(
                         "T0023",

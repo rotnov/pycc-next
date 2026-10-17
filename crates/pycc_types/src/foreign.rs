@@ -371,6 +371,19 @@ pub(crate) fn is_object_operand(env: &Environment, ty: &Ty) -> bool {
         || is_packable_tuple(ty)
         || is_packable_frozenset(ty)
         || is_carriable_instance(env, ty)
+        || is_boxable_callable(ty)
+}
+
+/// Non-strict mode: whether `ty` is a function value whose parameters (at
+/// most eight) and result are all CPython objects, which crosses into
+/// CPython as a callable over it (`pycc_ext_obj_pack_closure`): one call
+/// signature per argument count serves every such function.
+pub(crate) fn is_boxable_callable(ty: &Ty) -> bool {
+    matches!(ty, Ty::Callable(sig)
+        if crate::non_strict::is_non_strict()
+            && sig.0.len() <= 8
+            && sig.0.iter().all(|param| *param == Ty::Object)
+            && sig.1 == Ty::Object)
 }
 
 /// Whether `ty` is a `frozenset` of `int`, `float`, `bool` or `str`, which
@@ -481,6 +494,7 @@ pub(crate) fn check_object_call_args<'a>(
             && !is_packable_frozenset(arg_ty)
             && !matches!(arg_ty, Ty::None)
             && !is_carriable_instance(env, arg_ty)
+            && !is_boxable_callable(arg_ty)
             && !boxable_generator
         {
             return Err(object_operation_unsupported(&format!(

@@ -43,6 +43,20 @@ pub(crate) fn lower_call_expr(
     let HirExpr::Call { callee, args } = expr else {
         unreachable!()
     };
+    // A byte buffer's `append`/`extend` of a value not stored natively
+    // (`pycc_hir::builtins::byte_buffer_method_call`).
+    if matches!(
+        callee.as_str(),
+        pycc_hir::builtins::BYTEARRAY_APPEND | pycc_hir::builtins::BYTEARRAY_EXTEND
+    ) {
+        let tys: Vec<Ty> = args
+            .iter()
+            .map(|arg| lower_expr(arg, scopes, classes, current_class).ty())
+            .collect();
+        if let Some(call) = pycc_hir::builtins::byte_buffer_method_call(callee, args, &tys) {
+            return lower_expr(&call, scopes, classes, current_class);
+        }
+    }
     // #1313: a direct call of any name typed `Ty::Object`. The
     // admission is by type, not provenance -- the same rule
     // `ObjAttrGet`/`ObjMethodCall` follow -- so it covers both a
@@ -666,10 +680,15 @@ pub(crate) fn lower_keyword_call_expr(
     let (names, values) = keywords
         .iter()
         .map(|(name, value)| {
-            (
-                name.clone(),
-                lower_expr(value, scopes, classes, current_class),
-            )
+            let value = lower_expr(value, scopes, classes, current_class);
+            // An unpacked native container crosses as its CPython copy
+            // (`pycc_types`' `is_unpackable_container`).
+            let value = if pycc_hir::is_unpacking(name) && value.ty() != Ty::Object {
+                MirExpr::ObjectBox(Box::new(value))
+            } else {
+                crate::obj_arith::object_arg(value)
+            };
+            (name.clone(), value)
         })
         .unzip();
     MirExpr::ObjKeywordCall(Box::new(crate::ObjKeywordCall {

@@ -41,11 +41,14 @@ fn an_indexed_parameter_is_text_and_a_bound_an_int() {
     );
     let (module, _) = plan_of(source);
     assert_eq!(def_names(&module.body), ["f", "_pycc_native_f"]);
-    // The guards read `builtins` through a hidden import, first.
+    // The guards read `builtins` through a hidden import, first, and its
+    // types once, into globals.
     assert!(matches!(&module.body[0], Stmt::Import(i) if i.names[0].name.as_str() == "builtins"));
-    let Stmt::FunctionDef(original) = &module.body[1] else { unreachable!() };
+    assert!(matches!(&module.body[1], Stmt::Assign(a)
+        if matches!(&a.targets[0], Expr::Name(n) if n.id.as_str() == "__pycc_specialize_int")));
+    let Stmt::FunctionDef(original) = &module.body[4] else { unreachable!() };
     assert!(matches!(original.body[0], Stmt::If(_)), "the guard comes first");
-    let Stmt::FunctionDef(clone) = &module.body[2] else { unreachable!() };
+    let Stmt::FunctionDef(clone) = &module.body[5] else { unreachable!() };
     let annotation = |i: usize| match clone.parameters.args[i].parameter.annotation.as_deref() {
         Some(Expr::Name(n)) => n.id.to_string(),
         other => panic!("{other:?}"),
@@ -62,7 +65,7 @@ fn a_method_guard_calls_through_the_receiver_after_the_docstring() {
     let (module, planned) = plan_of(source);
     assert_eq!(planned.len(), 1);
     assert_eq!(planned[0].qualname, "C.m");
-    let Stmt::ClassDef(class) = &module.body[1] else { unreachable!() };
+    let Stmt::ClassDef(class) = &module.body[4] else { unreachable!() };
     assert_eq!(def_names(&class.body), ["m", "_pycc_native_m"]);
     let Stmt::FunctionDef(m) = &class.body[0] else { unreachable!() };
     assert!(matches!(m.body[0], Stmt::Expr(_)), "the docstring stays first");
@@ -88,9 +91,11 @@ fn containers_and_loopless_or_unguessable_functions_are_left_alone() {
     assert!(guesses("def f(x):\n    for i in range(3):\n        print(x)\n").is_empty());
     // A float operand is not an int.
     assert!(guesses("def f(x):\n    while x < 1:\n        x = x * 2.0\n").is_empty());
-    // Private, decorated, generator, variadic and keyword-only defs.
+    // Dunder, decorated, generator, variadic and keyword-only defs, and one
+    // binding `type` itself.
     for source in [
-        "def _f(s):\n    for c in s:\n        print(s[0])\n",
+        "def __f(s):\n    for c in s:\n        print(s[0])\n",
+        "def f(s):\n    for c in s:\n        type = s[0]\n",
         "@d\ndef f(s):\n    for c in s:\n        print(s[0])\n",
         "def f(s):\n    for c in s:\n        yield s[0]\n",
         "def f(s, *a):\n    for c in s:\n        print(s[0])\n",
@@ -98,6 +103,56 @@ fn containers_and_loopless_or_unguessable_functions_are_left_alone() {
         "def f(s, k=g()):\n    for c in s:\n        print(s[0])\n",
     ] {
         assert!(guesses(source).is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn a_private_function_is_specialized_and_a_local_type_skips_only_its_own() {
+    let source = "def _f(s):\n    for c in s:\n        print(s[0])\n\n\n\
+def g(s):\n    length, type = s[0], s[1]\n    for c in s:\n        print(c)\n";
+    assert_eq!(guesses(source), vec![("_f".to_string(), vec![("s".to_string(), "str")])]);
+}
+
+#[test]
+fn the_integer_attribute_a_method_reads_first_is_a_snapshot() {
+    let source = concat!(
+        "class R:\n",
+        "    def m(self, bs):\n",
+        "        if self.depth == 8:\n",
+        "            return 0\n",
+        "        out = bytearray()\n",
+        "        for o in bs:\n",
+        "            out.append(o >> self.depth)\n",
+        "        return out\n",
+    );
+    assert_eq!(
+        guesses(source),
+        vec![(
+            "R.m".to_string(),
+            vec![("bs".to_string(), "bytearray"), ("self.depth".to_string(), "int")]
+        )]
+    );
+    let (module, _) = plan_of(source);
+    let Stmt::ClassDef(class) = &module.body[4] else { unreachable!() };
+    let Stmt::FunctionDef(clone) = &class.body[1] else { unreachable!() };
+    let last = clone.parameters.args.last().expect("the snapshot parameter");
+    assert_eq!(last.parameter.name.as_str(), "_pycc_attr_depth");
+    // A method call before a read (it may change the attribute), a store,
+    // or an attribute read later than first, takes no snapshot.
+    for body in [
+        "        self.reset()\n        if self.depth == 8:\n            return 0\n",
+        "        if self.depth == 8:\n            self.depth = 1\n",
+        "        if bs == 8:\n            return self.depth\n",
+        "        if self.depth == 8:\n            print(bs)\n        k = self.depth + 1\n",
+    ] {
+        let source = format!(
+            "class R:\n    def m(self, bs):\n{body}        for o in bs:\n            print(o - 1)\n"
+        );
+        let planned = guesses(&source);
+        assert!(
+            planned.iter().all(|(_, params)| params.iter().all(|(p, _)| !p.contains('.'))),
+            "{source}: {planned:?}"
+        );
     }
 }
 
@@ -143,7 +198,7 @@ fn a_parameter_whose_items_are_numbers_is_a_bytearray() {
     // The copy spells the byte buffer annotation; the guard tests the
     // builtin type.
     let (module, _) = plan_of(paeth);
-    let Stmt::FunctionDef(clone) = &module.body[2] else { unreachable!() };
+    let Stmt::FunctionDef(clone) = &module.body[5] else { unreachable!() };
     assert!(matches!(clone.parameters.args[1].parameter.annotation.as_deref(),
         Some(Expr::Name(n)) if n.id.as_str() == BYTEARRAY_ANNOTATION));
     // An item stored a number, with no item read, is one too; a list

@@ -17,7 +17,7 @@
 mod bare_container;
 mod buffer_spelling;
 mod container_annotation;
-mod generator;
+pub(crate) mod generator;
 pub(crate) mod params;
 #[cfg(test)]
 mod params_tests;

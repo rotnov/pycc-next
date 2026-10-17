@@ -25,7 +25,7 @@ use inkwell::values::BasicValueEnum;
 /// list, because the foreign modules declare many symbols rather than one
 /// and a second `add_function` of any one name is an LLVM module-verifier
 /// error.
-pub(super) fn shim_fn<'ctx>(
+pub(crate) fn shim_fn<'ctx>(
     module: &inkwell::module::Module<'ctx>,
     symbol: &str,
     fn_type: inkwell::types::FunctionType<'ctx>,

@@ -78,6 +78,22 @@ fn sends_and_helper_stop_iterations_match_cpython() {
     }
 }
 
+/// A function returning a generator it does not iterate itself (`return
+/// lengths(rows)`) is not a generator: it ran as one, ending at once, so
+/// the caller saw an empty sequence.
+#[test]
+fn a_function_returning_a_generator_is_not_one() {
+    let name = "generator_returned.py";
+    for release in [false, true] {
+        let dir = ScratchDir::new("generator_returned").expect("scratch");
+        let ours = build_and_run(&dir, &fixture(name), release);
+        let theirs = python().arg(fixture(name)).output().expect("python3 runs");
+        assert!(theirs.status.success(), "{}", text(&theirs.stderr));
+        assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs");
+        assert_eq!(ours.status.code(), theirs.status.code());
+    }
+}
+
 /// `send(None)` to a generator whose send type excludes `None`.
 #[test]
 fn sending_none_to_a_generator_taking_ints_is_a_type_error() {

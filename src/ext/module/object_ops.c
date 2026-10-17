@@ -413,13 +413,21 @@ PyObject *pycc_ext_obj_call_kw(PyObject *callable, PyObject **args,
     long long total = nargs + nkw;
     long long i;
     int packed = 1;
+    int unpacking = 0;
 
     for (i = 0; i < total; i++) {
         if (args[i] == NULL) {
             packed = 0;
         }
     }
-    if (callable != NULL && packed) {
+    for (i = 0; i < nkw; i++) {
+        unpacking |= pycc_ext_is_unpacking(names[i]);
+    }
+    /* `*xs` / `**kw` among the arguments (`object_unpack.c`): bound at run
+     * time, with CPython's checks. */
+    if (callable != NULL && packed && unpacking) {
+        result = pycc_ext_call_unpacking(callable, args, nargs, names, nkw);
+    } else if (callable != NULL && packed) {
         kwnames = PyTuple_New((Py_ssize_t)nkw);
         for (i = 0; kwnames != NULL && i < nkw; i++) {
             PyObject *name = PyUnicode_InternFromString(names[i]);

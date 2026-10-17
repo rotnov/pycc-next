@@ -32,6 +32,7 @@
 mod functions;
 
 pub use functions::start_program;
+pub(crate) use functions::is_non_strict;
 use super::signatures::parse_helper;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{Expr, ExprContext, Stmt, StmtClassDef};

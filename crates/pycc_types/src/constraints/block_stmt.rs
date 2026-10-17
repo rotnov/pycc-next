@@ -84,6 +84,17 @@ pub(super) fn collect_stmt_constraints(
             } else {
                 term
             };
+            // Non-strict mode: rebinding a name still being inferred (an
+            // unannotated parameter, `width = self.width` under `if width
+            // is None:`) to a CPython object makes it an object, which
+            // holds every value it had. One it cannot hold keeps the
+            // check phase's refusal.
+            if crate::non_strict::is_non_strict()
+                && let Some(Ok(Ty::Object)) = &term
+                && let Some(existing @ Err(_)) = env.bindings.get(target.as_str()).cloned()
+            {
+                let _ = unify_terms(existing, Ok(Ty::Object), parents, concrete, "T0023", "");
+            }
             if let Some(term) = term {
                 env.bindings.entry(target.clone()).or_insert(term);
             } else {

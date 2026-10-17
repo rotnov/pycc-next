@@ -531,7 +531,21 @@ impl Rewrite<'_> {
         // for a constructor call, so one of a constructor with defaults is
         // bound here.
         let constructor = matches!(receiver, Receiver::Implicit) && defaults;
-        if !sig.flat && !mapping && (!star || !defaults) && !constructor {
+        // HIR binds no keyword of a method call: `self.m(k=v)` is bound here
+        // when every keyword names a parameter of `m` (a call that cannot
+        // bind keeps CPython's dispatch, in case `self` is not the class's).
+        let self_keywords = matches!(&receiver, Receiver::Bound(Expr::Name(n)) if n.id.as_str() == "self")
+            && args.iter().any(|a| matches!(a, Arg::Keyword(..)))
+            && !star
+            && args.iter().all(|a| match a {
+                Arg::Keyword(name, _) => sig
+                    .positional()
+                    .chain(&sig.kwonly)
+                    .any(|p| p.name == *name)
+                    || sig.kwarg.is_some(),
+                _ => true,
+            });
+        if !sig.flat && !mapping && (!star || !defaults) && !constructor && !self_keywords {
             return None;
         }
         let emitter = Emitter {
@@ -590,7 +604,8 @@ impl Transformer for Rewrite<'_> {
     }
 }
 
-/// Whether some call of the module passes `*seq` or `**mapping`.
+/// Whether some call of the module passes `*seq` or `**mapping`, or is a
+/// `self.m(...)` call with keywords.
 fn has_mapping_call(body: &[Stmt]) -> bool {
     use ruff_python_ast::visitor::{self, Visitor};
     struct Find(bool);
@@ -601,7 +616,10 @@ fn has_mapping_call(body: &[Stmt]) -> bool {
                     || c.arguments
                         .args
                         .iter()
-                        .any(|a| matches!(a, Expr::Starred(_))))
+                        .any(|a| matches!(a, Expr::Starred(_)))
+                    || (!c.arguments.keywords.is_empty()
+                        && matches!(c.func.as_ref(), Expr::Attribute(a)
+                            if matches!(a.value.as_ref(), Expr::Name(n) if n.id.as_str() == "self"))))
             {
                 self.0 = true;
             }

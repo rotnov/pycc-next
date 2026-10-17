@@ -65,6 +65,12 @@ pub fn start_program(non_strict: bool) {
     NON_STRICT.with(|flag| flag.set(non_strict));
 }
 
+/// Whether the program [`start_program`] started is built in non-strict
+/// mode.
+pub(crate) fn is_non_strict() -> bool {
+    NON_STRICT.with(std::cell::Cell::get)
+}
+
 /// The local names `body` binds to the four functions by `from dataclasses
 /// import ...`, and whether it imports `dataclasses` itself.
 fn imported(body: &[Stmt]) -> (HashMap<String, &'static str>, bool) {

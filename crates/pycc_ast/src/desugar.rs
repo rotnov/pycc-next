@@ -67,6 +67,7 @@ mod closures;
 mod collections;
 mod displays;
 mod comps;
+mod const_sets;
 mod const_tuples;
 mod dataclasses;
 mod enums;
@@ -84,6 +85,7 @@ mod hoist;
 mod keys;
 mod pure_calls;
 mod ndarray_ndim;
+mod object_except;
 mod signatures;
 mod specialize;
 mod starred;
@@ -110,6 +112,7 @@ pub fn fold_static_branches(module: &mut ModModule) {
     module.body = body.into();
 }
 pub use ext_generators::split_ext_generators;
+pub use object_except::object_except_handlers;
 pub use specialize::{
     BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, Specialized, specialize_untyped,
 };
@@ -187,6 +190,7 @@ pub fn desugar(module: &mut ModModule) {
         functools::expand_caches(&mut body);
         item_dunders::instance_item_access(&mut body);
         const_tuples::constant_tuple_membership(&mut body);
+        const_sets::hoist_constant_sets(&mut body);
         displays::canonical_displays(&mut body);
         wildcard::expand_wildcards(&mut body);
         ndarray_ndim::close_ndims(&mut body);

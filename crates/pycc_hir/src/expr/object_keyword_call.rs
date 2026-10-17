@@ -42,8 +42,34 @@ use crate::{HirExpr, ImportBinding, unsupported};
 /// (`pycc_types`' `foreign::keyword_call`).
 pub const KEYWORD_CALL_UNSUPPORTED: &str = "keyword call arguments are not supported yet";
 
+/// The [`HirExpr::KeywordCall`] "keyword" names of a call with unpacking,
+/// which no Python identifier can spell: `f(a, *xs, b, k=v, **kw)` is the
+/// positional half `f(a)` followed by `("*", xs)`, `("+", b)`, `("k", v)`
+/// and `("**", kw)`, in source order. `*` extends the positional arguments
+/// with an iterable, `+` appends one more positional argument after an
+/// unpacking, `**` merges a mapping into the keyword arguments
+/// (`pycc_ext_obj_call_kw` binds them at run time, as CPython does).
+pub const STAR_ARGS: &str = "*";
+/// See [`STAR_ARGS`].
+pub const STAR_ARG: &str = "+";
+/// See [`STAR_ARGS`].
+pub const STAR_KWARGS: &str = "**";
+
+/// Whether `name`, a [`HirExpr::KeywordCall`] keyword, is one of the
+/// unpacking markers ([`STAR_ARGS`]).
+#[must_use]
+pub fn is_unpacking(name: &str) -> bool {
+    matches!(name, STAR_ARGS | STAR_ARG | STAR_KWARGS)
+}
+
+/// Whether `call` unpacks an argument (`*xs` or `**kw`).
+pub(super) fn unpacks(call: &ExprCall) -> bool {
+    call.arguments.args.iter().any(|a| matches!(a, Expr::Starred(_)))
+        || call.arguments.keywords.iter().any(|k| k.arg.is_none())
+}
+
 /// Lowers `call`, which passes at least one keyword argument the binder
-/// cannot bind (module doc).
+/// cannot bind, or unpacks an argument (module doc, [`STAR_ARGS`]).
 pub(super) fn lower(
     call: &ExprCall,
     in_function: bool,
@@ -52,9 +78,6 @@ pub(super) fn lower(
     signatures: &SignatureTable,
 ) -> Result<HirExpr, Diagnostic> {
     let refuse = || unsupported(KEYWORD_CALL_UNSUPPORTED, call.range);
-    if call.arguments.keywords.iter().any(|k| k.arg.is_none()) {
-        return Err(refuse());
-    }
     // A module `def` the binder holds but cannot bind here (an observable
     // reordering, #1204) stays refused before its positional half could be
     // routed through the binder's default filling and report a missing
@@ -70,8 +93,17 @@ pub(super) fn lower(
     // (`list.append() takes exactly one argument, got 0` for
     // `xs.append(value=2)`, the bare-`super()` refusal for `super(x=1)`)
     // would describe a call that does not exist.
+    // The positional half stops at the first `*xs`: every argument from
+    // there on is bound at run time.
+    let first_star = call
+        .arguments
+        .args
+        .iter()
+        .position(|a| matches!(a, Expr::Starred(_)))
+        .unwrap_or(call.arguments.args.len());
     let mut positional = call.clone();
     positional.arguments.keywords = Default::default();
+    positional.arguments.args = call.arguments.args[..first_star].to_vec().into();
     let inner = lower_expr(
         &Expr::Call(positional),
         in_function,
@@ -83,20 +115,21 @@ pub(super) fn lower(
     if !is_object_call_shape(&inner) {
         return Err(refuse());
     }
-    let keywords = call
-        .arguments
-        .keywords
-        .iter()
-        .map(|keyword| {
-            let name = keyword
-                .arg
-                .as_ref()
-                .expect("`**` unpacking was refused above")
-                .to_string();
-            lower_expr(&keyword.value, in_function, class_name, imports, signatures)
-                .map(|value| (name, value))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let lower = |value: &Expr| lower_expr(value, in_function, class_name, imports, signatures);
+    let mut keywords = Vec::new();
+    for arg in &call.arguments.args[first_star..] {
+        keywords.push(match arg {
+            Expr::Starred(starred) => (STAR_ARGS.to_string(), lower(&starred.value)?),
+            other => (STAR_ARG.to_string(), lower(other)?),
+        });
+    }
+    for keyword in &call.arguments.keywords {
+        let name = keyword
+            .arg
+            .as_ref()
+            .map_or_else(|| STAR_KWARGS.to_string(), ToString::to_string);
+        keywords.push((name, lower(&keyword.value)?));
+    }
     let range = std::ops::Range::<u32>::from(call.range);
     Ok(HirExpr::KeywordCall {
         call: Box::new(inner),

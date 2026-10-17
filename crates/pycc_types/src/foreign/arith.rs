@@ -147,7 +147,8 @@ pub(crate) fn object_display_ty<'a>(
     if !pycc_hir::display_is_object(kind, &tys) {
         return None;
     }
-    // `None` is CPython's own `Py_None` there.
+    // `None` is CPython's own `Py_None` there, and a generator of boxable
+    // values crosses as a CPython iterator over it.
     // A fresh native list nothing else holds (`(text, [])`) is copied into
     // the CPython one as it is boxed, which no alias can observe.
     let fresh = |element: &HirExpr, ty: &Ty| crate::object_box::fresh_container(env, element, ty);
@@ -162,7 +163,10 @@ pub(crate) fn object_display_ty<'a>(
         }
     }
     Some(match elements.iter().zip(&tys).find(|(element, ty)| {
-        **ty != Ty::None && !is_object_operand(env, ty) && !fresh(element, ty)
+        **ty != Ty::None
+            && !is_object_operand(env, ty)
+            && !fresh(element, ty)
+            && !crate::object_box::is_boxable_generator(env, ty)
     }).map(|(_, ty)| ty) {
         None => Ok(Ty::Object),
         Some(ty) => Err(object_operation_unsupported(&format!(

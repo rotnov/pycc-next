@@ -70,6 +70,7 @@ mod exception_dunders;
 pub(crate) mod generic_base;
 mod inherited_copy;
 mod method;
+mod method_attrs;
 mod method_default_fill;
 pub use inherited_copy::{
     CopiedMemberKind, InheritedCopy, SUPER_TARGET_MARKER, binds_member, first_definer,

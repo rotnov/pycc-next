@@ -398,6 +398,21 @@ pub(crate) fn collect_exports_excluding(
                 ),
             }
         };
+        // A private instance method is published in non-strict mode only,
+        // so CPython code (`getattr(self, "_process_" + kind)`) finds it as
+        // it finds the method of a Python class, and only when every
+        // parameter is an `object`: a native container parameter would
+        // hand the method a copy of the caller's container. Anything else
+        // stays unpublished, as before, rather than a gap.
+        if let ExportName::Method { method, .. } = &spelling
+            && is_private_method_name(method)
+            && !(pycc_types::non_strict_checked()
+                && receiver == ExtReceiver::SelfInstance
+                && carried_params.iter().all(|(_, ty)| *ty == Ty::Object)
+                && unsupported_boundary_ty(carried_params, return_ty, &carrier_classes).is_none())
+        {
+            continue;
+        }
         if let Some(offender) = unsupported_boundary_ty(carried_params, return_ty, &carrier_classes)
         {
             gaps.push((

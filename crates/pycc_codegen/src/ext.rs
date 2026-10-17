@@ -293,6 +293,17 @@ pub const EXT_OBJ_PACK_LIST_SYMBOL: &str = "pycc_ext_obj_pack_list";
 /// frozenset, whose immutability makes the copy indistinguishable.
 pub const EXT_OBJ_PACK_FROZENSET_SYMBOL: &str = "pycc_ext_obj_pack_frozenset";
 
+/// Non-strict mode: a borrowed function value (`PyClosureObj *`) of object
+/// parameters and result, and its parameter count, in; a new reference to a
+/// CPython callable calling it out (`src/ext/module/object_closure.c`).
+pub const EXT_OBJ_PACK_CLOSURE_SYMBOL: &str = "pycc_ext_obj_pack_closure";
+
+/// [`EXT_OBJ_PACK_CLOSURE_SYMBOL`] for a module-level function used as a
+/// value (no captures), with the address of a per-function slot first: the
+/// callable is made once, kept in the slot, and the same one returned again,
+/// as a Python function is one object.
+pub const EXT_OBJ_PACK_FUNCTION_SYMBOL: &str = "pycc_ext_obj_pack_function";
+
 /// The fixed C shim's `len` helper (Part 3 of #1026): it takes a borrowed
 /// `PyObject *` and an out-pointer, writes the D-141 encoded `int` word for
 /// `PyObject_Size(o)` through it and returns `0`, or returns `-1` with a
@@ -933,8 +944,15 @@ pub fn is_ext_exportable_name(name: &str) -> bool {
         // predicate alone.
         return true;
     };
-    if second.starts_with('_') || second.is_empty() {
+    // A private instance method (`<Class>._m`, not `__m`), which the
+    // driver publishes in non-strict mode only: admitted here in every
+    // mode, the superset direction.
+    let private = second.starts_with('_') && !second.starts_with("__");
+    if (second.starts_with('_') && !private) || second.is_empty() {
         return false;
+    }
+    if private {
+        return segments.next().is_none();
     }
     match segments.next() {
         // `<Class>.<method>` -- `Regular`, `PropertyGetter` or

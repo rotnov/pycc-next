@@ -30,6 +30,45 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   reduced to a minimal program. CI runs it for 2 minutes per push and 30 minutes
   nightly (`.github/workflows/fuzz.yml`, findings uploaded as an artifact).
 
+- Untyped code compiled natively by `--non-strict` (ROADMAP v0.6 accept 2, in progress):
+  - `bytes` literals, as CPython `bytes` objects (strict mode still refuses them, `C0001`);
+  - calls unpacking arguments into a CPython callee -- `f(*args)`, `o.m(a, *xs, b, k=v,
+    **kw)`, `zip(*rows)` -- bound at run time with CPython's checks and `TypeError`
+    messages; a builtin called with keyword or unpacked arguments is CPython's own;
+  - `except` clauses whose type is a CPython object (`except struct.error:`, `except
+    mod.Error as e:`, `e` the CPython exception), tested in order with the other clauses;
+  - an object tested against a tuple, list or set of scalars (`kind in (1, 2, 3, 4)`);
+  - a standard-library function pycc compiles (`math.ceil`, ...) called with a CPython
+    object is CPython's own;
+  - builtin exception and warning classes, `bytes`, `bytearray`, `getattr`, ... as values
+    (`warnings.warn(msg, RuntimeWarning)`);
+  - a builtin call inside an `--ext` module's public generator is routed through CPython
+    like one anywhere else (its diagnostic is now placed);
+  - untyped classes: attributes a method creates outside `__init__` (`self.width = ...`
+    in a header parser) are `object` slots, an unset one raising CPython's
+    `AttributeError`; a method's keyword calls of its own methods (`self.chunk(lenient=
+    True)`), generator methods, a method read as a value (`self._scaled(self.size, k)`),
+    nested functions defined under an `if` (each branch's `def newarray()`), slice stores
+    on objects, and private methods CPython code looks up (`getattr(self, "_process_" +
+    kind)`), published in non-strict mode when their parameters are all objects;
+  - a module-level function used as a value crosses into CPython as a callable (`fn =
+    (None, sub, up)[k]; fn(...)`), one object per function;
+  - a helper parameter defaulting to `None` and called with an `int` is an optional
+    `int`; one rebound to an object is an object;
+  - a CPython object compared with a list, tuple or set of scalars, indexing a tuple of
+    one element type, or put in a display together with a generator;
+  - conditional expressions joining two generators;
+  - `bytearray(...)` locals are native byte buffers (items, `len`, iteration, `append`
+    and `extend` of `int`s run natively), and the guarded native specializations cover
+    private methods too, iteration of a byte buffer (`for o in bs:`), and the integer
+    attribute a method reads first (`self.bitdepth`), passed in as an `int`;
+  - a constant set operand of a comparison (`t <= set(range(65, 91)) | set(range(97,
+    123))`) is built once, as a module-level `frozenset`; standard-library functions an
+    object call reaches are looked up once.
+- pypng 0.20220715.0: 64 of its 85 functions compile natively (15 in 0.5.0), its own
+  suite passing; `bench/package_check.py --time` also times decoding every PngSuite
+  image its tests use.
+
 ### Fixed
 
 Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
@@ -71,6 +110,10 @@ Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
   blank line followed its `def`, so CPython code right after it raised `NameError`.
 - `int()` and `float()` of a `str` refused Unicode decimal digits (`int('١٢')`).
 - A `for ... else` over a `str` or tuple ran its `else:` clause after `break`.
+- A function returning a generator without yielding itself (`return lengths(rows)`) ran
+  as a generator that ended at once, so its caller saw no items.
+- The guarded specializations of an `--ext` module were all dropped when any function
+  bound the name `type` locally (`length, type = struct.unpack(...)`).
 
 ## [0.5.0] - 2026-10-16
 

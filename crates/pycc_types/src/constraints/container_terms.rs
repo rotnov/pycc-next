@@ -220,6 +220,14 @@ pub(crate) fn collect_comprehension_constraints(
     {
         return Ok(Some(Ok(Ty::Object)));
     }
+    // Non-strict mode: over an iterable whose type is not known yet, which
+    // may be an object, the container is not known either.
+    if crate::non_strict::is_non_strict()
+        && let CompIter::Iterable(_) | CompIter::Name(_) = comp.iter
+        && !matches!(scoped.bindings.get(&comp.var), Some(Ok(_)))
+    {
+        return Ok(None);
+    }
     // A set comprehension's container term is chosen by
     // [`set_comp::set_comp_container`] (#1343, #1344), which owns the
     // rule. The element is the last body expression (`body_exprs`

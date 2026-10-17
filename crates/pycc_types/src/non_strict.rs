@@ -161,6 +161,15 @@ pub(crate) use fresh_returns::is_fresh_returning;
 /// Records that `name` was rebound with a value of another type, when both
 /// types fit an `object` slot (`boxable`). The caller still reports its
 /// diagnostic; [`with_widening`] decides whether a retry removes it.
+/// Whether a name holding a value of type `ty` may become an `object`
+/// ([`request_widen`]): an object, `None`, a value the shim boxes, or a
+/// generator of such values (crossing as a CPython iterator over it).
+pub(crate) fn widens_to_object(env: &crate::Environment, ty: &Ty) -> bool {
+    matches!(ty, Ty::Object | Ty::None)
+        || crate::foreign::is_object_operand(env, ty)
+        || crate::object_box::is_boxable_generator(env, ty)
+}
+
 pub(crate) fn request_widen(name: &str, previous: &Ty, new: &Ty, boxable: impl Fn(&Ty) -> bool) {
     if is_non_strict() && boxable(previous) && boxable(new) {
         let item = crate::locate::current_item();

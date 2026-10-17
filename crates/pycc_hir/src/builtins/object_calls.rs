@@ -11,6 +11,29 @@ use crate::Ty;
 /// The CPython-backed signature of builtin `name` over `args`, when one of
 /// the arms below claims the call.
 pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String>> {
+    // A `bytes` literal (`super::BYTES_LITERAL`): its Latin-1 text encoded.
+    if let (super::BYTES_LITERAL, [Ty::Str]) = (name, args) {
+        return Some(Ok(sig("pycc_ext_obj_bytes", &[Ty::Object], Ty::Object)));
+    }
+    // A byte buffer's `append` of an `int` and `extend` by a native list of
+    // them (`crate::ndarray`): stored straight into the `bytearray`.
+    if let (super::BYTEARRAY_APPEND, [Ty::Object, Ty::Int]) = (name, args) {
+        return Some(Ok(sig("pycc_ext_obj_ba_append", &[Ty::Object, Ty::Int], Ty::Object)));
+    }
+    if let (super::BYTEARRAY_EXTEND, [Ty::Object, list @ Ty::List(element)]) = (name, args)
+        && **element == Ty::Int
+    {
+        return Some(Ok(sig("pycc_ext_obj_ba_extend", &[Ty::Object, list.clone()], Ty::Object)));
+    }
+    // An `except` clause whose type is a CPython object
+    // (`crate::stmt::exception`'s object handlers): the caught exception
+    // matched against it, and the CPython exception it is.
+    if let (super::EXC_MATCH, [exc @ Ty::Instance(_), Ty::Object]) = (name, args) {
+        return Some(Ok(sig("pycc_ext_obj_exc_match", &[exc.clone(), Ty::Object], Ty::Bool)));
+    }
+    if let (super::EXC_OBJECT, [exc @ Ty::Instance(_)]) = (name, args) {
+        return Some(Ok(sig("pycc_ext_obj_exc_object", &[exc.clone()], Ty::Object)));
+    }
     // `float('inf')` bound to an `int` slot (`pycc_types::int_inf`).
     if let ("__pycc_int_inf_pos" | "__pycc_int_inf_neg", []) = (name, args) {
         let symbol = if name == "__pycc_int_inf_pos" { "pycc_rt_int_inf_pos" } else { "pycc_rt_int_inf_neg" };

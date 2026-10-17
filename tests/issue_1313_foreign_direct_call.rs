@@ -150,18 +150,13 @@ fn the_argument_shapes_outside_the_scalars_are_refused() {
         "passing a `list[int]` argument to a CPython object's call",
     );
     assert_one_error(
-        // A plain keyword argument is admitted since Part 8 of #1371;
-        // `**` unpacking is not.
+        // A plain keyword argument is admitted since Part 8 of #1371, and
+        // `**` unpacking since v0.6 (`tests/untyped_classes.rs`); a native
+        // dict is not a CPython mapping.
         "obj_call_keyword",
         "from itertools import zip_longest\nd = {\"repeat\": 2}\nzip_longest(\"ab\", **d)\n",
-        "C0001",
-        "keyword call arguments are not supported yet",
-    );
-    assert_one_error(
-        "obj_call_starred",
-        "from itertools import zip_longest\nxs = [\"ab\"]\nzip_longest(*xs)\n",
-        "C0001",
-        "a starred expression",
+        "I0404",
+        "passing a `dict[str, int]` argument to a CPython object's call",
     );
 }
 

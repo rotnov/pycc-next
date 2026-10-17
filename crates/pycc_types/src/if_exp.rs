@@ -37,8 +37,16 @@ pub(crate) fn infer_if_exp(
     }
     // Non-strict mode (#3): branches with no common native type are both
     // boxed, so the expression is an object.
-    let boxable = |ty: &Ty| matches!(ty, Ty::Object | Ty::None) || is_object_operand(env, ty);
-    if crate::non_strict::is_non_strict() && boxable(&body_ty) && boxable(&orelse_ty) {
+    // A fresh native container (`[0]`, `make_list()`) boxes into its
+    // CPython copy, which nothing else can observe.
+    let boxable = |value: &HirExpr, ty: &Ty| {
+        matches!(ty, Ty::Object | Ty::None)
+            || is_object_operand(env, ty)
+            || crate::object_box::fresh_container(env, value, ty)
+            || crate::object_box::display_boxable(value, ty)
+            || crate::object_box::is_boxable_generator(env, ty)
+    };
+    if crate::non_strict::is_non_strict() && boxable(body, &body_ty) && boxable(orelse, &orelse_ty) {
         return Ok(Ty::Object);
     }
     Err(no_common_type(&body_ty, &orelse_ty))

@@ -585,14 +585,13 @@ fn a_call_scanned_before_its_class_fails_is_reported_first() {
 }
 
 #[test]
-fn a_starred_argument_call_reports_the_starred_diagnostic_then_the_call() {
+fn a_starred_argument_call_reports_the_call() {
+    // The unpacking itself lowers (`expr::object_keyword_call`); the enum
+    // class call is what is refused.
     let source = format!("{COLOR}def f(xs: list[int]) -> None:\n    Color(*xs)\n");
     let diagnostics = lower_err(&source);
-    assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
-    let starred = nth_offset(&source, "*xs", 0);
-    assert_eq!(diagnostics[0].code, "C0001");
-    assert_eq!(diagnostics[0].span, Some(Span::new(starred, starred + 3)));
-    assert_enum_call(&diagnostics[1], "Color", "Color(*xs)", &source);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_enum_call(&diagnostics[0], "Color", "Color(*xs)", &source);
 }
 
 #[test]

@@ -27,7 +27,8 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
                                       [--max-build-seconds S] [--instructions]
   PACKAGE  names from PACKAGES (default: all of them).
-  --time   also time each package's hot path compiled and in CPython.
+  --time   also time each package's hot paths compiled and in CPython (pypng:
+           its 256x256 filter image, and every PngSuite image its tests use).
   --instructions
            also count, under valgrind's callgrind, the instructions one call
            of each package's hot path executes against the compiled modules
@@ -94,6 +95,8 @@ class Package:
     instructions_label: str
     max_instructions: int
     instruction_calls: int
+    # More hot paths `--time` times, as (label, code) pairs like `speed`.
+    more_speed: tuple[tuple[str, str], ...] = ()
 
 
 # Prefixed to `Package.tests`: puts the tree on the path, imports every module and checks
@@ -139,6 +142,29 @@ data = out.getvalue()
 def decode():
     return [bytes(r) for r in png.Reader(bytes=data).read()[2]]
 assert decode() == rows
+"""
+
+# pypng's other hot path: decoding every PngSuite image (`pngsuite`, the module
+# its tests read them from; all 28 of them, since `test_png` iterates
+# `pngsuite.png`) and iterating its rows.
+PYPNG_SUITE = """
+import gc, sys, time
+sys.path.insert(0, sys.argv[1])
+import png, pngsuite
+images = list(pngsuite.png.values())
+def decode():
+    for data in images:
+        for row in png.Reader(bytes=data).read()[2]:
+            pass
+decode()
+best = float("inf")
+for _ in range(int(sys.argv[2])):
+    gc.collect()
+    t = time.perf_counter()
+    for _ in range(5):
+        decode()
+    best = min(best, time.perf_counter() - t)
+print(f"{best:.4f}")
 """
 
 PACKAGES = {
@@ -296,6 +322,7 @@ for _ in range(int(sys.argv[2])):
             # Ubuntu's python3.13); the bound is 5% above.
             max_instructions=22_200_000,
             instruction_calls=2,
+            more_speed=(("read() of every PngSuite image its tests use (28) x5", PYPNG_SUITE),),
         ),
     ]
 }
@@ -465,16 +492,17 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             return False
 
     if a.time:
-        times = {}
-        for label, tree in (("cpython", plain), ("compiled", built)):
-            r = python(pkg.speed, str(tree), str(a.runs), cwd=cwd)
-            if r.returncode != 0:
-                print(r.stdout + r.stderr)
-                return False
-            times[label] = float(r.stdout)
-        print(f"  {pkg.speed_label}: CPython {times['cpython']:.3f}s, "
-              f"compiled {times['compiled']:.3f}s "
-              f"({times['cpython'] / times['compiled']:.2f}x)")
+        for speed_label, speed in ((pkg.speed_label, pkg.speed), *pkg.more_speed):
+            times = {}
+            for label, tree in (("cpython", plain), ("compiled", built)):
+                r = python(speed, str(tree), str(a.runs), cwd=cwd)
+                if r.returncode != 0:
+                    print(r.stdout + r.stderr)
+                    return False
+                times[label] = float(r.stdout)
+            print(f"  {speed_label}: CPython {times['cpython']:.3f}s, "
+                  f"compiled {times['compiled']:.3f}s "
+                  f"({times['cpython'] / times['compiled']:.2f}x)")
     if a.instructions:
         per_call = instructions_per_call(pkg, built, cwd)
         if per_call is None:

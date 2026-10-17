@@ -324,6 +324,15 @@ fn assign_target(target: &Expr, value: &Expr) -> Vec<(String, Vec<(NodeKey, Opti
             format!("attr=:{}", attr.attr),
             exprs_of([&*attr.value, value]),
         )],
+        // A slice store lowers to `HirStmt::SetSlice`: the value, the
+        // sequence, then the bounds.
+        Expr::Subscript(sub) if matches!(&*sub.slice, Expr::Slice(_)) => {
+            let mut collector = Collector::default();
+            collector.visit_expr(value);
+            collector.visit_expr(&sub.value);
+            collector.visit_slice(&sub.slice);
+            vec![("[:]=".into(), collector.out)]
+        }
         Expr::Subscript(sub) => {
             let mut collector = Collector::default();
             collector.visit_slice(&sub.slice);

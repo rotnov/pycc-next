@@ -493,3 +493,19 @@ pub enum MirItem {
         from: Option<FromImport>,
     },
 }
+
+/// Whether `body` (a function's) contains a `yield` of its own: whether the
+/// function is a generator, which a function merely returning a generator
+/// (`def f() -> Iterator[int]: return g()`) is not.
+#[must_use]
+pub fn body_yields(body: &[MirStmt]) -> bool {
+    fn expr_yields(expr: &MirExpr) -> bool {
+        matches!(expr, MirExpr::GenYield { .. } | MirExpr::GenYieldFrom { .. })
+            || expr.children().into_iter().any(expr_yields)
+    }
+    body.iter().any(|stmt| {
+        matches!(stmt, MirStmt::Yield(_) | MirStmt::GenReturn(_))
+            || stmt.exprs().into_iter().any(expr_yields)
+            || stmt.bodies().into_iter().any(body_yields)
+    })
+}

@@ -138,7 +138,7 @@ pub(crate) fn collect_call_constraints(
         // it is the capability gap every other use of a `memoryview`
         // is (`C0001`), not D-110's "no value in the current subset
         // is callable" (`T0021`).
-        match resolved_term(term, parents, concrete) {
+        match resolved_term(term.clone(), parents, concrete) {
             Some(ty) => {
                 crate::expr::reject_memoryview_read(
                     callee,
@@ -153,6 +153,23 @@ pub(crate) fn collect_call_constraints(
                     collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
                 }
                 return Ok(None);
+            }
+            // Non-strict mode: a name not typed yet that is called (an
+            // unannotated helper's parameter, `get()`) is a CPython
+            // callable: it is an object, whatever binds it.
+            None if crate::non_strict::is_non_strict() => {
+                unify_terms(
+                    term,
+                    Ok(Ty::Object),
+                    parents,
+                    concrete,
+                    "T0021",
+                    "a called name",
+                )?;
+                for arg in args {
+                    collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+                }
+                return Ok(Some(Ok(Ty::Object)));
             }
             None => {}
         }
@@ -455,6 +472,15 @@ pub(crate) fn collect_call_constraints(
                 "pass exactly {} argument(s)",
                 expected_arg_tys.len()
             )));
+        }
+        // Non-strict mode: called with a CPython object, the function is
+        // CPython's own (`pycc_mir`'s module call), its result an object.
+        if crate::non_strict::is_non_strict()
+            && arg_terms
+                .iter()
+                .any(|term| matches!(term, Some(Ok(Ty::Object))))
+        {
+            return Ok(Some(Ok(Ty::Object)));
         }
         for (term, expected) in arg_terms.iter().zip(expected_arg_tys) {
             if let Some(Ok(arg_ty)) = term

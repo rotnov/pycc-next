@@ -173,6 +173,36 @@ impl Scope<'_, '_> {
                 self.nd(&args[0])
                     .map(|nd| self.op(NdOp::Dim(0), args[0].clone(), Vec::new(), nd))
             }
+            // `b.append(x)` / `b.extend(xs)` on a byte buffer: the
+            // builtins that store a native `int` (or list of them) into the
+            // buffer and otherwise call the method (`crate::builtins`'
+            // `BYTEARRAY_APPEND` / `BYTEARRAY_EXTEND`).
+            HirExpr::MethodCall { base, method, args }
+                if matches!(method.as_str(), "append" | "extend")
+                    && args.len() == 1
+                    && matches!(base.as_ref(), HirExpr::Name(_))
+                    && self.nd(base).is_some_and(|nd| nd.dtype == NdDtype::Byte) =>
+            {
+                let callee = if method == "append" {
+                    crate::builtins::BYTEARRAY_APPEND
+                } else {
+                    crate::builtins::BYTEARRAY_EXTEND
+                };
+                Some(HirExpr::Call {
+                    callee: callee.to_string(),
+                    args: vec![(**base).clone(), args[0].clone()],
+                })
+            }
+            // The same call kept with its container reading too (a module
+            // whose class defines `append`): the byte buffer's builtin is
+            // the one reading left.
+            HirExpr::ReceiverDispatchedCall { call, .. }
+                if matches!(call.as_ref(), HirExpr::Call { callee, .. }
+                    if callee == crate::builtins::BYTEARRAY_APPEND
+                        || callee == crate::builtins::BYTEARRAY_EXTEND) =>
+            {
+                Some((**call).clone())
+            }
             _ => None,
         };
         if let Some(replacement) = replacement {
@@ -456,6 +486,54 @@ impl Scope<'_, '_> {
                         step: HirExpr::IntLiteral(1),
                         body: new_body,
                     }];
+                }
+                // A byte buffer: `for x in b` is `i = 0; while i < len(b):
+                // x = b[i]; i += 1; ...`, the steps CPython's `bytearray`
+                // iterator takes, which reads the size again at each step
+                // (the body may resize the buffer).
+                if let Some(nd) = nd_of_name(self.ctx, self.facts, &list)
+                    && nd.dtype == NdDtype::Byte
+                {
+                    let index = self.fresh();
+                    let mut new_body = vec![
+                        HirStmt::Assign {
+                            target: var.clone(),
+                            value: self.op(
+                                NdOp::Get { chained: false },
+                                HirExpr::Name(list.clone()),
+                                vec![HirExpr::Name(index.clone())],
+                                nd,
+                            ),
+                        },
+                        HirStmt::Assign {
+                            target: index.clone(),
+                            value: HirExpr::BinOp {
+                                op: crate::BinOpKind::Add,
+                                left: Box::new(HirExpr::Name(index.clone())),
+                                right: Box::new(HirExpr::IntLiteral(1)),
+                            },
+                        },
+                    ];
+                    new_body.extend(body);
+                    return vec![
+                        HirStmt::Assign {
+                            target: index.clone(),
+                            value: HirExpr::IntLiteral(0),
+                        },
+                        HirStmt::While {
+                            test: HirExpr::Compare {
+                                op: crate::CmpOpKind::Lt,
+                                left: Box::new(HirExpr::Name(index)),
+                                right: Box::new(self.op(
+                                    NdOp::Dim(0),
+                                    HirExpr::Name(list),
+                                    Vec::new(),
+                                    nd,
+                                )),
+                            },
+                            body: new_body,
+                        },
+                    ];
                 }
                 // The rows of a two-dimensional array: `for row in a` is
                 // `for i in range(len(a)): row = a[i]`, each row the view

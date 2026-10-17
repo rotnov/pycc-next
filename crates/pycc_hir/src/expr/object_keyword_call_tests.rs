@@ -77,14 +77,34 @@ fn the_object_call_shapes_are_deferred_with_their_keywords_in_order() {
     }
 }
 
-/// `**` unpacking (on any callee, a `def` the binder holds included), a
-/// positional half that does not lower, a stdlib intrinsic,
-/// `super().m(k=1)` and a generic class instantiation keep the keyword
-/// `C0001` at the call. A held `def` the binder refuses for its evaluation
-/// order is `keyword_bind::eval_order`'s test.
+/// A call unpacking arguments into a callee that can be an object is
+/// deferred too: the positional half stops at the first `*xs`, and every
+/// later argument follows as an unpacking marker, in source order.
+#[test]
+fn an_unpacking_call_is_deferred_with_its_markers_in_order() {
+    let source = "xs = [1]\nd = {}\nf(1, *xs, 2, k=3, **d)\n";
+    let HirExpr::KeywordCall { call, keywords, .. } = last_expr(source) else {
+        panic!("{source:?} must defer");
+    };
+    assert_eq!(
+        *call,
+        HirExpr::Call {
+            callee: "f".to_string(),
+            args: vec![HirExpr::IntLiteral(1)],
+        }
+    );
+    let names: Vec<&str> = keywords.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, [crate::STAR_ARGS, crate::STAR_ARG, "k", crate::STAR_KWARGS]);
+    assert!(names.iter().all(|n| *n == "k" || crate::is_unpacking(n)));
+}
+
+/// `**` unpacking into a `def` the binder holds, a positional half that
+/// does not lower, a stdlib intrinsic, `super().m(k=1)` and a generic
+/// class instantiation keep the keyword `C0001` at the call. A held `def`
+/// the binder refuses for its evaluation order is
+/// `keyword_bind::eval_order`'s test.
 #[test]
 fn every_other_shape_keeps_the_keyword_refusal_at_the_call() {
-    assert_refused_at("d = {}\nf(1, **d)\n", "f(1, **d)");
     assert_refused_at(
         "def f(a: int, b: int) -> None:\n    print(a)\n\n\nf(b=1, a=2)\nf(a=1, **{})\n",
         "f(a=1, **{})",

@@ -100,6 +100,7 @@ fn scalar_of<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
         Ty::Set(_) | Ty::FrozenSet(_) => Scalar::Set(value.into_pointer_value()),
         Ty::Instance(_) => Scalar::Instance(value.into_pointer_value()),
         Ty::Object => Scalar::Object(value.into_pointer_value()),
+        Ty::Generator(_) => Scalar::Generator(value.into_pointer_value()),
         other => panic!(
             "pycc_codegen: internal error: a conditional expression typed `{}`, which \
              pycc_hir::if_exp_result_ty never yields",

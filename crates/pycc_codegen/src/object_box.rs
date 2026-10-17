@@ -88,6 +88,72 @@ pub(crate) fn emit_boxed<'ctx>(
             &sig.0,
         );
     }
+    // Non-strict mode: a function value of object parameters and result
+    // crosses as a CPython callable over it (`pycc_ext_obj_pack_closure`).
+    if let pycc_mir::Ty::Callable(sig) = value.ty() {
+        let Scalar::Closure(closure) =
+            emit_expr(context, builder, module, rt, user_functions, locals, value)
+        else {
+            panic!("pycc_codegen: internal error: a function value is not a closure")
+        };
+        let ptr = context.ptr_type(inkwell::AddressSpace::default());
+        let i64_type = context.i64_type();
+        let arity = i64_type.const_int(sig.0.len() as u64, false);
+        // A module-level function used as a value is packed once, into a
+        // slot of its own (`EXT_OBJ_PACK_FUNCTION_SYMBOL`).
+        let packed = if let MirExpr::MakeClosure {
+            function,
+            captures,
+            ..
+        } = value
+            && captures.is_empty()
+        {
+            let symbol = format!("pycc.boxed_function.{function}");
+            let slot = module.get_global(&symbol).unwrap_or_else(|| {
+                let global = module.add_global(ptr, None, &symbol);
+                global.set_initializer(&ptr.const_null());
+                global.set_linkage(inkwell::module::Linkage::Private);
+                global
+            });
+            let pack = crate::foreign_pack::shim_fn(
+                module,
+                crate::EXT_OBJ_PACK_FUNCTION_SYMBOL,
+                ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into()], false),
+            );
+            builder
+                .build_call(
+                    pack,
+                    &[slot.as_pointer_value().into(), closure.into(), arity.into()],
+                    "pack_function",
+                )
+                .expect("build_call should not fail for the function packer")
+        } else {
+            let pack = crate::foreign_pack::shim_fn(
+                module,
+                crate::EXT_OBJ_PACK_CLOSURE_SYMBOL,
+                ptr.fn_type(&[ptr.into(), i64_type.into()], false),
+            );
+            builder
+                .build_call(pack, &[closure.into(), arity.into()], "pack_closure")
+                .expect("build_call should not fail for the closure packer")
+        }
+        .try_as_basic_value()
+        .expect_basic("the closure packer returns a pointer")
+        .into_pointer_value();
+        if !crate::heap_rc::is_borrowed_read(value) {
+            crate::heap_rc::emit_decref(context, builder, rt, crate::heap_rc::HeapKind::Closure, closure);
+        }
+        route_null(
+            context,
+            builder,
+            module,
+            rt,
+            ForeignFailEdge::for_current(builder),
+            packed,
+            "object_box",
+        );
+        return packed;
+    }
     if value.ty() == pycc_mir::Ty::None {
         if !matches!(value, MirExpr::NoneLiteral) {
             emit_expr(context, builder, module, rt, user_functions, locals, value);

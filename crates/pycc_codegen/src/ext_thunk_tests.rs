@@ -312,8 +312,9 @@ fn no_thunk_is_emitted_for_a_name_the_export_set_excludes() {
     // Each of these carries a tuple and would otherwise qualify. A thunk
     // for one of them is not merely dead weight: `0gen_` names have no
     // `fnptr_` global at all, so emitting one would panic, and a `_private`
-    // or private-method thunk would advertise a symbol `collect_exports`
-    // never generates a wrapper for.
+    // or class-private (`__x`) method thunk would advertise a symbol
+    // `collect_exports` never generates a wrapper for. (A private method,
+    // `Shape._area`, is admitted: non-strict mode publishes one.)
     //
     // #1145 moved the bare `Shape.area` spelling *into* the export set --
     // it is an instance method now, not an unrecognized third segment -- so
@@ -324,7 +325,7 @@ fn no_thunk_is_emitted_for_a_name_the_export_set_excludes() {
         "ext_thunk_excluded_names",
         &module(vec![
             func("_private", &[("t", tuple(vec![Ty::Int]))], Ty::Int),
-            func("Shape._area", &[("t", tuple(vec![Ty::Int]))], Ty::Int),
+            func("Shape.__area", &[("t", tuple(vec![Ty::Int]))], Ty::Int),
             func(
                 "Shape.width.setter",
                 &[("t", tuple(vec![Ty::Int]))],

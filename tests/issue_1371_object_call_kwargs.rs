@@ -158,10 +158,12 @@ fn the_shapes_outside_part_8_are_refused() {
             "passing a class method's `cls` argument to a CPython object's call",
         ),
         (
+            // `**` unpacking is admitted since v0.6; a native dict is not
+            // a CPython mapping.
             "obj_kw_double_star",
             "d = {\"fillvalue\": 2}\nzip_longest(\"ab\", **d)\n",
-            "C0001",
-            KEYWORD,
+            "I0404",
+            "passing a `dict[str, int]` argument to a CPython object's call",
         ),
         (
             "obj_kw_container_method",

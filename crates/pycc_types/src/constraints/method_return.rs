@@ -56,6 +56,14 @@ pub(super) fn method_call_on_instance(
     if matches!(return_term, Ok(ty) if ty_contains_param(ty)) {
         return None;
     }
+    // A generator method whose element type the solver is still inferring
+    // yields no term until it is resolved, as a generator function's call
+    // does (`call_term`).
+    if let Ok(Ty::Generator(element)) = return_term
+        && crate::empty_container::contains_infer(&element.0)
+    {
+        return None;
+    }
     Some(return_term.clone())
 }
 
@@ -137,6 +145,45 @@ pub(super) fn unify_method_args(
             }
             _ => conflict,
         })?;
+    }
+    // Non-strict mode: a literal default the call leaves to the method
+    // (`self.m(x)` of `def m(self, x, width=None)`) is one more value its
+    // parameter takes, as when a function call fills it in.
+    if crate::non_strict::is_non_strict() {
+        let owner = mangled.split('.').next().and_then(|class| {
+            env.class_defs
+                .iter()
+                .find(|(name, _)| name == class)
+                .map(|(_, def)| def)
+        });
+        let omitted = owner
+            .and_then(|owner| owner.omitted_method_defaults(mangled, arg_terms.len()))
+            .unwrap_or_default();
+        let filled = params.iter().skip(1 + arg_terms.len());
+        for (offset, (default, parameter)) in omitted.into_iter().zip(filled).enumerate() {
+            let ty = match default {
+                HirExpr::NoneLiteral => Ty::None,
+                HirExpr::IntLiteral(_) => Ty::Int,
+                HirExpr::FloatLiteral(_) => Ty::Float,
+                HirExpr::BoolLiteral(_) => Ty::Bool,
+                HirExpr::StringLiteral(_) => Ty::Str,
+                _ => continue,
+            };
+            if parameter.is_ok() {
+                continue;
+            }
+            unify_terms(
+                parameter.clone(),
+                Ok(ty),
+                parents,
+                concrete,
+                "T0021",
+                &format!(
+                    "argument {} of private helper `{mangled}`",
+                    arg_terms.len() + offset + 1
+                ),
+            )?;
+        }
     }
     Ok(())
 }

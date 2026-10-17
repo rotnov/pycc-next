@@ -152,7 +152,34 @@ pub(crate) fn infer_attr_get_expr(
     if matches!(base_ty, Ty::Object) {
         return Ok(Ty::Object);
     }
-    class::resolve_attr_get(env, &base_ty, attr)
+    class::resolve_attr_get(env, &base_ty, attr).or_else(|diagnostic| {
+        bound_method_ty(env, &base_ty, attr).ok_or(diagnostic)
+    })
+}
+
+/// Non-strict mode: a method of a class read as a value (`get =
+/// self.as_rgb`) is a function value, the method with its receiver bound
+/// (`pycc_mir`'s `lower_attr_get_expr`), when no slot, property or class
+/// attribute of that name exists. Its type is the method's signature less
+/// the receiver.
+fn bound_method_ty(env: &Environment, base_ty: &Ty, attr: &str) -> Option<Ty> {
+    let Ty::Instance(class_name) = base_ty else {
+        return None;
+    };
+    if !crate::non_strict::is_non_strict() {
+        return None;
+    }
+    let class_def = env.lookup_class(class_name)?;
+    let mangled = class_def.mro.iter().find_map(|name| {
+        env.lookup_class(name)?
+            .methods
+            .iter()
+            .find(|(method, _)| method == attr)
+            .map(|(_, mangled)| mangled.clone())
+    })?;
+    let (params, ret) = env.lookup_function(&mangled)?;
+    let params = params.get(1..)?.to_vec();
+    Some(Ty::Callable(Box::new((params, ret.clone()))))
 }
 
 pub(crate) fn infer_method_call_expr(
@@ -267,6 +294,12 @@ pub(crate) fn infer_method_call_expr(
         return resolved
             .map(|sig| sig.ret)
             .map_err(|message| Diagnostic::error("T0021", message, Span::new(0, 0)));
+    }
+    // Non-strict mode: a `str` method pycc does not compile (`"cd".encode()`)
+    // is CPython's own, on the `str` boxed.
+    if base_ty == Ty::Str && crate::non_strict::is_non_strict() {
+        crate::foreign::check_object_call_args(env, args, &arg_tys, "method")?;
+        return Ok(Ty::Object);
     }
     if let Ty::List(elem) = &base_ty {
         return crate::list_ops::list_method_ty(elem, method, &arg_tys);

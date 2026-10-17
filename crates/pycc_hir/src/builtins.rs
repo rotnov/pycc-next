@@ -21,6 +21,7 @@
 
 use crate::Ty;
 
+mod byte_buffer;
 mod itertools;
 mod methods;
 mod object_calls;
@@ -30,7 +31,22 @@ mod operators;
 pub use object_defaultdict::object_defaultdict_source;
 pub use operators::{list_inplace_operator, set_inplace_index, set_operator};
 
+pub use byte_buffer::{BYTEARRAY_APPEND, BYTEARRAY_EXTEND, byte_buffer_method_call};
 pub use itertools::{is_itertools_call, itertools_call};
+
+/// Non-strict mode: the callee a `bytes` literal lowers to, with its bytes
+/// as Latin-1 text (one code point per byte); CPython's own `bytes` object
+/// (`pycc_ext_obj_bytes`).
+pub const BYTES_LITERAL: &str = "__pycc_bytes";
+
+/// Non-strict mode: `__pycc_exc_match(e, T)`, whether the caught exception
+/// `e` matches the CPython object `T` an `except` clause names
+/// (`pycc_ext_obj_exc_match`).
+pub const EXC_MATCH: &str = "__pycc_exc_match";
+
+/// Non-strict mode: `__pycc_exc_object(e)`, the caught exception `e` as the
+/// CPython exception object it is (`pycc_ext_obj_exc_object`).
+pub const EXC_OBJECT: &str = "__pycc_exc_object";
 pub use methods::{materialized_method_args, resolve_method};
 
 /// How one builtin call lowers: the runtime symbol and its ABI.
@@ -244,6 +260,11 @@ pub fn is_object_format(callee: &str, args: &[Ty]) -> bool {
 
 /// Every builtin name [`resolve_call`] claims for some argument types.
 pub const CALL_NAMES: &[&str] = &[
+    "__pycc_bytes",
+    "__pycc_ba_append",
+    "__pycc_ba_extend",
+    "__pycc_exc_match",
+    "__pycc_exc_object",
     "__pycc_obj_defaultdict",
     "__pycc_counter",
     "__pycc_counter_of",

@@ -55,6 +55,21 @@ pub(crate) fn infer_keyword_call(
     span: Span,
 ) -> Result<Ty, Diagnostic> {
     if !calls_an_object(env, local_names, call) {
+        // Non-strict mode: a builtin pycc does not call with these
+        // arguments is CPython's own (the fallback loop calls it through
+        // `builtins`, which is an object); the diagnostic says so, at the
+        // callee's name.
+        if let HirExpr::Call { callee, .. } = call
+            && crate::non_strict::is_non_strict()
+            && env.lookup(callee).is_none()
+            && crate::name_diagnostics::is_known_callable_builtin(callee)
+        {
+            return Err(Diagnostic::error(
+                "C0001",
+                format!("call to builtin `{callee}` is valid Python but not implemented yet"),
+                Span::new(span.start, span.start + callee.len() as u32),
+            ));
+        }
         return Err(keyword_call_unsupported(span));
     }
     let ty = infer_expr_in(env, local_names, call)?;
@@ -67,11 +82,27 @@ pub(crate) fn infer_keyword_call(
     } else {
         "call"
     };
-    super::check_object_call_args(
-        env,
-        keywords.iter().map(|(_, value)| value),
-        &keyword_tys,
-        what,
-    )?;
+    // An unpacked native container of scalars (`f(*xs)`, `f(**d)`) is
+    // read once into the call's own arguments, so its CPython copy is
+    // indistinguishable from it.
+    let (_, passed): (Vec<_>, Vec<_>) = keywords
+        .iter()
+        .zip(&keyword_tys)
+        .partition(|((name, _), ty)| {
+            pycc_hir::is_unpacking(name) && is_unpackable_container(ty)
+        });
+    let (values, tys): (Vec<&HirExpr>, Vec<Ty>) = passed
+        .into_iter()
+        .map(|((_, value), ty)| (value, ty.clone()))
+        .unzip();
+    super::check_object_call_args(env, values, &tys, what)?;
     Ok(ty)
+}
+
+/// Whether `ty` is a native list of scalars, which an unpacking argument
+/// (`f(*xs)`) crosses as its CPython copy (`pycc_mir`'s keyword-call
+/// lowering boxes it).
+#[must_use]
+pub(crate) fn is_unpackable_container(ty: &Ty) -> bool {
+    matches!(ty, Ty::List(e) if matches!(**e, Ty::Int | Ty::Float | Ty::Bool | Ty::Str))
 }

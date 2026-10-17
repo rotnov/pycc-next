@@ -198,21 +198,133 @@ PyObject *pycc_ext_obj_max_keyed(PyObject *pairs)
     return pycc_ext_extreme_keyed(pairs, Py_GT, "max");
 }
 
+/*
+ * The standard-library functions the two helpers below call, looked up once
+ * and kept for the process: a dict from `(module, function)` to the
+ * function. Importing the module and reading the attribute at every call
+ * cost more than most of the calls themselves. A program that rebinds such
+ * a function at run time (`builtins.max = ...`) is not seen, as it is not
+ * by the calls pycc compiles natively.
+ *
+ * Returns a borrowed reference, or NULL with an exception set.
+ */
+static PyObject *pycc_ext_stdlib_functions = NULL;
+
+static PyObject *pycc_ext_stdlib_function(PyObject *module_name, PyObject *function)
+{
+    PyObject *key;
+    PyObject *callable;
+    PyObject *module;
+
+    if (pycc_ext_stdlib_functions == NULL) {
+        pycc_ext_stdlib_functions = PyDict_New();
+        if (pycc_ext_stdlib_functions == NULL) {
+            return NULL;
+        }
+    }
+    key = PyTuple_Pack(2, module_name, function);
+    if (key == NULL) {
+        return NULL;
+    }
+    callable = PyDict_GetItemWithError(pycc_ext_stdlib_functions, key);
+    if (callable != NULL || PyErr_Occurred()) {
+        Py_DECREF(key);
+        return callable;
+    }
+    module = PyImport_Import(module_name);
+    callable = module == NULL ? NULL : PyObject_GetAttr(module, function);
+    Py_XDECREF(module);
+    if (callable == NULL || PyDict_SetItem(pycc_ext_stdlib_functions, key, callable) != 0) {
+        Py_XDECREF(callable);
+        Py_DECREF(key);
+        return NULL;
+    }
+    Py_DECREF(key);
+    /* The dict holds the reference now. */
+    Py_DECREF(callable);
+    return callable;
+}
+
 /* `module.function(*args)`, the result a new reference (`None` after a
- * bridged failure). */
+ * bridged failure). The names are string literals: their `str`s are made
+ * once per call site and kept, like the function itself. */
+#define PYCC_EXT_STDLIB_CALL_SITES 64
+static struct {
+    const char *module;
+    const char *function;
+    PyObject *callable;
+} pycc_ext_stdlib_sites[PYCC_EXT_STDLIB_CALL_SITES];
+
 static PyObject *pycc_ext_stdlib_call(const char *module_name, const char *function,
                                       PyObject *a, PyObject *b)
 {
-    PyObject *module = PyImport_ImportModule(module_name);
+    PyObject *callable = NULL;
+    PyObject *args[2] = {a, b};
     PyObject *result;
+    size_t i;
 
-    if (module == NULL) {
-        return pycc_ext_stdlib_failed();
+    for (i = 0; i < PYCC_EXT_STDLIB_CALL_SITES; i++) {
+        if (pycc_ext_stdlib_sites[i].module == NULL) {
+            break;
+        }
+        if (pycc_ext_stdlib_sites[i].module == module_name
+            && pycc_ext_stdlib_sites[i].function == function) {
+            callable = pycc_ext_stdlib_sites[i].callable;
+            break;
+        }
     }
-    result = b == NULL ? PyObject_CallMethod(module, function, "(O)", a)
-                       : PyObject_CallMethod(module, function, "OO", a, b);
-    Py_DECREF(module);
+    if (callable == NULL) {
+        PyObject *module_str = PyUnicode_FromString(module_name);
+        PyObject *function_str = module_str == NULL ? NULL : PyUnicode_FromString(function);
+
+        callable = function_str == NULL ? NULL
+                                        : pycc_ext_stdlib_function(module_str, function_str);
+        Py_XDECREF(module_str);
+        Py_XDECREF(function_str);
+        if (callable == NULL) {
+            return pycc_ext_stdlib_failed();
+        }
+        if (i < PYCC_EXT_STDLIB_CALL_SITES) {
+            Py_INCREF(callable);
+            pycc_ext_stdlib_sites[i].module = module_name;
+            pycc_ext_stdlib_sites[i].function = function;
+            pycc_ext_stdlib_sites[i].callable = callable;
+        }
+    }
+    result = PyObject_Vectorcall(callable, args, b == NULL ? 1 : 2, NULL);
     return result == NULL ? pycc_ext_stdlib_failed() : result;
+}
+
+/* Non-strict mode: `module.function(args)` of a standard-library function
+ * pycc compiles, called with a CPython object (`pycc_mir`'s
+ * `MODULE_CALLS`): CPython's own function. Every argument is borrowed. */
+static PyObject *pycc_ext_module_call(PyObject *module_name, PyObject *function,
+                                      PyObject *const *args, size_t nargs)
+{
+    PyObject *callable = pycc_ext_stdlib_function(module_name, function);
+    PyObject *result = callable == NULL ? NULL : PyObject_Vectorcall(callable, args, nargs, NULL);
+
+    return result == NULL ? pycc_ext_stdlib_failed() : result;
+}
+
+PyObject *pycc_ext_obj_module_call1(PyObject *module, PyObject *function, PyObject *a)
+{
+    PyObject *args[1] = {a};
+    return pycc_ext_module_call(module, function, args, 1);
+}
+
+PyObject *pycc_ext_obj_module_call2(PyObject *module, PyObject *function, PyObject *a,
+                                    PyObject *b)
+{
+    PyObject *args[2] = {a, b};
+    return pycc_ext_module_call(module, function, args, 2);
+}
+
+PyObject *pycc_ext_obj_module_call3(PyObject *module, PyObject *function, PyObject *a,
+                                    PyObject *b, PyObject *c)
+{
+    PyObject *args[3] = {a, b, c};
+    return pycc_ext_module_call(module, function, args, 3);
 }
 
 PyObject *pycc_ext_obj_heapify(PyObject *h)
@@ -274,6 +386,14 @@ PyObject *pycc_ext_obj_iter(PyObject *a)
 PyObject *pycc_ext_obj_next(PyObject *a)
 {
     return pycc_ext_stdlib_call("builtins", "next", a, NULL);
+}
+
+/* A `bytes` literal (`pycc_hir::builtins::BYTES_LITERAL`): its bytes, given
+ * as a `str` of one code point below 256 per byte. */
+PyObject *pycc_ext_obj_bytes(PyObject *latin1)
+{
+    PyObject *result = PyUnicode_AsLatin1String(latin1);
+    return result == NULL ? pycc_ext_stdlib_failed() : result;
 }
 
 PyObject *pycc_ext_obj_list(PyObject *a)

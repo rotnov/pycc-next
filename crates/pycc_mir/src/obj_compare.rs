@@ -110,11 +110,15 @@ pub(super) fn lower_object_compare(
     }
     // An object in a native `str`, or in a native frozenset of scalars: the
     // container is boxed into a CPython one.
+    // Non-strict mode: so is a native list, tuple or set of scalars
+    // (`pycc_types`' `scalar_collection`), as its CPython copy.
+    let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Str);
     if matches!(op, CmpOpKind::In | CmpOpKind::NotIn)
         && left.ty() == Ty::Object
         && (right.ty() == Ty::Str
             || matches!(right.ty(), Ty::FrozenSet(element)
-                if matches!(*element, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)))
+                | Ty::List(element) | Ty::VarTuple(element) | Ty::Set(element) if scalar(&element))
+            || matches!(right.ty(), Ty::Tuple(elements) if elements.iter().all(scalar)))
     {
         return Ok(MirExpr::ObjContains {
             negate: op == CmpOpKind::NotIn,

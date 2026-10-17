@@ -266,7 +266,7 @@ pub(crate) fn check_assignment_of(
         }
         if !class::is_assignable_env(env, &ty, &previous) && !boxed {
             non_strict::request_widen(target, &previous, &ty, |t| {
-                matches!(t, Ty::Object | Ty::None) || foreign::is_object_operand(env, t)
+                non_strict::widens_to_object(env, t)
             });
             // A native container rebound to a fresh container of another
             // type (`t = list(...)` then `t = {x}`): the name becomes an

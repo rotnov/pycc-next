@@ -280,7 +280,14 @@ fn link_frontend(
         }
         item_origins.push(loaded.module.item_origins.clone());
         files.push((loaded.display_path.clone(), loaded.source));
-        parsed_files.push(loaded.parsed);
+        // Located against the module as lowered: an `--ext` module's
+        // public generators were split (`pycc_hir::lower_module`).
+        let parsed = if ext_module {
+            pycc_ast::split_ext_generators(&loaded.parsed).unwrap_or(loaded.parsed)
+        } else {
+            loaded.parsed
+        };
+        parsed_files.push(parsed);
         inputs.push(LinkInput {
             display_path: loaded.display_path,
             module: loaded.module,

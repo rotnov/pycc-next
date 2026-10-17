@@ -100,6 +100,10 @@ pub(super) fn is_bare_narrowed_object_read(
 pub(super) fn object_operand(value: MirExpr) -> MirExpr {
     match value {
         MirExpr::ObjectUnbox(object, _) => *object,
+        // A function value crosses as a CPython callable over it.
+        other if matches!(other.ty(), Ty::Callable(_)) => MirExpr::ObjectBox(Box::new(other)),
+        // So does a generator, as a CPython iterator over it.
+        other if matches!(other.ty(), Ty::Generator(_)) => MirExpr::ObjectBox(Box::new(other)),
         other => other,
     }
 }

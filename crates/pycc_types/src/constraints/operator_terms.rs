@@ -108,6 +108,18 @@ pub(crate) fn collect_if_exp_constraints(
             Ok(pycc_hir::if_exp_result_ty(&body, &orelse).map(Ok))
         }
         (Some(Ok(Ty::None)), _) | (_, Some(Ok(Ty::None))) => Ok(None),
+        // Non-strict mode: a branch that is a CPython object makes the
+        // expression one, the other branch boxed (`crate::if_exp`), so the
+        // other branch's type is its own, not unified with `object`.
+        (Some(Ok(Ty::Object)), Some(_)) | (Some(_), Some(Ok(Ty::Object)))
+            if crate::non_strict::is_non_strict() =>
+        {
+            Ok(Some(Ok(Ty::Object)))
+        }
+        // Non-strict mode: two branches not both known are not unified
+        // either (one may turn out an object, boxing the other); the
+        // checker types the expression once both are known.
+        (Some(_), Some(_)) if crate::non_strict::is_non_strict() => Ok(None),
         (Some(body), Some(orelse)) => {
             unify_terms(
                 body.clone(),

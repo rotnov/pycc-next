@@ -63,6 +63,10 @@ struct Ctx {
     /// bind itself.
     module: Facts,
     fresh: usize,
+    /// Whether a `bytearray(...)` call is a byte buffer: when the
+    /// non-strict fallback planner binds CPython's `builtins` module
+    /// (`pycc_ast::FALLBACK_BUILTINS`), through which it is called.
+    byte_buffers: bool,
 }
 
 /// What a scope knows about its names.
@@ -131,6 +135,7 @@ fn mentions_nd(ty: &Ty) -> bool {
 fn uses_typed_arrays(hir: &HirModule) -> bool {
     let numpy = hir.imports.iter().any(is_numpy_import);
     numpy
+        || binds_fallback_builtins(hir)
         || hir
             .class_defs
             .iter()
@@ -141,6 +146,15 @@ fn uses_typed_arrays(hir: &HirModule) -> bool {
             } => params.iter().any(|(_, t)| mentions_nd(t)) || mentions_nd(return_ty),
             HirItem::TopLevelStmt(_) => false,
         })
+}
+
+/// Whether the module binds the non-strict fallback planner's CPython
+/// `builtins` module, whose `bytearray(...)` calls make byte buffers.
+fn binds_fallback_builtins(hir: &HirModule) -> bool {
+    hir.imports.iter().any(|binding| {
+        matches!(binding, ImportBinding::Foreign { local_name, .. }
+            if local_name == pycc_ast::FALLBACK_BUILTINS)
+    })
 }
 
 fn is_numpy_import(binding: &ImportBinding) -> bool {
@@ -173,6 +187,7 @@ pub fn lower_typed_arrays(hir: &mut HirModule) {
         methods: HashMap::new(),
         module: Facts::default(),
         fresh: 0,
+        byte_buffers: binds_fallback_builtins(hir),
     };
     for item in &hir.items {
         if let HirItem::Function {
