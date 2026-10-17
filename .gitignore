@@ -53,3 +53,4 @@ Thumbs.db
 # Differential fuzzer (fuzz/fuzz.py): its work directory and default findings
 /fuzz/.work/
 /fuzz/findings/
+ci-logs/
