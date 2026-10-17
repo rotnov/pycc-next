@@ -30,6 +30,16 @@ pub(crate) fn infer_list_literal_expr(
     // `T0021`, and it no longer points at #927: the annotated form
     // is handled now.
     if elements.is_empty() {
+        // Strict mode: an empty list no evidence typed holds no element any
+        // operation can observe (`print([])`, `len([])`, `bool([])`,
+        // `sorted([])`), so it is a `list[int]`; every later use is still
+        // checked against that type (`pycc_mir` lowers it to an empty
+        // `list[int]`). Non-strict mode keeps `T0003`, which makes the
+        // list CPython's, and so does the empty-container pre-pass, which
+        // types the list from its uses instead.
+        if !crate::non_strict::is_non_strict() && !crate::non_strict::empty_display_untyped() {
+            return Ok(Ty::List(Box::new(Ty::Int)));
+        }
         return Err(crate::empty_container::unresolved_list());
     }
     let mut elem_ty: Option<Ty> = None;

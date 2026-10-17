@@ -41,3 +41,10 @@ fn takewhile_and_dropwhile() {
 fn match_on_a_tuple_subject() {
     matches_cpython("match_tuple_subject");
 }
+
+/// An empty list display no evidence types holds no element any
+/// operation observes.
+#[test]
+fn untyped_empty_list_displays() {
+    matches_cpython("empty_list_values");
+}
