@@ -243,7 +243,7 @@ Accept:
 5. **Correctness backlog:** every open issue in this milestone is fixed or closed with
    evidence (starting with #1, non-strict rebinding of a function by compiled callers).
 
-## v0.6 — Drop-in for real projects
+## v0.6 — Drop-in for real projects (released 2026-10-17)
 
 Accept:
 1. **`pip install` builds with pycc:** a PEP 517 build backend (`pycc.build`, shipped in the

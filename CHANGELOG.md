@@ -4,6 +4,43 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-17
+
+Drop-in for real projects. `pip install` builds a project with pycc through a PEP 517
+backend shipped in the release archive; strict mode gets a real `int | float` type with
+CPython's semantics for every operation; a differential fuzzer compares generated
+programs against CPython in four build modes (0 findings in its last 30-minute nightly
+run, 18 mismatches found and fixed on the way); untyped classes compile under
+`--non-strict`, so pypng decodes the PngSuite images its tests use 3.18x faster than
+CPython (v0.5: ~1.6x). Also shipped, ahead of v0.7: a Windows x86_64 archive (MSVC
+toolchain, abi3 `.pyd` modules, `win_amd64` wheels), method-level fallback (only the
+smallest enclosing function or method of a construct pycc cannot compile runs in
+CPython) and classes inheriting library classes, which take pydantic 2.13.5 to 789 of its
+1249 functions compiled with 5716 of its 5740 tests passing (its speed is not measured
+yet), and pypng to 78 of 85. Not met: the real-world corpus target (ROADMAP v0.6 accept
+5) -- strict compiles 188/200 (target 190) and `--non-strict` keeps 1 of 1191 top-level
+statements in CPython (target 0); carried over to v0.7. Prebuilt archives: Linux x86_64,
+Linux aarch64, macOS arm64 and, new, Windows x86_64.
+
+Benchmarks (`python3 bench/run.py`, best of 7, shared 4-core Xeon 2.1 GHz, load average
+6-11 from other jobs; process start included except for the numpy kernels):
+
+| program | CPython | pycc-next | Rust | pycc vs CPython | pycc vs Rust |
+|---|---|---|---|---|---|
+| collections_bfs | 0.900s | 0.144s | 0.049s | **6.3x faster** | 2.92x slower |
+| fib | 0.282s | 0.013s | 0.007s | **21.7x faster** | 1.91x slower |
+| mandelbrot | 1.545s | 0.043s | 0.042s | **35.5x faster** | 1.03x slower |
+| nbody | 2.530s | 0.067s | 0.025s | **37.7x faster** | 2.68x slower |
+| prefix_sum_np (kernel) | 2.798s | 0.029s | 0.013s | **95.4x faster** | 2.19x slower |
+| sieve | 1.000s | 0.048s | 0.021s | **20.7x faster** | 2.35x slower |
+| spectral_norm | 0.836s | 0.018s | 0.011s | **45.5x faster** | 1.69x slower |
+| stencil2d (kernel) | 3.751s | 0.007s | 0.003s | **530.5x faster** | 2.17x slower |
+
+Against 0.5.0's table (same machine type, different load): fib, sieve and the numpy
+kernels read lower (fib 21.7x against 26.5x, sieve 20.7x against 37.5x, prefix_sum_np
+95x against 135x), nbody and mandelbrot higher; this run shared the box with other
+builds, so treat the differences as noise until re-measured on a quiet machine.
+
 ### Added
 
 - Windows x86_64 (v0.7 accept 1): `pycc-vX.Y.Z-x86_64-windows.zip` (`bin\pycc.exe`,
@@ -115,8 +152,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
     function in the module passes a `bytearray(...)` (or a local bound only to one):
     pypng's `_deinterlace(self, raw)` used to be guessed `str` from `raw[i]`/`raw[i:j]`
     alone, so its specialization never ran.
-- pypng 0.20220715.0: 64 of its 85 functions compile natively (15 in 0.5.0), its own
-  suite passing; `bench/package_check.py --time` also times decoding every PngSuite
+- pypng 0.20220715.0: 64 of its 85 functions compile natively (15 in 0.5.0; 78 with
+  method-level fallback, above), its own suite passing; `bench/package_check.py --time` also times decoding every PngSuite
   image its tests use.
 - `int | float` (v0.6 accept 3): a real union type in strict mode. A name bound to an
   `int` and to a `float` (a `float('inf')` sentinel `min` replaces with an `int`, an
@@ -258,6 +295,31 @@ Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
   as a generator that ended at once, so its caller saw no items.
 - The guarded specializations of an `--ext` module were all dropped when any function
   bound the name `type` locally (`length, type = struct.unpack(...)`).
+
+### Known gaps
+
+- Real-world corpus (ROADMAP v0.6 accept 5, not met): strict 188/200 (target 190);
+  `--non-strict` 200/200 with 1 of 1191 top-level statements in CPython (problem 188's
+  `mat_pow`). The strict refusals are heterogeneous containers, an `int | None` used as
+  an `int` without a `None` test, path-dependent rebinding and `iter`/`range` objects as
+  values. Carried over to v0.7 (issues #5, #6, #7).
+- Windows x86_64 is new: a native program's stdout is `\n`-terminated UTF-8 whatever the
+  console code page, `--static-libpython` is refused, and the compiler uses the system
+  allocator (`docs/DEVIATIONS.md`). The benchmark table above is Linux x86_64 only.
+- pydantic under `--ext --non-strict`: 24 of its 5740 tests fail (monkeypatched module
+  attributes compiled code does not see, `sys._getframe` from compiled frames, four
+  subprocess tests that fail in CPython too); 460 of its 1249 functions still run in
+  CPython.
+- Open rows of `docs/DEVIATIONS.md`, among them: an `int` beyond 63 bits as a slice bound
+  and `int ** negative int`; container element and key types strict mode refuses
+  (`T0034`-`T0039`); unsupported constructs refused in strict mode (`C0001`) or run in
+  CPython under `--non-strict`; a published native class is not subclassable from
+  Python outside its package; `async with` runs in CPython; a compiled generator handed
+  to CPython accepts only `send(None)`; an uncaught exception in compiled code prints
+  only the last traceback line; `raise X from None` keeps `__suppress_context__` false;
+  reference cycles are never freed and `__del__` is never called; a big `int` held by a
+  tuple is never released; enum members at the `--ext` boundary (`C0003`). See
+  `docs/DEVIATIONS.md` for every known difference from CPython 3.13.
 
 ## [0.5.0] - 2026-10-16
 

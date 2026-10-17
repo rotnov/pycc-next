@@ -39,7 +39,7 @@ Caught **before** it runs. Not in CI logs. Not in production. At compile time.
 - 🤝 **Plays with the ecosystem.** Target: a CPython extension module you `import`, calling numpy and torch as usual.
 - 🧪 **CPython is the judge.** Correct means: same output, same exceptions as CPython 3.13.
 
-## Status: 0.5, honestly 🧭
+## Status: 0.6, honestly 🧭
 
 Works today: strict type checking with Rust-style diagnostics pointing at the offending
 code; native compilation via LLVM; classes, exceptions, generators, closures, lists,
@@ -48,19 +48,22 @@ dicts, sets, comprehensions, `match`, arbitrary-precision `int`, typed numpy arr
 programs of several modules and packages; `@dataclass` (with `fields()`/`asdict()`/
 `astuple()`/`replace()`), `enum.Enum`/`IntEnum`/`StrEnum`, sorting and hashing instances,
 `functools.cache`/`lru_cache`; reference-counted memory;
-CPython extension modules; `--non-strict` for untyped code. 9,500+ tests.
+CPython extension modules; `--non-strict` for untyped code, including classes inheriting
+library classes, falling back to CPython one function or method at a time; a real
+`int | float` type; `pip install` through the `pycc.build` PEP 517 backend. 9,500+ tests.
 
-**Speed** (`python3 bench/run.py --runs 11`, best of 11, shared 4-core Xeon 2.1 GHz, process
-start included; the Rust twins build with `rustc -O` for the default target CPU and black-box
-their inputs, like the Python programs' inputs are opaque to pycc-next):
+**Speed** (`python3 bench/run.py`, best of 7, shared 4-core Xeon 2.1 GHz under load from
+other jobs, process start included; the Rust twins build with `rustc -O` for the default
+target CPU and black-box their inputs, like the Python programs' inputs are opaque to
+pycc-next):
 
 | program | CPython 3.13 | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
 |---|---|---|---|---|---|
-| fib(32) | 0.354s | 0.015s | 0.008s | **24.0x faster** | 1.8x slower |
-| mandelbrot | 1.810s | 0.061s | 0.055s | **29.5x faster** | 1.1x slower |
-| nbody | 2.584s | 0.084s | 0.034s | **30.9x faster** | 2.4x slower |
-| sieve | 1.776s | 0.057s | 0.028s | **31.3x faster** | 2.1x slower |
-| spectral_norm | 1.175s | 0.021s | 0.012s | **56.4x faster** | 1.8x slower |
+| fib(32) | 0.282s | 0.013s | 0.007s | **21.7x faster** | 1.9x slower |
+| mandelbrot | 1.545s | 0.043s | 0.042s | **35.5x faster** | 1.0x slower |
+| nbody | 2.530s | 0.067s | 0.025s | **37.7x faster** | 2.7x slower |
+| sieve | 1.000s | 0.048s | 0.021s | **20.7x faster** | 2.4x slower |
+| spectral_norm | 0.836s | 0.018s | 0.011s | **45.5x faster** | 1.7x slower |
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
