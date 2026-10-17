@@ -253,8 +253,10 @@ fn a_generic_call_in_a_generic_method_is_refused() {
 
 /// Where the body compiled for a subclass cannot be typed, the program is
 /// refused -- never compiled to construct the base -- and the diagnostic
-/// names the subclass: the constructed subclass instance escapes into a
-/// `-> Base` return, or the subclass's constructor takes other arguments.
+/// names the subclass: the constructed subclass instance meets a base
+/// instance in the same `-> Base` return (a copy whose every return
+/// constructs through the receiver returns the subclass instead), or the
+/// subclass's constructor takes other arguments.
 /// An abstract base's own construction is refused as for `B(...)`.
 #[test]
 fn an_untypeable_subclass_construction_is_refused_and_names_the_subclass() {
@@ -262,7 +264,8 @@ fn an_untypeable_subclass_construction_is_refused_and_names_the_subclass() {
         (
             "1411_escape",
             format!(
-                "{HEAD}    def clone(self) -> A:\n        return type(self)(self.n)\n\
+                "{HEAD}    def clone(self) -> A:\n        if self.n:\n            \
+                 return type(self)(self.n)\n        return A(0)\n\
                  class B(A):\n    pass\nprint(B(2).clone().n)\n"
             ),
             "\"T0022\"",

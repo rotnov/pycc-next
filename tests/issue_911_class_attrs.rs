@@ -500,13 +500,17 @@ fn writing_a_class_attribute_through_self_outside_init_is_rejected() {
     );
 }
 
-/// `C.X = 5` -- a write through the class name. Re-measured *after* the read
+/// `C.X = 5` -- a write through the class name -- while an instance also
+/// reads `self.X`. (When every access spells `C.X`, the attribute is a
+/// module variable instead: `pycc_ast::desugar::class_attrs`, fixture
+/// `tests/fixtures/class_attr_writes.py`.) Re-measured *after* the read
 /// interception landed; this pins whatever diagnostic it now produces.
 #[test]
 fn writing_a_class_attribute_through_the_class_name_is_rejected() {
     assert_rejected(
         "911_write_class",
-        "class C:\n    X: int = 1\n\n    def __init__(self) -> None:\n        self.n = 0\n\n\nC.X = 5\n",
+        "class C:\n    X: int = 1\n\n    def __init__(self) -> None:\n        self.n = 0\n\n    \
+         def get(self) -> int:\n        return self.X\n\n\nC.X = 5\n",
         "T0021",
     );
 }
