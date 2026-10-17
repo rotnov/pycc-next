@@ -300,7 +300,7 @@ Accept:
    dependent rebinding (200), `iter`/`range` objects as values (057, 168) and 188.
    Carried over to v0.7 accept 5 (issues #5, #6, #7); v0.6.0 ships without it.
 
-## v0.7 — Real-world Python: frameworks, Windows
+## v0.7 — Real-world Python: frameworks, Windows (released 2026-10-17)
 
 Accept:
 1. **Windows:** a `pycc-vX.Y.Z-x86_64-windows.zip` release archive (MSVC toolchain, CPython
@@ -347,7 +347,8 @@ Accept:
    with 20 failing against the compiled tree (5762 and 0 against the sources; the 20
    are generic-model cache and pickle tests that walk `sys._getframe`, see DEVIATIONS,
    and tests that monkeypatch a compiled module's globals). **The compiled tree is
-   slower**, median of 15 interleaved fresh-process runs (ms; CPython/compiled):
+   slower**, median of 15 interleaved fresh-process runs (ms, compiled vs CPython;
+   speed = CPython/compiled):
    import 191.6 vs 75.8 (0.40x), model definition 12.9 vs 9.0 (0.70x),
    `model_json_schema()` 25.8 vs 18.0 (0.70x), validation/serialization round-trips
    18.8 vs 17.0 (0.91x). Why: (1) import compiles 674 KB of CPython source with

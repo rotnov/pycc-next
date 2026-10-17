@@ -4,6 +4,40 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-17
+
+Real-world Python: frameworks, Windows. All five v0.7 goals are met. Windows x86_64 is a
+first-class platform: CI runs the test suite, the corpus gate and the real-package wheel
+checks on `windows-2025`, and the release ships a smoke-tested
+`pycc-v0.7.0-x86_64-windows.zip` (first shipped, ahead of schedule, in 0.6.0).
+`--non-strict` compiles classes inheriting library classes and sends only the smallest
+enclosing function or method of a construct it cannot compile to CPython (also in 0.6.0).
+pydantic 2.13.5 builds `--ext --non-strict` with 809 of its 1249 functions native and
+5742 of its tests passing (5762 against its sources) -- but the compiled tree is
+**slower** than CPython: import 0.40x, model definition 0.70x, `model_json_schema()`
+0.70x, round-trips 0.91x of CPython's speed (the profile is in `docs/ROADMAP.md`, v0.7
+accept 4; making it faster is v0.8). The real-world corpus goal carried over from v0.6 is
+met: strict 190/200, `--non-strict` 200/200 with 0 of 1191 top-level statements in
+CPython. Prebuilt archives: Linux x86_64, Linux aarch64, macOS arm64, Windows x86_64.
+
+Benchmarks (`python3 bench/run.py`, best of 7, shared 4-core Xeon 2.1 GHz, Linux x86_64;
+process start included except for the numpy kernels):
+
+| program | CPython | pycc-next | Rust | pycc vs CPython | pycc vs Rust |
+|---|---|---|---|---|---|
+| collections_bfs | 0.843s | 0.131s | 0.054s | **6.5x faster** | 2.43x slower |
+| fib | 0.243s | 0.013s | 0.008s | **18.5x faster** | 1.73x slower |
+| mandelbrot | 1.485s | 0.042s | 0.040s | **35.2x faster** | 1.04x slower |
+| nbody | 2.299s | 0.068s | 0.027s | **33.6x faster** | 2.55x slower |
+| prefix_sum_np (kernel) | 2.746s | 0.030s | 0.014s | **92.3x faster** | 2.15x slower |
+| sieve | 1.084s | 0.058s | 0.022s | **18.7x faster** | 2.66x slower |
+| spectral_norm | 0.815s | 0.017s | 0.009s | **47.0x faster** | 1.87x slower |
+| stencil2d (kernel) | 3.694s | 0.007s | 0.003s | **532.5x faster** | 2.25x slower |
+
+Against 0.6.0's table pycc-next's own times are about the same except sieve (0.058s
+against 0.048s); the ratios also moved with CPython's times on a shared machine, so treat
+differences under ~20% as noise. Windows is not benchmarked.
+
 ### Added
 
 - Strict mode folds an `isinstance(x, C)` test (`C` a builtin class or a tuple of them,
@@ -41,13 +75,39 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `list[int]` (a one-element display of a not-yet-typed value gave no type, and the
   comprehension's was guessed before the operator settled), so a helper building one
   was refused with `T0022`.
-
 - `list(range(10 ** 30))` (and `tuple()`/`sorted()` of a range longer than a C
   `ssize_t`) iterated forever; it now raises CPython's `OverflowError: Python int too
   large to convert to C ssize_t` (#3).
 - A missing key of a `dict[..., str]`, an out-of-range index of a `list[str]` and
   `pop()` of an empty one leaked the placeholder `str` returned beside the exception; it
   is now the shared immortal empty `str` (#4).
+
+### Known gaps
+
+- Compiled library code is slower than CPython: pydantic 2.13.5 under `--ext
+  --non-strict` imports at 0.40x, defines models and builds JSON schemas at 0.70x and
+  round-trips at 0.91x of CPython's speed (fallback source compiled with `compile()` at
+  every import, ~25-40 ns per call across the boundary, object-protocol bodies without
+  CPython's specializing interpreter). 440 of its 1249 functions still run in CPython
+  (top reasons: the `...` literal, function-local `import`, nested `def`, `lambda`,
+  `hash()` of an object); 20 of its tests fail against the compiled tree (`sys._getframe`
+  walks from compiled frames, monkeypatched module globals compiled code does not see).
+  Target of v0.8.
+- Real-world corpus, strict: 10 of 200 refused -- mixed-type containers, an `int | None`
+  used as an `int` without a `None` test, a variable rebound to another type on some
+  paths, iterator objects as values.
+- Windows x86_64: a native program's stdout is `\n`-terminated UTF-8 whatever the console
+  code page, `--static-libpython` is refused, and the compiler uses the system allocator.
+- Open rows of `docs/DEVIATIONS.md`, among them: an `int` beyond 63 bits as a slice bound
+  and `int ** negative int`; container element and key types strict mode refuses
+  (`T0034`-`T0039`); unsupported constructs refused in strict mode (`C0001`) or run in
+  CPython under `--non-strict`; `sys._getframe` counts only Python frames; a published
+  native class is not subclassable from Python outside its package; `async with` runs in
+  CPython; an uncaught exception in compiled code prints only the last traceback line;
+  `raise X from None` keeps `__suppress_context__` false; reference cycles are never freed
+  and `__del__` is never called; a big `int` held by a tuple is never released; enum
+  members at the `--ext` boundary (`C0003`). See `docs/DEVIATIONS.md` for every known
+  difference from CPython 3.13.
 
 ## [0.6.0] - 2026-10-17
 
