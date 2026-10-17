@@ -487,11 +487,12 @@ pub(crate) fn emit_contains<'ctx>(
     // A number of another kind than the list's elements (`1.0 in [1, 2]`):
     // the needle as an `int | float` word, compared by value.
     let numeric_element = matches!(elem, Ty::Int | Ty::Bool | Ty::Float);
-    let other_kind = match (&item, &elem) {
-        (Scalar::Num(_), _) | (Scalar::Float(_), Ty::Int | Ty::Bool) => true,
-        (Scalar::Int(_) | Scalar::Bool(_), Ty::Float) => true,
-        _ => false,
-    };
+    let other_kind = matches!(
+        (&item, &elem),
+        (Scalar::Num(_), _)
+            | (Scalar::Float(_), Ty::Int | Ty::Bool)
+            | (Scalar::Int(_) | Scalar::Bool(_), Ty::Float)
+    );
     if function == rt.list_contains && numeric_element && other_kind {
         let (word, converted) = crate::num::operand_word(context, builder, rt, item);
         let found = builder

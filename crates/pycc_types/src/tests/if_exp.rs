@@ -118,18 +118,12 @@ fn every_truth_testable_condition_is_admitted() {
 
 #[test]
 fn a_condition_with_no_testable_truth_is_refused() {
-    for (param, name) in [
-        ("d: dict[str, int]", "dict[str, int]"),
-    ] {
-        let arg = param.split(':').next().unwrap();
-        refused(
-            &format!("def f({param}) -> int:\n    return 1 if {arg} else 2\n"),
-            "T0021",
-            &format!(
-                "conditional expression condition of type `{name}` has no truth value pycc can test"
-            ),
-        );
-    }
+    refused(
+        "def f(d: dict[str, int]) -> int:\n    return 1 if d else 2\n",
+        "T0021",
+        "conditional expression condition of type `dict[str, int]` has no truth value pycc can \
+         test",
+    );
 }
 
 #[test]
