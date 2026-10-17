@@ -41,10 +41,7 @@ pub(crate) fn generator_return_ty(
 /// are kept as a bare `return`; `return value` becomes the
 /// [`crate::GEN_RETURN_MARKER`] statement (the value for
 /// `StopIteration.value`) followed by a bare `return`.
-pub(crate) fn generator_returns(
-    body: &mut Vec<HirStmt>,
-    def: &pycc_ast::StmtFunctionDef,
-) -> Result<(), Diagnostic> {
+pub(crate) fn generator_returns(body: &mut Vec<HirStmt>) {
     let mut index = 0;
     while index < body.len() {
         match &mut body[index] {
@@ -65,18 +62,18 @@ pub(crate) fn generator_returns(
                 index += 1;
             }
             HirStmt::If { body, orelse, .. } => {
-                generator_returns(body, def)?;
-                generator_returns(orelse, def)?;
+                generator_returns(body);
+                generator_returns(orelse);
             }
             HirStmt::While { body, .. }
             | HirStmt::ForRange { body, .. }
             | HirStmt::ForList { body, .. }
-            | HirStmt::ForObject { body, .. } => generator_returns(body, def)?,
+            | HirStmt::ForObject { body, .. } => generator_returns(body),
             HirStmt::LoopElse { loop_stmt, orelse } => {
                 let mut inner = vec![std::mem::replace(loop_stmt.as_mut(), HirStmt::Return(None))];
-                generator_returns(&mut inner, def)?;
+                generator_returns(&mut inner);
                 **loop_stmt = inner.pop().expect("a loop statement stays one statement");
-                generator_returns(orelse, def)?;
+                generator_returns(orelse);
             }
             HirStmt::Try {
                 body,
@@ -90,21 +87,20 @@ pub(crate) fn generator_returns(
                 orelse,
                 finalbody,
             } => {
-                generator_returns(body, def)?;
+                generator_returns(body);
                 for handler in handlers.iter_mut() {
-                    generator_returns(&mut handler.body, def)?;
+                    generator_returns(&mut handler.body);
                 }
-                generator_returns(orelse, def)?;
-                generator_returns(finalbody, def)?;
+                generator_returns(orelse);
+                generator_returns(finalbody);
             }
             HirStmt::Match { cases, .. } => {
                 for case in cases.iter_mut() {
-                    generator_returns(&mut case.body, def)?;
+                    generator_returns(&mut case.body);
                 }
             }
             _ => {}
         }
         index += 1;
     }
-    Ok(())
 }

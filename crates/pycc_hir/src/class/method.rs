@@ -299,7 +299,7 @@ pub(super) fn lower_method(
             other => other,
         };
         let return_ty = crate::func::generator::generator_return_ty(return_ty, aliases, def)?;
-        crate::func::generator::generator_returns(&mut body, def)?;
+        crate::func::generator::generator_returns(&mut body);
         return_ty
     } else {
         return_ty

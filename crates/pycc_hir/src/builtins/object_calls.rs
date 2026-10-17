@@ -32,7 +32,7 @@ pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, 
         return Some(Ok(sig("pycc_ext_obj_exc_match", &[exc.clone(), Ty::Object], Ty::Bool)));
     }
     if let (super::EXC_OBJECT, [exc @ Ty::Instance(_)]) = (name, args) {
-        return Some(Ok(sig("pycc_ext_obj_exc_object", &[exc.clone()], Ty::Object)));
+        return Some(Ok(sig("pycc_ext_obj_exc_object", std::slice::from_ref(exc), Ty::Object)));
     }
     // `float('inf')` bound to an `int` slot (`pycc_types::int_inf`).
     if let ("__pycc_int_inf_pos" | "__pycc_int_inf_neg", []) = (name, args) {

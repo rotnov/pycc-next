@@ -103,8 +103,8 @@ fn emit(
         events.push((position, offset, Event::Child(child)));
     }
     let mut imports: Vec<Option<ImportBinding>> = part.imports.into_iter().map(Some).collect();
-    for binding in 0..imports.len() {
-        let sited = match &imports[binding] {
+    for (binding, import) in imports.iter_mut().enumerate() {
+        let sited = match import {
             Some(ImportBinding::Foreign {
                 site: ForeignImportSite::Item(position),
                 span,
@@ -119,7 +119,7 @@ fn emit(
             None => {
                 // Compile-time bindings and block-sited imports have no
                 // position; they keep the input's own order, first.
-                let binding = imports[binding].take().expect("each binding is taken once");
+                let binding = import.take().expect("each binding is taken once");
                 out.imports.push(binding);
                 out.import_owner.push(index);
             }

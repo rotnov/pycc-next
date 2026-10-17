@@ -155,7 +155,7 @@ fn collect_body(body: &[Stmt]) -> Vec<StmtSpans> {
 /// pre-order `hir_side::collect_stmts` walks the HIR in.
 fn collect_stmt(stmt: &Stmt, out: &mut Vec<StmtSpans>) {
     let header = span(stmt_header(stmt));
-    let mut entry = |key: String, exprs: Vec<(NodeKey, Option<Span>)>| {
+    let mut entry = |key: String, exprs: Vec<NodeSite>| {
         out.push(StmtSpans {
             key: NodeKey::new(key),
             span: header,
@@ -317,7 +317,7 @@ fn elif_clause(clause: &ElifElseClause, out: &mut Vec<StmtSpans>) {
 /// The entries one assignment target contributes: a name binds `=name`,
 /// an attribute `attr=:a`, a subscript `[]=`, and a tuple or list target
 /// one `=name` per name it unpacks into.
-fn assign_target(target: &Expr, value: &Expr) -> Vec<(String, Vec<(NodeKey, Option<Span>)>)> {
+fn assign_target(target: &Expr, value: &Expr) -> Vec<(String, Vec<NodeSite>)> {
     match target {
         Expr::Name(name) => vec![(format!("={}", name.id), exprs_of([value]))],
         Expr::Attribute(attr) => vec![(
@@ -345,13 +345,13 @@ fn assign_target(target: &Expr, value: &Expr) -> Vec<(String, Vec<(NodeKey, Opti
     }
 }
 
-fn unpack_targets(elts: &[Expr], value: &Expr) -> Vec<(String, Vec<(NodeKey, Option<Span>)>)> {
+fn unpack_targets(elts: &[Expr], value: &Expr) -> Vec<(String, Vec<NodeSite>)> {
     elts.iter()
         .flat_map(|elt| assign_target(elt, value))
         .collect()
 }
 
-fn exprs_of<'a>(exprs: impl IntoIterator<Item = &'a Expr>) -> Vec<(NodeKey, Option<Span>)> {
+fn exprs_of<'a>(exprs: impl IntoIterator<Item = &'a Expr>) -> Vec<NodeSite> {
     let mut collector = Collector::default();
     for expr in exprs {
         collector.visit_expr(expr);
@@ -359,11 +359,14 @@ fn exprs_of<'a>(exprs: impl IntoIterator<Item = &'a Expr>) -> Vec<(NodeKey, Opti
     collector.out
 }
 
+/// An expression's key and, when it has one, its source span.
+type NodeSite = (NodeKey, Option<Span>);
+
 /// Records the key of every expression it visits, in the order
 /// `hir_side::collect_exprs` walks the HIR.
 #[derive(Default)]
 struct Collector {
-    out: Vec<(NodeKey, Option<Span>)>,
+    out: Vec<NodeSite>,
 }
 
 impl Collector {

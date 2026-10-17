@@ -41,11 +41,10 @@ use std::collections::{BTreeSet, HashSet};
 pub(crate) fn lower_delete(
     del: &StmtDelete,
     lower_expr: &dyn Fn(&Expr) -> Result<HirExpr, Diagnostic>,
-    non_strict: bool,
 ) -> Result<Vec<HirStmt>, Diagnostic> {
     let mut lowered = Vec::new();
     for target in &del.targets {
-        lower_target(target, lower_expr, non_strict, &mut lowered)?;
+        lower_target(target, lower_expr, &mut lowered)?;
     }
     Ok(lowered)
 }
@@ -53,7 +52,6 @@ pub(crate) fn lower_delete(
 fn lower_target(
     target: &Expr,
     lower_expr: &dyn Fn(&Expr) -> Result<HirExpr, Diagnostic>,
-    non_strict: bool,
     lowered: &mut Vec<HirStmt>,
 ) -> Result<(), Diagnostic> {
     match target {
@@ -70,12 +68,12 @@ fn lower_target(
         }
         Expr::Tuple(tuple) => {
             for elt in &tuple.elts {
-                lower_target(elt, lower_expr, non_strict, lowered)?;
+                lower_target(elt, lower_expr, lowered)?;
             }
         }
         Expr::List(list) => {
             for elt in &list.elts {
-                lower_target(elt, lower_expr, non_strict, lowered)?;
+                lower_target(elt, lower_expr, lowered)?;
             }
         }
         Expr::Subscript(subscript) => {

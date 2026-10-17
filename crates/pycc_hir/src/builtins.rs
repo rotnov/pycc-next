@@ -459,7 +459,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("__pycc_stdin_readlines", []) => sig("pycc_rt_stdin_readlines", &[], list_of(str_)),
         ("__pycc_stdout_write", [Ty::Str]) => sig("pycc_rt_stdout_write", &[str_], int),
         ("__pycc_print_str", [Ty::Str]) => {
-            sig("pycc_rt_print_write_str", &[str_.clone()], Ty::None)
+            sig("pycc_rt_print_write_str", std::slice::from_ref(&str_), Ty::None)
         }
         ("__pycc_stdout_flush", []) => sig("pycc_rt_print_flush", &[], Ty::None),
         // A function's `*args` list (`pycc_ast::desugar::signatures`).
@@ -468,7 +468,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         }
         // `collections.Counter` / `defaultdict` (`pycc_ast::desugar::collections`).
         ("__pycc_counter", [d @ Ty::Dict(kv)]) if kv.1 == Ty::Int => {
-            sig("pycc_rt_counter_new", &[d.clone()], d.clone())
+            sig("pycc_rt_counter_new", std::slice::from_ref(d), d.clone())
         }
         ("__pycc_counter_of", [Ty::List(elem)]) if crate::is_hashable_ty(elem) => sig(
             "pycc_rt_counter_of_list",
@@ -476,7 +476,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             Ty::Dict(Box::new(((**elem).clone(), int.clone()))),
         ),
         ("__pycc_counter_of", [d @ Ty::Dict(kv)]) if kv.1 == Ty::Int => {
-            sig("pycc_rt_counter_of_dict", &[d.clone()], d.clone())
+            sig("pycc_rt_counter_of_dict", std::slice::from_ref(d), d.clone())
         }
         ("__pycc_defaultdict", [d @ Ty::Dict(kv), proto, Ty::Str])
             if same_elem(proto, &kv.1) && crate::is_list_element_ty(&kv.1) =>
@@ -496,7 +496,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             sig("pycc_rt_defaultdict_call_new", &[d.clone(), f.clone(), str_.clone()], d.clone())
         }
         ("__pycc_defaultdict_none", [d @ Ty::Dict(_)]) => {
-            sig("pycc_rt_defaultdict_none_new", &[d.clone()], d.clone())
+            sig("pycc_rt_defaultdict_none_new", std::slice::from_ref(d), d.clone())
         }
         // Non-strict mode: CPython's own `collections.defaultdict`, from its
         // factory's source (`object_defaultdict_source`).
@@ -513,7 +513,9 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("__pycc_setrecursionlimit", [a]) if is_intlike(a) => {
             sig("pycc_rt_setrecursionlimit", &[int], Ty::None)
         }
-        ("input", [Ty::Str]) => sig("pycc_rt_input_prompt", &[str_.clone()], str_),
+        ("input", [Ty::Str]) => {
+            sig("pycc_rt_input_prompt", std::slice::from_ref(&str_), str_.clone())
+        }
         ("int", [Ty::Str]) => sig("pycc_rt_int_from_str", &[str_], int),
         ("int", [Ty::Str, b]) if is_intlike(b) => {
             sig("pycc_rt_int_from_str_base", &[str_, int.clone()], int)
@@ -536,7 +538,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("format", [Ty::Int]) => sig("pycc_rt_int_to_str", &[int], str_),
         ("format", [Ty::Float]) => sig("pycc_rt_float_to_str", &[float], str_),
         ("format", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),
-        ("format", [Ty::Str]) => sig("pycc_rt_str_copy", &[str_.clone()], str_),
+        ("format", [Ty::Str]) => sig("pycc_rt_str_copy", std::slice::from_ref(&str_), str_.clone()),
         // One conversion of `template % args` (`crate::printf`).
         ("__pycc_printf", [Ty::Int, Ty::Str]) => {
             sig("pycc_rt_printf_int", &[int, str_.clone()], str_)
@@ -553,30 +555,36 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("str", [Ty::Int]) => sig("pycc_rt_int_to_str", &[int], str_),
         ("str", [Ty::Float]) => sig("pycc_rt_float_to_str", &[float], str_),
         ("str", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),
-        ("str", [Ty::Str]) => sig("pycc_rt_str_copy", &[str_.clone()], str_),
+        ("str", [Ty::Str]) => sig("pycc_rt_str_copy", std::slice::from_ref(&str_), str_.clone()),
         ("str", []) => sig("pycc_rt_str_empty", &[], str_),
         ("str" | "repr", [t @ Ty::VarTuple(_)]) if renders_natively(t) => {
-            sig("pycc_rt_list_repr", &[t.clone()], str_)
+            sig("pycc_rt_list_repr", std::slice::from_ref(t), str_)
         }
         ("str", [list @ Ty::List(_)]) if renders_natively(list) => {
-            sig("pycc_rt_list_repr", &[list.clone()], str_)
+            sig("pycc_rt_list_repr", std::slice::from_ref(list), str_)
         }
-        ("str", [dict @ Ty::Dict(_)]) => sig("pycc_rt_dict_repr", &[dict.clone()], str_),
+        ("str", [dict @ Ty::Dict(_)]) => sig("pycc_rt_dict_repr", std::slice::from_ref(dict), str_),
         // `<function f at 0x...>` / `<generator object g at 0x...>`.
-        ("str", [f @ Ty::Callable(_)]) => sig("pycc_rt_closure_repr", &[f.clone()], str_),
-        ("str", [g @ Ty::Generator(_)]) => sig("pycc_rt_gen_repr", &[g.clone()], str_),
+        ("str", [f @ Ty::Callable(_)]) => {
+            sig("pycc_rt_closure_repr", std::slice::from_ref(f), str_)
+        }
+        ("str", [g @ Ty::Generator(_)]) => sig("pycc_rt_gen_repr", std::slice::from_ref(g), str_),
         // `repr(x)`: equal to `str(x)` for every type but `str` itself, whose
         // repr is quoted and escaped (a container's `str` is its repr).
         ("repr", [Ty::Int]) => sig("pycc_rt_int_to_str", &[int], str_),
         ("repr", [Ty::Float]) => sig("pycc_rt_float_to_str", &[float], str_),
         ("repr", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),
-        ("repr", [Ty::Str]) => sig("pycc_rt_str_repr", &[str_.clone()], str_),
+        ("repr", [Ty::Str]) => sig("pycc_rt_str_repr", std::slice::from_ref(&str_), str_.clone()),
         ("repr", [list @ Ty::List(_)]) if renders_natively(list) => {
-            sig("pycc_rt_list_repr", &[list.clone()], str_)
+            sig("pycc_rt_list_repr", std::slice::from_ref(list), str_)
         }
-        ("repr", [dict @ Ty::Dict(_)]) => sig("pycc_rt_dict_repr", &[dict.clone()], str_),
-        ("repr", [f @ Ty::Callable(_)]) => sig("pycc_rt_closure_repr", &[f.clone()], str_),
-        ("repr", [g @ Ty::Generator(_)]) => sig("pycc_rt_gen_repr", &[g.clone()], str_),
+        ("repr", [dict @ Ty::Dict(_)]) => {
+            sig("pycc_rt_dict_repr", std::slice::from_ref(dict), str_)
+        }
+        ("repr", [f @ Ty::Callable(_)]) => {
+            sig("pycc_rt_closure_repr", std::slice::from_ref(f), str_)
+        }
+        ("repr", [g @ Ty::Generator(_)]) => sig("pycc_rt_gen_repr", std::slice::from_ref(g), str_),
         ("len", [Ty::Str]) => sig("pycc_rt_str_len", &[str_], int),
         ("ord", [Ty::Str]) => sig("pycc_rt_str_ord", &[str_], int),
         // `__pycc_chr`: a `chr` call whose argument is a code point pycc's
@@ -593,11 +601,13 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("math.lcm", [a, b]) if is_intlike(a) && is_intlike(b) => {
             sig("pycc_rt_math_lcm", &[int.clone(), int.clone()], int)
         }
-        ("math.isqrt", [a]) if is_intlike(a) => sig("pycc_rt_math_isqrt", &[int.clone()], int),
+        ("math.isqrt", [a]) if is_intlike(a) => {
+            sig("pycc_rt_math_isqrt", std::slice::from_ref(&int), int.clone())
+        }
         ("math.floor", [Ty::Float]) => sig("pycc_rt_math_floor", &[float], int),
         ("math.ceil", [Ty::Float]) => sig("pycc_rt_math_ceil", &[float], int),
         ("math.floor" | "math.ceil", [a]) if is_intlike(a) => {
-            sig("pycc_rt_math_int_identity", &[int.clone()], int)
+            sig("pycc_rt_math_int_identity", std::slice::from_ref(&int), int.clone())
         }
         (_, [a]) if math_log(name, a).is_some() => math_log(name, a)?,
         ("math.log", [x, base]) if is_numeric(x) && is_numeric(base) => {
@@ -619,7 +629,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             sig(symbol, &vec![Ty::Float; arity], Ty::Float)
         }
         ("math.factorial", [a]) if is_intlike(a) => {
-            sig("pycc_rt_math_factorial", &[int.clone()], int)
+            sig("pycc_rt_math_factorial", std::slice::from_ref(&int), int.clone())
         }
         ("math.comb" | "math.perm", [a, b]) if is_intlike(a) && is_intlike(b) => sig(
             if name == "math.comb" {
@@ -702,9 +712,15 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             sig("pycc_rt_list_reversed", &[args[0].clone()], args[0].clone())
         }
         ("list", [Ty::List(_)]) => sig("pycc_rt_list_copy", &[args[0].clone()], args[0].clone()),
-        ("list", [Ty::Str]) => sig("pycc_rt_str_to_list", &[str_.clone()], list_of(str_)),
-        ("sorted", [Ty::Str]) => sig("pycc_rt_str_sorted", &[str_.clone()], list_of(str_)),
-        ("reversed", [Ty::Str]) => sig("pycc_rt_str_reversed", &[str_.clone()], list_of(str_)),
+        ("list", [Ty::Str]) => {
+            sig("pycc_rt_str_to_list", std::slice::from_ref(&str_), list_of(str_.clone()))
+        }
+        ("sorted", [Ty::Str]) => {
+            sig("pycc_rt_str_sorted", std::slice::from_ref(&str_), list_of(str_.clone()))
+        }
+        ("reversed", [Ty::Str]) => {
+            sig("pycc_rt_str_reversed", std::slice::from_ref(&str_), list_of(str_.clone()))
+        }
         ("any" | "all", [Ty::List(elem)]) if orderable(elem) => sig(
             if name == "any" {
                 "pycc_rt_list_any"
@@ -723,12 +739,12 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ),
         ("set", [Ty::Str]) => sig(
             "pycc_rt_set_from_str",
-            &[str_.clone()],
-            Ty::Set(Box::new(str_)),
+            std::slice::from_ref(&str_),
+            Ty::Set(Box::new(str_.clone())),
         ),
         ("set", [set]) if hashed_set(set).is_some() => sig(
             "pycc_rt_set_copy",
-            &[set.clone()],
+            std::slice::from_ref(set),
             Ty::Set(Box::new(hashed_set(set)?.clone())),
         ),
         ("set", [Ty::Dict(kv)]) if crate::is_hashable_ty(&kv.0) => sig(
@@ -738,7 +754,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ),
         ("list", [set]) if hashed_set(set).is_some() => sig(
             "pycc_rt_set_list",
-            &[set.clone()],
+            std::slice::from_ref(set),
             list_of(hashed_set(set)?.clone()),
         ),
         ("list", [Ty::Dict(kv)]) => sig(
@@ -774,7 +790,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("dict", [Ty::Dict(_)]) => sig("pycc_rt_dict_copy_of", &[args[0].clone()], args[0].clone()),
         ("sorted", [set]) if hashed_set(set).is_some_and(orderable) => sig(
             "pycc_rt_set_sorted",
-            &[set.clone()],
+            std::slice::from_ref(set),
             list_of(hashed_set(set)?.clone()),
         ),
         ("sorted", [Ty::Dict(kv)]) if orderable(&kv.0) => sig(
@@ -857,7 +873,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
                 &[false, false],
                 list_of(elem.clone()),
                 false,
-                &[elem.clone()],
+                std::slice::from_ref(elem),
             )
         }
         ("__pycc_sort_keyed", [Ty::List(target), Ty::List(pair), Ty::Bool]) => {
@@ -882,7 +898,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
                 &[false],
                 elem.clone(),
                 true,
-                &[elem.clone()],
+                std::slice::from_ref(elem),
             )
         }
         // `heapq`/`bisect` over a native list (`pycc_ast::desugar::stdlib`

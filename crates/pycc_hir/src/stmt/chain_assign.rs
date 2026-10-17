@@ -101,7 +101,6 @@ pub(crate) fn lower_stmt_expanded(
         Stmt::Delete(del) => super::del::lower_delete(
             del,
             &|expr| crate::expr::lower_expr(expr, in_function, class_name, imports, signatures),
-            crate::func::is_non_strict(aliases),
         ),
         _ => expand(stmt),
     }

@@ -127,7 +127,7 @@ pub(crate) fn lower_function(
     let mut body = body;
     if crate::body_yields(&body) || pycc_ast::body_yields(&def.body) {
         let return_ty = generator::generator_return_ty(return_ty, aliases, def)?;
-        generator::generator_returns(&mut body, def)?;
+        generator::generator_returns(&mut body);
         return Ok(HirItem::Function {
             name: def.name.to_string(),
             params,

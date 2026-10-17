@@ -37,7 +37,9 @@ pub fn resolve_method(
     };
     let found = match (receiver, method, args) {
         (Ty::Str, "split" | "rsplit", []) => s("pycc_rt_str_split_ws", &[], list_of(str_)),
-        (Ty::Str, "split", [Ty::Str]) => s("pycc_rt_str_split", &[str_.clone()], list_of(str_)),
+        (Ty::Str, "split", [Ty::Str]) => {
+            s("pycc_rt_str_split", std::slice::from_ref(&str_), list_of(str_.clone()))
+        }
         (Ty::Str, "split", [Ty::Str, m]) if is_intlike(m) => {
             s("pycc_rt_str_split_max", &[str_.clone(), int], list_of(str_))
         }
@@ -45,13 +47,21 @@ pub fn resolve_method(
         (Ty::Str, "strip", []) => s("pycc_rt_str_strip", &[], str_),
         (Ty::Str, "lstrip", []) => s("pycc_rt_str_lstrip", &[], str_),
         (Ty::Str, "rstrip", []) => s("pycc_rt_str_rstrip", &[], str_),
-        (Ty::Str, "strip", [Ty::Str]) => s("pycc_rt_str_strip_chars", &[str_.clone()], str_),
-        (Ty::Str, "lstrip", [Ty::Str]) => s("pycc_rt_str_lstrip_chars", &[str_.clone()], str_),
-        (Ty::Str, "rstrip", [Ty::Str]) => s("pycc_rt_str_rstrip_chars", &[str_.clone()], str_),
+        (Ty::Str, "strip", [Ty::Str]) => {
+            s("pycc_rt_str_strip_chars", std::slice::from_ref(&str_), str_.clone())
+        }
+        (Ty::Str, "lstrip", [Ty::Str]) => {
+            s("pycc_rt_str_lstrip_chars", std::slice::from_ref(&str_), str_.clone())
+        }
+        (Ty::Str, "rstrip", [Ty::Str]) => {
+            s("pycc_rt_str_rstrip_chars", std::slice::from_ref(&str_), str_.clone())
+        }
         (Ty::Str, "join", [Ty::List(elem)]) if **elem == Ty::Str => {
             s("pycc_rt_str_join", &[args[0].clone()], str_)
         }
-        (Ty::Str, "join", [Ty::Str]) => s("pycc_rt_str_join_chars", &[str_.clone()], str_),
+        (Ty::Str, "join", [Ty::Str]) => {
+            s("pycc_rt_str_join_chars", std::slice::from_ref(&str_), str_.clone())
+        }
         (Ty::Str, "count", [Ty::Str]) => s("pycc_rt_str_count", &[str_], int),
         (Ty::Str, "find", [Ty::Str]) => s("pycc_rt_str_find", &[str_], int),
         (Ty::Str, "rfind", [Ty::Str]) => s("pycc_rt_str_rfind", &[str_], int),
@@ -101,21 +111,21 @@ pub fn resolve_method(
         ),
         (Ty::List(elem), "popleft", []) => word_sig(
             "pycc_rt_deque_popleft",
-            &[receiver.clone()],
+            std::slice::from_ref(receiver),
             &[false],
             (**elem).clone(),
             true,
             &[],
         ),
         (Ty::List(elem), "extendleft", [Ty::List(other)]) if elem == other => {
-            s("pycc_rt_deque_extendleft", &[receiver.clone()], Ty::None)
+            s("pycc_rt_deque_extendleft", std::slice::from_ref(receiver), Ty::None)
         }
         (Ty::List(_), "rotate", []) => s("pycc_rt_deque_rotate1", &[], Ty::None),
         (Ty::List(_), "rotate", [n]) if is_intlike(n) => {
             s("pycc_rt_deque_rotate", &[Ty::Int], Ty::None)
         }
         (Ty::List(elem), "extend", [Ty::List(other)]) if elem == other => {
-            s("pycc_rt_list_extend", &[receiver.clone()], Ty::None)
+            s("pycc_rt_list_extend", std::slice::from_ref(receiver), Ty::None)
         }
         (Ty::List(elem), "count" | "index" | "remove", [item])
             if same_elem(item, elem) && value_comparable(elem) =>
@@ -177,11 +187,11 @@ pub fn resolve_method(
             s("pycc_rt_counter_subtract_list", &[args[0].clone()], Ty::None)
         }
         (Ty::Dict(kv), "subtract", [other]) if kv.1 == Ty::Int && other == receiver => {
-            s("pycc_rt_counter_subtract_dict", &[receiver.clone()], Ty::None)
+            s("pycc_rt_counter_subtract_dict", std::slice::from_ref(receiver), Ty::None)
         }
         (Ty::Dict(_), "clear", []) => s("pycc_rt_dict_clear", &[], Ty::None),
         (Ty::Dict(_), "update", [other]) if other == receiver => {
-            s("pycc_rt_dict_update", &[receiver.clone()], Ty::None)
+            s("pycc_rt_dict_update", std::slice::from_ref(receiver), Ty::None)
         }
         (Ty::Dict(kv), "popitem", []) => s(
             "pycc_rt_dict_popitem",
@@ -205,7 +215,7 @@ pub fn resolve_method(
                 &[false, true, true],
                 kv.1.clone(),
                 true,
-                &[kv.1.clone()],
+                std::slice::from_ref(&kv.1),
             )
         }
         (Ty::Dict(kv), "setdefault", [key, default])
@@ -239,7 +249,7 @@ pub fn resolve_method(
         }
         (Ty::Set(elem), "pop", []) if crate::is_hashable_ty(elem) => word_sig(
             "pycc_rt_set_pop",
-            &[receiver.clone()],
+            std::slice::from_ref(receiver),
             &[false],
             (**elem).clone(),
             true,
@@ -259,7 +269,7 @@ pub fn resolve_method(
         (Ty::Set(elem), "update", [other])
             if crate::is_hashable_ty(elem) && hashed_set(other) == Some(elem) =>
         {
-            s("pycc_rt_set_update", &[other.clone()], Ty::None)
+            s("pycc_rt_set_update", std::slice::from_ref(other), Ty::None)
         }
         (set, "union" | "intersection" | "difference" | "symmetric_difference", [other])
             if hashed_set(set).is_some() && hashed_set(other) == hashed_set(set) =>
@@ -270,7 +280,7 @@ pub fn resolve_method(
                 "difference" => "pycc_rt_set_difference",
                 _ => "pycc_rt_set_symmetric_difference",
             };
-            s(symbol, &[other.clone()], receiver.clone())
+            s(symbol, std::slice::from_ref(other), receiver.clone())
         }
         // A `str` argument is the iterable of its characters
         // (`ILLEGAL_CHARS.isdisjoint(text)`).
@@ -292,7 +302,7 @@ pub fn resolve_method(
                 "issuperset" => "pycc_rt_set_issuperset",
                 _ => "pycc_rt_set_isdisjoint",
             };
-            s(symbol, &[other.clone()], Ty::Bool)
+            s(symbol, std::slice::from_ref(other), Ty::Bool)
         }
         _ => return None,
     };
