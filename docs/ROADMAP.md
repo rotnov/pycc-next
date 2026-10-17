@@ -302,9 +302,21 @@ Accept:
    descriptors, class attributes of any type, decorated methods and properties; annotations
    naming library types (`mod.Type`), general unions and `X | None` of object types; the
    `with` statement (sync and async context managers), and starred expressions in every
-   position. Oracle fixtures per feature.
+   position. Oracle fixtures per feature. **Met 2026-10-17** (CI run 39035410995, commit
+   1b4f1e2): `tests/library_classes.rs` (`threading.Thread`, `collections.Counter`,
+   `argparse.Action`, a `namedtuple` and exception subclasses, a metaclass,
+   `__init_subclass__`, a descriptor, `@property`/`@staticmethod`/`@classmethod`/
+   `cached_property`/`functools.wraps`, `re.Match` and union annotations, `with`, starred
+   expressions; native, `--ext`, subclassed from Python, constant memory); the class
+   statement runs in CPython with its method bodies compiled (`src/fallback/lift.rs`).
+   `async with` is not compiled (no async support; it runs in CPython, DEVIATIONS).
 3. **Method-level fallback:** a construct `--non-strict` cannot compile sends only the
    smallest enclosing function or method to CPython, never the whole class or module.
+   **Met 2026-10-17** (CI run 39035410995, commit 1b4f1e2): `tests/method_fallback.rs`
+   (only the failing methods run in CPython; an `--ext` compiled class keeps its native
+   type with the failing method attached, `src/fallback/attach.rs`; Python subclasses,
+   `super()` and a leak probe); pydantic 2.13.5 (`bench/pydantic_check.py`): 789/1249
+   functions compile, every module builds (33/1249 and 55 failing builds before).
 4. **pydantic v2, measured once:** the Python part of pydantic v2 (pinned; pydantic-core
    unchanged) builds with `--ext --non-strict`, passes its own test suite against the
    compiled modules, and its model-definition / schema-building time is measured against
