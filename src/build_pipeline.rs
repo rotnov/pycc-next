@@ -578,9 +578,16 @@ fn plan_ext(
     let inc_body = ext_build::with_module_doc(inc_body, &entry_source);
     write_ext_source(&shim, ext_build::SHIM_C)?;
     write_ext_source(&inc, &inc_body)?;
+    let map = obj_path.with_file_name(ext_build::EXPORT_MAP_NAME);
+    let mut link_args = ext_build::ext_link_args(platform, &probe.libs);
+    let export_args = ext_build::ext_export_args(platform, &map);
+    if !export_args.is_empty() {
+        write_ext_source(&map, &ext_build::export_map())?;
+        link_args.extend(export_args);
+    }
     Ok(ExtPlan {
         compile_args: ext_build::ext_compile_args(platform, &probe.include, &shim),
-        link_args: ext_build::ext_link_args(platform, &probe.libs),
+        link_args,
         artifact: output.artifact,
     })
 }

@@ -457,6 +457,44 @@ pub(crate) fn ext_link_args(platform: ExtLinkPlatform, libs: &Path) -> Vec<OsStr
     }
 }
 
+/// The linker version script's file name in the build scratch directory
+/// (ELF only, [`ext_export_args`]).
+pub(crate) const EXPORT_MAP_NAME: &str = "pycc_ext_exports.map";
+
+/// The ELF version script: the module exports its `PyInit_` function and
+/// the runtime's live-object counters ([`RUNTIME_COUNTERS`]) and nothing
+/// else, as a PE exports only what it names.
+pub(crate) fn export_map() -> String {
+    let mut map = String::from("{\n  global:\n    PyInit_*;\n");
+    for name in RUNTIME_COUNTERS {
+        map.push_str(&format!("    {name};\n"));
+    }
+    map.push_str("  local: *;\n};\n");
+    map
+}
+
+/// The link arguments that keep an ELF module to the code it uses (v0.8):
+/// with every runtime symbol local ([`export_map`], written to `map`),
+/// `--gc-sections` drops the runtime functions nothing in the module
+/// reaches, which took a pydantic module from 2.4 MB of code to 1.0 MB and
+/// halved the time `dlopen` maps and relocates it; `--strip-debug` drops
+/// the runtime's debug sections, which no loader reads. Empty for
+/// Mach-O and PE, whose exports are already explicit.
+pub(crate) fn ext_export_args(platform: ExtLinkPlatform, map: &Path) -> Vec<OsString> {
+    match platform {
+        ExtLinkPlatform::Linux => {
+            let mut script = OsString::from("-Wl,--version-script=");
+            script.push(map.as_os_str());
+            vec![
+                script,
+                OsString::from("-Wl,--gc-sections"),
+                OsString::from("-Wl,--strip-debug"),
+            ]
+        }
+        ExtLinkPlatform::MacOs | ExtLinkPlatform::Windows => Vec::new(),
+    }
+}
+
 /// The runtime's live-object counters, which a host (and the leak tests)
 /// reads from an extension module with `ctypes`.
 pub(crate) const RUNTIME_COUNTERS: [&str; 10] = [

@@ -524,3 +524,28 @@ fn a_shadow_sysconfig_in_the_build_directory_never_runs_during_the_probe() {
     assert!(!ran, "the planted sysconfig.py executed");
     assert!(!stdout.contains("probe_shadow"), "{stdout}");
 }
+
+#[test]
+fn an_elf_module_exports_only_its_init_and_the_runtime_counters() {
+    let map = Path::new("scratch").join(EXPORT_MAP_NAME);
+    let args = ext_export_args(ExtLinkPlatform::Linux, &map);
+    let mut script = OsString::from("-Wl,--version-script=");
+    script.push(map.as_os_str());
+    assert_eq!(
+        args,
+        vec![
+            script,
+            OsString::from("-Wl,--gc-sections"),
+            OsString::from("-Wl,--strip-debug"),
+        ]
+    );
+    let text = export_map();
+    assert!(text.starts_with("{\n  global:\n    PyInit_*;\n"), "{text}");
+    for name in RUNTIME_COUNTERS {
+        assert!(text.contains(&format!("    {name};\n")), "{text}");
+    }
+    assert!(text.ends_with("  local: *;\n};\n"), "{text}");
+    for platform in [ExtLinkPlatform::MacOs, ExtLinkPlatform::Windows] {
+        assert!(ext_export_args(platform, &map).is_empty());
+    }
+}
