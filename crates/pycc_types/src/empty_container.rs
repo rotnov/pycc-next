@@ -157,6 +157,7 @@ mod ty_queries;
 
 pub(crate) use diagnostics::{name_binding, unresolved_dict, unresolved_list};
 pub(crate) use ty_queries::contains_infer;
+pub(crate) use unify::walk::{stmt_exprs_mut, walk_expr_mut};
 use ty_queries::contains_optional;
 
 pub(crate) use call_site::resolve_call_site_params;

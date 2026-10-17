@@ -73,12 +73,54 @@ fn an_augmented_assignment_stays_in_its_web() {
     );
 }
 
+/// Issue #6: an unannotated parameter is the first definition of its web;
+/// a rebinding no read of the parameter's own value reaches is its own
+/// variable.
 #[test]
-fn a_parameter_is_never_split() {
+fn an_unannotated_parameter_rebinding_splits() {
     assert_eq!(
         names_after("def f(a):\n    a = str(a)\n    return a\n"),
-        ["str", "a", "a", "a"]
+        ["str", "a", "a_1", "a_1"]
     );
+}
+
+#[test]
+fn a_conditional_parameter_rebinding_does_not_split() {
+    let names = names_after("def f(a):\n    if g():\n        a = str(a)\n    return a\n");
+    assert!(names.iter().all(|n| n != "a_1"), "{names:?}");
+}
+
+#[test]
+fn an_annotated_parameter_is_never_split() {
+    assert_eq!(
+        names_after("def f(a: int):\n    a = str(a)\n    return a\n"),
+        ["int", "str", "a", "a", "a"]
+    );
+}
+
+/// A guard normalizing a parameter's shape gets join copies, so the
+/// rebinding and the value after the `if` have variables of their own.
+#[test]
+fn an_isinstance_guard_rebinding_a_parameter_gets_join_copies() {
+    assert_eq!(
+        names_after(
+            "def f(b):\n    if not isinstance(b[0], list):\n        b = [[x] for x in b]\n    return b\n"
+        ),
+        ["isinstance", "b", "list", "b", "x", "x", "b_1", "b_1", "b_2", "b", "b_2", "b_2"]
+    );
+}
+
+#[test]
+fn a_bare_name_guard_or_a_non_builtin_class_gets_no_copies() {
+    for source in [
+        "def f(b):\n    if not isinstance(b, list):\n        b = [b]\n    return b\n",
+        "def f(b):\n    if not isinstance(b[0], C):\n        b = [b]\n    return b\n",
+        "def f(b):\n    if not isinstance(b[0], list):\n        b = [b]\n    else:\n        pass\n    return b\n",
+        "list = tuple\ndef f(b):\n    if not isinstance(b[0], list):\n        b = [b]\n    return b\n",
+    ] {
+        let names = names_after(source);
+        assert!(names.iter().all(|n| n != "b_1" && n != "b_2"), "{source}: {names:?}");
+    }
 }
 
 #[test]

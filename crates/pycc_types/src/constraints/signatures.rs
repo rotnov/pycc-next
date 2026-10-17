@@ -554,6 +554,16 @@ fn solve_all(
     // per union-find root, then propagate any selected fallback back through
     // operators. This keeps inference independent of body/declaration order.
     propagate_binop_constraints(&constraints.deferred.binops, &mut parents, &mut concrete)?;
+    // A comprehension or one-element display whose element settled types
+    // first, and whatever operator it feeds, to a fixpoint (bounded by the
+    // number of containers, each typed once).
+    while super::set_comp::settle_comprehension_containers(
+        &constraints.deferred.container_defaults,
+        &mut parents,
+        &mut concrete,
+    ) {
+        propagate_binop_constraints(&constraints.deferred.binops, &mut parents, &mut concrete)?;
+    }
     // #1343: container defaults run before the annotation defaults, so a
     // defaulted `set[int]` root is concrete before a scalar annotation
     // bound could claim it -- the order the hard `set[int]` guess had.

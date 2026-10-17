@@ -67,14 +67,10 @@ pycc-next):
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
-wrong outputs (CI-gated), 99.9% of top-level statements native (1190 of 1191) and the rest
-per-statement CPython fallback; strict mode compiles and passes 188/200 unchanged — most of
-the rest use dynamic values (mixed-type containers, an `int | None` used as an `int`
-without a `None` test, a variable rebound to another type) that strict mode refuses. The
-one statement that still falls back (`python3 bench/corpus.py --flags=--non-strict
---show-fallbacks`) is problem 188's `mat_pow`, whose nested helper rebinds its list
-parameter to a list of lists (`A = [A]`, under an `isinstance` test) and is called with
-both.
+wrong outputs (CI-gated), every top-level statement native (0 of 1191 in CPython
+fallback); strict mode compiles and passes 189/200 unchanged — most of the rest use
+dynamic values (mixed-type containers, an `int | None` used as an `int` without a `None`
+test, a variable rebound to another type on some paths only) that strict mode refuses.
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 

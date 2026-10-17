@@ -53,6 +53,25 @@ pub(crate) enum ContainerDefault {
         key: Option<usize>,
         value: Option<usize>,
     },
+    /// A one-element list display `[e]` of an element the solver has not
+    /// typed when it meets it: `list[e]` once `elt` settles
+    /// ([`settle_comprehension_containers`]); never guessed, so a display
+    /// whose element stays open types nothing, as before.
+    Display { var: usize, elt: usize },
+}
+
+/// [`ContainerDefault::Display`]'s container term for `[elt]`.
+pub(crate) fn display_container(
+    elt: usize,
+    parents: &mut Vec<usize>,
+    concrete: &mut Vec<Option<Ty>>,
+    deferred: &mut DeferredConstraints,
+) -> TypeTerm {
+    let var = fresh_variable(parents, concrete);
+    deferred
+        .container_defaults
+        .push(ContainerDefault::Display { var, elt });
+    Err(var)
 }
 
 fn term_var(term: &Option<TypeTerm>) -> Option<usize> {
@@ -167,6 +186,53 @@ pub(crate) fn deferred_frozenset(
         .container_defaults
         .push(ContainerDefault::FrozenSetOf { source, result });
     Err(result)
+}
+
+/// Types every list or dict comprehension container whose element (key
+/// and value) types have settled, before any default is guessed: an
+/// operator over one (`[c] * b`) or a comprehension of them (`[[c] * b for
+/// ...]`) then types in turn. Whether it typed one.
+pub(super) fn settle_comprehension_containers(
+    defaults: &[ContainerDefault],
+    parents: &mut [usize],
+    concrete: &mut [Option<Ty>],
+) -> bool {
+    let mut changed = false;
+    for default in defaults {
+        let settled = |parents: &mut [usize], concrete: &[Option<Ty>], var: Option<usize>| {
+            var.and_then(|v| concrete[root(parents, v)].clone())
+        };
+        let (var, container) = match default {
+            ContainerDefault::ListComp { var, elt: Some(elt) }
+            | ContainerDefault::Display { var, elt } => {
+                let Some(elem) = settled(parents, concrete, Some(*elt)) else {
+                    continue;
+                };
+                let container = match collected_objects(&elem) {
+                    Some(object) => object,
+                    None if pycc_hir::is_list_element_ty(&elem) => Ty::List(Box::new(elem)),
+                    None => continue,
+                };
+                (*var, container)
+            }
+            ContainerDefault::DictComp { var, key, value } => {
+                let Some(dict) = settled(parents, concrete, *key)
+                    .zip(settled(parents, concrete, *value))
+                    .and_then(|(k, v)| dict_of(k, v))
+                else {
+                    continue;
+                };
+                (*var, dict)
+            }
+            _ => continue,
+        };
+        let root = root(parents, var);
+        if concrete[root].is_none() {
+            concrete[root] = Some(container);
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Applies `defaults` to every root still unresolved, writing each default

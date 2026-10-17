@@ -126,6 +126,13 @@ pub fn is_public_name(name: &str) -> bool {
     !name.starts_with('_')
 }
 
+/// The prefix of a per-call-site copy of a nested helper
+/// (`pycc_types::static_isinstance`, issue #7): private, compiler-made, and
+/// with no `def` statement of its own, so codegen calls it directly, as it
+/// does a monomorphized generic (`0gen_...`). No source name can spell it
+/// (`pycc_ast` reserves `_pycc_`).
+pub const SITE_COPY_PREFIX: &str = "_pycc_site";
+
 /// The callee of the call `pycc_hir` lowers a `yield value` statement to
 /// (`HirStmt::ExprStmt`); not a Python identifier, so no source name can
 /// spell it.

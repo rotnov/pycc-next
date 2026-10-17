@@ -28,20 +28,37 @@ use ruff_python_ast::{
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+mod guard_joins;
 mod scan;
 use scan::{ScopeScan, free_names_of_class, free_names_of_def};
 
 /// Renames every web but one of each split name in `body` (a module) and in
 /// every function defined in it.
 pub(crate) fn split_webs(body: &mut [Stmt]) {
+    let joins = guard_joins::insert(body);
+    split(body);
+    if let Some(joins) = &joins {
+        guard_joins::restore(body, joins);
+    }
+}
+
+fn split(body: &mut [Stmt]) {
     let all = all_names(body);
     let mut renames: HashMap<u32, String> = HashMap::new();
     let mut taken = all.clone();
     let mut functions = Vec::new();
+    let methods = method_defs(body);
     analyze_scope(&*body, &[], &mut taken, &mut renames, &mut functions);
     while let Some(def) = functions.pop() {
         let def: &StmtFunctionDef = def;
-        let params = parameter_names(&def.parameters);
+        let mut params = parameter_names(&def.parameters);
+        // A method's receiver keeps one variable whatever binds it: a
+        // rebinding is refused downstream (zero-argument `super()` reads it).
+        if methods.contains(&std::ptr::from_ref(def))
+            && let Some((_, annotated)) = params.first_mut()
+        {
+            *annotated = true;
+        }
         analyze_scope(&def.body, &params, &mut taken, &mut renames, &mut functions);
     }
     if renames.is_empty() {
@@ -81,8 +98,34 @@ fn is_empty_container(expr: &Expr) -> bool {
     }
 }
 
-fn parameter_names(parameters: &Parameters) -> Vec<String> {
-    parameters.iter().map(|p| p.name().to_string()).collect()
+/// Every function defined directly in a class body, anywhere in `body`.
+fn method_defs(body: &[Stmt]) -> HashSet<*const StmtFunctionDef> {
+    struct Collect(HashSet<*const StmtFunctionDef>);
+    impl<'a> Visitor<'a> for Collect {
+        fn visit_stmt(&mut self, stmt: &'a Stmt) {
+            if let Stmt::ClassDef(class) = stmt {
+                for inner in &class.body {
+                    if let Stmt::FunctionDef(def) = inner {
+                        self.0.insert(std::ptr::from_ref(def));
+                    }
+                }
+            }
+            visitor::walk_stmt(self, stmt);
+        }
+    }
+    let mut collect = Collect(HashSet::new());
+    for stmt in body {
+        collect.visit_stmt(stmt);
+    }
+    collect.0
+}
+
+/// A scope's parameters: `(name, annotated)`.
+fn parameter_names(parameters: &Parameters) -> Vec<(String, bool)> {
+    parameters
+        .iter()
+        .map(|p| (p.name().to_string(), p.annotation().is_some()))
+        .collect()
 }
 
 /// Every identifier `body` mentions, so a fresh name collides with none.
@@ -735,7 +778,7 @@ type State = BTreeMap<String, BTreeSet<usize>>;
 /// functions it defines.
 fn analyze_scope<'a>(
     body: &'a [Stmt],
-    params: &[String],
+    params: &[(String, bool)],
     taken: &mut HashSet<String>,
     renames: &mut HashMap<u32, String>,
     functions: &mut Vec<&'a StmtFunctionDef>,
@@ -775,15 +818,18 @@ fn analyze_scope<'a>(
     if opaque {
         return;
     }
-    // Candidate names: bound here, not excluded, not a dunder, not a
-    // parameter (its annotation types it for the whole body).
+    // Candidate names: bound here, not excluded, not a dunder, not an
+    // annotated parameter (its annotation types it for the whole body). An
+    // unannotated parameter is the first definition of its web (issue #6):
+    // a rebinding no read of the parameter's own value reaches gets a
+    // variable, and a type, of its own.
+    let is_param = |n: &str| params.iter().any(|(p, _)| p == n);
+    let annotated = |n: &str| params.iter().any(|(p, annotated)| p == n && *annotated);
     let candidates: BTreeSet<&str> = events
         .iter()
         .filter(|e| matches!(e.kind, Kind::Def | Kind::Aug | Kind::Reset))
         .map(|e| e.name.as_str())
-        .filter(|n| {
-            !excluded.contains(*n) && !n.starts_with("__") && !params.iter().any(|p| p == n)
-        })
+        .filter(|n| !excluded.contains(*n) && !n.starts_with("__") && !annotated(n))
         .collect();
     if candidates.is_empty() {
         return;
@@ -805,7 +851,7 @@ fn analyze_scope<'a>(
     for name in &candidates {
         let id = def_event.len();
         def_event.push(None);
-        if params.iter().any(|p| p == name) {
+        if is_param(name) {
             must_keep.insert(id);
             param_defs.push((name, id));
         } else {

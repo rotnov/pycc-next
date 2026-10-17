@@ -48,6 +48,7 @@ mod object_none;
 mod redeclaration;
 mod round;
 mod set_element;
+mod static_isinstance;
 mod solver;
 mod std_receiver;
 mod string_conversion;

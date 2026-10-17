@@ -181,7 +181,7 @@ pub fn check_and_resolve_all_keyed(hir: &HirModule) -> Result<HirModule, KeyedDi
             let prepared = Prepared::new(hir)?;
             let module = prepared.module(hir);
             crate::locate::with_locator(module, |index| prepared.origin(index), || {
-                resolve_prepared(module)
+                resolve_prepared(module, &prepared.folds)
             })
             .map_err(|d| prepared.rekey(d))
         })
@@ -189,9 +189,13 @@ pub fn check_and_resolve_all_keyed(hir: &HirModule) -> Result<HirModule, KeyedDi
 }
 
 /// [`check_and_resolve_all_keyed`] over an already [`Prepared`] module.
-fn resolve_prepared(hir: &HirModule) -> Result<HirModule, KeyedDiagnostics> {
+fn resolve_prepared(
+    hir: &HirModule,
+    folds: &[crate::static_isinstance::Fold],
+) -> Result<HirModule, KeyedDiagnostics> {
     let function_local_names = module_function_local_names(hir);
     let signatures = checked_function_signatures_all(hir, &function_local_names)?;
+    crate::static_isinstance::verify(hir, &signatures, folds).map_err(module_level)?;
 
     let mut resolved_hir = hir.clone();
     for item in &mut resolved_hir.items {
@@ -225,6 +229,43 @@ fn resolve_prepared(hir: &HirModule) -> Result<HirModule, KeyedDiagnostics> {
     unroll_enum_loops(monomorphized).map_err(module_level)
 }
 
+/// Steps 1 and 2 of [`Prepared`]'s pre-pass: `hir` with its unannotated
+/// `__init__` parameters, empty containers and helper container parameters
+/// typed; `None` when nothing changed.
+fn resolve_containers(hir: &HirModule) -> Result<Option<HirModule>, KeyedDiagnostics> {
+    // A native program's unannotated `__init__` parameters, from its
+    // constructor calls: the class phase types the slots they seed.
+    let init_params = empty_container::resolve_init_params(hir)?;
+    let hir = init_params.as_ref().unwrap_or(hir);
+    let resolved = empty_container::resolve_empty_containers(hir).or_else(|| init_params.clone());
+    // Container parameters of private helpers, from their call sites:
+    // after the empty containers, whose resolved types the arguments
+    // carry (`empty_container::call_site`).
+    // Each can unblock the other: a container parameter typed from its
+    // call sites types the elements a helper appends to its own empty
+    // list (`r = []; r.append((x, y))` over `for x in xs`), and that
+    // list typed may type a further call site. Alternate until neither
+    // changes anything (bounded).
+    let mut resolved = resolved;
+    for _ in 0..4 {
+        let Some(params) =
+            empty_container::resolve_call_site_params(resolved.as_ref().unwrap_or(hir))
+        else {
+            break;
+        };
+        resolved = Some(empty_container::resolve_empty_containers(&params).unwrap_or(params));
+    }
+    // An empty container whose producer reads an unannotated
+    // function's parameter or return: typed once the solver has pinned
+    // those (`empty_container::solved_signatures`).
+    if let Some(solved) =
+        empty_container::resolve_with_solved_signatures(resolved.as_ref().unwrap_or(hir))
+    {
+        resolved = Some(solved);
+    }
+    Ok(resolved)
+}
+
 /// The module both entry points check: the shared pre-pass, run in the same
 /// place over the same input by `pycc check` and `pycc build`.
 ///
@@ -243,45 +284,44 @@ fn resolve_prepared(hir: &HirModule) -> Result<HirModule, KeyedDiagnostics> {
 struct Prepared {
     resolved: Option<HirModule>,
     copied: Option<inherited_copies::CopiedModule>,
+    /// A per-call-site helper copy's item index to its origin's
+    /// (`crate::static_isinstance`, issue #7).
+    site_origins: HashMap<usize, usize>,
+    /// The guards `crate::static_isinstance` folded, re-decided once the
+    /// checker has validated the signatures (issue #5).
+    folds: Vec<crate::static_isinstance::Fold>,
 }
 
 impl Prepared {
     fn new(hir: &HirModule) -> Result<Self, KeyedDiagnostics> {
-        // A native program's unannotated `__init__` parameters, from its
-        // constructor calls: the class phase types the slots they seed.
-        let init_params = empty_container::resolve_init_params(hir)?;
-        let hir = init_params.as_ref().unwrap_or(hir);
-        let resolved = empty_container::resolve_empty_containers(hir)
-            .or_else(|| init_params.clone());
-        // Container parameters of private helpers, from their call sites:
-        // after the empty containers, whose resolved types the arguments
-        // carry (`empty_container::call_site`).
-        // Each can unblock the other: a container parameter typed from its
-        // call sites types the elements a helper appends to its own empty
-        // list (`r = []; r.append((x, y))` over `for x in xs`), and that
-        // list typed may type a further call site. Alternate until neither
-        // changes anything (bounded).
-        let mut resolved = resolved;
-        for _ in 0..4 {
-            let Some(params) =
-                empty_container::resolve_call_site_params(resolved.as_ref().unwrap_or(hir))
-            else {
-                break;
-            };
-            resolved = Some(empty_container::resolve_empty_containers(&params).unwrap_or(params));
-        }
-        // An empty container whose producer reads an unannotated
-        // function's parameter or return: typed once the solver has pinned
-        // those (`empty_container::solved_signatures`).
-        if let Some(solved) =
-            empty_container::resolve_with_solved_signatures(resolved.as_ref().unwrap_or(hir))
-        {
-            resolved = Some(solved);
+        let mut resolved = resolve_containers(hir)?;
+        // Issue #7: a nested helper whose calls give it conflicting argument
+        // types gets a copy per call site, and the passes above run again
+        // to type each copy from its own call -- only when that resolves the
+        // conflict. Issue #5: guards a subject's static type decides are
+        // folded, in the copies too.
+        let mut site_origins = HashMap::default();
+        let mut folds = Vec::new();
+        let current = resolved.as_ref().unwrap_or(hir);
+        if let Some(copied) = crate::static_isinstance::copy_call_sites(hir, current, |copied| {
+            resolve_containers(copied).ok().flatten()
+        }) {
+            site_origins = copied.origins;
+            folds = copied.folds;
+            resolved = Some(copied.module);
+        } else if let Some((folded, folded_guards)) = crate::static_isinstance::fold(current) {
+            folds = folded_guards;
+            resolved = Some(folded);
         }
         let base = resolved.as_ref().unwrap_or(hir);
         empty_container::attr_slot::reject_unresolved_attr_slots(base)?;
         let copied = inherited_copies::add_inherited_copies(base);
-        Ok(Prepared { resolved, copied })
+        Ok(Prepared {
+            resolved,
+            copied,
+            site_origins,
+            folds,
+        })
     }
 
     fn module<'a>(&'a self, hir: &'a HirModule) -> &'a HirModule {
@@ -295,14 +335,41 @@ impl Prepared {
     /// The item whose source a receiver-exact copy at `index` was made
     /// from (`crate::locate`).
     fn origin(&self, index: usize) -> Option<usize> {
-        self.copied.as_ref().and_then(|copied| copied.origin(index))
+        let copied = self.copied.as_ref().and_then(|copied| copied.origin(index));
+        self.site_origins
+            .get(&copied.unwrap_or(index))
+            .copied()
+            .or(copied)
     }
 
     fn rekey(&self, diagnostics: KeyedDiagnostics) -> KeyedDiagnostics {
-        match &self.copied {
+        let diagnostics = match &self.copied {
             Some(copied) => copied.rekey(diagnostics),
             None => diagnostics,
+        };
+        if self.site_origins.is_empty() {
+            return diagnostics;
         }
+        // A call-site copy's diagnostic belongs to the helper it copies;
+        // one the helper (or another copy) already reported is dropped.
+        let mut seen: HashSet<(DiagnosticKey, &'static str, Option<pycc_diag::Span>)> =
+            HashSet::default();
+        let mut out = Vec::with_capacity(diagnostics.len());
+        for (key, diagnostic) in diagnostics {
+            let key = match key {
+                DiagnosticKey::Function(index) => {
+                    DiagnosticKey::Function(*self.site_origins.get(&index).unwrap_or(&index))
+                }
+                DiagnosticKey::ModuleAt(index) => {
+                    DiagnosticKey::ModuleAt(*self.site_origins.get(&index).unwrap_or(&index))
+                }
+                other => other,
+            };
+            if seen.insert((key, diagnostic.code, diagnostic.span)) {
+                out.push((key, diagnostic));
+            }
+        }
+        out
     }
 }
 
@@ -560,7 +627,14 @@ pub fn check_all_keyed(hir: &HirModule) -> Result<(), KeyedDiagnostics> {
             let prepared = Prepared::new(hir)?;
             let module = prepared.module(hir);
             crate::locate::with_locator(module, |index| prepared.origin(index), || {
-                check_prepared(module)
+                check_prepared(module)?;
+                if prepared.folds.is_empty() {
+                    return Ok(());
+                }
+                let names = module_function_local_names(module);
+                let signatures = checked_function_signatures_all(module, &names)?;
+                crate::static_isinstance::verify(module, &signatures, &prepared.folds)
+                    .map_err(module_level)
             })
             .map_err(|d| prepared.rekey(d))
         })

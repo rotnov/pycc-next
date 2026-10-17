@@ -31,7 +31,8 @@ pub(super) fn is_scalar_value(value: &Expr) -> bool {
 /// an enclosing scope: everything it reads that it does not bind itself,
 /// plus everything it declares `global` or `nonlocal`.
 pub(super) fn free_names_of_def(def: &StmtFunctionDef) -> HashSet<String> {
-    let mut local: HashSet<String> = parameter_names(&def.parameters).into_iter().collect();
+    let mut local: HashSet<String> =
+        parameter_names(&def.parameters).into_iter().map(|(name, _)| name).collect();
     let mut scan = ScopeScan::default();
     for stmt in &def.body {
         scan.visit_stmt(stmt);

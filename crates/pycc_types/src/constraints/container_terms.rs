@@ -26,10 +26,18 @@ pub(crate) fn collect_list_literal_constraints(
         ));
     }
     if let Some(element_ty) = homogeneous_private_solver_scalar_list_element(&element_terms) {
-        Ok(Some(Ok(Ty::List(Box::new(element_ty)))))
-    } else {
-        Ok(None)
+        return Ok(Some(Ok(Ty::List(Box::new(element_ty)))));
     }
+    // One element whose type is not known yet (`[c]` over a parameter):
+    // the list of whatever it settles to, as for a comprehension's element
+    // (`set_comp::list_comp_container`), so `[c] * b` and a comprehension
+    // building it type once `c` does.
+    if let [Some(Err(elt))] = element_terms.as_slice() {
+        return Ok(Some(super::set_comp::display_container(
+            *elt, parents, concrete, deferred,
+        )));
+    }
+    Ok(None)
 }
 
 pub(crate) fn collect_subscript_constraints(

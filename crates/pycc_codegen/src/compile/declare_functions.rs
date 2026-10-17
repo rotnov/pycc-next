@@ -100,7 +100,9 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                 // top-level `def` whose execution order matters, so they
                 // dispatch directly through `direct_value` instead of
                 // through the indirect function-pointer slot.
-                let is_monomorphized = name.starts_with("0gen_");
+                // A per-call-site helper copy (issue #7) is one too.
+                let is_monomorphized =
+                    name.starts_with("0gen_") || name.starts_with(pycc_hir::SITE_COPY_PREFIX);
                 if is_monomorphized {
                     UserFunction {
                         param_tys: params.iter().map(|(_, ty)| ty.clone()).collect(),

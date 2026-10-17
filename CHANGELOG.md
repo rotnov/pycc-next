@@ -4,7 +4,24 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- Strict mode folds an `isinstance(x, C)` test (`C` a builtin class or a tuple of them,
+  combined with `not`/`and`/`or`) whose subject's static type decides it, keeping only
+  the branch that runs; the subject is still evaluated (#5). An unannotated parameter
+  rebound to a value of another type gets a variable of its own, as a local does, and a
+  parameter an `isinstance` guard normalizes (`if not isinstance(B[0], list): B = [[b]
+  for b in B]`) gets one per path (#6). A nested helper whose calls give it conflicting
+  argument types is compiled once per call site (#7). Together they compile corpus
+  problem 188: strict 189/200 (from 188), and `--non-strict` runs no top-level
+  statement of the corpus in CPython (from 1 of 1191).
+
 ### Fixed
+
+- The constraint solver typed `[[c] * b for i in range(a)]` over a parameter `c` as
+  `list[int]` (a one-element display of a not-yet-typed value gave no type, and the
+  comprehension's was guessed before the operator settled), so a helper building one
+  was refused with `T0022`.
 
 - `list(range(10 ** 30))` (and `tuple()`/`sorted()` of a range longer than a C
   `ssize_t`) iterated forever; it now raises CPython's `OverflowError: Python int too
