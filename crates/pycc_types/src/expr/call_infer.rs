@@ -75,6 +75,17 @@ pub(crate) fn infer_call_expr(
             crate::foreign::check_object_call_args(env, args, &arg_tys, "call")?;
             return Ok(Ty::Object);
         }
+        // `cls(args)` in a `@classmethod` constructs the class `cls` is
+        // typed as, exactly as `type(self)(args)` does in an instance
+        // method: an inherited classmethod that constructs through `cls`
+        // is compiled again for each subclass with `cls` retyped (D-254).
+        if let Some(class) = class_receiver(env, callee, &ty) {
+            let arg_tys = args
+                .iter()
+                .map(|arg| infer_expr_in(env, local_names, arg))
+                .collect::<Result<Vec<_>, _>>()?;
+            return class::resolve_instantiation(env, &class, args, &arg_tys);
+        }
         return Err(non_callable_binding(callee));
     }
     // Issue #118 Part 1: a maybe-bound callee is not callable -- it
@@ -835,4 +846,17 @@ pub(crate) fn infer_call_expr(
         // is passed through as a borrowed pointer.
     }
     Ok(return_ty.clone())
+}
+
+/// The class a call of `callee` constructs when `callee` is a
+/// `@classmethod`'s `cls`, still bound to its class (`ty`).
+fn class_receiver(env: &Environment, callee: &str, ty: &Ty) -> Option<String> {
+    match ty {
+        Ty::Instance(class)
+            if env.in_classmethod && callee == "cls" && env.lookup_class(class).is_some() =>
+        {
+            Some(class.to_string())
+        }
+        _ => None,
+    }
 }

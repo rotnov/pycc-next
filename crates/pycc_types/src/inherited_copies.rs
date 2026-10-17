@@ -144,7 +144,7 @@ pub(crate) fn add_inherited_copies(hir: &HirModule) -> Option<CopiedModule> {
             module.items.push(HirItem::Function {
                 name: name.clone(),
                 params: retype_receiver(params, copy),
-                return_ty: return_ty.clone(),
+                return_ty: copy_return_ty(return_ty, body, copy),
                 body: copy_body(hir, body, copy),
             });
         }
@@ -232,6 +232,34 @@ fn retype_receiver(params: &[(String, Ty)], copy: &PlannedCopy) -> Vec<(String, 
             )
         })
         .collect()
+}
+
+/// The copy's return type: the origin class becomes the copy's receiver
+/// class when the body returns a construction through its receiver
+/// (`return cls(...)` in a `@classmethod`, `return type(self)(...)`), which
+/// in CPython is an instance of the receiver's run-time class. pycc has no
+/// instance subtyping, so keeping the origin class would refuse the copy.
+fn copy_return_ty(return_ty: &Ty, body: &[HirStmt], copy: &PlannedCopy) -> Ty {
+    if *return_ty != Ty::Instance(Box::new(copy.origin_class.clone())) {
+        return return_ty.clone();
+    }
+    let is_classmethod = copy.origin_name.ends_with(".classmethod");
+    let mut constructs = false;
+    let mut body = body.to_vec();
+    crate::empty_container::for_each_stmt_mut(&mut body, &mut |stmt| {
+        if let HirStmt::Return(Some(value)) = stmt {
+            constructs |= match value {
+                pycc_hir::HirExpr::ReceiverClassCall { .. } => true,
+                pycc_hir::HirExpr::Call { callee, .. } => is_classmethod && callee == "cls",
+                _ => false,
+            };
+        }
+    });
+    if constructs {
+        Ty::Instance(Box::new(copy.receiver.clone()))
+    } else {
+        return_ty.clone()
+    }
 }
 
 /// A dataclass-synthesized `__repr__` spells its class name as a literal;

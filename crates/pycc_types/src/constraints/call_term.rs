@@ -145,6 +145,15 @@ pub(crate) fn collect_call_constraints(
                     &ty,
                     env.owned_buffers.contains(callee),
                 )?;
+                // `cls(args)` in a `@classmethod` (the check phase's
+                // `class_receiver`): the call is an instance of `cls`'s
+                // class; anywhere else the check phase refuses it.
+                if callee == "cls" && matches!(ty, Ty::Instance(_)) {
+                    for arg in args {
+                        collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+                    }
+                    return Ok(Some(Ok(ty)));
+                }
             }
             // A loop target over a container this pass cannot type (a list
             // of function values): the check phase types the call.

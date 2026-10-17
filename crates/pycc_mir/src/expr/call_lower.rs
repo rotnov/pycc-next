@@ -57,6 +57,19 @@ pub(crate) fn lower_call_expr(
             return lower_expr(&call, scopes, classes, current_class);
         }
     }
+    // `cls(args)` in a `@classmethod`: `pycc_types` admits a call of a
+    // name typed as an instance only for that receiver, so this is the
+    // class `cls` is typed as in this body (retyped per subclass, D-254).
+    if callee == "cls"
+        && let Some(Ty::Instance(class)) = scopes.iter().rev().find_map(|s| s.get("cls"))
+        && let Some(class_def) = classes.get(class.as_str())
+    {
+        let args = args
+            .iter()
+            .map(|a| lower_expr(a, scopes, classes, current_class))
+            .collect();
+        return lower_instantiation(class, class_def, args, scopes, classes);
+    }
     // #1313: a direct call of any name typed `Ty::Object`. The
     // admission is by type, not provenance -- the same rule
     // `ObjAttrGet`/`ObjMethodCall` follow -- so it covers both a

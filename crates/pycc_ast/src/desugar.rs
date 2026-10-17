@@ -7,6 +7,9 @@
 //! says otherwise (`map`/`filter` produce a list instead of a lazy
 //! iterator). The rewrites:
 //!
+//! * Strict mode: a class attribute the program assigns through its class
+//!   (`C.count += 1`) becomes a module variable when every access spells
+//!   `C.count` (see [`class_attrs`]).
 //! * A `@dataclass` class becomes a plain class with the methods
 //!   `dataclasses` generates (see [`dataclasses`]); `Color(value)` of an enum
 //!   class becomes its synthesized value lookup (see [`enums`]); a
@@ -63,6 +66,7 @@ mod aliases;
 mod build;
 mod builtin_defaults;
 mod chr_ranges;
+mod class_attrs;
 mod closures;
 mod collections;
 mod displays;
@@ -185,6 +189,7 @@ pub fn desugar(module: &mut ModModule) {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
         static_branches::fold_static_branches(&mut body);
         chr_ranges::native_chr_calls(&mut body);
+        class_attrs::mutable_class_attrs(&mut body);
         dataclasses::expand_dataclasses(&mut body);
         enums::enum_lookups(&mut body);
         functools::expand_caches(&mut body);

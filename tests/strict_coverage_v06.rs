@@ -55,3 +55,11 @@ fn untyped_empty_list_displays() {
 fn str_and_bool_of_native_values() {
     matches_cpython("str_of_containers");
 }
+
+/// `cls(...)` in a `@classmethod` constructs the receiver's class, also
+/// when a subclass inherits the classmethod, and a class attribute the
+/// program assigns through its class (`Base.count += 1`) is shared state.
+#[test]
+fn classmethod_construction_and_class_attribute_writes() {
+    matches_cpython("class_attr_writes");
+}

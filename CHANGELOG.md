@@ -85,6 +85,20 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   magnitude is between about `1e-77` and `1e77` (boxed otherwise), so pure `int` and
   pure `float` code is unchanged. Tests: `tests/num_union.rs` (strict, `--non-strict`,
   `--ext`, leak probe).
+- Strict mode compiles constructs the fuzzer counted among its most frequent refusals
+  (tests: `tests/strict_coverage_v06.rs`, each fixture native strict, `--non-strict` and
+  `--ext`): `break`/`continue` out of a `try` with a `finally:` clause (the `finally`
+  block runs first, through handlers, `else:` and nested `try`s); the f-string `=` debug
+  specifier, with a conversion or format spec; `itertools.takewhile`/`dropwhile` with a
+  lambda or function predicate; a `match` on a tuple subject mixing literal, capture and
+  starred patterns (it was refused as `T0021` "literal pattern str does not match subject
+  type int"); an empty list display passed straight to a builtin that cannot observe its
+  element type (`print([])`, `len([])`, `sorted([])`, `[] * n`); `str()` of tuples,
+  sets and optionals and `bool()` of every native value; `cls(...)` in a `@classmethod`,
+  constructing the receiver's class also when a subclass inherits the classmethod (whose
+  return type is then that subclass, as for `type(self)(...)`); and a class attribute
+  the program assigns through its class (`Base.count += 1`), as long as every access
+  spells `Base.count` (`docs/DEVIATIONS.md`).
 
 ### Removed
 

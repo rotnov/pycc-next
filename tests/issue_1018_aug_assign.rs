@@ -155,8 +155,12 @@ fn every_inherited_refusal_is_the_plain_assignments() {
             "class C:\n    count = 0\n\n    def bump(self) -> None:\n        self.count += 1\n",
             "error[T0044]: cannot assign to `count`: it is a class-level attribute of class `C`",
         ),
+        // A write through the class is a module variable only while every
+        // access spells `C.count` (`pycc_ast::desugar::class_attrs`); a read
+        // through an instance keeps the class attribute a constant.
         (
-            "class C:\n    count = 0\n\nC.count += 1\n",
+            "class C:\n    count = 0\n\n    def get(self) -> int:\n        return self.count\n\n\
+             C.count += 1\n",
             "error[T0021]: name `C` is not defined",
         ),
         // A class-body augmented assignment stays behind the class-body gate.
