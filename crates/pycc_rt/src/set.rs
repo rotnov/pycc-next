@@ -260,9 +260,9 @@ impl PySetObj {
                 return;
             }
             if i + LINEAR_PROBES <= mask {
-                for j in i + 1..=i + LINEAR_PROBES {
-                    if table[j].state == EMPTY {
-                        table[j] = Entry {
+                for slot in &mut table[i + 1..=i + LINEAR_PROBES] {
+                    if slot.state == EMPTY {
+                        *slot = Entry {
                             hash,
                             key,
                             state: ACTIVE,

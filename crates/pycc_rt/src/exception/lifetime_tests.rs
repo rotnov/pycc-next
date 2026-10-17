@@ -29,7 +29,7 @@ fn exc(name: &'static str, message: *mut PyStrObj) -> *mut PyExceptionObj {
 fn the_last_release_frees_the_exception_and_its_message() {
     let message = shared_str("m");
     let e = exc("ValueError", message);
-    pycc_rt_exception_incref(e);
+    unsafe { pycc_rt_exception_incref(e) };
     pycc_rt_exception_decref(e);
     assert_eq!(count(message), 2, "one release of two keeps it alive");
     pycc_rt_exception_decref(e);
@@ -61,7 +61,7 @@ fn raising_over_a_pending_exception_releases_it() {
     pycc_rt_exception_raise(replacement);
     assert_eq!(count(first), 1, "the replaced exception is freed");
     // Raising the pending exception again hands over a second reference.
-    pycc_rt_exception_incref(replacement);
+    unsafe { pycc_rt_exception_incref(replacement) };
     pycc_rt_exception_raise(replacement);
     assert_eq!(pycc_rt_exception_value(), replacement);
     pycc_rt_exception_clear();

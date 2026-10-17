@@ -74,8 +74,12 @@ pub extern "C" fn pycc_rt_closure_new(
     obj
 }
 
+/// Takes one more reference to `obj` (null is a no-op).
+///
+/// # Safety
+/// `obj` must be null or a live function value (`pycc_rt_closure_new`).
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_closure_incref(obj: *mut PyClosureObj) {
+pub unsafe extern "C" fn pycc_rt_closure_incref(obj: *mut PyClosureObj) {
     if !obj.is_null() {
         // SAFETY: a non-null `obj` is live.
         unsafe { (*obj).rc += 1 };
@@ -84,8 +88,12 @@ pub extern "C" fn pycc_rt_closure_incref(obj: *mut PyClosureObj) {
 
 /// Releases one reference; the last one releases the captured values and
 /// frees the object.
+///
+/// # Safety
+/// `obj` must be null or a live function value whose reference the caller
+/// owns and gives up.
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_closure_decref(obj: *mut PyClosureObj) {
+pub unsafe extern "C" fn pycc_rt_closure_decref(obj: *mut PyClosureObj) {
     if obj.is_null() {
         return;
     }
@@ -150,13 +158,13 @@ mod tests {
     fn the_last_release_runs_drop_and_frees() {
         let before = pycc_rt_closure_live_objects();
         let obj = pycc_rt_closure_new(std::ptr::null(), Some(count_drop), 1, std::ptr::null());
-        pycc_rt_closure_incref(obj);
-        pycc_rt_closure_decref(obj);
+        unsafe { pycc_rt_closure_incref(obj) };
+        unsafe { pycc_rt_closure_decref(obj) };
         assert_eq!(pycc_rt_closure_live_objects(), before + 1);
-        pycc_rt_closure_decref(obj);
+        unsafe { pycc_rt_closure_decref(obj) };
         assert_eq!(pycc_rt_closure_live_objects(), before);
-        pycc_rt_closure_decref(std::ptr::null_mut());
-        pycc_rt_closure_incref(std::ptr::null_mut());
+        unsafe { pycc_rt_closure_decref(std::ptr::null_mut()) };
+        unsafe { pycc_rt_closure_incref(std::ptr::null_mut()) };
     }
 
     #[test]
@@ -166,7 +174,7 @@ mod tests {
             closure_repr(obj),
             format!("<function f.<locals>.g at {:#x}>", obj as usize)
         );
-        pycc_rt_closure_decref(obj);
+        unsafe { pycc_rt_closure_decref(obj) };
         assert_eq!(c_name(std::ptr::null()), "?");
     }
 }

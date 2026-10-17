@@ -63,7 +63,8 @@ pub(crate) fn free_extra(d: &mut PyDictObj) {
     let extra = unsafe { Box::from_raw(std::mem::replace(&mut d.extra, std::ptr::null_mut())) };
     match extra.factory {
         Factory::Proto(word) => value::release(d.value_kind, word),
-        Factory::Call(obj) => crate::closure::pycc_rt_closure_decref(obj),
+        // SAFETY: the dict owned a reference to its live factory.
+        Factory::Call(obj) => unsafe { crate::closure::pycc_rt_closure_decref(obj) },
         Factory::None => {}
     }
 }
@@ -82,7 +83,8 @@ pub(crate) fn copy_extra(source: &PyDictObj, copy: &mut PyDictObj) {
             Factory::Proto(word)
         }
         Factory::Call(obj) => {
-            crate::closure::pycc_rt_closure_incref(obj);
+            // SAFETY: `source` holds a reference to its live factory.
+            unsafe { crate::closure::pycc_rt_closure_incref(obj) };
             Factory::Call(obj)
         }
         Factory::None => Factory::None,
@@ -177,9 +179,12 @@ pub(crate) fn missing(d: &mut PyDictObj, key: i64) -> Option<Result<i64, ()>> {
             let dict_ptr: *mut PyDictObj = d;
             // SAFETY: `d` is live here; the matching decref is below.
             unsafe { super::pycc_rt_dict_incref(dict_ptr) };
-            crate::closure::pycc_rt_closure_incref(obj);
+            // SAFETY: the dict's factory is live; the reference taken here
+            // is released right after the call.
+            unsafe { crate::closure::pycc_rt_closure_incref(obj) };
             let result = call_factory(obj, d.value_kind);
-            crate::closure::pycc_rt_closure_decref(obj);
+            // SAFETY: releases the reference taken above.
+            unsafe { crate::closure::pycc_rt_closure_decref(obj) };
             let outcome = match result {
                 Some(value) => {
                     value::retain(d.key_kind, key);
@@ -265,7 +270,8 @@ pub unsafe extern "C" fn pycc_rt_defaultdict_call_new(
     f: *mut PyClosureObj,
     _name: *mut PyStrObj,
 ) -> *mut PyDictObj {
-    crate::closure::pycc_rt_closure_incref(f);
+    // SAFETY: the caller guarantees `f` is a live function value.
+    unsafe { crate::closure::pycc_rt_closure_incref(f) };
     defaultdict(d, Factory::Call(f), String::new())
 }
 
@@ -665,7 +671,7 @@ pub unsafe extern "C" fn pycc_rt_counter_binop(
     };
     let zero = crate::tag_smallint(0);
     let positive = |v: i64| crate::int_arith::int_cmp(v, zero) > 0;
-    let mut put = |k: i64, v: i64| {
+    let put = |k: i64, v: i64| {
         if positive(v) {
             value::retain(a.key_kind, k);
             dict(result).insert(k, v);

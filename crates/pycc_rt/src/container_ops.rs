@@ -267,9 +267,15 @@ pub unsafe extern "C" fn pycc_rt_set_issuperset(a: *mut PySetObj, b: *mut PySetO
     unsafe { crate::set::pycc_rt_set_issubset(b, a) }
 }
 
+/// A `(kind, word)` element of a list.
+type KindedWord = (i64, i64);
+
+/// A `(key, element)` pair of a `key=` sort.
+type KeyedPair = (KindedWord, KindedWord);
+
 /// The `(key, element)` pairs of a `[(f(v), v) for v in xs]` list (the
 /// `key=` rewrite of `pycc_ast::desugar::keys`), borrowed.
-fn keyed_pairs(pairs: *mut PyListObj) -> Vec<((i64, i64), (i64, i64))> {
+fn keyed_pairs(pairs: *mut PyListObj) -> Vec<KeyedPair> {
     list(pairs)
         .kinded_items()
         .into_iter()
@@ -284,7 +290,7 @@ fn keyed_pairs(pairs: *mut PyListObj) -> Vec<((i64, i64), (i64, i64))> {
 /// reverse=...)` order: a stable sort consulting only `<` on the keys, and
 /// for `reverse` CPython's own reverse-sort-reverse, which keeps equal keys
 /// in their original order.
-fn order_by_keys(pairs: &[((i64, i64), (i64, i64))], reverse: bool) -> Vec<i64> {
+fn order_by_keys(pairs: &[KeyedPair], reverse: bool) -> Vec<i64> {
     let mut positions: Vec<i64> = (0..pairs.len() as i64).collect();
     if reverse {
         positions.reverse();

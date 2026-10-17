@@ -19,7 +19,8 @@ fn own_members(members: &[*mut PyExceptionObj]) -> (*mut *mut PyExceptionObj, us
         return (std::ptr::null_mut(), 0);
     }
     for member in members {
-        pycc_rt_exception_incref(*member);
+        // SAFETY: the members of a group being built are live exceptions.
+        unsafe { pycc_rt_exception_incref(*member) };
     }
     let boxed: Box<[*mut PyExceptionObj]> = members.to_vec().into_boxed_slice();
     (Box::leak(boxed).as_mut_ptr(), members.len())

@@ -6,7 +6,7 @@ use crate::exception::{EXCEPTION_TYPE_VALUE_ERROR, raise_builtin};
 use crate::int_arith::{decode_big, encode_big, int_from_float};
 use crate::int_encoding::{fits_smallint, inline_int_value, tag_smallint};
 use num_bigint::BigInt;
-use num_integer::{Integer, Roots};
+use num_integer::Integer;
 use num_traits::{Signed, Zero};
 
 /// `math.gcd(a, b)`: never negative.

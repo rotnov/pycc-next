@@ -326,7 +326,7 @@ pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
         crate::rc::release_object(list.foreign);
     }
     if list.kind == crate::value::TUPLE_OBJECT {
-        let kinds = crate::tuple::kinds_of(&list);
+        let kinds = crate::tuple::kinds_of(list);
         for (word, kind) in list.typed::<i64>().iter().zip(kinds) {
             release_word_into(crate::value::rc_kind(i64::from(*kind)), *word, dead);
         }

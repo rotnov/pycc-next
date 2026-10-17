@@ -268,9 +268,9 @@ mod tests {
         assert_eq!(i(-42, " 05d"), "-0042");
         assert_eq!(i(66, "5c"), "    B");
         let f = |v: f64, c: &str| output(&float_body(v, &parse_conv(c)), &parse_conv(c), true);
-        assert_eq!(f(-3.14159, "05f"), "-3.141590");
+        assert_eq!(f(-3.25, "05f"), "-3.250000");
         assert_eq!(f(12345.678, "+e"), "+1.234568e+04");
-        assert_eq!(f(-3.14159, "#.0f"), "-3.");
+        assert_eq!(f(-3.25, "#.0f"), "-3.");
         assert_eq!(f(12345.678, "#.0e"), "1.e+04");
         assert_eq!(f(0.000012345, "#g"), "1.23450e-05");
         assert_eq!(f(f64::INFINITY, "05f"), "00inf");

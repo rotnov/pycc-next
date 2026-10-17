@@ -240,7 +240,8 @@ impl Input {
         let desc = Desc::decode(raw);
         let source = if raw & SOURCE_GEN != 0 {
             let generator = object.cast::<PyGenObj>();
-            crate::generator::pycc_rt_gen_incref(generator);
+            // SAFETY: a generator argument is live.
+            unsafe { crate::generator::pycc_rt_gen_incref(generator) };
             Source::Gen { generator }
         } else {
             debug_assert!(raw & SOURCE_LIST != 0, "a list or generator source");
@@ -302,7 +303,10 @@ impl Drop for Input {
     fn drop(&mut self) {
         match &mut self.source {
             Source::List { list, .. } => release(crate::list::LIST_KIND_LIST, *list as i64),
-            Source::Gen { generator } => crate::generator::pycc_rt_gen_decref(*generator),
+            // SAFETY: releases the reference `Input::new` took.
+            Source::Gen { generator } => unsafe {
+                crate::generator::pycc_rt_gen_decref(*generator)
+            },
         }
     }
 }

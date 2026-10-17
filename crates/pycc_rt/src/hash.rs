@@ -76,8 +76,12 @@ pub extern "C" fn pycc_rt_hash_int(word: i64) -> i64 {
 
 /// CPython's `hash(s)` of a `str` (the per-process SipHash key, or
 /// `PYTHONHASHSEED`'s). Borrows `s`.
+///
+/// # Safety
+/// `s` must be a live, non-null `str` object.
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_hash_str(s: *mut crate::PyStrObj) -> i64 {
+pub unsafe extern "C" fn pycc_rt_hash_str(s: *mut crate::PyStrObj) -> i64 {
+    // SAFETY: the caller guarantees `s` is a live `str` object.
     crate::str_hash::hash_str(unsafe { (*s).bytes() })
 }
 

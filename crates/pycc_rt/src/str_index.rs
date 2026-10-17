@@ -56,7 +56,7 @@ impl PyStrObj {
             let mut seen = 0usize;
             for (at, byte) in bytes.iter().enumerate() {
                 if starts_char(*byte) {
-                    if seen % STRIDE == 0 {
+                    if seen.is_multiple_of(STRIDE) {
                         table.push(at);
                     }
                     seen += 1;

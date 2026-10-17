@@ -78,8 +78,11 @@ pub extern "C" fn pycc_rt_exception_alloc(
 }
 
 /// Takes one more reference to `obj` (null is a no-op).
+///
+/// # Safety
+/// `obj` must be null or a live exception object.
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_exception_incref(obj: *mut PyExceptionObj) {
+pub unsafe extern "C" fn pycc_rt_exception_incref(obj: *mut PyExceptionObj) {
     if !obj.is_null() {
         // SAFETY: a non-null `obj` is a live exception object.
         let rc = unsafe { &(*obj).rc };

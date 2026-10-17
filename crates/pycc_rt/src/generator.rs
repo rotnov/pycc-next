@@ -541,7 +541,8 @@ pub extern "C" fn pycc_rt_gen_raise_exit() {
         }
         cell.get()
     });
-    crate::exception::pycc_rt_exception_incref(exit);
+    // SAFETY: the cached `GeneratorExit` is a live exception the cell owns.
+    unsafe { crate::exception::pycc_rt_exception_incref(exit) };
     crate::exception::pycc_rt_exception_raise(exit);
 }
 
@@ -675,8 +676,12 @@ pub extern "C" fn pycc_rt_gen_stop_unless_raised() {
     }
 }
 
+/// Takes one more reference to `g` (null is a no-op).
+///
+/// # Safety
+/// `g` must be null or a live generator object.
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_gen_incref(g: *mut PyGenObj) {
+pub unsafe extern "C" fn pycc_rt_gen_incref(g: *mut PyGenObj) {
     if !g.is_null() {
         // SAFETY: a non-null `g` is live.
         unsafe { (*g).rc += 1 };
@@ -685,8 +690,12 @@ pub extern "C" fn pycc_rt_gen_incref(g: *mut PyGenObj) {
 
 /// Releases one reference; the last one closes an unfinished generator,
 /// frees its frame and the object.
+///
+/// # Safety
+/// `g` must be null or a live generator object whose reference the caller
+/// owns and gives up.
 #[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_gen_decref(g: *mut PyGenObj) {
+pub unsafe extern "C" fn pycc_rt_gen_decref(g: *mut PyGenObj) {
     if g.is_null() {
         return;
     }

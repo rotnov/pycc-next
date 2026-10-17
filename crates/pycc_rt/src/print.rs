@@ -23,20 +23,6 @@ pub extern "C" fn pycc_rt_print_flush() {
     crate::io::flush();
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{pycc_rt_print_newline, pycc_rt_print_space};
-
-    #[test]
-    fn print_flush_does_not_panic_on_an_empty_or_partial_line() {
-        pycc_rt_print_flush();
-        pycc_rt_print_space();
-        pycc_rt_print_flush();
-        pycc_rt_print_newline();
-    }
-}
-
 /// Writes a `PyStrObj`'s bytes to stdout with no trailing newline (Task 10)
 /// -- `print`'s new fully-general dispatch converts every argument to a
 /// `str` via `to_str` first (reusing `pycc_rt_int_to_str`/`float_to_str`/
@@ -95,4 +81,18 @@ pub extern "C" fn pycc_rt_print_newline() {
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_print_none() {
     io::out(b"None");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{pycc_rt_print_newline, pycc_rt_print_space};
+
+    #[test]
+    fn print_flush_does_not_panic_on_an_empty_or_partial_line() {
+        pycc_rt_print_flush();
+        pycc_rt_print_space();
+        pycc_rt_print_flush();
+        pycc_rt_print_newline();
+    }
 }
