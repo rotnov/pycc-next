@@ -143,6 +143,37 @@ sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
 """,
         compiled=("png",),
     ),
+    "mistune": Harness(
+        root="mistune-3.3.4",
+        pyproject="""
+[project]
+name = "mistune"
+version = "3.3.4"
+requires-python = ">=3.13"
+license = "BSD-3-Clause"
+
+[tool.pycc]
+strict = false
+# src/mistune is found by the default discovery (src layout).
+""",
+        # A test reads the project's own `pyproject.toml` from the working
+        # directory: the suite runs from the test directory, which holds a copy.
+        tests=(("tests", "mistune-3.3.4/tests"),
+               ("pyproject.toml", "mistune-3.3.4/pyproject.toml")),
+        run="""
+import os
+os.chdir(sys.argv[1])
+r = unittest.main(module=None, exit=False, verbosity=1, argv=[
+    "wheel_check", "discover", "-s", os.path.join(sys.argv[1], "tests"),
+    "-t", sys.argv[1]]).result
+sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
+""",
+        compiled=tuple(
+            ".".join(["mistune", *pathlib.PurePosixPath(m).with_suffix("").parts])
+            .removesuffix(".__init__")
+            for m in package_check.MISTUNE_MODULES
+        ),
+    ),
 }
 
 # Prefixed to `Harness.run`: argv[1] is the test directory (put on the path for the

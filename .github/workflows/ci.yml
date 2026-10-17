@@ -60,7 +60,7 @@ jobs:
       - name: Real packages built into wheels by pip with pycc.build
         run: |
           name=pycc-ci-$(uname -m)-linux
-          python3 bench/wheel_check.py diff-match-patch tomli pypng \
+          python3 bench/wheel_check.py diff-match-patch tomli pypng mistune \
             --pycc "dist/$name/bin/pycc" --backend "dist/$name/python"
       # Includes the hosted tests that build against and compare with the
       # CPython found as `python3` (the oracle). Skipped: the static-libpython
@@ -95,15 +95,16 @@ jobs:
           name: fuzz-smoke-findings
           path: fuzz-findings
           if-no-files-found: ignore
-      # Real-package gates (v0.3 accept 4, v0.4 accept 4, v0.5 accept 2):
-      # diff-match-patch and pypng (sdist sha256) and tomli (GitHub tag archive
-      # sha256, and that of the files used), each built module by module with
-      # --ext --non-strict, and each package's own test suite run by CPython
-      # against the compiled modules. Compile speed (v0.5 accept 4): each
-      # package builds in 10 s at most (the time is printed per module).
-      - name: Real packages (diff-match-patch, tomli, pypng) against their own tests
+      # Real-package gates (v0.3 accept 4, v0.4 accept 4, v0.5 accept 2, v0.8
+      # accept 4): diff-match-patch, pypng and mistune (sdist sha256) and tomli
+      # (GitHub tag archive sha256, and that of the files used), each built
+      # module by module with --ext --non-strict, and each package's own test
+      # suite run by CPython against the compiled modules. Compile speed (v0.5
+      # accept 4): each package builds in 10 s at most, its modules in
+      # parallel as pycc.build builds them (the time is printed per module).
+      - name: Real packages (diff-match-patch, tomli, pypng, mistune) against their own tests
         if: matrix.os == 'ubuntu-24.04'
-        run: python3 bench/package_check.py diff-match-patch tomli pypng --time --runs 1 --max-build-seconds 10
+        run: python3 bench/package_check.py diff-match-patch tomli pypng mistune --time --runs 1 --max-build-seconds 10
       # Hot-path instruction counts under callgrind (stable on a shared runner,
       # unlike wall time): each package's hot path executes at most its
       # documented bound per call (`max_instructions` in bench/package_check.py,
@@ -112,7 +113,7 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         run: |
           sudo apt-get install -y -q valgrind
-          python3 bench/package_check.py diff-match-patch tomli pypng --instructions
+          python3 bench/package_check.py diff-match-patch tomli pypng mistune --instructions
       # Compile speed (v0.5 accept 4): `pycc build` of every bench/py program
       # takes 2 s at most.
       - name: Benchmark programs build in 2 s
@@ -152,7 +153,7 @@ jobs:
       # archive's pycc.build backend, installed, and its own tests run.
       - name: Real packages built into wheels by pip with pycc.build
         run: |
-          python3 bench/wheel_check.py diff-match-patch tomli pypng \
+          python3 bench/wheel_check.py diff-match-patch tomli pypng mistune \
             --pycc dist/pycc-ci-aarch64-macos/bin/pycc --backend dist/pycc-ci-aarch64-macos/python
       # Same skips and failure reporting as the Linux job.
       - name: Tests
@@ -220,11 +221,11 @@ jobs:
       - name: Real packages built into wheels by pip with pycc.build
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          python3 bench/wheel_check.py diff-match-patch tomli pypng \
+          python3 bench/wheel_check.py diff-match-patch tomli pypng mistune \
             --pycc dist/pycc-ci-x86_64-windows/bin/pycc.exe --backend dist/pycc-ci-x86_64-windows/python
-      - name: Real packages (diff-match-patch, tomli, pypng) against their own tests
+      - name: Real packages (diff-match-patch, tomli, pypng, mistune) against their own tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: python3 bench/package_check.py diff-match-patch tomli pypng
+        run: python3 bench/package_check.py diff-match-patch tomli pypng mistune
       # Same skips and failure reporting as the Linux job.
       - name: Tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}

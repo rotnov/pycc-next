@@ -33,6 +33,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   README, "Which CPython"). An `--ext` build of a small module took about 1.4 s, most of
   it compiling the 8,000-line shim; it now takes about 0.4 s.
 
+- `bench/package_check.py` and `bench/wheel_check.py` check a fourth real package,
+  mistune 3.3.4 (a Markdown engine, 38 modules): it builds unchanged and its own 1155
+  tests pass against the compiled modules; CI runs both on every platform. It is 0.66x
+  CPython's speed on its own benchmark (README). `package_check` builds a package's
+  modules in parallel, as `pycc.build` does, and gates the elapsed time (`--jobs`).
+
 ### Fixed
 
 - A string annotation (`x: "State"`) naming a `TYPE_CHECKING`-only import, under

@@ -433,6 +433,27 @@ Accept:
    PyPI (a Markdown or template engine) builds with `--ext --non-strict`, passes its own
    test suite, and runs its own benchmark or a representative workload >= 2x faster than
    CPython; added to `bench/package_check.py` and the CI wheel checks.
+   **Progress 2026-10-17** (not met): mistune 3.3.4 (BSD-3-Clause, a CommonMark Markdown
+   engine, 38 modules, sdist pinned by sha256) builds unchanged with `--ext --non-strict`
+   and its own 1155 tests pass against the compiled modules (`bench/package_check.py
+   mistune`, `bench/wheel_check.py mistune`; added to CI on all four platforms, with a
+   callgrind bound on one `mistune.html` pass over `benchmark/cases`); 354 of its 413
+   functions compile. It is **slower** than CPython: 0.66x on `mistune.html` of its
+   benchmark documents, 0.61x with every plugin (local, best of 3); under callgrind 77.7M
+   instructions per pass against CPython's 56.8M. Compiled code runs a third of the
+   bytecode (13M fewer instructions in the interpreter loop) but pays 34M back: generic
+   `PyObject_GetAttr` on CPython-created instances (+5.4M with the type lookups), method
+   and temporary objects (+2.4M deallocation), stable-ABI `_Py_IncRef`/`_Py_DecRef` calls
+   (+2.1M), the forwarders of methods of CPython-run classes, and `str` conversions
+   (+1.6M). Fixed on the way, each general: `typing.Optional`/`Union` and unmodeled
+   `typing` names in non-strict mode, string annotations naming `TYPE_CHECKING`-only
+   imports, private module functions exported, `str` crossing the boundary without
+   copies (identity kept), searches with `memchr`, and the C shim's fixed half compiled
+   once per machine (`--ext` builds of small modules ~1.4 s -> ~0.4 s). Remaining for 2x:
+   its classes (`Parser(Generic[ST])`, `BlockState`, `InlineState`, the renderers) must
+   compile natively and their instances be reached natively from the other modules of
+   the package -- each module is its own extension, so today another module sees a
+   compiled instance only through CPython's attribute protocol.
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.

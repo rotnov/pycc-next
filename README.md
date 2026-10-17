@@ -168,7 +168,7 @@ import inside an `if`/`try` block are compile errors; the details are in [`docs/
 
 ### Real packages, unchanged
 
-`python3 bench/package_check.py` (CI-gated) downloads three pinned, permissively licensed
+`python3 bench/package_check.py` (CI-gated) downloads four pinned, permissively licensed
 pure-Python packages, builds each of their modules unchanged as its own extension,
 removes the `.py` files and runs the package's own unittest suite with CPython against
 the compiled modules (`python3 bench/package_check.py tomli --time` checks one and times
@@ -181,7 +181,9 @@ under callgrind and fails over a documented bound, which CI also gates):
   from; its sdist has no tests, so the GitHub tag archive is used, pinned by its sha256
   and by that of the files used);
 - [pypng](https://pypi.org/project/pypng/) 0.20220715.0 (MIT, a PNG encoder and decoder
-  in one module, `png`, pinned by sdist sha256).
+  in one module, `png`, pinned by sdist sha256);
+- [mistune](https://pypi.org/project/mistune/) 3.3.4 (BSD-3-Clause, a CommonMark Markdown
+  parser and renderer in 38 modules, pinned by sdist sha256).
 
 An archive member that is not a regular file or a directory (a link, a device) is
 refused before extraction.
@@ -257,6 +259,26 @@ best of 15 interleaved runs; 4.6x fewer instructions under callgrind). The filte
 so they compute on tagged words without overflow checks; what remains is mostly CPython
 itself (`zlib`, `struct.unpack` and `array` for the 16-bit images, the palette's tuples)
 and per-row object calls, not the filters.
+
+mistune is typed, class-based library code: a block parser, an inline parser, plugins,
+directives and renderers, in 38 modules that call each other through their classes,
+with tokens as dicts and dispatch by name (`getattr(self, name)`, a dict of lambdas).
+All 38 build unchanged (in parallel, as `pycc.build` builds them) and its own 1155 tests
+pass against them; 354 of its 413 functions compile (`--report-fallbacks`). It is
+**slower** than CPython: rendering every document of its own benchmark
+(`benchmark/cases`) with `mistune.html` takes 0.22 s against 0.15 s for 20 passes
+(0.66x), and its "full" parser with every plugin 0.61x; under callgrind 77.7M
+instructions per pass against CPython's 56.8M. Its classes are created by CPython
+(`Generic[ST]` bases, bases from another module, lambdas), so every method is a
+compiled body behind a Python forwarder, every `self.x` is a generic
+`PyObject_GetAttr` where CPython's interpreter uses a specialized instruction, and
+its values (tokens, states, matches) are CPython objects reached through the C API:
+compiled code runs a third of the bytecode CPython runs and saves 13M instructions per
+pass there, and pays 34M back in attribute lookups, method objects, stable-ABI reference
+counting calls and conversions. What it took to compile at all is general: `typing`'s
+`Optional`/`Union` and its unmodeled names (`Match`, `MutableMapping`), string
+annotations of `TYPE_CHECKING`-only imports, private module functions exported, `str`
+crossing without copies.
 
 ## Use pycc in your project
 

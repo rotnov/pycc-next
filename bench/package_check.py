@@ -22,10 +22,16 @@ Packages:
     sdist ships it with its unittest suite and the PngSuite test images (`pngsuite`,
     which stays Python with the tests). Its hot path is undoing the scanline filters
     when decoding.
+  mistune 3.3.4 (BSD-3-Clause): a CommonMark Markdown parser and renderer, 37
+    modules (core, block and inline parsers, plugins, directives, renderers). The
+    PyPI sdist ships it with its unittest suite (1155 tests, the CommonMark spec
+    examples among them) and its own benchmark's documents (`benchmark/cases`),
+    which `--time` renders as `benchmark/bench.py` does.
 
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
-                                      [--max-build-seconds S] [--instructions]
+                                      [--max-build-seconds S] [--jobs N]
+                                      [--instructions]
   PACKAGE  names from PACKAGES (default: all of them).
   --time   also time each package's hot paths compiled and in CPython (pypng:
            its 256x256 filter image, and every PngSuite image its tests use).
@@ -43,12 +49,17 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            1-10% lower (for tomli, half of whose `loads()` is CPython's).
   --max-build-seconds S
            fail a package whose modules take more than S seconds to build in
-           all (v0.5 accept 4: 10 on the CI Linux runner). Each module's build
-           time and the package's total are always printed.
+           all (v0.5 accept 4: 10 on the CI Linux runner). The modules build
+           in parallel, as the `pycc.build` backend builds them (--jobs, by
+           default one per CPU); each module's build time, the package's
+           elapsed time (what the bound applies to) and the sum of the
+           modules' times are always printed.
+  --jobs N  build N modules at a time.
 Exit status 0 only when every module of every package builds (within the bound,
 when one is given) and every suite passes.
 """
 import argparse
+import concurrent.futures
 import dataclasses
 import hashlib
 import os
@@ -165,6 +176,55 @@ for _ in range(int(sys.argv[2])):
     t = time.perf_counter()
     for _ in range(5):
         decode()
+    best = min(best, time.perf_counter() - t)
+print(f"{best:.4f}")
+"""
+
+# mistune's modules: all of the package (its command-line `__main__` too).
+MISTUNE_MODULES = (
+    "__init__.py", "__main__.py", "_inline/__init__.py", "_inline/emphasis.py",
+    "_inline/links.py", "block_parser.py", "core.py", "directives/__init__.py",
+    "directives/_base.py", "directives/_fenced.py", "directives/_rst.py",
+    "directives/admonition.py", "directives/image.py", "directives/include.py",
+    "directives/toc.py", "helpers.py", "inline_parser.py", "list_parser.py", "markdown.py",
+    "plugins/__init__.py", "plugins/abbr.py", "plugins/def_list.py", "plugins/footnotes.py",
+    "plugins/formatting.py", "plugins/math.py", "plugins/ruby.py", "plugins/speedup.py",
+    "plugins/spoiler.py", "plugins/table.py", "plugins/task_lists.py", "plugins/url.py",
+    "renderers/__init__.py", "renderers/_list.py", "renderers/html.py",
+    "renderers/markdown.py", "renderers/rst.py", "toc.py", "util.py",
+)
+
+# mistune's own benchmark (`benchmark/bench.py`): its documents, each rendered
+# by a parser `md` (the benchmark runs each case 100 times; here every case,
+# 20 times over).
+MISTUNE_CASES = """
+import gc, os, sys, time
+sys.path.insert(0, sys.argv[1])
+import mistune
+cases = os.path.join(sys.argv[1], "benchmark", "cases")
+docs = []
+for name in sorted(os.listdir(cases)):
+    with open(os.path.join(cases, name), encoding="utf-8") as f:
+        docs.append(f.read())
+"""
+# The benchmark's "mistune (full)" parser: every plugin and the directives.
+MISTUNE_FULL = """
+from mistune.directives import RSTDirective, Admonition, TableOfContents, Include
+md = mistune.create_markdown(escape=False, plugins=[
+    "url", "abbr", "ruby", "strikethrough", "mark", "insert", "subscript", "superscript",
+    "footnotes", "def_list", "math", "table", "task_lists",
+    RSTDirective([Admonition(), TableOfContents(), Include()])])
+"""
+MISTUNE_TIMED = """
+for doc in docs:
+    md(doc)
+best = float("inf")
+for _ in range(int(sys.argv[2])):
+    gc.collect()
+    t = time.perf_counter()
+    for _ in range(20):
+        for doc in docs:
+            md(doc)
     best = min(best, time.perf_counter() - t)
 print(f"{best:.4f}")
 """
@@ -326,6 +386,49 @@ for _ in range(int(sys.argv[2])):
             instruction_calls=2,
             more_speed=(("read() of every PngSuite image its tests use (28) x5", PYPNG_SUITE),),
         ),
+        Package(
+            name="mistune",
+            version="3.3.4",
+            url="https://files.pythonhosted.org/packages/source/m/mistune/mistune-3.3.4.tar.gz",
+            archive="mistune-3.3.4.tar.gz",
+            sha256="58b5c96d6fcb61190dfe5fae498d2b2065f99cf61e9649418fd54cf1ada86dfe",
+            tree_sha256=None,
+            layout=(
+                ("mistune", "mistune-3.3.4/src/mistune"),
+                ("tests", "mistune-3.3.4/tests"),
+                ("benchmark", "mistune-3.3.4/benchmark"),
+                ("pyproject.toml", "mistune-3.3.4/pyproject.toml"),
+            ),
+            import_name="mistune",
+            modules=MISTUNE_MODULES,
+            # From the tree, as from the project's root: a test reads its
+            # `pyproject.toml`.
+            tests="""
+import os
+os.chdir(sys.argv[1])
+r = unittest.main(module=None, exit=False, verbosity=1, argv=[
+    "package_check", "discover", "-s", os.path.join(sys.argv[1], "tests"),
+    "-t", sys.argv[1]]).result
+sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
+""",
+            speed=MISTUNE_CASES + """
+md = mistune.html
+""" + MISTUNE_TIMED,
+            speed_label="mistune.html of every benchmark/cases document x20",
+            instructions=MISTUNE_CASES + """
+for _ in range(int(sys.argv[2])):
+    for doc in docs:
+        mistune.html(doc)
+""",
+            instructions_label="mistune.html of every benchmark/cases document",
+            # 77.6M instructions per call at the first measurement (Ubuntu's
+            # python3.13; CPython running the sources: see the README); the
+            # bound leaves room for CI's CPython until it is measured there.
+            max_instructions=85_400_000,
+            instruction_calls=2,
+            more_speed=(("the benchmark's \"mistune (full)\" parser (every plugin) x20",
+                         MISTUNE_CASES + MISTUNE_FULL + MISTUNE_TIMED),),
+        ),
     ]
 }
 
@@ -440,22 +543,28 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     pkg_dir = built if single else built / pkg.layout[0][0]
 
     defs = fell = 0
-    build_seconds = 0.0
-    for mod in pkg.modules:
+
+    def build(mod: str) -> tuple[subprocess.CompletedProcess, float]:
         py = pkg_dir / mod
         out = py.with_suffix("") if mod != "__init__.py" else py.parent / "__init__"
         started = time.perf_counter()
         b = subprocess.run([a.pycc, "build", str(py), "-o", str(out), "--ext", "--non-strict",
                             "--release", "--foreign-relative-imports", "--report-fallbacks"],
                            capture_output=True, text=True, timeout=900)
-        seconds = time.perf_counter() - started
-        build_seconds += seconds
+        return b, time.perf_counter() - started
+
+    # In parallel, as the `pycc.build` backend builds a package's modules.
+    started = time.perf_counter()
+    with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
+        results = list(pool.map(build, pkg.modules))
+    build_seconds = time.perf_counter() - started
+    for mod, (b, seconds) in zip(pkg.modules, results):
         print(f"  {mod}: built in {seconds:.2f}s")
         if b.returncode != 0:
             print(b.stdout + b.stderr)
             print(f"FAIL: pycc could not build {pkg.import_name}/{mod}")
             return False
-        source = py.read_text(encoding="utf-8")
+        source = (pkg_dir / mod).read_text(encoding="utf-8")
         defs += count_defs(source)
         lines = source.splitlines()
         for m in re.finditer(r"^fallback: .*? at .*?:(\d+)(?:-(\d+))? runs in CPython: (.*)$",
@@ -473,15 +582,19 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     for mod in pkg.modules:
         (pkg_dir / mod).unlink()
     native = defs - fell
-    print(f"  {len(pkg.modules)} modules built in {build_seconds:.2f}s; "
-          f"{native}/{defs} functions native")
+    cpu = sum(seconds for _, seconds in results)
+    print(f"  {len(pkg.modules)} modules built in {build_seconds:.2f}s "
+          f"({cpu:.2f}s of builds, {a.jobs} at a time); {native}/{defs} functions native")
     if a.max_build_seconds is not None and build_seconds > a.max_build_seconds:
         print(f"FAIL: {pkg.name} took {build_seconds:.2f}s to build, more than "
               f"{a.max_build_seconds:g}s")
         return False
 
+    # A module's dotted name: `a/b.py` is `<package>.a.b`, `a/__init__.py` is `<package>.a`.
     names = ",".join(
-        pkg.import_name if single or m == "__init__.py" else f"{pkg.import_name}.{m[:-3]}"
+        pkg.import_name if single else
+        ".".join([pkg.import_name, *pathlib.PurePosixPath(m).with_suffix("").parts])
+        .removesuffix(".__init__")
         for m in pkg.modules
     )
     for label, tree in (("cpython", plain), ("compiled", built)):
@@ -550,6 +663,7 @@ def main() -> int:
     ap.add_argument("--time", action="store_true")
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--max-build-seconds", type=float)
+    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     ap.add_argument("--instructions", action="store_true")
     a = ap.parse_args()
     for name in a.packages:
