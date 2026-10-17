@@ -20,6 +20,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 mod c_objects;
+#[cfg(any(windows, test))]
+mod windows_clang;
 
 /// `Ok(())` on success, `Err(code)` carrying the exit code to use on
 /// failure. `?` inside this function needs a `Result`, not an `ExitCode`
@@ -314,6 +316,11 @@ pub(crate) fn try_build(
 /// archive unpacked, so it says what to install.
 fn linker_spawn_error(cmd: &std::process::Command, e: &std::io::Error) -> String {
     let hint = match e.kind() {
+        std::io::ErrorKind::NotFound if cfg!(windows) => {
+            "; pycc compiles and links every artifact with clang and MSVC's linker -- install \
+             LLVM (clang) and the Visual Studio Build Tools (\"Desktop development with C++\"), \
+             and run pycc from a developer prompt, or name the clang with PYCC_CLANG"
+        }
         std::io::ErrorKind::NotFound => {
             "; pycc links every artifact with a C compiler driver -- install a C toolchain \
              (gcc or clang, e.g. `apt install build-essential`) so that it is on PATH"
@@ -585,21 +592,23 @@ fn write_ext_source(path: &Path, contents: &str) -> Result<(), ExitCode> {
 }
 
 /// Windows has no `cc` by default (that's a Unix convention -- MSVC's own
-/// tools are `cl.exe`/`link.exe`), so this uses the `clang` bundled with the
-/// same LLVM install `LLVM_SYS_221_PREFIX` already points builds at (see
-/// D-015/D-027) -- clang's driver translates GCC-style `-l`/`-L`/`-o` flags
-/// into the `link.exe` invocation this target needs, verified empirically
-/// (`clang -target x86_64-pc-windows-msvc -### ...`) rather than assumed.
+/// tools are `cl.exe`/`link.exe`), so this uses a `clang.exe`, found as
+/// `windows_clang` describes (the machine's own, else the one of the LLVM
+/// pycc was built against) -- clang's driver translates GCC-style
+/// `-l`/`-L`/`-o` flags into the `link.exe` invocation this target needs,
+/// verified empirically (`clang -target x86_64-pc-windows-msvc -### ...`)
+/// rather than assumed.
 /// Elsewhere, the system `cc` already works for the no-`--target` case
 /// (verified: native-build-test passes on both Linux architectures and
 /// macOS) -- see this function's other two cfg-gated bodies below for
 /// what changes when `--target` is given (D-031).
 #[cfg(windows)]
 fn linker_command(_target: Option<&str>) -> std::process::Command {
-    let clang = std::path::Path::new(env!("LLVM_SYS_221_PREFIX"))
-        .join("bin")
-        .join("clang.exe");
-    std::process::Command::new(clang)
+    std::process::Command::new(windows_clang::resolve(
+        |name| std::env::var_os(name),
+        Path::is_file,
+        Path::new(env!("LLVM_SYS_221_PREFIX")),
+    ))
 }
 
 /// Linux's default `cc` is GCC (confirmed: Ubuntu's `ubuntu-latest`/
