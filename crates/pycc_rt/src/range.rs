@@ -128,3 +128,50 @@ pub(crate) fn range_normalize_operand(encoded: i64) -> i64 {
 pub extern "C" fn pycc_rt_range_normalize_operand(encoded: i64) -> i64 {
     range_normalize_operand(encoded)
 }
+
+/// The `stop` a `list()`/`tuple()`/`sorted()` call over `range(start, stop,
+/// step)` iterates to. CPython takes the range's length first and raises
+/// `OverflowError` when it does not fit a C `ssize_t`
+/// (`list(range(10 ** 30))`), instead of iterating forever: on that path
+/// this raises the same error and returns `start`, which ends the loop
+/// before its first element. A zero `step` is left to `range_continue`,
+/// which raises `ValueError` as `range()` does. Every operand is borrowed;
+/// the result is one of them.
+pub(crate) fn range_sized_stop(start: i64, stop: i64, step: i64) -> i64 {
+    // Three inline operands span at most 2^63 - 1 values: always a length.
+    if inline_int_value(start).is_some()
+        && inline_int_value(stop).is_some()
+        && inline_int_value(step).is_some()
+    {
+        return stop;
+    }
+    let (lo, hi, step_big) = (
+        crate::int_arith::decode_big(start),
+        crate::int_arith::decode_big(stop),
+        crate::int_arith::decode_big(step),
+    );
+    let zero = num_bigint::BigInt::from(0);
+    let one = num_bigint::BigInt::from(1);
+    let len = if step_big > zero && lo < hi {
+        (&hi - &lo - &one) / &step_big + &one
+    } else if step_big < zero && lo > hi {
+        (&lo - &hi - &one) / (-&step_big) + &one
+    } else {
+        zero
+    };
+    if len > num_bigint::BigInt::from(i64::MAX) {
+        raise_builtin(
+            EXCEPTION_TYPE_OVERFLOW_ERROR,
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        );
+        return start;
+    }
+    stop
+}
+
+/// [`range_sized_stop`] for generated code.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_range_sized_stop(start: i64, stop: i64, step: i64) -> i64 {
+    range_sized_stop(start, stop, step)
+}

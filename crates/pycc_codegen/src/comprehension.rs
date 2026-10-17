@@ -207,7 +207,14 @@ pub(super) fn emit_comprehension<'ctx>(
     let reserve = (matches!(elts, CompElts::List(_) if cond.is_none())
         && matches!(source, CompSource::ListExpr(_)))
     .then_some(container);
-    let lp = open_loop(cx, function, prefix, var, var_ty, source, reserve);
+    // `[v for v in range(...)]` with no filter -- the form `list()`,
+    // `tuple()` and `sorted()` of a `range` desugar to -- only builds the
+    // range's elements: CPython's `len()` of a range past a C `ssize_t`
+    // raises `OverflowError` before iterating, and so does this loop.
+    let sized = cond.is_none()
+        && matches!(source, CompSource::Range { .. })
+        && matches!(&elts, CompElts::List(MirExpr::Name { name, .. }) if name == var);
+    let lp = open_loop(cx, function, prefix, var, var_ty, source, reserve, sized);
 
     // The filter: with `cond`, a small `if_taken`/`if_skip` block pair
     // (mirroring `MirStmt::If`'s two-block shape) where `if_skip` doubles as
@@ -454,6 +461,8 @@ fn emit_element<'ctx>(cx: &CompCx<'_, 'ctx>, container: PointerValue<'ctx>, elts
 /// Builds the loop's test/body/after blocks for `source`, positions the
 /// builder at the start of the body and binds `var` there. Each source kind
 /// mirrors the matching `For*` arm's preheader/test/body shape exactly.
+/// `sized` checks a `range` source's length first (`pycc_rt_range_sized_stop`).
+#[allow(clippy::too_many_arguments)]
 fn open_loop<'ctx>(
     cx: &CompCx<'_, 'ctx>,
     function: FunctionValue<'ctx>,
@@ -462,6 +471,7 @@ fn open_loop<'ctx>(
     var_ty: &Ty,
     source: &CompSource,
     reserve: Option<PointerValue<'ctx>>,
+    sized: bool,
 ) -> CompLoop<'ctx> {
     let (context, builder, rt) = (cx.context, cx.builder, cx.rt);
     match source {
@@ -504,6 +514,20 @@ fn open_loop<'ctx>(
             .into_iter()
             .flatten()
             .collect();
+            let stop_v = if sized {
+                builder
+                    .build_call(
+                        rt.range_sized_stop,
+                        &[start_v.into(), stop_v.into(), step_v.into()],
+                        "range_sized_stop",
+                    )
+                    .expect("build_call should not fail for a range length check")
+                    .try_as_basic_value()
+                    .expect_basic("pycc_rt_range_sized_stop returns an i64")
+                    .into_int_value()
+            } else {
+                stop_v
+            };
             // Re-read after the retain: it splits the block.
             let preheader = builder.get_insert_block().unwrap();
             let (test_bb, body_bb, after_bb) = append_loop_blocks(cx, function, prefix);

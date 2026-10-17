@@ -72,6 +72,10 @@ pub(super) struct RtFns<'ctx> {
     pub(super) smul_overflow: FunctionValue<'ctx>,
     pub(super) int_truthy: FunctionValue<'ctx>,
     pub(super) range_continue: FunctionValue<'ctx>,
+    /// `pycc_rt_range_sized_stop(start, stop, step) -> i64`: the bound a
+    /// `list(range(...))` materialization iterates to, raising CPython's
+    /// `OverflowError` for a length past a C `ssize_t`.
+    pub(super) range_sized_stop: FunctionValue<'ctx>,
     /// #147 (D-179): `pycc_rt_range_normalize_operand`, the encoded-word-in,
     /// encoded-word-out normalizer every `range()` operand passes through.
     /// It maps D-141's `False`/`True` markers to the ordinary smallints
@@ -521,6 +525,10 @@ pub(super) fn declare_rt_functions<'ctx>(
             context
                 .i8_type()
                 .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+        ),
+        range_sized_stop: declare(
+            "pycc_rt_range_sized_stop",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
         ),
         range_normalize_operand: declare(
             "pycc_rt_range_normalize_operand",

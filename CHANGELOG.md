@@ -4,6 +4,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Fixed
+
+- `list(range(10 ** 30))` (and `tuple()`/`sorted()` of a range longer than a C
+  `ssize_t`) iterated forever; it now raises CPython's `OverflowError: Python int too
+  large to convert to C ssize_t` (#3).
+- A missing key of a `dict[..., str]`, an out-of-range index of a `list[str]` and
+  `pop()` of an empty one leaked the placeholder `str` returned beside the exception; it
+  is now the shared immortal empty `str` (#4).
+
 ## [0.6.0] - 2026-10-17
 
 Drop-in for real projects. `pip install` builds a project with pycc through a PEP 517

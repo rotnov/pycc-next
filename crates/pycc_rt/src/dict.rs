@@ -206,7 +206,7 @@ impl PyDictObj {
 pub(crate) fn sentinel(kind: i64) -> i64 {
     match kind {
         crate::list::LIST_KIND_INT => crate::tag_smallint(0),
-        crate::list::LIST_KIND_STR => new_pystr(b"") as i64,
+        crate::list::LIST_KIND_STR => crate::str_index::empty_str() as i64,
         _ => 0,
     }
 }

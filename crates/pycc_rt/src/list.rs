@@ -254,7 +254,7 @@ impl PyListObj {
     fn sentinel(&self) -> i64 {
         match self.kind {
             LIST_KIND_INT => tag_smallint(0),
-            LIST_KIND_STR => new_pystr(b"") as i64,
+            LIST_KIND_STR => crate::str_index::empty_str() as i64,
             _ => 0,
         }
     }

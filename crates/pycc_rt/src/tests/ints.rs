@@ -755,3 +755,38 @@ fn bigint_from_i128_of_zero_still_has_a_single_zero_limb() {
     assert!(!b.negative);
     assert_eq!(b.limbs, vec![0]);
 }
+
+/// #3: `range_sized_stop` keeps `stop` for every range whose length fits a
+/// C `ssize_t` and raises `OverflowError` (returning `start`) for a longer
+/// one; a zero step is left to `range_continue`.
+#[test]
+fn range_sized_stop_raises_overflow_error_past_ssize_t() {
+    pycc_rt_exception_clear();
+    let small = (tag_smallint(0), tag_smallint(10), tag_smallint(3));
+    assert_eq!(pycc_rt_range_sized_stop(small.0, small.1, small.2), small.1);
+    let max = tag_bigint(bigint_from_i128(i128::from(i64::MAX)));
+    let past = tag_bigint(bigint_from_i128(i128::from(i64::MAX) + 1));
+    let zero = tag_smallint(0);
+    let one = tag_smallint(1);
+    // Exactly `i64::MAX` elements fit.
+    assert_eq!(pycc_rt_range_sized_stop(zero, max, one), max);
+    assert_eq!(pycc_rt_exception_active(), 0);
+    // A step of two halves the length; a zero step is not this check's.
+    assert_eq!(pycc_rt_range_sized_stop(zero, past, tag_smallint(2)), past);
+    assert_eq!(pycc_rt_range_sized_stop(zero, past, zero), past);
+    // An empty range, ascending or descending, has length zero.
+    assert_eq!(pycc_rt_range_sized_stop(past, zero, one), zero);
+    assert_eq!(pycc_rt_range_sized_stop(zero, past, tag_smallint(-1)), past);
+    assert_eq!(pycc_rt_exception_active(), 0);
+    // One element more raises and ends the loop at `start`.
+    assert_eq!(pycc_rt_range_sized_stop(zero, past, one), zero);
+    assert_eq!(pycc_rt_exception_active(), 1);
+    let obj = exception::pycc_rt_exception_value();
+    assert_eq!(unsafe { (*obj).type_tag }, EXCEPTION_TYPE_OVERFLOW_ERROR);
+    pycc_rt_exception_clear();
+    assert_eq!(pycc_rt_range_sized_stop(past, zero, tag_smallint(-1)), past);
+    assert_eq!(pycc_rt_exception_active(), 1);
+    pycc_rt_exception_clear();
+    bigint_release(max);
+    bigint_release(past);
+}
