@@ -25,9 +25,11 @@ class Bag:
         return s
 
     def ranked(self):
-        # Falls back alone: a lambda used as a value.
-        key = lambda v: -v
-        return sorted([self.count, self.scale, self.total()], key=key)
+        # Falls back alone: a walrus in a short-circuited operand.
+        values = [self.count, self.scale, self.total()]
+        if values and (first := values[0]) is not None:
+            values.append(first - first)
+        return sorted(values, reverse=True)[:3]
 
     def tagged(self, suffix: str) -> str:
         # Falls back alone, attached to the compiled class.
@@ -68,9 +70,11 @@ class Rich:
         return s
 
     def ordered(self):
-        # Falls back alone: a lambda used as a value.
-        key = lambda v: -v
-        return sorted(self.items, key=key)
+        # Falls back alone: a walrus in a short-circuited operand.
+        items = list(self.items)
+        if items and (first := items[0]) is not None:
+            items.append(first - first)
+        return sorted(items, reverse=True)[: len(self.items)]
 
     def secret(self) -> int:
         return self.__secret + 1

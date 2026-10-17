@@ -11,12 +11,15 @@ impl Plan {
     pub(super) fn cascade(&mut self) {
         loop {
             let globals = self.dict_globals();
+            // What the nested statements CPython runs read (`nested`).
+            let nested_reads = self.nested_mentions();
             let read: BTreeSet<&String> = self
                 .fallback
                 .keys()
                 .chain(&self.mirrored)
                 .flat_map(|index| &self.stmts[*index].mentions)
                 .chain(&self.external)
+                .chain(&nested_reads)
                 .collect();
             // A name fallback code reads that no top-level statement binds
             // may come from a `from m import *`, whose names are not known
@@ -247,6 +250,7 @@ impl Plan {
     pub(super) fn dict_globals(&self) -> BTreeSet<String> {
         let mut fallback_bound = BTreeSet::new();
         let mut fallback_read = self.external.clone();
+        fallback_read.extend(self.nested_mentions());
         let mut compiled_bound = BTreeSet::new();
         for (index, stmt) in self.stmts.iter().enumerate() {
             if self.fallback.contains_key(&index) {

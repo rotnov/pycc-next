@@ -154,6 +154,15 @@ pub(crate) fn collect_call_constraints(
                     }
                     return Ok(Some(Ok(ty)));
                 }
+                // Non-strict mode: a name an earlier call already made an
+                // object (the arm below) stays a CPython callable, so a
+                // second call of it (`t(1)`, then `t(2, 3)`) is one too.
+                if ty == Ty::Object && crate::non_strict::is_non_strict() {
+                    for arg in args {
+                        collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+                    }
+                    return Ok(Some(Ok(Ty::Object)));
+                }
             }
             // A loop target over a container this pass cannot type (a list
             // of function values): the check phase types the call.

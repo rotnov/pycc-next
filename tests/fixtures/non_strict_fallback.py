@@ -9,7 +9,7 @@ def scale(x: int, k: int) -> int:
 
 
 def describe(values):
-    # Falls back: a lambda and a generator expression.
+    # Compiled: CPython creates its lambda, whose body is compiled.
     key = lambda v: -v
     return ",".join(str(v) for v in sorted(values, key=key))
 
@@ -32,10 +32,9 @@ def guarded(n):
 
 
 def boom(n):
-    # Falls back; its exception is caught in compiled code.
-    pick = lambda: 10 // n
-    run = pick
-    return run()
+    # Falls back (it calls a lambda expression); its exception is caught
+    # in compiled code.
+    return (lambda: 10 // n)()
 
 
 counter = 0

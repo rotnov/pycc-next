@@ -131,8 +131,20 @@ impl Plan {
                         out.text.push_str(&self.exec_text(&mut out.chunks, &source));
                     }
                 }
+                // The nested statements' scaffolds (`nested`), defined
+                // before any compiled function can run one.
+                let nested = self.nested_preamble(&mut out.chunks);
+                out.text.push_str(&nested);
                 out.text.push('\n');
                 preamble = at..out.text.len() as u32;
+                // The compiled bodies of nested `def`s (`nested`), defined
+                // before any compiled function can make one.
+                for unit in self.nested_body_units() {
+                    let at = out.text.len() as u32;
+                    self.emit_compiled(&mut out, unit, &globals, &native);
+                    out.ranges[unit] = at..out.text.len() as u32;
+                    out.text.push('\n');
+                }
             }
             if self.is_split(index) {
                 cursor = self.render_split(index, &mut out, &globals, &native, &mut prefix);
@@ -248,7 +260,7 @@ impl Plan {
     /// `exec`s the (padded) CPython source `source` in the namespace: in
     /// an `--ext` module the code object of a new chunk of `chunks`
     /// (`CodeChunk`), elsewhere `compile()`d where it runs.
-    fn exec_text(&self, chunks: &mut Vec<CodeChunk>, source: &str) -> String {
+    pub(super) fn exec_text(&self, chunks: &mut Vec<CodeChunk>, source: &str) -> String {
         if self.publishes.variables {
             chunks.push(CodeChunk {
                 source: source.to_string(),
@@ -318,6 +330,7 @@ impl Plan {
                 }
             }
         }
+        edits.extend(self.nested_edits(index));
         if let Some(lift) = self.lift(index) {
             edits.extend(lift.edits.iter().map(|(range, text)| names::Edit {
                 range: range.clone(),

@@ -382,9 +382,12 @@ and setuptools): that is the test harness, not a change to the packages.
   its classes' constants as class attributes. Known gaps are listed in
   `docs/DEVIATIONS.md`.
 - **Per-function fallback** (non-strict only): a construct pycc cannot compile yet (a
-  lambda used as a value, ...) sends only the smallest enclosing function or method to
+  call of a `lambda` expression, ...) sends only the smallest enclosing function or method to
   CPython, kept as Python source and run by CPython's own `exec` in the module's
-  namespace, at its place in the module. A class whose statement CPython has to run
+  namespace, at its place in the module. A nested `def` or `lambda` used as a value
+  goes alone: CPython creates the function (its decorators, defaults, `__qualname__`),
+  its body is compiled, and its enclosing function stays compiled. A class whose
+  statement CPython has to run
   (it inherits a CPython class such as `threading.Thread`, `collections.Counter`,
   `argparse.Action` or a library exception, has a metaclass, descriptors, class
   attributes of any type, decorated methods or properties) is created by CPython, and

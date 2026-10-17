@@ -231,3 +231,109 @@ fn relative_local_import_resolves_against_the_package() {
         );
     }
 }
+
+/// What the nested-statement fixtures' reports must say: every nested
+/// `def` named here is created by CPython with its body compiled.
+fn assert_lifted(report: &str, names: &[&str]) {
+    for name in names {
+        assert!(
+            report.contains(&format!("lifted: function `{name}`"))
+                || report.contains(&format!("lifted: lambda `{name}`")),
+            "{name} should have a compiled body:\n{report}"
+        );
+    }
+}
+
+#[test]
+fn nested_def_native() {
+    native("v08_nested_def");
+}
+
+#[test]
+fn nested_def_ext() {
+    ext("v08_nested_def");
+}
+
+#[test]
+fn nested_def_bodies_are_compiled() {
+    let dir = ScratchDir::new("v08_nested_def_report").expect("scratch");
+    let source = fixture("v08_nested_def", &dir, "m.py");
+    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict"]);
+    assert_lifted(
+        &report,
+        &[
+            "traced.<locals>.wrapper",
+            "counter.<locals>.bump",
+            "counter.<locals>.peek",
+            "late_binding.<locals>.get",
+            "defaults_now.<locals>.show",
+            "shared_loop.<locals>.tag",
+            "logged.<locals>.call",
+        ],
+    );
+}
+
+#[test]
+fn lambda_native() {
+    native("v08_lambda");
+}
+
+#[test]
+fn lambda_ext() {
+    ext("v08_lambda");
+}
+
+#[test]
+fn lambda_bodies_are_compiled() {
+    let dir = ScratchDir::new("v08_lambda_report").expect("scratch");
+    let source = fixture("v08_lambda", &dir, "m.py");
+    let report = build(&source, &dir.join("m"), &["--ext", "--non-strict"]);
+    assert_lifted(
+        &report,
+        &[
+            "camel.<locals>.<lambda>",
+            "scaled.<locals>.<lambda>",
+            "make_all.<locals>.<lambda>",
+            "bind_now.<locals>.<lambda>",
+            "picker.<locals>.<lambda>",
+        ],
+    );
+}
+
+/// Closures made and dropped in a loop release their cells, their
+/// function objects and what they capture: the captured object's
+/// reference count and the number of live cells come back to where they
+/// were.
+#[test]
+fn closures_and_cells_do_not_leak() {
+    let dir = ScratchDir::new("v08_closure_leak").expect("scratch");
+    let source = dir.join("lk.py");
+    std::fs::write(
+        &source,
+        "import functools\n\n\n\
+         def wrap(func, tag):\n    calls = 0\n\n    @functools.wraps(func)\n    \
+         def wrapper(*args):\n        nonlocal calls\n        calls += 1\n        \
+         return func(*args), tag, calls\n\n    return wrapper\n\n\n\
+         def many(func, tag, n):\n    total = 0\n    for i in range(n):\n        \
+         w = wrap(func, tag)\n        w(i)\n        f = lambda v: (v, tag, i)\n        \
+         total += f(1)[0]\n    return total\n",
+    )
+    .unwrap();
+    build(&source, &dir.join("lk"), &["--ext", "--non-strict"]);
+    let run = python()
+        .args([
+            "-c",
+            "import gc, sys, types, lk\n\
+             tag = object()\n\
+             def cells():\n    gc.collect()\n    \
+             return sum(1 for o in gc.get_objects() if type(o) is types.CellType)\n\
+             lk.many(abs, tag, 10)\n\
+             r0, c0 = sys.getrefcount(tag), cells()\n\
+             print(lk.many(abs, tag, 20000))\n\
+             print(sys.getrefcount(tag) - r0, cells() - c0)",
+        ])
+        .current_dir(&*dir)
+        .output()
+        .expect("python should spawn");
+    assert_eq!(text(&run.stdout), "20000\n0 0\n", "{}", text(&run.stderr));
+}

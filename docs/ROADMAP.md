@@ -461,6 +461,9 @@ Accept:
 Progress:
 - Accept 2 (in progress): the `...` literal (a bare `...` statement is a no-op; the value
   is the `Ellipsis` object), `hash()` of a CPython object and function-local imports of
-  CPython modules compile natively (`tests/v08_constructs.rs`); pydantic 2.13.5: 955 of
-  1249 functions native (`bench/pydantic_check.py`, from 809). Remaining: nested `def`,
-  `lambda`, and the call boundary's forwarder frame.
+  CPython modules compile natively, and in non-strict code a nested `def` or `lambda`
+  used as a value runs in CPython alone, its body compiled and its enclosing function
+  compiled (`tests/v08_constructs.rs`); pydantic 2.13.5: 978 of 1249 functions native
+  (`bench/pydantic_check.py`, from 809; 1021 before typing's `Union`/`Any`/`Annotated`
+  became compiled names, whose module-level value uses now fall back), its suite failing
+  the same 20 tests. Remaining: those value uses, and the call boundary's forwarder frame.

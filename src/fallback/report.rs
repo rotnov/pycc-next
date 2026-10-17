@@ -27,6 +27,10 @@ impl Plan {
         });
         let mut lines = Vec::new();
         for (index, reason) in &self.fallback {
+            // A nested `def`'s body is reported with its statement.
+            if self.body_owner(*index).is_some() {
+                continue;
+            }
             if let Some(lift) = self.lift(*index) {
                 // A module-level function is its own lift's statement (the
                 // whole `def` runs in CPython); a `def` in a block is a
@@ -80,6 +84,44 @@ impl Plan {
             ));
         }
         lines.extend(twins);
+        // The nested statements CPython runs (`nested`), their enclosing
+        // functions compiled.
+        for (_, nested) in self.live_nested() {
+            let (first, last) = self.lines(nested.range.clone());
+            let outer = if nested.outer_qualname.is_empty() {
+                "module code".to_string()
+            } else {
+                format!("`{}`", nested.outer_qualname)
+            };
+            let what = match &nested.def_name {
+                Some(_) => "function",
+                None => "lambda",
+            };
+            let line = if self.compiled_body(nested).is_some() {
+                format!(
+                    "lifted: {what} `{}` at {}:{}: its `{}` (decorators, defaults, signature) runs \
+                     in CPython, its body is compiled, {outer} compiled: {}",
+                    nested.qualname(),
+                    self.display,
+                    span(first, last),
+                    if nested.def_name.is_some() { "def" } else { "lambda" },
+                    nested.reason
+                )
+            } else {
+                format!(
+                    "fallback: {what} `{}` at {}:{} runs in CPython: {} ({outer} compiled)",
+                    nested.qualname(),
+                    self.display,
+                    span(first, last),
+                    nested
+                        .body
+                        .as_ref()
+                        .and_then(|body| self.fallback.get(&body.unit))
+                        .unwrap_or(&nested.reason)
+                )
+            };
+            lines.push(line);
+        }
         lines
     }
 

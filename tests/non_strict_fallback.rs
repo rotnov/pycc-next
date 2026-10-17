@@ -54,7 +54,7 @@ fn fell_back(report: &str, name: &str) -> bool {
 }
 
 fn assert_report(report: &str) {
-    for name in ["describe", "boom", "bump"] {
+    for name in ["boom", "bump"] {
         assert!(
             fell_back(report, name),
             "{name} should fall back:\n{report}"
@@ -63,11 +63,12 @@ fn assert_report(report: &str) {
     // `guarded` returns an `int` or a `str`: an object in an `--ext` module;
     // in a native build its `def` runs in CPython (`lifted:`), its body
     // compiled.
-    for name in ["scale", "fails", "guarded"] {
+    for name in ["scale", "fails", "guarded", "describe"] {
         assert!(!fell_back(report, name), "{name} should compile:\n{report}");
     }
+    // A lambda used as a value: CPython creates it, its body is compiled.
     assert!(
-        report.contains("C0001 expression kind not supported yet: a `lambda`"),
+        report.contains("lifted: lambda `describe.<locals>.<lambda>`"),
         "{report}"
     );
 }
@@ -216,7 +217,7 @@ fn strict_mode_still_refuses_what_non_strict_runs_in_cpython() {
         .expect("spawn");
     assert!(lenient.status.success(), "{}", text(&lenient.stdout));
     assert!(
-        fell_back(&text(&lenient.stderr), "f"),
+        text(&lenient.stderr).contains("lifted: lambda `f.<locals>.<lambda>`"),
         "{}",
         text(&lenient.stderr)
     );

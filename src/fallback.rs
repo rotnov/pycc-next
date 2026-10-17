@@ -50,6 +50,7 @@ mod exceptions;
 mod function_values;
 mod lift;
 mod names;
+mod nested;
 mod package_bases;
 mod render;
 mod report;
@@ -228,6 +229,9 @@ pub(crate) struct Plan {
     /// The classes other modules of the entry's package subclass
     /// (`package_bases`): they run in CPython (`cascade`).
     package_bases: BTreeMap<String, String>,
+    /// The nested `def`s and `lambda`s of compiled functions that CPython
+    /// runs, their enclosing functions compiled (`nested`).
+    nested: Vec<nested::Nested>,
 }
 
 impl Plan {
@@ -363,6 +367,7 @@ impl Plan {
             top,
             lifts,
             package_bases: BTreeMap::new(),
+            nested: Vec::new(),
         })
     }
 
@@ -499,11 +504,30 @@ impl Plan {
             self.demoted.len(),
             self.erased.len(),
             self.twinned.len(),
+            self.nested.len(),
         );
         // The docstring and `from __future__` imports stay compiled: the
         // preamble goes after them.
         let first = self.preamble_position();
+        // A nested `def` or `lambda` runs in CPython alone, its enclosing
+        // function compiled (`nested`); the unit's other failures this
+        // round may be consequences of it, so the rewrite is compiled
+        // before any of them is absorbed.
+        let mut nested_units = BTreeSet::new();
         for failure in failures {
+            if self.nest(rendered, failure)
+                && let Some(unit) = self.owner_of(rendered, failure)
+            {
+                nested_units.insert(unit);
+            }
+        }
+        for failure in failures {
+            if self
+                .owner_of(rendered, failure)
+                .is_some_and(|unit| nested_units.contains(&unit))
+            {
+                continue;
+            }
             if self.class_without_attribute(failure) || self.receiving_generators(failure) {
                 continue;
             }
@@ -588,6 +612,7 @@ impl Plan {
             self.demoted.len(),
             self.erased.len(),
             self.twinned.len(),
+            self.nested.len(),
         ) != before
     }
 

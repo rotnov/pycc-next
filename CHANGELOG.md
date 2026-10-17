@@ -17,7 +17,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   locals, runs CPython's import (through `sys.modules`) each time the statement runs, and
   its `ImportError`/`ModuleNotFoundError` is catchable in compiled code; an import of a
   module pycc compiles natively (`math`, `typing`, ...) or of a project module there stays
-  `C0001`. pydantic 2.13.5: 955 of 1249 functions native (from 809).
+  `C0001`. In `--non-strict` code a nested `def` or `lambda` pycc does not compile as a
+  native closure (one used as a value: a decorator's wrapper, a returned or stored closure,
+  a `lambda` passed as a `key`) no longer sends its enclosing function to CPython: CPython
+  runs only the `def` or `lambda` itself (its decorators such as `functools.wraps`, its
+  defaults evaluated when it runs, its `__name__` and `__qualname__`), its body is
+  compiled, and the enclosing function stays compiled. Captured variables are shared
+  through real cells, so late binding, `nonlocal` and several closures over one variable
+  behave as in CPython. pydantic 2.13.5: 978 of 1249 functions native (from 809; 916
+  without nested functions and lambdas), its own suite failing the same 20 tests as with
+  0.7.0.
 - v0.8 accept 4 (a text-processing package): `typing.Optional[X]` and
   `typing.Union[...]` annotations are the unions `X | None` and `X | ...` they spell, in
   strict and non-strict mode; in non-strict mode a `typing` name pycc does not model
