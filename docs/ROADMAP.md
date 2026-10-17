@@ -298,6 +298,7 @@ Accept:
    for 188). The other strict refusals are heterogeneous containers (049, 070, 130), an
    `int | None` used as an `int` without a `None` test (016, 056, 100, 123, 184), path-
    dependent rebinding (200), `iter`/`range` objects as values (057, 168) and 188.
+   Carried over to v0.7 accept 5 (issues #5, #6, #7); v0.6.0 ships without it.
 
 ## v0.7 — Real-world Python: frameworks, Windows
 
