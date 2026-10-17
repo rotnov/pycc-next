@@ -336,9 +336,9 @@ pub(crate) fn truthy<'ctx>(
         // `docs/decisions/D-116-tuple-v0-2-scope-int-bool-float-elements-only.md`
         // and `docs/ROADMAP.md`'s matching follow-up for this
         // new-as-of-PR-11b reachability.
-        Scalar::Tuple(_) => {
-            panic!("pycc_codegen: truthiness of a tuple[...] value is not supported yet")
-        }
+        // A struct tuple has a fixed, non-zero arity (the empty tuple is a
+        // tuple object), so it is always truthy.
+        Scalar::Tuple(_) => context.i8_type().const_int(1, false),
         // Unlike every container arm above, a class instance's truthiness
         // (D-154, Part 1 of #375) needs no runtime call and no honest-panic
         // deferral: this PR ships no `__bool__`/`__len__` (both explicitly

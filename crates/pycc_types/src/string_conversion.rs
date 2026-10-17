@@ -295,8 +295,8 @@ pub(crate) fn instance_text_call(
     let Ty::Instance(class_name) = arg else {
         // `repr()` of a tuple, set, `None`, ...: its `str`, which `print`
         // renders (`pycc_mir` lowers it to an f-string of the value).
-        // So is `str()` of an `Optional[int|float|bool]`.
-        if (want_repr || matches!(arg, Ty::Optional(_)))
+        // So is `str()` of an `Optional[int|float|bool]`, a tuple or a set.
+        if (want_repr || matches!(arg, Ty::Optional(_) | Ty::Tuple(_) | Ty::Set(_) | Ty::FrozenSet(_)))
             && pycc_hir::builtins::resolve_call(callee, arg_tys).is_none()
             && repr_is_str(arg)
             && reject_unrenderable(env, arg, StringConversionSite::ConversionCall).is_ok()

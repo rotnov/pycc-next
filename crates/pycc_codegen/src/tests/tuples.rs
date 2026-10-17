@@ -258,20 +258,18 @@ fn passing_a_tuple_value_as_a_function_argument_marshals_it_by_value() {
 }
 
 #[test]
-#[should_panic(expected = "pycc_codegen: truthiness of a tuple[...] value is not supported yet")]
-fn truthiness_of_a_tuple_value_panics_honestly() {
-    // The `tuple[...]` counterpart of `truthiness_of_a_set_value_
-    // panics_honestly` above: a real, reachable feature gap, not a
-    // defensive arm. `pycc_types` accepts any type in a boolean
-    // context, so `if t:` for a tuple local type-checks today; D-116
-    // ships no `bool(tuple)` semantics, so an honest panic naming the
-    // gap is the correct behavior. Calls `truthy` directly with a
-    // hand-built `Scalar::Tuple`, for the identical reason that test
-    // gives.
+fn a_struct_tuple_is_always_truthy() {
+    // A struct tuple has a fixed, non-zero arity (the empty tuple is a
+    // tuple object), so its truth value is the constant `1`, as
+    // `bool((1, 2))` is in CPython. Calls `truthy` directly with a
+    // hand-built `Scalar::Tuple`.
     let context = Context::create();
     let (module, rt) = list_scalar_panic_fixture(&context);
     let builder = context.create_builder();
-    truthy(&context, &builder, &module, &rt, tuple_scalar(&context));
+    let function = module.add_function("probe", context.void_type().fn_type(&[], false), None);
+    builder.position_at_end(context.append_basic_block(function, "entry"));
+    let truth = truthy(&context, &builder, &module, &rt, tuple_scalar(&context));
+    assert_eq!(truth.get_zero_extended_constant(), Some(1));
 }
 
 #[test]

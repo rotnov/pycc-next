@@ -48,3 +48,10 @@ fn match_on_a_tuple_subject() {
 fn untyped_empty_list_displays() {
     matches_cpython("empty_list_values");
 }
+
+/// `str()`/`repr()` of tuples, sets and optionals, and `bool()` of every
+/// native value.
+#[test]
+fn str_and_bool_of_native_values() {
+    matches_cpython("str_of_containers");
+}

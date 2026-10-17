@@ -325,7 +325,11 @@ pub(crate) fn lower_call_expr(
                 arg.ty(),
                 Ty::Tuple(_) | Ty::Set(_) | Ty::FrozenSet(_) | Ty::None | Ty::Optional(_)
             )
-            || callee == "str" && matches!(arg.ty(), Ty::Optional(_)))
+            || callee == "str"
+                && matches!(
+                    arg.ty(),
+                    Ty::Optional(_) | Ty::Tuple(_) | Ty::Set(_) | Ty::FrozenSet(_)
+                ))
     {
         return MirExpr::FString(vec![MirFStringPart::Interpolation(Box::new(arg.clone()))]);
     }
