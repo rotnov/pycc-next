@@ -20,3 +20,10 @@ fn matches_cpython(name: &str) {
 fn jumps_run_the_finally_block_first() {
     matches_cpython("jump_through_finally");
 }
+
+/// The f-string `=` debug specifier, with and without a conversion or a
+/// format spec.
+#[test]
+fn fstring_debug_specifier() {
+    matches_cpython("fstring_debug");
+}

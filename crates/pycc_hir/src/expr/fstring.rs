@@ -29,29 +29,28 @@ pub(super) fn lower_fstring(
         pycc_ast::FStringPart::FString(f) => f.elements.iter().map(Element::Of).collect(),
     });
     let parts = elements
-        .map(|element| -> Result<FStringPart, Diagnostic> {
+        .map(|element| -> Result<Vec<FStringPart>, Diagnostic> {
             let element = match element {
-                Element::Text(text) => return Ok(FStringPart::Literal(text)),
+                Element::Text(text) => return Ok(vec![FStringPart::Literal(text)]),
                 Element::Of(element) => element,
             };
             Ok(match element {
                 pycc_ast::InterpolatedStringElement::Literal(lit) => {
-                    FStringPart::Literal(lit.value.to_string())
+                    vec![FStringPart::Literal(lit.value.to_string())]
                 }
                 pycc_ast::InterpolatedStringElement::Interpolation(interp) => {
-                    if interp.debug_text.is_some() {
-                        // #720: the `=` debug specifier (`f"{n=}"`) renders the
-                        // source text plus `repr(value)`, which this crate does
-                        // not implement. Silently discarding `debug_text` would
-                        // compile cleanly and print the wrong value, so reject
-                        // it explicitly instead.
-                        return Err(unsupported(
-                            "f-string debug specifier (=) is not supported yet",
-                            interp.range,
-                        ));
-                    }
+                    // The `=` debug specifier (`f"{n=}"`): the source text
+                    // between the braces (up to a conversion or spec), then
+                    // the value -- its `repr` unless a conversion or a format
+                    // spec says otherwise, as CPython renders it.
+                    let debug = interp.debug_text.as_ref().map(|debug| debug.as_str().to_string());
                     // `!r` / `!s` are `repr(x)` / `str(x)` of the value.
                     let conversion = match interp.conversion {
+                        pycc_ast::ConversionFlag::None
+                            if debug.is_some() && interp.format_spec.is_none() =>
+                        {
+                            Some("repr")
+                        }
                         pycc_ast::ConversionFlag::None => None,
                         pycc_ast::ConversionFlag::Repr => Some("repr"),
                         pycc_ast::ConversionFlag::Str => Some("str"),
@@ -99,16 +98,20 @@ pub(super) fn lower_fstring(
                         },
                         None => value,
                     };
-                    FStringPart::Interpolation(Box::new(match spec {
+                    let value = FStringPart::Interpolation(Box::new(match spec {
                         Some(spec) => HirExpr::Call {
                             callee: "__pycc_format".to_string(),
                             args: vec![value, HirExpr::StringLiteral(spec)],
                         },
                         None => value,
-                    }))
+                    }));
+                    match debug {
+                        Some(text) => vec![FStringPart::Literal(text), value],
+                        None => vec![value],
+                    }
                 }
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(HirExpr::FString(parts))
+    Ok(HirExpr::FString(parts.into_iter().flatten().collect()))
 }

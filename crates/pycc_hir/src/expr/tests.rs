@@ -246,29 +246,37 @@ fn an_ordinary_fstring_interpolation_lowers_successfully() {
 }
 
 #[test]
-fn fstring_debug_specifier_is_rejected() {
-    // #720: `f"{n=}"` silently dropped the `=` debug specifier and
-    // printed the bare value instead of `n=5`. Reject it explicitly
-    // rather than compiling clean with wrong output.
-    assert_eq!(lower_err_code("n = 5\nx = f\"{n=}\"\n"), "C0001");
-    let message = lower_err_message("n = 5\nx = f\"{n=}\"\n");
-    assert!(
-        message.contains("f-string debug specifier (=) is not supported yet"),
-        "unexpected message: {message}"
+fn fstring_debug_specifier_renders_the_source_text_and_the_repr() {
+    // `f"{n=}"` is the source text `n=` then `repr(n)`; a conversion or a
+    // format spec replaces the default `repr`.
+    assert_first_assign(
+        "x = f\"{n=}\"\n",
+        HirExpr::FString(vec![
+            FStringPart::Literal("n=".to_string()),
+            FStringPart::Interpolation(Box::new(HirExpr::Call {
+                callee: "repr".to_string(),
+                args: vec![HirExpr::Name("n".to_string())],
+            })),
+        ]),
+    );
+    assert_first_assign(
+        "x = f\"{n = :>3}\"\n",
+        HirExpr::FString(vec![
+            FStringPart::Literal("n = ".to_string()),
+            FStringPart::Interpolation(Box::new(HirExpr::Call {
+                callee: "__pycc_format".to_string(),
+                args: vec![HirExpr::Name("n".to_string()), HirExpr::StringLiteral(">3".to_string())],
+            })),
+        ]),
     );
 }
 
 #[test]
-fn fstring_debug_specifier_is_rejected_even_with_a_format_spec() {
-    // The debug-specifier check must fire before the format-spec check
-    // reaches its own arm, since `f"{n=:.2f}"` carries both a debug
-    // specifier and a format spec -- this exercises that ordering
-    // rather than only the debug-specifier-alone case above.
-    let message = lower_err_message("n = 5\nx = f\"{n=:.2f}\"\n");
-    assert!(
-        message.contains("f-string debug specifier (=) is not supported yet"),
-        "unexpected message: {message}"
-    );
+fn fstring_debug_specifier_with_a_nested_spec_field_is_still_rejected() {
+    // A debug specifier lowers, but the nested spec field beside it stays
+    // the capability gap it is without one.
+    let message = lower_err_message("n = 5\nw = 3\nx = f\"{n=:{w}}\"\n");
+    assert!(message.contains("nested field"), "unexpected message: {message}");
 }
 
 // PEP 572 (#774): CPython's own grammar never actually parses a
