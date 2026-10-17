@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from gen_core import (BOOL, FLOAT, FLOAT_EDGE, FLOAT_SPECS, INT, INT_EDGE, INT_SPECS, LINT, LSTR,
                       STR, STR_ASCII, STR_UNI, Core, Scope, fstring)
+from gen_misc import MiscBlocks
 from gen_stmts import IND, Stmts, indent
 
 
-class Blocks:
+class Blocks(MiscBlocks):
     def __init__(self, c: Core) -> None:
         self.c = c
         self.r = c.r
@@ -557,5 +558,5 @@ FEATURES = {
     "compute_top": 6, "compute_func": 6, "recursion": 2, "int_table": 3, "float_fmt": 3, "int_fmt": 2,
     "str_ops": 3, "fstrings": 3, "containers": 3, "comprehensions": 3, "collections": 2, "itertools": 2,
     "dataclass": 2, "classes": 3, "closure": 2, "generator": 2, "exceptions": 3, "match": 2,
-    "varargs": 2, "global": 1,
+    "varargs": 2, "global": 1, "idioms": 4, "match_more": 1,
 }

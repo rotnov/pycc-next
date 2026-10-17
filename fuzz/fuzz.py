@@ -276,7 +276,12 @@ class Case:
             k = harness.compare(want, got)
             if k != kind:
                 return False
-            # Keep the same kind of difference; the text may shrink with the program.
+            # Keep the same kind of difference; the text may shrink with the
+            # program, but an exception pycc raised must stay the same one
+            # (a reduction may otherwise drift into another, type-invalid
+            # shape that fails differently).
+            if ":raised " in sig:
+                return signature(mode, kind, want, got, "") == sig
             return True
         return still_fails
 
