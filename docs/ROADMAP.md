@@ -437,18 +437,19 @@ Accept:
    engine, 38 modules, sdist pinned by sha256) builds unchanged with `--ext --non-strict`
    and its own 1155 tests pass against the compiled modules (`bench/package_check.py
    mistune`, `bench/wheel_check.py mistune`; added to CI on all four platforms, with a
-   callgrind bound on one `mistune.html` pass over `benchmark/cases`); 354 of its 413
-   functions compile. It is **slower** than CPython: 0.66x on `mistune.html` of its
-   benchmark documents, 0.61x with every plugin (local, best of 3); under callgrind 77.7M
+   callgrind bound on one `mistune.html` pass over `benchmark/cases`); 380 of its 413
+   functions compile. It is **slower** than CPython: 0.70x on `mistune.html` of its
+   benchmark documents, 0.74x with every plugin (local, best of 3); under callgrind 72.2M
    instructions per pass against CPython's 56.8M. Compiled code runs a third of the
-   bytecode (13M fewer instructions in the interpreter loop) but pays 34M back: generic
+   bytecode (13M fewer instructions in the interpreter loop) but paid 34M back when profiled at 77.7M: generic
    `PyObject_GetAttr` on CPython-created instances (+5.4M with the type lookups), method
    and temporary objects (+2.4M deallocation), stable-ABI `_Py_IncRef`/`_Py_DecRef` calls
    (+2.1M), the forwarders of methods of CPython-run classes, and `str` conversions
    (+1.6M). Fixed on the way, each general: `typing.Optional`/`Union` and unmodeled
    `typing` names in non-strict mode, string annotations naming `TYPE_CHECKING`-only
    imports, private module functions exported, `str` crossing the boundary without
-   copies (identity kept), searches with `memchr`, and the C shim's fixed half compiled
+   copies (identity kept), searches with `memchr`, `typing.cast` of objects erased,
+   `for c in s` without a list of characters, and the C shim's fixed half compiled
    once per machine (`--ext` builds of small modules ~1.4 s -> ~0.4 s). Remaining for 2x:
    its classes (`Parser(Generic[ST])`, `BlockState`, `InlineState`, the renderers) must
    compile natively and their instances be reached natively from the other modules of

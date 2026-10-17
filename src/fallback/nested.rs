@@ -258,9 +258,13 @@ impl Plan {
             if let Some(outer) = &n.outer
                 && let Some(celled) = by_outer.get(&(n.unit, outer.start))
             {
+                // A `def` binding a name a sibling keeps in a cell stores
+                // into that cell, as CPython's `def` stores into the cell
+                // variable of the enclosing function.
                 n.celled = n
                     .captures
                     .iter()
+                    .chain(n.def_name.iter())
                     .filter(|c| celled.contains(*c))
                     .cloned()
                     .collect();

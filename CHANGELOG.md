@@ -44,7 +44,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 - `bench/package_check.py` and `bench/wheel_check.py` check a fourth real package,
   mistune 3.3.4 (a Markdown engine, 38 modules): it builds unchanged and its own 1155
-  tests pass against the compiled modules; CI runs both on every platform. It is 0.66x
+  tests pass against the compiled modules; CI runs both on every platform. It is 0.70x
   CPython's speed on its own benchmark (README). `package_check` builds a package's
   modules in parallel, as `pycc.build` does, and gates the elapsed time (`--jobs`).
 
@@ -57,6 +57,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- A nested `def` that rebinds a name a sibling closure captures (`if f is None: def f(...)`
+  over a parameter `f`, mistune's `add_toc_hook`) stores into the cell that closure reads,
+  instead of a plain local the closure never saw.
 - An `--ext` module's pre-compiled fallback code no longer changes the order a constant set
   display (`{1, 8, 0}`) iterates in: `marshal` rebuilds a frozenset constant in its own
   order, so a chunk holding one is compiled at import, as before (the differential

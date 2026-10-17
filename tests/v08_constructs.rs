@@ -337,3 +337,47 @@ fn closures_and_cells_do_not_leak() {
         .expect("python should spawn");
     assert_eq!(text(&run.stdout), "20000\n0 0\n", "{}", text(&run.stderr));
 }
+
+#[test]
+fn nested_rebinding_native() {
+    native("v08_nested_rebind");
+}
+
+#[test]
+fn nested_rebinding_ext() {
+    ext("v08_nested_rebind");
+}
+
+/// A nested `def` rebinding a captured parameter shares its cell with the
+/// sibling closure, and neither the cell nor what it holds leaks.
+#[test]
+fn rebinding_nested_def_cells_do_not_leak() {
+    let dir = ScratchDir::new("v08_rebind_leak").expect("scratch");
+    let source = dir.join("rb.py");
+    std::fs::write(
+        &source,
+        "def make(tag, heading_id=None):\n    if heading_id is None:\n\n        \
+         def heading_id(i):\n            return (tag, i)\n\n    \
+         def hook(n):\n        return heading_id(n)\n\n    return hook\n\n\n\
+         def many(tag, n):\n    total = 0\n    for i in range(n):\n        \
+         total += make(tag)(i)[1] + make(tag, lambda v: (tag, v))(1)[1]\n    return total\n",
+    )
+    .unwrap();
+    build(&source, &dir.join("rb"), &["--ext", "--non-strict"]);
+    let run = python()
+        .args([
+            "-c",
+            "import gc, sys, types, rb\n\
+             tag = object()\n\
+             def cells():\n    gc.collect()\n    \
+             return sum(1 for o in gc.get_objects() if type(o) is types.CellType)\n\
+             rb.many(tag, 10)\n\
+             r0, c0 = sys.getrefcount(tag), cells()\n\
+             print(rb.many(tag, 20000))\n\
+             print(sys.getrefcount(tag) - r0, cells() - c0)",
+        ])
+        .current_dir(&*dir)
+        .output()
+        .expect("python should spawn");
+    assert_eq!(text(&run.stdout), "200010000\n0 0\n", "{}", text(&run.stderr));
+}
