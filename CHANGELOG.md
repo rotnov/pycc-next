@@ -75,6 +75,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Changed
 
+- CI runs `cargo clippy --release --workspace --all-targets -- -D warnings` (Linux
+  x86_64), and the tree is clippy-clean. The runtime's closure, generator and exception
+  `incref`/`decref` entry points and `pycc_rt_hash_str` are now `unsafe extern "C"` with
+  documented pointer contracts (they dereference their argument); their symbols and ABI
+  are unchanged.
 - Faster `int` code: a function's `int` locals whose every value is proven a smallint
   (an interval analysis over its assignments, `range()` loops, byte buffer items,
   `& k`, `% k`, `abs()`, ...: `pycc_codegen`'s `int_range`) compute on the tagged words
