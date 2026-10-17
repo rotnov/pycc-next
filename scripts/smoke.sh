@@ -11,8 +11,14 @@
 # builds a small project's wheel with `pip wheel` (no network, the archive's
 # bin/ on PATH), installs it and runs its compiled modules against CPython. The release
 # workflow runs it on the tarball before publishing; tests/relocatable_release.rs
-# checks the same things from `cargo test`.
+# checks the same things from `cargo test`. On Windows it runs under Git Bash
+# with the MSVC developer environment (the linker driver needs it).
 set -eu
+
+case $(uname -s) in
+    MINGW* | MSYS* | CYGWIN*) windows=1 exe=.exe ;;
+    *) windows= exe= ;;
+esac
 
 src=$(cd "${1:?usage: scripts/smoke.sh PKG_DIR}" && pwd)
 python=${PYCC_PYTHON:-python3}
@@ -20,8 +26,27 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cp -R "$src" "$work/pkg"
 mkdir "$work/home" "$work/native" "$work/ext" "$work/ext_src" "$work/ns"
-pycc="$work/pkg/bin/pycc"
-clean() { env -i PATH="$PATH" HOME="$work/home" ${PYCC_PYTHON:+PYCC_PYTHON="$PYCC_PYTHON"} "$@"; }
+pycc="$work/pkg/bin/pycc$exe"
+# A Windows process needs a few system variables to start, and the linker
+# driver the MSVC developer environment ("Developer Command Prompt"); those
+# are kept, nothing else.
+keep="SYSTEMROOT WINDIR TEMP TMP PATHEXT COMSPEC PROGRAMDATA LIB LIBPATH INCLUDE
+    VCToolsInstallDir VCINSTALLDIR VSINSTALLDIR VisualStudioVersion WindowsSdkDir
+    WindowsSDKVersion WindowsSdkBinPath UniversalCRTSdkDir UCRTVersion"
+clean() {
+    if [ -n "$windows" ]; then
+        n=$#
+        for v in $keep; do
+            eval "x=\${$v-}"
+            if [ -n "$x" ]; then set -- "$@" "$v=$x"; fi
+        done
+        set -- "$@" USERPROFILE="$(cygpath -w "$work/home")"
+        # The command's n words move behind the variables.
+        i=0
+        while [ "$i" -lt "$n" ]; do a=$1; shift; set -- "$@" "$a"; i=$((i + 1)); done
+    fi
+    env -i PATH="$PATH" HOME="$work/home" ${PYCC_PYTHON:+PYCC_PYTHON="$PYCC_PYTHON"} "$@"
+}
 same() { [ "$1" = "$2" ] || { printf 'MISMATCH %s\n--- pycc\n%s\n--- cpython\n%s\n' "$3" "$1" "$2" >&2; exit 1; }; }
 
 clean "$pycc" version
@@ -88,10 +113,10 @@ EOF2
 printf '' > "$work/proj/src/hello/__init__.py"
 cp "$work/ext_src/m.py" "$work/proj/src/hello/fast.py"
 clean "$python" -m venv "$work/venv"
-vpy="$work/venv/bin/python"
+if [ -n "$windows" ]; then vpy="$work/venv/Scripts/python.exe"; else vpy="$work/venv/bin/python"; fi
 clean "$vpy" -I -m pip install -q --no-index --no-deps "$work"/pkg/python/pycc_build-*.whl
 cd "$work"
-env -i PATH="$work/pkg/bin:$PATH" HOME="$work/home" ${PYCC_PYTHON:+PYCC_PYTHON="$PYCC_PYTHON"} \
+PATH="$work/pkg/bin:$PATH" clean \
     "$vpy" -I -m pip wheel -q --no-build-isolation --no-index --no-deps -w "$work/wheels" "$work/proj"
 for whl in "$work"/wheels/*.whl; do
     case $whl in
@@ -100,7 +125,8 @@ for whl in "$work"/wheels/*.whl; do
     esac
     clean "$vpy" -I -m pip install -q --no-index --no-deps "$whl"
 done
-driver="import hello.fast as m; print(m.__file__.endswith('.abi3.so'), m.add(2, 40), m.greet('pycc'))"
+if [ -n "$windows" ]; then suffix=.pyd; else suffix=.abi3.so; fi
+driver="import hello.fast as m; print(m.__file__.endswith('$suffix'), m.add(2, 40), m.greet('pycc'))"
 got=$(cd "$work/home" && clean "$vpy" -I -c "$driver")
 want=$(cd "$work/proj/src" && clean "$python" -c "$driver")
 same "$got" "True${want#False}" pep517

@@ -18,16 +18,21 @@ class CompileError(Exception):
     """pycc refused a module that may not fall back to pure Python."""
 
 
+# The compiler's file name (`pycc.exe` on Windows).
+EXE_NAME = "pycc.exe" if os.name == "nt" else "pycc"
+
+
 def find_pycc(env: dict | None = None) -> pathlib.Path:
     """The `pycc` executable: `$PYCC` (the executable, or an unpacked release archive
-    holding `bin/pycc`), else `pycc` on `PATH`. The compiler finds its runtime
-    (`lib/pycc/libpycc_rt.a`) next to itself, so the release layout must stay whole."""
+    holding `bin/pycc`, `bin\\pycc.exe` on Windows), else `pycc` on `PATH`. The
+    compiler finds its runtime (`lib/pycc/`) next to itself, so the release layout
+    must stay whole."""
     env = os.environ if env is None else env
     value = env.get("PYCC")
     if value:
         path = pathlib.Path(value)
         if path.is_dir():
-            path = path / "bin" / "pycc"
+            path = path / "bin" / EXE_NAME
         if not (path.is_file() and os.access(path, os.X_OK)):
             raise ProjectError(f"PYCC={value!r} is not the pycc executable or a pycc release "
                                "directory holding bin/pycc")

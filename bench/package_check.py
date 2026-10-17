@@ -63,6 +63,8 @@ import time
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+# The compiler's file name in a Cargo profile directory.
+PYCC_EXE = "pycc.exe" if os.name == "nt" else "pycc"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -542,7 +544,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     target = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
     ap.add_argument("packages", nargs="*", metavar="PACKAGE")
-    ap.add_argument("--pycc", default=str(target / "release/pycc"))
+    ap.add_argument("--pycc", default=str(target / "release" / PYCC_EXE))
     ap.add_argument("--cache", default=str(target / "package_check"))
     ap.add_argument("--keep", help="build in this (new) directory and keep it")
     ap.add_argument("--time", action="store_true")

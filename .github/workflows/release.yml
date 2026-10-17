@@ -25,15 +25,39 @@ jobs:
           - { os: ubuntu-24.04-arm, platform: aarch64-linux }
           # Apple silicon, macOS 26 (the minimum the archive supports).
           - { os: macos-26, platform: aarch64-macos, macos_target: "26.0" }
+          # x86_64 Windows, MSVC toolchain; a .zip archive.
+          - { os: windows-2025, platform: x86_64-windows }
     runs-on: ${{ matrix.os }}
     permissions: { contents: read }
     env:
       PLATFORM: "${{ matrix.platform }}"
       MACOSX_DEPLOYMENT_TARGET: "${{ matrix.macos_target }}"
+    # Git Bash on Windows, so every platform runs the same scripts.
+    defaults: { run: { shell: bash } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.13" }
+      # As in ci.yml's Windows job: CPython as `python3`, the MSVC developer
+      # environment, MSVC's link.exe for cargo, and LLVM's own release.
+      - name: CPython 3.13 as python3 (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          py_dir=$(cygpath -u "$pythonLocation")
+          [ -e "$py_dir/python3.exe" ] || cp "$py_dir/python.exe" "$py_dir/python3.exe"
+          python3 -c "import sys; assert sys.version_info[:2] == (3, 13), sys.version"
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: MSVC link.exe for cargo (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $link = Join-Path $env:VCToolsInstallDir "bin\Hostx64\x64\link.exe"
+          if (-not (Test-Path $link)) { Write-Error "no $link"; exit 1 }
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$link" >> $env:GITHUB_ENV
+      - name: Install LLVM 22 (Windows)
+        if: runner.os == 'Windows'
+        run: scripts/windows_llvm.sh
       - name: Install LLVM 22 (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -50,28 +74,39 @@ jobs:
       - run: >-
           cargo test --release --workspace -- --include-ignored
           --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
+      # A .tar.gz, or a .zip on Windows; each with its sha256.
       - name: Package
         run: |
           name=pycc-${TAG}-${PLATFORM}
           scripts/package.sh dist/$name
-          tar -C dist -czf dist/$name.tar.gz $name
-          (cd dist && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
-      # Unpack the tarball elsewhere and use it like a user would (cleared
+          if [ "$RUNNER_OS" = Windows ]; then
+            (cd dist && python3 -m zipfile -c $name.zip $name && sha256sum $name.zip > $name.zip.sha256)
+          else
+            tar -C dist -czf dist/$name.tar.gz $name
+            (cd dist && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
+          fi
+      # Unpack the archive elsewhere and use it like a user would (cleared
       # environment, no checkout paths): native, --ext and --non-strict
       # builds must match CPython before anything is published.
-      - name: Smoke-test the tarball
+      - name: Smoke-test the archive
         run: |
           name=pycc-${TAG}-${PLATFORM}
-          (cd dist && shasum -a 256 -c $name.tar.gz.sha256)
           smoke=$(mktemp -d)
-          tar -C "$smoke" -xzf dist/$name.tar.gz
+          if [ "$RUNNER_OS" = Windows ]; then
+            (cd dist && sha256sum -c $name.zip.sha256)
+            python3 -m zipfile -e dist/$name.zip "$smoke"
+          else
+            (cd dist && shasum -a 256 -c $name.tar.gz.sha256)
+            tar -C "$smoke" -xzf dist/$name.tar.gz
+          fi
           scripts/smoke.sh "$smoke/$name"
       - uses: actions/upload-artifact@v4
         with:
           name: pycc-${{ matrix.platform }}
           path: |
             dist/*.tar.gz
-            dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -97,8 +132,8 @@ jobs:
       - name: Verify the archives
         run: |
           cd dist
-          for platform in x86_64-linux aarch64-linux aarch64-macos; do
-            name=pycc-${TAG}-${platform}.tar.gz
+          for name in pycc-${TAG}-x86_64-linux.tar.gz pycc-${TAG}-aarch64-linux.tar.gz \
+              pycc-${TAG}-aarch64-macos.tar.gz pycc-${TAG}-x86_64-windows.zip; do
             [ -f "$name" ] && [ -f "$name.sha256" ] || { echo "missing $name"; exit 1; }
             sha256sum -c "$name.sha256"
           done
@@ -108,5 +143,5 @@ jobs:
         run: |
           notes=$(awk -v ver="${TAG#v}" 'index($0, "## [" ver "]")==1{f=1;next} /^## \[/{f=0} f' CHANGELOG.md)
           pre=""; case "$TAG" in *-*) pre="--prerelease";; esac
-          gh release create "$TAG" dist/*.tar.gz dist/*.sha256 --target "$GITHUB_SHA" $pre \
+          gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/*.sha256 --target "$GITHUB_SHA" $pre \
             --title "pycc-next $TAG" --notes "$notes"

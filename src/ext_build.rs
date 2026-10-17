@@ -128,9 +128,19 @@ const PROBE_SCRIPT: &str = "import os,sys,sysconfig\n\
                             print(sysconfig.get_path('include'))\n\
                             print(os.path.join(sys.base_prefix, 'libs'))\n";
 
+/// The interpreter `--ext` probes when `PYCC_PYTHON` is unset: `python3`, or
+/// `python.exe` on Windows, where the python.org installer and
+/// `actions/setup-python` provide no `python3`.
+pub(crate) const DEFAULT_PYTHON: &str = if cfg!(windows) {
+    "python.exe"
+} else {
+    "python3"
+};
+
 impl ExtToolchain {
     /// The production constructor. `PYCC_PYTHON` names the interpreter to
-    /// probe (default `python3`); `PYCC_PYTHON_INCLUDE`, when set, supplies
+    /// probe (default `python3`, `python.exe` on Windows, as for an embedded
+    /// build); `PYCC_PYTHON_INCLUDE`, when set, supplies
     /// the header directory without probing at all, for a cross build or a
     /// sysroot whose interpreter cannot run on this host.
     ///
@@ -143,7 +153,7 @@ impl ExtToolchain {
     /// against the real `Python.h` rather than here.
     pub(crate) fn from_env() -> Self {
         let interpreter =
-            std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| OsString::from("python3"));
+            std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| OsString::from(DEFAULT_PYTHON));
         let probe_override = std::env::var_os("PYCC_PYTHON_INCLUDE").map(|include| {
             let include = PathBuf::from(include);
             ExtProbe {

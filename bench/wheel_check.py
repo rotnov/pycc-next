@@ -155,7 +155,7 @@ site = {pathlib.Path(sysconfig.get_path(k)).resolve() for k in ("purelib", "plat
 for name in sys.argv[2].split(","):
     m = importlib.import_module(name)
     f = pathlib.Path(m.__file__).resolve()
-    if not f.name.endswith(".abi3.so") or not any(s in f.parents for s in site):
+    if not f.name.endswith((".abi3.so", ".pyd")) or not any(s in f.parents for s in site):
         sys.exit(f"{name} was imported from {f}, not an extension module of the wheel")
     print(f"  {name}: {f.name}")
 """
@@ -235,7 +235,7 @@ def check(name: str, a: argparse.Namespace, backend: pathlib.Path, tmp: pathlib.
         print(r.stdout + r.stderr)
         print("FAIL: could not create a venv")
         return False
-    vpy = venv / "bin" / "python"
+    vpy = venv / "Scripts" / "python.exe" if os.name == "nt" else venv / "bin" / "python"
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "PIP_"))}
     env["PYCC"] = str(pathlib.Path(a.pycc).resolve())
     wheels = tmp / "wheels"
@@ -280,7 +280,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     target = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
     ap.add_argument("packages", nargs="*", metavar="PACKAGE")
-    ap.add_argument("--pycc", default=str(target / "release/pycc"))
+    ap.add_argument("--pycc", default=str(target / "release" / package_check.PYCC_EXE))
     ap.add_argument("--backend", help="a directory holding pycc_build-*.whl")
     ap.add_argument("--cache", default=str(target / "package_check"))
     ap.add_argument("--keep", help="build in this (new) directory and keep it")

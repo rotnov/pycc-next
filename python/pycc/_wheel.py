@@ -176,7 +176,12 @@ def platform_tag(compiled: list[pathlib.Path], *, system: str | None = None,
         if major >= 11:
             minor = 0
         return f"macosx_{major}_{minor}_{arch}"
-    raise TagError(f"pycc builds extension modules for Linux and macOS, not {system}")
+    if system == "Windows":
+        arch = {"amd64": "amd64", "x86_64": "amd64", "arm64": "arm64"}.get(machine)
+        if arch is None:
+            raise TagError(f"unsupported Windows architecture {machine!r}")
+        return f"win_{arch}"
+    raise TagError(f"pycc builds extension modules for Linux, macOS and Windows, not {system}")
 
 
 def record_hash(data: bytes) -> str:

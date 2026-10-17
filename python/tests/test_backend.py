@@ -298,9 +298,17 @@ class Tags(unittest.TestCase):
             with self.assertRaises(_wheel.TagError):
                 tag(machine="ppc", env={})
 
+    def test_windows_tags(self):
+        self.assertEqual(_wheel.platform_tag([], system="Windows", machine="AMD64"),
+                         "win_amd64")
+        self.assertEqual(_wheel.platform_tag([], system="Windows", machine="ARM64"),
+                         "win_arm64")
+        with self.assertRaises(_wheel.TagError):
+            _wheel.platform_tag([], system="Windows", machine="x86")
+
     def test_other_systems_are_refused(self):
         with self.assertRaises(_wheel.TagError):
-            _wheel.platform_tag([], system="Windows", machine="AMD64")
+            _wheel.platform_tag([], system="FreeBSD", machine="amd64")
 
 
 class Configuration(Project):

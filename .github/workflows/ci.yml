@@ -2,6 +2,11 @@ name: ci
 on:
   push: { branches: [main] }
   pull_request:
+  # A manual run (e.g. of a branch); `windows_only` skips the Linux and macOS
+  # jobs, to iterate on the Windows job alone.
+  workflow_dispatch:
+    inputs:
+      windows_only: { type: boolean, default: false, description: "Run only the Windows job" }
 permissions: { contents: read }
 jobs:
   test:
@@ -11,6 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm]
+    if: ${{ !inputs.windows_only }}
     runs-on: ${{ matrix.os }}
     env: { LLVM_SYS_221_PREFIX: /usr/lib/llvm-22 }
     steps:
@@ -115,6 +121,7 @@ jobs:
   macos:
     # Apple silicon, macOS 26 -- the newest arm64 image GitHub hosts; macOS 26
     # is also the minimum the binaries target (README).
+    if: ${{ !inputs.windows_only }}
     runs-on: macos-26
     env: { MACOSX_DEPLOYMENT_TARGET: "26.0" }
     steps:
@@ -141,6 +148,12 @@ jobs:
           vtool -show-build "$pkg/bin/pycc"
           codesign --verify --verbose "$pkg/bin/pycc"
           scripts/smoke.sh "$pkg"
+      # As on Linux: each real package's wheel built by pip through the
+      # archive's pycc.build backend, installed, and its own tests run.
+      - name: Real packages built into wheels by pip with pycc.build
+        run: |
+          python3 bench/wheel_check.py diff-match-patch tomli pypng \
+            --pycc dist/pycc-ci-aarch64-macos/bin/pycc --backend dist/pycc-ci-aarch64-macos/python
       # Same skips and failure reporting as the Linux job.
       - name: Tests
         run: >-
@@ -152,5 +165,76 @@ jobs:
         if: failure()
         with:
           name: ci-logs-macos
+          path: ci-logs
+          if-no-files-found: ignore
+  windows:
+    # x86_64 Windows with the MSVC toolchain (ROADMAP v0.7 accept 1).
+    # The port is in progress: until this job is green it reports without
+    # gating (remove continue-on-error then).
+    continue-on-error: true
+    runs-on: windows-2025
+    timeout-minutes: 240
+    # Git Bash, so the same scripts as on Linux and macOS run here.
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      # The tests and scripts run the oracle as `python3`; the Windows
+      # install may only provide python.exe.
+      - name: CPython 3.13 as python3
+        run: |
+          py_dir=$(cygpath -u "$pythonLocation")
+          [ -e "$py_dir/python3.exe" ] || cp "$py_dir/python.exe" "$py_dir/python3.exe"
+          python3 -c "import sys; assert sys.version_info[:2] == (3, 13), sys.version"
+          python3 -c "import os, sys; p = os.path.join(sys.base_prefix, 'libs', 'python3.lib'); sys.exit(0 if os.path.isfile(p) else 'missing ' + p)"
+      - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
+      # The MSVC developer environment (what vcvarsall.bat sets: LIB, INCLUDE,
+      # VCToolsInstallDir, ...): Rust's and pycc's links need it.
+      - uses: ilammy/msvc-dev-cmd@v1
+      # Git Bash puts its coreutils `link.exe` ahead of MSVC's on PATH, so
+      # cargo is given MSVC's linker by absolute path. (pycc's own driver,
+      # clang, finds MSVC's through VCToolsInstallDir.)
+      - name: MSVC link.exe for cargo
+        shell: pwsh
+        run: |
+          $link = Join-Path $env:VCToolsInstallDir "bin\Hostx64\x64\link.exe"
+          if (-not (Test-Path $link)) { Write-Error "no $link"; exit 1 }
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$link" >> $env:GITHUB_ENV
+      - name: Install LLVM 22
+        run: scripts/windows_llvm.sh
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      # The release archive as release.yml builds it (no tag here), unpacked
+      # and smoke-tested.
+      - name: Package and smoke-test the release archive
+        run: |
+          name=pycc-ci-x86_64-windows
+          scripts/package.sh dist/$name
+          (cd dist && python3 -m zipfile -c $name.zip $name)
+          smoke=$(mktemp -d)
+          python3 -m zipfile -e dist/$name.zip "$smoke"
+          scripts/smoke.sh "$smoke/$name"
+      - name: Real packages built into wheels by pip with pycc.build
+        if: ${{ !cancelled() }}
+        run: |
+          python3 bench/wheel_check.py diff-match-patch tomli pypng \
+            --pycc dist/pycc-ci-x86_64-windows/bin/pycc.exe --backend dist/pycc-ci-x86_64-windows/python
+      - name: Real packages (diff-match-patch, tomli, pypng) against their own tests
+        if: ${{ !cancelled() }}
+        run: python3 bench/package_check.py diff-match-patch tomli pypng
+      # Same skips and failure reporting as the Linux job.
+      - name: Tests
+        if: ${{ !cancelled() }}
+        run: >-
+          scripts/ci_test.sh --include-ignored
+          --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
+      - name: Corpus (non-strict)
+        if: ${{ !cancelled() }}
+        run: scripts/ci_corpus.sh -j 4 --flags=--non-strict --require-correct
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-logs-windows
           path: ci-logs
           if-no-files-found: ignore

@@ -38,6 +38,7 @@ def run_one(pdir: pathlib.Path, pycc: str, flags: list[str], tmp: pathlib.Path) 
         # An embedded build's sidecar holds a copy of the standard library:
         # keep one problem's artifacts on disk at a time, not 200.
         exe.unlink(missing_ok=True)
+        exe.with_name(exe.name + ".exe").unlink(missing_ok=True)  # Windows
         shutil.rmtree(exe.with_name(exe.name + ".pycc"), ignore_errors=True)
 
 
@@ -70,7 +71,8 @@ def build_and_run(pdir: pathlib.Path, pycc: str, flags: list[str], exe: pathlib.
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pycc", default=str(ROOT / "target/release/pycc"))
+    ap.add_argument("--pycc", default=str(ROOT / "target" / "release" /
+                                          ("pycc.exe" if os.name == "nt" else "pycc")))
     ap.add_argument("--flags", default="")
     ap.add_argument("-j", type=int, default=4)
     ap.add_argument("--show-errors", action="store_true")
