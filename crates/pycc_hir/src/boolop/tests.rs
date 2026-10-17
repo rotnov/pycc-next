@@ -124,8 +124,6 @@ fn or_joins_a_left_optional_as_its_payload() {
 fn operands_with_no_common_type_are_refused() {
     let pairs = [
         (Ty::Int, Ty::Str),
-        (Ty::Int, Ty::Float),
-        (Ty::Float, Ty::Bool),
         (
             Ty::Instance(Box::new("A".to_string())),
             Ty::Instance(Box::new("B".to_string())),
@@ -136,6 +134,10 @@ fn operands_with_no_common_type_are_refused() {
             Ty::Optional(Box::new(Ty::Float)),
         ),
     ];
+    // An `int` (or `bool`) with a `float` is an `int | float`.
+    for (left, right) in [(Ty::Int, Ty::Float), (Ty::Float, Ty::Bool)] {
+        assert_eq!(bool_op_result_ty(BoolOpKind::And, &left, &right), Some(Ty::Num));
+    }
     for (left, right) in pairs {
         assert_eq!(
             bool_op_result_ty(BoolOpKind::And, &left, &right),

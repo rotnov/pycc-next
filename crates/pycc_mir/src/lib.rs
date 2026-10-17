@@ -177,14 +177,18 @@ impl IndexUse {
     }
 }
 
-/// [`MirExpr::ObjectIndex`] around `index` when it is a CPython object;
+/// [`MirExpr::ObjectIndex`] around `index` when it is a CPython object, the
+/// run-time `int` check of an `int | float` (`pycc_rt_num_index`), and
 /// `index` itself otherwise.
 #[must_use]
 pub fn index_operand(index: MirExpr, use_: IndexUse) -> MirExpr {
-    if index.ty() == Ty::Object {
-        MirExpr::ObjectIndex(Box::new(index), use_)
-    } else {
-        index
+    match index.ty() {
+        Ty::Object => MirExpr::ObjectIndex(Box::new(index), use_),
+        Ty::Num => MirExpr::RtCall(Box::new(RtCallExpr {
+            sig: pycc_hir::builtins::num_index_sig(),
+            args: vec![index, MirExpr::IntLiteral(use_.coerce_kind() as i64)],
+        })),
+        _ => index,
     }
 }
 

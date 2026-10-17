@@ -317,6 +317,7 @@ pub(crate) fn may_release(expr: &MirExpr) -> bool {
         | MirExpr::Name { .. }
         | MirExpr::IntBoundary(_)
         | MirExpr::OptionalWrap(..)
+        | MirExpr::NumWrap(_)
         | MirExpr::OptionalUnwrap(..)
         | MirExpr::AttrGet { .. }
         // A typed array operation reads or writes the array's own memory

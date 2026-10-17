@@ -34,11 +34,6 @@ pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, 
     if let (super::EXC_OBJECT, [exc @ Ty::Instance(_)]) = (name, args) {
         return Some(Ok(sig("pycc_ext_obj_exc_object", std::slice::from_ref(exc), Ty::Object)));
     }
-    // `float('inf')` bound to an `int` slot (`pycc_types::int_inf`).
-    if let ("__pycc_int_inf_pos" | "__pycc_int_inf_neg", []) = (name, args) {
-        let symbol = if name == "__pycc_int_inf_pos" { "pycc_rt_int_inf_pos" } else { "pycc_rt_int_inf_neg" };
-        return Some(Ok(sig(symbol, &[], Ty::Int)));
-    }
     // Non-strict mode: `itertools.accumulate(xs)` over a CPython object runs
     // CPython's own, its result a CPython iterator.
     if let ("__pycc_it_accumulate_add", [Ty::Object, code]) = (name, args)

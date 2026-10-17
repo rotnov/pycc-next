@@ -425,6 +425,11 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
         Ty::Int => out.push_str(&format!(
             "    return pycc_ext_pack_int(\"{source_name}\", result);\n}}\n\n"
         )),
+        // v0.6: `int | float` packs an int word through `pack_int`, so it
+        // names the function for the same reason.
+        Ty::Num => out.push_str(&format!(
+            "    return pycc_ext_pack_num(\"{source_name}\", result);\n}}\n\n"
+        )),
         // Part 2b of #1142 (#1164): its own arm rather than the generic one
         // below, because that arm resolves its packer through
         // `BoundaryCarrier::into_scalar`, which answers `None` for a buffer

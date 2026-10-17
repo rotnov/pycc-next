@@ -131,7 +131,11 @@ pub(crate) fn unify_terms_with_declared(
     declared: Option<&Ty>,
 ) -> Result<bool, Diagnostic> {
     match (left, right) {
+        // Two known types: an `int` and a `float` conflict (only an
+        // inference variable widens to `int | float`), unless one side is
+        // already `int | float`.
         (Ok(left), Ok(right)) => merge_inferred_types(left.clone(), right.clone())
+            .filter(|merged| *merged != Ty::Num || left == Ty::Num || right == Ty::Num)
             .map(|_| false)
             .ok_or_else(|| inference_conflict(code, context, left, right, declared)),
         (Err(var), Ok(ty)) | (Ok(ty), Err(var)) => {
@@ -176,9 +180,12 @@ pub(crate) fn unify_terms_with_declared(
                 )));
             }
             let root = root(parents, var);
+            let demanded = demanded_root(root);
             let merged = match concrete[root].clone() {
-                Some(current) => merge_inferred_types(current.clone(), ty.clone())
-                    .ok_or_else(|| inference_conflict(code, context, current, ty, declared))?,
+                Some(current) => {
+                    with_demand(demanded, || merge_inferred_types(current.clone(), ty.clone()))
+                        .ok_or_else(|| inference_conflict(code, context, current, ty, declared))?
+                }
                 None => ty,
             };
             let changed = concrete[root] != Some(merged.clone());
@@ -191,13 +198,14 @@ pub(crate) fn unify_terms_with_declared(
             if left_root == right_root {
                 return Ok(false);
             }
+            let demanded = demanded_root(left_root) | demanded_root(right_root);
             let merged = match (concrete[left_root].clone(), concrete[right_root].clone()) {
                 // `declared` is threaded through for consistency even though
                 // this arm is unreachable while it is `Some` (see the ordering
                 // note above): a future caller that made it reachable would get
                 // the right message rather than a silently stale one.
                 (Some(left), Some(right)) => Some(
-                    merge_inferred_types(left.clone(), right.clone())
+                    with_demand(demanded, || merge_inferred_types(left.clone(), right.clone()))
                         .ok_or_else(|| inference_conflict(code, context, left, right, declared))?,
                 ),
                 (Some(ty), None) | (None, Some(ty)) => Some(ty),
@@ -205,6 +213,9 @@ pub(crate) fn unify_terms_with_declared(
             };
             parents[right_root] = left_root;
             concrete[left_root] = merged;
+            if demanded {
+                DEMANDED.with(|roots| roots.borrow_mut().insert(left_root));
+            }
             Ok(true)
         }
     }
@@ -219,6 +230,14 @@ pub(super) fn merge_inferred_types(left: Ty, right: Ty) -> Option<Ty> {
         Some(left)
     } else if matches!((&left, &right), (Ty::Bool, Ty::Int) | (Ty::Int, Ty::Bool)) {
         Some(Ty::Int)
+    } else if !DEMANDING.with(std::cell::Cell::get)
+        && [&left, &right]
+            .iter()
+            .all(|ty| matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num))
+    {
+        // An `int` and a `float` (a helper called with both, a return of
+        // each) are both held by `int | float`.
+        Some(Ty::Num)
     } else if let (Ty::VarTuple(element), Ty::Tuple(items)) | (Ty::Tuple(items), Ty::VarTuple(element)) =
         (&left, &right)
         && pycc_hir::tuple_fits_var_tuple(items, element)
@@ -266,4 +285,58 @@ fn optional_join(left: &Ty, right: &Ty) -> Option<Ty> {
         }
         _ => None,
     }
+}
+
+thread_local! {
+    /// Set while a merge must not widen an `int` and a `float` to
+    /// `int | float` ([`unify_demanded`]).
+    static DEMANDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The union-find roots of the running solve a use demanded a type of
+    /// ([`unify_demanded`]): a later value of the other numeric kind
+    /// conflicts with the demand, whichever comes first.
+    static DEMANDED: std::cell::RefCell<std::collections::BTreeSet<usize>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Whether `root` holds a demand; while one is being made, records it.
+fn demanded_root(root: usize) -> bool {
+    if DEMANDING.with(std::cell::Cell::get) {
+        DEMANDED.with(|roots| roots.borrow_mut().insert(root));
+        return true;
+    }
+    DEMANDED.with(|roots| roots.borrow().contains(&root))
+}
+
+/// Runs `merge` with the no-widening rule on when `demanded`.
+fn with_demand<T>(demanded: bool, merge: impl FnOnce() -> T) -> T {
+    let before = DEMANDING.with(|demanding| demanding.replace(demanded || demanding.get()));
+    let result = merge();
+    DEMANDING.with(|demanding| demanding.set(before));
+    result
+}
+
+/// Runs one solve (`signatures::infer_function_signatures_with_solver_all`)
+/// with its own, initially empty set of demanded roots.
+pub(crate) fn with_fresh_demands<T>(solve: impl FnOnce() -> T) -> T {
+    let saved = DEMANDED.with(|roots| std::mem::take(&mut *roots.borrow_mut()));
+    let result = solve();
+    DEMANDED.with(|roots| *roots.borrow_mut() = saved);
+    result
+}
+
+/// [`unify_terms`] for a use that demands `ty` of `term` (a `range()`
+/// bound): a `float` term conflicts with a demanded `int` instead of the
+/// two widening to `int | float`, which only values bound together do.
+pub(crate) fn unify_demanded(
+    term: TypeTerm,
+    ty: Ty,
+    parents: &mut [usize],
+    concrete: &mut [Option<Ty>],
+    code: &'static str,
+    context: &str,
+) -> Result<bool, Diagnostic> {
+    DEMANDING.with(|demanding| demanding.set(true));
+    let result = unify_terms(term, Ok(ty), parents, concrete, code, context);
+    DEMANDING.with(|demanding| demanding.set(false));
+    result
 }

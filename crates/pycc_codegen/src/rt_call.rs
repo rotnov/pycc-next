@@ -17,7 +17,7 @@ use pycc_mir::{RtCallExpr, Ty};
 fn abi_value<'ctx>(scalar: Scalar<'ctx>) -> BasicMetadataValueEnum<'ctx> {
     match scalar {
         Scalar::Generator(v) | Scalar::Closure(v) => v.into(),
-        Scalar::Int(v) | Scalar::Bool(v) => v.into(),
+        Scalar::Int(v) | Scalar::Num(v) | Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),
         Scalar::Str(v)
         | Scalar::List(v)
@@ -55,6 +55,7 @@ pub(super) fn emit_rt_call<'ctx>(
     let mark = heap_rc::pending_mark(rt);
     let mut pending_ints = Vec::new();
     let mut coerced_strs = Vec::new();
+    let mut converted_nums = Vec::new();
     // A produced CPython object argument (a shim helper's, boxed by
     // `pycc_mir`) is held across the call and released after it.
     let mut held_objects = Vec::new();
@@ -106,9 +107,27 @@ pub(super) fn emit_rt_call<'ctx>(
             scalar
         };
         if *is_word {
-            let scalar = coerce_scalar_to_type(context, builder, scalar, param.clone());
+            // A `float` for an `int | float` word is a fresh word, released
+            // after the call.
+            let (scalar, fresh) = match (param, scalar) {
+                (Ty::Num, scalar @ Scalar::Float(_)) => {
+                    let (word, converted) = crate::num::operand_word(context, builder, rt, scalar);
+                    converted_nums.push(converted);
+                    (Scalar::Num(word), true)
+                }
+                (_, scalar) => (
+                    coerce_scalar_to_type(context, builder, rt, scalar, param.clone()),
+                    false,
+                ),
+            };
             let (word, boxed) =
                 crate::containers::borrowed_word(context, builder, rt, param, scalar);
+            // An `int | float` word a runtime call may store (`appendleft`,
+            // `setdefault`, ...) passes the container-ingress check; a pure
+            // lookup only borrows it.
+            if *param == Ty::Num && !is_lookup(sig.symbol) {
+                crate::num::emit_check_element(context, builder, rt, word, fresh);
+            }
             boxes.push(boxed);
             values.push(word.into());
             param_types.push(i64_type.into());
@@ -119,7 +138,19 @@ pub(super) fn emit_rt_call<'ctx>(
                 (Ty::Float, scalar @ (Scalar::Int(_) | Scalar::Bool(_))) => {
                     Scalar::Float(crate::coerce::to_float(context, builder, rt, scalar))
                 }
-                (_, scalar) => coerce_scalar_to_type(context, builder, scalar, param.clone()),
+                // `float(x)` of an `int | float` (`OverflowError` for a huge
+                // `int`).
+                (Ty::Float, Scalar::Num(word)) => {
+                    Scalar::Float(crate::num::emit_num_to_float(context, builder, rt, word, true))
+                }
+                // A `float` for an `int | float` parameter is a fresh word,
+                // released after the call.
+                (Ty::Num, scalar @ Scalar::Float(_)) => {
+                    let (word, converted) = crate::num::operand_word(context, builder, rt, scalar);
+                    converted_nums.push(converted);
+                    Scalar::Num(word)
+                }
+                (_, scalar) => coerce_scalar_to_type(context, builder, rt, scalar, param.clone()),
             };
             values.push(abi_value(scalar));
             param_types.push(ty_to_basic_type(context, param.clone()).into());
@@ -183,6 +214,7 @@ pub(super) fn emit_rt_call<'ctx>(
     for boxed in boxes {
         crate::containers::release_boxed(context, builder, rt, boxed);
     }
+    crate::num::release_converted(context, builder, rt, &converted_nums);
     for held in held_objects.into_iter().rev() {
         held.release(builder, rt);
     }
@@ -209,4 +241,15 @@ pub(super) fn emit_rt_call<'ctx>(
         return crate::containers::owned_word_element(context, builder, rt, &sig.ret, word);
     }
     crate::call_result::call_result_scalar(context, call_site, &sig.ret)
+}
+
+/// Whether the runtime function `symbol` only borrows its word argument (a
+/// search), so an `int | float` word with a heap payload need not pass the
+/// container-ingress check: a container never holds one, so the search
+/// simply does not find it.
+fn is_lookup(symbol: &str) -> bool {
+    matches!(
+        symbol,
+        "pycc_rt_list_index" | "pycc_rt_list_count" | "pycc_rt_list_remove" | "pycc_rt_list_contains"
+    )
 }

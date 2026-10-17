@@ -65,6 +65,15 @@ pub(crate) fn emit_bin_op_expr<'ctx>(
     let r = emit_expr(context, builder, module, rt, user_functions, locals, right);
     heap_rc::truncate_pending(rt, mark);
     pop_pending_int_release(rt, pending_l);
+    if *ty == Ty::Num {
+        return crate::num::emit_binop(context, builder, rt, *op, left, l, right, r);
+    }
+    if *ty == Ty::Float
+        && *op == pycc_mir::BinOpKind::Div
+        && (left.ty() == Ty::Num || right.ty() == Ty::Num)
+    {
+        return crate::num::emit_truediv(context, builder, rt, left, l, right, r);
+    }
     if let Ty::List(_) | Ty::VarTuple(_) = ty {
         let result = list::emit_list_binop(context, builder, rt, *op, l, r);
         release_scalar_if_temporary(context, builder, rt, left, &l);

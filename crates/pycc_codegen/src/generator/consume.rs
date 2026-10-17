@@ -262,6 +262,7 @@ pub(crate) fn emit_next<'ctx>(
     let fallback = scalar_basic(coerce_scalar_to_type(
         context,
         builder,
+        rt,
         fallback,
         ty.clone(),
     ));

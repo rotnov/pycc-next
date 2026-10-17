@@ -109,7 +109,7 @@ pub fn sequence_element(ty: &Ty) -> Option<&Ty> {
 #[must_use]
 pub fn is_hashable_ty(ty: &Ty) -> bool {
     match ty {
-        Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
+        Ty::Int | Ty::Bool | Ty::Float | Ty::Num | Ty::Str => true,
         Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_hashable_ty),
         Ty::VarTuple(element) => is_hashable_ty(element),
         _ => false,
@@ -144,9 +144,25 @@ pub fn display_is_object(kind: DisplayKind, elements: &[Ty]) -> bool {
     if elements.contains(&Ty::Object) {
         return true;
     }
+    // Numbers of both kinds (`[1, 2.5]`) are one native `int | float`
+    // element type (`crate::num_join`).
     fn uniform<'a>(mut tys: impl Iterator<Item = &'a Ty>) -> bool {
-        let first = tys.next();
-        tys.all(|ty| Some(ty) == first)
+        let Some(first) = tys.next() else {
+            return true;
+        };
+        let mut joined = first.clone();
+        tys.all(|ty| {
+            if *ty == joined {
+                return true;
+            }
+            match crate::num_join(&joined, ty) {
+                Some(num) => {
+                    joined = num;
+                    true
+                }
+                None => false,
+            }
+        })
     }
     let span = Span::new(0, 0);
     match kind {
@@ -269,6 +285,7 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
         ))),
         Ty::Int
         | Ty::Float
+        | Ty::Num
         | Ty::Bool
         | Ty::Str
         | Ty::None
@@ -291,7 +308,13 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
 #[must_use]
 pub fn is_list_element_ty(element: &Ty) -> bool {
     match element {
-        Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Instance(_) | Ty::Callable(_) => true,
+        Ty::Int
+        | Ty::Float
+        | Ty::Num
+        | Ty::Bool
+        | Ty::Str
+        | Ty::Instance(_)
+        | Ty::Callable(_) => true,
         Ty::List(inner) => is_list_element_ty(inner),
         Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_list_element_ty),
         Ty::VarTuple(element) => is_var_tuple_element_ty(element),

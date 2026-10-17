@@ -2,8 +2,8 @@
 //! call into `pycc_rt`, split out of `builtins.rs` by cohesion.
 
 use super::{
-    BuiltinSig, hashed_set, is_intlike, list_of, orderable, same_elem, sig, value_comparable,
-    word_sig,
+    BuiltinSig, hashed_set, is_intlike, list_of, orderable, same_elem, searches_elem, sig,
+    value_comparable, word_sig,
 };
 use crate::Ty;
 
@@ -128,7 +128,7 @@ pub fn resolve_method(
             s("pycc_rt_list_extend", std::slice::from_ref(receiver), Ty::None)
         }
         (Ty::List(elem), "count" | "index" | "remove", [item])
-            if same_elem(item, elem) && value_comparable(elem) =>
+            if searches_elem(item, elem) && value_comparable(elem) =>
         {
             let (symbol, ret) = match method {
                 "count" => ("pycc_rt_list_count", int),

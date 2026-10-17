@@ -322,7 +322,7 @@ fn arm_value<'ctx>(
                     BigIntRefcount::Retain,
                 );
             }
-            coerce_scalar_to_type(emitter.context, emitter.builder, payload, ty.clone())
+            coerce_scalar_to_type(emitter.context, emitter.builder, emitter.rt, payload, ty.clone())
         }
         _ if needs_boxing(left, ty) => boxed_value(emitter, left, scalar),
         _ => owned_value(emitter, left, scalar, ty),
@@ -396,7 +396,7 @@ pub(super) fn owned_value<'ctx>(
         source,
         scalar,
     );
-    coerce_scalar_to_type(emitter.context, emitter.builder, scalar, ty.clone())
+    coerce_scalar_to_type(emitter.context, emitter.builder, emitter.rt, scalar, ty.clone())
 }
 
 /// An `Optional` payload as the `Scalar` its inner type carries. `pycc_hir`
@@ -413,7 +413,7 @@ fn payload_scalar<'ctx>(inner: &Ty, payload: BasicValueEnum<'ctx>) -> Scalar<'ct
 pub(super) fn basic_value(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
     match scalar {
         Scalar::Generator(v) | Scalar::Closure(v) => v.into(),
-        Scalar::Int(v) | Scalar::Bool(v) => v.into(),
+        Scalar::Int(v) | Scalar::Num(v) | Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),
         Scalar::Str(v)
         | Scalar::List(v)
@@ -434,6 +434,7 @@ pub(super) fn basic_value(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
 fn scalar_of<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
     match ty {
         Ty::Int => Scalar::Int(value.into_int_value()),
+        Ty::Num => Scalar::Num(value.into_int_value()),
         Ty::Bool => Scalar::Bool(value.into_int_value()),
         Ty::Float => Scalar::Float(value.into_float_value()),
         Ty::Str => Scalar::Str(value.into_pointer_value()),

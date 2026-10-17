@@ -32,6 +32,10 @@ pub(crate) enum Scalar<'ctx> {
     /// to `int`'s own overflow/bigint-promotion story); every `float`
     /// value is exactly one `f64`, always (Task 6).
     Float(FloatValue<'ctx>),
+    /// `int | float`: `pycc_rt::num`'s NaN-boxed word, LLVM `i64`. Only
+    /// `pycc_rt_num_*` functions interpret it; a word holding a heap
+    /// bigint owns one reference, like an `int` word (`crate::num`).
+    Num(IntValue<'ctx>),
     /// A pointer to a heap-allocated `pycc_rt::PyStrObj` (D-059/D-060,
     /// Task 7) -- always refcounted, never inspected directly by this
     /// crate (see this enum's own doc comment).
@@ -359,7 +363,7 @@ pub(crate) fn ty_to_basic_type(
     ty: pycc_mir::Ty,
 ) -> inkwell::types::BasicTypeEnum<'_> {
     match ty {
-        pycc_mir::Ty::Int => context.i64_type().into(),
+        pycc_mir::Ty::Int | pycc_mir::Ty::Num => context.i64_type().into(),
         pycc_mir::Ty::Bool => context.i8_type().into(),
         pycc_mir::Ty::Float => context.f64_type().into(),
         pycc_mir::Ty::Str => context.ptr_type(inkwell::AddressSpace::default()).into(),
@@ -509,6 +513,8 @@ pub(crate) fn default_value_for_type<'ctx>(
 ) -> inkwell::values::BasicValueEnum<'ctx> {
     match ty {
         pycc_mir::Ty::Int => context.i64_type().const_zero().into(),
+        // The `int` `0`, a valid `int | float` word holding no reference.
+        pycc_mir::Ty::Num => context.i64_type().const_int(1, false).into(),
         pycc_mir::Ty::Bool => context.i8_type().const_zero().into(),
         pycc_mir::Ty::Float => context.f64_type().const_zero().into(),
         pycc_mir::Ty::Str

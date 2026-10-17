@@ -403,6 +403,7 @@ fn is_walrus_value_ty_supported(ty: &Ty) -> bool {
         Ty::Int | Ty::Float | Ty::Bool | Ty::None => true,
         Ty::Optional(inner) => is_walrus_value_ty_supported(inner),
         Ty::Str
+        | Ty::Num
         | Ty::Infer
         | Ty::Param(_)
         | Ty::List(_)

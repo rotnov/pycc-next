@@ -143,7 +143,7 @@ pub(crate) fn storage_slot_at_entry<'ctx>(
                     .const_null(),
             )
             .expect("build_store should not fail immediately after this function's own alloca");
-    } else if ty == pycc_mir::Ty::Int {
+    } else if matches!(ty, pycc_mir::Ty::Int | pycc_mir::Ty::Num) {
         builder
             .build_store(ptr, context.i64_type().const_zero())
             .expect("build_store should not fail immediately after this function's own alloca");
@@ -225,10 +225,11 @@ pub(crate) fn emit_assign<'ctx>(
         .get(target)
         .cloned()
         .expect("every assignment target must have a predeclared storage slot");
-    if slot.ty == pycc_mir::Ty::Int {
-        // A local whose every value is a smallint holds nothing to release
-        // (`int_range`).
-        if !rt.int_ranges.borrow().is_small_local(target) {
+    if matches!(slot.ty, pycc_mir::Ty::Int | pycc_mir::Ty::Num) {
+        // An `int | float` word is released exactly as an `int` word
+        // (`crate::num`); a local whose every value is a smallint holds
+        // nothing to release (`int_range`).
+        if !(slot.ty == pycc_mir::Ty::Int && rt.int_ranges.borrow().is_small_local(target)) {
             release_int_slot_before_store(context, builder, rt, &slot);
         }
     } else if matches!(&slot.ty, pycc_mir::Ty::Optional(inner) if **inner == pycc_mir::Ty::Int) {
@@ -241,10 +242,10 @@ pub(crate) fn emit_assign<'ctx>(
         // ever hold a bigint word to release).
         release_optional_int_slot_before_store(context, builder, rt, &slot);
     }
-    let value = coerce_scalar_to_type(context, builder, value, slot.ty);
+    let value = coerce_scalar_to_type(context, builder, rt, value, slot.ty);
     let basic_value: inkwell::values::BasicValueEnum = match value {
         Scalar::Generator(v) | Scalar::Closure(v) => v.into(),
-        Scalar::Int(v) => v.into(),
+        Scalar::Int(v) | Scalar::Num(v) => v.into(),
         Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),
         Scalar::Str(v) => v.into(),

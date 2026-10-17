@@ -32,6 +32,7 @@ mod copy_slots;
 mod if_exp;
 mod int_tree;
 mod nothrow;
+mod num;
 use bigint_rc::{
     BigIntRefcount, emit_bigint_refcount_call, pop_pending_int_release,
     push_pending_int_release_if_scalar_temporary, push_pending_int_release_if_temporary,

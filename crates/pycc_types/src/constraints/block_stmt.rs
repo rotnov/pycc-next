@@ -535,9 +535,9 @@ pub(super) fn collect_stmt_constraints(
                     env,
                     expr,
                 )? {
-                    unify_terms(
+                    super::unify::unify_demanded(
                         term,
-                        Ok(Ty::Int),
+                        Ty::Int,
                         parents,
                         concrete,
                         "T0021",

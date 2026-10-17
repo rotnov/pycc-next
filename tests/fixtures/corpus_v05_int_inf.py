@@ -60,3 +60,10 @@ f = float('inf')
 for v in [2.5, 1.25]:
     f = min(f, v)
 print(f, float('inf') / 2, -float('inf'))
+
+# v0.6: the name is an `int | float`, so the float arithmetic a v0.5 `int`
+# infinity refused is CPython's.
+x = float('inf')
+if len('ab') > 5:
+    x = 1
+print(x // 2, x % 2, x - x, x * 0, x ** 2, [x], (x, 1), {x: 1})

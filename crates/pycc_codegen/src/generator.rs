@@ -717,7 +717,7 @@ pub(crate) fn emit_yield<'ctx>(
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
     let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, value, scalar);
     let scalar = retain_if_int_duplicate(context, builder, rt, value, scalar);
-    let scalar = coerce_scalar_to_type(context, builder, scalar, frame.sig.0.clone());
+    let scalar = coerce_scalar_to_type(context, builder, rt, scalar, frame.sig.0.clone());
     let slot = byte_ptr(context, builder, frame.object, VALUE_OFFSET);
     builder
         .build_store(slot, scalar_basic(scalar))
@@ -784,7 +784,7 @@ pub(super) fn none_scalar(context: &Context) -> Scalar<'_> {
 /// The LLVM value of `scalar`.
 pub(super) fn scalar_basic(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
     match scalar {
-        Scalar::Int(v) | Scalar::Bool(v) => v.into(),
+        Scalar::Int(v) | Scalar::Num(v) | Scalar::Bool(v) => v.into(),
         Scalar::Float(v) => v.into(),
         Scalar::Str(v)
         | Scalar::List(v)
@@ -803,6 +803,7 @@ pub(super) fn scalar_basic(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
 pub(super) fn basic_scalar<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
     match ty {
         Ty::Int => Scalar::Int(value.into_int_value()),
+        Ty::Num => Scalar::Num(value.into_int_value()),
         Ty::Bool | Ty::None => Scalar::Bool(value.into_int_value()),
         Ty::Float => Scalar::Float(value.into_float_value()),
         Ty::Str => Scalar::Str(value.into_pointer_value()),

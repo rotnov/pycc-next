@@ -171,6 +171,28 @@ pub(crate) fn lower_call_expr(
     if callee == "cast" && !is_user_defined {
         return lower_expr(&args[1], scopes, classes, current_class);
     }
+    if callee == pycc_hir::NUM_MARKER {
+        let value = lower_expr(&args[0], scopes, classes, current_class);
+        return match value.ty() {
+            Ty::Num => value,
+            _ => MirExpr::NumWrap(Box::new(value)),
+        };
+    }
+    // `bool(x)` of a native value is its truth value, `not not x`, which
+    // the condition's own truth test computes; `bool()` is `False`. A
+    // CPython object keeps its `bool` call (`PyObject_IsTrue`).
+    if callee == "bool" && !is_user_defined && !classes.contains_key(callee.as_str()) {
+        match args.as_slice() {
+            [] => return MirExpr::BoolLiteral(false),
+            [arg] => {
+                let value = lower_expr(arg, scopes, classes, current_class);
+                if value.ty() != Ty::Object {
+                    return MirExpr::Not(Box::new(MirExpr::Not(Box::new(value))));
+                }
+            }
+            _ => {}
+        }
+    }
     // A user function's parameter types: an `IntEnum` member passed for an
     // `int` parameter is its value.
     let param_tys = if is_user_defined {
@@ -580,6 +602,7 @@ pub(crate) fn lower_call_expr(
         // `divmod` of two ints is `tuple[int, int]`.
         match (callee.as_str(), args.first().map(MirExpr::ty)) {
             ("abs", Some(Ty::Float)) => Ty::Float,
+            ("abs", Some(Ty::Num)) => Ty::Num,
             ("abs", _) => Ty::Int,
             _ => Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])),
         }

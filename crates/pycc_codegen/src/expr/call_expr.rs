@@ -125,6 +125,11 @@ pub(crate) fn emit_call_expr<'ctx>(
             held.release(builder, rt);
             return result;
         }
+        if let Scalar::Num(word) = scalar {
+            let value = crate::num::emit_num_to_float(context, builder, rt, word, false);
+            heap_rc::release_scalar_if_temporary(context, builder, rt, arg, &scalar);
+            return Scalar::Float(value);
+        }
         return Scalar::Float(to_float(context, builder, rt, scalar));
     }
     // #1331: `hash(x)`, guarded like `float` above; `pycc_types`

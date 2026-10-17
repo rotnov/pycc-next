@@ -38,6 +38,11 @@ pub(crate) fn infer_list_literal_expr(
         match &elem_ty {
             None => elem_ty = Some(this_ty),
             Some(expected) if *expected == this_ty => {}
+            // `[1, 2.5]`: an `int` and a `float` are both `int | float`
+            // elements (`pycc_mir` wraps each other element).
+            Some(expected) if pycc_hir::num_join(expected, &this_ty).is_some() => {
+                elem_ty = pycc_hir::num_join(expected, &this_ty);
+            }
             Some(expected) => {
                 // Exact `Ty` equality, not `is_assignable`'s
                 // bool-is-an-int-subtype rule used elsewhere in this
@@ -107,10 +112,19 @@ pub(crate) fn infer_dict_literal_expr(
         return Err(crate::empty_container::unresolved_dict());
     };
     let key_ty = infer_expr_in(env, local_names, first_key)?;
-    let val_ty = infer_expr_in(env, local_names, first_value)?;
+    let mut val_ty = infer_expr_in(env, local_names, first_value)?;
     for (key, value) in &pairs[1..] {
         let this_key_ty = infer_expr_in(env, local_names, key)?;
         let this_val_ty = infer_expr_in(env, local_names, value)?;
+        // `{1: 1.5, 2: 3}`: `int` and `float` values are both `int | float`
+        // values (`pycc_mir` wraps each other value).
+        if this_key_ty == key_ty
+            && this_val_ty != val_ty
+            && let Some(joined) = pycc_hir::num_join(&val_ty, &this_val_ty)
+        {
+            val_ty = joined;
+            continue;
+        }
         // Exact `Ty` equality on both key and value, not
         // `is_assignable`'s bool-is-an-int-subtype rule -- same
         // reasoning as `ListLiteral`'s own homogeneity check.
@@ -637,6 +651,7 @@ pub(crate) fn infer_list_append_expr(
         // Non-strict mode (#3): a list holding values of two types is
         // CPython's own list, as every Python list is.
         if let pycc_hir::ContainerReceiver::Name(name) = list {
+            crate::num_widen::request_list(name, &list_ty, &value_ty);
             crate::non_strict::request_widen(name, &list_ty, &Ty::Object, |_| true);
         }
         return Err(Diagnostic::error(

@@ -149,7 +149,7 @@ pub(crate) fn marshal_args<'ctx>(
                     &format!("{callee_name}() argument {}", index + 1),
                 );
                 return match scalar {
-                    Scalar::Int(v) | Scalar::Bool(v) => v.into(),
+                    Scalar::Int(v) | Scalar::Num(v) | Scalar::Bool(v) => v.into(),
                     Scalar::Float(v) => v.into(),
                     Scalar::Str(v) => v.into(),
                     // A `frozenset` or `tuple[str, ...]` copy, fresh: the
@@ -195,10 +195,10 @@ pub(crate) fn marshal_args<'ctx>(
             // abandoned before transfer completes). See
             // https://github.com/rotnov/pycc/issues/834.
             push_pending_int_release_if_scalar_temporary(rt, a, &scalar);
-            let scalar = coerce_scalar_to_type(context, builder, scalar, param_ty.clone());
+            let scalar = coerce_scalar_to_type(context, builder, rt, scalar, param_ty.clone());
             match scalar {
                 Scalar::Generator(v) | Scalar::Closure(v) => v.into(),
-                Scalar::Int(v) => v.into(),
+                Scalar::Int(v) | Scalar::Num(v) => v.into(),
                 Scalar::Bool(v) => v.into(),
                 Scalar::Float(v) => v.into(),
                 Scalar::Str(v) => v.into(),

@@ -394,6 +394,11 @@ pub(super) fn lower_isinstance(
     let class_names = extract_class_names(&args[1]).expect(
         "pycc_mir: internal error: isinstance's second argument was not validated by pycc_types",
     );
+    // An `int | float` holds an `int` (a `bool` included) or a `float`
+    // decided at run time (`pycc_rt_num_isinstance`).
+    if obj_ty == Ty::Num {
+        return num_isinstance(obj, &class_names);
+    }
     // Compute the result: true if any target class matches.
     let obj_mro = match &obj_ty {
         Ty::Instance(class_name) => classes
@@ -431,6 +436,28 @@ pub(super) fn lower_isinstance(
         obj: Box::new(obj),
         tags,
     }
+}
+
+/// `isinstance(obj, classes)` of an `int | float` value: `object` always
+/// matches; `int`, `float` and `bool` are tested at run time on the word.
+fn num_isinstance(obj: MirExpr, class_names: &[String]) -> MirExpr {
+    let mut mask = 0;
+    for name in class_names {
+        mask |= match name.as_str() {
+            "object" => return MirExpr::BoolLiteral(true),
+            "int" => 1,
+            "float" => 2,
+            "bool" => 4,
+            _ => 0,
+        };
+    }
+    if mask == 0 {
+        return MirExpr::BoolLiteral(false);
+    }
+    MirExpr::RtCall(Box::new(crate::RtCallExpr {
+        sig: pycc_hir::builtins::num_isinstance_sig(),
+        args: vec![obj, MirExpr::IntLiteral(mask)],
+    }))
 }
 
 /// #380 (PR-20, PEP 544): Evaluates `isinstance(obj, Protocol)` at

@@ -65,6 +65,7 @@ pub(crate) fn unary_result_type(op: UnaryOpKind, operand: Ty) -> Result<Ty, Diag
         UnaryOpKind::USub | UnaryOpKind::UAdd => match operand {
             Ty::Bool | Ty::Int => Ok(Ty::Int),
             Ty::Float => Ok(Ty::Float),
+            Ty::Num => Ok(Ty::Num),
             _ => Err(unary_type_error(op, operand)),
         },
         UnaryOpKind::Not if is_truth_testable(&operand) => Ok(Ty::Bool),
@@ -100,6 +101,7 @@ pub(crate) fn is_truth_testable(ty: &Ty) -> bool {
         Ty::Bool
             | Ty::Int
             | Ty::Float
+            | Ty::Num
             | Ty::Str
             | Ty::None
             | Ty::Optional(_)

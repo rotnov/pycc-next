@@ -833,6 +833,7 @@ pub(crate) fn check_stmt_arm_in_function(
                 };
                 if !class::is_assignable_env(env, &crate::int_enum_slot(&inferred, annotation), annotation)
                     && !object_box::admits_value(env, value, &inferred, annotation)?
+                    && !crate::num_widen::display_widens(value, &inferred, annotation)
                 {
                     // #380 (PR-20): if the mismatch involves a protocol,
                     // produce a detailed T0046 conformance error.

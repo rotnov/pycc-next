@@ -142,6 +142,9 @@ pub(super) fn lower_stmt(
                 Some(Ty::Optional(inner)) if value.ty() != Ty::Optional(inner.clone()) => {
                     MirExpr::OptionalWrap(Box::new(value), inner)
                 }
+                // An `int`, `bool` or `float` rebinding an `int | float`
+                // name keeps the name's `int | float` slot.
+                Some(Ty::Num) if value.ty() != Ty::Num => MirExpr::NumWrap(Box::new(value)),
                 // Part 2 of #1387 (#1475): a native value rebinding an
                 // `object`-typed name is boxed into the name's
                 // `PyObject *` slot. Only the current frame's own binding
@@ -240,6 +243,23 @@ pub(super) fn lower_stmt(
                 // annotation is boxed, so the slot is the `PyObject *` one
                 // (the value is not `object` here: the first arm took that).
                 crate::object_box::box_into(value, annotation)
+            } else if *annotation == Ty::Num {
+                // `int | float`: the slot is the `int | float` word.
+                MirExpr::NumWrap(Box::new(value))
+            } else if matches!(annotation, Ty::List(element) if **element == Ty::Num)
+                && let MirExpr::ListLiteral(elements) = value
+            {
+                // `xs: list[int | float] = [1, 2]`: a display of numbers
+                // under that annotation holds `int | float` words.
+                MirExpr::ListLiteral(
+                    elements
+                        .into_iter()
+                        .map(|element| match element.ty() {
+                            Ty::Num => element,
+                            _ => MirExpr::NumWrap(Box::new(element)),
+                        })
+                        .collect(),
+                )
             } else if let Ty::Optional(inner) = annotation {
                 // `T | None` (PEP 604, D-197, #763, Part 1 of #747): a bare
                 // `None` initializer, or a bare `inner`-typed (or

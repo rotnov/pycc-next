@@ -687,7 +687,7 @@ fn exception_call_produces_c0001() {
 #[test]
 fn other_callable_builtins_produce_c0001() {
     // A representative sample of other callable builtins from the table.
-    for name in ["bool", "range", "zip", "dict", "list", "sum"] {
+    for name in ["range", "zip", "dict", "list", "sum"] {
         let env = Environment::new();
         let expr = HirExpr::Call {
             callee: name.to_string(),
@@ -800,17 +800,15 @@ fn bool_of_a_foreign_object_is_admitted_as_bool() {
 }
 
 #[test]
-fn bool_of_a_non_object_keeps_its_c0001_refusal() {
-    // Fork 1 of the plan, stated openly: Part 4 relaxes exactly the object
-    // case. `bool(1)` is still the capability-gap refusal it was, and
-    // #1017/#1018 own the general builtin-conversion story.
+fn bool_of_a_native_value_is_its_truth_value() {
+    // v0.6: `bool(x)` of a native value is typed as `not x` is.
     let mut env = Environment::new();
     env.bind("x".to_string(), Ty::Int);
     let expr = HirExpr::Call {
         callee: "bool".to_string(),
         args: vec![HirExpr::Name("x".to_string())],
     };
-    assert_eq!(infer_expr(&env, &expr).unwrap_err().code, "C0001");
+    assert_eq!(infer_expr(&env, &expr).unwrap(), Ty::Bool);
 }
 
 #[test]

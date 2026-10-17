@@ -14,7 +14,7 @@ pub(crate) fn declare_module_globals<'ctx>(
                 inkwell::types::BasicTypeEnum,
                 inkwell::values::BasicValueEnum,
             ) = match ty {
-                pycc_mir::Ty::Int => (
+                pycc_mir::Ty::Int | pycc_mir::Ty::Num => (
                     context.i64_type().into(),
                     tag_smallint_const(context, 0).into(),
                 ),

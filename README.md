@@ -325,6 +325,12 @@ and setuptools): that is the test harness, not a change to the packages.
   site must agree and the body must pin the return, otherwise it is `T0001` and needs
   annotations. An `--ext` module's public functions must be annotated (`T0001`),
   since Python may call them with anything.
+  A value that is an `int` at one point and a `float` at another is an `int | float`
+  -- annotated, or inferred for a name, an accumulator (`s = 0` ... `s += 0.5`), a
+  `float('inf')` sentinel an `int` replaces, a list display or `.append` of both, a
+  dict display's values: one tagged machine word (an `int`, or a `float` held inline
+  for magnitudes between about `1e-77` and `1e77`), with CPython's semantics for
+  whichever it holds. Pure `int` and pure `float` code is unchanged.
 - **Non-strict**: `pycc build|run|check --non-strict`, or `[tool.pycc] strict = false`
   in a `pyproject.toml` next to the entry file (`[build] strict = false` in a
   `pycc.toml` works too). A missing annotation and `Any` become a CPython object

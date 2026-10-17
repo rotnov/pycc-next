@@ -69,13 +69,10 @@ fn a_value_join_with_no_common_type_is_refused() {
     refused(
         "def f(a: int, b: str) -> None:\n    print(a or b)\n",
         "T0021",
-        "`or` operands have no common type: int and str (pycc has no union types)",
+        "`or` operands have no common type: int and str (pycc's only unions are `T | None` and `int | float`)",
     );
-    refused(
-        "def f(a: int, b: float) -> None:\n    print(a and b)\n",
-        "T0021",
-        "`and` operands have no common type: int and float",
-    );
+    // An `int` and a `float` join to `int | float`.
+    checks("def f(a: int, b: float) -> None:\n    print(a and b)\n");
 }
 
 #[test]
@@ -99,7 +96,7 @@ fn a_none_operand_is_refused_only_in_value_context() {
     refused(
         "def f(a: int) -> None:\n    print(a or None)\n",
         "T0021",
-        "`or` operand `None` has no value pycc can join (pycc has no union types)",
+        "`or` operand `None` has no value pycc can join (pycc's only unions are `T | None` and `int | float`)",
     );
     checks("def f(a: int) -> None:\n    if a or None:\n        print(1)\n");
 }

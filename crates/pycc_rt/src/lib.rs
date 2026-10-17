@@ -57,7 +57,6 @@ mod hash;
 mod instance;
 /// Arbitrary-precision `int` arithmetic, comparison and conversion.
 mod int_arith;
-mod int_inf;
 /// `<< >> & | ^` over encoded ints (#1210).
 mod int_bitwise;
 mod int_encoding;
@@ -74,6 +73,7 @@ mod list;
 mod math_float;
 /// The integer functions of `math`.
 mod math_ops;
+pub mod num;
 /// `print`'s stdout flush (#1340); the other print primitives stay below.
 mod pool;
 mod print;

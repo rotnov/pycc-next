@@ -24,7 +24,38 @@ pub(crate) fn lower_list_literal_expr(
                 .collect(),
         };
     }
-    MirExpr::ListLiteral(elements)
+    MirExpr::ListLiteral(num_wrapped(elements))
+}
+
+/// `[1, 2.5]`: when the elements' types join to `int | float`, every
+/// element is wrapped as an `int | float` word; otherwise they are returned
+/// unchanged.
+fn num_wrapped(elements: Vec<MirExpr>) -> Vec<MirExpr> {
+    let mixed = elements
+        .iter()
+        .skip(1)
+        .try_fold(elements.first().map(MirExpr::ty), |joined, element| {
+            let joined = joined?;
+            if joined == element.ty() {
+                Some(Some(joined))
+            } else {
+                pycc_hir::num_join(&joined, &element.ty()).map(Some)
+            }
+        })
+        .flatten();
+    if mixed != Some(Ty::Num) {
+        return elements;
+    }
+    elements
+        .into_iter()
+        .map(|element| {
+            if element.ty() == Ty::Num {
+                element
+            } else {
+                MirExpr::NumWrap(Box::new(element))
+            }
+        })
+        .collect()
 }
 
 // `HirExpr::Subscript` is reused unconditionally by `pycc_hir`'s own
@@ -160,7 +191,9 @@ pub(crate) fn lower_dict_literal_expr(
             pairs.into_iter().flat_map(|(k, v)| [k, v]).collect(),
         );
     }
-    MirExpr::DictLiteral(pairs)
+    // `{1: 1.5, 2: 3}`: the values of an `int | float`-valued dict.
+    let (keys, values): (Vec<MirExpr>, Vec<MirExpr>) = pairs.into_iter().unzip();
+    MirExpr::DictLiteral(keys.into_iter().zip(num_wrapped(values)).collect())
 }
 
 pub(crate) fn lower_set_literal_expr(

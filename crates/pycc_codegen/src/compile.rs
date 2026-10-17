@@ -435,7 +435,7 @@ fn compile_module(
                 );
                 if *ty == pycc_mir::Ty::Str {
                     owned_str_slots.push(slot.ptr);
-                } else if *ty == pycc_mir::Ty::Int {
+                } else if matches!(ty, pycc_mir::Ty::Int | pycc_mir::Ty::Num) {
                     owned_int_slots.push((slot.ptr, true));
                     rt.owned_int_names.borrow_mut().insert(param_name.clone());
                 } else if let Some(kind) = heap_rc::heap_kind(&rt, ty) {
@@ -529,7 +529,7 @@ fn compile_module(
                 // storage and joins the release list; the parameter loop above
                 // deliberately has no counterpart.
                 let is_buffer = ty == pycc_mir::Ty::MemoryView;
-                let is_int = ty == pycc_mir::Ty::Int;
+                let is_int = matches!(ty, pycc_mir::Ty::Int | pycc_mir::Ty::Num);
                 let slot = storage_slot_at_entry(&context, &builder, ty, &local_name, true);
                 if is_int && !rt.int_ranges.borrow().is_small_local(&local_name) {
                     owned_int_slots.push((slot.ptr, false));

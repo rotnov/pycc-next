@@ -67,6 +67,12 @@ pub(crate) fn lower_unary_op_expr(
                     1.0
                 };
                 (BinOpKind::Mul, operand, MirExpr::FloatLiteral(factor))
+            } else if operand.ty() == Ty::Num {
+                // `int | float`: `x * -1` is `-x` for an `int` (any size,
+                // `True` included) and for a `float` (`-0.0`, NaN, the
+                // infinities), and `x * 1` is `+x`.
+                let factor = if matches!(op, UnaryOpKind::USub) { -1 } else { 1 };
+                (BinOpKind::Mul, operand, MirExpr::IntLiteral(factor))
             } else {
                 let bin_op = if matches!(op, UnaryOpKind::USub) {
                     BinOpKind::Sub

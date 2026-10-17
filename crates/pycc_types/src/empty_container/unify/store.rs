@@ -253,6 +253,13 @@ impl Store {
                     // `tuple[T, ...]` one; any other pair is a conflict.
                     let joined = match (&x, &y) {
                         (Ty::Int, Ty::Bool) | (Ty::Bool, Ty::Int) => Some(Ty::Int),
+                        // An `int` and a `float` (`out.append(0)` and
+                        // `out.append(best)` with a `float` or `int | float`
+                        // best) are both held by an `int | float` element.
+                        (
+                            Ty::Int | Ty::Bool | Ty::Float | Ty::Num,
+                            Ty::Int | Ty::Bool | Ty::Float | Ty::Num,
+                        ) => Some(Ty::Num),
                         (Ty::VarTuple(e), Ty::Tuple(items)) | (Ty::Tuple(items), Ty::VarTuple(e))
                             if pycc_hir::tuple_fits_var_tuple(items, e) =>
                         {

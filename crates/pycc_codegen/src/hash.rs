@@ -174,6 +174,12 @@ pub(super) fn emit_hash<'ctx>(
         }
         (_, Scalar::Bool(value)) => hash_bool(context, builder, value),
         (_, Scalar::Float(value)) => hash_float(builder, rt, value),
+        // CPython's hash of the value an `int | float` holds.
+        (_, Scalar::Num(word)) => {
+            let hash = crate::num::emit_unary(builder, rt.num.hash, word).into_int_value();
+            release_scalar_if_temporary(context, builder, rt, arg, &scalar);
+            hash
+        }
         // A tuple display or call result held as a tuple object.
         (_, Scalar::List(tuple)) => {
             let hash = builder

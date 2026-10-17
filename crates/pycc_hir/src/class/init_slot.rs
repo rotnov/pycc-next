@@ -384,6 +384,7 @@ fn slot_ty_from_init_rhs(
                 // parameter is purely compile-time.
                 Some(
                     ty @ (Ty::Int
+                    | Ty::Num
                     | Ty::Float
                     | Ty::Bool
                     | Ty::Str

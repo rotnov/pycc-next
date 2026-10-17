@@ -578,9 +578,12 @@ fn coerce_scalar_to_type_rejects_a_non_int_payload_widening_into_optional_int() 
     // mismatch #809's `(inner.as_ref(), coerced)` match rejects.
     let context = Context::create();
     let builder = context.create_builder();
+    let rt_module = context.create_module("rt");
+    let rt = crate::rt_fns::declare_rt_functions(&context, &rt_module);
     coerce_scalar_to_type(
         &context,
         &builder,
+        &rt,
         Scalar::Float(context.f64_type().const_float(1.0)),
         pycc_mir::Ty::Optional(Box::new(Ty::Int)),
     );
@@ -604,9 +607,12 @@ fn coerce_scalar_to_type_rejects_a_none_placeholder_targeting_an_unsupported_inn
     let none_placeholder = context
         .struct_type(&[context.i8_type().into(), context.i8_type().into()], false)
         .const_zero();
+    let rt_module = context.create_module("rt");
+    let rt = crate::rt_fns::declare_rt_functions(&context, &rt_module);
     coerce_scalar_to_type(
         &context,
         &builder,
+        &rt,
         Scalar::Optional(none_placeholder),
         pycc_mir::Ty::Optional(Box::new(Ty::Str)),
     );
@@ -642,9 +648,11 @@ fn coerce_scalar_to_type_builds_an_i8_zero_placeholder_payload_for_a_mismatched_
     let mismatched = ty_to_basic_type(&context, pycc_mir::Ty::Optional(Box::new(Ty::Int)))
         .into_struct_type()
         .get_undef();
+    let rt = crate::rt_fns::declare_rt_functions(&context, &module);
     let result = coerce_scalar_to_type(
         &context,
         &builder,
+        &rt,
         Scalar::Optional(mismatched),
         pycc_mir::Ty::Optional(Box::new(Ty::Bool)),
     );

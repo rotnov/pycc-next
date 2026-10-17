@@ -4,7 +4,7 @@
 
 use super::{Resolution, collect_binding_sites, nested_bodies, scoped_for_body};
 use crate::Environment;
-use pycc_hir::{ContainerReceiver, HirExpr, HirStmt};
+use pycc_hir::{ContainerReceiver, HirExpr, HirStmt, Ty};
 
 /// The first producer use of `target` anywhere in `body`, in source order.
 ///
@@ -47,8 +47,92 @@ pub(super) fn find_producer(
     local_names: &[&str],
 ) -> Option<Resolution> {
     match scan_body(body, ProducerTarget::Name(target), env, local_names) {
-        ProducerScan::Resolved(resolution) => Some(resolution),
+        ProducerScan::Resolved(resolution) => {
+            Some(widen_numeric(resolution, body, target, env, local_names))
+        }
         ProducerScan::Matched | ProducerScan::NotFound => None,
+    }
+}
+
+/// A numeric element (or dict value) type the first producer gave, widened
+/// to `int | float` when another producer stores the other kind of number
+/// (`out.append(0)` ... `out.append(best)` with a `float` best): one
+/// `int | float` element holds both, where the first producer's type alone
+/// would refuse the later store.
+fn widen_numeric(
+    resolution: Resolution,
+    body: &[HirStmt],
+    target: &str,
+    env: &Environment,
+    local_names: &[&str],
+) -> Resolution {
+    let numeric = |ty: &Ty| matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num);
+    let first = match &resolution {
+        Resolution::List(element) | Resolution::Dict(_, element) if numeric(element) => {
+            element.clone()
+        }
+        _ => return resolution,
+    };
+    let mut stored = Vec::new();
+    collect_stored_values(body, target, env, local_names, &mut stored);
+    let floating = |ty: &Ty| matches!(ty, Ty::Float | Ty::Num);
+    let mixed = stored.iter().all(numeric)
+        && (stored.iter().any(floating) || floating(&first))
+        && (stored.iter().any(|ty| !floating(ty)) || !floating(&first));
+    if !mixed {
+        return resolution;
+    }
+    match resolution {
+        Resolution::List(_) => Resolution::List(Ty::Num),
+        Resolution::Dict(key, _) => Resolution::Dict(key, Ty::Num),
+    }
+}
+
+/// The types of the values every producer of `target` in `body` stores
+/// (those that infer).
+fn collect_stored_values(
+    body: &[HirStmt],
+    target: &str,
+    env: &Environment,
+    local_names: &[&str],
+    out: &mut Vec<Ty>,
+) {
+    for stmt in body {
+        // Issue #1188's receiver-dispatched `xs.append(v)` (an `--ext`
+        // module's) stores too.
+        let dispatched = match stmt {
+            HirStmt::ExprStmt(HirExpr::ReceiverDispatchedCall {
+                call,
+                container: pycc_hir::ContainerFallback::Admitted,
+            }) => call.container_form(),
+            _ => None,
+        };
+        let dispatched_value = match &dispatched {
+            Some(HirExpr::ListAppend { list, value })
+                if receiver_matches(list, ProducerTarget::Name(target)) =>
+            {
+                Some(&**value)
+            }
+            _ => None,
+        };
+        let value = match stmt {
+            _ if dispatched_value.is_some() => dispatched_value,
+            HirStmt::ExprStmt(HirExpr::ListAppend { list, value })
+                if receiver_matches(list, ProducerTarget::Name(target)) =>
+            {
+                Some(&**value)
+            }
+            HirStmt::DictSet { dict, value, .. } if dict == target => Some(value),
+            _ => None,
+        };
+        if let Some(value) = value
+            && let Ok(ty) = crate::infer_expr_in(env, local_names, value)
+        {
+            out.push(ty);
+        }
+        for nested in nested_bodies(stmt) {
+            collect_stored_values(nested, target, env, local_names, out);
+        }
     }
 }
 

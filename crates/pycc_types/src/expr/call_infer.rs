@@ -127,6 +127,20 @@ pub(crate) fn infer_call_expr(
     if callee == "cast" && !env.lookup_function(callee).is_some() {
         return class::check_cast(env, local_names, args);
     }
+    if callee == pycc_hir::NUM_MARKER
+        && let [value] = args.as_slice()
+    {
+        let ty = infer_expr_in(env, local_names, value)?;
+        return if matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num) {
+            Ok(Ty::Num)
+        } else {
+            Err(Diagnostic::error(
+                "T0021",
+                format!("an `int | float` element cannot hold `{}`", ty.name()),
+                Span::new(0, 0),
+            ))
+        };
+    }
     // For a callee that survives D-110's binding gate above, preserve
     // the established diagnostic order by inferring every
     // argument before validating arity or compatibility. Most Python
@@ -467,7 +481,7 @@ pub(crate) fn infer_call_expr(
         // does not own.
         let object_admitted =
             matches!(arg_tys[0], Ty::Object) && env.lookup_class(callee).is_none();
-        if !(matches!(arg_tys[0], Ty::Int | Ty::Float | Ty::Bool) || object_admitted) {
+        if !(matches!(arg_tys[0], Ty::Int | Ty::Float | Ty::Num | Ty::Bool) || object_admitted) {
             return Err(Diagnostic::error(
                 "T0021",
                 format!(
@@ -505,6 +519,35 @@ pub(crate) fn infer_call_expr(
         // and the outer one reads plainly.
         if arg_tys.len() == 1 && matches!(arg_tys[0], Ty::Object) {
             return Ok(Ty::Bool);
+        }
+        // A native value: its truth value, as `not x` computes it
+        // (`pycc_mir` lowers `bool(x)` to `not not x`); `bool()` is `False`.
+        if arg_tys.is_empty() {
+            return Ok(Ty::Bool);
+        }
+        if let [arg] = arg_tys {
+            // An instance whose class defines its own truth value is refused,
+            // as for an `and`/`or` operand (pycc does not call the dunder).
+            if let Ty::Instance(class_name) = arg
+                && let Some((owner, dunder)) = crate::boolop::class_truth_dunder(env, class_name)
+            {
+                return Err(Diagnostic::error(
+                    "C0001",
+                    format!(
+                        "`bool()` of a `{class_name}` is not supported yet: class `{owner}` \
+                         defines `{dunder}`, and pycc does not call it for a truth test yet"
+                    ),
+                    Span::new(0, 0),
+                ));
+            }
+            return crate::unop::unary_result_type(pycc_hir::UnaryOpKind::Not, arg.clone())
+                .map_err(|_| {
+                    Diagnostic::error(
+                        "T0021",
+                        format!("`bool()` of `{}` is not supported yet", arg.name()),
+                        Span::new(0, 0),
+                    )
+                });
         }
     }
     // `repr(o)`, on `str(o)`'s terms below: CPython's own `repr()`

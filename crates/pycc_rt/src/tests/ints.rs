@@ -93,20 +93,15 @@ fn inline_int_kinds_are_no_ops_for_both_refcount_operations() {
     assert_eq!(int_encoding::BIGINT_DROPS.with(|c| c.get()), before);
 }
 
-/// The private functions, not the `extern "C"` wrappers: an `extern "C"`
-/// function may not unwind, so the fail-closed panic is only observable
-/// through the private path (the same split as `range_continue` versus
-/// `pycc_rt_range_continue`).
+/// A word ending in binary `10` other than the bool markers is an inline
+/// `float` of an `int | float` word (`crate::num`), which holds no
+/// reference: both operations leave it alone rather than classifying it.
 #[test]
-#[should_panic(expected = "pycc_rt: invalid encoded int word 0x2a")]
-fn retaining_an_invalid_encoded_word_fails_closed() {
+fn an_inline_float_word_is_a_no_op_for_both_refcount_operations() {
+    let before = int_encoding::BIGINT_DROPS.with(|c| c.get());
     bigint_retain(0x2a);
-}
-
-#[test]
-#[should_panic(expected = "pycc_rt: invalid encoded int word 0x2a")]
-fn releasing_an_invalid_encoded_word_fails_closed() {
     bigint_release(0x2a);
+    assert_eq!(int_encoding::BIGINT_DROPS.with(|c| c.get()), before);
 }
 
 /// The `extern "C"` wrappers themselves, on the non-panicking paths that

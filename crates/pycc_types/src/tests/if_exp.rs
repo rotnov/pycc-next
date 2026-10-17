@@ -62,11 +62,15 @@ fn every_join_row_types_an_annotated_function() {
 }
 
 #[test]
+fn int_and_float_branches_join_to_int_or_float() {
+    checks("def f(t: bool, a: int, b: float) -> None:\n    print(a if t else b)\n");
+}
+
+#[test]
 fn branches_with_no_common_type_are_refused_naming_both() {
     for (params, body, orelse, names) in [
         ("a: int, b: str", "a", "b", "int and str"),
         ("a: bool, b: int", "a", "b", "bool and int"),
-        ("a: int, b: float", "a", "b", "int and float"),
         ("a: str", "a", "None", "str and None"),
         ("a: int", "None", "None", "None and None"),
     ] {
@@ -74,7 +78,7 @@ fn branches_with_no_common_type_are_refused_naming_both() {
             &format!("def f(t: bool, {params}) -> None:\n    print({body} if t else {orelse})\n"),
             "T0021",
             &format!(
-                "conditional expression branches have no common type: {names} (pycc has no union types)"
+                "conditional expression branches have no common type: {names} (pycc's only unions are `T | None` and `int | float`)"
             ),
         );
     }

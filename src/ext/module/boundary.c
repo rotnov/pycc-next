@@ -345,6 +345,53 @@ static PyObject *pycc_ext_pack_float(double value)
  * singleton, so `m.f() is True` holds at the boundary rather than merely
  * comparing equal.
  */
+/*
+ * v0.6: an `int | float` parameter. A `float` crosses as the runtime's
+ * tagged float word (inline, or a boxed float past the inline range); an
+ * `int` or a `bool` crosses exactly as at an `int` parameter, since the
+ * int word is a subset of the `int | float` word. Anything else is a
+ * `TypeError` naming both accepted types.
+ */
+static int pycc_ext_unpack_num(PyObject *obj, const char *fn_name, Py_ssize_t index,
+                               long long *out)
+{
+    PyObject *type_name;
+
+    if (PyFloat_Check(obj)) {
+        *out = pycc_rt_num_from_float(PyFloat_AsDouble(obj));
+        return 0;
+    }
+    if (PyLong_Check(obj)) {
+        return pycc_ext_unpack_int(obj, fn_name, index, out);
+    }
+    type_name = PyType_GetName(Py_TYPE(obj));
+    if (type_name == NULL) {
+        PyErr_SetString(PyExc_TypeError, "object is not an int or a float");
+    } else {
+        PyErr_Format(PyExc_TypeError, "%s() argument %zd: expected int or float, got '%U'",
+                     fn_name, index + 1, type_name);
+        Py_DECREF(type_name);
+    }
+    return -1;
+}
+
+/*
+ * Packs an `int | float` result, which arrives retained (D-180 rule 6) and
+ * dies here: a float word becomes a CPython `float`, anything else is an
+ * int word and takes `pycc_ext_pack_int`'s path.
+ */
+static PyObject *pycc_ext_pack_num(const char *fn_name, long long encoded)
+{
+    PyObject *value;
+
+    if (!pycc_rt_num_is_float(encoded)) {
+        return pycc_ext_pack_int(fn_name, encoded);
+    }
+    value = PyFloat_FromDouble(pycc_rt_num_to_float(encoded));
+    pycc_rt_num_release(encoded);
+    return value;
+}
+
 static PyObject *pycc_ext_pack_bool(char value)
 {
     return PyBool_FromLong(value != 0);

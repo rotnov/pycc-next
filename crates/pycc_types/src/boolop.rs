@@ -108,7 +108,7 @@ fn admit_operand(
     }
     if !truth_only && matches!(ty, Ty::None) {
         return Err(operand_error(format!(
-            "`{}` operand `None` has no value pycc can join (pycc has no union types)",
+            "`{}` operand `None` has no value pycc can join (pycc's only unions are `T | None` and `int | float`)",
             op.as_str()
         )));
     }
@@ -143,7 +143,7 @@ pub(crate) fn class_truth_dunder(
 
 fn no_common_type(op: BoolOpKind, left: &Ty, right: &Ty) -> Diagnostic {
     operand_error(format!(
-        "`{}` operands have no common type: {} and {} (pycc has no union types)",
+        "`{}` operands have no common type: {} and {} (pycc's only unions are `T | None` and `int | float`)",
         op.as_str(),
         left.name(),
         right.name()

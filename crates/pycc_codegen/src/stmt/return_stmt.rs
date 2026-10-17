@@ -229,7 +229,7 @@ pub(crate) fn emit_return_stmt<'ctx>(
                 None => retain_if_int_duplicate(context, builder, rt, expr, scalar),
             };
             let scalar =
-                coerce_scalar_to_type(context, builder, scalar, expected_return_ty.clone());
+                coerce_scalar_to_type(context, builder, rt, scalar, expected_return_ty.clone());
             // Part 2b of #1142 (#1164): a returned artifact-owned
             // buffer leaves through the frame's owned-slot
             // epilogue, and **nothing about ownership happens
@@ -426,7 +426,7 @@ pub(crate) fn emit_return_stmt<'ctx>(
             }
             let basic_value: inkwell::values::BasicValueEnum = match scalar {
                 Scalar::Generator(v) | Scalar::Closure(v) => v.into(),
-                Scalar::Int(v) => v.into(),
+                Scalar::Int(v) | Scalar::Num(v) => v.into(),
                 Scalar::Bool(v) => v.into(),
                 Scalar::Float(v) => v.into(),
                 Scalar::Str(v) => v.into(),

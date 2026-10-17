@@ -121,6 +121,12 @@ pub(crate) fn compare_link_ty(
         if let Ty::List(elem) | Ty::VarTuple(elem) = right_ty
             && *left_ty != Ty::Object
         {
+            // Numbers of different kinds compare by value (`1.0 in [1, 2]`,
+            // `pycc_rt_list_contains_num`).
+            let number = |ty: &Ty| matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num);
+            if number(left_ty) && number(elem) {
+                return Ok(Ty::Bool);
+            }
             return crate::list_ops::membership_ty(env, left_ty, elem);
         }
         // A dict key or a hashable set element: the runtime's hash lookup.

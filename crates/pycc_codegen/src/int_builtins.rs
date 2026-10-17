@@ -143,6 +143,21 @@ pub(super) fn emit_call<'ctx>(
             release_if_int_temporary(context, builder, rt, x, word);
             Some(Scalar::Int(result))
         }
+        // `abs` and `int` of an `int | float` (`crate::num`).
+        ("abs" | "int", [x]) if x.ty() == Ty::Num => {
+            let scalar = emit(x);
+            let Scalar::Num(word) = scalar else {
+                panic!("pycc_codegen: internal error: an `int | float` operand was not a word")
+            };
+            let (function, abs) = if callee == "abs" {
+                (rt.num.abs, true)
+            } else {
+                (rt.num.to_int, false)
+            };
+            let result = crate::num::emit_unary(builder, function, word).into_int_value();
+            crate::heap_rc::release_scalar_if_temporary(context, builder, rt, x, &scalar);
+            Some(if abs { Scalar::Num(result) } else { Scalar::Int(result) })
+        }
         ("int", [x]) if x.ty() == Ty::Float => {
             let Scalar::Float(v) = emit(x) else {
                 panic!("pycc_codegen: internal error: a float `int` operand was not a float")

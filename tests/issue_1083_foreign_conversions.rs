@@ -136,28 +136,30 @@ fn both_conversions_of_a_cpython_object_are_admitted() {
     }
 }
 
-/// `bool` on anything that is not a CPython object keeps `C0001` verbatim.
-///
-/// Fork 1 of the plan, pinned from the outside: PR 4a admits the builtin for
-/// `Ty::Object` alone, so every previously-refused `bool` call is refused in
-/// exactly the way it was. A regression here would most likely arrive as an
-/// "improvement" -- adding `bool` to `KNOWN_CALLABLE_BUILTINS`' neighbours
-/// or generalizing the arm -- which is why the code, not just the object
-/// case, is asserted.
+/// `bool` of a native value is its truth value (v0.6), checked like `not x`:
+/// an `int`, `float`, `str` or list compiles, and an instance of a class
+/// defining `__bool__` (which pycc does not call for a truth test yet) is
+/// still refused with `C0001`.
 #[test]
-fn bool_of_a_non_object_keeps_its_unchanged_refusal() {
+fn bool_of_a_native_value_is_its_truth_value() {
     let dir = ScratchDir::new("foreign_bool_non_object").expect("scratch");
     for body in [
         "print(bool(1))\n",
         "print(bool(1.5))\n",
         "print(bool(\"x\"))\n",
         "xs = [1]\nprint(bool(xs))\n",
+        "print(bool())\n",
     ] {
         let out = check(&dir, body);
-        assert!(!out.status.success(), "{body} should still be refused");
-        let text = format!("{}{}", stdout_of(&out), stderr_of(&out));
-        assert!(text.contains("C0001"), "{body}: {text}");
+        assert!(out.status.success(), "{body}: {}{}", stdout_of(&out), stderr_of(&out));
     }
+    let out = check(
+        &dir,
+        "class C:\n    def __bool__(self) -> bool:\n        return False\n\nprint(bool(C()))\n",
+    );
+    assert!(!out.status.success());
+    let text = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    assert!(text.contains("C0001"), "{text}");
 }
 
 /// `float` on a non-numeric, non-object argument keeps its `T0021` message

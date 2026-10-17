@@ -39,6 +39,9 @@ pub(crate) fn to_numeric_encoded_int<'ctx>(
         Scalar::Float(_) => {
             panic!("pycc_codegen: internal error: expected an int-or-bool operand, got float")
         }
+        Scalar::Num(_) => {
+            panic!("pycc_codegen: internal error: expected an int-or-bool operand, got int | float")
+        }
         Scalar::Str(_) => {
             panic!("pycc_codegen: internal error: expected an int-or-bool operand, got str")
         }
@@ -253,6 +256,7 @@ pub(crate) fn build_buffer_alloc_untag_len<'ctx>(
 pub(crate) fn coerce_scalar_to_type<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
     scalar: Scalar<'ctx>,
     target_ty: pycc_mir::Ty,
 ) -> Scalar<'ctx> {
@@ -268,6 +272,12 @@ pub(crate) fn coerce_scalar_to_type<'ctx>(
         (pycc_mir::Ty::None, Scalar::Optional(_)) => crate::call_result::none_scalar(context),
         (pycc_mir::Ty::Int, Scalar::Bool(value)) => {
             Scalar::Int(to_encoded_int(context, builder, Scalar::Bool(value)))
+        }
+        // An `int | float` slot (`crate::num`): an `int` is its own word and
+        // a `bool` its identity marker, so neither changes ownership; a
+        // `float` becomes a fresh word.
+        (pycc_mir::Ty::Num, scalar @ (Scalar::Int(_) | Scalar::Bool(_) | Scalar::Float(_))) => {
+            Scalar::Num(crate::num::to_num_word(context, builder, rt, scalar))
         }
         // A `Scalar::Optional` arriving here is either a *real*
         // `Optional[inner]` value (e.g. `w: int | None = y` where `y` is
@@ -388,7 +398,7 @@ pub(crate) fn coerce_scalar_to_type<'ctx>(
         // itself needs (e.g. `bool -> int`, the arm above), then wrap the
         // result as the struct's present (`i8 = 1`) payload field.
         (pycc_mir::Ty::Optional(inner), bare) => {
-            let coerced = coerce_scalar_to_type(context, builder, bare, (*inner).clone());
+            let coerced = coerce_scalar_to_type(context, builder, rt, bare, (*inner).clone());
             // #809 (Part 3 of #747): `T0049`'s widened gate
             // (`crates/pycc_hir/src/func.rs`) now also admits
             // `Optional[float]`/`Optional[bool]`, so this match is keyed on
@@ -485,6 +495,7 @@ pub(crate) fn range_operand_to_normalized_int<'ctx>(
         // `pycc_types` before codegen, so this whole arm is defensive
         // either way.
         Scalar::Float(_)
+        | Scalar::Num(_)
         | Scalar::Str(_)
         | Scalar::List(_)
         | Scalar::Dict(_)
@@ -585,6 +596,7 @@ pub(crate) fn to_float<'ctx>(
 ) -> FloatValue<'ctx> {
     match scalar {
         Scalar::Float(v) => v,
+        Scalar::Num(word) => crate::num::emit_num_to_float(context, builder, rt, word, false),
         Scalar::Generator(_) | Scalar::Closure(_) => {
             panic!("pycc_codegen: internal error: expected a numeric operand, got generator")
         }
@@ -690,6 +702,33 @@ pub(crate) fn emit_round<'ctx>(
             let ndigits = emit(ndigits);
             let ndigits = list::raw_index(context, builder, rt, ndigits);
             (rt.float_round, vec![x.into(), ndigits.into()])
+        }
+        // `int | float` (`crate::num`) and `round(int, ndigits)`: the
+        // runtime rounds the value the word holds, returning a fresh word.
+        (scalar @ (Scalar::Num(_) | Scalar::Int(_) | Scalar::Bool(_)), ndigits)
+            if matches!(scalar, Scalar::Num(_)) || ndigits.is_some() =>
+        {
+            let num = matches!(scalar, Scalar::Num(_));
+            let word = match scalar {
+                Scalar::Num(word) => word,
+                other => to_encoded_int(context, builder, other),
+            };
+            let result = match ndigits {
+                None => crate::num::emit_unary(builder, rt.num.round, word).into_int_value(),
+                Some(ndigits) => {
+                    let ndigits = emit(ndigits);
+                    let ndigits = list::raw_index(context, builder, rt, ndigits);
+                    let function = if num { rt.num.round_digits } else { rt.num.int_round_digits };
+                    builder
+                        .build_call(function, &[word.into(), ndigits.into()], "round_digits")
+                        .expect("build_call should not fail for a declared runtime function")
+                        .try_as_basic_value()
+                        .expect_basic("the round runtime functions return a value")
+                        .into_int_value()
+                }
+            };
+            crate::heap_rc::release_scalar_if_temporary(context, builder, rt, &args[0], &scalar);
+            return if num && args.len() == 2 { Scalar::Num(result) } else { Scalar::Int(result) };
         }
         (int, _) => return Scalar::Int(to_numeric_encoded_int(context, builder, int)),
     };

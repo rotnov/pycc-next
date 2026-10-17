@@ -77,6 +77,7 @@ pub(crate) fn emit_optional_wrap_expr<'ctx>(
     coerce_scalar_to_type(
         context,
         builder,
+        rt,
         scalar,
         pycc_mir::Ty::Optional(inner.clone()),
     )

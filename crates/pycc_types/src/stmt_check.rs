@@ -274,6 +274,7 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
                 if !unpacks_into_float_tuple
                     && !class::is_assignable_env(env, &crate::int_enum_slot(&inferred, annotation), annotation)
                     && !object_box::admits_value(env, value, &inferred, annotation)?
+                    && !crate::num_widen::display_widens(value, &inferred, annotation)
                 {
                     // #380 (PR-20): if the mismatch involves a protocol,
                     // produce a detailed T0046 conformance error.
@@ -766,6 +767,9 @@ pub(crate) fn check_dict_set(
         let index_ty = infer_expr_in(env, local_names, key)?;
         let value_ty = infer_expr_in(env, local_names, value)?;
         return list_ops::check_list_set(elem, &index_ty, &value_ty).inspect_err(|_| {
+            // A list of `int`s stored a `float` (or the reverse) holds
+            // `int | float` elements.
+            crate::num_widen::request_list(dict, &dict_ty, &value_ty);
             // Non-strict mode (#3): a list holding values of two types is
             // CPython's own list, as every Python list is.
             non_strict::request_widen(dict, &dict_ty, &Ty::Object, |_| true);

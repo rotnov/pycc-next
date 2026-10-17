@@ -25,6 +25,7 @@ pub(crate) fn contains_infer(ty: &Ty) -> bool {
         Ty::Callable(sig) => sig.0.iter().any(contains_infer) || contains_infer(&sig.1),
         Ty::Int
         | Ty::Float
+        | Ty::Num
         | Ty::Bool
         | Ty::Str
         | Ty::None
@@ -56,6 +57,7 @@ pub(super) fn contains_optional(ty: &Ty) -> bool {
         Ty::Callable(_) => false,
         Ty::Int
         | Ty::Float
+        | Ty::Num
         | Ty::Bool
         | Ty::Str
         | Ty::None

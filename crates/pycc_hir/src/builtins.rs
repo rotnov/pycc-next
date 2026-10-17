@@ -89,6 +89,20 @@ fn sig(symbol: &'static str, params: &[Ty], ret: Ty) -> BuiltinSig {
     }
 }
 
+/// `pycc_rt_num_isinstance(x, mask)`: whether the `int | float` `x` holds
+/// an `int` (mask bit 1, a `bool` included), a `float` (bit 2) or a `bool`
+/// (bit 4).
+#[must_use]
+pub fn num_isinstance_sig() -> BuiltinSig {
+    sig("pycc_rt_num_isinstance", &[Ty::Num, Ty::Int], Ty::Bool)
+}
+
+/// The runtime function reading an `int | float` index as an `int`.
+#[must_use]
+pub fn num_index_sig() -> BuiltinSig {
+    sig("pycc_rt_num_index", &[Ty::Num, Ty::Int], Ty::Int)
+}
+
 /// [`sig`] whose arguments flagged in `words` pass as container words, whose
 /// result is a word when `ret_word`, and which takes `kinds` as trailing
 /// kind arguments.
@@ -124,7 +138,7 @@ fn hashed_set(ty: &Ty) -> Option<&Ty> {
 /// its `__repr__`, which the runtime cannot call).
 fn renders_natively(ty: &Ty) -> bool {
     match ty {
-        Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+        Ty::Int | Ty::Float | Ty::Num | Ty::Bool | Ty::Str => true,
         Ty::List(elem) | Ty::VarTuple(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => {
             renders_natively(elem)
         }
@@ -139,7 +153,7 @@ fn is_intlike(ty: &Ty) -> bool {
 }
 
 fn is_numeric(ty: &Ty) -> bool {
-    matches!(ty, Ty::Int | Ty::Bool | Ty::Float)
+    matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num)
 }
 
 /// The runtime symbol of a `math` function of `float` arguments (an `int`
@@ -171,7 +185,8 @@ fn math_log(name: &str, arg: &Ty) -> Option<BuiltinSig> {
         _ => return None,
     };
     Some(match arg {
-        Ty::Float => sig(float_symbol, &[Ty::Float], Ty::Float),
+        // An `int | float` argument converts as `float(x)` does.
+        Ty::Float | Ty::Num => sig(float_symbol, &[Ty::Float], Ty::Float),
         a if is_intlike(a) => sig(int_symbol, &[Ty::Int], Ty::Float),
         _ => return None,
     })
@@ -181,7 +196,7 @@ fn math_log(name: &str, arg: &Ty) -> Option<BuiltinSig> {
 /// (`pycc_rt::value::lt`, lexicographic for lists and tuples).
 fn orderable(elem: &Ty) -> bool {
     match elem {
-        Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
+        Ty::Int | Ty::Bool | Ty::Float | Ty::Num | Ty::Str => true,
         Ty::List(inner) | Ty::VarTuple(inner) => orderable(inner),
         Ty::Tuple(elements) => elements.iter().all(orderable),
         _ => false,
@@ -210,6 +225,14 @@ pub fn value_comparable(elem: &Ty) -> bool {
 /// by the runtime's element-word equality.
 fn same_elem(item: &Ty, elem: &Ty) -> bool {
     item == elem || (is_intlike(item) && is_intlike(elem))
+}
+
+/// [`same_elem`], or any number searched for in a `list[int | float]`
+/// (`xs.index(2.5)`): a lookup only borrows the item, so a converted
+/// `float` word is released after the call rather than stored.
+fn searches_elem(item: &Ty, elem: &Ty) -> bool {
+    same_elem(item, elem)
+        || (*elem == Ty::Num && matches!(item, Ty::Int | Ty::Bool | Ty::Float | Ty::Num))
 }
 
 /// The key and element types of a `(key, element)` pair element.
@@ -535,6 +558,10 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("format" | "__pycc_format", [Ty::Str, Ty::Str]) => {
             sig("pycc_rt_format_str", &[str_.clone(), str_.clone()], str_)
         }
+        ("format" | "__pycc_format", [Ty::Num, Ty::Str]) => {
+            sig("pycc_rt_format_num", &[Ty::Num, str_.clone()], str_)
+        }
+        ("format" | "str" | "repr", [Ty::Num]) => sig("pycc_rt_num_to_str", &[Ty::Num], str_),
         ("format", [Ty::Int]) => sig("pycc_rt_int_to_str", &[int], str_),
         ("format", [Ty::Float]) => sig("pycc_rt_float_to_str", &[float], str_),
         ("format", [Ty::Bool]) => sig("pycc_rt_bool_to_str", &[Ty::Bool], str_),
@@ -606,6 +633,8 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         }
         ("math.floor", [Ty::Float]) => sig("pycc_rt_math_floor", &[float], int),
         ("math.ceil", [Ty::Float]) => sig("pycc_rt_math_ceil", &[float], int),
+        ("math.floor", [Ty::Num]) => sig("pycc_rt_num_floor", &[Ty::Num], int),
+        ("math.ceil", [Ty::Num]) => sig("pycc_rt_num_ceil", &[Ty::Num], int),
         ("math.floor" | "math.ceil", [a]) if is_intlike(a) => {
             sig("pycc_rt_math_int_identity", std::slice::from_ref(&int), int.clone())
         }
@@ -645,6 +674,17 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             &[int.clone(), int.clone(), int.clone()],
             int,
         ),
+        // An `int | float` result: `min(best, cost)` of a `float` sentinel
+        // and an `int`, or with an `int | float` operand. CPython's `min`
+        // returns the first of equal values, whichever type it has.
+        ("min" | "max", [a, b])
+            if is_numeric(a)
+                && is_numeric(b)
+                && (*a == Ty::Num || *b == Ty::Num || is_intlike(a) != is_intlike(b)) =>
+        {
+            let symbol = if name == "max" { "pycc_rt_num_max2" } else { "pycc_rt_num_min2" };
+            sig(symbol, &[Ty::Num, Ty::Num], Ty::Num)
+        }
         ("min" | "max", [a, b]) if a == b || (is_intlike(a) && is_intlike(b)) => {
             let max = name == "max";
             let (symbol, ty) = match a {
@@ -703,6 +743,7 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("sum", [Ty::List(elem)]) => match **elem {
             Ty::Int | Ty::Bool => sig("pycc_rt_list_sum_int", &[args[0].clone()], int),
             Ty::Float => sig("pycc_rt_list_sum_float", &[args[0].clone()], float),
+            Ty::Num => sig("pycc_rt_list_sum_num", &[args[0].clone()], Ty::Num),
             _ => return None,
         },
         ("sorted", [Ty::List(elem)]) if orderable(elem) => {

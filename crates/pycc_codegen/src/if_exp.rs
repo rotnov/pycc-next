@@ -87,6 +87,7 @@ pub(super) fn emit_if_exp<'ctx>(
 fn scalar_of<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
     match ty {
         Ty::Int => Scalar::Int(value.into_int_value()),
+        Ty::Num => Scalar::Num(value.into_int_value()),
         Ty::Bool => Scalar::Bool(value.into_int_value()),
         Ty::Float => Scalar::Float(value.into_float_value()),
         Ty::Str => Scalar::Str(value.into_pointer_value()),

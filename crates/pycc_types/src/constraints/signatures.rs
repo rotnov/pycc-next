@@ -225,6 +225,13 @@ pub(crate) fn infer_function_signatures_with_solver_all(
     hir: &HirModule,
     function_local_names: &[Vec<&str>],
 ) -> Result<FunctionSignatures, KeyedDiagnostics> {
+    super::unify::with_fresh_demands(|| solve_all(hir, function_local_names))
+}
+
+fn solve_all(
+    hir: &HirModule,
+    function_local_names: &[Vec<&str>],
+) -> Result<FunctionSignatures, KeyedDiagnostics> {
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
     let mut signatures = HashMap::default();

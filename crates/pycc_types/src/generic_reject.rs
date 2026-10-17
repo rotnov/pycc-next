@@ -32,6 +32,7 @@ pub(crate) fn ty_contains_param(ty: &Ty) -> bool {
         // scan for.
         Ty::Int
         | Ty::Float
+        | Ty::Num
         | Ty::Bool
         | Ty::Str
         | Ty::None
@@ -127,6 +128,7 @@ pub(crate) fn scan_signature_ty_for_param(
         // `ty_contains_param`'s own identical arm/reasoning above.
         Ty::Int
         | Ty::Float
+        | Ty::Num
         | Ty::Bool
         | Ty::Str
         | Ty::None

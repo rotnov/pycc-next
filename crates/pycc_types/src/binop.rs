@@ -90,12 +90,18 @@ pub(crate) fn numeric_result_type(op: BinOpKind, left: Ty, right: Ty) -> Result<
     let as_numeric = |t: &Ty| match t {
         Ty::Bool | Ty::Int => Some(Ty::Int),
         Ty::Float => Some(Ty::Float),
+        Ty::Num => Some(Ty::Num),
         _ => None,
     };
     match (as_numeric(&left), as_numeric(&right)) {
         (Some(_), Some(_)) if op == BinOpKind::Div => Ok(Ty::Float),
         (Some(Ty::Int), Some(Ty::Int)) => Ok(Ty::Int),
-        (Some(_), Some(_)) => Ok(Ty::Float),
+        // A `float` operand makes the result a `float` whatever the other
+        // one holds; otherwise an `int | float` operand makes it one too
+        // (`int | float` `**` a negative `int` is a `float`, which the
+        // union holds).
+        (Some(Ty::Float), Some(_)) | (Some(_), Some(Ty::Float)) => Ok(Ty::Float),
+        (Some(_), Some(_)) => Ok(Ty::Num),
         _ => Err(Diagnostic::error(
             "T0021",
             format!(

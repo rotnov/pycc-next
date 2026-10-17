@@ -18,7 +18,8 @@ use crate::dict::PyDictObj;
 use crate::instance::PyInstanceObj;
 use crate::list::{
     LIST_KIND_BOOL, LIST_KIND_CLOSURE, LIST_KIND_DICT, LIST_KIND_FLOAT, LIST_KIND_INSTANCE,
-    LIST_KIND_INT, LIST_KIND_LIST, LIST_KIND_SET, LIST_KIND_STR, LIST_KIND_TUPLE, PyListObj,
+    LIST_KIND_INT, LIST_KIND_LIST, LIST_KIND_NUM, LIST_KIND_SET, LIST_KIND_STR, LIST_KIND_TUPLE,
+    PyListObj,
 };
 use crate::set::PySetObj;
 use crate::{PyStrObj, encoded_int_cmp, inline_int_value};
@@ -72,6 +73,7 @@ pub(crate) fn sequence_items(word: i64) -> Vec<(i64, i64)> {
 /// Python `a == b` for two words of `kind`.
 pub(crate) fn eq(kind: i64, a: i64, b: i64) -> bool {
     match kind {
+        LIST_KIND_NUM => crate::num::compare(a, b) == Some(Ordering::Equal),
         LIST_KIND_INT => encoded_int_cmp(a, b) == Ordering::Equal,
         LIST_KIND_FLOAT => f64::from_bits(a as u64) == f64::from_bits(b as u64),
         LIST_KIND_STR => a == b || str_bytes(a) == str_bytes(b),
@@ -88,7 +90,7 @@ pub(crate) fn eq(kind: i64, a: i64, b: i64) -> bool {
                 && xs
                     .iter()
                     .zip(ys.iter())
-                    .all(|((kx, x), (ky, y))| kx == ky && eq(*kx, *x, *y))
+                    .all(|((kx, x), (ky, y))| kinded_eq(*kx, *x, *ky, *y))
         }
         LIST_KIND_DICT => {
             a == b || crate::dict::dicts_equal(a as *mut PyDictObj, b as *mut PyDictObj)
@@ -99,10 +101,23 @@ pub(crate) fn eq(kind: i64, a: i64, b: i64) -> bool {
     }
 }
 
+/// Python `a == b` for two words of kinds `ka` and `kb` (tuple items):
+/// numbers of different kinds compare by value.
+pub(crate) fn kinded_eq(ka: i64, a: i64, kb: i64, b: i64) -> bool {
+    if ka == kb {
+        return eq(ka, a, b);
+    }
+    match (crate::num::of_kind(ka, a), crate::num::of_kind(kb, b)) {
+        (Some(x), Some(y)) => crate::num::compare_values(x, y) == Some(Ordering::Equal),
+        _ => false,
+    }
+}
+
 /// Python `a < b` for two words of `kind`; `None` when the kind has no
 /// order (the caller raises `TypeError`).
 pub(crate) fn lt(kind: i64, a: i64, b: i64) -> Option<bool> {
     Some(match kind {
+        LIST_KIND_NUM => crate::num::compare(a, b) == Some(Ordering::Less),
         LIST_KIND_INT => encoded_int_cmp(a, b).is_lt(),
         LIST_KIND_FLOAT => f64::from_bits(a as u64) < f64::from_bits(b as u64),
         LIST_KIND_BOOL => a < b,
@@ -111,8 +126,14 @@ pub(crate) fn lt(kind: i64, a: i64, b: i64) -> Option<bool> {
             let (xs, ys) = (sequence_items(a), sequence_items(b));
             // CPython: the first position whose items differ decides,
             // else the shorter sequence is smaller.
-            for ((kx, x), (_, y)) in xs.iter().zip(ys.iter()) {
-                if !eq(*kx, *x, *y) {
+            for ((kx, x), (ky, y)) in xs.iter().zip(ys.iter()) {
+                if !kinded_eq(*kx, *x, *ky, *y) {
+                    if kx != ky
+                        && let (Some(p), Some(q)) =
+                            (crate::num::of_kind(*kx, *x), crate::num::of_kind(*ky, *y))
+                    {
+                        return Some(crate::num::compare_values(p, q) == Some(Ordering::Less));
+                    }
                     return lt(*kx, *x, *y);
                 }
             }
@@ -134,6 +155,7 @@ pub(crate) fn type_name(kind: i64) -> &'static str {
         LIST_KIND_DICT => "dict",
         LIST_KIND_SET => "set",
         LIST_KIND_CLOSURE => "function",
+        LIST_KIND_NUM => "int | float",
         _ => "object",
     }
 }
@@ -214,6 +236,7 @@ pub(crate) fn hash_float(v: f64) -> i64 {
 pub(crate) fn hash(kind: i64, word: i64) -> Option<i64> {
     Some(match kind {
         LIST_KIND_INT => crate::pycc_rt_hash_int(word),
+        LIST_KIND_NUM => crate::num::hash(word),
         LIST_KIND_BOOL => word,
         LIST_KIND_FLOAT => hash_float(f64::from_bits(word as u64)),
         LIST_KIND_STR => {
@@ -259,6 +282,7 @@ pub(crate) fn hash_or_raise(kind: i64, word: i64) -> Option<i64> {
 pub(crate) fn truthy(kind: i64, word: i64) -> bool {
     match kind {
         LIST_KIND_INT => inline_int_value(word) != Some(0),
+        LIST_KIND_NUM => crate::num::pycc_rt_num_truthy(word) != 0,
         LIST_KIND_FLOAT => f64::from_bits(word as u64) != 0.0,
         LIST_KIND_STR => !str_bytes(word).is_empty(),
         LIST_KIND_LIST | LIST_KIND_TUPLE => !sequence_items(word).is_empty(),
@@ -273,6 +297,7 @@ pub(crate) fn truthy(kind: i64, word: i64) -> bool {
 pub(crate) fn repr(kind: i64, word: i64, out: &mut String) -> bool {
     let rendered = match kind {
         LIST_KIND_INT => crate::int_to_str(word),
+        LIST_KIND_NUM => return crate::num::repr(word, out),
         LIST_KIND_FLOAT => crate::pycc_rt_float_to_str(f64::from_bits(word as u64)),
         LIST_KIND_BOOL => crate::pycc_rt_bool_to_str(word as i8),
         LIST_KIND_STR => {

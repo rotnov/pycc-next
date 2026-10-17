@@ -85,6 +85,7 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
 ) -> Scalar<'ctx> {
     match ty {
         pycc_mir::Ty::Int => Scalar::Int(raw),
+        pycc_mir::Ty::Num => Scalar::Num(raw),
         pycc_mir::Ty::Bool => Scalar::Bool(
             builder
                 .build_int_truncate(raw, context.i8_type(), "attr_bool_trunc")
@@ -180,7 +181,7 @@ pub(crate) fn scalar_to_slot_word<'ctx>(
         Scalar::Generator(_) => {
             panic!("pycc_codegen: internal error: an attribute slot never holds a generator")
         }
-        Scalar::Int(v) => v,
+        Scalar::Int(v) | Scalar::Num(v) => v,
         Scalar::Bool(v) => builder
             .build_int_z_extend(v, context.i64_type(), "attr_bool_zext")
             .expect("build_int_z_extend should not fail widening i8 to i64"),

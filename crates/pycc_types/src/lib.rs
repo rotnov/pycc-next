@@ -43,7 +43,7 @@ mod ndarray;
 mod non_strict;
 mod not_implemented;
 mod object_box;
-mod int_inf;
+mod num_widen;
 mod object_none;
 mod redeclaration;
 mod round;

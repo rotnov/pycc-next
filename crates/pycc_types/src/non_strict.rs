@@ -139,10 +139,12 @@ pub(crate) fn admits_rebinding_coercion(env: &crate::Environment, name: &str, fr
 }
 
 /// Whether an index (a list, tuple or `str` subscript, a `range()`
-/// argument) of type `ty` is read through `__index__` at run time: an
-/// object, in non-strict mode only (`pycc_mir::MirExpr::ObjectIndex`).
+/// argument) of type `ty` is checked to be an `int` at run time: an object,
+/// in non-strict mode only, read through `__index__`
+/// (`pycc_mir::MirExpr::ObjectIndex`), and an `int | float` in both modes
+/// (`pycc_rt_num_index`).
 pub(crate) fn admits_index(ty: &Ty) -> bool {
-    is_non_strict() && *ty == Ty::Object
+    (is_non_strict() && *ty == Ty::Object) || *ty == Ty::Num
 }
 
 /// A name to widen: `(Some(i), name)` is the local `name` of function item
@@ -151,7 +153,7 @@ pub(crate) fn admits_index(ty: &Ty) -> bool {
 /// that receives the values it reads as parameters), so a name one
 /// function rebinds with another type stays native in every other
 /// function that binds it once.
-type WidenKey = (Option<usize>, String);
+pub(crate) type WidenKey = (Option<usize>, String);
 
 mod container_widen;
 mod fresh_returns;
@@ -171,6 +173,7 @@ pub(crate) fn widens_to_object(env: &crate::Environment, ty: &Ty) -> bool {
 }
 
 pub(crate) fn request_widen(name: &str, previous: &Ty, new: &Ty, boxable: impl Fn(&Ty) -> bool) {
+    crate::num_widen::request(name, previous, new);
     if is_non_strict() && boxable(previous) && boxable(new) {
         let item = crate::locate::current_item();
         WIDEN.with(|widen| widen.borrow_mut().insert((item, name.to_string())));
@@ -329,7 +332,7 @@ fn take_widen_requests() -> BTreeSet<WidenKey> {
 /// module scope binds too (a function may declare it `global`), or a
 /// request from no item or from an item the check added (an inherited
 /// method's copy).
-fn scope_keys(hir: &HirModule, requests: BTreeSet<WidenKey>) -> BTreeSet<WidenKey> {
+pub(crate) fn scope_keys(hir: &HirModule, requests: BTreeSet<WidenKey>) -> BTreeSet<WidenKey> {
     let module_names = module_scope_names(hir);
     requests
         .into_iter()
@@ -615,6 +618,17 @@ fn widen(
     keys: &BTreeSet<WidenKey>,
     attrs: &BTreeSet<(String, String)>,
 ) -> HirModule {
+    widen_to(hir, keys, attrs, &Ty::Object)
+}
+
+/// [`widen`] into a slot of type `annotation`: `object`, or `int | float`
+/// (`crate::num_widen`, which widens no attribute).
+pub(crate) fn widen_to(
+    hir: &HirModule,
+    keys: &BTreeSet<WidenKey>,
+    attrs: &BTreeSet<(String, String)>,
+    annotation: &Ty,
+) -> HirModule {
     let everywhere: BTreeSet<String> = keys
         .iter()
         .filter(|(item, _)| item.is_none())
@@ -654,17 +668,27 @@ fn widen(
                         .filter(|(item, _)| *item == Some(index))
                         .map(|(_, name)| name.clone()),
                 );
-                widen_block(body, &names, &mut seen);
+                widen_block(body, &names, &mut seen, annotation);
             }
             HirItem::TopLevelStmt(stmt) => {
-                widen_block(std::slice::from_mut(stmt), &everywhere, &mut top_level_seen);
+                widen_block(
+                    std::slice::from_mut(stmt),
+                    &everywhere,
+                    &mut top_level_seen,
+                    annotation,
+                );
             }
         }
     }
     module
 }
 
-fn widen_block(body: &mut [HirStmt], names: &BTreeSet<String>, seen: &mut BTreeSet<String>) {
+fn widen_block(
+    body: &mut [HirStmt],
+    names: &BTreeSet<String>,
+    seen: &mut BTreeSet<String>,
+    annotation: &Ty,
+) {
     for stmt in body {
         let is_list_comp = matches!(stmt, HirStmt::ListCompAssign { .. });
         match stmt {
@@ -674,7 +698,7 @@ fn widen_block(body: &mut [HirStmt], names: &BTreeSet<String>, seen: &mut BTreeS
                 seen.insert(target.clone());
                 *stmt = HirStmt::AnnAssign {
                     target: target.clone(),
-                    annotation: Ty::Object,
+                    annotation: annotation.clone(),
                     value: Some(value.clone()),
                     is_final: false,
                 };
@@ -696,7 +720,7 @@ fn widen_block(body: &mut [HirStmt], names: &BTreeSet<String>, seen: &mut BTreeS
                 iter,
                 cond,
                 elt,
-            } if names.contains(target) && !seen.contains(target) => {
+            } if names.contains(target) && !seen.contains(target) && *annotation == Ty::Object => {
                 seen.insert(target.clone());
                 let elt = if is_list_comp {
                     pycc_hir::CompElt::List(elt.as_ref().clone())
@@ -722,21 +746,21 @@ fn widen_block(body: &mut [HirStmt], names: &BTreeSet<String>, seen: &mut BTreeS
             // first.
             HirStmt::If { body, orelse, .. } => {
                 let mut orelse_seen = seen.clone();
-                widen_block(body, names, seen);
-                widen_block(orelse, names, &mut orelse_seen);
+                widen_block(body, names, seen, annotation);
+                widen_block(orelse, names, &mut orelse_seen, annotation);
                 seen.extend(orelse_seen);
             }
             HirStmt::While { body, .. }
             | HirStmt::ForRange { body, .. }
             | HirStmt::ForList { body, .. }
-            | HirStmt::ForObject { body, .. } => widen_block(body, names, seen),
+            | HirStmt::ForObject { body, .. } => widen_block(body, names, seen, annotation),
             HirStmt::LoopElse { loop_stmt, orelse } => {
-                widen_block(std::slice::from_mut(loop_stmt.as_mut()), names, seen);
-                widen_block(orelse, names, seen);
+                widen_block(std::slice::from_mut(loop_stmt.as_mut()), names, seen, annotation);
+                widen_block(orelse, names, seen, annotation);
             }
             HirStmt::Match { cases, .. } => {
                 for case in cases {
-                    widen_block(&mut case.body, names, seen);
+                    widen_block(&mut case.body, names, seen, annotation);
                 }
             }
             HirStmt::Try {
@@ -751,12 +775,12 @@ fn widen_block(body: &mut [HirStmt], names: &BTreeSet<String>, seen: &mut BTreeS
                 orelse,
                 finalbody,
             } => {
-                widen_block(body, names, seen);
+                widen_block(body, names, seen, annotation);
                 for handler in handlers {
-                    widen_block(&mut handler.body, names, seen);
+                    widen_block(&mut handler.body, names, seen, annotation);
                 }
-                widen_block(orelse, names, seen);
-                widen_block(finalbody, names, seen);
+                widen_block(orelse, names, seen, annotation);
+                widen_block(finalbody, names, seen, annotation);
             }
             _ => {}
         }
@@ -796,7 +820,7 @@ mod tests {
             assign(2),
         ];
         let names = BTreeSet::from(["t".to_string()]);
-        widen_block(&mut body, &names, &mut BTreeSet::new());
+        widen_block(&mut body, &names, &mut BTreeSet::new(), &Ty::Object);
         let HirStmt::If { body: inner, .. } = &body[0] else {
             unreachable!()
         };

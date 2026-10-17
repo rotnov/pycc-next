@@ -159,6 +159,10 @@ pub(super) fn lower_attr_store(
     // `object`-typed slot is boxed the same way.
     let value = if *slot_ty == Ty::Int && value.ty() == Ty::Bool {
         MirExpr::IntBoundary(Box::new(value))
+    } else if *slot_ty == Ty::Num && value.ty() != Ty::Num {
+        // An `int | float` attribute holds `int | float` words, and the
+        // wrapped value's `Ty::Num` makes the release gate fire too.
+        MirExpr::NumWrap(Box::new(value))
     } else {
         crate::object_box::box_into(value, slot_ty)
     };

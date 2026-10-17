@@ -11,7 +11,7 @@
 //!   truth-testable; `if n > 0 and name:` over `int` and `str` is fine.
 //! * **Value context** -- everywhere else. The node yields the selected
 //!   operand itself, so both operands must join to one type
-//!   ([`bool_op_result_ty`]). pycc has no union types, so a pair with no
+//!   ([`bool_op_result_ty`]). pycc's only unions are `T | None` and `int | float`, so a pair with no
 //!   common type is refused rather than widened.
 //!
 //! [`mark_truth_context`] descends only through a `BoolOp` and a `not`. It
@@ -83,9 +83,13 @@ pub fn bool_op_result_ty(op: BoolOpKind, left: &Ty, right: &Ty) -> Option<Ty> {
         _ => left,
     };
     match (left, right) {
-        (Ty::Bool | Ty::Int | Ty::Float | Ty::Str | Ty::Optional(_), _) if left == right => {
+        (Ty::Bool | Ty::Int | Ty::Float | Ty::Num | Ty::Str | Ty::Optional(_), _)
+            if left == right =>
+        {
             Some(left.clone())
         }
+        // `x or 1.5` with an `int` `x`: `int | float`.
+        _ if crate::num_join(left, right).is_some() => crate::num_join(left, right),
         (Ty::Instance(l), Ty::Instance(r)) if l == r => Some(left.clone()),
         (Ty::Bool, Ty::Int) | (Ty::Int, Ty::Bool) => Some(Ty::Int),
         (bare, Ty::Optional(inner)) | (Ty::Optional(inner), bare) if inner.as_ref() == bare => {

@@ -62,6 +62,9 @@ pub const LIST_KIND_CLOSURE: i64 = 10;
 /// compiler compares, hashes and renders such a tuple through CPython (it
 /// boxes it first), never through `crate::value`.
 pub const LIST_KIND_OBJECT: i64 = 11;
+/// Element kind of an `int | float` (`crate::num` words with no heap
+/// payload: container ingress refuses the others, as for `int`).
+pub const LIST_KIND_NUM: i64 = 12;
 
 /// See the module doc comment for the layout and ownership contract.
 #[repr(C)]

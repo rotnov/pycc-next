@@ -196,6 +196,9 @@ pub(crate) const BUFFER_VIEW_RETURN_C_TYPE: &str = "PyccExtBufferView *";
 pub(crate) fn boundary_carrier(ty: &Ty) -> Option<BoundaryCarrier> {
     match ty {
         Ty::Int => Some(BoundaryCarrier::Scalar("long long", "int")),
+        // v0.6: `int | float` crosses as its tagged word, a superset of the
+        // `int` word (`pycc_ext_unpack_num`, `pycc_ext_pack_num`).
+        Ty::Num => Some(BoundaryCarrier::Scalar("long long", "num")),
         Ty::Float => Some(BoundaryCarrier::Scalar("double", "float")),
         Ty::Bool => Some(BoundaryCarrier::Scalar("char", "bool")),
         Ty::Str => Some(BoundaryCarrier::Scalar("void *", "str")),
@@ -243,6 +246,9 @@ pub(crate) fn boundary_carrier(ty: &Ty) -> Option<BoundaryCarrier> {
                 // itself before a `Ty::Tuple` is ever built -- so stated
                 // rather than left to the recursion.
                 Ty::Object => None,
+                // Nor for `int | float` (v0.6), which has no `_at` element
+                // shim.
+                Ty::Num => None,
                 // Nor for a variadic tuple (v0.5): a tuple holding one is a
                 // boxed tuple object, which a return carries as one packed
                 // object (`return_c_type`), never as flattened out-slots.
@@ -421,6 +427,7 @@ fn render_offender(ty: &Ty) -> String {
 pub(crate) fn render_ty(ty: &Ty) -> &'static str {
     match ty {
         Ty::Int => "int",
+        Ty::Num => "int | float",
         Ty::Float => "float",
         Ty::Bool => "bool",
         Ty::Str => "str",

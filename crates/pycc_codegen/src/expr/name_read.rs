@@ -106,6 +106,12 @@ pub(crate) fn emit_name_expr<'ctx>(
                 .expect("build_load should not fail for a slot this function itself allocated");
             Scalar::Int(loaded.into_int_value())
         }
+        Ty::Num => {
+            let loaded = builder
+                .build_load(context.i64_type(), slot.ptr, "load")
+                .expect("build_load should not fail for a slot this function itself allocated");
+            Scalar::Num(loaded.into_int_value())
+        }
         Ty::Bool => {
             let loaded = builder
                 .build_load(context.i8_type(), slot.ptr, "load")

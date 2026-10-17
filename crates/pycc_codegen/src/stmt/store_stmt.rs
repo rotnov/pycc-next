@@ -392,11 +392,11 @@ pub(crate) fn emit_dict_set_stmt<'ctx>(
     let (key_ty, value_ty) = containers::dict_kv(&locals[dict].ty);
     // CPython evaluates the value, then the container and the key.
     let value_scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
-    let value_scalar = coerce_scalar_to_type(context, builder, value_scalar, value_ty.clone());
+    let value_scalar = coerce_scalar_to_type(context, builder, rt, value_scalar, value_ty.clone());
     let value_word = list::element_word(context, builder, rt, &value_ty, value, value_scalar);
     let dict_ptr = emit_dict_name_read(context, builder, module, rt, user_functions, locals, dict);
     let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
-    let key_scalar = coerce_scalar_to_type(context, builder, key_scalar, key_ty.clone());
+    let key_scalar = coerce_scalar_to_type(context, builder, rt, key_scalar, key_ty.clone());
     let key_word = list::element_word(context, builder, rt, &key_ty, key, key_scalar);
     build_dict_set(builder, rt, dict_ptr, key_word, value_word);
     guard_statement_effects(context, builder, rt);
@@ -623,7 +623,7 @@ pub(crate) fn emit_attr_set_stmt<'ctx>(
     // rejected with `error[T0021]`). A future widening would break
     // the coincidence silently; threading the declared type
     // through from `mir.class_defs` remains out of scope.
-    if value_ty == pycc_mir::Ty::Int {
+    if matches!(value_ty, pycc_mir::Ty::Int | pycc_mir::Ty::Num) {
         release_int_attr_slot_before_store(context, builder, rt, base_ptr, slot);
     }
     let word = scalar_to_slot_word(context, builder, value_scalar);

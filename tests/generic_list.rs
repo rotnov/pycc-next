@@ -128,8 +128,8 @@ fn unsupported_list_shapes_are_refused_not_miscompiled() {
             "error[T0034]: list[None] is not compiled yet",
         ),
         (
-            "xs = [1]\nprint(round(1, 2))\n",
-            "error[C0001]: `round()` of (int, int)",
+            "xs = [1]\nprint(round(1.5, 2.5))\n",
+            "error[C0001]: `round()` of (float, float)",
         ),
     ] {
         let stderr = check_fails("generic_list_refusals", source);

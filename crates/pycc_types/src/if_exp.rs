@@ -10,7 +10,7 @@
 //! * The node yields the selected branch, so the two branch types must join
 //!   under [`if_exp_result_ty`], which `pycc_mir` recomputes with the same
 //!   function. A pair with no common type is refused with `T0021` naming
-//!   both types: pycc has no union types.
+//!   both types: pycc's only unions are `T | None` and `int | float`.
 
 use crate::Environment;
 use crate::boolop::class_truth_dunder;
@@ -75,7 +75,7 @@ fn admit_condition(env: &Environment, ty: &Ty) -> Result<(), Diagnostic> {
 /// The `T0021` for two branch types [`if_exp_result_ty`] cannot join.
 pub(crate) fn no_common_type(body: &Ty, orelse: &Ty) -> Diagnostic {
     t0021(format!(
-        "conditional expression branches have no common type: {} and {} (pycc has no union types)",
+        "conditional expression branches have no common type: {} and {} (pycc's only unions are `T | None` and `int | float`)",
         body.name(),
         orelse.name()
     ))

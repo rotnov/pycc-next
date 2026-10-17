@@ -132,6 +132,12 @@ pub fn is_public_name(name: &str) -> bool {
 /// spell it.
 pub const YIELD_MARKER: &str = "<yield>";
 
+/// The callee of the one-argument call that makes a number an
+/// `int | float` value (`pycc_types`' `int | float` widening wraps the
+/// elements of a list it widens in it); not a Python identifier, so no
+/// source name can spell it.
+pub const NUM_MARKER: &str = "<int | float>";
+
 /// The callee of the call `pycc_hir` lowers `yield from sub` to (as a
 /// statement or a value); typed as `sub`'s return type.
 pub const YIELD_FROM_MARKER: &str = "<yield from>";
@@ -183,6 +189,15 @@ pub fn body_yields(body: &[HirStmt]) -> bool {
 pub enum Ty {
     Int,
     Float,
+    /// `int | float`: a value that is an `int` at one point and a `float`
+    /// at another (`best = float('inf')` later replaced by an `int`, an
+    /// accumulator that starts as `0` and receives floats), spelled
+    /// `int | float` in an annotation or inferred by `pycc_types` where
+    /// one name is bound to both. Every operation has CPython's semantics
+    /// for whichever the value is at run time. One NaN-boxed word
+    /// (`pycc_rt::num`): a `float` is its own bits, an `int` is inline up
+    /// to 50 bits and a counted heap bigint beyond.
+    Num,
     Bool,
     Str,
     None,
@@ -366,6 +381,16 @@ pub enum Ty {
     Callable(Box<(Vec<Ty>, Ty)>),
 }
 
+/// The `int | float` two numbers of different types join to: an `int` (or
+/// `bool`) with a `float`, or anything numeric with an `int | float`.
+/// `None` for any other pair, including `int` with `bool` (one `int`).
+#[must_use]
+pub fn num_join(a: &Ty, b: &Ty) -> Option<Ty> {
+    let number = |ty: &Ty| matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num);
+    let floating = |ty: &Ty| matches!(ty, Ty::Float | Ty::Num);
+    (a != b && number(a) && number(b) && (floating(a) || floating(b))).then_some(Ty::Num)
+}
+
 impl Ty {
     /// `Generator[element, None, None]` (`Iterator[element]`).
     pub fn generator(element: Ty) -> Ty {
@@ -381,6 +406,7 @@ impl Ty {
         match self {
             Ty::Int => "int".to_string(),
             Ty::Float => "float".to_string(),
+            Ty::Num => "int | float".to_string(),
             Ty::Bool => "bool".to_string(),
             Ty::Str => "str".to_string(),
             Ty::None => "None".to_string(),

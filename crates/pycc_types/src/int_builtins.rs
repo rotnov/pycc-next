@@ -54,10 +54,11 @@ pub(crate) fn result_ty(callee: &str, arg_tys: &[Ty]) -> Option<Result<Ty, Diagn
     let ty = match (callee, arg_tys.as_slice()) {
         ("abs", [x]) if int_like(x) => Ty::Int,
         ("abs", [Ty::Float]) => Ty::Float,
+        ("abs", [Ty::Num]) => Ty::Num,
         ("divmod", [a, b]) if int_like(a) && int_like(b) => {
             Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int]))
         }
-        ("int", [x]) if int_like(x) || *x == Ty::Float => Ty::Int,
+        ("int", [x]) if int_like(x) || matches!(x, Ty::Float | Ty::Num) => Ty::Int,
         _ => return None,
     };
     Some(Ok(ty))

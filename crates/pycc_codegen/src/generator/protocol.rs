@@ -174,6 +174,7 @@ pub(crate) fn emit_send<'ctx>(
         Some(coerce_scalar_to_type(
             context,
             builder,
+            rt,
             scalar,
             sent_ty.clone(),
         ))
@@ -319,7 +320,7 @@ pub(crate) fn emit_gen_return<'ctx>(
     }
     let scalar = heap_rc::retain_if_heap_duplicate(context, builder, rt, value, scalar);
     let scalar = retain_if_int_duplicate(context, builder, rt, value, scalar);
-    let scalar = coerce_scalar_to_type(context, builder, scalar, frame.sig.2.clone());
+    let scalar = coerce_scalar_to_type(context, builder, rt, scalar, frame.sig.2.clone());
     let slot = byte_ptr(context, builder, frame.object, VALUE_OFFSET);
     builder
         .build_store(slot, scalar_basic(scalar))

@@ -205,6 +205,10 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
         MirExpr::NotImplemented => {
             object_expr::emit_not_implemented_expr(context, builder, module, expr)
         }
+        MirExpr::NumWrap(inner) => {
+            let value = emit_expr(context, builder, module, rt, user_functions, locals, inner);
+            Scalar::Num(crate::num::to_num_word(context, builder, rt, value))
+        }
         MirExpr::OptionalWrap(..) => object_expr::emit_optional_wrap_expr(
             context,
             builder,

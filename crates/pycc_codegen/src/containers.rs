@@ -109,6 +109,8 @@ pub(crate) fn word_kind(rt: &RtFns<'_>, ty: &Ty) -> u64 {
     match ty {
         Ty::Int => 0,
         Ty::Float => 1,
+        // `pycc_rt::list::LIST_KIND_NUM`.
+        Ty::Num => 12,
         Ty::Bool => 2,
         Ty::Str => 3,
         Ty::Instance(_)
@@ -347,7 +349,7 @@ pub(crate) fn unbox_struct_tuple<'ctx>(
     for (index, ty) in elements.iter().enumerate() {
         let word = load_tuple_word(context, builder, boxed, index as u64);
         let value: BasicValueEnum<'ctx> = match slot_word_to_scalar(context, builder, word, ty) {
-            Scalar::Int(v) | Scalar::Bool(v) => v.into(),
+            Scalar::Int(v) | Scalar::Num(v) | Scalar::Bool(v) => v.into(),
             Scalar::Float(v) => v.into(),
             _ => unreachable!("a struct tuple field is int, bool or float"),
         };
@@ -426,6 +428,7 @@ pub(crate) fn borrowed_word<'ctx>(
 ) -> (IntValue<'ctx>, Option<PointerValue<'ctx>>) {
     match (ty, scalar) {
         (Ty::Int, scalar) => (to_encoded_int(context, builder, scalar), None),
+        (Ty::Num, scalar) => (crate::num::to_num_word(context, builder, rt, scalar), None),
         (Ty::Tuple(elements), Scalar::Tuple(tuple)) => {
             let boxed = box_struct_tuple(context, builder, rt, elements, tuple);
             let word = builder
@@ -481,7 +484,33 @@ pub(crate) fn emit_contains<'ctx>(
         }
         _ => panic!("pycc_codegen: internal error: a membership test of a non-container"),
     };
-    let item = coerce_scalar_to_type(context, builder, item, elem.clone());
+    // A number of another kind than the list's elements (`1.0 in [1, 2]`):
+    // the needle as an `int | float` word, compared by value.
+    let numeric_element = matches!(elem, Ty::Int | Ty::Bool | Ty::Float);
+    let other_kind = match (&item, &elem) {
+        (Scalar::Num(_), _) | (Scalar::Float(_), Ty::Int | Ty::Bool) => true,
+        (Scalar::Int(_) | Scalar::Bool(_), Ty::Float) => true,
+        _ => false,
+    };
+    if function == rt.list_contains && numeric_element && other_kind {
+        let (word, converted) = crate::num::operand_word(context, builder, rt, item);
+        let found = builder
+            .build_call(rt.num.list_contains, &[pointer.into(), word.into()], "contains_num")
+            .expect("build_call should not fail for a declared runtime function")
+            .try_as_basic_value()
+            .expect_basic("a membership test returns i8")
+            .into_int_value();
+        crate::num::release_converted(context, builder, rt, &[converted]);
+        let found = if negate {
+            builder
+                .build_xor(found, context.i8_type().const_int(1, false), "not_in")
+                .expect("build_xor should not fail for two i8 operands")
+        } else {
+            found
+        };
+        return Scalar::Bool(found);
+    }
+    let item = coerce_scalar_to_type(context, builder, rt, item, elem.clone());
     let (word, boxed) = borrowed_word(context, builder, rt, &elem, item);
     let found = builder
         .build_call(function, &[pointer.into(), word.into()], "contains")

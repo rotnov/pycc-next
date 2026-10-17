@@ -100,7 +100,7 @@ pub(super) fn exception_classes(
 /// The `pycc_rt::rc` kind byte that releases a word of type `ty` (`w`,
 /// nothing, for an uncounted type).
 pub(crate) fn rc_kind_byte(rt: &RtFns<'_>, ty: &Ty) -> u8 {
-    if *ty == Ty::Int {
+    if matches!(ty, Ty::Int | Ty::Num) {
         return b'i';
     }
     match heap_kind(rt, ty) {
@@ -451,7 +451,7 @@ pub(crate) fn retain_scalar<'ctx>(
 ) {
     if let Some((kind, ptr)) = counted(rt, ty, scalar) {
         emit_incref(context, builder, rt, kind, ptr);
-    } else if let (Ty::Int, Scalar::Int(word)) = (ty, scalar) {
+    } else if let (Ty::Int, Scalar::Int(word)) | (Ty::Num, Scalar::Num(word)) = (ty, scalar) {
         crate::bigint_rc::emit_bigint_refcount_call(
             context,
             builder,
@@ -473,7 +473,7 @@ pub(super) fn release_scalar_if_temporary<'ctx>(
     source: &MirExpr,
     scalar: &Scalar<'ctx>,
 ) {
-    if let Scalar::Int(_) = scalar {
+    if let Scalar::Int(_) | Scalar::Num(_) = scalar {
         release_scalar_if_int_temporary(context, builder, rt, source, scalar);
     } else if !is_borrowed_read(source)
         && let Some((kind, ptr)) = counted_temporary(rt, &source.ty(), scalar)

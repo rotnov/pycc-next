@@ -135,6 +135,8 @@ fn the_shim_declares_exactly_the_unpack_helpers_the_boundary_refuses_through() {
         // (`src/ext_build/getset/setter.rs`); an argument slot of that type
         // is an `object` with a check in the function's prologue.
         "ndarray",
+        // An `int | float` parameter (v0.6): an `int` or a `float`.
+        "num",
         "object",
         "str",
         // A `tuple[str, ...]` parameter: a native copy of the CPython
@@ -233,6 +235,9 @@ fn every_admitted_argument_type_refuses_before_the_call_and_after_the_arity_chec
 fn expected_to_carry(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+        // v0.6: `int | float` crosses as its tagged word, unpacked from a
+        // Python `int` or `float` and packed back as whichever it holds.
+        Ty::Num => true,
         // D-116 fixes a tuple's element types to the three scalars a
         // `pycc_ext_unpack_*_at` helper exists for: `str` is a single C
         // slot at a top-level position but has no element shim, and a

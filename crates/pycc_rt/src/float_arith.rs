@@ -24,17 +24,21 @@ pub extern "C" fn pycc_rt_float_div(a: f64, b: f64) -> f64 {
     float_div(a, b)
 }
 
+/// CPython's message for `x // 0.0`.
+pub(crate) const FLOORDIV_BY_ZERO: &str = "float floor division by zero";
+/// CPython's message for `x % 0.0`.
+pub(crate) const MOD_BY_ZERO: &str = "float modulo by zero";
+
 /// CPython-compatible float floor-division and modulo. Computing both from
 /// the same adjusted remainder avoids the off-by-one quotient produced by a
 /// naive `(a / b).floor()` for values such as `1.0 // 0.1`.
-pub(crate) fn float_divmod(a: f64, b: f64) -> (f64, f64) {
+/// A zero divisor raises `ZeroDivisionError` with `message`, the one
+/// CPython 3.13 gives the operator at hand (`float floor division by
+/// zero`, `float modulo by zero`).
+pub(crate) fn float_divmod(a: f64, b: f64, message: &str) -> (f64, f64) {
     if b == 0.0 {
         // D-173: set the pending exception flag instead of panicking.
-        raise_builtin(
-            EXCEPTION_TYPE_ZERO_DIV_ERROR,
-            "ZeroDivisionError",
-            "float floor division or modulo by zero",
-        );
+        raise_builtin(EXCEPTION_TYPE_ZERO_DIV_ERROR, "ZeroDivisionError", message);
         return (0.0, 0.0);
     }
 
@@ -65,14 +69,14 @@ pub(crate) fn float_divmod(a: f64, b: f64) -> (f64, f64) {
 /// quotient the same way CPython does after floating-point remainder error.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_float_floordiv(a: f64, b: f64) -> f64 {
-    float_divmod(a, b).0
+    float_divmod(a, b, FLOORDIV_BY_ZERO).0
 }
 
 /// Python's `%` on `float`: result takes the divisor's sign, including
 /// signed zero.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_float_floormod(a: f64, b: f64) -> f64 {
-    float_divmod(a, b).1
+    float_divmod(a, b, MOD_BY_ZERO).1
 }
 
 /// Python's `**` on `float`: unlike `int_pow`, a negative exponent is

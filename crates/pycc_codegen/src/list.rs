@@ -155,6 +155,14 @@ pub(crate) fn element_word<'ctx>(
             check_element_int(context, builder, rt, encoded);
             encoded
         }
+        // An `int | float` element: its word, refused when it holds a heap
+        // payload, as an `int` element is (`pycc_rt_num_check_element`).
+        (Ty::Num, scalar) => {
+            let fresh = matches!(scalar, Scalar::Float(_));
+            let word = crate::num::to_num_word(context, builder, rt, scalar);
+            crate::num::emit_check_element(context, builder, rt, word, fresh);
+            word
+        }
         (Ty::Tuple(elements), Scalar::Tuple(tuple)) => {
             let boxed = crate::containers::box_struct_tuple(context, builder, rt, elements, tuple);
             builder
@@ -182,6 +190,7 @@ pub(crate) fn word_element<'ctx>(
 ) -> Scalar<'ctx> {
     match elem {
         Ty::Int => Scalar::Int(word),
+        Ty::Num => Scalar::Num(word),
         Ty::Tuple(elements) => {
             let ptr = builder
                 .build_int_to_ptr(

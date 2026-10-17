@@ -488,7 +488,7 @@ fn constraint_collection_bool_call_admits_a_foreign_object_argument() {
 }
 
 #[test]
-fn constraint_collection_bool_call_keeps_c0001_for_a_non_object_argument() {
+fn constraint_collection_bool_call_of_a_native_argument_is_bool() {
     let signatures = HashMap::default();
     let mut parents = Vec::new();
     let mut concrete = Vec::new();
@@ -498,7 +498,7 @@ fn constraint_collection_bool_call_keeps_c0001_for_a_non_object_argument() {
         callee: "bool".to_string(),
         args: vec![HirExpr::IntLiteral(1)],
     };
-    let err = collect_expr_constraints(
+    let ty = collect_expr_constraints(
         &signatures,
         &mut parents,
         &mut concrete,
@@ -506,8 +506,8 @@ fn constraint_collection_bool_call_keeps_c0001_for_a_non_object_argument() {
         &env,
         &expr,
     )
-    .unwrap_err();
-    assert_eq!(err.code, "C0001");
+    .unwrap();
+    assert_eq!(ty, Some(Ok(Ty::Bool)));
 }
 
 #[test]

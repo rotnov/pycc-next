@@ -359,15 +359,15 @@ fn retain_if_int_duplicate_reporting<'ctx>(
     source_expr: &MirExpr,
     scalar: Scalar<'ctx>,
 ) -> (Scalar<'ctx>, Option<IntValue<'ctx>>) {
-    let retained_word = if let Scalar::Int(word) = scalar {
+    let retained_word = if let Scalar::Int(word) | Scalar::Num(word) = scalar {
         let is_duplicate = match source_expr {
             MirExpr::AttrGet {
-                ty: pycc_mir::Ty::Int,
+                ty: pycc_mir::Ty::Int | pycc_mir::Ty::Num,
                 base,
                 ..
             } => crate::heap_rc::is_borrowed_read(base),
             MirExpr::Name {
-                ty: pycc_mir::Ty::Int,
+                ty: pycc_mir::Ty::Int | pycc_mir::Ty::Num,
                 ..
             }
             // PEP 572 (#774): mirrors `int_value_is_a_duplicate_reference`'s
@@ -376,7 +376,7 @@ fn retain_if_int_duplicate_reporting<'ctx>(
             // argument that is itself a bare walrus needs the same retain
             // a plain `Name` read gets here.
             | MirExpr::NamedExpr {
-                ty: pycc_mir::Ty::Int,
+                ty: pycc_mir::Ty::Int | pycc_mir::Ty::Num,
                 ..
             } => true,
             // No `Ty::Int` test alongside the tuple test: the enclosing
@@ -397,6 +397,9 @@ fn retain_if_int_duplicate_reporting<'ctx>(
             // duplicate exactly when `value` is.
             MirExpr::Sequence { value, .. } => {
                 return retain_if_int_duplicate_reporting(context, builder, rt, value, scalar);
+            }
+            MirExpr::NumWrap(inner) if inner.ty() != pycc_mir::Ty::Float => {
+                return retain_if_int_duplicate_reporting(context, builder, rt, inner, scalar);
             }
             _ => false,
         };
@@ -500,15 +503,21 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         // #1346: a sequence yields its `value`'s word unchanged, so it owns
         // exactly what `value` owns.
         MirExpr::Sequence { value, .. } => int_value_is_a_duplicate_reference(value),
+        // An `int` or `bool` keeps its word in an `int | float` slot
+        // (`crate::num`), so it owns what the operand owns; a converted
+        // `float` is a fresh word.
+        MirExpr::NumWrap(inner) => {
+            inner.ty() != pycc_mir::Ty::Float && int_value_is_a_duplicate_reference(inner)
+        }
         // An attribute of a fresh base (`f().x`) is retained by the read
         // itself before the base is released (`heap_rc`), so it is owned.
         MirExpr::AttrGet {
-            ty: pycc_mir::Ty::Int,
+            ty: pycc_mir::Ty::Int | pycc_mir::Ty::Num,
             base,
             ..
         } => crate::heap_rc::is_borrowed_read(base),
         MirExpr::Name {
-            ty: pycc_mir::Ty::Int,
+            ty: pycc_mir::Ty::Int | pycc_mir::Ty::Num,
             ..
         }
         // PEP 572 (#774): `target := value`. Codegen for `NamedExpr` stores
@@ -523,7 +532,7 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         // still owns, reintroducing the same use-after-free class D-181
         // closed for plain names.
         | MirExpr::NamedExpr {
-            ty: pycc_mir::Ty::Int,
+            ty: pycc_mir::Ty::Int | pycc_mir::Ty::Num,
             ..
         }
         // Issue #769 (Part 2 of #747; re-verified for #809's widened
@@ -794,7 +803,7 @@ pub(super) fn int_temporary_word<'ctx>(
     source_expr: &MirExpr,
     word: IntValue<'ctx>,
 ) -> Option<IntValue<'ctx>> {
-    (source_expr.ty() == pycc_mir::Ty::Int && !int_value_is_a_duplicate_reference(source_expr))
+    (matches!(source_expr.ty(), pycc_mir::Ty::Int | pycc_mir::Ty::Num) && !int_value_is_a_duplicate_reference(source_expr))
         .then_some(word)
 }
 
@@ -811,7 +820,7 @@ pub(super) fn release_scalar_if_int_temporary<'ctx>(
     source_expr: &MirExpr,
     scalar: &Scalar<'ctx>,
 ) {
-    if let Scalar::Int(word) = scalar {
+    if let Scalar::Int(word) | Scalar::Num(word) = scalar {
         release_if_int_temporary(context, builder, rt, source_expr, *word);
     }
 }
@@ -865,7 +874,7 @@ pub(super) fn push_pending_int_release_if_scalar_temporary<'ctx>(
     source_expr: &MirExpr,
     scalar: &Scalar<'ctx>,
 ) -> Option<IntValue<'ctx>> {
-    if let Scalar::Int(word) = scalar {
+    if let Scalar::Int(word) | Scalar::Num(word) = scalar {
         push_pending_int_release_if_temporary(rt, source_expr, *word)
     } else {
         None

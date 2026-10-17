@@ -259,8 +259,10 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
                     | pycc_mir::BinOpKind::Pow
             )
             && !(*op == pycc_mir::BinOpKind::Div
-                && matches!(left.ty(), pycc_mir::Ty::Int | pycc_mir::Ty::Bool)
-                && matches!(right.ty(), pycc_mir::Ty::Int | pycc_mir::Ty::Bool)) =>
+                && matches!(left.ty(), pycc_mir::Ty::Int | pycc_mir::Ty::Bool | pycc_mir::Ty::Num)
+                && matches!(right.ty(), pycc_mir::Ty::Int | pycc_mir::Ty::Bool | pycc_mir::Ty::Num))
+            && !(*op == pycc_mir::BinOpKind::Div
+                && (left.ty() == pycc_mir::Ty::Num || right.ty() == pycc_mir::Ty::Num)) =>
         {
             false
         }
@@ -272,6 +274,13 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
             ty: pycc_mir::Ty::Int,
             ..
         } => *op == pycc_mir::BinOpKind::Pow,
+        // An `int | float` operation raises `ZeroDivisionError`, and
+        // `OverflowError` converting a huge `int` operand to `float`
+        // (`crate::num`).
+        MirExpr::BinOp {
+            ty: pycc_mir::Ty::Num,
+            ..
+        } => true,
         MirExpr::BinOp {
             op, left, right, ty, ..
         } => {
@@ -289,7 +298,7 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // `str()` of an `int` past CPython's 4300-digit limit raises
         // `ValueError`.
         MirExpr::FString(parts) => parts.iter().any(|part| {
-            matches!(part, pycc_mir::MirFStringPart::Interpolation(e) if e.ty() == pycc_mir::Ty::Int)
+            matches!(part, pycc_mir::MirFStringPart::Interpolation(e) if matches!(e.ty(), pycc_mir::Ty::Int | pycc_mir::Ty::Num))
         }),
         // A list index's `IndexError` leaves through the inlined bounds
         // check's own cold branch (`list::build_list_get`), so the read
@@ -364,6 +373,9 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         // arm in this match, which classifies only the node's own
         // operation and relies on child expressions to guard themselves.
         | MirExpr::OptionalWrap(_, _)
+        // Converting a `float` into an `int | float` word may box it, which
+        // cannot fail.
+        | MirExpr::NumWrap(_)
         // PEP 572 (#774): `target := value`. Storing an already-evaluated
         // value into a predeclared slot is a plain store, exactly as
         // infallible as `ExceptionMessage`'s field load or `OptionalWrap`'s

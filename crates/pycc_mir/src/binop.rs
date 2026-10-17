@@ -63,6 +63,9 @@ pub(crate) fn binop_result_ty(op: BinOpKind, left: Ty, right: Ty) -> Ty {
     if op == BinOpKind::Div || left == Ty::Float || right == Ty::Float {
         return Ty::Float;
     }
+    if left == Ty::Num || right == Ty::Num {
+        return Ty::Num;
+    }
     Ty::Int
 }
 
@@ -89,6 +92,10 @@ mod tests {
             (BinOpKind::Add, Ty::Float, Ty::Int, Ty::Float),
             (BinOpKind::Add, Ty::Int, Ty::Float, Ty::Float),
             (BinOpKind::Add, Ty::Bool, Ty::Int, Ty::Int),
+            (BinOpKind::Add, Ty::Num, Ty::Int, Ty::Num),
+            (BinOpKind::Pow, Ty::Bool, Ty::Num, Ty::Num),
+            (BinOpKind::Mul, Ty::Num, Ty::Float, Ty::Float),
+            (BinOpKind::Div, Ty::Num, Ty::Num, Ty::Float),
         ] {
             assert_eq!(
                 binop_result_ty(op, left.clone(), right.clone()),

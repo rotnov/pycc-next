@@ -45,6 +45,7 @@ pub(crate) fn to_str<'ctx>(
         Scalar::Closure(v) => (rt.closures.repr, v.into()),
         Scalar::Str(v) => return v,
         Scalar::Int(v) => (rt.int_to_str, v.into()),
+        Scalar::Num(v) => (rt.num.to_str, v.into()),
         Scalar::Float(v) => (rt.float_to_str, v.into()),
         Scalar::Bool(v) => (rt.bool_to_str, v.into()),
         // `str(xs)`: the runtime renders every element kind.
@@ -264,6 +265,7 @@ pub(crate) fn truthy<'ctx>(
             .try_as_basic_value()
             .expect_basic("pycc_rt_int_truthy returns a non-void i8")
             .into_int_value(),
+        Scalar::Num(v) => crate::num::emit_unary(builder, rt.num.truthy, v).into_int_value(),
         // Python's `bool(x)` for a `float` is `False` only for exactly
         // `0.0`/`-0.0` -- `NaN` is truthy -- so this needs the
         // *unordered*-or-not-equal predicate, `UNE`, not `ONE` (same

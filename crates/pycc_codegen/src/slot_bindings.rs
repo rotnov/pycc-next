@@ -30,6 +30,7 @@ pub(super) fn collect_expr_bindings(expr: &MirExpr, bindings: &mut BTreeMap<Stri
         if matches!(
             ty,
             pycc_mir::Ty::Int
+                | pycc_mir::Ty::Num
                 | pycc_mir::Ty::Bool
                 | pycc_mir::Ty::Float
                 | pycc_mir::Ty::Str
@@ -68,6 +69,7 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
             if matches!(
                 ty,
                 pycc_mir::Ty::Int
+                    | pycc_mir::Ty::Num
                     | pycc_mir::Ty::Bool
                     | pycc_mir::Ty::Float
                     | pycc_mir::Ty::Str

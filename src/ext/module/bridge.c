@@ -60,6 +60,11 @@ extern void pycc_rt_exception_clear(void);
  * word `0`, so the pairing stays balanced on every classification. */
 extern void pycc_rt_bigint_retain(long long word);
 extern void pycc_rt_bigint_release(long long word);
+/* v0.6 `int | float` words (`pycc_rt::num`). */
+extern long long pycc_rt_num_from_float(double value);
+extern double pycc_rt_num_to_float(long long word);
+extern signed char pycc_rt_num_is_float(long long word);
+extern void pycc_rt_num_release(long long word);
 /* The `str` boundary (Part 2 of #1037, #1049). `pycc_rt`'s own `i64` length
  * is `long long` here and its `usize` is `size_t`; `PyStrObj` stays an opaque
  * `void *` on this side, exactly as it is in the generated wrapper. */

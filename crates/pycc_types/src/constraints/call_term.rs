@@ -518,6 +518,10 @@ pub(crate) fn collect_call_constraints(
             return crate::round::round_call_ty(&arg_tys).map(|ty| Some(Ok(ty)));
         }
     }
+    // The `int | float` element wrapper (`infer_expr_in`'s arm).
+    if callee == pycc_hir::NUM_MARKER {
+        return Ok(Some(Ok(Ty::Num)));
+    }
     if callee == "float" && !signatures.contains_key(callee) {
         // A user-defined `float` takes priority over the builtin -- see
         // `infer_expr_in`'s own identical guard and its comment for why
@@ -557,7 +561,7 @@ pub(crate) fn collect_call_constraints(
         // compiling a private helper returning `float(gc)`: `I0404`,
         // with and without a user-defined `class float`.
         if let Some(Ok(arg_ty)) = &arg_terms[0]
-            && !matches!(arg_ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Object)
+            && !matches!(arg_ty, Ty::Int | Ty::Float | Ty::Num | Ty::Bool | Ty::Object)
         {
             return Err(Diagnostic::error(
                 "T0021",
@@ -592,6 +596,11 @@ pub(crate) fn collect_call_constraints(
         // class table, and `I0404` keeps `Ty::Object` out of every
         // function body this solver runs on.
         if let [Some(Ok(Ty::Object))] = arg_terms.as_slice() {
+            return Ok(Some(Ok(Ty::Bool)));
+        }
+        // A native value's truth value (`infer_expr_in`'s `bool` arm, which
+        // refuses a value with no truth value pycc can test).
+        if arg_terms.len() <= 1 {
             return Ok(Some(Ok(Ty::Bool)));
         }
     }

@@ -12,6 +12,7 @@ impl MirExpr {
             MirExpr::NoneLiteral => Ty::None,
             MirExpr::NotImplemented | MirExpr::ObjectBox(_) => Ty::Object,
             MirExpr::OptionalWrap(_, inner) => Ty::Optional(inner.clone()),
+            MirExpr::NumWrap(_) => Ty::Num,
             MirExpr::OptionalUnwrap(_, inner)
             | MirExpr::ObjectUnbox(_, inner)
             | MirExpr::ObjectCoerce(_, inner)
@@ -321,7 +322,7 @@ impl MirExpr {
                     arg.collect_named_expr_bindings(out);
                 }
             }
-            MirExpr::OptionalWrap(inner, _) | MirExpr::ObjectBox(inner) => {
+            MirExpr::OptionalWrap(inner, _) | MirExpr::ObjectBox(inner) | MirExpr::NumWrap(inner) => {
                 inner.collect_named_expr_bindings(out)
             }
             // Issue #769 (Part 2 of #747): `OptionalUnwrap` wraps a single

@@ -29,6 +29,7 @@ pub fn if_exp_result_ty(body: &Ty, orelse: &Ty) -> Option<Ty> {
             Ty::Bool
             | Ty::Int
             | Ty::Float
+            | Ty::Num
             | Ty::Str
             | Ty::Object
             | Ty::Optional(_)
@@ -43,6 +44,8 @@ pub fn if_exp_result_ty(body: &Ty, orelse: &Ty) -> Option<Ty> {
             | Ty::Param(_),
             _,
         ) if body == orelse => Some(body.clone()),
+        // `x if c else 1.5` with an `int` `x`: the result is `int | float`.
+        (left, right) if crate::num_join(left, right).is_some() => crate::num_join(left, right),
         (bare, Ty::None) | (Ty::None, bare) if optional_payload(bare) => {
             Some(Ty::Optional(Box::new(bare.clone())))
         }
@@ -111,12 +114,17 @@ mod tests {
     }
 
     #[test]
+    fn an_int_and_a_float_join_to_int_or_float() {
+        assert_eq!(if_exp_result_ty(&Ty::Int, &Ty::Float), Some(Ty::Num));
+        assert_eq!(if_exp_result_ty(&Ty::Float, &Ty::Num), Some(Ty::Num));
+    }
+
+    #[test]
     fn every_other_pair_has_no_common_type() {
         let class_a = Ty::Instance(Box::new("A".to_string()));
         let class_b = Ty::Instance(Box::new("B".to_string()));
         for (body, orelse) in [
             (Ty::Bool, Ty::Int),
-            (Ty::Int, Ty::Float),
             (Ty::Int, Ty::Str),
             (Ty::Str, Ty::None),
             (Ty::None, Ty::None),

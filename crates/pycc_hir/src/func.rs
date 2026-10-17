@@ -582,6 +582,19 @@ fn enclosing_class_ty(class_name: &str, class_defs: &[ClassAnnotationInfo]) -> T
 /// alias table, so a class name takes priority over an alias of the same
 /// name (matching Python's own scope rule where class definitions bind the
 /// class name in the enclosing namespace).
+/// Whether a `|` annotation is `int | float` or `float | int`: the one
+/// general union compiled natively (`Ty::Num`).
+fn is_int_float_union(bin_op: &pycc_ast::ExprBinOp) -> bool {
+    let name = |expr: &Expr| match expr {
+        Expr::Name(name) => Some(name.id.to_string()),
+        _ => None,
+    };
+    matches!(
+        (name(&bin_op.left).as_deref(), name(&bin_op.right).as_deref()),
+        (Some("int"), Some("float")) | (Some("float"), Some("int"))
+    )
+}
+
 pub(crate) fn annotation_to_ty(
     annotation: &Expr,
     type_param: Option<&str>,
@@ -1205,6 +1218,9 @@ pub(crate) fn annotation_to_ty(
         // union: explicitly out of scope for this PR (Part 2+), rejected
         // with `T0048` rather than silently misparsed or falling through to
         // the generic catch-all below.
+        Expr::BinOp(bin_op) if bin_op.op == Operator::BitOr && is_int_float_union(bin_op) => {
+            Ok(Ty::Num)
+        }
         Expr::BinOp(bin_op) if bin_op.op == Operator::BitOr => {
             let other_side = match (bin_op.left.as_ref(), bin_op.right.as_ref()) {
                 (Expr::NoneLiteral(_), other) => other,

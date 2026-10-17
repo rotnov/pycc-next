@@ -92,11 +92,20 @@ pub(crate) fn fits_smallint(value: i64) -> Option<i64> {
 /// variables) participate. Unbound arithmetic temporaries still leak --
 /// that is Part 2 (#625) -- and the accepted residual concessions are
 /// listed in the ADR that narrows D-058.
+///
+/// `#[repr(C)]` so its first three fields form the header it shares with
+/// [`FloatBoxObj`], the boxed `float` of an `int | float` word
+/// (`crate::num`): [`bigint_retain`]/[`bigint_release`] count and free
+/// either through that header, so every `int` refcount path also serves
+/// an `int | float` word.
+#[repr(C)]
 pub(crate) struct BigIntObj {
     /// Live references. `1` at birth; the object is freed at the release
     /// that would take it to `0`.
     pub(crate) rc: std::cell::Cell<u32>,
     pub(crate) negative: bool,
+    /// `false`: the header of a bigint ([`FloatBoxObj`] sets it).
+    pub(crate) is_float: bool,
     pub(crate) limbs: Vec<u32>,
 }
 
@@ -107,9 +116,58 @@ impl BigIntObj {
         BigIntObj {
             rc: std::cell::Cell::new(1),
             negative,
+            is_float: false,
             limbs,
         }
     }
+}
+
+/// A `float` an `int | float` word cannot hold inline (`crate::num`): a
+/// heap object with [`BigIntObj`]'s header, `is_float` set.
+#[repr(C)]
+pub(crate) struct FloatBoxObj {
+    pub(crate) rc: std::cell::Cell<u32>,
+    pub(crate) negative: bool,
+    pub(crate) is_float: bool,
+    pub(crate) value: f64,
+}
+
+const _: () = assert!(std::mem::offset_of!(BigIntObj, rc) == std::mem::offset_of!(FloatBoxObj, rc));
+const _: () = assert!(
+    std::mem::offset_of!(BigIntObj, is_float) == std::mem::offset_of!(FloatBoxObj, is_float)
+);
+const _: () = assert!(std::mem::align_of::<FloatBoxObj>() >= 4);
+
+/// Live [`FloatBoxObj`]s, for the leak probes of `tests/num_union.rs`
+/// (`pycc_rt_num_box_live_objects`). A boxed float is the rare path of an
+/// `int | float` word (a magnitude outside about 1e-77..1e77), so counting
+/// it costs the common inline path nothing.
+static FLOAT_BOXES_LIVE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// How many boxed `float`s of `int | float` words are live.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_num_box_live_objects() -> i64 {
+    FLOAT_BOXES_LIVE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A fresh boxed `float` word holding one reference.
+pub(crate) fn box_float(value: f64) -> i64 {
+    FLOAT_BOXES_LIVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Box::into_raw(Box::new(FloatBoxObj {
+        rc: std::cell::Cell::new(1),
+        negative: false,
+        is_float: true,
+        value,
+    })) as i64
+}
+
+/// The boxed `float` of the heap word `word`, or `None` for a bigint.
+pub(crate) fn boxed_float(word: i64) -> Option<f64> {
+    // SAFETY: `word` is a live heap object; both kinds share the header.
+    let header = unsafe { &*(word as *const BigIntObj) };
+    header
+        .is_float
+        .then(|| unsafe { &*(word as *const FloatBoxObj) }.value)
 }
 
 // Counts `BigIntObj` frees so unit tests can observe a release actually
@@ -221,7 +279,9 @@ pub(crate) fn tag_bigint(b: BigIntObj) -> i64 {
 /// additionally guards the call site inline so those never reach this
 /// function at all (see the `(w & 3) == 0 && w != 0` test it emits).
 pub(crate) fn bigint_retain(word: i64) {
-    if word == 0 {
+    // `0` and every inline word -- a smallint, a bool marker, an inline
+    // `float` of an `int | float` word (`crate::num`) -- hold nothing.
+    if word == 0 || word & LOW_TAG_MASK != 0 {
         return;
     }
     if classify_encoded_int(word) == EncodedIntKind::BigInt {
@@ -237,17 +297,23 @@ pub(crate) fn bigint_retain(word: i64) {
 /// one goes away. `word == 0` and the inline kinds behave exactly as in
 /// `bigint_retain`.
 pub(crate) fn bigint_release(word: i64) {
-    if word == 0 {
+    if word == 0 || word & LOW_TAG_MASK != 0 {
         return;
     }
     if classify_encoded_int(word) == EncodedIntKind::BigInt {
         // SAFETY: as in `bigint_retain`. The `Box::from_raw` reclaims the
-        // very allocation `tag_bigint` leaked, and only on the release that
-        // retires the final reference, so no other name can still hold it.
+        // very allocation `tag_bigint` (or `box_float`) leaked, and only on
+        // the release that retires the final reference, so no other name
+        // can still hold it.
         let obj = unsafe { &*(word as *const BigIntObj) };
         let live = obj.rc.get();
         if live == 1 {
-            drop(unsafe { Box::from_raw(word as *mut BigIntObj) });
+            if obj.is_float {
+                drop(unsafe { Box::from_raw(word as *mut FloatBoxObj) });
+                FLOAT_BOXES_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            } else {
+                drop(unsafe { Box::from_raw(word as *mut BigIntObj) });
+            }
         } else {
             obj.rc.set(live - 1);
         }
@@ -308,9 +374,6 @@ pub(crate) fn magnitude_sign(negative: bool, magnitude: &[u32]) -> i8 {
 pub(crate) fn encoded_int_cmp(a: i64, b: i64) -> std::cmp::Ordering {
     if let (Some(a), Some(b)) = (inline_int_value(a), inline_int_value(b)) {
         return a.cmp(&b);
-    }
-    if let Some(ordering) = crate::int_inf::cmp(a, b) {
-        return ordering;
     }
     let (a_negative, a_magnitude) = to_sign_and_magnitude(a);
     let (b_negative, b_magnitude) = to_sign_and_magnitude(b);

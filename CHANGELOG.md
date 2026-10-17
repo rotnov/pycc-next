@@ -72,6 +72,25 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - pypng 0.20220715.0: 64 of its 85 functions compile natively (15 in 0.5.0), its own
   suite passing; `bench/package_check.py --time` also times decoding every PngSuite
   image its tests use.
+- `int | float` (v0.6 accept 3): a real union type in strict mode. A name bound to an
+  `int` and to a `float` (a `float('inf')` sentinel `min` replaces with an `int`, an
+  accumulator that starts at `0` and receives floats, a branch binding each), a list
+  display or `.append` of both, a dict display's values, an `int | float` annotation,
+  parameter, return, instance attribute, dict key or `--ext` parameter/result. Every
+  operation is CPython's for whichever value it holds: arithmetic including `//`, `%`
+  and `**`, exact mixed and big-`int` comparisons, `abs`, `round`, `int()`,
+  `float()`, `math.floor`/`ceil`, `str`/`repr`/f-strings/format specs, `hash`, `sum`,
+  `min`/`max`, `sorted`, membership. The value is one machine word extending the `int`
+  encoding: a small `int`, a heap big `int`, or a `float` stored inline when its
+  magnitude is between about `1e-77` and `1e77` (boxed otherwise), so pure `int` and
+  pure `float` code is unchanged. Tests: `tests/num_union.rs` (strict, `--non-strict`,
+  `--ext`, leak probe).
+
+### Removed
+
+- The v0.5 `int` infinity: `float('inf')` in a variable an `int` later replaces is now
+  an `int | float`, so `x // 2`, `x - x` and storing it into a container give
+  CPython's results instead of `OverflowError`.
 
 ### Changed
 
@@ -99,6 +118,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   of an inline `int` skip the bigint and general formatting paths.
 
 ### Fixed
+
+- `float` floor division and modulo by zero raised `ZeroDivisionError: float floor
+  division or modulo by zero`; the messages are now CPython 3.13's `float floor division
+  by zero` and `float modulo by zero`.
 
 Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
 

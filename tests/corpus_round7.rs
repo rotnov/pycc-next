@@ -150,10 +150,11 @@ fn an_uninferable_public_signature_keeps_t0001() {
         "T0001",
         "parameter `x` of public function `f` needs a type annotation",
     );
-    // Call sites disagree: one signature cannot serve both.
+    // Call sites disagree: one signature cannot serve both (an `int` and
+    // a `float` argument make the parameter an `int | float` instead).
     refused(
         "t0001_conflict",
-        "def f(x):\n    return x + 1\n\nprint(f(1))\nprint(f(2.5))\n",
+        "def f(x):\n    return x * 2\n\nprint(f(1))\nprint(f(\"ab\"))\n",
         &[],
         "T0001",
         param,

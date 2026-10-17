@@ -49,6 +49,13 @@ pub enum MirExpr {
     /// `coerce_scalar_to_type` is driven by that already-correct slot type
     /// directly at the assignment site either way.
     OptionalWrap(Box<MirExpr>, Box<Ty>),
+    /// An `int`, `bool` or `float` value stored into an `int | float` slot
+    /// (`Ty::Num`). Statically `Ty::Num`, so the slot
+    /// `pycc_codegen::collect_stmt_bindings` derives from `value.ty()` is
+    /// the `int | float` one, exactly as `OptionalWrap` fixes an
+    /// `Optional` slot. An `int` or `bool` is its own word; a `float` is
+    /// converted (`pycc_codegen::num`), which cannot fail.
+    NumWrap(Box<MirExpr>),
     /// A native `int`, `float`, `bool`, `str`, compiled-instance or `None`
     /// value boxed into an `object` slot (Part 2 of #1387, D-258's boxing
     /// amendment). Statically `Ty::Object`, so the slot

@@ -166,7 +166,7 @@ fn branches_with_no_common_type_are_refused() {
     let text = check_fails("def f(t: bool) -> None:\n    print(1 if t else True)\n");
     assert!(
         text.contains(
-            "error[T0021]: conditional expression branches have no common type: int and bool (pycc has no union types)"
+            "error[T0021]: conditional expression branches have no common type: int and bool (pycc's only unions are `T | None` and `int | float`)"
         ),
         "{text}"
     );

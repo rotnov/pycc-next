@@ -166,6 +166,19 @@ pub(super) fn emit_compare_values<'ctx>(
         };
         return crate::containers::emit_value_compare(context, builder, rt, &left_ty, l, r, code);
     }
+    // `int | float` (`crate::num`): one runtime comparison, exact between
+    // an `int` and a `float`.
+    if left_ty == Ty::Num || right_ty == Ty::Num {
+        let code = match op {
+            OrderedCmpOp::Eq => 0,
+            OrderedCmpOp::NotEq => 1,
+            OrderedCmpOp::Lt => 2,
+            OrderedCmpOp::LtE => 3,
+            OrderedCmpOp::Gt => 4,
+            OrderedCmpOp::GtE => 5,
+        };
+        return crate::num::emit_compare(context, builder, rt, code, l, r);
+    }
     let mixed_int_float = (left_ty == Ty::Int && right_ty == Ty::Float)
         || (left_ty == Ty::Float && right_ty == Ty::Int);
     if mixed_int_float {

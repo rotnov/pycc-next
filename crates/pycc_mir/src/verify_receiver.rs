@@ -428,6 +428,7 @@ impl Verifier<'_> {
             }
             MirExpr::IntBoundary(inner)
             | MirExpr::OptionalWrap(inner, _)
+            | MirExpr::NumWrap(inner)
             | MirExpr::ObjectBox(inner)
             | MirExpr::OptionalUnwrap(inner, _)
             | MirExpr::ObjectUnbox(inner, _)

@@ -63,7 +63,7 @@ fn float_divmod_rejects_a_zero_divisor() {
     // D-173: float floor division/modulo by zero now sets the
     // exception flag instead of panicking.
     pycc_rt_exception_clear();
-    let (q, r) = float_divmod(1.0, 0.0);
+    let (q, r) = float_divmod(1.0, 0.0, "float modulo by zero");
     assert_eq!(pycc_rt_exception_active(), 1);
     assert_eq!(q, 0.0);
     assert_eq!(r, 0.0);

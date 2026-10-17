@@ -25,6 +25,12 @@ pub(super) fn call_result_scalar<'ctx>(
                 .expect_basic("this function is declared to return int")
                 .into_int_value(),
         ),
+        Ty::Num => Scalar::Num(
+            call_site
+                .try_as_basic_value()
+                .expect_basic("this function is declared to return int | float")
+                .into_int_value(),
+        ),
         Ty::Bool => Scalar::Bool(
             call_site
                 .try_as_basic_value()

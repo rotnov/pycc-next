@@ -9,6 +9,9 @@ use super::*;
 pub(crate) fn is_key_of(found: &Ty, key: &Ty) -> bool {
     found == key
         || matches!((found, key), (Ty::Tuple(items), Ty::VarTuple(element)) if pycc_hir::tuple_fits_var_tuple(items, element))
+        // An `int | float` key is any number (`d[1]`, `d[2.5]`), hashed and
+        // compared by value as CPython's are.
+        || (*key == Ty::Num && matches!(found, Ty::Int | Ty::Bool | Ty::Float))
 }
 
 pub(crate) fn is_assignable(from: Ty, to: Ty) -> bool {
@@ -17,6 +20,8 @@ pub(crate) fn is_assignable(from: Ty, to: Ty) -> bool {
     // the same boxed tuple object at run time.
     || matches!((&from, &to), (Ty::Tuple(items), Ty::VarTuple(element)) if pycc_hir::tuple_fits_var_tuple(items, element))
     || (from == Ty::Bool && to == Ty::Int) // bool is a subtype of int, TYPE_SYSTEM.md's representation table
+    // `int | float` holds an `int` (a `bool` included) or a `float` as it is.
+    || (to == Ty::Num && matches!(from, Ty::Int | Ty::Bool | Ty::Float))
     // PEP 695 (#387): a `Ty::Param` in a generic class's method signature
     // is accepted as matching any concrete scalar type during type checking,
     // because `monomorphize` will substitute the type parameter with the
@@ -102,7 +107,7 @@ pub(crate) fn final_reassignment(target: &str) -> Diagnostic {
 }
 
 pub(crate) fn numeric_or_bool_compatible(a: Ty, b: Ty) -> bool {
-    let is_numeric_like = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool);
+    let is_numeric_like = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Num | Ty::Bool);
     (is_numeric_like(&a) && is_numeric_like(&b)) || (a == Ty::Str && b == Ty::Str)
 }
 

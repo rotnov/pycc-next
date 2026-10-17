@@ -38,6 +38,7 @@ pub(super) fn operand<'ctx>(
 ) -> FloatValue<'ctx> {
     match scalar {
         Scalar::Int(word) => crate::int_fast::emit_int_to_float_guarded(context, builder, rt, word),
+        Scalar::Num(word) => crate::num::emit_num_to_float(context, builder, rt, word, true),
         other => crate::to_float(context, builder, rt, other),
     }
 }
