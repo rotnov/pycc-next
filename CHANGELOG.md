@@ -136,6 +136,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   keyword arguments it spells (whatever its value types), raising CPython's `TypeError`
   at run time when it cannot bind.
 
+- Real-world corpus (v0.6 accept 5, strict 183 -> 188/200, `--non-strict` fallback
+  statements 2 -> 1 of 1191), each tested native strict, `--non-strict` and `--ext`
+  against CPython:
+  - containers own big `int`s and boxed `int | float` floats: a list, tuple, dict or set
+    holds them (they raised `OverflowError`, and a literal was `T0051`); tuples whose
+    numbers differ in kind compare by value, and a `float` key finds the equal `int`
+    key of a `dict[int, ...]` (`tests/num_union.rs`);
+  - `T | None` (`tests/optional_values.rs`): in strict mode `str | None`, container and
+    instance optionals as locals, parameters and returns; lists and dict values of
+    `int | None` and pointer optionals (`parents = [None] * n` then `parents[v] = u`,
+    `["a", None]`); `x == None`/`x != v`; `while x is not None:` and `if x:` narrowing.
+    An unnarrowed `int | None` used as an `int` stays a compile error;
+  - `tuple(xs)` of a list or `str`: a native `tuple[T, ...]` that a list can hold,
+    unpacked with CPython's length check (`tests/tuple_of_list.rs`);
+  - `--non-strict`: a dict comprehension with a CPython object key or value, or over a
+    CPython object, builds the CPython dict natively (`tests/object_dict_comprehension.rs`).
+
 ### Removed
 
 - The v0.5 `int` infinity: `float('inf')` in a variable an `int` later replaces is now

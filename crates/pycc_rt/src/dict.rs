@@ -17,6 +17,7 @@
 //! `crate::rc`'s worklist.
 
 pub(crate) mod flavor;
+mod num_key;
 
 use crate::exception::raise_key_error;
 use crate::list::{LIST_KIND_TUPLE, PyListObj};

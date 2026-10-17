@@ -68,12 +68,26 @@ fn guard(
 
 /// The `if` arm's narrowing: `(name, type, narrows the body)` -- `true` for
 /// `isinstance(o, C)`, `false` for `not isinstance(o, C)`, which narrows
-/// the `else` branch.
+/// the `else` branch. A `T | None` name tested against `None` (`x is not
+/// None`, `x`) narrows to its `T` the same way, as the check phase does.
 pub(super) fn branch_target(
     signatures: &HashMap<String, SignatureTerms>,
     env: &ConstraintEnvironment<'_, '_>,
     test: &HirExpr,
+    parents: &mut [usize],
+    concrete: &[Option<Ty>],
 ) -> Option<(String, Ty, bool)> {
+    if let Some((name, polarity)) = pycc_hir::optional_none_test(test)
+        && !env.maybe_bindings.contains(name)
+        && let Some(term) = env.bindings.get(name)
+        && let Some(Ty::Optional(inner)) = resolved_term(term.clone(), parents, concrete)
+    {
+        return Some((
+            name.to_string(),
+            *inner,
+            polarity == pycc_hir::NoneTestPolarity::IsNot,
+        ));
+    }
     let (name, inner, polarity) = guard(signatures, env, test)?;
     Some((name, inner, polarity == IsInstancePolarity::Positive))
 }

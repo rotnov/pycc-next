@@ -9,7 +9,6 @@
 
 use super::keyword_bind::SignatureTable;
 use super::{contains_named_expr, lower_condition, lower_expr, lower_range_call};
-use crate::int_boundary::check_boundary_literal;
 use crate::{
     CompElt, CompIter, ContainerReceiver, FStringPart, HirComprehension, HirExpr, HirStmt,
     ImportBinding, unsupported,
@@ -531,11 +530,6 @@ pub(crate) fn lower_list_comp(
     // for a comprehension-internal `yield`/`yield from` in both enclosing
     // scopes.
     let elt_hir = lower_expr(&comp.elt, true, class_name, imports, signatures)?;
-    check_boundary_literal(
-        &elt_hir,
-        pycc_ast::expr_range(&comp.elt),
-        "listcomp element",
-    )?;
     let elt = rename_name_in_expr(elt_hir, &source_name, &synth_var);
     let cond = cond.map(|c| rename_name_in_expr(c, &source_name, &synth_var));
     refuse_walrus(
@@ -562,7 +556,6 @@ pub(crate) fn lower_set_comp(
     // Literal `true`: same reasoning as `lower_list_comp`'s `elt` above
     // (D-149 correction 5).
     let elt_hir = lower_expr(&comp.elt, true, class_name, imports, signatures)?;
-    check_boundary_literal(&elt_hir, pycc_ast::expr_range(&comp.elt), "setcomp element")?;
     let elt = rename_name_in_expr(elt_hir, &source_name, &synth_var);
     let cond = cond.map(|c| rename_name_in_expr(c, &source_name, &synth_var));
     refuse_walrus(
@@ -620,11 +613,6 @@ pub(crate) fn lower_dict_comp(
         &synth_var,
     );
     let value_hir = lower_expr(&comp.value, true, class_name, imports, signatures)?;
-    check_boundary_literal(
-        &value_hir,
-        pycc_ast::expr_range(&comp.value),
-        "dictcomp value",
-    )?;
     let value = rename_name_in_expr(value_hir, &source_name, &synth_var);
     let cond = cond.map(|c| rename_name_in_expr(c, &source_name, &synth_var));
     refuse_walrus(

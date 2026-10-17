@@ -317,23 +317,6 @@ pub(crate) fn of_kind(kind: i64, word: i64) -> Option<Num> {
     })
 }
 
-/// Raises the container-ingress `OverflowError` for a word with a heap
-/// payload: a bigint (as for an `int` element) or a boxed `float`. A word
-/// with no payload passes.
-#[unsafe(no_mangle)]
-pub extern "C" fn pycc_rt_num_check_element(word: i64) {
-    if word & LOW_TAG_MASK != 0 || word == 0 {
-        return;
-    }
-    let message = if boxed_float(word).is_some() {
-        "storing a `float` of magnitude beyond 1e77 or below 1e-77 in an `int | float` \
-         container is not supported yet"
-    } else {
-        "storing a bigint-valued `int` in a container is not supported yet"
-    };
-    raise_builtin(crate::EXCEPTION_TYPE_OVERFLOW_ERROR, "OverflowError", message);
-}
-
 /// Python's truth value.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_num_truthy(word: i64) -> i8 {

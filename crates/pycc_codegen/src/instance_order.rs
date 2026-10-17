@@ -266,7 +266,7 @@ pub(super) fn emit_instance_order<'ctx>(
         ),
         pycc_mir::OrderKind::Sort => crate::call_result::none_scalar(context),
         pycc_mir::OrderKind::Min | pycc_mir::OrderKind::Max => {
-            crate::list::word_element(context, builder, &order.elem, word)
+            crate::list::word_element(context, builder, rt, &order.elem, word)
         }
     };
     release_scalar_if_temporary(context, builder, rt, &order.list, &list_scalar);

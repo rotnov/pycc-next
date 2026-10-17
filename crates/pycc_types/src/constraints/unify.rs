@@ -134,8 +134,20 @@ pub(crate) fn unify_terms_with_declared(
         // Two known types: an `int` and a `float` conflict (only an
         // inference variable widens to `int | float`), unless one side is
         // already `int | float`.
+        // A returned value the declared return type holds (`return x` of
+        // a `str` from `-> str | None`).
+        (Ok(left), Ok(right))
+            if declared == Some(&left)
+                && crate::assign_check::is_assignable(right.clone(), left.clone()) =>
+        {
+            Ok(false)
+        }
         (Ok(left), Ok(right)) => merge_inferred_types(left.clone(), right.clone())
             .filter(|merged| *merged != Ty::Num || left == Ty::Num || right == Ty::Num)
+            // A written return annotation is the type: a value it does not
+            // hold conflicts even where two inferred types would join
+            // (`int` and `int | None`).
+            .filter(|merged| declared.is_none_or(|declared| merged == declared))
             .map(|_| false)
             .ok_or_else(|| inference_conflict(code, context, left, right, declared)),
         (Err(var), Ok(ty)) | (Ok(ty), Err(var)) => {
@@ -255,26 +267,27 @@ pub(super) fn merge_inferred_types(left: Ty, right: Ty) -> Option<Ty> {
         // and as a scalar (a helper called with an object and with an
         // `int`) is the object, which holds either.
         Some(Ty::Object)
-    } else if crate::non_strict::is_non_strict()
-        && let Some(inner) = optional_join(&left, &right)
-    {
-        // Non-strict mode: a term inferred both as `None` and as a scalar
-        // (a helper parameter defaulting to `None` and called with an
-        // `int`) is the optional scalar.
-        Some(Ty::Optional(Box::new(inner)))
     } else {
-        None
+        // A term inferred both as `None` and as a value (a helper parameter
+        // defaulting to `None` and called with an `int`, a helper that
+        // returns `None` on one path and a list on another) is the
+        // optional value.
+        optional_join(&left, &right).map(|inner| Ty::Optional(Box::new(inner)))
     }
 }
 
-/// The scalar `T` when `left` and `right` are `None`, `T` or `T | None`
-/// with at least one `None` side and one `T` side.
+/// The `T` when `left` and `right` are `None`, `T` or `T | None` with at
+/// least one `None` side and one `T` side, for a `T` that can be optional.
 fn optional_join(left: &Ty, right: &Ty) -> Option<Ty> {
+    // Non-strict mode keeps a pointer `T | None` other than `str | None`
+    // (`pycc_mir::optional_str`) a CPython object.
+    let optional_inner = |ty: &Ty| {
+        matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
+            || (!crate::non_strict::is_non_strict() && pycc_hir::is_pointer_optional_inner(ty))
+    };
     let scalar = |ty: &Ty| match ty {
-        Ty::Int | Ty::Float | Ty::Bool | Ty::Str => Some(ty.clone()),
-        Ty::Optional(inner) if matches!(**inner, Ty::Int | Ty::Float | Ty::Bool | Ty::Str) => {
-            Some((**inner).clone())
-        }
+        Ty::Optional(inner) if optional_inner(inner) => Some((**inner).clone()),
+        ty if optional_inner(ty) => Some(ty.clone()),
         _ => None,
     };
     match (left, right) {

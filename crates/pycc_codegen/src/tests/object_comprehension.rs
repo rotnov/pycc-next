@@ -104,21 +104,32 @@ fn a_function_body_comprehension_over_an_object_bridges_its_failures() {
     );
 }
 
-/// `pycc_types` refuses a dict comprehension over an object (I0404), so one
-/// reaching codegen is an internal error.
+/// A dict comprehension over an object builds the CPython dict: a kind-2
+/// collection, each packed key and value stored by
+/// `pycc_ext_obj_collect_pair`.
 #[test]
-#[should_panic(expected = "only a list or set comprehension of packable elements")]
-fn a_dict_comprehension_over_an_object_is_an_internal_error() {
-    module_ir(
+fn a_dict_comprehension_over_an_object_builds_a_cpython_dict() {
+    compile_ext_items_checking_ir(
         "objcomp_dict",
-        vec![comprehension(
-            None,
-            MirCompElt::Dict {
-                key: var(),
-                value: var(),
-            },
-        )],
-        |_| {},
+        with_foreign_numpy(vec![MirItem::Function {
+            name: "f".to_string(),
+            params: vec![],
+            return_ty: Ty::None,
+            body: vec![
+                MirStmt::ExprStmt(comprehension(
+                    None,
+                    MirCompElt::Dict {
+                        key: var(),
+                        value: var(),
+                    },
+                )),
+                MirStmt::Return(None),
+            ],
+        }]),
+        |ir| {
+            assert!(ir.contains("call ptr @pycc_ext_obj_new_collection(i64 2)"), "{ir}");
+            assert!(ir.contains("@pycc_ext_obj_collect_pair("), "{ir}");
+        },
     );
 }
 

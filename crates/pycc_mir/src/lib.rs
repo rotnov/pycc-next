@@ -231,13 +231,15 @@ pub enum MirCompElt {
 }
 
 impl MirComprehension {
-    /// Whether a list or set comprehension over a native source collects
-    /// CPython objects (non-strict mode, where `pycc_types` admits it): no
-    /// native container holds an `object` element, so it produces a fresh
-    /// CPython `list` or `set`, as one over a CPython source does.
+    /// Whether a list, set or dict comprehension over a native source
+    /// collects CPython objects (non-strict mode, where `pycc_types` admits
+    /// it): no native container holds an `object` element (nor a native
+    /// dict an `object` key or value), so it produces a fresh CPython
+    /// `list`, `set` or `dict`, as one over a CPython source does.
     pub fn collects_objects(&self) -> bool {
         match &self.elt {
             MirCompElt::List(elt) | MirCompElt::Set(elt, None) => elt.ty() == Ty::Object,
+            MirCompElt::Dict { key, value } => key.ty() == Ty::Object || value.ty() == Ty::Object,
             _ => false,
         }
     }
@@ -786,7 +788,7 @@ fn apply_kill_prescan(scopes: &mut [HashMap<String, Ty>], body: &[HirStmt]) {
 /// overlay, assignment targets never do" split -- `lower_stmt`'s own
 /// `Assign`/`AnnAssign` arms bind `target`'s *real* type via `bind`/
 /// `bind_variable` directly and never call this.
-fn narrowed_ty(scopes: &[HashMap<String, Ty>], name: &str) -> Option<Ty> {
+pub(crate) fn narrowed_ty(scopes: &[HashMap<String, Ty>], name: &str) -> Option<Ty> {
     scopes
         .iter()
         .rev()

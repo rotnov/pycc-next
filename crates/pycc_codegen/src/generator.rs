@@ -801,6 +801,8 @@ pub(super) fn scalar_basic(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
 
 /// The `Scalar` of a value of type `ty` loaded as `value`.
 pub(super) fn basic_scalar<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
+    // A pointer-represented `T | None` is the `T` pointer.
+    let ty = crate::scalar::pointer_optional_inner(ty).unwrap_or(ty);
     match ty {
         Ty::Int => Scalar::Int(value.into_int_value()),
         Ty::Num => Scalar::Num(value.into_int_value()),

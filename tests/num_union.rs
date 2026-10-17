@@ -68,8 +68,8 @@ fn float_lookups_in_num_containers_match_cpython() {
 
 /// Every runtime path of an `int | float` value -- arithmetic, the errors
 /// it raises, comparisons, `min`/`max`/`abs`/`round`/`hash`, text and
-/// format specs, a container refusing a boxed float, a `float` needle or
-/// key borrowed by a container lookup, and the `--ext`
+/// format specs, containers holding boxed floats and big ints, a `float`
+/// needle or key borrowed by a container lookup, and the `--ext`
 /// boundary in both directions -- releases the boxed floats it makes: the
 /// runtime's live count is flat across a hosted loop.
 #[test]
@@ -122,4 +122,22 @@ fn boxed_floats_do_not_leak() {
         "{}",
         String::from_utf8_lossy(&run.stderr)
     );
+}
+
+/// Big `int`s and boxed floats held in lists, tuples, dicts (keys and
+/// values) and sets: stored, read, copied, sorted, compared, hashed and
+/// printed as CPython does, in every build mode.
+#[test]
+fn heap_numbers_live_in_containers() {
+    assert_native_matches("heap_numbers_in_containers.py");
+    assert_ext_matches("heap_numbers_in_containers.py", "import heap_numbers_in_containers");
+}
+
+/// Containers whose numbers differ in kind compare by value (`(1, 2.5) ==
+/// (1.0, 2.5)`, tuples of different arity included), and a `float` key
+/// looks up an `int`-keyed dict, raising `KeyError` with its own repr.
+#[test]
+fn numbers_of_different_kinds_compare_and_look_up_by_value() {
+    assert_native_matches("num_union_cross_kind.py");
+    assert_ext_matches("num_union_cross_kind.py", "import num_union_cross_kind");
 }

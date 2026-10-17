@@ -10,9 +10,14 @@ use super::{
 use pycc_hir::{HirStmt, Ty};
 use std::collections::HashMap;
 
+mod comp_assign;
 mod for_list;
+mod return_tuple;
 mod store;
 mod try_stmt;
+
+use comp_assign::object_comp_assign;
+use return_tuple::coerce_returned_tuple;
 
 /// Blocker fix (D-068 review of #780): shared loop-body lowering helper for
 /// `While`/`ForRange`/`ForList`'s three arms below -- lowers `body` via
@@ -499,15 +504,32 @@ pub(super) fn lower_stmt(
             for (name, ty) in named_bindings {
                 bind_variable(scopes, name, ty);
             }
-            // Issue #769 (Part 2 of #747), D-205 scope cut: narrowing is
-            // deliberately `if`-only -- `pycc_types::narrow` never applies
-            // `apply_branch_narrowing` to a `while` test (see its own call
-            // sites), so no narrow overlay is pushed for entering the body,
-            // mirroring the checker. `lower_loop_body` (D-068 review fix)
-            // still reconciles any narrowing state established/killed
-            // *inside* the loop body itself against the loop running zero
-            // times, exactly like `ForRange`/`ForList` below.
-            let body = lower_loop_body(body, scopes, classes, current_class);
+            // A `while x is not None:` (or `while x:`) test narrows an
+            // `Optional` `x` in the body, as `pycc_types::narrow::
+            // while_body_narrowing` does: the test runs before every trip,
+            // and the kill prescan has already dropped a narrowing the
+            // body could invalidate. The post-loop join drops it again
+            // (the loop exits when the test is false).
+            let narrowing = match super::object_narrow::narrowing_target(test, scopes, classes) {
+                Some((name, inner, super::object_narrow::NarrowSide::Body))
+                    if matches!(super::lookup(scopes, &name), Ty::Optional(_)) =>
+                {
+                    Some((name, inner))
+                }
+                _ => None,
+            };
+            let body = match narrowing {
+                None => lower_loop_body(body, scopes, classes, current_class),
+                Some((name, inner)) => {
+                    super::apply_kill_prescan(scopes, body);
+                    let pre_snapshot = super::narrowing_snapshot(scopes);
+                    super::push_narrowing(scopes, &name, inner);
+                    let (body, body_end) =
+                        super::lower_scoped_body(body, scopes, classes, current_class, None);
+                    super::restore_narrowing(scopes, super::join_narrowed(&pre_snapshot, &[&body_end]));
+                    body
+                }
+            };
             MirStmt::While {
                 test: lowered_test,
                 body,
@@ -668,6 +690,21 @@ pub(super) fn lower_stmt(
             key,
             value,
         } => {
+            if let Some(stmt) = object_comp_assign(
+                target,
+                var,
+                iter,
+                cond.as_deref(),
+                pycc_hir::CompElt::Dict {
+                    key: key.as_ref().clone(),
+                    value: value.as_ref().clone(),
+                },
+                scopes,
+                classes,
+                current_class,
+            ) {
+                return stmt;
+            }
             let (source, var_ty) = resolve_comp_source(iter, var, scopes, classes, current_class);
             let cond = cond
                 .as_deref()
@@ -896,105 +933,7 @@ fn float_tuple_annotation_arity(ty: &Ty) -> Option<usize> {
     }
 }
 
-/// Non-strict mode: `target = [elt for var in iter]` (or a set) whose
-/// element is a CPython object builds a CPython container
-/// ([`crate::MirComprehension::collects_objects`]), which only the
-/// expression form emits -- so the statement lowers to an assignment of
-/// that expression, whose loop variable stays out of the enclosing scope as
-/// in CPython.
-#[allow(clippy::too_many_arguments)]
-fn object_comp_assign(
-    target: &str,
-    var: &str,
-    iter: &pycc_hir::CompIter,
-    cond: Option<&pycc_hir::HirExpr>,
-    elt: pycc_hir::CompElt,
-    scopes: &mut Vec<HashMap<String, Ty>>,
-    classes: &HashMap<String, HirClassDef>,
-    current_class: Option<&str>,
-) -> Option<MirStmt> {
-    let comp = pycc_hir::HirExpr::Comprehension(Box::new(pycc_hir::HirComprehension {
-        var: var.to_string(),
-        iter: iter.clone(),
-        cond: cond.cloned(),
-        elt,
-    }));
-    let lowered = lower_expr(&comp, scopes, classes, current_class);
-    let MirExpr::Comprehension(c) = &lowered else {
-        return None;
-    };
-    if !c.collects_objects() && !matches!(c.source, crate::CompSource::Object(_)) {
-        return None;
-    }
-    let assign = HirStmt::Assign {
-        target: target.to_string(),
-        value: comp,
-    };
-    Some(lower_stmt(&assign, scopes, classes, current_class))
-}
-
 /// The frame entry recording a function's declared native tuple return
-/// type, for [`coerce_returned_tuple`]. Not an identifier, so no source
+/// type, for `return_tuple::coerce_returned_tuple`. Not an identifier, so no source
 /// name can collide with it.
 pub(crate) const RETURN_KEY: &str = "$return";
-
-/// Non-strict mode: a tuple display with an object element is the CPython
-/// tuple (`obj_arith::object_display`); returned from a function declared
-/// to return a native tuple of scalars, it is the native tuple instead,
-/// each object element converted with a run-time type check
-/// (`MirExpr::ObjectCoerce`, admitted by `pycc_types`'
-/// `non_strict::admits_tuple_display_return`).
-///
-/// A native tuple returned from a function declared to return a tuple with
-/// `object` slots (`-> tuple[int, Any]`, v0.5) has those elements boxed: a
-/// display's elements in place, any other value through
-/// `MirExpr::TupleRebox` (`pycc_types::object_box::tuple_reboxes`).
-fn coerce_returned_tuple(value: MirExpr, declared: Option<Ty>) -> MirExpr {
-    if let (Some(Ty::Tuple(slots)), Ty::Tuple(items)) = (&declared, value.ty())
-        && items.len() == slots.len()
-        && *items != **slots
-        && slots.contains(&Ty::Object)
-    {
-        return match value {
-            MirExpr::TupleLiteral(elements) => MirExpr::TupleLiteral(
-                elements
-                    .into_iter()
-                    .zip(slots.iter())
-                    .map(|(element, slot)| crate::object_box::box_into(element, slot))
-                    .collect(),
-            ),
-            other => MirExpr::TupleRebox(Box::new(other), Box::new(Ty::Tuple(slots.clone()))),
-        };
-    }
-    let (Some(Ty::Tuple(tys)), MirExpr::ObjDisplay { kind, elements }) = (&declared, &value) else {
-        return value;
-    };
-    if *kind != crate::ObjDisplayKind::Tuple || elements.len() != tys.len() {
-        return value;
-    }
-    let MirExpr::ObjDisplay { elements, .. } = value else {
-        unreachable!("matched above")
-    };
-    let elements = elements
-        .into_iter()
-        .zip(tys.iter())
-        .map(|(element, ty)| {
-            let element = match element {
-                MirExpr::ObjectBox(inner)
-                    if inner.ty() == *ty
-                        || matches!((inner.ty(), ty), (Ty::Tuple(items), Ty::VarTuple(e))
-                            if pycc_hir::tuple_fits_var_tuple(&items, e)) =>
-                {
-                    *inner
-                }
-                other => other,
-            };
-            if element.ty() == Ty::Object && *ty != Ty::Object {
-                MirExpr::ObjectCoerce(Box::new(element), Box::new(ty.clone()))
-            } else {
-                element
-            }
-        })
-        .collect();
-    MirExpr::TupleLiteral(elements)
-}

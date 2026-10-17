@@ -1250,31 +1250,23 @@ pub(crate) fn annotation_to_ty(
                 Err(_) if is_non_strict(aliases) => return Ok(Ty::Object),
                 Err(error) => return Err(error),
             };
-            // `Optional[T]` is only supported for `T` in `{int, float, bool}`
-            // (D-197, #763, Part 1 of #747; widened to `float`/`bool` by
-            // #809, Part 2): codegen's `{ inner, i8 }` representation
-            // (`crates/pycc_codegen/src/lib.rs`'s `ty_to_basic_type`) and
-            // every downstream `Scalar`/emit site are exercised and tested
-            // for these three scalar inner types only. Refcounted/pointer
-            // inner types (`str` and friends) and general `A | B` unions
-            // stay out of scope, mirroring `list[int]`'s own `T0034` scope
-            // cut (D-105/D-122). Gated here, pre-lowering, at the one place
-            // a `Ty::Optional` is ever constructed from source, so nothing
-            // else in the pipeline needs to re-derive this check: a
-            // `Ty::Optional` reaching `pycc_types`/`pycc_mir`/`pycc_codegen`
-            // always wraps one of `Ty::Int`, `Ty::Float`, or `Ty::Bool`
-            // starting from this return.
+            // `Optional[T]` is supported for `T` in `{int, float, bool}`
+            // (D-197; codegen's `{ inner, i8 }` struct) and, in strict mode,
+            // for every pointer-represented `T` (`is_pointer_optional_inner`:
+            // a null pointer is `None`). Gated here, at the one place a
+            // `Ty::Optional` is constructed from source.
             if !matches!(inner, Ty::Int | Ty::Float | Ty::Bool) && is_non_strict(aliases) {
                 // Non-strict mode: an optional value of any other type is an
                 // object (`None` or the value), as in CPython.
                 return Ok(Ty::Object);
             }
-            if !matches!(inner, Ty::Int | Ty::Float | Ty::Bool) {
+            if !matches!(inner, Ty::Int | Ty::Float | Ty::Bool) && !crate::is_pointer_optional_inner(&inner) {
                 let range = std::ops::Range::<u32>::from(bin_op.range);
                 return Err(Diagnostic::error(
                     "T0049",
                     format!(
-                        "`Optional[{}]` is not supported yet -- only `Optional[int]`, `Optional[float]`, and `Optional[bool]` (`int | None`, `float | None`, `bool | None`) are",
+                        "`Optional[{}]` is not supported yet -- only `int`, `float`, `bool`, `str`, a list, dict or set, a class instance, \
+                         or a tuple with a non-number element can be optional (`T | None`)",
                         inner.name()
                     ),
                     Span::new(range.start, range.end),

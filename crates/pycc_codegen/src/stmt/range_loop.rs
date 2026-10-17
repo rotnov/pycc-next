@@ -28,7 +28,8 @@ fn emit_condition<'ctx>(
     }
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, test);
     let held = object_release::hold(context, module, rt, test, &scalar);
-    let cond = truthy(context, builder, module, rt, scalar);
+    let cond = crate::optional_ptr::truthy(context, builder, module, rt, &test.ty(), scalar)
+        .unwrap_or_else(|| truthy(context, builder, module, rt, scalar));
     held.release(builder, rt);
     // #146 Part 2 (D-181): released *after* `truthy`, which
     // reads a bigint operand's limbs -- releasing first could

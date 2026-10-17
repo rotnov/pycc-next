@@ -184,6 +184,13 @@ pub(crate) fn lower_call_expr(
     if callee == "cast" && !is_user_defined {
         return lower_expr(&args[1], scopes, classes, current_class);
     }
+    if callee == pycc_hir::OPTIONAL_INT_MARKER {
+        let value = lower_expr(&args[0], scopes, classes, current_class);
+        return match value.ty() {
+            Ty::Optional(_) => value,
+            _ => MirExpr::OptionalWrap(Box::new(value), Box::new(Ty::Int)),
+        };
+    }
     if callee == pycc_hir::NUM_MARKER {
         let value = lower_expr(&args[0], scopes, classes, current_class);
         return match value.ty() {

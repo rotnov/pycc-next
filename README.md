@@ -64,15 +64,14 @@ their inputs, like the Python programs' inputs are opaque to pycc-next):
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
-wrong outputs (CI-gated), 99.8% of top-level statements native (1189 of 1191) and the rest
-per-statement CPython fallback; strict mode compiles and passes 183/200 unchanged — most of
-the rest use dynamic values (mixed-type containers, `None` in a list or as one of several
-return types, a parameter rebound to another type) that strict mode refuses. The two
-statements that still fall back (`python3 bench/corpus.py --flags=--non-strict
---show-fallbacks`): problem 134's `graph = {i: [] for i in range(n)}`, whose lists the
-program later reads through keys from a CPython list of `None`s and `int`s (the dict
-comprehension would have to build a CPython dict), and problem 188's `mat_pow`, whose nested
-helper rebinds its list parameter to a list of lists (`A = [A]`) and is called with both.
+wrong outputs (CI-gated), 99.9% of top-level statements native (1190 of 1191) and the rest
+per-statement CPython fallback; strict mode compiles and passes 188/200 unchanged — most of
+the rest use dynamic values (mixed-type containers, an `int | None` used as an `int`
+without a `None` test, a variable rebound to another type) that strict mode refuses. The
+one statement that still falls back (`python3 bench/corpus.py --flags=--non-strict
+--show-fallbacks`) is problem 188's `mat_pow`, whose nested helper rebinds its list
+parameter to a list of lists (`A = [A]`, under an `isinstance` test) and is called with
+both.
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 

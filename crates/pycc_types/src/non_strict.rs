@@ -39,6 +39,8 @@ thread_local! {
 /// Selects (or clears) non-strict checking for this thread.
 pub fn set_non_strict(non_strict: bool) {
     NON_STRICT.with(|cell| cell.set(non_strict));
+    // `pycc_mir` lowers the checked program in the same mode.
+    pycc_hir::set_non_strict_program(non_strict);
 }
 
 /// Whether this thread checks in non-strict mode.

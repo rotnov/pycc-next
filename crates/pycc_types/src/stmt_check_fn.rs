@@ -545,19 +545,24 @@ pub(crate) fn check_stmt_arm_in_function(
             // arm just above.
             collect_named_expr_bindings(env, local_names, test)?;
             infer_expr_in(env, local_names, test)?;
+            let narrowing = narrow::while_body_narrowing(env, test);
             // Issue #118 Part 1: the loop body may execute zero times, so
             // every body-only binding joins back as `Maybe`.
             // Fast path: if the body introduces no bindings, check in-place.
             if !introduces_bindings(body) {
-                check_while_body_in_place_in_function(env, local_names, body, return_ty.clone())
+                narrow::with_while_narrowing(env, narrowing, |env| {
+                    check_while_body_in_place_in_function(env, local_names, body, return_ty.clone())
+                })
             } else {
                 let mut body_env = env.clone();
-                narrow::check_stmt_sequence_in_function(
-                    &mut body_env,
-                    local_names,
-                    body,
-                    return_ty.clone(),
-                )?;
+                narrow::with_while_narrowing(&mut body_env, narrowing, |body_env| {
+                    narrow::check_stmt_sequence_in_function(
+                        body_env,
+                        local_names,
+                        body,
+                        return_ty.clone(),
+                    )
+                })?;
                 join_loop_body(env, &body_env);
                 Ok(())
             }
@@ -626,7 +631,7 @@ pub(crate) fn check_stmt_arm_in_function(
                     return_ty.clone(),
                 );
             }
-            let list_ty = lookup_bound_name(env, local_names, list)?;
+            let list_ty = crate::narrow::narrowed_iterable(env, list, lookup_bound_name(env, local_names, list)?);
             if list_ty == Ty::Object {
                 return foreign::for_loop::check_function_object_loop(
                     env,

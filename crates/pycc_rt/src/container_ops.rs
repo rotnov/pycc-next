@@ -222,6 +222,30 @@ pub unsafe extern "C" fn pycc_rt_tuple_to_list(t: *mut PyListObj, kind: i64) -> 
     new_raw_words(kind, words)
 }
 
+/// `tuple(xs)` of a list: a new tuple object (a frozen list, as
+/// `pycc_rt_list_mark_tuple` makes one) holding new references to the
+/// list's elements.
+///
+/// # Safety
+/// `xs` must be a live list whose elements are not `bool`s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_to_tuple(xs: *mut PyListObj) -> *mut PyListObj {
+    let copy = unsafe { crate::list::ops::pycc_rt_list_copy(xs) };
+    unsafe { crate::list::pycc_rt_list_mark_tuple(copy) };
+    copy
+}
+
+/// `tuple(s)` of a `str`: a new tuple object of its characters.
+///
+/// # Safety
+/// `s` must be a live `str`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_to_tuple(s: *mut crate::PyStrObj) -> *mut PyListObj {
+    let chars = crate::str_ops::pycc_rt_str_to_list(s);
+    unsafe { crate::list::pycc_rt_list_mark_tuple(chars) };
+    chars
+}
+
 /// `list(s)` of a set (a new list in iteration order).
 ///
 /// # Safety

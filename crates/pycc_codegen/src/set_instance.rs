@@ -542,11 +542,12 @@ impl<'ctx> SetEmitter<'_, 'ctx> {
 pub(super) fn set_element_scalar<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
     element_ty: &pycc_mir::Ty,
     word: IntValue<'ctx>,
 ) -> Scalar<'ctx> {
     if !matches!(element_ty, pycc_mir::Ty::Instance(..)) {
-        return crate::list::word_element(context, builder, element_ty, word);
+        return crate::list::word_element(context, builder, rt, element_ty, word);
     }
     Scalar::Instance(
         builder

@@ -23,7 +23,6 @@
 
 use super::lower_expr;
 use crate::expr::keyword_bind::SignatureTable;
-use crate::int_boundary::check_boundary_literal;
 use crate::{ContainerReceiver, HirExpr, ImportBinding, unsupported};
 use pycc_ast::Expr;
 use pycc_diag::Diagnostic;
@@ -129,13 +128,7 @@ fn lower_list_append(
             call.range,
         ));
     };
-    let value_span = pycc_ast::expr_range(value);
     let value = lower_expr(value, in_function, class_name, imports, signatures)?;
-    // Non-strict mode: the receiver may be a CPython list, which holds any
-    // `int`; `pycc_types` checks a native receiver instead.
-    if !signatures.non_strict() {
-        check_boundary_literal(&value, value_span, "`list.append()` value")?;
-    }
     Ok(HirExpr::ListAppend {
         list,
         value: Box::new(value),
@@ -258,10 +251,8 @@ fn lower_dict_get(
             call.range,
         ));
     };
-    let default_span = pycc_ast::expr_range(default);
     let key = lower_expr(key, in_function, class_name, imports, signatures)?;
     let default = lower_expr(default, in_function, class_name, imports, signatures)?;
-    check_boundary_literal(&default, default_span, "`dict.get()` default")?;
     Ok(HirExpr::DictGetOrDefault {
         dict,
         key: Box::new(key),
@@ -292,9 +283,7 @@ fn lower_set_add(
             call.range,
         ));
     };
-    let value_span = pycc_ast::expr_range(value);
     let value = lower_expr(value, in_function, class_name, imports, signatures)?;
-    check_boundary_literal(&value, value_span, "`set.add()` value")?;
     Ok(HirExpr::SetAdd {
         set: set_name.id.as_str().to_string(),
         value: Box::new(value),

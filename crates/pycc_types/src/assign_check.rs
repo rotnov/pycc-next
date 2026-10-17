@@ -14,6 +14,13 @@ pub(crate) fn is_key_of(found: &Ty, key: &Ty) -> bool {
         || (*key == Ty::Num && matches!(found, Ty::Int | Ty::Bool | Ty::Float))
 }
 
+/// [`is_key_of`] for a lookup (`d[k]`, `d.get(k, default)`): a `float` or
+/// `int | float` also looks up an `int`-keyed dict, finding the `int` key
+/// equal to it as CPython's hash and `==` do (`pycc_rt::dict::num_key`).
+pub(crate) fn is_lookup_key_of(found: &Ty, key: &Ty) -> bool {
+    is_key_of(found, key) || (*key == Ty::Int && matches!(found, Ty::Float | Ty::Num))
+}
+
 pub(crate) fn is_assignable(from: Ty, to: Ty) -> bool {
     from == to
     // A fixed-arity tuple of `T`s is a `tuple[T, ...]` (`Ty::VarTuple`):

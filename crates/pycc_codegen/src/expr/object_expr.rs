@@ -96,6 +96,10 @@ pub(crate) fn emit_optional_unwrap_expr<'ctx>(
         unreachable!()
     };
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
+    // A pointer-represented `T | None` already is the `T` pointer.
+    if pycc_hir::is_pointer_optional_inner(inner) {
+        return scalar;
+    }
     let Scalar::Optional(v) = scalar else {
         panic!(
             "pycc_codegen: internal error: OptionalUnwrap's operand did not evaluate to Scalar::Optional -- pycc_mir should only ever wrap a Ty::Optional-scoped Name read"

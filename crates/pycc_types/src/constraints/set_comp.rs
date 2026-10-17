@@ -116,6 +116,11 @@ pub(crate) fn dict_comp_container(
 }
 
 fn dict_of(key: Ty, value: Ty) -> Option<Ty> {
+    // Non-strict mode: a CPython object key or value makes the CPython dict
+    // `pycc_mir` builds (`MirComprehension::collects_objects`).
+    if crate::non_strict::is_non_strict() && (key == Ty::Object || value == Ty::Object) {
+        return Some(Ty::Object);
+    }
     (pycc_hir::is_hashable_ty(&key) && pycc_hir::is_list_element_ty(&value))
         .then(|| Ty::Dict(Box::new((key, value))))
 }

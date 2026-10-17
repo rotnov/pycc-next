@@ -44,7 +44,9 @@ use super::foreign_call;
 use super::foreign_fail::{ForeignFailEdge, route_negative, route_null};
 use super::foreign_pack::{emit_pack, shim_fn};
 use super::release_scalar_if_temporary;
-use super::{EXT_OBJ_COLLECT_SYMBOL, EXT_OBJ_NEW_COLLECTION_SYMBOL, ObjCollectionKind};
+use super::{
+    EXT_OBJ_COLLECT_PAIR_SYMBOL, EXT_OBJ_COLLECT_SYMBOL, EXT_OBJ_NEW_COLLECTION_SYMBOL, ObjCollectionKind,
+};
 use super::{Scalar, emit_expr, truthy};
 use inkwell::values::PointerValue;
 use pycc_mir::MirExpr;
@@ -60,15 +62,19 @@ pub(super) fn emit_object_comprehension<'ctx>(
     elts: CompElts<'_>,
 ) -> Scalar<'ctx> {
     let (context, builder, module, rt) = (cx.context, cx.builder, cx.module, cx.rt);
-    let (kind, elt) = match elts {
+    // The element step: one packed item, or a packed key and value.
+    let (kind, item) = match elts {
         CompElts::List(elt) if pycc_hir::object_comp_collects_natively(&elt.ty()) => {
             return emit_native_list_comprehension(cx, var_ptr, iterable, cond, elt);
         }
-        CompElts::List(elt) => (ObjCollectionKind::List, elt),
-        CompElts::Set(elt, None) => (ObjCollectionKind::Set, elt),
-        CompElts::Objects(elt, kind) => (kind, elt),
-        CompElts::Set(_, Some(_)) | CompElts::Dict(..) => panic!(
-            "pycc_codegen: internal error: only a list or set comprehension of packable \
+        CompElts::List(elt) => (ObjCollectionKind::List, Ok(elt)),
+        CompElts::Set(elt, None) => (ObjCollectionKind::Set, Ok(elt)),
+        CompElts::Objects(elt, kind) => (kind, Ok(elt)),
+        CompElts::Dict(key, value) | CompElts::ObjectDict(key, value) => {
+            (ObjCollectionKind::Dict, Err((key, value)))
+        }
+        CompElts::Set(_, Some(_)) => panic!(
+            "pycc_codegen: internal error: only a list, set or dict comprehension of packable \
              elements may iterate a CPython object -- pycc_types::check (I0404) should have \
              rejected this before codegen"
         ),
@@ -145,44 +151,10 @@ pub(super) fn emit_object_comprehension<'ctx>(
         builder.position_at_end(keep_bb);
     }
 
-    let scalar = crate::object_unbox::emit_pack_operand(
-        context,
-        builder,
-        module,
-        rt,
-        cx.user_functions,
-        cx.locals,
-        elt,
-    );
-    let item = emit_pack(context, builder, module, scalar, "objcomp_item");
-    release_scalar_if_temporary(context, builder, rt, elt, &scalar);
-    crate::object_release::release_if_produced(context, builder, module, elt, &scalar);
-    let collect = shim_fn(
-        module,
-        EXT_OBJ_COLLECT_SYMBOL,
-        context
-            .i32_type()
-            .fn_type(&[ptr.into(), i64_ty.into(), ptr.into()], false),
-    );
-    let status = builder
-        .build_call(
-            collect,
-            &[collection.into(), kind_code.into(), item.into()],
-            "objcomp_collect",
-        )
-        .expect("build_call should not fail for pycc_ext_obj_collect")
-        .try_as_basic_value()
-        .expect_basic("pycc_ext_obj_collect returns int")
-        .into_int_value();
-    route_negative(
-        context,
-        builder,
-        module,
-        rt,
-        edge,
-        status,
-        "objcomp_collect",
-    );
+    match item {
+        Ok(elt) => collect_object(cx, collection, kind, elt),
+        Err((key, value)) => collect_object_pair(cx, collection, key, value),
+    }
     builder
         .build_unconditional_branch(lp.header_bb)
         .expect("build_unconditional_branch should not fail closing the loop body");
@@ -363,5 +335,63 @@ pub(super) fn collect_object<'ctx>(
         edge,
         status,
         "objcomp_collect",
+    );
+}
+
+/// Packs `key` then `value` (CPython's evaluation order) and stores the
+/// pair in the CPython dict `dict` (`pycc_ext_obj_collect_pair`, which
+/// consumes both), raising through the current function's foreign failure
+/// edge.
+pub(super) fn collect_object_pair<'ctx>(
+    cx: &CompCx<'_, 'ctx>,
+    dict: PointerValue<'ctx>,
+    key: &MirExpr,
+    value: &MirExpr,
+) {
+    let (context, builder, module, rt) = (cx.context, cx.builder, cx.module, cx.rt);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let edge = ForeignFailEdge::for_current(builder);
+    let pack = |expr: &MirExpr, name: &str| {
+        let scalar = crate::object_unbox::emit_pack_operand(
+            context,
+            builder,
+            module,
+            rt,
+            cx.user_functions,
+            cx.locals,
+            expr,
+        );
+        let item = emit_pack(context, builder, module, scalar, name);
+        release_scalar_if_temporary(context, builder, rt, expr, &scalar);
+        crate::object_release::release_if_produced(context, builder, module, expr, &scalar);
+        item
+    };
+    let key_item = pack(key, "objcomp_key");
+    let value_item = pack(value, "objcomp_value");
+    let collect = shim_fn(
+        module,
+        EXT_OBJ_COLLECT_PAIR_SYMBOL,
+        context
+            .i32_type()
+            .fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
+    );
+    let status = builder
+        .build_call(
+            collect,
+            &[dict.into(), key_item.into(), value_item.into()],
+            "objcomp_collect_pair",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_collect_pair")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_collect_pair returns int")
+        .into_int_value();
+    route_negative(
+        context,
+        builder,
+        module,
+        rt,
+        edge,
+        status,
+        "objcomp_collect_pair",
     );
 }

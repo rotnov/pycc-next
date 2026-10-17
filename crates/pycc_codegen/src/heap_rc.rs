@@ -165,6 +165,8 @@ pub(crate) fn heap_kind(rt: &RtFns<'_>, ty: &Ty) -> Option<HeapKind> {
         Ty::Instance(class) if rt.exception_classes.borrow().contains(class.as_str()) => {
             Some(HeapKind::Exception)
         }
+        // A pointer-represented `T | None` is a `T` pointer that may be null.
+        Ty::Optional(inner) if pycc_hir::is_pointer_optional_inner(inner) => heap_kind(rt, inner),
         _ => None,
     }
 }
@@ -191,6 +193,14 @@ fn reads_storage(expr: &MirExpr) -> bool {
         // (`str_truthy::emit_string_literal`), which nothing frees.
         MirExpr::StringLiteral(_) => true,
         MirExpr::AttrGet { base, .. } | MirExpr::Subscript { base, .. } => is_borrowed_read(base),
+        // Wrapping into, or unwrapping out of, a pointer-represented
+        // `T | None` is the same pointer.
+        MirExpr::OptionalWrap(value, _) | MirExpr::OptionalUnwrap(value, _)
+            if crate::scalar::pointer_optional_inner(&value.ty()).is_some()
+                || crate::scalar::pointer_optional_inner(&expr.ty()).is_some() =>
+        {
+            is_borrowed_read(value)
+        }
         _ => false,
     }
 }

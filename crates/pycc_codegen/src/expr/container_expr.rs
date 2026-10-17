@@ -99,6 +99,7 @@ pub(crate) fn emit_subscript_expr<'ctx>(
             let element = containers::tuple_element(
                 context,
                 builder,
+                rt,
                 &elements,
                 Scalar::List(tuple_ptr),
                 *literal_index as u64,
@@ -173,7 +174,7 @@ pub(crate) fn emit_subscript_expr<'ctx>(
             let raw_index = list::raw_index(context, builder, rt, index_scalar);
             let word = list::build_list_get(context, builder, rt, &expr.ty(), base_ptr, raw_index);
             heap_rc::truncate_pending(rt, mark);
-            let element = list::word_element(context, builder, &expr.ty(), word);
+            let element = list::word_element(context, builder, rt, &expr.ty(), word);
             // As for `AttrGet`: an element of a fresh list is
             // retained before the list is released.
             if !heap_rc::is_borrowed_read(base) {
@@ -333,6 +334,14 @@ pub(crate) fn emit_dict_get_expr<'ctx>(
     let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
     heap_rc::truncate_pending(rt, mark);
     let (key_ty, value_ty) = containers::dict_kv(&dict_ty);
+    // A `float` key of an `int`-keyed dict finds the equal `int` key.
+    if let Some((word, converted)) = num_key_of_int_dict(context, builder, rt, &key_ty, key, key_scalar) {
+        let value_word = call_word(builder, rt.num.dict_get_key, &[dict_ptr.into(), word.into()]);
+        crate::num::release_converted(context, builder, rt, &[converted]);
+        release_scalar_if_temporary(context, builder, rt, key, &key_scalar);
+        release_scalar_if_temporary(context, builder, rt, dict, &Scalar::Dict(dict_ptr));
+        return containers::owned_word_element(context, builder, rt, &value_ty, value_word);
+    }
     let (key_word, boxed) = containers::lookup_word(context, builder, rt, &key_ty, key_scalar);
     let value_word = builder
         .build_call(rt.dict_get, &[dict_ptr.into(), key_word.into()], "dict_get")
@@ -775,9 +784,20 @@ pub(crate) fn emit_dict_get_or_default_expr<'ctx>(
     // The runtime adopts the default's reference.
     let default_word = list::element_word(context, builder, rt, &value_ty, default, default_scalar);
     // After the default's ingress check, which may raise: a key converted
-    // to an `int | float` word is released after the lookup only.
-    let (key_word, boxed) = containers::lookup_word(context, builder, rt, &key_ty, key_scalar);
-    let value_word = build_dict_get_or_default(builder, rt, dict_ptr, key_word, default_word);
+    // to an `int | float` word is released after the lookup only. A
+    // `float` key of an `int`-keyed dict finds the equal `int` key.
+    let (value_word, boxed) = match num_key_of_int_dict(context, builder, rt, &key_ty, key, key_scalar) {
+        Some((word, converted)) => {
+            let args = [dict_ptr.into(), word.into(), default_word.into()];
+            let value_word = call_word(builder, rt.num.dict_get_or_default_key, &args);
+            crate::num::release_converted(context, builder, rt, &[converted]);
+            (value_word, None)
+        }
+        None => {
+            let (key_word, boxed) = containers::lookup_word(context, builder, rt, &key_ty, key_scalar);
+            (build_dict_get_or_default(builder, rt, dict_ptr, key_word, default_word), boxed)
+        }
+    };
     containers::release_boxed(context, builder, rt, boxed);
     release_scalar_if_temporary(context, builder, rt, key, &key_scalar);
     release_dict_receiver(context, builder, rt, receiver);
@@ -880,4 +900,33 @@ pub(crate) fn emit_frozen_set_from_expr<'ctx>(
         source.as_deref(),
         &elem,
     )
+}
+
+/// The `int | float` word of a `float` (or `int | float`) `key` looking up
+/// an `int`-keyed dict, and the word converted for it that the caller
+/// releases after the call; `None` for any other key.
+fn num_key_of_int_dict<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    key_ty: &Ty,
+    key: &MirExpr,
+    key_scalar: Scalar<'ctx>,
+) -> Option<(IntValue<'ctx>, Option<IntValue<'ctx>>)> {
+    (*key_ty == Ty::Int && matches!(key.ty(), Ty::Float | Ty::Num))
+        .then(|| crate::num::operand_word(context, builder, rt, key_scalar))
+}
+
+/// One call of a runtime function returning a word.
+fn call_word<'ctx>(
+    builder: &inkwell::builder::Builder<'ctx>,
+    function: inkwell::values::FunctionValue<'ctx>,
+    args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
+) -> IntValue<'ctx> {
+    builder
+        .build_call(function, args, "dict_num_key")
+        .expect("build_call should not fail for a declared runtime function")
+        .try_as_basic_value()
+        .expect_basic("the lookup returns a word")
+        .into_int_value()
 }

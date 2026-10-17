@@ -39,6 +39,13 @@ pub(crate) fn compare_link_ty(
     {
         return Ok(Ty::Bool);
     }
+    // `opt == v` / `opt != v` of an `Optional[T]` and a `T` (or two
+    // `Optional[T]`s): equal when both are `None`, or both hold values that
+    // compare equal (`pycc_codegen::optional_compare`). A class instance
+    // `T` is left out: its own `__eq__` would have to see the `None`.
+    if matches!(op, CmpOp::Eq | CmpOp::NotEq) && optional_equality(left_ty, right_ty) {
+        return Ok(Ty::Bool);
+    }
     if matches!(op, CmpOp::Is | CmpOp::IsNot) {
         // #1476: identity is the object's own, so a narrowed `object` name
         // is typed as the object it still is, never its narrowed native
@@ -91,14 +98,22 @@ pub(crate) fn compare_link_ty(
             Ty::Int | Ty::Float | Ty::Bool | Ty::Str if crate::non_strict::is_non_strict() => {
                 Ok(Ty::Bool)
             }
-            other => Err(Diagnostic::error(
+            other => Err({
+                // A name tested against `None` that is bound to `None`
+                // elsewhere (`while cur is not None:` ... `cur = None`) is
+                // `T | None` (`crate::num_widen` retries the check).
+                let operand = if matches!(left, HirExpr::NoneLiteral) { right } else { left };
+                if let HirExpr::Name(name) = operand {
+                    crate::num_widen::request(name, &Ty::None, other);
+                }
+                Diagnostic::error(
                 "T0021",
                 format!(
                     "cannot compare `{}` and `None` with `is`/`is not` -- only an `Optional[T]` (or `None`) operand is supported",
                     other.name()
                 ),
                 Span::new(0, 0),
-            )),
+            )}),
         };
     }
     // Part 2b of #1371: membership answers for every pair, so a native
@@ -334,14 +349,14 @@ fn container_compare_ty(op: CmpOp, left: &Ty, right: &Ty) -> Option<Result<Ty, D
             Span::new(0, 0),
         ))
     };
-    if left != right {
+    if left != right && !numerically_alike(left, right) {
         return Some(refuse());
     }
     // The runtime compares elements by value (`pycc_rt::value`): a
     // user-class instance element needs its own `__eq__`/`__hash__`, and an
     // instance set is a different runtime object (`int_set.rs`) that the
     // value routines must never read as a hash table.
-    if !pycc_hir::builtins::value_comparable(left) {
+    if !pycc_hir::builtins::value_comparable(left) || !pycc_hir::builtins::value_comparable(right) {
         return Some(Err(Diagnostic::error(
             "T0021",
             format!(
@@ -357,15 +372,54 @@ fn container_compare_ty(op: CmpOp, left: &Ty, right: &Ty) -> Option<Result<Ty, D
     }
     // Set ordering is inclusion (`a <= b` is `a.issubset(b)`).
     let inclusion = matches!(left, Ty::Set(e) | Ty::FrozenSet(e) if pycc_hir::is_hashable_ty(e));
-    Some(if ordered(left) || inclusion { Ok(Ty::Bool) } else { refuse() })
+    Some(if (ordered(left) && ordered(right)) || inclusion { Ok(Ty::Bool) } else { refuse() })
 }
 
 /// Whether `<` is defined between two values of `ty`.
+/// Whether two different sequence types compare as CPython compares them
+/// with no `TypeError`: lists (or tuples) whose elements are pairwise of
+/// one type or both numbers (`[1, 2] == [1.0, 2.0]`), tuples of any
+/// arities so (`(1, 2.5) < (1.0, 3, 0)`; the runtime compares items by
+/// their own kinds, the shorter tuple first when a prefix is equal).
+fn numerically_alike(left: &Ty, right: &Ty) -> bool {
+    let number = |ty: &Ty| matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num);
+    let item = |a: &Ty, b: &Ty| a == b || (number(a) && number(b)) || numerically_alike(a, b);
+    match (left, right) {
+        (Ty::List(a), Ty::List(b)) | (Ty::VarTuple(a), Ty::VarTuple(b)) => item(a, b),
+        (Ty::Tuple(xs), Ty::Tuple(ys)) => xs.iter().zip(ys.iter()).all(|(a, b)| item(a, b)),
+        (Ty::Tuple(xs), Ty::VarTuple(e)) | (Ty::VarTuple(e), Ty::Tuple(xs)) => {
+            xs.iter().all(|a| item(a, e))
+        }
+        _ => false,
+    }
+}
+
 fn ordered(ty: &Ty) -> bool {
     match ty {
-        Ty::Int | Ty::Bool | Ty::Float | Ty::Str => true,
+        Ty::Int | Ty::Bool | Ty::Float | Ty::Num | Ty::Str => true,
         Ty::List(elem) | Ty::VarTuple(elem) => ordered(elem),
         Ty::Tuple(elements) => elements.iter().all(ordered),
         _ => false,
     }
+}
+
+/// Whether `left == right` is an equality of an `Optional[T]` with a `T`
+/// or another `Optional[T]` the runtime compares natively (see
+/// [`compare_link_ty`]): `T` a number, `str` or a container of those.
+fn optional_equality(left: &Ty, right: &Ty) -> bool {
+    let unwrap = |ty: &Ty| match ty {
+        Ty::Optional(inner) => ((**inner).clone(), true),
+        other => (other.clone(), false),
+    };
+    let ((l, l_optional), (r, r_optional)) = (unwrap(left), unwrap(right));
+    let number = |ty: &Ty| matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num);
+    let native = |ty: &Ty| {
+        number(ty)
+            || *ty == Ty::Str
+            || (matches!(
+                ty,
+                Ty::List(_) | Ty::VarTuple(_) | Ty::Tuple(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_)
+            ) && pycc_hir::builtins::value_comparable(ty))
+    };
+    (l_optional || r_optional) && native(&l) && native(&r) && (l == r || (number(&l) && number(&r)))
 }

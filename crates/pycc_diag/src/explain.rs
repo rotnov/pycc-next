@@ -1009,36 +1009,27 @@ if (n := 5) > 0:  # OK -- int is a supported walrus value
         summary: "int literal out of range for a runtime int-boundary position (D-061 tagged smallint)",
         explanation: "\
 T0051 fires when an `int` literal written directly in one of the compiler's \
-13 named runtime `int`-boundary positions -- a list/set/dict literal \
-element or value, `list.append()`/`dict.get()` default/`set.add()`'s \
-argument, a list index, a slice bound, a \
-listcomp/setcomp element or dictcomp value, a subscript-assignment \
-value (`name[key] = <literal>`), or a `str` repeat count -- is too large to fit D-061's 63-bit tagged \
-smallint representation. D-178 (issue #148) made an out-of-range `int` \
-literal materialize as a heap bigint at compile time everywhere else, but \
-each of these 13 positions calls a runtime helper \
-(`pycc_rt_int_untag_checked`) that only accepts a tagged smallint and \
-raises `OverflowError` or `IndexError` at run time if it receives a \
-bigint. Without this diagnostic `pycc check` could not see this \
-coming: the literal type-checked fine, and the program only failed once \
-run. T0051 restores `pycc check` as the catch point for the literal case, \
-with a diagnostic spanning exactly the out-of-range literal. A `range()` \
-argument is deliberately NOT one of these positions: D-179 already made \
-`range()` fully bigint-capable in its bounds, step, and a mid-loop-promoting \
-induction variable, so an out-of-range literal there is ordinary supported \
-behavior, not a boundary failure. A bigint value \
-reaching one of the 13 positions through *arithmetic* (not a literal) is \
-unaffected and raises at run time. The `str`-repeat-count \
-position is narrower still: it is recognized only when the string side of \
-the multiplication is itself a string literal (`\"ab\" * <huge int>`); a \
-`str`-typed *variable* multiplied by an oversized literal is a documented, \
-out-of-scope gap because identifying it needs type information HIR \
-lowering does not have.",
+runtime `int`-boundary positions -- a list index, a slice bound, or a `str` \
+repeat count -- is too large to fit D-061's 63-bit tagged smallint \
+representation. D-178 (issue #148) made an out-of-range `int` literal \
+materialize as a heap bigint at compile time everywhere else, but each of \
+these positions calls a runtime helper (`pycc_rt_int_untag_checked`) that \
+only accepts a tagged smallint and raises `OverflowError` or `IndexError` \
+at run time if it receives a bigint. T0051 makes `pycc check` the catch \
+point for the literal case, with a diagnostic spanning exactly the \
+out-of-range literal. Container elements are not boundary positions: since \
+v0.6 a list, dict or set holds a big `int` as it is. Nor is a `range()` \
+argument: D-179 made `range()` fully bigint-capable in its bounds, step, \
+and a mid-loop-promoting induction variable. A bigint value reaching one of \
+the positions through *arithmetic* (not a literal) is unaffected and raises \
+at run time. The `str`-repeat-count position is narrower still: it is \
+recognized only when the string side of the multiplication is itself a \
+string literal (`\"ab\" * <huge int>`); a `str`-typed *variable* multiplied \
+by an oversized literal is a documented, out-of-scope gap because \
+identifying it needs type information HIR lowering does not have.",
         example: "\
-xs = [4611686018427387904]  # T0051 -- out of range for a list-literal element
-
-xs = [1]
-xs.append(4611686018427387904)  # T0051 -- out of range for `list.append()`'s value
+xs = [4611686018427387904]  # OK -- a list holds a big int
+xs.append(4611686018427387904)  # OK
 
 xs = [1, 2, 3]
 y = xs[4611686018427387904]  # T0051 -- out of range for a list index

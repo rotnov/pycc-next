@@ -471,9 +471,6 @@ pub extern "C" fn pycc_rt_int_from_i64(v: i64) -> i64 {
     encode_i128(i128::from(v))
 }
 
-/// [`int_untag_checked`]'s `use_kind`: the word is stored as a container
-/// element.
-pub const UNTAG_ELEMENT: i32 = 0;
 /// [`int_untag_checked`]'s `use_kind`: the word indexes a sequence.
 pub const UNTAG_INDEX: i32 = 1;
 /// [`int_untag_checked`]'s `use_kind`: the word is a size, count or slice
@@ -485,8 +482,7 @@ pub const UNTAG_SIZE: i32 = 2;
 /// heap bigint raises (D-173) and yields the sentinel `0`, which generated
 /// code never consumes: it checks the pending flag right after this call.
 /// An index raises CPython's own `IndexError`; a size or count CPython's
-/// `OverflowError`; a container element, which CPython would store, the
-/// recorded `OverflowError` gap (`docs/DEVIATIONS.md`). Raising rather than
+/// `OverflowError`. Raising rather than
 /// aborting matters for an `--ext` module, whose callers pass ints of any
 /// size: an abort would kill the host interpreter.
 pub(crate) fn int_untag_checked(tagged: i64, use_kind: i32) -> i64 {
@@ -499,15 +495,10 @@ pub(crate) fn int_untag_checked(tagged: i64, use_kind: i32) -> i64 {
             "IndexError",
             "cannot fit 'int' into an index-sized integer",
         ),
-        UNTAG_SIZE => (
-            EXCEPTION_TYPE_OVERFLOW_ERROR,
-            "OverflowError",
-            "cannot fit 'int' into an index-sized integer",
-        ),
         _ => (
             EXCEPTION_TYPE_OVERFLOW_ERROR,
             "OverflowError",
-            "storing a bigint-valued `int` in a container is not supported yet",
+            "cannot fit 'int' into an index-sized integer",
         ),
     };
     raise_builtin(tag, name, message);
@@ -897,13 +888,6 @@ mod tests {
         assert_raises(EXCEPTION_TYPE_OVERFLOW_ERROR, fit, || {
             int_untag_checked(p, UNTAG_SIZE);
         });
-        assert_raises(
-            EXCEPTION_TYPE_OVERFLOW_ERROR,
-            "storing a bigint-valued `int` in a container is not supported yet",
-            || {
-                int_untag_checked(p, UNTAG_ELEMENT);
-            },
-        );
     }
 
     #[test]

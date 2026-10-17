@@ -459,6 +459,11 @@ pub(crate) fn ty_to_basic_type(
         // guaranteed to never be a legitimate `int` value, so no sentinel is
         // safe. An explicit flag is therefore correct where `Optional[int]`
         // would otherwise be described as "niche-optimized."
+        // A pointer-represented `T | None` is the bare pointer, null for
+        // `None` ([`pointer_optional_inner`]).
+        pycc_mir::Ty::Optional(inner) if pycc_hir::is_pointer_optional_inner(&inner) => {
+            ty_to_basic_type(context, *inner)
+        }
         pycc_mir::Ty::Optional(inner) => {
             let payload_ty = ty_to_basic_type(context, (*inner).clone());
             context
@@ -571,6 +576,9 @@ pub(crate) fn default_value_for_type<'ctx>(
         // explicitly rather than reading a D-141-encoded int), so a plain
         // per-type zero from `default_value_for_type` itself is a valid
         // placeholder for them.
+        pycc_mir::Ty::Optional(ref inner) if pycc_hir::is_pointer_optional_inner(inner) => {
+            context.ptr_type(inkwell::AddressSpace::default()).const_null().into()
+        }
         pycc_mir::Ty::Optional(ref inner) => {
             let struct_ty = ty_to_basic_type(context, ty.clone()).into_struct_type();
             let payload = match inner.as_ref() {
@@ -589,5 +597,33 @@ pub(crate) fn default_value_for_type<'ctx>(
         pycc_mir::Ty::None | pycc_mir::Ty::Infer | pycc_mir::Ty::Param(_) => {
             context.i8_type().const_zero().into()
         }
+    }
+}
+
+/// The `T` of a `T | None` held as the bare `T` pointer, null for `None`
+/// (`pycc_hir::is_pointer_optional_inner`): a value of such a type is the
+/// `Scalar` of `T` itself, and every reference-counting path treats it as a
+/// `T` whose pointer may be null (each `incref`/`decref` is null-safe).
+pub(crate) fn pointer_optional_inner(ty: &pycc_mir::Ty) -> Option<&pycc_mir::Ty> {
+    match ty {
+        pycc_mir::Ty::Optional(inner) if pycc_hir::is_pointer_optional_inner(inner) => Some(inner),
+        _ => None,
+    }
+}
+
+/// The pointer a pointer-valued `scalar` holds (a `str`, a list or tuple
+/// object, a dict, a set, an instance, a CPython object, a closure or a
+/// generator), or `None` for a value scalar.
+pub(crate) fn scalar_pointer<'ctx>(scalar: &Scalar<'ctx>) -> Option<inkwell::values::PointerValue<'ctx>> {
+    match scalar {
+        Scalar::Str(p)
+        | Scalar::List(p)
+        | Scalar::Dict(p)
+        | Scalar::Set(p)
+        | Scalar::Instance(p)
+        | Scalar::Object(p)
+        | Scalar::Closure(p)
+        | Scalar::Generator(p) => Some(*p),
+        _ => None,
     }
 }

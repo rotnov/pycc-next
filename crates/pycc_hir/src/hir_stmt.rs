@@ -409,6 +409,22 @@ pub enum NoneTestPolarity {
 /// re-derives which side is which, and answers `None` for any other shape,
 /// rather than assuming an operand order or a `None` side.
 pub fn optional_none_test(test: &HirExpr) -> Option<(&str, NoneTestPolarity)> {
+    // A truth test of the name (`if x:` / `if not x:`): a true `x` is not
+    // `None`, so `x` narrows where it is true, as `x is not None` does
+    // (and `not x` narrows the other way, as `x is None` does).
+    match test {
+        HirExpr::Name(name) => return Some((name.as_str(), NoneTestPolarity::IsNot)),
+        HirExpr::UnaryOp {
+            op: crate::UnaryOpKind::Not,
+            operand,
+        } => {
+            return match operand.as_ref() {
+                HirExpr::Name(name) => Some((name.as_str(), NoneTestPolarity::Is)),
+                _ => None,
+            };
+        }
+        _ => {}
+    }
     let HirExpr::Compare { op, left, right } = test else {
         return None;
     };

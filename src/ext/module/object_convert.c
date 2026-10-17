@@ -18,6 +18,9 @@ PyObject *pycc_ext_obj_new_collection(long long kind)
     if (kind == 1) {
         return PySet_New(NULL);
     }
+    if (kind == 2) {
+        return PyDict_New();
+    }
     PyErr_SetString(PyExc_SystemError,
                     "pycc_ext_obj_new_collection called with an unknown kind");
     return NULL;
@@ -57,6 +60,42 @@ int pycc_ext_obj_collect(PyObject *collection, long long kind, PyObject *item)
     }
     status = kind == 0 ? PyList_Append(collection, item) : PySet_Add(collection, item);
     Py_DECREF(item);
+    return status < 0 ? -1 : 0;
+}
+
+/*
+ * Non-strict mode: one step of a dict comprehension with a CPython object
+ * key or value (`EXT_OBJ_COLLECT_PAIR_SYMBOL` in
+ * `crates/pycc_codegen/src/ext.rs`). `dict` is borrowed and was built by
+ * `pycc_ext_obj_new_collection(2)`.
+ *
+ * `key` and `value` are *packed*, new references, consumed on every path as
+ * `pycc_ext_obj_collect` consumes its item; a `NULL` one is a packer that
+ * already set the exception. `PyDict_SetItem` takes its own references and
+ * raises `TypeError` for an unhashable key, as CPython's own dict
+ * comprehension does.
+ *
+ * Returns `0`, or `-1` with the exception set.
+ */
+int pycc_ext_obj_collect_pair(PyObject *dict, PyObject *key, PyObject *value)
+{
+    int status;
+
+    if (key == NULL || value == NULL) {
+        Py_XDECREF(key);
+        Py_XDECREF(value);
+        return -1;
+    }
+    if (dict == NULL || !PyDict_Check(dict)) {
+        Py_DECREF(key);
+        Py_DECREF(value);
+        PyErr_SetString(PyExc_SystemError,
+                        "pycc_ext_obj_collect_pair called with an invalid dict");
+        return -1;
+    }
+    status = PyDict_SetItem(dict, key, value);
+    Py_DECREF(key);
+    Py_DECREF(value);
     return status < 0 ? -1 : 0;
 }
 

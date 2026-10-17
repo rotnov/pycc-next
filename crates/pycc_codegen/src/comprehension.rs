@@ -78,6 +78,10 @@ pub(super) enum CompElts<'a> {
     /// source (`MirComprehension::collects_objects`), producing the CPython
     /// collection (`object_comprehension::collect_object`).
     Objects(&'a MirExpr, super::ObjCollectionKind),
+    /// Non-strict mode: a dict with a CPython object key or value over a
+    /// native source, producing the CPython dict
+    /// (`object_comprehension::collect_object_pair`).
+    ObjectDict(&'a MirExpr, &'a MirExpr),
 }
 
 impl CompElts<'_> {
@@ -87,7 +91,7 @@ impl CompElts<'_> {
             CompElts::List(_) => ("listcomp", "list"),
             CompElts::Set(..) => ("setcomp", "set"),
             CompElts::Dict(..) => ("dictcomp", "dict"),
-            CompElts::Objects(..) => ("objcomp", "object"),
+            CompElts::Objects(..) | CompElts::ObjectDict(..) => ("objcomp", "object"),
         }
     }
 }
@@ -154,6 +158,12 @@ pub(super) fn emit_comprehension<'ctx>(
             held_collection = Some(held);
             collection
         }
+        CompElts::ObjectDict(..) => {
+            let (collection, held) =
+                super::object_comprehension::new_object_collection(cx, super::ObjCollectionKind::Dict);
+            held_collection = Some(held);
+            collection
+        }
         // An unfiltered comprehension over a named list appends one element
         // per item: room for them all from the start (the name is read
         // again by the loop; reading it has no effect).
@@ -217,7 +227,15 @@ pub(super) fn emit_comprehension<'ctx>(
             // its truth test and released after it (Part 1 of #1092).
             let held =
                 crate::object_release::hold(cx.context, cx.module, cx.rt, cond_expr, &cond_scalar);
-            let cond_i1 = truthy(cx.context, cx.builder, cx.module, cx.rt, cond_scalar);
+            let cond_i1 = crate::optional_ptr::truthy(
+                cx.context,
+                cx.builder,
+                cx.module,
+                cx.rt,
+                &cond_expr.ty(),
+                cond_scalar,
+            )
+            .unwrap_or_else(|| truthy(cx.context, cx.builder, cx.module, cx.rt, cond_scalar));
             held.release(cx.builder, cx.rt);
             // #146 Part 2 (D-181): released after `truthy`, which reads a
             // bigint operand's limbs.
@@ -255,7 +273,7 @@ pub(super) fn emit_comprehension<'ctx>(
         CompElts::List(_) => Scalar::List(container),
         CompElts::Set(..) => Scalar::Set(container),
         CompElts::Dict(..) => Scalar::Dict(container),
-        CompElts::Objects(..) => {
+        CompElts::Objects(..) | CompElts::ObjectDict(..) => {
             // The result is the node's value, a producer its consumer
             // releases or binds (`object_release::is_produced`).
             if let Some(held) = held_collection {
@@ -321,6 +339,7 @@ pub(super) fn emit_comprehension_expr<'ctx>(
         MirCompElt::Set(elt, None) if comp.collects_objects() => {
             CompElts::Objects(elt, super::ObjCollectionKind::Set)
         }
+        MirCompElt::Dict { key, value } if comp.collects_objects() => CompElts::ObjectDict(key, value),
         MirCompElt::List(elt) => CompElts::List(elt),
         MirCompElt::Set(elt, ops) => CompElts::Set(elt, ops.as_deref()),
         MirCompElt::Dict { key, value } => CompElts::Dict(key, value),
@@ -389,6 +408,9 @@ fn emit_element<'ctx>(cx: &CompCx<'_, 'ctx>, container: PointerValue<'ctx>, elts
     match elts {
         CompElts::Objects(elt, kind) => {
             super::object_comprehension::collect_object(cx, container, kind, elt);
+        }
+        CompElts::ObjectDict(key, value) => {
+            super::object_comprehension::collect_object_pair(cx, container, key, value);
         }
         CompElts::Set(elt, Some(ops)) => {
             let emitter = SetEmitter {
@@ -566,7 +588,7 @@ fn open_loop<'ctx>(
                 list::build_list_len(context, b, list_ptr)
             });
             let word = list::build_list_get_unchecked(context, builder, var_ty, list_ptr, current);
-            let element = list::word_element(context, builder, var_ty, word);
+            let element = list::word_element(context, builder, rt, var_ty, word);
             // A borrowed element: the loop variable owns its own reference,
             // as `MirStmt::ForList`'s does.
             bind_borrowed(cx, var, var_ty, element);
@@ -606,7 +628,7 @@ fn open_loop<'ctx>(
                 .try_as_basic_value()
                 .expect_basic("pycc_rt_dict_key_at returns a non-void i64")
                 .into_int_value();
-            let element = list::word_element(context, builder, var_ty, key_word);
+            let element = list::word_element(context, builder, rt, var_ty, key_word);
             bind_borrowed(cx, var, var_ty, element);
             lp
         }
@@ -632,7 +654,7 @@ fn open_loop<'ctx>(
                 build_int_set_len(b, rt, set_ptr)
             });
             let encoded_element = build_int_set_get(builder, rt, set_ptr, current);
-            let element = set_element_scalar(context, builder, var_ty, encoded_element);
+            let element = set_element_scalar(context, builder, rt, var_ty, encoded_element);
             bind_borrowed(cx, var, var_ty, element);
             lp
         }

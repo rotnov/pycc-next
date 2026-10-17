@@ -43,7 +43,18 @@ pub(super) fn lower_for_list(
     // `HirExpr::Subscript` arm doing the same list/dict routing for
     // reads (subscripting a set is rejected earlier, by
     // `pycc_types`' own T0033, so there is no set counterpart there).
-    match lookup(scopes, list) {
+    // A narrowed pointer-represented `T | None` iterates as its `T` (the
+    // slot already holds the `T` pointer).
+    let list_ty = match lookup(scopes, list) {
+        Ty::Optional(inner)
+            if pycc_hir::is_pointer_optional_inner(&inner)
+                && crate::narrowed_ty(scopes, list).is_some() =>
+        {
+            *inner
+        }
+        other => other,
+    };
+    match list_ty {
         Ty::List(elem_ty) | Ty::VarTuple(elem_ty) => {
             bind_variable(scopes, var.clone(), (*elem_ty).clone());
             // D-068 re-review of #780 (sixth round): see the

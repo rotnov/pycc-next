@@ -15,6 +15,16 @@ pub(crate) fn lower_list_literal_expr(
         .iter()
         .map(|e| lower_expr(e, scopes, classes, current_class))
         .collect();
+    // `["a", None]`: a `T | None` list, natively -- in strict mode; a
+    // non-strict program builds such a display as the CPython list, as
+    // `pycc_types` types it there.
+    let elements = if pycc_hir::is_non_strict_program()
+        && super::super::obj_arith::is_object_display(pycc_hir::DisplayKind::List, &elements)
+    {
+        elements
+    } else {
+        optional_wrapped(elements)
+    };
     // Non-strict mode (#3): an object element makes it a CPython list.
     if super::super::obj_arith::is_object_display(pycc_hir::DisplayKind::List, &elements) {
         return MirExpr::ObjList {
@@ -25,6 +35,37 @@ pub(crate) fn lower_list_literal_expr(
         };
     }
     MirExpr::ListLiteral(num_wrapped(elements))
+}
+
+/// `["a", None]`: when the elements' types join to `T | None`, every `T`
+/// element (and `None`) is wrapped as a `T | None` value; otherwise they
+/// are returned unchanged.
+fn optional_wrapped(elements: Vec<MirExpr>) -> Vec<MirExpr> {
+    let joined = elements
+        .iter()
+        .skip(1)
+        .try_fold(elements.first().map(MirExpr::ty), |joined, element| {
+            let joined = joined?;
+            if joined == element.ty() {
+                Some(Some(joined))
+            } else {
+                pycc_hir::optional_element_join(&joined, &element.ty()).map(Some)
+            }
+        })
+        .flatten();
+    let Some(Ty::Optional(inner)) = joined else {
+        return elements;
+    };
+    elements
+        .into_iter()
+        .map(|element| {
+            if matches!(element.ty(), Ty::Optional(_)) {
+                element
+            } else {
+                MirExpr::OptionalWrap(Box::new(element), inner.clone())
+            }
+        })
+        .collect()
 }
 
 /// `[1, 2.5]`: when the elements' types join to `int | float`, every
@@ -183,6 +224,18 @@ pub(crate) fn lower_dict_literal_expr(
             )
         })
         .collect();
+    // `{1: "a", 2: None}`: the values of a `T | None`-valued dict, in
+    // strict mode (a non-strict program builds the CPython dict, as
+    // `pycc_types` types it there).
+    let tys: Vec<Ty> = pairs.iter().flat_map(|(k, v)| [k.ty(), v.ty()]).collect();
+    let pairs = if pycc_hir::is_non_strict_program()
+        && pycc_hir::display_is_object(pycc_hir::DisplayKind::Dict, &tys)
+    {
+        pairs
+    } else {
+        let (keys, values): (Vec<MirExpr>, Vec<MirExpr>) = pairs.into_iter().unzip();
+        keys.into_iter().zip(optional_wrapped(values)).collect()
+    };
     // Non-strict mode (#3): an object key or value makes it a CPython dict.
     let tys: Vec<Ty> = pairs.iter().flat_map(|(k, v)| [k.ty(), v.ty()]).collect();
     if pycc_hir::display_is_object(pycc_hir::DisplayKind::Dict, &tys) {
@@ -191,9 +244,10 @@ pub(crate) fn lower_dict_literal_expr(
             pairs.into_iter().flat_map(|(k, v)| [k, v]).collect(),
         );
     }
-    // `{1: 1.5, 2: 3}`: the values of an `int | float`-valued dict.
+    // `{1: 1.5, 2: 3}`, `{1.5: "a", 2: "b"}`: the values (or keys) of an
+    // `int | float`-valued (or -keyed) dict.
     let (keys, values): (Vec<MirExpr>, Vec<MirExpr>) = pairs.into_iter().unzip();
-    MirExpr::DictLiteral(keys.into_iter().zip(num_wrapped(values)).collect())
+    MirExpr::DictLiteral(num_wrapped(keys).into_iter().zip(num_wrapped(values)).collect())
 }
 
 pub(crate) fn lower_set_literal_expr(
@@ -212,6 +266,8 @@ pub(crate) fn lower_set_literal_expr(
     if super::super::obj_arith::is_object_display(pycc_hir::DisplayKind::Set, &elements) {
         return super::super::obj_arith::object_display(crate::ObjDisplayKind::Set, elements);
     }
+    // `{1, 2.5}`: the elements of a set of `int | float`.
+    let elements = num_wrapped(elements);
     // #1343: the first element's type is the literal's, as
     // `MirExpr::ty` derives it.
     let ops = elements

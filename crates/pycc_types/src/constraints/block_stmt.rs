@@ -412,7 +412,7 @@ pub(super) fn collect_stmt_constraints(
                 .cloned()
                 .collect();
             // #1476: an `isinstance` guard narrows the branch it admits.
-            let narrowing = object_narrow::branch_target(signatures, env, test);
+            let narrowing = object_narrow::branch_target(signatures, env, test, parents, concrete);
             let mut body_env = env.clone();
             let mut orelse_env = env.clone();
             if let Some((name, inner, narrows_body)) = narrowing {

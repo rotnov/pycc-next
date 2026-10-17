@@ -383,7 +383,7 @@ fn retain_if_int_duplicate_reporting<'ctx>(
             // `if let Scalar::Int` has already established that this
             // element is an `int` word, so a `Ty::Float`/`Ty::Bool` tuple
             // field never reaches here at all.
-            MirExpr::Subscript { base, .. } => matches!(base.ty(), pycc_mir::Ty::Tuple(_)),
+            MirExpr::Subscript { base, .. } => subscript_is_borrowed(base),
             // Issue #769 (Part 2 of #747): same borrowed-read shape as
             // `Name { ty: Ty::Int, .. }` immediately above -- see
             // `int_value_is_a_duplicate_reference`'s own `OptionalUnwrap`
@@ -456,6 +456,20 @@ pub(super) fn retain_if_int_duplicate_and_track_for_exception_edge<'ctx>(
     scalar
 }
 
+/// Whether an `int` element read `base[i]` borrows the word its container
+/// keeps owning. A struct tuple's field is always a borrow (its slot keeps
+/// the field). A list or tuple object element is borrowed exactly when the
+/// container itself is a borrowed read: an element of a fresh container is
+/// retained before the container is released (`emit_subscript_expr`), so it
+/// arrives owned. A container may hold heap bigints (or boxed floats of an
+/// `int | float`), so this decides a real reference.
+fn subscript_is_borrowed(base: &MirExpr) -> bool {
+    match base.ty() {
+        pycc_mir::Ty::Tuple(elements) if !pycc_hir::tuple_is_boxed(&elements) => true,
+        _ => crate::heap_rc::is_borrowed_read(base),
+    }
+}
+
 /// Whether evaluating `expr` yields a word this expression **borrows** from
 /// some other owner, rather than a freshly owned one -- the release-side
 /// mirror of `retain_if_int_duplicate`'s own inline classification (D-181).
@@ -479,15 +493,14 @@ pub(super) fn retain_if_int_duplicate_and_track_for_exception_edge<'ctx>(
 ///   this arm `borrowed` is load-bearing: flipping it to owning would make
 ///   `t[0] + 1` retire the tuple's own ingress reference on a mere read
 ///   and reintroduce the #633 direction-A use-after-free D-181 closed.
-///   The *list* `Subscript` branch is not borrowed: D-141's
-///   container ingress rejects bigints outright, so a list element is
-///   always a smallint the guard filters out anyway.
+///   A *list* (or tuple object) `Subscript` is borrowed when its base is
+///   a borrowed read ([`subscript_is_borrowed`]): a container owns a
+///   reference to each heap bigint it holds.
 ///
 /// Everything else is **owning**, including every other container egress
-/// (`DictGet`, `ListPop`, `DictGetOrDefault`): those all read D-141
-/// container payloads, which by that same ingress rule are never heap
-/// bigints, so classifying them owning emits a release whose inline guard
-/// is statically false in practice and can never free a live word.
+/// (`DictGet`, `ListPop`, `DictGetOrDefault`): the runtime hands each of
+/// those back with a reference of its own (a read retains, a removal
+/// transfers the container's).
 ///
 /// `Call { ty: Int }` is owning **conditionally**, and the premise is worth
 /// stating: a user function's `return` runs `retain_if_int_duplicate` on
@@ -564,7 +577,7 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         // expression is `Ty::Int`, so a `Ty::Float`/`Ty::Bool` tuple field
         // never reaches this arm and testing for it here would be a
         // permanently-false branch.
-        MirExpr::Subscript { base, .. } => matches!(base.ty(), pycc_mir::Ty::Tuple(_)),
+        MirExpr::Subscript { base, .. } => subscript_is_borrowed(base),
         // One combined arm for every remaining variant, including the
         // non-`Ty::Int` `Name`/`AttrGet` reads the two arms above did not
         // claim. Grouped rather than enumerated one-per-line so the whole

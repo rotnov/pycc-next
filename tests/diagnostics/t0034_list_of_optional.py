@@ -1,2 +1,2 @@
-def f(a: list[int | None]) -> int:
+def f(a: list[float | None]) -> int:
     return 1

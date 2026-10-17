@@ -99,31 +99,6 @@ fn assert_clean_value_error(case: &str, source: &str, message: &str) {
     );
 }
 
-/// Asserts the documented D-072 exit-`101` boundary carrying `message`.
-/// `pycc run` (rather than `pycc build` plus a direct exec) is deliberate:
-/// `pycc_rt`'s panic unwinds across an `extern "C"` boundary and becomes a
-/// non-unwinding process abort, so the raw child reports no exit code at
-/// all. The `101` is the driver's own mapping of that abort.
-fn assert_runtime_abort(case: &str, source: &str, message: &str) {
-    let (_dir, src) = write_case(case, source);
-    let run = Command::new(pycc_bin())
-        .args(["run", src.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert_eq!(
-        run.status.code(),
-        Some(101),
-        "{case} should hit the documented exit-101 boundary, got {:?}: {}",
-        run.status.code(),
-        String::from_utf8_lossy(&run.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(
-        stderr.contains(message),
-        "{case} should report {message:?}, got: {stderr}"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Completion criteria 1-2: bigint bounds, steps, and induction variables.
 // ---------------------------------------------------------------------------
@@ -196,17 +171,15 @@ fn a_bigint_valued_zero_step_still_reports_the_zero_step_boundary() {
 }
 
 // ---------------------------------------------------------------------------
-// Still-aborting position: container ingress is deliberately out of scope.
+// Container ingress: since v0.6 a container holds a big `int`.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_comprehension_collecting_a_bigint_loop_variable_still_hits_the_container_boundary() {
-    // `listcomp_validate_elt`, not `range_untag_operand`: #147 removed the
-    // *operand* guard, and D-141's container-value guard (issue #618) stays.
-    assert_runtime_abort(
+fn a_comprehension_collecting_a_bigint_loop_variable_holds_the_bigints() {
+    assert_runs_and_prints(
         "listcomp_bigint_element",
-        &format!("x = [i for i in range({PROMOTED}, 4611686018427387906)]\nprint(len(x))\n"),
-        "OverflowError: storing a bigint-valued `int` in a container is not supported yet",
+        &format!("x = [i for i in range({PROMOTED}, 4611686018427387906)]\nprint(len(x), x[-1])\n"),
+        "2 4611686018427387905\n",
     );
 }
 

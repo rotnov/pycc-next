@@ -130,6 +130,13 @@ pub(super) fn emit_eval_print_arg<'ctx>(
             // (not an `int`), and no conversion yet -- phase 2 converts it.
             return PrintArg::Object(scalar);
         }
+        // A pointer-represented `T | None`: `None` or the value's text.
+        if let Some(text) =
+            crate::optional_ptr::to_str(context, builder, module, rt, &arg.ty(), &scalar)
+        {
+            crate::heap_rc::release_scalar_if_temporary(context, builder, rt, arg, &scalar);
+            return PrintArg::Str(text);
+        }
         if matches!(scalar, Scalar::List(_) | Scalar::Dict(_) | Scalar::Set(_)) {
             return PrintArg::List(scalar, !crate::heap_rc::is_borrowed_read(arg));
         }
@@ -293,6 +300,12 @@ pub(super) fn emit_fstring_interpolation<'ctx>(
         emit_string_literal(context, builder, module, rt, "None")
     } else {
         let scalar = emit_expr(context, builder, module, rt, user_functions, locals, inner);
+        if let Some(text) =
+            crate::optional_ptr::to_str(context, builder, module, rt, &inner.ty(), &scalar)
+        {
+            crate::heap_rc::release_scalar_if_temporary(context, builder, rt, inner, &scalar);
+            return text;
+        }
         let scalar = incref_if_str_duplicate(builder, rt, inner, scalar);
         // #1340: an object part is formatted in place, as CPython formats
         // each interpolation before evaluating the next one, and through

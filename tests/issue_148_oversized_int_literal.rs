@@ -128,37 +128,18 @@ fn assert_compile_time_boundary_rejection(case: &str, source: &str) {
     );
 }
 
+/// A container holds a big `int` (v0.6): no container position is a
+/// boundary, so an oversized literal there matches CPython.
 #[test]
-fn an_oversized_literal_as_a_container_value_is_rejected_at_compile_time() {
-    // `list_validate_element` -- the container-value guard family.
-    assert_compile_time_boundary_rejection(
-        "list_element",
-        &format!("x = [{OVERSIZED}]\nprint(len(x))\n"),
-    );
-}
-
-#[test]
-fn an_oversized_literal_appended_to_a_list_is_rejected_at_compile_time() {
-    assert_compile_time_boundary_rejection(
-        "list_append",
-        &format!("x = [1]\nx.append({OVERSIZED})\nprint(len(x))\n"),
-    );
-}
-
-#[test]
-fn an_oversized_literal_added_to_a_set_is_rejected_at_compile_time() {
-    assert_compile_time_boundary_rejection(
-        "set_add",
-        &format!("x = {{1}}\nx.add({OVERSIZED})\nprint(len(x))\n"),
-    );
-}
-
-#[test]
-fn an_oversized_literal_as_a_comprehension_element_is_rejected_at_compile_time() {
-    assert_compile_time_boundary_rejection(
-        "listcomp_element",
-        &format!("x = [{OVERSIZED} for i in range(2)]\nprint(len(x))\n"),
-    );
+fn an_oversized_literal_in_a_container_matches_cpython() {
+    for (case, source) in [
+        ("list_element", format!("x = [{OVERSIZED}]\nprint(len(x), x)\n")),
+        ("list_append", format!("x = [1]\nx.append({OVERSIZED})\nprint(x)\n")),
+        ("set_add", format!("x = {{1}}\nx.add({OVERSIZED})\nprint(sorted(x))\n")),
+        ("listcomp_element", format!("x = [{OVERSIZED} for i in range(2)]\nprint(x)\n")),
+    ] {
+        assert_matches_cpython(case, &source);
+    }
 }
 
 #[test]

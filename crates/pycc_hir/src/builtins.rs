@@ -22,6 +22,7 @@
 use crate::Ty;
 
 mod byte_buffer;
+mod conversions;
 mod itertools;
 mod methods;
 mod object_calls;
@@ -367,6 +368,7 @@ pub const CALL_NAMES: &[&str] = &[
     "sorted",
     "str",
     "sum",
+    "tuple",
     "zip",
 ];
 
@@ -470,6 +472,9 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             })
             .collect();
         return resolve_call(name, &as_lists);
+    }
+    if let Some(found) = conversions::conversion_call(name, args) {
+        return Some(Ok(found));
     }
     let (int, float, str_) = (Ty::Int, Ty::Float, Ty::Str);
     let found = match (name, args) {
@@ -591,6 +596,13 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             sig("pycc_rt_list_repr", std::slice::from_ref(list), str_)
         }
         ("str", [dict @ Ty::Dict(_)]) => sig("pycc_rt_dict_repr", std::slice::from_ref(dict), str_),
+        // A pointer-represented `T | None`: `"None"` or `str(T)`.
+        ("str", [opt @ Ty::Optional(inner)])
+            if crate::is_pointer_optional_inner(inner) && renders_natively(inner) =>
+        {
+            let inner = (**inner).clone();
+            word_sig("pycc_rt_optional_word_to_str", std::slice::from_ref(opt), &[true], str_, false, &[inner])
+        }
         // `<function f at 0x...>` / `<generator object g at 0x...>`.
         ("str", [f @ Ty::Callable(_)]) => {
             sig("pycc_rt_closure_repr", std::slice::from_ref(f), str_)
@@ -752,10 +764,6 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("reversed", [Ty::List(_)]) => {
             sig("pycc_rt_list_reversed", &[args[0].clone()], args[0].clone())
         }
-        ("list", [Ty::List(_)]) => sig("pycc_rt_list_copy", &[args[0].clone()], args[0].clone()),
-        ("list", [Ty::Str]) => {
-            sig("pycc_rt_str_to_list", std::slice::from_ref(&str_), list_of(str_.clone()))
-        }
         ("sorted", [Ty::Str]) => {
             sig("pycc_rt_str_sorted", std::slice::from_ref(&str_), list_of(str_.clone()))
         }
@@ -771,64 +779,6 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             &[args[0].clone()],
             Ty::Bool,
         ),
-        // Containers of the generic runtime objects (`pycc_rt::set`,
-        // `pycc_rt::dict`, tuple objects).
-        ("set", [Ty::List(elem)]) if crate::is_hashable_ty(elem) => sig(
-            "pycc_rt_set_of_list",
-            &[args[0].clone()],
-            Ty::Set(elem.clone()),
-        ),
-        ("set", [Ty::Str]) => sig(
-            "pycc_rt_set_from_str",
-            std::slice::from_ref(&str_),
-            Ty::Set(Box::new(str_.clone())),
-        ),
-        ("set", [set]) if hashed_set(set).is_some() => sig(
-            "pycc_rt_set_copy",
-            std::slice::from_ref(set),
-            Ty::Set(Box::new(hashed_set(set)?.clone())),
-        ),
-        ("set", [Ty::Dict(kv)]) if crate::is_hashable_ty(&kv.0) => sig(
-            "pycc_rt_set_from_dict",
-            &[args[0].clone()],
-            Ty::Set(Box::new(kv.0.clone())),
-        ),
-        ("list", [set]) if hashed_set(set).is_some() => sig(
-            "pycc_rt_set_list",
-            std::slice::from_ref(set),
-            list_of(hashed_set(set)?.clone()),
-        ),
-        ("list", [Ty::Dict(kv)]) => sig(
-            "pycc_rt_dict_keys",
-            &[args[0].clone()],
-            list_of(kv.0.clone()),
-        ),
-        ("list", [Ty::Tuple(elements)])
-            if !elements.is_empty()
-                && crate::tuple_is_boxed(elements)
-                && elements.iter().all(|e| *e == elements[0]) =>
-        {
-            word_sig(
-                "pycc_rt_tuple_to_list",
-                &[args[0].clone()],
-                &[false],
-                list_of(elements[0].clone()),
-                false,
-                &[elements[0].clone()],
-            )
-        }
-        ("dict", [Ty::List(elem)]) => match elem.as_ref() {
-            Ty::Tuple(pair) if pair.len() == 2 && crate::is_hashable_ty(&pair[0]) => word_sig(
-                "pycc_rt_dict_of_pairs",
-                &[args[0].clone()],
-                &[false],
-                Ty::Dict(Box::new((pair[0].clone(), pair[1].clone()))),
-                false,
-                &[pair[0].clone(), pair[1].clone()],
-            ),
-            _ => return None,
-        },
-        ("dict", [Ty::Dict(_)]) => sig("pycc_rt_dict_copy_of", &[args[0].clone()], args[0].clone()),
         ("sorted", [set]) if hashed_set(set).is_some_and(orderable) => sig(
             "pycc_rt_set_sorted",
             std::slice::from_ref(set),

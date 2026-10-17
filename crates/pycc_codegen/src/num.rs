@@ -38,8 +38,11 @@ pub(crate) struct NumFns<'ctx> {
     pub(crate) round: FunctionValue<'ctx>,
     pub(crate) round_digits: FunctionValue<'ctx>,
     pub(crate) int_round_digits: FunctionValue<'ctx>,
-    pub(crate) check_element: FunctionValue<'ctx>,
     pub(crate) list_contains: FunctionValue<'ctx>,
+    /// `d[x]` / `d.get(x, default)` of an `int`-keyed dict with a `float`
+    /// or `int | float` key (`pycc_rt::dict::num_key`).
+    pub(crate) dict_get_key: FunctionValue<'ctx>,
+    pub(crate) dict_get_or_default_key: FunctionValue<'ctx>,
     /// `llvm.fshl.i64`/`llvm.fshr.i64`: the rotations of the inline
     /// `float` encoding.
     fshl: FunctionValue<'ctx>,
@@ -93,13 +96,17 @@ impl<'ctx> NumFns<'ctx> {
                 "pycc_rt_int_round_digits",
                 i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
             ),
-            check_element: declare(
-                "pycc_rt_num_check_element",
-                context.void_type().fn_type(&[i64_type.into()], false),
-            ),
             list_contains: declare(
                 "pycc_rt_list_contains_num",
                 i8_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+            ),
+            dict_get_key: declare(
+                "pycc_rt_dict_get_num_key",
+                i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+            ),
+            dict_get_or_default_key: declare(
+                "pycc_rt_dict_get_or_default_num_key",
+                i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
             ),
             fshl: intrinsic("llvm.fshl"),
             fshr: intrinsic("llvm.fshr"),
@@ -386,47 +393,5 @@ pub(crate) fn emit_unary<'ctx>(
     word: IntValue<'ctx>,
 ) -> inkwell::values::BasicValueEnum<'ctx> {
     call_value(builder, function, &[word.into()], "num_unary")
-}
-
-/// The container-ingress check of an `int | float` element: a word with a
-/// heap payload (low bits `00`, non-zero) raises `OverflowError` on a cold
-/// call, followed by the pending-exception guard. `release_on_refuse` is
-/// set when `word` is a fresh conversion of a `float` no one else owns: the
-/// refusal then releases it before raising.
-pub(crate) fn emit_check_element<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    word: IntValue<'ctx>,
-    release_on_refuse: bool,
-) {
-    let i64_type = context.i64_type();
-    let tag = builder.build_and(word, i64_type.const_int(0b11, false), "num_elem_tag").expect("and");
-    let aligned = builder
-        .build_int_compare(IntPredicate::EQ, tag, i64_type.const_zero(), "num_elem_aligned")
-        .expect("icmp");
-    let non_zero = builder
-        .build_int_compare(IntPredicate::NE, word, i64_type.const_zero(), "num_elem_nonzero")
-        .expect("icmp");
-    let heap = builder.build_and(aligned, non_zero, "num_elem_heap").expect("and");
-    let function = current_function(builder);
-    let refuse_bb = context.append_basic_block(function, "num_elem_refuse");
-    let join_bb = context.append_basic_block(function, "num_elem_ok");
-    let branch = builder
-        .build_conditional_branch(heap, refuse_bb, join_bb)
-        .expect("branch");
-    crate::int_fast::weight_branch(context, branch, false);
-    builder.position_at_end(refuse_bb);
-    builder
-        .build_call(rt.num.check_element, &[word.into()], "")
-        .expect("build_call should not fail for a declared runtime function");
-    if release_on_refuse {
-        builder
-            .build_call(rt.bigint_release, &[word.into()], "")
-            .expect("build_call should not fail for a declared runtime function");
-    }
-    crate::exception::guard_statement_effects(context, builder, rt);
-    builder.build_unconditional_branch(join_bb).expect("branch");
-    builder.position_at_end(join_bb);
 }
 

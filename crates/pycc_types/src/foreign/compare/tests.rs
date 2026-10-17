@@ -68,8 +68,9 @@ fn identity_between_two_native_values_keeps_its_c0001() {
 
 #[test]
 fn identity_of_a_native_value_against_none_keeps_its_t0021() {
+    // A name tested against `None` becomes `int | None` instead (v0.6).
     assert_refused(
-        "x = 1\nb = x is None\n",
+        "b = len(\"a\") is None\n",
         "T0021",
         "cannot compare `int` and `None`",
     );

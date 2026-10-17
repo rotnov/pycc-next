@@ -168,9 +168,11 @@ fn strict_mode_keeps_refusing_the_object_builtins() {
         "C0001",
         "call to builtin `range`",
     );
+    // `tuple(xs)` of a list is native (`tests/tuple_of_list.rs`) except
+    // of `bool`s, whose list storage no tuple object has.
     refused(
         "strict_tuple_of_list",
-        "t = tuple([1, 2])\nprint(t)\n",
+        "t = tuple([True, False])\nprint(t)\n",
         &[],
         "C0001",
         "call to builtin `tuple`",

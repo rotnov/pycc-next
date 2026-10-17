@@ -203,6 +203,13 @@ pub(crate) fn emit_call_expr<'ctx>(
             )
         };
         let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
+        if callee == "str"
+            && let Some(text) =
+                crate::optional_ptr::to_str(context, builder, module, rt, &arg.ty(), &scalar)
+        {
+            release_scalar_if_temporary(context, builder, rt, arg, &scalar);
+            return Scalar::Str(text);
+        }
         // `str(xs)` of a list (`pycc_types` admits it beside `str(o)`).
         if callee == "str" && matches!(scalar, Scalar::List(_)) {
             let text = to_str(builder, rt, scalar);

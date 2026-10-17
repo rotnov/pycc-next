@@ -18,6 +18,8 @@ pub(super) fn call_result_scalar<'ctx>(
     call_site: CallSiteValue<'ctx>,
     ty: &Ty,
 ) -> Scalar<'ctx> {
+    // A pointer-represented `T | None` comes back as the `T` pointer.
+    let ty = crate::scalar::pointer_optional_inner(ty).unwrap_or(ty);
     match ty {
         Ty::Int => Scalar::Int(
             call_site

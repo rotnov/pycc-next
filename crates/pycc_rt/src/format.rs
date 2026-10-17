@@ -526,9 +526,37 @@ pub extern "C" fn pycc_rt_optional_bool_to_str(value: i8, present: i8) -> *mut P
     if present == 0 { new_pystr(b"None") } else { pycc_rt_bool_to_str(value) }
 }
 
+/// `str()` of a pointer-represented `T | None` (a `str`, a container or a
+/// tuple object, whose word is null for `None`): a new `str`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_optional_word_to_str(word: i64, kind: i64) -> *mut PyStrObj {
+    if word == 0 {
+        return new_pystr(b"None");
+    }
+    if kind == crate::list::LIST_KIND_STR {
+        let s = word as *mut PyStrObj;
+        unsafe { crate::pycc_rt_str_incref(s) };
+        return s;
+    }
+    let mut out = String::new();
+    crate::value::repr(kind, word, &mut out);
+    new_pystr(out.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pointer_optional_renders_none_or_its_value() {
+        let text = |s: *mut PyStrObj| String::from_utf8_lossy(unsafe { &*s }.bytes()).into_owned();
+        assert_eq!(text(pycc_rt_optional_word_to_str(0, crate::list::LIST_KIND_STR)), "None");
+        let abc = new_pystr(b"abc");
+        assert_eq!(text(pycc_rt_optional_word_to_str(abc as i64, crate::list::LIST_KIND_STR)), "abc");
+        let xs = crate::list::pycc_rt_list_new(crate::list::LIST_KIND_INT, 0);
+        unsafe { crate::list::pycc_rt_list_append(xs, crate::tag_smallint(4)) };
+        assert_eq!(text(pycc_rt_optional_word_to_str(xs as i64, crate::list::LIST_KIND_LIST)), "[4]");
+    }
 
     fn int(v: i64, spec: &str) -> String {
         format_int(&BigInt::from(v), spec, "int").unwrap_or_else(|Fail(_, _, m)| m)

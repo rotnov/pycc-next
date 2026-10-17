@@ -1,4 +1,4 @@
-//! Typing of a list or set comprehension whose iterable is a CPython object
+//! Typing of a list, set or dict comprehension whose iterable is a CPython object
 //! (Part 1 of #1255), with `numpy` bound as a foreign import.
 
 use pycc_diag::Span;
@@ -86,9 +86,9 @@ fn a_native_iterable_expression_is_refused() {
 #[test]
 fn a_dict_or_unpackable_comprehension_over_an_object_is_refused() {
     assert_refused(
-        "d = {s: 1 for s in numpy.pi}\n",
+        "d = {s: [1] for s in numpy.pi}\n",
         "I0404",
-        "a dict comprehension over a CPython object",
+        "collecting a `list[int]` key or value into a CPython dict",
     );
     assert_refused(
         "xs = [[1] for s in numpy.pi]\n",

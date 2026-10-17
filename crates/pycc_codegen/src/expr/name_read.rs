@@ -99,6 +99,9 @@ pub(crate) fn emit_name_expr<'ctx>(
     // be reached by any input, well-formed or not. Merged into one
     // match (matching `ty` once) so there's no redundant
     // impossible-to-cover branch left over.
+    //
+    // A pointer-represented `T | None` slot holds the `T` pointer.
+    let ty = crate::scalar::pointer_optional_inner(ty).unwrap_or(ty);
     match ty {
         Ty::Int => {
             let loaded = builder

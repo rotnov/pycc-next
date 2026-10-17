@@ -29,6 +29,13 @@
 //! is sufficient on its own to make `pycc check` catch the defect, without
 //! opening up `pycc_mir` or `pycc_codegen` at all.
 //!
+//! Since containers own heap bigints (v0.6), the container-element
+//! positions among them -- a list, dict or set display element, an
+//! `.append()`/`.add()` value, a `dict.get()` default, a comprehension
+//! element and a subscript-assign value -- are no boundary at all and are
+//! no longer checked; the list index, slice bound and `str` repeat count
+//! remain.
+//!
 //! The last of those 13 positions -- `str` repeat count (`<str> *
 //! <int-literal>` or `<int-literal> * <str>`) -- is intentionally narrower:
 //! `pycc_hir` has no
@@ -197,13 +204,6 @@ fn int_literal_boundary_diagnostic(
          instead of a literal still compiles, and raises `OverflowError` or `IndexError` at run \
          time",
     )
-}
-
-/// The `T0051` [`check_boundary_literal`] reports for `lowered` in
-/// `position`, without a source span: for a check `pycc_types` makes once
-/// it knows the position is native (a non-strict `.append()` value).
-pub fn boundary_literal_diagnostic(lowered: &HirExpr, position: &'static str) -> Option<Diagnostic> {
-    check_boundary_literal(lowered, 0..0, position).err()
 }
 
 /// Checks one already-lowered boundary-position sub-expression: if it is an

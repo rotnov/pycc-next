@@ -167,11 +167,13 @@ fn the_shapes_outside_part_1_are_refused() {
             "I0404",
             "a list or set comprehension over it unless it is a bare name",
         ),
+        // A dict comprehension over an object builds the CPython dict
+        // (`tests/object_dict_comprehension.rs`) when its key and value pack.
         (
             "obj_comp_dict",
-            "d = {k: 1 for k in table.keys()}\n",
+            "d = {k: [1] for k in table.keys()}\n",
             "I0404",
-            "a dict comprehension over a CPython object",
+            "collecting a `list[int]` key or value into a CPython dict",
         ),
         (
             "obj_comp_unpackable_list",

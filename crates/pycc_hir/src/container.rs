@@ -84,6 +84,16 @@ pub fn is_var_tuple_element_ty(element: &Ty) -> bool {
     is_list_element_ty(element) && !matches!(element, Ty::Int | Ty::Float | Ty::Bool)
 }
 
+/// Whether a `tuple[element, ...]` value is compiled: one of an
+/// [`is_var_tuple_element_ty`] element, or the tuple object `tuple(xs)`
+/// builds of a list of `int`s or `float`s (`builtins::conversions`). No
+/// fixed-arity tuple of those flows into one (it is an SSA struct), so
+/// such a value meets only its own kind, and the annotation stays refused.
+#[must_use]
+pub fn is_held_var_tuple_element_ty(element: &Ty) -> bool {
+    is_var_tuple_element_ty(element) || matches!(element, Ty::Int | Ty::Float)
+}
+
 /// Whether a fixed-arity tuple of type `tuple[elements]` is, as it is
 /// represented, also a `tuple[element, ...]` (`Ty::VarTuple`): a boxed
 /// tuple object whose elements all have type `element`, or `()`.
@@ -205,7 +215,7 @@ pub fn display_is_object(kind: DisplayKind, elements: &[Ty]) -> bool {
 pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
     match ty {
         Ty::List(element) => {
-            if !is_list_element_ty(element) {
+            if !is_list_element_ty(element) && !is_optional_element_ty(element) {
                 return Err(Diagnostic::error(
                     "T0034",
                     format!(
@@ -222,7 +232,7 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
             // An instance key is admitted here; `pycc_types::dict_key` refuses one
             // whose class compares by `__eq__` (it has the class table).
             let key_ok = is_hashable_ty(&pair.0) || matches!(pair.0, Ty::Instance(_));
-            if !key_ok || !is_list_element_ty(&pair.1) {
+            if !key_ok || (!is_list_element_ty(&pair.1) && !is_optional_element_ty(&pair.1)) {
                 return Err(Diagnostic::error(
                     "T0036",
                     format!(
@@ -274,7 +284,7 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
             }
             Ok(())
         }
-        Ty::VarTuple(element) if is_var_tuple_element_ty(element) => Ok(()),
+        Ty::VarTuple(element) if is_held_var_tuple_element_ty(element) => Ok(()),
         Ty::VarTuple(element) => check_tuple_element_ty(element, span).and(Err(Diagnostic::error(
             "T0053",
             format!(
@@ -302,6 +312,15 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
     }
 }
 
+/// Whether a list element or dict value may be `element`, a `T | None` of
+/// an `int` or a pointer-represented `T` a list holds: its word is the
+/// `T`'s, or `0` for `None` (`pycc_rt::optional_kind`).
+#[must_use]
+pub fn is_optional_element_ty(element: &Ty) -> bool {
+    matches!(element, Ty::Optional(inner)
+        if is_list_element_ty(inner) && (**inner == Ty::Int || crate::is_pointer_optional_inner(inner)))
+}
+
 /// Whether `element` can be stored as one native container word: `int`,
 /// `float`, `bool`, `str`, a user-class instance, or (recursively) a list,
 /// a non-empty tuple, a dict or a set whose own element types are
@@ -318,7 +337,7 @@ pub fn is_list_element_ty(element: &Ty) -> bool {
         | Ty::Callable(_) => true,
         Ty::List(inner) => is_list_element_ty(inner),
         Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_list_element_ty),
-        Ty::VarTuple(element) => is_var_tuple_element_ty(element),
+        Ty::VarTuple(element) => is_held_var_tuple_element_ty(element),
         Ty::Dict(pair) => is_hashable_ty(&pair.0) && is_list_element_ty(&pair.1),
         Ty::Set(inner) | Ty::FrozenSet(inner) => is_hashable_ty(inner),
         _ => false,

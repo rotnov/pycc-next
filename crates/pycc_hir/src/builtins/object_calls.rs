@@ -54,13 +54,15 @@ pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, 
         return Some(Ok(sig(symbol, &[Ty::Object], Ty::Object)));
     }
     // Non-strict mode: `tuple(xs)` of a CPython object or of a list of
-    // scalars (copied, which nothing can observe: the tuple is immutable
-    // and its items are) is CPython's own tuple, and `iter(xs)` CPython's
-    // own iterator (over a list display only: `pycc_types`); both are
-    // refused in strict mode.
+    // `bool`s (copied, which nothing can observe: the tuple is immutable
+    // and its items are) is CPython's own tuple -- a list of other
+    // elements makes a native one (`conversions`) -- and `iter(xs)`
+    // CPython's own iterator (over a list display only: `pycc_types`);
+    // both are refused in strict mode.
     if let ("tuple" | "iter", [arg]) = (name, args)
         && (*arg == Ty::Object
-            || matches!(arg, Ty::List(e) if packs_immutably(e)))
+            || matches!(arg, Ty::List(e)
+                if packs_immutably(e) && (name == "iter" || **e == Ty::Bool)))
     {
         let symbol = if name == "tuple" { "pycc_ext_obj_tuple" } else { "pycc_ext_obj_iter" };
         return Some(Ok(sig(symbol, &[Ty::Object], Ty::Object)));

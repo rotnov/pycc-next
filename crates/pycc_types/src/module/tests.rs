@@ -365,7 +365,9 @@ fn solver_collects_one_diagnostic_per_failing_body_and_skips_the_post_phases() {
 #[test]
 fn solver_collects_an_implicit_return_failure_in_a_later_body() {
     // `a` fails in its body walk; `f` succeeds and unifies `_g`'s return
-    // with `int`; `_g` has no `return`, so its implicit `None` conflicts.
+    // with `int`; `_g` has no `return`, so its implicit `None` makes it
+    // `int | None` (the checker then refuses `f`'s `return _g()`), and only
+    // `a`'s failure is the solver's.
     let hir = lower(
         "def a() -> int:\n    return \"z\"\n\n\ndef f() -> int:\n    return _g()\n\n\ndef _g():\n    x = 1\n",
     );
@@ -373,16 +375,9 @@ fn solver_collects_an_implicit_return_failure_in_a_later_body() {
     let collected = infer_function_signatures_with_solver_all(&hir, &local_names).unwrap_err();
     assert_eq!(
         keyed_codes(&collected),
-        vec![
-            (DiagnosticKey::Function(0), "T0022"),
-            (DiagnosticKey::Function(2), "T0022")
-        ]
+        vec![(DiagnosticKey::Function(0), "T0022")]
     );
     assert_eq!(collected[0].1.message, T0022_RETURN);
-    assert_eq!(
-        collected[1].1.message,
-        "private helper implicit return: conflicting inferred types `int` and `None`"
-    );
 }
 
 // -- #949: the return conflict's wording follows the return *term* ---------

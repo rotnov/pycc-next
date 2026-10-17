@@ -207,6 +207,14 @@ pub(crate) fn declare_module_globals<'ctx>(
                 // present flag itself is `0` either way, matching every
                 // "unassigned" global's own zero-flag/null-pointer pattern
                 // above.
+                // A pointer-represented `T | None`: the `T` pointer, null.
+                pycc_mir::Ty::Optional(inner) if pycc_hir::is_pointer_optional_inner(inner) => (
+                    context.ptr_type(inkwell::AddressSpace::default()).into(),
+                    context
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null()
+                        .into(),
+                ),
                 pycc_mir::Ty::Optional(inner) => {
                     let struct_ty = ty_to_basic_type(context, ty.clone()).into_struct_type();
                     // #809: `default_value_for_type` (below) already draws

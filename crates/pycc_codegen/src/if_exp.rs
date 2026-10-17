@@ -85,6 +85,8 @@ pub(super) fn emit_if_exp<'ctx>(
 /// The joined value as the `Scalar` for the node's type, one of the shapes
 /// `pycc_hir::if_exp_result_ty` yields.
 fn scalar_of<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
+    // A pointer-represented `T | None` is the `T` pointer.
+    let ty = crate::scalar::pointer_optional_inner(ty).unwrap_or(ty);
     match ty {
         Ty::Int => Scalar::Int(value.into_int_value()),
         Ty::Num => Scalar::Num(value.into_int_value()),

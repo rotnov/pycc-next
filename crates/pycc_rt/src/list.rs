@@ -20,7 +20,8 @@
 //! pinned by `list_layout_matches_the_codegen_contract`.
 //!
 //! **Ownership.** A list owns one reference to each `str`, list or instance
-//! element: the storing operations (`append`, `insert`, `set`) adopt the
+//! element, and to each heap bigint (or boxed `float` of an `int | float`)
+//! of an `int` list: the storing operations (`append`, `insert`, `set`) adopt the
 //! reference the caller passes, `set` releases the element it overwrites,
 //! `pop` hands its element's reference back, and the copying operations
 //! (`+`, `*`, slicing) take a new reference per copy. Reads (`xs[i]`,
@@ -62,8 +63,8 @@ pub const LIST_KIND_CLOSURE: i64 = 10;
 /// compiler compares, hashes and renders such a tuple through CPython (it
 /// boxes it first), never through `crate::value`.
 pub const LIST_KIND_OBJECT: i64 = 11;
-/// Element kind of an `int | float` (`crate::num` words with no heap
-/// payload: container ingress refuses the others, as for `int`).
+/// Element kind of an `int | float` (`crate::num` words; a heap bigint or
+/// boxed `float` is owned as an `int` list owns a bigint).
 pub const LIST_KIND_NUM: i64 = 12;
 
 /// See the module doc comment for the layout and ownership contract.

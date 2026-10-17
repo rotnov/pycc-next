@@ -119,7 +119,7 @@ pub(crate) fn emit_for_list_stmt<'ctx>(
     // `iterating_an_inferred_empty_list_runs_zero_iterations` in
     // `tests/issue_1021_empty_container_inference.rs`).
     let word = list::build_list_get_unchecked(context, builder, var_ty, list_ptr, current);
-    let element = list::word_element(context, builder, var_ty, word);
+    let element = list::word_element(context, builder, rt, var_ty, word);
     // The element is borrowed from the list; the loop variable owns
     // its value like any other slot, unless it only ever borrows.
     if !rt.borrowed_locals.borrow().contains(var) {
@@ -387,7 +387,7 @@ pub(crate) fn emit_for_dict_stmt<'ctx>(
     // its own reference and releases the one it held, as
     // `ForList`'s does.
     let (key_ty, _) = containers::dict_kv(&locals[dict].ty);
-    let key = list::word_element(context, builder, &key_ty, key_word);
+    let key = list::word_element(context, builder, rt, &key_ty, key_word);
     heap_rc::retain_scalar(context, builder, rt, &key_ty, &key);
     if let Some(slot) = locals.get(var) {
         heap_rc::release_slot(context, builder, rt, &slot.ty, slot.ptr);
@@ -595,7 +595,7 @@ pub(crate) fn emit_for_set_stmt<'ctx>(
     // describes: a separate storage slot written once per
     // iteration.
     let encoded_element = build_int_set_get(builder, rt, set_ptr, current);
-    let element = set_element_scalar(context, builder, var_ty, encoded_element);
+    let element = set_element_scalar(context, builder, rt, var_ty, encoded_element);
     // A `set[C]` element is borrowed: the loop variable takes its own
     // reference, as `ForList`'s does.
     heap_rc::retain_scalar(context, builder, rt, var_ty, &element);

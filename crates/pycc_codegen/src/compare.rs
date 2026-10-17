@@ -83,7 +83,21 @@ pub(super) fn emit_compare_values<'ctx>(
             // construction, not merely untested; matching on the
             // scalar directly removes the branch instead of leaving
             // it as a dead, permanently-uncoverable region.
+            let pointer = crate::scalar::pointer_optional_inner(&other_ty)
+                .is_some()
+                .then(|| crate::scalar::scalar_pointer(&other_scalar))
+                .flatten();
             let present = match other_scalar {
+                // A pointer-represented `T | None`: present when non-null.
+                _ if pointer.is_some() => {
+                    let ptr = pointer.expect("checked just above");
+                    let non_null = builder
+                        .build_is_not_null(ptr, "opt_ptr_present")
+                        .expect("build_is_not_null should not fail for a pointer");
+                    builder
+                        .build_int_z_extend(non_null, context.i8_type(), "opt_ptr_present_i8")
+                        .expect("build_int_z_extend should not fail widening i1 to i8")
+                }
                 Scalar::Optional(v) => builder
                     .build_extract_value(v, 1, "opt_present")
                     .expect(
@@ -113,6 +127,21 @@ pub(super) fn emit_compare_values<'ctx>(
             return builder
                 .build_int_z_extend(as_bool, context.i8_type(), "bool_from_is")
                 .expect("build_int_z_extend should not fail widening i1 to i8");
+        }
+        // `==`/`!=` with a `T | None` operand (`crate::optional_compare`).
+        pycc_mir::CmpOpKind::Eq | pycc_mir::CmpOpKind::NotEq
+            if let Some(result) = crate::optional_compare::emit_optional_eq(
+                context,
+                builder,
+                rt,
+                matches!(op, pycc_mir::CmpOpKind::NotEq),
+                left,
+                l,
+                right,
+                r,
+            ) =>
+        {
+            return result;
         }
         pycc_mir::CmpOpKind::Eq => OrderedCmpOp::Eq,
         pycc_mir::CmpOpKind::NotEq => OrderedCmpOp::NotEq,
@@ -164,7 +193,9 @@ pub(super) fn emit_compare_values<'ctx>(
             OrderedCmpOp::Gt => 4,
             OrderedCmpOp::GtE => 5,
         };
-        return crate::containers::emit_value_compare(context, builder, rt, &left_ty, l, r, code);
+        return crate::containers::emit_value_compare(
+            context, builder, rt, (&left_ty, l), (&right_ty, r), code,
+        );
     }
     // `int | float` (`crate::num`): one runtime comparison, exact between
     // an `int` and a `float`.

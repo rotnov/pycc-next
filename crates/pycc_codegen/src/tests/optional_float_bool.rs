@@ -596,7 +596,8 @@ fn coerce_scalar_to_type_rejects_a_non_int_payload_widening_into_optional_int() 
 fn coerce_scalar_to_type_rejects_a_none_placeholder_targeting_an_unsupported_inner_type() {
     // The sibling defensive backstop to the test immediately above, this
     // time for the *placeholder* branch (`v.get_type() != struct_ty`) added
-    // by this PR's own fix: `T0049` never admits `Optional[str]`, so a
+    // by this PR's own fix: `T0049` never admits an optional struct
+    // tuple (`str | None` is a pointer optional since v0.6), so a
     // hand-built call reaching this arm directly (bypassing `T0049`
     // entirely, the same way the sibling test above does) proves the
     // `match inner.as_ref() { Ty::Int | Ty::Float | Ty::Bool => .., other
@@ -614,7 +615,7 @@ fn coerce_scalar_to_type_rejects_a_none_placeholder_targeting_an_unsupported_inn
         &builder,
         &rt,
         Scalar::Optional(none_placeholder),
-        pycc_mir::Ty::Optional(Box::new(Ty::Str)),
+        pycc_mir::Ty::Optional(Box::new(Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])))),
     );
 }
 

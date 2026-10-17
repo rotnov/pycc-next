@@ -443,14 +443,17 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
             // arm's doc comment above for why this order is required.
             collect_named_expr_bindings(env, &[], test)?;
             infer_expr(env, test)?;
+            let narrowing = narrow::while_body_narrowing(env, test);
             // Issue #118 Part 1: the loop body may execute zero times, so
             // every body-only binding joins back as `Maybe`.
             // Fast path: if the body introduces no bindings, check in-place.
             if !introduces_bindings(body) {
-                check_while_body_in_place(env, body)
+                narrow::with_while_narrowing(env, narrowing, |env| check_while_body_in_place(env, body))
             } else {
                 let mut body_env = env.clone();
-                narrow::check_stmt_sequence(&mut body_env, body)?;
+                narrow::with_while_narrowing(&mut body_env, narrowing, |body_env| {
+                    narrow::check_stmt_sequence(body_env, body)
+                })?;
                 join_loop_body(env, &body_env);
                 Ok(())
             }
@@ -522,7 +525,7 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
             // (e.g. `ExprStmt` via `infer_expr`) resolves names with an
             // empty `local_names` slice too, so an unresolved `list` is
             // simply "not defined," never `unbound_local`.
-            let list_ty = lookup_bound_name(env, &[], list)?;
+            let list_ty = crate::narrow::narrowed_iterable(env, list, lookup_bound_name(env, &[], list)?);
             // An object bound on some paths only (its read, checked at run
             // time, was admitted above) iterates through CPython too.
             if list_ty == Ty::Object {

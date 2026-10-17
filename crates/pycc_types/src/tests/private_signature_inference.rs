@@ -827,7 +827,9 @@ fn private_implicit_none_return_rejects_an_int_constrained_call_site() {
         imports: Vec::new(),
         class_defs: Vec::new(),
     };
-    assert_eq!(check(&hir).unwrap_err().code, "T0022");
+    // The implicit `None` makes `_noop` return `int | None`, which the
+    // `range()` stop refuses.
+    assert_eq!(check(&hir).unwrap_err().code, "T0021");
 }
 
 #[test]

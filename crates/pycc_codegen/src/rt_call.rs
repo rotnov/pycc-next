@@ -109,25 +109,18 @@ pub(super) fn emit_rt_call<'ctx>(
         if *is_word {
             // A `float` for an `int | float` word is a fresh word, released
             // after the call.
-            let (scalar, fresh) = match (param, scalar) {
+            let scalar = match (param, scalar) {
                 (Ty::Num, scalar @ Scalar::Float(_)) => {
                     let (word, converted) = crate::num::operand_word(context, builder, rt, scalar);
                     converted_nums.push(converted);
-                    (Scalar::Num(word), true)
+                    Scalar::Num(word)
                 }
-                (_, scalar) => (
-                    coerce_scalar_to_type(context, builder, rt, scalar, param.clone()),
-                    false,
-                ),
+                (_, scalar) => coerce_scalar_to_type(context, builder, rt, scalar, param.clone()),
             };
+            // A runtime call borrows its word argument: one it stores takes
+            // its own reference (`pycc_rt::value::retain`).
             let (word, boxed) =
                 crate::containers::borrowed_word(context, builder, rt, param, scalar);
-            // An `int | float` word a runtime call may store (`appendleft`,
-            // `setdefault`, ...) passes the container-ingress check; a pure
-            // lookup only borrows it.
-            if *param == Ty::Num && !is_lookup(sig.symbol) {
-                crate::num::emit_check_element(context, builder, rt, word, fresh);
-            }
             boxes.push(boxed);
             values.push(word.into());
             param_types.push(i64_type.into());
@@ -229,7 +222,7 @@ pub(super) fn emit_rt_call<'ctx>(
             .try_as_basic_value()
             .expect_basic("a tuple-returning builtin returns a pointer")
             .into_pointer_value();
-        let tuple = crate::containers::unbox_struct_tuple(context, builder, elements, boxed);
+        let tuple = crate::containers::unbox_struct_tuple(context, builder, rt, elements, boxed);
         heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::List, boxed);
         return Scalar::Tuple(tuple);
     }
@@ -243,13 +236,3 @@ pub(super) fn emit_rt_call<'ctx>(
     crate::call_result::call_result_scalar(context, call_site, &sig.ret)
 }
 
-/// Whether the runtime function `symbol` only borrows its word argument (a
-/// search), so an `int | float` word with a heap payload need not pass the
-/// container-ingress check: a container never holds one, so the search
-/// simply does not find it.
-fn is_lookup(symbol: &str) -> bool {
-    matches!(
-        symbol,
-        "pycc_rt_list_index" | "pycc_rt_list_count" | "pycc_rt_list_remove" | "pycc_rt_list_contains"
-    )
-}

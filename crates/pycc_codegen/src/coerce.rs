@@ -182,8 +182,6 @@ pub(crate) fn raw_i64_to_tagged_int<'ctx>(
 /// `UNTAG_*` constants).
 #[derive(Clone, Copy)]
 pub(crate) enum UntagUse {
-    /// Stored as a container element (`OverflowError`, a recorded gap).
-    Element = 0,
     /// A sequence index (`IndexError`, as CPython).
     Index = 1,
     /// A size, count or slice bound (`OverflowError`).
@@ -192,10 +190,8 @@ pub(crate) enum UntagUse {
 
 /// Calls D-141's runtime-owned classifier/decoder, then checks the pending
 /// flag: a heap bigint raises (it does not fit a machine word) and the
-/// sentinel result is never consumed. Container-value ingress uses the call
-/// only to validate bigint exclusion and then stores the original encoded
-/// word; index, slice, and `str`-repeat-count sites consume its decoded raw
-/// result. Raising instead of aborting keeps an `--ext` module's host
+/// sentinel result is never consumed. Index, slice, and `str`-repeat-count
+/// sites consume its decoded raw result. Raising instead of aborting keeps an `--ext` module's host
 /// interpreter alive when a caller passes a large `int`.
 pub(crate) fn build_untag_checked<'ctx>(
     context: &'ctx Context,
@@ -270,6 +266,18 @@ pub(crate) fn coerce_scalar_to_type<'ctx>(
         // past the end of the alloca, which at `-O0` (where the store is not
         // dead) clobbered the neighbouring stack slot or the return address.
         (pycc_mir::Ty::None, Scalar::Optional(_)) => crate::call_result::none_scalar(context),
+        // A pointer-represented `T | None` (`scalar::pointer_optional_inner`):
+        // `None` (the placeholder) is the null `T` pointer, and a `T` is
+        // itself.
+        (pycc_mir::Ty::Optional(inner), Scalar::Optional(_))
+            if pycc_hir::is_pointer_optional_inner(&inner) =>
+        {
+            let null = context.ptr_type(inkwell::AddressSpace::default()).const_null();
+            crate::generator::basic_scalar(&inner, null.into())
+        }
+        (pycc_mir::Ty::Optional(inner), scalar) if pycc_hir::is_pointer_optional_inner(&inner) => {
+            coerce_scalar_to_type(context, builder, rt, scalar, *inner)
+        }
         (pycc_mir::Ty::Int, Scalar::Bool(value)) => {
             Scalar::Int(to_encoded_int(context, builder, Scalar::Bool(value)))
         }

@@ -621,9 +621,17 @@ fn a_three_way_union_chain_also_produces_t0048() {
 
 #[test]
 fn an_optional_of_a_non_int_type_produces_t0049() {
-    let module = pycc_parser_test_helper::parse("def f(x: str | None) -> None:\n    pass\n");
+    // A struct tuple of scalars is no pointer, so it cannot be optional;
+    // `str | None` and the other pointer types can (strict mode).
+    let module = pycc_parser_test_helper::parse("def f(x: tuple[int, int] | None) -> None:\n    pass\n");
     let diag = lower_checked(&module).unwrap_err();
     assert_eq!(diag.code, "T0049");
+    let module = pycc_parser_test_helper::parse("def f(x: str | None) -> None:\n    pass\n");
+    let hir = lower_checked(&module).unwrap();
+    let HirItem::Function { params, .. } = &hir.items[0] else {
+        panic!("expected a function item");
+    };
+    assert_eq!(params[0].1, Ty::Optional(Box::new(Ty::Str)));
 }
 
 #[test]

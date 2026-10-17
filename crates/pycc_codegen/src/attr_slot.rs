@@ -83,6 +83,8 @@ pub(crate) fn slot_word_to_scalar<'ctx>(
     raw: IntValue<'ctx>,
     ty: &pycc_mir::Ty,
 ) -> Scalar<'ctx> {
+    // A pointer-represented `T | None` slot holds the `T` pointer word.
+    let ty = crate::scalar::pointer_optional_inner(ty).unwrap_or(ty);
     match ty {
         pycc_mir::Ty::Int => Scalar::Int(raw),
         pycc_mir::Ty::Num => Scalar::Num(raw),

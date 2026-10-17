@@ -187,8 +187,7 @@ pub extern "C" fn pycc_rt_num_copy(word: i64) -> i64 {
 /// that does not (a `float`, or an overflow) is added to the `int` total as
 /// an ordinary `+`. A `float` total then continues with Neumaier's
 /// compensated summation over `float` items and adds 64-bit `int` items
-/// uncompensated, and anything else is ordinary `+` from there on. The
-/// list's words hold no heap payload (container ingress refuses one).
+/// uncompensated, and anything else is ordinary `+` from there on.
 ///
 /// # Safety
 /// `list` must be a live `PyListObj` pointer of `LIST_KIND_NUM`.

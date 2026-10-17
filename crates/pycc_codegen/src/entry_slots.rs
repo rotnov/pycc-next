@@ -123,6 +123,7 @@ pub(crate) fn storage_slot_at_entry<'ctx>(
             | pycc_mir::Ty::Generator(_)
             | pycc_mir::Ty::Callable(_)
     ) || matches!(&ty, pycc_mir::Ty::Tuple(elements) if pycc_hir::tuple_is_boxed(elements))
+        || crate::scalar::pointer_optional_inner(&ty).is_some()
     {
         // Lists, instances, dicts, sets, boxed tuples and CPython objects are
         // counted (`heap_rc`) and released the same way, so their slots start

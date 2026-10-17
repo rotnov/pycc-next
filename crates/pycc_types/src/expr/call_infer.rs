@@ -138,6 +138,21 @@ pub(crate) fn infer_call_expr(
     if callee == "cast" && !env.lookup_function(callee).is_some() {
         return class::check_cast(env, local_names, args);
     }
+    if callee == pycc_hir::OPTIONAL_INT_MARKER
+        && let [value] = args.as_slice()
+    {
+        let ty = infer_expr_in(env, local_names, value)?;
+        let optional_int = Ty::Optional(Box::new(Ty::Int));
+        return if matches!(ty, Ty::Int | Ty::Bool | Ty::None) || ty == optional_int {
+            Ok(optional_int)
+        } else {
+            Err(Diagnostic::error(
+                "T0021",
+                format!("an `int | None` element cannot hold `{}`", ty.name()),
+                Span::new(0, 0),
+            ))
+        };
+    }
     if callee == pycc_hir::NUM_MARKER
         && let [value] = args.as_slice()
     {

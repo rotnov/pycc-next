@@ -69,17 +69,13 @@ fn the_derived_container_form_is_the_gate_off_node() {
 }
 
 #[test]
-fn a_boundary_literal_refuses_the_container_reading() {
-    // 2**62 fits in i64, so the method reading lowers it, but it is outside
-    // the tagged smallint range the container fast path's boundary check
-    // (T0051) admits: the container reading is kept as refused.
+fn a_big_literal_takes_the_container_reading() {
+    // 2**62 is outside the tagged smallint range, but a container holds a
+    // heap bigint (v0.6), so the container reading is admitted.
     let (_, container) = parts(last_expr(&format!(
         "{ALL_FOUR}xs = [1]\nxs.append(4611686018427387904)\n"
     )));
-    let ContainerFallback::Refused(diagnostic) = container else {
-        panic!("expected a refused container reading, got {container:?}");
-    };
-    assert_eq!(diagnostic.code, "T0051");
+    assert_eq!(container, ContainerFallback::Admitted);
 }
 
 #[test]

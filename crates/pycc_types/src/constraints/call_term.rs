@@ -532,6 +532,9 @@ pub(crate) fn collect_call_constraints(
     if callee == pycc_hir::NUM_MARKER {
         return Ok(Some(Ok(Ty::Num)));
     }
+    if callee == pycc_hir::OPTIONAL_INT_MARKER {
+        return Ok(Some(Ok(Ty::Optional(Box::new(Ty::Int)))));
+    }
     if callee == "float" && !signatures.contains_key(callee) {
         // A user-defined `float` takes priority over the builtin -- see
         // `infer_expr_in`'s own identical guard and its comment for why

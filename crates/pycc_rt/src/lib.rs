@@ -74,6 +74,7 @@ mod math_float;
 /// The integer functions of `math`.
 mod math_ops;
 pub mod num;
+pub mod optional_kind;
 /// `print`'s stdout flush (#1340); the other print primitives stay below.
 mod pool;
 mod print;

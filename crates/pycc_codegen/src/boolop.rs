@@ -432,6 +432,8 @@ pub(super) fn basic_value(scalar: Scalar<'_>) -> BasicValueEnum<'_> {
 /// (Part 6 of #1371) or a class instance, the last of which the final arm
 /// handles.
 fn scalar_of<'ctx>(ty: &Ty, value: BasicValueEnum<'ctx>) -> Scalar<'ctx> {
+    // A pointer-represented `T | None` is the `T` pointer.
+    let ty = crate::scalar::pointer_optional_inner(ty).unwrap_or(ty);
     match ty {
         Ty::Int => Scalar::Int(value.into_int_value()),
         Ty::Num => Scalar::Num(value.into_int_value()),

@@ -732,9 +732,9 @@ fn container_diagnostics_are_unchanged_through_check_and_run() {
         ),
         (
             "boundary_literal",
-            "xs = [1]\nxs.append(99999999999999999999999)\n",
+            "xs = [1]\nxs.append(len(xs[99999999999999999999999:]))\n",
             "error[T0051]: integer literal `99999999999999999999999` is out of range for a \
-             `list.append()` value",
+             slice bound",
         ),
     ];
     for (name, body, needle) in cases {

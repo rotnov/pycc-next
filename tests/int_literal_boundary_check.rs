@@ -4,8 +4,11 @@
 // consequence D-178 (PR #617, closing #148) knowingly accepted when it made
 // an out-of-range literal materialize as a heap bigint everywhere else.
 //
+// Since v0.6 containers hold big `int`s, so the remaining positions are a
+// list index, a slice bound and a `str` repeat count.
+//
 // `crates/pycc_hir/src/expr.rs`'s own `mod tests` already exercises every
-// one of the 13 named positions directly against `lower_checked`, which is
+// one of the named positions directly against `lower_checked`, which is
 // what D-014's coverage gate needs. This file instead proves the two
 // end-to-end behaviors real Python source must keep, front to back through
 // the real `pycc` CLI (mirroring `container_methods1_codegen_depth.rs`'s own
@@ -40,7 +43,7 @@ fn a_literal_in_a_boundary_position_fails_check_instead_of_building() {
         ScratchDir::new("int_boundary_literal_check_fails").expect("failed to create scratch dir");
     let source = "\
 xs = [1]
-xs.append(4611686018427387904)
+print(xs[4611686018427387904])
 ";
     let src = write_fixture(&dir, "literal_boundary.py", source);
 
@@ -80,16 +83,15 @@ fn a_bigint_reaching_a_boundary_position_through_arithmetic_still_builds_and_tra
     // Neither operand is itself out of range (4611686018427387903 is the
     // largest tagged smallint -- see `crates/pycc_rt/src/lib.rs`'s own
     // `fits_smallint` tests), but their sum, `4611686018427387904`, is not:
-    // `int_add` materializes it as a heap bigint (D-178), and
-    // `xs.append(...)`'s own boundary check on that heap value keeps
-    // aborting at run time, unaffected by this issue's compile-time literal
-    // check (criterion 2).
+    // `int_add` materializes it as a heap bigint (D-178), and the list
+    // index's own boundary check on that heap value keeps raising at run
+    // time, unaffected by this issue's compile-time literal check
+    // (criterion 2).
     let source = "\
 xs = [1]
 a = 4611686018427387903
 b = 1
-xs.append(a + b)
-print(len(xs))
+print(xs[a + b])
 ";
     let src = write_fixture(&dir, "arithmetic_boundary.py", source);
 

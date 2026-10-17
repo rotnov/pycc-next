@@ -459,7 +459,7 @@ fn a_container_return_annotation_still_meets_every_element_and_arity_gate() {
         ("def f() -> tuple[()]:\n    return f()\n", "T0053"),
         ("def f() -> dict[str]:\n    return f()\n", "T0053"),
         ("def f[T](x: T) -> list[T]:\n    return f(x)\n", "T0042"),
-        ("def f() -> list[int] | None:\n    return f()\n", "T0049"),
+        ("def f() -> tuple[int, int] | None:\n    return f()\n", "T0049"),
     ] {
         let diagnostic = container_annotation_err(source);
         assert_eq!(diagnostic.code, code, "{source}");

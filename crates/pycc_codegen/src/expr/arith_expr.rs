@@ -657,7 +657,9 @@ pub(crate) fn emit_not_expr<'ctx>(
         operand,
     );
     let held = object_release::hold(context, module, rt, operand, &operand_scalar);
-    let truthy_cond = truthy(context, builder, module, rt, operand_scalar);
+    let truthy_cond =
+        crate::optional_ptr::truthy(context, builder, module, rt, &operand.ty(), operand_scalar)
+            .unwrap_or_else(|| truthy(context, builder, module, rt, operand_scalar));
     held.release(builder, rt);
     release_scalar_if_temporary(context, builder, rt, operand, &operand_scalar);
     let inverted = builder

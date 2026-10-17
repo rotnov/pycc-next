@@ -10,7 +10,6 @@ use crate::expr::{
     comp_assign_stmt, is_zero_arg_super_call, lower_dict_comp, lower_expr, lower_list_comp,
     lower_set_comp,
 };
-use crate::int_boundary::check_boundary_literal;
 use crate::{HirExpr, HirStmt, ImportBinding, unsupported};
 use pycc_ast::{Expr, ExprAttribute, StmtAssign};
 use pycc_diag::Diagnostic;
@@ -72,13 +71,6 @@ pub(super) fn lower_assign(
                     pycc_ast::expr_range(target),
                 ));
             };
-            // Issue #618 (T0051): only the assigned `value` is a
-            // checked boundary position here; the `key` slot is
-            // deliberately left unchecked for the same reason a
-            // dict-literal key is unchecked elsewhere in this module
-            // -- this compiler never gives a dict key an `int`-typed,
-            // boundary-sensitive representation, so a key literal has
-            // no runtime `int`-untagging boundary to protect.
             if let Expr::Slice(slice) = sub.slice.as_ref() {
                 let value =
                     lower_expr(&assign.value, in_function, class_name, imports, signatures)?;
@@ -102,19 +94,6 @@ pub(super) fn lower_assign(
             }
             let key = lower_expr(&sub.slice, in_function, class_name, imports, signatures)?;
             let value = lower_expr(&assign.value, in_function, class_name, imports, signatures)?;
-            // This lowering step is type-blind (see the comment
-            // above): `base_name` may turn out to be a `list[int]` at
-            // `pycc_types` time, not a `dict`, in which case T0033
-            // rejects the whole assignment downstream and this label
-            // is never surfaced. The label is deliberately
-            // base-neutral ("subscript-assign", not "dict
-            // subscript-assign") so it does not imply a base type
-            // this lowering step hasn't actually confirmed.
-            check_boundary_literal(
-                &value,
-                pycc_ast::expr_range(&assign.value),
-                "subscript-assign value",
-            )?;
             HirStmt::DictSet {
                 dict: base_name.id.as_str().to_string(),
                 key,

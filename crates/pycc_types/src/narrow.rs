@@ -421,3 +421,47 @@ pub(crate) fn check_stmt_sequence_in_function(
     }
     Ok(())
 }
+
+/// The type a `for ... in name` iterates: a narrowed pointer-represented
+/// `T | None` iterates as its `T` (`pycc_mir::stmt::for_list` agrees), and
+/// every other name as `ty`, its bound type.
+pub(crate) fn narrowed_iterable(env: &Environment, name: &str, ty: Ty) -> Ty {
+    match (&ty, env.narrowed.get(name)) {
+        (Ty::Optional(inner), Some(narrowed))
+            if pycc_hir::is_pointer_optional_inner(inner) && **inner == *narrowed =>
+        {
+            narrowed.clone()
+        }
+        _ => ty,
+    }
+}
+
+/// The `T | None` name a `while` test narrows in the loop body (`while x is
+/// not None:`, `while x:`), with its `T`. The test runs before every trip,
+/// so the body starts with the name present; [`apply_kill_prescan`] has
+/// already dropped any narrowing the body could invalidate, and a rebinding
+/// inside the body ends this one from there on (`check_assignment`).
+pub(crate) fn while_body_narrowing(env: &Environment, test: &pycc_hir::HirExpr) -> Option<(String, Ty)> {
+    let target = narrowing_target(env, test)?;
+    (target.side == NarrowSide::Body && matches!(env.lookup_any(&target.name), Some(Ty::Optional(_))))
+        .then_some((target.name, target.inner))
+}
+
+/// Runs `check` with `narrowing` (from [`while_body_narrowing`]) applied to
+/// `env`, restoring the name's previous overlay entry afterwards.
+pub(crate) fn with_while_narrowing<T>(
+    env: &mut Environment,
+    narrowing: Option<(String, Ty)>,
+    check: impl FnOnce(&mut Environment) -> T,
+) -> T {
+    let Some((name, inner)) = narrowing else {
+        return check(env);
+    };
+    let previous = env.narrowed.insert(name.clone(), inner);
+    let result = check(env);
+    match previous {
+        Some(previous) => env.narrowed.insert(name, previous),
+        None => env.narrowed.remove(&name),
+    };
+    result
+}

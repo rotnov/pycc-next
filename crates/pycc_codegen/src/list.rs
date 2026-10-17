@@ -125,17 +125,6 @@ pub(crate) fn raw_index<'ctx>(
     untag_or_check(context, builder, rt, UntagUse::Index, encoded)
 }
 
-/// The bigint-exclusion check every container ingress applies to an
-/// encoded `int` word (`OverflowError` beyond the inline range).
-pub(crate) fn check_element_int<'ctx>(
-    context: &'ctx Context,
-    builder: &inkwell::builder::Builder<'ctx>,
-    rt: &RtFns<'ctx>,
-    encoded: IntValue<'ctx>,
-) {
-    let _ = untag_or_check(context, builder, rt, UntagUse::Element, encoded);
-}
-
 /// `coerce_scalar_to_type` of a value about to go through [`element_word`]
 /// for an element of type `elem`, except that an `int | float` element is
 /// left to [`element_word`]: it converts a `float` itself and so knows the
@@ -157,8 +146,8 @@ pub(crate) fn coerce_element<'ctx>(
 /// Converts an element `scalar` (the value of `source`) into the word a
 /// container of `elem` stores, taking the reference the container will own:
 /// a borrowed counted value is retained, and a struct tuple is boxed into a
-/// new tuple object. An `int` element keeps its D-141 encoded word after the
-/// bigint-exclusion check every container ingress applies.
+/// new tuple object. An `int` element keeps its D-141 encoded word; a
+/// borrowed heap bigint (or boxed `float` of an `int | float`) is retained.
 pub(crate) fn element_word<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -168,18 +157,43 @@ pub(crate) fn element_word<'ctx>(
     scalar: Scalar<'ctx>,
 ) -> IntValue<'ctx> {
     match (elem, scalar) {
-        (Ty::Int, scalar) => {
-            let encoded = to_encoded_int(context, builder, scalar);
-            check_element_int(context, builder, rt, encoded);
-            encoded
-        }
-        // An `int | float` element: its word, refused when it holds a heap
-        // payload, as an `int` element is (`pycc_rt_num_check_element`).
-        (Ty::Num, scalar) => {
-            let fresh = matches!(scalar, Scalar::Float(_));
-            let word = crate::num::to_num_word(context, builder, rt, scalar);
-            crate::num::emit_check_element(context, builder, rt, word, fresh);
+        // An `int | None` element: the `int` word, or `0` for `None`. The
+        // container owns a reference to a heap payload (retained here
+        // whoever owned it: an owned one leaks at worst, never dangles).
+        (Ty::Optional(inner), scalar) if **inner == Ty::Int => {
+            let optional = coerce_scalar_to_type(context, builder, rt, scalar, elem.clone());
+            let Scalar::Optional(pair) = optional else {
+                unreachable!("an `int | None` value is its pair")
+            };
+            let word = optional_int_word(context, builder, pair);
+            crate::bigint_rc::emit_bigint_refcount_call(
+                context,
+                builder,
+                rt,
+                word,
+                crate::bigint_rc::BigIntRefcount::Retain,
+            );
             word
+        }
+        // A pointer-represented `T | None`: the `T` pointer, null for `None`.
+        (Ty::Optional(inner), scalar) if pycc_hir::is_pointer_optional_inner(inner) => {
+            let scalar = coerce_scalar_to_type(context, builder, rt, scalar, elem.clone());
+            let scalar = crate::heap_rc::retain_if_heap_duplicate(context, builder, rt, source, scalar);
+            scalar_to_slot_word(context, builder, scalar)
+        }
+        (Ty::Int, scalar) => {
+            let scalar = crate::bigint_rc::retain_if_int_duplicate(context, builder, rt, source, scalar);
+            to_encoded_int(context, builder, scalar)
+        }
+        // An `int | float` element: its word. A `float` converts to a fresh
+        // word the container adopts; an `int` or `int | float` operand is
+        // retained when borrowed, as an `int` element is.
+        (Ty::Num, scalar) => {
+            let scalar = match scalar {
+                Scalar::Float(_) => scalar,
+                scalar => crate::bigint_rc::retain_if_int_duplicate(context, builder, rt, source, scalar),
+            };
+            crate::num::to_num_word(context, builder, rt, scalar)
         }
         (Ty::Tuple(elements), Scalar::Tuple(tuple)) => {
             let boxed = crate::containers::box_struct_tuple(context, builder, rt, elements, tuple);
@@ -203,12 +217,25 @@ pub(crate) fn element_word<'ctx>(
 pub(crate) fn word_element<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
     elem: &Ty,
     word: IntValue<'ctx>,
 ) -> Scalar<'ctx> {
     match elem {
         Ty::Int => Scalar::Int(word),
         Ty::Num => Scalar::Num(word),
+        // An `int | None` element read as its pair: `0` is `None`. The
+        // pair owns its payload (retained, as `element_word` stores it).
+        Ty::Optional(inner) if **inner == Ty::Int => {
+            crate::bigint_rc::emit_bigint_refcount_call(
+                context,
+                builder,
+                rt,
+                word,
+                crate::bigint_rc::BigIntRefcount::Retain,
+            );
+            Scalar::Optional(optional_int_pair(context, builder, word))
+        }
         Ty::Tuple(elements) => {
             let ptr = builder
                 .build_int_to_ptr(
@@ -221,7 +248,7 @@ pub(crate) fn word_element<'ctx>(
                 Scalar::List(ptr)
             } else {
                 Scalar::Tuple(crate::containers::unbox_struct_tuple(
-                    context, builder, elements, ptr,
+                    context, builder, rt, elements, ptr,
                 ))
             }
         }
@@ -427,14 +454,39 @@ pub(crate) fn build_list_set<'ctx>(
     let stored = builder
         .build_int_truncate_or_bit_cast(word, storage, "list_store")
         .expect("trunc of an element word");
+    let slot = element_ptr(context, builder, elem, list, position);
+    // An `int` element may be a heap bigint the list owns: the overwritten
+    // word is released once the new one is in place.
+    let replaced = (matches!(elem, Ty::Int | Ty::Num)
+        || matches!(elem, Ty::Optional(inner) if **inner == Ty::Int))
+    .then(|| {
+        let old = builder
+            .build_load(storage, slot, "list_replaced")
+            .expect("build_load should not fail for a list element");
+        tag(
+            context,
+            old.as_instruction_value(),
+            crate::tbaa::list_element_name(storage.get_bit_width()),
+        );
+        old.into_int_value()
+    });
     let store = builder
-        .build_store(element_ptr(context, builder, elem, list, position), stored)
+        .build_store(slot, stored)
         .expect("build_store should not fail for a list element");
     tag(
         context,
         Some(store),
         crate::tbaa::list_element_name(storage.get_bit_width()),
     );
+    if let Some(old) = replaced {
+        crate::bigint_rc::emit_bigint_refcount_call(
+            context,
+            builder,
+            rt,
+            old,
+            crate::bigint_rc::BigIntRefcount::Release,
+        );
+    }
 }
 
 /// `if xs:` -- a list is truthy exactly when it is non-empty.
@@ -557,4 +609,57 @@ pub(crate) fn build_list_insert<'ctx>(
             "",
         )
         .expect("build_call should not fail for a declared runtime function");
+}
+
+/// The container word of the `int | None` pair `pair`: its payload when
+/// present, `0` for `None`.
+fn optional_int_word<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    pair: inkwell::values::StructValue<'ctx>,
+) -> IntValue<'ctx> {
+    let payload = builder
+        .build_extract_value(pair, 0, "opt_elem_payload")
+        .expect("build_extract_value should not fail on an Optional's field 0")
+        .into_int_value();
+    let flag = builder
+        .build_extract_value(pair, 1, "opt_elem_flag")
+        .expect("build_extract_value should not fail on an Optional's field 1")
+        .into_int_value();
+    let present = builder
+        .build_int_compare(IntPredicate::NE, flag, context.i8_type().const_zero(), "opt_elem_present")
+        .expect("build_int_compare should not fail for two i8 values");
+    builder
+        .build_select(present, payload, context.i64_type().const_zero(), "opt_elem_word")
+        .expect("build_select should not fail for two i64 values")
+        .into_int_value()
+}
+
+/// The `int | None` pair of the container word `word` (`0` is `None`, whose
+/// payload is the smallint `0`, a valid word every reader may decode).
+fn optional_int_pair<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    word: IntValue<'ctx>,
+) -> inkwell::values::StructValue<'ctx> {
+    let i64_type = context.i64_type();
+    let present = builder
+        .build_int_compare(IntPredicate::NE, word, i64_type.const_zero(), "opt_elem_present")
+        .expect("build_int_compare should not fail for two i64 values");
+    let payload = builder
+        .build_select(present, word, crate::int_const::tag_smallint_const(context, 0), "opt_elem_payload")
+        .expect("build_select should not fail for two i64 values")
+        .into_int_value();
+    let flag = builder
+        .build_int_z_extend(present, context.i8_type(), "opt_elem_flag")
+        .expect("build_int_z_extend should not fail widening i1 to i8");
+    let pair_ty = context.struct_type(&[i64_type.into(), context.i8_type().into()], false);
+    let with_payload = builder
+        .build_insert_value(pair_ty.get_undef(), payload, 0, "opt_elem_pair")
+        .expect("build_insert_value should not fail for field 0")
+        .into_struct_value();
+    builder
+        .build_insert_value(with_payload, flag, 1, "opt_elem_pair")
+        .expect("build_insert_value should not fail for field 1")
+        .into_struct_value()
 }

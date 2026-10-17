@@ -843,12 +843,12 @@ fn an_uncompiled_set_element_type_is_still_refused() {
         &format!("set[set[R]] is not compiled yet -- {widened}"),
         "",
     );
-    // An optional instance is refused by the `Optional` gate first.
+    // An optional instance is a type, but no set element.
     assert_one_error(
         "e2e_1343_optional_element",
         &format!("{r}def f(s: set[R | None]) -> None:\n    pass\n"),
-        "T0049",
-        "`Optional[R]` is not supported yet",
+        "T0038",
+        &format!("set[R | None] is not compiled yet -- {widened}"),
         "",
     );
     assert_one_error(

@@ -31,11 +31,34 @@ def churn(n: int, x: int | float) -> int | float:
             acc = acc + 0
         kept = [i, 1, 2.5]
         acc = acc + sum(kept) * 0 + kept.index(1) * 0
-        # A boxed float is refused by a container (`OverflowError`).
+        # A container owns the boxed floats (and big ints) it holds.
+        kept.append(big)
+        kept.append(huge)
+        kept[0] = big * 2
+        kept[1] += big
+        kept.sort()
+        copy = kept[1:] + kept * 2
+        acc = acc + max(kept) * 0 + kept.pop() * 0 + len(copy) * 0
+        table = {1: big, 2: huge}
+        table[3] = big / 2
+        table[1] = huge
+        keys = {big: 1, huge: 2}
+        keys[big] = 3
+        seen = {big, huge, big * 2}
+        seen.add(big)
+        seen.discard(huge)
+        acc = acc + table.pop(2) * 0 + keys[big] * 0 + len(seen) * 0
+        # An `int | float` or `float` key looks up an `int`-keyed dict.
+        ids = {1: big, 2: huge}
+        acc = acc + ids[x * 0 + 1.0] * 0 + ids.get(2.0, big) * 0 + ids.get(big, huge) * 0
         try:
-            kept.append(big)
-        except OverflowError:
+            acc = acc + ids[big]
+        except KeyError:
             acc = acc + 0
+        for value in kept:
+            acc = acc + value * 0
+        for v in table.values():
+            acc = acc + v * 0
     return acc
 
 
@@ -49,8 +72,8 @@ def num(x: int | float) -> int | float:
 
 def lookups(n: int, x: int | float) -> int:
     """`float` needles and keys for `int | float` containers: each lookup
-    borrows a word converted from the `float`, and a store refusing a
-    boxed float releases the one it converted."""
+    borrows a word converted from the `float`, and a store owns the boxed
+    float it converted."""
     xs: list[int | float] = [1, 2.5]
     d: dict[int | float, int] = {}
     d[1] = 10
@@ -67,20 +90,8 @@ def lookups(n: int, x: int | float) -> int:
             hits += d[big]
         except KeyError:
             hits += 1
-        try:
-            d[big] = 5
-        except OverflowError:
-            hits += 1
-        try:
-            hits += int(w.get("k", 1e300) > 0)
-        except OverflowError:
-            hits += 1
-        try:
-            w["k"] = big
-        except OverflowError:
-            hits += 1
-        try:
-            s.add(1e-300)
-        except OverflowError:
-            hits += 1
+        d[big] = 5
+        hits += int(w.get("k", 1e300) > 0)
+        w["k"] = big
+        s.add(1e-300)
     return hits

@@ -70,9 +70,7 @@ class Blocks(MiscBlocks):
         op = r.choice(["//", "%", "divmod", "**", "<<", ">>", "&", "|", "^", "str", "pow3", "cmp", "hash"])
         v, d = f"{p}a", f"{p}b"
         if op == "divmod":
-            # `print(divmod(big, d))` boxes a tuple holding a bigint, a
-            # documented deviation (docs/DEVIATIONS.md): unpack it instead.
-            body = f"{p}q, {p}r = divmod({v}, {d})\nprint({v}, {d}, {p}q, {p}r)"
+            body = f"{p}q, {p}r = divmod({v}, {d})\nprint({v}, {d}, {p}q, {p}r, divmod({v}, {d}))"
         elif op == "**":
             body = f"print({v} ** {r.randint(0, 9)}, {d} ** 2)"
         elif op in ("<<", ">>"):
@@ -87,10 +85,12 @@ class Blocks(MiscBlocks):
             body = f"print(hash({v}), hash({d}) == hash({d}), {v} * {d}, {v} - {d}, {v} + {d})"
         else:
             body = f"print({v} {op} {d}, -{v} {op} {d}, {v} {op} -{d})"
-        # Values beyond 63 bits cannot sit in a list literal (a documented
-        # deviation): pass each pair to a function instead.
+        # Each pair goes through a function, and the values through a list
+        # of big `int`s.
         lines = [f"def {p}row({v}: int, {d}: int) -> None:"] + [IND + ln for ln in body.split("\n")]
         lines += [f"{p}row({x}, {y})" for x in vals for y in divs]
+        lines += [f"{p}vals = [{', '.join(str(x) for x in vals)}]",
+                  f"print({p}vals, sorted({p}vals), max({p}vals), {p}vals.index({vals[0]}))"]
         return lines
 
     def b_float_fmt(self, p: str) -> list[str]:

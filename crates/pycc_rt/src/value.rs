@@ -30,6 +30,11 @@ pub const TUPLE_OBJECT: i64 = 16;
 
 /// The `crate::rc` kind byte of a word of kind `kind`.
 pub(crate) fn rc_kind(kind: i64) -> u8 {
+    // A `T | None` word is a `T` word or `0`, which every release is a
+    // no-op on.
+    if let Some(inner) = crate::optional_kind::inner(kind) {
+        return rc_kind(inner);
+    }
     match kind {
         LIST_KIND_STR => b's',
         LIST_KIND_LIST | LIST_KIND_TUPLE => b'l',
@@ -39,6 +44,10 @@ pub(crate) fn rc_kind(kind: i64) -> u8 {
         LIST_KIND_CLOSURE => b'f',
         crate::list::LIST_KIND_EXCEPTION => b'x',
         crate::list::LIST_KIND_OBJECT => b'o',
+        // An `int` (or `int | float`) word may be a heap bigint or boxed
+        // float, which the container owns one reference to; an inline word
+        // owns nothing (`crate::int_encoding::bigint_retain`).
+        LIST_KIND_INT | LIST_KIND_NUM => b'i',
         _ => b'w',
     }
 }
@@ -72,6 +81,9 @@ pub(crate) fn sequence_items(word: i64) -> Vec<(i64, i64)> {
 
 /// Python `a == b` for two words of `kind`.
 pub(crate) fn eq(kind: i64, a: i64, b: i64) -> bool {
+    if let Some(inner) = crate::optional_kind::inner(kind) {
+        return if a == 0 || b == 0 { a == b } else { eq(inner, a, b) };
+    }
     match kind {
         LIST_KIND_NUM => crate::num::compare(a, b) == Some(Ordering::Equal),
         LIST_KIND_INT => encoded_int_cmp(a, b) == Ordering::Equal,
@@ -104,6 +116,11 @@ pub(crate) fn eq(kind: i64, a: i64, b: i64) -> bool {
 /// Python `a == b` for two words of kinds `ka` and `kb` (tuple items):
 /// numbers of different kinds compare by value.
 pub(crate) fn kinded_eq(ka: i64, a: i64, kb: i64, b: i64) -> bool {
+    let ((ka, a), (kb, b)) = (present(ka, a), present(kb, b));
+    let none = |kind: i64, word: i64| word == 0 && crate::optional_kind::inner(kind).is_some();
+    if none(ka, a) || none(kb, b) {
+        return none(ka, a) && none(kb, b);
+    }
     if ka == kb {
         return eq(ka, a, b);
     }
@@ -116,6 +133,10 @@ pub(crate) fn kinded_eq(ka: i64, a: i64, kb: i64, b: i64) -> bool {
 /// Python `a < b` for two words of `kind`; `None` when the kind has no
 /// order (the caller raises `TypeError`).
 pub(crate) fn lt(kind: i64, a: i64, b: i64) -> Option<bool> {
+    // `None` orders with nothing.
+    if let Some(inner) = crate::optional_kind::inner(kind) {
+        return if a == 0 || b == 0 { None } else { lt(inner, a, b) };
+    }
     Some(match kind {
         LIST_KIND_NUM => crate::num::compare(a, b) == Some(Ordering::Less),
         LIST_KIND_INT => encoded_int_cmp(a, b).is_lt(),
@@ -126,7 +147,9 @@ pub(crate) fn lt(kind: i64, a: i64, b: i64) -> Option<bool> {
             let (xs, ys) = (sequence_items(a), sequence_items(b));
             // CPython: the first position whose items differ decides,
             // else the shorter sequence is smaller.
-            for ((kx, x), (ky, y)) in xs.iter().zip(ys.iter()) {
+            for (&(kx, x), &(ky, y)) in xs.iter().zip(ys.iter()) {
+                let ((kx, x), (ky, y)) = (present(kx, x), present(ky, y));
+                let (kx, x, ky, y) = (&kx, &x, &ky, &y);
                 if !kinded_eq(*kx, *x, *ky, *y) {
                     if kx != ky
                         && let (Some(p), Some(q)) =
@@ -164,11 +187,15 @@ pub(crate) fn type_name(kind: i64) -> &'static str {
 /// is then `false`).
 pub(crate) fn lt_or_raise(kind: i64, a: i64, b: i64) -> bool {
     lt(kind, a, b).unwrap_or_else(|| {
-        let name = type_name(kind);
+        let name = |word: i64| match crate::optional_kind::inner(kind) {
+            Some(_) if word == 0 => "NoneType",
+            Some(inner) => type_name(inner),
+            None => type_name(kind),
+        };
         crate::raise_builtin(
             crate::exception::EXCEPTION_TYPE_TYPE_ERROR,
             "TypeError",
-            &format!("'<' not supported between instances of '{name}' and '{name}'"),
+            &format!("'<' not supported between instances of '{}' and '{}'", name(a), name(b)),
         );
         false
     })
@@ -234,6 +261,9 @@ pub(crate) fn hash_float(v: f64) -> i64 {
 /// Python `hash(word)`; `None` for an unhashable kind (a list, dict or
 /// set).
 pub(crate) fn hash(kind: i64, word: i64) -> Option<i64> {
+    if let Some(inner) = crate::optional_kind::inner(kind) {
+        return if word == 0 { Some(crate::optional_kind::NONE_HASH) } else { hash(inner, word) };
+    }
     Some(match kind {
         LIST_KIND_INT => crate::pycc_rt_hash_int(word),
         LIST_KIND_NUM => crate::num::hash(word),
@@ -280,6 +310,9 @@ pub(crate) fn hash_or_raise(kind: i64, word: i64) -> Option<i64> {
 
 /// Python truth value of `word`.
 pub(crate) fn truthy(kind: i64, word: i64) -> bool {
+    if let Some(inner) = crate::optional_kind::inner(kind) {
+        return word != 0 && truthy(inner, word);
+    }
     match kind {
         LIST_KIND_INT => inline_int_value(word) != Some(0),
         LIST_KIND_NUM => crate::num::pycc_rt_num_truthy(word) != 0,
@@ -295,6 +328,13 @@ pub(crate) fn truthy(kind: i64, word: i64) -> bool {
 /// Appends `repr(word)` to `out`; `false` when rendering raised (a `float`
 /// needing scientific notation).
 pub(crate) fn repr(kind: i64, word: i64, out: &mut String) -> bool {
+    if let Some(inner) = crate::optional_kind::inner(kind) {
+        if word == 0 {
+            out.push_str("None");
+            return true;
+        }
+        return repr(inner, word, out);
+    }
     let rendered = match kind {
         LIST_KIND_INT => crate::int_to_str(word),
         LIST_KIND_NUM => return crate::num::repr(word, out),
@@ -378,6 +418,15 @@ pub extern "C" fn pycc_rt_value_compare(kind: i64, a: i64, b: i64, op: i64) -> i
         CMP_GT => lt_or_raise(kind, b, a),
         _ => eq(kind, a, b) || lt_or_raise(kind, b, a),
     })
+}
+
+/// A `T | None` word that holds a `T` as the `T` word of `T`'s kind; any
+/// other word (`None` included) unchanged.
+fn present(kind: i64, word: i64) -> (i64, i64) {
+    match crate::optional_kind::inner(kind) {
+        Some(inner) if word != 0 => (inner, word),
+        _ => (kind, word),
+    }
 }
 
 #[cfg(test)]

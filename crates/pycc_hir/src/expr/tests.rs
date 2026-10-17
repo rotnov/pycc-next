@@ -451,19 +451,26 @@ fn assert_t0051(source: &str, expected_position: &str) {
     );
 }
 
+// Since v0.6 containers own heap bigints, so a container element is no
+// boundary position: an out-of-range literal there lowers as a bigint.
 #[test]
-fn boundary_list_literal_element_is_t0051() {
-    assert_t0051(&format!("xs = [{OOR}]\n"), "list-literal element");
-}
-
-#[test]
-fn boundary_set_literal_element_is_t0051() {
-    assert_t0051(&format!("s = {{{OOR}}}\n"), "set-literal element");
-}
-
-#[test]
-fn boundary_dict_literal_value_is_t0051() {
-    assert_t0051(&format!("d = {{\"a\": {OOR}}}\n"), "dict-literal value");
+fn an_out_of_range_literal_in_a_container_element_lowers() {
+    for source in [
+        format!("xs = [{OOR}]\n"),
+        format!("s = {{{OOR}}}\n"),
+        format!("d = {{\"a\": {OOR}}}\n"),
+        format!("xs = [1]\nxs.append({OOR})\n"),
+        format!("d = {{\"a\": 1}}\nprint(d.get(\"z\", {OOR}))\n"),
+        format!("s = {{1}}\ns.add({OOR})\n"),
+        format!("d = {{\"a\": 1}}\nd[\"a\"] = {OOR}\n"),
+        format!("xs = [1, 2]\nys = [{OOR} for x in xs]\n"),
+        format!("xs = [1, 2]\nys = {{{OOR} for x in xs}}\n"),
+        format!("xs = [1, 2]\nys = {{x: {OOR} for x in xs}}\n"),
+    ] {
+        let module = pycc_parser::parse(&source).expect("test fixture must parse");
+        let result = crate::lower_checked(&module);
+        assert!(result.is_ok(), "{source:?}: {result:?}");
+    }
 }
 
 #[test]
@@ -510,41 +517,12 @@ fn boundary_slice_step_is_t0051() {
 }
 
 #[test]
-fn boundary_list_append_value_is_t0051() {
-    assert_t0051(
-        &format!("xs = [1]\nxs.append({OOR})\n"),
-        "`list.append()` value",
-    );
-}
-
-#[test]
-fn boundary_dict_get_default_is_t0051() {
-    assert_t0051(
-        &format!("d = {{\"a\": 1}}\nprint(d.get(\"z\", {OOR}))\n"),
-        "`dict.get()` default",
-    );
-}
-
-#[test]
-fn boundary_set_add_value_is_t0051() {
-    assert_t0051(&format!("s = {{1}}\ns.add({OOR})\n"), "`set.add()` value");
-}
-
-#[test]
-fn boundary_dict_subscript_assign_value_is_t0051() {
-    assert_t0051(
-        &format!("d = {{\"a\": 1}}\nd[\"a\"] = {OOR}\n"),
-        "subscript-assign value",
-    );
-}
-
-#[test]
 fn range_argument_out_of_range_is_not_t0051() {
     // D-179 already removed `range` from D-141's runtime int-boundary
     // inventory: range() is fully bigint-capable (bounds, step, and a
     // mid-loop-promoting induction variable), so an out-of-range literal
     // here is ordinary supported behavior, not a T0051 candidate --
-    // unlike the other 13 positions this module checks. D-207 records
+    // unlike the positions this module checks. D-207 records
     // that #618's own filed inventory wrongly copied this position
     // forward from before D-179 excluded it.
     let source = format!("for i in range({OOR}):\n    print(i)\n");
@@ -564,30 +542,6 @@ fn range_argument_out_of_range_in_a_comprehension_is_not_t0051() {
     assert!(
         result.is_ok(),
         "range() with an out-of-range literal must still lower successfully, got {result:?}"
-    );
-}
-
-#[test]
-fn boundary_listcomp_element_is_t0051() {
-    assert_t0051(
-        &format!("xs = [1, 2]\nys = [{OOR} for x in xs]\n"),
-        "listcomp element",
-    );
-}
-
-#[test]
-fn boundary_setcomp_element_is_t0051() {
-    assert_t0051(
-        &format!("xs = [1, 2]\nys = {{{OOR} for x in xs}}\n"),
-        "setcomp element",
-    );
-}
-
-#[test]
-fn boundary_dictcomp_value_is_t0051() {
-    assert_t0051(
-        &format!("xs = [1, 2]\nys = {{x: {OOR} for x in xs}}\n"),
-        "dictcomp value",
     );
 }
 

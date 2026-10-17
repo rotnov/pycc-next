@@ -1,5 +1,5 @@
-error[T0049]: `Optional[list[int]]` is not supported yet -- only `Optional[int]`, `Optional[float]`, and `Optional[bool]` (`int | None`, `float | None`, `bool | None`) are
+error[T0049]: `Optional[tuple[int, int]]` is not supported yet -- only `int`, `float`, `bool`, `str`, a list, dict or set, a class instance, or a tuple with a non-number element can be optional (`T | None`)
  --> tests/diagnostics/t0049_optional_of_container.py:1:10
   |
-1 | def f(a: list[int] | None) -> int:
-  |          ^^^^^^^^^^^^^^^^ `Optional[list[int]]` is not supported yet -- only `Optional[int]`, `Optional[float]`, and `Optional[bool]` (`int | None`, `float | None`, `bool | None`) are
+1 | def f(a: tuple[int, int] | None) -> int:
+  |          ^^^^^^^^^^^^^^^^^^^^^^ `Optional[tuple[int, int]]` is not supported yet -- only `int`, `float`, `bool`, `str`, a list, dict or set, a class instance, or a tuple with a non-number element can be optional (`T | None`)

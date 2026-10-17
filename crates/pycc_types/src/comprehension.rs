@@ -141,7 +141,7 @@ fn non_object_iterable(ty: &Ty) -> Diagnostic {
 /// (Part 1 of #1255): a fresh CPython `list` or `set`, typed as the opaque
 /// [`Ty::Object`] (D-258). Each element is packed across the boundary, so it
 /// must be packable ([`crate::foreign::is_packable_operand`]); a dict
-/// comprehension over an object is not compiled yet.
+/// comprehension over one is a CPython `dict` of packed keys and values.
 fn object_comp_container_ty(
     env: &Environment,
     local_names: &[&str],
@@ -150,10 +150,10 @@ fn object_comp_container_ty(
     let (elt, kind) = match *elts {
         CompElts::List(elt) => (elt, "list"),
         CompElts::Set(elt) => (elt, "set"),
-        CompElts::Dict(..) => {
-            return Err(crate::foreign::object_operation_unsupported(
-                "a dict comprehension over a CPython object",
-            ));
+        CompElts::Dict(key, value) => {
+            let key_ty = infer_expr_in(env, local_names, key)?;
+            let value_ty = infer_expr_in(env, local_names, value)?;
+            return object_dict_comp_ty(&key_ty, &value_ty);
         }
     };
     let elt_ty = infer_expr_in(env, local_names, elt)?;
@@ -170,6 +170,22 @@ fn object_comp_container_ty(
             "collecting a `{}` element into a CPython {kind}",
             elt_ty.name()
         )));
+    }
+    Ok(Ty::Object)
+}
+
+/// A dict comprehension that builds a CPython `dict` -- over a CPython
+/// object, or (non-strict mode) over a native source with a CPython object
+/// key or value (`pycc_mir`'s `collects_objects`): each key and value is
+/// packed across the boundary, so both must be packable.
+fn object_dict_comp_ty(key_ty: &Ty, value_ty: &Ty) -> Result<Ty, Diagnostic> {
+    for ty in [key_ty, value_ty] {
+        if *ty != Ty::Object && !crate::foreign::is_packable_operand(ty) {
+            return Err(crate::foreign::object_operation_unsupported(&format!(
+                "collecting a `{}` key or value into a CPython dict",
+                ty.name()
+            )));
+        }
     }
     Ok(Ty::Object)
 }
@@ -228,6 +244,9 @@ pub(crate) fn comp_container_ty(
         CompElts::Dict(key, value) => {
             let key_ty = infer_expr_in(env, local_names, key)?;
             let value_ty = infer_expr_in(env, local_names, value)?;
+            if crate::non_strict::is_non_strict() && (key_ty == Ty::Object || value_ty == Ty::Object) {
+                return object_dict_comp_ty(&key_ty, &value_ty);
+            }
             let dict_ty = Ty::Dict(Box::new((key_ty, value_ty)));
             pycc_hir::check_container_ty(&dict_ty, Span::new(0, 0))?;
             crate::dict_key::check_dict_key(env, &dict_ty)?;

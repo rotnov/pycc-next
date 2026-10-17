@@ -43,6 +43,11 @@ pub(crate) fn infer_list_literal_expr(
             Some(expected) if pycc_hir::num_join(expected, &this_ty).is_some() => {
                 elem_ty = pycc_hir::num_join(expected, &this_ty);
             }
+            // `["a", None]`: a `T` and `None` are both `T | None` elements
+            // (`pycc_mir` wraps each `T`).
+            Some(expected) if pycc_hir::optional_element_join(expected, &this_ty).is_some() => {
+                elem_ty = pycc_hir::optional_element_join(expected, &this_ty);
+            }
             Some(expected) => {
                 // Exact `Ty` equality, not `is_assignable`'s
                 // bool-is-an-int-subtype rule used elsewhere in this
@@ -111,18 +116,30 @@ pub(crate) fn infer_dict_literal_expr(
     let Some((first_key, first_value)) = pairs.first() else {
         return Err(crate::empty_container::unresolved_dict());
     };
-    let key_ty = infer_expr_in(env, local_names, first_key)?;
+    let mut key_ty = infer_expr_in(env, local_names, first_key)?;
     let mut val_ty = infer_expr_in(env, local_names, first_value)?;
     for (key, value) in &pairs[1..] {
         let this_key_ty = infer_expr_in(env, local_names, key)?;
         let this_val_ty = infer_expr_in(env, local_names, value)?;
-        // `{1: 1.5, 2: 3}`: `int` and `float` values are both `int | float`
-        // values (`pycc_mir` wraps each other value).
-        if this_key_ty == key_ty
-            && this_val_ty != val_ty
-            && let Some(joined) = pycc_hir::num_join(&val_ty, &this_val_ty)
-        {
-            val_ty = joined;
+        // `{1: 1.5, 2: 3}`, `{1.5: "a", 2: "b"}`: `int` and `float` values
+        // (or keys) are both `int | float` ones (`pycc_mir` wraps each
+        // other one).
+        let joined_key = if this_key_ty == key_ty {
+            Some(key_ty.clone())
+        } else {
+            pycc_hir::num_join(&key_ty, &this_key_ty)
+        };
+        // `{1: "a", 2: None}`: a `T` and `None` value are both `T | None`
+        // ones (`pycc_mir` wraps each `T`).
+        let joined_val = if this_val_ty == val_ty {
+            Some(val_ty.clone())
+        } else {
+            pycc_hir::num_join(&val_ty, &this_val_ty)
+                .or_else(|| pycc_hir::optional_element_join(&val_ty, &this_val_ty))
+        };
+        if let (Some(joined_key), Some(joined_val)) = (joined_key, joined_val) {
+            key_ty = joined_key;
+            val_ty = joined_val;
             continue;
         }
         // Exact `Ty` equality on both key and value, not
@@ -187,9 +204,15 @@ pub(crate) fn infer_set_literal_expr(
             Span::new(0, 0),
         ));
     };
-    let elem_ty = infer_expr_in(env, local_names, first)?;
+    let mut elem_ty = infer_expr_in(env, local_names, first)?;
     for element in &elements[1..] {
         let this_ty = infer_expr_in(env, local_names, element)?;
+        // `{1, 2.5}`: an `int` and a `float` are both `int | float`
+        // elements (`pycc_mir` wraps each other element).
+        if let Some(joined) = pycc_hir::num_join(&elem_ty, &this_ty) {
+            elem_ty = joined;
+            continue;
+        }
         // Exact `Ty` equality, not `is_assignable`'s
         // bool-is-an-int-subtype rule -- same reasoning as
         // `ListLiteral`'s own homogeneity check.
@@ -400,7 +423,7 @@ pub(crate) fn infer_subscript_expr(
         // the list-index case above.
         Ty::Dict(kv) => {
             let (key_ty, val_ty) = *kv;
-            if !crate::assign_check::is_key_of(&index_ty, &key_ty) {
+            if !crate::assign_check::is_lookup_key_of(&index_ty, &key_ty) {
                 // Non-strict mode: as for a store (`stmt_check`), a key of
                 // another type makes the dict CPython's own.
                 if let HirExpr::Name(dict) = base.as_ref() {
@@ -664,17 +687,6 @@ pub(crate) fn infer_list_append_expr(
             Span::new(0, 0),
         ).with_help(format!("change the value to `{}` (the expected/declared type), or the declaration/annotation to `{}` (the actual type)", elem_ty.name(), value_ty.name())));
     }
-    // Non-strict mode: `pycc_hir` leaves an out-of-range literal to this
-    // check, made once the receiver is known to be native; a list that
-    // holds one becomes CPython's own list.
-    if let Some(diagnostic) =
-        pycc_hir::boundary_literal_diagnostic(value, "`list.append()` value")
-    {
-        if let pycc_hir::ContainerReceiver::Name(name) = list {
-            crate::non_strict::request_container_widen(&HirExpr::Name(name.clone()), &list_ty);
-        }
-        return Err(diagnostic);
-    }
     Ok(Ty::None)
 }
 
@@ -732,7 +744,7 @@ pub(crate) fn infer_dict_get_or_default_expr(
         ));
     };
     let key_ty = infer_expr_in(env, local_names, key)?;
-    if !crate::assign_check::is_key_of(&key_ty, &kv.0) {
+    if !crate::assign_check::is_lookup_key_of(&key_ty, &kv.0) {
         return Err(Diagnostic::error(
             "T0021",
             format!(

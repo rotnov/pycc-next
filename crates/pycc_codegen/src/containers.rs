@@ -106,6 +106,11 @@ impl<'ctx> ContainerFns<'ctx> {
 /// exception class carries no reference count, so its kind is the uncounted
 /// one (`6`).
 pub(crate) fn word_kind(rt: &RtFns<'_>, ty: &Ty) -> u64 {
+    // A `T | None` element: the `T`'s kind with
+    // `pycc_rt::optional_kind::OPTIONAL_KIND` set.
+    if let Ty::Optional(inner) = ty {
+        return 32 | word_kind(rt, inner);
+    }
     match ty {
         Ty::Int => 0,
         Ty::Float => 1,
@@ -304,9 +309,17 @@ pub(crate) fn box_struct_tuple<'ctx>(
     for (index, ty) in elements.iter().enumerate() {
         let field = struct_field(builder, tuple, index as u32, ty);
         let word = match ty {
+            // The tuple object owns its own reference to a heap bigint:
+            // the struct's field keeps the one it holds (D-182).
             Ty::Int => {
                 let encoded = to_encoded_int(context, builder, field);
-                list::check_element_int(context, builder, rt, encoded);
+                crate::bigint_rc::emit_bigint_refcount_call(
+                    context,
+                    builder,
+                    rt,
+                    encoded,
+                    crate::bigint_rc::BigIntRefcount::Retain,
+                );
                 encoded
             }
             _ => scalar_to_slot_word(context, builder, field),
@@ -320,9 +333,14 @@ pub(crate) fn box_struct_tuple<'ctx>(
 /// the sentinel a runtime call returns when it raised (a missing dict key,
 /// an empty `pop`) -- yields the zero tuple instead of being read, so the
 /// pending exception reaches its handler before anything uses the value.
+///
+/// A heap bigint field is retained: the struct keeps its words after the
+/// tuple object may be gone (a struct tuple's fields own their references,
+/// D-182).
 pub(crate) fn unbox_struct_tuple<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
     elements: &[Ty],
     boxed: PointerValue<'ctx>,
 ) -> StructValue<'ctx> {
@@ -349,7 +367,17 @@ pub(crate) fn unbox_struct_tuple<'ctx>(
     for (index, ty) in elements.iter().enumerate() {
         let word = load_tuple_word(context, builder, boxed, index as u64);
         let value: BasicValueEnum<'ctx> = match slot_word_to_scalar(context, builder, word, ty) {
-            Scalar::Int(v) | Scalar::Num(v) | Scalar::Bool(v) => v.into(),
+            Scalar::Int(v) => {
+                crate::bigint_rc::emit_bigint_refcount_call(
+                    context,
+                    builder,
+                    rt,
+                    v,
+                    crate::bigint_rc::BigIntRefcount::Retain,
+                );
+                v.into()
+            }
+            Scalar::Num(v) | Scalar::Bool(v) => v.into(),
             Scalar::Float(v) => v.into(),
             _ => unreachable!("a struct tuple field is int, bool or float"),
         };
@@ -379,7 +407,7 @@ pub(crate) fn owned_word_element<'ctx>(
     elem: &Ty,
     word: inkwell::values::IntValue<'ctx>,
 ) -> Scalar<'ctx> {
-    let scalar = list::word_element(context, builder, elem, word);
+    let scalar = list::word_element(context, builder, rt, elem, word);
     if let (Ty::Tuple(elements), Scalar::Tuple(_)) = (elem, &scalar)
         && !pycc_hir::tuple_is_boxed(elements)
     {
@@ -400,6 +428,7 @@ pub(crate) fn owned_word_element<'ctx>(
 pub(crate) fn tuple_element<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
     elements: &[Ty],
     scalar: Scalar<'ctx>,
     index: u64,
@@ -410,7 +439,7 @@ pub(crate) fn tuple_element<'ctx>(
         }
         Scalar::List(boxed) => {
             let word = load_tuple_word(context, builder, boxed, index);
-            list::word_element(context, builder, &elements[index as usize], word)
+            list::word_element(context, builder, rt, &elements[index as usize], word)
         }
         _ => panic!("pycc_codegen: internal error: a tuple read of a non-tuple value"),
     }
@@ -578,19 +607,21 @@ pub(crate) fn is_container_ty(ty: &Ty) -> bool {
     )
 }
 
-/// `l <op> r` for two containers of type `ty` (`code` is
-/// `pycc_rt::value::CMP_*`), as an `i8` bool. Both operands are borrowed.
+/// `l <op> r` for two containers (`code` is `pycc_rt::value::CMP_*`), as an
+/// `i8` bool. Both operands are borrowed. The two may differ in their
+/// numbers' kinds (`[1, 2] == [1.0, 2.0]`, `(1, 2.5) < (1.0, 3)`) or a
+/// tuple's arity: each is boxed by its own type, and the runtime compares
+/// the elements of the two objects by their own kinds.
 pub(crate) fn emit_value_compare<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
-    ty: &Ty,
-    l: Scalar<'ctx>,
-    r: Scalar<'ctx>,
+    (ty, l): (&Ty, Scalar<'ctx>),
+    (right_ty, r): (&Ty, Scalar<'ctx>),
     code: u64,
 ) -> IntValue<'ctx> {
     let (left, left_box) = borrowed_word(context, builder, rt, ty, l);
-    let (right, right_box) = borrowed_word(context, builder, rt, ty, r);
+    let (right, right_box) = borrowed_word(context, builder, rt, right_ty, r);
     let result = builder
         .build_call(
             rt.containers.value_compare,

@@ -32,10 +32,12 @@ pub(crate) fn resolve_builtin_call(callee: &str, arg_tys: &[Ty]) -> Option<Resul
     if callee == "range" && !crate::non_strict::is_non_strict() {
         return None;
     }
-    // So is `tuple(xs)` of a list (`pycc_hir::builtins::resolve_call`).
+    // So is `iter(xs)` of a list, and `tuple(xs)` of a CPython object or a
+    // list of `bool`s (`pycc_hir::builtins::resolve_call`).
     if matches!(callee, "tuple" | "iter")
         && !crate::non_strict::is_non_strict()
-        && matches!(arg_tys, [Ty::List(_) | Ty::Object])
+        && (matches!(arg_tys, [Ty::Object])
+            || matches!(arg_tys, [Ty::List(e)] if callee == "iter" || **e == Ty::Bool))
     {
         return None;
     }

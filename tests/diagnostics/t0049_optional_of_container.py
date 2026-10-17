@@ -1,2 +1,2 @@
-def f(a: list[int] | None) -> int:
+def f(a: tuple[int, int] | None) -> int:
     return 1

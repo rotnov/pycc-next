@@ -358,11 +358,6 @@ pub(crate) fn lower_expr(
                 .iter()
                 .map(|e| {
                     let lowered = lower_expr(e, in_function, class_name, imports, signatures)?;
-                    check_boundary_literal(
-                        &lowered,
-                        pycc_ast::expr_range(e),
-                        "list-literal element",
-                    )?;
                     Ok(lowered)
                 })
                 .collect::<Result<Vec<_>, _>>()?,
@@ -380,11 +375,6 @@ pub(crate) fn lower_expr(
                     let key = lower_expr(key, in_function, class_name, imports, signatures)?;
                     let value =
                         lower_expr(&item.value, in_function, class_name, imports, signatures)?;
-                    check_boundary_literal(
-                        &value,
-                        pycc_ast::expr_range(&item.value),
-                        "dict-literal value",
-                    )?;
                     Ok((key, value))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
@@ -394,11 +384,6 @@ pub(crate) fn lower_expr(
                 .iter()
                 .map(|e| {
                     let lowered = lower_expr(e, in_function, class_name, imports, signatures)?;
-                    check_boundary_literal(
-                        &lowered,
-                        pycc_ast::expr_range(e),
-                        "set-literal element",
-                    )?;
                     Ok(lowered)
                 })
                 .collect::<Result<Vec<_>, _>>()?,

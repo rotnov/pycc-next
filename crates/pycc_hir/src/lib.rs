@@ -14,7 +14,6 @@ mod hir_module;
 mod if_exp;
 mod import;
 mod int_boundary;
-pub use int_boundary::boundary_literal_diagnostic;
 pub mod int_enum;
 mod isinstance_narrow;
 pub mod locate;
@@ -137,6 +136,11 @@ pub const YIELD_MARKER: &str = "<yield>";
 /// elements of a list it widens in it); not a Python identifier, so no
 /// source name can spell it.
 pub const NUM_MARKER: &str = "<int | float>";
+
+/// The callee of the one-argument call that makes an `int` or `None` an
+/// `int | None` element (`pycc_types` wraps the elements of a list it
+/// widens to `list[int | None]` in it); not a Python identifier.
+pub const OPTIONAL_INT_MARKER: &str = "<int | None>";
 
 /// The callee of the call `pycc_hir` lowers `yield from sub` to (as a
 /// statement or a value); typed as `sub`'s return type.
@@ -381,11 +385,71 @@ pub enum Ty {
     Callable(Box<(Vec<Ty>, Ty)>),
 }
 
+thread_local! {
+    static NON_STRICT_PROGRAM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Records whether the program this thread compiles is built in
+/// non-strict mode, for the later stages that lower it (`pycc_mir`): the
+/// driver sets it through `pycc_types::set_non_strict`, before checking.
+pub fn set_non_strict_program(non_strict: bool) {
+    NON_STRICT_PROGRAM.with(|cell| cell.set(non_strict));
+}
+
+/// Whether the program this thread compiles is built in non-strict mode
+/// ([`set_non_strict_program`]).
+#[must_use]
+pub fn is_non_strict_program() -> bool {
+    NON_STRICT_PROGRAM.with(std::cell::Cell::get)
+}
+
+/// Whether `T | None` holds a `T` as a pointer that is null for `None`: a
+/// `str`, a list, dict or set, a variadic or boxed tuple, or a class
+/// instance. Every one is one pointer word whose reference counting is
+/// null-safe, so `pycc_codegen` represents the optional as the bare pointer
+/// (`int`, `float` and `bool` payloads carry a presence flag instead).
+pub fn is_pointer_optional_inner(ty: &Ty) -> bool {
+    match ty {
+        Ty::Str
+        | Ty::List(_)
+        | Ty::Dict(_)
+        | Ty::Set(_)
+        | Ty::FrozenSet(_)
+        | Ty::VarTuple(_)
+        | Ty::Instance(_) => true,
+        Ty::Tuple(elements) => tuple_is_boxed(elements),
+        _ => false,
+    }
+}
+
 /// The `int | float` two numbers of different types join to: an `int` (or
 /// `bool`) with a `float`, or anything numeric with an `int | float`.
 /// `None` for any other pair, including `int` with `bool` (one `int`).
 #[must_use]
 pub fn num_join(a: &Ty, b: &Ty) -> Option<Ty> {
+    num_join_inner(a, b)
+}
+
+/// The `T | None` a list display's elements `a` and `b` join to: `None`
+/// with a `T` (or a `T | None`), for a `T` a container may hold optional
+/// (`crate::container::is_optional_element_ty`). `None` for any other pair.
+#[must_use]
+pub fn optional_element_join(a: &Ty, b: &Ty) -> Option<Ty> {
+    let joined = match (a, b) {
+        (Ty::None, Ty::None) => return None,
+        (Ty::None, other) | (other, Ty::None) => match other {
+            Ty::Optional(_) => other.clone(),
+            other => Ty::Optional(Box::new(other.clone())),
+        },
+        (Ty::Optional(inner), other) | (other, Ty::Optional(inner)) if **inner == *other => {
+            Ty::Optional(inner.clone())
+        }
+        _ => return None,
+    };
+    crate::container::is_optional_element_ty(&joined).then_some(joined)
+}
+
+fn num_join_inner(a: &Ty, b: &Ty) -> Option<Ty> {
     let number = |ty: &Ty| matches!(ty, Ty::Int | Ty::Bool | Ty::Float | Ty::Num);
     let floating = |ty: &Ty| matches!(ty, Ty::Float | Ty::Num);
     (a != b && number(a) && number(b) && (floating(a) || floating(b))).then_some(Ty::Num)

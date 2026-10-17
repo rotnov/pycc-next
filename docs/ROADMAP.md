@@ -289,6 +289,15 @@ Accept:
    filtered by the harness. A 120 s smoke run is part of regular CI.
 5. **Real-world corpus:** strict >= 190/200; `--non-strict` 200/200, 0 wrong, with no
    top-level statement in CPython fallback.
+   **Not met (2026-10-17):** strict 188/200 (from 183), 0 wrong; `--non-strict` 200/200,
+   0 wrong, 1/1191 top-level statements in CPython fallback (from 2). The remaining
+   fallback is problem 188's `mat_pow`; it needs (1) folding `isinstance` of a statically
+   known type inside function bodies, (2) parameters as the first definition of a
+   rebinding web (`B = [[b] for b in B]` gets its own type), and (3) per-call-site
+   instantiation of a nested helper called with different container types (needed only
+   for 188). The other strict refusals are heterogeneous containers (049, 070, 130), an
+   `int | None` used as an `int` without a `None` test (016, 056, 100, 123, 184), path-
+   dependent rebinding (200), `iter`/`range` objects as values (057, 168) and 188.
 
 ## v0.7 — Real-world Python: frameworks, Windows
 

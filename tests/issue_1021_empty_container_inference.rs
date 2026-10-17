@@ -991,22 +991,23 @@ print(f(1))
 
 /// The annotation source keeps its `Optional` resolutions: the type is
 /// written in source, no narrowing is involved, and `T0034` names the real
-/// D-105 gap where a `T0003` miss would be the worse diagnostic.
+/// D-105 gap (a `float | None` element; `int | None` is compiled) where a
+/// `T0003` miss would be the worse diagnostic.
 #[test]
 fn a_written_optional_annotation_still_reports_the_container_gap() {
     let error = check_error(
         "annotated_optional_empty_list",
         "\
-def f(x: int | None) -> int:
-    xs: list[int | None] = []
+def f(x: float | None) -> int:
+    xs: list[float | None] = []
     xs.append(x)
     return len(xs)
 
-print(f(1))
+print(f(1.0))
 ",
     );
     assert!(error.contains("T0034"), "{error}");
-    assert!(error.contains("list[int | None]"), "{error}");
+    assert!(error.contains("list[float | None]"), "{error}");
 }
 
 /// A producer inside a method may call `super()`, and resolving that call

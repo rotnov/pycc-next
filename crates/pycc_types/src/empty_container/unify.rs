@@ -628,11 +628,19 @@ impl Engine {
                 ..
             } => {
                 let var = self.name_var(scope, target);
+                // A `T | None` name stores its `T` values (`to_fill =
+                // el`): that is the evidence it gives, as `x = None`
+                // beside `x = v` gives none.
+                let annotation = match annotation {
+                    Ty::Optional(inner) => inner.as_ref(),
+                    other => other,
+                };
                 if concrete_ty(annotation) {
                     let known = self.store.known(annotation.clone());
                     self.store.unify(var, known);
                 }
                 if let Some(value) = value
+                    && !matches!(value, HirExpr::NoneLiteral)
                     && let Some(t) = self.term(scope, value)
                 {
                     self.store.unify(var, t);
@@ -654,6 +662,11 @@ impl Engine {
                 {
                     self.store.unify(t, known);
                 }
+            }
+            // `xs[i] = None` makes the container's element optional, as
+            // `x = None` beside `x = v` does a name: no evidence.
+            HirStmt::DictSet { key, value: HirExpr::NoneLiteral, .. } => {
+                self.term(scope, key);
             }
             HirStmt::DictSet { dict, key, value } => {
                 let base = self.name_var(scope, dict);

@@ -80,8 +80,14 @@ fn optional_none_test_recognizes_name_is_not_none() {
 }
 
 #[test]
-fn optional_none_test_rejects_non_compare_test() {
+fn optional_none_test_reads_a_name_as_its_truthiness() {
     let test = HirExpr::Name("flag".to_string());
+    assert_eq!(optional_none_test(&test), Some(("flag", NoneTestPolarity::IsNot)));
+}
+
+#[test]
+fn optional_none_test_rejects_a_non_name_non_compare_test() {
+    let test = HirExpr::IntLiteral(1);
     assert_eq!(optional_none_test(&test), None);
 }
 

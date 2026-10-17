@@ -103,13 +103,14 @@ fn an_uncaught_bigint_error_matches_cpython() {
     }
 }
 
-/// A literal too large for a list element is still refused at compile time
-/// (`T0051`), now that it lowers to an expansion instead of one `i64`.
+/// A literal too large for a list index is still refused at compile time
+/// (`T0051`), now that it lowers to an expansion instead of one `i64`; a
+/// container element holds it (v0.6).
 #[test]
 fn an_oversized_literal_in_a_boundary_position_is_still_t0051() {
     let dir = ScratchDir::new("int_bigint_t0051").expect("scratch");
     let source = dir.join("boundary.py");
-    std::fs::write(&source, "xs = [1]\nxs.append(99999999999999999999999)\n").expect("write");
+    std::fs::write(&source, "xs = [1]\nprint(xs[99999999999999999999999])\n").expect("write");
     let check = pycc()
         .arg("check")
         .arg(&source)
@@ -207,9 +208,9 @@ fn run_in(dir: &Path, program: &str) -> Output {
 /// A large `int` passed from Python into a position that needs a machine
 /// word (an index, a slice bound, a repeat count, a container element, a
 /// buffer index) raises a Python exception; it never aborts the host
-/// interpreter. Index and repeat count raise CPython's own exceptions; a
-/// container element (`OverflowError`) and a list slice bound (`IndexError`)
-/// raise the recorded gap (`docs/DEVIATIONS.md`).
+/// interpreter. Index and repeat count raise CPython's own exceptions, a
+/// container element holds it (v0.6), and a list slice bound (`IndexError`)
+/// raises the recorded gap (`docs/DEVIATIONS.md`).
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn a_large_int_in_a_machine_word_position_raises_instead_of_aborting_the_host() {
@@ -242,7 +243,7 @@ print(m.at(2), m.push(5), m.head(2), m.rep(2), m.divide(-big, 7) == -big // 7)
         stdout(&run),
         "at IndexError cannot fit 'int' into an index-sized integer\n\
          at_negative IndexError cannot fit 'int' into an index-sized integer\n\
-         push OverflowError storing a bigint-valued `int` in a container is not supported yet\n\
+         push no exception\n\
          head IndexError cannot fit 'int' into an index-sized integer\n\
          rep OverflowError cannot fit 'int' into an index-sized integer\n\
          buf_at IndexError cannot fit 'int' into an index-sized integer\n\

@@ -1146,45 +1146,23 @@ fn converting_a_list_to_str_renders_it_like_cpython() {
 }
 
 #[test]
-fn appending_a_bigint_valued_element_fails_explicitly_instead_of_corrupting_the_slot() {
-    // D-141 supersedes D-106's raw payload but deliberately retains the
-    // bigint-container scope cut. `pycc_rt_int_add`/`_mul` promote past
-    // D-061's smallint range on overflow, and the shared encoded-boundary
-    // validator must reject that value honestly rather than store it as if
-    // the current containers supported bigint ownership. Real CPython prints
-    // the exact product here; this remains a documented v0.2 scope cut.
-    //
-    // The overflowing value is built by multiplication rather than written
-    // as a literal. That was originally because `tag_smallint_const`
-    // rejected an out-of-tagged-range integer *literal* at compile time;
-    // since #148/D-178 a literal does reach `.append()` and hits this same
-    // boundary (pinned by `tests/issue_148_oversized_int_literal.rs`), so
-    // this case now specifically covers the *promotion* ingress. The factor
-    // is a variable: a constant product of literals out of range is itself
-    // refused at compile time (`T0051`), like a single oversized literal.
+fn appending_a_bigint_valued_element_stores_it() {
+    // A product promoted past D-061's smallint range is a heap bigint, which
+    // a list owns since v0.6: it is stored and read back as CPython does.
     let source = "\
 def _run() -> None:
     xs = [1]
     n = 3000000000
     xs.append(n * n)
-    print(xs[1])
+    print(xs[1], xs)
 
 _run()
 ";
-    let output = build_and_run("list_append_bigint_aborts", source);
-    assert!(
-        !output.status.success(),
-        "a bigint-valued element must fail loudly, not be stored as a supported container value"
-    );
-    // An honest Python exception, not merely a failure -- asserting the
-    // message is what distinguishes it from a segfault or any other abort
-    // that a missing guard could also produce.
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains(
-            "OverflowError: storing a bigint-valued `int` in a container is not supported yet"
-        ),
-        "expected pycc_rt's honest bigint message, got: {stderr}"
+    let output = build_and_run("list_append_bigint_stores", source);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "9000000000000000000 [1, 9000000000000000000]\n"
     );
 }
 

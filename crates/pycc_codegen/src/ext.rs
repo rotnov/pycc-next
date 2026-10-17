@@ -599,6 +599,16 @@ pub const EXT_OBJ_NEW_COLLECTION_SYMBOL: &str = "pycc_ext_obj_new_collection";
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_COLLECT_SYMBOL: &str = "pycc_ext_obj_collect";
 
+/// The fixed C shim's dict insert (non-strict mode): given a borrowed dict
+/// from [`EXT_OBJ_NEW_COLLECTION_SYMBOL`] with [`ObjCollectionKind::Dict`]
+/// and a *packed* key and value, it stores the pair and returns `0`, or
+/// returns `-1` with the CPython exception already set (an unhashable key
+/// raises `TypeError` there). Both references are consumed on every path,
+/// as [`EXT_OBJ_COLLECT_SYMBOL`] consumes its item.
+///
+/// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
+pub const EXT_OBJ_COLLECT_PAIR_SYMBOL: &str = "pycc_ext_obj_collect_pair";
+
 /// Which CPython collection a comprehension over an object builds (Part 1
 /// of #1255): the code [`EXT_OBJ_NEW_COLLECTION_SYMBOL`] and
 /// [`EXT_OBJ_COLLECT_SYMBOL`] take. Spelled once here so the two helpers'
@@ -609,6 +619,9 @@ pub enum ObjCollectionKind {
     List,
     /// A `set`, from `{elt for x in <object>}`.
     Set,
+    /// A `dict`, from `{k: v for x in xs}` with a CPython object key or
+    /// value (filled by [`EXT_OBJ_COLLECT_PAIR_SYMBOL`]).
+    Dict,
 }
 
 impl ObjCollectionKind {
@@ -617,6 +630,7 @@ impl ObjCollectionKind {
         match self {
             ObjCollectionKind::List => 0,
             ObjCollectionKind::Set => 1,
+            ObjCollectionKind::Dict => 2,
         }
     }
 }

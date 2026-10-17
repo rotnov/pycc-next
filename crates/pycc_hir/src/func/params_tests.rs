@@ -258,22 +258,21 @@ fn a_default_of_the_wrong_type_is_a_call_argument_mismatch() {
 
 #[test]
 fn a_wider_optional_annotation_keeps_its_own_unsupported_annotation_error() {
-    // `str | None` is not an annotation this compiler supports; the
-    // annotation is resolved first, so its own diagnostic wins over
-    // anything the default could say. This is a deliberate change: before
-    // this part the same source reported `C0001 default parameter values
-    // are not supported yet` at the parameter, because the default check
-    // ran before `annotation_to_ty`.
-    let source = "def f(a: str | None = None) -> None:\n    return\n";
+    // `tuple[int, int] | None` is not an annotation this compiler supports
+    // (a struct tuple is no pointer); the annotation is resolved first, so
+    // its own diagnostic wins over anything the default could say. This is
+    // a deliberate change: before this part the same source reported `C0001
+    // default parameter values are not supported yet` at the parameter,
+    // because the default check ran before `annotation_to_ty`.
+    let source = "def f(a: tuple[int, int] | None = None) -> None:\n    return\n";
     let diagnostic = lower_err(source);
     assert_eq!(diagnostic.code, "T0049", "{diagnostic:?}");
     assert_eq!(
         diagnostic.message,
-        "`Optional[str]` is not supported yet -- only `Optional[int]`, \
-         `Optional[float]`, and `Optional[bool]` (`int | None`, `float | None`, \
-         `bool | None`) are"
+        "`Optional[tuple[int, int]]` is not supported yet -- only `int`, `float`, `bool`, `str`, a list, dict or set, a class \
+         instance, or a tuple with a non-number element can be optional (`T | None`)"
     );
-    assert_eq!(diagnostic.span, Some(span_of(source, "str | None")));
+    assert_eq!(diagnostic.span, Some(span_of(source, "tuple[int, int] | None")));
 }
 
 #[test]
@@ -291,16 +290,15 @@ fn an_unsupported_annotation_is_reported_before_its_default() {
     // Under `DefaultPolicy::Admit` the annotation is resolved first, so an
     // annotation pycc does not support keeps reporting its own diagnostic,
     // at the annotation's own span rather than the default's.
-    let source = "def f(a: list[int] | None = None) -> None:\n    return\n";
+    let source = "def f(a: tuple[float, int] | None = None) -> None:\n    return\n";
     let diagnostic = lower_err(source);
     assert_eq!(diagnostic.code, "T0049", "{diagnostic:?}");
     assert_eq!(
         diagnostic.message,
-        "`Optional[list[int]]` is not supported yet -- only `Optional[int]`, \
-         `Optional[float]`, and `Optional[bool]` (`int | None`, `float | None`, \
-         `bool | None`) are"
+        "`Optional[tuple[float, int]]` is not supported yet -- only `int`, `float`, `bool`, `str`, a list, dict or set, a class \
+         instance, or a tuple with a non-number element can be optional (`T | None`)"
     );
-    assert_eq!(diagnostic.span, Some(span_of(source, "list[int] | None")));
+    assert_eq!(diagnostic.span, Some(span_of(source, "tuple[float, int] | None")));
 }
 
 // --- `DefaultPolicy::Reject` and method defaults ---------------------
@@ -341,7 +339,7 @@ fn a_method_default_is_reported_after_its_annotation_is_resolved() {
     // A method admits defaults, so it follows the module-level order: the
     // unsupported annotation reports first.
     let diagnostic = lower_err(
-        "class C:\n    def m(self, a: list[int] | None = None) -> None:\n        return\n",
+        "class C:\n    def m(self, a: tuple[int, int] | None = None) -> None:\n        return\n",
     );
     assert_eq!(diagnostic.code, "T0049", "{diagnostic:?}");
 }
