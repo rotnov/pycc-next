@@ -91,14 +91,6 @@ fn match_with_mapping_pattern_type_checks() {
 }
 
 #[test]
-fn match_with_mapping_rest_pattern_type_checks() {
-    let result = check_source(
-        "x = {\"k\": 1}\nmatch x:\n    case {\"k\": v, **rest}:\n            print(v)\n    case _:\n        pass\n",
-    );
-    assert!(result.is_ok());
-}
-
-#[test]
 fn match_with_class_pattern_type_checks() {
     let result = check_source(
         "class P:\n    def __init__(self, a: int) -> None:\n        self.a = a\ndef f(x: P) -> None:\n    match x:\n        case P(a):\n            pass\n        case _:\n            pass\n",

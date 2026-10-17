@@ -50,6 +50,24 @@ Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
 - `--ext --non-strict`: a public exception class with its own `__init__`, methods or
   class attributes was published without them (`SubErr(5)` from Python skipped
   `__init__`); it now runs in CPython.
+- A set display of three or more constants iterated in insertion order instead of the
+  order of CPython's folded frozenset constant (`{-9, 6, 2, 7}` prints `{2, -9, 6, 7}`).
+- `repr()` of a float with two shortest round-tripping strings picked Rust's instead of
+  CPython's (nearest the exact value, ties to even: `137931034482758.62`).
+- `for a, b in zip(xs, ys)` read the lengths once: a body shrinking a list raised
+  `IndexError`, one growing it stopped early.
+- `--non-strict`: a `str` method run through CPython inside another call's arguments
+  (`xs.append(s.removeprefix(p))`) was called as the outer method on `str`.
+- `match`: `case [x, *rest]` bound the whole subject to `rest`; an or-pattern inside a
+  sequence, mapping or class pattern required every alternative; a mapping pattern
+  raised `KeyError` for a missing key. A star before the end of a sequence pattern and
+  `**rest` are now refused instead of miscompiled.
+- `print(d, d.popitem())` printed a dict or set argument before later arguments changed
+  it.
+- `--non-strict`: a set display meeting a CPython object crossed as a `frozenset`.
+- `--ext --non-strict`: a twinned function was defined at the end of the module when no
+  blank line followed its `def`, so CPython code right after it raised `NameError`.
+- `int()` and `float()` of a `str` refused Unicode decimal digits (`int('١٢')`).
 
 ## [0.5.0] - 2026-10-16
 

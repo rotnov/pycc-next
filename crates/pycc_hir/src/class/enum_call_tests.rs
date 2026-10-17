@@ -225,10 +225,12 @@ fn a_match_star_capture_suppresses_the_scan() {
 }
 
 #[test]
-fn a_match_mapping_rest_capture_suppresses_the_scan() {
-    lower_ok(&format!(
+fn a_match_mapping_rest_capture_is_refused_before_the_scan() {
+    // `**rest` is not supported yet (C0001), so it never reaches the scan.
+    let errs = lower_err(&format!(
         "{COLOR}def f(d: dict[str, int]) -> None:\n    match d:\n        case {{**Color}}:\n            Color()\n"
     ));
+    assert!(errs.iter().any(|d| d.message.contains("`**rest` capture")), "{errs:?}");
 }
 
 #[test]

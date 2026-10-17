@@ -202,21 +202,17 @@ fn lowers_match_with_mapping_pattern() {
 }
 
 #[test]
-fn lowers_match_with_mapping_rest_pattern() {
-    let stmt = lower_match_stmt(
+fn refuses_a_mapping_rest_pattern() {
+    // `**rest` is refused (C0001) rather than lowered: it once bound the
+    // whole subject instead of the unmatched items (differential fuzzer).
+    let module = pycc_parser_test_helper::parse(
         "x = {\"k\": 1}\nmatch x:\n    case {\"k\": v, **rest}:\n        pass\n    case _:\n        pass\n",
     );
-    let cases = match_cases(&stmt);
-    assert_eq!(cases.len(), 2);
-    assert_eq!(
-        cases[0].pattern,
-        HirPattern::Mapping(
-            vec![(
-                HirExpr::StringLiteral("k".to_string()),
-                HirPattern::Capture("v".to_string())
-            )],
-            Some("rest".to_string()),
-        )
+    let err = lower_checked(&module).unwrap_err();
+    assert!(
+        err.code == "C0001"
+            && err.message.contains("a `**rest` capture in a mapping pattern is not supported yet"),
+        "{err:?}"
     );
 }
 

@@ -374,8 +374,9 @@ fn lower_mapping_conds(
         alternatives = conjoin(alternatives, alts);
         bindings.extend(b);
     }
-    // `**rest` is refused when the pattern is lowered to HIR.
-    debug_assert!(rest.is_none());
+    // `**rest` is refused when the pattern is lowered to HIR: `rest` is
+    // always `None` here.
+    let _ = rest;
     (alternatives, bindings)
 }
 
