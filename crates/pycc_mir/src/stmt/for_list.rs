@@ -71,26 +71,43 @@ pub(super) fn lower_for_list(
             }
         }
         Ty::Str => {
-            // `for c in s`: the loop runs over `list(s)`, bound to a
-            // synthetic name (a digit-led name no source can spell).
-            let chars = format!("0chars_{var}_{list}");
-            bind_variable(scopes, chars.clone(), Ty::List(Box::new(Ty::Str)));
+            // `for c in s`: an index loop over the code points of the
+            // string the loop started with (held in a synthetic name, a
+            // digit-led name no source can spell, as CPython's iterator
+            // holds it), reading one character per trip: no list of every
+            // character is built first, which an early `break` would waste.
+            let text = format!("0chars_{var}_{list}");
+            let index = format!("0index_{var}_{list}");
+            bind_variable(scopes, text.clone(), Ty::Str);
+            bind_variable(scopes, index.clone(), Ty::Int);
             bind_variable(scopes, var.clone(), Ty::Str);
             crate::kill_narrowing(scopes, var);
-            let body = lower_loop_body(body, scopes, classes, current_class);
-            let source = MirExpr::Name {
-                name: list.clone(),
-                ty: Ty::Str,
+            let lowered = lower_loop_body(body, scopes, classes, current_class);
+            let name = |name: &str, ty: Ty| MirExpr::Name {
+                name: name.to_string(),
+                ty,
             };
+            let len = crate::RtCallExpr {
+                sig: pycc_hir::builtins::resolve_call("len", &[Ty::Str])
+                    .and_then(Result::ok)
+                    .expect("`len(str)` is a table builtin"),
+                args: vec![name(&text, Ty::Str)],
+            };
+            let mut body = vec![MirStmt::Assign {
+                target: var.clone(),
+                value: crate::expr::builtin_call::lower_str_getitem(name(&text, Ty::Str), name(&index, Ty::Int)),
+            }];
+            body.extend(lowered);
             MirStmt::Seq(vec![
                 MirStmt::Assign {
-                    target: chars.clone(),
-                    value: crate::str_to_list(source),
+                    target: text.clone(),
+                    value: name(list, Ty::Str),
                 },
-                MirStmt::ForList {
-                    var: var.clone(),
-                    var_ty: Ty::Str,
-                    list: chars,
+                MirStmt::ForRange {
+                    var: index,
+                    start: MirExpr::IntLiteral(0),
+                    stop: MirExpr::RtCall(Box::new(len)),
+                    step: MirExpr::IntLiteral(1),
                     body,
                 },
             ])

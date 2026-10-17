@@ -148,7 +148,7 @@ fn rt(symbol: &'static str, params: Vec<Ty>, ret: Ty, args: Vec<MirExpr>) -> Mir
 }
 
 /// `s[i]` on a `str`.
-pub(super) fn lower_str_getitem(base: MirExpr, index: MirExpr) -> MirExpr {
+pub(crate) fn lower_str_getitem(base: MirExpr, index: MirExpr) -> MirExpr {
     rt(
         "pycc_rt_str_getitem",
         vec![Ty::Str, Ty::Int],

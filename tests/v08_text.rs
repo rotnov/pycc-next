@@ -13,6 +13,11 @@
 //!   `MutableMapping`) is the CPython object it names;
 //! * a string annotation naming a `TYPE_CHECKING`-only import, under
 //!   `from __future__ import annotations`, is erased whole (quotes included);
+//! * `for c in s` reads one character per trip instead of building the
+//!   list of every character first;
+//! * `typing.cast(T, x)` of a CPython object is that object, whatever `T`
+//!   spells (non-strict mode: `cast(str, token["raw"])`,
+//!   `cast(Callable[..., str], f)`);
 //! * a private module-level function whose parameters are immutable values
 //!   (`str`, `int`, ...) is an attribute of its `--ext` module, as a Python
 //!   module's is.
@@ -286,4 +291,47 @@ fn private_value_functions_are_module_attributes() {
         "from m import _wrap, _repeat, public\nprint(_wrap('x', 2), _repeat('ab', 3), public('q'))\n\
 import m\nprint(sorted(n for n in dir(m) if n.startswith('_') and not n.startswith('__')))\n",
     );
+}
+
+#[test]
+fn str_loop_native_strict() {
+    native("v08_str_loop", &[]);
+}
+
+#[test]
+fn str_loop_native_non_strict() {
+    native("v08_str_loop", &["--non-strict"]);
+}
+
+#[test]
+fn str_loop_ext_strict() {
+    ext("v08_str_loop", &[], "import m");
+}
+
+#[test]
+fn str_loop_ext_non_strict() {
+    ext("v08_str_loop", &["--non-strict"], "import m");
+}
+
+#[test]
+fn cast_of_objects_native_non_strict() {
+    native("v08_cast_objects", &["--non-strict"]);
+}
+
+#[test]
+fn cast_of_objects_ext_non_strict() {
+    ext("v08_cast_objects", &["--non-strict"], "import m");
+    ext("v08_cast_method", &["--non-strict"], "import m");
+}
+
+/// Non-strict mode: `typing` forms a module also uses as values are their
+/// CPython objects.
+#[test]
+fn typing_forms_used_as_values_native_non_strict() {
+    native("v08_typing_values", &["--non-strict"]);
+}
+
+#[test]
+fn typing_forms_used_as_values_ext_non_strict() {
+    ext("v08_typing_values", &["--non-strict"], "import m");
 }

@@ -37,13 +37,20 @@ pub(crate) struct Precompiled {
 }
 
 /// The script compiling the chunks of its stdin (JSON) to marshalled code.
+/// A chunk whose code holds a `frozenset` constant of two or more elements
+/// is left to `compile()` at import: `marshal` rebuilds a frozenset in its
+/// iteration order, so the set display it folds (`{1, 8, 0}`) would iterate
+/// in another order than the source's, as a `.pyc` does.
 const COMPILE_SCRIPT: &str = "import sys,json,marshal,importlib.util,__future__\n\
+    def sets(co):\n\
+    \x20 return any((isinstance(k,frozenset) and len(k)>1) or (hasattr(k,'co_consts') and sets(k)) for k in co.co_consts)\n\
     chunks=json.loads(sys.stdin.buffer.read())\n\
     out=[]\n\
     for c in chunks:\n\
     \x20 try:\n\
     \x20   f=__future__.annotations.compiler_flag if c['future'] else 0\n\
-    \x20   out.append(marshal.dumps(compile(c['source'],c['filename'],'exec',f,True,0)).hex())\n\
+    \x20   co=compile(c['source'],c['filename'],'exec',f,True,0)\n\
+    \x20   out.append(None if sets(co) else marshal.dumps(co).hex())\n\
     \x20 except Exception:\n\
     \x20   out.append(None)\n\
     sys.stdout.write(json.dumps({'magic':int.from_bytes(importlib.util.MAGIC_NUMBER,'little'),'code':out}))\n";

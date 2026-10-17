@@ -238,6 +238,14 @@ pub(crate) fn check_cast(
     local_names: &[&str],
     args: &[HirExpr],
 ) -> Result<Ty, Diagnostic> {
+    // A CPython object stays one (v0.8 accept 4): CPython's `cast` returns
+    // its value unchanged, so `cast(str, token["raw"])` or
+    // `cast(Callable[..., str], f)` is the object, whatever the target names
+    // and however it is spelled; the target is not evaluated
+    // (`docs/DEVIATIONS.md`).
+    if args.len() == 2 && infer_expr_in(env, local_names, &args[1])? == Ty::Object {
+        return Ok(Ty::Object);
+    }
     let target = cast_target_name(args)?;
     validate_class_name(env, target)?;
     let target_ty = cast_target_ty(target);

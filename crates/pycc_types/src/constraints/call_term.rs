@@ -437,6 +437,15 @@ pub(crate) fn collect_call_constraints(
     // `AnnAssign`) and is absent for a return-type-inferred private
     // helper, which only ever reaches this solver arm.
     if callee == "cast" && !signatures.contains_key(callee) {
+        // A CPython object stays one, as in `check_cast`; so does the value
+        // of a cast to a type expression, which only `check_cast` can
+        // judge (it accepts one for an object value).
+        if args.len() == 2
+            && (matches!(arg_terms.get(1), Some(Some(Ok(Ty::Object))))
+                || !matches!(args[0], HirExpr::Name(_)))
+        {
+            return Ok(arg_terms[1].clone());
+        }
         let target = crate::class::cast_target_name(args)?;
         if pycc_hir::is_builtin_type_name(target) {
             return Ok(Some(Ok(crate::class::cast_target_ty(target))));

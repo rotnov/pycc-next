@@ -129,3 +129,37 @@ fn an_ext_module_imports_its_fallback_code_without_compiling_it() {
         }
     }
 }
+
+/// A constant set display (`{1, 8, 0}`) in fallback code iterates in the
+/// source's order: `marshal` rebuilds a frozenset constant in its own
+/// iteration order, so a chunk holding one is compiled at import instead
+/// (the differential fuzzer's finding).
+#[test]
+fn a_constant_set_display_in_fallback_code_keeps_the_sources_order() {
+    let module = "def f(p0: tuple, p1: tuple) -> dict:\n    s: str = {1, 8, 0}\n    \
+                  print(s, {3, 70, 1, 900}, frozenset({5, 37, 2}))\n\n\nf(6, 5)\n";
+    let compiled = ScratchDir::new("precompiled_sets").expect("scratch");
+    let source = compiled.join("m.py");
+    std::fs::write(&source, module).expect("write the module");
+    let build = pycc()
+        .args(["build", "--ext", "--non-strict"])
+        .arg(&source)
+        .arg("-o")
+        .arg(compiled.join("m"))
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&build.stderr));
+    std::fs::remove_file(&source).expect("import the artifact, not the source");
+    let plain = ScratchDir::new("precompiled_sets_src").expect("scratch");
+    std::fs::write(plain.join("m.py"), module).expect("write the module");
+    let import = |dir: &Path| {
+        python()
+            .args(["-c", "import m"])
+            .current_dir(dir)
+            .output()
+            .expect("python should spawn")
+    };
+    let (ours, oracle) = (import(&compiled), import(&plain));
+    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
+    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+}

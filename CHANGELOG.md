@@ -48,8 +48,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   CPython's speed on its own benchmark (README). `package_check` builds a package's
   modules in parallel, as `pycc.build` does, and gates the elapsed time (`--jobs`).
 
+- `typing.cast(T, x)` of a CPython object is that object, whatever `T` names and however
+  it is spelled (`cast(str, token["raw"])`, `cast(Callable[..., str], f)`, which made the
+  function using it run in CPython); `T` is not evaluated (`docs/DEVIATIONS.md`).
+- `for c in s` over a `str` reads one character per trip from the string the loop started
+  with, instead of first building the list of all its characters (which an early `break`
+  then mostly discarded).
+
 ### Fixed
 
+- An `--ext` module's pre-compiled fallback code no longer changes the order a constant set
+  display (`{1, 8, 0}`) iterates in: `marshal` rebuilds a frozenset constant in its own
+  order, so a chunk holding one is compiled at import, as before (the differential
+  fuzzer's finding on `main`).
 - A string annotation (`x: "State"`) naming a `TYPE_CHECKING`-only import, under
   `from __future__ import annotations`, no longer fails the build: the fallback's
   annotation erasure removed the annotation's text but left its closing quote.
