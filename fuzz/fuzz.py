@@ -41,7 +41,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import harness  # noqa: E402
-from gen import Program, generate  # noqa: E402
+from gen import Block, Program, generate  # noqa: E402
 from reduce import reduce  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -417,6 +417,8 @@ def main() -> int:
     ap.add_argument("--reduce-grace", type=float, default=900,
                     help="reductions end this many seconds after --seconds at the latest")
     ap.add_argument("--replay", help="SEED:INDEX: run one case verbosely")
+    ap.add_argument("--program", type=pathlib.Path,
+                    help="run (and reduce) this program file instead of generated ones, verbosely")
     ap.add_argument("--top-refusals", type=int, default=25)
     ap.add_argument("--summary-json", type=pathlib.Path, help="also write the statistics as JSON here")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -425,6 +427,8 @@ def main() -> int:
     if cfg.replay:
         cfg.seed, idx = map(int, cfg.replay.split(":"))
         cfg.count, cfg.verbose, cfg.jobs = idx + 1, True, 1
+    if cfg.program and cfg.seed is None:
+        cfg.seed = 0
     if cfg.seed is None:
         cfg.seed = int(time.time()) % 1_000_000
     cfg.findings = cfg.findings.resolve()
@@ -433,7 +437,12 @@ def main() -> int:
     stats = Stats()
     start = time.monotonic()
     cfg.deadline = start + cfg.seconds
-    if cfg.replay:
+    if cfg.program:
+        cfg.seed, cfg.verbose, cfg.jobs = 0, True, 1
+        lines = cfg.program.read_text().rstrip("\n").split("\n")
+        prog = Program([], [Block("program", lines)], f"file-{cfg.program.stem}")
+        Case(cfg, prog, cfg.work, stats, random.Random(0)).run()
+    elif cfg.replay:
         prog = generate(cfg.seed, idx)
         print(prog.render()[0])
         Case(cfg, prog, cfg.work, stats, random.Random(f"modes:{cfg.seed}:{idx}")).run()
