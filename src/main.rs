@@ -23,6 +23,11 @@ mod timing;
 /// accept 4); mimalloc serves that pattern markedly faster than the
 /// system allocator. Only the compiler's own Rust allocations use it: the
 /// programs it builds never link it.
+///
+/// Not on Windows: LLVM's official Windows release, which pycc links there,
+/// is built with the static C runtime (/MT), and mimalloc's C object with
+/// Rust's default dynamic one (/MD); MSVC refuses to link the two (LNK2038).
+#[cfg(not(windows))]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
