@@ -120,23 +120,6 @@ fn native_text(buf: Vec<u8>) -> *mut PyStrObj {
     new_pystr(String::from_utf8_lossy(&buf).as_bytes())
 }
 
-#[cfg(test)]
-mod newline_tests {
-    use super::{from_crlf, to_crlf};
-
-    #[test]
-    fn writes_translate_every_newline_to_crlf() {
-        assert_eq!(&*to_crlf(b"abc"), b"abc");
-        assert_eq!(&*to_crlf(b"a\nb\n"), b"a\r\nb\r\n");
-        assert_eq!(&*to_crlf(b"\r\n"), b"\r\r\n");
-    }
-
-    #[test]
-    fn reads_translate_crlf_and_lone_cr_to_newline() {
-        assert_eq!(from_crlf(b"abc\n".to_vec()), b"abc\n");
-        assert_eq!(from_crlf(b"a\r\nb\rc\r".to_vec()), b"a\nb\nc\n");
-    }
-}
 
 /// Writes `text` to standard output.
 pub(crate) fn out_str(text: &str) {
@@ -185,5 +168,23 @@ pub(crate) fn read_all() -> Option<*mut PyStrObj> {
             let _ = std::io::stdin().lock().read_to_end(&mut buf);
             Some(native_text(buf))
         }
+    }
+}
+
+#[cfg(test)]
+mod newline_tests {
+    use super::{from_crlf, to_crlf};
+
+    #[test]
+    fn writes_translate_every_newline_to_crlf() {
+        assert_eq!(&*to_crlf(b"abc"), b"abc");
+        assert_eq!(&*to_crlf(b"a\nb\n"), b"a\r\nb\r\n");
+        assert_eq!(&*to_crlf(b"\r\n"), b"\r\r\n");
+    }
+
+    #[test]
+    fn reads_translate_crlf_and_lone_cr_to_newline() {
+        assert_eq!(from_crlf(b"abc\n".to_vec()), b"abc\n");
+        assert_eq!(from_crlf(b"a\r\nb\rc\r".to_vec()), b"a\nb\nc\n");
     }
 }
