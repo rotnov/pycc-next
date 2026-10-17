@@ -307,6 +307,15 @@ Accept:
    3.13+ for `--ext`), built and smoke-tested in the release workflow; CI runs the test
    suite, the corpus gate and the real-package checks on `windows-2025`; the PEP 517 backend
    produces `win_amd64` wheels. macOS also runs the real-package wheel checks.
+   **Met 2026-10-17:** ci.yml's `windows` job (windows-2025, MSVC, LLVM's own 22.1.8
+   release pinned by sha256 in `scripts/windows_llvm.sh`) builds, packages and smoke-tests
+   the `.zip` archive, builds diff-match-patch, tomli and pypng into `cp313-abi3-win_amd64`
+   wheels with `pip wheel` (`bench/wheel_check.py`) and against their own tests
+   (`bench/package_check.py`), runs the whole test suite (`scripts/ci_test.sh` under Git
+   Bash) and the non-strict corpus gate (200/200); release.yml builds, smoke-tests and
+   publishes `pycc-vX.Y.Z-x86_64-windows.zip` with the other archives (not yet exercised by
+   a release). macOS runs `bench/wheel_check.py`. CI run 39041988599 on fad5439 green. Windows gaps:
+   `docs/DEVIATIONS.md` (native stdout writes `\n`, no static libpython).
 2. **Classes from libraries:** `--non-strict` compiles classes that inherit from CPython
    classes (bases written as names or attributes, `class M(lib.Base)`), with metaclasses,
    descriptors, class attributes of any type, decorated methods and properties; annotations
