@@ -63,3 +63,11 @@ fn str_and_bool_of_native_values() {
 fn classmethod_construction_and_class_attribute_writes() {
     matches_cpython("class_attr_writes");
 }
+
+/// `f(**{'a': x})` passes the display's entries as keyword arguments, in
+/// evaluation order, to a parameter or a `**kwargs` parameter; one that
+/// cannot bind raises CPython's `TypeError` at run time.
+#[test]
+fn keyword_arguments_from_a_dict_display() {
+    matches_cpython("kwargs_dict_display");
+}

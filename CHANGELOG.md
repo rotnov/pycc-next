@@ -98,7 +98,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   constructing the receiver's class also when a subclass inherits the classmethod (whose
   return type is then that subclass, as for `type(self)(...)`); and a class attribute
   the program assigns through its class (`Base.count += 1`), as long as every access
-  spells `Base.count` (`docs/DEVIATIONS.md`).
+  spells `Base.count` (`docs/DEVIATIONS.md`); and `f(**{'name': 'c', 'z': 3})`, a dict
+  display of identifier keys unpacked into a call of a module function, bound as the
+  keyword arguments it spells (whatever its value types), raising CPython's `TypeError`
+  at run time when it cannot bind.
 
 ### Removed
 

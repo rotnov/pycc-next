@@ -26,7 +26,10 @@
 //!   becomes a helper that evaluates every argument and raises the
 //!   `TypeError`;
 //! * a call with `*seq` or `**mapping` becomes a helper binding at run
-//!   time, checking in CPython's order ([`emit`]).
+//!   time, checking in CPython's order ([`emit`]). A `**` operand that is a
+//!   dict display of identifier keys is spliced into keyword arguments
+//!   first, and the call is then bound here whatever its callee
+//!   ([`splice`]), so one that cannot bind still raises at run time.
 //!
 //! Methods of top-level classes are bound the same way when one class
 //! alone defines their name (`obj.m(...)`, `C.m(...)` of a static method),
@@ -34,6 +37,7 @@
 //! a value is called with its flat parameters (`docs/DEVIATIONS.md`).
 
 mod emit;
+mod splice;
 
 use super::Fresh;
 use super::build::load;
@@ -518,6 +522,8 @@ impl Rewrite<'_> {
     /// The rewrite of `call`, or `None` to leave it as written.
     fn rewrite_call(&self, call_expr: &ruff_python_ast::ExprCall) -> Option<Expr> {
         let (sig, callee, receiver) = self.callee(&call_expr.func)?;
+        let spliced_call = splice::spliced(call_expr);
+        let call_expr = spliced_call.as_ref().unwrap_or(call_expr);
         let args = call_args(&call_expr.arguments);
         let mapping = args.iter().any(|a| matches!(a, Arg::DoubleStar(_)));
         let star = args.iter().any(|a| matches!(a, Arg::Star(_)));
@@ -545,7 +551,13 @@ impl Rewrite<'_> {
                     || sig.kwarg.is_some(),
                 _ => true,
             });
-        if !sig.flat && !mapping && (!star || !defaults) && !constructor && !self_keywords {
+        if !sig.flat
+            && !mapping
+            && (!star || !defaults)
+            && !constructor
+            && !self_keywords
+            && spliced_call.is_none()
+        {
             return None;
         }
         let emitter = Emitter {
