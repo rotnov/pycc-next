@@ -353,7 +353,8 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
 }
 
 /*
- * A tuple (`kind` 0), set (1) or dict (2) display with an object element.
+ * A tuple (`kind` 0), set (1) or dict (2) display with an object element,
+ * or (3) a set display of constants, in CPython's folded order.
  * `items` follows `pycc_ext_obj_build_list`'s contract (every packed element
  * consumed on every path); a dict's items alternate key and value. The
  * elements are first collected into a list, which keeps that one consuming
@@ -398,6 +399,19 @@ PyObject *pycc_ext_obj_build_display(PyObject **items, long long n, int kind)
     case 1:
         result = PySet_New(list);
         break;
+    case 3: {
+        /* A display of constants: CPython folds it into a frozenset
+         * constant, rebuilds that from its own order when merging
+         * constants, and copies it into a new set (`SET_UPDATE`). */
+        PyObject *folded = PyFrozenSet_New(list);
+        PyObject *order = folded == NULL ? NULL : PySequence_Tuple(folded);
+        PyObject *merged = order == NULL ? NULL : PyFrozenSet_New(order);
+        result = merged == NULL ? NULL : PySet_New(merged);
+        Py_XDECREF(merged);
+        Py_XDECREF(order);
+        Py_XDECREF(folded);
+        break;
+    }
     case 2:
         result = PyDict_New();
         for (i = 0; result != NULL && i + 1 < (Py_ssize_t)n; i += 2) {

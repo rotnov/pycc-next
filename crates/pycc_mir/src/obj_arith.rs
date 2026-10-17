@@ -25,7 +25,7 @@ pub(super) fn lower_object_binop(
         Ok(MirExpr::ObjBinOp {
             op,
             in_place,
-            left: Box::new(object_operand(left)),
+            left: Box::new(object_arg(object_operand(left))),
             right: Box::new(object_arg(object_operand(right))),
         })
     } else {

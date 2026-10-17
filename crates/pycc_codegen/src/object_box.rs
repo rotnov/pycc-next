@@ -137,7 +137,15 @@ fn as_object_display(value: &MirExpr) -> Option<MirExpr> {
             es.iter().map(element).collect(),
         ),
         MirExpr::SetLiteral { elements, .. } => display(
-            pycc_mir::ObjDisplayKind::Set,
+            if elements.len() >= 3
+                && elements
+                    .iter()
+                    .all(crate::expr::container_expr::is_folded_constant)
+            {
+                pycc_mir::ObjDisplayKind::ConstantSet
+            } else {
+                pycc_mir::ObjDisplayKind::Set
+            },
             elements.iter().map(element).collect(),
         ),
         MirExpr::DictLiteral(pairs) => display(

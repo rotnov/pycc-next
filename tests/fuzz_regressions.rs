@@ -182,6 +182,16 @@ fn str_repr_escapes_unprintable_unicode() {
     assert_matches_cpython("fuzz_str_repr_unicode");
 }
 
+/// The same order when the display is built as a CPython object
+/// (`--non-strict`).
+#[test]
+fn a_constant_set_display_object_iterates_in_cpythons_order() {
+    let source = fixture("fuzz_constant_set_object.py");
+    let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
+    let got = support::run_native("fuzz_constant_set_object", &source, &["--release", "--non-strict"]);
+    assert_eq!(got, expected);
+}
+
 /// `repr()` of a float with two shortest round-tripping strings is the one
 /// nearest its exact value, ties to even (`137931034482758.62`).
 #[test]

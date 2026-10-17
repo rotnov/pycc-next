@@ -194,6 +194,10 @@ pub enum ObjDisplayKind {
     Tuple,
     Set,
     Dict,
+    /// A set display of three or more constants, built in the order
+    /// CPython's folded frozenset constant gives it
+    /// (`pycc_rt_set_constant_display`'s module documentation).
+    ConstantSet,
 }
 
 impl ObjDisplayKind {
@@ -203,6 +207,7 @@ impl ObjDisplayKind {
             Self::Tuple => 0,
             Self::Set => 1,
             Self::Dict => 2,
+            Self::ConstantSet => 3,
         }
     }
 }

@@ -447,7 +447,7 @@ pub(crate) fn emit_set_literal_expr_2<'ctx>(
 
 /// Whether CPython's compiler sees `expr` as a constant (after its AST
 /// optimizer folds `-9`): a literal, or a tuple of them.
-fn is_folded_constant(expr: &MirExpr) -> bool {
+pub(crate) fn is_folded_constant(expr: &MirExpr) -> bool {
     match expr {
         MirExpr::IntLiteral(_)
         | MirExpr::FloatLiteral(_)
