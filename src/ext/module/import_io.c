@@ -389,7 +389,7 @@ int pycc_ext_import_error_bridge(void)
  * base listed ahead of its subclass fails there.
  */
 #define PYCC_EXT_OBJ_TAG(py_class, tag_value, literal)                                           \
-    if (PyErr_GivenExceptionMatches(exc, py_class)) {                                            \
+    if (exact ? type == py_class : PyErr_GivenExceptionMatches(exc, py_class)) {                 \
         *class_name = literal;                                                                   \
         *class_name_len = sizeof(literal) - 1;                                                   \
         return tag_value;                                                                        \
@@ -402,42 +402,54 @@ static unsigned char pycc_ext_obj_error_tag(PyObject *exc, const char **class_na
      * deriving from one (a subclass that runs in fallback code): compiled
      * `except` clauses test the class's own tag. */
     int user_tag = pycc_ext_user_exception_tag(exc, class_name, class_name_len);
+    PyObject *type = (PyObject *)Py_TYPE(exc);
+    int exact;
+
     if (user_tag >= 0) {
         return (unsigned char)user_tag;
     }
-    PYCC_EXT_OBJ_TAG(PyExc_ModuleNotFoundError, 27, "ModuleNotFoundError")
-    PYCC_EXT_OBJ_TAG(PyExc_ImportError, 26, "ImportError")
-    PYCC_EXT_OBJ_TAG(PyExc_OverflowError, 25, "OverflowError")
-    PYCC_EXT_OBJ_TAG(PyExc_AssertionError, 28, "AssertionError")
-    PYCC_EXT_OBJ_TAG(PyExc_AttributeError, 29, "AttributeError")
-    PYCC_EXT_OBJ_TAG(PyExc_EOFError, 30, "EOFError")
-    PYCC_EXT_OBJ_TAG(PyExc_NameError, 31, "NameError")
-    PYCC_EXT_OBJ_TAG(PyExc_MemoryError, 32, "MemoryError")
-    PYCC_EXT_OBJ_TAG(PyExc_StopIteration, 33, "StopIteration")
-    PYCC_EXT_OBJ_TAG(PyExc_GeneratorExit, 34, "GeneratorExit")
-    PYCC_EXT_OBJ_TAG(PyExc_BrokenPipeError, 19, "BrokenPipeError")
-    PYCC_EXT_OBJ_TAG(PyExc_ConnectionAbortedError, 20, "ConnectionAbortedError")
-    PYCC_EXT_OBJ_TAG(PyExc_ConnectionRefusedError, 21, "ConnectionRefusedError")
-    PYCC_EXT_OBJ_TAG(PyExc_ConnectionResetError, 22, "ConnectionResetError")
-    PYCC_EXT_OBJ_TAG(PyExc_BlockingIOError, 8, "BlockingIOError")
-    PYCC_EXT_OBJ_TAG(PyExc_ChildProcessError, 9, "ChildProcessError")
-    PYCC_EXT_OBJ_TAG(PyExc_ConnectionError, 10, "ConnectionError")
-    PYCC_EXT_OBJ_TAG(PyExc_FileExistsError, 11, "FileExistsError")
-    PYCC_EXT_OBJ_TAG(PyExc_FileNotFoundError, 12, "FileNotFoundError")
-    PYCC_EXT_OBJ_TAG(PyExc_InterruptedError, 13, "InterruptedError")
-    PYCC_EXT_OBJ_TAG(PyExc_IsADirectoryError, 14, "IsADirectoryError")
-    PYCC_EXT_OBJ_TAG(PyExc_NotADirectoryError, 15, "NotADirectoryError")
-    PYCC_EXT_OBJ_TAG(PyExc_PermissionError, 16, "PermissionError")
-    PYCC_EXT_OBJ_TAG(PyExc_ProcessLookupError, 17, "ProcessLookupError")
-    PYCC_EXT_OBJ_TAG(PyExc_TimeoutError, 18, "TimeoutError")
-    PYCC_EXT_OBJ_TAG(PyExc_OSError, 7, "OSError")
-    PYCC_EXT_OBJ_TAG(PyExc_ZeroDivisionError, 5, "ZeroDivisionError")
-    PYCC_EXT_OBJ_TAG(PyExc_KeyError, 3, "KeyError")
-    PYCC_EXT_OBJ_TAG(PyExc_IndexError, 4, "IndexError")
-    PYCC_EXT_OBJ_TAG(PyExc_ValueError, 1, "ValueError")
-    PYCC_EXT_OBJ_TAG(PyExc_TypeError, 2, "TypeError")
-    PYCC_EXT_OBJ_TAG(PyExc_RuntimeError, 6, "RuntimeError")
-    PYCC_EXT_OBJ_TAG(PyExc_Exception, 0, "Exception")
+    /* Two passes over the one list: first by identity, which answers the
+     * common case (CPython raised a builtin class itself, as a missing key
+     * raises `KeyError`) with pointer compares instead of up to 33
+     * `PyErr_GivenExceptionMatches` calls; then by subclass. The identity
+     * pass gives the subclass pass's answer: no line above a class's own
+     * line can match an instance of it, because a line that did would be a
+     * base listed ahead of its subclass. */
+    for (exact = 1; exact >= 0; exact--) {
+        PYCC_EXT_OBJ_TAG(PyExc_ModuleNotFoundError, 27, "ModuleNotFoundError")
+        PYCC_EXT_OBJ_TAG(PyExc_ImportError, 26, "ImportError")
+        PYCC_EXT_OBJ_TAG(PyExc_OverflowError, 25, "OverflowError")
+        PYCC_EXT_OBJ_TAG(PyExc_AssertionError, 28, "AssertionError")
+        PYCC_EXT_OBJ_TAG(PyExc_AttributeError, 29, "AttributeError")
+        PYCC_EXT_OBJ_TAG(PyExc_EOFError, 30, "EOFError")
+        PYCC_EXT_OBJ_TAG(PyExc_NameError, 31, "NameError")
+        PYCC_EXT_OBJ_TAG(PyExc_MemoryError, 32, "MemoryError")
+        PYCC_EXT_OBJ_TAG(PyExc_StopIteration, 33, "StopIteration")
+        PYCC_EXT_OBJ_TAG(PyExc_GeneratorExit, 34, "GeneratorExit")
+        PYCC_EXT_OBJ_TAG(PyExc_BrokenPipeError, 19, "BrokenPipeError")
+        PYCC_EXT_OBJ_TAG(PyExc_ConnectionAbortedError, 20, "ConnectionAbortedError")
+        PYCC_EXT_OBJ_TAG(PyExc_ConnectionRefusedError, 21, "ConnectionRefusedError")
+        PYCC_EXT_OBJ_TAG(PyExc_ConnectionResetError, 22, "ConnectionResetError")
+        PYCC_EXT_OBJ_TAG(PyExc_BlockingIOError, 8, "BlockingIOError")
+        PYCC_EXT_OBJ_TAG(PyExc_ChildProcessError, 9, "ChildProcessError")
+        PYCC_EXT_OBJ_TAG(PyExc_ConnectionError, 10, "ConnectionError")
+        PYCC_EXT_OBJ_TAG(PyExc_FileExistsError, 11, "FileExistsError")
+        PYCC_EXT_OBJ_TAG(PyExc_FileNotFoundError, 12, "FileNotFoundError")
+        PYCC_EXT_OBJ_TAG(PyExc_InterruptedError, 13, "InterruptedError")
+        PYCC_EXT_OBJ_TAG(PyExc_IsADirectoryError, 14, "IsADirectoryError")
+        PYCC_EXT_OBJ_TAG(PyExc_NotADirectoryError, 15, "NotADirectoryError")
+        PYCC_EXT_OBJ_TAG(PyExc_PermissionError, 16, "PermissionError")
+        PYCC_EXT_OBJ_TAG(PyExc_ProcessLookupError, 17, "ProcessLookupError")
+        PYCC_EXT_OBJ_TAG(PyExc_TimeoutError, 18, "TimeoutError")
+        PYCC_EXT_OBJ_TAG(PyExc_OSError, 7, "OSError")
+        PYCC_EXT_OBJ_TAG(PyExc_ZeroDivisionError, 5, "ZeroDivisionError")
+        PYCC_EXT_OBJ_TAG(PyExc_KeyError, 3, "KeyError")
+        PYCC_EXT_OBJ_TAG(PyExc_IndexError, 4, "IndexError")
+        PYCC_EXT_OBJ_TAG(PyExc_ValueError, 1, "ValueError")
+        PYCC_EXT_OBJ_TAG(PyExc_TypeError, 2, "TypeError")
+        PYCC_EXT_OBJ_TAG(PyExc_RuntimeError, 6, "RuntimeError")
+        PYCC_EXT_OBJ_TAG(PyExc_Exception, 0, "Exception")
+    }
     /* Not an `Exception` at all: `SystemExit`, `KeyboardInterrupt`,
      * `GeneratorExit`, or a `BaseExceptionGroup` that is not an
      * `ExceptionGroup`. `except Exception` must not catch it. */

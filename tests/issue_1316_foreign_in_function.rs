@@ -197,6 +197,33 @@ fn a_subclass_reaches_its_own_handler_before_its_base() {
     );
 }
 
+/// The bridge answers a builtin class CPython raised itself (an exact
+/// `KeyError`) by identity, and an instance of a CPython subclass by the
+/// subclass pass: a `KeyError` subclass still reaches `except KeyError` and
+/// not an `IndexError` handler listed first, and a `ConnectionError`
+/// subclass reaches `except ConnectionError`, not a sibling's handler.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn exact_classes_and_cpython_subclasses_map_to_the_same_handlers() {
+    assert_matches_cpython(
+        "fn1316_exact_tag",
+        "pycc_fn1316_exact",
+        "import hh\n\n\ndef f(k: int) -> int:\n    try:\n        hh.fail(k)\n        return 0\n    \
+         except IndexError:\n        return 4\n    except KeyError:\n        return 3\n    \
+         except BrokenPipeError:\n        return 19\n    except ConnectionError:\n        return 10\n\n\n\
+         print(f(0), f(1), f(2), f(3), f(4))\n",
+        &[(
+            "hh",
+            "class MyKey(KeyError):\n    pass\n\n\nclass MyConn(ConnectionError):\n    pass\n\n\n\
+             def fail(k):\n    if k == 0:\n        return {}['x']\n    if k == 1:\n        raise MyKey('y')\n    \
+             if k == 2:\n        raise MyConn('z')\n    if k == 3:\n        raise BrokenPipeError('w')\n    \
+             return [][0]\n",
+        )],
+        "import pycc_fn1316_exact\n",
+        "3 3 10 19 4\n",
+    );
+}
+
 /// An uncaught failure in a function the host calls after import reaches
 /// the host as CPython's original exception, with its `.name`.
 #[test]
