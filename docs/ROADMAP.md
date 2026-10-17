@@ -376,3 +376,31 @@ Accept:
    containers (049, 070, 130), an `int | None` used as an `int` without a `None` test
    (016, 056, 100, 123, 184), a variable rebound to another type on some paths (200) and
    iterator objects as values (057).
+
+## v0.8 — Library code faster than CPython
+
+v0.7 made real libraries compile (pydantic: 809/1249 functions native, its suite passing)
+but the compiled tree is slower than CPython running the sources (import 0.40x, model
+definition 0.70x, `model_json_schema()` 0.70x, round-trips 0.91x). v0.8 makes compiled
+library code a speed-up, not only a correctness result.
+
+Accept:
+1. **pydantic faster than CPython:** `bench/pydantic_check.py --time` on pydantic 2.13.5
+   (same pydantic-core wheel for both trees): import no slower than CPython (the fallback
+   source is no longer compiled with `compile()` on every import), model definition and
+   `model_json_schema()` >= 1.3x faster, validation/serialization round-trips no slower.
+2. **The common fallback constructs compile:** the `...` literal, function-local
+   `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
+   `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions
+   native; the call boundary costs no Python forwarder frame for methods of CPython-run
+   classes.
+3. **Compiled frames are real frames:** `sys._getframe`, tracebacks and line numbers of
+   compiled functions match CPython (their DEVIATIONS rows are removed); pydantic's own
+   suite fails no test that passes against its sources.
+4. **A fourth real package, another domain:** a pure-Python text-processing package from
+   PyPI (a Markdown or template engine) builds with `--ext --non-strict`, passes its own
+   test suite, and runs its own benchmark or a representative workload >= 2x faster than
+   CPython; added to `bench/package_check.py` and the CI wheel checks.
+5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
+   stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
+   >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.
