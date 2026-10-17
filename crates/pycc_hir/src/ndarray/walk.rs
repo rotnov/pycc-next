@@ -19,6 +19,7 @@ pub fn expr_children(expr: &HirExpr) -> Vec<&HirExpr> {
         | HirExpr::StringLiteral(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::EmptyList(_)
         | HirExpr::EmptySet(_)
@@ -122,6 +123,7 @@ pub fn expr_children_mut(expr: &mut HirExpr) -> Vec<&mut HirExpr> {
         | HirExpr::StringLiteral(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::EmptyList(_)
         | HirExpr::EmptySet(_)

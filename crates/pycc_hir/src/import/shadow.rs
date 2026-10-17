@@ -97,6 +97,10 @@ pub(crate) fn reject_shadowed_foreign_imports(
     let mut reported: Vec<&str> = Vec::new();
     let mut diagnostics = Vec::new();
     for (index, binding) in imports.iter().enumerate() {
+        // A function-local import binds no module name (v0.8 accept 2).
+        if !binding.binds_module_name() {
+            continue;
+        }
         let ImportBinding::Foreign {
             local_name,
             module_path,

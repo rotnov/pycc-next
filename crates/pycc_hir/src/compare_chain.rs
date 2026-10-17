@@ -140,7 +140,8 @@ pub(crate) fn lower_cmp_op(
 }
 
 /// Whether `expr` is a literal constant, which can never be a CPython
-/// object (see [`lower_cmp_op`]'s `general_identity`).
+/// object (see [`lower_cmp_op`]'s `general_identity`). The `...` literal is
+/// not one: it is CPython's `Ellipsis` object (`HirExpr::Ellipsis`).
 fn is_literal(expr: &Expr) -> bool {
     matches!(
         expr,
@@ -148,7 +149,6 @@ fn is_literal(expr: &Expr) -> bool {
             | Expr::BytesLiteral(_)
             | Expr::NumberLiteral(_)
             | Expr::BooleanLiteral(_)
-            | Expr::EllipsisLiteral(_)
     )
 }
 

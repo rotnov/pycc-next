@@ -397,6 +397,7 @@ pub(crate) fn collect_named_expr_bindings(
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::Super => Ok(()),
         HirExpr::ListPop { list } => match list.attr_expr() {

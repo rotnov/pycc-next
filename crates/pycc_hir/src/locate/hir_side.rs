@@ -239,6 +239,7 @@ pub(super) fn collect_exprs<'a>(expr: &'a HirExpr, out: &mut Vec<&'a HirExpr>) {
         | HirExpr::StringLiteral(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::EmptyList(_)
         | HirExpr::EmptySet(_)
@@ -354,6 +355,7 @@ pub(super) fn expr_key(expr: &HirExpr) -> Option<NodeKey> {
         HirExpr::StringLiteral(value) => format!("s:{value}"),
         HirExpr::NoneLiteral => "none".into(),
         HirExpr::NotImplemented => "n:NotImplemented".into(),
+        HirExpr::Ellipsis => "n:Ellipsis".into(),
         HirExpr::Name(name) => format!("n:{name}"),
         HirExpr::Call { callee, .. } | HirExpr::GenericClassInstantiate { class: callee, .. } => {
             format!("c:{callee}")

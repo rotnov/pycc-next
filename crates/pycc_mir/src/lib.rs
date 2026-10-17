@@ -412,7 +412,9 @@ pub fn build(hir: &HirModule) -> MirModule {
     // would. A function body reads it through the same
     // outward `lookup` walk, matching the constraint solver's own
     // per-function `foreign_objects` copy.
-    for import in &hir.imports {
+    // A function-local import (v0.8 accept 2) binds a local instead, at
+    // its own `MirStmt::ForeignImport`.
+    for import in hir.imports.iter().filter(|import| import.binds_module_name()) {
         if let ImportBinding::Foreign { local_name, .. } = import {
             bind(&mut scopes, local_name.clone(), Ty::Object);
         }

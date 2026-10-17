@@ -591,6 +591,7 @@ fn int_value_is_a_duplicate_reference(expr: &MirExpr) -> bool {
         | MirExpr::StringLiteral(_)
         | MirExpr::NoneLiteral
         | MirExpr::NotImplemented
+        | MirExpr::Ellipsis
         | MirExpr::Call { .. }
         | MirExpr::RtCall(_)
         | MirExpr::Nd(_)

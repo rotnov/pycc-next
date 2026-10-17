@@ -309,7 +309,7 @@ fn a_single_general_identity_between_non_literals_lowers() {
 fn a_single_identity_with_a_literal_operand_keeps_its_c0001() {
     // `a is True` lowers: identity with a `bool` singleton is typed by
     // `pycc_types`.
-    for operand in ["1", "1.5", "'s'", "b's'", "..."] {
+    for operand in ["1", "1.5", "'s'", "b's'"] {
         for source in [
             format!("def f(a: int) -> bool:\n    return a is {operand}\n"),
             format!("def f(a: int) -> bool:\n    return {operand} is not a\n"),
@@ -325,6 +325,20 @@ fn a_single_identity_with_a_literal_operand_keeps_its_c0001() {
             );
         }
     }
+}
+
+/// The `...` literal is CPython's `Ellipsis` object, so an identity test
+/// with it lowers; where a module can hold no object, the literal itself is
+/// refused.
+#[test]
+fn an_identity_with_the_ellipsis_literal_refuses_only_the_literal() {
+    let error = lowering_error("def f(a: int) -> bool:\n    return a is ...\n");
+    assert_eq!(error.code, "C0001");
+    assert!(
+        error.message.contains("an `...` ellipsis literal used as a value"),
+        "{}",
+        error.message
+    );
 }
 
 /// Part 2b of #1371: a single `in`/`not in` whose container may be a

@@ -24,6 +24,7 @@ impl MirExpr {
             | MirExpr::EmptySet(_)
             | MirExpr::NoneLiteral
             | MirExpr::NotImplemented
+            | MirExpr::Ellipsis
             | MirExpr::Name { .. }
             | MirExpr::NullInstance { .. } => {}
             MirExpr::IntBoundary(inner)

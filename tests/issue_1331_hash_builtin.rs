@@ -255,13 +255,6 @@ fn hash_module_bodies_match_cpython_as_extensions() {
 
 #[test]
 fn a_hashable_but_unimplemented_argument_is_c0001() {
-    let (tag, argument, name) = ("e2e_1331_none", "None", "None");
-    assert_one_error(
-        tag,
-        &format!("print(hash({argument}))\n"),
-        "C0001",
-        &format!("`hash()` of `{name}` is valid Python but not implemented yet"),
-    );
     assert_one_error(
         "e2e_1331_frozenset",
         "s = frozenset([1])\nprint(hash(s))\n",
@@ -273,10 +266,24 @@ fn a_hashable_but_unimplemented_argument_is_c0001() {
     // from its call site: the argument's type is resolved only after the
     // solver runs, and the final check still refuses it.
     assert_one_error(
-        "e2e_1331_helper_none",
-        "def _h(y):\n    return hash(y)\n\n\nprint(_h(None))\n",
+        "e2e_1331_helper_frozenset",
+        "def _h(y):\n    return hash(y)\n\n\nprint(_h(frozenset([1])))\n",
         "C0001",
-        "`hash()` of `None` is valid Python but not implemented yet",
+        "`hash()` of `frozenset[int]` is valid Python but not implemented yet",
+    );
+}
+
+/// `hash(None)` (v0.8) is CPython's constant, of the literal, of a
+/// parameter and of a call returning `None`, whose effects still run.
+#[test]
+fn hash_of_none_matches_cpython() {
+    let source = "def _noisy():\n    print(\"called\")\n\n\n\
+                  def _h(y):\n    return hash(y)\n\n\n\
+                  print(hash(None), hash(_noisy()), _h(None))\n";
+    assert_native_matches_cpython(
+        "e2e_1331_none",
+        source,
+        "called\n4238894112 4238894112 4238894112\n",
     );
 }
 

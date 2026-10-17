@@ -67,8 +67,38 @@ pub fn project_import_requests(module: &ModModule) -> Vec<ProjectImportRequest> 
     for stmt in &module.body {
         requests.extend(project_import_request(stmt, false));
         nested_import_requests(stmt, false, &mut requests);
+        function_import_requests(stmt, false, &mut requests);
     }
     requests
+}
+
+/// The requests of every `import`/`from ... import` inside a function or
+/// method body (v0.8 accept 2), at any depth, flagged `nested`: answering
+/// one never loads a file, and only a foreign answer lowers
+/// (`module::local_imports`). `in_function` is whether `stmt` is itself in
+/// a function body; a class body outside one is walked for its methods.
+fn function_import_requests(
+    stmt: &Stmt,
+    in_function: bool,
+    requests: &mut Vec<ProjectImportRequest>,
+) {
+    match stmt {
+        Stmt::Import(_) | Stmt::ImportFrom(_) if in_function => {
+            requests.extend(project_import_request(stmt, true));
+        }
+        Stmt::FunctionDef(def) => {
+            for inner in &def.body {
+                function_import_requests(inner, true, requests);
+            }
+        }
+        _ => {
+            for body in child_bodies(stmt) {
+                for inner in body {
+                    function_import_requests(inner, in_function, requests);
+                }
+            }
+        }
+    }
 }
 
 /// The requests of every `import`/`from ... import` nested in `stmt` when
@@ -101,6 +131,29 @@ fn nested_import_requests(stmt: &Stmt, nested: bool, requests: &mut Vec<ProjectI
         for inner in body {
             nested_import_requests(inner, true, requests);
         }
+    }
+}
+
+/// The statement bodies directly inside the compound statement `stmt`
+/// (not a `def`'s, which [`function_import_requests`] enters itself).
+pub(crate) fn child_bodies(stmt: &Stmt) -> Vec<&[Stmt]> {
+    match stmt {
+        Stmt::If(s) => std::iter::once(s.body.as_slice())
+            .chain(s.elif_else_clauses.iter().map(|c| c.body.as_slice()))
+            .collect(),
+        Stmt::For(s) => vec![&s.body, &s.orelse],
+        Stmt::While(s) => vec![&s.body, &s.orelse],
+        Stmt::With(s) => vec![&s.body],
+        Stmt::Try(s) => std::iter::once(s.body.as_slice())
+            .chain(s.handlers.iter().map(|handler| {
+                let pycc_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                handler.body.as_slice()
+            }))
+            .chain([s.orelse.as_slice(), s.finalbody.as_slice()])
+            .collect(),
+        Stmt::Match(s) => s.cases.iter().map(|case| case.body.as_slice()).collect(),
+        Stmt::ClassDef(s) => vec![&s.body],
+        _ => Vec::new(),
     }
 }
 

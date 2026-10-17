@@ -898,9 +898,18 @@ pub(super) fn lower_stmt(
                 },
             }
         }
-        HirStmt::ForeignImport { bindings, .. } => MirStmt::ForeignImport {
-            bindings: bindings.clone(),
-        },
+        HirStmt::ForeignImport { bindings, .. } => {
+            // Each name holds the imported CPython object from here on: a
+            // module global of a module-level block's import, already bound
+            // so, or a function local (v0.8 accept 2).
+            for (local_name, _, _) in bindings {
+                bind(scopes, local_name.clone(), Ty::Object);
+                super::kill_narrowing(scopes, local_name);
+            }
+            MirStmt::ForeignImport {
+                bindings: bindings.clone(),
+            }
+        }
     }
 }
 

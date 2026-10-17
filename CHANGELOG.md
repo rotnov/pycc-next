@@ -4,6 +4,21 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- v0.8 accept 2 (the constructs library code falls back for most often): a bare `...`
+  statement (an `@overload` stub's or a protocol method's body) is a no-op in every mode,
+  and the `...` literal as a value (and, in non-strict code, the name `Ellipsis`) is
+  CPython's `Ellipsis` object wherever a module may hold CPython objects (`--ext`,
+  `--non-strict`, a module with a CPython import); `hash()` of a CPython object, of a
+  tuple holding one and of `None` compiles (CPython's `PyObject_Hash`, its `TypeError`
+  for an unhashable value included). An `import` or `from ... import` of a CPython module
+  inside a function or method body compiles, in strict and non-strict mode: it binds
+  locals, runs CPython's import (through `sys.modules`) each time the statement runs, and
+  its `ImportError`/`ModuleNotFoundError` is catchable in compiled code; an import of a
+  module pycc compiles natively (`math`, `typing`, ...) or of a project module there stays
+  `C0001`. pydantic 2.13.5: 955 of 1249 functions native (from 809).
+
 ## [0.7.0] - 2026-10-17
 
 Real-world Python: frameworks, Windows. All five v0.7 goals are met. Windows x86_64 is a

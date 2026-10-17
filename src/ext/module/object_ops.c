@@ -698,6 +698,37 @@ PyObject *pycc_ext_obj_not_implemented(void)
 }
 
 /*
+ * The value of a `...` literal (`EXT_OBJ_ELLIPSIS_SYMBOL`): a borrowed
+ * pointer to CPython's immortal `Ellipsis`, handed out exactly like
+ * `NotImplemented` above.
+ */
+PyObject *pycc_ext_obj_ellipsis(void)
+{
+    return Py_Ellipsis;
+}
+
+/*
+ * `hash(o)` of a CPython object (`EXT_OBJ_HASH_SYMBOL`): writes
+ * `PyObject_Hash(o)` through `*out` and answers 0, or answers -1 with the
+ * exception CPython raised (an unhashable object's `TypeError`, a raising
+ * `__hash__`) set. `o` is borrowed.
+ */
+int pycc_ext_obj_hash(PyObject *o, long long *out)
+{
+    Py_hash_t hash;
+
+    if (o == NULL || out == NULL) {
+        return -1;
+    }
+    hash = PyObject_Hash(o);
+    if (hash == -1 && PyErr_Occurred()) {
+        return -1;
+    }
+    *out = (long long)hash;
+    return 0;
+}
+
+/*
  * Part 1 of #1371: `isinstance(o, cls)` with an object `o`
  * (`EXT_OBJ_ISINSTANCE_SYMBOL`). Both operands are borrowed. A `NULL`
  * `cls` selects a builtin class by `builtin`: 0 `int`, 1 `str`, 2 `float`,

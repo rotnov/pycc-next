@@ -22,7 +22,27 @@ fn not_implemented_is_one_infallible_accessor_call_returned_as_the_object() {
                 ir.contains("call ptr @pycc_ext_obj_not_implemented()"),
                 "{ir}"
             );
-            assert!(ir.contains("ret ptr %not_implemented"), "{ir}");
+            assert!(ir.contains("ret ptr %singleton"), "{ir}");
+        },
+    );
+}
+
+/// The `...` literal's `MirExpr::Ellipsis` is the same shape through its
+/// own accessor.
+#[test]
+fn ellipsis_is_one_infallible_accessor_call_returned_as_the_object() {
+    compile_ext_items_checking_ir(
+        "ellipsis_return",
+        vec![MirItem::Function {
+            name: "_el".to_string(),
+            params: Vec::new(),
+            return_ty: Ty::Object,
+            body: vec![MirStmt::Return(Some(MirExpr::Ellipsis))],
+        }],
+        |ir| {
+            assert!(ir.contains("declare ptr @pycc_ext_obj_ellipsis()"), "{ir}");
+            assert!(ir.contains("call ptr @pycc_ext_obj_ellipsis()"), "{ir}");
+            assert!(ir.contains("ret ptr %singleton"), "{ir}");
         },
     );
 }

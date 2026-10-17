@@ -327,6 +327,7 @@ pub(super) fn expression_can_set_exception(expr: &MirExpr) -> bool {
         | MirExpr::StringLiteral(_)
         | MirExpr::NoneLiteral
         | MirExpr::NotImplemented
+        | MirExpr::Ellipsis
         | MirExpr::Name { .. }
         | MirExpr::Compare { .. }
         | MirExpr::ListLiteral(_)

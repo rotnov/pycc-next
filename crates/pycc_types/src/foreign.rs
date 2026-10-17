@@ -596,6 +596,8 @@ pub(crate) const PASSING_TO_A_FUNCTION: &str = "passing a CPython object to a ge
 pub(crate) fn foreign_object_names(imports: &[ImportBinding]) -> Vec<&str> {
     imports
         .iter()
+        // A function-local import (v0.8 accept 2) binds no module name.
+        .filter(|binding| binding.binds_module_name())
         .filter_map(|binding| match binding {
             ImportBinding::Foreign { local_name, .. } => Some(local_name.as_str()),
             ImportBinding::Module { .. }

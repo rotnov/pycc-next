@@ -519,6 +519,17 @@ pub const EXT_OBJ_NONE_SYMBOL: &str = "pycc_ext_obj_none";
 /// Spelled once here for the same lazy-link reason as [`EXT_OBJ_LEN_SYMBOL`].
 pub const EXT_OBJ_NOT_IMPLEMENTED_SYMBOL: &str = "pycc_ext_obj_not_implemented";
 
+/// The fixed C shim's `Ellipsis` accessor: a *borrowed* pointer to
+/// CPython's immortal `Ellipsis` singleton, the value of a `...` literal
+/// (`MirExpr::Ellipsis`), handed out exactly like
+/// [`EXT_OBJ_NOT_IMPLEMENTED_SYMBOL`]'s.
+pub const EXT_OBJ_ELLIPSIS_SYMBOL: &str = "pycc_ext_obj_ellipsis";
+
+/// The fixed C shim's `hash(o)` helper: `int pycc_ext_obj_hash(PyObject *o,
+/// long long *out)` writes CPython's `PyObject_Hash(o)` through `out` and
+/// answers `0`, or answers `-1` with CPython's exception set.
+pub const EXT_OBJ_HASH_SYMBOL: &str = "pycc_ext_obj_hash";
+
 /// The fixed C shim's `isinstance` helper (Part 1 of #1371): it takes a
 /// borrowed object, a borrowed class (or `NULL`, which selects a builtin
 /// class by the third argument, `pycc_mir::ObjBuiltinClass::shim_code`) and

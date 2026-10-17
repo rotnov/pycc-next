@@ -339,6 +339,7 @@ impl<'a> Walker<'a> {
             | HirExpr::StringLiteral(_)
             | HirExpr::NoneLiteral
             | HirExpr::NotImplemented
+            | HirExpr::Ellipsis
             | HirExpr::EmptyList(_)
             | HirExpr::EmptySet(_)
             | HirExpr::EmptyDict(_)

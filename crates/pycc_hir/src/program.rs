@@ -173,6 +173,8 @@ pub fn link_layout(
                 .hir
                 .imports
                 .iter()
+                // A function-local import (v0.8 accept 2) binds no module name.
+                .filter(|binding| binding.binds_module_name())
                 .filter_map(move |binding| match binding {
                     ImportBinding::Foreign {
                         local_name,

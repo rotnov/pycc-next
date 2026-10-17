@@ -21,6 +21,48 @@
 
 use super::*;
 
+/// CPython's `PyObject_Hash` of the CPython object `object` (borrowed),
+/// through the shim's `int pycc_ext_obj_hash(PyObject *, long long *)`: the
+/// raw `i64` hash, or the foreign failure edge when the object raises
+/// (an unhashable object's `TypeError`, a raising `__hash__`).
+fn hash_object<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    object: PointerValue<'ctx>,
+) -> IntValue<'ctx> {
+    let edge = crate::foreign_fail::ForeignFailEdge::for_current(builder);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_type = context.i64_type();
+    let hash_fn = crate::foreign_pack::shim_fn(
+        module,
+        crate::ext::EXT_OBJ_HASH_SYMBOL,
+        context
+            .i32_type()
+            .fn_type(&[ptr.into(), ptr.into()], false),
+    );
+    let out = build_at_entry_block(builder, edge.function(), |b| {
+        b.build_alloca(i64_type, "foreign_hash_out")
+            .expect("build_alloca should not fail")
+    });
+    let status = builder
+        .build_call(hash_fn, &[object.into(), out.into()], "foreign_hash")
+        .expect("build_call should not fail for pycc_ext_obj_hash")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_hash returns int")
+        .into_int_value();
+    crate::foreign_fail::route_negative(context, builder, module, rt, edge, status, "foreign_hash");
+    builder
+        .build_load(i64_type, out, "foreign_hash_value")
+        .expect("build_load should not fail")
+        .into_int_value()
+}
+
+/// `hash(None)`: a constant since CPython 3.12 (`_Py_HashPointer` is no
+/// longer used for `None`), the same in every process.
+const NONE_HASH: u64 = 0xFCA8_6420;
+
 /// `pycc_rt_hash_int(word)`, the raw `i64` hash of one encoded int.
 fn hash_int_word<'ctx>(
     builder: &inkwell::builder::Builder<'ctx>,
@@ -167,10 +209,35 @@ pub(super) fn emit_hash<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     arg: &MirExpr,
 ) -> Scalar<'ctx> {
+    // `hash(None)`: CPython's constant, after the argument's effects (a
+    // call returning `None`); the literal itself has none.
+    if arg.ty() == pycc_mir::Ty::None {
+        if !matches!(arg, MirExpr::NoneLiteral) {
+            emit_expr(context, builder, module, rt, user_functions, locals, arg);
+        }
+        return Scalar::Int(
+            builder
+                .build_call(
+                    rt.int_from_i64,
+                    &[context.i64_type().const_int(NONE_HASH, false).into()],
+                    "hash_result",
+                )
+                .expect("build_call should not fail for pycc_rt_int_from_i64")
+                .try_as_basic_value()
+                .expect_basic("pycc_rt_int_from_i64 returns an encoded int")
+                .into_int_value(),
+        );
+    }
     let scalar = emit_expr(context, builder, module, rt, user_functions, locals, arg);
     let raw = match (arg.ty(), scalar) {
         (pycc_mir::Ty::Tuple(elements), Scalar::Tuple(tuple)) => {
             hash_tuple(context, builder, rt, &elements, tuple)
+        }
+        (_, Scalar::Object(object)) => {
+            let held = crate::object_release::hold(context, module, rt, arg, &scalar);
+            let hash = hash_object(context, builder, module, rt, object);
+            held.release(builder, rt);
+            hash
         }
         (_, Scalar::Bool(value)) => hash_bool(context, builder, value),
         (_, Scalar::Float(value)) => hash_float(builder, rt, value),

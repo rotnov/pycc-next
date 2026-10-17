@@ -677,8 +677,10 @@ pub(crate) fn lower_stmt(
         // A CPython-backed `import` (#1291) or `from ... import` (#1383)
         // nested in a module-level `if`/`try` block, whose bindings `module::lower_top_level_item`
         // recorded before lowering the block.
+        // v0.8 accept 2: one in a function body whose bindings the item's
+        // function-local imports recorded (`module::local_imports`).
         other => match crate::import::nested_foreign_import(other, imports) {
-            Some(lowered) if !in_function => lowered,
+            Some(lowered) if !in_function || is_local_import(&lowered, imports) => lowered,
             _ => return Err(unsupported::unsupported_statement(other, in_function)),
         },
     };
@@ -837,6 +839,33 @@ fn comp_iter_contains_named_expr(iter: &CompIter) -> bool {
     }
 }
 
+/// Whether the `HirStmt::ForeignImport` `lowered` lowered from bindings
+/// with a function-local site ([`crate::ForeignImportSite::Local`]).
+fn is_local_import(lowered: &HirStmt, imports: &[ImportBinding]) -> bool {
+    let HirStmt::ForeignImport { span, .. } = lowered else {
+        return false;
+    };
+    imports.iter().any(|binding| {
+        matches!(binding, ImportBinding::Foreign {
+            site: crate::ForeignImportSite::Local { .. },
+            span: binding_span,
+            ..
+        } if binding_span == span)
+    })
+}
+
+/// Whether `stmt` is a statement CPython runs as a no-op: `pass`, or a bare
+/// `...` expression statement (the body of an `@overload` stub or a
+/// protocol method), which evaluates the `Ellipsis` singleton and discards
+/// it, with no effect pycc has to reproduce.
+pub(crate) fn is_no_op_stmt(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Pass(_) => true,
+        Stmt::Expr(expr_stmt) => matches!(*expr_stmt.value, Expr::EllipsisLiteral(_)),
+        _ => false,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn lower_body(
     body: &[Stmt],
@@ -857,7 +886,7 @@ pub(crate) fn lower_body(
     // PEP 487/PEP 487 hook recognition. A body consisting solely of `pass`
     // produces an empty `Vec<HirStmt>`, which is a valid no-op body.
     let mut lowered = Vec::with_capacity(body.len());
-    for stmt in body.iter().filter(|stmt| !matches!(stmt, Stmt::Pass(_))) {
+    for stmt in body.iter().filter(|stmt| !is_no_op_stmt(stmt)) {
         lowered.extend(lower_stmt_expanded(
             stmt,
             aliases,

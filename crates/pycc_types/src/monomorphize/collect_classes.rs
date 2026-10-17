@@ -184,6 +184,7 @@ pub(crate) fn collect_generic_class_instantiations_from_expr(
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::Super => {}
     }

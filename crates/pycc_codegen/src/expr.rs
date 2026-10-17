@@ -202,7 +202,7 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             let placeholder_ty = context.struct_type(&[context.i8_type().into(); 2], false);
             Scalar::Optional(placeholder_ty.const_zero())
         }
-        MirExpr::NotImplemented => {
+        MirExpr::NotImplemented | MirExpr::Ellipsis => {
             object_expr::emit_not_implemented_expr(context, builder, module, expr)
         }
         MirExpr::NumWrap(inner) => {

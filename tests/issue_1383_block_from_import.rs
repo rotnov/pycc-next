@@ -151,14 +151,16 @@ fn a_nested_from_import_of_a_pycc_std_module_keeps_the_block_diagnostic() {
     assert!(rendered.contains(BLOCK_TEXT), "{rendered}");
 }
 
+/// A function body's foreign from-import compiles since v0.8 accept 2
+/// (`tests/v08_constructs.rs`); one of a `pycc_std` module does not.
 #[test]
-fn a_function_body_from_import_keeps_its_diagnostic() {
-    let dir = ScratchDir::new("block_from_function").expect("scratch");
-    let rendered = one_error(
-        &dir,
+fn a_function_body_from_import_of_a_foreign_module_compiles() {
+    assert_checks_clean(
+        "block_from_function",
         "def f() -> None:\n    from itertools import product\n",
-        "C0001",
     );
+    let dir = ScratchDir::new("block_from_function_std").expect("scratch");
+    let rendered = one_error(&dir, "def f() -> None:\n    from math import sqrt\n", "C0001");
     assert!(
         rendered.contains("an `import` inside a function or block body"),
         "{rendered}"

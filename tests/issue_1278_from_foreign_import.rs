@@ -114,10 +114,10 @@ fn the_shapes_outside_this_channel_keep_their_c0001() {
         ),
         (
             // A module-level `if`/`try` body admits it since #1383
-            // (`tests/issue_1383_block_from_import.rs`); a function body
-            // does not.
+            // (`tests/issue_1383_block_from_import.rs`), a function body
+            // since v0.8 accept 2, but not of a `pycc_std` module.
             "from_foreign_function",
-            "def f() -> None:\n    from itertools import zip_longest\n",
+            "def f() -> None:\n    from math import sqrt\n",
             "an `import` inside a function or block body",
         ),
         (

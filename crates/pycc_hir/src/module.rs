@@ -35,6 +35,7 @@
 //! own. HIR failures still stop the pipeline before the type
 //! checker (`src/frontend.rs`), so no partial module is ever type-checked.
 
+mod local_imports;
 mod lowered;
 pub(crate) mod own_foreign;
 mod poison;
@@ -411,6 +412,9 @@ pub fn lower_module(
     let mut item_starts: Vec<usize> = Vec::with_capacity(module.body.len());
     // Where each item came from (`last_item_origins`).
     let mut origins: Vec<u32> = vec![u32::MAX; state.items.len()];
+    // v0.8 accept 2: the function-local foreign imports of the items that
+    // lowered (`local_imports`), appended to the table after the loop.
+    let mut local_import_bindings: Vec<ImportBinding> = Vec::new();
     for (index, stmt) in module.body.iter().enumerate() {
         item_starts.push(diagnostics.len());
         let position = if index < prologue_len {
@@ -428,7 +432,19 @@ pub fn lower_module(
                 .flatten()
             {
                 Some(diagnostic) => Err(diagnostic),
-                None => lower_top_level_item(stmt, &mut state, resolved, position),
+                None => {
+                    // v0.8 accept 2: the item's function-local foreign
+                    // imports are in the table only while it lowers.
+                    let locals = local_imports::lower(stmt, resolved);
+                    let before = state.imports.len();
+                    state.imports.extend(locals.iter().cloned());
+                    let outcome = lower_top_level_item(stmt, &mut state, resolved, position);
+                    state.imports.drain(before..before + locals.len());
+                    if outcome.is_ok() {
+                        local_import_bindings.extend(locals);
+                    }
+                    outcome
+                }
             },
         };
         match outcome {
@@ -547,6 +563,7 @@ pub fn lower_module(
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
+    state.imports.extend(local_import_bindings);
     let ModuleState {
         aliases,
         imports,

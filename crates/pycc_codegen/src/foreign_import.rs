@@ -389,7 +389,7 @@ pub(super) fn emit<'ctx>(
                 .targets
                 .borrow()
                 .last()
-                .expect("a module body statement is always inside an exception target");
+                .expect("a statement is always inside an exception target");
             let unbridged_bb = context.append_basic_block(entry_fn, "foreign_import_unbridged");
             builder
                 .build_conditional_branch(raised, target, unbridged_bb)
@@ -405,7 +405,7 @@ pub(super) fn emit<'ctx>(
                 builder,
                 module,
                 rt,
-                crate::foreign_fail::ForeignFailEdge::ModuleExec(entry_fn),
+                crate::foreign_fail::ForeignFailEdge::for_current(builder),
             );
         }
     }
@@ -420,10 +420,12 @@ pub(super) fn emit<'ctx>(
 }
 
 /// Emits a [`pycc_mir::MirStmt::ForeignImport`]: one import per binding,
-/// in order, into the module-exec entry point `builder` is emitting into.
-/// No `options.ext` guard is needed: a foreign binding reaches codegen only
-/// in an `ext` build, because the driver refuses every other build with
-/// `I0403`, and `expect_module_exec_entry` pins the entry point. Each
+/// in order, into the function `builder` is emitting into -- the
+/// module-exec entry point for an import in a module-level block, or a
+/// compiled function for a function-local import (v0.8 accept 2), whose
+/// names are that function's locals. No `options.ext` guard is needed: a
+/// foreign binding reaches codegen only in an `ext` build, because the
+/// driver refuses every other build with `I0403`. Each
 /// binding's failure edge is [`FailureEdge::Bridge`] (#1293), so a failed
 /// binding stops the remaining ones exactly as a raise would, leaving the
 /// earlier ones bound as in CPython. A binding with a `from` is one name
@@ -436,7 +438,7 @@ pub(super) fn emit_stmt<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     bindings: &[(String, String, Option<FromImport>)],
 ) {
-    let entry_fn = crate::foreign_attr::expect_module_exec_entry(builder);
+    let entry_fn = crate::foreign_fail::ForeignFailEdge::for_current(builder).function();
     for (local_name, module_path, from) in bindings {
         emit(
             context,

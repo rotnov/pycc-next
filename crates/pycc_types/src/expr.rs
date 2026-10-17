@@ -191,6 +191,8 @@ fn infer_expr_here(
         HirExpr::NoneLiteral => Ok(Ty::None),
         // #1418: CPython's `NotImplemented` singleton is a CPython object.
         HirExpr::NotImplemented => Ok(Ty::Object),
+        // The `...` literal is CPython's `Ellipsis` singleton.
+        HirExpr::Ellipsis => Ok(Ty::Object),
         HirExpr::FString(..) => name_infer::infer_f_string_expr(env, local_names, expr),
         HirExpr::Name(..) => name_infer::infer_name_expr(env, local_names, expr),
         HirExpr::UnaryOp { op, operand } => {

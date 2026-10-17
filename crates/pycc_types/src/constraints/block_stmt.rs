@@ -252,12 +252,17 @@ pub(super) fn collect_stmt_constraints(
         // separate, independently-testable follow-up if solver-scope
         // coverage of this gap is wanted later.
         // #1244: a `del` binds nothing to infer; the checker owns its
-        // binding-state rule. A nested foreign import (#1291) needs no constraint: its names
-        // are seeded as `Ty::Object` globals position-blind, like a
-        // top-level foreign import's (`constraints/signatures.rs`).
-        HirStmt::AnnAssign { value: None, .. }
-        | HirStmt::Delete { .. }
-        | HirStmt::ForeignImport { .. } => {}
+        // binding-state rule.
+        HirStmt::AnnAssign { value: None, .. } | HirStmt::Delete { .. } => {}
+        // A foreign import binds each of its names to the CPython object:
+        // a module-level block's names are also seeded as `Ty::Object`
+        // globals position-blind (#1291, `constraints/signatures.rs`), a
+        // function-local one's are this function's locals (v0.8 accept 2).
+        HirStmt::ForeignImport { bindings, .. } => {
+            for (local_name, _, _) in bindings {
+                env.bindings.insert(local_name.clone(), Ok(Ty::Object));
+            }
+        }
         // Part 2c of #1371: a slice `del` binds nothing, but its base and
         // bounds are ordinary reads -- a call to an unannotated helper
         // in one still needs its call-site constraints. `pycc_hir`

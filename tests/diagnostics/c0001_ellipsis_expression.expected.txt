@@ -1,5 +1,5 @@
-error[C0001]: expression kind not supported yet: an `...` ellipsis literal
+error[C0001]: expression kind not supported yet: an `...` ellipsis literal used as a value (CPython's `Ellipsis` object, admitted in an `--ext` module, in non-strict mode or in a module with a CPython import; a bare `...` statement is a no-op)
  --> tests/diagnostics/c0001_ellipsis_expression.py:2:9
   |
 2 |     x = ...
-  |         ^^^ expression kind not supported yet: an `...` ellipsis literal
+  |         ^^^ expression kind not supported yet: an `...` ellipsis literal used as a value (CPython's `Ellipsis` object, admitted in an `--ext` module, in non-strict mode or in a module with a CPython import; a bare `...` statement is a no-op)

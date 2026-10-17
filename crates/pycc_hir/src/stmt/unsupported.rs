@@ -35,7 +35,8 @@ pub(super) fn unsupported_statement(other: &Stmt, in_function: bool) -> Diagnost
         }
         Stmt::Import(_) | Stmt::ImportFrom(_) if in_function => {
             "an `import` inside a function or block body \
-             (only a module-level import, or one inside an `if TYPE_CHECKING:` guard, is supported)"
+             (only a module-level import, one inside an `if TYPE_CHECKING:` guard, \
+             or an import of a CPython module, is supported)"
         }
         Stmt::Import(_) | Stmt::ImportFrom(_) => {
             "an `import` inside a block body \

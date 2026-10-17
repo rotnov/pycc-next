@@ -185,7 +185,7 @@ pub(crate) fn remap_foreign_import_positions(
                             .filter(|kept| **kept)
                             .count(),
                     ),
-                    site @ ForeignImportSite::Block { .. } => *site,
+                    site @ (ForeignImportSite::Block { .. } | ForeignImportSite::Local { .. }) => *site,
                 },
                 span: *span,
             },

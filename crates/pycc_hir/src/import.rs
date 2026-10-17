@@ -25,10 +25,11 @@ mod shadow;
 mod spelling;
 mod type_alias;
 
-pub(crate) use block::{lower_block_imports, nested_foreign_import};
+pub(crate) use block::{handlers_catch_import_error, lower_block_imports, nested_foreign_import};
 pub(crate) use carrier::{reject_carrier_misuse, splice_by_item};
 pub(crate) use fallback::{FallbackGroup, fallback_groups};
 pub use request::{ProjectImportRequest, is_native_std_module, project_import_requests};
+pub(crate) use request::child_bodies;
 pub(crate) use shadow::{import_local_name, reject_shadowed_foreign_imports};
 pub(crate) use type_alias::{lower_legacy_type_alias_ann_assign, lower_type_alias_stmt};
 
@@ -163,7 +164,7 @@ fn lower_future_import(
     Ok(LoweredImport::default())
 }
 
-fn statement_span<R>(range: R) -> Span
+pub(crate) fn statement_span<R>(range: R) -> Span
 where
     std::ops::Range<u32>: From<R>,
 {
@@ -374,7 +375,7 @@ impl<'a> ResolvedImports<'a> {
         self.by_module_key.insert(module_key, resolved);
     }
 
-    fn get(&self, span: Span) -> Option<&ResolvedImport<'a>> {
+    pub(crate) fn get(&self, span: Span) -> Option<&ResolvedImport<'a>> {
         self.by_span.get(&span)
     }
 

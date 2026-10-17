@@ -74,6 +74,7 @@ pub(crate) fn bind_named_expr_targets(
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::Super => Ok(()),
         HirExpr::ListPop { list } => {

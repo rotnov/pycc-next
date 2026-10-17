@@ -37,6 +37,8 @@ const VALUE_BUILTINS: &[&str] = &[
     "hex", "id", "input", "int", "isinstance", "issubclass", "iter", "len", "list", "map", "max",
     "memoryview", "min", "next", "object", "oct", "open", "ord", "pow", "print", "range", "repr",
     "reversed", "round", "set", "setattr", "slice", "sorted", "str", "sum", "tuple", "type", "zip",
+    // The `...` singleton by its name (`x is Ellipsis`).
+    "Ellipsis",
     // The builtin exception and warning classes (`warnings.warn(m,
     // RuntimeWarning)`, `except (KeyError, mod.Error)`).
     "ArithmeticError", "AssertionError", "AttributeError", "BaseException", "BaseExceptionGroup",

@@ -1,3 +1,3 @@
 def f() -> int:
-    import os
+    import math
     return 1

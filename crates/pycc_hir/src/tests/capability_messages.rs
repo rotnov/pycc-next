@@ -165,7 +165,7 @@ fn a_nested_class_is_qualified_by_its_position() {
 fn a_function_local_import_is_qualified_by_its_position() {
     assert_capability_error_message(
         "def f() -> int:\n    import os\n    return 1\n",
-        "statement kind not supported yet: an `import` inside a function or block body (only a module-level import, or one inside an `if TYPE_CHECKING:` guard, is supported)",
+        "statement kind not supported yet: an `import` inside a function or block body (only a module-level import, one inside an `if TYPE_CHECKING:` guard, or an import of a CPython module, is supported)",
     );
 }
 
@@ -173,7 +173,7 @@ fn a_function_local_import_is_qualified_by_its_position() {
 fn a_function_local_from_import_is_qualified_by_its_position() {
     assert_capability_error_message(
         "def f() -> int:\n    from os import path\n    return 1\n",
-        "statement kind not supported yet: an `import` inside a function or block body (only a module-level import, or one inside an `if TYPE_CHECKING:` guard, is supported)",
+        "statement kind not supported yet: an `import` inside a function or block body (only a module-level import, one inside an `if TYPE_CHECKING:` guard, or an import of a CPython module, is supported)",
     );
 }
 

@@ -67,6 +67,12 @@ pub enum HirExpr {
     /// appear: nowhere else, and never in a `native` build, where the name
     /// stays an undefined `HirExpr::Name`.
     NotImplemented,
+    /// The `...` literal used as a value: CPython's `Ellipsis` singleton,
+    /// typed `Ty::Object`. Lowered only where the module may hold CPython
+    /// objects (an `ext` module, non-strict mode, or a module with a
+    /// foreign import); a bare `...` expression statement is a no-op and
+    /// never lowered (`stmt::is_no_op_stmt`).
+    Ellipsis,
     Name(String),
     Call {
         callee: String,

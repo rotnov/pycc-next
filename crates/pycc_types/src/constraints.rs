@@ -466,6 +466,8 @@ fn collect_expr_constraints_here(
         // #1418: `return NotImplemented` in a comparison method of an `ext`
         // module is CPython's singleton, a CPython object.
         HirExpr::NotImplemented => Ok(Some(Ok(Ty::Object))),
+        // The `...` literal is CPython's `Ellipsis` singleton.
+        HirExpr::Ellipsis => Ok(Some(Ok(Ty::Object))),
         HirExpr::Name(..) => name_term::collect_name_constraints(parents, concrete, env, expr),
         HirExpr::FString(parts) => {
             for part in parts {

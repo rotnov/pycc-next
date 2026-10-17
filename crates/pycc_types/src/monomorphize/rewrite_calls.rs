@@ -409,6 +409,7 @@ pub(crate) fn rewrite_generic_calls_in_expr(
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::Super => infer_expr_in(env, local_names, expr),
     }

@@ -1,14 +1,15 @@
 //! #1331 (Part 1 of #1327): the `hash(...)` builtin call, extended by #1335
 //! (Part 1 of #1332) to a user-class instance.
 //!
-//! `hash(x)` is admitted for an `int`, a `bool`, a `str`, a `float`, a tuple whose elements are
-//! all of those, and an instance whose class resolves to the identity
+//! `hash(x)` is admitted for an `int`, a `bool`, a `str`, a `float`, `None`, a tuple whose
+//! elements are all of those but `None`, a CPython object or a tuple holding one (v0.8: CPython's
+//! `PyObject_Hash` of the value as a CPython object, [`is_object_hash`]), and an instance whose class resolves to the identity
 //! hash or to a plain `def __hash__(self)` returning `int`/`bool`; it always
 //! yields `int`. A `list`, `dict` or `set` argument, and an instance whose
 //! class binds `__eq__` without `__hash__`, is `T0021` "unhashable type",
 //! the `TypeError` CPython raises for it reported statically (the `len(5)`
 //! precedent). Every other argument -- a tuple holding a non-scalar,
-//! `None`, `frozenset[int]`, an instance `pycc_hir::resolve_instance_hash`
+//! `frozenset[int]`, an `Optional`, an instance `pycc_hir::resolve_instance_hash`
 //! refuses -- is hashable in CPython but not yet here, so it is an honest
 //! `C0001`.
 //!
@@ -50,13 +51,33 @@ fn wrong_arity(count: usize) -> Diagnostic {
 
 /// Whether `ty` is a type `hash()` compiles today.
 fn is_admitted(ty: &Ty) -> bool {
+    if is_object_hash(ty) {
+        return true;
+    }
     match ty {
-        Ty::Int | Ty::Bool | Ty::Str | Ty::Float | Ty::Num => true,
+        Ty::Int | Ty::Bool | Ty::Str | Ty::Float | Ty::Num | Ty::None => true,
         Ty::Tuple(elements) => elements.iter().all(|e| matches!(e, Ty::Int | Ty::Bool | Ty::Str | Ty::Float)),
         // A `tuple[T, ...]` is a tuple object: `pycc_rt_hash_tuple_object`.
         Ty::VarTuple(element) => pycc_hir::is_hashable_ty(element),
         _ => false,
     }
+}
+
+/// Whether `hash()` of a `ty` value is CPython's `PyObject_Hash` of the
+/// value as a CPython object: a CPython object, or a tuple holding one
+/// (whose other elements a tuple crossing boxes, `foreign::is_packable_tuple`).
+/// `pycc_mir` boxes the tuple and `pycc_codegen` hashes the object.
+#[must_use]
+pub(crate) fn is_object_hash(ty: &Ty) -> bool {
+    fn holds_object(ty: &Ty) -> bool {
+        match ty {
+            Ty::Object => true,
+            Ty::Tuple(elements) => elements.iter().any(holds_object),
+            Ty::VarTuple(element) => holds_object(element),
+            _ => false,
+        }
+    }
+    *ty == Ty::Object || (crate::foreign::is_packable_tuple(ty) && holds_object(ty))
 }
 
 /// The refusal for an argument whose type is not admitted.
@@ -197,8 +218,8 @@ mod tests {
     #[test]
     fn a_hashable_but_unimplemented_argument_is_c0001() {
         for arg in [
-            Ty::None,
-            tuple(vec![Ty::None, Ty::Int]),
+            Ty::Optional(Box::new(Ty::Int)),
+            tuple(vec![Ty::FrozenSet(Box::new(Ty::Int)), Ty::Int]),
             Ty::FrozenSet(Box::new(Ty::Int)),
         ] {
             let err = check_call(std::slice::from_ref(&arg), &env()).unwrap_err();
@@ -234,7 +255,8 @@ mod tests {
             check_call_terms::<usize>(&[Some(Ok(Ty::Bool))]).unwrap(),
             Ty::Int
         );
-        let err = check_call_terms::<usize>(&[Some(Ok(Ty::None))]).unwrap_err();
+        let err = check_call_terms::<usize>(&[Some(Ok(Ty::Optional(Box::new(Ty::Int))))])
+            .unwrap_err();
         assert_eq!(err.code, "C0001");
         let empty: [Option<Result<Ty, usize>>; 0] = [];
         let err = check_call_terms(&empty).unwrap_err();

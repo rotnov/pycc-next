@@ -13,8 +13,8 @@ use crate::{ForeignImportSite, ImportBinding, lower_import_stmt};
 use pycc_ast::ModModule;
 
 /// Whether the module's own body binds a foreign import that lowering will
-/// bind: at top level, or nested in a module-level `if`/`try` outside a
-/// `TYPE_CHECKING` body.
+/// bind: at top level, nested in a module-level `if`/`try` outside a
+/// `TYPE_CHECKING` body, or in a function body (`local_imports`).
 ///
 /// It replays `ModuleState::imports` in source order, starting from `seed`
 /// (the table the item loop starts from), through the same two functions
@@ -51,6 +51,10 @@ pub(crate) fn binds_foreign_import(
             .iter()
             .any(|binding| matches!(binding, ImportBinding::Foreign { .. }))
         {
+            return true;
+        }
+        // v0.8 accept 2: so does one in a function or method body.
+        if !super::local_imports::lower(stmt, resolved).is_empty() {
             return true;
         }
         imports.extend(bindings);

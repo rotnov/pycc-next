@@ -2,30 +2,28 @@
 
 use super::*;
 
-// CPython's `NotImplemented` singleton (#1418), a borrowed pointer
-// from the fixed shim -- only an `ext` module's admitted
-// `return NotImplemented` builds this node.
+// CPython's `NotImplemented` singleton (#1418), and its `Ellipsis`
+// (the `...` literal), each a borrowed pointer to an immortal object from
+// the fixed shim.
 pub(crate) fn emit_not_implemented_expr<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     module: &inkwell::module::Module<'ctx>,
     expr: &MirExpr,
 ) -> Scalar<'ctx> {
-    let MirExpr::NotImplemented = expr else {
-        unreachable!()
+    let symbol = match expr {
+        MirExpr::NotImplemented => EXT_OBJ_NOT_IMPLEMENTED_SYMBOL,
+        MirExpr::Ellipsis => EXT_OBJ_ELLIPSIS_SYMBOL,
+        _ => unreachable!(),
     };
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
-    let accessor = foreign_pack::shim_fn(
-        module,
-        EXT_OBJ_NOT_IMPLEMENTED_SYMBOL,
-        ptr.fn_type(&[], false),
-    );
+    let accessor = foreign_pack::shim_fn(module, symbol, ptr.fn_type(&[], false));
     Scalar::Object(
         builder
-            .build_call(accessor, &[], "not_implemented")
-            .expect("build_call should not fail for pycc_ext_obj_not_implemented")
+            .build_call(accessor, &[], "singleton")
+            .expect("build_call should not fail for a singleton accessor")
             .try_as_basic_value()
-            .expect_basic("pycc_ext_obj_not_implemented returns PyObject *")
+            .expect_basic("a singleton accessor returns PyObject *")
             .into_pointer_value(),
     )
 }

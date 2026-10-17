@@ -10,7 +10,7 @@ impl MirExpr {
             MirExpr::BoolLiteral(_) => Ty::Bool,
             MirExpr::StringLiteral(_) | MirExpr::FString(_) => Ty::Str,
             MirExpr::NoneLiteral => Ty::None,
-            MirExpr::NotImplemented | MirExpr::ObjectBox(_) => Ty::Object,
+            MirExpr::NotImplemented | MirExpr::Ellipsis | MirExpr::ObjectBox(_) => Ty::Object,
             MirExpr::OptionalWrap(_, inner) => Ty::Optional(inner.clone()),
             MirExpr::NumWrap(_) => Ty::Num,
             MirExpr::OptionalUnwrap(_, inner)
@@ -258,6 +258,7 @@ impl MirExpr {
             | MirExpr::EmptyDict(_)
             | MirExpr::NoneLiteral
             | MirExpr::NotImplemented
+            | MirExpr::Ellipsis
             | MirExpr::Name { .. }
             | MirExpr::NullInstance { .. } => {}
             MirExpr::ListPop { list, index, .. } => {

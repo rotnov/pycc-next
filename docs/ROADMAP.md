@@ -405,3 +405,10 @@ Accept:
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.
+
+Progress:
+- Accept 2 (in progress): the `...` literal (a bare `...` statement is a no-op; the value
+  is the `Ellipsis` object), `hash()` of a CPython object and function-local imports of
+  CPython modules compile natively (`tests/v08_constructs.rs`); pydantic 2.13.5: 955 of
+  1249 functions native (`bench/pydantic_check.py`, from 809). Remaining: nested `def`,
+  `lambda`, and the call boundary's forwarder frame.

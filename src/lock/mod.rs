@@ -231,7 +231,8 @@ pub(crate) fn split_roots(hir: &HirModule) -> SplitRoots {
             continue;
         }
         let set = match site {
-            ForeignImportSite::Block { optional: true } => &mut guarded,
+            ForeignImportSite::Block { optional: true }
+            | ForeignImportSite::Local { optional: true } => &mut guarded,
             _ => &mut required,
         };
         set.insert(root.to_string());

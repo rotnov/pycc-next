@@ -282,6 +282,7 @@ fn collect_named_expr_targets_in_expr(expr: &HirExpr, killed: &mut HashSet<Strin
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::Super => {}
         HirExpr::ListPop { list } => {
@@ -692,6 +693,36 @@ pub enum ForeignImportSite {
         /// Whether a qualifying `try` guards this import (see above).
         optional: bool,
     },
+    /// An `import` or foreign `from ... import` inside a function or method
+    /// body (v0.8 accept 2). It runs as the `HirStmt::ForeignImport`
+    /// statement lowered at its own position in the function and binds
+    /// *local* names, so unlike a [`Self::Block`] entry it binds no module
+    /// global: the position-blind passes skip it
+    /// ([`ImportBinding::binds_module_name`]). The table entry exists for
+    /// the driver's lock, interop policy (`I0402`) and native-build
+    /// (`I0403`) gates; `module::lower_module` appends it after every
+    /// top-level item is lowered, so no module-level name lookup sees it.
+    /// `optional` is [`Self::Block`]'s, for a `try` in the function body.
+    Local {
+        /// Whether a `try` catching a failed import guards it.
+        optional: bool,
+    },
+}
+
+impl ImportBinding {
+    /// Whether the binding binds a name in the module's own namespace:
+    /// every binding but a function-local foreign import
+    /// ([`ForeignImportSite::Local`]).
+    #[must_use]
+    pub fn binds_module_name(&self) -> bool {
+        !matches!(
+            self,
+            ImportBinding::Foreign {
+                site: ForeignImportSite::Local { .. },
+                ..
+            }
+        )
+    }
 }
 
 /// Which kind of top-level definition an [`ImportBinding::Project`] names

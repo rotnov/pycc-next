@@ -518,6 +518,23 @@ pub(crate) fn lower_call_expr(
         let instance = instance.clone();
         return lower_instance_hash(instance, &class, scopes, classes);
     }
+    // `hash(t)` of a tuple holding a CPython object (`pycc_types::hash`'s
+    // `is_object_hash`): the tuple crosses as the CPython tuple, which
+    // `pycc_codegen::hash` hashes as an object, under the same shadow guard.
+    let args = if callee == "hash"
+        && let [tuple] = args.as_slice()
+        && matches!(tuple.ty(), Ty::Tuple(_) | Ty::VarTuple(_))
+        && holds_object(&tuple.ty())
+        && !scopes
+            .iter()
+            .any(|scope| scope.contains_key(&format!("$fn:{callee}")))
+    {
+        args.into_iter()
+            .map(|tuple| crate::object_box::box_into(tuple, &Ty::Object))
+            .collect()
+    } else {
+        args
+    };
     // Part 11 of #1371: `type(o)` on a CPython object, under the
     // same shadow guard as `hash` above; a user `class type` was
     // already claimed by the instantiation lookup. `pycc_types`
@@ -777,4 +794,15 @@ fn object_defaultdict(
         sig,
         args: vec![MirExpr::ObjectBox(Box::new(MirExpr::StringLiteral(source)))],
     })))
+}
+
+/// Whether a value of type `ty` holds a CPython object: is one, or is a
+/// tuple with one among its elements.
+fn holds_object(ty: &Ty) -> bool {
+    match ty {
+        Ty::Object => true,
+        Ty::Tuple(elements) => elements.iter().any(holds_object),
+        Ty::VarTuple(element) => holds_object(element),
+        _ => false,
+    }
 }

@@ -438,10 +438,9 @@ fn nested_and_aliased_imports_are_requested_under_their_alias_spans() {
 }
 
 #[test]
-fn function_and_loop_body_imports_are_not_requested_but_type_checking_ones_are() {
+fn loop_body_imports_are_not_requested_but_type_checking_ones_are() {
     let requests = project_import_requests(&parse(
-        "def f() -> None:\n    import a\nfor i in range(3):\n    import b\nwhile c:\n    \
-         import g\n",
+        "for i in range(3):\n    import b\nwhile c:\n    import g\n",
     ));
     assert!(requests.is_empty(), "{requests:#?}");
 
@@ -454,6 +453,23 @@ fn function_and_loop_body_imports_are_not_requested_but_type_checking_ones_are()
         .filter_map(|request| request.module.as_deref())
         .collect();
     assert_eq!(modules, vec!["a", "b", "d"]);
+}
+
+/// v0.8 accept 2: an import in a function or method body, at any depth, is
+/// requested as a nested one (answering it never loads a file); one in a
+/// class body outside a method is not.
+#[test]
+fn function_body_imports_are_requested_as_nested() {
+    let requests = project_import_requests(&parse(
+        "def f() -> None:\n    import a\n    for i in x:\n        from b import c\n\
+         class K:\n    import d\n    def m(self) -> None:\n        if x:\n            import e\n",
+    ));
+    let modules: Vec<&str> = requests
+        .iter()
+        .filter_map(|request| request.module.as_deref())
+        .collect();
+    assert_eq!(modules, vec!["a", "b", "e"]);
+    assert!(requests.iter().all(|request| request.nested), "{requests:#?}");
 }
 
 /// #1290: which `try` shapes make a nested import optional.

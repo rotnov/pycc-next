@@ -996,6 +996,17 @@ pub(crate) fn lower_expr(
                 )?),
             }
         }
+        // The `...` literal as a value is CPython's `Ellipsis` singleton:
+        // a CPython object, so only where the module may hold one.
+        Expr::EllipsisLiteral(_) if signatures.object_receivers() => HirExpr::Ellipsis,
+        Expr::EllipsisLiteral(ellipsis) => {
+            return Err(unsupported(
+                "expression kind not supported yet: an `...` ellipsis literal used as a value \
+                 (CPython's `Ellipsis` object, admitted in an `--ext` module, in non-strict \
+                 mode or in a module with a CPython import; a bare `...` statement is a no-op)",
+                ellipsis.range,
+            ));
+        }
         other => {
             return Err(unsupported(
                 format!(
@@ -1033,6 +1044,7 @@ pub(crate) fn contains_named_expr(expr: &HirExpr) -> bool {
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::Super => false,
         HirExpr::Call { args, .. } => args.iter().any(contains_named_expr),

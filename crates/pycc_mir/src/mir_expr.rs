@@ -26,6 +26,9 @@ pub enum MirExpr {
     /// `Ty::Object`; codegen loads it through the
     /// `pycc_ext_obj_not_implemented` shim.
     NotImplemented,
+    /// CPython's `Ellipsis` singleton (`HirExpr::Ellipsis`), statically
+    /// `Ty::Object`, loaded through the `pycc_ext_obj_ellipsis` shim.
+    Ellipsis,
     /// Wraps a bare `inner`-typed value or a `NoneLiteral` so `.ty()`
     /// reports `Ty::Optional(inner)` regardless of the wrapped value's own
     /// static type (D-197, #763, Part 1 of #747). Exactly mirroring

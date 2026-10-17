@@ -131,6 +131,7 @@ pub(crate) fn collect_named_expr_names_in_expr<'a>(expr: &'a HirExpr, names: &mu
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
         | HirExpr::NotImplemented
+        | HirExpr::Ellipsis
         | HirExpr::Name(_)
         | HirExpr::Super => {}
         HirExpr::ListPop { list } => {
@@ -273,7 +274,7 @@ pub(crate) fn collect_local_names<'a>(body: &'a [HirStmt], names: &mut Vec<&'a s
                 }
             }
             // An `import` binds its local names as an assignment does
-            // (#1291; `pycc_hir` produces this node only at module level).
+            // (#1291 in a module-level block; v0.8 accept 2 in a function).
             HirStmt::ForeignImport { bindings, .. } => {
                 for (target, _, _) in bindings {
                     if !is_local(names, target) {

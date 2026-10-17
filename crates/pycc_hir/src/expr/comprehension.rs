@@ -57,7 +57,8 @@ pub(crate) fn rename_name_in_expr(expr: HirExpr, from: &str, to: &str) -> HirExp
         | HirExpr::EmptySet(_)
         | HirExpr::EmptyDict(_)
         | HirExpr::NoneLiteral
-        | HirExpr::NotImplemented => expr,
+        | HirExpr::NotImplemented
+        | HirExpr::Ellipsis => expr,
         // `callee` is a bare `String`: a module-level function, or a
         // variable holding a function value (`f(1) for f in fs`), which
         // the loop variable's rename renames like any other read of it.

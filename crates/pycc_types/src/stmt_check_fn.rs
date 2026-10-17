@@ -973,8 +973,8 @@ pub(crate) fn check_stmt_arm_in_function(
         HirStmt::DeleteItem { base, key, span } => {
             foreign::arith::check_delete_item(env, local_names, base, key, *span)
         }
-        // `pycc_hir` never produces this node in a function body; binding
-        // it here keeps the two statement checkers in step (#1291).
+        // A function-local foreign import (v0.8 accept 2) binds its names
+        // as this function's locals.
         HirStmt::ForeignImport { bindings, .. } => {
             foreign::bind_block_import(env, bindings);
             Ok(())
