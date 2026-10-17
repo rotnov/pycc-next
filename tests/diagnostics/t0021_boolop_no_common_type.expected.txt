@@ -1,4 +1,4 @@
-error[T0021]: `or` operands have no common type: int and str (pycc has no union types)
+error[T0021]: `or` operands have no common type: int and str (pycc's only unions are `T | None` and `int | float`)
  --> tests/diagnostics/t0021_boolop_no_common_type.py:2:11
   |
 2 |     print(a or b)

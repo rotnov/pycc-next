@@ -450,16 +450,17 @@ fn the_other_two_conversions_of_a_cpython_object_are_admitted() {
     }
 }
 
-/// `str` on anything that is not a CPython object, and `int` of a `str`,
-/// keep `C0001` verbatim. (`int` of an `int`, `bool` or `float` compiles
-/// since arbitrary-precision `int`; `tests/int_bigint.rs` covers it.)
+/// `str` of a value pycc cannot render, and `int` of a container, keep
+/// `C0001` verbatim. (`int` of an `int`, `bool` or `float` compiles since
+/// arbitrary-precision `int`, `tests/int_bigint.rs` covers it; `str` of a
+/// set compiles since v0.6, `tests/strict_coverage_v06.rs`.)
 #[test]
 fn int_and_str_of_a_non_object_keep_their_unchanged_refusal() {
     let dir = ScratchDir::new("foreign_int_str_non_object").expect("scratch");
     for body in [
         "print(int({1}))\n",
         "print(int([1.5]))\n",
-        "print(str({1}))\n",
+        "class C:\n    pass\n\nprint(str([C()]))\n",
     ] {
         let out = check(&dir, body);
         assert!(!out.status.success(), "{body} should still be refused");

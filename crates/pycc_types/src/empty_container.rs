@@ -146,6 +146,7 @@ use super::*;
 pub(crate) mod attr_slot;
 pub(crate) use solved_signatures::resolve_with_solved_signatures;
 mod call_site;
+mod consumed;
 mod init_params;
 mod object_slot;
 mod producer;
@@ -360,6 +361,11 @@ fn resolve_empty_containers_inner(hir: &HirModule) -> Option<HirModule> {
     {
         let snapshot = resolved.clone();
         attr_slot::resolve_class_slots(&snapshot, &mut resolved, &local_names);
+    }
+    // Strict mode: an empty display only a builtin consumes is a
+    // `list[int]` (`consumed`); non-strict mode builds it as CPython's.
+    if !crate::non_strict::is_non_strict() {
+        consumed::default_consumed_empty_lists(&mut resolved);
     }
     Some(resolved)
 }

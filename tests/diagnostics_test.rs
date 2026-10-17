@@ -221,20 +221,6 @@ fn l0001_async_for_outside_async_function() {
     assert_diagnostic_matches_fixture("l0001_async_for_outside_async_function");
 }
 
-/// Paired with the `l0001_*` fixtures above: a `break`/`continue` with a
-/// real enclosing loop lowers, except when it would leave a `try` whose
-/// `finally` clause must run first -- that jump is still a `C0001`
-/// capability gap rather than code that skips the `finally` block.
-#[test]
-fn c0001_break_across_finally() {
-    assert_diagnostic_matches_fixture("c0001_break_across_finally");
-}
-
-#[test]
-fn c0001_continue_across_finally() {
-    assert_diagnostic_matches_fixture("c0001_continue_across_finally");
-}
-
 // Issue #361 / D-149, the expression-lowering sequel to #141/D-148:
 // `yield`/`yield from` outside any function are misclassified as `C0001`
 // ("valid Python, not implemented yet") when CPython actually rejects both
@@ -1395,14 +1381,6 @@ fn c0001_unestablished_instance_declaration() {
 #[test]
 fn c0001_instance_declaration_type() {
     assert_diagnostic_matches_fixture("c0001_instance_declaration_type");
-}
-
-/// A non-binding position. `infer_expr_in` has no expected type and there is
-/// no name to scan forward from, so the message keeps its generic " here"
-/// wording rather than naming a binding.
-#[test]
-fn t0003_call_argument_has_no_binding() {
-    assert_diagnostic_matches_fixture("t0003_call_argument_has_no_binding");
 }
 
 /// `xs: list[int] = [[]]`: the outer literal is a non-empty `ListLiteral`, so

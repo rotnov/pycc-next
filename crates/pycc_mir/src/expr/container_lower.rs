@@ -11,10 +11,6 @@ pub(crate) fn lower_list_literal_expr(
     let HirExpr::ListLiteral(elements) = expr else {
         unreachable!()
     };
-    // An empty display no evidence typed (`pycc_types`: a `list[int]`).
-    if elements.is_empty() {
-        return MirExpr::EmptyList(Ty::Int);
-    }
     let elements: Vec<MirExpr> = elements
         .iter()
         .map(|e| lower_expr(e, scopes, classes, current_class))

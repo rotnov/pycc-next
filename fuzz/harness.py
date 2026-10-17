@@ -148,6 +148,8 @@ def compare(want: Outcome, got: Outcome) -> str | None:
 KNOWN_DEVIATIONS = [
     (re.compile(r"storing a bigint-valued `int` in a container is not supported yet"),
      "an int beyond 63 bits stored in a container or a boxed tuple"),
+    (re.compile(r"in an `int \| float` container is not supported yet"),
+     "an int | float float beyond the inline range stored in a container"),
     (re.compile(r"'builtins\.generator' object has no attribute"),
      "a generator crossing an --ext boundary is an iterator only (fallback code cannot send/throw)"),
 ]

@@ -1,5 +1,0 @@
-error[T0003]: an empty list literal has no inferable element type here
- --> tests/diagnostics/t0003_call_argument_has_no_binding.py:2:16
-  |
-2 |     return len([])
-  |                ^^ needs a type annotation
