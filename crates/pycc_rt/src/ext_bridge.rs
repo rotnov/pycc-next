@@ -150,9 +150,74 @@ pub extern "C" fn pycc_rt_ext_int_decode(encoded: i64) -> i64 {
     untag_smallint(encoded)
 }
 
+/// The byte an `int` word stores into a `bytearray` (`bytearray.append`
+/// and `extend`), or `None` for a value outside `range(0, 256)` (every
+/// bigint is). A bool marker is its `0` or `1`.
+fn byte_of_word(encoded: i64) -> Option<u8> {
+    match pycc_rt_ext_int_classify(encoded) {
+        PYCC_EXT_INT_SMALLINT => u8::try_from(untag_smallint(encoded)).ok(),
+        PYCC_EXT_INT_FALSE => Some(0),
+        PYCC_EXT_INT_TRUE => Some(1),
+        _ => None,
+    }
+}
+
+/// [`byte_of_word`] for the shim: the byte, or `-1` outside `range(0, 256)`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_ext_byte_of_word(encoded: i64) -> i32 {
+    byte_of_word(encoded).map_or(-1, i32::from)
+}
+
+/// Writes the byte of each `int` element of `list` to `out` (`len(list)`
+/// bytes), as `bytearray.extend` stores them: `0`, or `-1` when an element
+/// is outside `range(0, 256)`, having written only the elements before it.
+///
+/// # Safety
+/// `list` must be a live `list[int]` and `out` writable for its length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_ext_list_bytes(list: *mut crate::list::PyListObj, out: *mut u8) -> i32 {
+    let list = unsafe { &*list };
+    for i in 0..list.len() as usize {
+        match byte_of_word(list.word_at(i)) {
+            Some(byte) => unsafe { *out.add(i) = byte },
+            None => return -1,
+        }
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::int_encoding::tag_smallint;
+
+    #[test]
+    fn a_word_s_byte_is_its_value_in_range_0_to_255() {
+        assert_eq!(pycc_rt_ext_byte_of_word(tag_smallint(0)), 0);
+        assert_eq!(pycc_rt_ext_byte_of_word(tag_smallint(255)), 255);
+        assert_eq!(pycc_rt_ext_byte_of_word(tag_smallint(256)), -1);
+        assert_eq!(pycc_rt_ext_byte_of_word(tag_smallint(-1)), -1);
+        assert_eq!(pycc_rt_ext_byte_of_word(BOOL_TRUE_MARKER), 1);
+        assert_eq!(pycc_rt_ext_byte_of_word(BOOL_FALSE_MARKER), 0);
+        let big = crate::int_arith::pycc_rt_int_from_i64(1 << 62);
+        assert_eq!(pycc_rt_ext_byte_of_word(big), -1);
+        crate::pycc_rt_bigint_release(big);
+    }
+
+    #[test]
+    fn a_list_s_bytes_stop_at_the_first_out_of_range_element() {
+        let list = crate::list::pycc_rt_list_new(crate::list::LIST_KIND_INT, 0);
+        for v in [1, 2, 300, 4] {
+            unsafe { crate::list::pycc_rt_list_append(list, tag_smallint(v)) };
+        }
+        let mut out = [9u8; 4];
+        assert_eq!(unsafe { pycc_rt_ext_list_bytes(list, out.as_mut_ptr()) }, -1);
+        assert_eq!(out, [1, 2, 9, 9]);
+        unsafe { crate::list::pycc_rt_list_set(list, 2, tag_smallint(3)) };
+        assert_eq!(unsafe { pycc_rt_ext_list_bytes(list, out.as_mut_ptr()) }, 0);
+        assert_eq!(out, [1, 2, 3, 4]);
+        unsafe { crate::rc::pycc_rt_list_free(list) };
+    }
 
     #[test]
     fn hex_text_round_trips_any_magnitude() {

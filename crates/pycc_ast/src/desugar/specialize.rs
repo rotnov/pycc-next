@@ -126,13 +126,14 @@ pub fn specialize_untyped(
         .filter(|builtin| binds_at_module_level(&module.body, builtin))
         .collect();
     let module_binds = |name: &str| module_bound.contains(name);
+    let call_sites = call_sites::CallSites::of(module);
     let mut out = Vec::new();
     let old = std::mem::take(&mut module.body);
     let mut body = Vec::with_capacity(old.len());
     for stmt in old {
         match stmt {
             Stmt::FunctionDef(mut def) => {
-                let planned = plan(&def, None, skip, keep_builtins, &module_binds);
+                let planned = plan(&def, None, skip, keep_builtins, &module_binds, &call_sites);
                 if planned.is_none()
                     && let Some((clone, spec)) = plan_iterable(&def, skip)
                 {
@@ -165,6 +166,7 @@ pub fn specialize_untyped(
                                 skip,
                                 keep_builtins,
                                 &module_binds,
+                                &call_sites,
                             ) {
                                 Some((clone, spec)) => {
                                     add_guard(&mut def, Some(&class_name), &spec);
@@ -245,6 +247,7 @@ fn plan(
     skip: &dyn Fn(&str) -> bool,
     keep_builtins: &dyn Fn(&str) -> bool,
     module_binds: &dyn Fn(&str) -> bool,
+    call_sites: &call_sites::CallSites,
 ) -> Option<(StmtFunctionDef, Specialized)> {
     let class_facts = class.map(|(_, facts)| facts);
     let class = class.map(|(name, _)| name);
@@ -288,7 +291,7 @@ fn plan(
     let evidence = Evidence::of(&def.body, &names);
     let mut guessed = Vec::new();
     let mut annotations = Vec::with_capacity(params.len());
-    for param in params {
+    for (index, param) in params.iter().enumerate() {
         let param_name = param.parameter.name.as_str();
         let annotation: Expr = match (&param.parameter.annotation, &param.default) {
             (Some(annotation), _) => annotation.as_ref().clone(),
@@ -299,7 +302,8 @@ fn plan(
                 name(literal_type(default)?, ExprContext::Load, param.range())
             }
             (None, None) => {
-                let ty = evidence.guess(param_name).unwrap_or("object");
+                let passed = call_sites.passes_bytearray(class.is_some(), fn_name, index);
+                let ty = evidence.guess(param_name, passed).unwrap_or("object");
                 if ty != "object" {
                     guessed.push((param_name.to_string(), ty));
                 }
@@ -538,6 +542,7 @@ fn loops(body: &[Stmt]) -> bool {
 }
 
 mod attrs;
+mod call_sites;
 mod evidence;
 use evidence::Evidence;
 

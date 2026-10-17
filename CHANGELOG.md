@@ -65,9 +65,33 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   - a constant set operand of a comparison (`t <= set(range(65, 91)) | set(range(97,
     123))`) is built once, as a module-level `frozenset`; standard-library functions an
     object call reaches are looked up once.
+  - a guarded specialization also guesses `bytearray` for a parameter every call of the
+    function in the module passes a `bytearray(...)` (or a local bound only to one):
+    pypng's `_deinterlace(self, raw)` used to be guessed `str` from `raw[i]`/`raw[i:j]`
+    alone, so its specialization never ran.
 - pypng 0.20220715.0: 64 of its 85 functions compile natively (15 in 0.5.0), its own
   suite passing; `bench/package_check.py --time` also times decoding every PngSuite
   image its tests use.
+
+### Changed
+
+- Faster `int` code: a function's `int` locals whose every value is proven a smallint
+  (an interval analysis over its assignments, `range()` loops, byte buffer items,
+  `& k`, `% k`, `abs()`, ...: `pycc_codegen`'s `int_range`) compute on the tagged words
+  directly -- no tag tests, overflow checks, runtime fallbacks or bigint releases --
+  and `abs()` of a number no longer checks for a pending exception. pypng's
+  `undo_filter_paeth` loop runs about 3x fewer instructions.
+- Faster non-strict code calling CPython: a module function used as a value is boxed
+  without rebuilding its closure each time, and called through CPython's vectorcall
+  protocol (no argument tuple); a constant tuple or list a membership test reads
+  (`kind not in (1, 2, 3, 4)`) is built once per site; a standard-library function
+  called with a CPython object (`math.ceil(o)`) is found again by its site;
+  `bytearray.extend` of a native list stores its bytes in one pass, and
+  `b.extend([e for v in xs])` reuses one list per site when `e` runs no other code.
+- Faster runtime helpers: a list comprehension over a named list allocates its result at
+  the source's length, `list.append` stores in place when there is room, freeing a list
+  of smallints releases nothing, `int ** int` of machine-sized operands and a bare `%d`
+  of an inline `int` skip the bigint and general formatting paths.
 
 ### Fixed
 

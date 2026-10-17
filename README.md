@@ -243,10 +243,12 @@ nested `def convert()` each branch defines, and `bytes` literals, `*args` calls 
 `Writer` class (a class used as a default value), `Image` (a `with` statement), the
 exception classes (a custom `__str__`, attribute bases), and helpers using generator
 expressions or `dict()`. Decoding every PngSuite image its tests use (`--time`'s second
-measurement) runs **2.5x faster** than CPython (3.4x fewer instructions under
-callgrind): the tiny palette and 1-to-4-bit images spend their time in per-row and
-per-chunk object operations (`self.row_bytes` is a CPython object) and in CPython
-itself (`zlib`, `struct`, `array`), not in the filters.
+measurement) runs **3.2x faster** than CPython (19 ms against 60 ms for five passes,
+best of 15 interleaved runs; 4.6x fewer instructions under callgrind). The filter loops'
+`int` locals are proven to stay small (byte items, `& 0xFF`, `abs()`, `range()` bounds),
+so they compute on tagged words without overflow checks; what remains is mostly CPython
+itself (`zlib`, `struct.unpack` and `array` for the 16-bit images, the palette's tuples)
+and per-row object calls, not the filters.
 
 ## Use pycc in your project
 

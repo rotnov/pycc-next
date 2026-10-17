@@ -137,30 +137,7 @@ fn compile_module(
     let (mut user_functions, function_defs_in_order, def_counts) =
         declare_functions::declare_user_functions(&context, &module, mir, &slice_widened);
 
-    // A name defined once and never bound as a variable can only ever hold
-    // that one definition (see `UserFunction::single_def`). The ext
-    // wrappers only read the slot, so CPython rebinding the module attribute
-    // does not reach compiled callers -- the same as for indirect calls.
-    let rebound_names = collect_module_bindings(mir);
-    for &(name, f) in &function_defs_in_order {
-        if def_counts[name] == 1
-            && !rebound_names.contains_key(name)
-            && let Some(uf) = user_functions.get_mut(name)
-            && uf.fn_ptr_global.is_some()
-        {
-            uf.single_def = Some(f);
-        }
-    }
-    // A single definition whose `def` precedes every statement that can run
-    // code is bound before any function body can run, so no call reaches
-    // its slot while it is still null (see `UserFunction::bound_before_code`).
-    for name in nothrow::bound_before_code(mir) {
-        if let Some(uf) = user_functions.get_mut(name)
-            && uf.single_def.is_some()
-        {
-            uf.bound_before_code = true;
-        }
-    }
+    declare_functions::mark_single_defs(mir, &mut user_functions, &function_defs_in_order, &def_counts);
 
     // #1050: an `ext` artifact's generated C reaches an export whose
     // signature carries a `tuple` through a scalar-only thunk rather than
@@ -336,40 +313,7 @@ fn compile_module(
             "build_return should not fail: builder is always freshly positioned before this call",
         );
 
-    // Every exceptional module-scope edge converges here. Keeping one
-    // target alive while top-level expressions are emitted lets recursive
-    // expression guards stop later operands and effects immediately.
-    builder.position_at_end(top_exception_exit);
-    if options.ext {
-        // D-244's `ext` mode: the module body runs inside the host
-        // interpreter's `Py_mod_exec` slot, so an uncaught module-scope
-        // exception must *fail the import*, not end the process.
-        // `pycc_rt_exception_print_and_exit` is `-> !` and calls
-        // `std::process::exit(1)`, which here would terminate the
-        // interpreter that just imported this artifact. Return `-1`
-        // instead, leaving the pending exception state set: the C shim
-        // reads it through `pycc_rt_ext_pending_type`/`_message`, raises
-        // the matching CPython exception, and returns `-1` from the slot.
-        // `print_and_exit` stays `native` mode's handler, untouched.
-        builder
-            .build_return(Some(
-                &i64_type.const_int(EXT_MODULE_EXEC_FAILED as u64, true),
-            ))
-            .expect("build_return should not fail on a freshly positioned builder");
-    } else {
-        let exc_val = builder
-            .build_call(rt.exception_value, &[], "top_exc_val")
-            .expect("build_call should not fail for exception_value")
-            .try_as_basic_value()
-            .expect_basic("pycc_rt_exception_value returns a pointer")
-            .into_pointer_value();
-        builder
-            .build_call(rt.exception_print_and_exit, &[exc_val.into()], "")
-            .expect("build_call should not fail for exception_print_and_exit");
-        builder
-            .build_unreachable()
-            .expect("build_unreachable should terminate a noreturn block");
-    }
+    top_level::emit_top_exception_exit(&context, &builder, &rt, top_exception_exit, options.ext);
 
     // Second pass: fill in each user function's body, now that every
     // function (including ones a body might call) is already declared.
@@ -567,6 +511,16 @@ fn compile_module(
                     })
                     .map(|(name, _)| name),
             );
+            // `int` locals whose every value is a smallint own nothing: no
+            // release before a store or on the way out (`int_range`).
+            *rt.int_ranges.borrow_mut() = crate::int_range::int_ranges(
+                body,
+                local_bindings
+                    .iter()
+                    .filter(|(_, ty)| **ty == pycc_mir::Ty::Int)
+                    .map(|(name, _)| name),
+                !user_functions.contains_key("abs"),
+            );
             for (local_name, ty) in local_bindings {
                 let is_str = ty == pycc_mir::Ty::Str;
                 let heap = heap_rc::heap_kind(&rt, &ty)
@@ -577,7 +531,7 @@ fn compile_module(
                 let is_buffer = ty == pycc_mir::Ty::MemoryView;
                 let is_int = ty == pycc_mir::Ty::Int;
                 let slot = storage_slot_at_entry(&context, &builder, ty, &local_name, true);
-                if is_int {
+                if is_int && !rt.int_ranges.borrow().is_small_local(&local_name) {
                     owned_int_slots.push((slot.ptr, false));
                     rt.owned_int_names.borrow_mut().insert(local_name.clone());
                 }
@@ -1043,6 +997,7 @@ fn compile_module(
             if generator_element.is_some() {
                 crate::generator::finish(&context, &module, &builder, &rt, f);
             }
+            *rt.int_ranges.borrow_mut() = Default::default();
         }
     }
 

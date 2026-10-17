@@ -21,6 +21,16 @@ pub(crate) fn emit_bin_op_expr<'ctx>(
     else {
         unreachable!()
     };
+    // Smallint operands and result (`int_range`): one instruction or two
+    // on the tagged words. The operands own nothing.
+    let small = crate::int_small::binop_operands(&rt.int_ranges.borrow(), *op, left, right, ty);
+    if let Some((_, right_range)) = small {
+        let l = emit_expr(context, builder, module, rt, user_functions, locals, left);
+        let r = emit_expr(context, builder, module, rt, user_functions, locals, right);
+        let l = to_numeric_encoded_int(context, builder, l);
+        let r = to_numeric_encoded_int(context, builder, r);
+        return Scalar::Int(crate::int_small::emit_binop(context, builder, *op, l, r, right_range));
+    }
     if crate::int_tree::applies(expr) {
         return Scalar::Int(crate::int_tree::emit(
             context,

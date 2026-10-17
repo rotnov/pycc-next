@@ -80,23 +80,9 @@ int pycc_ext_ba_byte_error(void)
  */
 static int pycc_ext_ba_byte_of_word(long long encoded, char *out)
 {
-    long long value;
+    int value = pycc_rt_ext_byte_of_word(encoded);
 
-    switch (pycc_rt_ext_int_classify(encoded)) {
-    case PYCC_EXT_INT_SMALLINT:
-        value = pycc_rt_ext_int_decode(encoded);
-        break;
-    case PYCC_EXT_INT_FALSE:
-        value = 0;
-        break;
-    case PYCC_EXT_INT_TRUE:
-        value = 1;
-        break;
-    default:
-        value = -1;
-        break;
-    }
-    if (value < 0 || value > 255) {
+    if (value < 0) {
         return pycc_ext_ba_byte_error();
     }
     *out = (char)value;
@@ -127,30 +113,23 @@ PyObject *pycc_ext_obj_ba_append(PyObject *ba, long long encoded)
 
 /*
  * `b.extend(xs)` on a byte buffer (`pycc_hir::builtins::BYTEARRAY_EXTEND`)
- * with a native list of `int`s (borrowed): every item is checked before
- * the `bytearray` grows, so a failing item leaves it unchanged, as
- * CPython's own `extend` does.
+ * with a native list of `int`s (borrowed): the `bytearray` grows, takes the
+ * items' bytes, and shrinks back when an item is outside `range(0, 256)`,
+ * so a failing item leaves it unchanged, as CPython's own `extend` does.
  */
 PyObject *pycc_ext_obj_ba_extend(PyObject *ba, void *list)
 {
     long long len = pycc_rt_list_len(list);
-    long long i;
-    Py_ssize_t size;
-    char *data;
-    char byte;
+    Py_ssize_t size = PyByteArray_Size(ba);
 
-    for (i = 0; i < len; i++) {
-        if (pycc_ext_ba_byte_of_word(pycc_rt_list_get(list, i), &byte) != 0) {
-            return pycc_ext_stdlib_failed();
-        }
-    }
-    size = PyByteArray_Size(ba);
     if (size < 0 || PyByteArray_Resize(ba, size + (Py_ssize_t)len) != 0) {
         return pycc_ext_stdlib_failed();
     }
-    data = PyByteArray_AsString(ba) + size;
-    for (i = 0; i < len; i++) {
-        (void)pycc_ext_ba_byte_of_word(pycc_rt_list_get(list, i), &data[i]);
+    if (pycc_rt_ext_list_bytes(list, (unsigned char *)PyByteArray_AsString(ba) + size) != 0) {
+        /* Back to the old size: the bytes before `size` were not touched. */
+        (void)PyByteArray_Resize(ba, size);
+        (void)pycc_ext_ba_byte_error();
+        return pycc_ext_stdlib_failed();
     }
     Py_INCREF(Py_None);
     return Py_None;

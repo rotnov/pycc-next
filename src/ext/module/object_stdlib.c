@@ -298,10 +298,48 @@ static PyObject *pycc_ext_stdlib_call(const char *module_name, const char *funct
 /* Non-strict mode: `module.function(args)` of a standard-library function
  * pycc compiles, called with a CPython object (`pycc_mir`'s
  * `MODULE_CALLS`): CPython's own function. Every argument is borrowed. */
+/* The names arrive as the same two `str` objects at every evaluation of a
+ * site (a literal's shared CPython `str`, `pycc_ext_obj_pack_str`), so a
+ * site's function is found again by their identity, without building the
+ * dict key. The cache keeps a reference to both names, so no other string
+ * can take one's address. */
+#define PYCC_EXT_MODULE_CALL_SITES 64
+static struct {
+    PyObject *module;
+    PyObject *function;
+    PyObject *callable;
+} pycc_ext_module_sites[PYCC_EXT_MODULE_CALL_SITES];
+
+static PyObject *pycc_ext_module_function(PyObject *module_name, PyObject *function)
+{
+    PyObject *callable;
+    size_t i;
+
+    for (i = 0; i < PYCC_EXT_MODULE_CALL_SITES; i++) {
+        if (pycc_ext_module_sites[i].module == NULL) {
+            break;
+        }
+        if (pycc_ext_module_sites[i].module == module_name
+            && pycc_ext_module_sites[i].function == function) {
+            return pycc_ext_module_sites[i].callable;
+        }
+    }
+    callable = pycc_ext_stdlib_function(module_name, function);
+    if (callable != NULL && i < PYCC_EXT_MODULE_CALL_SITES) {
+        Py_INCREF(module_name);
+        Py_INCREF(function);
+        Py_INCREF(callable);
+        pycc_ext_module_sites[i].module = module_name;
+        pycc_ext_module_sites[i].function = function;
+        pycc_ext_module_sites[i].callable = callable;
+    }
+    return callable;
+}
+
 static PyObject *pycc_ext_module_call(PyObject *module_name, PyObject *function,
                                       PyObject *const *args, size_t nargs)
 {
-    PyObject *callable = pycc_ext_stdlib_function(module_name, function);
+    PyObject *callable = pycc_ext_module_function(module_name, function);
     PyObject *result = callable == NULL ? NULL : PyObject_Vectorcall(callable, args, nargs, NULL);
 
     return result == NULL ? pycc_ext_stdlib_failed() : result;

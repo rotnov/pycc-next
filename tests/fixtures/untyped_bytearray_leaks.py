@@ -49,6 +49,9 @@ def round_trip():
     attempt(m.poke, line, 1, 2 ** 70)
     attempt(m.poke, line, 2 ** 70, 1)
     attempt(m.peek, line, -400)
+    m.unpack(bytearray(base[:40]), 2, 0)
+    attempt(m.unpack, bytearray(base[:40]), -2, 3)
+    attempt(m.unpack, bytearray(base[:40]), 4, 250)
     # The object path.
     m.checksum(bytes(base))
     attempt(m.undo_sub, 1, bytes(base), bytes(base))

@@ -98,3 +98,49 @@ pub(super) fn bind_def<'ctx>(
         publish_plan.names_at(ordinal),
     );
 }
+
+/// Emits the module entry point's exceptional exit: every module-scope
+/// exception edge branches to `top_exception_exit`.
+pub(super) fn emit_top_exception_exit<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    top_exception_exit: BasicBlock<'ctx>,
+    ext: bool,
+) {
+    let i64_type = context.i64_type();
+    // Every exceptional module-scope edge converges here. Keeping one
+    // target alive while top-level expressions are emitted lets recursive
+    // expression guards stop later operands and effects immediately.
+    builder.position_at_end(top_exception_exit);
+    if ext {
+        // D-244's `ext` mode: the module body runs inside the host
+        // interpreter's `Py_mod_exec` slot, so an uncaught module-scope
+        // exception must *fail the import*, not end the process.
+        // `pycc_rt_exception_print_and_exit` is `-> !` and calls
+        // `std::process::exit(1)`, which here would terminate the
+        // interpreter that just imported this artifact. Return `-1`
+        // instead, leaving the pending exception state set: the C shim
+        // reads it through `pycc_rt_ext_pending_type`/`_message`, raises
+        // the matching CPython exception, and returns `-1` from the slot.
+        // `print_and_exit` stays `native` mode's handler, untouched.
+        builder
+            .build_return(Some(
+                &i64_type.const_int(EXT_MODULE_EXEC_FAILED as u64, true),
+            ))
+            .expect("build_return should not fail on a freshly positioned builder");
+    } else {
+        let exc_val = builder
+            .build_call(rt.exception_value, &[], "top_exc_val")
+            .expect("build_call should not fail for exception_value")
+            .try_as_basic_value()
+            .expect_basic("pycc_rt_exception_value returns a pointer")
+            .into_pointer_value();
+        builder
+            .build_call(rt.exception_print_and_exit, &[exc_val.into()], "")
+            .expect("build_call should not fail for exception_print_and_exit");
+        builder
+            .build_unreachable()
+            .expect("build_unreachable should terminate a noreturn block");
+    }
+}

@@ -10,6 +10,8 @@
  * shim translation unit (`src/ext_build.rs`'s `SHIM_C`), after `bridge.c`.
  */
 
+#include <stddef.h>
+
 extern void pycc_rt_closure_incref(void *obj);
 extern void pycc_rt_closure_decref(void *obj);
 
@@ -20,6 +22,9 @@ typedef struct {
     PyObject_HEAD
     void *closure;
     long long arity;
+    /* CPython's vectorcall entry (`__vectorcalloffset__`): a call passes
+     * its arguments as an array, with no tuple built for them. */
+    vectorcallfunc vectorcall;
 } PyccExtClosure;
 
 static void pycc_ext_closure_dealloc(PyObject *self)
@@ -40,20 +45,17 @@ static void *pycc_ext_closure_call_fn(void *closure)
     return *(void **)((char *)closure + 8);
 }
 
-static PyObject *pycc_ext_closure_call(PyObject *self, PyObject *args, PyObject *kwargs)
+/* Calls the function value of `wrapper` with the `n` arguments `items`
+ * (borrowed). */
+static PyObject *pycc_ext_closure_invoke(PyccExtClosure *wrapper, PyObject *const *items,
+                                         Py_ssize_t n)
 {
-    PyccExtClosure *wrapper = (PyccExtClosure *)self;
     PyObject *a[PYCC_EXT_CLOSURE_MAX_ARITY];
-    Py_ssize_t n = PyTuple_Size(args);
     Py_ssize_t i;
     void *fn = pycc_ext_closure_call_fn(wrapper->closure);
     void *c = wrapper->closure;
     PyObject *result = NULL;
 
-    if (kwargs != NULL && PyDict_Size(kwargs) > 0) {
-        PyErr_SetString(PyExc_TypeError, "a compiled function value takes no keyword arguments");
-        return NULL;
-    }
     if (n != (Py_ssize_t)wrapper->arity) {
         PyErr_Format(PyExc_TypeError, "function takes %lld positional arguments but %zd were given",
                      wrapper->arity, n);
@@ -61,7 +63,7 @@ static PyObject *pycc_ext_closure_call(PyObject *self, PyObject *args, PyObject 
     }
     /* Each parameter owns its argument. */
     for (i = 0; i < n; i++) {
-        a[i] = PyTuple_GetItem(args, i);
+        a[i] = items[i];
         Py_INCREF(a[i]);
     }
     /* The function value outlives its own call. */
@@ -112,9 +114,41 @@ static PyObject *pycc_ext_closure_call(PyObject *self, PyObject *args, PyObject 
     return result;
 }
 
+static PyObject *pycc_ext_closure_call(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *items[PYCC_EXT_CLOSURE_MAX_ARITY];
+    Py_ssize_t n = PyTuple_Size(args);
+    Py_ssize_t i;
+
+    if (kwargs != NULL && PyDict_Size(kwargs) > 0) {
+        PyErr_SetString(PyExc_TypeError, "a compiled function value takes no keyword arguments");
+        return NULL;
+    }
+    for (i = 0; i < n && i < PYCC_EXT_CLOSURE_MAX_ARITY; i++) {
+        items[i] = PyTuple_GetItem(args, i);
+    }
+    return pycc_ext_closure_invoke((PyccExtClosure *)self, items, n);
+}
+
+static PyObject *pycc_ext_closure_vectorcall(PyObject *self, PyObject *const *args, size_t nargsf,
+                                             PyObject *kwnames)
+{
+    if (kwnames != NULL && PyTuple_Size(kwnames) > 0) {
+        PyErr_SetString(PyExc_TypeError, "a compiled function value takes no keyword arguments");
+        return NULL;
+    }
+    return pycc_ext_closure_invoke((PyccExtClosure *)self, args, PyVectorcall_NARGS(nargsf));
+}
+
+static PyMemberDef pycc_ext_closure_members[] = {
+    {"__vectorcalloffset__", Py_T_PYSSIZET, offsetof(PyccExtClosure, vectorcall), Py_READONLY, NULL},
+    {NULL, 0, 0, 0, NULL},
+};
+
 static PyType_Slot pycc_ext_closure_slots[] = {
     {Py_tp_dealloc, (void *)pycc_ext_closure_dealloc},
     {Py_tp_call, (void *)pycc_ext_closure_call},
+    {Py_tp_members, (void *)pycc_ext_closure_members},
     {0, NULL},
 };
 
@@ -139,7 +173,7 @@ PyObject *pycc_ext_obj_pack_closure(void *closure, long long arity)
         spec.basicsize = (int)sizeof(PyccExtClosure);
         spec.itemsize = 0;
         spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION
-                     | Py_TPFLAGS_IMMUTABLETYPE;
+                     | Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_HAVE_VECTORCALL;
         spec.slots = pycc_ext_closure_slots;
         pycc_ext_closure_type = PyType_FromSpec(&spec);
         if (pycc_ext_closure_type == NULL) {
@@ -153,6 +187,7 @@ PyObject *pycc_ext_obj_pack_closure(void *closure, long long arity)
     pycc_rt_closure_incref(closure);
     wrapper->closure = closure;
     wrapper->arity = arity;
+    wrapper->vectorcall = pycc_ext_closure_vectorcall;
     return (PyObject *)wrapper;
 }
 

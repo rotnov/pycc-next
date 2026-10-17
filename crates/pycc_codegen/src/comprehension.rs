@@ -154,7 +154,36 @@ pub(super) fn emit_comprehension<'ctx>(
             held_collection = Some(held);
             collection
         }
-        CompElts::List(elt) => list::build_list_new(cx.context, cx.builder, cx.rt, &elt.ty(), 0),
+        // An unfiltered comprehension over a named list appends one element
+        // per item: room for them all from the start (the name is read
+        // again by the loop; reading it has no effect).
+        CompElts::List(elt) => match (source, cond, cx.rt.comprehension_into.take()) {
+            // A list the caller reuses (`extend_scratch`), already empty.
+            (_, _, Some(into)) => into,
+            (CompSource::List(name), None, None) => {
+                let source_list = emit_list_name_read(
+                    cx.context,
+                    cx.builder,
+                    cx.module,
+                    cx.rt,
+                    cx.user_functions,
+                    cx.locals,
+                    name,
+                );
+                let len = list::build_list_len(cx.context, cx.builder, source_list);
+                let kind = cx
+                    .context
+                    .i64_type()
+                    .const_int(list::list_kind(cx.rt, &elt.ty()), false);
+                cx.builder
+                    .build_call(cx.rt.list_new, &[kind.into(), len.into()], "list_new")
+                    .expect("build_call should not fail for a well-formed list construction")
+                    .try_as_basic_value()
+                    .expect_basic("pycc_rt_list_new returns a non-void pointer")
+                    .into_pointer_value()
+            }
+            _ => list::build_list_new(cx.context, cx.builder, cx.rt, &elt.ty(), 0),
+        },
         CompElts::Set(elt, _) => {
             crate::set_instance::build_set_new(cx.builder, cx.rt, &Ty::Set(Box::new(elt.ty())))
         }
@@ -163,7 +192,12 @@ pub(super) fn emit_comprehension<'ctx>(
         }
     };
 
-    let lp = open_loop(cx, function, prefix, var, var_ty, source);
+    // An unfiltered list comprehension over a computed list appends one
+    // element per item: room for them once the list is known.
+    let reserve = (matches!(elts, CompElts::List(_) if cond.is_none())
+        && matches!(source, CompSource::ListExpr(_)))
+    .then_some(container);
+    let lp = open_loop(cx, function, prefix, var, var_ty, source, reserve);
 
     // The filter: with `cond`, a small `if_taken`/`if_skip` block pair
     // (mirroring `MirStmt::If`'s two-block shape) where `if_skip` doubles as
@@ -405,6 +439,7 @@ fn open_loop<'ctx>(
     var: &str,
     var_ty: &Ty,
     source: &CompSource,
+    reserve: Option<PointerValue<'ctx>>,
 ) -> CompLoop<'ctx> {
     let (context, builder, rt) = (cx.context, cx.builder, cx.rt);
     match source {
@@ -517,6 +552,14 @@ fn open_loop<'ctx>(
                 }
                 _ => None,
             };
+            // Room for the produced list's elements, at the source's length
+            // when the loop begins (`reserve`).
+            if let Some(produced) = reserve {
+                let len = list::build_list_len(context, builder, list_ptr);
+                builder
+                    .build_call(rt.list_reserve, &[produced.into(), len.into()], "list_reserve")
+                    .expect("build_call should not fail for a list reservation");
+            }
             // CPython lets a list grow while it is iterated, so the length is
             // re-read on every trip with no resize guard.
             let (lp, current) = open_indexed_loop(cx, function, prefix, None, |b| {

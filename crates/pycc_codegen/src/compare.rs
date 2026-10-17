@@ -275,7 +275,14 @@ pub(super) fn emit_compare_values<'ctx>(
             OrderedCmpOp::Gt => IntPredicate::SGT,
             OrderedCmpOp::GtE => IntPredicate::SGE,
         };
-        let cond = crate::int_fast::emit_int_compare(context, builder, rt, predicate, l, r);
+        let cond = if crate::int_small::compares_directly(&rt.int_ranges.borrow(), left, right) {
+            // Two smallints (`int_range`): the words order as the values.
+            builder
+                .build_int_compare(predicate, l, r, "small_cmp")
+                .expect("icmp of two i64")
+        } else {
+            crate::int_fast::emit_int_compare(context, builder, rt, predicate, l, r)
+        };
         builder
             .build_int_z_extend(cond, context.i8_type(), "bool_from_cmp")
             .expect("build_int_z_extend should not fail widening i1 to i8")

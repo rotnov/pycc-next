@@ -228,6 +228,14 @@ fn raise_too_many_digits() -> i64 {
 /// simplification recorded in D-244's 2026-09-13 amendment and in
 /// `docs/DEVIATIONS.md`).
 pub(crate) fn int_pow(base: i64, exp: i64) -> i64 {
+    // Two inline values whose power fits an `i64`: by repeated squaring,
+    // without a bigint.
+    if let (Some(b), Some(e)) = (inline_int_value(base), inline_int_value(exp))
+        && let Ok(e) = u32::try_from(e)
+        && let Some(power) = b.checked_pow(e)
+    {
+        return encode_i128(i128::from(power));
+    }
     let exponent = decode_big(exp);
     if exponent.is_negative() {
         raise_builtin(
@@ -629,6 +637,16 @@ mod tests {
         let (actual_tag, actual) = pending_tag_and_message();
         assert_eq!((actual_tag, actual.as_str()), (tag, message));
         pycc_rt_exception_clear();
+    }
+
+    #[test]
+    fn a_power_of_inline_values_is_exact_on_both_sides_of_the_inline_range() {
+        assert_eq!(int_pow(tag_smallint(3), tag_smallint(4)), tag_smallint(81));
+        assert_eq!(int_pow(tag_smallint(-2), tag_smallint(3)), tag_smallint(-8));
+        assert_eq!(int_pow(tag_smallint(2), tag_smallint(0)), tag_smallint(1));
+        assert_eq!(text(int_pow(tag_smallint(2), tag_smallint(62))), "4611686018427387904");
+        assert_eq!(text(int_pow(tag_smallint(2), tag_smallint(64))), "18446744073709551616");
+        assert_eq!(text(int_pow(tag_smallint(-3), tag_smallint(41))), "-36472996377170786403");
     }
 
     #[test]

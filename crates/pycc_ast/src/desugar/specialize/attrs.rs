@@ -131,7 +131,7 @@ pub(super) fn snapshot_attrs(
     let evidence = super::Evidence::of(&scratch, &names);
     let ints: Vec<String> = candidates
         .into_iter()
-        .filter(|attr| evidence.guess(&format!("{ATTR_PREFIX}{attr}")) == Some("int"))
+        .filter(|attr| evidence.guess(&format!("{ATTR_PREFIX}{attr}"), false) == Some("int"))
         .collect();
     if ints.is_empty() {
         return Vec::new();

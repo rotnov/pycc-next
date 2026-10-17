@@ -165,6 +165,15 @@ fn truncate(text: &str, conv: &Conv) -> String {
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_printf_int(value: i64, conv: *mut PyStrObj) -> *mut PyStrObj {
     let conv = parse_conv(text_of(conv));
+    // A bare `%d`/`%i`/`%u` of an inline value is its decimal text.
+    if let Some(v) = crate::int_encoding::inline_int_value(value)
+        && matches!(conv.ch, 'd' | 'i' | 'u')
+        && !(conv.left || conv.plus || conv.blank || conv.alternate || conv.zero)
+        && conv.width == 0
+        && conv.precision.is_none()
+    {
+        return finish(Ok(v.to_string()));
+    }
     finish(int_conv(&decode_big(value), &conv))
 }
 
@@ -265,5 +274,23 @@ mod tests {
         assert_eq!(f(12345.678, "#.0e"), "1.e+04");
         assert_eq!(f(0.000012345, "#g"), "1.23450e-05");
         assert_eq!(f(f64::INFINITY, "05f"), "00inf");
+    }
+
+    #[test]
+    fn a_bare_decimal_conversion_of_an_inline_int_is_its_text() {
+        let text = |word: i64, c: &str| {
+            let conv = unsafe { crate::pycc_rt_str_from_literal(c.as_ptr(), c.len() as i64) };
+            let s = pycc_rt_printf_int(word, conv);
+            String::from_utf8(unsafe { &*s }.bytes().to_vec()).unwrap()
+        };
+        let small = crate::int_encoding::tag_smallint;
+        assert_eq!(text(small(-42), "d"), "-42");
+        assert_eq!(text(small(7), "i"), "7");
+        assert_eq!(text(small(7), "u"), "7");
+        // Flags, width and precision still go through the full conversion.
+        assert_eq!(text(small(7), "03d"), "007");
+        assert_eq!(text(small(7), "x"), "7");
+        let big = crate::int_arith::pycc_rt_int_from_i64(i64::MAX);
+        assert_eq!(text(big, "d"), "9223372036854775807");
     }
 }

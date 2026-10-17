@@ -67,12 +67,15 @@ impl Evidence {
         }
     }
 
-    /// The type `param` is guessed to have, if any.
-    pub(super) fn guess(&self, param: &str) -> Option<&'static str> {
+    /// The type `param` is guessed to have, if any; `passed_bytearray`
+    /// when every call of the function in the module passes a `bytearray`
+    /// for it (`call_sites`), which outweighs the sequence evidence that
+    /// would otherwise guess `str`.
+    pub(super) fn guess(&self, param: &str, passed_bytearray: bool) -> Option<&'static str> {
         let uses = self.uses.get(param).copied().unwrap_or_default();
         // A byte buffer parameter is checked to be one again at each
         // binding, which a rebinding to anything else would fail.
-        if uses.byte_item && !uses.text && !self.rebound.contains(param) {
+        if (uses.byte_item || passed_bytearray) && !uses.text && !self.rebound.contains(param) {
             Some("bytearray")
         } else if (uses.text || uses.sequence) && !uses.not_text {
             Some("str")

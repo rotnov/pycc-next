@@ -46,6 +46,10 @@ mod for_range_fast;
 mod int_builtins;
 mod int_const;
 mod int_fast;
+mod int_range;
+mod int_small;
+mod const_container;
+mod extend_scratch;
 mod leaf_inline;
 /// `list[T]` emission over the generic `PyListObj` (`pycc_rt::list`).
 mod list;

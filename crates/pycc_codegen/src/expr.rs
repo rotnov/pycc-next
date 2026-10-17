@@ -20,6 +20,7 @@ pub(crate) fn emit_expr<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     expr: &MirExpr,
 ) -> Scalar<'ctx> {
+    use pycc_mir::Ty;
     let value = emit_expr_unchecked(context, builder, module, rt, user_functions, locals, expr);
     // Recursive calls come back through this wrapper. Consequently a node
     // that can set the pending state stops evaluation before its parent can
@@ -27,7 +28,16 @@ pub(crate) fn emit_expr<'ctx>(
     // Pure literals, reads, comparisons, and ordinary arithmetic skip the
     // TLS call and branch entirely; D-173's original unconditional guard at
     // every node made tight numeric loops several times slower.
-    let nothrow_call = matches!(expr, MirExpr::Call { callee, .. } if rt.nothrow.borrow().contains(callee));
+    // The builtin `abs` of a number never raises either.
+    let nothrow_call = match expr {
+        MirExpr::Call { callee, args, .. } => {
+            rt.nothrow.borrow().contains(callee)
+                || (callee == "abs"
+                    && !user_functions.contains_key("abs")
+                    && matches!(args.as_slice(), [x] if matches!(x.ty(), Ty::Int | Ty::Float | Ty::Bool)))
+        }
+        _ => false,
+    };
     if expression_can_set_exception(expr) && !nothrow_call {
         guard_statement_effects(context, builder, rt);
     }

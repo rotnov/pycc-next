@@ -333,7 +333,14 @@ pub(crate) fn free_list(list: *mut PyListObj, dead: &mut Worklist) {
         crate::tuple::free_data(list);
     } else {
         let kind = list.element_rc_kind();
-        if kind != b'w' {
+        if kind == b'i' {
+            // A smallint owns nothing: only another word is released.
+            for word in list.typed::<i64>() {
+                if !crate::int_encoding::is_smallint(*word) {
+                    crate::int_encoding::bigint_release(*word);
+                }
+            }
+        } else if kind != b'w' {
             for word in list.typed::<i64>() {
                 release_word_into(kind, *word, dead);
             }
@@ -389,7 +396,48 @@ pub unsafe extern "C" fn pycc_rt_list_append(list: *mut PyListObj, word: i64) {
         deque::append(list, word);
         return;
     }
+    // Room left at the end of a list of words: store in place, without
+    // rebuilding the `Vec` (a list comprehension's hot path).
+    if list.kind != LIST_KIND_BOOL && list.head == 0 && list.len < list.cap {
+        // SAFETY: the allocation holds `cap` words from `data`.
+        unsafe { *list.data.cast::<i64>().add(list.len as usize) = word };
+        list.len += 1;
+        return;
+    }
     with_vec!(list, |items| items.push(Elem::from_word(word)));
+}
+
+/// Empties `list`, releasing its elements but keeping its storage: a list
+/// reused for each run of one site (`pycc_codegen`'s `extend_scratch`).
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer that is not a deque.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_reset(list: *mut PyListObj) {
+    let list = unsafe { &mut *list };
+    let kind = list.element_rc_kind();
+    if kind != b'w' {
+        for i in 0..list.len as usize {
+            let word = list.word_at(i);
+            if kind != b'i' || !crate::int_encoding::is_smallint(word) {
+                list.release(word);
+            }
+        }
+    }
+    list.len = 0;
+}
+
+/// Makes room for `additional` more elements of `list` (a list
+/// comprehension's, before its loop appends one per item of its source).
+///
+/// # Safety
+/// `list` must be a live `PyListObj` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_list_reserve(list: *mut PyListObj, additional: i64) {
+    let list = unsafe { &mut *list };
+    if list.flavor != deque::DEQUE {
+        with_vec!(list, |items| items.reserve(additional.max(0) as usize));
+    }
 }
 
 /// Resolves a Python index (negative counts from the end) against `len`.

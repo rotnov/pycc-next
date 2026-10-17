@@ -44,6 +44,8 @@ extern void pycc_rt_ext_cstr_free(char *text);
 extern long long pycc_rt_ext_bool_encode(int value);
 extern int pycc_rt_ext_int_classify(long long encoded);
 extern long long pycc_rt_ext_int_decode(long long encoded);
+extern int pycc_rt_ext_byte_of_word(long long encoded);
+extern int pycc_rt_ext_list_bytes(void *list, unsigned char *out);
 extern int pycc_rt_ext_pending_type(void);
 extern int pycc_rt_ext_pending_is_unbound_local(void);
 extern int pycc_rt_ext_pending_key_is_repr(void);

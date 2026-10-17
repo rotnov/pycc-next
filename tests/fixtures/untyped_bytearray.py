@@ -69,3 +69,19 @@ def shrink(buf):
         n += buf[len(buf) - 1] - 0
         del buf[0]
     return n
+
+
+def unpack(bs, depth, k):
+    # Sub-byte samples, as pypng unpacks a row: each `extend` of a list
+    # comprehension reuses one list per site (`extend_scratch`). A negative
+    # `depth` makes a shift raise part way through filling it, a large `k`
+    # a byte out of range, an index past `bs` an `IndexError`.
+    out = bytearray()
+    d = depth * 1
+    shifts = [d * i for i in reversed(list(range(8 // (d * d))))]
+    mask = 2 ** (d * d) - 1
+    for o in bs:
+        out.extend([mask & (o >> i) for i in shifts])
+        out.extend([(o + k * 1) for _ in range(2)])
+        out.extend([bs[(o + i) % 5] for i in range(3) if i != 1])
+    return out

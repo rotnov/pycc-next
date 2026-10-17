@@ -226,7 +226,11 @@ pub(crate) fn emit_assign<'ctx>(
         .cloned()
         .expect("every assignment target must have a predeclared storage slot");
     if slot.ty == pycc_mir::Ty::Int {
-        release_int_slot_before_store(context, builder, rt, &slot);
+        // A local whose every value is a smallint holds nothing to release
+        // (`int_range`).
+        if !rt.int_ranges.borrow().is_small_local(target) {
+            release_int_slot_before_store(context, builder, rt, &slot);
+        }
     } else if matches!(&slot.ty, pycc_mir::Ty::Optional(inner) if **inner == pycc_mir::Ty::Int) {
         // #770 review: the release-side half of the retain
         // `MirExpr::OptionalWrap`'s codegen now performs on a borrowed

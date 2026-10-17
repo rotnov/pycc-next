@@ -221,3 +221,38 @@ fn a_parameter_whose_items_are_numbers_is_a_bytearray() {
         vec![("f".to_string(), vec![("s".to_string(), "str")])]
     );
 }
+
+#[test]
+fn a_parameter_every_call_passes_a_bytearray_is_one() {
+    // `raw[i]` and `raw[i:j]` alone guess `str`; the one call passes a
+    // local bound only to `bytearray(...)` (here in a nested function, and
+    // routed through the fallback builtins as the planner may route it).
+    let method = "class R:\n    def d(self, raw):\n        out = []\n        for i in range(len(raw)):\n            out.append(raw[i:i + 1])\n        return raw[0], out\n";
+    for make in ["bytearray(it)", "__pycc_fallback_builtins.bytearray(it)"] {
+        let source = format!(
+            "{method}    def read(self, it):\n        def rows():\n            bs = {make}\n            return self.d(bs)\n        return rows()\n"
+        );
+        assert_eq!(
+            guesses(&source),
+            vec![("R.d".to_string(), vec![("raw".to_string(), "bytearray")])],
+            "{make}"
+        );
+    }
+    let str_guess = || vec![("R.d".to_string(), vec![("raw".to_string(), "str")])];
+    // A call passing anything else, or none at all, keeps the body's guess.
+    let other = format!("{method}    def read(self, it):\n        bs = bytearray(it)\n        self.d(bs)\n        return self.d(it)\n");
+    assert_eq!(guesses(&other), str_guess());
+    let keyword = format!("{method}    def read(self, it):\n        return self.d(raw=bytearray(it))\n");
+    assert_eq!(guesses(&keyword), str_guess());
+    let rebound = format!("{method}    def read(self, it):\n        bs = bytearray(it)\n        bs = it\n        return self.d(bs)\n");
+    assert_eq!(guesses(&rebound), str_guess());
+    let starred = format!("{method}    def read(self, it):\n        return self.d(*it)\n");
+    assert_eq!(guesses(&starred), str_guess());
+    assert_eq!(guesses(method), str_guess());
+    // A text use outweighs the calls.
+    let text = "class R:\n    def d(self, raw):\n        for i in range(len(raw)):\n            raw.upper()\n    def read(self, it):\n        return self.d(bytearray(it))\n";
+    assert_eq!(guesses(text), str_guess());
+    // A function's calls are its own: a method of the same name is not one.
+    let function = "def d(raw):\n    t = 0\n    for i in range(len(raw)):\n        t += len(raw[i:])\n    return t\nclass C:\n    def m(self, it):\n        return self.d(it)\ndef g(it):\n    return d(bytearray(it))\n";
+    assert_eq!(guesses(function), vec![("d".to_string(), vec![("raw".to_string(), "bytearray")])]);
+}

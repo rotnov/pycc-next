@@ -80,6 +80,7 @@ fn bytearray_loops_run_native_with_cpython_results() {
             "`peek` runs natively when called with buf: bytearray, i: int",
             "`grow` runs natively when called with buf: bytearray, n: int",
             "`shrink` runs natively when called with buf: bytearray",
+            "`unpack` runs natively when called with bs: bytearray, depth: int, k: int",
         ] {
             assert!(report.contains(&format!("specialized: {spec}")), "{spec}\n{report}");
         }
@@ -129,13 +130,14 @@ fn a_specialization_calls_builtins_natively_when_it_can() {
     assert!(out.status.success(), "{report}");
     assert!(report.contains("specialized: `f` runs natively when called with s: bytearray, k: int"), "{report}");
     assert!(report.contains("specialized: `g` runs natively when called with s: str, k: int"), "{report}");
-    // `f`'s specialization computes `abs` with the runtime, not CPython.
+    // `f`'s specialization computes `abs` natively, not with CPython: inline,
+    // since `s[i] - 9` is a smallint (`int_range`).
     let ir = std::fs::read_to_string(&ll).expect("ir");
     let body = ir
         .split("\ndefine ")
         .find(|f| f.lines().next().is_some_and(|l| l.contains("@pyfn__pycc_native_f(")))
         .expect("the specialization");
-    assert!(body.contains("@pycc_rt_int_abs"), "{body}");
+    assert!(!body.contains("@pycc_rt_int_abs"), "{body}");
     assert!(!body.contains("@pycc_ext_obj_call"), "{body}");
     let script = "import m\nprint(m.f(bytearray(b'\\x01\\x10\\xff'), 3), m.f([1, 2], 2), m.g('abc', 3))\n\
                   try:\n    m.f(bytearray(b'a'), 2)\nexcept IndexError as e:\n    print(e)\n";

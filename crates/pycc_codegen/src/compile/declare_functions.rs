@@ -167,3 +167,37 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
     }
     (user_functions, function_defs_in_order, def_counts)
 }
+
+/// Marks the functions defined once and never rebound as having a single
+/// definition, and those bound before any code can run.
+pub(super) fn mark_single_defs<'a, 'ctx>(
+    mir: &'a MirModule,
+    user_functions: &mut HashMap<&'a str, UserFunction<'ctx>>,
+    function_defs_in_order: &[(&'a str, FunctionValue<'ctx>)],
+    def_counts: &HashMap<&'a str, usize>,
+) {
+    // A name defined once and never bound as a variable can only ever hold
+    // that one definition (see `UserFunction::single_def`). The ext
+    // wrappers only read the slot, so CPython rebinding the module attribute
+    // does not reach compiled callers -- the same as for indirect calls.
+    let rebound_names = collect_module_bindings(mir);
+    for &(name, f) in function_defs_in_order {
+        if def_counts[name] == 1
+            && !rebound_names.contains_key(name)
+            && let Some(uf) = user_functions.get_mut(name)
+            && uf.fn_ptr_global.is_some()
+        {
+            uf.single_def = Some(f);
+        }
+    }
+    // A single definition whose `def` precedes every statement that can run
+    // code is bound before any function body can run, so no call reaches
+    // its slot while it is still null (see `UserFunction::bound_before_code`).
+    for name in nothrow::bound_before_code(mir) {
+        if let Some(uf) = user_functions.get_mut(name)
+            && uf.single_def.is_some()
+        {
+            uf.bound_before_code = true;
+        }
+    }
+}

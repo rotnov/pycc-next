@@ -197,3 +197,31 @@ fn a_bool_list_stores_bytes_and_round_trips_every_operation() {
     }
     assert_eq!(pycc_rt_exception_active(), 0);
 }
+
+#[test]
+fn reserve_reset_and_append_in_place_keep_a_list_s_storage() {
+    let list = int_list(&[]);
+    unsafe { pycc_rt_list_reserve(list, 8) };
+    let data = unsafe { &*list }.data;
+    for v in 0..8 {
+        unsafe { pycc_rt_list_append(list, tag_smallint(v)) };
+    }
+    // Appended in place: the storage reserved first.
+    assert_eq!(unsafe { &*list }.data, data);
+    assert_eq!(ints(list), (0..8).collect::<Vec<_>>());
+    // A bigint element is released by a reset; the storage stays.
+    let big = crate::int_arith::pycc_rt_int_from_i64(1 << 62);
+    unsafe { pycc_rt_list_append(list, big) };
+    unsafe { pycc_rt_list_reset(list) };
+    assert_eq!(ints(list), Vec::<i64>::new());
+    assert!(unsafe { &*list }.capacity() >= 9);
+    unsafe { pycc_rt_list_append(list, tag_smallint(5)) };
+    assert_eq!(ints(list), vec![5]);
+    // A list of `str` releases its elements too.
+    let strs = pycc_rt_list_new(LIST_KIND_STR, 0);
+    unsafe { pycc_rt_list_append(strs, str_word("a")) };
+    unsafe { pycc_rt_list_reset(strs) };
+    assert_eq!(unsafe { &*strs }.len(), 0);
+    unsafe { crate::rc::pycc_rt_list_free(strs) };
+    unsafe { crate::rc::pycc_rt_list_free(list) };
+}

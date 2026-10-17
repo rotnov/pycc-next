@@ -41,6 +41,9 @@ pub(super) fn emit_rt_call<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     call: &RtCallExpr,
 ) -> Scalar<'ctx> {
+    if let Some(result) = crate::extend_scratch::emit(context, builder, module, rt, user_functions, locals, call) {
+        return result;
+    }
     let sig = &call.sig;
     let i64_type = context.i64_type();
     let mut values = Vec::with_capacity(call.args.len());

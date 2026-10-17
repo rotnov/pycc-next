@@ -98,6 +98,13 @@ fn emit_int_self_update<'ctx>(
     let Some(slot) = locals.get(target) else {
         return false;
     };
+    // Proven smallints compute without a fast-path test at all
+    // (`int_small`, through the ordinary assignment).
+    if crate::int_small::binop_operands(&rt.int_ranges.borrow(), *op, left, right, &pycc_mir::Ty::Int)
+        .is_some()
+    {
+        return false;
+    }
     let is_alloca = slot
         .ptr
         .as_instruction()

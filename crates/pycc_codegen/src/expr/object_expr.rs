@@ -447,6 +447,22 @@ pub(crate) fn emit_obj_contains_expr<'ctx>(
         release_scalar_if_temporary(context, builder, rt, item, &item_scalar);
         return result;
     }
+    if crate::const_container::is_constant_sequence(container) {
+        let container_ptr =
+            crate::const_container::emit_cached_constant(context, builder, module, rt, user_functions, locals, container);
+        let result = foreign_compare::emit_contains(
+            context,
+            builder,
+            module,
+            rt,
+            *negate,
+            item_scalar,
+            Scalar::Object(container_ptr),
+        );
+        held_item.release(builder, rt);
+        release_scalar_if_temporary(context, builder, rt, item, &item_scalar);
+        return result;
+    }
     let pending = push_pending_int_release_if_scalar_temporary(rt, item, &item_scalar);
     let container_scalar = emit_expr(
         context,

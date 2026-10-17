@@ -57,4 +57,9 @@ for n in (0, 1, 5, 40, 41):
 show("grow", m.grow, line(0, 3), 1)
 show("shrink", m.shrink, line(6, 5))
 show("shrink", m.shrink, bytearray())
+# `unpack`'s reused lists: after each failure the next call starts clean.
+for args in ((line(6, 7), 2, 0), (line(6, 7), -2, 0), (line(6, 7), 1, 0), (line(6, 7), 1, 250),
+             (line(6, 7), 2, 3), (line(3, 7), 1, 0), (line(6, 7), 1, 3), (line(0, 1), 1, 0),
+             (bytes(line(6, 7)), 2, 0)):
+    show("unpack", m.unpack, *args)
 sys.stdout.flush()

@@ -91,6 +91,25 @@ pub(crate) fn emit_boxed<'ctx>(
     // Non-strict mode: a function value of object parameters and result
     // crosses as a CPython callable over it (`pycc_ext_obj_pack_closure`).
     if let pycc_mir::Ty::Callable(sig) = value.ty() {
+        if let MirExpr::MakeClosure {
+            function,
+            captures,
+            ..
+        } = value
+            && captures.is_empty()
+        {
+            return emit_boxed_function(
+                context,
+                builder,
+                module,
+                rt,
+                user_functions,
+                locals,
+                value,
+                function,
+                sig.0.len(),
+            );
+        }
         let Scalar::Closure(closure) =
             emit_expr(context, builder, module, rt, user_functions, locals, value)
         else {
@@ -99,47 +118,17 @@ pub(crate) fn emit_boxed<'ctx>(
         let ptr = context.ptr_type(inkwell::AddressSpace::default());
         let i64_type = context.i64_type();
         let arity = i64_type.const_int(sig.0.len() as u64, false);
-        // A module-level function used as a value is packed once, into a
-        // slot of its own (`EXT_OBJ_PACK_FUNCTION_SYMBOL`).
-        let packed = if let MirExpr::MakeClosure {
-            function,
-            captures,
-            ..
-        } = value
-            && captures.is_empty()
-        {
-            let symbol = format!("pycc.boxed_function.{function}");
-            let slot = module.get_global(&symbol).unwrap_or_else(|| {
-                let global = module.add_global(ptr, None, &symbol);
-                global.set_initializer(&ptr.const_null());
-                global.set_linkage(inkwell::module::Linkage::Private);
-                global
-            });
-            let pack = crate::foreign_pack::shim_fn(
-                module,
-                crate::EXT_OBJ_PACK_FUNCTION_SYMBOL,
-                ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into()], false),
-            );
-            builder
-                .build_call(
-                    pack,
-                    &[slot.as_pointer_value().into(), closure.into(), arity.into()],
-                    "pack_function",
-                )
-                .expect("build_call should not fail for the function packer")
-        } else {
-            let pack = crate::foreign_pack::shim_fn(
-                module,
-                crate::EXT_OBJ_PACK_CLOSURE_SYMBOL,
-                ptr.fn_type(&[ptr.into(), i64_type.into()], false),
-            );
-            builder
-                .build_call(pack, &[closure.into(), arity.into()], "pack_closure")
-                .expect("build_call should not fail for the closure packer")
-        }
-        .try_as_basic_value()
-        .expect_basic("the closure packer returns a pointer")
-        .into_pointer_value();
+        let pack = crate::foreign_pack::shim_fn(
+            module,
+            crate::EXT_OBJ_PACK_CLOSURE_SYMBOL,
+            ptr.fn_type(&[ptr.into(), i64_type.into()], false),
+        );
+        let packed = builder
+            .build_call(pack, &[closure.into(), arity.into()], "pack_closure")
+            .expect("build_call should not fail for the closure packer")
+            .try_as_basic_value()
+            .expect_basic("the closure packer returns a pointer")
+            .into_pointer_value();
         if !crate::heap_rc::is_borrowed_read(value) {
             crate::heap_rc::emit_decref(context, builder, rt, crate::heap_rc::HeapKind::Closure, closure);
         }
@@ -223,4 +212,92 @@ fn as_object_display(value: &MirExpr) -> Option<MirExpr> {
         ),
         _ => return None,
     })
+}
+
+/// A module-level function `function` used as a value (`value`, a capture-free
+/// `MirExpr::MakeClosure` of `arity` parameters), boxed into its CPython
+/// callable: packed once, into a slot of its own
+/// (`EXT_OBJ_PACK_FUNCTION_SYMBOL`), and read from that slot (with a new
+/// reference) at every later evaluation, without building the native
+/// closure again.
+#[allow(clippy::too_many_arguments)]
+fn emit_boxed_function<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    value: &MirExpr,
+    function: &str,
+    arity: usize,
+) -> PointerValue<'ctx> {
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_type = context.i64_type();
+    let symbol = format!("pycc.boxed_function.{function}");
+    let slot = module.get_global(&symbol).unwrap_or_else(|| {
+        let global = module.add_global(ptr, None, &symbol);
+        global.set_initializer(&ptr.const_null());
+        global.set_linkage(inkwell::module::Linkage::Private);
+        global
+    });
+    let current = builder
+        .get_insert_block()
+        .and_then(|b| b.get_parent())
+        .expect("inside a function");
+    let cached_bb = context.append_basic_block(current, "boxed_fn_cached");
+    let first_bb = context.append_basic_block(current, "boxed_fn_first");
+    let join_bb = context.append_basic_block(current, "boxed_fn_join");
+    let cached = builder
+        .build_load(ptr, slot.as_pointer_value(), "boxed_fn")
+        .expect("load of the function's slot")
+        .into_pointer_value();
+    let is_cached = builder
+        .build_is_not_null(cached, "boxed_fn_ready")
+        .expect("null test of a pointer");
+    crate::int_fast::likely_branch(context, builder, is_cached, cached_bb, first_bb);
+    builder.position_at_end(cached_bb);
+    builder
+        .build_call(rt.obj_retain, &[cached.into()], "")
+        .expect("build_call should not fail for the object retain");
+    builder.build_unconditional_branch(join_bb).expect("branch");
+    builder.position_at_end(first_bb);
+    let Scalar::Closure(closure) = emit_expr(context, builder, module, rt, user_functions, locals, value) else {
+        panic!("pycc_codegen: internal error: a function value is not a closure")
+    };
+    let pack = crate::foreign_pack::shim_fn(
+        module,
+        crate::EXT_OBJ_PACK_FUNCTION_SYMBOL,
+        ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into()], false),
+    );
+    let packed = builder
+        .build_call(
+            pack,
+            &[
+                slot.as_pointer_value().into(),
+                closure.into(),
+                i64_type.const_int(arity as u64, false).into(),
+            ],
+            "pack_function",
+        )
+        .expect("build_call should not fail for the function packer")
+        .try_as_basic_value()
+        .expect_basic("the function packer returns a pointer")
+        .into_pointer_value();
+    crate::heap_rc::emit_decref(context, builder, rt, crate::heap_rc::HeapKind::Closure, closure);
+    route_null(
+        context,
+        builder,
+        module,
+        rt,
+        ForeignFailEdge::for_current(builder),
+        packed,
+        "object_box",
+    );
+    let first_end = builder.get_insert_block().expect("positioned");
+    builder.build_unconditional_branch(join_bb).expect("branch");
+    builder.position_at_end(join_bb);
+    let phi = builder.build_phi(ptr, "boxed_fn_value").expect("phi");
+    phi.add_incoming(&[(&cached, cached_bb), (&packed, first_end)]);
+    phi.as_basic_value().into_pointer_value()
 }

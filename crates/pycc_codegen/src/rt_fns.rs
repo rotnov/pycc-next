@@ -148,6 +148,11 @@ pub(super) struct RtFns<'ctx> {
     pub(super) float_round_to_int: FunctionValue<'ctx>,
     pub(super) list_new: FunctionValue<'ctx>,
     pub(super) list_append: FunctionValue<'ctx>,
+    pub(super) list_reserve: FunctionValue<'ctx>,
+    pub(super) list_reset: FunctionValue<'ctx>,
+    /// The list the next list comprehension fills instead of a new one
+    /// (`extend_scratch`), taken when its container is made.
+    pub(super) comprehension_into: std::cell::Cell<Option<inkwell::values::PointerValue<'ctx>>>,
     pub(super) list_index_error: FunctionValue<'ctx>,
     pub(super) tuple_index_error: FunctionValue<'ctx>,
     pub(super) list_set: FunctionValue<'ctx>,
@@ -394,6 +399,9 @@ pub(super) struct RtFns<'ctx> {
     /// whose slots its epilogue releases (#625): `return n` of one moves
     /// the slot's reference out instead of retaining a second one.
     pub(super) owned_int_names: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The ranges proven for the current function's `int` locals
+    /// (`int_range`).
+    pub(super) int_ranges: std::cell::RefCell<crate::int_range::IntRanges>,
     /// The current function's hidden frame slots holding a `for` loop's
     /// own reference to the list it iterates, keyed by the `ForList`
     /// statement's address: the owned-slot epilogue releases one a
@@ -669,6 +677,12 @@ pub(super) fn declare_rt_functions<'ctx>(
             "pycc_rt_list_append",
             void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         ),
+        list_reserve: declare(
+            "pycc_rt_list_reserve",
+            void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+        ),
+        list_reset: declare("pycc_rt_list_reset", void_type.fn_type(&[ptr_type.into()], false)),
+        comprehension_into: std::cell::Cell::new(None),
         list_index_error: declare(
             "pycc_rt_list_index_error_of",
             void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
@@ -963,6 +977,7 @@ pub(super) fn declare_rt_functions<'ctx>(
         exception_classes: std::cell::RefCell::new(Default::default()),
         borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
         owned_int_names: std::cell::RefCell::new(std::collections::HashSet::new()),
+        int_ranges: std::cell::RefCell::new(Default::default()),
         loop_list_slots: std::cell::RefCell::new(HashMap::new()),
     }
 }
