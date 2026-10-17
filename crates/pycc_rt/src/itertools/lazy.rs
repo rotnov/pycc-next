@@ -548,6 +548,71 @@ pub extern "C" fn pycc_rt_it_pairwise(it: *mut u8, source: i64, out: i64) -> *mu
     )
 }
 
+// ------------------------------------------------------ takewhile/dropwhile
+
+/// `takewhile` (`dropping == false`) or `dropwhile` over `(truth, element)`
+/// pairs: `takewhile` yields elements while the truth holds and stops at
+/// the first false one; `dropwhile` skips them while it holds and yields
+/// every element from the first false one on.
+struct While {
+    input: Input,
+    dropping: bool,
+    elem_kind: i64,
+    done: bool,
+}
+
+impl Native for While {
+    fn next(&mut self) -> Option<Item> {
+        loop {
+            if self.done && !self.dropping {
+                return None;
+            }
+            let desc: Desc = *self.input.desc();
+            let fields = self.input.next()?.into_fields(&desc);
+            let truth = crate::value::truthy(desc.elem(0), fields[0]);
+            let element = fields[1];
+            match (self.dropping, self.done, truth) {
+                // `takewhile`: an element while the truth holds.
+                (false, _, true) => return Some(Item::Word(element)),
+                (false, _, false) => {
+                    release(self.elem_kind, element);
+                    self.done = true;
+                    return None;
+                }
+                // `dropwhile`: skip while the truth holds, then everything.
+                (true, false, true) => release(self.elem_kind, element),
+                (true, _, _) => {
+                    self.done = true;
+                    return Some(Item::Word(element));
+                }
+            }
+        }
+    }
+}
+
+/// `itertools.takewhile` (`dropping == 0`) or `itertools.dropwhile`
+/// (`dropping == 1`) over an iterator of `(bool, element)` pairs.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_it_while(it: *mut u8, dropping: i64, source: i64, out: i64) -> *mut PyGenObj {
+    let dropping = flag(dropping) != 0;
+    let input = Input::new(it, source);
+    let elem_kind = input.desc().elem(1);
+    spawn(
+        Box::new(While {
+            input,
+            dropping,
+            elem_kind,
+            done: false,
+        }),
+        out,
+        if dropping {
+            b"itertools.dropwhile\0"
+        } else {
+            b"itertools.takewhile\0"
+        },
+    )
+}
+
 // ---------------------------------------------------------------- groupby
 
 /// `groupby`'s state: each input value is split into a key word and an

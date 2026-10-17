@@ -27,3 +27,9 @@ fn jumps_run_the_finally_block_first() {
 fn fstring_debug_specifier() {
     matches_cpython("fstring_debug");
 }
+
+/// `itertools.takewhile`/`dropwhile` with a lambda or a function predicate.
+#[test]
+fn takewhile_and_dropwhile() {
+    matches_cpython("itertools_while");
+}

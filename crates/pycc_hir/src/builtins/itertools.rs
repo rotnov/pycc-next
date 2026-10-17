@@ -247,6 +247,23 @@ pub fn itertools_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, Stri
                 tuple(vec![elem.clone(), elem]),
             )))
         }
+        // `takewhile`/`dropwhile` over `(predicate value, element)` pairs
+        // (`pycc_ast` rewrites the predicate into the pair's first field).
+        ("while", [it, mode]) if is_intlike(mode) => {
+            let Some(Ty::Tuple(pair)) = carried_element(it) else {
+                return None;
+            };
+            let [Ty::Bool, elem] = pair.as_slice() else {
+                return None;
+            };
+            Some(Ok(iterator(
+                "pycc_rt_it_while",
+                &[source_param(it), Ty::Int],
+                &[false, false],
+                vec![source(it)],
+                elem.clone(),
+            )))
+        }
         ("groupby" | "groupby_keyed", [it, keyed]) if is_intlike(keyed) => {
             let elem = carried_element(it)?;
             let (key, value) = if rest == "groupby_keyed" {

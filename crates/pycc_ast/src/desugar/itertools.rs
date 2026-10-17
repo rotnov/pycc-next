@@ -1,6 +1,6 @@
 //! `itertools` calls compile natively: a call of `count`, `islice`,
 //! `chain` (and `chain.from_iterable`), `accumulate`, `pairwise`,
-//! `groupby`, `product`, `permutations`, `combinations` or
+//! `groupby`, `takewhile`, `dropwhile`, `product`, `permutations`, `combinations` or
 //! `combinations_with_replacement` -- through `import itertools [as it]` or
 //! `from itertools import f [as g]`, the name bound nowhere else -- is
 //! spelled as a `pycc_hir::builtins` name `__pycc_it_<function>`, typed by
@@ -33,6 +33,8 @@ const FUNCTIONS: &[&str] = &[
     "accumulate",
     "pairwise",
     "groupby",
+    "takewhile",
+    "dropwhile",
     "product",
     "permutations",
     "combinations",
@@ -318,6 +320,23 @@ impl Rewrite {
                     }
                 }
             }
+            // `takewhile(pred, it)` / `dropwhile(pred, it)`: the runtime
+            // iterates `(bool(pred(x)), x)` pairs, a lambda inlined.
+            "takewhile" | "dropwhile" => match (args.as_ref(), keywords.is_empty()) {
+                ([pred, source], true) => {
+                    let (var, test) = keyed(pred, range)?;
+                    let truth = call_name("bool", vec![test], range);
+                    let pair = super::build::tuple(
+                        vec![truth, load(&var, range)],
+                        ExprContext::Load,
+                        range,
+                    );
+                    let pairs = genexp(pair, &var, self.iterable(source), range);
+                    let mode = u64::from(function == "dropwhile");
+                    it("while", vec![pairs, int(mode, range)])
+                }
+                _ => None,
+            },
             "product" => {
                 if args.is_empty() || args.len() > 4 || !only(&["repeat"]) {
                     return None;
