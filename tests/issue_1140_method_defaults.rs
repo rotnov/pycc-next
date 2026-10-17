@@ -90,20 +90,17 @@ fn a_short_constructor_call_binds_as_cpython_and_a_method_call_reports_the_range
         "{}",
         stderr_of(&output)
     );
-    for (tail, message) in [
-        // Part 1 of #1191 fills omitted method defaults, not a missing
-        // required argument.
-        (
-            "S(1, 'a').feed()\n",
-            "`feed` expects from 1 to 2 argument(s), got 0",
-        ),
-    ] {
-        let output = pycc_on("check", "1140_native_short", &format!("{CLASS}{tail}"));
-        let rendered = stdout_of(&output);
-        assert_eq!(output.status.code(), Some(1), "{rendered}");
-        assert!(rendered.contains("error[T0021]"), "{rendered}");
-        assert!(rendered.contains(message), "{rendered}");
-    }
+    // Part 1 of #1191 fills omitted method defaults, not a missing
+    // required argument.
+    let (tail, message) = (
+        "S(1, 'a').feed()\n",
+        "`feed` expects from 1 to 2 argument(s), got 0",
+    );
+    let output = pycc_on("check", "1140_native_short", &format!("{CLASS}{tail}"));
+    let rendered = stdout_of(&output);
+    assert_eq!(output.status.code(), Some(1), "{rendered}");
+    assert!(rendered.contains("error[T0021]"), "{rendered}");
+    assert!(rendered.contains(message), "{rendered}");
 }
 
 /// A mutable method default is evaluated once and shared between calls, as

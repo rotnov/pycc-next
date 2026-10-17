@@ -302,10 +302,9 @@ fn key_error_for_a_non_str_key_crosses_the_ext_boundary() {
 fn a_fallback_str_method_inside_a_method_call() {
     let source = fixture("fuzz_fallback_str_method_in_call.py");
     let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
-    for flags in [&["--release", "--non-strict"][..]] {
-        let got = support::run_native("fuzz_fallback_str_method", &source, flags);
-        assert_eq!(got, expected, "{flags:?}");
-    }
+    let flags = &["--release", "--non-strict"][..];
+    let got = support::run_native("fuzz_fallback_str_method", &source, flags);
+    assert_eq!(got, expected, "{flags:?}");
 }
 
 /// An `--ext --non-strict` module's twinned function is defined where its

@@ -27,29 +27,6 @@ fn build_and_run(label: &str, source: &str) -> std::process::Output {
     Command::new(&out).output().unwrap()
 }
 
-/// Issue #118 Part 1: builds `source` and asserts that `pycc build` fails
-/// (compile-time rejection), checking for a diagnostic code in stderr. The
-/// strict AOT frontend now rejects maybe-unbound reads at compile time
-/// (T0041) rather than leaving them for runtime traps.
-fn build_and_expect_compile_error(label: &str, source: &str, expected_code: &str) {
-    let dir = ScratchDir::new(&format!("slice1_{label}")).expect("failed to create scratch dir");
-    let src = write_fixture(&dir, &format!("{label}.py"), source);
-    let out = dir.join(label);
-    let output = Command::new(pycc_bin())
-        .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(
-        !output.status.success(),
-        "`pycc build` should have failed for {label} but succeeded"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains(expected_code),
-        "`pycc build` for {label} should report {expected_code}, got: {stderr}"
-    );
-}
-
 fn compile_mir(label: &str, mir: &MirModule) -> Result<(), String> {
     let dir =
         ScratchDir::new(&format!("slice1_mir_{label}")).expect("failed to create scratch dir");
@@ -751,7 +728,6 @@ fn range_targets_keep_the_last_element_and_ignore_body_reassignment_for_iteratio
     // its read is checked at run time -- here it is bound to the last
     // element.
     let source_pre_bound = "\
-
 empty = 7
 for empty in range(0):
     print(empty)
@@ -762,7 +738,6 @@ print(empty)
     assert_eq!(output.stdout, b"7\n");
 
     let source_loop_only = "\
-
 for i in range(3):
     print(i)
 print(i)
@@ -1145,7 +1120,6 @@ fn list_targets_keep_the_last_element_and_ignore_body_reassignment() {
     // The loop-only `i` is maybe-bound after the loop; its read is checked at
     // run time and sees the last element, as in CPython.
     let source = "\
-
 xs = [1, 2, 3]
 for i in xs:
     print(i)

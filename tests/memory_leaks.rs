@@ -541,11 +541,10 @@ fn dicts_and_sets_match_cpython_and_are_memcheck_clean() {
 /// every container owns and releases what it stores.
 #[test]
 fn generic_containers_match_cpython_and_are_memcheck_clean() {
-    for fixture in ["closures_keys"] {
-        let dir = ScratchDir::new("memory_fixture_generic").expect("scratch dir");
-        let bin = assert_fixture_matches_cpython(&dir, fixture);
-        assert_memcheck_clean(&bin);
-    }
+    let fixture = "closures_keys";
+    let dir = ScratchDir::new("memory_fixture_generic").expect("scratch dir");
+    let bin = assert_fixture_matches_cpython(&dir, fixture);
+    assert_memcheck_clean(&bin);
 }
 
 /// A list of exception instances counts them as exceptions (kind `x`),

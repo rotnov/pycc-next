@@ -119,7 +119,7 @@ mod tests {
         let source = scratch.join("unit.c");
         std::fs::write(&source, "int pycc_c_objects_test(void) { return 1; }\n").unwrap();
         let args = vec![OsString::from("-O2"), source.into_os_string()];
-        let objects = CObjects::spawn(&args, &*scratch, || Command::new("cc"))
+        let objects = CObjects::spawn(&args, &scratch, || Command::new("cc"))
             .unwrap()
             .wait()
             .unwrap();
@@ -134,7 +134,7 @@ mod tests {
         let source = scratch.join("bad.c");
         std::fs::write(&source, "this is not C\n").unwrap();
         let args = vec![source.into_os_string()];
-        let compiles = CObjects::spawn(&args, &*scratch, || Command::new("cc")).unwrap();
+        let compiles = CObjects::spawn(&args, &scratch, || Command::new("cc")).unwrap();
         assert!(compiles.wait().is_err());
     }
 
@@ -143,7 +143,7 @@ mod tests {
     fn dropping_unwaited_compiles_stops_them() {
         let scratch = pycc_scratch::ScratchDir::new("c-objects-drop").unwrap();
         let args = vec![OsString::from("x.c")];
-        let compiles = CObjects::spawn(&args, &*scratch, || {
+        let compiles = CObjects::spawn(&args, &scratch, || {
             let mut cmd = Command::new("sh");
             cmd.arg("-c").arg("sleep 30").arg("sh");
             cmd

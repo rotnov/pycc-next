@@ -499,6 +499,9 @@ pub(crate) struct EmbedPlan {
 /// Precondition (#1470): [`embed_slot_dunders`] accepts `typed_hir`. The
 /// build driver checks it first, so an uninstallable slot dunder is a
 /// `C0003` before the probe; a caller that skips the check panics here.
+// Each argument is an independent input of the build driver (paths, the
+// typed program, its exports, toolchain, platform and host).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn plan_embed(
     out: &Path,
     entry: &Path,

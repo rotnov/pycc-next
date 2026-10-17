@@ -75,9 +75,9 @@ fn every_augmented_assignment_capability_refusal_is_named_and_located() {
     }
 }
 
-/// S4: a computed index or subscript base is evaluated exactly once:
-/// `pycc_ast::desugar` binds each to a temporary before the augmented
-/// statement (`tests/fixtures/desugar_stmts.py` runs it against CPython).
+// S4: a computed index or subscript base is evaluated exactly once:
+// `pycc_ast::desugar` binds each to a temporary before the augmented
+// statement (`tests/fixtures/desugar_stmts.py` runs it against CPython).
 
 /// S1: `BinOp` admits only immutable operand types (and a list, extended
 /// in place), so a user-defined operand is refused, never rebound to a fresh

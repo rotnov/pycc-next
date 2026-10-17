@@ -255,16 +255,13 @@ fn hash_module_bodies_match_cpython_as_extensions() {
 
 #[test]
 fn a_hashable_but_unimplemented_argument_is_c0001() {
-    for (tag, argument, name) in [
-        ("e2e_1331_none", "None", "None"),
-    ] {
-        assert_one_error(
-            tag,
-            &format!("print(hash({argument}))\n"),
-            "C0001",
-            &format!("`hash()` of `{name}` is valid Python but not implemented yet"),
-        );
-    }
+    let (tag, argument, name) = ("e2e_1331_none", "None", "None");
+    assert_one_error(
+        tag,
+        &format!("print(hash({argument}))\n"),
+        "C0001",
+        &format!("`hash()` of `{name}` is valid Python but not implemented yet"),
+    );
     assert_one_error(
         "e2e_1331_frozenset",
         "s = frozenset([1])\nprint(hash(s))\n",

@@ -103,19 +103,16 @@ fn both_admitted_iterable_shapes_are_admitted() {
 #[test]
 fn the_deferred_iterable_shapes_keep_their_own_refusals() {
     let dir = ScratchDir::new("foreign_iteration_refused").expect("scratch");
-    for (body, code, phrase) in [
-        (
-            "t = (1, \"a\")\nfor x in t:\n    pass\n",
-            "T0033",
-            "`tuple[int, str]` cannot be iterated",
-        ),
-    ] {
-        let out = check(&dir, body);
-        assert!(!out.status.success(), "{body}: {}", stdout_of(&out));
-        let text = format!("{}{}", stdout_of(&out), stderr_of(&out));
-        assert!(text.contains(code), "{body}: {text}");
-        assert!(text.contains(phrase), "{body}: {text}");
-    }
+    let (body, code, phrase) = (
+        "t = (1, \"a\")\nfor x in t:\n    pass\n",
+        "T0033",
+        "`tuple[int, str]` cannot be iterated",
+    );
+    let out = check(&dir, body);
+    assert!(!out.status.success(), "{body}: {}", stdout_of(&out));
+    let text = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    assert!(text.contains(code), "{body}: {text}");
+    assert!(text.contains(phrase), "{body}: {text}");
     for body in [
         "import gc\n\nfor x in gc:\n    pass\n",
         "import gc\n\nfor x in gc.garbage[0]:\n    pass\n",
