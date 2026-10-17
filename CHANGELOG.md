@@ -52,6 +52,8 @@ Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
   `__init__`); it now runs in CPython.
 - A set display of three or more constants iterated in insertion order instead of the
   order of CPython's folded frozenset constant (`{-9, 6, 2, 7}` prints `{2, -9, 6, 7}`).
+  The same held for such a display built as a CPython object (`--non-strict`:
+  `str({...})`, `{...} | o`).
 - `repr()` of a float with two shortest round-tripping strings picked Rust's instead of
   CPython's (nearest the exact value, ties to even: `137931034482758.62`).
 - `for a, b in zip(xs, ys)` read the lengths once: a body shrinking a list raised
@@ -68,6 +70,7 @@ Found by the fuzzer, each with a regression test in `tests/fuzz_regressions.rs`:
 - `--ext --non-strict`: a twinned function was defined at the end of the module when no
   blank line followed its `def`, so CPython code right after it raised `NameError`.
 - `int()` and `float()` of a `str` refused Unicode decimal digits (`int('١٢')`).
+- A `for ... else` over a `str` or tuple ran its `else:` clause after `break`.
 
 ## [0.5.0] - 2026-10-16
 
