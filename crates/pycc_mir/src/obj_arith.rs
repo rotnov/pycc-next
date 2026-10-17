@@ -55,7 +55,10 @@ pub(crate) fn object_display(kind: crate::ObjDisplayKind, elements: Vec<MirExpr>
 /// container (`pycc_codegen::object_box`).
 pub(crate) fn object_arg(arg: MirExpr) -> MirExpr {
     match arg {
-        MirExpr::DictLiteral(_) | MirExpr::SetLiteral { .. } => MirExpr::ObjectBox(Box::new(arg)),
+        MirExpr::DictLiteral(_)
+        | MirExpr::SetLiteral { .. }
+        | MirExpr::EmptyDict(_)
+        | MirExpr::EmptySet(_) => MirExpr::ObjectBox(Box::new(arg)),
         // A generator crosses as the CPython iterator over it, a function
         // value as a CPython callable over it.
         _ if matches!(arg.ty(), Ty::Generator(_) | Ty::Callable(_)) => {

@@ -90,6 +90,8 @@ mod keys;
 mod pure_calls;
 mod ndarray_ndim;
 mod object_except;
+mod aug_target;
+mod with_stmt;
 mod signatures;
 mod specialize;
 mod starred;
@@ -117,11 +119,14 @@ pub fn fold_static_branches(module: &mut ModModule) {
 }
 pub use ext_generators::split_ext_generators;
 pub use object_except::object_except_handlers;
+pub use aug_target::desugar_computed_aug_target;
+pub use with_stmt::desugar_with;
 pub use specialize::{
     BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, Specialized, specialize_untyped,
 };
 pub use ext_signatures::{
     ExtSignature, expand_dataclasses_in as expand_dataclasses, ext_entry_name, ext_entry_target, ext_signatures,
+    needs_wrapper as ext_needs_wrapper,
     split_ext_signatures,
 };
 

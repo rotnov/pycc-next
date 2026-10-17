@@ -141,6 +141,48 @@ impl Rewriter<'_> {
         Some(iter.fold(first, |acc, next| binop(acc, next, range)))
     }
 
+    /// A dict display with `**` items: `{**a, k: v, **b}` ->
+    /// `dict(a) | {k: v} | dict(b)`, which builds the same dict (a later
+    /// key wins, at its first key's place) in the same evaluation order.
+    fn unpacked_dict(&self, dict: &ruff_python_ast::ExprDict) -> Option<Expr> {
+        if !dict.items.iter().any(|item| item.key.is_none()) || !self.builtin("dict") {
+            return None;
+        }
+        let range = dict.range;
+        let mut pieces: Vec<Expr> = Vec::new();
+        let mut run: Vec<ruff_python_ast::DictItem> = Vec::new();
+        let flush = |run: &mut Vec<ruff_python_ast::DictItem>, pieces: &mut Vec<Expr>| {
+            if !run.is_empty() {
+                pieces.push(Expr::Dict(ruff_python_ast::ExprDict {
+                    node_index: Default::default(),
+                    range,
+                    items: std::mem::take(run),
+                }));
+            }
+        };
+        for item in &dict.items {
+            match &item.key {
+                None => {
+                    flush(&mut run, &mut pieces);
+                    pieces.push(call_name("dict", vec![item.value.clone()], range));
+                }
+                Some(_) => run.push(item.clone()),
+            }
+        }
+        flush(&mut run, &mut pieces);
+        let mut iter = pieces.into_iter();
+        let first = iter.next()?;
+        Some(iter.fold(first, |acc, next| {
+            Expr::BinOp(ruff_python_ast::ExprBinOp {
+                node_index: Default::default(),
+                range,
+                left: Box::new(acc),
+                op: ruff_python_ast::Operator::BitOr,
+                right: Box::new(next),
+            })
+        }))
+    }
+
     /// `print(a, *xs, sep=s, end=e)` -> `print(s.join([str(a)] + [str(v)
     /// for v in xs]), end=e)`.
     fn starred_print(&self, call_expr: &ExprCall) -> Option<Expr> {
@@ -388,6 +430,15 @@ impl Transformer for Rewriter<'_> {
                     })
             }
             Expr::List(list) => self.starred_list(&list.elts, list.range),
+            // `(*xs, a)` and `{*xs, a}`: the starred list, as a tuple or a
+            // set (v0.7 accept 2).
+            Expr::Tuple(tuple) if tuple.ctx.is_load() && self.builtin("tuple") => self
+                .starred_list(&tuple.elts, tuple.range)
+                .map(|list| call_name("tuple", vec![list], tuple.range)),
+            Expr::Set(set) if self.builtin("set") => self
+                .starred_list(&set.elts, set.range)
+                .map(|list| call_name("set", vec![list], set.range)),
+            Expr::Dict(dict) => self.unpacked_dict(dict),
             _ => None,
         };
         if let Some(replacement) = replacement {

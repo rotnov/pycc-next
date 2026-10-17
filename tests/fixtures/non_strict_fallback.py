@@ -22,7 +22,8 @@ def fails(n: int) -> int:
 
 
 def guarded(n):
-    # Falls back; calls compiled `fails` and catches its exception.
+    # Compiled (its `def` may run in CPython for its `int` or `str` result);
+    # calls compiled `fails` and catches its exception.
     check = lambda m: fails(m)
     try:
         return check(n)

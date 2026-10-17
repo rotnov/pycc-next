@@ -373,6 +373,17 @@ pub const EXT_OBJ_GETITEM_SYMBOL: &str = "pycc_ext_obj_getitem";
 /// The word is borrowed, as the int packer borrows it.
 pub const EXT_OBJ_GETITEM_INT_SYMBOL: &str = "pycc_ext_obj_getitem_int";
 
+/// `__pycc_fallback_ns["name"]`, a non-strict module global that fallback
+/// code binds read from the module's namespace dictionary
+/// (`src/fallback.rs`): [`EXT_OBJ_GETITEM_SYMBOL`], but a missing name
+/// raises CPython's `NameError: name 'name' is not defined`, as reading the
+/// unbound global does, instead of the dictionary's `KeyError`.
+pub const EXT_NS_GETITEM_SYMBOL: &str = "pycc_ext_ns_getitem";
+
+/// The name the non-strict fallback rewrite binds the module's namespace
+/// dictionary to (`src/fallback.rs`'s `NS`).
+pub const FALLBACK_NS_NAME: &str = "__pycc_fallback_ns";
+
 /// `o[a:b]` with native `int` bounds and no step: [`EXT_OBJ_GETSLICE_SYMBOL`]
 /// without building a `slice` for an exact `tuple` or `list`.
 pub const EXT_OBJ_GETSLICE_INT_SYMBOL: &str = "pycc_ext_obj_getslice_int";
@@ -919,6 +930,12 @@ pub fn is_ext_exportable_name(name: &str) -> bool {
     if name.starts_with("_pycc_sig_") {
         return true;
     }
+    // A method body the non-strict fallback lifted out of a class CPython
+    // creates (`src/fallback/lift.rs`, `LIFT_PREFIX`), which the driver
+    // exports for its Python forwarder.
+    if name.starts_with("__pycc_lift") && !name.contains('.') {
+        return true;
+    }
     // #1467: the two PEP 562 module hooks, which the driver publishes from
     // the entry module although D-038's predicate refuses every dunder. The
     // driver admits only the entry module's own `def`, which this lexical
@@ -936,6 +953,16 @@ pub fn is_ext_exportable_name(name: &str) -> bool {
     // is refused on the next line either way, which is what the driver's
     // mirror does with its own empty-segment guard.
     let first = segments.next().unwrap_or("");
+    // A private module-level function, which the driver publishes in
+    // non-strict mode only: admitted here in every mode, the superset
+    // direction. A compiler name (`_pycc_...`) never is.
+    if !name.contains('.')
+        && first.starts_with('_')
+        && !first.starts_with("__")
+        && !first.starts_with("_pycc_")
+    {
+        return true;
+    }
     if first.starts_with('_') || first.is_empty() {
         return false;
     }

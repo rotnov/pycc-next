@@ -588,3 +588,60 @@ pub(crate) fn opaque_bound_names(stmt: &Stmt) -> BTreeSet<String> {
     collector.visit_stmt(stmt);
     collector.names
 }
+
+/// The bare names the bases of the class statements in `stmt` read (the
+/// root of an attribute chain, `mod` of `mod.Base`, included), at any depth
+/// outside a function body.
+pub(crate) fn base_names(stmt: &Stmt) -> BTreeSet<String> {
+    fn root(expr: &Expr, out: &mut BTreeSet<String>) {
+        match expr {
+            Expr::Name(name) => {
+                out.insert(name.id.as_str().to_string());
+            }
+            Expr::Attribute(attr) => root(&attr.value, out),
+            Expr::Subscript(sub) => root(&sub.value, out),
+            Expr::Call(call) => root(&call.func, out),
+            _ => {}
+        }
+    }
+    fn walk(body: &[Stmt], out: &mut BTreeSet<String>) {
+        for stmt in body {
+            match stmt {
+                Stmt::ClassDef(class) => {
+                    for base in class.bases() {
+                        root(base, out);
+                    }
+                    walk(&class.body, out);
+                }
+                Stmt::If(s) => {
+                    walk(&s.body, out);
+                    for clause in &s.elif_else_clauses {
+                        walk(&clause.body, out);
+                    }
+                }
+                Stmt::For(s) => {
+                    walk(&s.body, out);
+                    walk(&s.orelse, out);
+                }
+                Stmt::While(s) => {
+                    walk(&s.body, out);
+                    walk(&s.orelse, out);
+                }
+                Stmt::With(s) => walk(&s.body, out),
+                Stmt::Try(s) => {
+                    walk(&s.body, out);
+                    for handler in &s.handlers {
+                        let pycc_ast::ExceptHandler::ExceptHandler(h) = handler;
+                        walk(&h.body, out);
+                    }
+                    walk(&s.orelse, out);
+                    walk(&s.finalbody, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = BTreeSet::new();
+    walk(std::slice::from_ref(stmt), &mut out);
+    out
+}

@@ -146,7 +146,8 @@ import ...` is a compiler directive, not a module (#919, D-229): its nine no-op
 features lower to nothing, a name CPython rejects is `L0001`, and the one
 CPython-valid feature that changes the grammar, `barry_as_FLUFL`, is `C0001`
 (``the `barry_as_FLUFL` future feature (`<>` in place of `!=`) is not
-supported yet``), as is `from __future__ import x as y`. A `from ... import
+supported yet``); an aliased feature (`from __future__ import annotations as
+_annotations`) is honored and binds nothing. A `from ... import
 x as y` binds `y` to what the unaliased form binds `x` to -- for `pycc_std`
 a function or constant only (a typing or decorator marker is resolved by its
 spelling, so its alias stays `C0001`), and never to a name pycc resolves by

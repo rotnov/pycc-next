@@ -895,8 +895,9 @@ fn py_str(text: &str) -> String {
 pub(crate) fn parse_helper(source: &str, range: TextRange) -> Vec<Stmt> {
     let padding = "\n".repeat(range.start().to_usize());
     let text = format!("{padding}{source}");
-    let parsed = ruff_python_parser::parse_module(&text)
-        .expect("a generated binding helper is valid Python");
+    let parsed = ruff_python_parser::parse_module(&text).unwrap_or_else(|error| {
+        panic!("a generated binding helper is valid Python: {error:?}\n{source}")
+    });
     let mut body: Vec<Stmt> = parsed.into_syntax().body.into_iter().collect();
     struct Relocate(TextRange);
     impl ruff_python_ast::visitor::transformer::Transformer for Relocate {

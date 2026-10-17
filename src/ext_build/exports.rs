@@ -404,6 +404,17 @@ pub(crate) fn collect_exports_excluding(
         // parameter is an `object`: a native container parameter would
         // hand the method a copy of the caller's container. Anything else
         // stays unpublished, as before, rather than a gap.
+        // So is a private module-level function, which CPython code
+        // imports (`from m import _helper`) as it imports a Python one's.
+        if matches!(spelling, ExportName::ModuleLevel)
+            && is_private_method_name(name)
+            && !pycc_ast::is_reserved_name(name)
+            && !(pycc_types::non_strict_checked()
+                && carried_params.iter().all(|(_, ty)| *ty == Ty::Object)
+                && unsupported_boundary_ty(carried_params, return_ty, &carrier_classes).is_none())
+        {
+            continue;
+        }
         if let ExportName::Method { method, .. } = &spelling
             && is_private_method_name(method)
             && !(pycc_types::non_strict_checked()

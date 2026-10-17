@@ -236,10 +236,11 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
             Ok(())
         }
         // A generator yields what a list can hold (its value area holds one
-        // element in the same representation).
+        // element in the same representation), or a CPython object (v0.7
+        // accept 2: an object reference, released as any other).
         Ty::Generator(sig) => {
             let (element, sent, returned) = &**sig;
-            if !is_list_element_ty(element) {
+            if !is_list_element_ty(element) && *element != Ty::Object {
                 return Err(Diagnostic::error(
                     "T0034",
                     format!(

@@ -40,6 +40,8 @@ const ENTRY_PREFIX: &str = "_pycc_sig_";
 /// The non-strict fallback rewrite's alias of the `builtins` module
 /// (`src/fallback.rs`), which a rewritten default may read.
 const FALLBACK_BUILTINS: &str = "__pycc_fallback_builtins";
+/// The fallback rewrite's alias of the module's namespace dict.
+const FALLBACK_NS: &str = "__pycc_fallback_ns";
 
 /// One published signature: the function or method, its compiled entry and
 /// the source of its Python wrapper.
@@ -162,8 +164,20 @@ fn text(source: &str, range: TextRange) -> Option<&str> {
     source.get(range.start().to_usize()..range.end().to_usize())
 }
 
+/// An annotation's source text, parenthesized when it spans lines (written
+/// inside parentheses the annotation's own range leaves out), so it stays
+/// one expression where the generated source puts it.
+fn annotation_text(source: &str, range: TextRange) -> Option<String> {
+    let text = text(source, range)?;
+    Some(if text.contains('\n') {
+        format!("({text})")
+    } else {
+        text.to_string()
+    })
+}
+
 /// Whether `def` publishes a signature the boundary cannot bind alone.
-fn needs_wrapper(parameters: &Parameters) -> bool {
+pub fn needs_wrapper(parameters: &Parameters) -> bool {
     !parameters.posonlyargs.is_empty()
         || !parameters.kwonlyargs.is_empty()
         || parameters.vararg.is_some()
@@ -307,7 +321,7 @@ fn plan_def(
             ),
         };
         let annotation = match annotation {
-            Some(annotation) => text(source, annotation.range())?.to_string(),
+            Some(annotation) => annotation_text(source, annotation.range())?,
             None if non_strict => "object".to_string(),
             // An unannotated parameter with a literal default has the
             // default's type (#1409), `None` an object's.
@@ -344,7 +358,7 @@ fn plan_def(
         .map(&param)
         .collect::<Option<Vec<_>>>()?;
     let returns = match def.returns.as_deref() {
-        Some(returns) => text(source, returns.range())?.to_string(),
+        Some(returns) => annotation_text(source, returns.range())?,
         // Non-strict mode: an unannotated return is an object.
         None if non_strict => "object".to_string(),
         None => return None,
@@ -509,11 +523,18 @@ fn plan_def(
     };
     let (guard_test, twin_builder) = guarded.unwrap_or_default();
     let checks = format!("{guard_test}{checks}");
-    let fallback_builtins = if declared.iter().any(|d| d.contains(FALLBACK_BUILTINS)) {
+    let mut fallback_builtins = if declared.iter().any(|d| d.contains(FALLBACK_BUILTINS)) {
         format!(", {FALLBACK_BUILTINS}=__import__(\"builtins\")")
     } else {
         String::new()
     };
+    // A default the fallback rewrite reads from the module's namespace
+    // (`__pycc_fallback_ns['X']`, `src/fallback.rs`) is evaluated here, in
+    // the module's dict, which is that namespace; the compiled module binds
+    // the alias natively, not in its dict.
+    if declared.iter().any(|d| d.contains(FALLBACK_NS)) {
+        fallback_builtins.push_str(&format!(", {FALLBACK_NS}=globals()"));
+    }
     let wrapper = format!(
         "def _pycc_make(_pycc_entry, _pycc_missing=object(), _pycc_tuple=tuple, \
          _pycc_isinstance=isinstance, _pycc_type=type, _pycc_TypeError=TypeError, \

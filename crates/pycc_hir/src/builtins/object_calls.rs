@@ -65,11 +65,13 @@ pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, 
         let symbol = if name == "tuple" { "pycc_ext_obj_tuple" } else { "pycc_ext_obj_iter" };
         return Some(Ok(sig(symbol, &[Ty::Object], Ty::Object)));
     }
-    // Non-strict mode: `list`, `sorted`, `sum` and `next` of a CPython object run
-    // CPython's own, the result a CPython object.
-    if let ("list" | "sorted" | "sum" | "next", [Ty::Object]) = (name, args) {
+    // Non-strict mode: `list`, `dict`, `set`, `sorted`, `sum` and `next` of
+    // a CPython object run CPython's own, the result a CPython object.
+    if let ("list" | "dict" | "set" | "sorted" | "sum" | "next", [Ty::Object]) = (name, args) {
         let symbol = match name {
             "list" => "pycc_ext_obj_list",
+            "dict" => "pycc_ext_obj_dict",
+            "set" => "pycc_ext_obj_set",
             "sorted" => "pycc_ext_obj_sorted",
             "next" => "pycc_ext_obj_next",
             _ => "pycc_ext_obj_sum",

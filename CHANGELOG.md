@@ -6,6 +6,39 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Added
 
+- Method-level fallback (v0.7 accept 3): under `--non-strict`, a construct pycc cannot
+  compile sends only the smallest enclosing function or method to CPython, not its
+  whole class or module statement. A class statement CPython runs keeps each method's
+  body compiled (its `def` forwards to a compiled function; `self` crosses as the
+  instance, `super()`, `__class__` and private-name mangling as in CPython); a
+  decorated top-level function keeps its `def` in CPython and its body compiled; in an
+  `--ext` module a compiled class keeps its native type, a method that cannot compile
+  attached to it as a CPython function (`src/fallback/lift.rs`, `src/fallback/attach.rs`,
+  `--report-fallbacks` reports each).
+- Classes from libraries (v0.7 accept 2): `--non-strict` compiles the methods of classes
+  inheriting CPython classes (`threading.Thread`, `collections.Counter`,
+  `argparse.Action`, a `namedtuple`, library exceptions, `class M(lib.Base)`), with
+  metaclasses, `__init_subclass__`, descriptors, class attributes of any type,
+  `@property`, `@staticmethod`, `@classmethod`, `functools.cached_property` and
+  `functools.wraps`-style decorators, all applied by CPython; annotations naming
+  library types (`re.Match`, `mod.Type`), general unions and `X | None` of objects
+  (objects); the `with` statement (PEP 343; `async with` still runs in CPython), and
+  starred expressions in displays, assignment targets and calls. A compiled generator
+  handed to CPython supports `send(None)`, `throw()` and `close()` (as
+  `contextlib.contextmanager` needs). A class Python code in the package subclasses
+  (its own fallback code or a sibling module) is created by CPython, since a published
+  native class is not subclassable; private module functions are published by
+  non-strict `--ext` modules, so sibling modules can import them; an `--ext` function
+  whose signature the boundary cannot bind (`**kwargs`, positional-only parameters of a
+  public function) runs in CPython. `from __future__ import annotations as x` and
+  augmented assignment to a computed target (`f()[k] += 1`) compile.
+- `bench/pydantic_check.py` builds pydantic 2.13.5's Python part (pinned by sha256)
+  module by module with `--ext --non-strict`, counts the functions that compile, and
+  optionally runs pydantic's own test suite against the compiled tree: 789 of its 1249
+  functions compile and every module builds (33 and 55 modules failing to build
+  before this release's work); 5716 of its tests pass, 24 fail (monkeypatched module
+  attributes compiled code does not see, `sys._getframe` from compiled frames, and
+  four subprocess tests that fail in CPython too).
 - `pip install` builds with pycc (v0.6 accept 1): `pycc.build`, a PEP 517 (and PEP 660)
   build backend in `python/`, shipped in the release archive as
   `python/pycc_build-X.Y.Z-py3-none-any.whl`. A project selecting it compiles each of
@@ -141,6 +174,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   float it was converted to; the runtime's refcount paths read a boxed float through a
   bigint-sized reference (undefined behaviour), and an `int`-only reader handed one would
   have read its `f64` and the memory past it as bigint limbs -- it now panics instead.
+- Non-strict: compiled code reading a module global that fallback code binds, before it
+  is bound, raised `KeyError: 'name'`; it now raises CPython's `NameError: name 'name'
+  is not defined`.
 - `float` floor division and modulo by zero raised `ZeroDivisionError: float floor
   division or modulo by zero`; the messages are now CPython 3.13's `float floor division
   by zero` and `float modulo by zero`.

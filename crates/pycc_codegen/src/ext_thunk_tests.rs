@@ -311,10 +311,11 @@ fn a_rebound_public_name_gets_exactly_one_thunk() {
 fn no_thunk_is_emitted_for_a_name_the_export_set_excludes() {
     // Each of these carries a tuple and would otherwise qualify. A thunk
     // for one of them is not merely dead weight: `0gen_` names have no
-    // `fnptr_` global at all, so emitting one would panic, and a `_private`
-    // or class-private (`__x`) method thunk would advertise a symbol
-    // `collect_exports` never generates a wrapper for. (A private method,
-    // `Shape._area`, is admitted: non-strict mode publishes one.)
+    // `fnptr_` global at all, so emitting one would panic, and a
+    // class-private (`__x`) method or compiler-name (`_pycc_`) thunk would
+    // advertise a symbol `collect_exports` never generates a wrapper for.
+    // (A private method, `Shape._area`, and a private module-level
+    // function, `_private`, are admitted: non-strict mode publishes them.)
     //
     // #1145 moved the bare `Shape.area` spelling *into* the export set --
     // it is an instance method now, not an unrecognized third segment -- so
@@ -324,7 +325,7 @@ fn no_thunk_is_emitted_for_a_name_the_export_set_excludes() {
     let observed = thunks_of(
         "ext_thunk_excluded_names",
         &module(vec![
-            func("_private", &[("t", tuple(vec![Ty::Int]))], Ty::Int),
+            func("_pycc_private", &[("t", tuple(vec![Ty::Int]))], Ty::Int),
             func("Shape.__area", &[("t", tuple(vec![Ty::Int]))], Ty::Int),
             func(
                 "Shape.width.setter",
@@ -452,7 +453,12 @@ fn the_export_predicate_admits_every_method_kind_a_mangled_name_can_carry_a_rece
 fn the_export_predicate_applies_the_public_name_rule_to_both_segments() {
     assert!(!crate::is_ext_exportable_name("_Grid.scale.static"));
     assert!(!crate::is_ext_exportable_name("Grid._scale.static"));
-    assert!(!crate::is_ext_exportable_name("_f"));
+    // A private module-level function: non-strict mode publishes it, so it
+    // is admitted in every mode (the superset direction); a compiler name
+    // never is.
+    assert!(crate::is_ext_exportable_name("_f"));
+    assert!(!crate::is_ext_exportable_name("_pycc_f"));
+    assert!(!crate::is_ext_exportable_name("__f"));
     assert!(crate::is_ext_exportable_name("f"));
 }
 
@@ -465,7 +471,8 @@ fn the_export_predicate_admits_exactly_the_two_pep_562_module_hooks() {
     assert!(crate::is_ext_exportable_name("__dir__"));
     assert!(!crate::is_ext_exportable_name("__getattr__x"));
     assert!(!crate::is_ext_exportable_name("__getattribute__"));
-    assert!(!crate::is_ext_exportable_name("_getattr"));
+    // A private module-level function, not a hook spelling.
+    assert!(crate::is_ext_exportable_name("_getattr"));
     assert!(!crate::is_ext_exportable_name("Grid.__getattr__"));
 }
 

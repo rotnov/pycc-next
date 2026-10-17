@@ -327,6 +327,13 @@ pub(crate) fn lower_call_expr(
         if rewritten.ty() == Ty::Str {
             return rewritten;
         }
+        // `str(e)` of an exception without `__str__`: its message.
+        if callee == "str" {
+            let message = rewrite_exception_to_message(arg, classes);
+            if message.ty() == Ty::Str {
+                return message;
+            }
+        }
     }
     // `repr(x)` of a value whose repr is its `str` and that no builtin row
     // claims (a tuple, a set, `None`): the f-string rendering of `x`

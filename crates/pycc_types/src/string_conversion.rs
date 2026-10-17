@@ -305,8 +305,18 @@ pub(crate) fn instance_text_call(
         }
         return None;
     };
-    if pycc_hir::is_builtin_exception_class(class_name) {
-        return None;
+    // `str(e)` of an exception without a `__str__` of its own is its
+    // message, as `print(e)` renders it (`pycc_mir`'s
+    // `rewrite_exception_to_message`).
+    let is_exception = pycc_hir::is_builtin_exception_class(class_name)
+        || env.lookup_class(class_name).is_some_and(|class| {
+            class.exception_type_tag.is_some()
+                || class.mro.iter().any(|entry| pycc_hir::is_builtin_exception_class(entry))
+        });
+    if is_exception {
+        let has_str = !pycc_hir::is_builtin_exception_class(class_name)
+            && instance_text_dunder(env, class_name, want_repr).is_some();
+        return (!want_repr && !has_str).then_some(Ok(Ty::Str));
     }
     Some(match instance_text_dunder(env, class_name, want_repr) {
         Some(_) => Ok(Ty::Str),

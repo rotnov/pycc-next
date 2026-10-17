@@ -86,8 +86,8 @@ fn the_buffer_slice_fact_is_a_third_reason_a_thunk_exists() {
         true
     ));
     assert!(
-        !ext_thunk_required("_f", &[Ty::MemoryView], &Ty::MemoryView, true),
-        "a private name is not exported, so it has no thunk to widen"
+        !ext_thunk_required("_pycc_f", &[Ty::MemoryView], &Ty::MemoryView, true),
+        "a compiler name is not exported, so it has no thunk to widen"
     );
 }
 

@@ -85,10 +85,13 @@ pub(super) fn lower_attr_store(
     // `HirClassDef`, so the store stays String-keyed. It must come
     // before `class_def_of`, which panics on a `Ty::Object` base.
     if base.ty() == Ty::Object {
+        // The value crosses as any object operation's argument does: a
+        // dict, set or tuple display `pycc_types` admits here in non-strict
+        // mode is built as the CPython container.
         return MirStmt::ObjAttrSet {
             base,
             attr: attr.clone(),
-            value,
+            value: crate::obj_arith::object_arg(value),
         };
     }
     let class_def = class_def_of(&base, classes);

@@ -124,6 +124,8 @@ pub(super) fn expand_caches(body: &mut Vec<Stmt>) {
         let range = def.range;
         let names: Vec<&str> = params.iter().map(|(n, _)| n.as_str()).collect();
         let (key_ty, key) = match params.as_slice() {
+            // No parameter: the one result is cached under a constant key.
+            [] => ("int".to_string(), "0".to_string()),
             [(n, ty)] => (ty.to_string(), n.clone()),
             many => (
                 format!(

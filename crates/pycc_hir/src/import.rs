@@ -123,13 +123,13 @@ pub(crate) fn future_prologue_len(body: &[Stmt]) -> usize {
 /// whatever it names; (2) names are checked left to right -- `braces` is
 /// `not a chance`, `*` and any other unknown name is `future feature <name>
 /// is not defined` -- all `L0001` via `context_invalid`, CPython's wording
-/// verbatim; then, for a statement CPython would accept, (3) an `as` alias
-/// is the same `C0001` every other `from ... import x as y` reports (CPython
-/// binds a `_Feature` object pycc never models), and (4) `barry_as_FLUFL`
+/// verbatim; then, for a statement CPython would accept, (3) `barry_as_FLUFL`
 /// is a `C0001` naming the feature. Everything left contributes nothing:
-/// no binding, no `HirItem`, and no name is bound -- a deliberate,
-/// recorded divergence from CPython, which binds each feature name to its
-/// `__future__._Feature` object.
+/// no binding, no `HirItem`, and no name is bound, an `as` alias's
+/// included (`from __future__ import annotations as _annotations`, as
+/// pydantic writes it) -- a deliberate, recorded divergence from CPython,
+/// which binds each feature name (or alias) to its `__future__._Feature`
+/// object (`docs/DEVIATIONS.md`).
 fn lower_future_import(
     import: &StmtImportFrom,
     position: FuturePosition,
@@ -153,7 +153,6 @@ fn lower_future_import(
         }
     }
     for alias in &import.names {
-        check_alias_shape(import, alias)?;
         if alias.name.as_str() == BARRY_AS_FLUFL {
             return Err(unsupported(
                 "the `barry_as_FLUFL` future feature (`<>` in place of `!=`) is not supported yet",

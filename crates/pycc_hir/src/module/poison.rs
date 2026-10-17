@@ -159,7 +159,7 @@ pub(crate) fn poisonable_names(stmt: &Stmt) -> Vec<&str> {
         }
         Stmt::ImportFrom(import) => {
             // D-229: a `from __future__ import ...` lowers (to nothing) when
-            // every name is a no-op feature and none carries an `asname`;
+            // every name is a no-op feature, aliased or not;
             // `barry_as_FLUFL` is CPython-accepted but pycc-rejected, so it
             // poisons like any other failing shape. This mirror is
             // position-blind -- it sees one statement, not its index -- so
@@ -173,9 +173,10 @@ pub(crate) fn poisonable_names(stmt: &Stmt) -> Vec<&str> {
             // list; `__future__` has none to expand), which no later
             // statement can name.
             if is_future_import(import)
-                && import.names.iter().all(|alias| {
-                    alias.asname.is_none() && is_noop_future_feature(alias.name.as_str())
-                })
+                && import
+                    .names
+                    .iter()
+                    .all(|alias| is_noop_future_feature(alias.name.as_str()))
             {
                 return Vec::new();
             }

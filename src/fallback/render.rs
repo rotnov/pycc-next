@@ -20,6 +20,10 @@ pub(crate) struct Rendered {
     pub(super) edited: Vec<(Range<u32>, u32)>,
     /// The names of the twinned functions (`Plan::twinned`).
     pub(super) twinned: BTreeSet<String>,
+    /// Each method attached to a compiled class (`attach`): the class, the
+    /// class statement's offset in `text`, and the attributes of `self`
+    /// the method uses, which the frontend checks the carrier exposes.
+    pub(super) attached: Vec<(String, u32, BTreeSet<String>)>,
 }
 
 impl Rendered {
@@ -44,17 +48,32 @@ impl Rendered {
     }
 }
 
+/// The rewrite being built.
+struct Out {
+    text: String,
+    ranges: Vec<Range<u32>>,
+    copied: Vec<(u32, u32, u32)>,
+    mirror_spans: Vec<(Range<u32>, String)>,
+    edited: Vec<(Range<u32>, u32)>,
+}
+
+/// The range of a unit with no text of its own in the rewrite (a lift whose
+/// statement is compiled, or that falls back with it): no offset is in it.
+const NOWHERE: Range<u32> = u32::MAX..u32::MAX;
+
 impl Plan {
     /// The rewritten source.
     pub(crate) fn render(&self) -> Rendered {
         let native = self.native_globals();
         let globals: BTreeSet<String> = self.dict_globals().difference(&native).cloned().collect();
-        let mut mirror_spans = Vec::new();
         let src = &self.source;
-        let mut text = String::with_capacity(src.len() * 2);
-        let mut ranges = Vec::with_capacity(self.stmts.len());
-        let mut copied = Vec::new();
-        let mut edited = Vec::new();
+        let mut out = Out {
+            text: String::with_capacity(src.len() * 2),
+            ranges: vec![NOWHERE; self.stmts.len()],
+            copied: Vec::new(),
+            mirror_spans: Vec::new(),
+            edited: Vec::new(),
+        };
         let mut trailing: Vec<String> = Vec::new();
         let mut cursor = 0usize;
         let preamble_at = self.preamble_position();
@@ -62,119 +81,79 @@ impl Plan {
         let mut index = 0;
         // A copy to run first thing on the next statement's line (`copy; `).
         let mut prefix: Option<String> = None;
-        while index < self.stmts.len() {
+        while index < self.top {
             let stmt = &self.stmts[index];
             let start = stmt.range.start as usize;
-            text.push_str(&src[cursor..start]);
+            out.text.push_str(&src[cursor..start]);
             if let Some(run) = prefix.take() {
-                text.push_str(&run);
-                text.push_str("; ");
+                out.text.push_str(&run);
+                out.text.push_str("; ");
             }
             if index == preamble_at {
-                let at = text.len() as u32;
-                text.push_str(&format!(
+                let at = out.text.len() as u32;
+                out.text.push_str(&format!(
                     "import sys as {SYS}; import builtins as {BUILTINS}; \
-                     {NS} = {SYS}.modules[__name__].__dict__\n"
+                     {NS} = {SYS}.modules[__name__].__dict__"
                 ));
-                preamble = at..text.len() as u32;
+                // The methods attached to compiled classes (`attach`),
+                // defined in CPython before anything can call them.
+                for unit in self.attached() {
+                    if let Some(source) = self.attached_source(unit) {
+                        out.text.push_str("; ");
+                        out.text.push_str(&self.exec_text(&source));
+                    }
+                }
+                out.text.push('\n');
+                preamble = at..out.text.len() as u32;
+            }
+            if self.is_split(index) {
+                cursor = self.render_split(index, &mut out, &globals, &native, &mut prefix);
+                index += 1;
+                continue;
             }
             if self.fallback.contains_key(&index) {
                 let mut last = index;
-                while last + 1 < self.stmts.len() && self.fallback.contains_key(&(last + 1)) {
+                while last + 1 < self.top
+                    && self.fallback.contains_key(&(last + 1))
+                    && !self.is_split(last + 1)
+                {
                     last += 1;
                 }
                 let end = self.stmts[last].range.end as usize;
                 let chunk = &src[start..end];
                 let line = src[..start].matches('\n').count();
                 let padded = format!("{}{}\n", "\n".repeat(line), chunk);
-                let at = text.len() as u32;
                 // The newlines go first, so the call sits on the chunk's last
                 // line: a statement may follow it there after a `;`.
-                text.push_str(&"\n".repeat(chunk.matches('\n').count()));
-                text.push_str(&format!(
-                    "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",
-                    py_str(&padded),
-                    py_str(&self.display),
-                    self.compile_flags()
-                ));
-                let end_at = text.len() as u32;
-                for _ in index..=last {
-                    ranges.push(at..end_at);
+                out.text.push_str(&"\n".repeat(chunk.matches('\n').count()));
+                let at = out.text.len() as u32;
+                out.text.push_str(&self.exec_text(&padded));
+                let end_at = out.text.len() as u32;
+                for unit in index..=last {
+                    out.ranges[unit] = at..end_at;
                 }
                 cursor = end;
                 index = last + 1;
                 continue;
             }
-            let mut rewriter = names::Rewriter::new(&globals, NS).with_mirrors(native.clone());
-            pycc_ast::visitor::Visitor::visit_stmt(&mut rewriter, &self.ast[index]);
-            let mut edits = rewriter.edits;
-            edits.extend(
-                self.object_builtins
-                    .range(stmt.range.start..stmt.range.end)
-                    .map(|(at, (end, text))| names::Edit {
-                        range: *at..*end,
-                        text: text.clone(),
-                        mirror: None,
-                    }),
-            );
-            edits.extend(
-                self.erased
-                    .range(stmt.range.start..stmt.range.end)
-                    .chain(self.substituted.range(stmt.range.start..stmt.range.end))
-                    .map(|(at, (end, text))| names::Edit {
-                        range: *at..*end,
-                        text: text.clone(),
-                        mirror: None,
-                    }),
-            );
-            if self.objectified.contains(&index)
-                && let Stmt::FunctionDef(def) = &self.ast[index]
-            {
-                edits.extend(object_annotations(def));
-            }
-            // An insertion goes before a replacement starting where it does.
-            edits.sort_by_key(|edit| (edit.range.start, edit.range.end));
-            let at = text.len() as u32;
-            let mut inner = start;
-            for edit in edits {
-                let (edit_start, edit_end) = (edit.range.start as usize, edit.range.end as usize);
-                if edit_start < inner {
-                    continue;
-                }
-                copied.push((text.len() as u32, inner as u32, (edit_start - inner) as u32));
-                text.push_str(&src[inner..edit_start]);
-                if let Some(name) = edit.mirror {
-                    let at = text.len() as u32;
-                    mirror_spans.push((at..at + edit.text.len() as u32, name));
-                }
-                let at = text.len() as u32;
-                text.push_str(&edit.text);
-                edited.push((at..text.len() as u32, edit_start as u32));
-                inner = edit_end;
-            }
+            let at = out.text.len() as u32;
+            self.emit_compiled(&mut out, index, &globals, &native);
             let end = stmt.range.end as usize;
-            copied.push((text.len() as u32, inner as u32, (end - inner) as u32));
-            text.push_str(&src[inner..end]);
             if self.mirrored.contains(&index) {
                 // Padded, so a traceback through the CPython copy names
                 // its lines.
                 let line = src[..start].matches('\n').count();
-                let run = format!(
-                    "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",
-                    py_str(&format!("{}{}", "\n".repeat(line), &src[start..end])),
-                    py_str(&self.display),
-                    self.compile_flags()
-                );
+                let run = self.exec_text(&format!("{}{}", "\n".repeat(line), &src[start..end]));
                 if !matches!(self.stmts[index].kind, Kind::Def(..)) {
                     // Same line, so later line numbers do not move.
-                    text.push_str("; ");
-                    text.push_str(&run);
+                    out.text.push_str("; ");
+                    out.text.push_str(&run);
                 } else if let Some(blank) = blank_line_after(src, end) {
                     // A `def`'s last line is in its body: the copy runs on
                     // the blank line after it, so no line number moves.
-                    ranges.push(at..text.len() as u32);
-                    text.push_str(&src[end..blank]);
-                    text.push_str(&run);
+                    out.ranges[index] = at..out.text.len() as u32;
+                    out.text.push_str(&src[end..blank]);
+                    out.text.push_str(&run);
                     cursor = blank;
                     index += 1;
                     continue;
@@ -187,10 +166,11 @@ impl Plan {
                     trailing.push(run);
                 }
             }
-            ranges.push(at..text.len() as u32);
+            out.ranges[index] = at..out.text.len() as u32;
             cursor = end;
             index += 1;
         }
+        let mut text = out.text;
         text.push_str(&src[cursor..]);
         // The copies with no blank line after their `def`, after the last
         // line, where no line number moves.
@@ -201,13 +181,27 @@ impl Plan {
             text.push_str(&run);
             text.push('\n');
         }
+        let attached = self
+            .attached()
+            .into_iter()
+            .filter_map(|unit| {
+                let lift = self.lift(unit)?;
+                let attach = lift.attach.as_ref()?;
+                Some((
+                    attach.class.clone(),
+                    out.ranges[lift.owner].start,
+                    attach.self_attrs.clone(),
+                ))
+            })
+            .collect();
         Rendered {
+            attached,
             text,
-            ranges,
+            ranges: out.ranges,
             preamble,
-            copied,
-            mirror_spans,
-            edited,
+            copied: out.copied,
+            mirror_spans: out.mirror_spans,
+            edited: out.edited,
             twinned: self
                 .twinned
                 .keys()
@@ -217,6 +211,160 @@ impl Plan {
                 })
                 .collect(),
         }
+    }
+
+    /// `exec`s the (padded) CPython source `source` in the namespace.
+    fn exec_text(&self, source: &str) -> String {
+        format!(
+            "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",
+            py_str(source),
+            py_str(&self.display),
+            self.compile_flags()
+        )
+    }
+
+    /// Appends compiled unit `index` (a top-level statement, or a lift) to
+    /// `out`: its source from `stmts[index].range`, with every edit.
+    fn emit_compiled(
+        &self,
+        out: &mut Out,
+        index: usize,
+        globals: &BTreeSet<String>,
+        native: &BTreeSet<String>,
+    ) {
+        let src = &self.source;
+        let stmt = &self.stmts[index];
+        let start = stmt.range.start as usize;
+        let mut rewriter = names::Rewriter::new(globals, NS).with_mirrors(native.clone());
+        pycc_ast::visitor::Visitor::visit_stmt(&mut rewriter, &self.ast[index]);
+        let mut edits = rewriter.edits;
+        let plain = |(at, (end, text)): (&u32, &(u32, String))| names::Edit {
+            range: *at..*end,
+            text: text.clone(),
+            mirror: None,
+        };
+        let range = stmt.range.start..stmt.range.end;
+        edits.extend(self.object_builtins.range(range.clone()).map(plain));
+        edits.extend(
+            self.erased
+                .range(range.clone())
+                .chain(self.substituted.range(range))
+                .map(plain),
+        );
+        if self.objectified.contains(&index)
+            && let Stmt::FunctionDef(def) = &self.ast[index]
+        {
+            edits.extend(object_annotations(def));
+        }
+        // The bodies of the methods attached to this compiled class
+        // (`attach`) are forwarders to their CPython functions.
+        if index < self.top {
+            for unit in self.lifts_of(index).collect::<Vec<_>>() {
+                if !self.is_attached(unit) {
+                    continue;
+                }
+                if let Some((body, text)) = self.attached_forwarder(unit) {
+                    edits.retain(|edit| !(body.start <= edit.range.start && edit.range.end <= body.end));
+                    edits.push(names::Edit {
+                        range: body,
+                        text,
+                        mirror: None,
+                    });
+                }
+            }
+        }
+        if let Some(lift) = self.lift(index) {
+            edits.extend(lift.edits.iter().map(|(range, text)| names::Edit {
+                range: range.clone(),
+                text: text.clone(),
+                mirror: None,
+            }));
+        }
+        // An insertion goes before a replacement starting where it does.
+        edits.sort_by_key(|edit| (edit.range.start, edit.range.end));
+        let mut inner = start;
+        for edit in edits {
+            let (edit_start, edit_end) = (edit.range.start as usize, edit.range.end as usize);
+            if edit_start < inner {
+                continue;
+            }
+            out.copied
+                .push((out.text.len() as u32, inner as u32, (edit_start - inner) as u32));
+            out.text.push_str(&src[inner..edit_start]);
+            if let Some(name) = edit.mirror {
+                let at = out.text.len() as u32;
+                out.mirror_spans.push((at..at + edit.text.len() as u32, name));
+            }
+            let at = out.text.len() as u32;
+            out.text.push_str(&edit.text);
+            out.edited.push((at..out.text.len() as u32, edit_start as u32));
+            inner = edit_end;
+        }
+        let end = stmt.range.end as usize;
+        out.copied
+            .push((out.text.len() as u32, inner as u32, (end - inner) as u32));
+        out.text.push_str(&src[inner..end]);
+    }
+
+    /// Appends split statement `index` (`lift`): each compiled lift at its
+    /// own lines, then the statement's `exec` once they are all defined.
+    /// Returns the source offset rendering continues from.
+    fn render_split(
+        &self,
+        index: usize,
+        out: &mut Out,
+        globals: &BTreeSet<String>,
+        native: &BTreeSet<String>,
+        prefix: &mut Option<String>,
+    ) -> usize {
+        let src = &self.source;
+        let stmt = &self.stmts[index];
+        let (start, end) = (stmt.range.start as usize, stmt.range.end as usize);
+        let mut pos = start;
+        let mut compiled = false;
+        let units: Vec<usize> = self.lifts_of(index).collect();
+        for unit in units {
+            if self.fallback.contains_key(&unit) {
+                continue;
+            }
+            let lift = self.lift(unit).expect("a lift");
+            out.text
+                .push_str(&"\n".repeat(src[pos..lift.keyword as usize].matches('\n').count()));
+            let at = out.text.len() as u32;
+            self.emit_compiled(out, unit, globals, native);
+            out.ranges[unit] = at..out.text.len() as u32;
+            pos = lift.range.end as usize;
+            compiled = true;
+        }
+        let rest = src[pos..end].matches('\n').count();
+        out.text.push_str(&"\n".repeat(rest));
+        let line = src[..start].matches('\n').count();
+        let run = self.exec_text(&format!("{}{}\n", "\n".repeat(line), self.split_source(index)));
+        if !compiled || rest > 0 {
+            // The statement's last line holds no compiled code.
+            let at = out.text.len() as u32;
+            out.text.push_str(&run);
+            out.ranges[index] = at..out.text.len() as u32;
+            return end;
+        }
+        if let Some(blank) = blank_line_after(src, end) {
+            out.text.push_str(&src[end..blank]);
+            let at = out.text.len() as u32;
+            out.text.push_str(&run);
+            out.ranges[index] = at..out.text.len() as u32;
+            return blank;
+        }
+        if self.ast.get(index + 1).is_some_and(is_simple_statement) {
+            *prefix = Some(run);
+            return end;
+        }
+        // No free line after the statement: the `exec` takes one of its
+        // own, and the lines after it move by one.
+        out.text.push('\n');
+        let at = out.text.len() as u32;
+        out.text.push_str(&run);
+        out.ranges[index] = at..out.text.len() as u32;
+        end
     }
 }
 

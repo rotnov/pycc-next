@@ -54,13 +54,16 @@ fn fell_back(report: &str, name: &str) -> bool {
 }
 
 fn assert_report(report: &str) {
-    for name in ["describe", "guarded", "boom", "bump"] {
+    for name in ["describe", "boom", "bump"] {
         assert!(
             fell_back(report, name),
             "{name} should fall back:\n{report}"
         );
     }
-    for name in ["scale", "fails"] {
+    // `guarded` returns an `int` or a `str`: an object in an `--ext` module;
+    // in a native build its `def` runs in CPython (`lifted:`), its body
+    // compiled.
+    for name in ["scale", "fails", "guarded"] {
         assert!(!fell_back(report, name), "{name} should compile:\n{report}");
     }
     assert!(

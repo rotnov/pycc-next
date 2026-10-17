@@ -477,6 +477,96 @@ static PyObject *pycc_ext_gen_iternext(PyObject *self)
     return value;
 }
 
+extern signed char pycc_rt_gen_throw_pending(void *gen);
+extern signed char pycc_rt_gen_close(void *gen);
+
+/* The value after the generator was resumed for `send(None)`/`throw()`:
+ * as `tp_iternext`, but exhaustion is CPython's `StopIteration`. */
+static PyObject *pycc_ext_gen_step_result(PyObject *self)
+{
+    PyObject *value = pycc_ext_gen_iternext(self);
+
+    if (value == NULL && !PyErr_Occurred()) {
+        PyErr_SetNone(PyExc_StopIteration);
+    }
+    return value;
+}
+
+/* `g.send(value)`: a compiled generator receives nothing, so only `None`
+ * (the same as `next(g)`). */
+static PyObject *pycc_ext_gen_send(PyObject *self, PyObject *value)
+{
+    if (value != Py_None) {
+        PyErr_SetString(PyExc_TypeError,
+                        "pycc: a compiled generator yielding to CPython receives only None");
+        return NULL;
+    }
+    return pycc_ext_gen_step_result(self);
+}
+
+/* `g.throw(exc)` (or the deprecated `throw(type[, value[, tb]])`): `exc`
+ * raised in the generator where it is suspended, bridged into pycc's
+ * exception (`pycc_ext_obj_error_bridge`), as `contextlib` throws the
+ * exception of a `with` body into the generator managing it. */
+static PyObject *pycc_ext_gen_throw(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+    PyccExtGenObj *obj = (PyccExtGenObj *)self;
+    PyObject *exc;
+
+    if (nargs < 1 || nargs > 3) {
+        PyErr_SetString(PyExc_TypeError, "throw expected at least 1 argument");
+        return NULL;
+    }
+    exc = args[0];
+    if (nargs >= 2 && args[1] != Py_None) {
+        exc = args[1];
+    }
+    if (PyType_Check(exc) && PyType_IsSubtype((PyTypeObject *)exc,
+                                              (PyTypeObject *)PyExc_BaseException)) {
+        exc = PyObject_CallNoArgs(exc);
+        if (exc == NULL) {
+            return NULL;
+        }
+    } else if (PyExceptionInstance_Check(exc)) {
+        Py_INCREF(exc);
+    } else {
+        PyErr_SetString(PyExc_TypeError,
+                        "exceptions must be classes or instances deriving from BaseException");
+        return NULL;
+    }
+    if (obj->gen == NULL) {
+        PyErr_SetRaisedException(exc);
+        return NULL;
+    }
+    PyErr_SetRaisedException(exc);
+    pycc_ext_obj_error_bridge();
+    if (!pycc_rt_gen_throw_pending(obj->gen)) {
+        pycc_ext_raise_pending();
+        return NULL;
+    }
+    return pycc_ext_gen_step_result(self);
+}
+
+/* `g.close()`: `GeneratorExit` raised where the generator is suspended. */
+static PyObject *pycc_ext_gen_close(PyObject *self, PyObject *unused)
+{
+    PyccExtGenObj *obj = (PyccExtGenObj *)self;
+
+    (void)unused;
+    if (obj->gen != NULL && !pycc_rt_gen_close(obj->gen)) {
+        pycc_ext_raise_pending();
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyMethodDef pycc_ext_gen_methods[] = {
+    {"send", (PyCFunction)pycc_ext_gen_send, METH_O, NULL},
+    {"throw", (PyCFunction)(void (*)(void))pycc_ext_gen_throw, METH_FASTCALL, NULL},
+    {"close", (PyCFunction)pycc_ext_gen_close, METH_NOARGS, NULL},
+    {NULL, NULL, 0, NULL},
+};
+
 static void pycc_ext_gen_dealloc(PyObject *self)
 {
     PyTypeObject *tp = Py_TYPE(self);
@@ -497,6 +587,7 @@ static PyType_Slot pycc_ext_gen_type_slots[] = {
     {Py_tp_dealloc, pycc_ext_gen_dealloc},
     {Py_tp_iter, PyObject_SelfIter},
     {Py_tp_iternext, pycc_ext_gen_iternext},
+    {Py_tp_methods, pycc_ext_gen_methods},
     {0, NULL},
 };
 

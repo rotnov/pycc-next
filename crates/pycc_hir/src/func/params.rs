@@ -257,7 +257,11 @@ pub(crate) fn check_default(
         return Err(unsupported(UNADMITTED_DEFAULT, range));
     };
     let from = default_ty(&lowered);
-    let object_none = policy == DefaultPolicy::AdmitMethod && from == Ty::None && *ty == Ty::Object;
+    // Non-strict mode: a module-level `def`'s `None` default at an object
+    // parameter too, which a call boxes as `Py_None` (`object_box`).
+    let object_none = (policy == DefaultPolicy::AdmitMethod || non_strict)
+        && from == Ty::None
+        && *ty == Ty::Object;
     // Non-strict mode (#3): a scalar literal default is boxed into the object
     // parameter like any scalar argument.
     let object_scalar =

@@ -23,6 +23,10 @@ pub(crate) fn generator_return_ty(
         {
             Ok(Ty::generator(Ty::Infer))
         }
+        // Non-strict mode (v0.7 accept 2): a generator annotated `object`
+        // (a lifted method, `fallback::lift`), or unannotated in an `--ext`
+        // module, yields CPython objects.
+        Ty::Object if is_non_strict(aliases) => Ok(Ty::generator(Ty::Object)),
         other => Err(unsupported(
             format!(
                 "a generator function must be annotated `Iterator[T]`, `Iterable[T]` or \

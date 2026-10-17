@@ -87,7 +87,9 @@ pub fn split_ext_generators(module: &ModModule) -> Option<ModModule> {
 }
 
 fn is_public(name: &str) -> bool {
-    !name.starts_with('_')
+    // A method body the non-strict fallback lifted (`__pycc_liftN_m__`,
+    // `src/fallback/lift.rs`) is published for its CPython forwarder.
+    !name.starts_with('_') || name.starts_with("__pycc_lift")
 }
 
 /// A public, undecorated generator `def` with plain parameters.

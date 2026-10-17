@@ -45,6 +45,7 @@ pub(crate) fn entry_source(path: &Path) -> String {
 pub(super) fn set_override(text: Option<String>) {
     if text.is_none() {
         TWINNED.with(|cell| cell.borrow_mut().clear());
+        ATTACHED.with(|cell| cell.borrow_mut().clear());
     }
     ENTRY_OVERRIDE.with(|cell| *cell.borrow_mut() = text);
 }
@@ -55,10 +56,26 @@ thread_local! {
     static TWINNED: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
 }
 
+thread_local! {
+    /// The methods of the active rewrite attached to compiled classes
+    /// (`Rendered::attached`).
+    static ATTACHED: RefCell<Vec<Attached>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A class with methods attached to it, where its statement starts in the
+/// rewrite, and the attributes of `self` those methods use.
+pub(crate) type Attached = (String, u32, BTreeSet<String>);
+
 /// Makes `rendered` the entry source the frontend compiles.
 pub(super) fn install(rendered: &Rendered) {
     set_override(Some(rendered.text.clone()));
     TWINNED.with(|cell| *cell.borrow_mut() = rendered.twinned.clone());
+    ATTACHED.with(|cell| *cell.borrow_mut() = rendered.attached.clone());
+}
+
+/// The active rewrite's attached methods (`Rendered::attached`).
+pub(crate) fn attached_methods() -> Vec<Attached> {
+    ATTACHED.with(|cell| cell.borrow().clone())
 }
 
 /// The compiled functions (and their `pycc_ast::ext_signatures` entries)
@@ -79,6 +96,7 @@ pub(crate) fn twinned_exports() -> BTreeSet<String> {
 pub(crate) struct Snapshot {
     entry: Option<String>,
     twinned: BTreeSet<String>,
+    attached: Vec<Attached>,
 }
 
 impl Snapshot {
@@ -87,6 +105,7 @@ impl Snapshot {
         Self {
             entry: entry_override(),
             twinned: TWINNED.with(|cell| cell.borrow().clone()),
+            attached: attached_methods(),
         }
     }
 
@@ -94,5 +113,6 @@ impl Snapshot {
     pub(crate) fn install(self) {
         ENTRY_OVERRIDE.with(|cell| *cell.borrow_mut() = self.entry);
         TWINNED.with(|cell| *cell.borrow_mut() = self.twinned);
+        ATTACHED.with(|cell| *cell.borrow_mut() = self.attached);
     }
 }

@@ -122,6 +122,11 @@ pub(crate) fn classify_export_name(name: &str) -> Option<ExportName> {
     if pycc_ast::ext_entry_target(name).is_some() {
         return Some(ExportName::ModuleLevel);
     }
+    // A method body the non-strict fallback lifted out of a class CPython
+    // creates (`crate::fallback`'s `lift`), which its forwarder calls.
+    if name.starts_with(crate::fallback::LIFT_PREFIX) && !name.contains('.') {
+        return Some(ExportName::ModuleLevel);
+    }
     let mut segments = name.split('.');
     let class_or_fn = segments.next()?;
     // An empty segment is not a name `is_public_name` was written to judge:
@@ -129,6 +134,15 @@ pub(crate) fn classify_export_name(name: &str) -> Option<ExportName> {
     // as public. Neither is a name the lowerer can emit, so both are refused
     // fail-closed here -- and the codegen mirror refuses them too, which is
     // what keeps the two predicates equal.
+    // A private module-level function (`_helper`, not `__x` nor a
+    // compiler name), admitted lexically like a private method: the driver
+    // publishes it in non-strict mode only (`collect_exports`).
+    if segments.clone().next().is_none()
+        && is_private_method_name(class_or_fn)
+        && !pycc_ast::is_reserved_name(class_or_fn)
+    {
+        return Some(ExportName::ModuleLevel);
+    }
     if class_or_fn.is_empty() || !is_public_name(class_or_fn) {
         return None;
     }

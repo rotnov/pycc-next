@@ -45,6 +45,31 @@ PyObject *pycc_ext_obj_getitem(PyObject *o, PyObject *k)
 }
 
 /*
+ * `__pycc_fallback_ns["name"]`: a module global that non-strict fallback
+ * code binds, read by compiled code from the module's namespace dict. As
+ * `pycc_ext_obj_getitem` (consuming the packed key), but a missing name is
+ * CPython's `NameError: name 'x' is not defined`, what reading the unbound
+ * global raises, not the dict's `KeyError`.
+ */
+PyObject *pycc_ext_ns_getitem(PyObject *ns, PyObject *k)
+{
+    PyObject *result = NULL;
+
+    if (ns != NULL && k != NULL) {
+        result = PyDict_CheckExact(ns) ? PyDict_GetItemWithError(ns, k) : PyObject_GetItem(ns, k);
+        if (PyDict_CheckExact(ns)) {
+            if (result != NULL) {
+                Py_INCREF(result);
+            } else if (!PyErr_Occurred()) {
+                PyErr_Format(PyExc_NameError, "name '%U' is not defined", k);
+            }
+        }
+    }
+    Py_XDECREF(k);
+    return result;
+}
+
+/*
  * The smallint an encoded `int` word holds, through `*out`: 1 for a
  * smallint, 0 for any other word (a bool marker or a bigint), which the
  * callers below hand to the generic path instead.

@@ -97,6 +97,45 @@ pub(crate) fn lower_stmt_expanded(
             }
             Ok(lowered)
         }
+        // Non-strict mode (v0.7 accept 2): a `with` statement is the
+        // statements PEP 343 defines it by (`pycc_ast::desugar_with`).
+        Stmt::With(with) if signatures.non_strict() => match pycc_ast::desugar_with(with) {
+            Some(pieces) => {
+                let mut lowered = Vec::new();
+                for piece in &pieces {
+                    lowered.extend(lower_stmt_expanded(
+                        piece,
+                        aliases,
+                        in_loop,
+                        in_function,
+                        in_finally,
+                        except_star,
+                        class_name,
+                        type_param,
+                        class_defs,
+                        imports,
+                        signatures,
+                    )?);
+                }
+                Ok(lowered)
+            }
+            None => expand(stmt),
+        },
+        // Non-strict mode: an augmented assignment to an attribute or item
+        // of a computed expression binds it first
+        // (`pycc_ast::desugar_computed_aug_target`).
+        Stmt::AugAssign(aug) if signatures.non_strict() => {
+            match pycc_ast::desugar_computed_aug_target(aug) {
+                Some(pieces) => {
+                    let mut lowered = Vec::new();
+                    for piece in &pieces {
+                        lowered.extend(expand(piece)?);
+                    }
+                    Ok(lowered)
+                }
+                None => expand(stmt),
+            }
+        }
         // #1244: `del a, b` deletes each name in turn, and `del ()` none.
         Stmt::Delete(del) => super::del::lower_delete(
             del,

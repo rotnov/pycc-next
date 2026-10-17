@@ -780,6 +780,10 @@ fn emit_call_with<'ctx>(
 /// already-set exception, and the operation therefore has exactly *one*
 /// failure edge rather than two. The result is a new reference, owned
 /// on the rule `foreign_attr.rs` documents for an attribute load.
+///
+/// `namespace` loads a fallback-bound global from the module's namespace
+/// dictionary ([`crate::ext::EXT_NS_GETITEM_SYMBOL`]: a missing key is a
+/// `NameError`).
 pub(super) fn emit_subscript<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -787,6 +791,7 @@ pub(super) fn emit_subscript<'ctx>(
     rt: &RtFns<'ctx>,
     base: Scalar<'ctx>,
     index: Scalar<'ctx>,
+    namespace: bool,
 ) -> Scalar<'ctx> {
     let edge = ForeignFailEdge::for_current(builder);
     let base_ptr = expect_object_pointer(base);
@@ -820,7 +825,11 @@ pub(super) fn emit_subscript<'ctx>(
 
     let getitem = shim_fn(
         module,
-        EXT_OBJ_GETITEM_SYMBOL,
+        if namespace {
+            crate::ext::EXT_NS_GETITEM_SYMBOL
+        } else {
+            EXT_OBJ_GETITEM_SYMBOL
+        },
         ptr.fn_type(&[ptr.into(), ptr.into()], false),
     );
     let result = builder

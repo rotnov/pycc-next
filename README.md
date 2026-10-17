@@ -199,10 +199,9 @@ v0.3 was 1.7x).
 tomli is typed code written for mypyc (`from __future__ import annotations`, aliases
 imported only under `if TYPE_CHECKING:`, `Final` constants, frozenset tables,
 keyword-only parameters, `tuple[int, str]` results). Its four modules build unchanged
-and its own 18 tests pass (one is skipped by tomli itself). 36 of its 40
-functions compile; 4 run in CPython (`--report-fallbacks`: the exception class, whose
-`__init__` imports, `make_safe_parse_float()` and its closure, and an `lru_cache`d
-helper). A function whose
+and its own 18 tests pass (one is skipped by tomli itself). 37 of its 40
+functions compile; 3 run in CPython (`--report-fallbacks`: the exception class's
+`__init__`, which imports, and `make_safe_parse_float()` and its closure). A function whose
 signature the boundary cannot carry (a `tuple[int, str]` result, a `frozenset`
 parameter) is compiled for the module's own callers and runs in CPython only when Python
 calls it (`twin:` in the report). `loads()` of tomli's benchmark document runs
@@ -234,15 +233,18 @@ buffers in place (`--report-fallbacks`: `specialized: undo_filter_paeth ... scan
 bytearray, previous: bytearray, result: bytearray`). Reading a 256x256 RGB image whose rows
 use all five filter types runs **10x faster** than in CPython: `python3
 bench/package_check.py pypng --time --runs 5` measured 0.015 s against 0.157 s for five
-`Reader.read()`s. 64 of its 85 functions compile (15 in v0.5; `--report-fallbacks`),
+`Reader.read()`s. 78 of its 85 functions compile (64 before v0.7's method-level fallback, 15 in v0.5;
+`--report-fallbacks`),
 `Reader` among them: its chunk handlers, which it looks up by name
 (`getattr(self, "_process_" + kind)`), its generator methods feeding each other, the
 nested `def convert()` each branch defines, and `bytes` literals, `*args` calls and
 `except struct.error:`. Its sub-byte rows are unpacked by a specialization taking
-`self.bitdepth` as a native `int` into a native `bytearray`. Still in CPython: the
-`Writer` class (a class used as a default value), `Image` (a `with` statement), the
-exception classes (a custom `__str__`, attribute bases), and helpers using generator
-expressions or `dict()`. Decoding every PngSuite image its tests use (`--time`'s second
+`self.bitdepth` as a native `int` into a native `bytearray`. Still in CPython: seven
+functions (`Writer.__init__` and `from_array`, which `del` a CPython object, two using
+generator expressions, a local `import`, a read of `__file__`, and a membership test of
+an object in a list of tuples); the `Writer` and exception classes are created by
+CPython (a class used as a default value, a custom `__str__`, attribute bases), their
+other methods compiled. Decoding every PngSuite image its tests use (`--time`'s second
 measurement) runs **3.2x faster** than CPython (19 ms against 60 ms for five passes,
 best of 15 interleaved runs; 4.6x fewer instructions under callgrind). The filter loops'
 `int` locals are proven to stay small (byte items, `& 0xFF`, `abs()`, `range()` bounds),
@@ -351,10 +353,23 @@ and setuptools): that is the test harness, not a change to the packages.
   works, and publishes the module's variables and imports as module attributes and
   its classes' constants as class attributes. Known gaps are listed in
   `docs/DEVIATIONS.md`.
-- **Per-function fallback** (non-strict only): a top-level function, class or
-  statement that pycc cannot compile yet (a lambda used as a value, ...) is
-  kept as Python source and run by CPython's own `exec` in the
-  module's namespace, at its place in the module. Compiled code calls a fallback
+- **Per-function fallback** (non-strict only): a construct pycc cannot compile yet (a
+  lambda used as a value, ...) sends only the smallest enclosing function or method to
+  CPython, kept as Python source and run by CPython's own `exec` in the module's
+  namespace, at its place in the module. A class whose statement CPython has to run
+  (it inherits a CPython class such as `threading.Thread`, `collections.Counter`,
+  `argparse.Action` or a library exception, has a metaclass, descriptors, class
+  attributes of any type, decorated methods or properties) is created by CPython, and
+  each of its methods' bodies is still compiled: the `def` in the class body forwards
+  to a compiled function (`self` crosses as the CPython instance, `super()` and
+  `__class__` keep working), so Python code subclassing the class, metaclass hooks and
+  `__init_subclass__` behave as in CPython. In an `--ext` module a compiled class whose
+  method cannot compile stays a native class, that method attached to it as a CPython
+  function. A decorated top-level function keeps its `def` (decorators, defaults,
+  signature) in CPython and its body compiled. `--report-fallbacks` reports each
+  (`fallback: method ...`, `lifted: function ...`, `fallback: class ... its methods
+  compiled`). Library-typed annotations (`m: re.Match`), general unions, `X | None` of
+  objects, the `with` statement and starred expressions compile natively on objects. Compiled code calls a fallback
   function as a CPython object; fallback code calls compiled functions as the
   module's published callables (an unannotated function that fallback code calls
   is compiled with object parameters instead of inferred ones; one with a parameter

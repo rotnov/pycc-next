@@ -24,16 +24,36 @@
 //! 3. repeat until the rewrite compiles, or no diagnostic names a statement
 //!    that is still compiled (then the original diagnostics are reported).
 //!
+//! The unit of fallback is the smallest enclosing function or method, not
+//! the top-level statement: every `def` of a class body or block is a
+//! *lift* (`lift.rs`), a unit of its own after the top-level statements.
+//! A class (or block) statement CPython runs keeps its lifts compiled, each
+//! `def` forwarding to a compiled module function holding its body; a lift
+//! that fails runs in CPython inside its statement. In an `--ext` module a
+//! compiled class keeps its native type and a failing method of it is
+//! *attached* (`attach.rs`): a CPython function the class calls. The
+//! statement-level steps above apply to these units unchanged; `cascade.rs`
+//! adds what fallback code needs (a class it subclasses, a compiled name it
+//! cannot see) and `driver.rs` runs the loop.
+//!
 //! Strict mode never falls back. Only the entry module falls back; a
 //! diagnostic in another module of the program is reported as before.
 
 mod annotations;
+mod attach;
 mod builtins;
+mod cascade;
+mod driver;
 mod exceptions;
 mod function_values;
+mod lift;
 mod names;
+mod package_bases;
 mod render;
+mod report;
 
+pub(crate) use lift::LIFT_PREFIX;
+pub(crate) use driver::{can_fall_back, with_fallback};
 pub(crate) use render::Rendered;
 
 use pycc_ast::Stmt;
@@ -53,7 +73,8 @@ const SYS: &str = "__pycc_fallback_sys";
 mod state;
 
 pub(crate) use state::{
-    Snapshot, active, entry_override, entry_source, reporting, set_report, twinned_exports,
+    Snapshot, active, attached_methods, entry_override, entry_source, reporting, set_report,
+    twinned_exports,
 };
 use state::{REPORT, install, set_override};
 
@@ -86,6 +107,10 @@ impl Publishes {
     /// public (a leading underscore is never exported), and for a function
     /// whose signature is inferred (`unannotated`), typed for any caller.
     fn sees(self, name: &str, class: bool, unannotated: bool) -> bool {
+        // A lifted method body (`lift`): published for its forwarder.
+        if name.starts_with(lift::LIFT_PREFIX) {
+            return self.functions;
+        }
         let published = if class {
             self.classes
         } else {
@@ -125,6 +150,11 @@ struct TopStmt {
     /// An exception class the artifact would publish without its own
     /// members (`exceptions`): Python code never sees it compiled.
     hidden_members: bool,
+    /// The names its class statements' bases read (`class C(B)`, at any
+    /// depth outside a function): a compiled class Python code subclasses
+    /// runs in CPython (`cascade`), since a published class is not a base
+    /// CPython accepts.
+    bases: BTreeSet<String>,
 }
 
 /// A diagnostic of the compiled rewrite, as the fallback loop sees it.
@@ -188,6 +218,14 @@ pub(crate) struct Plan {
     /// (`Publishes::variables`): every name a top-level statement other
     /// than a `def` or `class` binds.
     external: BTreeSet<String>,
+    /// How many of `stmts` (and `ast`) are top-level statements; the rest
+    /// are the `def`s lifted out of them (`lift`), unit `top + i` being
+    /// `lifts[i]`.
+    top: usize,
+    lifts: Vec<lift::Lift>,
+    /// The classes other modules of the entry's package subclass
+    /// (`package_bases`): they run in CPython (`cascade`).
+    package_bases: BTreeMap<String, String>,
 }
 
 impl Plan {
@@ -246,6 +284,7 @@ impl Plan {
                         && !wrapped.contains(def.name.as_str())),
                 hidden_members: matches!(stmt, Stmt::ClassDef(class)
                     if hidden_members.contains(class.name.as_str())),
+                bases: names::base_names(stmt),
             })
             .collect::<Vec<_>>();
         let external = if publishes.variables {
@@ -261,10 +300,50 @@ impl Plan {
         };
         let defers_annotations = annotations::defers_annotations(&module.body);
         let annotation_sites = annotations::sites(source, &module.body);
+        let mut stmts = stmts;
+        let mut ast: Vec<Stmt> = module.body.into_iter().collect();
+        let top = ast.len();
+        let mut lifts = Vec::new();
+        let mut lifted_asts = Vec::new();
+        let mut next = 0;
+        for (index, stmt) in ast.iter().enumerate() {
+            let mut found = lift::find(index, stmt, source, &mut next);
+            if found.is_empty() {
+                continue;
+            }
+            if let Stmt::ClassDef(class) = stmt {
+                attach::analyze(class, &mut found);
+            }
+            // Once split, CPython runs the statement without the lifted
+            // bodies, and reads the lifted functions instead.
+            let starts: BTreeSet<u32> = found.iter().map(|(l, _)| l.range.start).collect();
+            let stripped = lift::without_bodies(stmt, &starts);
+            let owner = &mut stmts[index];
+            owner.mentions = names::module_references(&stripped);
+            owner.mentions.extend(found.iter().map(|(l, _)| l.name.clone()));
+            owner.declares = names::all_global_declarations(&stripped);
+            for (lift, analyzed) in found {
+                let name = lift.name.clone();
+                stmts.push(TopStmt {
+                    range: lift.keyword..lift.range.end,
+                    kind: Kind::Def(name.clone(), false),
+                    bound: BTreeSet::from([name.clone()]),
+                    mentions: names::module_references(&analyzed),
+                    opaque: BTreeSet::from([name]),
+                    declares: names::all_global_declarations(&analyzed),
+                    defaults: false,
+                    hidden_members: false,
+                    bases: BTreeSet::new(),
+                });
+                lifts.push(lift);
+                lifted_asts.push(analyzed);
+            }
+        }
+        ast.extend(lifted_asts);
         Some(Self {
             source: source.to_string(),
             display: display.to_string(),
-            ast: module.body.into_iter().collect(),
+            ast,
             stmts,
             fallback: BTreeMap::new(),
             object_builtins: BTreeMap::new(),
@@ -279,10 +358,22 @@ impl Plan {
             entry_dir: None,
             publishes,
             external,
+            top,
+            lifts,
+            package_bases: BTreeMap::new(),
         })
     }
 
     /// Records the entry file's directory (see `entry_dir`).
+    /// Records the entry file (`set_entry_dir`, and under
+    /// `--foreign-relative-imports` the classes its package subclasses).
+    pub(crate) fn set_entry(&mut self, path: &Path) {
+        if self.publishes.foreign_relative_imports {
+            self.package_bases = package_bases::subclassed_in_package(path);
+        }
+        self.set_entry_dir(path.parent().map(Path::to_path_buf));
+    }
+
     pub(crate) fn set_entry_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.entry_dir = dir;
         self.substituted.clear();
@@ -331,13 +422,7 @@ impl Plan {
         if stmt.opaque.contains("*") {
             return false;
         }
-        let local = |module: &str| {
-            let top = module.split('.').next().unwrap_or(module);
-            self.entry_dir.as_ref().is_some_and(|dir| {
-                dir.join(format!("{top}.py")).exists() || dir.join(top).is_dir()
-            })
-        };
-        if modules.iter().any(|m| local(m)) {
+        if modules.iter().any(|m| self.is_local_module(m)) {
             return false;
         }
         self.binds_alone(index)
@@ -356,12 +441,31 @@ impl Plan {
             Stmt::ImportFrom(import) => import.module.iter().map(|m| m.as_str()).collect(),
             _ => return false,
         };
-        modules.iter().any(|module| {
-            let top = module.split('.').next().unwrap_or(module);
-            self.entry_dir.as_ref().is_some_and(|dir| {
-                dir.join(format!("{top}.py")).exists() || dir.join(top).is_dir()
-            })
-        })
+        modules.iter().any(|module| self.is_local_module(module))
+    }
+
+    /// Whether the absolute import of `module` names a module of the
+    /// program's own: one found from its source root (the entry's directory,
+    /// climbed past every package `__init__.py`, as the loader finds it), but
+    /// not, under `--foreign-relative-imports`, one of the entry's own
+    /// top-level package, which binds the CPython module (#1382).
+    fn is_local_module(&self, module: &str) -> bool {
+        let top = module.split('.').next().unwrap_or(module);
+        let Some(dir) = &self.entry_dir else {
+            return false;
+        };
+        let mut root = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+        let mut package = None;
+        while root.join("__init__.py").is_file() {
+            package = root.file_name().map(|n| n.to_string_lossy().into_owned());
+            if !root.pop() {
+                break;
+            }
+        }
+        if self.publishes.foreign_relative_imports && package.as_deref() == Some(top) {
+            return false;
+        }
+        root.join(format!("{top}.py")).exists() || root.join(top).is_dir()
     }
 
     /// Whether the plan makes a project import fall back, which no plan
@@ -398,6 +502,9 @@ impl Plan {
         // preamble goes after them.
         let first = self.preamble_position();
         for failure in failures {
+            if self.class_without_attribute(failure) || self.receiving_generators(failure) {
+                continue;
+            }
             if self.erase_annotation(rendered, failure)
                 || self.functions_as_objects(rendered, failure)
                 || self.rewrite_builtin_use(rendered, failure)
@@ -423,6 +530,31 @@ impl Plan {
                         }
                         _ => reason,
                     };
+                    // An unsupported construct in the body of a `def` the
+                    // statement lifts fails the lifted body too: that lift
+                    // falls back at once (`lift`).
+                    // A method of a compiled class that can attach to it
+                    // (`attach`) runs in CPython alone, the class compiled.
+                    if index < self.top
+                        && failure.diagnostic.code == "C0001"
+                        && let Some(at) = self.source_start(rendered, failure)
+                        && let Some(unit) = self
+                            .lifts_of(index)
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .find(|unit| {
+                                self.lift(*unit).is_some_and(|lift| lift.body.contains(&at))
+                            })
+                    {
+                        self.fallback.entry(unit).or_insert_with(|| reason.clone());
+                        if self.publishes.classes
+                            && matches!(self.stmts[index].kind, Kind::Class(_))
+                            && !self.fallback.contains_key(&index)
+                            && self.lift(unit).is_some_and(|lift| lift.attach.is_some())
+                        {
+                            continue;
+                        }
+                    }
                     self.fallback.entry(index).or_insert(reason);
                 }
                 Some(_) => {}
@@ -430,14 +562,14 @@ impl Plan {
                     // A diagnostic no statement owns is usually the
                     // module-level solver's: the module-level statements
                     // fall back first, every statement only once they have.
-                    let module_level: Vec<usize> = (first..self.stmts.len())
+                    let module_level: Vec<usize> = (first..self.top)
                         .filter(|index| {
                             matches!(self.stmts[*index].kind, Kind::Other | Kind::Import)
                                 && !self.fallback.contains_key(index)
                         })
                         .collect();
                     let marked: Vec<usize> = if module_level.is_empty() {
-                        (first..self.stmts.len()).collect()
+                        (first..self.top).collect()
                     } else {
                         module_level
                     };
@@ -457,6 +589,82 @@ impl Plan {
         ) != before
     }
 
+    /// Makes the compiled class a `T0044` (`class `C` has no attribute
+    /// named `x``) names run in CPython, returning whether it did: code
+    /// reading or setting an attribute the class does not declare is code
+    /// CPython would run on a Python instance (`o.extra = 1` from module
+    /// code), which a compiled instance, with no `__dict__`, refuses.
+    fn class_without_attribute(&mut self, failure: &Failure) -> bool {
+        let message = failure.diagnostic.message.as_str();
+        if failure.diagnostic.code != "T0044" {
+            return false;
+        }
+        let Some(rest) = message.strip_prefix("class `") else {
+            return false;
+        };
+        let Some((class, rest)) = rest.split_once('`') else {
+            return false;
+        };
+        let Some(attr) = rest
+            .strip_prefix(" has no attribute named `")
+            .and_then(|r| r.split('`').next())
+        else {
+            return false;
+        };
+        let Some(index) = (0..self.top).find(|index| {
+            matches!(&self.stmts[*index].kind, Kind::Class(name) if name == class)
+        }) else {
+            return false;
+        };
+        if self.fallback.contains_key(&index) {
+            return false;
+        }
+        self.fallback.insert(
+            index,
+            format!("code outside the class uses an attribute `{attr}` it does not declare"),
+        );
+        true
+    }
+
+    /// Makes the compiled generator functions that receive sent values run
+    /// in CPython on a `send()` of a value their send type excludes
+    /// (`T0021`), returning whether any newly did. Sending from CPython
+    /// instead (the statement falling back) would reach the same compiled
+    /// generator, which receives only `None` from Python code; a generator
+    /// CPython creates takes any value. A *receiving* generator is one whose
+    /// `yield` is not a statement of its own (`x = (yield total)`); the
+    /// diagnostic does not say which generator was sent to, so every one
+    /// falls back.
+    fn receiving_generators(&mut self, failure: &Failure) -> bool {
+        if failure.diagnostic.code != "T0021"
+            || !failure.diagnostic.message.starts_with("`send()` to a generator taking")
+        {
+            return false;
+        }
+        let receiving: Vec<usize> = (0..self.top)
+            .filter(|index| !self.fallback.contains_key(index))
+            .filter(|index| {
+                let Stmt::FunctionDef(def) = &self.ast[*index] else {
+                    return false;
+                };
+                let range = &self.stmts[*index].range;
+                pycc_ast::body_yields(&def.body)
+                    && self.source[range.start as usize..range.end as usize]
+                        .lines()
+                        .any(|line| line.contains("yield") && !line.trim_start().starts_with("yield"))
+            })
+            .collect();
+        for &index in &receiving {
+            self.fallback.insert(
+                index,
+                "code sends values to its generators, which a compiled generator receives only \
+                 from compiled code"
+                    .to_string(),
+            );
+        }
+        !receiving.is_empty()
+    }
+
     /// Twins the function an export gap (`C0003`) of an `--ext` module
     /// refuses, returning whether it did.
     fn twin(&mut self, rendered: Option<&Rendered>, failure: &Failure, reason: &str) -> bool {
@@ -466,7 +674,10 @@ impl Plan {
         let Some(index) = self.owner_of(rendered, failure) else {
             return false;
         };
-        if !matches!(self.stmts[index].kind, Kind::Def(..)) || self.fallback.contains_key(&index) {
+        if !matches!(self.stmts[index].kind, Kind::Def(..))
+            || self.fallback.contains_key(&index)
+            || index >= self.top
+        {
             return false;
         }
         self.mirrored.insert(index);
@@ -477,12 +688,17 @@ impl Plan {
     /// The source line a failure's span starts on, when it has one in
     /// compiled source.
     fn source_line(&self, rendered: Option<&Rendered>, failure: &Failure) -> Option<usize> {
+        Some(line_of(&self.source, self.source_start(rendered, failure)?))
+    }
+
+    /// The source offset a failure's span starts at, when it has one in
+    /// compiled source.
+    fn source_start(&self, rendered: Option<&Rendered>, failure: &Failure) -> Option<u32> {
         let span = failure.diagnostic.span.filter(|s| (s.start, s.end) != (0, 0))?;
-        let at = match rendered {
-            Some(rendered) => rendered.source_offset(span.start)?,
-            None => span.start,
-        };
-        Some(line_of(&self.source, at))
+        match rendered {
+            Some(rendered) => rendered.source_offset(span.start),
+            None => Some(span.start),
+        }
     }
 
     /// The statement a failure belongs to.
@@ -509,308 +725,6 @@ impl Plan {
         None
     }
 
-    /// Adds the statements whose compiled form Python code could not see:
-    /// a compiled import, function or class that fallback code reads
-    /// (unless the module publishes the function or class).
-    fn cascade(&mut self) {
-        loop {
-            let globals = self.dict_globals();
-            let read: BTreeSet<&String> = self
-                .fallback
-                .keys()
-                .chain(&self.mirrored)
-                .flat_map(|index| &self.stmts[*index].mentions)
-                .chain(&self.external)
-                .collect();
-            // A name fallback code reads that no top-level statement binds
-            // may come from a `from m import *`, whose names are not known
-            // here: such an import falls back with the first one.
-            let all_bound: BTreeSet<&String> =
-                self.stmts.iter().flat_map(|stmt| &stmt.bound).collect();
-            let unbound_read = read.iter().find(|name| !all_bound.contains(*name)).copied();
-            let mirror: Vec<usize> = (0..self.stmts.len())
-                .filter(|index| {
-                    !self.fallback.contains_key(index)
-                        && !self.mirrored.contains(index)
-                        && matches!(self.stmts[*index].kind, Kind::Import | Kind::Other)
-                        && self.stmts[*index].bound.iter().any(|n| read.contains(n))
-                        && self.mirrorable(*index)
-                })
-                .collect();
-            if !mirror.is_empty() {
-                self.mirrored.extend(mirror);
-                continue;
-            }
-            let objectify: Vec<usize> = (0..self.stmts.len())
-                .filter(|index| {
-                    !self.fallback.contains_key(index)
-                        && !self.objectified.contains(index)
-                        && matches!(&self.stmts[*index].kind,
-                            Kind::Def(name, true) if read.contains(name)
-                                && !self.stmts[*index].defaults
-                                && self.publishes.sees(name, false, false)
-                                && self.publishes.infers_unannotated)
-                })
-                .collect();
-            if !objectify.is_empty() {
-                self.objectified.extend(objectify);
-                continue;
-            }
-            // Issue #1: a compiled `def` whose name fallback code binds
-            // too (a redefinition in a block, `f = lambda ...`, a function
-            // declaring it `global`) runs in CPython as well, so the name
-            // has one home, the namespace, which compiled callers read.
-            let fallback_binds: BTreeSet<&String> = self
-                .fallback
-                .keys()
-                .flat_map(|index| {
-                    let stmt = &self.stmts[*index];
-                    stmt.bound.iter().chain(&stmt.declares)
-                })
-                .collect();
-            // So does a function defined more than once that fallback code
-            // reads: the module publishes a redefined function only once
-            // its last `def` has run (`pycc_codegen::ext_publish`), so
-            // Python code reading an earlier one would find no name.
-            let mut compiled_defs: BTreeMap<&String, usize> = BTreeMap::new();
-            for (index, stmt) in self.stmts.iter().enumerate() {
-                if let Kind::Def(name, _) = &stmt.kind
-                    && !self.fallback.contains_key(&index)
-                {
-                    *compiled_defs.entry(name).or_default() += 1;
-                }
-            }
-            let rebound: Vec<(usize, String)> = (0..self.stmts.len())
-                .filter(|index| !self.fallback.contains_key(index))
-                .filter_map(|index| match &self.stmts[index].kind {
-                    Kind::Def(name, _) if fallback_binds.contains(name) => Some((
-                        index,
-                        format!(
-                            "fallback code rebinds `{name}`, which compiled code calls natively"
-                        ),
-                    )),
-                    Kind::Def(name, _) if read.contains(name) && compiled_defs[name] > 1 => Some((
-                        index,
-                        format!(
-                            "fallback code uses `{name}`, which Python code cannot see compiled \
-                             before its last definition"
-                        ),
-                    )),
-                    _ => None,
-                })
-                .collect();
-            if !rebound.is_empty() {
-                self.fallback.extend(rebound);
-                continue;
-            }
-            let forced: Vec<(usize, String)> = self
-                .stmts
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| {
-                    !self.fallback.contains_key(index) && !self.mirrored.contains(index)
-                })
-                .filter_map(|(index, stmt)| {
-                    let name = match &stmt.kind {
-                        Kind::Import if stmt.opaque.contains("*") => unbound_read?,
-                        Kind::Import | Kind::Other => {
-                            stmt.opaque.iter().find(|n| globals.contains(*n))?
-                        }
-                        Kind::Def(name, unannotated)
-                            if read.contains(name)
-                                && (stmt.defaults || !self.publishes.sees(
-                                    name,
-                                    false,
-                                    *unannotated && !self.objectified.contains(&index),
-                                )) =>
-                        {
-                            name
-                        }
-                        Kind::Class(name)
-                            if read.contains(name) && !self.publishes.sees(name, true, false) =>
-                        {
-                            name
-                        }
-                        // Python code importing the module reads a public
-                        // class too: one published without its members
-                        // runs in CPython for it.
-                        Kind::Class(name)
-                            if stmt.hidden_members
-                                && (read.contains(name)
-                                    || self.publishes.variables && !name.starts_with('_')) =>
-                        {
-                            name
-                        }
-                        // An instance of a compiled class may reach fallback
-                        // code through any value without its name being
-                        // read, and an unpublished class's instances have no
-                        // attributes Python code can see.
-                        Kind::Class(name)
-                            if !self.publishes.classes && !self.fallback.is_empty() =>
-                        {
-                            name
-                        }
-                        Kind::Def(..) | Kind::Class(_) => return None,
-                    };
-                    Some((
-                        index,
-                        format!(
-                            "fallback code uses `{name}`, which Python code cannot see compiled"
-                        ),
-                    ))
-                })
-                .collect();
-            if forced.is_empty() {
-                return;
-            }
-            self.fallback.extend(forced);
-        }
-    }
-
-    /// Demotes the native global whose namespace copy `failure` points at
-    /// (a list cannot be stored into the namespace without a copy that
-    /// would break aliasing), returning whether it did.
-    fn demote(&mut self, rendered: Option<&Rendered>, failure: &Failure) -> bool {
-        let (Some(rendered), Some(span)) = (rendered, failure.diagnostic.span) else {
-            return false;
-        };
-        let Some((_, name)) = rendered
-            .mirror_spans
-            .iter()
-            .find(|(range, _)| range.contains(&span.start))
-        else {
-            return false;
-        };
-        self.demoted.insert(name.clone())
-    }
-
-    /// The dict globals (`dict_globals`) that compiled code keeps native
-    /// instead, copying every compiled store into the namespace: fallback
-    /// code reads them but never binds them, so compiled code is their one
-    /// writer, and every compiled store is a plain `=`/`+=` a copy can
-    /// follow. The copy only compiles for a value the namespace can hold
-    /// without breaking aliasing (a scalar or an object); any other is
-    /// demoted by the fallback loop.
-    pub(super) fn native_globals(&self) -> BTreeSet<String> {
-        let mut fallback_binds = BTreeSet::new();
-        for (index, stmt) in self.stmts.iter().enumerate() {
-            if self.fallback.contains_key(&index) {
-                fallback_binds.extend(stmt.bound.iter().cloned());
-                fallback_binds.extend(stmt.declares.iter().cloned());
-            } else if !matches!(stmt.kind, Kind::Other) {
-                fallback_binds.extend(stmt.opaque.iter().cloned());
-            }
-        }
-        let mut native: BTreeSet<String> = self
-            .dict_globals()
-            .into_iter()
-            .filter(|name| !fallback_binds.contains(name) && !self.demoted.contains(name))
-            .collect();
-        let none = BTreeSet::new();
-        for (index, stmt) in self.ast.iter().enumerate() {
-            if self.fallback.contains_key(&index) {
-                continue;
-            }
-            let mut rewriter = names::Rewriter::new(&none, NS).with_mirrors(native.clone());
-            pycc_ast::visitor::Visitor::visit_stmt(&mut rewriter, stmt);
-            native.retain(|name| !rewriter.unmirrorable.contains(name));
-        }
-        native
-    }
-
-    /// The module globals that live in the namespace dictionary.
-    fn dict_globals(&self) -> BTreeSet<String> {
-        let mut fallback_bound = BTreeSet::new();
-        let mut fallback_read = self.external.clone();
-        let mut compiled_bound = BTreeSet::new();
-        for (index, stmt) in self.stmts.iter().enumerate() {
-            if self.fallback.contains_key(&index) {
-                fallback_bound.extend(stmt.bound.iter().cloned());
-                fallback_read.extend(stmt.mentions.iter().cloned());
-            } else if self.twinned.contains_key(&index) {
-                fallback_bound.extend(stmt.declares.iter().cloned());
-                fallback_read.extend(stmt.mentions.iter().cloned());
-            } else if matches!(stmt.kind, Kind::Other | Kind::Import)
-                && !self.mirrored.contains(&index)
-            {
-                compiled_bound.extend(stmt.bound.iter().cloned());
-            }
-        }
-        let mut globals: BTreeSet<String> = fallback_read
-            .intersection(&compiled_bound)
-            .cloned()
-            .collect();
-        globals.extend(fallback_bound);
-        // A compiled `def`/`class` name stays native: it is published, or
-        // fallback code reading it made it fall back too (`cascade`).
-        for (index, stmt) in self.stmts.iter().enumerate() {
-            if let (false, Kind::Def(name, _) | Kind::Class(name)) =
-                (self.fallback.contains_key(&index), &stmt.kind)
-                && !compiled_bound.contains(name)
-            {
-                globals.remove(name);
-            }
-        }
-        globals
-    }
-
-    /// The statement the preamble goes before: the first one that is not
-    /// the module docstring or a `from __future__` import.
-    fn preamble_position(&self) -> usize {
-        let body = &self.ast;
-        let mut index = 0;
-        if matches!(body.first(), Some(Stmt::Expr(e)) if e.value.is_string_literal_expr()) {
-            index = 1;
-        }
-        while matches!(body.get(index), Some(Stmt::ImportFrom(import))
-            if import.module.as_ref().map(|m| m.as_str()) == Some("__future__"))
-        {
-            index += 1;
-        }
-        index
-    }
-
-    /// One line per fallback statement, for `--report-fallbacks`.
-    pub(crate) fn report_lines(&self) -> Vec<String> {
-        let twins = self.twinned.iter().map(|(index, reason)| {
-            let stmt = &self.stmts[*index];
-            let first = line_of(&self.source, stmt.range.start);
-            let last = line_of(&self.source, stmt.range.end.saturating_sub(1));
-            let name = match &stmt.kind {
-                Kind::Def(name, _) => name.as_str(),
-                _ => "?",
-            };
-            format!(
-                "twin: function `{name}` at {}:{first}-{last} is compiled, and runs in CPython \
-                 when Python code calls it: {reason}",
-                self.display
-            )
-        });
-        self.fallback
-            .iter()
-            .map(|(index, reason)| {
-                let stmt = &self.stmts[*index];
-                let first = line_of(&self.source, stmt.range.start);
-                let last = line_of(&self.source, stmt.range.end.saturating_sub(1));
-                let what = match &stmt.kind {
-                    Kind::Def(name, _) => format!("function `{name}`"),
-                    Kind::Class(name) => format!("class `{name}`"),
-                    Kind::Import | Kind::Other if first == last => "statement".to_string(),
-                    Kind::Import | Kind::Other => "statements".to_string(),
-                };
-                let lines = if first == last {
-                    format!("{first}")
-                } else {
-                    format!("{first}-{last}")
-                };
-                format!(
-                    "fallback: {what} at {}:{lines} runs in CPython: {reason}",
-                    self.display
-                )
-            })
-            .chain(twins)
-            .collect()
-    }
 }
 
 fn line_of(source: &str, offset: u32) -> usize {
@@ -888,281 +802,6 @@ fn py_str(text: &str) -> String {
     }
     out.push('"');
     out
-}
-
-/// Whether a diagnostic is one a fallback can resolve: anything but a
-/// syntax error, an interop-policy or embedding refusal.
-pub(crate) fn can_fall_back(diagnostic: &Diagnostic) -> bool {
-    !matches!(
-        diagnostic.code,
-        "L0001" | "L0002" | "I0402" | "I0403" | "I0405"
-    )
-}
-
-/// Runs `attempt` (one frontend pass) with the fallback loop around it,
-/// in non-strict mode. `split` turns a failure into the entry file's
-/// fallback-resolvable diagnostics, or `None` when the failure cannot be
-/// resolved by falling back (another file, a syntax error, an input
-/// error).
-pub(crate) fn with_fallback<T, E>(
-    path: &Path,
-    display: &str,
-    publishes: Publishes,
-    attempt: impl Fn() -> Result<T, E>,
-    split: impl Fn(&E) -> Option<Vec<Failure>>,
-) -> Result<T, E> {
-    set_override(None);
-    let first = attempt();
-    let failures = match &first {
-        Ok(_) if publishes.variables && mode_allows(path) => {
-            // Nothing falls back, but Python code reads the module's
-            // variables: compile the rewrite that publishes them.
-            let Some(mut plan) =
-                read_entry(path).and_then(|s| Plan::new(&s, display, publishes))
-            else {
-                return first;
-            };
-            if plan.external.is_empty() && !plan.stmts.iter().any(|stmt| stmt.hidden_members) {
-                return first;
-            }
-            plan.set_entry_dir(path.parent().map(Path::to_path_buf));
-            plan.cascade();
-            if plan.falls_back_a_project_import() {
-                return first;
-            }
-            let rendered = plan.render();
-            if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
-                eprintln!("--- fallback rewrite ---\n{}", rendered.text);
-            }
-            install(&rendered);
-            let value = match attempt() {
-                Ok(value) => Some(value),
-                Err(failure) => split(&failure).and_then(|failures| {
-                    converge(&mut plan, Some(rendered), failures, &attempt, &split)
-                }),
-            };
-            return match value {
-                Some(value) if !plan.falls_back_a_project_import() => {
-                    if REPORT.load(Ordering::Relaxed) {
-                        for line in plan.report_lines() {
-                            eprintln!("{line}");
-                        }
-                    }
-                    Ok(value)
-                }
-                _ => {
-                    set_override(None);
-                    attempt()
-                }
-            };
-        }
-        // Strict mode: Python code reads the module's variables, which a
-        // rewrite copies onto the module object (`crate::ext_globals`).
-        // Not under `--foreign-relative-imports`: the artifact is imported
-        // under a dotted name its `__name__` may not spell.
-        Ok(_)
-            if publishes.variables
-                && !publishes.foreign_relative_imports
-                && !crate::mode::non_strict_for(path) =>
-        {
-            return publish_strict(path, first, &attempt, &split);
-        }
-        Ok(_) => return first,
-        Err(failure) => match split(failure) {
-            Some(failures) if mode_allows(path) =>
-            {
-                failures
-            }
-            _ => return first,
-        },
-    };
-    let source = crate::fallback::read_entry(path);
-    let Some(mut plan) = source.and_then(|s| Plan::new(&s, display, publishes)) else {
-        return first;
-    };
-    plan.set_entry_dir(path.parent().map(Path::to_path_buf));
-    // With annotation aliases substituted (`annotations`), the failures of
-    // the source as written may be ones the substitution removes: the loop
-    // starts from the rewrite's own.
-    let (rendered, failures) = if plan.substituted.is_empty() {
-        (None, failures)
-    } else {
-        let rendered = plan.render();
-        if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
-            eprintln!("--- fallback rewrite ---\n{}", rendered.text);
-        }
-        install(&rendered);
-        match attempt() {
-            Ok(value) => {
-                if REPORT.load(Ordering::Relaxed) {
-                    for line in plan.report_lines() {
-                        eprintln!("{line}");
-                    }
-                }
-                return Ok(value);
-            }
-            Err(failure) => match split(&failure) {
-                Some(failures) => (Some(rendered), failures),
-                None => {
-                    set_override(None);
-                    return first;
-                }
-            },
-        }
-    };
-    let Some(mut value) = converge(&mut plan, rendered, failures, &attempt, &split) else {
-        set_override(None);
-        return first;
-    };
-    // Fallback code that reaches a project module would need CPython to
-    // import it: the program is refused with its original diagnostics.
-    if plan.falls_back_a_project_import() {
-        set_override(None);
-        return first;
-    }
-    // A statement that fell back for a type error early on may compile now
-    // that later rounds changed what it sees (a global kept native, a
-    // function compiled with objects, a builtin called through CPython):
-    // run the loop once more from a plan without those, and keep whichever
-    // result falls back less.
-    let mut retry = plan.clone();
-    retry.fallback.retain(|_, reason| !retryable(reason));
-    // So is a function compiled with objects only for fallback code that
-    // may be gone: a compiled class instance it then received as an object
-    // would have no attributes Python code can see.
-    retry.objectified.clear();
-    // What fallback code that stays forces is forced again.
-    retry.cascade();
-    if retry.fallback.len() < plan.fallback.len() {
-        let kept = entry_override();
-        let rendered = retry.render();
-        install(&rendered);
-        let retried = match attempt() {
-            Ok(value) => Some(value),
-            Err(failure) => split(&failure)
-                .and_then(|failures| converge(&mut retry, Some(rendered), failures, &attempt, &split)),
-        };
-        match retried {
-            Some(better)
-                if retry.fallback.len() < plan.fallback.len()
-                    && !retry.falls_back_a_project_import() =>
-            {
-                plan = retry;
-                value = better;
-            }
-            _ => set_override(kept),
-        }
-    }
-    if REPORT.load(Ordering::Relaxed) {
-        for line in plan.report_lines() {
-            eprintln!("{line}");
-        }
-    }
-    Ok(value)
-}
-
-/// Compiles the strict `--ext` rewrite publishing the entry module's
-/// variables (`crate::ext_globals`), dropping each name whose copy fails to
-/// compile; `first` (nothing published) when a failure is not one of the
-/// copies.
-fn publish_strict<T, E>(
-    path: &Path,
-    first: Result<T, E>,
-    attempt: &impl Fn() -> Result<T, E>,
-    split: &impl Fn(&E) -> Option<Vec<Failure>>,
-) -> Result<T, E> {
-    let Some(source) = read_entry(path) else {
-        return first;
-    };
-    let mut dropped = BTreeSet::new();
-    loop {
-        let Some(rewrite) = crate::ext_globals::rewrite(&source, &dropped) else {
-            set_override(None);
-            return first;
-        };
-        if std::env::var_os("PYCC_FALLBACK_DUMP").is_some() {
-            eprintln!("--- ext globals rewrite ---\n{}", rewrite.text);
-        }
-        set_override(Some(rewrite.text.clone()));
-        let failure = match attempt() {
-            Ok(value) => return Ok(value),
-            Err(failure) => failure,
-        };
-        let failures = split(&failure).unwrap_or_default();
-        let mut progress = false;
-        let mut attributed = !failures.is_empty();
-        for failure in &failures {
-            let at = failure.diagnostic.span.map(|s| s.start).or(failure.origin);
-            match at.and_then(|at| rewrite.copies.iter().find(|(range, _)| range.contains(&at))) {
-                Some((_, name)) => progress |= dropped.insert(name.clone()),
-                None => attributed = false,
-            }
-        }
-        if !attributed || !progress {
-            set_override(None);
-            return first;
-        }
-    }
-}
-
-/// Whether the fallback loop runs for `path`: non-strict mode, and not
-/// disabled with `PYCC_NO_FALLBACK`.
-fn mode_allows(path: &Path) -> bool {
-    crate::mode::non_strict_for(path) && std::env::var_os("PYCC_NO_FALLBACK").is_none()
-}
-
-/// Whether a statement that fell back for `reason` may compile in a later
-/// plan: a type error may, an unsupported construct (`C0001`) never does.
-fn retryable(reason: &str) -> bool {
-    !reason.starts_with("C0001")
-}
-
-/// The fallback loop: absorbs `failures` into `plan`, renders and compiles
-/// until an attempt succeeds (its value, with the rewrite as the entry
-/// override) or no failure marks anything new (`None`).
-fn converge<T, E>(
-    plan: &mut Plan,
-    mut rendered: Option<Rendered>,
-    mut failures: Vec<Failure>,
-    attempt: &impl Fn() -> Result<T, E>,
-    split: &impl Fn(&E) -> Option<Vec<Failure>>,
-) -> Option<T> {
-    let dump = std::env::var_os("PYCC_FALLBACK_DUMP").is_some();
-    loop {
-        if !plan.absorb(rendered.as_ref(), &failures) {
-            if dump {
-                eprintln!("--- fallback loop stuck on ---");
-                for failure in &failures {
-                    eprintln!("{} {:?}", describe(&failure.diagnostic), failure.diagnostic.span);
-                }
-            }
-            return None;
-        }
-        let next = plan.render();
-        if dump {
-            eprintln!("--- fallback rewrite ---\n{}", next.text);
-        }
-        install(&next);
-        rendered = Some(next);
-        match attempt() {
-            Ok(value) => return Some(value),
-            Err(failure) => match split(&failure) {
-                Some(next) => failures = next,
-                None => {
-                    if dump {
-                        eprintln!("--- fallback loop cannot place a failure ---");
-                    }
-                    return None;
-                }
-            },
-        }
-    }
-}
-
-/// The entry file's decoded source.
-fn read_entry(path: &Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    crate::source::decode_python_source(&bytes).ok()
 }
 
 #[cfg(test)]

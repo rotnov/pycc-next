@@ -439,6 +439,16 @@ PyObject *pycc_ext_obj_list(PyObject *a)
     return pycc_ext_stdlib_call("builtins", "list", a, NULL);
 }
 
+PyObject *pycc_ext_obj_dict(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "dict", a, NULL);
+}
+
+PyObject *pycc_ext_obj_set(PyObject *a)
+{
+    return pycc_ext_stdlib_call("builtins", "set", a, NULL);
+}
+
 PyObject *pycc_ext_obj_sorted(PyObject *a)
 {
     return pycc_ext_stdlib_call("builtins", "sorted", a, NULL);

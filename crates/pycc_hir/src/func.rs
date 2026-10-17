@@ -778,6 +778,11 @@ pub(crate) fn annotation_to_ty(
                 return Ok(ty);
             }
             let Expr::Name(base_name) = sub.value.as_ref() else {
+                // Non-strict mode: a library generic (`mod.Type[int]`) is
+                // an object.
+                if is_non_strict(aliases) && matches!(sub.value.as_ref(), Expr::Attribute(_)) {
+                    return Ok(Ty::Object);
+                }
                 return Err(unsupported(
                     "a subscripted type annotation's base must be a bare class name",
                     pycc_ast::expr_range(&sub.value),
@@ -1225,6 +1230,9 @@ pub(crate) fn annotation_to_ty(
             let other_side = match (bin_op.left.as_ref(), bin_op.right.as_ref()) {
                 (Expr::NoneLiteral(_), other) => other,
                 (other, Expr::NoneLiteral(_)) => other,
+                // Non-strict mode (v0.7 accept 2): a general union is an
+                // object, as CPython's value is whichever member it is.
+                _ if is_non_strict(aliases) => return Ok(Ty::Object),
                 _ => {
                     let range = std::ops::Range::<u32>::from(bin_op.range);
                     return Err(Diagnostic::error(
@@ -1234,7 +1242,14 @@ pub(crate) fn annotation_to_ty(
                     ));
                 }
             };
-            let inner = annotation_to_ty(other_side, type_param, class_name, aliases, class_defs)?;
+            let inner = match annotation_to_ty(other_side, type_param, class_name, aliases, class_defs)
+            {
+                Ok(inner) => inner,
+                // Non-strict mode: `T | None` of what is an object anyway
+                // (`mod.Type | None`) is an object too.
+                Err(_) if is_non_strict(aliases) => return Ok(Ty::Object),
+                Err(error) => return Err(error),
+            };
             // `Optional[T]` is only supported for `T` in `{int, float, bool}`
             // (D-197, #763, Part 1 of #747; widened to `float`/`bool` by
             // #809, Part 2): codegen's `{ inner, i8 }` representation
@@ -1249,6 +1264,11 @@ pub(crate) fn annotation_to_ty(
             // `Ty::Optional` reaching `pycc_types`/`pycc_mir`/`pycc_codegen`
             // always wraps one of `Ty::Int`, `Ty::Float`, or `Ty::Bool`
             // starting from this return.
+            if !matches!(inner, Ty::Int | Ty::Float | Ty::Bool) && is_non_strict(aliases) {
+                // Non-strict mode: an optional value of any other type is an
+                // object (`None` or the value), as in CPython.
+                return Ok(Ty::Object);
+            }
             if !matches!(inner, Ty::Int | Ty::Float | Ty::Bool) {
                 let range = std::ops::Range::<u32>::from(bin_op.range);
                 return Err(Diagnostic::error(
@@ -1268,6 +1288,9 @@ pub(crate) fn annotation_to_ty(
         Expr::StringLiteral(literal) => {
             string_annotation_to_ty(literal, type_param, class_name, aliases, class_defs)
         }
+        // Non-strict mode (v0.7 accept 2): a library type (`mod.Type`,
+        // `mod.Type[...]`) is an object, which its values are.
+        Expr::Attribute(_) if is_non_strict(aliases) => Ok(Ty::Object),
         other => Err(unsupported(
             format!(
                 "only a bare name type annotation is supported so far, got {}",

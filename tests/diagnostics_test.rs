@@ -253,11 +253,6 @@ fn c0001_future_barry_as_flufl() {
 }
 
 #[test]
-fn c0001_future_import_alias() {
-    assert_diagnostic_matches_fixture("c0001_future_import_alias");
-}
-
-#[test]
 fn l0001_yield_from_outside_function() {
     assert_diagnostic_matches_fixture("l0001_yield_from_outside_function");
 }

@@ -442,6 +442,43 @@ pub unsafe extern "C" fn pycc_rt_gen_can_send(g: *mut PyGenObj, is_none: i8) -> 
     }
 }
 
+/// The first half of `g.throw()` on a generator CPython holds (the
+/// iterator `pycc_ext_gen_wrap` boxes it in): takes the pending exception
+/// as the one to throw and readies `g` to raise it where it is suspended,
+/// `1` when the caller is now to resume it (with the value function that
+/// resumes it on every other step), `0` with an exception pending -- the
+/// thrown one for a finished generator, `ValueError` for a running one.
+///
+/// # Safety
+/// `g` must be a live generator, and an exception pending.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_gen_throw_pending(g: *mut PyGenObj) -> i8 {
+    let exc = crate::exception::pycc_rt_exception_take();
+    // SAFETY (caller): `g` is live.
+    unsafe {
+        match (*g).state {
+            DONE => {
+                crate::exception::pycc_rt_exception_raise(exc);
+                0
+            }
+            RUNNING => {
+                crate::exception::pycc_rt_exception_decref(exc);
+                raise_builtin(
+                    EXCEPTION_TYPE_VALUE_ERROR,
+                    "ValueError",
+                    "generator already executing",
+                );
+                0
+            }
+            _ => {
+                (*g).mode = MODE_THROWING;
+                (*g).thrown = exc;
+                1
+            }
+        }
+    }
+}
+
 /// `g.throw(exc)`: raises `exc` (whose reference passes to the call) at the
 /// `yield` where `g` is suspended (at its start when it has not run yet),
 /// with [`pycc_rt_gen_step`]'s answers. A finished generator raises `exc`

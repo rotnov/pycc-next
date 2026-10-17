@@ -956,23 +956,18 @@ fn an_unknown_future_feature_is_an_l0001_with_cpythons_wording() {
 }
 
 #[test]
-fn an_aliased_future_feature_is_the_generic_alias_c0001() {
-    // CPython accepts `annotations as ann` and binds a `_Feature` object
-    // pycc never models, so this is a capability gap, not a syntax error.
-    let source = "from __future__ import annotations as ann\n";
-    let diagnostics = lower_all_err(source);
-    assert_eq!(diagnostics.len(), 1);
-    assert_c0001(
-        &diagnostics[0],
-        "`from ... import x as y` aliasing is not supported yet",
-        span_of(source, source.trim_end(), 0),
-    );
-    // The alias check runs before the `barry_as_FLUFL` one.
+fn an_aliased_future_feature_lowers_to_nothing() {
+    // CPython binds `ann` to a `_Feature` object pycc never models; the
+    // directive itself is honored and binds nothing, like the unaliased
+    // form (docs/DEVIATIONS.md).
+    let hir = lower_all_ok("from __future__ import annotations as ann\n");
+    assert!(hir.imports.is_empty());
+    // `barry_as_FLUFL` stays refused under an alias too.
     let source = "from __future__ import barry_as_FLUFL as b\n";
     let diagnostics = lower_all_err(source);
     assert_c0001(
         &diagnostics[0],
-        "`from ... import x as y` aliasing is not supported yet",
+        "the `barry_as_FLUFL` future feature (`<>` in place of `!=`) is not supported yet",
         span_of(source, source.trim_end(), 0),
     );
 }
