@@ -343,3 +343,14 @@ Accept:
    This is a one-off evaluation, not a CI gate.
 5. **Real-world corpus:** strict >= 190/200; `--non-strict` 200/200, 0 wrong, with no
    top-level statement in CPython fallback (carried over from v0.6 if not met there).
+   **Met 2026-10-17** (CI run 39051177139, commit 61e1488): strict 190/200, 0 wrong
+   (`python3 bench/corpus.py`); `--non-strict` 200/200, 0 wrong, 0/1191 top-level
+   statements in CPython fallback (`--require-correct`). Problem 188 compiles through
+   `isinstance` folding of a statically known type (#5), parameter webs (#6) and
+   per-call-site copies of nested helpers (#7) (`pycc_types::static_isinstance`,
+   `pycc_ast::desugar::webs`); problem 168 through iterated `range` values compiled as
+   triples (`pycc_ast::desugar::range_values`) and `is None` folding of a never-`None`
+   value. Tests: `tests/corpus_v07.rs`. The remaining strict refusals are mixed-type
+   containers (049, 070, 130), an `int | None` used as an `int` without a `None` test
+   (016, 056, 100, 123, 184), a variable rebound to another type on some paths (200) and
+   iterator objects as values (057).
