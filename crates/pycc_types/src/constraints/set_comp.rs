@@ -199,7 +199,7 @@ pub(super) fn apply_container_defaults(
                         ))
                     });
                 let root = root(parents, *var);
-                concrete[root].get_or_insert_with(|| container);
+                concrete[root].get_or_insert(container);
             }
             ContainerDefault::DictComp { var, key, value } => {
                 let dict = settled(parents, concrete, *key)
@@ -207,7 +207,7 @@ pub(super) fn apply_container_defaults(
                     .and_then(|(k, v)| dict_of(k, v))
                     .unwrap_or_else(|| Ty::Dict(Box::new((Ty::Str, Ty::Int))));
                 let root = root(parents, *var);
-                concrete[root].get_or_insert_with(|| dict);
+                concrete[root].get_or_insert(dict);
             }
             _ => {}
         }
@@ -220,7 +220,7 @@ pub(super) fn apply_container_defaults(
                 _ => Ty::Set(Box::new(Ty::Int)),
             };
             let root = root(parents, *var);
-            concrete[root].get_or_insert_with(|| container);
+            concrete[root].get_or_insert(container);
         }
     }
     loop {

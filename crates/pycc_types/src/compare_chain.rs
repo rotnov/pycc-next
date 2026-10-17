@@ -225,7 +225,7 @@ pub(crate) fn infer_compare_chain(
         .collect();
     // A chain over a CPython object is the conjunction of its links, each
     // an ordinary object comparison (`pycc_hir::chain_as_conjunction`).
-    if operand_tys.iter().any(|ty| *ty == Ty::Object)
+    if operand_tys.contains(&Ty::Object)
         && let Some(conjunction) = pycc_hir::chain_as_conjunction(first, links)
     {
         return infer_expr_in(env, local_names, &conjunction);

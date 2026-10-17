@@ -352,7 +352,8 @@ fn a_chained_identity_link_on_a_narrowed_read_is_refused() {
             "def f(o: object) -> bool:\n    if isinstance(o, int):\n        return {test}\n    return False\n"
         ));
     }
-    for test in ["o is not (o or o) is not None"] {
+    {
+        let test = "o is not (o or o) is not None";
         refused(
             &format!(
                 "def f(o: object) -> bool:\n    if isinstance(o, int):\n        return {test}\n    return False\n"

@@ -82,11 +82,9 @@ impl Engine {
                     ) => {
                         // A dict CPython owns (its key slot in conflict)
                         // hands out objects.
-                        let slot = if !iterate && crate::non_strict::is_non_strict()
-                            && self.store.is_conflicted(k)
+                        let slot = if iterate
+                            || (crate::non_strict::is_non_strict() && self.store.is_conflicted(k))
                         {
-                            k
-                        } else if iterate {
                             k
                         } else {
                             v

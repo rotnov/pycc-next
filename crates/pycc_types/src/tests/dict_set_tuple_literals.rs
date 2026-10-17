@@ -569,7 +569,7 @@ fn an_empty_tuple_literal_is_the_empty_tuple() {
     let env = Environment::new();
     assert_eq!(
         infer_expr(&env, &HirExpr::TupleLiteral(vec![])),
-        Ok(Ty::Tuple(Box::new(vec![])))
+        Ok(Ty::Tuple(Box::default()))
     );
 }
 

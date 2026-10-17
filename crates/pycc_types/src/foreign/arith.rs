@@ -71,9 +71,11 @@ pub(crate) fn check_delete_item(
     let base_ty = infer_expr_in(env, local_names, base)?;
     if matches!(base_ty, Ty::Dict(_) | Ty::List(_)) {
         let key_ty = infer_expr_in(env, local_names, key)?;
-        if let Some(Ok(_)) =
-            pycc_hir::builtins::resolve_method(&base_ty, "__pycc_delitem__", &[key_ty.clone()])
-        {
+        if let Some(Ok(_)) = pycc_hir::builtins::resolve_method(
+            &base_ty,
+            "__pycc_delitem__",
+            std::slice::from_ref(&key_ty),
+        ) {
             return Ok(());
         }
         return Err(Diagnostic::error(

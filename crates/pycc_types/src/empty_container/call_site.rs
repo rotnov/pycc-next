@@ -103,6 +103,10 @@ fn apply_observed(
 /// yet.
 type Incomplete = crate::fx::HashSet<(String, usize)>;
 
+/// A visitor of a call: the environment and local names its arguments type
+/// in, the callee and the arguments.
+type CallVisitor<'a> = dyn FnMut(&crate::Environment, &[&str], &str, &[HirExpr]) + 'a;
+
 /// For every `(function, parameter index)` some call site passes a typable
 /// argument to: `Some(ty)` when every typable argument has container type
 /// `ty`, `None` when they disagree or one is not a container; and the
@@ -169,7 +173,7 @@ fn observe_calls(hir: &HirModule) -> (HashMap<(String, usize), Option<Ty>>, Inco
 /// arguments type in.
 pub(super) fn for_each_call(
     hir: &HirModule,
-    visit: &mut dyn FnMut(&crate::Environment, &[&str], &str, &[HirExpr]),
+    visit: &mut CallVisitor<'_>,
 ) {
     let local_names = crate::module::module_function_local_names(hir);
     let module_env = module_environment(hir);

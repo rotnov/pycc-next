@@ -849,7 +849,8 @@ fn int_and_str_of_a_foreign_object_are_admitted_as_int_and_str() {
 fn str_of_a_non_object_keeps_its_c0001_refusal() {
     // `str(x)` of a scalar is a runtime builtin (`pycc_hir::builtins`); a
     // set argument is still a capability gap.
-    for callee in ["str"] {
+    {
+        let callee = "str";
         let mut env = Environment::new();
         env.bind("x".to_string(), Ty::Set(Box::new(Ty::Int)));
         let expr = HirExpr::Call {

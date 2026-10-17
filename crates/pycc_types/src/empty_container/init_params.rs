@@ -49,10 +49,9 @@ pub(crate) fn resolve_init_params(hir: &HirModule) -> Result<Option<HirModule>, 
     let mut observed = observe(hir, &constructors);
     // An argument read from an unannotated function's return (`N, K =
     // MAP()`) is typed once the solver has pinned that return.
-    if observed.values().any(Option::is_none)
-        || inits_missing(hir, &inits, &observed)
-    {
-        if let Some(typed) = super::solved_signatures::with_solved_returns(hir) {
+    if (observed.values().any(Option::is_none)
+        || inits_missing(hir, &inits, &observed))
+        && let Some(typed) = super::solved_signatures::with_solved_returns(hir) {
             let retry = observe(&typed, &constructors);
             for (key, ty) in retry {
                 if let Some(ty) = ty {
@@ -63,7 +62,6 @@ pub(crate) fn resolve_init_params(hir: &HirModule) -> Result<Option<HirModule>, 
                 }
             }
         }
-    }
     let mut resolved = hir.clone();
     let mut missing: KeyedDiagnostics = Vec::new();
     for (index, item) in resolved.items.iter_mut().enumerate() {

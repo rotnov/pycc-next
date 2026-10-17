@@ -407,7 +407,7 @@ pub(crate) fn infer_call_expr(
         && env.lookup_function(callee).is_none()
         && env.lookup_class(callee).is_none()
     {
-        return crate::round::round_call_ty(&arg_tys);
+        return crate::round::round_call_ty(arg_tys);
     }
     if callee == "float" && env.lookup_function(callee).is_none() {
         // D-086's own remedy for the int-to-float boundary: a hand-recognized

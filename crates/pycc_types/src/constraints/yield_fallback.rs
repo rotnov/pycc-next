@@ -64,7 +64,7 @@ fn mixes_objects(
             .iter()
             .map(|value| infer_expr_in(env, local_names, value).ok())
             .collect();
-        types.iter().any(|ty| *ty == Some(Ty::Object))
+        types.contains(&Some(Ty::Object))
             && types.iter().all(|ty| match ty {
                 Some(Ty::Object) => true,
                 Some(ty) => crate::object_box::admits(env, ty, &Ty::Object),
@@ -109,6 +109,10 @@ pub(super) fn every_value_from_body_is(
     .unwrap_or(false)
 }
 
+/// A visitor of a function body: its environment, local names and
+/// statements.
+type BodyVisitor<'a, T> = dyn FnMut(&Environment, &[&str], &[HirStmt]) -> T + 'a;
+
 /// Runs `f` over the body of `name` with the checker's flat local binder
 /// over it: `params` bound and `resolved` registered for the calls it makes.
 fn with_body_env<T>(
@@ -116,7 +120,7 @@ fn with_body_env<T>(
     name: &str,
     params: &[Ty],
     resolved: &FunctionSignatures,
-    f: &mut dyn FnMut(&Environment, &[&str], &[HirStmt]) -> T,
+    f: &mut BodyVisitor<'_, T>,
 ) -> Option<T> {
     let (param_names, body) = hir.items.iter().find_map(|item| match item {
         HirItem::Function {

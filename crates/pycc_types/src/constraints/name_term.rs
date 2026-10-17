@@ -3,8 +3,8 @@
 use super::*;
 
 pub(crate) fn collect_name_constraints(
-    parents: &mut Vec<usize>,
-    concrete: &mut Vec<Option<Ty>>,
+    parents: &mut [usize],
+    concrete: &mut [Option<Ty>],
     env: &ConstraintEnvironment<'_, '_>,
     expr: &HirExpr,
 ) -> Result<Option<TypeTerm>, Diagnostic> {
