@@ -84,7 +84,24 @@ enum IntParseError {
 /// sign, `_` between digits, a `0x`/`0o`/`0b` prefix matching `base`, or
 /// any of them for base 0) into an encoded int.
 fn parse_int(text: &str, base: i64) -> Result<i64, IntParseError> {
-    parse_int_checked(text, base).unwrap_or(Err(IntParseError::Invalid))
+    parse_int_checked(&ascii_digits(text), base).unwrap_or(Err(IntParseError::Invalid))
+}
+
+/// `text` with every Unicode decimal digit (`'١'`, `'５'`) as its ASCII
+/// digit, which is how CPython's `int()` and `float()` read a `str`
+/// (`_PyUnicode_TransformDecimalAndSpaceToASCII`).
+fn ascii_digits(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.is_ascii() {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    std::borrow::Cow::Owned(
+        text.chars()
+            .map(|c| match crate::unicode_tables::decimal_value(c) {
+                Some(d) => char::from(b'0' + d as u8),
+                None => c,
+            })
+            .collect(),
+    )
 }
 
 fn parse_int_checked(text: &str, base: i64) -> Option<Result<i64, IntParseError>> {
@@ -228,7 +245,8 @@ pub extern "C" fn pycc_rt_int_from_str_base(s: *mut PyStrObj, base: i64) -> i64 
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_float_from_str(s: *mut PyStrObj) -> f64 {
     let text = text_of(s);
-    let t = text.trim_matches(is_py_space);
+    let digits = ascii_digits(text);
+    let t = digits.trim_matches(is_py_space);
     let lower = t.to_ascii_lowercase();
     let unsigned = lower.trim_start_matches(['+', '-']);
     let negative = lower.starts_with('-');

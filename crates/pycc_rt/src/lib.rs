@@ -97,7 +97,7 @@ mod float_arith;
 mod range;
 mod str_core;
 mod str_index;
-mod unicode_printable;
+mod unicode_tables;
 mod optional_str;
 pub use buffer::*;
 pub use float_arith::*;

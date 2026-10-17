@@ -797,7 +797,7 @@ pub(crate) fn str_repr(text: &str, out: &mut String) {
             c if c.is_ascii() && (c < ' ' || c == '\x7f') => {
                 out.push_str(&format!("\\x{:02x}", c as u32));
             }
-            c if c.is_ascii() || crate::unicode_printable::is_printable(c) => out.push(c),
+            c if c.is_ascii() || crate::unicode_tables::is_printable(c) => out.push(c),
             c if (c as u32) <= 0xff => out.push_str(&format!("\\x{:02x}", c as u32)),
             c if (c as u32) <= 0xffff => out.push_str(&format!("\\u{:04x}", c as u32)),
             c => out.push_str(&format!("\\U{:08x}", c as u32)),

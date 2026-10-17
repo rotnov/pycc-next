@@ -224,13 +224,13 @@ fn a_constant_set_display_iterates_in_cpythons_order() {
     assert_matches_cpython("fuzz_constant_set_display");
 }
 
-/// `crates/pycc_rt/src/unicode_printable.rs` matches the oracle's own
-/// `str.isprintable()` (its generator's `--check`).
+/// `crates/pycc_rt/src/unicode_tables.rs` matches the oracle's own
+/// `str.isprintable()` and `unicodedata.decimal` (its generator's `--check`).
 #[test]
 #[ignore = "requires the CPython oracle (python3) on PATH"]
-fn the_unicode_printable_table_is_current() {
+fn the_unicode_tables_are_current() {
     let script =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/gen_unicode_printable.py");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/gen_unicode_tables.py");
     let check = Command::new(python())
         .arg(script)
         .arg("--check")
@@ -296,6 +296,38 @@ fn a_fallback_str_method_inside_a_method_call() {
         let got = support::run_native("fuzz_fallback_str_method", &source, flags);
         assert_eq!(got, expected, "{flags:?}");
     }
+}
+
+/// An `--ext --non-strict` module's twinned function is defined where its
+/// `def` is, even with no blank line after it, so CPython code right after
+/// it can call it.
+#[test]
+fn a_twin_is_defined_before_the_next_statement() {
+    let name = "fuzz_twin_before_use";
+    let source = fixture(&format!("{name}.py"));
+    let expected = observed(&Command::new(python()).arg(&source).output().expect("runs"), "__main__");
+    let dir = ScratchDir::new("fuzz_twin_before_use").expect("scratch");
+    let build = pycc()
+        .arg("build")
+        .arg(&source)
+        .arg("-o")
+        .arg(dir.join(name))
+        .args(["--ext", "--non-strict"])
+        .output()
+        .expect("pycc spawns");
+    assert!(build.status.success(), "{}", rendered(&build));
+    let run = Command::new(python())
+        .current_dir(&*dir)
+        .args(["-c", &format!("import {name}")])
+        .output()
+        .expect("python3 runs");
+    assert_eq!(observed(&run, name), expected);
+}
+
+/// `int()`/`float()` of a `str` read Unicode decimal digits.
+#[test]
+fn int_and_float_read_unicode_decimal_digits() {
+    assert_matches_cpython("fuzz_unicode_digits");
 }
 
 /// A set display meeting a CPython object crosses as a `set`, not a

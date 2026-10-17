@@ -60,10 +60,16 @@ impl Plan {
         let preamble_at = self.preamble_position();
         let mut preamble = 0..0;
         let mut index = 0;
+        // A copy to run first thing on the next statement's line (`copy; `).
+        let mut prefix: Option<String> = None;
         while index < self.stmts.len() {
             let stmt = &self.stmts[index];
             let start = stmt.range.start as usize;
             text.push_str(&src[cursor..start]);
+            if let Some(run) = prefix.take() {
+                text.push_str(&run);
+                text.push_str("; ");
+            }
             if index == preamble_at {
                 let at = text.len() as u32;
                 text.push_str(&format!(
@@ -172,6 +178,11 @@ impl Plan {
                     cursor = blank;
                     index += 1;
                     continue;
+                } else if self.ast.get(index + 1).is_some_and(is_simple_statement) {
+                    // No blank line after the `def`: the copy runs at the
+                    // start of the next (simple) statement's line, before
+                    // anything there can call it, and no line number moves.
+                    prefix = Some(run);
                 } else {
                     trailing.push(run);
                 }
@@ -207,6 +218,22 @@ impl Plan {
                 .collect(),
         }
     }
+}
+
+/// Whether `stmt` is a simple statement, which a `copy; ` prefix on its
+/// line can precede.
+fn is_simple_statement(stmt: &Stmt) -> bool {
+    !matches!(
+        stmt,
+        Stmt::FunctionDef(_)
+            | Stmt::ClassDef(_)
+            | Stmt::If(_)
+            | Stmt::For(_)
+            | Stmt::While(_)
+            | Stmt::With(_)
+            | Stmt::Try(_)
+            | Stmt::Match(_)
+    )
 }
 
 /// The offset of the first line after the line `end` is on, when that
