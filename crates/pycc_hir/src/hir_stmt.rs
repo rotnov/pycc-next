@@ -285,9 +285,10 @@ pub enum HirStmt {
     /// `break`: leaves the innermost enclosing loop (`While`, `ForRange`,
     /// `ForList`, `ForObject`), skipping that loop's `else:` clause when it
     /// has one ([`HirStmt::LoopElse`]). Lowering admits it only with a real
-    /// enclosing loop and never across a `finally` clause that sits between
-    /// the statement and that loop (a `C0001`: the `finally` would have to
-    /// run first, which codegen does not route yet).
+    /// enclosing loop; one that would leave a `try` with a `finally` clause
+    /// is rewritten to leave a one-iteration loop inside that `try` and jump
+    /// after the `finally` block (`stmt::loop_control`), so no `Break`
+    /// crosses a `finally` clause (an `except*` `try` refuses it: `C0001`).
     Break,
     /// `continue`: starts the innermost enclosing loop's next iteration.
     /// Admitted under exactly the rules [`HirStmt::Break`] states.

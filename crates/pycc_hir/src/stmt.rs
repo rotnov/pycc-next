@@ -616,11 +616,12 @@ pub(crate) fn lower_stmt(
                 imports,
                 signatures,
             )?;
-            // A `break`/`continue` leaving this `try` would have to run the
-            // `finally` block first; refuse it rather than skip that block.
+            // A `break`/`continue` leaving an `except*` `try` would have to
+            // run the `finally` block first; refuse it rather than skip that
+            // block (a plain `try` routes the jump through it below).
             // Checked after every clause lowered, so a context violation
             // (`L0001`) anywhere in the statement still wins.
-            if !finalbody.is_empty() {
+            if !finalbody.is_empty() && try_stmt.is_star {
                 loop_control::refuse_jump_across_finally(&try_stmt.body)?;
                 for handler in &try_stmt.handlers {
                     let pycc_ast::ExceptHandler::ExceptHandler(handler) = handler;
@@ -636,12 +637,12 @@ pub(crate) fn lower_stmt(
                     finalbody,
                 }
             } else {
-                HirStmt::Try {
+                loop_control::route_jumps_through_finally(HirStmt::Try {
                     body,
                     handlers,
                     orelse,
                     finalbody,
-                }
+                })
             }
         }
         Stmt::Raise(raise_stmt) => {

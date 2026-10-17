@@ -327,7 +327,7 @@ fn a_break_in_a_loop_else_clause_targets_the_enclosing_loop() {
 }
 
 #[test]
-fn a_break_out_of_a_try_with_a_finally_clause_is_not_supported_yet() {
+fn a_jump_out_of_a_try_with_a_finally_clause_lowers() {
     for source in [
         "for i in range(3):\n    try:\n        break\n    finally:\n        print(i)\n",
         "for i in range(3):\n    try:\n        pass\n    except ValueError:\n        if i:\n            continue\n    finally:\n        print(i)\n",
@@ -336,8 +336,15 @@ fn a_break_out_of_a_try_with_a_finally_clause_is_not_supported_yet() {
         "while True:\n    try:\n        match 1:\n            case 1:\n                break\n    finally:\n        print(1)\n",
         "while True:\n    try:\n        try:\n            pass\n        finally:\n            pass\n        continue\n    finally:\n        print(1)\n",
     ] {
-        assert_capability_error_message(source, "out of a `try` block that has a `finally` clause");
+        let module = pycc_parser_test_helper::parse(source);
+        lower_checked(&module).expect("the jump runs the `finally` block first");
     }
+}
+
+#[test]
+fn a_jump_out_of_a_try_star_with_a_finally_clause_is_not_supported_yet() {
+    let source = "for i in range(3):\n    try:\n        break\n    except* ValueError:\n        pass\n    finally:\n        print(i)\n";
+    assert_capability_error_message(source, "out of a `try` block that has a `finally` clause");
 }
 
 #[test]
