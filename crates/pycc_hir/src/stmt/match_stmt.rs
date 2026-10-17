@@ -109,6 +109,15 @@ pub(super) fn lower_pattern(
                 .iter()
                 .any(|p| matches!(p, Pattern::MatchStar(_)));
             if has_star {
+                // Lowered as the fixed prefix and the rest after it, so the
+                // star must come last (`[a, *rest]`, not `[*init, last]`).
+                if !matches!(seq.patterns.last(), Some(Pattern::MatchStar(_))) {
+                    return Err(unsupported(
+                        "a starred sub-pattern before the end of a sequence pattern is not \
+                         supported yet",
+                        seq.range,
+                    ));
+                }
                 let mut rest: Option<String> = None;
                 let mut fixed: Vec<HirPattern> = Vec::new();
                 for p in &seq.patterns {
@@ -141,8 +150,13 @@ pub(super) fn lower_pattern(
                 let val_pat = lower_pattern(pat, in_function, class_name, imports, signatures)?;
                 pairs.push((key_expr, val_pat));
             }
-            let rest = mapping.rest.as_ref().map(|n| n.id.to_string());
-            Ok(HirPattern::Mapping(pairs, rest))
+            if mapping.rest.is_some() {
+                return Err(unsupported(
+                    "a `**rest` capture in a mapping pattern is not supported yet",
+                    mapping.range,
+                ));
+            }
+            Ok(HirPattern::Mapping(pairs, None))
         }
         Pattern::MatchClass(class) => {
             let Expr::Name(name) = class.cls.as_ref() else {

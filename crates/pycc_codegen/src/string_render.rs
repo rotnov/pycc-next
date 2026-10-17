@@ -51,11 +51,11 @@ pub(super) enum PrintArg<'ctx> {
     /// CPython's `print` converts each argument only after evaluating all
     /// of them (#1340).
     Object(Scalar<'ctx>),
-    /// A list, still unconverted for the same reason as `Object`: a later
-    /// argument may mutate it (`print(xs, xs.pop())`), and CPython renders
-    /// the list as it is after every argument has been evaluated.
-    /// A list, rendered in phase 2; `true` when it is a fresh reference
-    /// the print releases once rendered.
+    /// A list, dict or set, still unconverted for the same reason as
+    /// `Object`: a later argument may mutate it (`print(xs, xs.pop())`,
+    /// `print(d, d.popitem())`), and CPython renders it as it is after
+    /// every argument has been evaluated. Rendered in phase 2; `true` when
+    /// it is a fresh reference the print releases once rendered.
     List(Scalar<'ctx>, bool),
 }
 
@@ -130,7 +130,7 @@ pub(super) fn emit_eval_print_arg<'ctx>(
             // (not an `int`), and no conversion yet -- phase 2 converts it.
             return PrintArg::Object(scalar);
         }
-        if matches!(scalar, Scalar::List(_)) {
+        if matches!(scalar, Scalar::List(_) | Scalar::Dict(_) | Scalar::Set(_)) {
             return PrintArg::List(scalar, !crate::heap_rc::is_borrowed_read(arg));
         }
         let scalar = incref_if_str_duplicate(builder, rt, arg, scalar);
@@ -190,14 +190,8 @@ pub(super) fn emit_write_print_arg<'ctx>(
         }
         PrintArg::List(list, fresh) => {
             let text = to_str(builder, rt, list);
-            if let (true, Scalar::List(ptr)) = (fresh, list) {
-                crate::heap_rc::emit_decref(
-                    context,
-                    builder,
-                    rt,
-                    crate::heap_rc::HeapKind::List,
-                    ptr,
-                );
+            if let (true, Some((kind, ptr))) = (fresh, container_kind(list)) {
+                crate::heap_rc::emit_decref(context, builder, rt, kind, ptr);
             }
             text
         }
@@ -208,6 +202,16 @@ pub(super) fn emit_write_print_arg<'ctx>(
     builder
         .build_call(rt.str_decref, &[str_ptr.into()], "print_decref_temp")
         .expect("build_call should not fail for a well-formed decref");
+}
+
+/// The heap kind and pointer of a list, dict or set scalar.
+fn container_kind(scalar: Scalar<'_>) -> Option<(crate::heap_rc::HeapKind, PointerValue<'_>)> {
+    match scalar {
+        Scalar::List(ptr) => Some((crate::heap_rc::HeapKind::List, ptr)),
+        Scalar::Dict(ptr) => Some((crate::heap_rc::HeapKind::Dict, ptr)),
+        Scalar::Set(ptr) => Some((crate::heap_rc::HeapKind::Set, ptr)),
+        _ => None,
+    }
 }
 
 /// The body of `emit_stmt`'s `print`-call arm: two-phase
@@ -245,8 +249,10 @@ pub(super) fn emit_print_call<'ctx>(
                 crate::heap_rc::hold_owned(rt, crate::heap_rc::HeapKind::Str, text);
                 None
             }
-            PrintArg::List(Scalar::List(list), true) => {
-                crate::heap_rc::hold_owned(rt, crate::heap_rc::HeapKind::List, list);
+            PrintArg::List(scalar, true) => {
+                if let Some((kind, ptr)) = container_kind(scalar) {
+                    crate::heap_rc::hold_owned(rt, kind, ptr);
+                }
                 None
             }
             PrintArg::None | PrintArg::List(..) => None,

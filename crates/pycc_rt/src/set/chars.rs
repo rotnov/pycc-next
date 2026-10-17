@@ -61,6 +61,15 @@ pub unsafe extern "C" fn pycc_rt_set_foreign(s: *mut PySetObj) -> *mut std::ffi:
     set(s).foreign.get()
 }
 
+/// 1 when `s` is a frozenset, 0 for a mutable set.
+///
+/// # Safety
+/// `s` must be a live set.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_set_is_frozen(s: *mut PySetObj) -> i32 {
+    i32::from(!is_instance_set(s) && set(s).frozen != 0)
+}
+
 /// Makes `object` (a CPython `frozenset` of `s`'s elements, whose reference
 /// this adopts) the one the frozenset `s` shares; released at once when `s`
 /// is not a frozenset.

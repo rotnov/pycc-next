@@ -717,14 +717,15 @@ extern void pycc_rt_tuple_set_foreign(void *tuple, void *object);
  * A native frozenset of `int`, `float`, `bool` or `str` copied into a CPython
  * `frozenset` (`EXT_OBJ_PACK_FROZENSET_SYMBOL` in
  * `crates/pycc_codegen/src/ext.rs`): its elements, in the set's order,
- * packed as `pycc_ext_obj_pack_list` packs a list's. The front end admits
- * only a frozenset, which no one can mutate, so the copy is
- * indistinguishable from the value.
+ * packed as `pycc_ext_obj_pack_list` packs a list's. A frozenset, which no
+ * one can mutate, is copied once and shared; a mutable set (a display used
+ * as the operand of an operation on an object) crosses as a fresh `set`.
  *
  * `set` is a pycc `PySetObj`, borrowed. Returns a new reference, or `NULL`
  * with the exception set.
  */
 extern void *pycc_rt_set_list(void *set);
+extern int pycc_rt_set_is_frozen(void *set);
 extern void pycc_rt_list_decref(void *list);
 
 PyObject *pycc_ext_obj_pack_frozenset(void *set)
@@ -751,7 +752,10 @@ PyObject *pycc_ext_obj_pack_frozenset(void *set)
     if (list == NULL) {
         return NULL;
     }
-    out = PyFrozenSet_New(list);
+    /* A mutable set display operand (`{1} ^ obj`) crosses as a `set`, the
+     * type CPython's own operation sees and returns; only a frozenset is
+     * shared from then on. */
+    out = pycc_rt_set_is_frozen(set) ? PyFrozenSet_New(list) : PySet_New(list);
     Py_DECREF(list);
     if (out != NULL) {
         Py_INCREF(out);

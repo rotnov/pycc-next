@@ -196,6 +196,27 @@ fn zip_loops_follow_their_sequences_as_they_change() {
     assert_matches_cpython("fuzz_zip_mutation");
 }
 
+/// `match`: a starred capture binds the remaining elements, a nested
+/// or-pattern is an `or`, a missing mapping key fails the case; a star
+/// before the end and a `**rest` capture are refused, not miscompiled.
+#[test]
+fn match_sequence_mapping_and_or_patterns() {
+    assert_matches_cpython("fuzz_match_patterns");
+    for (source, expected) in [
+        (
+            "xs: list[int] = [1]\nmatch xs:\n    case [*a, b]:\n        print(b)\n    case _:\n        pass\n",
+            "a starred sub-pattern before the end of a sequence pattern is not supported yet",
+        ),
+        (
+            "d: dict[str, int] = {}\nmatch d:\n    case {'k': 1, **rest}:\n        print(rest)\n    case _:\n        pass\n",
+            "a `**rest` capture in a mapping pattern is not supported yet",
+        ),
+    ] {
+        let text = support::check_fails(source);
+        assert!(text.contains(expected), "{text}");
+    }
+}
+
 /// A set display of constants iterates in CPython's order (its folded
 /// frozenset constant's), not in the order of one-by-one insertion.
 #[test]
@@ -275,6 +296,23 @@ fn a_fallback_str_method_inside_a_method_call() {
         let got = support::run_native("fuzz_fallback_str_method", &source, flags);
         assert_eq!(got, expected, "{flags:?}");
     }
+}
+
+/// A set display meeting a CPython object crosses as a `set`, not a
+/// `frozenset` (`--non-strict`).
+#[test]
+fn a_set_display_object_operand_crosses_as_a_set() {
+    let source = fixture("fuzz_set_display_object_operand.py");
+    let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
+    let got = support::run_native("fuzz_set_operand", &source, &["--release", "--non-strict"]);
+    assert_eq!(got, expected);
+}
+
+/// Every argument of `print` is evaluated before any is converted: a dict
+/// or set a later argument mutates prints as it ends up.
+#[test]
+fn print_converts_containers_after_evaluating_every_argument() {
+    assert_matches_cpython("fuzz_print_argument_order");
 }
 
 /// The same `KeyError` uncaught in a `--non-strict` native program that

@@ -298,7 +298,7 @@ fn lower_sequence_conds(
         right: Box::new(MirExpr::IntLiteral(fixed as i64)),
         ty: Ty::Bool,
     };
-    let mut conds = vec![len_cond];
+    let mut alternatives = vec![vec![len_cond]];
     let mut bindings = Vec::new();
     for (i, sub_pat) in sub_pats.iter().enumerate() {
         let elem = MirExpr::Subscript {
@@ -306,15 +306,41 @@ fn lower_sequence_conds(
             index: Box::new(MirExpr::IntLiteral(i as i64)),
         };
         let (alts, b) = lower_pattern_conds(&elem, sub_pat, scopes, classes, current_class);
-        for alt in alts {
-            conds.extend(alt);
-        }
+        alternatives = conjoin(alternatives, alts);
         bindings.extend(b);
     }
     if let Some(rest_name) = rest {
-        bindings.push((rest_name.clone(), subj.clone()));
+        // `[a, *rest]`: the elements after the fixed ones (a star anywhere
+        // else is refused when the pattern is lowered to HIR).
+        bindings.push((
+            rest_name.clone(),
+            MirExpr::Slice {
+                base: Box::new(subj.clone()),
+                start: Some(Box::new(MirExpr::IntLiteral(fixed as i64))),
+                stop: None,
+                step: None,
+            },
+        ));
     }
-    (vec![conds], bindings)
+    (alternatives, bindings)
+}
+
+/// The alternatives matching both `left` and `right` (each a disjunction of
+/// conjunctions): every pairing of one alternative from each, so a nested
+/// or-pattern (`[1 | 2]`) stays an `or` rather than becoming an `and`.
+fn conjoin(left: Vec<Vec<MirExpr>>, right: Vec<Vec<MirExpr>>) -> Vec<Vec<MirExpr>> {
+    if right.is_empty() {
+        return left;
+    }
+    let mut out = Vec::with_capacity(left.len() * right.len());
+    for l in &left {
+        for r in &right {
+            let mut both = l.clone();
+            both.extend(r.iter().cloned());
+            out.push(both);
+        }
+    }
+    out
 }
 
 /// Lowers a mapping pattern into per-key-value check conditions.
@@ -326,24 +352,31 @@ fn lower_mapping_conds(
     classes: &HashMap<String, HirClassDef>,
     current_class: Option<&str>,
 ) -> (Vec<Vec<MirExpr>>, Vec<(String, MirExpr)>) {
-    let mut conds = Vec::new();
+    let mut alternatives = vec![Vec::new()];
     let mut bindings = Vec::new();
     for (key_expr, val_pat) in pairs {
         let key_lowered = lower_expr(key_expr, scopes, classes, current_class);
+        // A missing key fails the pattern; only then is the value read.
+        alternatives = conjoin(
+            alternatives,
+            vec![vec![MirExpr::Compare {
+                op: CmpOpKind::In,
+                left: Box::new(key_lowered.clone()),
+                right: Box::new(subj.clone()),
+                ty: Ty::Bool,
+            }]],
+        );
         let val = MirExpr::DictGet {
             dict: Box::new(subj.clone()),
             key: Box::new(key_lowered),
         };
         let (alts, b) = lower_pattern_conds(&val, val_pat, scopes, classes, current_class);
-        for alt in alts {
-            conds.extend(alt);
-        }
+        alternatives = conjoin(alternatives, alts);
         bindings.extend(b);
     }
-    if let Some(rest_name) = rest {
-        bindings.push((rest_name.clone(), subj.clone()));
-    }
-    (vec![conds], bindings)
+    // `**rest` is refused when the pattern is lowered to HIR.
+    debug_assert!(rest.is_none());
+    (alternatives, bindings)
 }
 
 /// Lowers a class pattern into per-attribute check conditions.
@@ -362,7 +395,7 @@ fn lower_class_conds(
          pycc_types::check should have rejected this HIR before it reached pycc_mir"
     ));
     let flat_attrs = mro_attrs(class_def, classes);
-    let mut conds = Vec::new();
+    let mut conds: Vec<Vec<MirExpr>> = vec![Vec::new()];
     let mut bindings = Vec::new();
     for (i, sub_pat) in positional.iter().enumerate() {
         let (_, ty) = flat_attrs.get(i).expect(&format!(
@@ -376,9 +409,7 @@ fn lower_class_conds(
             ty: ty.clone(),
         };
         let (alts, b) = lower_pattern_conds(&attr_val, sub_pat, scopes, classes, current_class);
-        for alt in alts {
-            conds.extend(alt);
-        }
+        conds = conjoin(conds, alts);
         bindings.extend(b);
     }
     for (attr_name, sub_pat) in keyword {
@@ -397,12 +428,10 @@ fn lower_class_conds(
             ty: ty.clone(),
         };
         let (alts, b) = lower_pattern_conds(&attr_val, sub_pat, scopes, classes, current_class);
-        for alt in alts {
-            conds.extend(alt);
-        }
+        conds = conjoin(conds, alts);
         bindings.extend(b);
     }
-    (vec![conds], bindings)
+    (conds, bindings)
 }
 
 /// Rewrites an attribute access `base.attr` (where `base` names an enum
