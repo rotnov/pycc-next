@@ -9,7 +9,6 @@
 //! the [`N_LARGE`]` - `[`N_SMALL`] extra iterations would be roughly ten
 //! megabytes, five times the limit. Every run's output is also compared
 //! with CPython's for the same program.
-#![cfg(unix)]
 
 #[path = "memory_support/mod.rs"]
 mod memory_support;

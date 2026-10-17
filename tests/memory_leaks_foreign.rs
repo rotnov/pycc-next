@@ -10,7 +10,6 @@
 //! non-strict mode; the peak resident set may grow by at most
 //! [`GROWTH_LIMIT_KB`] (`tests/memory_support` explains the bound), and
 //! the output must equal CPython's.
-#![cfg(unix)]
 
 #[path = "memory_support/mod.rs"]
 mod memory_support;

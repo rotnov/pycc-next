@@ -1,7 +1,6 @@
 //! Native memory management across the `--ext` boundary: a CPython host
 //! calling a compiled module in a loop leaves the runtime's live-object
 //! counters flat. Split out of `tests/memory_leaks.rs`.
-#![cfg(unix)]
 
 use pycc_scratch::ScratchDir;
 use std::process::Command;

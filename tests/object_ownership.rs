@@ -11,7 +11,6 @@
 //! loops a million times over object arithmetic in constant memory. The
 //! probes also run under CPython's development mode and debug allocator,
 //! which catch a release of freed memory and a refcount underflow.
-#![cfg(unix)]
 
 #[path = "memory_support/mod.rs"]
 mod memory_support;

@@ -5,7 +5,6 @@
 //! [`GROWTH_LIMIT_KB`] (`tests/memory_support` explains the bound, which
 //! also covers the short lines of input itself), and the output must equal
 //! CPython's.
-#![cfg(unix)]
 
 #[path = "memory_support/mod.rs"]
 mod memory_support;

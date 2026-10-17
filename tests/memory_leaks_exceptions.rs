@@ -16,7 +16,6 @@
 //! exception leaked with its message is over a hundred bytes. Before
 //! exceptions were counted, catching `ZeroDivisionError` grew by about 220
 //! bytes per iteration and catching a failing `json.loads` by about 1.9 kB.
-#![cfg(unix)]
 
 #[path = "memory_support/mod.rs"]
 mod memory_support;

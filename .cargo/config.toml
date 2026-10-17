@@ -1,0 +1,7 @@
+# Windows (MSVC): the static C runtime. LLVM's official Windows release, which
+# pycc links (scripts/windows_llvm.sh), is built with /MT, and MSVC refuses to
+# link /MT and /MD objects together (LNK2038). It also keeps `pycc.exe` free of
+# the Visual C++ redistributable, and `pycc_rt.lib` agrees with the C objects
+# pycc compiles with clang, whose MSVC default is the static runtime too.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

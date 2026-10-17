@@ -10,7 +10,6 @@
 //! (`tests/memory_support` explains the bound), and the output must equal
 //! CPython's. Each probe must also build without a CPython fallback, so
 //! the native paths are the ones measured.
-#![cfg(unix)]
 
 #[path = "memory_support/mod.rs"]
 mod memory_support;

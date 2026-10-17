@@ -23,6 +23,11 @@
 //! point. Elsewhere (macOS: `posix_spawn` gives the child a new task, and
 //! `ru_maxrss` is in bytes there), or where tracing is not permitted, the
 //! peak is `ru_maxrss`.
+//!
+//! On Windows a new process has an address space of its own from the
+//! start, and its peak is `PeakWorkingSetSize` of `GetProcessMemoryInfo`,
+//! read through the child's process handle after it exited (the handle
+//! keeps the process object, and its counters, alive until it is closed).
 
 #![allow(dead_code)]
 
@@ -83,15 +88,22 @@ pub fn build_with(dir: &Path, name: &str, source: &str, flags: &[&str]) -> PathB
 /// A finished probe: its stdout, raw wait status and peak resident set.
 pub struct Measured {
     pub stdout: Vec<u8>,
-    /// The raw `waitpid` status (`libc::WIFEXITED` and friends apply).
-    pub status: libc::c_int,
+    /// The raw `waitpid` status (`libc::WIFEXITED` and friends apply); on
+    /// Windows the process exit code.
+    pub status: i32,
     /// The probe's own peak resident set, in kilobytes.
     pub peak_kb: i64,
 }
 
 impl Measured {
+    #[cfg(unix)]
     pub fn success(&self) -> bool {
         libc::WIFEXITED(self.status) && libc::WEXITSTATUS(self.status) == 0
+    }
+
+    #[cfg(windows)]
+    pub fn success(&self) -> bool {
+        self.status == 0
     }
 }
 
@@ -160,9 +172,15 @@ pub fn measure(mut command: Command, input: Option<&[u8]>) -> Measured {
             Err(error) => panic!("the probe should spawn: {error}"),
         }
     }
-    let child = command.spawn().expect("the probe should spawn");
+    finish(command.spawn().expect("the probe should spawn"), input)
+}
+
+/// Waits for the untraced `child` and reads its peak from `wait4`'s
+/// `ru_maxrss`.
+#[cfg(unix)]
+fn finish(mut child: std::process::Child, input: Option<&[u8]>) -> Measured {
     let pid = child.id() as libc::pid_t;
-    let stdout = collect_io(child, input);
+    let stdout = collect_io(&mut child, input);
     let mut status = 0;
     // SAFETY: an all-zero `rusage` is a valid value for `wait4` to fill.
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
@@ -201,11 +219,39 @@ fn untraced_copy(command: &Command) -> Command {
     copy
 }
 
+/// Waits for `child` and reads its peak working set (the module docs).
+#[cfg(windows)]
+fn finish(mut child: std::process::Child, input: Option<&[u8]>) -> Measured {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    let stdout = collect_io(&mut child, input);
+    let status = child.wait().expect("wait for the probe");
+    // SAFETY: an all-zero `PROCESS_MEMORY_COUNTERS` is a valid value to fill.
+    let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    // SAFETY: the handle is `child`'s own, open until `child` drops; the
+    // out-pointer is live and `size` is its size.
+    let ok = unsafe { GetProcessMemoryInfo(child.as_raw_handle(), &mut counters, size) };
+    assert_ne!(
+        ok,
+        0,
+        "GetProcessMemoryInfo: {}",
+        std::io::Error::last_os_error()
+    );
+    Measured {
+        stdout: stdout.join().expect("the stdout reader"),
+        status: status.code().unwrap_or(-1),
+        peak_kb: (counters.PeakWorkingSetSize / 1024) as i64,
+    }
+}
+
 /// Feeds `input` to `child`'s stdin and reads its stdout to the end, both on
 /// threads of their own (a probe blocked on a full pipe must not stall the
 /// thread that waits for it), returning the reader to join.
 fn collect_io(
-    mut child: std::process::Child,
+    child: &mut std::process::Child,
     input: Option<&[u8]>,
 ) -> std::thread::JoinHandle<Vec<u8>> {
     if let Some(input) = input {
@@ -233,9 +279,9 @@ mod traced {
     /// Drives the traced `child` to its exit, reading its `VmHWM` at the
     /// exit stop. Every `ptrace` request comes from this thread, the one
     /// that spawned the child: the tracer.
-    pub(super) fn finish(child: std::process::Child, input: Option<&[u8]>) -> Measured {
+    pub(super) fn finish(mut child: std::process::Child, input: Option<&[u8]>) -> Measured {
         let pid = child.id() as libc::pid_t;
-        let stdout = collect_io(child, input);
+        let stdout = collect_io(&mut child, input);
         let mut status = wait(pid);
         // `PTRACE_TRACEME` stops the child with `SIGTRAP` at its `exec`.
         assert!(
