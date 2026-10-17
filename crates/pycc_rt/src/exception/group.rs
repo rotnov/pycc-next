@@ -142,7 +142,12 @@ pub unsafe extern "C" fn pycc_rt_exception_group_partition(
         let member_tag = unsafe { (**member).type_tag };
         tag_slice.is_empty() || tag_slice.iter().any(|tag| tag_matches(member_tag, *tag))
     });
-    let message = obj.message;
+    // A bridged group carries no message of its own (`str_form`).
+    let message = if obj.message.is_null() {
+        super::str_form::exception_str(obj)
+    } else {
+        obj.message
+    };
     // SAFETY (caller): both out-pointers are writable.
     unsafe {
         *matched_out = build_group_or_null(

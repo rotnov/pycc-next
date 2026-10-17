@@ -8,12 +8,16 @@
 
 use super::{EXCEPTION_TYPE_KEY_ERROR, PyExceptionObj, alloc_exception_message};
 use crate::PyStrObj;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 /// `exc`'s `str()` form, borrowed from `exc` like its message: for a
 /// `KeyError`, the `repr` of its message, built on first use and cached on
 /// the exception object, which releases it when it is freed.
 pub(super) fn exception_str(exc: &PyExceptionObj) -> *mut PyStrObj {
-    if exc.type_tag != EXCEPTION_TYPE_KEY_ERROR || exc.message.is_null() {
+    if exc.message.is_null() {
+        return foreign_str(exc);
+    }
+    if exc.type_tag != EXCEPTION_TYPE_KEY_ERROR {
         return exc.message;
     }
     let cached = exc.str_form.get();
@@ -22,6 +26,45 @@ pub(super) fn exception_str(exc: &PyExceptionObj) -> *mut PyStrObj {
     }
     let message = String::from_utf8_lossy(unsafe { (*exc.message).bytes() });
     let rendered = alloc_exception_message(&str_repr(&message));
+    exc.str_form.set(rendered);
+    rendered
+}
+
+/// The `str()` hook of the `ext` shim (`pycc_rt_exception_str_install`):
+/// CPython's `str()` of an exception object as a new `str`, never null.
+type ExceptionStrHook = unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut PyStrObj;
+
+static EXCEPTION_STR: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Installs the hook that renders a CPython exception's `str()` (the `ext`
+/// shim's `pycc_ext_exception_str_hook`). An exception the shim bridged
+/// from a CPython one has no message of its own: its text is CPython's
+/// `str()` of the original, rendered by this hook only when compiled code
+/// first reads it, since most bridged exceptions (an `AttributeError` a
+/// `getattr` default absorbs, a `KeyError` an `except` handles) never show
+/// their text.
+#[unsafe(no_mangle)]
+pub extern "C" fn pycc_rt_exception_str_install(hook: ExceptionStrHook) {
+    EXCEPTION_STR.store(hook as *mut (), Ordering::Relaxed);
+}
+
+/// The text of `exc`, which carries no message: CPython's `str()` of the
+/// original it was bridged from, rendered on first use and cached; null
+/// when there is no original or no hook.
+fn foreign_str(exc: &PyExceptionObj) -> *mut PyStrObj {
+    let cached = exc.str_form.get();
+    if !cached.is_null() {
+        return cached;
+    }
+    let foreign = exc.foreign.get();
+    let hook = EXCEPTION_STR.load(Ordering::Relaxed);
+    if foreign.is_null() || hook.is_null() {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: only `pycc_rt_exception_str_install` stores here, and it
+    // stores an `ExceptionStrHook`.
+    let hook = unsafe { std::mem::transmute::<*mut (), ExceptionStrHook>(hook) };
+    let rendered = unsafe { hook(foreign) };
     exc.str_form.set(rendered);
     rendered
 }

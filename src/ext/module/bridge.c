@@ -193,7 +193,7 @@ extern void *pycc_rt_exception_alloc(unsigned char type_tag,
                                      size_t name_len,
                                      void *message);
 extern void pycc_rt_exception_raise(void *obj);
-extern void pycc_rt_exception_set_str_form(void *obj, void *text);
+extern void pycc_rt_exception_str_install(void *(*hook)(void *));
 
 /*
  * The two builtin tags the bridge raises, with the class name each one's
@@ -277,50 +277,65 @@ static Py_tss_t *pycc_ext_exec_target_key = NULL;
 static Py_tss_t *pycc_ext_exec_classes_key = NULL;
 
 /*
- * Translates `exc` into a pending pycc exception of `tag`, whose message is
+ * Translates `exc` into a pending pycc exception of `tag`, whose text is
  * CPython's own `str(exc)` and which carries `exc` itself. Shared by both
  * bridges. `class_name` must be a string literal: it outlives the object
  * as `pycc_rt_exception_alloc` requires, which a heap type's `tp_name` does
  * not.
  *
  * Returns 1 having taken over `exc`'s reference, with CPython's error
- * indicator clear. Returns 0 when `str(exc)` fails, with `exc` still the
- * caller's, no pycc exception pending, and the error indicator clear.
- * Every fallible step runs before any pycc state is touched.
+ * indicator clear (it cannot fail: the 0 its callers handle is no longer
+ * returned).
  */
 static int pycc_ext_bridge_store(PyObject *exc, unsigned char tag, const char *class_name,
                                  size_t class_name_len)
 {
-    PyObject *text;
-    const char *utf8;
-    Py_ssize_t utf8_len = 0;
-    void *message;
     void *obj;
 
-    text = PyObject_Str(exc);
-    if (text == NULL) {
-        PyErr_Clear();
-        return 0;
-    }
-    utf8 = PyUnicode_AsUTF8AndSize(text, &utf8_len);
-    if (utf8 == NULL) {
-        Py_DECREF(text);
-        PyErr_Clear();
-        return 0;
-    }
-    /* The copy completes before `text`, whose buffer `utf8` points into, is
-     * released -- the order `pycc_ext_obj_to_str` documents. The fresh +1
-     * is the message's owning reference, exactly as a string literal's is
-     * in a compiled `raise ImportError("...")`. */
-    message = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)utf8_len);
-    Py_DECREF(text);
-    obj = pycc_rt_exception_alloc(tag, (const unsigned char *)class_name, class_name_len, message);
-    /* The message already is CPython's `str(exc)`: a bridged `KeyError`
-     * must not show the `repr` of it. */
-    pycc_rt_exception_set_str_form(obj, message);
+    /* No message: the text is CPython's own `str(exc)`, rendered from the
+     * original only when compiled code reads it
+     * (`pycc_ext_exception_str_hook`), since most bridged exceptions are
+     * handled without showing it. */
+    obj = pycc_rt_exception_alloc(tag, (const unsigned char *)class_name, class_name_len, NULL);
     pycc_rt_exception_set_foreign(obj, exc);
     pycc_rt_exception_raise(obj);
     return 1;
+}
+
+/*
+ * The text of a bridged exception (`pycc_rt_exception_str_install`):
+ * CPython's `str()` of the original `exc` (borrowed), as a new pycc `str`.
+ * Whatever CPython exception is set stays set. A `str()` that fails gives
+ * the class name, the text the bridge used to fall back to.
+ */
+static void *pycc_ext_exception_str_hook(void *exc)
+{
+    PyObject *saved = PyErr_GetRaisedException();
+    PyObject *text = PyObject_Str((PyObject *)exc);
+    const char *utf8 = NULL;
+    Py_ssize_t utf8_len = 0;
+    void *message;
+
+    if (text != NULL) {
+        utf8 = PyUnicode_AsUTF8AndSize(text, &utf8_len);
+    }
+    if (utf8 == NULL) {
+        PyErr_Clear();
+        Py_XDECREF(text);
+        text = PyType_GetName(Py_TYPE((PyObject *)exc));
+        utf8 = text == NULL ? NULL : PyUnicode_AsUTF8AndSize(text, &utf8_len);
+        if (utf8 == NULL) {
+            PyErr_Clear();
+            utf8 = "";
+            utf8_len = 0;
+        }
+    }
+    /* The copy completes before `text`, whose buffer `utf8` points into, is
+     * released -- the order `pycc_ext_obj_to_str` documents. */
+    message = pycc_rt_str_from_literal((const unsigned char *)utf8, (long long)utf8_len);
+    Py_XDECREF(text);
+    PyErr_SetRaisedException(saved);
+    return message;
 }
 
 /*
