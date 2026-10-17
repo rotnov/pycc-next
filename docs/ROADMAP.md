@@ -390,6 +390,37 @@ Accept:
    (same pydantic-core wheel for both trees): import no slower than CPython (the fallback
    source is no longer compiled with `compile()` on every import), model definition and
    `model_json_schema()` >= 1.3x faster, validation/serialization round-trips no slower.
+   **Progress 2026-10-17** (not met; local, shared 4-core Xeon, CPython 3.13.16,
+   pydantic-core 2.46.5, median ms of interleaved fresh-process runs,
+   compiled vs CPython):
+
+   | step | import | define | schema | round-trips |
+   |---|---|---|---|---|
+   | v0.7 (7 runs) | 179.1 vs 81.5 (0.46x) | 12.9 vs 9.6 (0.75x) | 28.7 vs 17.1 (0.59x) | 19.7 vs 17.0 (0.86x) |
+   | fallback source pre-compiled (7 runs) | 100.1 vs 76.2 (0.76x) | 13.1 vs 8.9 (0.68x) | 25.3 vs 16.7 (0.66x) | 19.9 vs 17.3 (0.87x) |
+   | + only used runtime linked, call-site caches, lazy bridged text (15 runs, loaded host) | 95.5 vs 72.9 (0.76x) | 12.4 vs 9.4 (0.76x) | 25.7 vs 17.5 (0.68x) | 18.0 vs 17.1 (0.95x) |
+
+   Done: (1) the fallback source is marshalled at build time and unmarshalled at import
+   when the bytecode magic number matches and `-O` is off, with a `compile()` fallback
+   otherwise (`src/ext_build/precompiled.rs`); (2) an ELF module exports only `PyInit_*`
+   and the live-object counters and links with `--gc-sections`, so code shrinks from
+   2.4 MB to 1.0 MB per module (pydantic tree 490 MB -> 62 MB) and `dlopen` takes about
+   half as long; (3) keyword-name tuples are cached per call site, the attribute-name
+   cache has 4096 slots, and `isinstance` checks the exact type first; (4) a caught
+   CPython exception's `str()` is rendered only when compiled code reads it, which is
+   also CPython's timing. Tried and reverted: replacing the Python forwarder of a
+   CPython-run class's compiled method with a vectorcall method descriptor. It saved
+   7-14 ns per call, but it broke 36 pydantic tests that find their caller's namespace
+   with `sys._getframe(n)` and count the forwarder frames. That change waits for accept
+   3 (compiled frames as real frames). Profile (callgrind/cachegrind, one
+   define+schema round): the compiled tree runs 184M instructions to CPython's 151M and
+   gets 3.3M L1 instruction misses to CPython's 2.0M. The cost is spread out: stable-ABI
+   reference counting goes through function calls (`_Py_IncRef`/`_Py_DecRef`, 700K
+   calls per round), each module carries its own copy of the runtime helpers, and most
+   executed code still runs in the interpreter (the fallback code). No single hot path
+   carries the gap. What is left on import (about 20 ms) is resolving and mapping 79
+   shared objects (symbol lookup about 7M instructions) and the mirrored imports,
+   which run twice.
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions
