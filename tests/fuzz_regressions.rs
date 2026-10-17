@@ -189,6 +189,13 @@ fn float_repr_breaks_ties_like_cpython() {
     assert_matches_cpython("fuzz_float_repr_ties");
 }
 
+/// `for ... in zip(...)` sees the sequences change under it as CPython's
+/// iterators do (shrinking, growing, the name rebound), `else` included.
+#[test]
+fn zip_loops_follow_their_sequences_as_they_change() {
+    assert_matches_cpython("fuzz_zip_mutation");
+}
+
 /// A set display of constants iterates in CPython's order (its folded
 /// frozenset constant's), not in the order of one-by-one insertion.
 #[test]
@@ -256,6 +263,18 @@ fn ext_non_strict_exception_classes_keep_their_members() {
 #[test]
 fn key_error_for_a_non_str_key_crosses_the_ext_boundary() {
     assert_matches_cpython("fuzz_key_error_int_key");
+}
+
+/// A `str` method run through CPython inside another method call's
+/// arguments is called on its own receiver, not on the outer call's.
+#[test]
+fn a_fallback_str_method_inside_a_method_call() {
+    let source = fixture("fuzz_fallback_str_method_in_call.py");
+    let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
+    for flags in [&["--release", "--non-strict"][..]] {
+        let got = support::run_native("fuzz_fallback_str_method", &source, flags);
+        assert_eq!(got, expected, "{flags:?}");
+    }
 }
 
 /// The same `KeyError` uncaught in a `--non-strict` native program that

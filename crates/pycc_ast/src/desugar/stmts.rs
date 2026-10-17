@@ -2,7 +2,10 @@
 //! iterables, stores through computed subscripts, tuple targets with
 //! non-name elements, and augmented assignment through computed indices.
 
-use super::build::{assign, aug_assign, call_name, for_loop, int, load, store, subscript, tuple};
+use super::build::{
+    and_all, assign, aug_assign, call_name, for_loop, int, less_than, load, store, subscript, tuple,
+    while_loop,
+};
 use super::{Fresh, is_name, is_simple};
 use ruff_python_ast::{Expr, ExprContext, Operator, Stmt};
 use ruff_text_size::TextRange;
@@ -197,21 +200,29 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
         && args.len() >= 2
         && !args.iter().any(|a| matches!(a, Expr::Starred(_)))
     {
-        // `for a, b in zip(xs, ys)`: an index loop over the shortest.
+        // `for a, b in zip(xs, ys)`: an index loop that, like CPython's
+        // iterators, compares the index with each sequence's length as it
+        // stands at every step (the body may grow or shrink them), the
+        // sequences held in temporaries (the body may rebind their names).
+        // A `while` keeps the `else` clause's meaning.
         let seqs: Vec<Expr> = args
             .iter()
-            .map(|a| hoist(a.clone(), fresh, &mut pre, range))
+            .map(|a| {
+                let tmp = fresh.name();
+                pre.push(assign(store(&tmp, range), a.clone(), range));
+                load(&tmp, range)
+            })
             .collect();
         let index = fresh.name();
-        let lens = seqs
-            .iter()
-            .map(|s| call_name("len", vec![s.clone()], range))
-            .collect::<Vec<_>>();
-        let bound = if lens.len() == 1 {
-            lens.into_iter().next().expect("one length")
-        } else {
-            call_name("min", lens, range)
-        };
+        pre.push(assign(store(&index, range), int(0, range), range));
+        let test = and_all(
+            seqs.iter()
+                .map(|s| {
+                    less_than(load(&index, range), call_name("len", vec![s.clone()], range), range)
+                })
+                .collect(),
+            range,
+        );
         for (t, seq) in targets.iter().zip(&seqs) {
             head.push(assign(
                 t.clone(),
@@ -219,7 +230,15 @@ fn expand_for(mut s: ruff_python_ast::StmtFor, fresh: &Fresh, out: &mut Vec<Stmt
                 range,
             ));
         }
-        (store(&index, range), call_name("range", vec![bound], range))
+        head.push(aug_assign(store(&index, range), Operator::Add, int(1, range), range));
+        head.append(&mut body);
+        let mut body = head;
+        expand_body(&mut body, fresh, false);
+        for stmt in pre {
+            expand_stmt(stmt, fresh, out, false);
+        }
+        out.push(while_loop(test, body, orelse, range));
+        return;
     } else if let (Some([k, v]), Expr::Call(call)) = (tuple_elts(&target), &iter)
         && let Expr::Attribute(attr) = call.func.as_ref()
         && attr.attr.as_str() == "items"

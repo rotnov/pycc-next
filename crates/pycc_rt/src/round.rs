@@ -157,8 +157,12 @@ mod tests {
             "cannot convert float infinity to integer"
         );
         crate::pycc_rt_exception_clear();
-        pycc_rt_float_round_to_int(1e19);
-        assert_ne!(crate::pycc_rt_exception_active(), 0);
-        crate::pycc_rt_exception_clear();
+        // Beyond the inline range: the exact bigint, as CPython's.
+        let big = pycc_rt_float_round_to_int(1e19);
+        assert_eq!(crate::pycc_rt_exception_active(), 0);
+        assert_eq!(
+            crate::int_arith::decode_big(big),
+            "10000000000000000000".parse::<num_bigint::BigInt>().unwrap()
+        );
     }
 }

@@ -160,3 +160,34 @@ pub(super) fn for_loop(target: Expr, iter: Expr, body: Vec<Stmt>, orelse: Vec<St
         orelse: orelse.into(),
     })
 }
+
+pub(super) fn while_loop(test: Expr, body: Vec<Stmt>, orelse: Vec<Stmt>, range: TextRange) -> Stmt {
+    Stmt::While(ruff_python_ast::StmtWhile {
+        node_index: AtomicNodeIndex::default(),
+        range,
+        test: Box::new(test),
+        body: body.into(),
+        orelse: orelse.into(),
+    })
+}
+
+/// `left < right`.
+pub(super) fn less_than(left: Expr, right: Expr, range: TextRange) -> Expr {
+    Expr::Compare(ruff_python_ast::ExprCompare {
+        node_index: AtomicNodeIndex::default(),
+        range,
+        left: Box::new(left),
+        ops: vec![ruff_python_ast::CmpOp::Lt].into_boxed_slice(),
+        comparators: vec![right].into_boxed_slice(),
+    })
+}
+
+/// `a and b and ...` (`values` holds at least two operands).
+pub(super) fn and_all(values: Vec<Expr>, range: TextRange) -> Expr {
+    Expr::BoolOp(ruff_python_ast::ExprBoolOp {
+        node_index: AtomicNodeIndex::default(),
+        range,
+        op: ruff_python_ast::BoolOp::And,
+        values,
+    })
+}

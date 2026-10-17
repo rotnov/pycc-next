@@ -83,7 +83,9 @@ impl Plan {
             }
         } else if let Some(ty) = between(message, "cannot call a method on `", "`: it is not") {
             match ty {
-                "str" | "int" | "float" => self.method_through_type(at, ty),
+                "str" | "int" | "float" => {
+                    self.method_through_type(at, at + (span.end - span.start), ty)
+                }
                 _ => Vec::new(),
             }
         } else {
@@ -135,12 +137,25 @@ impl Plan {
         ends && starts && (!call || after.trim_start().starts_with('('))
     }
 
-    /// `recv.method(args)` at `at` as `builtins.<ty>.method(recv, args)`.
-    fn method_through_type(&self, at: u32, ty: &str) -> Vec<(u32, u32, String)> {
+    /// The method call `recv.method(args)` in `at..=end` whose method `ty`
+    /// has, as `builtins.<ty>.method(recv, args)`. The span may cover an
+    /// enclosing call (`xs.append(s.removeprefix(p))`): the outer call's
+    /// method is not `ty`'s, so its receiver is not the `ty` value.
+    fn method_through_type(&self, at: u32, end: u32, ty: &str) -> Vec<(u32, u32, String)> {
         let Some(index) = self.stmts.iter().position(|s| s.range.contains(&at)) else {
             return Vec::new();
         };
-        let mut finder = MethodCall { at, found: None };
+        let methods = match ty {
+            "str" => STR_METHODS,
+            "int" => INT_METHODS,
+            _ => FLOAT_METHODS,
+        };
+        let mut finder = MethodCall {
+            at,
+            end: end.max(at),
+            methods,
+            found: None,
+        };
         finder.visit_stmt(&self.ast[index]);
         let Some((start, receiver_end, name_start, method, args_open, has_args)) = finder.found
         else {
@@ -172,21 +187,39 @@ fn between<'m>(message: &'m str, prefix: &str, suffix: &str) -> Option<&'m str> 
 /// offset of its `(`, and whether it has arguments.
 struct MethodCall {
     at: u32,
+    end: u32,
+    methods: &'static [&'static str],
     found: Option<(u32, u32, u32, String, u32, bool)>,
 }
+
+/// The public methods of `str`, `int` and `float` (CPython 3.13's `dir`).
+const STR_METHODS: &[&str] = &[
+    "capitalize", "casefold", "center", "count", "encode", "endswith", "expandtabs", "find",
+    "format", "format_map", "index", "isalnum", "isalpha", "isascii", "isdecimal", "isdigit",
+    "isidentifier", "islower", "isnumeric", "isprintable", "isspace", "istitle", "isupper", "join",
+    "ljust", "lower", "lstrip", "maketrans", "partition", "removeprefix", "removesuffix",
+    "replace", "rfind", "rindex", "rjust", "rpartition", "rsplit", "rstrip", "split",
+    "splitlines", "startswith", "strip", "swapcase", "title", "translate", "upper", "zfill",
+];
+const INT_METHODS: &[&str] = &[
+    "as_integer_ratio", "bit_count", "bit_length", "conjugate", "from_bytes", "is_integer",
+    "to_bytes",
+];
+const FLOAT_METHODS: &[&str] = &["as_integer_ratio", "conjugate", "fromhex", "hex", "is_integer"];
 
 impl<'a> Visitor<'a> for MethodCall {
     fn visit_expr(&mut self, expr: &'a Expr) {
         if let Expr::Call(call) = expr
             && self.found.is_none()
-            && call.range.start().to_u32() == self.at
+            && (self.at..=self.end).contains(&call.range.start().to_u32())
             && let Expr::Attribute(attr) = &*call.func
+            && self.methods.contains(&attr.attr.as_str())
         {
             let receiver_end = pycc_ast::expr_range(&attr.value).end;
             let name_start = attr.attr.range.start().to_u32();
             let args_open = call.arguments.range.start().to_u32();
             self.found = Some((
-                self.at,
+                call.range.start().to_u32(),
                 receiver_end,
                 name_start,
                 attr.attr.as_str().to_string(),
