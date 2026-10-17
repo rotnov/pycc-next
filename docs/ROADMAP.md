@@ -272,6 +272,11 @@ Accept:
 3. **A real `int | float` type:** strict mode types a variable that holds an `int` or a
    `float` as `int | float` with CPython semantics for every operation, replacing the v0.5
    int-infinity rewrite; its DEVIATIONS rows are removed.
+   **Met 2026-10-17:** `Ty::Num` (a tagged word: inline int/float, heap bigint or boxed
+   float) in strict mode; the int-infinity rewrite and its DEVIATIONS rows are gone
+   (`tests/num_union.rs`, leak probes included). One new, narrower DEVIATIONS row remains:
+   a boxed `int | float` value (a >63-bit int or a float outside ~1e-77..1e77) stored in a
+   container raises `OverflowError`. CI run 39023482861 on 4dd0f8f green on all three jobs.
 4. **No hidden differences:** a differential fuzzer generates typed Python programs, runs
    them under CPython 3.13 and as native strict, `--non-strict` and `--ext` builds, and
    compares output and exceptions; a nightly CI job runs it for >= 30 minutes; every
