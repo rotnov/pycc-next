@@ -72,6 +72,13 @@ fallback); strict mode compiles and passes 190/200 unchanged — most of the res
 dynamic values (mixed-type containers, an `int | None` used as an `int` without a `None`
 test, a variable rebound to another type on some paths only) that strict mode refuses.
 
+**Library code is not faster yet.** pydantic 2.13.5 built `--ext --non-strict`
+(`bench/pydantic_check.py --time`, 809 of 1249 functions native, 5742 of its tests
+passing) is *slower* than CPython running its sources: import 0.40x, model definition
+0.70x, `model_json_schema()` 0.70x, validation round-trips 0.91x. Dynamic,
+call-heavy code pays the CPython/compiled boundary and runs through the object protocol;
+see [ROADMAP v0.7 accept 4](docs/ROADMAP.md) for the profile.
+
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
 ## numpy arrays

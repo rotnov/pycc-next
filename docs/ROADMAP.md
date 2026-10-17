@@ -341,6 +341,28 @@ Accept:
    compiled modules, and its model-definition / schema-building time is measured against
    CPython; the result (speed-up or not) and the remaining fallbacks are recorded here.
    This is a one-off evaluation, not a CI gate.
+   **Met 2026-10-17** (one-off, local, `bench/pydantic_check.py --time --tests`, shared
+   4-core Xeon, CPython 3.13.16, pydantic-core 2.46.5 for both trees): pydantic 2.13.5
+   builds with every module (809/1249 functions native); its suite passes 5742 tests
+   with 20 failing against the compiled tree (5762 and 0 against the sources; the 20
+   are generic-model cache and pickle tests that walk `sys._getframe`, see DEVIATIONS,
+   and tests that monkeypatch a compiled module's globals). **The compiled tree is
+   slower**, median of 15 interleaved fresh-process runs (ms; CPython/compiled):
+   import 191.6 vs 75.8 (0.40x), model definition 12.9 vs 9.0 (0.70x),
+   `model_json_schema()` 25.8 vs 18.0 (0.70x), validation/serialization round-trips
+   18.8 vs 17.0 (0.91x). Why: (1) import compiles 674 KB of CPython source with
+   `compile()` on every import (classes whose statement runs in CPython, their method
+   forwarders and the methods that fall back), which a `.pyc` cache saves CPython;
+   (2) every call into a compiled function crosses a boundary of ~25-40 ns (argument
+   unpacking, a `str` parameter copied into a native string, a Python forwarder frame
+   for a method of a CPython-run class), and pydantic's schema building is many short
+   calls; (3) the bodies are object-protocol code (attribute, item and call through
+   the C API without CPython's specializing interpreter), so a body compiled natively
+   gains little, except loop-heavy helpers (`_deduplicate_schemas` runs ~6x faster);
+   (4) a caught CPython exception was bridged with up to 33 class matches -- fixed,
+   exact builtin classes now match by identity (a caught `KeyError` 496 -> 312 ns,
+   CPython 202). Remaining top fallback reasons (functions): `...` literal 104,
+   function-local `import` 61, nested `def` 59, `lambda` 23, `hash()` of an object 15.
 5. **Real-world corpus:** strict >= 190/200; `--non-strict` 200/200, 0 wrong, with no
    top-level statement in CPython fallback (carried over from v0.6 if not met there).
    **Met 2026-10-17** (CI run 39051177139, commit 61e1488): strict 190/200, 0 wrong

@@ -14,7 +14,9 @@ as in `bench/package_check.py` (checked members, the `data` extraction filter).
 This is the one-off v0.7 accept-4 measurement, not a CI gate.
 
 Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
-                                       [--jobs N] [--tests PYTHON] [MODULE ...]
+                                       [--jobs N] [--tests PYTHON]
+                                       [--time [PYTHON]] [--runs N] [--repeat R]
+                                       [MODULE ...]
   MODULE   build only the modules whose path contains one of these strings.
   --keep   leave the built tree (compiled modules, `.py` files removed, the sdist's
            tests beside them) in DIR instead of a temporary directory.
@@ -23,12 +25,24 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
            dependencies installed (pytest, pytest-mock, dirty-equals, inline-snapshot,
            jsonschema, pytz, tzdata, hypothesis, faker, email-validator, ...). The
            mypy, docs and benchmark tests are skipped.
+  --time   first time `bench/pydantic_workload.py` (import; model definition, i.e.
+           class creation and core-schema building; `model_json_schema()`;
+           validation and serialization round-trips) against the compiled tree and
+           against the unchanged sources, both with PYTHON (default: this
+           interpreter) and the pydantic-core it has installed. Every run is a fresh
+           `-I` subprocess. One discarded warm-up run per tree comes first (it writes
+           the sources' `.pyc` files, as an installed package has them), then N
+           (`--runs`, default 15) runs per tree, interleaved in alternating order,
+           each phase repeated R (`--repeat`, default 20) times per run. Prints the
+           best and the median per phase and the ratio of the medians.
 """
 import argparse
 import concurrent.futures
 import pathlib
+import json
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -84,6 +98,43 @@ def build(pycc: str, py: pathlib.Path) -> tuple[pathlib.Path, int, int, list[str
     return py, defs, fell, notes
 
 
+WORKLOAD = pathlib.Path(__file__).resolve().parent / "pydantic_workload.py"
+PHASES = ("import", "define", "schema", "roundtrip")
+
+
+def time_trees(python: str, trees: dict[str, pathlib.Path], cwd: pathlib.Path,
+               runs: int, repeat: int) -> dict[str, list[dict[str, float]]]:
+    """Runs the workload `runs` times per tree, interleaved in alternating order,
+    after one discarded warm-up run each."""
+    def once(tree: pathlib.Path) -> dict[str, float]:
+        r = subprocess.run([python, "-I", str(WORKLOAD), str(tree.resolve()), str(repeat)], cwd=cwd,
+                           capture_output=True, text=True, timeout=900)
+        if r.returncode != 0:
+            sys.exit(f"the workload failed on {tree}:\n{r.stderr}")
+        return json.loads(r.stdout)
+
+    for tree in trees.values():
+        once(tree)
+    out: dict[str, list[dict[str, float]]] = {name: [] for name in trees}
+    for i in range(runs):
+        for name in list(trees) if i % 2 == 0 else list(reversed(trees)):
+            out[name].append(once(trees[name]))
+    return out
+
+
+def report(times: dict[str, list[dict[str, float]]]) -> None:
+    """Prints best and median per phase, in ms, and CPython's median over the
+    compiled tree's (above 1: the compiled tree is faster)."""
+    print(f"{'phase':10} {'compiled best / median':>23} {'CPython best / median':>22} "
+          f"{'CPython/compiled':>17}")
+    for ph in PHASES:
+        c = [r[ph] * 1000 for r in times["compiled"]]
+        p = [r[ph] * 1000 for r in times["CPython"]]
+        print(f"{ph:10} {min(c):10.2f} / {statistics.median(c):8.2f} "
+              f"{min(p):9.2f} / {statistics.median(p):8.2f} "
+              f"{statistics.median(p) / statistics.median(c):16.2f}x")
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("modules", nargs="*")
@@ -92,6 +143,9 @@ def main() -> int:
     p.add_argument("--keep")
     p.add_argument("--jobs", type=int, default=4)
     p.add_argument("--tests")
+    p.add_argument("--time", nargs="?", const=sys.executable)
+    p.add_argument("--runs", type=int, default=15)
+    p.add_argument("--repeat", type=int, default=20)
     a = p.parse_args()
     archive = package_check.fetch(PYDANTIC, pathlib.Path(a.cache))
     with tempfile.TemporaryDirectory() as tmp_name:
@@ -120,10 +174,21 @@ def main() -> int:
                 sys.stdout.flush()
         print(f"TOTAL: {total - fell_total}/{total} functions native, "
               f"{failed} modules failed to build")
-        if not a.tests:
+        if not a.tests and not a.time:
             return 1 if failed else 0
         for so in (tree / "pydantic").rglob("*.abi3.so"):
             so.with_name(so.name.replace(".abi3.so", ".py")).unlink(missing_ok=True)
+        if a.time:
+            plain = tmp / "plain"
+            shutil.copytree(src / "pydantic", plain / "pydantic")
+            work = tmp / "work"
+            work.mkdir()
+            python = str(pathlib.Path(a.time).absolute()) if "/" in a.time else a.time
+            report(time_trees(python, {"compiled": tree, "CPython": plain}, work,
+                              a.runs, a.repeat))
+            sys.stdout.flush()
+            if not a.tests:
+                return 1 if failed else 0
         shutil.copytree(src / "tests", tree / "tests")
         shutil.copy(src / "pyproject.toml", tree / "pyproject.toml")
         tests = str(pathlib.Path(a.tests).absolute()) if "/" in a.tests else a.tests

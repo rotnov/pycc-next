@@ -20,6 +20,18 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `(start, stop, step)` triples; `x is None` / `x is not None` of a value whose type is
   never `None` (a parameter defaulting to `None` that every call passes) folds like an
   `isinstance` test. Corpus problem 168 compiles: strict 190/200 (v0.7 accept 5).
+- `bench/pydantic_check.py --time` times pydantic 2.13.5 compiled against its sources
+  (`bench/pydantic_workload.py`: import, model definition, `model_json_schema()`,
+  validation/serialization round-trips; fresh interleaved processes, best and median).
+  The one-off result (v0.7 accept 4): the compiled tree is slower -- import 0.40x,
+  definition 0.70x, schema 0.70x, round-trips 0.91x of CPython's speed -- with 5742
+  tests passing and 20 failing; the profile is recorded in `docs/ROADMAP.md`.
+
+### Changed
+
+- A CPython exception caught in compiled code is mapped to its class by identity first
+  (the common case: CPython raised the builtin class itself), so catching a `KeyError`
+  from a `dict` takes 312 instead of 496 ns (CPython: 202).
 
 ### Fixed
 
