@@ -210,12 +210,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - id: build
         run: cargo build --release
-      # TEMPORARY (Windows port): which pycc_codegen unit test crashes.
-      - name: Debug codegen crash
-        continue-on-error: true
-        run: |
-          cargo test --release -p pycc_codegen --lib -- --include-ignored --test-threads=1 > cg.log 2>&1 || true
-          tail -n 40 cg.log
       # The release archive as release.yml builds it (no tag here), unpacked
       # and smoke-tested.
       - name: Package and smoke-test the release archive

@@ -44,7 +44,9 @@ pub(crate) fn check(module: &Module<'_>, target_data: &TargetData) {
                         "pycc_codegen: internal error: `{}` stores {written} bytes into a \
                          {held}-byte slot: `{}`",
                         function.get_name().to_string_lossy(),
-                        inkwell::values::AnyValue::print_to_string(&instruction).to_string_lossy(),
+                        crate::compile::llvm_string_to_owned(
+                            inkwell::values::AnyValue::print_to_string(&instruction)
+                        ),
                     );
                 }
             }
