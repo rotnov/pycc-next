@@ -13,11 +13,18 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   parameter an `isinstance` guard normalizes (`if not isinstance(B[0], list): B = [[b]
   for b in B]`) gets one per path (#6). A nested helper whose calls give it conflicting
   argument types is compiled once per call site (#7). Together they compile corpus
-  problem 188: strict 189/200 (from 188), and `--non-strict` runs no top-level
-  statement of the corpus in CPython (from 1 of 1191).
+  problem 188, and `--non-strict` runs no top-level statement of the corpus in CPython
+  (from 1 of 1191).
+- `range` objects kept in a variable or a list and only iterated (`r =
+  list(map(range, xs))`, `r[k] = range(a, b)`, `for i in r[0]`) compile, as their
+  `(start, stop, step)` triples; `x is None` / `x is not None` of a value whose type is
+  never `None` (a parameter defaulting to `None` that every call passes) folds like an
+  `isinstance` test. Corpus problem 168 compiles: strict 190/200 (v0.7 accept 5).
 
 ### Fixed
 
+- Replacing an element of a list of `int`/`float`/`bool` tuples (`rows[i] = (a, b)`) leaked
+  the boxed tuple it overwrote.
 - The constraint solver typed `[[c] * b for i in range(a)]` over a parameter `c` as
   `list[int]` (a one-element display of a not-yet-typed value gave no type, and the
   comprehension's was guessed before the operator settled), so a helper building one

@@ -14,8 +14,11 @@
 //!
 //! A test `isinstance(x, C)` of a builtin class `C` whose subject's type
 //! is a builtin type (`list[...]`, `str`, `dict[...]`, ...) has one value
-//! for every run: `pycc_types` folds it and keeps only the branch that
-//! runs, as mypy's unreachable-branch analysis does. The subjects the test
+//! for every run, and so has `x is None` / `x is not None` of an `x` whose
+//! type is neither `None`, `T | None` nor an object (a parameter defaulting
+//! to `None` that every call passes): `pycc_types` folds such a test and
+//! keeps only the branch that runs, as mypy's unreachable-branch analysis
+//! does. The subjects the test
 //! evaluates (`B[0]` above, which may raise `IndexError`) still run, as
 //! expression statements, in CPython's order (`and`/`or` short-circuit).
 //! `pycc_ast`'s web analysis gives a parameter such a guard rebinds a
@@ -40,7 +43,7 @@
 
 use crate::fx::HashMap;
 use crate::{Environment, bind_local_types_in_body, infer_expr_in};
-use pycc_hir::{BoolOpKind, HirExpr, HirItem, HirModule, HirStmt, Ty, UnaryOpKind};
+use pycc_hir::{BoolOpKind, CmpOpKind, HirExpr, HirItem, HirModule, HirStmt, Ty, UnaryOpKind};
 
 mod site_copies;
 
@@ -328,7 +331,21 @@ fn is_guard(test: &HirExpr, shadowed: &[&str]) -> bool {
         HirExpr::Call { callee, args } if callee == "isinstance" => {
             matches!(args.as_slice(), [_, class] if classes(class, shadowed).is_some())
         }
-        _ => false,
+        other => none_test(other).is_some(),
+    }
+}
+
+/// `x is None` (`Some((x, true))`) or `x is not None` (`Some((x, false))`).
+fn none_test(test: &HirExpr) -> Option<(&HirExpr, bool)> {
+    match test {
+        HirExpr::Compare { op, left, right } if matches!(right.as_ref(), HirExpr::NoneLiteral) => {
+            match op {
+                CmpOpKind::Is => Some((left, true)),
+                CmpOpKind::IsNot => Some((left, false)),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 
@@ -372,6 +389,16 @@ fn decide(
             let (right, more) = decide(right, type_of, deques)?;
             subjects.extend(more);
             Some((right, subjects))
+        }
+        HirExpr::Compare { .. } => {
+            let (subject, is) = none_test(test)?;
+            // A value of any other fully known type is never `None`.
+            let none = match type_of(subject)? {
+                Ty::None => true,
+                Ty::Optional(_) => return None,
+                _ => false,
+            };
+            Some((none == is, vec![subject.clone()]))
         }
         HirExpr::Call { args, .. } => {
             let [subject, class] = args.as_slice() else {

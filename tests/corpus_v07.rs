@@ -182,3 +182,77 @@ fn static_isinstance_guards_do_not_leak() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
+
+/// Corpus 168: `range` objects kept in a variable, or in a list, and only
+/// iterated compile as their `(start, stop, step)` triples
+/// (`pycc_ast::desugar::range_values`); an `x is not None` test of a
+/// parameter defaulting to `None` that every call passes folds
+/// (`pycc_types::static_isinstance`).
+#[test]
+fn iterated_range_values_match_cpython() {
+    assert_native_matches("range_values.py");
+}
+
+/// A range used any other way is still refused in strict mode: printed,
+/// or made with a step that is not a nonzero literal (CPython raises
+/// `ValueError` for a zero step when the range is made).
+#[test]
+fn other_range_values_are_still_refused() {
+    for source in [
+        "def _f(n: int) -> None:\n    d = range(n)\n    print(d)\n\n\n_f(3)\n",
+        "def _f(n: int) -> int:\n    d = range(0, n, 0)\n    t = 0\n    for v in d:\n        t += v\n    return t\n\n\nprint(_f(3))\n",
+    ] {
+        let rendered = support::check_fails(source);
+        assert!(rendered.contains("`range` is valid Python but not implemented yet"), "{rendered}");
+    }
+}
+
+/// Replacing an element of a list of `int` tuples (`rows[0] = (a, b, c)`,
+/// how a range list stores a range) releases the boxed tuple it overwrites:
+/// it leaked one per store before. Checked against CPython too.
+#[test]
+fn replaced_tuple_elements_match_cpython() {
+    assert_native_matches("tuple_rows.py");
+}
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn replaced_tuple_elements_do_not_leak() {
+    let source = support::fixture("tuple_rows.py");
+    let dir = pycc_scratch::ScratchDir::new("tuple_rows_leaks").expect("scratch");
+    let build = support::pycc()
+        .arg("build")
+        .arg(&source)
+        .arg("-o")
+        .arg(dir.join("tuple_rows"))
+        .arg("--ext")
+        .output()
+        .expect("pycc spawns");
+    assert!(build.status.success(), "{}", support::rendered(&build));
+    let driver = "import ctypes, io, contextlib\n\
+                  with contextlib.redirect_stdout(io.StringIO()):\n    \
+                  import tuple_rows as m\n\
+                  lib = ctypes.CDLL(m.__file__)\n\
+                  live = lib.pycc_rt_list_live_objects\n\
+                  live.restype = ctypes.c_int64\n\
+                  live.argtypes = []\n\
+                  for name, call in (('replace_rows', lambda: m.replace_rows(7)), ('ranges', lambda: m.ranges(5))):\n    \
+                  call()\n    \
+                  before = live()\n    \
+                  for _ in range(200):\n        call()\n    \
+                  d = live() - before\n    \
+                  assert d == 0, '%s leaked %d lists over 200 calls' % (name, d)\n\
+                  print('ok')\n";
+    let run = std::process::Command::new(support::python())
+        .args(["-B", "-c", driver])
+        .current_dir(&*dir)
+        .output()
+        .expect("python3 runs");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        "ok\n",
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+}

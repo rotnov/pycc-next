@@ -229,6 +229,18 @@ fn resolve_prepared(
     unroll_enum_loops(monomorphized).map_err(module_level)
 }
 
+/// Whether the checker's signatures for `folded` confirm every guard
+/// `crate::static_isinstance` folded in it: a fold decided from a solver
+/// guess they contradict is not made (the module is checked unfolded).
+fn folds_hold(folded: &HirModule, folds: &[crate::static_isinstance::Fold]) -> bool {
+    if folds.is_empty() {
+        return true;
+    }
+    let names = module_function_local_names(folded);
+    checked_function_signatures_all(folded, &names)
+        .is_ok_and(|signatures| crate::static_isinstance::verify(folded, &signatures, folds).is_ok())
+}
+
 /// Steps 1 and 2 of [`Prepared`]'s pre-pass: `hir` with its unannotated
 /// `__init__` parameters, empty containers and helper container parameters
 /// typed; `None` when nothing changed.
@@ -305,11 +317,15 @@ impl Prepared {
         let current = resolved.as_ref().unwrap_or(hir);
         if let Some(copied) = crate::static_isinstance::copy_call_sites(hir, current, |copied| {
             resolve_containers(copied).ok().flatten()
-        }) {
+        })
+        .filter(|copied| folds_hold(&copied.module, &copied.folds))
+        {
             site_origins = copied.origins;
             folds = copied.folds;
             resolved = Some(copied.module);
-        } else if let Some((folded, folded_guards)) = crate::static_isinstance::fold(current) {
+        } else if let Some((folded, folded_guards)) = crate::static_isinstance::fold(current)
+            .filter(|(folded, folded_guards)| folds_hold(folded, folded_guards))
+        {
             folds = folded_guards;
             resolved = Some(folded);
         }

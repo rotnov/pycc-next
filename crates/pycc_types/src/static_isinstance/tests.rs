@@ -154,3 +154,41 @@ class C:
 ";
     assert!(fold(&lowered(object)).is_none());
 }
+
+#[test]
+fn an_is_none_test_of_a_value_that_is_never_none_is_decided() {
+    let name = |n: &str| HirExpr::Name(n.to_string());
+    let is = |op, subject: &str| HirExpr::Compare {
+        op,
+        left: Box::new(name(subject)),
+        right: Box::new(HirExpr::NoneLiteral),
+    };
+    let type_of = |expr: &HirExpr| match expr {
+        HirExpr::Name(n) if n == "i" => Some(Ty::Int),
+        HirExpr::Name(n) if n == "o" => Some(Ty::Optional(Box::new(Ty::Int))),
+        HirExpr::Name(n) if n == "z" => Some(Ty::None),
+        _ => None,
+    };
+    assert!(is_guard(&is(CmpOpKind::IsNot, "i"), &[]));
+    assert_eq!(
+        decide(&is(CmpOpKind::IsNot, "i"), &type_of, false),
+        Some((true, vec![name("i")]))
+    );
+    assert_eq!(
+        decide(&is(CmpOpKind::Is, "i"), &type_of, false),
+        Some((false, vec![name("i")]))
+    );
+    assert_eq!(
+        decide(&is(CmpOpKind::Is, "z"), &type_of, false),
+        Some((true, vec![name("z")]))
+    );
+    // `T | None` is what the existing narrowing handles.
+    assert_eq!(decide(&is(CmpOpKind::Is, "o"), &type_of, false), None);
+    assert_eq!(decide(&is(CmpOpKind::Is, "unknown"), &type_of, false), None);
+    let eq = HirExpr::Compare {
+        op: CmpOpKind::Eq,
+        left: Box::new(name("i")),
+        right: Box::new(HirExpr::NoneLiteral),
+    };
+    assert!(!is_guard(&eq, &[]));
+}

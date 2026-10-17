@@ -428,9 +428,9 @@ pub(crate) fn build_list_get<'ctx>(
     build_list_get_unchecked(context, builder, elem, list, position)
 }
 
-/// `xs[index] = word`. A `str` list goes through `pycc_rt_list_set`, which
-/// also releases the overwritten element; every other kind holds no
-/// reference, so the store is inlined.
+/// `xs[index] = word`. A counted element (or a boxed struct tuple) goes
+/// through `pycc_rt_list_set`, which also releases the overwritten one;
+/// every other kind holds no reference, so the store is inlined.
 pub(crate) fn build_list_set<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
@@ -441,8 +441,9 @@ pub(crate) fn build_list_set<'ctx>(
     word: IntValue<'ctx>,
 ) {
     // A counted element goes through the runtime, which releases the
-    // element it overwrites.
-    if crate::heap_rc::heap_kind(rt, elem).is_some() {
+    // element it overwrites -- a struct tuple too, which a list holds as a
+    // boxed copy (`element_word`).
+    if crate::heap_rc::heap_kind(rt, elem).is_some() || matches!(elem, Ty::Tuple(_)) {
         builder
             .build_call(rt.list_set, &[list.into(), index.into(), word.into()], "")
             .expect("build_call should not fail for a declared runtime function");

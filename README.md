@@ -68,7 +68,7 @@ pycc-next):
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
 wrong outputs (CI-gated), every top-level statement native (0 of 1191 in CPython
-fallback); strict mode compiles and passes 189/200 unchanged — most of the rest use
+fallback); strict mode compiles and passes 190/200 unchanged — most of the rest use
 dynamic values (mixed-type containers, an `int | None` used as an `int` without a `None`
 test, a variable rebound to another type on some paths only) that strict mode refuses.
 

@@ -88,6 +88,7 @@ mod itertools;
 mod hoist;
 mod keys;
 mod pure_calls;
+mod range_values;
 mod ndarray_ndim;
 mod object_except;
 mod aug_target;
@@ -193,6 +194,7 @@ pub fn desugar(module: &mut ModModule) {
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
         static_branches::fold_static_branches(&mut body);
+        range_values::range_values(&mut body);
         chr_ranges::native_chr_calls(&mut body);
         class_attrs::mutable_class_attrs(&mut body);
         dataclasses::expand_dataclasses(&mut body);
