@@ -204,7 +204,8 @@ jobs:
       - name: Install LLVM 22
         run: scripts/windows_llvm.sh
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
+      - id: build
+        run: cargo build --release
       # The release archive as release.yml builds it (no tag here), unpacked
       # and smoke-tested.
       - name: Package and smoke-test the release archive
@@ -216,21 +217,21 @@ jobs:
           python3 -m zipfile -e dist/$name.zip "$smoke"
           scripts/smoke.sh "$smoke/$name"
       - name: Real packages built into wheels by pip with pycc.build
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           python3 bench/wheel_check.py diff-match-patch tomli pypng \
             --pycc dist/pycc-ci-x86_64-windows/bin/pycc.exe --backend dist/pycc-ci-x86_64-windows/python
       - name: Real packages (diff-match-patch, tomli, pypng) against their own tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: python3 bench/package_check.py diff-match-patch tomli pypng
       # Same skips and failure reporting as the Linux job.
       - name: Tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
           scripts/ci_test.sh --include-ignored
           --skip a_real_static_libpython --skip nbody_release_binary_meets_required_speedup
       - name: Corpus (non-strict)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: scripts/ci_corpus.sh -j 4 --flags=--non-strict --require-correct
       - uses: actions/upload-artifact@v4
         if: failure()

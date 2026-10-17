@@ -298,8 +298,12 @@ pub fn anchor_target_root_for_build_script(
 /// coverage run's profile-output template, which the nested build would
 /// otherwise overwrite).
 ///
-/// Two deliberate exceptions:
+/// Three deliberate exceptions:
 ///
+/// * `CARGO_TARGET_<TRIPLE>_LINKER` is kept. It names the platform linker,
+///   a toolchain fact like `LIB`: on Windows CI it points cargo at MSVC's
+///   `link.exe`, which Git Bash's coreutils `link` otherwise shadows on
+///   `PATH`.
 /// * `CARGO_HOME` is kept. It names the shared registry and cache, not
 ///   anything about the current build; dropping it would send the nested
 ///   build to a fresh default home and re-download the index.
@@ -321,7 +325,7 @@ pub fn anchor_target_root_for_build_script(
 /// variable happens to be unset, leaving a D-014 region gap that depends
 /// on the machine running the tests.
 pub fn should_scrub_for_nested_cargo(name: &str) -> bool {
-    if name == "CARGO_HOME" {
+    if name == "CARGO_HOME" || (name.starts_with("CARGO_TARGET_") && name.ends_with("_LINKER")) {
         return false;
     }
     name.starts_with("CARGO_")
@@ -670,6 +674,7 @@ mod tests {
             "INCLUDE",
             "LIB",
             "LIBPATH",
+            "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER",
         ] {
             assert!(!should_scrub_for_nested_cargo(kept), "{kept}");
         }
