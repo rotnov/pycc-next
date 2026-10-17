@@ -117,7 +117,7 @@ pub fn run_measured(bin: &Path) -> (Vec<u8>, i64) {
         bin.display(),
         measured.status
     );
-    (measured.stdout, measured.peak_kb)
+    (lf(measured.stdout), measured.peak_kb)
 }
 
 /// The peak resident set, in kilobytes, of `command`, which must exit with
@@ -394,5 +394,15 @@ pub fn cpython(src: &Path) -> Vec<u8> {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    output.stdout
+    lf(output.stdout)
+}
+
+/// `bytes` with `\r\n` as `\n`: on Windows CPython (and a program writing
+/// through its `sys.stdout`) ends lines with `\r\n`, a native program with
+/// `\n` (docs/DEVIATIONS.md).
+pub fn lf(bytes: Vec<u8>) -> Vec<u8> {
+    if !bytes.contains(&b'\r') {
+        return bytes;
+    }
+    String::from_utf8_lossy(&bytes).replace("\r\n", "\n").into_bytes()
 }

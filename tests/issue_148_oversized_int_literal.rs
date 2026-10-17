@@ -255,8 +255,8 @@ fn assert_matches_cpython(case: &str, source: &str) {
         String::from_utf8_lossy(&run.stderr)
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&oracle.stdout),
+        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        String::from_utf8_lossy(&oracle.stdout).replace("\r\n", "\n"),
         "{case}"
     );
 }

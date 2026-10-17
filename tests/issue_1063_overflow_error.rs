@@ -147,7 +147,10 @@ fn a_float_power_that_overflows_raises_before_the_next_statement() {
         ])
         .output()
         .expect("python3 runs");
-    assert_eq!(stdout, String::from_utf8_lossy(&oracle.stdout));
+    assert_eq!(
+        stdout.replace("\r\n", "\n"),
+        String::from_utf8_lossy(&oracle.stdout).replace("\r\n", "\n")
+    );
 }
 
 /// The converted `float_pow` zero-base arm, which is `ZeroDivisionError` and

@@ -697,9 +697,13 @@ fn add_windows_system_libs(_cmd: &mut std::process::Command) {}
 /// calls: `pycc_rt.lib` also carries Rust's `compiler_builtins`, whose own
 /// (musl-derived) libm definitions would otherwise win the link and round
 /// differently from CPython (`x ** 0.5` in `tests/speed_proofs.rs`).
+///
+/// The driver flag says the same to clang itself: without it, clang's MSVC
+/// link adds `-defaultlib:libcmt`, the static runtime, beside the DLL one
+/// `pycc_rt.lib` and the C objects (`ext_build::WINDOWS_CRT_FLAG`) name.
 #[cfg(windows)]
 fn add_windows_crt_math(cmd: &mut std::process::Command) {
-    cmd.arg("-lucrt");
+    cmd.arg(crate::ext_build::WINDOWS_CRT_FLAG).arg("-lucrt");
 }
 
 #[cfg(not(windows))]

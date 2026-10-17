@@ -48,7 +48,7 @@ fn run_with_input(program: &Path, input: &[u8]) -> (Vec<u8>, i64) {
         program.display(),
         measured.status
     );
-    (measured.stdout, measured.peak_kb)
+    (memory_support::lf(measured.stdout), measured.peak_kb)
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn next_of_stdin_runs_in_constant_memory() {
             .expect("piped stdin")
             .write_all(input.as_bytes())
             .expect("write CPython's stdin");
-        let expected = oracle.wait_with_output().expect("CPython runs").stdout;
+        let expected = memory_support::lf(oracle.wait_with_output().expect("CPython runs").stdout);
         assert_eq!(
             String::from_utf8_lossy(&out),
             String::from_utf8_lossy(&expected)
