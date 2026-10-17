@@ -324,6 +324,12 @@ fn a_twin_is_defined_before_the_next_statement() {
     assert_eq!(observed(&run, name), expected);
 }
 
+/// `break` out of a `for` over a `str` or a tuple skips its `else:`.
+#[test]
+fn for_else_over_a_str_or_tuple_respects_break() {
+    assert_matches_cpython("fuzz_for_else_str");
+}
+
 /// `int()`/`float()` of a `str` read Unicode decimal digits.
 #[test]
 fn int_and_float_read_unicode_decimal_digits() {

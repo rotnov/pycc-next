@@ -426,6 +426,33 @@ pub(super) fn lower_stmt(
             } else {
                 super::lower_stmt_sequence(orelse, scopes, classes, current_class)
             };
+            // A loop lowered with set-up statements before it (`for c in s`
+            // first binds `list(s)`): the `else:` wraps the loop itself, the
+            // one whose `break` must skip it, not the sequence.
+            if let MirStmt::Seq(stmts) = &lowered_loop
+                && stmts.last().is_some_and(|last| {
+                    matches!(
+                        last,
+                        MirStmt::While { .. }
+                            | MirStmt::ForRange { .. }
+                            | MirStmt::ForList { .. }
+                            | MirStmt::ForObject { .. }
+                            | MirStmt::ForDict { .. }
+                            | MirStmt::ForSet { .. }
+                            | MirStmt::ForGen { .. }
+                    )
+                })
+            {
+                let MirStmt::Seq(mut stmts) = lowered_loop else {
+                    unreachable!()
+                };
+                let inner = stmts.pop().expect("a last statement");
+                stmts.push(MirStmt::LoopElse {
+                    loop_stmt: Box::new(inner),
+                    orelse,
+                });
+                return MirStmt::Seq(stmts);
+            }
             MirStmt::LoopElse {
                 loop_stmt: Box::new(lowered_loop),
                 orelse,
