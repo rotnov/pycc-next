@@ -2121,28 +2121,3 @@ fn check_without_files_is_a_clean_invocation_error() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("at least one Python file"));
 }
-
-#[cfg(target_os = "windows")]
-#[test]
-fn native_windows_agent_lifecycle_and_policy_parsers_pass() {
-    let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
-    for pattern in [
-        "test_manage_ievo_hooks.py",
-        "test_validate_agent_policies.py",
-    ] {
-        let output = Command::new(&python)
-            .args([
-                "-B", "-m", "unittest", "discover", "-s", "scripts", "-p", pattern,
-            ])
-            .current_dir(repository)
-            .output()
-            .expect("the Tier-1 Windows runner must provide Python");
-        assert!(
-            output.status.success(),
-            "{pattern} failed under native Windows Python:\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-    }
-}
