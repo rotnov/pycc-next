@@ -457,6 +457,9 @@ pub enum CompSource {
     ListExpr(MirExpr),
 }
 
+// Most items are top-level statements: boxing `TopLevelStmt` would add an
+// allocation per statement to save space only on the other items.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, PartialEq)]
 pub enum MirItem {
     Function {

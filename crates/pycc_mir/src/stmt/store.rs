@@ -11,10 +11,10 @@ use std::collections::HashMap;
 /// `dict[key] = value`, where `dict` names a dict, list, memoryview or
 /// CPython object.
 pub(super) fn lower_item_store(
-    dict: &String,
+    dict: &str,
     key: &HirExpr,
     value: &HirExpr,
-    scopes: &mut Vec<HashMap<String, Ty>>,
+    scopes: &mut [HashMap<String, Ty>],
     classes: &HashMap<String, HirClassDef>,
     current_class: Option<&str>,
 ) -> MirStmt {
@@ -26,7 +26,7 @@ pub(super) fn lower_item_store(
     if base_ty == Ty::Object {
         return MirStmt::ObjSetItem {
             base: MirExpr::Name {
-                name: dict.clone(),
+                name: dict.to_owned(),
                 ty: Ty::Object,
             },
             key,
@@ -36,7 +36,7 @@ pub(super) fn lower_item_store(
     if let Ty::List(_) = base_ty {
         MirStmt::ListSet {
             base: MirExpr::Name {
-                name: dict.clone(),
+                name: dict.to_owned(),
                 ty: base_ty,
             },
             index: crate::index_operand(key, crate::IndexUse::List),
@@ -45,7 +45,7 @@ pub(super) fn lower_item_store(
     } else if base_ty == Ty::MemoryView {
         MirStmt::BufferSet {
             base: MirExpr::Name {
-                name: dict.clone(),
+                name: dict.to_owned(),
                 ty: Ty::MemoryView,
             },
             index: key,
@@ -55,7 +55,7 @@ pub(super) fn lower_item_store(
         MirStmt::ExprStmt(fused)
     } else {
         MirStmt::DictSet {
-            dict: dict.clone(),
+            dict: dict.to_owned(),
             key,
             value,
         }
@@ -75,7 +75,7 @@ pub(super) fn lower_attr_store(
     base: &HirExpr,
     attr: &String,
     value: &HirExpr,
-    scopes: &mut Vec<HashMap<String, Ty>>,
+    scopes: &mut [HashMap<String, Ty>],
     classes: &HashMap<String, HirClassDef>,
     current_class: Option<&str>,
 ) -> MirStmt {

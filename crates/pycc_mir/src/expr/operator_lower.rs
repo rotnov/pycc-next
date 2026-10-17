@@ -398,7 +398,7 @@ pub(crate) fn lower_compare_chain_expr(
         .collect();
     let tys: Vec<Ty> = lowered.iter().map(MirExpr::ty).collect();
     // A chain over a CPython object (`pycc_types::compare_chain`).
-    if tys.iter().any(|ty| *ty == Ty::Object)
+    if tys.contains(&Ty::Object)
         && let Some(conjunction) = pycc_hir::chain_as_conjunction(first, links)
     {
         return lower_expr(&conjunction, scopes, classes, current_class);

@@ -143,6 +143,10 @@ enum Returned {
     Forward(String),
 }
 
+/// A candidate's arity, its declared result types (when it declares a
+/// tuple) and what each of its `return`s hands back.
+type Shape = (usize, Option<Vec<Ty>>, Vec<Returned>);
+
 /// The functions that get a twin, with their result types.
 fn candidates(module: &MirModule) -> HashMap<String, Abi> {
     let mut definitions: HashMap<&str, usize> = HashMap::new();
@@ -151,7 +155,7 @@ fn candidates(module: &MirModule) -> HashMap<String, Abi> {
             *definitions.entry(name).or_insert(0) += 1;
         }
     }
-    let mut shapes: HashMap<String, (usize, Option<Vec<Ty>>, Vec<Returned>)> = HashMap::new();
+    let mut shapes: HashMap<String, Shape> = HashMap::new();
     for item in &module.items {
         let MirItem::Function {
             name,
@@ -263,7 +267,7 @@ fn abi_of(
     arity: usize,
     declared: Option<&Vec<Ty>>,
     returned: &[Returned],
-    shapes: &HashMap<String, (usize, Option<Vec<Ty>>, Vec<Returned>)>,
+    shapes: &HashMap<String, Shape>,
     abis: &HashMap<String, Abi>,
 ) -> Option<Abi> {
     let mut tys: Vec<Option<Ty>> = vec![None; arity];
@@ -396,7 +400,7 @@ fn has_closure(expr: &MirExpr) -> bool {
 }
 
 /// Rewrites every `return` of a twin's body.
-fn twin_returns(body: &mut Vec<MirStmt>, abi: &Abi, candidates: &HashMap<String, Abi>) {
+fn twin_returns(body: &mut [MirStmt], abi: &Abi, candidates: &HashMap<String, Abi>) {
     for stmt in body.iter_mut() {
         for inner in stmt.bodies_mut() {
             twin_returns(inner, abi, candidates);

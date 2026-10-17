@@ -694,7 +694,7 @@ fn tuple_literal_ty_derives_positionally_from_every_element() {
 fn an_empty_tuple_literal_is_the_empty_tuple_type() {
     // `()` is the native empty tuple object (v0.5): a `tuple[T, ...]` of
     // any `T` with no conversion.
-    assert_eq!(MirExpr::TupleLiteral(vec![]).ty(), Ty::Tuple(Box::new(vec![])));
+    assert_eq!(MirExpr::TupleLiteral(vec![]).ty(), Ty::Tuple(Box::default()));
 }
 
 #[test]
@@ -718,7 +718,7 @@ fn a_computed_index_into_an_empty_tuple_ty_panics_with_an_internal_error() {
     let expr = MirExpr::Subscript {
         base: Box::new(MirExpr::Name {
             name: "t".to_string(),
-            ty: Ty::Tuple(Box::new(Vec::new())),
+            ty: Ty::Tuple(Box::default()),
         }),
         index: Box::new(MirExpr::Name {
             name: "i".to_string(),

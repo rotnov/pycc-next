@@ -154,6 +154,9 @@ pub(crate) fn lower_sort_method(
 
 /// `element in set` / `not in` for a `set[C]` of instances; `Err` with the
 /// operands for any other test.
+// The `Err` hands the caller its operands back for the ordinary lowering;
+// boxing them would allocate on that common path.
+#[allow(clippy::result_large_err)]
 pub(crate) fn lower_set_contains(
     op: CmpOpKind,
     element: MirExpr,

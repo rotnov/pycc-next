@@ -132,7 +132,7 @@ pub(crate) fn lower_yield_expr(
 /// list iterator does.
 pub(crate) fn lower_yield_from_stmt(
     operand: &HirExpr,
-    scopes: &mut Vec<HashMap<String, Ty>>,
+    scopes: &mut [HashMap<String, Ty>],
     classes: &HashMap<String, HirClassDef>,
     current_class: Option<&str>,
 ) -> MirStmt {
