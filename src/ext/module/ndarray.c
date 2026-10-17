@@ -319,8 +319,13 @@ int pycc_ext_nd_int_word(long long encoded, long long *out)
         v = PyLong_AsLongLong(value);
         Py_DECREF(value);
         if (v == -1 && PyErr_Occurred()) {
+#ifndef _WIN32
+            /* numpy converts through a C `long`, 64-bit here, and says so;
+             * on Windows (32-bit `long`) it converts through `long long`,
+             * whose own message ("int too big to convert") is kept. */
             PyErr_Clear();
             PyErr_SetString(PyExc_OverflowError, "Python int too large to convert to C long");
+#endif
             return -1;
         }
         *out = v;

@@ -702,10 +702,12 @@ fn add_windows_system_libs(_cmd: &mut std::process::Command) {}
 /// runtime, to an MSVC link, beside the DLL one `pycc_rt.lib` and the C
 /// objects (`ext_build::WINDOWS_CRT_FLAG`) name; `libcmt.lib` would pull in
 /// the static UCRT (`libucrt.lib`), whose stdio collides with `ucrt.lib`'s
-/// (LNK2005), so it is excluded.
+/// (LNK2005), so it is excluded, and the DLL runtime is named instead:
+/// `msvcrt.lib` (the entry points, which also pulls in `vcruntime.lib`),
+/// `ucrt.lib`. A Rust `staticlib` records no runtime library of its own.
 #[cfg(windows)]
 fn add_windows_crt_math(cmd: &mut std::process::Command) {
-    cmd.arg("-Wl,/NODEFAULTLIB:libcmt").arg("-lucrt");
+    cmd.args(["-Wl,/NODEFAULTLIB:libcmt", "-lmsvcrt", "-lucrt"]);
 }
 
 #[cfg(not(windows))]
