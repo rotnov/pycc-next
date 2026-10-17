@@ -169,9 +169,6 @@ jobs:
           if-no-files-found: ignore
   windows:
     # x86_64 Windows with the MSVC toolchain (ROADMAP v0.7 accept 1).
-    # The port is in progress: until this job is green it reports without
-    # gating (remove continue-on-error then).
-    continue-on-error: true
     runs-on: windows-2025
     timeout-minutes: 240
     # Git Bash, so the same scripts as on Linux and macOS run here.
