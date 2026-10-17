@@ -271,5 +271,11 @@ Accept:
    them under CPython 3.13 and as native strict, `--non-strict` and `--ext` builds, and
    compares output and exceptions; a nightly CI job runs it for >= 30 minutes; every
    mismatch it found is fixed (with a regression fixture) or documented in DEVIATIONS.
+   **Met 2026-10-17:** `fuzz/` (generator, harness, AST reducer, runner); nightly
+   `.github/workflows/fuzz.yml` run 38996102925 on ad3e996: 3314 programs compared in
+   1802 s, 0 findings (an earlier nightly run on fe05aa0: 2190 programs, 0 findings). The
+   ~5 hours of local runs found 18 mismatches, each fixed with a fixture in
+   `tests/fuzz_regressions.rs`; 5 documented differences are listed in DEVIATIONS and
+   filtered by the harness. A 120 s smoke run is part of regular CI.
 5. **Real-world corpus:** strict >= 190/200; `--non-strict` 200/200, 0 wrong, with no
    top-level statement in CPython fallback.
