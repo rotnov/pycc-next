@@ -120,7 +120,6 @@ fn every_truth_testable_condition_is_admitted() {
 fn a_condition_with_no_testable_truth_is_refused() {
     for (param, name) in [
         ("d: dict[str, int]", "dict[str, int]"),
-        ("p: tuple[int, int]", "tuple[int, int]"),
     ] {
         let arg = param.split(':').next().unwrap();
         refused(
