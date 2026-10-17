@@ -136,6 +136,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- `int | float` memory safety: a `float` needle or key for an `int | float` container
+  (`1e100 in xs`, `d[1e-100]`, `d.get(x, ...)`, and a refused store) leaked the boxed
+  float it was converted to; the runtime's refcount paths read a boxed float through a
+  bigint-sized reference (undefined behaviour), and an `int`-only reader handed one would
+  have read its `f64` and the memory past it as bigint limbs -- it now panics instead.
 - `float` floor division and modulo by zero raised `ZeroDivisionError: float floor
   division or modulo by zero`; the messages are now CPython 3.13's `float floor division
   by zero` and `float modulo by zero`.

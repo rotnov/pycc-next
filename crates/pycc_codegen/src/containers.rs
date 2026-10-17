@@ -416,39 +416,80 @@ pub(crate) fn tuple_element<'ctx>(
     }
 }
 
+/// What [`borrowed_word`] made for a call, which the caller releases after
+/// it ([`release_boxed`]): a tuple object boxed for a struct tuple, or the
+/// fresh `int | float` word converted from a `float` (a heap box for a
+/// magnitude the word cannot hold inline, `crate::num`).
+#[derive(Clone, Copy)]
+pub(crate) enum BorrowedTemp<'ctx> {
+    Tuple(PointerValue<'ctx>),
+    Num(IntValue<'ctx>),
+}
+
 /// The word a value `scalar` of type `ty` crosses into a runtime call that
-/// only borrows it, plus the tuple object boxed for it (which the caller
-/// releases after the call), if one was built.
+/// only borrows it, plus what was made for it, if anything.
+///
+/// A `float` for an `int | float` word is converted here, not by a
+/// `coerce_scalar_to_type` beforehand: the coercion yields a word without
+/// saying it is fresh, and a fresh boxed float the call only borrows would
+/// then never be released.
 pub(crate) fn borrowed_word<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
     ty: &Ty,
     scalar: Scalar<'ctx>,
-) -> (IntValue<'ctx>, Option<PointerValue<'ctx>>) {
+) -> (IntValue<'ctx>, Option<BorrowedTemp<'ctx>>) {
     match (ty, scalar) {
         (Ty::Int, scalar) => (to_encoded_int(context, builder, scalar), None),
-        (Ty::Num, scalar) => (crate::num::to_num_word(context, builder, rt, scalar), None),
+        (Ty::Num, scalar) => {
+            let (word, converted) = crate::num::operand_word(context, builder, rt, scalar);
+            (word, converted.map(BorrowedTemp::Num))
+        }
         (Ty::Tuple(elements), Scalar::Tuple(tuple)) => {
             let boxed = box_struct_tuple(context, builder, rt, elements, tuple);
             let word = builder
                 .build_ptr_to_int(boxed, context.i64_type(), "boxed_tuple_word")
                 .expect("build_ptr_to_int should not fail for a pointer");
-            (word, Some(boxed))
+            (word, Some(BorrowedTemp::Tuple(boxed)))
         }
         (_, scalar) => (scalar_to_slot_word(context, builder, scalar), None),
     }
 }
 
-/// Releases a tuple object [`borrowed_word`] boxed.
+/// [`borrowed_word`] of a lookup operand -- a membership needle or a dict
+/// key -- coerced to the container's element type `ty` first, except for
+/// an `int | float` element, which [`borrowed_word`] converts itself.
+pub(crate) fn lookup_word<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    ty: &Ty,
+    scalar: Scalar<'ctx>,
+) -> (IntValue<'ctx>, Option<BorrowedTemp<'ctx>>) {
+    let scalar = if *ty == Ty::Num {
+        scalar
+    } else {
+        coerce_scalar_to_type(context, builder, rt, scalar, ty.clone())
+    };
+    borrowed_word(context, builder, rt, ty, scalar)
+}
+
+/// Releases what [`borrowed_word`] made.
 pub(crate) fn release_boxed<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
-    boxed: Option<PointerValue<'ctx>>,
+    made: Option<BorrowedTemp<'ctx>>,
 ) {
-    if let Some(boxed) = boxed {
-        heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::List, boxed);
+    match made {
+        Some(BorrowedTemp::Tuple(boxed)) => {
+            heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::List, boxed);
+        }
+        Some(BorrowedTemp::Num(word)) => {
+            crate::num::release_converted(context, builder, rt, &[Some(word)]);
+        }
+        None => {}
     }
 }
 
@@ -511,8 +552,7 @@ pub(crate) fn emit_contains<'ctx>(
         };
         return Scalar::Bool(found);
     }
-    let item = coerce_scalar_to_type(context, builder, rt, item, elem.clone());
-    let (word, boxed) = borrowed_word(context, builder, rt, &elem, item);
+    let (word, boxed) = lookup_word(context, builder, rt, &elem, item);
     let found = builder
         .build_call(function, &[pointer.into(), word.into()], "contains")
         .expect("build_call should not fail for a declared runtime function")

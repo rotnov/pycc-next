@@ -41,3 +41,46 @@ def churn(n: int, x: int | float) -> int | float:
 
 def echo(x: int | float) -> int | float:
     return x
+
+
+def num(x: int | float) -> int | float:
+    return x
+
+
+def lookups(n: int, x: int | float) -> int:
+    """`float` needles and keys for `int | float` containers: each lookup
+    borrows a word converted from the `float`, and a store refusing a
+    boxed float releases the one it converted."""
+    xs: list[int | float] = [1, 2.5]
+    d: dict[int | float, int] = {}
+    d[1] = 10
+    s = {num(4), num(0.5)}
+    w: dict[str, int | float] = {}
+    hits = 0
+    for i in range(n):
+        big = 1e100 * (i + 1)
+        for needle in (big, -big, 1e-100, 2.5):
+            hits += int(needle in xs) + int(needle not in d) + int(needle in s)
+            hits += d.get(needle, 0)
+        hits += int(x in xs) + int(x in d) + int(x in s) + d.get(x, 0)
+        try:
+            hits += d[big]
+        except KeyError:
+            hits += 1
+        try:
+            d[big] = 5
+        except OverflowError:
+            hits += 1
+        try:
+            hits += int(w.get("k", 1e300) > 0)
+        except OverflowError:
+            hits += 1
+        try:
+            w["k"] = big
+        except OverflowError:
+            hits += 1
+        try:
+            s.add(1e-300)
+        except OverflowError:
+            hits += 1
+    return hits

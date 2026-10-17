@@ -333,8 +333,7 @@ pub(crate) fn emit_dict_get_expr<'ctx>(
     let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
     heap_rc::truncate_pending(rt, mark);
     let (key_ty, value_ty) = containers::dict_kv(&dict_ty);
-    let key_coerced = coerce_scalar_to_type(context, builder, rt, key_scalar, key_ty.clone());
-    let (key_word, boxed) = containers::borrowed_word(context, builder, rt, &key_ty, key_coerced);
+    let (key_word, boxed) = containers::lookup_word(context, builder, rt, &key_ty, key_scalar);
     let value_word = builder
         .build_call(rt.dict_get, &[dict_ptr.into(), key_word.into()], "dict_get")
         .expect("build_call should not fail for a well-formed dict read")
@@ -763,8 +762,6 @@ pub(crate) fn emit_dict_get_or_default_expr<'ctx>(
     let receiver = emit_dict_receiver(context, builder, module, rt, user_functions, locals, dict);
     let dict_ptr = receiver.0;
     let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
-    let key_coerced = coerce_scalar_to_type(context, builder, rt, key_scalar, key_ty.clone());
-    let (key_word, boxed) = containers::borrowed_word(context, builder, rt, &key_ty, key_coerced);
     let default_scalar = emit_expr(
         context,
         builder,
@@ -774,9 +771,12 @@ pub(crate) fn emit_dict_get_or_default_expr<'ctx>(
         locals,
         default,
     );
-    let default_scalar = coerce_scalar_to_type(context, builder, rt, default_scalar, value_ty.clone());
+    let default_scalar = list::coerce_element(context, builder, rt, default_scalar, &value_ty);
     // The runtime adopts the default's reference.
     let default_word = list::element_word(context, builder, rt, &value_ty, default, default_scalar);
+    // After the default's ingress check, which may raise: a key converted
+    // to an `int | float` word is released after the lookup only.
+    let (key_word, boxed) = containers::lookup_word(context, builder, rt, &key_ty, key_scalar);
     let value_word = build_dict_get_or_default(builder, rt, dict_ptr, key_word, default_word);
     containers::release_boxed(context, builder, rt, boxed);
     release_scalar_if_temporary(context, builder, rt, key, &key_scalar);
@@ -833,7 +833,7 @@ pub(crate) fn emit_set_add_expr<'ctx>(
         panic!("pycc_codegen: internal error: `add` on a non-set")
     };
     let value_scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
-    let value_scalar = coerce_scalar_to_type(context, builder, rt, value_scalar, (*elem).clone());
+    let value_scalar = list::coerce_element(context, builder, rt, value_scalar, &elem);
     let word = list::element_word(context, builder, rt, &elem, value, value_scalar);
     containers::build_set_add(builder, rt, set_ptr, word);
     Scalar::Bool(context.i8_type().const_int(0, false))

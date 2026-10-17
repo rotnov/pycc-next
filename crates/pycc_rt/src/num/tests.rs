@@ -195,3 +195,42 @@ fn a_boxed_float_is_counted_like_a_bigint() {
     assert_eq!(text(word), "1e+300");
     pycc_rt_num_release(word);
 }
+
+/// A boxed float is a heap word the low tag cannot tell from a bigint: an
+/// `int`-only reader that reached one would take its `f64` and the memory
+/// past its (smaller) allocation as the bigint's `limbs`. Every such
+/// reader goes through `bigint_ref`, which refuses it.
+#[test]
+#[should_panic(expected = "bigint dereference of a boxed `float` word")]
+fn an_int_only_reader_refuses_a_boxed_float() {
+    let word = float(1e300);
+    assert_eq!(classify_encoded_int(word), EncodedIntKind::BigInt);
+    let _ = to_sign_and_magnitude(word);
+}
+
+#[test]
+#[should_panic(expected = "bigint dereference of a boxed `float` word")]
+fn an_int_comparison_refuses_a_boxed_float() {
+    let _ = encoded_int_cmp(float(-1e-300), big("123456789012345678901234567890"));
+}
+
+/// The refcount paths read only the header the two heap kinds share, and
+/// a bigint is still read in full.
+#[test]
+fn the_shared_header_counts_both_heap_kinds() {
+    let boxed = float(1e300);
+    let bigint = big("-123456789012345678901234567890");
+    for word in [boxed, bigint] {
+        bigint_retain(word);
+        assert_eq!(unsafe { heap_header(word) }.rc.get(), 2);
+        bigint_release(word);
+        assert_eq!(unsafe { heap_header(word) }.rc.get(), 1);
+    }
+    assert!(unsafe { heap_header(boxed) }.is_float);
+    assert!(!unsafe { heap_header(bigint) }.is_float);
+    assert_eq!(boxed_float(boxed), Some(1e300));
+    assert_eq!(boxed_float(bigint), None);
+    assert!(to_sign_and_magnitude(bigint).0);
+    pycc_rt_num_release(boxed);
+    pycc_rt_num_release(bigint);
+}

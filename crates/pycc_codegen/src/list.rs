@@ -136,6 +136,24 @@ pub(crate) fn check_element_int<'ctx>(
     let _ = untag_or_check(context, builder, rt, UntagUse::Element, encoded);
 }
 
+/// `coerce_scalar_to_type` of a value about to go through [`element_word`]
+/// for an element of type `elem`, except that an `int | float` element is
+/// left to [`element_word`]: it converts a `float` itself and so knows the
+/// word is fresh, which its ingress refusal must release.
+pub(crate) fn coerce_element<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    scalar: Scalar<'ctx>,
+    elem: &Ty,
+) -> Scalar<'ctx> {
+    if *elem == Ty::Num {
+        scalar
+    } else {
+        coerce_scalar_to_type(context, builder, rt, scalar, elem.clone())
+    }
+}
+
 /// Converts an element `scalar` (the value of `source`) into the word a
 /// container of `elem` stores, taking the reference the container will own:
 /// a borrowed counted value is retained, and a struct tuple is boxed into a

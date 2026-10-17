@@ -132,11 +132,47 @@ pub(crate) struct FloatBoxObj {
     pub(crate) value: f64,
 }
 
+/// The prefix [`BigIntObj`] and [`FloatBoxObj`] share, and the only view
+/// of a heap word taken before `is_float` says which object it is.
+///
+/// A `FloatBoxObj` is smaller than a `BigIntObj`, so a `&BigIntObj` to one
+/// would cover memory past its allocation and read its `f64` as `limbs`:
+/// every access that does not yet know the kind goes through this header
+/// ([`heap_header`]), and [`bigint_ref`] refuses a float box.
+#[repr(C)]
+pub(crate) struct HeapNumHeader {
+    pub(crate) rc: std::cell::Cell<u32>,
+    pub(crate) negative: bool,
+    pub(crate) is_float: bool,
+}
+
 const _: () = assert!(std::mem::offset_of!(BigIntObj, rc) == std::mem::offset_of!(FloatBoxObj, rc));
+const _: () =
+    assert!(std::mem::offset_of!(BigIntObj, rc) == std::mem::offset_of!(HeapNumHeader, rc));
+const _: () = assert!(
+    std::mem::offset_of!(BigIntObj, negative) == std::mem::offset_of!(HeapNumHeader, negative)
+);
+const _: () = assert!(
+    std::mem::offset_of!(FloatBoxObj, negative) == std::mem::offset_of!(HeapNumHeader, negative)
+);
 const _: () = assert!(
     std::mem::offset_of!(BigIntObj, is_float) == std::mem::offset_of!(FloatBoxObj, is_float)
 );
+const _: () = assert!(
+    std::mem::offset_of!(BigIntObj, is_float) == std::mem::offset_of!(HeapNumHeader, is_float)
+);
+const _: () = assert!(std::mem::size_of::<HeapNumHeader>() <= std::mem::size_of::<FloatBoxObj>());
 const _: () = assert!(std::mem::align_of::<FloatBoxObj>() >= 4);
+
+/// The shared header of the heap word `word` (a bigint or a boxed float).
+///
+/// # Safety
+/// `word` must be a live [`BigIntObj`] or [`FloatBoxObj`] pointer.
+pub(crate) unsafe fn heap_header<'a>(word: i64) -> &'a HeapNumHeader {
+    // SAFETY: both objects begin with this `#[repr(C)]` prefix (the
+    // offset assertions above), and it is no larger than either.
+    unsafe { &*(word as *const HeapNumHeader) }
+}
 
 /// Live [`FloatBoxObj`]s, for the leak probes of `tests/num_union.rs`
 /// (`pycc_rt_num_box_live_objects`). A boxed float is the rare path of an
@@ -164,8 +200,7 @@ pub(crate) fn box_float(value: f64) -> i64 {
 /// The boxed `float` of the heap word `word`, or `None` for a bigint.
 pub(crate) fn boxed_float(word: i64) -> Option<f64> {
     // SAFETY: `word` is a live heap object; both kinds share the header.
-    let header = unsafe { &*(word as *const BigIntObj) };
-    header
+    unsafe { heap_header(word) }
         .is_float
         .then(|| unsafe { &*(word as *const FloatBoxObj) }.value)
 }
@@ -285,10 +320,12 @@ pub(crate) fn bigint_retain(word: i64) {
         return;
     }
     if classify_encoded_int(word) == EncodedIntKind::BigInt {
-        // SAFETY: `classify_encoded_int` just proved `word` is a live
-        // `BigIntObj` pointer, and pycc programs are single-threaded, so no
-        // other reference can be mutating `rc` concurrently.
-        let obj = unsafe { &*(word as *const BigIntObj) };
+        // SAFETY: `classify_encoded_int` just proved `word` is a live heap
+        // word -- a bigint or an `int | float` word's boxed float, so only
+        // the header they share is read -- and pycc programs are
+        // single-threaded, so no other reference can be mutating `rc`
+        // concurrently.
+        let obj = unsafe { heap_header(word) };
         obj.rc.set(obj.rc.get() + 1);
     }
 }
@@ -305,7 +342,7 @@ pub(crate) fn bigint_release(word: i64) {
         // very allocation `tag_bigint` (or `box_float`) leaked, and only on
         // the release that retires the final reference, so no other name
         // can still hold it.
-        let obj = unsafe { &*(word as *const BigIntObj) };
+        let obj = unsafe { heap_header(word) };
         let live = obj.rc.get();
         if live == 1 {
             if obj.is_float {
@@ -322,10 +359,18 @@ pub(crate) fn bigint_release(word: i64) {
 
 /// # Safety
 /// `tagged` must classify as a `BigIntObj` pointer. Classification is
-/// repeated here so no dereference can bypass the fail-closed tag check.
+/// repeated here so no dereference can bypass the fail-closed tag check,
+/// and a heap word that is an `int | float` word's boxed float (which the
+/// tag alone cannot tell from a bigint) is refused the same way: reading
+/// it as a bigint would take its `f64` and the memory past its allocation
+/// for `limbs`.
 pub(crate) unsafe fn bigint_ref<'a>(tagged: i64) -> &'a BigIntObj {
     if classify_encoded_int(tagged) != EncodedIntKind::BigInt {
         panic!("pycc_rt: internal error: attempted bigint dereference of a non-pointer int word")
+    }
+    // SAFETY: a live heap word (the classification above).
+    if unsafe { heap_header(tagged) }.is_float {
+        panic!("pycc_rt: internal error: attempted bigint dereference of a boxed `float` word")
     }
     unsafe { &*(tagged as *const BigIntObj) }
 }

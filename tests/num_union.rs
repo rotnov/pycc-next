@@ -57,9 +57,19 @@ fn the_ext_boundary_carries_both_kinds() {
     );
 }
 
+/// `int | float` containers looked up with a `float` -- membership in a
+/// list, dict and set, a dict read and `.get()` -- including floats only
+/// a heap box holds.
+#[test]
+fn float_lookups_in_num_containers_match_cpython() {
+    assert_native_matches("num_union_lookups.py");
+    assert_ext_matches("num_union_lookups.py", "import num_union_lookups");
+}
+
 /// Every runtime path of an `int | float` value -- arithmetic, the errors
 /// it raises, comparisons, `min`/`max`/`abs`/`round`/`hash`, text and
-/// format specs, a container refusing a boxed float, and the `--ext`
+/// format specs, a container refusing a boxed float, a `float` needle or
+/// key borrowed by a container lookup, and the `--ext`
 /// boundary in both directions -- releases the boxed floats it makes: the
 /// runtime's live count is flat across a hosted loop.
 #[test]
@@ -93,6 +103,9 @@ fn boxed_floats_do_not_leak() {
                   ('churn-float', lambda: m.churn(5, -2.5e10)),\n\
                   ('echo', lambda: m.echo(1e200)),\n\
                   ('echo-int', lambda: m.echo(10 ** 40)),\n\
+                  ('lookups', lambda: m.lookups(3, 2.5)),\n\
+                  ('lookups-boxed', lambda: m.lookups(2, -1e250)),\n\
+                  ('lookups-int', lambda: m.lookups(2, 10 ** 40)),\n\
                   ):\n    \
                   d = delta(call)\n    \
                   assert d == 0, '%s leaked %d boxed floats over 200 calls' % (name, d)\n\

@@ -392,11 +392,11 @@ pub(crate) fn emit_dict_set_stmt<'ctx>(
     let (key_ty, value_ty) = containers::dict_kv(&locals[dict].ty);
     // CPython evaluates the value, then the container and the key.
     let value_scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
-    let value_scalar = coerce_scalar_to_type(context, builder, rt, value_scalar, value_ty.clone());
+    let value_scalar = list::coerce_element(context, builder, rt, value_scalar, &value_ty);
     let value_word = list::element_word(context, builder, rt, &value_ty, value, value_scalar);
     let dict_ptr = emit_dict_name_read(context, builder, module, rt, user_functions, locals, dict);
     let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
-    let key_scalar = coerce_scalar_to_type(context, builder, rt, key_scalar, key_ty.clone());
+    let key_scalar = list::coerce_element(context, builder, rt, key_scalar, &key_ty);
     let key_word = list::element_word(context, builder, rt, &key_ty, key, key_scalar);
     build_dict_set(builder, rt, dict_ptr, key_word, value_word);
     guard_statement_effects(context, builder, rt);
