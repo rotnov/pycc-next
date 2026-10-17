@@ -58,5 +58,24 @@ for t in ${failed[@]+"${failed[@]}"}; do
     RUST_BACKTRACE=1 cargo test --release --workspace -- "$@" --exact "$t" --nocapture \
         > "$logs/failed/$safe.log" 2>&1 || true
 done
+# A test binary that crashed (an access violation, a signal) reports no
+# FAILED line: rerun it on one thread, so the log ends at the test that
+# crashed, into ci-logs/crashed/<binary>.log, and put its tail in the summary.
+mkdir -p "$logs/crashed"
+sed -nE "s/^ *process didn't exit successfully: \`([^ ]+) .*/\1/p" "$logs/cargo-test.log" | sort -u |
+while IFS= read -r exe; do
+    if command -v cygpath > /dev/null; then exe=$(cygpath -u "$exe"); fi
+    name=$(basename "$exe")
+    RUST_BACKTRACE=1 "$exe" "$@" --test-threads=1 > "$logs/crashed/$name.log" 2>&1 || true
+    {
+        echo
+        echo "<details><summary>crashed: <code>$name</code> (rerun on one thread)</summary>"
+        echo
+        echo '```'
+        tail -n 30 "$logs/crashed/$name.log"
+        echo '```'
+        echo "</details>"
+    } >> "$summary"
+done
 echo "Full output and per-test reruns: artifact ci-logs-$(uname -m)" >> "$summary"
 exit "$status"
