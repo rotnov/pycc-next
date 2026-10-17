@@ -262,6 +262,14 @@ extern PyObject *pycc_rt_exception_foreign(void *obj);
 static Py_tss_t *pycc_ext_exec_target_key = NULL;
 
 /*
+ * v0.8 accept 2: the module this artifact's body last ran as (a strong
+ * reference, replaced by each exec). A relative import in a compiled
+ * function runs after the body, outside every exec, and resolves against
+ * it: the module whose globals the function's code reads in CPython.
+ */
+static PyObject *pycc_ext_home_module = NULL;
+
+/*
  * #1199: this exec's own class snapshot, a dict from each published class
  * name to the type object `pycc_ext_register_method_types` made for this
  * `Py_mod_exec`, held for exactly the duration of the body and saved and

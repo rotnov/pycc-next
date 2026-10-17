@@ -301,6 +301,14 @@ static int pycc_ext_exec_module(PyObject *module)
         PyErr_SetString(PyExc_RuntimeError, "pycc: cannot record the executing module");
         return -1;
     }
+    /* A relative import in a compiled function resolves against it. */
+    {
+        PyObject *previous = pycc_ext_home_module;
+
+        Py_INCREF(module);
+        pycc_ext_home_module = module;
+        Py_XDECREF(previous);
+    }
     exec_status = pycc_ext_module_exec();
 #ifdef PYCC_EXT_HAS_PRECOMPILED
     pycc_ext_code_remove(module);

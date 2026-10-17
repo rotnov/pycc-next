@@ -194,3 +194,40 @@ fn local_import_strict_and_leak_free() {
     let ours = Command::new(dir.join("app")).output().expect("run the build");
     assert_eq!(text(&ours.stdout), "34 10\n", "{}", text(&ours.stderr));
 }
+
+/// A relative function-local import (`--foreign-relative-imports`) runs
+/// after the module body, against the module's own package, in strict and
+/// non-strict mode; a missing sibling raises CPython's `ImportError`.
+#[test]
+fn relative_local_import_resolves_against_the_package() {
+    for flags in [&["--ext"][..], &["--ext", "--non-strict"][..]] {
+        let dir = ScratchDir::new("v08_relative_local_import").expect("scratch");
+        let pkg = dir.join("pkg");
+        std::fs::create_dir(&pkg).unwrap();
+        std::fs::write(pkg.join("__init__.py"), "").unwrap();
+        std::fs::write(pkg.join("a.py"), "X = 5\n").unwrap();
+        let source = pkg.join("m.py");
+        std::fs::write(
+            &source,
+            "def f() -> int:\n    from .a import X\n    return int(X) + 1\n\n\n\
+             def g() -> str:\n    try:\n        from .nope import Y\n    except ImportError as e:\n        \
+             return \"ImportError: \" + str(e)\n    return \"imported\"\n",
+        )
+        .unwrap();
+        let mut all = flags.to_vec();
+        all.push("--foreign-relative-imports");
+        build(&source, &pkg.join("m"), &all);
+        std::fs::remove_file(&source).unwrap();
+        let run = python()
+            .args(["-c", "from pkg import m\nprint(m.f(), m.g())"])
+            .current_dir(&*dir)
+            .output()
+            .expect("python should spawn");
+        assert_eq!(
+            text(&run.stdout),
+            "6 ImportError: No module named 'pkg.nope'\n",
+            "{flags:?}: {}",
+            text(&run.stderr)
+        );
+    }
+}

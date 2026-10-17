@@ -161,13 +161,14 @@ done:
  * `level` is `0` for an absolute import, which passes `None` as the
  * globals. A relative one (#1366; `level` is its dot count, and `module` is
  * the name as written after the dots, `""` for `from . import x`) is only
- * emitted under `pycc build --ext --foreign-relative-imports`, and only as a
- * module-body item, so it runs inside `Py_mod_exec`: it passes the executing
+ * emitted under `pycc build --ext --foreign-relative-imports`. As a
+ * module-body item it runs inside `Py_mod_exec`: it passes the executing
  * module's own dict as the globals, which CPython's `_calc___package__`
  * reads the package from, so a missing sibling, a climb beyond the
  * top-level package and a top-level import with no parent package raise
- * exactly what the `.py` form raises. Outside an exec (never emitted) it
- * raises `SystemError` rather than resolve against the wrong package.
+ * exactly what the `.py` form raises. In a compiled function (v0.8 accept
+ * 2) it runs after the body and uses the module the body last ran as
+ * (`pycc_ext_home_module`); before any exec it raises `SystemError`.
  *
  * Not `static`: LLVM-generated code declares and calls it by this name
  * (`EXT_OBJ_IMPORT_FROM_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
@@ -194,6 +195,10 @@ PyObject *pycc_ext_obj_import_from(const char *module_name, const char *const *f
 
         if (pycc_ext_exec_target_key != NULL) {
             target = (PyObject *)PyThread_tss_get(pycc_ext_exec_target_key);
+        }
+        /* A function-local import (v0.8 accept 2) runs after the body. */
+        if (target == NULL) {
+            target = pycc_ext_home_module;
         }
         if (target == NULL) {
             PyErr_SetString(PyExc_SystemError, "pycc: relative import outside Py_mod_exec");
