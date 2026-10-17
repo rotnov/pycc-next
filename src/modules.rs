@@ -428,6 +428,9 @@ impl Loader {
         }
         resolved.set_ext_module(self.ext_module);
         resolved.set_non_strict(self.non_strict);
+        if self.non_strict {
+            resolved.set_value_names(pycc_hir::names_used_as_values(&parsed));
+        }
         for loaded in &self.modules {
             resolved.add_module(
                 loaded.display_path.clone(),

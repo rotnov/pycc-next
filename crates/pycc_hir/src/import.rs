@@ -24,6 +24,8 @@ mod request;
 mod shadow;
 mod spelling;
 mod type_alias;
+mod value_names;
+pub use value_names::names_used_as_values;
 
 pub(crate) use block::{handlers_catch_import_error, lower_block_imports, nested_foreign_import};
 pub(crate) use carrier::{reject_carrier_misuse, splice_by_item};
@@ -290,6 +292,10 @@ pub struct ResolvedImports<'a> {
     /// `object` or an object container lower to the opaque `Ty::Object`
     /// instead of `T0001`/`T0002`. `false` by default (strict).
     non_strict: bool,
+    /// The names the module reads as values ([`names_used_as_values`]):
+    /// in non-strict mode a `typing` form among them is imported as the
+    /// CPython object.
+    value_names: std::collections::HashSet<String>,
 }
 
 impl<'a> ResolvedImports<'a> {
@@ -312,6 +318,12 @@ impl<'a> ResolvedImports<'a> {
 
     pub(crate) fn non_strict(&self) -> bool {
         self.non_strict
+    }
+
+    /// Records the names the module reads as values
+    /// ([`names_used_as_values`]).
+    pub fn set_value_names(&mut self, names: std::collections::HashSet<String>) {
+        self.value_names = names;
     }
 
     /// Adds container method names that one of this module's dependencies
@@ -573,16 +585,24 @@ pub(crate) fn lower_import_stmt(
             // Non-strict mode: a name pycc does not model (`typing.Match`,
             // `typing.MutableMapping`) is the module's CPython object, as an
             // import of any other module's name is.
-            let unmodeled: Vec<&pycc_ast::Alias> = import
-                .names
-                .iter()
-                .filter(|alias| pycc_std::resolve_symbol(module, alias.name.as_str()).is_none())
-                .collect();
+            // So is a modeled typing form the module also uses as a value
+            // (`V = Union[A, B]`), which has no compiled value.
+            let wants_object = |alias: &pycc_ast::Alias| {
+                let local = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+                match pycc_std::resolve_symbol(module, alias.name.as_str()) {
+                    None => true,
+                    Some(symbol) => {
+                        module == pycc_std::StdModule::Typing
+                            && value_names::needs_object_for_value(symbol.kind, symbol.name)
+                            && resolved.value_names.contains(local)
+                    }
+                }
+            };
+            let unmodeled: Vec<&pycc_ast::Alias> =
+                import.names.iter().filter(|alias| wants_object(alias)).collect();
             if resolved.non_strict() && !unmodeled.is_empty() {
                 let mut foreign = import.clone();
-                foreign
-                    .names
-                    .retain(|alias| pycc_std::resolve_symbol(module, alias.name.as_str()).is_none());
+                foreign.names.retain(|alias| wants_object(alias));
                 bound.extend(lower_foreign_from_import(&foreign, site)?.bindings);
             }
             for alias in &import.names {

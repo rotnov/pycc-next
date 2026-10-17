@@ -81,7 +81,7 @@ pub use hir_module::{
 pub use if_exp::if_exp_result_ty;
 pub use import::{
     ProjectImportRequest, ResolvedImport, ResolvedImports, ResolvedModule, is_native_std_module,
-    project_import_requests,
+    names_used_as_values, project_import_requests,
 };
 pub(crate) use import::{
     import_local_name, lower_import_stmt, lower_legacy_type_alias_ann_assign, lower_type_alias_stmt,
