@@ -452,6 +452,24 @@ Accept:
    24.2 vs 16.3 / 17.0 (0.70x; 0.68x), round-trips 0.95x, import 0.74x; 1025 of 1249
    functions native (1029: three methods of a class that now stays native raise an
    exception class with its own `__init__`, which runs in CPython), the suite passing.
+   Import, measured for (c) (local, best of 9): of `import pydantic` and the names the
+   workload uses, 103 ms against CPython's 72 ms, creating the 49 extension modules
+   (`dlopen` and `PyInit_`) is 7.8 ms; the rest is running their bodies. So linking the
+   per-module builds into one shared object alone would buy at most that, and nothing on
+   define/schema or mistune. The advisor's refinements to (c): if that link step comes
+   first, it is (c)'s first commit in (c)'s shape (symbols isolated at emission --
+   every non-`PyInit_` symbol internal or hidden, the shim's file-scope definitions
+   `static` -- not localized after the link; one `pkg/__init__.abi3.so`; the finder, the
+   build plumbing and the wheel checks (c) keeps); then each module needs its own globals
+   dict for the frames' code objects and `f_globals`, its full identity set (`__spec__`,
+   `__file__` inside the package directory, `__loader__`, PEP 562 `__getattr__`),
+   imports resolved at exec time through `sys.modules` with a native cross-module call
+   guarded by the dict's version tag (cycles keep CPython's partially initialized
+   modules), per-module shim state (carrier types keyed by module and class), types
+   created in `exec_module`, `__module__`/`__qualname__` for pickling, each module's
+   precompiled fallback run in its own dict, and the compile time of one large LLVM
+   module measured early (per-module LLVM modules in one artifact, calling each other
+   through symbols, is the fallback shape).
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions
