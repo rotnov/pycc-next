@@ -121,6 +121,8 @@ struct FnFrame<'ctx> {
     activation: Option<inkwell::values::PointerValue<'ctx>>,
     /// The live frame's `instr_ptr` stores, which `frame_ip::prune` thins.
     ip_stores: Vec<inkwell::values::InstructionValue<'ctx>>,
+    /// The block and line of the last `instr_ptr` store.
+    last_ip: Option<(BasicBlock<'ctx>, Option<u32>)>,
 }
 
 /// Marks `function` `cold`: a call of it is unlikely, so the blocks
@@ -333,6 +335,7 @@ pub(crate) fn begin_function<'ctx>(
         counters: HashMap::new(),
         site_stack: Vec::new(),
         ip_stores: Vec::new(),
+        last_ip: None,
     });
 }
 
@@ -457,7 +460,9 @@ fn link_frame<'ctx>(
     let current = field(context, builder, tstate, TSTATE_CURRENT_FRAME);
     let top = load(current, "frame_top");
     let has_top = builder.build_is_not_null(top, "frame_has_top").ok()?;
-    builder.build_conditional_branch(has_top, check, link).ok()?;
+    builder
+        .build_conditional_branch(has_top, check, link)
+        .ok()?;
     // A signature wrapper or forwarder on top stands for this function:
     // link past it.
     builder.position_at_end(check);
@@ -466,23 +471,45 @@ fn link_frame<'ctx>(
         .ok()?
         .into_int_value();
     let threaded = builder
-        .build_int_compare(inkwell::IntPredicate::EQ, owner, i8_type.const_zero(), "top_thread")
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            owner,
+            i8_type.const_zero(),
+            "top_thread",
+        )
         .ok()?;
     let probe = context.append_basic_block(function, "frame_enter_flags");
-    builder.build_conditional_branch(threaded, probe, link).ok()?;
+    builder
+        .build_conditional_branch(threaded, probe, link)
+        .ok()?;
     builder.position_at_end(probe);
     let top_code = load(field(context, builder, top, F_EXECUTABLE), "top_code");
     let flags = builder
-        .build_load(i32_type, field(context, builder, top_code, CODE_FLAGS), "top_flags")
+        .build_load(
+            i32_type,
+            field(context, builder, top_code, CODE_FLAGS),
+            "top_flags",
+        )
         .ok()?
         .into_int_value();
     let wrapper = builder
-        .build_and(flags, i32_type.const_int(CO_SIGNATURE, false), "top_wrapper")
+        .build_and(
+            flags,
+            i32_type.const_int(CO_SIGNATURE, false),
+            "top_wrapper",
+        )
         .ok()?;
     let is_wrapper = builder
-        .build_int_compare(inkwell::IntPredicate::NE, wrapper, i32_type.const_zero(), "is_wrapper")
+        .build_int_compare(
+            inkwell::IntPredicate::NE,
+            wrapper,
+            i32_type.const_zero(),
+            "is_wrapper",
+        )
         .ok()?;
-    builder.build_conditional_branch(is_wrapper, skip, link).ok()?;
+    builder
+        .build_conditional_branch(is_wrapper, skip, link)
+        .ok()?;
     builder.position_at_end(skip);
     let below = load(field(context, builder, top, F_PREVIOUS), "top_previous");
     builder.build_unconditional_branch(link).ok()?;
@@ -656,11 +683,20 @@ fn point_live_frame<'ctx>(
     frame: &mut FnFrame<'ctx>,
     index: u32,
 ) {
+    let Some(block) = builder.get_insert_block() else {
+        return;
+    };
+    // Only the line is read through `instr_ptr` (a traceback record carries
+    // its own position): a store repeating the line the block last stored
+    // is left out.
+    let line = frame.positions.get(index as usize).map(|p| p.line);
+    if frame.last_ip == Some((block, line)) {
+        return;
+    }
     if let Some(live) = frame.live
-        && builder
-            .get_insert_block()
-            .is_some_and(|block| block.get_terminator().is_none())
+        && block.get_terminator().is_none()
     {
+        frame.last_ip = Some((block, line));
         // `frame.instr_ptr = ip0 + index` (`PyccIFrame.instr_ptr`, word 7).
         let ip = unsafe {
             builder.build_in_bounds_gep(
@@ -931,9 +967,55 @@ fn exit_frame<'ctx>(context: &'ctx Context, rt: &RtFns<'ctx>, live: LiveFrame<'c
         .filter_map(|block| block.get_terminator())
         .filter(|t| t.get_opcode() == inkwell::values::InstructionOpcode::Return)
         .collect();
-    for terminator in returns {
-        unlink_frame(context, &builder, rt, live, terminator);
+    // Every return goes through one exit, so the unlink is emitted once.
+    let terminator = match returns.as_slice() {
+        [] => return,
+        [only] => *only,
+        _ => merge_returns(context, &builder, live.function, &returns),
+    };
+    unlink_frame(context, &builder, rt, live, terminator);
+}
+
+/// Replaces `returns` (every return of `function`) by branches to one new
+/// block returning the value each passed (a phi); answers its return.
+fn merge_returns<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    function: FunctionValue<'ctx>,
+    returns: &[inkwell::values::InstructionValue<'ctx>],
+) -> inkwell::values::InstructionValue<'ctx> {
+    let exit = context.append_basic_block(function, "frame_return");
+    let mut incoming = Vec::new();
+    for ret in returns {
+        let value = match ret.get_operand(0) {
+            Some(inkwell::values::Operand::Value(value)) => Some(value),
+            _ => None,
+        };
+        if let Some(block) = ret.get_parent() {
+            incoming.push((value, block));
+        }
+        builder.position_before(ret);
+        builder
+            .build_unconditional_branch(exit)
+            .expect("build_unconditional_branch should not fail");
+        ret.erase_from_basic_block();
     }
+    builder.position_at_end(exit);
+    let ret = match function.get_type().get_return_type() {
+        Some(ty) => {
+            let phi = builder
+                .build_phi(ty, "frame_return_value")
+                .expect("build_phi should not fail");
+            for (value, block) in &incoming {
+                if let Some(value) = value {
+                    phi.add_incoming(&[(value, *block)]);
+                }
+            }
+            builder.build_return(Some(&phi.as_basic_value()))
+        }
+        None => builder.build_return(None),
+    };
+    ret.expect("build_return should not fail")
 }
 
 /// Unlinks the live frame before the return `terminator`, inline: the
@@ -970,7 +1052,11 @@ fn unlink_frame<'ctx>(
     builder.insert_instruction(&terminator, None);
     builder.position_at_end(check);
     let owner = builder
-        .build_load(i8_type, field(context, builder, live.frame, F_OWNER), "frame_owner")
+        .build_load(
+            i8_type,
+            field(context, builder, live.frame, F_OWNER),
+            "frame_owner",
+        )
         .expect("build_load should not fail")
         .into_int_value();
     let inactive = builder
@@ -982,7 +1068,11 @@ fn unlink_frame<'ctx>(
         )
         .expect("build_int_compare should not fail");
     let object = builder
-        .build_load(ptr, field(context, builder, live.frame, F_FRAME_OBJ), "frame_obj")
+        .build_load(
+            ptr,
+            field(context, builder, live.frame, F_FRAME_OBJ),
+            "frame_obj",
+        )
         .expect("build_load should not fail")
         .into_pointer_value();
     let has_object = builder
@@ -1004,11 +1094,19 @@ fn unlink_frame<'ctx>(
         .expect("build_unconditional_branch should not fail");
     builder.position_at_end(fast);
     let tstate = builder
-        .build_load(ptr, field(context, builder, live.frame, F_TSTATE), "frame_tstate")
+        .build_load(
+            ptr,
+            field(context, builder, live.frame, F_TSTATE),
+            "frame_tstate",
+        )
         .expect("build_load should not fail")
         .into_pointer_value();
     let top = builder
-        .build_load(ptr, field(context, builder, live.frame, F_SAVED_TOP), "frame_saved_top")
+        .build_load(
+            ptr,
+            field(context, builder, live.frame, F_SAVED_TOP),
+            "frame_saved_top",
+        )
         .expect("build_load should not fail");
     builder
         .build_store(field(context, builder, tstate, TSTATE_CURRENT_FRAME), top)
