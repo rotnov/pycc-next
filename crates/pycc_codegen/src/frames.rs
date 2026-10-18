@@ -271,7 +271,13 @@ pub(crate) fn begin_function<'ctx>(
     // only passes its wrapper's arguments on: the function it calls has
     // the frame, which links past the wrapper, so the entry has none and
     // no traceback entry either.
-    if !state.enabled.get() || mangled.starts_with("_pycc_sig_") {
+    // So does the body of a nested `def` CPython creates
+    // (`src/fallback/nested`): its Python forwarder's frame is the
+    // function's.
+    if !state.enabled.get()
+        || mangled.starts_with("_pycc_sig_")
+        || mangled.starts_with("__pycc_lift_nest")
+    {
         return;
     }
     let (name, qualname) = if flags & FN_INFO_MODULE != 0 {
@@ -560,14 +566,11 @@ pub(crate) fn exception_edge<'ctx>(
             )
             .expect("build_call should not fail for pycc_ext_tb_here_live"),
         None => {
-            let activation = frame.activation.map_or_else(
-                || {
-                    context
-                        .ptr_type(inkwell::AddressSpace::default())
-                        .const_null()
-                },
-                |a| a,
-            );
+            let activation = frame.activation.unwrap_or_else(|| {
+                context
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .const_null()
+            });
             builder
                 .build_call(
                     rt.frames.tb_here,

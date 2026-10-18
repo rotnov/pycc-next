@@ -35,6 +35,12 @@
  * compiled frames off, `__pycc_forward__` patches nothing.
  */
 
+/* The trampolines, one per lift of the module, and how many there are:
+ * defined by the generated companion (`forward_trampolines_c` in
+ * src/ext_build/exports_inc.rs). */
+extern const int pycc_fwd_slot_count;
+extern const vectorcallfunc pycc_fwd_trampolines[];
+
 #define PYCC_FUNC_CODE 48
 #define PYCC_FUNC_DEFAULTS 56
 #define PYCC_FUNC_KWDEFAULTS 64
@@ -634,7 +640,8 @@ static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssiz
 }
 
 static PyMethodDef pycc_ext_forward_def = {
-    "__pycc_forward__", (PyCFunction)(void (*)(void))pycc_ext_forward, METH_FASTCALL, NULL};
+    "__pycc_forward__", (PyCFunction)(void (*)(void))pycc_ext_forward, METH_FASTCALL, NULL,
+};
 
 /* Binds `__pycc_forward__` in `module`'s namespace for the body; 0, or -1
  * with an exception set. */

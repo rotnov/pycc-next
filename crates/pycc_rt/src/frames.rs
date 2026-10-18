@@ -213,7 +213,7 @@ pub unsafe extern "C" fn pycc_rt_exception_tb_synced(
 /// statement's lines and carets) when the file is readable now.
 pub(crate) fn render_traceback(records: &[TbRecord]) -> String {
     let mut out = String::new();
-    let mut readable: std::collections::HashMap<String, bool> = Default::default();
+    let mut sources: std::collections::HashMap<String, Option<Vec<String>>> = Default::default();
     for record in records.iter().rev() {
         // SAFETY: records point to codegen-emitted infos, which live as
         // long as the program.
@@ -226,12 +226,55 @@ pub(crate) fn render_traceback(records: &[TbRecord]) -> String {
             }
             None => out.push_str(&format!("  File \"{filename}\", in {name}\n")),
         }
-        let can_read = *readable
+        let lines = sources
             .entry(filename.clone())
-            .or_insert_with(|| std::fs::File::open(&filename).is_ok());
-        if can_read && let Some(text) = info.text_at(record.pos) {
-            out.push_str(&text);
+            .or_insert_with(|| source_lines(&filename));
+        if let Some(lines) = lines
+            && let Some(text) = info.text_at(record.pos)
+        {
+            out.push_str(&expand(&text, lines));
         }
+    }
+    out
+}
+
+/// The marker opening a template line that stands for a line of source
+/// (`src/traceback_blocks.rs`' `template`).
+const SOURCE_LINE: char = '\u{1}';
+
+/// The lines of `path` as CPython's `linecache` reads them when the
+/// traceback prints (universal newlines, undecodable bytes replaced), or
+/// `None` when it cannot be read: then no source line prints, as in
+/// CPython.
+fn source_lines(path: &str) -> Option<Vec<String>> {
+    let bytes = std::fs::read(path).ok()?;
+    let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n").replace('\r', "\n");
+    Some(text.split('\n').map(str::to_string).collect())
+}
+
+/// A position's block template (no source text: each source line is
+/// `\u{1}<line>,<column>,<trimmed>`) with its source lines read from
+/// `lines`. A line the file no longer has prints nothing.
+fn expand(template: &str, lines: &[String]) -> String {
+    let mut out = String::new();
+    for text in template.split_inclusive('\n') {
+        let Some(reference) = text.strip_prefix(SOURCE_LINE) else {
+            out.push_str(text);
+            continue;
+        };
+        let mut fields = reference.trim_end().split(',').map(|f| f.parse::<usize>().ok());
+        let (Some(Some(number)), Some(Some(column)), Some(Some(trimmed))) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let Some(line) = number.checked_sub(1).and_then(|at| lines.get(at)) else {
+            continue;
+        };
+        let rest = line.get(column..).unwrap_or("");
+        out.push_str("    ");
+        out.push_str(if trimmed == 1 { rest.trim_end() } else { rest });
+        out.push('\n');
     }
     out
 }
