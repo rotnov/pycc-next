@@ -429,12 +429,13 @@ Accept:
    3.13's 64-bit GIL forms (`crates/pycc_codegen/src/object_rc.rs`, the shim's
    `bridge.c`; a cp313-only artifact is not needed); (b) the per-class reasons classes
    fall back -- done so far: annotated attribute stores, `self.__class__(...)`,
-   non-strict declarations without a slot, and container slots that code outside the
-   class reads through CPython kept as CPython objects (needed for correctness once
+   non-strict declarations without a slot, a published method returning `T | None`
+   (through an entry returning a CPython object), and container slots that code outside
+   the class reads through CPython kept as CPython objects (needed for correctness once
    more classes are native); still open: a constrained `TypeVar` in a `Generic[...]`
-   base (to be monomorphized per constraint or erased to `object` in non-strict mode),
-   a published method whose signature the boundary does not carry (`-> Optional[int]`),
-   lambdas in bodies; (c) a whole-package build: every module of a package compiled into
+   base (to be monomorphized per constraint or erased to `object` in non-strict mode;
+   mistune's `Parser` also has subclasses in other modules, so only (c) makes it
+   native), lambdas in bodies; (c) a whole-package build: every module of a package compiled into
    one extension (`pkg/__init__.abi3.so`, one runtime copy, one `dlopen`, native calls,
    attribute access and subclassing across modules), each submodule published under its
    own name with its own module object and globals by a `sys.meta_path` finder the
@@ -490,11 +491,13 @@ Accept:
    **Progress 2026-10-18** (not met): with compiled frames (accept 3) and inline
    reference counting 0.78x on `mistune.html`, 0.85x with every plugin (local, best of
    5; 0.68x and 0.64x on main before the inline counting), 66.2M instructions per pass
-   (68.7M before it). 386 of 413 functions native; `BlockState` and `InlineState` are
-   native types (annotated attribute stores, `self.__class__(...)`, non-strict
-   declarations without a slot, accept 1's note). Making `InlineState` native changed
-   nothing measurable on its own (69.65M against 69.67M): the instances are reached from
-   the parser modules, which are other extensions, through CPython. That, and the
+   (68.7M before it); 64.3M and 0.84x / 0.78x (best of 5) with `BlockState` native too.
+   386 of 413 functions native; `BlockState` and `InlineState` are native types
+   (annotated attribute stores, `self.__class__(...)`, non-strict declarations without a
+   slot, `Optional[int]` results published through an object-returning entry, accept 1's
+   note). Making `InlineState` native changed nothing measurable on its own (69.65M
+   against 69.67M): the instances are reached from the parser modules, which are other
+   extensions, through CPython. That, and the
    parsers' `Generic[ST]` and cross-module bases, are what the whole-package build of
    accept 1's design removes.
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode

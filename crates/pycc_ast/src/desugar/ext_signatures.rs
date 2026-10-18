@@ -189,6 +189,32 @@ pub fn needs_wrapper(parameters: &Parameters) -> bool {
         || parameters.args.iter().any(|p| p.default.is_some())
 }
 
+/// Whether non-strict `def` returns `T | None` (`Optional[T]`, `T | None`,
+/// `Union[..., None]`), which the boundary does not carry (v0.8): it is
+/// published through an entry returning the result as a CPython object, so
+/// the function or method stays compiled (a method of a class used to send
+/// the class to CPython, `C0003`), its wrapper Python's.
+fn optional_return(def: &StmtFunctionDef, non_strict: bool) -> bool {
+    fn names_none(expr: &Expr) -> bool {
+        match expr {
+            Expr::NoneLiteral(_) => true,
+            Expr::BinOp(op) => names_none(&op.left) || names_none(&op.right),
+            Expr::Tuple(tuple) => tuple.elts.iter().any(names_none),
+            _ => false,
+        }
+    }
+    non_strict
+        && match def.returns.as_deref() {
+            Some(Expr::Subscript(sub)) => match &*sub.value {
+                Expr::Name(n) if n.id.as_str() == "Optional" => true,
+                Expr::Name(n) if n.id.as_str() == "Union" => names_none(&sub.slice),
+                _ => false,
+            },
+            Some(expr @ Expr::BinOp(_)) => names_none(expr),
+            _ => false,
+        }
+}
+
 /// A planned `def`: its signature and the source of its entry.
 struct Planned {
     signature: ExtSignature,
@@ -296,7 +322,7 @@ fn plan_def(
             // takes its declared signature too.
             && !(non_strict && class.is_none() && !name.starts_with("__") && !name.starts_with("_pycc")))
         || super::ext_generators::yields(&def.body)
-        || !needs_wrapper(&def.parameters)
+        || !(needs_wrapper(&def.parameters) || optional_return(def, non_strict))
     {
         return None;
     }
@@ -366,6 +392,9 @@ fn plan_def(
         .map(&param)
         .collect::<Option<Vec<_>>>()?;
     let returns = match def.returns.as_deref() {
+        // The boundary carries no `T | None`: the entry returns the value
+        // as a CPython object (`optional_return`).
+        Some(_) if optional_return(def, non_strict) => "object".to_string(),
         Some(returns) => annotation_text(source, returns.range())?,
         // Non-strict mode: an unannotated return is an object.
         None if non_strict => "object".to_string(),
@@ -428,6 +457,12 @@ fn plan_def(
     let call = format!("{callee}({})", call.join(", "));
     if returns == "None" {
         let _ = writeln!(body, "    {call}");
+    } else if optional_return(def, non_strict) {
+        // Narrowed apart, each half converts to the object returned.
+        let _ = writeln!(body, "    _pycc_v = {call}");
+        let _ = writeln!(body, "    if _pycc_v is None:");
+        let _ = writeln!(body, "        return None");
+        let _ = writeln!(body, "    return _pycc_v");
     } else {
         let _ = writeln!(body, "    return {call}");
     }

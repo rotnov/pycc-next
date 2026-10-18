@@ -195,6 +195,45 @@ fn inline_object_counts_balance_and_free() {
     assert_eq!(text(&run.stdout), "3999\n0 1000\n199999\n0 51000\nTrue\n");
 }
 
+/// A non-strict function or method returning `T | None` is published
+/// through an entry returning the result as a CPython object (the boundary
+/// carries no `T | None`), so the method's class stays a native type: Python
+/// callers get `None` or the value, as from the sources.
+#[test]
+fn optional_results_cross_the_boundary() {
+    let dir = ScratchDir::new("v08_optional_returns").expect("scratch");
+    let source = dir.join("opt.py");
+    std::fs::write(
+        &source,
+        "from typing import Optional, Union\n\n\n\
+         class Cursor:\n    def __init__(self, text: str) -> None:\n        self.text = text\n        \
+         self.pos = 0\n\n    \
+         def find(self, ch: str) -> Optional[int]:\n        i = self.text.find(ch, self.pos)\n        \
+         if i < 0:\n            return None\n        self.pos = i + 1\n        return i\n\n    \
+         def word(self) -> str | None:\n        return self.text if self.text else None\n\n\n\
+         def half(n: int) -> Union[int, None]:\n    if n % 2:\n        return None\n    return n // 2\n",
+    )
+    .unwrap();
+    let report = build(&source, &dir.join("opt"), &["--ext", "--non-strict", "--release"]);
+    assert!(!report.contains("runs in CPython"), "{report}");
+    let probe = "import opt\n\
+                 c = opt.Cursor('a-b-c')\n\
+                 print(c.find('-'), c.find('-'), c.find('-'), c.pos)\n\
+                 print(c.word(), opt.Cursor('').word(), opt.half(8), opt.half(7))\n\
+                 print(type(opt.Cursor.find).__name__ in ('function', 'method_descriptor'))\n";
+    let run = python()
+        .args(["-c", probe])
+        .current_dir(&*dir)
+        .output()
+        .expect("python should spawn");
+    assert_eq!(
+        text(&run.stdout),
+        "1 3 None 4\na-b-c None 4 None\nTrue\n",
+        "{}",
+        text(&run.stderr)
+    );
+}
+
 #[test]
 fn class_of_self_and_declarations_native() {
     native("v08_class_of_self", &[]);

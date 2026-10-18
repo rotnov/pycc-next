@@ -85,8 +85,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `dict[str, int] = {}` did); `self.__class__(...)` in a method is `type(self)(...)`; in
   non-strict mode a class-body declaration pycc cannot give a slot (`lazy_line_starts:
   Set[int]`, one assigned only in a branch of `__init__`) is ignored, as CPython ignores
-  it, instead of sending the class to CPython. mistune: 386 of 413 functions native (380),
-  `BlockState` and `InlineState` native types.
+  it, instead of sending the class to CPython; a non-strict function or method returning
+  `T | None` (`Optional[int]`, `str | None`), which the boundary does not carry, is
+  published through a compiled entry returning the result as a CPython object instead of
+  running in CPython (a method of a class used to send the class to CPython). mistune:
+  386 of 413 functions native (380), `BlockState` and `InlineState` native types, 64.3M
+  instructions per `mistune.html` pass.
 
 ### Fixed
 
