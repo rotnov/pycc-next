@@ -21,6 +21,8 @@ mod module;
 pub mod ndarray;
 mod not_implemented;
 mod post_if;
+pub mod positions;
+pub use positions::SrcPos;
 pub mod printf;
 mod program;
 mod return_coverage;

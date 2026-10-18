@@ -333,11 +333,13 @@ impl Loader {
             .map_err(|error| FrontendFailure::input(display.clone(), error.to_string()))?;
         let source = source::decode_python_source(&bytes)
             .map_err(|message| FrontendFailure::input(display.clone(), message))?;
-        // The non-strict fallback rewrite of the entry module (#12).
-        let source = match is_entry.then(crate::fallback::entry_override).flatten() {
-            Some(rewritten) => rewritten,
-            None => source,
-        };
+        // The non-strict fallback rewrite of the entry module (#12), whose
+        // offsets map back to the file through its copied runs.
+        let (source, original, copied) =
+            match is_entry.then(crate::fallback::entry_override).flatten() {
+                Some(rewritten) => (rewritten, source, Some(crate::fallback::entry_copied())),
+                None => (source.clone(), source, None),
+            };
         let mut parsed = pycc_parser::parse_all(&source)
             .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
         // Names the compiler's own rewrites introduce are not the
@@ -511,8 +513,11 @@ impl Loader {
         let module_name = is_entry
             .then_some(self.entry_module_name.as_deref())
             .flatten();
-        let module = pycc_hir::lower_module(&parsed, &resolved, module_name)
-            .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
+        let module = pycc_hir::positions::with_source(index as u32, &display, &original, copied, || {
+            pycc_hir::lower_module(&parsed, &resolved, module_name)
+        })
+        .map_err(|diagnostics| FrontendFailure::compile(&display, &source, diagnostics))?;
+        drop(original);
         drop(resolved);
         let exports = match &qual {
             Some(qual) => namespace::exports(&scan, qual, index, &module.hir),

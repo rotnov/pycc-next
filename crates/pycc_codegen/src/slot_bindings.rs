@@ -428,6 +428,7 @@ pub(super) fn collect_stmt_bindings(stmt: &MirStmt, bindings: &mut BTreeMap<Stri
         | MirStmt::ObjRaise { .. }
         | MirStmt::Break
         | MirStmt::Continue
+        | MirStmt::Pos(_)
         | MirStmt::Reraise => {}
         MirStmt::LoopElse { loop_stmt, orelse } => {
             collect_stmt_bindings(loop_stmt, bindings);

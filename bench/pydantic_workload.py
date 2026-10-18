@@ -177,9 +177,8 @@ def roundtrip(models, data, page):
 
 
 def main():
-    # `Page[User]` (in define()) walks `sys._getframe(3)` to find its caller; compiled
-    # functions have no Python frame, so the compiled tree needs more Python frames
-    # above it (docs/DEVIATIONS.md): define() runs three calls deep in both trees.
+    # `Page[User]` (in define()) walks `sys._getframe(3)` to find its caller, which
+    # needs that many frames above it: define() runs three calls deep in both trees.
     models, times["define"] = timed(define)
     if "schema" in PHASES:
         times["schema"] = timed(schemas, models)[1]

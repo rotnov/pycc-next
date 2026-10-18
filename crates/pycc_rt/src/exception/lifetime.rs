@@ -60,6 +60,7 @@ pub(crate) fn new_exception(
         str_form: Cell::new(std::ptr::null_mut()),
         payload: Cell::new(None),
         foreign: Cell::new(std::ptr::null_mut()),
+        tb: Default::default(),
     }))
 }
 
@@ -132,6 +133,7 @@ fn free_one(obj: *mut PyExceptionObj, dead: &mut Vec<*mut PyExceptionObj>) {
     if let Some((word, _, kind)) = exc.payload.get() {
         crate::rc::release_word(kind, word as i64);
     }
+    exc.tb.release();
     let foreign = exc.foreign.get();
     if !foreign.is_null() {
         crate::rc::release_word(b'o', foreign as i64);

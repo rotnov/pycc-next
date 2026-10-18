@@ -303,6 +303,11 @@ pub enum HirStmt {
         loop_stmt: Box<HirStmt>,
         orelse: Vec<HirStmt>,
     },
+    /// The source position of the statement after it (`crate::positions`):
+    /// what a traceback entry and a frame's `f_lineno` report while that
+    /// statement runs. It has no runtime effect of its own, and every pass
+    /// that asks what a body *does* looks through it.
+    Pos(SrcPos),
 }
 
 /// Whether `body` contains a `break` bound to the loop whose body it is:

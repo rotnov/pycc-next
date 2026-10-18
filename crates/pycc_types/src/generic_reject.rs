@@ -325,7 +325,7 @@ pub(crate) fn reject_generic_calls_in_stmt(
             blocks.push(std::slice::from_ref(loop_stmt.as_ref()));
             blocks.push(orelse);
         }
-        HirStmt::Break | HirStmt::Continue => {}
+        HirStmt::Break | HirStmt::Continue | HirStmt::Pos(_) => {}
         HirStmt::ForRange {
             start,
             stop,

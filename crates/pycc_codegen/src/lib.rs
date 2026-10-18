@@ -12,6 +12,9 @@ use std::path::Path;
 
 mod exception;
 mod fallthrough;
+mod frame_needs;
+mod frames;
+mod global_sync;
 mod loop_control;
 use exception::{ExceptionCodegenState, expression_can_set_exception, guard_statement_effects};
 mod exception_value;

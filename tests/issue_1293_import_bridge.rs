@@ -482,8 +482,8 @@ fn an_embedded_build_catches_a_failed_import_like_cpython() {
     assert_eq!(stdout_of(&embedded), stdout_of(&cpython));
 }
 
-/// An uncaught failed import keeps the embed spec's text: the final
-/// `Type: message` line CPython's traceback ends with, and exit status 1.
+/// An uncaught failed import prints CPython's traceback, the embed spec's
+/// `Type: message` line last, and exits with status 1.
 #[cfg(not(windows))]
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
@@ -494,10 +494,8 @@ fn an_embedded_uncaught_failed_import_keeps_the_embed_spec_text() {
     );
     assert_eq!(embedded.status.code(), Some(1), "{}", stderr_of(&embedded));
     assert_eq!(stdout_of(&embedded), "a\n");
-    assert_eq!(
-        stderr_of(&embedded),
-        "ModuleNotFoundError: No module named 'msvcrt'\n"
-    );
+    assert_eq!(stderr_of(&embedded), stderr_of(&cpython));
+    assert!(stderr_of(&embedded).ends_with("ModuleNotFoundError: No module named 'msvcrt'\n"));
     assert_eq!(cpython.status.code(), Some(1));
     assert_eq!(stdout_of(&cpython), stdout_of(&embedded));
     assert_eq!(

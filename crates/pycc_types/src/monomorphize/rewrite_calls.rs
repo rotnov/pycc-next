@@ -476,7 +476,7 @@ pub(crate) fn rewrite_generic_calls_in_stmt(
             }
             Ok(())
         }
-        HirStmt::Break | HirStmt::Continue => Ok(()),
+        HirStmt::Break | HirStmt::Continue | HirStmt::Pos(_) => Ok(()),
         HirStmt::ForRange {
             var,
             start,

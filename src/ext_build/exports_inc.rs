@@ -107,6 +107,32 @@ pub(crate) fn generate_exports_inc_with_slots(
     out.push_str(&method_types_c(publications, ctors, getsets, slots));
     out.push_str(&carrier_class_isinstance_c(carriers));
     out.push_str(&carrier_class_copy_kinds_c(carriers));
+    out.push_str(&forward_trampolines_c(exports));
+    out
+}
+
+/// One vectorcall trampoline per lifted method body of `exports`, which
+/// `src/ext/module/forward.c` installs on the body's Python forwarder.
+fn forward_trampolines_c(exports: &[ExtExport]) -> String {
+    let count = exports
+        .iter()
+        .filter(|export| {
+            export.class.is_none() && export.name.starts_with(crate::fallback::LIFT_PREFIX)
+        })
+        .count();
+    let mut out = String::from("/* Forwarder trampolines (src/ext/module/forward.c). */\n");
+    let mut table = String::new();
+    for index in 0..count {
+        out.push_str(&format!(
+            "static PyObject *pycc_fwd_{index}(PyObject *f, PyObject *const *a, size_t n, \
+             PyObject *k)\n{{\n    return pycc_fwd_call({index}, f, a, n, k);\n}}\n"
+        ));
+        table.push_str(&format!("    pycc_fwd_{index},\n"));
+    }
+    out.push_str(&format!(
+        "static const int pycc_fwd_slot_count = {count};\n\
+         static const vectorcallfunc pycc_fwd_trampolines[] = {{\n{table}    NULL,\n}};\n\n"
+    ));
     out
 }
 

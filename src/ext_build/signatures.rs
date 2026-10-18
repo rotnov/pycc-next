@@ -33,11 +33,25 @@ fn forwarder(slot: usize) -> String {
     format!("pycc_ext_sig_fwd_{slot}")
 }
 
+/// The file name a signature wrapper's code is compiled under.
+const WRAPPER_FILENAME: &str = "<pycc signature>";
+
+/// `signature`'s wrapper source as a pre-compiled chunk
+/// (`super::precompiled`), which the hook loads instead of compiling it.
+pub(crate) fn signature_chunk(signature: &ExtSignature) -> crate::fallback::CodeChunk {
+    crate::fallback::CodeChunk {
+        source: signature.wrapper.clone(),
+        filename: WRAPPER_FILENAME.to_string(),
+        future_annotations: false,
+    }
+}
+
 /// The generated companion `inc` with `signatures` installed: the hook and
 /// the forwarders after the module-name macros, and each method's row at
-/// the head of its class's method table. `inc` itself when `signatures` is
-/// empty.
-pub(crate) fn install(inc: String, signatures: &[ExtSignature]) -> String {
+/// the head of its class's method table. Signature `k`'s wrapper is the
+/// pre-compiled chunk `first_chunk + k` ([`signature_chunk`]). `inc` itself
+/// when `signatures` is empty.
+pub(crate) fn install(inc: String, signatures: &[ExtSignature], first_chunk: usize) -> String {
     if signatures.is_empty() {
         return inc;
     }
@@ -66,11 +80,11 @@ pub(crate) fn install(inc: String, signatures: &[ExtSignature]) -> String {
     }
     head.push_str(
         "static const struct pycc_ext_signature {\n    const char *entry;\n    \
-         const char *target;\n    Py_ssize_t slot;\n    const char *source;\n} \
+         const char *target;\n    Py_ssize_t slot;\n    Py_ssize_t chunk;\n} \
          pycc_ext_signatures[] = {\n",
     );
     let mut slot = 0;
-    for signature in signatures {
+    for (chunk, signature) in (first_chunk..).zip(signatures) {
         let index = if signature.method().is_some() {
             slot += 1;
             (slot - 1).to_string()
@@ -79,13 +93,12 @@ pub(crate) fn install(inc: String, signatures: &[ExtSignature]) -> String {
         };
         let _ = writeln!(
             head,
-            "    {{{}, {}, {index}, {}}},",
+            "    {{{}, {}, {index}, {chunk}}},",
             c_name(&signature.entry),
             c_name(&signature.qualname),
-            c_name(&signature.wrapper)
         );
     }
-    head.push_str("    {NULL, NULL, 0, NULL},\n};\n\n");
+    head.push_str("    {NULL, NULL, 0, 0},\n};\n\n");
     head.push_str(PUBLISH_C);
     let marker = "#define PYCC_EXT_MODULE_NAME_STR";
     let at = inc
@@ -156,7 +169,7 @@ const PUBLISH_C: &str = r#"static int pycc_ext_signature_publish(PyObject *modul
             continue;
         }
         dict = PyModule_GetDict(module);
-        code = Py_CompileString(signature->source, "<pycc signature>", Py_file_input);
+        code = pycc_ext_chunk_code(signature->chunk);
         if (code == NULL) {
             return -1;
         }
@@ -214,18 +227,18 @@ mod tests {
 
     #[test]
     fn no_signature_leaves_the_companion_unchanged() {
-        assert_eq!(install(INC.to_string(), &[]), INC);
+        assert_eq!(install(INC.to_string(), &[], 0), INC);
     }
 
     #[test]
     fn a_method_gets_a_forwarder_row_and_a_function_a_table_entry() {
-        let out = install(INC.to_string(), &[signature("f"), signature("Box.area")]);
+        let out = install(INC.to_string(), &[signature("f"), signature("Box.area")], 3);
         let head = out
             .find("#define PYCC_EXT_HAS_SIGNATURES")
             .expect("the macro");
         assert!(head > out.find("PYCC_EXT_MODULE_NAME_STR").unwrap());
         assert!(head < out.find("BODY").unwrap());
-        assert!(out.contains("{\"_pycc_sig_f\", \"f\", -1, "), "{out}");
+        assert!(out.contains("{\"_pycc_sig_f\", \"f\", -1, 3}"), "{out}");
         assert!(out.contains("\"Box\\056area\", 0, "), "{out}");
         assert!(out.contains(
             "pycc_ext_type_methods_Box[] = {\n    {\"area\", (PyCFunction)(void (*)(void))pycc_ext_sig_fwd_0, \

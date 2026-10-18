@@ -399,7 +399,12 @@ impl Plan {
         let line = src[..start].matches('\n').count();
         let run = self.exec_text(
             &mut out.chunks,
-            &format!("{}{}\n", "\n".repeat(line), self.split_source(index)),
+            &format!(
+                "{}{}\n{}",
+                "\n".repeat(line),
+                self.split_source(index),
+                self.forward_call(index)
+            ),
         );
         if !compiled || rest > 0 {
             // The statement's last line holds no compiled code.

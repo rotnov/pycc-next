@@ -531,7 +531,7 @@ pub(crate) fn check_stmt_arm_in_function(
             env.loop_exits.record_break(&env.bindings);
             Ok(())
         }
-        HirStmt::Continue => Ok(()),
+        HirStmt::Continue | HirStmt::Pos(_) => Ok(()),
         HirStmt::LoopElse { .. } => {
             unreachable!("`check_stmt_in_function` checks a loop `else:` clause")
         }

@@ -22,6 +22,20 @@ pub(crate) fn emit_name_expr<'ctx>(
         "pycc_codegen: internal error: local type drifted"
     );
     if let Some(initialized_ptr) = slot.initialized {
+        // A module global (its flag is a module global, a local's an
+        // `alloca`) other code may rebind (`global_sync`).
+        if inkwell::values::BasicValue::as_instruction_value(&initialized_ptr).is_none() {
+            crate::global_sync::emit_sync(
+                context,
+                builder,
+                module,
+                rt,
+                name,
+                slot.ptr,
+                initialized_ptr,
+                ty,
+            );
+        }
         let initialized = builder
             .build_load(context.i8_type(), initialized_ptr, "global_initialized")
             .expect("build_load should not fail for a declared global flag")

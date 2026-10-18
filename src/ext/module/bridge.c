@@ -392,6 +392,18 @@ static PyObject *pycc_ext_key_error_from_repr(PyObject *text)
     return raised;
 }
 
+/* `frames.c`: a pycc exception's compiled-frame traceback entries. */
+static void pycc_ext_tb_sync(void *native, PyObject *obj);
+
+/* `pycc_ext_tb_sync` on the CPython exception raised now. */
+static void pycc_ext_tb_sync_raised(void *native)
+{
+    PyObject *raised = PyErr_GetRaisedException();
+
+    pycc_ext_tb_sync(native, raised);
+    PyErr_SetRaisedException(raised);
+}
+
 static int pycc_ext_raise_pending(void)
 {
     int tag = pycc_rt_ext_pending_type();
@@ -413,6 +425,7 @@ static int pycc_ext_raise_pending(void)
      */
     original = pycc_rt_exception_foreign(pycc_rt_exception_value());
     if (original != NULL) {
+        pycc_ext_tb_sync(pycc_rt_exception_value(), original);
         Py_INCREF(original);
         PyErr_SetRaisedException(original);
         pycc_rt_exception_clear();
@@ -603,12 +616,14 @@ static int pycc_ext_raise_pending(void)
         if (raised != NULL) {
             Py_DECREF(message);
             PyErr_SetRaisedException(raised);
+            pycc_ext_tb_sync_raised(pycc_rt_exception_value());
             pycc_rt_exception_clear();
             return 1;
         }
     }
     PyErr_SetObject(exc_type, message);
     Py_DECREF(message);
+    pycc_ext_tb_sync_raised(pycc_rt_exception_value());
     pycc_rt_exception_clear();
     return 1;
 }

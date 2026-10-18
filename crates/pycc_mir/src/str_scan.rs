@@ -79,6 +79,8 @@ fn recognize(stmt: &MirStmt) -> Option<[MirStmt; 2]> {
     {
         return None;
     }
+    // Position markers (`MirStmt::Pos`) say nothing about the loop's shape.
+    let body: Vec<&MirStmt> = body.iter().filter(|stmt| !matches!(stmt, MirStmt::Pos(_))).collect();
     let [
         MirStmt::Assign {
             target,

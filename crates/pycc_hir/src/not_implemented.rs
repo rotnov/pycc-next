@@ -246,6 +246,7 @@ fn stmt_returns_not_implemented(stmt: &HirStmt) -> bool {
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
+        | HirStmt::Pos(_)
         | HirStmt::Raise { .. } => false,
     }
 }

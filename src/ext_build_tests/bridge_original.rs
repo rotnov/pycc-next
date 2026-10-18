@@ -62,7 +62,9 @@ fn an_escaping_bridged_exception_is_re_raised_as_its_original() {
     let shim = shim_c();
     assert!(shim.contains(
         "    original = pycc_rt_exception_foreign(pycc_rt_exception_value());\n    \
-         if (original != NULL) {\n        Py_INCREF(original);\n        \
+         if (original != NULL) {\n        \
+         pycc_ext_tb_sync(pycc_rt_exception_value(), original);\n        \
+         Py_INCREF(original);\n        \
          PyErr_SetRaisedException(original);\n        pycc_rt_exception_clear();\n        \
          return 1;\n    }\n"
     ));

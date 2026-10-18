@@ -368,6 +368,8 @@ pub(super) struct RtFns<'ctx> {
     /// nested handler must not overwrite the exception saved by its outer
     /// handler.
     pub(super) exceptions: ExceptionCodegenState<'ctx>,
+    /// Compiled frames' records and traceback entries (`frames`).
+    pub(crate) frames: crate::frames::FrameState<'ctx>,
     /// Each typed array local's header snapshot (`ndarray`), keyed by
     /// function and variable name.
     pub(super) nd_caches: crate::ndarray::NdCaches<'ctx>,
@@ -953,6 +955,7 @@ pub(super) fn declare_rt_functions<'ctx>(
             ),
         ),
         exceptions: ExceptionCodegenState::new(),
+        frames: crate::frames::FrameState::declare(context, module),
         nd_caches: crate::ndarray::NdCaches::default(),
         loops: crate::loop_control::LoopControlState::default(),
         list_free: declare(

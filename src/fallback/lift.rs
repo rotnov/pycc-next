@@ -624,4 +624,30 @@ impl Plan {
         out.push_str(&src[cursor..range.end as usize]);
         out
     }
+
+    /// The line run after split statement `index`, once it has bound its
+    /// names: `__pycc_forward__("C.m", ...)` patches the forwarder of each
+    /// compiled lift of it, named by its qualified name
+    /// (`src/ext/module/forward.c`), so a call reaches the compiled body
+    /// with no forwarder frame. Empty when no lift of it compiled.
+    pub(super) fn forward_call(&self, index: usize) -> String {
+        let mut names: Vec<&str> = Vec::new();
+        for unit in self.lifts_of(index) {
+            if self.fallback.contains_key(&unit) {
+                continue;
+            }
+            let lift = self.lift(unit).expect("a lift");
+            if !names.contains(&lift.qualname.as_str()) {
+                names.push(&lift.qualname);
+            }
+        }
+        if names.is_empty() {
+            return String::new();
+        }
+        let quoted: Vec<String> = names.iter().map(|name| format!("\"{name}\"")).collect();
+        format!("{FORWARD_HOOK}({})\n", quoted.join(", "))
+    }
 }
+
+/// The hook [`Plan::forward_call`]'s line calls (`forward.c`).
+const FORWARD_HOOK: &str = "__pycc_forward__";

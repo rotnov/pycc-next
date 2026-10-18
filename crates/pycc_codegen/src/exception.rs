@@ -497,6 +497,8 @@ pub(super) fn guard_statement_effects<'ctx>(
         && rt.exceptions.pending_object_releases.borrow().is_empty()
         && rt.exceptions.pending_heap_releases.borrow().is_empty();
     if nothing_pending {
+        let exception_target =
+            crate::frames::exception_edge(context, builder, rt, exception_target);
         let branch = builder
             .build_conditional_branch(has_exc, exception_target, continuation)
             .expect("build_conditional_branch should guard a statement effect");
@@ -546,6 +548,7 @@ pub(super) fn jump_to_exception_target<'ctx>(
     }
     crate::object_release::release_pending(builder, rt);
     crate::heap_rc::release_pending(context, builder, rt);
+    let exception_target = crate::frames::exception_edge(context, builder, rt, exception_target);
     builder
         .build_unconditional_branch(exception_target)
         .expect("build_unconditional_branch should not fail for a fresh unwind block");

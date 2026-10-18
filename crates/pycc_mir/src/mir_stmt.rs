@@ -300,6 +300,10 @@ pub enum MirStmt {
     /// `continue` (from `HirStmt::Continue`): starts the innermost
     /// enclosing loop statement's next iteration.
     Continue,
+    /// The source position of the statement after it (from
+    /// `HirStmt::Pos`): codegen records it for tracebacks and frame line
+    /// numbers. No runtime effect of its own.
+    Pos(pycc_hir::SrcPos),
     /// A loop with an `else:` clause (from `HirStmt::LoopElse`).
     /// `loop_stmt` is one of the loop statements (`While`, `ForRange`,
     /// `ForList`, `ForObject`, `ForDict`, `ForSet`); `orelse` runs after it

@@ -257,13 +257,17 @@ pub(super) fn lower_method(
     // `Return(None)` body above: an abstract method is registered as a
     // function but never called, so an unused alias there is inert, and a
     // separate branch would only be a second thing to keep in step.
+    // The header marker opens the body, after the receiver alias, which
+    // later passes find first.
+    let header = crate::positions::def_header(def);
     let body = match receiver_name.as_deref() {
         Some(name) if name != receiver::CANONICAL_RECEIVER => {
             let mut aliased = vec![receiver::alias_stmt(name)];
+            aliased.extend(header);
             aliased.extend(body);
             aliased
         }
-        _ => body,
+        _ => header.into_iter().chain(body).collect(),
     };
     // #1418 (D-258's #1418 amendment): a comparison method that returns
     // `NotImplemented` returns a CPython object whatever its annotation

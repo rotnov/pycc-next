@@ -60,6 +60,7 @@ fn is_flat(stmt: &MirStmt, loops: usize) -> bool {
         MirStmt::ExprStmt(_)
         | MirStmt::Assign { .. }
         | MirStmt::NoOp
+        | MirStmt::Pos(_)
         | MirStmt::ReleaseName(_)
         | MirStmt::DictSet { .. }
         | MirStmt::BufferSet { .. }

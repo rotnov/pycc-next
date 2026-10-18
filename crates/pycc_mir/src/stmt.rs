@@ -434,6 +434,7 @@ pub(super) fn lower_stmt(
         }
         HirStmt::Break => MirStmt::Break,
         HirStmt::Continue => MirStmt::Continue,
+        HirStmt::Pos(pos) => MirStmt::Pos(*pos),
         // The loop, then its `else:` clause in exactly the shape the
         // checker gives it: the plain statement sequence when no `break`
         // can skip it, otherwise the body of `pycc_hir::loop_else_as_if`'s

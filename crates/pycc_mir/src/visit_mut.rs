@@ -366,6 +366,7 @@ impl MirStmt {
             | MirStmt::Seq(_)
             | MirStmt::Break
             | MirStmt::Continue
+            | MirStmt::Pos(_)
             | MirStmt::LoopElse { .. }
             | MirStmt::Try { .. }
             | MirStmt::TryStar { .. }

@@ -16,7 +16,8 @@ const MAX_NODES: usize = 32;
 
 /// Whether a function with body `body` should be inlined everywhere.
 pub(super) fn is_tiny_leaf(body: &[MirStmt]) -> bool {
-    let [MirStmt::Return(Some(value))] = body else {
+    let body: Vec<&MirStmt> = body.iter().filter(|stmt| !matches!(stmt, MirStmt::Pos(_))).collect();
+    let [MirStmt::Return(Some(value))] = body.as_slice() else {
         return false;
     };
     let mut budget = MAX_NODES;

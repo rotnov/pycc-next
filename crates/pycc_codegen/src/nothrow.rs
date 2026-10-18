@@ -114,7 +114,7 @@ fn int_like(ty: &Ty) -> bool {
 impl Cx<'_> {
     fn stmt(&self, stmt: &MirStmt) -> bool {
         match stmt {
-            MirStmt::Return(None) | MirStmt::NoOp => true,
+            MirStmt::Return(None) | MirStmt::NoOp | MirStmt::Pos(_) => true,
             MirStmt::Return(Some(value)) | MirStmt::ExprStmt(value) => self.expr(value),
             MirStmt::Assign { target, value } => {
                 self.params.contains(target.as_str()) && self.expr(value)

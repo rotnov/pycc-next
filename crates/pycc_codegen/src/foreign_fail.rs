@@ -132,6 +132,7 @@ pub(super) fn emit_failure<'ctx>(
         // return skips.
         crate::object_release::release_pending(builder, rt);
         crate::object_release::release_all(builder, &loop_iterators);
+        crate::frames::record_cpython_raise(context, module, builder, rt);
         builder
             .build_return(Some(
                 &context

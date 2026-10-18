@@ -661,6 +661,7 @@ fn producer_bound_in<'a>(body: &'a [HirStmt], shadowed: &HashSet<&str>) -> Optio
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
+        | HirStmt::Pos(_)
         | HirStmt::Raise { .. } => None,
     })
 }

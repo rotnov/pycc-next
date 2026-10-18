@@ -21,6 +21,9 @@ pub(crate) fn emit_expr<'ctx>(
     expr: &MirExpr,
 ) -> Scalar<'ctx> {
     use pycc_mir::Ty;
+    // The statement's site this operation is (`frames`): where a failure
+    // inside it is located.
+    crate::frames::enter_site(context, builder, rt, crate::frames::site_key(expr));
     let value = emit_expr_unchecked(context, builder, module, rt, user_functions, locals, expr);
     // Recursive calls come back through this wrapper. Consequently a node
     // that can set the pending state stops evaluation before its parent can
@@ -41,6 +44,7 @@ pub(crate) fn emit_expr<'ctx>(
     if expression_can_set_exception(expr) && !nothrow_call {
         guard_statement_effects(context, builder, rt);
     }
+    crate::frames::leave_site(context, builder, rt);
     // An operand a later sibling could free takes its own reference
     // (`operand_pin`), after the guard: only a successfully read value.
     heap_rc::retain_if_pinned(context, builder, rt, expr, &value);

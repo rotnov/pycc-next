@@ -120,7 +120,7 @@ impl<'a> Walker<'a> {
                 self.stmt(loop_stmt);
                 self.stmts(orelse);
             }
-            HirStmt::Break | HirStmt::Continue => {}
+            HirStmt::Break | HirStmt::Continue | HirStmt::Pos(_) => {}
             HirStmt::ForRange {
                 var,
                 start,

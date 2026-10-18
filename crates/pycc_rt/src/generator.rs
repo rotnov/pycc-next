@@ -579,6 +579,9 @@ pub extern "C" fn pycc_rt_gen_raise_exit() {
         cell.get()
     });
     // SAFETY: the cached `GeneratorExit` is a live exception the cell owns.
+    // Each close starts its traceback afresh: the frames the last close
+    // passed through are not this one's.
+    unsafe { (*exit).tb.release() };
     unsafe { crate::exception::pycc_rt_exception_incref(exit) };
     crate::exception::pycc_rt_exception_raise(exit);
 }

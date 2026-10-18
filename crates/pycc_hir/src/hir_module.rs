@@ -183,6 +183,7 @@ fn collect_killed_names(body: &[HirStmt], killed: &mut HashSet<String>) {
             | HirStmt::ForeignImport { .. }
             | HirStmt::Break
             | HirStmt::Continue
+            | HirStmt::Pos(_)
             | HirStmt::Raise { .. } => {}
         }
     }

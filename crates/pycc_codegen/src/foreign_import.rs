@@ -391,6 +391,7 @@ pub(super) fn emit<'ctx>(
                 .last()
                 .expect("a statement is always inside an exception target");
             let unbridged_bb = context.append_basic_block(entry_fn, "foreign_import_unbridged");
+            let target = crate::frames::exception_edge(context, builder, rt, target);
             builder
                 .build_conditional_branch(raised, target, unbridged_bb)
                 .expect("build_conditional_branch should not fail");

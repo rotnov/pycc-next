@@ -133,6 +133,7 @@ fn stmt_is_admitted(stmt: &MirStmt) -> bool {
             | MirStmt::Break
             | MirStmt::Continue
             | MirStmt::NoOp
+            | MirStmt::Pos(_)
             | MirStmt::ReleaseName(_)
     );
     shape

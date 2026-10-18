@@ -34,6 +34,8 @@ pub(super) fn emit_exception_check<'ctx>(
         )
         .expect("build_int_compare should not fail");
     let cont_bb = context.append_basic_block(entry_fn, "top_exc_cont");
+    let top_exception_exit =
+        crate::frames::exception_edge(context, builder, rt, top_exception_exit);
     builder
         .build_conditional_branch(has_exc, top_exception_exit, cont_bb)
         .expect("build_conditional_branch should not fail");

@@ -162,6 +162,19 @@ pub(crate) fn try_build(
         false => None,
     };
 
+    // A native program names its frames' files as CPython names a script's
+    // (an absolute path) and prints CPython's source blocks under them
+    // (`crate::traceback_blocks`); a hosted module names them at import.
+    let (source_files, source_blocks) = crate::timing::span("traceback source blocks", || {
+        use crate::traceback_blocks::FrameSources;
+        let kind = match (ext.is_some(), embedded) {
+            (true, _) => FrameSources::Module,
+            (false, true) => FrameSources::Embedded,
+            (false, false) => FrameSources::Native,
+        };
+        crate::traceback_blocks::frame_sources(&mir, kind)
+    });
+
     // The plans' C sources compile while LLVM compiles the program.
     let scratch_dir = obj_path.parent().unwrap_or(Path::new("."));
     let c_compile = |plan_args: &[std::ffi::OsString]| {
@@ -217,6 +230,10 @@ pub(crate) fn try_build(
                     // (`collect_exports` does not run here).
                     ext: ext.is_some() || embedded,
                     suppress_export_thunks: embedded && !crate::fallback::active(),
+                    source_files: source_files.clone(),
+                    source_blocks: source_blocks.clone(),
+                    position_sites: pycc_hir::positions::position_sites(),
+                    global_sync: (ext.is_some() || embedded) && crate::mode::non_strict_for(path),
                 },
             )
         });
@@ -565,10 +582,14 @@ fn plan_ext(
             )
         })
         .unwrap_or_default();
-    let inc_body = ext_build::install_signatures(inc_body, &published_signatures);
-    // The fallback rewrite's CPython source, compiled by the target
-    // interpreter now instead of by `compile()` at every import.
-    let chunks = crate::fallback::code_chunks();
+    // The fallback rewrite's CPython source and the signature wrappers'
+    // (after it), compiled by the target interpreter now instead of by
+    // `compile()` at every import.
+    let mut chunks = crate::fallback::code_chunks();
+    let first_wrapper = chunks.len();
+    chunks.extend(published_signatures.iter().map(ext_build::signature_chunk));
+    let inc_body =
+        ext_build::install_signatures(inc_body, &published_signatures, first_wrapper);
     let compiled = toolchain
         .precompile_interpreter()
         .filter(|_| !chunks.is_empty())
@@ -856,8 +877,24 @@ mod try_build_release_isolation_tests {
             .expect("fixture source should type-check");
         let mir = pycc_mir::build(&typed_hir);
         let ref_obj_path = dir.join("reference.o");
-        pycc_codegen::compile_to_object(&mir, &ref_obj_path, None, false)
-            .expect("reference codegen should succeed");
+        pycc_codegen::compile_to_object_with_options(
+            &mir,
+            &ref_obj_path,
+            &{
+                let (source_files, source_blocks) =
+                    crate::traceback_blocks::frame_sources(
+                        &mir,
+                        crate::traceback_blocks::FrameSources::Native,
+                    );
+                pycc_codegen::CompileOptions {
+                    source_files,
+                    source_blocks,
+                    position_sites: pycc_hir::positions::position_sites(),
+                    ..Default::default()
+                }
+            },
+        )
+        .expect("reference codegen should succeed");
         let ref_obj_bytes = std::fs::read(&ref_obj_path).unwrap();
 
         assert_eq!(

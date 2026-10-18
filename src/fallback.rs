@@ -76,7 +76,7 @@ const SYS: &str = "__pycc_fallback_sys";
 mod state;
 
 pub(crate) use state::{
-    Snapshot, active, attached_methods, code_chunks, entry_override, entry_source, reporting, set_report,
+    Snapshot, active, attached_methods, code_chunks, entry_copied, entry_override, entry_source, reporting, set_report,
     twinned_exports,
 };
 use state::{REPORT, install, set_override};

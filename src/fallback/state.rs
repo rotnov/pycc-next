@@ -51,6 +51,7 @@ pub(super) fn set_override(text: Option<String>) {
     // A chunk belongs to the rewrite that numbers it: any other text
     // (`install` sets the rewrite's own right after) has none.
     CHUNKS.with(|cell| cell.borrow_mut().clear());
+    COPIED.with(|cell| cell.borrow_mut().clear());
     ENTRY_OVERRIDE.with(|cell| *cell.borrow_mut() = text);
 }
 
@@ -64,6 +65,19 @@ thread_local! {
     /// The methods of the active rewrite attached to compiled classes
     /// (`Rendered::attached`).
     static ATTACHED: RefCell<Vec<Attached>> = const { RefCell::new(Vec::new()) };
+}
+
+thread_local! {
+    /// The runs of the entry file the active rewrite copies unchanged
+    /// (`Rendered::copied`): `(offset in the rewrite, offset in the file,
+    /// length)`.
+    static COPIED: RefCell<Vec<(u32, u32, u32)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The active rewrite's copied runs (`Rendered::copied`), which map a
+/// compiled statement's offset back to the entry file for its position.
+pub(crate) fn entry_copied() -> Vec<(u32, u32, u32)> {
+    COPIED.with(|cell| cell.borrow().clone())
 }
 
 thread_local! {
@@ -87,6 +101,7 @@ pub(super) fn install(rendered: &Rendered) {
     TWINNED.with(|cell| *cell.borrow_mut() = rendered.twinned.clone());
     ATTACHED.with(|cell| *cell.borrow_mut() = rendered.attached.clone());
     CHUNKS.with(|cell| *cell.borrow_mut() = rendered.chunks.clone());
+    COPIED.with(|cell| *cell.borrow_mut() = rendered.copied.clone());
 }
 
 /// The active rewrite's attached methods (`Rendered::attached`).
@@ -114,6 +129,7 @@ pub(crate) struct Snapshot {
     twinned: BTreeSet<String>,
     attached: Vec<Attached>,
     chunks: Vec<CodeChunk>,
+    copied: Vec<(u32, u32, u32)>,
 }
 
 impl Snapshot {
@@ -124,6 +140,7 @@ impl Snapshot {
             twinned: TWINNED.with(|cell| cell.borrow().clone()),
             attached: attached_methods(),
             chunks: code_chunks(),
+            copied: entry_copied(),
         }
     }
 
@@ -133,5 +150,6 @@ impl Snapshot {
         TWINNED.with(|cell| *cell.borrow_mut() = self.twinned);
         ATTACHED.with(|cell| *cell.borrow_mut() = self.attached);
         CHUNKS.with(|cell| *cell.borrow_mut() = self.chunks);
+        COPIED.with(|cell| *cell.borrow_mut() = self.copied);
     }
 }

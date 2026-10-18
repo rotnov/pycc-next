@@ -70,7 +70,7 @@ fn collect_stmt<'a>(stmt: &'a HirStmt, out: &mut Vec<&'a HirStmt>) {
         | HirStmt::DeleteItem { .. }
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
-        | HirStmt::Continue => {}
+        | HirStmt::Continue | HirStmt::Pos(_) => {}
     }
 }
 
@@ -101,7 +101,7 @@ pub(super) fn stmt_key(stmt: &HirStmt) -> Option<NodeKey> {
         HirStmt::ForeignImport { .. } => "import".into(),
         HirStmt::Break => "break".into(),
         HirStmt::Continue => "continue".into(),
-        HirStmt::LoopElse { .. } => return None,
+        HirStmt::LoopElse { .. } | HirStmt::Pos(_) => return None,
     };
     Some(NodeKey::new(key))
 }
@@ -210,7 +210,7 @@ pub(super) fn stmt_own_exprs<'a>(stmt: &'a HirStmt, visit: &mut dyn FnMut(&'a Hi
         | HirStmt::Delete { .. }
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
-        | HirStmt::Continue => {}
+        | HirStmt::Continue | HirStmt::Pos(_) => {}
     }
 }
 

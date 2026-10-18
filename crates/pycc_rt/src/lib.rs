@@ -49,6 +49,7 @@ pub mod closure;
 pub mod container_ops;
 pub mod dict;
 mod exception;
+pub mod frames;
 /// D-244 rule 2's `PyObject*` boundary, runtime half (#1025/#1028).
 pub mod ext_bridge;
 pub mod generator;

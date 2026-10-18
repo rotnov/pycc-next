@@ -276,7 +276,7 @@ pub(crate) fn collect_generic_class_instantiations_from_stmt(
                 collect_generic_class_instantiations_from_stmt(s, out);
             }
         }
-        HirStmt::Break | HirStmt::Continue => {}
+        HirStmt::Break | HirStmt::Continue | HirStmt::Pos(_) => {}
         HirStmt::DictSet { key, value, .. } => {
             collect_generic_class_instantiations_from_expr(key, out);
             collect_generic_class_instantiations_from_expr(value, out);

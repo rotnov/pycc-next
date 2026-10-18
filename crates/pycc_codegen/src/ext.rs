@@ -62,6 +62,23 @@ pub struct CompileOptions {
     /// behaviour, so every `ext: true, ..CompileOptions::default()` literal
     /// keeps its meaning.
     pub suppress_export_thunks: bool,
+    /// The display path of each source file of the program, by the module
+    /// index a `pycc_hir::SrcPos` carries: what a compiled frame's
+    /// `co_filename` and traceback line name (`frames`). Empty turns
+    /// compiled frames off.
+    pub source_files: Vec<String>,
+    /// The source block printed under each position's traceback line in a
+    /// native program (the statement's lines and carets, as CPython renders
+    /// them); positions with none print the line alone.
+    pub source_blocks: std::collections::HashMap<pycc_hir::SrcPos, String>,
+    /// Each statement marker's sites (`pycc_hir::positions::position_sites`),
+    /// which locate a failing call, subscript, attribute load or division
+    /// within its statement.
+    pub position_sites: Vec<Vec<pycc_hir::positions::Site>>,
+    /// A non-strict module hosted by CPython: compiled functions read the
+    /// globals it publishes through its `__dict__` (`global_sync`), so a
+    /// rebinding from outside reaches them.
+    pub global_sync: bool,
 }
 
 /// The symbol the module body is emitted under in `ext` mode: the fixed C
@@ -1205,6 +1222,7 @@ pub fn body_returns_buffer_slice(body: &[pycc_mir::MirStmt]) -> bool {
         | MirStmt::ForeignImport { .. }
         | MirStmt::Break
         | MirStmt::Continue
+        | MirStmt::Pos(_)
         | MirStmt::Yield(_)
         | MirStmt::GenReturn(_)
         | MirStmt::Reraise => false,

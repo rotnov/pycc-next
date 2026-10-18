@@ -23,7 +23,7 @@ pub use desugar::{
 };
 pub use rebound_defs::rebound_def_names;
 pub use reserved::{is_reserved_name, reserved_name_uses};
-pub use ruff_text_size::TextRange;
+pub use ruff_text_size::{Ranged, TextRange};
 pub use string_annotation::{
     normalize_string_annotations, parse_string_annotation, unquote_nested_string_annotations,
 };

@@ -31,6 +31,7 @@ pub(crate) fn contains_return(body: &[HirStmt]) -> bool {
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
+        | HirStmt::Pos(_)
         | HirStmt::Raise { .. } => false,
         HirStmt::Try {
             body,
@@ -93,7 +94,7 @@ pub(crate) fn introduces_bindings(body: &[HirStmt]) -> bool {
         | HirStmt::DeleteAttr { .. }
         | HirStmt::DeleteItem { .. }
         | HirStmt::Break
-        | HirStmt::Continue => false,
+        | HirStmt::Continue | HirStmt::Pos(_) => false,
         HirStmt::Try {
             body,
             handlers,

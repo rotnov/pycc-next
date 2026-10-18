@@ -1016,6 +1016,11 @@ fn lower_top_level_item<'a>(
         }
     }
     state.fallback_groups.extend(groups);
+    // The statement's position (`crate::positions`), for the module body's
+    // frame.
+    if let Some(pos) = crate::positions::stmt_position(stmt) {
+        state.items.push(HirItem::TopLevelStmt(crate::HirStmt::Pos(pos)));
+    }
     state
         .items
         .extend(lowered.into_iter().map(HirItem::TopLevelStmt));

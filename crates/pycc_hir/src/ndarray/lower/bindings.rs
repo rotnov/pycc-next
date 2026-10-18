@@ -93,7 +93,7 @@ pub(super) fn collect_bindings<'a>(
             | HirStmt::DeleteAttr { .. }
             | HirStmt::DeleteItem { .. }
             | HirStmt::Break
-            | HirStmt::Continue => {}
+            | HirStmt::Continue | HirStmt::Pos(_) => {}
         }
         // A walrus binds too; its name is never a typed array.
         for_each_stmt_expr(stmt, &mut |e| collect_walrus(e, out));
@@ -251,6 +251,7 @@ pub(super) fn for_each_stmt_expr<'a>(stmt: &'a HirStmt, f: &mut dyn FnMut(&'a Hi
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
+        | HirStmt::Pos(_)
         | HirStmt::LoopElse { .. } => {}
     }
 }

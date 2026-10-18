@@ -368,6 +368,7 @@ impl<'a> Bindings<'a> {
             | MirStmt::Seq(_)
             | MirStmt::Break
             | MirStmt::Continue
+            | MirStmt::Pos(_)
             | MirStmt::LoopElse { .. }
             | MirStmt::Raise { .. }
             | MirStmt::RaiseFrom { .. }

@@ -26,6 +26,7 @@ static PyObject *pycc_ext_exception_cpython(void *exc)
     PyObject *built;
 
     if (original != NULL) {
+        pycc_ext_tb_sync(exc, original);
         return original;
     }
     saved = PyErr_GetRaisedException();

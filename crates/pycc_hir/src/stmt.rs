@@ -808,7 +808,7 @@ fn violates_walrus_placement(lowered: &HirStmt) -> bool {
             exc.as_ref().is_some_and(contains_named_expr)
                 || cause.as_ref().is_some_and(contains_named_expr)
         }
-        HirStmt::Break | HirStmt::Continue => false,
+        HirStmt::Break | HirStmt::Continue | HirStmt::Pos(_) => false,
         // The `else:` clause's statements were checked by their own
         // `lower_stmt` calls; only the wrapped loop's header remains.
         HirStmt::LoopElse { loop_stmt, .. } => violates_walrus_placement(loop_stmt),
@@ -887,6 +887,9 @@ pub(crate) fn lower_body(
     // produces an empty `Vec<HirStmt>`, which is a valid no-op body.
     let mut lowered = Vec::with_capacity(body.len());
     for stmt in body.iter().filter(|stmt| !is_no_op_stmt(stmt)) {
+        if let Some(pos) = crate::positions::stmt_position(stmt) {
+            lowered.push(HirStmt::Pos(pos));
+        }
         lowered.extend(lower_stmt_expanded(
             stmt,
             aliases,

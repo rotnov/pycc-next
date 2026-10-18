@@ -190,11 +190,7 @@ fn an_uncaught_user_exception_prints_its_own_class_name() {
     );
     assert!(!ok, "an uncaught exception must exit non-zero");
     assert_eq!(stdout, "");
-    // #707 added a traceback-frame header naming the enclosing function.
-    assert_eq!(
-        stderr,
-        "Traceback (most recent call last):\n  File \"<compiled>\", in main\nConfigError: missing\n"
-    );
+    assert_traceback_tail(&stderr, "main", "raise ConfigError(\"missing\")", "ConfigError: missing");
 }
 
 #[test]
@@ -205,11 +201,7 @@ fn an_uncaught_builtin_exception_still_prints_its_own_class_name() {
     );
     assert!(!ok, "an uncaught exception must exit non-zero");
     assert_eq!(stdout, "");
-    // #707 added a traceback-frame header naming the enclosing function.
-    assert_eq!(
-        stderr,
-        "Traceback (most recent call last):\n  File \"<compiled>\", in main\nKeyError: 'nope'\n"
-    );
+    assert_traceback_tail(&stderr, "main", "raise KeyError(\"nope\")", "KeyError: 'nope'");
 }
 
 #[test]
@@ -353,4 +345,17 @@ fn a_generic_class_cannot_inherit_from_an_exception_class() {
         text.contains("generic class `MyError` with base classes"),
         "expected the #432 rejection, got: {text}"
     );
+}
+
+/// Asserts `stderr` is CPython's traceback shape for an exception raised in
+/// `function`: the header, a `File "...", line N, in <function>` line
+/// followed by the source line `raised` (v0.8 accept 3), and `last` (the
+/// `Type: message` line) at the end.
+fn assert_traceback_tail(stderr: &str, function: &str, raised: &str, last: &str) {
+    assert!(stderr.starts_with("Traceback (most recent call last):\n"), "{stderr}");
+    assert!(
+        stderr.contains(&format!(", in {function}\n    {raised}\n")),
+        "{stderr}"
+    );
+    assert!(stderr.ends_with(&format!("{last}\n")), "{stderr}");
 }

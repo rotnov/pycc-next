@@ -129,6 +129,9 @@ pub struct PyExceptionObj {
     /// The original CPython exception (`PyObject *`, owned) the `ext` shim
     /// translated this one from, or null (`lifetime.rs`).
     pub(crate) foreign: Cell<*mut std::ffi::c_void>,
+    /// The compiled frames this exception was raised in or propagated
+    /// into, innermost first (`crate::frames`).
+    pub(crate) tb: crate::frames::TbRecords,
 }
 
 #[derive(Clone, Copy)]
@@ -244,6 +247,12 @@ pub extern "C" fn pycc_rt_exception_take() -> *mut PyExceptionObj {
 /// NUL-terminated.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_ext_pending_type() -> i32 {
+    // Every compiled call's wrapper asks; while no thread has an exception
+    // pending, the answer needs no thread-local lookup
+    // ([`pycc_rt_exc_pending_threads`]).
+    if PENDING_THREADS.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+        return -1;
+    }
     EXCEPTION_STATE.with(|state| {
         let pending = state.get();
         if pending.active == 0 || pending.value.is_null() {
@@ -504,7 +513,11 @@ fn exception_frame_function(exc: &PyExceptionObj) -> Option<&str> {
 /// path.
 fn render_single_exception(exc: &PyExceptionObj) -> String {
     let mut out = String::new();
-    if let Some(frame) = exception_frame_function(exc) {
+    let records = exc.tb.snapshot();
+    if !records.is_empty() {
+        out.push_str("Traceback (most recent call last):\n");
+        out.push_str(&crate::frames::render_traceback(&records));
+    } else if let Some(frame) = exception_frame_function(exc) {
         out.push_str("Traceback (most recent call last):\n");
         out.push_str(&format!("  File \"<compiled>\", in {frame}\n"));
     }

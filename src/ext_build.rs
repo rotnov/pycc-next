@@ -50,7 +50,9 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/bridge.c"),
+    include_str!("ext/module/frames.c"),
     include_str!("ext/module/boundary.c"),
+    include_str!("ext/module/global_sync.c"),
     include_str!("ext/module/import_io.c"),
     include_str!("ext/module/object_unpack.c"),
     include_str!("ext/module/object_ops.c"),
@@ -63,6 +65,7 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/ndarray.c"),
     include_str!("ext/module/bytearray.c"),
     include_str!("ext/module/instances.c"),
+    include_str!("ext/module/forward.c"),
     include_str!("ext/module/buffers.c"),
     include_str!("ext/module/module_init.c"),
     include_str!("ext/pycc_ext_object_ops.c")
@@ -546,7 +549,7 @@ mod signatures;
 pub(crate) use richcompare::{ExtSlotDunders, SlotArtifact, collect_slot_dunders};
 #[cfg(test)]
 pub(crate) use richcompare::{SLOT_DUNDERS, is_slot_dunder_method};
-pub(crate) use signatures::install as install_signatures;
+pub(crate) use signatures::{install as install_signatures, signature_chunk};
 pub(crate) use precompiled::{install as install_precompiled, precompile};
 
 use publication::namespace_owner;

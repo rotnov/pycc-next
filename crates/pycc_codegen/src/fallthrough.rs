@@ -42,7 +42,7 @@ pub(crate) fn block_always_terminates(body: &[MirStmt]) -> bool {
                         | block_always_terminates(orelse))
             }
             // Control continues after (or at the head of) the loop.
-            MirStmt::Break | MirStmt::Continue => false,
+            MirStmt::Break | MirStmt::Continue | MirStmt::Pos(_) => false,
             MirStmt::Try {
                 body,
                 handlers,

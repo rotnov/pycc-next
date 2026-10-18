@@ -34,6 +34,10 @@ use ruff_text_size::{Ranged, TextRange};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+/// The `co_flags` bit marking a wrapper's code object (no CPython 3.13 flag
+/// uses it); `PYCC_CO_SIGNATURE` in `src/ext/module/frames.c`.
+pub const WRAPPER_FLAG: u32 = 0x4000_0000;
+
 /// The prefix of an entry's name.
 const ENTRY_PREFIX: &str = "_pycc_sig_";
 
@@ -286,7 +290,11 @@ fn plan_def(
     let name = def.name.as_str();
     if def.is_async
         || !def.decorator_list.is_empty()
-        || name.starts_with('_')
+        || (name.starts_with('_')
+            // A private module-level function is published in non-strict
+            // mode (CPython code imports `from m import _helper`), so it
+            // takes its declared signature too.
+            && !(non_strict && class.is_none() && !name.starts_with("__") && !name.starts_with("_pycc")))
         || super::ext_generators::yields(&def.body)
         || !needs_wrapper(&def.parameters)
     {
@@ -535,15 +543,30 @@ fn plan_def(
     if declared.iter().any(|d| d.contains(FALLBACK_NS)) {
         fallback_builtins.push_str(&format!(", {FALLBACK_NS}=globals()"));
     }
+    // The wrapper stands for the function, whose compiled frame is the one
+    // CPython would show: a compiled frame called from it links past it
+    // (its code carries [`WRAPPER_FLAG`], `src/ext/module/frames.c`), and
+    // an exception leaving it drops its own traceback entry -- a bare
+    // `raise` adds none.
+    let checks: String = checks.lines().map(|line| format!("    {line}\n")).collect();
     let wrapper = format!(
         "def _pycc_make(_pycc_entry, _pycc_missing=object(), _pycc_tuple=tuple, \
          _pycc_isinstance=isinstance, _pycc_type=type, _pycc_TypeError=TypeError, \
-         _pycc_int=int, _pycc_float=float, _pycc_str=str, _pycc_bool=bool\
+         _pycc_int=int, _pycc_float=float, _pycc_str=str, _pycc_bool=bool, \
+         _pycc_BaseException=BaseException\
          {fallback_builtins}):\n{twin_builder}    \
-         def {name}({declared}):\n{checks}        \
-         return _pycc_entry({passed})\n    \
+         def {name}({declared}):\n        \
+         try:\n{checks}            \
+         return _pycc_entry({passed})\n        \
+         except _pycc_BaseException as _pycc_e:\n            \
+         _pycc_t = _pycc_e.__traceback__\n            \
+         if _pycc_t is not None and _pycc_t.tb_frame.f_code.co_flags & {WRAPPER_FLAG:#x}:\n                \
+         _pycc_e.__traceback__ = _pycc_t.tb_next\n            \
+         del _pycc_t\n            \
+         raise\n    \
          {name}.__qualname__ = \"{qualname}\"\n    \
-         {name}.__code__ = {name}.__code__.replace(co_qualname=\"{qualname}\")\n    \
+         {name}.__code__ = {name}.__code__.replace(co_qualname=\"{qualname}\", \
+         co_flags={name}.__code__.co_flags | {WRAPPER_FLAG:#x})\n    \
          return {name}\n",
         declared = declared.join(", "),
         passed = passed.join(", "),

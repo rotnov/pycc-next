@@ -255,10 +255,7 @@ fn an_uncaught_file_not_found_error_prints_its_own_class_name() {
     assert!(!ok, "an uncaught exception must exit non-zero");
     assert_eq!(stdout, "");
     // #707 added a traceback-frame header naming the enclosing function.
-    assert_eq!(
-        stderr,
-        "Traceback (most recent call last):\n  File \"<compiled>\", in main\nFileNotFoundError: missing\n"
-    );
+    assert_traceback_tail(&stderr, "main", "raise FileNotFoundError(\"missing\")", "FileNotFoundError: missing");
 }
 
 #[test]
@@ -270,10 +267,7 @@ fn an_uncaught_broken_pipe_error_prints_its_own_class_name() {
     assert!(!ok, "an uncaught exception must exit non-zero");
     assert_eq!(stdout, "");
     // #707 added a traceback-frame header naming the enclosing function.
-    assert_eq!(
-        stderr,
-        "Traceback (most recent call last):\n  File \"<compiled>\", in main\nBrokenPipeError: pipe\n"
-    );
+    assert_traceback_tail(&stderr, "main", "raise BrokenPipeError(\"pipe\")", "BrokenPipeError: pipe");
 }
 
 // -- C0001 no longer fires for the 16 names on raise/except; still fires for
@@ -419,4 +413,17 @@ fn a_shadowed_family_member_elsewhere_turns_an_unrelated_raise_into_a_clean_diag
         text.contains("C0001"),
         "expected a clean diagnostic, not a panic: {text}"
     );
+}
+
+/// Asserts `stderr` is CPython's traceback shape for an exception raised in
+/// `function`: the header, a `File "...", line N, in <function>` line
+/// followed by the source line `raised` (v0.8 accept 3), and `last` (the
+/// `Type: message` line) at the end.
+fn assert_traceback_tail(stderr: &str, function: &str, raised: &str, last: &str) {
+    assert!(stderr.starts_with("Traceback (most recent call last):\n"), "{stderr}");
+    assert!(
+        stderr.contains(&format!(", in {function}\n    {raised}\n")),
+        "{stderr}"
+    );
+    assert!(stderr.ends_with(&format!("{last}\n")), "{stderr}");
 }

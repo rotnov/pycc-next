@@ -105,6 +105,15 @@ fn compile_module(
     *rt.assigned_slots.borrow_mut() = assigned_slots::AssignedSlots::analyze(mir, options.ext);
     *rt.nothrow.borrow_mut() = nothrow::nothrow_functions(mir);
     let _pins = operand_pin::plan_module(&rt, mir);
+    rt.frames.set_files(
+        options.source_files.clone(),
+        options.source_blocks.clone(),
+        options.position_sites.clone(),
+    );
+    if options.ext {
+        rt.frames.set_framed(frame_needs::framed_functions(mir));
+    }
+    rt.frames.set_global_sync(options.global_sync);
 
     // First pass: declare every user-defined function -- with its real
     // parameter types and return type (Task 5), instead of Task 3/4's
@@ -184,12 +193,24 @@ fn compile_module(
     let publish_plan = ext_publish::PublishPlan::new(mir, &copy_slots, options.ext);
     let mut fn_ordinal = 0usize;
     rt.exceptions.targets.borrow_mut().push(top_exception_exit);
+    crate::frames::begin_function(
+        &context,
+        &module,
+        &builder,
+        &rt,
+        "",
+        crate::frames::FN_INFO_MODULE,
+    );
     // Part 1 of #1096: while this target is the innermost one, no
     // module-level `try` encloses the statement being emitted, so a foreign
     // failure keeps its direct module-exec `-1` edge (`foreign_fail.rs`).
     rt.exceptions.module_exec_exit.set(Some(top_exception_exit));
     for item in &mir.items {
         match item {
+            // A position marker emits nothing a pending exception can follow.
+            MirItem::TopLevelStmt(MirStmt::Pos(pos)) => {
+                crate::frames::set_position(&context, &builder, &rt, *pos);
+            }
             MirItem::TopLevelStmt(stmt) => {
                 emit_stmt(
                     &context,
@@ -314,6 +335,7 @@ fn compile_module(
         );
 
     top_level::emit_top_exception_exit(&context, &builder, &rt, top_exception_exit, options.ext);
+    crate::frames::end_function(&context, &module, &rt);
 
     // Second pass: fill in each user function's body, now that every
     // function (including ones a body might call) is already declared.
@@ -686,6 +708,18 @@ fn compile_module(
             };
             let exception_exit = context.append_basic_block(f, "exception_exit");
             rt.exceptions.targets.borrow_mut().push(exception_exit);
+            crate::frames::begin_function(
+                &context,
+                &module,
+                &builder,
+                &rt,
+                name,
+                if generator_element.is_some() {
+                    crate::frames::FN_INFO_GENERATOR
+                } else {
+                    0
+                },
+            );
             if let (Some(begun), Some(element)) = (generator_begin, generator_element.clone()) {
                 crate::generator::initial_suspend(
                     &context, &module, &builder, &rt, f, name, begun, element,
@@ -997,11 +1031,16 @@ fn compile_module(
             if generator_element.is_some() {
                 crate::generator::finish(&context, &module, &builder, &rt, f);
             }
+            // Every `ret` of the function exists now (`frames::exit_frame`).
+            crate::frames::end_function(&context, &module, &rt);
             *rt.int_ranges.borrow_mut() = Default::default();
         }
     }
 
     crate::ndarray::clear_fresh_after_calls(&context, &module, &builder, &rt);
+    if options.ext {
+        crate::frames::finish_module(&context, &module, &rt);
+    }
     verify_module(&module);
 
     crate::emit::optimize_and_emit(&module, mir, options, observer, output_path, split)

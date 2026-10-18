@@ -74,6 +74,13 @@ pub(crate) fn emit_body<'ctx>(
                 .last()
                 .copied()
                 .expect("emit_body is always called inside an exception target");
+            // A raise records this frame's traceback entry; a re-raise
+            // (`raise` with no operand) does not, as CPython's does not.
+            let exception_target = if matches!(stmt, MirStmt::Reraise) {
+                exception_target
+            } else {
+                crate::frames::exception_edge(context, builder, rt, exception_target)
+            };
             builder
                 .build_unconditional_branch(exception_target)
                 .expect("build_unconditional_branch should route an explicit raise");
@@ -326,6 +333,10 @@ pub(crate) fn emit_stmt<'ctx>(
             finally_stack,
             loop_control::LoopJump::Continue,
         ),
+        MirStmt::Pos(pos) => {
+            crate::frames::set_position(context, builder, rt, *pos);
+            Ok(())
+        }
         MirStmt::LoopElse { .. } => range_loop::emit_loop_else_stmt(
             context,
             builder,

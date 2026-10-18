@@ -310,7 +310,20 @@ static int pycc_ext_exec_module(PyObject *module)
         pycc_ext_home_module = module;
         Py_XDECREF(previous);
     }
-    exec_status = pycc_ext_module_exec();
+    pycc_frames_probe();
+    /* Compiled reads of rebindable globals check this dict (global_sync.c),
+     * on the CPython whose dict layout the probe verified. */
+    if (pycc_frames_state == 1) {
+        pycc_ext_ns_dict = PyModule_GetDict(module);
+    }
+    /* The hook patching the forwarders of each statement CPython runs
+     * (forward.c), for the body only. */
+    if (pycc_ext_forward_install(module) != 0) {
+        exec_status = -1;
+    } else {
+        exec_status = pycc_ext_module_exec();
+        pycc_ext_forward_remove(module);
+    }
 #ifdef PYCC_EXT_HAS_PRECOMPILED
     pycc_ext_code_remove(module);
 #endif

@@ -219,6 +219,7 @@ fn collect_deleted_names(body: &[HirStmt], deleted: &mut HashSet<String>) {
             | HirStmt::ForeignImport { .. }
             | HirStmt::Break
             | HirStmt::Continue
+            | HirStmt::Pos(_)
             | HirStmt::Raise { .. } => {}
         }
     }

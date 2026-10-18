@@ -427,7 +427,7 @@ pub(crate) fn check_stmt_arm(env: &mut Environment, stmt: &HirStmt) -> Result<()
             env.loop_exits.record_break(&env.bindings);
             Ok(())
         }
-        HirStmt::Continue => Ok(()),
+        HirStmt::Continue | HirStmt::Pos(_) => Ok(()),
         HirStmt::LoopElse { .. } => unreachable!("`check_stmt` checks a loop `else:` clause"),
         HirStmt::While { test, body } => {
             // Issue #769 follow-up (D-068 re-review round 3): a `while`

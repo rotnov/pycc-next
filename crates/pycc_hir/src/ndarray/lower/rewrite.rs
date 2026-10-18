@@ -341,6 +341,7 @@ impl Scope<'_, '_> {
             | HirStmt::ForeignImport { .. }
             | HirStmt::Break
             | HirStmt::Continue
+            | HirStmt::Pos(_)
             | HirStmt::LoopElse { .. } => {}
         }
         for e in exprs {

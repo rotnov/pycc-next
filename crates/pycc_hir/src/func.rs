@@ -126,6 +126,7 @@ pub(crate) fn lower_function(
         signatures,
     )?;
     let mut body = body;
+    body.splice(0..0, crate::positions::def_header(def));
     if crate::body_yields(&body) || pycc_ast::body_yields(&def.body) {
         let return_ty = generator::generator_return_ty(return_ty, aliases, def)?;
         generator::generator_returns(&mut body);

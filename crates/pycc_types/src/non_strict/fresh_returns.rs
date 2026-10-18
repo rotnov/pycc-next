@@ -155,6 +155,7 @@ fn escapes_in(body: &[HirStmt], local: &str) -> bool {
             HirStmt::Return(None)
             | HirStmt::Break
             | HirStmt::Continue
+            | HirStmt::Pos(_)
             | HirStmt::ForList { .. }
             | HirStmt::LoopElse { .. }
             | HirStmt::Try { .. }

@@ -100,6 +100,7 @@ fn stmt_stores_into(stmt: &HirStmt, name: &str) -> bool {
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
+        | HirStmt::Pos(_)
         | HirStmt::Raise { .. } => false,
     }
 }
@@ -183,6 +184,7 @@ fn stmt_returns_slice_of(stmt: &HirStmt, name: &str) -> bool {
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
+        | HirStmt::Pos(_)
         | HirStmt::Raise { .. } => false,
     }
 }
@@ -281,6 +283,7 @@ fn stmt_returns_inside_finally(stmt: &HirStmt) -> bool {
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
+        | HirStmt::Pos(_)
         | HirStmt::Raise { .. } => false,
     }
 }
@@ -344,6 +347,7 @@ fn stmt_contains_return(stmt: &HirStmt) -> bool {
         | HirStmt::ForeignImport { .. }
         | HirStmt::Break
         | HirStmt::Continue
+        | HirStmt::Pos(_)
         | HirStmt::Raise { .. } => false,
     }
 }

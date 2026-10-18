@@ -265,6 +265,7 @@ impl Verifier<'_> {
             | MirStmt::Reraise
             | MirStmt::Break
             | MirStmt::Continue
+            | MirStmt::Pos(_)
             | MirStmt::ForeignImport { .. } => {}
             MirStmt::LoopElse { loop_stmt, orelse } => {
                 self.stmt(loop_stmt);

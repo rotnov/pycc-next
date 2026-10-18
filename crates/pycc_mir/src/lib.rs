@@ -678,6 +678,7 @@ fn set_frame_function(body: &mut [MirStmt], frame_name: &str) {
             | MirStmt::ForeignImport { .. }
             | MirStmt::Break
             | MirStmt::Continue
+            | MirStmt::Pos(_)
             | MirStmt::Reraise => {}
         }
     }

@@ -448,7 +448,7 @@ pub(super) fn collect_stmt_constraints(
             )?;
             solver::join_if_branches_solver(env, &body_env, &orelse_env, &pre_existing);
         }
-        HirStmt::Break | HirStmt::Continue => {}
+        HirStmt::Break | HirStmt::Continue | HirStmt::Pos(_) => {}
         // The loop, then its `else:` clause in the shape the check
         // phase gives it (`pycc_hir::loop_else_as_if` when a `break`
         // can skip it, the plain statements otherwise).

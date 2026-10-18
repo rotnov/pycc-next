@@ -215,7 +215,7 @@ fn assigning_prefix(self_name: &str, body: &[MirStmt], self_layout: &[String]) -
             }
             MirStmt::Assign { target, value } if target != self_name && !mentions(value, self_name) => {}
             MirStmt::ExprStmt(value) if !mentions(value, self_name) => {}
-            MirStmt::NoOp => {}
+            MirStmt::NoOp | MirStmt::Pos(_) => {}
             _ => break,
         }
     }

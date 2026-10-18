@@ -342,6 +342,7 @@ pub(crate) fn collect_local_names<'a>(body: &'a [HirStmt], names: &mut Vec<&'a s
             | HirStmt::DeleteItem { .. }
             | HirStmt::Break
             | HirStmt::Continue
+            | HirStmt::Pos(_)
             | HirStmt::Raise { .. } => {}
             HirStmt::Match { cases, .. } => {
                 for case in cases {

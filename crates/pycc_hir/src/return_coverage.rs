@@ -109,6 +109,7 @@ fn block_exits(body: &[HirStmt], jumps: bool) -> bool {
             // arm above. With `jumps` the caller asks exactly whether the
             // end of `body` is reached, which a jump never does.
             HirStmt::Break | HirStmt::Continue => jumps,
+            HirStmt::Pos(_) => false,
             // A raise transfers control to an exception handler/caller and
             // cannot fall through to the function's implicit return point.
             HirStmt::Raise { .. } => true,

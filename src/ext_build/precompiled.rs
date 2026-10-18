@@ -282,16 +282,11 @@ static PyObject *pycc_ext_chunk_compile(const struct pycc_ext_chunk *chunk)
     return result;
 }
 
-/* `__pycc_code__(k)`: the code object of chunk `k`. */
-static PyObject *pycc_ext_code(PyObject *self, PyObject *arg)
+/* The code object of chunk `index`; NULL with an exception set. */
+static PyObject *pycc_ext_chunk_code(Py_ssize_t index)
 {
     const struct pycc_ext_chunk *chunk;
-    Py_ssize_t index = PyLong_AsSsize_t(arg);
 
-    (void)self;
-    if (index == -1 && PyErr_Occurred()) {
-        return NULL;
-    }
     if (index < 0 || index >= pycc_ext_chunk_count) {
         PyErr_SetString(PyExc_SystemError, "pycc: no such pre-compiled chunk");
         return NULL;
@@ -312,6 +307,18 @@ static PyObject *pycc_ext_code(PyObject *self, PyObject *arg)
         PyErr_Clear();
     }
     return pycc_ext_chunk_compile(chunk);
+}
+
+/* `__pycc_code__(k)`: the code object of chunk `k`. */
+static PyObject *pycc_ext_code(PyObject *self, PyObject *arg)
+{
+    Py_ssize_t index = PyLong_AsSsize_t(arg);
+
+    (void)self;
+    if (index == -1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    return pycc_ext_chunk_code(index);
 }
 
 static PyMethodDef pycc_ext_code_def = {"__pycc_code__", pycc_ext_code, METH_O, NULL};

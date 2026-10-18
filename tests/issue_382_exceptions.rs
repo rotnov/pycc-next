@@ -704,12 +704,16 @@ fn uncaught_exception_exits_nonzero() {
         err.contains("ValueError"),
         "stderr should contain ValueError: {err}"
     );
-    // #707 added a traceback-frame header naming the enclosing function
-    // (`<module>` at top level); see `tests/issue_707_traceback_frames.rs`
-    // for the full format's dedicated coverage.
+    // CPython's traceback (v0.8 accept 3); see
+    // `tests/issue_707_traceback_frames.rs` for the format's own coverage.
+    let path = dir.join("uncaught.py");
     assert_eq!(
         err,
-        "Traceback (most recent call last):\n  File \"<compiled>\", in <module>\nValueError: uncaught\n"
+        format!(
+            "Traceback (most recent call last):\n  File \"{}\", line 1, in <module>\n    \
+             raise ValueError(\"uncaught\")\nValueError: uncaught\n",
+            path.display()
+        )
     );
 }
 
@@ -1196,18 +1200,17 @@ fn uncaught_failed_left_operand_skips_the_right_operand_at_top_level() {
         out.is_empty(),
         "right operand ran after the exception: {out:?}"
     );
-    // #707: `pycc_rt::exception::raise_builtin` (the path a runtime-raised
-    // builtin error like this `1 // 0` takes) never calls
-    // `pycc_rt_exception_set_frame`, so it carries no recorded frame and
-    // must render as a bare one-line message with no `Traceback` header --
-    // exactly like the pre-#707 format, and exactly like the unframed
-    // `render_single_exception_with_no_frame_omits_traceback_header` unit
-    // case in `crates/pycc_rt/src/exception.rs`. Assert the exact stderr
-    // rather than only `contains`, so a regression that starts (incorrectly)
-    // attaching a frame to this path is caught here.
+    // A runtime-raised builtin error (`1 // 0`) is located at its
+    // operator in the module's frame, as CPython locates it (v0.8 accept 3).
+    let path = dir.join("top_operand.py");
     assert_eq!(
-        err, "ZeroDivisionError: integer division or modulo by zero\n",
-        "an uncaught runtime-raised builtin error must render without a Traceback header"
+        err,
+        format!(
+            "Traceback (most recent call last):\n  File \"{}\", line 5, in <module>\n    \
+             x = (1 // 0) + side_effect()\n         ~~^^~~\n\
+             ZeroDivisionError: integer division or modulo by zero\n",
+            path.display()
+        )
     );
 }
 

@@ -18,6 +18,7 @@ mod project_config;
 mod source;
 mod specialize;
 mod timing;
+mod traceback_blocks;
 
 /// The frontend allocates and frees small strings and syntax nodes at a
 /// high rate, and a non-strict build runs it many times over (v0.5
