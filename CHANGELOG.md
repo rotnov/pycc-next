@@ -72,8 +72,30 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   with, instead of first building the list of all its characters (which an early `break`
   then mostly discarded).
 
+- `--release` `--ext` modules count CPython objects inline instead of calling
+  `_Py_IncRef`/`_Py_DecRef`: generated code and the C shim use CPython 3.13's own inline
+  forms for a 64-bit GIL build (`ob_refcnt` at offset 0 and `_Py_Dealloc` are part of the
+  stable ABI, so the artifact keeps its `abi3` tag; a debug CPython, a 32-bit or a
+  big-endian target keeps the calls). mistune: 68.7M -> 66.2M instructions per
+  `mistune.html` pass; pydantic's model definition and `model_json_schema()` about 7%
+  faster.
+- Classes stay native in more library code (v0.8 accepts 1 and 4): an annotated
+  attribute store `obj.x: T = value` in a function compiles for any `T` and value (strict
+  mode checks the value against `T` as a local's; before, only `list[int] = []` and
+  `dict[str, int] = {}` did); `self.__class__(...)` in a method is `type(self)(...)`; in
+  non-strict mode a class-body declaration pycc cannot give a slot (`lazy_line_starts:
+  Set[int]`, one assigned only in a branch of `__init__`) is ignored, as CPython ignores
+  it, instead of sending the class to CPython. mistune: 386 of 413 functions native (380),
+  `BlockState` and `InlineState` native types.
+
 ### Fixed
 
+- A container attribute (a native `list`, `dict`, `set` or tuple) of a compiled class in a
+  non-strict `--ext` module is a CPython object when code holding the instance as a
+  CPython object uses it -- the module's fallback code, a lifted body, and under
+  `--foreign-relative-imports` the package's other modules (`state.tokens` in a sibling
+  module): it used to be no attribute there at all (`AttributeError`), because a native
+  container cannot be shared with CPython without a copy.
 - A nested `def` that rebinds a name a sibling closure captures (`if f is None: def f(...)`
   over a parameter `f`, mistune's `add_toc_hook`) stores into the cell that closure reads,
   instead of a plain local the closure never saw.

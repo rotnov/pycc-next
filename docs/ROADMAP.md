@@ -421,6 +421,36 @@ Accept:
    carries the gap. What is left on import (about 20 ms) is resolving and mapping 79
    shared objects (symbol lookup about 7M instructions) and the mirrored imports,
    which run twice.
+   **Progress 2026-10-18** (not met). Design, agreed with the guru advisor: the shared
+   root cause of accepts 1 and 4 is that library classes are created by CPython and that
+   every module is its own extension. Three steps, cheapest first: (a) inline reference
+   counting -- done: `ob_refcnt` at offset 0 and `_Py_Dealloc` are stable ABI, so a
+   `--release` `--ext` artifact keeps its `abi3` tag and counts inline with CPython
+   3.13's 64-bit GIL forms (`crates/pycc_codegen/src/object_rc.rs`, the shim's
+   `bridge.c`; a cp313-only artifact is not needed); (b) the per-class reasons classes
+   fall back -- done so far: annotated attribute stores, `self.__class__(...)`,
+   non-strict declarations without a slot, and container slots that code outside the
+   class reads through CPython kept as CPython objects (needed for correctness once
+   more classes are native); still open: a constrained `TypeVar` in a `Generic[...]`
+   base (to be monomorphized per constraint or erased to `object` in non-strict mode),
+   a published method whose signature the boundary does not carry (`-> Optional[int]`),
+   lambdas in bodies; (c) a whole-package build: every module of a package compiled into
+   one extension (`pkg/__init__.abi3.so`, one runtime copy, one `dlopen`, native calls,
+   attribute access and subclassing across modules), each submodule published under its
+   own name with its own module object and globals by a `sys.meta_path` finder the
+   extension owns (`find_spec` only for names in its table, `create_module` returning the
+   pre-created module, `exec_module` running the compiled body, so CPython's lazy import
+   order, `sys.modules`, `__spec__`/`__file__` and reload behave), staged as per-module
+   fallback inside the whole-program build first, then the finder, then the PEP 517
+   backend and wheel checks. Rejected: one trampoline `.so` per submodule (a shared-library
+   dependency per module on four platforms for no gain) and PEP 697 subclassing of
+   another extension's type (it needs a cross-extension layout ABI and still calls the
+   base's methods through `PyObject`). Measured after (a) and (b), on main with compiled
+   frames (local, medians of 9 interleaved fresh-process runs, compiled vs CPython):
+   define 11.8 best / 14.0 median ms vs 8.7 / 9.4 (0.67x; 0.60x before), schema 21.7 /
+   24.2 vs 16.3 / 17.0 (0.70x; 0.68x), round-trips 0.95x, import 0.74x; 1025 of 1249
+   functions native (1029: three methods of a class that now stays native raise an
+   exception class with its own `__init__`, which runs in CPython), the suite passing.
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions
@@ -457,6 +487,16 @@ Accept:
    compile natively and their instances be reached natively from the other modules of
    the package -- each module is its own extension, so today another module sees a
    compiled instance only through CPython's attribute protocol.
+   **Progress 2026-10-18** (not met): with compiled frames (accept 3) and inline
+   reference counting 0.78x on `mistune.html`, 0.85x with every plugin (local, best of
+   5; 0.68x and 0.64x on main before the inline counting), 66.2M instructions per pass
+   (68.7M before it). 386 of 413 functions native; `BlockState` and `InlineState` are
+   native types (annotated attribute stores, `self.__class__(...)`, non-strict
+   declarations without a slot, accept 1's note). Making `InlineState` native changed
+   nothing measurable on its own (69.65M against 69.67M): the instances are reached from
+   the parser modules, which are other extensions, through CPython. That, and the
+   parsers' `Generic[ST]` and cross-module bases, are what the whole-package build of
+   accept 1's design removes.
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.

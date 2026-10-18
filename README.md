@@ -264,18 +264,21 @@ mistune is typed, class-based library code: a block parser, an inline parser, pl
 directives and renderers, in 38 modules that call each other through their classes,
 with tokens as dicts and dispatch by name (`getattr(self, name)`, a dict of lambdas).
 All 38 build unchanged (in parallel, as `pycc.build` builds them) and its own 1155 tests
-pass against them; 380 of its 413 functions compile (`--report-fallbacks`). It is
+pass against them; 386 of its 413 functions compile (`--report-fallbacks`). It is
 **slower** than CPython: rendering every document of its own benchmark
-(`benchmark/cases`) with `mistune.html` takes 0.20 s against 0.14 s for 20 passes
-(0.70x), and its "full" parser with every plugin 0.74x; under callgrind 72.2M
-instructions per pass against CPython's 56.8M. Its classes are created by CPython
-(`Generic[ST]` bases, bases from another module, lambdas), so every method is a
-compiled body behind a Python forwarder, every `self.x` is a generic
-`PyObject_GetAttr` where CPython's interpreter uses a specialized instruction, and
+(`benchmark/cases`) with `mistune.html` takes 0.18 s against 0.14 s for 20 passes
+(0.78x), and its "full" parser with every plugin 0.85x (best of 5, local; 0.70x and 0.74x
+before compiled frames and inline reference counting); under callgrind 66.2M
+instructions per pass against CPython's 56.8M (72.2M at first). Its state classes
+(`BlockState`, `InlineState`) are native types, but its parsers and renderers are created
+by CPython (`Generic[ST]` bases with a constrained `TypeVar`, bases from another module,
+lambdas), so their methods are compiled bodies behind forwarders, every `self.x` is a
+generic `PyObject_GetAttr` where CPython's interpreter uses a specialized instruction,
+each module is its own extension reaching the others' instances through CPython, and
 its values (tokens, states, matches) are CPython objects reached through the C API:
 compiled code runs a third of the bytecode CPython runs and saves 13M instructions per
 pass there, and paid 34M back (profiled at 77.7M) in attribute lookups, method objects, stable-ABI reference
-counting calls and conversions. What it took to compile at all is general: `typing`'s
+counting calls (now inline) and conversions. What it took to compile at all is general: `typing`'s
 `Optional`/`Union` and its unmodeled names (`Match`, `MutableMapping`), string
 annotations of `TYPE_CHECKING`-only imports, private module functions exported, `str`
 crossing without copies.
