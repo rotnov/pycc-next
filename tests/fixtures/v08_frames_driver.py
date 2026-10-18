@@ -117,8 +117,12 @@ for x in (0, 0):
     except ZeroDivisionError as e:
         show_tb(e)
 
-# Constant memory: frames and tracebacks are released.
-import resource  # noqa: E402
+# Constant memory: frames and tracebacks are released (measured where the
+# `resource` module exists; Windows has none).
+try:
+    import resource  # noqa: E402
+except ImportError:
+    resource = None
 
 
 def churn(count):
@@ -128,9 +132,10 @@ def churn(count):
         except ZeroDivisionError:
             pass
         m.outer(1)
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource else 0
 
 
 small = churn(20000)
 large = churn(200000)
-print("memory", "constant" if large - small < 4000 else f"grew {large - small} kB")
+if resource:
+    print("memory", "constant" if large - small < 4000 else f"grew {large - small} kB")

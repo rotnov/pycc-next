@@ -142,7 +142,7 @@ fn the_shims_bigint_egress_packs_the_value_then_releases_the_reference() {
     // The unclassifiable-word arm must not release: it is not a pointer
     // this code knows to be live.
     let fallback = &body[body.find("    default:").expect("the default arm")..];
-    let fallback = &fallback[..fallback.find("\n}\n").expect("the helper's end")];
+    let fallback = &fallback[..fallback.find("\n}").expect("the helper's end")];
     assert!(!fallback.contains("pycc_rt_bigint_release"), "{fallback}");
 }
 

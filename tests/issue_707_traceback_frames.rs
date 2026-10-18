@@ -43,10 +43,17 @@ fn assert_traceback_matches_cpython(dir: &std::path::Path, src_name: &str, sourc
         .arg(src_name)
         .output()
         .unwrap();
-    assert!(!run.status.success(), "expected non-zero exit for uncaught exception");
+    assert!(
+        !run.status.success(),
+        "expected non-zero exit for uncaught exception"
+    );
     assert_eq!(run.status.code(), cpython.status.code());
-    let err = String::from_utf8_lossy(&run.stderr).to_string();
-    assert_eq!(err, String::from_utf8_lossy(&cpython.stderr));
+    // Line content: a native program writes `\n`, CPython on Windows `\r\n`.
+    let err = String::from_utf8_lossy(&run.stderr).replace("\r\n", "\n");
+    assert_eq!(
+        err,
+        String::from_utf8_lossy(&cpython.stderr).replace("\r\n", "\n")
+    );
     err
 }
 
@@ -54,8 +61,12 @@ fn assert_traceback_matches_cpython(dir: &std::path::Path, src_name: &str, sourc
 #[ignore = "requires a CPython 3.13+ oracle (PYCC_PYTHON, default python3)"]
 fn a_module_level_uncaught_raise_shows_a_module_frame() {
     let dir = ScratchDir::new("707_module_frame").expect("failed to create scratch dir");
-    let err = assert_traceback_matches_cpython(&dir, "module_frame.py", "raise ValueError(\"boom\")\n");
-    assert!(err.contains(", line 1, in <module>\n    raise ValueError(\"boom\")\n"), "{err}");
+    let err =
+        assert_traceback_matches_cpython(&dir, "module_frame.py", "raise ValueError(\"boom\")\n");
+    assert!(
+        err.contains(", line 1, in <module>\n    raise ValueError(\"boom\")\n"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -187,7 +198,11 @@ fn a_raise_inside_a_property_setter_names_the_plain_property_not_the_mangled_nam
 fn a_frame_whose_source_is_gone_shows_no_source_lines() {
     let dir = ScratchDir::new("707_source_gone").expect("failed to create scratch dir");
     let src = dir.join("gone.py");
-    std::fs::write(&src, "def boom() -> None:\n    raise ValueError(\"bad\")\n\nboom()\n").unwrap();
+    std::fs::write(
+        &src,
+        "def boom() -> None:\n    raise ValueError(\"bad\")\n\nboom()\n",
+    )
+    .unwrap();
     let out = dir.join("gone");
     let build = Command::new(pycc_bin())
         .current_dir(&*dir)
@@ -197,7 +212,14 @@ fn a_frame_whose_source_is_gone_shows_no_source_lines() {
     assert!(build.status.success());
     std::fs::remove_file(&src).unwrap();
     let run = Command::new(&out).output().unwrap();
-    let path = dir.join("gone.py");
+    // CPython names the script by its absolute path, symlinks resolved
+    // (`/private/var` on macOS), as the build does.
+    let base = if cfg!(windows) {
+        dir.to_path_buf()
+    } else {
+        std::fs::canonicalize(&*dir).unwrap()
+    };
+    let path = base.join("gone.py");
     let path = path.display();
     assert_eq!(
         String::from_utf8_lossy(&run.stderr),

@@ -79,6 +79,8 @@ pub(crate) struct FrameState<'ctx> {
     /// `pycc_ext_tb_here_live(info, position, frame)` (`frames.c`).
     frame_enter: FunctionValue<'ctx>,
     frame_exit: FunctionValue<'ctx>,
+    /// `PyThreadState_Get`, which an inline frame link reads the chain of.
+    thread_state: FunctionValue<'ctx>,
     tb_here_live: FunctionValue<'ctx>,
 }
 
@@ -117,6 +119,8 @@ struct FnFrame<'ctx> {
     /// from any other (`pycc_rt_tb_here`'s `activation`): the live frame's
     /// own storage when it has one.
     activation: Option<inkwell::values::PointerValue<'ctx>>,
+    /// The live frame's `instr_ptr` stores, which `frame_ip::prune` thins.
+    ip_stores: Vec<inkwell::values::InstructionValue<'ctx>>,
 }
 
 /// Marks `function` `cold`: a call of it is unlikely, so the blocks
@@ -173,6 +177,13 @@ impl<'ctx> FrameState<'ctx> {
             module_body: Cell::new(false),
             frame_enter: declare("pycc_ext_frame_enter", &[ptr_type.into(), ptr_type.into()]),
             frame_exit: declare("pycc_ext_frame_exit", &[ptr_type.into()]),
+            thread_state: module.get_function("PyThreadState_Get").unwrap_or_else(|| {
+                module.add_function(
+                    "PyThreadState_Get",
+                    ptr_type.fn_type(&[], false),
+                    Some(Linkage::External),
+                )
+            }),
             tb_here_live,
         }
     }
@@ -321,6 +332,7 @@ pub(crate) fn begin_function<'ctx>(
         statement: None,
         counters: HashMap::new(),
         site_stack: Vec::new(),
+        ip_stores: Vec::new(),
     });
 }
 
@@ -341,13 +353,7 @@ fn enter_frame<'ctx>(
     let frame = builder
         .build_alloca(ptr.array_type(11), "pycc_frame")
         .expect("build_alloca should not fail for a frame");
-    builder
-        .build_call(
-            state.frame_enter,
-            &[frame.into(), info.as_pointer_value().into()],
-            "",
-        )
-        .expect("build_call should not fail for pycc_ext_frame_enter");
+    link_frame(context, builder, state, function, frame, info)?;
     let ip0_field = builder
         .build_struct_gep(info_type(context), info.as_pointer_value(), 4, "fninfo_ip0")
         .expect("build_struct_gep should not fail for PyccFnInfo.ip0");
@@ -360,6 +366,157 @@ fn enter_frame<'ctx>(
         ip0,
         function,
     })
+}
+
+/// A field of the frame at `frame` (`PyccIFrame`, `src/ext/module/frames.c`)
+/// at byte `offset`.
+fn field<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    base: inkwell::values::PointerValue<'ctx>,
+    offset: u64,
+) -> inkwell::values::PointerValue<'ctx> {
+    unsafe {
+        builder.build_in_bounds_gep(
+            context.i8_type(),
+            base,
+            &[context.i64_type().const_int(offset, false)],
+            "frame_field",
+        )
+    }
+    .expect("build_in_bounds_gep should not fail for a frame field")
+}
+
+/// Byte offsets in CPython 3.13's `_PyInterpreterFrame` (`PyccIFrame`).
+const F_EXECUTABLE: u64 = 0;
+const F_PREVIOUS: u64 = 8;
+const F_FUNCOBJ: u64 = 16;
+const F_GLOBALS: u64 = 24;
+const F_BUILTINS: u64 = 32;
+const F_LOCALS: u64 = 40;
+const F_FRAME_OBJ: u64 = 48;
+const F_INSTR_PTR: u64 = 56;
+const F_STACKTOP: u64 = 64;
+const F_RETURN_OFFSET: u64 = 68;
+const F_OWNER: u64 = 70;
+/// `localsplus[0]` and `[1]`: the thread state, and the top it replaced.
+const F_TSTATE: u64 = 72;
+const F_SAVED_TOP: u64 = 80;
+/// `PyThreadState.current_frame`, and `PyCodeObject.co_flags`.
+const TSTATE_CURRENT_FRAME: u64 = 72;
+const CODE_FLAGS: u64 = 48;
+/// The `co_flags` bit of a signature wrapper's or forwarder's code
+/// (`pycc_ast::ext_signatures::WRAPPER_FLAG`).
+const CO_SIGNATURE: u64 = 0x4000_0000;
+/// `PyccIFrame.owner` of a frame `pycc_ext_frame_enter` did not link.
+const OWNER_INACTIVE: u64 = 0x7F;
+
+/// Links `frame` for `info` onto the thread's frame chain, inline:
+/// `pycc_ext_frame_enter`'s work without the call once `info`'s code
+/// object exists (that first call makes it).
+fn link_frame<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    state: &FrameState<'ctx>,
+    function: FunctionValue<'ctx>,
+    frame: inkwell::values::PointerValue<'ctx>,
+    info: GlobalValue<'ctx>,
+) -> Option<()> {
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i8_type = context.i8_type();
+    let i32_type = context.i32_type();
+    let info = info.as_pointer_value();
+    let load = |at: inkwell::values::PointerValue<'ctx>, name: &str| {
+        builder
+            .build_load(ptr, at, name)
+            .expect("build_load should not fail for a frame word")
+            .into_pointer_value()
+    };
+    let slow = context.append_basic_block(function, "frame_enter_slow");
+    let fast = context.append_basic_block(function, "frame_enter_fast");
+    let check = context.append_basic_block(function, "frame_enter_wrapper");
+    let skip = context.append_basic_block(function, "frame_enter_skip");
+    let link = context.append_basic_block(function, "frame_enter_link");
+    let done = context.append_basic_block(function, "frame_enter_done");
+    let code = load(info, "frame_code");
+    let ready = builder.build_is_not_null(code, "frame_ready").ok()?;
+    let branch = builder.build_conditional_branch(ready, fast, slow).ok()?;
+    crate::int_fast::weight_branch(context, branch, true);
+    builder.position_at_end(slow);
+    builder
+        .build_call(state.frame_enter, &[frame.into(), info.into()], "")
+        .ok()?;
+    builder.build_unconditional_branch(done).ok()?;
+    builder.position_at_end(fast);
+    let tstate = builder
+        .build_call(state.thread_state, &[], "tstate")
+        .ok()?
+        .try_as_basic_value()
+        .basic()?
+        .into_pointer_value();
+    let current = field(context, builder, tstate, TSTATE_CURRENT_FRAME);
+    let top = load(current, "frame_top");
+    let has_top = builder.build_is_not_null(top, "frame_has_top").ok()?;
+    builder.build_conditional_branch(has_top, check, link).ok()?;
+    // A signature wrapper or forwarder on top stands for this function:
+    // link past it.
+    builder.position_at_end(check);
+    let owner = builder
+        .build_load(i8_type, field(context, builder, top, F_OWNER), "top_owner")
+        .ok()?
+        .into_int_value();
+    let threaded = builder
+        .build_int_compare(inkwell::IntPredicate::EQ, owner, i8_type.const_zero(), "top_thread")
+        .ok()?;
+    let probe = context.append_basic_block(function, "frame_enter_flags");
+    builder.build_conditional_branch(threaded, probe, link).ok()?;
+    builder.position_at_end(probe);
+    let top_code = load(field(context, builder, top, F_EXECUTABLE), "top_code");
+    let flags = builder
+        .build_load(i32_type, field(context, builder, top_code, CODE_FLAGS), "top_flags")
+        .ok()?
+        .into_int_value();
+    let wrapper = builder
+        .build_and(flags, i32_type.const_int(CO_SIGNATURE, false), "top_wrapper")
+        .ok()?;
+    let is_wrapper = builder
+        .build_int_compare(inkwell::IntPredicate::NE, wrapper, i32_type.const_zero(), "is_wrapper")
+        .ok()?;
+    builder.build_conditional_branch(is_wrapper, skip, link).ok()?;
+    builder.position_at_end(skip);
+    let below = load(field(context, builder, top, F_PREVIOUS), "top_previous");
+    builder.build_unconditional_branch(link).ok()?;
+    builder.position_at_end(link);
+    let previous = builder.build_phi(ptr, "frame_previous").ok()?;
+    previous.add_incoming(&[(&top, fast), (&top, check), (&top, probe), (&below, skip)]);
+    let store = |offset: u64, value: inkwell::values::BasicValueEnum<'ctx>| {
+        builder
+            .build_store(field(context, builder, frame, offset), value)
+            .expect("build_store should not fail for a frame field");
+    };
+    let word = |index: u32, name: &str| -> inkwell::values::BasicValueEnum<'ctx> {
+        let at = builder
+            .build_struct_gep(info_type(context), info, index, name)
+            .expect("build_struct_gep should not fail for PyccFnInfo");
+        load(at, name).into()
+    };
+    store(F_EXECUTABLE, code.into());
+    store(F_PREVIOUS, previous.as_basic_value());
+    store(F_FUNCOBJ, word(1, "fninfo_func"));
+    store(F_GLOBALS, word(2, "fninfo_globals"));
+    store(F_BUILTINS, word(3, "fninfo_builtins"));
+    store(F_LOCALS, ptr.const_null().into());
+    store(F_FRAME_OBJ, ptr.const_null().into());
+    store(F_INSTR_PTR, word(4, "fninfo_ip0"));
+    store(F_STACKTOP, i32_type.const_zero().into());
+    store(F_RETURN_OFFSET, context.i16_type().const_zero().into());
+    store(F_OWNER, i8_type.const_zero().into());
+    store(F_TSTATE, tstate.into());
+    store(F_SAVED_TOP, top.into());
+    builder.build_store(current, frame).ok()?;
+    builder.build_unconditional_branch(done).ok()?;
+    builder.position_at_end(done);
+    Some(())
 }
 
 /// `MirStmt::Pos`: makes `pos` the current position.
@@ -496,7 +653,7 @@ pub(crate) fn leave_site<'ctx>(
 fn point_live_frame<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
-    frame: &FnFrame<'ctx>,
+    frame: &mut FnFrame<'ctx>,
     index: u32,
 ) {
     if let Some(live) = frame.live
@@ -523,9 +680,10 @@ fn point_live_frame<'ctx>(
             )
         }
         .expect("build_in_bounds_gep should not fail for a frame field");
-        builder
+        let store = builder
             .build_store(slot, ip)
             .expect("build_store should not fail for a frame's instr_ptr");
+        frame.ip_stores.push(store);
     }
 }
 
@@ -690,6 +848,7 @@ pub(crate) fn end_function<'ctx>(context: &'ctx Context, module: &Module<'ctx>, 
     };
     if let Some(live) = frame.live {
         exit_frame(context, rt, live);
+        crate::frame_ip::prune(live.function, &frame.ip_stores);
     }
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let i32_type = context.i32_type();
@@ -766,18 +925,97 @@ pub(crate) fn end_function<'ctx>(context: &'ctx Context, module: &Module<'ctx>, 
 /// `ret` of the function, whichever path reaches it.
 fn exit_frame<'ctx>(context: &'ctx Context, rt: &RtFns<'ctx>, live: LiveFrame<'ctx>) {
     let builder = context.create_builder();
-    for block in live.function.get_basic_block_iter() {
-        let Some(terminator) = block.get_terminator() else {
-            continue;
-        };
-        if terminator.get_opcode() != inkwell::values::InstructionOpcode::Return {
-            continue;
-        }
-        builder.position_before(&terminator);
-        builder
-            .build_call(rt.frames.frame_exit, &[live.frame.into()], "")
-            .expect("build_call should not fail for pycc_ext_frame_exit");
+    let returns: Vec<_> = live
+        .function
+        .get_basic_block_iter()
+        .filter_map(|block| block.get_terminator())
+        .filter(|t| t.get_opcode() == inkwell::values::InstructionOpcode::Return)
+        .collect();
+    for terminator in returns {
+        unlink_frame(context, &builder, rt, live, terminator);
     }
+}
+
+/// Unlinks the live frame before the return `terminator`, inline: the
+/// top it replaced goes back unless the frame is inactive or a frame
+/// object was made for it, which `pycc_ext_frame_exit` handles.
+fn unlink_frame<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    live: LiveFrame<'ctx>,
+    terminator: inkwell::values::InstructionValue<'ctx>,
+) {
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i8_type = context.i8_type();
+    let Some(block) = terminator.get_parent() else {
+        return;
+    };
+    let function = live.function;
+    // The return moves to a block of its own, after the unlink.
+    let tail = block.get_next_basic_block();
+    let ret = match tail {
+        Some(next) => context.prepend_basic_block(next, "frame_exit_ret"),
+        None => context.append_basic_block(function, "frame_exit_ret"),
+    };
+    let slow = context.append_basic_block(function, "frame_exit_slow");
+    let fast = context.append_basic_block(function, "frame_exit_fast");
+    let check = context.append_basic_block(function, "frame_exit_check");
+    builder.position_before(&terminator);
+    builder
+        .build_unconditional_branch(check)
+        .expect("build_unconditional_branch should not fail");
+    terminator.remove_from_basic_block();
+    builder.position_at_end(ret);
+    builder.insert_instruction(&terminator, None);
+    builder.position_at_end(check);
+    let owner = builder
+        .build_load(i8_type, field(context, builder, live.frame, F_OWNER), "frame_owner")
+        .expect("build_load should not fail")
+        .into_int_value();
+    let inactive = builder
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            owner,
+            i8_type.const_int(OWNER_INACTIVE, false),
+            "frame_inactive",
+        )
+        .expect("build_int_compare should not fail");
+    let object = builder
+        .build_load(ptr, field(context, builder, live.frame, F_FRAME_OBJ), "frame_obj")
+        .expect("build_load should not fail")
+        .into_pointer_value();
+    let has_object = builder
+        .build_is_not_null(object, "frame_has_obj")
+        .expect("build_is_not_null should not fail");
+    let unusual = builder
+        .build_or(inactive, has_object, "frame_exit_unusual")
+        .expect("build_or should not fail");
+    let branch = builder
+        .build_conditional_branch(unusual, slow, fast)
+        .expect("build_conditional_branch should not fail");
+    crate::int_fast::weight_branch(context, branch, false);
+    builder.position_at_end(slow);
+    builder
+        .build_call(rt.frames.frame_exit, &[live.frame.into()], "")
+        .expect("build_call should not fail for pycc_ext_frame_exit");
+    builder
+        .build_unconditional_branch(ret)
+        .expect("build_unconditional_branch should not fail");
+    builder.position_at_end(fast);
+    let tstate = builder
+        .build_load(ptr, field(context, builder, live.frame, F_TSTATE), "frame_tstate")
+        .expect("build_load should not fail")
+        .into_pointer_value();
+    let top = builder
+        .build_load(ptr, field(context, builder, live.frame, F_SAVED_TOP), "frame_saved_top")
+        .expect("build_load should not fail");
+    builder
+        .build_store(field(context, builder, tstate, TSTATE_CURRENT_FRAME), top)
+        .expect("build_store should not fail");
+    builder
+        .build_unconditional_branch(ret)
+        .expect("build_unconditional_branch should not fail");
 }
 
 /// Emits the module's record table, `pycc_fn_info_table` (pointers) and

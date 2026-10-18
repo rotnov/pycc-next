@@ -12,6 +12,7 @@ use std::path::Path;
 
 mod exception;
 mod fallthrough;
+mod frame_ip;
 mod frame_needs;
 mod frames;
 mod global_sync;

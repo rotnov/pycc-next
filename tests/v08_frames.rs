@@ -74,7 +74,9 @@ fn compiled_frames_behave_as_cpython_frames() {
         "{}",
         text(&ours.stderr)
     );
-    assert!(text(&ours.stdout).contains("memory constant"));
+    if cfg!(unix) {
+        assert!(text(&ours.stdout).contains("memory constant"));
+    }
 }
 
 /// A native program with fallback code runs in an embedded CPython: its
