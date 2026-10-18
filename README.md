@@ -268,7 +268,7 @@ pass against them; 386 of its 413 functions compile (`--report-fallbacks`). It i
 **slower** than CPython: rendering every document of its own benchmark
 (`benchmark/cases`) with `mistune.html` takes 0.18 s against 0.14 s for 20 passes
 (0.78x), and its "full" parser with every plugin 0.85x (best of 5, local; 0.70x and 0.74x
-before compiled frames and inline reference counting); under callgrind 66.2M
+before compiled frames and inline reference counting); under callgrind 64.8M
 instructions per pass against CPython's 56.8M (72.2M at first). Its state classes
 (`BlockState`, `InlineState`) are native types, but its parsers and renderers are created
 by CPython (`Generic[ST]` bases with a constrained `TypeVar`, bases from another module,

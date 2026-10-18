@@ -76,7 +76,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `_Py_IncRef`/`_Py_DecRef`: generated code and the C shim use CPython 3.13's own inline
   forms for a 64-bit GIL build (`ob_refcnt` at offset 0 and `_Py_Dealloc` are part of the
   stable ABI, so the artifact keeps its `abi3` tag; a debug CPython, a 32-bit or a
-  big-endian target keeps the calls). mistune: 68.7M -> 66.2M instructions per
+  big-endian target keeps the calls). The increment is inlined at each site, the release
+  is one call into the module's own copy (inlining it too doubled LLVM's time for 0.7%
+  fewer instructions). mistune: 68.7M -> about 66.7M instructions per
   `mistune.html` pass; pydantic's model definition and `model_json_schema()` about 7%
   faster.
 - Classes stay native in more library code (v0.8 accepts 1 and 4): an annotated
@@ -89,7 +91,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `T | None` (`Optional[int]`, `str | None`), which the boundary does not carry, is
   published through a compiled entry returning the result as a CPython object instead of
   running in CPython (a method of a class used to send the class to CPython). mistune:
-  386 of 413 functions native (380), `BlockState` and `InlineState` native types, 64.3M
+  386 of 413 functions native (380), `BlockState` and `InlineState` native types, 64.8M
   instructions per `mistune.html` pass.
 
 ### Fixed

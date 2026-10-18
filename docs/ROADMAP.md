@@ -491,7 +491,9 @@ Accept:
    **Progress 2026-10-18** (not met): with compiled frames (accept 3) and inline
    reference counting 0.78x on `mistune.html`, 0.85x with every plugin (local, best of
    5; 0.68x and 0.64x on main before the inline counting), 66.2M instructions per pass
-   (68.7M before it); 64.3M and 0.84x / 0.78x (best of 5) with `BlockState` native too.
+   with every release inlined (68.7M before it); 64.8M and 0.84x / 0.78x (best of 5) with
+   `BlockState` native too and the release kept one call (inlining it doubled LLVM's time
+   and broke CI's 10 s package build bound, for 0.46M instructions).
    386 of 413 functions native; `BlockState` and `InlineState` are native types
    (annotated attribute stores, `self.__class__(...)`, non-strict declarations without a
    slot, `Optional[int]` results published through an object-returning entry, accept 1's
