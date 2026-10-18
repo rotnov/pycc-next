@@ -520,7 +520,10 @@ Progress:
   (`src/ext/module/forward.c`), 7 ns less per call of a method with exact positional
   arguments (41 vs 48 ns); a call with keywords or defaults binds in C at the forwarder's
   cost.
-- Accept 3 (met locally, CI pending): on CPython 3.13 compiled functions run in real
+- Accept 3 **Met 2026-10-18** (CI run 39109040009 on fa82859, all four jobs green; narrower
+  DEVIATIONS rows remain: empty `f_locals` of a compiled frame, no `settrace`/`setprofile`
+  events, statement-wide carets for some operations, frameless functions on CPython other
+  than 3.13): on CPython 3.13 compiled functions run in real
   CPython frames (`tests/v08_frames.rs`: `sys._getframe` chains through compiled and
   Python callers, `inspect.stack()`, tracebacks with CPython's lines and carets, a
   traceback formatted in a compiled handler, `warnings` `stacklevel`, module globals
