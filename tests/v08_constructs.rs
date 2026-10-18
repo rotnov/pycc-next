@@ -273,6 +273,29 @@ fn nested_def_bodies_are_compiled() {
     );
 }
 
+/// Decorators and defaults of a nested `def` naming the enclosing function
+/// (`@functools.wraps(outer)`), its locals, module globals, and names that
+/// are both, also in a method.
+#[test]
+fn nested_header_native() {
+    native("v08_nested_header");
+}
+
+#[test]
+fn nested_header_ext() {
+    ext("v08_nested_header");
+}
+
+#[test]
+fn nested_header_method_native() {
+    native("v08_nested_header_method");
+}
+
+#[test]
+fn nested_header_method_ext() {
+    ext("v08_nested_header_method");
+}
+
 #[test]
 fn lambda_native() {
     native("v08_lambda");

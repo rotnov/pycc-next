@@ -22,6 +22,7 @@
 //!
 //! **The rewrite.** At module start the fallback preamble `exec`s, per
 //! nested statement, a *scaffold*: a function named like the enclosing one
+//! (unless the statement reads that name)
 //! whose free variables are the captured names and whose body is the nested
 //! statement, as written (padded so its lines are the source's), followed by
 //! `return` of what it made. Its code object, re-qualified so the nested
@@ -455,7 +456,12 @@ impl Plan {
         } else {
             nested.outer_name.clone()
         };
-        if nested.captures.contains(&name) {
+        // The scaffold's name is a local of `make`, so a nested statement
+        // reading the enclosing function's name (`@functools.wraps(outer)`,
+        // a default, a recursive call) would read the scaffold as a free
+        // variable instead of the module global (or captured local) it
+        // names: rename it then.
+        if nested.captures.contains(&name) || nested.mentions.contains(&name) {
             name = format!("__pycc_scaffold{id}");
         }
         let mut header = vec![format!("def {make}():")];
