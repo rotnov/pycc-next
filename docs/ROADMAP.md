@@ -440,7 +440,9 @@ Accept:
    callgrind bound on one `mistune.html` pass over `benchmark/cases`); 380 of its 413
    functions compile. It is **slower** than CPython: 0.70x on `mistune.html` of its
    benchmark documents, 0.74x with every plugin (local, best of 3); under callgrind 72.2M
-   instructions per pass against CPython's 56.8M. Compiled code runs a third of the
+   instructions per pass against CPython's 56.8M (83.2M on CI's x86 runner, bound 85.4M,
+   CI run 39078886178, where Linux and macOS are green and Windows builds and passes
+   all four packages). Compiled code runs a third of the
    bytecode (13M fewer instructions in the interpreter loop) but paid 34M back when profiled at 77.7M: generic
    `PyObject_GetAttr` on CPython-created instances (+5.4M with the type lookups), method
    and temporary objects (+2.4M deallocation), stable-ABI `_Py_IncRef`/`_Py_DecRef` calls

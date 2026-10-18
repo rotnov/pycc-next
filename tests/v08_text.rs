@@ -148,7 +148,12 @@ fn str_crossings_leak_nothing() {
     let dir = ScratchDir::new("v08_str_leaks").expect("scratch");
     let source = fixture("v08_str_ops", &dir, "m.py");
     // The functions only: the fixture's own run is the other tests'.
-    let functions = std::fs::read_to_string(&source).unwrap().replace("\nmain()\n", "\n");
+    // (A Windows checkout's fixture has `\r\n` line ends.)
+    let functions = std::fs::read_to_string(&source)
+        .unwrap()
+        .replace("\r\n", "\n")
+        .replace("\nmain()\n", "\n");
+    assert!(!functions.contains("\nmain()"), "the fixture's own run should be removed");
     std::fs::write(&source, functions).unwrap();
     build(&source, &dir.join("m"), &["--ext"]);
     std::fs::remove_file(&source).expect("import the artifact");
