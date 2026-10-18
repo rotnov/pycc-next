@@ -6,6 +6,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Added
 
+- v0.8 accept 3 (compiled frames are real frames): on CPython 3.13 a compiled function
+  of an `--ext` module or an embedded program runs in a real CPython frame, so
+  `sys._getframe(n)` (`f_code`, `f_lineno`, `f_back`, `f_globals`), `inspect.stack()`,
+  `warnings.warn(..., stacklevel=n)` and tracebacks see compiled functions as CPython
+  shows Python ones: name, qualified name, file, line, source line and carets. A native
+  program's uncaught exception prints CPython's full traceback, its source lines read
+  from the source file when it prints (a binary carries no source text). A non-strict
+  module's compiled code sees a module global rebound from Python (`mod.VERSION = ...`,
+  `mock.patch("mod.f", ...)`). Private module-level functions publish their declared
+  signature (defaults, keywords). The frames mirror CPython 3.13's internal frame,
+  code and function layouts, checked by an import-time probe; any other version keeps
+  frameless compiled functions (docs/DEVIATIONS.md). pydantic 2.13.5's own suite fails
+  no test more than against its sources (was 20).
+- v0.8 accept 2 (call boundary): a method of a class CPython creates calls its compiled
+  body through a vectorcall trampoline that binds the arguments in C, with no Python
+  forwarder frame (7 ns less per call, and no extra frame on the stack); signature
+  wrappers ship pre-compiled.
 - v0.8 accept 2 (the constructs library code falls back for most often): a bare `...`
   statement (an `@overload` stub's or a protocol method's body) is a no-op in every mode,
   and the `...` literal as a value (and, in non-strict code, the name `Ellipsis`) is

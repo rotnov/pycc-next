@@ -418,9 +418,13 @@ and setuptools): that is the test harness, not a change to the packages.
   builtin from compiled code rather than a fallback, as is a builtin used as a value
   (`defaultdict(int)`), `exit()`, and a `str`/`int`/`float` method pycc does not
   compile for its arguments (`"\n".join(objects)`). Exceptions cross the
-  boundary both ways with CPython's type and message, and tracebacks keep their line
-  numbers. `--report-fallbacks` prints what fell back and why; strict mode keeps
-  refusing with the same diagnostics.
+  boundary both ways with CPython's type and message. On CPython 3.13 a compiled
+  function runs in a real CPython frame: `sys._getframe`, `inspect`, `warnings`'
+  `stacklevel` and tracebacks see it as they see a Python function (name, file, line,
+  globals, caller), and a module global rebound from Python (`mod.VERSION = ...`,
+  `mock.patch`) is what compiled code reads next. A native program's uncaught
+  exception prints CPython's full traceback. `--report-fallbacks` prints what fell
+  back and why; strict mode keeps refusing with the same diagnostics.
 
 ### Which CPython
 

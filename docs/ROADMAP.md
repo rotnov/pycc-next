@@ -469,4 +469,28 @@ Progress:
   compiled (`tests/v08_constructs.rs`); pydantic 2.13.5: 978 of 1249 functions native
   (`bench/pydantic_check.py`, from 809; 1021 before typing's `Union`/`Any`/`Annotated`
   became compiled names, whose module-level value uses now fall back), its suite failing
-  the same 20 tests. Remaining: those value uses, and the call boundary's forwarder frame.
+  the same 20 tests. Remaining: those value uses. The call boundary's forwarder frame is
+  gone (with accept 3): once a class statement CPython runs has run, each method's
+  forwarder calls its compiled body through a C vectorcall trampoline
+  (`src/ext/module/forward.c`), 7 ns less per call of a method with exact positional
+  arguments (41 vs 48 ns); a call with keywords or defaults binds in C at the forwarder's
+  cost.
+- Accept 3 (met locally, CI pending): on CPython 3.13 compiled functions run in real
+  CPython frames (`tests/v08_frames.rs`: `sys._getframe` chains through compiled and
+  Python callers, `inspect.stack()`, tracebacks with CPython's lines and carets, a
+  traceback formatted in a compiled handler, `warnings` `stacklevel`, module globals
+  rebound from Python, published private functions, constant memory; a native program's
+  traceback reads its source at run time). Design, agreed with the guru advisor: the
+  `abi3` shim mirrors 3.13's `_PyInterpreterFrame`, `PyFrameObject`, `PyCodeObject` and
+  `PyFunctionObject` layouts and uses them only after an import-time probe; each function
+  gets a synthetic code object (one `NOP` per source position); a function that can run
+  CPython code links its frame onto the thread's chain, one that only computes natively
+  gets its traceback entry when the exception reaches CPython; a rebindable global is
+  re-read when the module dict's version tag changed. Other CPython versions keep
+  frameless compiled functions (docs/DEVIATIONS.md). pydantic 2.13.5's suite: 0 failures
+  (was 20 more than against its sources; 5762 passed). Cost: a framed call about 10 ns
+  more, a frameless one nothing; `bench/run.py`'s native programs run the same
+  instructions or fewer; `bench/package_check.py --instructions` within bounds;
+  `bench/pydantic_check.py --time` (15 runs, CPython/compiled median ratio, before ->
+  after): import 0.74x -> 0.80x, define 0.67x -> 0.66x, schema 0.67x -> 0.66x,
+  round-trips 0.94x -> 0.95x.
