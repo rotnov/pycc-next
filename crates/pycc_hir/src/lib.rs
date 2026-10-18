@@ -40,6 +40,7 @@ pub use hir_stmt::*;
 pub use boolop::{BoolOpKind, bool_op_result_ty};
 pub use buffer_store::{body_returns_inside_finally, body_returns_slice_of, body_stores_into};
 pub use class::enum_call::enum_class_call_message;
+pub use class::{external_slot_ty, set_external_attribute_reads};
 pub use class::{
     ClassAttrValue, ClassNamespaceWinner, CopiedMemberKind, EnumMemberValue, EqRefusal,
     ForeignCallableRef, HOISTED_CLASS_ATTR_PREFIX, HashRefusal, HirClassDef, InheritedCopy,

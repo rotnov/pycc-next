@@ -22,7 +22,7 @@ use super::attr_initializer::InitializerScope;
 use super::attrs::{lower_class_attr, lower_unannotated_class_attr, strip_class_var};
 use super::declared_attrs::{
     ClassMethodTables, collect_declared_attrs, instance_declaration_name,
-    reject_unestablished_or_colliding,
+    drop_unestablished_or_colliding, reject_unestablished_or_colliding,
 };
 use super::init_slot::DeclaredAttrs;
 use super::reserved_names::reject_reserved_method_name;
@@ -188,7 +188,7 @@ pub(super) fn walk_class_body(input: &ClassBodyInput<'_>) -> Result<ClassBodyOut
     // `def __init__`, whose pre-scan needs the full list; the walk then skips
     // every statement collected here. A `@dataclass` body gives the same
     // spelling its field meaning instead.
-    let declared = if is_dataclass {
+    let mut declared = if is_dataclass {
         Vec::new()
     } else {
         collect_declared_attrs(body, class_name, type_param, aliases, class_name_defs)?
@@ -904,6 +904,19 @@ pub(super) fn walk_class_body(input: &ClassBodyInput<'_>) -> Result<ClassBodyOut
     }
     // Non-strict mode: an attribute a method assigns elsewhere is an
     // `object` slot (`super::method_attrs`).
+    if crate::func::is_non_strict(aliases) {
+        super::external_reads::widen_external_container_slots(&mut attrs);
+        drop_unestablished_or_colliding(
+            &mut declared,
+            &attrs,
+            &ClassMethodTables {
+                methods: &methods,
+                properties: &properties,
+                static_methods: &static_methods,
+                class_methods: &class_methods,
+            },
+        );
+    }
     if crate::func::is_non_strict(aliases) && !is_dataclass && type_param.is_none() {
         super::method_attrs::add_method_attrs(body, &mut attrs, &|name| {
             methods.iter().any(|(held, _)| held == name)

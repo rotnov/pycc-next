@@ -308,14 +308,6 @@ fn each_declaration_refusal_is_c0001() {
              instance-slot representation",
         ),
         (
-            "e2e_1266_disagree",
-            "class C:\n    x: list[int]\n\n    def __init__(self) -> None:\n        \
-             self.x: dict[str, int] = {}\n"
-                .to_string(),
-            "instance attribute `x` is declared in class `C` as `list[int]` but annotated \
-             `dict[str, int]` in `__init__` -- the two annotations must agree",
-        ),
-        (
             "e2e_1266_param",
             "class Box[T]:\n    v: T\n\n    def __init__(self, v: T) -> None:\n        \
              self.v = 3\n"
@@ -334,6 +326,18 @@ fn each_declaration_refusal_is_c0001() {
         assert!(text.contains("error[C0001]"), "{category}: {text}");
         assert!(text.contains(message), "{category}: {text}");
     }
+    // v0.8: an annotated store disagreeing with the declaration is a type
+    // error of the store (`pycc_ast::desugar::ann_attrs`).
+    let text = fails(
+        "e2e_1266_disagree",
+        "check",
+        "class C:\n    x: list[int]\n\n    def __init__(self) -> None:\n        \
+         self.x: dict[str, int] = {}\n",
+    );
+    assert!(
+        text.contains("error[T0021]: cannot assign `dict[str, int]` to attribute `x` of type `list[int]`"),
+        "{text}"
+    );
 }
 
 /// A declaration beside a class constant of the same name keeps #911's own

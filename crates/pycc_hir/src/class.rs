@@ -65,6 +65,8 @@ mod body;
 mod declared_attrs;
 pub(crate) mod enum_call;
 mod enum_class;
+mod external_reads;
+pub use external_reads::{external_slot_ty, set_external_attribute_reads};
 mod enum_methods;
 mod exception_dunders;
 pub(crate) mod generic_base;

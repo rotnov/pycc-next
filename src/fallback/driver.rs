@@ -25,6 +25,15 @@ pub(crate) fn with_fallback<T, E>(
     split: impl Fn(&E) -> Option<Vec<Failure>>,
 ) -> Result<T, E> {
     set_override(None);
+    // A non-strict `--ext` module: its container slots that code holding an
+    // instance as a CPython object may use -- its own fallback code, and
+    // in a package built one extension per module the other modules -- are
+    // CPython objects (`pycc_hir`'s `external_reads`).
+    pycc_hir::set_external_attribute_reads(if publishes.variables && mode_allows(path) {
+        super::package_bases::attributes_used_in_package(path, publishes.foreign_relative_imports)
+    } else {
+        BTreeSet::new()
+    });
     let first = attempt();
     let failures = match &first {
         Ok(_) if publishes.variables && mode_allows(path) => {

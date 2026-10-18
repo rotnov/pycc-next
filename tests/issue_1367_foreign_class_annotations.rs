@@ -94,6 +94,14 @@ fn check_accepts_every_admitted_position() {
          \x20       self.f = f\n        self.q = q\n\
          b = _Box(_pick(x), Queue())\n",
     );
+    // v0.8: an annotated attribute store (`pycc_ast::desugar::ann_attrs`).
+    assert_checks(
+        "1367_annotated_attr",
+        &format!(
+            "{FRACTION}class _C:\n    def __init__(self, f: Fraction) -> None:\n\
+             \x20       self.f: Fraction = f\n"
+        ),
+    );
 }
 
 /// The subscript's arguments are never resolved: `Nope` names nothing, and
@@ -186,15 +194,6 @@ fn the_positions_outside_part_1_are_refused() {
         "def _f(t: object) -> int:\n    return 1\n",
         "C0001",
         "type annotation `object` is not supported yet",
-    );
-    assert_one_error(
-        "1367_annotated_attr",
-        &format!(
-            "{FRACTION}class _C:\n    def __init__(self, f: Fraction) -> None:\n\
-             \x20       self.f: Fraction = f\n"
-        ),
-        "C0001",
-        "an annotated attribute target annotated `object` with this value is not supported yet",
     );
     assert_one_error(
         "1367_list_argument",

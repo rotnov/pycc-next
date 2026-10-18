@@ -46,8 +46,8 @@ fn rejects_an_annotated_assignment_to_a_non_name_target() {
     // with a message naming the admitted form.
     assert_capability_error_message(
         "obj.attr: int = 1\n",
-        "an annotated attribute target at module level is not supported yet -- only \
-         `<obj>.<attr>: list[int] = []` or `<obj>.<attr>: dict[str, int] = {}`",
+        "an annotated attribute target at module level is not supported yet -- an annotated \
+         attribute store `<obj>.<attr>: T = value` is supported inside a function body",
     );
 }
 

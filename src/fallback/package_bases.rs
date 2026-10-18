@@ -14,7 +14,7 @@
 //! wrongly (`docs/DEVIATIONS.md`).
 
 use pycc_ast::{Expr, Stmt};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// The classes of `entry` (a module of a package) that a class statement of
@@ -24,34 +24,10 @@ use std::path::{Path, PathBuf};
 /// (`import pkg.m` then `pkg.m.C`, `from . import m` then `m.C`) -- each
 /// with the first subclass found (`pkg.n.D`), for the report.
 pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
-    let Ok(entry) = entry.canonicalize() else {
+    let Some(package) = Package::read(entry) else {
         return BTreeMap::new();
     };
-    let Some((root, top)) = package_root(&entry) else {
-        return BTreeMap::new();
-    };
-    let Some(target) = qualname(&root, &entry) else {
-        return BTreeMap::new();
-    };
-    let mut files = Vec::new();
-    collect_py(&root.join(&top), &mut files);
-    let mut parsed = Vec::new();
-    for file in files {
-        let Some(qual) = qualname(&root, &file) else {
-            continue;
-        };
-        let Some(source) = std::fs::read(&file)
-            .ok()
-            .and_then(|bytes| crate::source::decode_python_source(&bytes).ok())
-        else {
-            continue;
-        };
-        let Ok(module) = pycc_parser::parse_all(&source) else {
-            continue;
-        };
-        let is_package = file.file_name().is_some_and(|n| n == "__init__.py");
-        parsed.push((file, qual, is_package, module));
-    }
+    let Package { entry, target, parsed } = package;
     // A package `__init__.py`'s re-exports: `(package, name)` -> the
     // `(module, name)` it imports, so `from pkg import C` resolves to the
     // module defining `C`.
@@ -101,6 +77,87 @@ pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
         }
     }
     found
+}
+
+/// The entry module's package, its modules parsed.
+struct Package {
+    /// The entry file, canonical.
+    entry: PathBuf,
+    /// The entry module's dotted name.
+    target: String,
+    /// Every module of the package: its file, dotted name, whether it is a
+    /// package `__init__.py`, and its syntax tree.
+    parsed: Vec<(PathBuf, String, bool, pycc_ast::ModModule)>,
+}
+
+impl Package {
+    /// The package of `entry`, or `None` when it is not in one.
+    fn read(entry: &Path) -> Option<Self> {
+        let entry = entry.canonicalize().ok()?;
+        let (root, top) = package_root(&entry)?;
+        let target = qualname(&root, &entry)?;
+        let mut files = Vec::new();
+        collect_py(&root.join(&top), &mut files);
+        let mut parsed = Vec::new();
+        for file in files {
+            let Some(qual) = qualname(&root, &file) else {
+                continue;
+            };
+            let Some(source) = std::fs::read(&file)
+                .ok()
+                .and_then(|bytes| crate::source::decode_python_source(&bytes).ok())
+            else {
+                continue;
+            };
+            let Ok(module) = pycc_parser::parse_all(&source) else {
+                continue;
+            };
+            let is_package = file.file_name().is_some_and(|n| n == "__init__.py");
+            parsed.push((file, qual, is_package, module));
+        }
+        Some(Self { entry, target, parsed })
+    }
+}
+
+/// The attribute names `entry` and, in a package built one extension per
+/// module, the package's other modules use on an object other than a
+/// method's own `self` (`state.tokens`, `m.f`), loaded, stored or deleted:
+/// compiled code holding an instance of a class of `entry` as a CPython
+/// object (fallback code, a lifted body, another module) reaches it
+/// through CPython's attribute protocol, so its slots of these names must
+/// be ones CPython can see (`pycc_hir::set_external_attribute_reads`).
+pub(crate) fn attributes_used_in_package(entry: &Path, package: bool) -> BTreeSet<String> {
+    use pycc_ast::visitor::{self, Visitor};
+    struct Names(BTreeSet<String>);
+    impl<'a> Visitor<'a> for Names {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if let Expr::Attribute(attr) = expr
+                && !matches!(&*attr.value, Expr::Name(n) if n.id.as_str() == "self")
+            {
+                self.0.insert(attr.attr.to_string());
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let mut names = Names(BTreeSet::new());
+    let own = std::fs::read(entry)
+        .ok()
+        .and_then(|bytes| crate::source::decode_python_source(&bytes).ok())
+        .and_then(|source| pycc_parser::parse_all(&source).ok());
+    for stmt in own.iter().flat_map(|module| module.body.iter()) {
+        names.visit_stmt(stmt);
+    }
+    if package && let Some(package) = Package::read(entry) {
+        for (file, _, _, module) in &package.parsed {
+            if *file == package.entry {
+                continue;
+            }
+            for stmt in &module.body {
+                names.visit_stmt(stmt);
+            }
+        }
+    }
+    names.0
 }
 
 /// The directory holding the entry's top-level package, and that package's

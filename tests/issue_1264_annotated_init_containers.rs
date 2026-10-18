@@ -154,20 +154,25 @@ fn an_annotated_store_nested_in_an_init_block_declares_no_slot() {
     assert!(text.contains("error[T0044]"), "{text}");
 }
 
-/// Every other annotated attribute target names the admitted form.
+/// v0.8: any other annotated attribute store in a function compiles too
+/// (`pycc_ast::desugar::ann_attrs`), its value checked against the
+/// annotation as a local's is.
 #[test]
-fn a_scalar_annotated_attribute_target_names_the_admitted_form() {
+fn a_scalar_annotated_attribute_target_compiles_and_is_checked() {
+    let dir = ScratchDir::new("e2e_1264_scalar").expect("scratch");
+    let source = dir.join("a.py");
+    std::fs::write(
+        &source,
+        "class C:\n    def __init__(self) -> None:\n        self.n: int = 0\n\n\
+         def bump(c: C) -> int:\n    c.n: int = c.n + 2\n    return c.n\n\n\
+         print(bump(C()))\n",
+    )
+    .expect("write the subject");
+    let out = build_and_run(&dir, &source);
+    assert_eq!(out, "2\n");
     let text = check_fails(
-        "e2e_1264_scalar",
-        "class C:\n    def __init__(self) -> None:\n        self.n: int = 0\n",
+        "e2e_1264_scalar_mismatch",
+        "class C:\n    def __init__(self) -> None:\n        self.n: int = 'x'\n",
     );
-    assert!(
-        text.contains(
-            "error[C0001]: an annotated attribute target annotated `int` with this value is not \
-             supported yet -- only `<obj>.<attr>: list[int] = []` or `<obj>.<attr>: dict[str, \
-             int] = {}` inside a function body is supported so far (the general annotated \
-             attribute target is issue #891)"
-        ),
-        "{text}"
-    );
+    assert!(text.contains("error[T0025]"), "{text}");
 }

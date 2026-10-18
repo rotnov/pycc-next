@@ -1,3 +1,7 @@
 class C:
     def __init__(self) -> None:
-        self.x: int = 1
+        self.x = 1
+
+
+c = C()
+c.x: int = 1

@@ -26,10 +26,14 @@ use pycc_ast::{Expr, ExprAttribute, StmtAnnAssign};
 use pycc_diag::Diagnostic;
 
 /// The admitted-form sentence every refused annotated attribute target
-/// ends with, so the refusals stay in step with each other.
-const ADMITTED_FORM: &str = "only `<obj>.<attr>: list[int] = []` or `<obj>.<attr>: dict[str, int] = {}` \
-     inside a function body is supported so far (the general annotated attribute \
-     target is issue #891)";
+/// ends with, so the refusals stay in step with each other. A function
+/// body's `obj.x: T = value` reaches this crate already split into a local
+/// `_pycc_N: T = value` and `obj.x = _pycc_N` (v0.8,
+/// `pycc_ast::desugar::ann_attrs`); what [`lower_attribute_target`] still
+/// lowers itself (a typed empty `list`/`dict`) is what an undesugared
+/// module -- a unit test's -- may hold.
+const ADMITTED_FORM: &str = "an annotated attribute store `<obj>.<attr>: T = value` is supported \
+     inside a function body";
 
 /// Lowers `ann` (`Stmt::AnnAssign`) to `HirStmt::AnnAssign` for a bare-name
 /// target, or to `HirStmt::AttrSet` for the one admitted attribute-target

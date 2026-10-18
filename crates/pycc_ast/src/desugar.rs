@@ -63,6 +63,8 @@
 //!   fresh temporaries (`_pycc_N`).
 
 mod aliases;
+mod ann_attrs;
+mod class_of_self;
 mod build;
 mod builtin_defaults;
 mod chr_ranges;
@@ -213,6 +215,7 @@ pub fn desugar(module: &mut ModModule) {
         builtin_defaults::inline_builtin_defaults(&mut body);
         iter_alias::iterator_readers(&mut body);
         aliases::drop_object_bases(&mut body);
+        class_of_self::class_of_self(&mut body);
         stdlib::native_stdlib_calls(&mut body);
         itertools::native_itertools_calls(&mut body);
         collections::native_collections(&mut body);
@@ -225,6 +228,7 @@ pub fn desugar(module: &mut ModModule) {
     };
     {
         let mut body: Vec<Stmt> = std::mem::take(&mut module.body).into_iter().collect();
+        ann_attrs::split_attribute_annotations(&mut body, &fresh);
         globals::cell_globals(&mut body, &fresh);
         module.body = body.into();
     }

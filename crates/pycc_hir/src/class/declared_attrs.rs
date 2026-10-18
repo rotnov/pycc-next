@@ -125,8 +125,18 @@ pub(super) fn collect_declared_attrs(
             aliases,
             class_name_defs,
         )
-        .map_err(|error| crate::func::with_bare_list_or_dict_advice(error, &ann.annotation))?;
-        if !matches!(
+        .map_err(|error| crate::func::with_bare_list_or_dict_advice(error, &ann.annotation));
+        // Non-strict mode (v0.8): a declaration this position cannot type
+        // is not one -- at run time a class-body annotation without a
+        // value binds nothing, so the attribute is the slot `__init__` (or
+        // another method) gives it, as if the line were absent.
+        let non_strict = crate::func::is_non_strict(aliases);
+        let ty = match ty {
+            Ok(ty) => ty,
+            Err(_) if non_strict => continue,
+            Err(error) => return Err(error),
+        };
+        let admitted = matches!(
             ty,
             Ty::Int
                 | Ty::Float
@@ -146,7 +156,11 @@ pub(super) fn collect_declared_attrs(
                 // pointer word. Instances are never freed (`pycc_rt::
                 // instance`), so the slot needs no refcount traffic.
                 | Ty::Instance(_)
-        ) {
+        );
+        if !admitted && non_strict {
+            continue;
+        }
+        if !admitted {
             return Err(unsupported(
                 format!(
                     "instance attribute `{name}` declared in class `{class_name}` has type `{}`, \
@@ -197,6 +211,27 @@ pub(super) struct ClassMethodTables<'a> {
 /// visible declaration. The same holds for an attribute only an ancestor
 /// establishes. A refusal can be loosened later; an accepted inert form could
 /// not be tightened.
+/// Non-strict mode (v0.8): drops each declaration
+/// [`reject_unestablished_or_colliding`] would refuse, leaving the
+/// attribute to whatever binds it at run time (module doc of
+/// [`collect_declared_attrs`]'s non-strict rule): one never assigned at the
+/// top level of `__init__` (assigned in a branch, or by another method) and
+/// one naming a method-like member of the class.
+pub(super) fn drop_unestablished_or_colliding(
+    declared: &mut Vec<DeclaredAttr>,
+    attrs: &[(String, Ty)],
+    tables: &ClassMethodTables<'_>,
+) {
+    declared.retain(|decl| {
+        let name = decl.name.as_str();
+        let clashes = tables.methods.iter().any(|(n, _)| n == name)
+            || tables.properties.iter().any(|p| p.name == name)
+            || tables.static_methods.iter().any(|(n, _)| n == name)
+            || tables.class_methods.iter().any(|(n, _)| n == name);
+        !clashes && attrs.iter().any(|(n, _)| n == name)
+    });
+}
+
 pub(super) fn reject_unestablished_or_colliding(
     declared: &[DeclaredAttr],
     attrs: &[(String, Ty)],

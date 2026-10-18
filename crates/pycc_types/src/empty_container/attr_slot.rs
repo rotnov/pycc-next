@@ -117,6 +117,9 @@ pub(crate) fn resolve_class_slots(
             // None`, an empty list nothing appends to in its own class) is a
             // CPython object instead of a `T0003`.
             let found = found.or_else(|| crate::non_strict::is_non_strict().then_some(Ty::Object));
+            // A container code outside the class reads through
+            // CPython is a CPython object (`pycc_hir::external_slot_ty`).
+            let found = found.map(|found| pycc_hir::external_slot_ty(attr, found));
             if let Some(found) = found {
                 attrs[i].1 = found;
                 // A later attribute's value may read this one
