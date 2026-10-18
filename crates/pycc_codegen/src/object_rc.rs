@@ -4,8 +4,8 @@
 //! `pycc_ext_obj_retain`/`pycc_ext_obj_release` (`Py_XINCREF`/
 //! `Py_XDECREF`). Under the shim's `Py_LIMITED_API 0x030D0000` those are
 //! calls into libpython, so every count was two calls. A `--release` build
-//! defines both in the generated module instead, as internal, always-inlined
-//! functions holding CPython 3.13's own inline forms for a 64-bit GIL build,
+//! defines both in the generated module instead, as internal functions
+//! holding CPython 3.13's own inline forms for a 64-bit GIL build,
 //! the same ones the shim's `src/ext/module/bridge.c` uses (its comment says
 //! why the stable ABI fixes them):
 //!
@@ -14,6 +14,11 @@
 //! * release: `NULL` and an object whose low 32 bits are negative (immortal)
 //!   are skipped; `ob_refcnt` is decremented and `_Py_Dealloc` (a stable-ABI
 //!   function) called at zero.
+//!
+//! The retain is always inlined (four instructions); the release, whose
+//! branches and `_Py_Dealloc` call are most of an inlined copy, stays one
+//! call into the module's own copy: inlining it everywhere doubled LLVM's
+//! time on mistune's modules for 0.7% fewer instructions at run time.
 //!
 //! The shim keeps its own external definitions for its C callers; the
 //! module's are internal, so the two never clash at link time. Only a
@@ -52,11 +57,15 @@ fn declared<'ctx>(module: &Module<'ctx>, name: &str) -> Option<FunctionValue<'ct
         .filter(|function| function.count_basic_blocks() == 0 && function.count_params() == 1)
 }
 
-/// Makes `function` an internal, always-inlined definition.
-fn internal_inline(module: &Module<'_>, function: FunctionValue<'_>) {
+/// Makes `function` an internal definition, always inlined or never.
+fn internal(module: &Module<'_>, function: FunctionValue<'_>, inline: bool) {
     let context = module.get_context();
     function.set_linkage(Linkage::Internal);
-    let kind = inkwell::attributes::Attribute::get_named_enum_kind_id("alwaysinline");
+    let kind = inkwell::attributes::Attribute::get_named_enum_kind_id(if inline {
+        "alwaysinline"
+    } else {
+        "noinline"
+    });
     function.add_attribute(
         inkwell::attributes::AttributeLoc::Function,
         context.create_enum_attribute(kind, 0),
@@ -64,7 +73,7 @@ fn internal_inline(module: &Module<'_>, function: FunctionValue<'_>) {
 }
 
 fn define_retain(module: &Module<'_>, function: FunctionValue<'_>) {
-    internal_inline(module, function);
+    internal(module, function, true);
     let context = module.get_context();
     let builder = context.create_builder();
     let i32_type = context.i32_type();
@@ -96,7 +105,7 @@ fn define_retain(module: &Module<'_>, function: FunctionValue<'_>) {
 }
 
 fn define_release(module: &Module<'_>, function: FunctionValue<'_>) {
-    internal_inline(module, function);
+    internal(module, function, false);
     let context = module.get_context();
     let builder = context.create_builder();
     let i32_type = context.i32_type();
@@ -172,6 +181,7 @@ mod tests {
         assert!(ir.contains("icmp slt i32"), "{ir}");
         assert!(ir.contains("call void @_Py_Dealloc(ptr"), "{ir}");
         assert!(ir.contains("alwaysinline"), "{ir}");
+        assert!(ir.contains("noinline"), "{ir}");
     }
 
     #[test]

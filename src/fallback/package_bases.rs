@@ -27,12 +27,12 @@ pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
     let Some(package) = Package::read(entry) else {
         return BTreeMap::new();
     };
-    let Package { entry, target, parsed } = package;
+    let (entry, target, parsed) = (&package.entry, &package.target, &package.parsed);
     // A package `__init__.py`'s re-exports: `(package, name)` -> the
     // `(module, name)` it imports, so `from pkg import C` resolves to the
     // module defining `C`.
     let mut exports: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
-    for (_, qual, is_package, module) in &parsed {
+    for (_, qual, is_package, module) in parsed {
         if !*is_package {
             continue;
         }
@@ -50,8 +50,8 @@ pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
         }
     }
     let mut found = BTreeMap::new();
-    for (file, qual, is_package, module) in &parsed {
-        if *file == entry {
+    for (file, qual, is_package, module) in parsed {
+        if file == entry {
             continue;
         }
         let mut scan = Scan::new(qual, *is_package);
@@ -71,7 +71,7 @@ pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
                     _ => break,
                 }
             }
-            if module == target {
+            if module == *target {
                 found.entry(name).or_insert(subclass);
             }
         }
@@ -91,8 +91,21 @@ struct Package {
 }
 
 impl Package {
-    /// The package of `entry`, or `None` when it is not in one.
-    fn read(entry: &Path) -> Option<Self> {
+    /// The package of `entry`, or `None` when it is not in one; read once
+    /// per entry by a build, which asks for it from every fallback round.
+    fn read(entry: &Path) -> Option<std::sync::Arc<Self>> {
+        type Cache = Vec<(PathBuf, Option<std::sync::Arc<Package>>)>;
+        static READ: std::sync::Mutex<Cache> = std::sync::Mutex::new(Vec::new());
+        let mut cache = READ.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, package)) = cache.iter().find(|(path, _)| path == entry) {
+            return package.clone();
+        }
+        let package = Self::parse(entry).map(std::sync::Arc::new);
+        cache.push((entry.to_path_buf(), package.clone()));
+        package
+    }
+
+    fn parse(entry: &Path) -> Option<Self> {
         let entry = entry.canonicalize().ok()?;
         let (root, top) = package_root(&entry)?;
         let target = qualname(&root, &entry)?;
