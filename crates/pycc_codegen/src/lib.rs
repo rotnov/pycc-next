@@ -107,6 +107,7 @@ mod object_coerce;
 mod tuple_rebox;
 mod object_comprehension;
 mod native_operand;
+mod object_rc;
 mod object_release;
 mod object_return;
 mod object_slot;

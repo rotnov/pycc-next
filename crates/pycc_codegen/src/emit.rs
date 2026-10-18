@@ -73,6 +73,10 @@ pub(crate) fn optimize_and_emit(
         pre.push(".pre.ll");
         let _ = module.print_to_file(std::path::Path::new(&pre));
     }
+    // `--release` counts CPython objects inline (`crate::object_rc`).
+    if release {
+        crate::object_rc::inline_object_rc(module, &target_machine.get_target_data());
+    }
     let optimizing = std::time::Instant::now();
     let applied_pipeline = if release {
         module
