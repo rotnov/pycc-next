@@ -185,16 +185,19 @@ mod tests {
     }
 
     #[test]
-    fn leaves_a_module_without_the_declarations_and_a_big_endian_target_alone() {
+    fn leaves_a_module_without_the_declarations_and_other_targets_alone() {
         let context = Context::create();
         let module = context.create_module("m");
         assert_eq!(inline_object_rc(&module, &target().get_target_data()), 0);
         let ptr = context.ptr_type(AddressSpace::default());
         let fn_type = context.void_type().fn_type(&[ptr.into()], false);
         module.add_function(crate::ext::EXT_OBJ_RETAIN_SYMBOL, fn_type, None);
-        let big = crate::target_machine::target_machine_for(Some("powerpc64-unknown-linux-gnu"), true)
-            .expect("powerpc64 target");
-        assert_eq!(inline_object_rc(&module, &big.get_target_data()), 0);
+        // Data layouts alone (no backend needed): a 64-bit big-endian one
+        // and a 32-bit little-endian one.
+        for layout in ["E-m:e-i64:64-n32:64", "e-m:e-p:32:32-i64:64-n32"] {
+            let data = TargetData::create(layout);
+            assert_eq!(inline_object_rc(&module, &data), 0, "{layout}");
+        }
         let ir = crate::llvm_string_to_owned(module.print_to_string());
         assert!(ir.contains("declare void @pycc_ext_obj_retain(ptr"), "{ir}");
     }
