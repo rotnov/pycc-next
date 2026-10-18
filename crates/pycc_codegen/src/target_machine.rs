@@ -137,16 +137,16 @@ pub(crate) fn target_machine_for(
 /// two commits whose code for it was identical, instruction for instruction,
 /// because unrelated functions grew (v0.5, `CHANGELOG.md`). With it,
 /// the hot loops run as fast at every placement as at the best one.
-/// `-x86-pad-max-prefix-size=5`: pad with instruction prefixes where it can
-/// instead of executed `nop`s, which keeps the cost of the padding on other
-/// x86 cores to a few executed instructions. Both options belong to the x86
-/// backend and change nothing for other targets.
+/// The padding is `nop`s, not instruction prefixes
+/// (`-x86-pad-max-prefix-size=5`, used until v0.8): prefix padding doubled
+/// the time LLVM takes to emit an object (the assembler's relaxation
+/// re-lays out every padded fragment), which pushed the mistune and
+/// diff-match-patch builds past CI's 10 s package build bound, for about 1%
+/// fewer executed instructions (diff-match-patch's `diff_main`: 130.1M
+/// against 131.4M). The option belongs to the x86 backend and changes
+/// nothing for other targets.
 fn set_backend_options() {
-    let args: [&std::ffi::CStr; 3] = [
-        c"pycc",
-        c"-x86-branches-within-32B-boundaries",
-        c"-x86-pad-max-prefix-size=5",
-    ];
+    let args: [&std::ffi::CStr; 2] = [c"pycc", c"-x86-branches-within-32B-boundaries"];
     let argv: Vec<*const std::ffi::c_char> = args.iter().map(|arg| arg.as_ptr()).collect();
     // SAFETY: `argv` holds `args.len()` pointers to NUL-terminated strings
     // that outlive the call, and `TARGET_INIT` runs this once per process,

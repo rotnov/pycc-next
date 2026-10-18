@@ -38,6 +38,29 @@ fn split(args: &[OsString]) -> (Vec<&OsString>, Vec<&OsString>) {
         .partition(|arg| !Path::new(arg).extension().is_some_and(|ext| ext == "c"))
 }
 
+/// `flags`, with `-O2` lowered to `-Og` for the shim's module unit (v0.8):
+/// it is the runtime unit's declarations and the module's own wrappers,
+/// compiled for every module of a package, so at `-O2` it was a quarter of
+/// a mistune build's CPU time. `-Og` halves that (GCC: 0.30 s -> 0.15 s
+/// for `block_parser`'s unit) and the wrappers run the same instructions
+/// as at `-O1` (mistune's benchmark: 64.93M against 64.94M per pass;
+/// `-O0`, as fast to compile, costs 0.4M more). The runtime unit, compiled
+/// once per machine and holding the hot helpers, keeps `-O2`.
+fn module_unit_flags(source: &Path, flags: &[&OsString]) -> Vec<OsString> {
+    let module_unit =
+        source.file_name() == Some(std::ffi::OsStr::new(crate::ext_build::SHIM_C_NAME));
+    flags
+        .iter()
+        .map(|flag| {
+            if module_unit && flag.as_os_str() == "-O2" {
+                OsString::from("-Og")
+            } else {
+                (*flag).clone()
+            }
+        })
+        .collect()
+}
+
 impl CObjects {
     /// Starts compiling every C source among `compile_args` into `dir`,
     /// each with every flag among them. `command` makes the driver (the
@@ -77,7 +100,7 @@ impl CObjects {
             }
             let mut cmd = command();
             cmd.arg("-c")
-                .args(&flags)
+                .args(module_unit_flags(Path::new(source), &flags))
                 .arg(source)
                 .arg("-o")
                 .arg(&object);
@@ -152,6 +175,17 @@ mod tests {
         let (flags, sources) = split(&args);
         assert_eq!(flags, ["-O2", "-I", "/inc", "-fPIC"]);
         assert_eq!(sources, ["/s/shim.c", "/s/launcher.c"]);
+    }
+
+    #[test]
+    fn only_the_module_unit_is_compiled_at_og() {
+        let o2 = OsString::from("-O2");
+        let fpic = OsString::from("-fPIC");
+        let flags = [&o2, &fpic];
+        let module = Path::new("/s").join(crate::ext_build::SHIM_C_NAME);
+        let runtime = Path::new("/s").join(crate::ext_build::SHIM_RUNTIME_C_NAME);
+        assert_eq!(module_unit_flags(&module, &flags), ["-Og", "-fPIC"]);
+        assert_eq!(module_unit_flags(&runtime, &flags), ["-O2", "-fPIC"]);
     }
 
     #[cfg(unix)]

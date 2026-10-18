@@ -115,6 +115,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Changed
 
+- `--ext` builds take less CPU: the shim's per-module unit compiles at `-Og` (its
+  wrappers run the same instructions as at `-O1`, at half the compile time of `-O2`; the
+  runtime unit, compiled once per machine, stays `-O2`), and x86 jumps are kept off
+  32-byte boundaries with `nop` padding instead of instruction prefixes, which doubled
+  LLVM's object emission time. mistune's 38 modules build in about 0.83x the time
+  (local); hot loops run as fast (diff-match-patch's speed test and `bench/run.py`'s
+  nbody, sieve, mandelbrot and spectral-norm within 0.5%, best of 15 interleaved runs on
+  a Skylake-class Xeon); diff-match-patch executes 1% more instructions (the nops).
+
 - `str` crossing the `--ext` boundary: an argument is no longer copied (the native string
   borrows the CPython `str`'s UTF-8 text and keeps it alive), and a result that is a string
   which came from CPython is that same object, not a copy -- so `f(s) is s` for a function
