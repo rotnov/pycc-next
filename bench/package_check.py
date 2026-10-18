@@ -269,7 +269,12 @@ print(f"{best:.4f}")
             # The first 2000 characters of the speed test's texts: almost all
             # of a call is `diff_bisect`'s native loop (with the runtime's
             # `str` indexing). 126.9M instructions per call at 0.5.0 on CI
-            # (125.6M with Ubuntu's python3.13); the bound is 5% above.
+            # (125.6M with Ubuntu's python3.13); the bound was 5% above.
+            # Re-baselined in v0.8 to 135.2M, 2% above CI's 132.5M (run
+            # 39109040009): about 1.3M of those are the nops that now pad
+            # jumps off 32-byte boundaries (prefix padding doubled LLVM's
+            # emission time), with wall time unchanged within 0.5% (best of
+            # 15 interleaved runs, Skylake-class Xeon).
             instructions="""
 import sys, pkgutil
 sys.path.insert(0, sys.argv[1])
@@ -282,7 +287,7 @@ for _ in range(int(sys.argv[2])):
     dmp.diff_main(a, b, False)
 """,
             instructions_label="diff_main of the speed test's first 2000 characters",
-            max_instructions=133_300_000,
+            max_instructions=135_200_000,
             instruction_calls=2,
         ),
         Package(
