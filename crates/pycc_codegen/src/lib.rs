@@ -81,6 +81,8 @@ mod closure;
 mod closure_tests;
 mod ext;
 mod ext_publish;
+mod member_symbols;
+pub use member_symbols::{MODULE_UNIT_ENTRIES, member_prefix};
 mod ext_thunk;
 mod foreign_arith;
 mod foreign_attr;

@@ -6,6 +6,24 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Added
 
+- v0.8 accepts 1 and 4 (the whole-package build, first stage): `pycc build PKG --ext -o
+  PKG/__init__` compiles every module of a package directory (and of its subpackages;
+  `--exclude MODULE` keeps a module or subpackage in Python) into one extension,
+  `PKG/__init__.abi3.so` (`.pyd`), with one copy of the runtime and one `dlopen`. Each
+  module is compiled by a member build of its own, in parallel (`PYCC_JOBS`), as when it
+  was an extension of its own, and keeps its own module object, created when it is first
+  imported, in import order, by the extension's `sys.meta_path` finder
+  (`PyModule_FromDefAndSpec`, `PyModule_ExecDef`): its own `__name__`, `__spec__`,
+  `__file__`, `__path__`, globals, PEP 562 `__getattr__`, `importlib.reload`,
+  `importlib.resources`, pickling by reference; circular imports and import-time side
+  effects behave as in CPython. The members' symbols are prefixed per module where they
+  are emitted, the shim's per-module state is each module's own record, and their
+  exception classes share one registry with tags no two modules share, an `except` in
+  one module matching another module's exception classes as CPython does. The
+  `pycc.build` backend builds a package whole by default (`[tool.pycc] whole-package`),
+  and `bench/package_check.py` and `bench/pydantic_check.py` build packages whole
+  (`--separate`: module by module). pydantic's `import` is about 15 ms faster than with
+  one extension per module; the code each module runs is unchanged.
 - v0.8 accept 3 (compiled frames are real frames): on CPython 3.13 a compiled function
   of an `--ext` module or an embedded program runs in a real CPython frame, so
   `sys._getframe(n)` (`f_code`, `f_lineno`, `f_back`, `f_globals`), `inspect.stack()`,

@@ -79,6 +79,12 @@ pub struct CompileOptions {
     /// globals it publishes through its `__dict__` (`global_sync`), so a
     /// rebinding from outside reaches them.
     pub global_sync: bool,
+    /// A module compiled as one member of a package's extension (v0.8, the
+    /// whole-package build): the prefix of every symbol its object defines
+    /// and of the module-unit entry points it calls
+    /// (`crate::member_symbols`). `None` for a module that is an extension
+    /// of its own.
+    pub symbol_prefix: Option<String>,
 }
 
 /// The symbol the module body is emitted under in `ext` mode: the fixed C

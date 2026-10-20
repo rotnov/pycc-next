@@ -158,9 +158,15 @@ $ pycc build app/main.py -o main --ext                 # one CPython extension m
 With `--ext` the artifact is the entry module: `import main` from CPython runs the whole
 program, with every project module it imports compiled in. Those modules are private to
 the extension (not attributes of it, and not in `sys.modules`); only the entry module's
-own definitions are exported. To ship each module of a package as its own extension,
-build them one by one with `pycc build pkg/mod.py --ext --foreign-relative-imports`:
-their relative imports then bind the other modules through CPython. Imports of anything
+own definitions are exported. To ship a package, build it whole: `pycc build pkg --ext
+-o pkg/__init__` compiles every module of the directory `pkg` (and of its subpackages;
+`--exclude MODULE` keeps one in Python) into one extension, `pkg/__init__.abi3.so`, with
+one copy of the runtime and one `dlopen`. Each module stays a module of its own --
+created when it is first imported, in import order, with its own `__name__`, `__spec__`,
+`__file__` (the path its own extension would have) and globals -- and the imports
+between the modules bind them through CPython (`docs/DEVIATIONS.md` lists what differs
+from separate extensions). `pycc build pkg/mod.py --ext --foreign-relative-imports`
+still builds one module as its own extension. Imports of anything
 else (the standard library, third-party packages) work as in a single file. Modules may import
 each other (a circular import sees the partially initialized module, as in CPython). A
 module used as a value, the entry module imported back by its own imports and a project
@@ -169,7 +175,8 @@ import inside an `if`/`try` block are compile errors; the details are in [`docs/
 ### Real packages, unchanged
 
 `python3 bench/package_check.py` (CI-gated) downloads four pinned, permissively licensed
-pure-Python packages, builds each of their modules unchanged as its own extension,
+pure-Python packages, builds each unchanged -- a package whole into one extension
+(`--separate`: each module as its own), a single-module package as its extension --
 removes the `.py` files and runs the package's own unittest suite with CPython against
 the compiled modules (`python3 bench/package_check.py tomli --time` checks one and times
 its hot path; `--instructions` counts the instructions one call of the hot path executes
@@ -191,12 +198,13 @@ refused before extraction.
 For diff-match-patch:
 
 ```console
-$ pycc build diff_match_patch/__init__.py -o diff_match_patch/__init__ \
-      --ext --non-strict --foreign-relative-imports            # likewise for every module
+$ pycc build diff_match_patch -o diff_match_patch/__init__ \
+      --ext --non-strict --exclude tests                       # the whole package
 $ python3 -m unittest diff_match_patch.tests                    # 28 tests, OK
 ```
 
-A package `__init__.py` builds to `pkg/__init__.abi3.so`, imported as the package. Every
+The package builds to `diff_match_patch/__init__.abi3.so`, imported as the package, which
+imports its two other modules from itself; its `tests` stay Python. Every
 function and method of the package compiles (`--report-fallbacks` reports none; the
 `__init__`'s re-exporting imports also run as CPython imports). Its untyped text
 functions run natively on `str` (guarded native specializations, see Modes): the
@@ -286,9 +294,11 @@ crossing without copies.
 ## Use pycc in your project
 
 `pycc.build` is a PEP 517 build backend: with it, `pip install .` and `pip wheel .`
-compile your project's modules to abi3 CPython extension modules (one `--ext` module
-per `.py` file, `--foreign-relative-imports`, `--release`), keep the modules you name in
-Python, and write a wheel tagged `cp313-abi3-<platform>` (CPython 3.13 and newer):
+compile your project's modules to abi3 CPython extension modules (a package whole, into
+one `pkg/__init__.abi3.so` holding the modules that build with its `__init__`'s
+settings; any other module, and a top-level module, one `--ext` extension per `.py`
+file, `--foreign-relative-imports`; `--release`), keep the modules you name in Python,
+and write a wheel tagged `cp313-abi3-<platform>` (CPython 3.13 and newer):
 `manylinux_<glibc>_<arch>` on Linux (the build machine's glibc; `linux_<arch>` if a
 module links a library manylinux does not allow), `macosx_<N>_0_arm64` on macOS (the
 minimum macOS the modules record) and `win_amd64` on Windows. Select it in `pyproject.toml`:
@@ -308,6 +318,7 @@ strict = true                      # default; false builds every module --non-st
 pure-python = ["geo.cli"]          # modules (a package name covers its subpackages) kept as .py
 fallback-to-python = false         # true, or a list of modules: ship as .py if pycc refuses them
 extra-args = []                    # more `pycc build` flags for every module
+whole-package = true               # default; false builds each module as its own extension
 # packages = ["geo"], py-modules = ["m"], source-dir = "src": what ships, when the
 # default discovery does not find it (a src/ layout, else the package or module named
 # after the project, else the flat layout's packages and modules but tests, docs, ...).

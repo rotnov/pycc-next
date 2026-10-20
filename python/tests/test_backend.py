@@ -76,6 +76,26 @@ with open(log, "a") as f:
                         "python": os.environ.get("PYCC_PYTHON")}}) + "\\n")
 src = pathlib.Path(args[1])
 out = pathlib.Path(args[args.index("-o") + 1])
+if src.is_dir():
+    # A whole-package build: every module not excluded, as pycc reports them.
+    excludes = [args[i + 1] for i, a in enumerate(args) if a == "--exclude"]
+    failed = False
+    for py in sorted(src.rglob("*.py")):
+        rel = ".".join(py.relative_to(src).with_suffix("").parts).removesuffix("__init__")
+        rel = rel.rstrip(".")
+        if any(rel == e or rel.startswith(e + ".") for e in excludes):
+            continue
+        dotted = ".".join(p for p in [src.name, rel] if p)
+        if "FAIL" in py.read_text():
+            print(f"error[C0001]: not supported at {{py}}:1", file=sys.stderr)
+            print(f"pycc: {{dotted}}: failed", file=sys.stderr)
+            failed = True
+        else:
+            print(f"pycc: {{dotted}}: built in 0.01s", file=sys.stderr)
+    if failed:
+        sys.exit(1)
+    pathlib.Path(str(out) + ".abi3.so").write_bytes(pathlib.Path({so!r}).read_bytes())
+    sys.exit(0)
 if "FAIL" in src.read_text():
     print(f"error[C0001]: not supported at {{src}}:1", file=sys.stderr)
     sys.exit(1)
@@ -453,20 +473,29 @@ class Wheel(Project):
             "demo_pkg-1.2.0.dist-info/entry_points.txt", "demo_pkg-1.2.0.dist-info/RECORD",
         ])
         self.assertEqual({r[0] for r in record}, set(names))
+        # The package is built whole with the modules that build like its
+        # `__init__` (only itself here: `core` is strict, `cli` Python); `core`
+        # is an extension of its own beside it.
         calls = {pathlib.Path(c["args"][1]).name: c for c in self.calls()}
-        self.assertEqual(set(calls), {"__init__.py", "core.py"})
-        init, core = calls["__init__.py"]["args"], calls["core.py"]["args"]
+        self.assertEqual(set(calls), {"demo_pkg", "core.py"})
+        init, core = calls["demo_pkg"]["args"], calls["core.py"]["args"]
         for args in (init, core):
             self.assertEqual(args[0], "build")
-            for flag in ("--ext", "--foreign-relative-imports", "--release"):
+            for flag in ("--ext", "--release"):
                 self.assertIn(flag, args)
+        self.assertIn("--foreign-relative-imports", core)
         self.assertIn("--non-strict", init)
+        self.assertEqual(init[init.index("-o") + 1],
+                         str(pathlib.Path(init[1]) / "__init__"))
+        self.assertEqual([init[i + 1] for i, a in enumerate(init) if a == "--exclude"],
+                         ["cli", "core"])
         self.assertNotIn("--non-strict", core)
         # Staged inside the wheel directory, TMPDIR too; nothing left behind.
         for c in calls.values():
             self.assertTrue(c["tmpdir"].startswith(str(self.out)), c["tmpdir"])
             self.assertEqual(c["python"], sys.executable)
         self.assertIn("demo_pkg.core: compiled", self.stderr)
+        self.assertIn("demo_pkg: 1 module(s) compiled into __init__.abi3.so", self.stderr)
         # pycc's messages name the project's files, not the staged copies.
         src = self.root.resolve() / "src"
         self.assertIn(f"{src}{os.sep}demo_pkg{os.sep}core.py:1", self.stderr)
@@ -476,6 +505,56 @@ class Wheel(Project):
         with chdir(self.root):
             dist_info = build.prepare_metadata_for_build_wheel(str(meta_dir))
         self.assertEqual((meta_dir / dist_info / "METADATA").read_text(), meta)
+
+    def test_a_package_is_built_whole_into_one_extension(self):
+        self.project('strict = false\npure-python = ["demo_pkg.cli"]')
+        exe = self.fake_pycc()
+        with self.build_wheel(PYCC=str(exe)) as z:
+            names = [n for n in z.namelist() if "dist-info" not in n]
+        self.assertEqual(names, ["demo_pkg/__init__.abi3.so", "demo_pkg/cli.py",
+                                 "demo_pkg/data/table.txt", "demo_pkg/py.typed"])
+        [call] = self.calls()
+        self.assertEqual(pathlib.Path(call["args"][1]).name, "demo_pkg")
+        self.assertIn("--exclude", call["args"])
+        self.assertIn("demo_pkg: 2 module(s) compiled into", self.stderr)
+
+    def test_a_member_that_may_fall_back_is_left_out_and_the_package_rebuilt(self):
+        self.project('strict = false\nfallback-to-python = ["demo_pkg.core"]', {
+            "src/demo_pkg/__init__.py": "X = 1\n",
+            "src/demo_pkg/core.py": "FAIL\n",
+            "src/demo_pkg/util.py": "Y = 2\n",
+        })
+        exe = self.fake_pycc()
+        with self.build_wheel(PYCC=str(exe)) as z:
+            names = [n for n in z.namelist() if "dist-info" not in n]
+        self.assertEqual(names, ["demo_pkg/__init__.abi3.so", "demo_pkg/core.py"])
+        first, second = self.calls()
+        self.assertNotIn("--exclude", first["args"])
+        self.assertEqual(second["args"][-2:], ["--exclude", "core"])
+        self.assertIn("demo_pkg.core: pycc could not compile it; it ships as Python",
+                      self.stderr)
+
+    def test_a_member_that_may_not_fall_back_fails_the_build(self):
+        self.project('strict = false', {
+            "src/demo_pkg/__init__.py": "X = 1\n",
+            "src/demo_pkg/core.py": "FAIL\n",
+        })
+        exe = self.fake_pycc()
+        with chdir(self.root), environ(PYCC=str(exe)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(build.BuildError) as e:
+                build.build_wheel(str(self.out))
+        self.assertIn("pycc could not compile demo_pkg.core (package demo_pkg, built whole)",
+                      str(e.exception))
+
+    def test_whole_package_false_builds_each_module_on_its_own(self):
+        self.project('strict = false\nwhole-package = false\npure-python = ["demo_pkg.cli"]')
+        exe = self.fake_pycc()
+        with self.build_wheel(PYCC=str(exe)) as z:
+            names = [n for n in z.namelist() if "dist-info" not in n]
+        self.assertIn("demo_pkg/core.abi3.so", names)
+        self.assertEqual({pathlib.Path(c["args"][1]).name for c in self.calls()},
+                         {"__init__.py", "core.py"})
 
     def test_a_compile_error_fails_the_build_with_pycc_diagnostics(self):
         self.project(files={"m.py": "FAIL\n", "ok.py": ""})

@@ -7,6 +7,7 @@ modules to abi3 CPython extension modules with pycc.
 
     [tool.pycc]
     strict = true                      # false: every module builds --non-strict
+    whole-package = true               # false: each module its own extension
     pure-python = ["mypkg.cli"]        # modules (or whole packages) kept as .py
     fallback-to-python = false         # or a list: ship these as .py if pycc refuses them
     extra-args = []                    # more `pycc build` flags for every module
@@ -30,7 +31,7 @@ import sys
 import tempfile
 
 from . import __version__
-from ._compile import CompileError, compile_modules, find_pycc
+from ._compile import CompileError, compile_modules, compile_package, find_pycc
 from ._project import (Project, ProjectError, entry_points, license_files, load, metadata,
                        sdist_files, source_dir, sources)
 from ._wheel import ABI3_PYTHON, TagError, WheelWriter, platform_tag, write_sdist
@@ -112,6 +113,46 @@ def _finish(project: Project, writer: WheelWriter, wheel_directory, tag: str, pu
     return name
 
 
+def _plan_packages(project: Project, files, compile_list) -> list[tuple[str, list[str],
+                                                                       list[str]]]:
+    """The packages built whole (v0.8): each top-level package whose `__init__` is
+    compiled, as `(package, members, excludes)` -- its compiled modules that build with
+    the options of its `__init__` and whose packages all do, and the `--exclude` names
+    (relative to the package) of its other modules, which stay Python or are built as
+    extensions of their own beside the package's."""
+    if not project.tool.whole_package:
+        return []
+    options = {module: opts for module, _, opts in compile_list}
+    plans = []
+    for module, _, opts in compile_list:
+        if "." in module.removesuffix(".__init__") or not module.endswith(".__init__"):
+            continue
+        package = module.removesuffix(".__init__")
+        same = (opts.strict, opts.extra_args)
+
+        def member(name: str) -> bool:
+            # The module and every package above it below `package` build alike.
+            parts = name.removesuffix(".__init__").split(".")
+            inits = [".".join(parts[:i]) + ".__init__" for i in range(1, len(parts) + 1)]
+            chain = inits if name.endswith(".__init__") else inits[:-1] + [name]
+            return all(n in options and (options[n].strict, options[n].extra_args) == same
+                       for n in chain)
+
+        mods = [f.module for f in files if f.module is not None
+                and (f.module == module or f.module.startswith(package + "."))]
+        members = [m for m in mods if member(m)]
+        excludes = []
+        for m in mods:
+            if m in members:
+                continue
+            rel = m[len(package) + 1:].removesuffix(".__init__")
+            # A subpackage left out whole needs one entry.
+            if not any(rel == e or rel.startswith(e + ".") for e in excludes):
+                excludes.append(rel)
+        plans.append((package, members, sorted(excludes)))
+    return plans
+
+
 def build_wheel(wheel_directory, config_settings=None, metadata_directory=None) -> str:
     """Compiles every module not kept in Python and writes the wheel. A wheel with
     no compiled module is pure (`py3-none-any`); otherwise it is tagged
@@ -150,10 +191,20 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None) 
             env.setdefault("PYCC_PYTHON", sys.executable)
             print(f"pycc.build {__version__}: compiling {len(compile_list)} module(s) of "
                   f"{project.name} {project.version} with {pycc}", file=sys.stderr)
+            whole, fell_back = _build_packages(project, pycc, src, files, compile_list, env)
+            in_package = {m for p in whole for m in p.members}
+            separate = [c for c in compile_list
+                        if c[0] not in in_package and c[0] not in fell_back]
             outcomes = {o.module: o for o in compile_modules(
-                pycc, src, compile_list, project.tool.release, env, source_dir(project))}
+                pycc, src, separate, project.tool.release, env, source_dir(project))}
             compiled = []
+            for p in whole:
+                writer.add(f"{p.package}/{p.artifact.name}", p.artifact.read_bytes(),
+                           executable=True)
+                compiled.append(p.artifact)
             for f in files:
+                if f.module in in_package:
+                    continue
                 o = outcomes.get(f.module) if f.module is not None else None
                 if o is not None and o.artifact is not None:
                     stem = f.rel[:-len(".py")]
@@ -170,6 +221,60 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None) 
             shutil.rmtree(staging, ignore_errors=True)
     except (ProjectError, CompileError, TagError) as e:
         raise BuildError(str(e)) from None
+
+
+def _build_packages(project: Project, pycc, src: pathlib.Path, files, compile_list,
+                    env: dict) -> tuple[list, set[str]]:
+    """Builds every package of `_plan_packages` whole. A member pycc refuses that may
+    fall back to Python is excluded and the package built again; a package whose
+    `__init__` itself falls back is built module by module. Returns the packages built
+    and the modules that fell back to Python."""
+    options = {module: opts for module, _, opts in compile_list}
+    done = []
+    fell_back: set[str] = set()
+    for package, members, excludes in _plan_packages(project, files, compile_list):
+        while True:
+            o = compile_package(pycc, src, package, members, options[package + ".__init__"],
+                                excludes, project.tool.release, env, source_dir(project))
+            if o.artifact is not None:
+                print(f"pycc.build: {package}: {len(members)} module(s) compiled into "
+                      f"{o.artifact.name} in {o.seconds:.2f}s", file=sys.stderr)
+                if o.log:
+                    print("  " + o.log.replace("\n", "\n  "), file=sys.stderr)
+                done.append(o)
+                break
+            failed = [_module_of(package, members, name) for name in o.failed]
+            if not failed or not all(m is not None and options[m].fallback for m in failed):
+                names = ", ".join(o.failed) or package
+                raise CompileError(
+                    f"pycc could not compile {names} (package {package}, built whole):\n"
+                    f"{o.log}\n\nFix the diagnostics above, or keep the module in Python "
+                    f'with [tool.pycc] pure-python = ["{o.failed[0] if o.failed else package}"] '
+                    f"(or allow it to fall back with fallback-to-python).")
+            if package + ".__init__" in failed:
+                break  # module by module, as without the whole-package build
+            for m in failed:
+                print(f"pycc.build: {m}: pycc could not compile it; it ships as Python "
+                      f"(fallback-to-python)", file=sys.stderr)
+                members.remove(m)
+                fell_back.add(m)
+                rel = m[len(package) + 1:].removesuffix(".__init__")
+                excludes.append(rel)
+                if m.endswith(".__init__"):
+                    # Its subpackage is left out whole: the modules below it are
+                    # built as extensions of their own.
+                    members[:] = [n for n in members
+                                  if not n.startswith(f"{package}.{rel}.")]
+    return done, fell_back
+
+
+def _module_of(package: str, members: list[str], dotted: str) -> str | None:
+    """The backend's name of the member pycc names `dotted` (`pkg.sub` is the module
+    `pkg.sub.__init__`)."""
+    for m in members:
+        if m.removesuffix(".__init__") == dotted:
+            return m
+    return None
 
 
 def build_editable(wheel_directory, config_settings=None, metadata_directory=None) -> str:

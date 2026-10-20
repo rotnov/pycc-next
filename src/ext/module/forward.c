@@ -35,11 +35,10 @@
  * compiled frames off, `__pycc_forward__` patches nothing.
  */
 
-/* The trampolines, one per lift of the module, and how many there are:
+/* The trampolines, one per lift of the module, and how many there are, are
  * defined by the generated companion (`forward_trampolines_c` in
- * src/ext_build/exports_inc.rs). */
-extern const int pycc_fwd_slot_count;
-extern const vectorcallfunc pycc_fwd_trampolines[];
+ * src/ext_build/exports_inc.rs) and reached through the module's record
+ * (`PyccExtModule.fwd_trampolines`), as are its slots. */
 
 #define PYCC_FUNC_CODE 48
 #define PYCC_FUNC_DEFAULTS 56
@@ -85,8 +84,6 @@ static vectorcallfunc pycc_fwd_original = NULL;
 static PyObject *pycc_fwd_prefix = NULL;
 /* `"."`, which separates a qualified name's parts. */
 static PyObject *pycc_fwd_dot = NULL;
-static PycFwdSlot *pycc_fwd_slots = NULL;
-static int pycc_fwd_used = 0;
 
 /* `property`, `classmethod` and `staticmethod`, and what each wraps. */
 static PyObject *pycc_fwd_wrapper_types[3] = {NULL, NULL, NULL};
@@ -397,10 +394,10 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
 
 /* Trampoline `index`'s call: straight to the compiled body when the call
  * passes exactly the positional parameters, else `pycc_fwd_bind`. */
-static PyObject *pycc_fwd_call(int index, PyObject *func, PyObject *const *args, size_t nargsf,
-                               PyObject *kwnames)
+static PyObject *pycc_fwd_call_in(PyccExtModule *m, int index, PyObject *func,
+                                  PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    PycFwdSlot *slot = &pycc_fwd_slots[index];
+    PycFwdSlot *slot = &m->fwd_slots[index];
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
 
     if (kwnames == NULL && nargs == slot->argcount && slot->simple
@@ -426,7 +423,7 @@ static int pycc_fwd_code_int(PyObject *code, const char *name)
  * Python function whose code names only a lift (`__pycc_lift...`) bound in
  * `ns` and has at most the `__class__` cell.
  */
-static void pycc_fwd_patch(PyObject *ns, PyObject *func)
+static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
 {
     PyObject *code, *names, *freevars, *lift, *target;
     PycFwdSlot *slot;
@@ -434,7 +431,7 @@ static void pycc_fwd_patch(PyObject *ns, PyObject *func)
 
     if (Py_TYPE(func) != (PyTypeObject *)pycc_frames_function_type
         || *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) != pycc_fwd_original
-        || pycc_fwd_used >= pycc_fwd_slot_count) {
+        || m->fwd_used >= *m->fwd_slot_count) {
         return;
     }
     code = PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE);
@@ -452,7 +449,7 @@ static void pycc_fwd_patch(PyObject *ns, PyObject *func)
     if (target == NULL || !PyCFunction_Check(target)) {
         goto done;
     }
-    slot = &pycc_fwd_slots[pycc_fwd_used];
+    slot = &m->fwd_slots[m->fwd_used];
     memset(slot, 0, sizeof(*slot));
     flags = pycc_fwd_code_int(code, "co_flags");
     slot->argcount = pycc_fwd_code_int(code, "co_argcount");
@@ -497,23 +494,24 @@ static void pycc_fwd_patch(PyObject *ns, PyObject *func)
     }
     *(int *)((char *)code + PYCC_CODE_FLAGS) |= PYCC_CO_SIGNATURE;
     *(uint32_t *)((char *)func + PYCC_FUNC_VERSION) = 0;
-    *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) = pycc_fwd_trampolines[pycc_fwd_used];
-    pycc_fwd_used++;
+    *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) = m->fwd_trampolines[m->fwd_used];
+    m->fwd_used++;
 done:
     PyErr_Clear();
     Py_XDECREF(names);
     Py_XDECREF(freevars);
 }
 
-static void pycc_fwd_walk(PyObject *ns, PyObject *obj, int depth);
+static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth);
 
 /* Walks `obj.<name>` when `obj` has it. */
-static void pycc_fwd_walk_attr(PyObject *ns, PyObject *obj, const char *name, int depth)
+static void pycc_fwd_walk_attr(PyccExtModule *m, PyObject *ns, PyObject *obj, const char *name,
+                               int depth)
 {
     PyObject *inner = PyObject_GetAttrString(obj, name);
 
     if (inner != NULL && inner != obj && inner != Py_None) {
-        pycc_fwd_walk(ns, inner, depth + 1);
+        pycc_fwd_walk(m, ns, inner, depth + 1);
     }
     Py_XDECREF(inner);
     PyErr_Clear();
@@ -523,7 +521,7 @@ static void pycc_fwd_walk_attr(PyObject *ns, PyObject *obj, const char *name, in
  * (`functools.wraps`'s `__wrapped__`, `functools.cached_property`'s and
  * `partialmethod`'s `func`, a `wrapped` field), without running any of
  * its attribute hooks. */
-static void pycc_fwd_walk_dict(PyObject *ns, PyObject *obj, int depth)
+static void pycc_fwd_walk_dict(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth)
 {
     static const char *const keys[] = {"__wrapped__", "wrapped", "func", NULL};
     PyObject *dict;
@@ -540,7 +538,7 @@ static void pycc_fwd_walk_dict(PyObject *ns, PyObject *obj, int depth)
 
         if (inner != NULL && inner != obj) {
             Py_INCREF(inner);
-            pycc_fwd_walk(ns, inner, depth + 1);
+            pycc_fwd_walk(m, ns, inner, depth + 1);
             Py_DECREF(inner);
         }
     }
@@ -550,7 +548,7 @@ static void pycc_fwd_walk_dict(PyObject *ns, PyObject *obj, int depth)
 
 /* Patches the forwarders reachable from `obj`: itself, or the function a
  * decorator wraps (`depth` bounds the walk). */
-static void pycc_fwd_walk(PyObject *ns, PyObject *obj, int depth)
+static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth)
 {
     int i, j;
 
@@ -558,8 +556,8 @@ static void pycc_fwd_walk(PyObject *ns, PyObject *obj, int depth)
         return;
     }
     if (Py_TYPE(obj) == (PyTypeObject *)pycc_frames_function_type) {
-        pycc_fwd_patch(ns, obj);
-        pycc_fwd_walk_dict(ns, obj, depth);
+        pycc_fwd_patch(m, ns, obj);
+        pycc_fwd_walk_dict(m, ns, obj, depth);
         return;
     }
     if (PyType_Check(obj)) {
@@ -569,12 +567,12 @@ static void pycc_fwd_walk(PyObject *ns, PyObject *obj, int depth)
         if (pycc_fwd_wrapper_types[i] != NULL
             && Py_TYPE(obj) == (PyTypeObject *)pycc_fwd_wrapper_types[i]) {
             for (j = 0; pycc_fwd_wrapper_attrs[i][j] != NULL; j++) {
-                pycc_fwd_walk_attr(ns, obj, pycc_fwd_wrapper_attrs[i][j], depth);
+                pycc_fwd_walk_attr(m, ns, obj, pycc_fwd_wrapper_attrs[i][j], depth);
             }
             return;
         }
     }
-    pycc_fwd_walk_dict(ns, obj, depth);
+    pycc_fwd_walk_dict(m, ns, obj, depth);
 }
 
 /*
@@ -616,14 +614,22 @@ static PyObject *pycc_fwd_resolve(PyObject *ns, PyObject *qualname)
     return obj;
 }
 
+/* The capsule name of a module's record, the `self` of its
+ * `__pycc_forward__`. */
+#define PYCC_FWD_CAPSULE "pycc.module"
+
 /* `__pycc_forward__(qualname, ...)`: patches the forwarder each lift's
- * qualified name names in the running statement's namespace. */
+ * qualified name names in the running statement's namespace, into the slots
+ * of the module whose record `self` holds. */
 static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 {
     PyObject *ns = PyEval_GetGlobals();
+    PyccExtModule *m = (PyccExtModule *)PyCapsule_GetPointer(self, PYCC_FWD_CAPSULE);
     Py_ssize_t i;
 
-    (void)self;
+    if (m == NULL) {
+        return NULL;
+    }
     if (pycc_fwd_original == NULL || ns == NULL || !PyDict_Check(ns)) {
         Py_RETURN_NONE;
     }
@@ -631,7 +637,7 @@ static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssiz
         PyObject *obj = pycc_fwd_resolve(ns, args[i]);
 
         if (obj != NULL) {
-            pycc_fwd_walk(ns, obj, 0);
+            pycc_fwd_walk(m, ns, obj, 0);
             Py_DECREF(obj);
         }
         PyErr_Clear();
@@ -643,23 +649,28 @@ static PyMethodDef pycc_ext_forward_def = {
     "__pycc_forward__", (PyCFunction)(void (*)(void))pycc_ext_forward, METH_FASTCALL, NULL,
 };
 
-/* Binds `__pycc_forward__` in `module`'s namespace for the body; 0, or -1
- * with an exception set. */
-static int pycc_ext_forward_install(PyObject *module)
+/* Binds `__pycc_forward__` in the namespace of `module`, of record `m`, for
+ * the body; 0, or -1 with an exception set. */
+static int pycc_ext_forward_install(PyccExtModule *m, PyObject *module)
 {
     PyObject *hook;
+    PyObject *capsule;
     int status;
 
-    if (pycc_fwd_slot_count > 0 && pycc_fwd_slots == NULL) {
-        pycc_fwd_slots = (PycFwdSlot *)PyMem_Calloc((size_t)pycc_fwd_slot_count,
-                                                    sizeof(PycFwdSlot));
-        if (pycc_fwd_slots == NULL) {
+    if (*m->fwd_slot_count > 0 && m->fwd_slots == NULL) {
+        m->fwd_slots = (PycFwdSlot *)PyMem_Calloc((size_t)*m->fwd_slot_count, sizeof(PycFwdSlot));
+        if (m->fwd_slots == NULL) {
             PyErr_NoMemory();
             return -1;
         }
     }
     pycc_forward_probe();
-    hook = PyCFunction_NewEx(&pycc_ext_forward_def, NULL, NULL);
+    capsule = PyCapsule_New(m, PYCC_FWD_CAPSULE, NULL);
+    if (capsule == NULL) {
+        return -1;
+    }
+    hook = PyCFunction_NewEx(&pycc_ext_forward_def, capsule, NULL);
+    Py_DECREF(capsule);
     if (hook == NULL) {
         return -1;
     }

@@ -28,7 +28,10 @@ fn shim_unpack_suffixes() -> BTreeSet<String> {
     for (start, _) in shim.match_indices(PREFIX) {
         let rest = &shim[start + PREFIX.len()..];
         let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_');
-        found.insert(rest[..end.unwrap_or(rest.len())].to_string());
+        let suffix = &rest[..end.unwrap_or(rest.len())];
+        // `pycc_ext_unpack_<x>_in` is the runtime unit's form of the module
+        // unit's `pycc_ext_unpack_<x>`, taking the module's record.
+        found.insert(suffix.strip_suffix("_in").unwrap_or(suffix).to_string());
     }
     found
 }

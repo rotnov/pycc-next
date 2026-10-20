@@ -470,6 +470,34 @@ Accept:
    precompiled fallback run in its own dict, and the compile time of one large LLVM
    module measured early (per-module LLVM modules in one artifact, calling each other
    through symbols, is the fallback shape).
+   **Progress 2026-10-20** (not met): (c)'s first stage landed -- the packaging. `pycc
+   build PKG --ext -o PKG/__init__` compiles every module of the package into one
+   `PKG/__init__.abi3.so`: each module by a member build of its own, in parallel and
+   with its per-module code unchanged (its own LLVM module, its own C unit), then one
+   runtime unit, one package unit (`src/ext/package/finder.c`: `PyInit_<pkg>`, the
+   `sys.meta_path` finder, `PyModule_FromDefAndSpec`/`PyModule_ExecDef` per module)
+   and one link. Decisions, with the guru advisor: symbols are isolated where they
+   are emitted (`pycc_codegen::member_symbols`: every symbol a member defines, and the
+   module-unit entry points it calls, renamed `pycc_P<len><part>..._` after
+   optimization and before the split emission, whose promoted locals take the same
+   prefix; the member's C unit reads the same names from a generated header and makes
+   its own definitions `static`), not by `ld -r`/`objcopy`; the shim's per-module
+   state is an explicit record per module (`PyccExtModule`: name, class tables,
+   carrier types, home module, forwarder slots, exec keys), passed by the module
+   unit's entry points, not ambient; frame globals are bound per function record at
+   each exec; user exception classes share one registry with package-unique tags
+   (each member's tag base estimated from the sources and checked after its build),
+   and `except` in one module matches another module's classes through a
+   class-based fallback of the tag test (as CPython's `isinstance`). Measured
+   (local, shared 4-core Xeon, 15 interleaved fresh-process runs, best / median ms):
+   pydantic built whole against one extension per module, import 77.0 / 96.2
+   against 92.3 / 115.3 (CPython 59.7 / 73.3), define 10.1 / 12.8 against 10.6 /
+   13.9, schema 17.5 / 20.9 against 19.5 / 22.9, round-trips 16.5 / 19.6 against
+   15.7 / 20.1; 1025 of 1249 functions native; its suite fails the same 4 tests as
+   against its sources (`test_exports`, which import the package in a subprocess
+   without it on the path) and passes 5758. So the import gains about 15 ms
+   (more than the 7.8 ms of extension creation measured before: one `dlopen`, one
+   runtime mapped), and the rest is unchanged, as the code each module runs is.
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions
@@ -520,6 +548,12 @@ Accept:
    extensions, through CPython. That, and the
    parsers' `Generic[ST]` and cross-module bases, are what the whole-package build of
    accept 1's design removes.
+   **Progress 2026-10-20** (not met): built whole (accept 1's first stage), mistune
+   is one extension of 38 modules, built in 6.5 s locally (7.0 s as 38 extensions,
+   the CI bound 10 s), its 1155 tests passing, 386 of 413 functions native,
+   65.3M instructions per `mistune.html` pass (65.2M), 0.96x and 0.90x (best of 5,
+   noisy host): the modules still reach each other's instances through CPython,
+   which the next stages (native calls, then native classes across modules) change.
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.

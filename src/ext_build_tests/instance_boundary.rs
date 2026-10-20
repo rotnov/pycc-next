@@ -57,7 +57,8 @@ fn an_instance_argument_and_result_are_one_void_pointer_slot_each() {
 #[test]
 fn the_instance_helpers_are_declared_above_the_include_and_defined_below_it() {
     let shim = shim_c();
-    let include = shim
+    let unit = super::shim_split::module_unit();
+    let include = unit
         .find("#include \"pycc_ext_exports.inc\"")
         .expect("the generated include");
     // The generated wrappers call both, so both are declared before the
@@ -65,20 +66,20 @@ fn the_instance_helpers_are_declared_above_the_include_and_defined_below_it() {
     // `pycc_ext_carrier_class_isinstance` and the module name macro.
     for (declaration, definition) in [
         (
-            "static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, \
+            "PYCC_SHIM int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, \
              Py_ssize_t index,\n                                    const char *class_name, \
              void **out);\n",
-            "static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, \
+            "PYCC_SHIM int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, \
              Py_ssize_t index,\n                                    const char *class_name, \
              void **out)\n{",
         ),
         (
-            "static PyObject *pycc_ext_pack_instance(void *result);\n",
-            "static PyObject *pycc_ext_pack_instance(void *result)\n{",
+            "PYCC_SHIM PyObject *pycc_ext_pack_instance(void *result);\n",
+            "PYCC_SHIM PyObject *pycc_ext_pack_instance(void *result)\n{",
         ),
     ] {
-        let declared = shim.find(declaration).expect(declaration);
-        let defined = shim.find(definition).expect(definition);
+        let declared = unit.find(declaration).expect(declaration);
+        let defined = unit.find(definition).expect(definition);
         assert!(declared < include && include < defined, "{declaration}");
     }
     // Ingress admits only this module's carriers whose instance's run-time
@@ -87,11 +88,11 @@ fn the_instance_helpers_are_declared_above_the_include_and_defined_below_it() {
     for needle in [
         "int carrier = PyType_GetSlot(Py_TYPE(obj), Py_tp_dealloc) == (void \
          *)pycc_ext_instance_dealloc;\n",
-        "            if (pycc_ext_carrier_class_isinstance(cls, len, class_name)) {\n",
+        "            if (m->carrier_class_isinstance(cls, len, class_name)) {\n",
         "                pycc_rt_instance_incref(inst);\n                *out = inst;\n                return 0;\n",
         "is uninitialized (its __init__ never \"\n                     \"ran)\"",
         "\"%s() argument %zd must be %s.%s, not %U\"",
-        "    packed = pycc_ext_obj_pack_instance(result);\n    pycc_rt_instance_decref(result);\n",
+        "    packed = pycc_ext_obj_pack_instance_in(m, result);\n    pycc_rt_instance_decref(result);\n",
     ] {
         assert!(shim.contains(needle), "{needle}");
     }

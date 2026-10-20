@@ -216,8 +216,12 @@ fn pip_builds_installs_and_runs_a_compiled_wheel() {
             .args(["-I", "-c", LOADERS])
             .current_dir(&cwd),
     );
+    // The package is built whole (v0.8) with the modules that build like its
+    // `__init__` (non-strict: `geo.loose`, a module of the package's
+    // extension, imported by its finder); `geo.shapes` (strict) is an
+    // extension of its own beside it.
     assert_eq!(
-        loaders, "ExtensionFileLoader ExtensionFileLoader ExtensionFileLoader SourceFileLoader\n",
+        loaders, "ExtensionFileLoader ExtensionFileLoader _PyccFinder SourceFileLoader\n",
         "geo, geo.shapes and geo.loose must be compiled, geo.cli Python"
     );
     let script = run_ok(&mut Command::new(scratch.join("venv/bin/geo-demo")));

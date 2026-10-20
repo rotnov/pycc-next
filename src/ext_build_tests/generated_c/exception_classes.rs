@@ -23,34 +23,23 @@ fn inc_from_source(source: &str) -> String {
 }
 
 #[test]
-fn a_program_with_no_user_exception_class_still_emits_both_class_functions() {
-    // Both are emitted unconditionally, with empty bodies: the shim calls
-    // them by name whatever the program declares, so an artifact that
-    // omitted them would fail to link. A program whose only exception
-    // classes are the seeded builtins is this same case -- they carry
-    // `None` or a fixed tag below `FIRST_USER_EXCEPTION_TYPE_TAG` and are
-    // never table entries.
+fn a_program_with_no_user_exception_class_still_emits_the_registration() {
+    // Emitted unconditionally, with an empty body: the shim calls it by
+    // name whatever the program declares, so an artifact that omitted it
+    // would fail to link. A program whose only exception classes are the
+    // seeded builtins is this same case -- they carry `None` or a fixed tag
+    // below `FIRST_USER_EXCEPTION_TYPE_TAG` and are never table entries.
+    // The lookups by tag and by class live in the shim's registry
+    // (`bridge.c`), shared by every module of a package's extension.
     let inc = inc_no_classes("m", &[]);
-    assert!(
-        inc.contains(&format!(
-            "{USER_EXCEPTION_LOOKUP_DECL}\n{{\n    (void)tag;\n    return NULL;\n}}\n"
-        )),
-        "{inc}"
-    );
     assert!(
         inc.contains(&format!(
             "{USER_EXCEPTION_REGISTER_DECL}\n{{\n    (void)module;\n    return 0;\n}}\n"
         )),
         "{inc}"
     );
-    assert!(
-        inc.contains(&format!(
-            "{USER_EXCEPTION_MATCH_DECL}\n{{\n    (void)exc;\n    (void)class_name;\n    \
-             (void)class_name_len;\n    return -1;\n}}\n"
-        )),
-        "{inc}"
-    );
     assert!(!inc.contains("pycc_ext_user_exception_classes["), "{inc}");
+    assert!(!inc.contains("pycc_ext_user_exception_register("), "{inc}");
     let builtins_only = inc_from_source("try:\n    x = 1\nexcept ValueError:\n    x = 2\n");
     assert!(
         !builtins_only.contains("pycc_ext_user_exception_classes["),
@@ -87,11 +76,13 @@ fn a_class_subclassing_exception_is_registered_under_the_qualified_module_name()
         inc.contains("    if (pycc_ext_user_exception_classes[0] == NULL) {\n"),
         "{inc}"
     );
-    // Every tag the table does not hold -- tag 0, the 23..=24 pair C3 keeps
-    // as `Exception`, and any sparse gap -- leaves the `switch` through an
-    // explicit `return NULL`, never off the end of a non-`void` function.
+    // The class is entered in the shim's registry under its tag, with its
+    // name, once created.
     assert!(
-        inc.contains("    default:\n        return NULL;\n    }\n}\n"),
+        inc.contains(&format!(
+            "    pycc_ext_user_exception_register({FIRST_USER_EXCEPTION_TYPE_TAG}, \
+             pycc_ext_user_exception_classes[0], \"MyError\");\n"
+        )),
         "{inc}"
     );
 }
@@ -175,11 +166,15 @@ fn a_group_derived_class_is_excluded_without_shifting_the_class_beside_it() {
     );
     assert!(
         inc.contains(&format!(
-            "    case {user_tag}:\n        return pycc_ext_user_exception_classes[0];\n"
+            "    pycc_ext_user_exception_register({user_tag}, \
+             pycc_ext_user_exception_classes[0], \"E\");\n"
         )),
         "{inc}"
     );
-    assert!(!inc.contains(&format!("    case {group_tag}:")), "{inc}");
+    assert!(
+        !inc.contains(&format!("pycc_ext_user_exception_register({group_tag},")),
+        "{inc}"
+    );
     assert!(
         inc.contains("PYCC_EXT_MODULE_NAME_STR \".E\", PyExc_ValueError, NULL);"),
         "{inc}"

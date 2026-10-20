@@ -1,10 +1,11 @@
 """Build pydantic v2's Python part with pycc-next and count what compiles (v0.7).
 
 pydantic 2.13.5 (MIT), pinned by the sha256 of its PyPI sdist, is built unchanged
-module by module, each as its own `--ext --non-strict --foreign-relative-imports`
-extension module (pydantic-core, its Rust part, is not built: it is the PyPI wheel the
-test interpreter has installed; `pydantic.v1`, the bundled copy of pydantic 1, is
-skipped). For every module the script prints how many of its
+with `--ext --non-strict`: whole, into one extension `pydantic/__init__.abi3.so` holding
+every module (`pycc build pydantic --ext`, v0.8), or with `--separate` module by module,
+each as its own `--foreign-relative-imports` extension module (pydantic-core, its Rust
+part, is not built: it is the PyPI wheel the test interpreter has installed;
+`pydantic.v1`, the bundled copy of pydantic 1, is kept in Python). For every module the script prints how many of its
 functions and methods compile natively, from `--report-fallbacks`: a `def` inside a
 range the report says runs in CPython (`fallback: ... at f:a-b runs in CPython`) is
 not native; a class statement CPython runs with its methods compiled reports only its
@@ -16,8 +17,12 @@ This is the one-off v0.7 accept-4 measurement, not a CI gate.
 Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
                                        [--jobs N] [--tests PYTHON]
                                        [--time [PYTHON]] [--runs N] [--repeat R]
-                                       [MODULE ...]
-  MODULE   build only the modules whose path contains one of these strings.
+                                       [--separate] [MODULE ...]
+  MODULE   build only the modules whose path contains one of these strings
+           (implies --separate).
+  --separate
+           build each module as its own extension (before v0.8's whole-package
+           build).
   --keep   leave the built tree (compiled modules, `.py` files removed, the sdist's
            tests beside them) in DIR instead of a temporary directory.
   --tests  then run pydantic's own test suite against the compiled tree with
@@ -38,6 +43,7 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
 """
 import argparse
 import concurrent.futures
+import os
 import pathlib
 import json
 import re
@@ -69,20 +75,18 @@ PYDANTIC = package_check.Package(
     instruction_calls=0,
 )
 
-FALLBACK = re.compile(r"^fallback: .*? at .*?:(\d+)(?:-(\d+))? runs in CPython: (.*)$", re.M)
+FALLBACK = re.compile(r"^fallback: .*? at (.*?):(\d+)(?:-(\d+))? runs in CPython: (.*)$", re.M)
 
 
 def count_defs(text: str) -> int:
     return len(re.findall(r"^\s*(?:async\s+)?def ", text, re.M))
 
 
-def build(pycc: str, py: pathlib.Path) -> tuple[pathlib.Path, int, int, list[str]]:
-    """Builds one module; returns it, its function count, how many run in CPython,
-    and the report's fallback reasons (or the build failure)."""
-    out = py.parent / "__init__" if py.name == "__init__.py" else py.with_suffix("")
-    r = subprocess.run([pycc, "build", str(py), "-o", str(out), "--ext", "--non-strict",
-                        "--release", "--foreign-relative-imports", "--report-fallbacks"],
-                       capture_output=True, text=True, timeout=1800)
+def count(py: pathlib.Path, r: subprocess.CompletedProcess,
+          whole: bool) -> tuple[pathlib.Path, int, int, list[str]]:
+    """`py`, its function count, how many run in CPython and the report's fallback
+    reasons (or the build failure), from the build `r` (of the whole package when
+    `whole`, whose report names each module's file)."""
     text = py.read_text(encoding="utf-8")
     defs = count_defs(text)
     if r.returncode != 0:
@@ -91,11 +95,25 @@ def build(pycc: str, py: pathlib.Path) -> tuple[pathlib.Path, int, int, list[str
     lines = text.splitlines()
     fell, notes = 0, []
     for m in FALLBACK.finditer(r.stderr):
-        lo, hi = int(m[1]), int(m[2] or m[1])
+        if whole and pathlib.Path(m[1]).resolve() != py.resolve():
+            continue
+        lo, hi = int(m[2]), int(m[3] or m[2])
         n = count_defs("\n".join(lines[lo - 1:hi]))
         fell += n
-        notes.append(f"{lo}-{hi} ({n}): {m[3][:160]}")
+        notes.append(f"{lo}-{hi} ({n}): {m[4][:160]}")
     return py, defs, fell, notes
+
+
+FLAGS = ["--ext", "--non-strict", "--release", "--report-fallbacks"]
+
+
+def build(pycc: str, py: pathlib.Path) -> tuple[pathlib.Path, int, int, list[str]]:
+    """Builds one module as its own extension (`--separate`)."""
+    out = py.parent / "__init__" if py.name == "__init__.py" else py.with_suffix("")
+    r = subprocess.run([pycc, "build", str(py), "-o", str(out), *FLAGS,
+                        "--foreign-relative-imports"],
+                       capture_output=True, text=True, timeout=1800)
+    return count(py, r, whole=False)
 
 
 WORKLOAD = pathlib.Path(__file__).resolve().parent / "pydantic_workload.py"
@@ -146,6 +164,7 @@ def main() -> int:
     p.add_argument("--time", nargs="?", const=sys.executable)
     p.add_argument("--runs", type=int, default=15)
     p.add_argument("--repeat", type=int, default=20)
+    p.add_argument("--separate", action="store_true")
     a = p.parse_args()
     archive = package_check.fetch(PYDANTIC, pathlib.Path(a.cache))
     with tempfile.TemporaryDirectory() as tmp_name:
@@ -163,21 +182,33 @@ def main() -> int:
         if a.modules:
             mods = [m for m in mods if any(o in str(m) for o in a.modules)]
         total = fell_total = failed = 0
-        with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
-            for py, defs, fell, notes in ex.map(lambda q: build(a.pycc, q), mods):
-                total += defs
-                fell_total += fell
-                failed += bool(notes and notes[0].startswith("BUILD FAILED"))
-                print(f"{py.relative_to(tree)}: {defs - fell}/{defs} native")
-                for n in notes:
-                    print("    " + n)
-                sys.stdout.flush()
+        if a.separate or a.modules:
+            with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
+                results = list(ex.map(lambda q: build(a.pycc, q), mods))
+        else:
+            package = tree / "pydantic"
+            r = subprocess.run([a.pycc, "build", str(package), "-o", str(package / "__init__"),
+                                *FLAGS, "--exclude", "v1"], capture_output=True, text=True,
+                               timeout=3600, env=dict(os.environ, PYCC_JOBS=str(a.jobs)))
+            results = [count(q, r, whole=True) for q in mods]
+        for py, defs, fell, notes in results:
+            total += defs
+            fell_total += fell
+            failed += bool(notes and notes[0].startswith("BUILD FAILED"))
+            print(f"{py.relative_to(tree)}: {defs - fell}/{defs} native")
+            for n in notes:
+                print("    " + n)
+            sys.stdout.flush()
         print(f"TOTAL: {total - fell_total}/{total} functions native, "
               f"{failed} modules failed to build")
         if not a.tests and not a.time:
             return 1 if failed else 0
-        for so in (tree / "pydantic").rglob("*.abi3.so"):
-            so.with_name(so.name.replace(".abi3.so", ".py")).unlink(missing_ok=True)
+        for py in mods:
+            # A module whose separate build failed stays Python.
+            if not (a.separate or a.modules) or any(
+                    q.name.startswith(py.stem + ".") and q.suffix in (".so", ".pyd")
+                    for q in py.parent.iterdir()):
+                py.unlink()
         if a.time:
             plain = tmp / "plain"
             shutil.copytree(src / "pydantic", plain / "pydantic")

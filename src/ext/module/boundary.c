@@ -546,7 +546,7 @@ static PyObject *pycc_ext_pack_object(void *result)
 
 /* Defined later in the translation unit (`object_convert.c`,
  * `pycc_ext_object_ops.c`). */
-PyObject *pycc_ext_obj_pack_list(void *list);
+static PyObject *pycc_ext_obj_pack_list_in(PyccExtModule *m, void *list);
 int pycc_ext_coerce_str_tuple(PyObject *o, const char *what, void **out);
 extern void pycc_rt_list_decref(void *list);
 
@@ -573,7 +573,7 @@ static int pycc_ext_unpack_str_tuple(PyObject *obj, const char *fn_name, Py_ssiz
  * same object every time it crosses). Consumes the compiled body's owned
  * reference, as `pycc_ext_pack_str` consumes its string.
  */
-static PyObject *pycc_ext_pack_tuple_object(void *result)
+static PyObject *pycc_ext_pack_tuple_object_in(PyccExtModule *m, void *result)
 {
     PyObject *packed;
 
@@ -581,15 +581,15 @@ static PyObject *pycc_ext_pack_tuple_object(void *result)
         PyErr_SetString(PyExc_SystemError, "tuple result was NULL");
         return NULL;
     }
-    packed = pycc_ext_obj_pack_list(result);
+    packed = pycc_ext_obj_pack_list_in(m, result);
     pycc_rt_list_decref(result);
     return packed;
 }
 
 /* The `tuple[str, ...]` carrier's egress (`pycc_ext_unpack_str_tuple`). */
-static PyObject *pycc_ext_pack_str_tuple(void *result)
+static PyObject *pycc_ext_pack_str_tuple_in(PyccExtModule *m, void *result)
 {
-    return pycc_ext_pack_tuple_object(result);
+    return pycc_ext_pack_tuple_object_in(m, result);
 }
 
 /*

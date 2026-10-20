@@ -142,17 +142,17 @@ fn is_copied_constant(global: LLVMValueRef) -> bool {
 
 /// How many partitions `module` should be emitted as, or `None` to emit it
 /// whole; when split, its local symbols are promoted (module doc).
-pub(crate) fn plan(module: &Module<'_>) -> Option<Partitions> {
+pub(crate) fn plan(module: &Module<'_>, member_prefix: &str) -> Option<Partitions> {
     if cfg!(windows) {
         // D-029: object emission on Windows stays on the single path the
         // Windows tests pin.
         return None;
     }
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    plan_for(module, threads.min(MAX_PARTITIONS))
+    plan_for(module, threads.min(MAX_PARTITIONS), member_prefix)
 }
 
-fn plan_for(module: &Module<'_>, threads: usize) -> Option<Partitions> {
+fn plan_for(module: &Module<'_>, threads: usize, member_prefix: &str) -> Option<Partitions> {
     let raw = module.as_mut_ptr();
     // SAFETY: queries of the module's alias and ifunc lists.
     let has_aliases = unsafe {
@@ -181,7 +181,7 @@ fn plan_for(module: &Module<'_>, threads: usize) -> Option<Partitions> {
     if total < MIN_INSTRUCTIONS || count < 2 {
         return None;
     }
-    promote_locals(raw);
+    promote_locals(raw, member_prefix);
     // Largest first, each to the least loaded partition (ties: the lowest).
     sizes.sort_by(|(fa, a), (fb, b)| b.cmp(a).then_with(|| name(*fa).cmp(&name(*fb))));
     let mut load = vec![0usize; count];
@@ -199,16 +199,18 @@ fn plan_for(module: &Module<'_>, threads: usize) -> Option<Partitions> {
 }
 
 /// Makes every local function and global (but a copied constant) a hidden
-/// external symbol with a reserved name; an unnamed one gets a name.
-fn promote_locals(module: LLVMModuleRef) {
+/// external symbol with a reserved name; an unnamed one gets a name. A
+/// package member's (`member_prefix`, `crate::member_symbols`) carry its
+/// prefix, so two members' promoted symbols never meet in the link.
+fn promote_locals(module: LLVMModuleRef, member_prefix: &str) {
     let mut anonymous = 0usize;
     let mut promote = |value: LLVMValueRef| {
         let old = name(value);
         let new = if old.is_empty() {
             anonymous += 1;
-            format!("{LOCAL_PREFIX}anon.{anonymous}")
+            format!("{LOCAL_PREFIX}{member_prefix}anon.{anonymous}")
         } else {
-            format!("{LOCAL_PREFIX}{old}")
+            format!("{LOCAL_PREFIX}{member_prefix}{old}")
         };
         set_name(value, &new);
         // SAFETY: relinks a live global of the module.

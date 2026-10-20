@@ -100,8 +100,14 @@ pub(crate) fn optimize_and_emit(
         observer(module, applied_pipeline);
     }
     report_time("llvm: optimize", optimizing);
+    // A package member's symbols, named per module before the backend
+    // (and before the split promotes its local symbols).
+    let member_prefix = options.symbol_prefix.as_deref().unwrap_or("");
+    if !member_prefix.is_empty() {
+        crate::member_symbols::rename(module, member_prefix);
+    }
     let emitting = std::time::Instant::now();
-    let objects = if split && let Some(parts) = crate::split_emit::plan(module) {
+    let objects = if split && let Some(parts) = crate::split_emit::plan(module, member_prefix) {
         crate::split_emit::emit(module, &parts, output_path, target_triple, release)?
     } else {
         target_machine

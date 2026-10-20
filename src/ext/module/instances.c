@@ -34,26 +34,25 @@ static void pycc_ext_instance_dealloc(PyObject *self)
 }
 
 /*
- * #1435: the carrier type of each class, keyed by the class name its
- * instances' layout descriptors carry. A published class's own type object,
- * and the hidden carrier type of an unpublished class with comparison slots
- * (#1427) or field descriptors (#1448), is entered by the generated
- * `pycc_ext_register_method_types` (`pycc_ext_carrier_register`); any other
- * class -- one with neither -- gets a carrier type whose only method is the
- * shared `__copy__` (#1455) the first time one of its instances crosses
- * (`pycc_ext_carrier_type`, defined after the companion because it needs
- * the module name). The dict holds a strong reference to every type for the
- * rest of the process, which the shim's refusal of subinterpreters licenses
- * exactly as it licenses every other file-scope static here.
+ * #1435: the carrier type of each class of module `m`, keyed by the class
+ * name its instances' layout descriptors carry (`m->carrier_types`: class
+ * names are unique within a module, not within a package's extension). A
+ * published class's own type object, and the hidden carrier type of an
+ * unpublished class with comparison slots (#1427) or field descriptors
+ * (#1448), is entered by the generated `pycc_ext_register_method_types`
+ * (`pycc_ext_carrier_register`); any other class -- one with neither --
+ * gets a carrier type whose only method is the module's `__copy__` (#1455)
+ * the first time one of its instances crosses (`pycc_ext_carrier_type`).
+ * The dict holds a strong reference to every type for the rest of the
+ * process, which the shim's refusal of subinterpreters licenses exactly as
+ * it licenses every other file-scope static here.
  */
-static PyObject *pycc_ext_carrier_types = NULL;
-
-static int pycc_ext_carrier_types_ready(void)
+static int pycc_ext_carrier_types_ready(PyccExtModule *m)
 {
-    if (pycc_ext_carrier_types == NULL) {
-        pycc_ext_carrier_types = PyDict_New();
+    if (m->carrier_types == NULL) {
+        m->carrier_types = PyDict_New();
     }
-    return pycc_ext_carrier_types == NULL ? -1 : 0;
+    return m->carrier_types == NULL ? -1 : 0;
 }
 
 /* Enters a published class's type object as its instances' carrier type.
@@ -61,12 +60,12 @@ static int pycc_ext_carrier_types_ready(void)
  * runs, so a later crossing finds the type that carries the class's
  * methods rather than creating one with only `__copy__`. Returns 0, or -1
  * with a CPython exception set. */
-static int pycc_ext_carrier_register(const char *class_name, PyObject *type)
+static int pycc_ext_carrier_register_in(PyccExtModule *m, const char *class_name, PyObject *type)
 {
-    if (pycc_ext_carrier_types_ready() < 0) {
+    if (pycc_ext_carrier_types_ready(m) < 0) {
         return -1;
     }
-    return PyDict_SetItemString(pycc_ext_carrier_types, class_name, type);
+    return PyDict_SetItemString(m->carrier_types, class_name, type);
 }
 
 /* Stores the instance a successful `tp_init` built and records `self` as
@@ -121,24 +120,6 @@ static PyObject *pycc_ext_pack_memoryview_borrowed_slice(PyObject *owner, const 
                                                          const char *fn_name, Py_ssize_t index,
                                                          int writable, long long start,
                                                          long long stop);
-/*
- * Part 1 of #1447 (#1449): the two halves of a same-module instance
- * crossing, declared here because the generated wrappers in the companion
- * `#include`d next are their only callers and defined after it because both
- * need what the companion defines -- the ingress asks the generated
- * `pycc_ext_carrier_class_isinstance`, and the egress reuses #1435's
- * `pycc_ext_obj_pack_instance`, which needs the module name.
- */
-static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize_t index,
-                                    const char *class_name, void **out);
-static PyObject *pycc_ext_pack_instance(void *result);
-static int pycc_ext_slot_operand_is(PyObject *other, const char *class_name);
-/*
- * #1455: the `__copy__` every carrier type carries, declared here because
- * the generated per-class method tables in the companion name it and defined
- * after it because it calls the generated `pycc_ext_carrier_class_copy_kinds`.
- */
-static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused);
 
 /*
  * #1461: keyword arguments at the host boundary, bound by name as CPython
@@ -340,17 +321,6 @@ static void pycc_ext_unhashable_slots(PyType_Slot *slots)
     }
 }
 
-/*
- * Defined in the generated companion (`CARRIER_CLASS_ISINSTANCE_DECL` and
- * `CARRIER_CLASS_COPY_KINDS_DECL` in `src/ext_build/`), and called below it.
- * Declared here for the shim's runtime unit, which is compiled without the
- * companion (`src/ext_build/shim_split.rs`).
- */
-static int pycc_ext_carrier_class_isinstance(const unsigned char *cls, size_t len, const char *name);
-static int pycc_ext_carrier_class_copy_kinds(const unsigned char *cls, size_t len,
-                                             const char **kinds, size_t *nkinds,
-                                             const char **refused);
-
 #include "pycc_ext_exports.inc"
 
 /*
@@ -372,7 +342,7 @@ static int pycc_ext_carrier_class_copy_kinds(const unsigned char *cls, size_t le
  * CPython. The clone takes its own reference to every slot value, by the
  * slot's kind (`pycc_rt_ext_instance_copy`), `o` slots included.
  */
-static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
+static PyObject *pycc_ext_instance_copy_in(PyccExtModule *m, PyObject *self)
 {
     PyTypeObject *tp = Py_TYPE(self);
     void *inst = ((PyccExtInstance *)self)->inst;
@@ -387,7 +357,6 @@ static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
     PyObject *carrier;
     int found;
 
-    (void)unused;
     if (inst == NULL) {
         Py_ssize_t name_len = 0;
         name = PyType_GetName(tp);
@@ -404,7 +373,7 @@ static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
     else {
         cls = pycc_rt_ext_instance_class(inst, &len);
     }
-    found = pycc_ext_carrier_class_copy_kinds(cls, len, &kinds, &nkinds, &refused);
+    found = m->carrier_class_copy_kinds(cls, len, &kinds, &nkinds, &refused);
     Py_XDECREF(name);
     if (found < 0) {
         PyErr_SetString(PyExc_SystemError, "pycc: no copy table entry for a carrier's class");
@@ -438,29 +407,6 @@ static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
     return carrier;
 }
 
-/*
- * #1455: the method table of a carrier type created on demand -- the shared
- * `__copy__` alone. A class with no published type still copies like a
- * Python object; the generated table refuses the ones that must not.
- */
-static PyMethodDef pycc_ext_carrier_methods[] = {
-    {"__copy__", (PyCFunction)(void (*)(void))pycc_ext_instance_copy, METH_NOARGS, NULL},
-    {NULL, NULL, 0, NULL},
-};
-
-/*
- * #1435: the slots of a carrier type created on demand -- the shared
- * deallocator and, since #1455, the shared `__copy__`; no other method, and
- * no descriptor or comparison slot, because a class that has either gets a
- * generated hidden carrier type instead (#1427, #1448). The
- * spec's `Py_TPFLAGS_DISALLOW_INSTANTIATION` keeps the host from calling it,
- * since no `tp_init` exists to build the instance it would carry.
- */
-static PyType_Slot pycc_ext_carrier_slots[] = {
-    {Py_tp_dealloc, pycc_ext_instance_dealloc},
-    {Py_tp_methods, pycc_ext_carrier_methods},
-    {0, NULL},
-};
 
 /*
  * The carrier type for the class named `name`/`len` (a borrowed reference
@@ -476,11 +422,11 @@ static PyType_Slot pycc_ext_carrier_slots[] = {
  * `tp_name` may point at the spec's name, and the type itself is never
  * released either.
  */
-static PyObject *pycc_ext_carrier_type(const unsigned char *name, size_t len)
+static PyObject *pycc_ext_carrier_type(PyccExtModule *m, const unsigned char *name, size_t len)
 {
     PyObject *key;
     PyObject *type;
-    size_t prefix = strlen(PYCC_EXT_MODULE_NAME_STR);
+    size_t prefix = strlen(m->name);
     char *full;
     PyType_Spec spec;
     int found;
@@ -490,14 +436,14 @@ static PyObject *pycc_ext_carrier_type(const unsigned char *name, size_t len)
                         "an instance without a class descriptor cannot cross into CPython");
         return NULL;
     }
-    if (pycc_ext_carrier_types_ready() < 0) {
+    if (pycc_ext_carrier_types_ready(m) < 0) {
         return NULL;
     }
     key = PyUnicode_FromStringAndSize((const char *)name, (Py_ssize_t)len);
     if (key == NULL) {
         return NULL;
     }
-    found = PyDict_GetItemRef(pycc_ext_carrier_types, key, &type);
+    found = PyDict_GetItemRef(m->carrier_types, key, &type);
     if (found != 0) {
         Py_DECREF(key);
         if (found < 0) {
@@ -511,7 +457,7 @@ static PyObject *pycc_ext_carrier_type(const unsigned char *name, size_t len)
         Py_DECREF(key);
         return PyErr_NoMemory();
     }
-    memcpy(full, PYCC_EXT_MODULE_NAME_STR, prefix);
+    memcpy(full, m->name, prefix);
     full[prefix] = '.';
     memcpy(full + prefix + 1, name, len);
     full[prefix + 1 + len] = '\0';
@@ -519,9 +465,9 @@ static PyObject *pycc_ext_carrier_type(const unsigned char *name, size_t len)
     spec.basicsize = (int)sizeof(PyccExtInstance);
     spec.itemsize = 0;
     spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION | Py_TPFLAGS_IMMUTABLETYPE;
-    spec.slots = pycc_ext_carrier_slots;
+    spec.slots = m->carrier_slots;
     type = PyType_FromSpec(&spec);
-    if (type == NULL || PyDict_SetItem(pycc_ext_carrier_types, key, type) < 0) {
+    if (type == NULL || PyDict_SetItem(m->carrier_types, key, type) < 0) {
         Py_XDECREF(type);
         Py_DECREF(key);
         return NULL;
@@ -549,7 +495,7 @@ static PyObject *pycc_ext_carrier_type(const unsigned char *name, size_t len)
  * lowers to a null pointer and `pycc_types` refuses as an argument; it is
  * answered with a `SystemError`, which the consuming helpers tolerate.
  */
-PyObject *pycc_ext_obj_pack_instance(void *inst)
+static PyObject *pycc_ext_obj_pack_instance_in(PyccExtModule *m, void *inst)
 {
     PyObject *carrier;
     PyObject *type;
@@ -568,7 +514,7 @@ PyObject *pycc_ext_obj_pack_instance(void *inst)
         return carrier;
     }
     name = pycc_rt_ext_instance_class(inst, &len);
-    type = pycc_ext_carrier_type(name, len);
+    type = pycc_ext_carrier_type(m, name, len);
     if (type == NULL) {
         return NULL;
     }
@@ -602,7 +548,7 @@ PyObject *pycc_ext_obj_pack_instance(void *inst)
  * carries the published-family rule. Defined after the companion include,
  * which defines the generated function it calls first.
  */
-int pycc_ext_obj_isinstance_compiled(PyObject *o, const char *name)
+static int pycc_ext_obj_isinstance_compiled_in(PyccExtModule *m, PyObject *o, const char *name)
 {
     void *inst;
     const unsigned char *cls;
@@ -616,10 +562,10 @@ int pycc_ext_obj_isinstance_compiled(PyObject *o, const char *name)
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
-            return pycc_ext_carrier_class_isinstance(cls, len, name);
+            return m->carrier_class_isinstance(cls, len, name);
         }
     }
-    return pycc_ext_compiled_class_isinstance(o, name);
+    return m->compiled_class_isinstance(o, name);
 }
 
 /*
@@ -641,8 +587,8 @@ int pycc_ext_obj_isinstance_compiled(PyObject *o, const char *name)
  * leaves nothing dangling; the carrier link the instance holds is weak and
  * cleared by the carrier's own `tp_dealloc`.
  */
-static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize_t index,
-                                    const char *class_name, void **out)
+static int pycc_ext_unpack_instance_in(PyccExtModule *m, PyObject *obj, const char *fn_name,
+                                       Py_ssize_t index, const char *class_name, void **out)
 {
     PyObject *type_name;
     void *inst = NULL;
@@ -654,7 +600,7 @@ static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize
         inst = ((PyccExtInstance *)obj)->inst;
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
-            if (pycc_ext_carrier_class_isinstance(cls, len, class_name)) {
+            if (m->carrier_class_isinstance(cls, len, class_name)) {
                 /* A reference of its own for the receiver: a parameter
                  * slot or the narrowed read owns what it is given. */
                 pycc_rt_instance_incref(inst);
@@ -677,7 +623,7 @@ static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize
                      fn_name, index + 1, type_name);
     } else {
         PyErr_Format(PyExc_TypeError, "%s() argument %zd must be %s.%s, not %U", fn_name,
-                     index + 1, PYCC_EXT_MODULE_NAME_STR, class_name, type_name);
+                     index + 1, m->name, class_name, type_name);
     }
     Py_DECREF(type_name);
     return -1;
@@ -707,7 +653,8 @@ static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize
  * `*out` is a new reference, as at the argument ingress: compiled code
  * owns the narrowed read (`heap_rc::is_borrowed_read` classifies it fresh).
  */
-int pycc_ext_obj_unbox_instance(PyObject *o, const char *class_name, void **out)
+static int pycc_ext_obj_unbox_instance_in(PyccExtModule *m, PyObject *o, const char *class_name,
+                                          void **out)
 {
     PyObject *type_name;
     void *inst = NULL;
@@ -723,7 +670,7 @@ int pycc_ext_obj_unbox_instance(PyObject *o, const char *class_name, void **out)
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
-            if (pycc_ext_carrier_class_isinstance(cls, len, class_name)) {
+            if (m->carrier_class_isinstance(cls, len, class_name)) {
                 /* A reference of its own for the receiver: a parameter
                  * slot or the narrowed read owns what it is given. */
                 pycc_rt_instance_incref(inst);
@@ -743,7 +690,7 @@ int pycc_ext_obj_unbox_instance(PyObject *o, const char *class_name, void **out)
     } else {
         PyErr_Format(PyExc_TypeError,
                      "narrowed object must be a compiled %s.%s instance, not %U",
-                     PYCC_EXT_MODULE_NAME_STR, class_name, type_name);
+                     m->name, class_name, type_name);
     }
     Py_DECREF(type_name);
     return -1;
@@ -759,7 +706,7 @@ int pycc_ext_obj_unbox_instance(PyObject *o, const char *class_name, void **out)
  * A carrier of this module that no `tp_init` filled answers 1, so the
  * wrapper refuses it with its own `uninitialized` message.
  */
-static int pycc_ext_slot_operand_is(PyObject *other, const char *class_name)
+static int pycc_ext_slot_operand_is_in(PyccExtModule *m, PyObject *other, const char *class_name)
 {
     void *inst;
     const unsigned char *cls;
@@ -773,7 +720,7 @@ static int pycc_ext_slot_operand_is(PyObject *other, const char *class_name)
         return 1;
     }
     cls = pycc_rt_ext_instance_class(inst, &len);
-    return pycc_ext_carrier_class_isinstance(cls, len, class_name);
+    return m->carrier_class_isinstance(cls, len, class_name);
 }
 
 /*
@@ -790,7 +737,7 @@ static int pycc_ext_slot_operand_is(PyObject *other, const char *class_name)
  * guard turns a would-be crash into a `SystemError` with a message that
  * names the return position rather than #1435's argument position.
  */
-static PyObject *pycc_ext_pack_instance(void *result)
+static PyObject *pycc_ext_pack_instance_in(PyccExtModule *m, void *result)
 {
     PyObject *packed;
     if (result == NULL) {
@@ -799,7 +746,7 @@ static PyObject *pycc_ext_pack_instance(void *result)
     }
     /* `result` is a reference the caller owns and hands over: the carrier
      * holds its own, so this one is released once packed. */
-    packed = pycc_ext_obj_pack_instance(result);
+    packed = pycc_ext_obj_pack_instance_in(m, result);
     pycc_rt_instance_decref(result);
     return packed;
 }

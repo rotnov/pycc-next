@@ -22,18 +22,18 @@
  * every definition shares that one's wrapper
  * (`crates/pycc_codegen/src/ext_publish.rs`); a second publish of one name
  * would still just replace the binding.
- * A class is bound from this exec's snapshot (`pycc_ext_exec_classes_key`)
+ * A class is bound from this exec's snapshot (`pycc_ext_mod.exec_classes_key`)
  * of the `pycc_ext_type_object_<Class>` static that
  * `pycc_ext_register_method_types` filled before the body, not from the
  * static itself: the static is one per process, and a nested `Py_mod_exec`
  * of this artifact mid-body replaces it, so reading it here would bind the
  * inner exec's class on the outer module.
  *
- * Returns 0, or -1 with an exception set. Not `static`: LLVM-generated code
- * declares and calls it by this name (`EXT_PUBLISH_SYMBOL` in
+ * Returns 0, or -1 with an exception set. An entry point: LLVM-generated
+ * code declares and calls it by this name (`EXT_PUBLISH_SYMBOL` in
  * `crates/pycc_codegen/src/ext.rs`).
  */
-int pycc_ext_publish(const char *name)
+PYCC_ENTRY int pycc_ext_publish(const char *name)
 {
     PyMethodDef *row = NULL;
     PyMethodDef *def;
@@ -57,15 +57,15 @@ int pycc_ext_publish(const char *name)
             return 0;
         }
     }
-    module = pycc_ext_exec_target_key == NULL
+    module = pycc_ext_mod.exec_target_key == NULL
         ? NULL
-        : (PyObject *)PyThread_tss_get(pycc_ext_exec_target_key);
+        : (PyObject *)PyThread_tss_get(pycc_ext_mod.exec_target_key);
     if (module == NULL) {
         PyErr_Format(PyExc_SystemError, "pycc: cannot publish '%s' outside its module body", name);
         return -1;
     }
     if (row == NULL) {
-        classes = (PyObject *)PyThread_tss_get(pycc_ext_exec_classes_key);
+        classes = (PyObject *)PyThread_tss_get(pycc_ext_mod.exec_classes_key);
         type = classes == NULL ? NULL : PyDict_GetItemString(classes, name);
         if (type == NULL) {
             PyErr_Format(PyExc_SystemError, "pycc: class '%s' has no type object", name);
@@ -130,7 +130,7 @@ static int pycc_ext_publish_unbound_classes(PyObject *module, PyObject *classes)
 }
 
 /*
- * #1199: the snapshot `pycc_ext_exec_classes_key` holds for one exec -- a
+ * #1199: the snapshot `pycc_ext_mod.exec_classes_key` holds for one exec -- a
  * new dict holding a reference to every published class's type object as
  * `pycc_ext_register_method_types` just made it. NULL with an exception
  * set on failure.
@@ -182,6 +182,9 @@ static int pycc_ext_exec_module(PyObject *module)
     pycc_rt_object_repr_install(pycc_ext_obj_repr_hook);
     /* A bridged exception's text is CPython's `str()`, rendered on use. */
     pycc_rt_exception_str_install(pycc_ext_exception_str_hook);
+    /* An `except` matches another module's exception classes as CPython's
+     * does (`pycc_ext_exception_tag_matches`). */
+    pycc_rt_exception_match_install(pycc_ext_exception_tag_matches);
 
     /*
      * The synthesized user exception classes are created and published as
@@ -238,7 +241,7 @@ static int pycc_ext_exec_module(PyObject *module)
      * again, and must not replace a key that live wrappers on other threads
      * still read.
      */
-    if (pycc_ext_exec_target_key == NULL) {
+    if (pycc_ext_mod.exec_target_key == NULL) {
         Py_tss_t *key = PyThread_tss_alloc();
         if (key == NULL) {
             PyErr_NoMemory();
@@ -249,10 +252,10 @@ static int pycc_ext_exec_module(PyObject *module)
             PyErr_SetString(PyExc_RuntimeError, "pycc: cannot create the exec-target key");
             return -1;
         }
-        pycc_ext_exec_target_key = key;
+        pycc_ext_mod.exec_target_key = key;
     }
     /* #1199: the exec-classes key, on the same create-once rule. */
-    if (pycc_ext_exec_classes_key == NULL) {
+    if (pycc_ext_mod.exec_classes_key == NULL) {
         Py_tss_t *key = PyThread_tss_alloc();
         if (key == NULL) {
             PyErr_NoMemory();
@@ -263,7 +266,7 @@ static int pycc_ext_exec_module(PyObject *module)
             PyErr_SetString(PyExc_RuntimeError, "pycc: cannot create the exec-classes key");
             return -1;
         }
-        pycc_ext_exec_classes_key = key;
+        pycc_ext_mod.exec_classes_key = key;
     }
     /*
      * #1199: this exec's classes, taken now, before the body can run a
@@ -279,7 +282,7 @@ static int pycc_ext_exec_module(PyObject *module)
      * #1366: this module is the one a relative import in its body resolves
      * against, for exactly the duration of the body. The previous value is
      * restored on both exits, so an exec running beneath another one on
-     * this thread (see `pycc_ext_exec_target_key`) hands the outer one's
+     * this thread (see `pycc_ext_mod.exec_target_key`) hands the outer one's
      * target back.
      */
 #ifdef PYCC_EXT_HAS_PRECOMPILED
@@ -290,11 +293,11 @@ static int pycc_ext_exec_module(PyObject *module)
         return -1;
     }
 #endif
-    saved_target = PyThread_tss_get(pycc_ext_exec_target_key);
-    saved_classes = PyThread_tss_get(pycc_ext_exec_classes_key);
-    if (PyThread_tss_set(pycc_ext_exec_target_key, module) != 0
-        || PyThread_tss_set(pycc_ext_exec_classes_key, classes) != 0) {
-        (void)PyThread_tss_set(pycc_ext_exec_target_key, saved_target);
+    saved_target = PyThread_tss_get(pycc_ext_mod.exec_target_key);
+    saved_classes = PyThread_tss_get(pycc_ext_mod.exec_classes_key);
+    if (PyThread_tss_set(pycc_ext_mod.exec_target_key, module) != 0
+        || PyThread_tss_set(pycc_ext_mod.exec_classes_key, classes) != 0) {
+        (void)PyThread_tss_set(pycc_ext_mod.exec_target_key, saved_target);
         Py_DECREF(classes);
 #ifdef PYCC_EXT_HAS_PRECOMPILED
         pycc_ext_code_remove(module);
@@ -304,21 +307,24 @@ static int pycc_ext_exec_module(PyObject *module)
     }
     /* A relative import in a compiled function resolves against it. */
     {
-        PyObject *previous = pycc_ext_home_module;
+        PyObject *previous = pycc_ext_mod.home_module;
 
         Py_INCREF(module);
-        pycc_ext_home_module = module;
+        pycc_ext_mod.home_module = module;
         Py_XDECREF(previous);
     }
     pycc_frames_probe();
     /* Compiled reads of rebindable globals check this dict (global_sync.c),
-     * on the CPython whose dict layout the probe verified. */
+     * on the CPython whose dict layout the probe verified; a compiled
+     * frame's globals are it too. */
     if (pycc_frames_state == 1) {
         pycc_ext_ns_dict = PyModule_GetDict(module);
+        pycc_ext_fn_info_bind(pycc_ext_ns_dict, (PyccFnInfo *const *)pycc_fn_info_table,
+                              pycc_fn_info_count);
     }
     /* The hook patching the forwarders of each statement CPython runs
      * (forward.c), for the body only. */
-    if (pycc_ext_forward_install(module) != 0) {
+    if (pycc_ext_forward_install(&pycc_ext_mod, module) != 0) {
         exec_status = -1;
     } else {
         exec_status = pycc_ext_module_exec();
@@ -327,8 +333,8 @@ static int pycc_ext_exec_module(PyObject *module)
 #ifdef PYCC_EXT_HAS_PRECOMPILED
     pycc_ext_code_remove(module);
 #endif
-    (void)PyThread_tss_set(pycc_ext_exec_target_key, saved_target);
-    (void)PyThread_tss_set(pycc_ext_exec_classes_key, saved_classes);
+    (void)PyThread_tss_set(pycc_ext_mod.exec_target_key, saved_target);
+    (void)PyThread_tss_set(pycc_ext_mod.exec_classes_key, saved_classes);
     if (exec_status != 0) {
         Py_DECREF(classes);
         /*
@@ -409,6 +415,19 @@ static struct PyModuleDef pycc_ext_moduledef = {
     NULL,
 };
 
+#ifdef PYCC_EXT_PACKAGE_MEMBER
+/*
+ * A module of a package built whole (v0.8): the package's extension has
+ * one `PyInit_`, the package unit's, whose finder creates this module from
+ * its definition (`PyModule_FromDefAndSpec`) and runs its exec slot
+ * (`PyModule_ExecDef`) when it is imported. `pycc_ext_member.h` names this
+ * entry point per module.
+ */
+PYCC_ENTRY PyModuleDef *pycc_ext_member_def(void)
+{
+    return &pycc_ext_moduledef;
+}
+#else
 #define PYCC_EXT_CONCAT_(a, b) a##b
 #define PYCC_EXT_CONCAT(a, b) PYCC_EXT_CONCAT_(a, b)
 
@@ -434,3 +453,4 @@ PyMODINIT_FUNC PYCC_EXT_CONCAT(PyInit_, PYCC_EXT_MODULE_NAME)(void)
     }
     return PyModuleDef_Init(&pycc_ext_moduledef);
 }
+#endif

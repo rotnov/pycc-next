@@ -215,11 +215,13 @@ static int pycc_fninfo_ready(PyccFnInfo *info)
     if (info->code != NULL) {
         return 1;
     }
-    if (pycc_frames_state != 1 || pycc_ext_home_module == NULL) {
+    /* `globals` is the dict of the module the function belongs to, which
+     * that module's exec stored (`pycc_ext_fn_info_bind`). */
+    globals = info->globals;
+    if (pycc_frames_state != 1 || globals == NULL) {
         return 0;
     }
     saved = PyErr_GetRaisedException();
-    globals = PyModule_GetDict(pycc_ext_home_module);
     buf = (unsigned char *)PyMem_Malloc((size_t)n * 2 + 8 + (size_t)n * 24);
     if (buf == NULL || globals == NULL) {
         goto done;
@@ -291,8 +293,6 @@ static int pycc_fninfo_ready(PyccFnInfo *info)
     if (func == NULL) {
         goto done;
     }
-    Py_INCREF(globals);
-    info->globals = globals;
     info->builtins = PyEval_GetBuiltins();
     Py_XINCREF(info->builtins);
     info->ip0 = pycc_code_base(code) + 1;
@@ -313,6 +313,28 @@ done:
     PyErr_Clear();
     PyErr_SetRaisedException(saved);
     return info->code != NULL;
+}
+
+/*
+ * Binds the records of one module's compiled functions (`table`, `count`:
+ * its `pycc_fn_info_table`) to `globals`, its dict, at each exec of the
+ * module: a frame's `f_globals` and its code's file come from the module
+ * the function belongs to, which in a package's extension is not the only
+ * module the runtime serves. A record whose code is already made keeps the
+ * dict it was made with, as a function object keeps its `__globals__`.
+ */
+static void pycc_ext_fn_info_bind(PyObject *globals, PyccFnInfo *const *table, long long count)
+{
+    long long i;
+
+    for (i = 0; i < count; i++) {
+        PyccFnInfo *info = table[i];
+
+        if (info->code == NULL && info->globals != globals) {
+            Py_XDECREF(info->globals);
+            info->globals = Py_NewRef(globals);
+        }
+    }
 }
 
 /* Whether `frame` runs a signature wrapper, which stands for the compiled
@@ -570,7 +592,11 @@ static void pycc_frames_probe(void)
         static const uint32_t probe_positions[1][4] = {{7, 7, 4, 9}};
         PyccFnInfo probe = {NULL, NULL, NULL, NULL, NULL, "probe", "probe", "<pycc>",
                             probe_positions, 1, 5, 0, 0, NULL};
-        PyObject *f = pycc_frame_fabricate(&probe, 0);
+        PyObject *f;
+
+        /* A namespace of its own: the probe belongs to no module. */
+        probe.globals = PyDict_New();
+        f = pycc_frame_fabricate(&probe, 0);
         int ok = 0;
 
         if (f != NULL && PyFrame_GetLineNumber((PyFrameObject *)f) == 7) {
@@ -671,8 +697,3 @@ void pycc_ext_tb_here_live(const PyccFnInfo *info, uint32_t pos, PyccIFrame *fra
     }
     pycc_rt_tb_here_frame(info, pos, f, frame);
 }
-
-/* A forwarder trampoline's call (`src/ext/module/forward.c`), named by the
- * trampolines the generated companion defines. */
-static PyObject *pycc_fwd_call(int index, PyObject *func, PyObject *const *args, size_t nargsf,
-                               PyObject *kwnames);

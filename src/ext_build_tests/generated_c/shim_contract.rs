@@ -43,23 +43,25 @@ fn the_embedded_shim_is_the_tracked_c_file_and_declares_the_limited_api_floor() 
     ] {
         assert!(SHIM_C.contains(helper), "{helper}");
     }
-    // R3: the lookup's forward declaration here and its definition in the
-    // generated companion are two hand-written spellings of one signature,
-    // bound by nothing until a C compiler runs. Both are asserted against
-    // the same constant, so a drift fails an ordinary `cargo test`.
+    // The registry the generated registration enters each user exception
+    // class in, under the one spelling the generator calls.
     assert!(
-        shim_c().contains(&format!("{USER_EXCEPTION_LOOKUP_DECL};")),
-        "{USER_EXCEPTION_LOOKUP_DECL}"
+        shim_c().contains(
+            "static void pycc_ext_user_exception_register(unsigned char tag, PyObject *cls, \
+             const char *name)\n{"
+        ),
+        "{SHIM_C}"
     );
+    // Part 7 of #1371: the compiled-class `isinstance` the companion defines
+    // reaches the shim through the module's record (`module_ctx.c`).
+    let isinstance_name = COMPILED_CLASS_ISINSTANCE_DECL
+        .split('(')
+        .next()
+        .and_then(|head| head.rsplit(' ').next())
+        .expect("the declaration names a function");
     assert!(
-        shim_c().contains(&format!("{USER_EXCEPTION_MATCH_DECL};")),
-        "{USER_EXCEPTION_MATCH_DECL}"
-    );
-    // Part 7 of #1371: the compiled-class `isinstance` is the same
-    // forward-declared-above, defined-in-the-companion arrangement.
-    assert!(
-        shim_c().contains(&format!("{COMPILED_CLASS_ISINSTANCE_DECL};")),
-        "{COMPILED_CLASS_ISINSTANCE_DECL}"
+        shim_c().contains(&format!("    {isinstance_name},\n")),
+        "{isinstance_name}"
     );
     // ... and the fall-through it calls is defined there under the one
     // spelling the generator uses.
@@ -174,7 +176,9 @@ fn the_shims_str_egress_releases_the_reference_unconditionally() {
     // A result that shares a CPython `str` returns that object, and also
     // releases the native string first.
     let shared = body.find("return shared;").expect("the shared return");
-    let shared_release = body.find("pycc_rt_str_decref(result);").expect("the release");
+    let shared_release = body
+        .find("pycc_rt_str_decref(result);")
+        .expect("the release");
     assert!(shared_release < shared && shared < pack, "{body}");
     assert!(
         pack < release && release < ret,

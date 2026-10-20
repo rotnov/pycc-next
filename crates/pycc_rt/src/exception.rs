@@ -399,6 +399,9 @@ pub unsafe extern "C" fn pycc_rt_exception_raise_with_cause(
 /// no hierarchy -- a handler whose class has subclasses matches through its
 /// MIR-built tag set, which codegen's dispatch chain
 /// (`pycc_codegen::exception`) ORs over one call to this function per tag.
+/// A tag the set does not name can still match through the `ext` shim's
+/// installed fallback (`match_hook`): an exception class of another module
+/// of the same extension, which the catching module's set cannot name.
 ///
 /// # Safety
 ///
@@ -411,8 +414,8 @@ pub unsafe extern "C" fn pycc_rt_exception_type_matches(
     if obj.is_null() {
         return 0;
     }
-    let obj_tag = unsafe { (*obj).type_tag };
-    i8::from(tag_matches(obj_tag, type_tag))
+    let exc = unsafe { &*obj };
+    i8::from(tag_matches(exc.type_tag, type_tag) || match_hook::hook_matches(exc, type_tag))
 }
 
 /// Returns the exception's own message string, borrowed and unretained
@@ -828,6 +831,7 @@ pub(crate) fn raise_key_error(kind: i64, key: i64) {
 
 mod group;
 mod lifetime;
+mod match_hook;
 mod str_form;
 
 pub use group::{pycc_rt_exception_group_alloc, pycc_rt_exception_group_partition};

@@ -19,7 +19,8 @@ file of the package is changed. Then, for each package:
      every RECORD hash and size matches;
   3. `pip install --no-index --no-deps` puts it into a fresh venv;
   4. the venv's Python (`-I`, from an empty directory) imports every module the backend
-     compiles and checks it is an extension module of the venv's site-packages, then runs
+     compiles and checks it is an extension module of the venv's site-packages (its own,
+     or a module of its package's extension, which the backend builds whole), then runs
      the package's own tests, copied out of the archive without its sources.
 
 Usage: python3 bench/wheel_check.py [PACKAGE ...] [--pycc PATH] [--backend DIR]
@@ -186,8 +187,12 @@ site = {pathlib.Path(sysconfig.get_path(k)).resolve() for k in ("purelib", "plat
 for name in sys.argv[2].split(","):
     m = importlib.import_module(name)
     f = pathlib.Path(m.__file__).resolve()
-    if not f.name.endswith((".abi3.so", ".pyd")) or not any(s in f.parents for s in site):
-        sys.exit(f"{name} was imported from {f}, not an extension module of the wheel")
+    # An extension of its own, or a module of a package's one (its finder's).
+    loader = type(m.__spec__.loader).__name__
+    if not f.name.endswith((".abi3.so", ".pyd")) or not any(s in f.parents for s in site) \
+            or loader not in ("ExtensionFileLoader", "_PyccFinder"):
+        sys.exit(f"{name} was imported from {f} ({loader}), not an extension module of "
+                 "the wheel")
     print(f"  {name}: {f.name}")
 """
 

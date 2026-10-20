@@ -42,7 +42,7 @@ _FLAT_EXCLUDE = {
 
 _TOOL_KEYS = {
     "strict", "release", "packages", "py-modules", "source-dir", "pure-python",
-    "fallback-to-python", "extra-args", "sdist-include", "overrides",
+    "fallback-to-python", "extra-args", "sdist-include", "overrides", "whole-package",
 }
 _OVERRIDE_KEYS = {"strict", "pure-python", "fallback-to-python", "extra-args"}
 
@@ -89,6 +89,7 @@ class ToolConfig:
     extra_args: list[str] = dataclasses.field(default_factory=list)
     sdist_include: list[str] = dataclasses.field(default_factory=list)
     overrides: dict[str, dict] = dataclasses.field(default_factory=dict)
+    whole_package: bool = True
 
     def options(self, module: str) -> ModuleOptions:
         """The options `module` builds with: the project-wide settings, then the
@@ -155,6 +156,8 @@ def parse_tool(table: dict) -> ToolConfig:
         cfg.strict = _expect(table["strict"], bool, "[tool.pycc] strict")
     if "release" in table:
         cfg.release = _expect(table["release"], bool, "[tool.pycc] release")
+    if "whole-package" in table:
+        cfg.whole_package = _expect(table["whole-package"], bool, "[tool.pycc] whole-package")
     if "packages" in table:
         cfg.packages = [_dotted(p, "[tool.pycc] packages")
                         for p in _str_list(table["packages"], "[tool.pycc] packages")]

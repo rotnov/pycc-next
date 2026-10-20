@@ -141,18 +141,26 @@ fn the_shim_answers_a_carrier_before_the_published_family() {
         "{inc}"
     );
     let shim = shim_c();
-    let include = shim.find("#include \"pycc_ext_exports.inc\"").unwrap();
     let definition = shim
-        .find("int pycc_ext_obj_isinstance_compiled(PyObject *o, const char *name)\n{")
+        .find(
+            "static int pycc_ext_obj_isinstance_compiled_in(PyccExtModule *m, PyObject *o, \
+             const char *name)\n{",
+        )
         .unwrap();
-    assert!(include < definition);
     let body = &shim[definition..];
     let carrier = body
-        .find("return pycc_ext_carrier_class_isinstance(cls, len, name);")
+        .find("return m->carrier_class_isinstance(cls, len, name);")
         .unwrap();
     let family = body
-        .find("return pycc_ext_compiled_class_isinstance(o, name);")
+        .find("return m->compiled_class_isinstance(o, name);")
         .unwrap();
     assert!(carrier < family);
+    // The module's record, which hands the runtime both generated tables,
+    // follows the companion in the module unit.
+    let unit = super::shim_split::module_unit();
+    let include = unit.find("#include \"pycc_ext_exports.inc\"").unwrap();
+    let record = unit.find("PyccExtModule pycc_ext_mod = {\n").unwrap();
+    assert!(include < record);
+    assert!(unit[record..].contains("    pycc_ext_carrier_class_isinstance,\n"));
     assert!(CARRIER_CLASS_ISINSTANCE_DECL.contains(" pycc_ext_carrier_class_isinstance("));
 }

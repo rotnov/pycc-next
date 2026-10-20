@@ -14,6 +14,7 @@ mod lock;
 mod memoryview_mode;
 mod mode;
 mod modules;
+mod package_build;
 mod project_config;
 mod source;
 mod specialize;
@@ -66,12 +67,22 @@ fn main() -> ExitCode {
             release,
             ext,
             foreign_relative_imports,
+            excludes,
+            package_member,
+            exception_tag_base,
             static_libpython,
             interop,
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
             fallback::set_report(mode.report_fallbacks);
+            // One module of a package built whole (v0.8): named by its
+            // dotted name, its user exception classes tagged from its base.
+            if let Some(dotted) = &package_member {
+                let base = exception_tag_base.unwrap_or(pycc_hir::FIRST_USER_EXCEPTION_TYPE_TAG);
+                package_build::set_member(dotted);
+                pycc_hir::set_exception_tag_base(base);
+            }
             // Resolved here, not inside `try_build`: this consumption point
             // (a neighboring `pycc.toml`'s `[build] opt = "release"` as a
             // default profile) is scoped to `pycc build` specifically --
@@ -103,12 +114,42 @@ fn main() -> ExitCode {
             // would race every other test in this binary.
             let toolchain = ext.then(ext_build::ExtToolchain::from_env);
             let started = std::time::Instant::now();
+            // A package directory under `--ext` is a whole-package build.
+            if let Some(toolchain) = toolchain.as_ref().filter(|_| package_member.is_none() && path.is_dir()) {
+                let mut mode_args = Vec::new();
+                if mode.non_strict {
+                    mode_args.push(std::ffi::OsString::from("--non-strict"));
+                }
+                if mode.report_fallbacks {
+                    mode_args.push(std::ffi::OsString::from("--report-fallbacks"));
+                }
+                let build = build_pipeline::PackageBuild {
+                    path: &path,
+                    out: &out,
+                    target: target.as_deref(),
+                    release,
+                    excludes: &excludes,
+                    mode_args,
+                };
+                let result = build_pipeline::build_package(&build, toolchain, &scratch);
+                timing::print(started);
+                return match result {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(code) => code,
+                };
+            }
+            // A member's objects go to its output directory, where the
+            // package build links them.
+            let obj_path = match package_member {
+                Some(_) => out.join("llvm.o"),
+                None => scratch.join("main.o"),
+            };
             let result = try_build(
                 &path,
                 &out,
                 target.as_deref(),
                 release,
-                &scratch.join("main.o"),
+                &obj_path,
                 toolchain.as_ref(),
                 &embed::EmbedToolchain::from_env().with_link(link),
                 interop.into_cli(),

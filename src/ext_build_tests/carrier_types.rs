@@ -21,18 +21,30 @@ fn the_carrier_helpers_sit_on_the_right_side_of_the_generated_include() {
         "{shim}"
     );
     // The helpers the generated registration and `tp_init` call are
-    // defined above the include too.
+    // defined above the include too: the runtime unit's, over a module's
+    // record.
     for helper in [
-        "static int pycc_ext_carrier_register(const char *class_name, PyObject *type)\n",
+        "static int pycc_ext_carrier_register_in(PyccExtModule *m, const char *class_name, \
+         PyObject *type)\n",
         "static void pycc_ext_carrier_bind(PyObject *self, void *inst)\n",
     ] {
         let at = shim.find(helper).expect(helper);
         assert!(at < include, "{helper}");
     }
-    // The packer the compiled code calls is an external definition after
-    // the include, where the module name macro exists.
-    let packer = shim
-        .find("PyObject *pycc_ext_obj_pack_instance(void *inst)\n")
+    // In the module unit, the registration the companion calls is declared
+    // before it and defined, over the module's record, after it, as is the
+    // packer the compiled code calls.
+    let unit = super::shim_split::module_unit();
+    let include = unit.find("#include \"pycc_ext_exports.inc\"").unwrap();
+    let declared = unit
+        .find("int pycc_ext_carrier_register(const char *class_name, PyObject *type);\n")
+        .expect("the registration's declaration");
+    let defined = unit
+        .find("int pycc_ext_carrier_register(const char *class_name, PyObject *type)\n{")
+        .expect("the registration");
+    assert!(declared < include && include < defined);
+    let packer = unit
+        .find("PYCC_ENTRY PyObject *pycc_ext_obj_pack_instance(void *inst)\n")
         .expect("the instance packer");
     assert!(packer > include);
 }

@@ -67,6 +67,8 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/instances.c"),
     include_str!("ext/module/forward.c"),
     include_str!("ext/module/buffers.c"),
+    include_str!("ext/module/module_ctx_head.c"),
+    include_str!("ext/module/module_ctx.c"),
     include_str!("ext/module/module_init.c"),
     include_str!("ext/pycc_ext_object_ops.c")
 );
@@ -568,6 +570,12 @@ pub(crate) const SHIM_RUNTIME_C_NAME: &str = "pycc_ext_runtime.c";
 /// [`SHIM_C_NAME`]), the companion it includes (at [`EXPORTS_INC_NAME`])
 /// and the runtime unit (at [`SHIM_RUNTIME_C_NAME`]). The two `.c` files
 /// are what is compiled, module unit first.
+/// The shim's runtime unit (`shim_split`): one copy serves every module of
+/// a package's extension, which the package build compiles itself.
+pub(crate) fn runtime_unit_text() -> &'static str {
+    shim_split::runtime_unit()
+}
+
 pub(crate) fn shim_sources(obj_path: &Path, inc_body: &str) -> [(PathBuf, String); 3] {
     [
         (
@@ -585,27 +593,9 @@ pub(crate) fn shim_sources(obj_path: &Path, inc_body: &str) -> [(PathBuf, String
     ]
 }
 
-/// The exact C declaration of the generated tag-to-class lookup.
-///
-/// Shared on purpose (risk R3 of this change's plan): the *definition* is
-/// emitted here while the forward declaration is hand-written in
-/// [`SHIM_C`], and nothing links the two until a C compiler runs inside an
-/// `#[ignore]`d test the coverage job never executes. Both the shim test
-/// and the generated-text test assert this one constant, so a spelling or
-/// parameter-type drift fails an ordinary `cargo test` instead.
-pub(crate) const USER_EXCEPTION_LOOKUP_DECL: &str =
-    "static PyObject *pycc_ext_user_exception_class(unsigned char tag)";
-
-/// The exact C declaration of the generated reverse lookup: the tag of the
-/// most derived registered user exception class a CPython exception is an
-/// instance of, or -1. Shared with the hand-written forward declaration in
-/// [`SHIM_C`] for the same reason as [`USER_EXCEPTION_LOOKUP_DECL`].
-pub(crate) const USER_EXCEPTION_MATCH_DECL: &str = "static int pycc_ext_user_exception_tag(\
-     PyObject *exc, const char **class_name, size_t *class_name_len)";
-
 /// The exact C declaration of the generated eager-registration entry point,
 /// called from `pycc_ext_exec_module` after the `.inc` is included (so it
-/// needs no forward declaration, unlike [`USER_EXCEPTION_LOOKUP_DECL`]).
+/// needs no forward declaration).
 pub(crate) const USER_EXCEPTION_REGISTER_DECL: &str =
     "static int pycc_ext_register_exception_classes(PyObject *module)";
 
@@ -803,31 +793,22 @@ fn register_class_c(slot: usize, class: &UserExceptionClass) -> String {
     out
 }
 
-/// The user-exception-class half of the generated companion: the cache, the
-/// tag lookup `pycc_ext_raise_pending` calls, and the eager registration
-/// `pycc_ext_exec_module` calls.
+/// The user-exception-class half of the generated companion: the cache and
+/// the eager registration `pycc_ext_exec_module` calls, which creates each
+/// class, publishes it as a module attribute and enters it in the shim's
+/// registry (`pycc_ext_user_exception_register`, `bridge.c`) under its tag,
+/// where the tag lookups `pycc_ext_raise_pending` and the error bridge make
+/// find it. One registry serves every module of a package's extension,
+/// whose tags never overlap (`--exception-tag-base`).
 ///
-/// Both functions are emitted unconditionally -- with empty bodies when the
-/// program declares no user exception class -- so every artifact links.
-///
-/// Entries are keyed by **explicit tag** in a `switch`, not by an offset
-/// into the cache: the tag space is sparse relative to the table, because
-/// `finalize` consumes a tag for a group-derived class that
-/// [`collect_user_exception_classes`] excludes. An array indexed by
-/// `tag - FIRST_USER_EXCEPTION_TYPE_TAG` and sized by entry count would
-/// then send a later class past its bounds and silently flatten it to
-/// `Exception` with no compile or link error; a `switch` makes that
-/// unrepresentable rather than merely tested against.
+/// The registration is emitted unconditionally -- with an empty body when
+/// the program declares no user exception class -- so every artifact links.
+/// The registry is keyed by **explicit tag**: the tag space is sparse
+/// relative to the table, because `finalize` consumes a tag for a
+/// group-derived class that [`collect_user_exception_classes`] excludes.
 fn exception_classes_c(classes: &[UserExceptionClass]) -> String {
     let mut out = String::new();
     if classes.is_empty() {
-        out.push_str(&format!(
-            "{USER_EXCEPTION_LOOKUP_DECL}\n{{\n    (void)tag;\n    return NULL;\n}}\n\n"
-        ));
-        out.push_str(&format!(
-            "{USER_EXCEPTION_MATCH_DECL}\n{{\n    (void)exc;\n    (void)class_name;\n    \
-             (void)class_name_len;\n    return -1;\n}}\n\n"
-        ));
         out.push_str(&format!(
             "{USER_EXCEPTION_REGISTER_DECL}\n{{\n    (void)module;\n    return 0;\n}}\n\n"
         ));
@@ -840,33 +821,17 @@ fn exception_classes_c(classes: &[UserExceptionClass]) -> String {
          static PyObject *pycc_ext_user_exception_classes[{}];\n\n",
         classes.len()
     ));
-    out.push_str(&format!(
-        "{USER_EXCEPTION_LOOKUP_DECL}\n{{\n    switch (tag) {{\n"
-    ));
-    for (slot, class) in classes.iter().enumerate() {
-        out.push_str(&format!(
-            "    case {}:\n        return pycc_ext_user_exception_classes[{slot}];\n",
-            class.tag
-        ));
-    }
-    out.push_str("    default:\n        return NULL;\n    }\n}\n\n");
-    // A class is defined after each of its bases, so the last match in
-    // program order is the most derived one.
-    out.push_str(&format!("{USER_EXCEPTION_MATCH_DECL}\n{{\n"));
-    for (slot, class) in classes.iter().enumerate().rev() {
-        let name = c_string_literal(&class.name);
-        out.push_str(&format!(
-            "    if (pycc_ext_user_exception_classes[{slot}] != NULL\n        \
-             && PyErr_GivenExceptionMatches(exc, pycc_ext_user_exception_classes[{slot}])) {{\n        \
-             *class_name = {name};\n        *class_name_len = sizeof({name}) - 1;\n        \
-             return {};\n    }}\n",
-            class.tag
-        ));
-    }
-    out.push_str("    return -1;\n}\n\n");
     out.push_str(&format!("{USER_EXCEPTION_REGISTER_DECL}\n{{\n"));
     for (slot, class) in classes.iter().enumerate() {
         out.push_str(&register_class_c(slot, class));
+    }
+    for (slot, class) in classes.iter().enumerate() {
+        out.push_str(&format!(
+            "    pycc_ext_user_exception_register({}, pycc_ext_user_exception_classes[{slot}], \
+             {});\n",
+            class.tag,
+            c_string_literal(&class.name)
+        ));
     }
     out.push_str("    return 0;\n}\n\n");
     out

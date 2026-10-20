@@ -47,21 +47,21 @@ fn parse<'ctx>(context: &'ctx Context, ir: &str) -> Module<'ctx> {
 fn a_small_module_is_emitted_whole() {
     let context = Context::create();
     let module = parse(&context, &program_ir(2, 10));
-    assert!(plan_for(&module, 4).is_none());
+    assert!(plan_for(&module, 4, "").is_none());
 }
 
 #[test]
 fn one_thread_never_splits() {
     let context = Context::create();
     let module = parse(&context, &program_ir(6, 5_000));
-    assert!(plan_for(&module, 1).is_none());
+    assert!(plan_for(&module, 1, "").is_none());
 }
 
 #[test]
 fn a_large_module_is_balanced_over_the_partitions_with_its_locals_promoted() {
     let context = Context::create();
     let module = parse(&context, &program_ir(6, 5_000));
-    let parts = plan_for(&module, 3).expect("30,000 instructions split");
+    let parts = plan_for(&module, 3, "").expect("30,000 instructions split");
     assert_eq!(parts.count, 3);
     let mut per_part = vec![0; parts.count];
     for part in parts.owner.values() {
@@ -114,7 +114,7 @@ fn the_partitions_link_into_the_program_the_whole_module_is() {
     };
     let context = Context::create();
     let module = parse(&context, &ir);
-    let parts = plan_for(&module, 3).unwrap();
+    let parts = plan_for(&module, 3, "").unwrap();
     let objects = emit(&module, &parts, &scratch.join("main.o"), None, true).unwrap();
     assert_eq!(objects.len(), 3);
     assert_eq!(objects[0], scratch.join("main.o"));

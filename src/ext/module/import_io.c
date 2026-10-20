@@ -168,18 +168,20 @@ done:
  * top-level package and a top-level import with no parent package raise
  * exactly what the `.py` form raises. In a compiled function (v0.8 accept
  * 2) it runs after the body and uses the module the body last ran as
- * (`pycc_ext_home_module`); before any exec it raises `SystemError`.
+ * (`m->home_module`); before any exec it raises `SystemError`.
  *
- * Not `static`: LLVM-generated code declares and calls it by this name
- * (`EXT_OBJ_IMPORT_FROM_SYMBOL` in `crates/pycc_codegen/src/ext.rs`).
+ * LLVM-generated code calls it as `pycc_ext_obj_import_from`
+ * (`EXT_OBJ_IMPORT_FROM_SYMBOL` in `crates/pycc_codegen/src/ext.rs`), the
+ * module unit's entry point that passes its own `m`.
  * `module` and every `fromlist` entry are NUL-terminated UTF-8 constants
  * the artifact owns; `index` is always inside `[0, nfrom)` because the
  * compiler emits both. The returned reference is owned by the module
  * global that binds it, on the same rule as `pycc_ext_obj_import`: a
  * re-import or rebind releases it, and the last value is never released.
  */
-PyObject *pycc_ext_obj_import_from(const char *module_name, const char *const *fromlist,
-                                   long long nfrom, long long index, long long level)
+static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *module_name,
+                                       const char *const *fromlist, long long nfrom,
+                                       long long index, long long level)
 {
     PyObject *globals = Py_None;
     PyObject *import = NULL;
@@ -193,12 +195,12 @@ PyObject *pycc_ext_obj_import_from(const char *module_name, const char *const *f
     if (level > 0) {
         PyObject *target = NULL;
 
-        if (pycc_ext_exec_target_key != NULL) {
-            target = (PyObject *)PyThread_tss_get(pycc_ext_exec_target_key);
+        if (m->exec_target_key != NULL) {
+            target = (PyObject *)PyThread_tss_get(m->exec_target_key);
         }
         /* A function-local import (v0.8 accept 2) runs after the body. */
         if (target == NULL) {
-            target = pycc_ext_home_module;
+            target = m->home_module;
         }
         if (target == NULL) {
             PyErr_SetString(PyExc_SystemError, "pycc: relative import outside Py_mod_exec");

@@ -11,14 +11,15 @@
  * they differ does `pycc_ext_global_sync` look the name up: if the dict
  * holds another object than the one last seen, the slot takes it (an
  * object as it is, a `str`, `int`, `float` or `bool` converted to the
- * slot's native type). `pycc_ext_ns_dict` is NULL -- and every read takes
+ * slot's native type). A module's `pycc_ext_ns_dict` is NULL -- and every read takes
  * its slot as it is -- on another CPython version, whose dict layout the
  * shim does not know, and in a native program.
  */
 
-/* The executing module's `__dict__` (borrowed: the module outlives every
- * call of its functions), set before the body runs on CPython 3.13. */
-PyObject *pycc_ext_ns_dict = NULL;
+/* Each module's `pycc_ext_ns_dict` -- its `__dict__` (borrowed: the module
+ * outlives every call of its functions), set before the body runs on CPython
+ * 3.13 -- is defined by the module's own unit (`module_init.c`), whose
+ * `pycc_ext_global_sync` passes it to `pycc_ext_global_sync_in`. */
 
 /* `PyDictObject.ma_version_tag` in CPython 3.13. */
 #define PYCC_DICT_VERSION_TAG 24
@@ -40,10 +41,9 @@ typedef struct PyccGlobalCache {
 #define PYCC_GLOBAL_FLOAT 3
 #define PYCC_GLOBAL_BOOL 4
 
-void pycc_ext_global_sync(const char *name, void *slot, int kind, PyccGlobalCache *cache,
-                          char *initialized)
+static void pycc_ext_global_sync_in(PyObject *dict, const char *name, void *slot, int kind,
+                                    PyccGlobalCache *cache, char *initialized)
 {
-    PyObject *dict = pycc_ext_ns_dict;
     PyObject *saved;
     PyObject *value;
     int stored = 0;

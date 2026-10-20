@@ -32,12 +32,8 @@ pub(crate) const METHOD_TYPE_REGISTER_DECL: &str =
     "static int pycc_ext_register_method_types(PyObject *module)";
 
 /// The exact C declaration of the generated compiled-class `isinstance`
-/// (Part 7 of #1371), which the shim forward-declares because the `.inc` is
-/// included far below its caller `pycc_ext_obj_isinstance_compiled` -- the
-/// same arrangement as [`USER_EXCEPTION_LOOKUP_DECL`]. Both the shim test and
-/// the generated-text test assert this one constant.
-///
-/// [`USER_EXCEPTION_LOOKUP_DECL`]: super::USER_EXCEPTION_LOOKUP_DECL
+/// (Part 7 of #1371), which the module unit's record (`module_ctx.c`)
+/// hands the shim's `pycc_ext_obj_isinstance_compiled`.
 pub(crate) const COMPILED_CLASS_ISINSTANCE_DECL: &str =
     "static int pycc_ext_compiled_class_isinstance(PyObject *o, const char *name)";
 

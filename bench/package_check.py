@@ -1,9 +1,12 @@
 """Build real PyPI packages with pycc-next and run their own test suites against them.
 
 Each package in PACKAGES is pinned by version and by the sha256 of what is downloaded. Its
-modules are built unchanged, each as its own `--ext --non-strict` extension module; the
-`.py` files are removed from the tree, and the package's own unittest suite runs in
-CPython against the compiled modules (and, first, against the sources). The downloaded
+modules are built unchanged with `--ext --non-strict`: a package (a directory) whole, into
+one extension `pkg/__init__.abi3.so` holding every module (`pycc build PKG --ext`, v0.8;
+`--separate` builds each module as its own extension instead), a single-module package
+as its own extension; the `.py` files are removed from the tree, and the package's own
+unittest suite runs in CPython against the compiled modules (and, first, against the
+sources). The downloaded
 archive is untrusted data: every member must be a regular file or a directory (a
 symlink, hard link or special file fails the check before anything is extracted, so
 what is hashed is what is built and run), it is extracted with tarfile's `data` filter
@@ -31,7 +34,7 @@ Packages:
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
                                       [--max-build-seconds S] [--jobs N]
-                                      [--instructions]
+                                      [--instructions] [--separate]
   PACKAGE  names from PACKAGES (default: all of them).
   --time   also time each package's hot paths compiled and in CPython (pypng:
            its 256x256 filter image, and every PngSuite image its tests use).
@@ -55,6 +58,9 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            elapsed time (what the bound applies to) and the sum of the
            modules' times are always printed.
   --jobs N  build N modules at a time.
+  --separate
+           build each module of a package as its own extension, as before
+           v0.8's whole-package build (for comparison).
 Exit status 0 only when every module of every package builds (within the bound,
 when one is given) and every suite passes.
 """
@@ -110,6 +116,8 @@ class Package:
     instruction_calls: int
     # More hot paths `--time` times, as (label, code) pairs like `speed`.
     more_speed: tuple[tuple[str, str], ...] = ()
+    # Modules and subpackages of the package that stay Python (`--exclude`).
+    excludes: tuple[str, ...] = ()
 
 
 # Prefixed to `Package.tests`: puts the tree on the path, imports every module and checks
@@ -119,8 +127,11 @@ import importlib, sys, unittest
 sys.path.insert(0, sys.argv[1])
 for name in sys.argv[3].split(","):
     m = importlib.import_module(name)
-    if sys.argv[2] == "compiled" and not m.__file__.endswith((".so", ".pyd")):
-        sys.exit(f"{m.__name__} was imported from {m.__file__}, not a compiled module")
+    loader = type(m.__spec__.loader).__name__
+    if sys.argv[2] == "compiled" and (loader not in ("ExtensionFileLoader", "_PyccFinder")
+                                      or not m.__file__.endswith((".so", ".pyd"))):
+        sys.exit(f"{m.__name__} was imported from {m.__file__} ({loader}), "
+                 "not a compiled module")
 """
 
 # pypng's hot path: a 256x256 RGB image whose rows cycle through the five PNG
@@ -243,6 +254,7 @@ PACKAGES = {
             layout=(("diff_match_patch", "diff_match_patch-20241021/diff_match_patch"),),
             import_name="diff_match_patch",
             modules=("__init__.py", "__version__.py", "diff_match_patch.py"),
+            excludes=("tests",),
             tests="""
 from diff_match_patch.tests import diff_match_patch_test as t
 r = unittest.main(module=t, argv=["package_check"], exit=False, verbosity=1).result
@@ -549,19 +561,36 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
 
     defs = fell = 0
 
+    flags = ["--ext", "--non-strict", "--release", "--report-fallbacks"]
+
     def build(mod: str) -> tuple[subprocess.CompletedProcess, float]:
         py = pkg_dir / mod
         out = py.with_suffix("") if mod != "__init__.py" else py.parent / "__init__"
         started = time.perf_counter()
-        b = subprocess.run([a.pycc, "build", str(py), "-o", str(out), "--ext", "--non-strict",
-                            "--release", "--foreign-relative-imports", "--report-fallbacks"],
+        b = subprocess.run([a.pycc, "build", str(py), "-o", str(out), *flags,
+                            "--foreign-relative-imports"],
                            capture_output=True, text=True, timeout=900)
         return b, time.perf_counter() - started
 
-    # In parallel, as the `pycc.build` backend builds a package's modules.
+    env = dict(os.environ, PYCC_JOBS=str(a.jobs))
     started = time.perf_counter()
-    with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
-        results = list(pool.map(build, pkg.modules))
+    if single or a.separate:
+        # In parallel, as the `pycc.build` backend builds separate modules.
+        with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
+            results = list(pool.map(build, pkg.modules))
+    else:
+        # The whole package, into one extension; its member builds run in
+        # parallel (PYCC_JOBS at a time).
+        excludes = [arg for e in pkg.excludes for arg in ("--exclude", e)]
+        b = subprocess.run([a.pycc, "build", str(pkg_dir), "-o", str(pkg_dir / "__init__"),
+                            *flags, *excludes], capture_output=True, text=True, timeout=900,
+                           env=env)
+        times = dict(re.findall(r"^pycc: (\S+): built in ([\d.]+)s$", b.stderr, re.M))
+        results = []
+        for mod in pkg.modules:
+            dotted = ".".join([pkg.import_name, *pathlib.PurePosixPath(mod).with_suffix("")
+                               .parts]).removesuffix(".__init__")
+            results.append((b, float(times.get(dotted, "nan"))))
     build_seconds = time.perf_counter() - started
     for mod, (b, seconds) in zip(pkg.modules, results):
         print(f"  {mod}: built in {seconds:.2f}s")
@@ -572,16 +601,26 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
         source = (pkg_dir / mod).read_text(encoding="utf-8")
         defs += count_defs(source)
         lines = source.splitlines()
-        for m in re.finditer(r"^fallback: .*? at .*?:(\d+)(?:-(\d+))? runs in CPython: (.*)$",
+        # A whole-package build reports every module's fallbacks: this
+        # module's name its file.
+        for m in re.finditer(r"^fallback: .*? at (.*?):(\d+)(?:-(\d+))? runs in CPython: (.*)$",
                              b.stderr, re.M):
-            lo = int(m[1])
-            hi = int(m[2] or m[1])
+            if not pathlib.Path(m[1]).as_posix().endswith(f"/{pkg_dir.name}/{mod}") \
+                    and not single:
+                continue
+            lo = int(m[2])
+            hi = int(m[3] or m[2])
             n = count_defs("\n".join(lines[lo - 1:hi]))
             fell += n
-            print(f"  {mod}:{lo}-{hi} in CPython ({n} functions): {m[3]}")
-        for line in b.stderr.splitlines():
+            print(f"  {mod}:{lo}-{hi} in CPython ({n} functions): {m[4]}")
+        if single or a.separate:
+            for line in b.stderr.splitlines():
+                if line.startswith(("specialized:", "not specialized:")):
+                    print(f"  {mod}: {line}")
+    if not (single or a.separate):
+        for line in dict.fromkeys(results[0][0].stderr.splitlines()):
             if line.startswith(("specialized:", "not specialized:")):
-                print(f"  {mod}: {line}")
+                print(f"  {line}")
     # Only now: a module's dotted name is found from the `__init__.py`
     # files beside and above it.
     for mod in pkg.modules:
@@ -670,6 +709,7 @@ def main() -> int:
     ap.add_argument("--max-build-seconds", type=float)
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     ap.add_argument("--instructions", action="store_true")
+    ap.add_argument("--separate", action="store_true")
     a = ap.parse_args()
     for name in a.packages:
         if name not in PACKAGES:

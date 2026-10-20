@@ -20,8 +20,8 @@
 
 use crate::module::LoweredModule;
 use crate::{
-    FIRST_USER_EXCEPTION_TYPE_TAG, FOREIGN_BASE_EXCEPTION_TYPE_TAG, FromImport,
-    HirModule, ImportBinding, MAX_USER_EXCEPTION_CLASSES, builtin_exception_class_defs,
+    FIRST_USER_EXCEPTION_TYPE_TAG, FOREIGN_BASE_EXCEPTION_TYPE_TAG, FromImport, HirModule,
+    ImportBinding, MAX_USER_EXCEPTION_CLASSES, builtin_exception_class_defs,
     builtin_exception_init_item, foreign_bound_module, foreign_bound_object,
     is_builtin_exception_class, unsupported,
 };
@@ -390,6 +390,28 @@ fn definition_span(module: &LoweredModule, name: &str) -> Span {
         .unwrap_or(Span::new(0, 0))
 }
 
+/// The first tag [`finalize`] gives a user exception class: by default
+/// [`FIRST_USER_EXCEPTION_TYPE_TAG`]; a module built as one member of a
+/// package's extension starts where the previous member's classes end, so
+/// no two classes of one extension share a tag (v0.8, `pycc build
+/// --exception-tag-base`). Process-wide: a member is built by a process of
+/// its own.
+static EXCEPTION_TAG_BASE: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(FIRST_USER_EXCEPTION_TYPE_TAG);
+
+/// Sets the first user exception tag ([`EXCEPTION_TAG_BASE`]); a value below
+/// [`FIRST_USER_EXCEPTION_TYPE_TAG`] is raised to it.
+pub fn set_exception_tag_base(base: u8) {
+    EXCEPTION_TAG_BASE.store(
+        base.max(FIRST_USER_EXCEPTION_TYPE_TAG),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+fn exception_tag_base() -> u8 {
+    EXCEPTION_TAG_BASE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The program-wide phases that close lowering, run once over the linked
 /// program (or, via `lower_all`, over a single module): assigns each
 /// raisable user class its runtime exception type tag in program order and
@@ -412,7 +434,7 @@ pub fn finalize(mut hir: HirModule) -> Result<HirModule, Vec<Diagnostic>> {
         // the entry's own name identifies the synthetic entries exactly and
         // this loop never mistakes a user class named `Exception` for the
         // builtin one.
-        let mut next_tag: u16 = u16::from(FIRST_USER_EXCEPTION_TYPE_TAG);
+        let mut next_tag: u16 = u16::from(exception_tag_base());
         for (name, def) in &mut hir.class_defs {
             if is_builtin_exception_class(name)
                 || !def

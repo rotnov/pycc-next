@@ -286,18 +286,24 @@ fn the_shim_installs_the_shared_copy_on_every_carrier_type() {
     ] {
         assert!(shim.contains(needle), "missing {needle:?}");
     }
-    let declared = shim
-        .find("static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused);")
+    // The module unit's `__copy__` is declared before the companion, which
+    // names it, and defined, over the module's record, after it.
+    let unit = super::shim_split::module_unit();
+    let declared = unit
+        .find("PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused);")
         .unwrap();
-    let include = shim.find("#include \"pycc_ext_exports.inc\"").unwrap();
-    let defined = shim
-        .find("static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)\n{")
+    let include = unit.find("#include \"pycc_ext_exports.inc\"").unwrap();
+    let defined = unit
+        .find("PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)\n{")
         .unwrap();
     assert!(declared < include && include < defined);
+    let defined = shim
+        .find("static PyObject *pycc_ext_instance_copy_in(PyccExtModule *m, PyObject *self)\n{")
+        .unwrap();
     let body = &shim[defined..];
     let body = &body[..body.find("\n}\n").unwrap()];
     for needle in [
-        "found = pycc_ext_carrier_class_copy_kinds(cls, len, &kinds, &nkinds, &refused);",
+        "found = m->carrier_class_copy_kinds(cls, len, &kinds, &nkinds, &refused);",
         "\"cannot copy '%U' object: %s\"",
         "\"pycc: copy kind table does not match the instance layout\"",
         "clone = pycc_rt_ext_instance_copy(inst, kinds, nkinds);",

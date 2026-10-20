@@ -93,7 +93,9 @@ pub use isinstance_narrow::{IsInstancePolarity, isinstance_narrow_target, isinst
 pub use module::{LoweredModule, last_item_origins, lower_all, lower_checked, lower_module};
 pub use not_implemented::{WIDENED_RETURN_HELP, body_returns_not_implemented};
 pub use post_if::continuation_narrows;
-pub use program::{LinkInput, LinkLayout, Placement, finalize, link, link_layout};
+pub use program::{
+    LinkInput, LinkLayout, Placement, finalize, link, link_layout, set_exception_tag_base,
+};
 /// The callee of a nested function used as a value (`pycc_ast::desugar`).
 pub use pycc_ast::CLOSURE_MARKER;
 pub use pycc_ast::function_qualname;

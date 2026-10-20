@@ -210,36 +210,171 @@ extern int pycc_rt_ext_instance_delete_slot(void *instance, long long slot, unsi
 extern long long pycc_ext_module_exec(void);
 
 /*
+ * The state that belongs to one compiled module (v0.8, the whole-package
+ * build). A package's modules share one extension and one copy of this
+ * runtime unit, so what differs per module -- its name, the generated tables
+ * answering for its classes, its carrier types, the module object a relative
+ * import in its functions resolves against, its forwarder slots -- lives in
+ * one record per module, which the module's own unit defines
+ * (`pycc_ext_mod`, `module_init.c`). A runtime function that needs it takes
+ * it as its first parameter: the module unit's entry points pass their own
+ * record (`pycc_ext_mod`), so which module is asking is never ambient state.
+ * A single-module artifact has exactly one record.
+ */
+struct PycFwdSlot;
+typedef struct PyccExtModule {
+    /* The module's dotted name (`PYCC_EXT_MODULE_NAME_STR`). */
+    const char *name;
+    /*
+     * Part 7 of #1371: `isinstance(o, C)` for a class `C` compiled in this
+     * module (`COMPILED_CLASS_ISINSTANCE_DECL` in `src/ext_build.rs`): 1 when
+     * `o` is an instance of the host type object of any *published* class
+     * whose MRO contains `name`, -1 with the exception set when
+     * `PyObject_IsInstance` raises, and 0 otherwise. A name no published
+     * class descends from is answered by
+     * `pycc_ext_unpublished_class_isinstance`. A carrier of a compiled
+     * instance (#1435) never reaches it: `pycc_ext_obj_isinstance_compiled`
+     * answers that from the instance's run-time class first.
+     */
+    int (*compiled_class_isinstance)(PyObject *o, const char *name);
+    /* #1435, #1455: the generated per-class tables of the carriers
+     * (`CARRIER_CLASS_ISINSTANCE_DECL`, `CARRIER_CLASS_COPY_KINDS_DECL`). */
+    int (*carrier_class_isinstance)(const unsigned char *cls, size_t len, const char *name);
+    int (*carrier_class_copy_kinds)(const unsigned char *cls, size_t len, const char **kinds,
+                                    size_t *nkinds, const char **refused);
+    /* The forwarder trampolines, one per lift of the module, and their
+     * count (`forward_trampolines_c` in `src/ext_build/exports_inc.rs`). */
+    const int *fwd_slot_count;
+    const vectorcallfunc *fwd_trampolines;
+    /* The slots of a carrier type created on demand: the shared
+     * deallocator and this module's `__copy__` (`module_ctx.c`). */
+    PyType_Slot *carrier_slots;
+    /* #1435: the carrier type of each class, by class name (see
+     * `pycc_ext_carrier_type`); created on first use. */
+    PyObject *carrier_types;
+    /* v0.8 accept 2: the module this module's body last ran as (a strong
+     * reference, replaced by each exec). A relative import in a compiled
+     * function runs after the body, outside every exec, and resolves
+     * against it: the module whose globals the function's code reads in
+     * CPython. */
+    PyObject *home_module;
+    /* The forwarder slots (`forward.c`), and how many are taken. */
+    struct PycFwdSlot *fwd_slots;
+    int fwd_used;
+    /*
+     * #1366: the module object whose `Py_mod_exec` body is running on this
+     * thread, or NULL outside one. `pycc_ext_obj_import_from` reads it for
+     * a relative import, whose package CPython computes from the importing
+     * module's own globals (`__package__`, then `__spec__.parent`), exactly
+     * as `IMPORT_NAME` passes the frame's globals.
+     *
+     * Per thread, and saved and restored around each exec rather than just
+     * set and cleared, because one module's exec can run beneath itself:
+     * the same shared object imported under a second name or reloaded from
+     * its own body, and a second thread can import it while the first has
+     * released the GIL inside the body's own `__import__`. One key per
+     * module, as each artifact used to have its own: the body of another
+     * module of the same extension running on this thread (a compiled
+     * function of this module called from it) is not this module's exec.
+     * Created once per process and never replaced: live wrappers on other
+     * threads may still read it.
+     *
+     * #1199: `pycc_ext_publish` reads it too, to find the module a
+     * top-level definition is bound on -- but only after the name it was
+     * handed resolved against this module's own export and class tables.
+     */
+    Py_tss_t *exec_target_key;
+    /*
+     * #1199: this exec's own class snapshot, a dict from each published
+     * class name to the type object `pycc_ext_register_method_types` made
+     * for this `Py_mod_exec`, held for exactly the duration of the body and
+     * saved and restored around it like `exec_target_key`. The type statics
+     * are one per process, so a nested exec of this module mid-body (the
+     * body's cycle drops the module from `sys.modules` and imports it
+     * again) replaces them; `pycc_ext_publish` reads the snapshot instead,
+     * so each module binds its own exec's class. The snapshot's references
+     * also keep an outer exec's type alive after the inner exec drops the
+     * static's reference to it. Created once per process, on the same
+     * never-replaced rule.
+     */
+    Py_tss_t *exec_classes_key;
+} PyccExtModule;
+
+/*
+ * The user exception classes of every module of this extension, by tag.
+ * The tags of a package's modules never overlap (each module's are offset
+ * by the build: `--exception-tag-base`), so one registry answers for all of
+ * them: the class a pending tag raises as, and the tag a CPython exception
+ * bridges to. Each module's exec registers its classes
+ * (`pycc_ext_register_exception_classes`, generated) before its body runs.
+ * The registry holds a strong reference to each class, replaced when a
+ * re-import registers the tag again.
+ */
+static PyObject *pycc_ext_user_classes[256];
+static const char *pycc_ext_user_names[256];
+static unsigned char pycc_ext_user_tags[256];
+static int pycc_ext_user_count = 0;
+/* Whether the class of a user tag is a subclass of the class of a handler
+ * tag: 1, -1 (not), or 0 (not asked yet). Reset by every registration. */
+static signed char pycc_ext_user_subclass_cache[256][256];
+
+/* Enters `cls` (borrowed) as the class of user `tag`, named `name` (a
+ * string literal of the registering module). */
+static void pycc_ext_user_exception_register(unsigned char tag, PyObject *cls, const char *name)
+{
+    PyObject *previous = pycc_ext_user_classes[tag];
+
+    if (previous == NULL) {
+        pycc_ext_user_tags[pycc_ext_user_count++] = tag;
+    }
+    Py_INCREF(cls);
+    pycc_ext_user_classes[tag] = cls;
+    pycc_ext_user_names[tag] = name;
+    memset(pycc_ext_user_subclass_cache, 0, sizeof(pycc_ext_user_subclass_cache));
+    Py_XDECREF(previous);
+}
+
+/*
  * The pending tag's synthesized user exception class, or NULL when the tag
- * names no class this artifact registered. Defined in the generated
- * companion, which is `#include`d far below this point -- hence the forward
- * declaration here. The returned pointer is *borrowed*: the generated
- * file-scope cache owns the strong reference, exactly as every `PyExc_*`
- * below is a borrowed immortal.
+ * names no class a module registered. The returned pointer is *borrowed*:
+ * the registry owns the strong reference, exactly as every `PyExc_*` below
+ * is a borrowed immortal.
  */
-static PyObject *pycc_ext_user_exception_class(unsigned char tag);
+static PyObject *pycc_ext_user_exception_class(unsigned char tag)
+{
+    return pycc_ext_user_classes[tag];
+}
 
 /*
- * The reverse: the tag of the most derived class this artifact registered
- * that `exc` is an instance of (a fallback class deriving from a compiled
- * exception class included), with its class-name literal, or -1. Defined
- * in the generated companion too.
+ * The reverse: the tag of the most derived registered class `exc` is an
+ * instance of (a fallback class deriving from a compiled exception class
+ * included), with its class-name literal, or -1. Most derived by
+ * `issubclass`, so the answer does not depend on registration order.
  */
-static int pycc_ext_user_exception_tag(PyObject *exc, const char **class_name, size_t *class_name_len);
+static int pycc_ext_user_exception_tag(PyObject *exc, const char **class_name,
+                                       size_t *class_name_len)
+{
+    int best = -1;
+    int i;
 
-/*
- * Part 7 of #1371: `isinstance(o, C)` for a class `C` compiled in this
- * module. Defined in the generated companion for the same reason as the
- * declaration above (`COMPILED_CLASS_ISINSTANCE_DECL` in `src/ext_build.rs`).
- * Returns 1 when `o` is an instance of the host type object of any
- * *published* class whose MRO contains `name`, -1 with the exception set
- * when `PyObject_IsInstance` raises, and 0 otherwise. A name no published
- * class descends from has no type object to test against, and is answered
- * by `pycc_ext_unpublished_class_isinstance` below. A carrier of a compiled
- * instance (#1435) never reaches it: `pycc_ext_obj_isinstance_compiled`
- * answers that from the instance's run-time class first.
- */
-static int pycc_ext_compiled_class_isinstance(PyObject *o, const char *name);
+    for (i = 0; i < pycc_ext_user_count; i++) {
+        unsigned char tag = pycc_ext_user_tags[i];
+        PyObject *cls = pycc_ext_user_classes[tag];
+
+        if (!PyErr_GivenExceptionMatches(exc, cls)) {
+            continue;
+        }
+        if (best < 0 || PyObject_IsSubclass(cls, pycc_ext_user_classes[best]) == 1) {
+            best = tag;
+        }
+        PyErr_Clear();
+    }
+    if (best >= 0) {
+        *class_name = pycc_ext_user_names[best];
+        *class_name_len = strlen(pycc_ext_user_names[best]);
+    }
+    return best;
+}
 
 /*
  * The failed-import bridge (#1293, Part 3 of #1282). A foreign import nested
@@ -259,6 +394,10 @@ extern void *pycc_rt_exception_alloc(unsigned char type_tag,
                                      void *message);
 extern void pycc_rt_exception_raise(void *obj);
 extern void pycc_rt_exception_str_install(void *(*hook)(void *));
+/* The fallback of compiled `except` dispatch across modules
+ * (`pycc_ext_exception_tag_matches`). */
+extern void pycc_rt_exception_match_install(int (*hook)(unsigned char exc_tag, void *foreign,
+                                                        unsigned char handler_tag));
 
 /*
  * The two builtin tags the bridge raises, with the class name each one's
@@ -297,57 +436,6 @@ extern void pycc_rt_exception_str_install(void *(*hook)(void *));
  */
 extern void pycc_rt_exception_set_foreign(void *obj, PyObject *foreign);
 extern PyObject *pycc_rt_exception_foreign(void *obj);
-
-/*
- * #1366: the module object whose `Py_mod_exec` body is running on this
- * thread, or NULL outside one. `pycc_ext_obj_import_from` reads it for a
- * relative import, whose package CPython computes from the importing
- * module's own globals (`__package__`, then `__spec__.parent`), exactly as
- * `IMPORT_NAME` passes the frame's globals. Only a build under
- * `--foreign-relative-imports` emits such an import, and only as a
- * module-body item, which runs inside `Py_mod_exec`.
- *
- * Per thread, and saved and restored around each exec rather than just set
- * and cleared, because one artifact's exec can run beneath itself: the same
- * shared object imported under a second name (`top.pkg.m` and `m` share
- * one dlopen handle, so one file static) or reloaded from its own body, and
- * a second thread can import it while the first has released the GIL
- * inside the body's own `__import__`. The key is file-static, and each
- * artifact compiles its own copy of this shim, so another pycc artifact's
- * exec never touches it. Created once per process and never replaced:
- * live wrappers on other threads may still read it.
- *
- * #1199: `pycc_ext_publish` reads it too, to find the module a top-level
- * definition is bound on -- but only after the name it was handed resolved
- * against this artifact's own export and class tables. The embedded
- * launcher runs its program as `__main__` with both tables empty, so every
- * publication call it makes is a no-op that never reads the key, and it
- * never emits a relative import either.
- */
-static Py_tss_t *pycc_ext_exec_target_key = NULL;
-
-/*
- * v0.8 accept 2: the module this artifact's body last ran as (a strong
- * reference, replaced by each exec). A relative import in a compiled
- * function runs after the body, outside every exec, and resolves against
- * it: the module whose globals the function's code reads in CPython.
- */
-static PyObject *pycc_ext_home_module = NULL;
-
-/*
- * #1199: this exec's own class snapshot, a dict from each published class
- * name to the type object `pycc_ext_register_method_types` made for this
- * `Py_mod_exec`, held for exactly the duration of the body and saved and
- * restored around it like `pycc_ext_exec_target_key`. The type statics are
- * one per process, so a nested exec of this artifact mid-body (the body's
- * cycle drops the module from `sys.modules` and imports it again) replaces
- * them; `pycc_ext_publish` reads the snapshot instead, so each module binds
- * its own exec's class, as every module did before #1199 bound them all
- * ahead of the body. The snapshot's references also keep an outer exec's
- * type alive after the inner exec drops the static's reference to it.
- * Created once per process, on the same never-replaced rule.
- */
-static Py_tss_t *pycc_ext_exec_classes_key = NULL;
 
 /*
  * Translates `exc` into a pending pycc exception of `tag`, whose text is
@@ -466,33 +554,16 @@ static void pycc_ext_tb_sync_raised(void *native)
     PyErr_SetRaisedException(raised);
 }
 
-static int pycc_ext_raise_pending(void)
+/*
+ * The builtin CPython class a pycc exception of `tag` is raised as, or NULL
+ * for a tag the switch does not name (`Exception`, the two exception-group
+ * tags, a user class), which `pycc_ext_raise_pending` decides itself.
+ * Borrowed, as every `PyExc_*` is.
+ */
+static PyObject *pycc_ext_builtin_exception_class(int tag)
 {
-    int tag = pycc_rt_ext_pending_type();
     PyObject *exc_type;
-    PyObject *user_class;
-    PyObject *message;
-    PyObject *original;
-    size_t len = 0;
-    const unsigned char *bytes;
 
-    if (tag < 0) {
-        return 0;
-    }
-    /*
-     * #1293: a pending exception a bridge produced, escaping unchanged,
-     * re-raises CPython's own original object rather than a rebuilt one.
-     * Anything pycc raised itself, including an `except*` remainder's
-     * freshly allocated group, carries none and takes the switch.
-     */
-    original = pycc_rt_exception_foreign(pycc_rt_exception_value());
-    if (original != NULL) {
-        pycc_ext_tb_sync(pycc_rt_exception_value(), original);
-        Py_INCREF(original);
-        PyErr_SetRaisedException(original);
-        pycc_rt_exception_clear();
-        return 1;
-    }
     switch (tag) {
     case 1:
         exc_type = PyExc_ValueError;
@@ -602,12 +673,7 @@ static int pycc_ext_raise_pending(void)
     /* `NameError`, appended past `EOFError` the same way -- a function's
      * read of a module global not bound yet. */
     case 31:
-        /* A function local read before its assignment ran raises CPython's
-         * `UnboundLocalError`, which subclasses `NameError`. */
         exc_type = PyExc_NameError;
-        if (pycc_rt_ext_pending_is_unbound_local()) {
-            exc_type = PyExc_UnboundLocalError;
-        }
         break;
     /* `MemoryError`, appended past `NameError` the same way. */
     case 32:
@@ -631,6 +697,94 @@ static int pycc_ext_raise_pending(void)
         exc_type = PyExc_BaseException;
         break;
     default:
+        exc_type = NULL;
+        break;
+    }
+    return exc_type;
+}
+
+/*
+ * `pycc_rt_exception_type_matches`' fallback (`pycc_rt_exception_match_install`):
+ * whether a pycc exception of `exc_tag` matches a handler of `handler_tag`
+ * the handler's own tag set left out. Compiled `except` dispatch compares
+ * tags against a set computed when the catching module was compiled, which
+ * cannot hold the classes of another module of the same extension: an
+ * exception of module A's `class E(ValueError)` (A's tag) reaching module
+ * B's `except ValueError:` must still match, as in CPython. So the answer is
+ * CPython's own: the original object's class, for an exception bridged from
+ * CPython (`foreign`), else the registered class of `exc_tag`, tested
+ * against the handler's class (the builtin class of a builtin tag, the
+ * registered class of a user tag). The second is a pure function of the two
+ * tags once the classes are registered, and is cached. Anything else -- no
+ * registered class for either tag, an exception-group tag -- does not
+ * match, as before. CPython's error indicator is left as it was.
+ */
+static int pycc_ext_exception_tag_matches(unsigned char exc_tag, void *foreign,
+                                          unsigned char handler_tag)
+{
+    PyObject *exc_class = pycc_ext_user_classes[exc_tag];
+    PyObject *handler = pycc_ext_user_classes[handler_tag];
+    PyObject *saved;
+    signed char *cached;
+    int answer;
+
+    if (exc_class == NULL && foreign == NULL) {
+        return 0;
+    }
+    if (handler == NULL) {
+        handler = pycc_ext_builtin_exception_class(handler_tag);
+    }
+    if (handler == NULL) {
+        return 0;
+    }
+    if (foreign != NULL) {
+        return PyErr_GivenExceptionMatches((PyObject *)foreign, handler);
+    }
+    cached = &pycc_ext_user_subclass_cache[exc_tag][handler_tag];
+    if (*cached == 0) {
+        saved = PyErr_GetRaisedException();
+        answer = PyObject_IsSubclass(exc_class, handler);
+        PyErr_Clear();
+        PyErr_SetRaisedException(saved);
+        *cached = answer == 1 ? 1 : -1;
+    }
+    return *cached > 0;
+}
+
+static int pycc_ext_raise_pending(void)
+{
+    int tag = pycc_rt_ext_pending_type();
+    PyObject *exc_type;
+    PyObject *user_class;
+    PyObject *message;
+    PyObject *original;
+    size_t len = 0;
+    const unsigned char *bytes;
+
+    if (tag < 0) {
+        return 0;
+    }
+    /*
+     * #1293: a pending exception a bridge produced, escaping unchanged,
+     * re-raises CPython's own original object rather than a rebuilt one.
+     * Anything pycc raised itself, including an `except*` remainder's
+     * freshly allocated group, carries none and takes the switch.
+     */
+    original = pycc_rt_exception_foreign(pycc_rt_exception_value());
+    if (original != NULL) {
+        pycc_ext_tb_sync(pycc_rt_exception_value(), original);
+        Py_INCREF(original);
+        PyErr_SetRaisedException(original);
+        pycc_rt_exception_clear();
+        return 1;
+    }
+    exc_type = pycc_ext_builtin_exception_class(tag);
+    if (tag == 31 && pycc_rt_ext_pending_is_unbound_local()) {
+        /* A function local read before its assignment ran raises CPython's
+         * `UnboundLocalError`, which subclasses `NameError`. */
+        exc_type = PyExc_UnboundLocalError;
+    }
+    if (exc_type == NULL) {
         /*
          * Tag 0 is `Exception`. So, deliberately, are the two remaining
          * builtin tags -- a hole in the otherwise contiguous switched range,
@@ -658,7 +812,6 @@ static int pycc_ext_raise_pending(void)
         if (user_class != NULL) {
             exc_type = user_class;
         }
-        break;
     }
     bytes = pycc_rt_ext_pending_message(&len);
     /* Not NUL-terminated: a `PyStrObj` carries an explicit length. */

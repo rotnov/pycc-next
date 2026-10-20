@@ -764,9 +764,9 @@ extern long long pycc_rt_list_len(void *list);
 extern long long pycc_rt_list_get(void *list, long long index);
 extern long long pycc_rt_list_elem_kind(void *list, long long index);
 extern long long pycc_rt_list_is_tuple(void *list);
-PyObject *pycc_ext_obj_pack_instance(void *inst);
+static PyObject *pycc_ext_obj_pack_instance_in(PyccExtModule *m, void *inst);
 
-PyObject *pycc_ext_obj_pack_list(void *list);
+static PyObject *pycc_ext_obj_pack_list_in(PyccExtModule *m, void *list);
 extern void *pycc_rt_tuple_foreign(void *tuple);
 extern void pycc_rt_tuple_set_foreign(void *tuple, void *object);
 
@@ -804,7 +804,8 @@ PyObject *pycc_ext_obj_pack_frozenset(void *set)
         return shared;
     }
     items = pycc_rt_set_list(set);
-    list = pycc_ext_obj_pack_list(items);
+    /* No module: a set's elements are scalars and `str`s, never instances. */
+    list = pycc_ext_obj_pack_list_in(NULL, items);
     pycc_rt_list_decref(items);
     if (list == NULL) {
         return NULL;
@@ -826,9 +827,10 @@ PyObject *pycc_ext_obj_pack_frozenset(void *set)
  * packed as a new `PyObject *` reference, or `NULL` with the exception set:
  * a scalar is converted, a `str` shares its CPython `str`, a list or tuple
  * is copied (`pycc_ext_obj_pack_list`), and a CPython object element
- * (kind 11) is the object itself. The word is borrowed.
+ * (kind 11) is the object itself. The word is borrowed. An instance is
+ * packed as an instance of a class of module `m` (NULL where none can occur).
  */
-static PyObject *pycc_ext_pack_word(long long kind, long long word)
+static PyObject *pycc_ext_pack_word(PyccExtModule *m, long long kind, long long word)
 {
     PyObject *object;
     double value;
@@ -844,22 +846,25 @@ static PyObject *pycc_ext_pack_word(long long kind, long long word)
     case 3:
         return pycc_ext_obj_pack_str((void *)(intptr_t)word);
     case 4:
-        return pycc_ext_obj_pack_instance((void *)(intptr_t)word);
+        if (m == NULL) {
+            break;
+        }
+        return pycc_ext_obj_pack_instance_in(m, (void *)(intptr_t)word);
     case 5:
     case 7:
-        return pycc_ext_obj_pack_list((void *)(intptr_t)word);
+        return pycc_ext_obj_pack_list_in(m, (void *)(intptr_t)word);
     case 11:
         object = (PyObject *)(intptr_t)word;
         Py_INCREF(object);
         return object;
     default:
-        PyErr_SetString(PyExc_SystemError,
-                        "pycc_ext_obj_pack_list met an element kind it cannot copy");
-        return NULL;
+        break;
     }
+    PyErr_SetString(PyExc_SystemError, "pycc_ext_obj_pack_list met an element kind it cannot copy");
+    return NULL;
 }
 
-PyObject *pycc_ext_obj_pack_list(void *list)
+static PyObject *pycc_ext_obj_pack_list_in(PyccExtModule *m, void *list)
 {
     long long len;
     long long i;
@@ -890,7 +895,7 @@ PyObject *pycc_ext_obj_pack_list(void *list)
         long long word = pycc_rt_list_get(list, i);
         PyObject *item;
 
-        item = pycc_ext_pack_word(pycc_rt_list_elem_kind(list, i), word);
+        item = pycc_ext_pack_word(m, pycc_rt_list_elem_kind(list, i), word);
         if (item == NULL) {
             Py_DECREF(out);
             return NULL;
@@ -921,7 +926,8 @@ extern void pycc_rt_list_decref(void *list);
  * shared, with a new reference. `tuple` is borrowed. Returns the new tuple,
  * or `NULL` with the exception set when a packer fails.
  */
-void *pycc_ext_obj_tuple_rebox(void *tuple, const unsigned char *kinds, long long n)
+static void *pycc_ext_obj_tuple_rebox_in(PyccExtModule *m, void *tuple,
+                                         const unsigned char *kinds, long long n)
 {
     void *out;
     long long i;
@@ -936,7 +942,7 @@ void *pycc_ext_obj_tuple_rebox(void *tuple, const unsigned char *kinds, long lon
         long long kind = pycc_rt_list_elem_kind(tuple, i);
 
         if (kinds[i] == 11 && kind != 11) {
-            PyObject *item = pycc_ext_pack_word(kind, word);
+            PyObject *item = pycc_ext_pack_word(m, kind, word);
             if (item == NULL) {
                 /* Words not yet written are zero, which releasing skips. */
                 pycc_rt_list_decref(out);

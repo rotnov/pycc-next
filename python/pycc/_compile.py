@@ -124,3 +124,58 @@ def compile_modules(pycc: pathlib.Path, staging: pathlib.Path,
             if o.log:
                 print("  " + o.log.replace("\n", "\n  "), file=sys.stderr)
     return outcomes
+
+
+@dataclasses.dataclass
+class PackageOutcome:
+    package: str
+    artifact: pathlib.Path | None  # None: the build failed
+    members: list[str]  # the modules the artifact holds
+    failed: list[str]  # the modules pycc could not compile (when artifact is None)
+    seconds: float
+    log: str
+
+
+def package_command(pycc: pathlib.Path, staging: pathlib.Path, package: str,
+                    options: ModuleOptions, release: bool, excludes: list[str]) -> list[str]:
+    """The `pycc build` command line that compiles the package `package` whole, into
+    one extension `package/__init__<suffix>` (v0.8), `excludes` kept in Python."""
+    top = staging / package
+    cmd = [str(pycc), "build", str(top), "-o", str(top / "__init__"), "--ext"]
+    if release:
+        cmd.append("--release")
+    if not options.strict:
+        cmd += ["--non-strict", "--report-fallbacks"]
+    for name in excludes:
+        cmd += ["--exclude", name]
+    return cmd + list(options.extra_args)
+
+
+def compile_package(pycc: pathlib.Path, staging: pathlib.Path, package: str,
+                    members: list[str], options: ModuleOptions, excludes: list[str],
+                    release: bool, env: dict, display: pathlib.Path) -> PackageOutcome:
+    """Builds the package `package` (a directory in `staging`) whole: every module of
+    `members` into one extension. On failure, `failed` names the modules pycc refused
+    (from its `pycc: <module>: failed` lines)."""
+    cmd = package_command(pycc, staging, package, options, release, excludes)
+    started = time.perf_counter()
+    try:
+        r = subprocess.run(cmd, cwd=staging, env=env, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+    except OSError as e:
+        raise ProjectError(f"could not run {pycc}: {e}") from None
+    seconds = time.perf_counter() - started
+    log = (r.stdout + r.stderr).strip()
+    for copy in {str(staging), str(staging.resolve())}:
+        log = log.replace(copy + os.sep, str(display) + os.sep)
+    top = staging / package
+    if r.returncode != 0:
+        failed = [line[len("pycc: "):-len(": failed")] for line in log.splitlines()
+                  if line.startswith("pycc: ") and line.endswith(": failed")]
+        return PackageOutcome(package, None, members, failed, seconds, log)
+    artifacts = [p for p in top.iterdir()
+                 if p.name.startswith("__init__.") and p.suffix in (".so", ".pyd")]
+    if len(artifacts) != 1:
+        raise ProjectError(f"pycc built package {package} but left {len(artifacts)} "
+                           f"extension files for {top / '__init__'}")
+    return PackageOutcome(package, artifacts[0], members, [], seconds, log)

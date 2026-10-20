@@ -77,7 +77,7 @@ fn the_shim_defines_the_publication_entry_point_codegen_calls() {
         .find("        if (class_slot == NULL) {\n            return 0;\n        }")
         .expect("an unknown name is a no-op");
     let key = publish
-        .find("PyThread_tss_get(pycc_ext_exec_target_key)")
+        .find("PyThread_tss_get(pycc_ext_mod.exec_target_key)")
         .expect("the target module is read");
     assert!(
         methods < class && class < unknown && unknown < key,
@@ -87,7 +87,7 @@ fn the_shim_defines_the_publication_entry_point_codegen_calls() {
     // A class is bound from this exec's snapshot, never from the
     // process-wide type static a nested exec may have replaced.
     let snapshot = publish
-        .find("classes = (PyObject *)PyThread_tss_get(pycc_ext_exec_classes_key);")
+        .find("classes = (PyObject *)PyThread_tss_get(pycc_ext_mod.exec_classes_key);")
         .expect("the exec's class snapshot is read");
     assert!(key < snapshot, "{publish}");
     assert!(
@@ -179,8 +179,8 @@ fn each_exec_publishes_classes_from_its_own_snapshot() {
         .expect("the snapshot is taken");
     let installed = exec
         .find(
-            "|| PyThread_tss_set(pycc_ext_exec_classes_key, classes) != 0) {\n        \
-             (void)PyThread_tss_set(pycc_ext_exec_target_key, saved_target);\n        \
+            "|| PyThread_tss_set(pycc_ext_mod.exec_classes_key, classes) != 0) {\n        \
+             (void)PyThread_tss_set(pycc_ext_mod.exec_target_key, saved_target);\n        \
              Py_DECREF(classes);",
         )
         .expect("the snapshot is installed, and released if it cannot be");
@@ -188,14 +188,14 @@ fn each_exec_publishes_classes_from_its_own_snapshot() {
         .find("exec_status = pycc_ext_module_exec();")
         .expect("the body runs");
     let restored = exec
-        .find("(void)PyThread_tss_set(pycc_ext_exec_classes_key, saved_classes);")
+        .find("(void)PyThread_tss_set(pycc_ext_mod.exec_classes_key, saved_classes);")
         .expect("the outer snapshot is restored");
     assert!(
         registered < taken && taken < installed && installed < body && body < restored,
         "{exec}"
     );
     assert!(
-        exec.contains("saved_classes = PyThread_tss_get(pycc_ext_exec_classes_key);"),
+        exec.contains("saved_classes = PyThread_tss_get(pycc_ext_mod.exec_classes_key);"),
         "{exec}"
     );
     // Released if the pre-compiled code hook cannot be bound
@@ -267,12 +267,7 @@ fn a_published_class_is_registered_but_bound_only_through_its_publication() {
             "{line:?} precedes the guard:\n{init}"
         );
     }
-    for later in [
-        "kwds",
-        "pycc_ext_unpack_",
-        "pycc_rt_instance_new",
-        "fnptr_",
-    ] {
+    for later in ["kwds", "pycc_ext_unpack_", "pycc_rt_instance_new", "fnptr_"] {
         assert!(init[at..].contains(later), "{later:?} missing:\n{init}");
     }
 }

@@ -126,6 +126,21 @@ pub enum Command {
         /// imports (docs/CLI_SPEC.md). Requires `--ext`.
         #[arg(long, requires = "ext")]
         foreign_relative_imports: bool,
+        /// A package build (`PATH` a package directory, v0.8): a module or
+        /// subpackage, named relative to the package or with the package's
+        /// name first, kept in Python instead of compiled into the package's
+        /// extension. Repeatable. Requires `--ext`.
+        #[arg(long = "exclude", value_name = "MODULE", requires = "ext")]
+        excludes: Vec<String>,
+        /// Internal (the package build's member builds): compile `PATH` as
+        /// the module of this dotted name of a package built whole, to
+        /// objects in the directory `-o` names.
+        #[arg(long, hide = true, requires = "ext")]
+        package_member: Option<String>,
+        /// Internal (the package build's member builds): the first exception
+        /// tag the module's own exception classes take.
+        #[arg(long, hide = true, requires = "package_member")]
+        exception_tag_base: Option<u8>,
         /// Link libpython into the executable from the embed interpreter's
         /// static archive instead of bundling its shared library, and
         /// export its C-API symbols so a standard-library extension loads
