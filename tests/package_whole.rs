@@ -161,6 +161,12 @@ fn the_package_matches_cpython(release: bool) {
             "{report}"
         );
     }
+    // A class another module subclasses through a third module's re-export
+    // runs in CPython.
+    assert!(
+        report.contains("`pkw.sub.tagged.Bold` of the package subclasses `Tag`"),
+        "{report}"
+    );
     // Instances of a class another module compiled are read natively.
     assert!(
         report.contains("native class: instances of `pkw.cursor.Cursor` are read natively"),

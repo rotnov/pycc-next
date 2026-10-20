@@ -70,6 +70,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - Non-strict: a CPython object returned from, or passed to, a compiled function as
   `int | None`, `float | None`, `bool | None` or `str | None` is `None` or converted to
   the scalar (`TypeError` otherwise), instead of the function falling back.
+- `bench/package_check.py` and the CI wheel checks: pystache 0.6.8 (MIT, a Mustache
+  template engine, v0.8 accept 4's package by the rule in `docs/ROADMAP.md`), its 255
+  tests passing compiled; its own benchmark 0.58x for now.
+
 
 - v0.8 accept 3 (compiled frames are real frames): on CPython 3.13 a compiled function
   of an `--ext` module or an embedded program runs in a real CPython frame, so
@@ -161,6 +165,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- Non-strict `--ext`: a class that a module of its package subclasses through a
+  re-export in a module other than a package `__init__.py` (`from .init import C`,
+  `init` importing it from the module defining it) is created by CPython, as a
+  subclassed class must be; it was compiled, and the subclass's module failed to import
+  (`not an acceptable base type`).
 - Non-strict `--ext`: `isinstance(e, Exception)` (or any builtin exception class) of a
   CPython exception object answered `False`; it is now CPython's own test.
 - A container attribute (a native `list`, `dict`, `set` or tuple) of a compiled class in a

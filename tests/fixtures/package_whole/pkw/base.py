@@ -25,6 +25,14 @@ class Shape(ABC):
         return f"{self.name} with area {self.area():.2f}"
 
 
+class Tag:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def show(self) -> str:
+        return "<" + self.name + ">"
+
+
 class Box(Generic[T]):
     def __init__(self, item: T) -> None:
         self.item = item

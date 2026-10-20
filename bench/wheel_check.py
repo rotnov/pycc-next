@@ -175,6 +175,37 @@ sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
             for m in package_check.MISTUNE_MODULES
         ),
     ),
+    "pystache": Harness(
+        root="pystache-0.6.8",
+        pyproject="""
+[project]
+name = "pystache"
+version = "0.6.8"
+requires-python = ">=3.13"
+license = "MIT"
+
+[tool.pycc]
+strict = false
+packages = ["pystache"]
+# The package's unittest suite ships inside it; it stays Python (it is the oracle).
+pure-python = ["pystache.tests"]
+""",
+        tests=(),
+        run="""
+import os
+import pystache.tests
+start = os.path.dirname(pystache.tests.__file__)
+r = unittest.main(module=None, exit=False, verbosity=1, argv=[
+    "wheel_check", "discover", "-s", start,
+    "-t", os.path.dirname(os.path.dirname(start))]).result
+sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
+""",
+        compiled=tuple(
+            ".".join(["pystache", *pathlib.PurePosixPath(m).with_suffix("").parts])
+            .removesuffix(".__init__")
+            for m in package_check.PYSTACHE_MODULES
+        ),
+    ),
 }
 
 # Prefixed to `Harness.run`: argv[1] is the test directory (put on the path for the

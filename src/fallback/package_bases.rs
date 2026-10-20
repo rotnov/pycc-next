@@ -28,15 +28,14 @@ pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
         return BTreeMap::new();
     };
     let (entry, target, parsed) = (&package.entry, &package.target, &package.parsed);
-    // A package `__init__.py`'s re-exports: `(package, name)` -> the
+    // Each module's module-level re-exports: `(module, name)` -> the
     // `(module, name)` it imports, so `from pkg import C` resolves to the
-    // module defining `C`.
+    // module defining `C`, through a package `__init__.py` or any other
+    // module re-exporting it (`pkg/__init__.py` importing from `pkg.init`,
+    // which imports from `pkg.spec`).
     let mut exports: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
     for (_, qual, is_package, module) in parsed {
-        if !*is_package {
-            continue;
-        }
-        let scan = Scan::new(qual, true);
+        let scan = Scan::new(qual, *is_package);
         for stmt in &module.body {
             if let Stmt::ImportFrom(import) = stmt
                 && let Some(from) =

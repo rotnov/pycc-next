@@ -182,7 +182,7 @@ import inside an `if`/`try` block are compile errors; the details are in [`docs/
 
 ### Real packages, unchanged
 
-`python3 bench/package_check.py` (CI-gated) downloads four pinned, permissively licensed
+`python3 bench/package_check.py` (CI-gated) downloads five pinned, permissively licensed
 pure-Python packages, builds each unchanged -- a package whole into one extension
 (`--separate`: each module as its own), a single-module package as its extension --
 removes the `.py` files and runs the package's own unittest suite with CPython against
@@ -198,7 +198,10 @@ under callgrind and fails over a documented bound, which CI also gates):
 - [pypng](https://pypi.org/project/pypng/) 0.20220715.0 (MIT, a PNG encoder and decoder
   in one module, `png`, pinned by sdist sha256);
 - [mistune](https://pypi.org/project/mistune/) 3.3.4 (BSD-3-Clause, a CommonMark Markdown
-  parser and renderer in 38 modules, pinned by sdist sha256).
+  parser and renderer in 38 modules, pinned by sdist sha256);
+- [pystache](https://pypi.org/project/pystache/) 0.6.8 (MIT, a Mustache template engine
+  in 17 modules, with its unittest suite and benchmark inside the package, pinned by
+  sdist sha256).
 
 An archive member that is not a regular file or a directory (a link, a device) is
 refused before extraction.

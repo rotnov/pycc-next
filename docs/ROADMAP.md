@@ -390,6 +390,29 @@ Accept:
    (same pydantic-core wheel for both trees): import no slower than CPython (the fallback
    source is no longer compiled with `compile()` on every import), model definition and
    `model_json_schema()` >= 1.3x faster, validation/serialization round-trips no slower.
+   - Amendment (2026-10-21): the 1.3x define/schema bar is withdrawn. It assumed
+     compiling pydantic's own code would make it faster than CPython interpreting it;
+     the profile says what is compilable is too small a share, and stays object-protocol
+     work. Evidence (callgrind, one define + schema repetition, (5 reps - 1 rep) / 4):
+     CPython on the sources runs 151.2M instructions, 97% inside the interpreter binary
+     -- 57.6M in `_PyEval_EvalFrameDefault`, ~90M in C API object operations; the
+     compiled tree runs 171.0M -- 33.5M in compiled code, 21.2M still interpreted
+     (stdlib `typing`/`inspect`/`dataclasses` and pydantic's fallback code), ~116M of C
+     API object operations and libc (more than CPython's: temporaries' deallocation
+     5.1M against 1.9M, attribute-name and pack/release helpers). By owner (cProfile
+     tottime on CPython): pydantic's own Python ~48%, builtins/C object work ~30%, the
+     standard library ~16%, import machinery ~5%. 1.3x means removing ~23% of CPython's
+     total from the ~48% that is compilable, so pydantic's code would have to run ~1.9x
+     faster than CPython interprets it; it is metaprogramming over CPython objects
+     (classes `ModelMetaclass` creates, `typing` objects, dicts), each operation an
+     object-protocol call compiled or not, and its compiled form is slower than the
+     interpreter today. No lever pycc can build reaches 1.3x. The accept item is now: no
+     phase slower than CPython -- import, define, schema and round-trips each >= 1.0x
+     (median ms of interleaved fresh-process runs, `bench/pydantic_check.py --time`),
+     reached by cutting pycc's own per-operation cost on CPython objects (temporaries'
+     deallocation, the attribute-name cache path, pack/release) and import's remaining
+     extension creation and module execution, each step measured; Met only when it
+     holds on CI.
    **Progress 2026-10-17** (not met; local, shared 4-core Xeon, CPython 3.13.16,
    pydantic-core 2.46.5, median ms of interleaved fresh-process runs,
    compiled vs CPython):
@@ -636,6 +659,31 @@ Accept:
    constrained `TypeVar` bases are not built for it. Fixed on the way, each general:
    `super(C, obj)` in a method of a class CPython creates (394 of 413 functions native),
    and objects reaching `int | None`-style slots.
+   **Progress 2026-10-21** (not met): mistune does not reach 2x and stays in
+   `bench/package_check.py` and the CI wheel checks for its correctness value (0.8x-0.9x:
+   63.5M against CPython's 57.2M instructions per pass, the cost in CPython objects --
+   token dicts, `re` match objects, `re` itself about 11.6M per pass). The accept's
+   package is chosen again by a rule fixed before measuring: the most-downloaded pure-
+   Python template engine (pypistats, last month, 2026-10-20) that (a) has no C extension
+   and no C-accelerated dependency, (b) renders by interpreting the template in its own
+   code rather than generating Python source CPython compiles and runs (which pycc never
+   sees), and (c) ships a self-contained test suite in its PyPI sdist. Jinja2 (534M) and
+   Mako (181M) fail (a) and (b) (MarkupSafe's C speedups, generated Python); chevron
+   (11.0M) fails (c) (no tests in the sdist; the repository's need the Mustache spec
+   submodule); pystache 0.6.8 (3.89M, MIT) meets all three; genshi, cheetah3 and tempita
+   are below 0.25M. Disclosure: before the rule was fixed, chevron was timed once
+   compiled (1.00x, its `render` falling back) and pystache was profiled once under
+   CPython; neither run chose the package. pystache is added to `bench/package_check.py`
+   and the CI wheel checks (its 255 tests pass compiled; a class of it that its own test
+   modules subclass, through two re-exports, now runs in CPython, the re-exports of any
+   module being followed). Its own benchmark (`pystache/tests/benchmark.py`'s examples):
+   0.58x (0.044 s against 0.076 s for 1000 rounds; 0.83M instructions per round against
+   CPython's 0.50M), 105 of 111 functions native: as for pydantic and mistune, compiled
+   code spends more on each CPython-object operation than the interpreter does
+   (microbenchmarks of one operation on CPython objects, compiled against CPython: a
+   method call 0.69x, a call with arguments 0.56x, an attribute store 0.58x, a dict
+   display 0.76x; a `dict` read 1.9x, `isinstance` 16x), which is accept 1's amended
+   lever.
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.

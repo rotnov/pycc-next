@@ -117,6 +117,11 @@ print(calls.use(1, "r"), calls.private("s"))
 reloaded = importlib.reload(util)
 print(reloaded is util, calls.scaled is util.scaled, calls.use(3, "t"), calls.loop(4))
 
+# A class another module subclasses through a third module's re-export.
+import pkw.sub.tagged as tagged  # noqa: E402
+
+print(tagged.Bold("x").show(), base.Tag("y").show(), isinstance(tagged.Bold("z"), base.Tag))
+
 # Instances of another module's class, read natively in the compiled tree.
 import pkw.cursor as cursor  # noqa: E402
 import pkw.scan as scan  # noqa: E402

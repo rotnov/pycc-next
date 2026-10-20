@@ -30,6 +30,10 @@ Packages:
     PyPI sdist ships it with its unittest suite (1155 tests, the CommonMark spec
     examples among them) and its own benchmark's documents (`benchmark/cases`),
     which `--time` renders as `benchmark/bench.py` does.
+  pystache 0.6.8 (MIT): a Mustache template engine (v0.8 accept 4's package; the
+    selection rule is in docs/ROADMAP.md), 17 modules. The PyPI sdist ships it with
+    its unittest suite (a subpackage, `pystache.tests`, which stays Python) and its
+    own benchmark (`pystache/tests/benchmark.py`), whose examples `--time` renders.
 
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
@@ -240,6 +244,28 @@ for _ in range(int(sys.argv[2])):
 print(f"{best:.4f}")
 """
 
+# pystache's modules: the package but its tests (a subpackage of it, which stays
+# Python).
+PYSTACHE_MODULES = (
+    "__init__.py", "_version.py", "commands/__init__.py", "commands/render.py",
+    "commands/test.py", "common.py", "context.py", "defaults.py", "init.py", "loader.py",
+    "locator.py", "parsed.py", "parser.py", "renderengine.py", "renderer.py",
+    "specloader.py", "template_spec.py",
+)
+
+# pystache's own benchmark (`pystache/tests/benchmark.py`): its examples, each a
+# `pystache.render()` of a template checked against the expected output (the script
+# itself times each example with `timeit`; here all of them, 1000 times over).
+PYSTACHE_BENCHMARK = """
+import contextlib, gc, io, sys, time
+sys.path.insert(0, sys.argv[1])
+with contextlib.redirect_stdout(io.StringIO()):
+    from pystache.tests import benchmark
+tests = [benchmark.make_test_function(example) for example in benchmark.examples]
+for test in tests:
+    test()
+"""
+
 PACKAGES = {
     p.name: p
     for p in [
@@ -445,6 +471,49 @@ for _ in range(int(sys.argv[2])):
             instruction_calls=2,
             more_speed=(("the benchmark's \"mistune (full)\" parser (every plugin) x20",
                          MISTUNE_CASES + MISTUNE_FULL + MISTUNE_TIMED),),
+        ),
+        Package(
+            name="pystache",
+            version="0.6.8",
+            url="https://files.pythonhosted.org/packages/source/p/pystache/pystache-0.6.8.tar.gz",
+            archive="pystache-0.6.8.tar.gz",
+            sha256="3707518e6a4d26dd189b07c10c669b1fc17df72684617c327bd3550e7075c72c",
+            tree_sha256=None,
+            layout=(("pystache", "pystache-0.6.8/pystache"),),
+            import_name="pystache",
+            modules=PYSTACHE_MODULES,
+            # The package's own tests are a subpackage of it: they stay Python.
+            excludes=("tests",),
+            tests="""
+import os
+r = unittest.main(module=None, exit=False, verbosity=1, argv=[
+    "package_check", "discover", "-s", os.path.join(sys.argv[1], "pystache", "tests"),
+    "-t", sys.argv[1]]).result
+sys.exit(0 if r.wasSuccessful() and r.testsRun > 0 else 1)
+""",
+            speed=PYSTACHE_BENCHMARK + """
+best = float("inf")
+for _ in range(int(sys.argv[2])):
+    gc.collect()
+    t = time.perf_counter()
+    for _ in range(1000):
+        for test in tests:
+            test()
+    best = min(best, time.perf_counter() - t)
+print(f"{best:.4f}")
+""",
+            speed_label="the package's own benchmark (tests/benchmark.py) examples x1000",
+            instructions=PYSTACHE_BENCHMARK + """
+for _ in range(int(sys.argv[2])):
+    for test in tests:
+        test()
+""",
+            instructions_label="the package's own benchmark examples, each rendered once",
+            # 0.83M instructions at the first measurement (Ubuntu's python3.13;
+            # CPython running the sources: 0.50M); the bound leaves room for CI's
+            # CPython until it is measured there.
+            max_instructions=1_100_000,
+            instruction_calls=100,
         ),
     ]
 }
