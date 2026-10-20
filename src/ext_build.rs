@@ -812,6 +812,7 @@ fn exception_classes_c(classes: &[UserExceptionClass]) -> String {
         out.push_str(&format!(
             "{USER_EXCEPTION_REGISTER_DECL}\n{{\n    (void)module;\n    return 0;\n}}\n\n"
         ));
+        out.push_str(&exception_class_named_c(classes));
         return out;
     }
     out.push_str(&format!(
@@ -834,6 +835,42 @@ fn exception_classes_c(classes: &[UserExceptionClass]) -> String {
         ));
     }
     out.push_str("    return 0;\n}\n\n");
+    out.push_str(&exception_class_named_c(classes));
+    out
+}
+
+/// The exact C declaration of the generated name-to-class map of the
+/// exception classes compiled code tests with `isinstance` (the module
+/// record's `exception_class_named`).
+pub(crate) const EXCEPTION_CLASS_NAMED_DECL: &str =
+    "static PyObject *pycc_ext_exception_class_named(const char *name)";
+
+/// The CPython class standing for an exception class `isinstance(o, C)`
+/// names in compiled code: one of the module's own synthesized classes
+/// (`classes`, created by the registration above), else a builtin one by
+/// its tag (`pycc_ext_exception_class_for_tag`), else NULL for a name that
+/// is no exception class. A caught exception is a CPython object, so the
+/// test is CPython's own `isinstance` against that class.
+fn exception_class_named_c(classes: &[UserExceptionClass]) -> String {
+    let mut out = format!("{EXCEPTION_CLASS_NAMED_DECL}\n{{\n");
+    for (slot, class) in classes.iter().enumerate() {
+        out.push_str(&format!(
+            "    if (strcmp(name, {}) == 0) {{\n        \
+             return pycc_ext_user_exception_classes[{slot}];\n    }}\n",
+            c_string_literal(&class.name)
+        ));
+    }
+    out.push_str("    static const char *const builtin[] = {");
+    for name in pycc_hir::BUILTIN_EXCEPTION_CLASSES {
+        out.push_str(&format!("{}, ", c_string_literal(name)));
+    }
+    out.push_str(&format!(
+        "}};\n    for (int tag = 0; tag < {}; tag++) {{\n        \
+         if (strcmp(name, builtin[tag]) == 0) {{\n            \
+         return pycc_ext_exception_class_for_tag(tag);\n        }}\n    }}\n    \
+         return NULL;\n}}\n\n",
+        pycc_hir::BUILTIN_EXCEPTION_CLASSES.len()
+    ));
     out
 }
 

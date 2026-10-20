@@ -164,6 +164,9 @@ pub(crate) fn marshal_args<'ctx>(
                     // A `frozenset` or `tuple[str, ...]` copy, fresh: the
                     // parameter slot owns it.
                     Scalar::Set(v) | Scalar::List(v) => v.into(),
+                    // An instance its carrier held, a new reference the
+                    // parameter slot owns.
+                    Scalar::Instance(v) => v.into(),
                     _ => unreachable!("object_coerce yields a scalar"),
                 };
             }

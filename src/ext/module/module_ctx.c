@@ -31,6 +31,7 @@ static PyccExtModule pycc_ext_mod = {
     PYCC_EXT_MODULE_NAME_STR,
     pycc_ext_compiled_class_isinstance,
     pycc_ext_carrier_class_isinstance,
+    pycc_ext_exception_class_named,
     pycc_ext_carrier_class_copy_kinds,
     &pycc_fwd_slot_count,
     pycc_fwd_trampolines,
@@ -114,6 +115,12 @@ PYCC_ENTRY int pycc_ext_obj_isinstance_compiled(PyObject *o, const char *name)
 PYCC_ENTRY int pycc_ext_obj_unbox_instance(PyObject *o, const char *class_name, void **out)
 {
     return pycc_ext_obj_unbox_instance_in(&pycc_ext_mod, o, class_name, out);
+}
+
+PYCC_ENTRY int pycc_ext_obj_coerce_instance(PyObject *o, const char *class_name, const char *what,
+                                            void **out)
+{
+    return pycc_ext_obj_coerce_instance_in(&pycc_ext_mod, o, class_name, what, out);
 }
 
 PYCC_ENTRY PyObject *pycc_ext_obj_import_from(const char *module_name, const char *const *fromlist,

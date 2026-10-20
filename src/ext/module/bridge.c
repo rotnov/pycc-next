@@ -240,6 +240,11 @@ typedef struct PyccExtModule {
     /* #1435, #1455: the generated per-class tables of the carriers
      * (`CARRIER_CLASS_ISINSTANCE_DECL`, `CARRIER_CLASS_COPY_KINDS_DECL`). */
     int (*carrier_class_isinstance)(const unsigned char *cls, size_t len, const char *name);
+    /* The CPython class standing for the exception class `name` compiled code
+     * of this module tests with `isinstance` (a builtin one, or one of the
+     * module's own; `exception_class_named_c` in `src/ext_build.rs`), or NULL
+     * for a name that is no exception class. Borrowed. */
+    PyObject *(*exception_class_named)(const char *name);
     int (*carrier_class_copy_kinds)(const unsigned char *cls, size_t len, const char **kinds,
                                     size_t *nkinds, const char **refused);
     /* The forwarder trampolines, one per lift of the module, and their
@@ -343,6 +348,29 @@ static void pycc_ext_user_exception_register(unsigned char tag, PyObject *cls, c
 static PyObject *pycc_ext_user_exception_class(unsigned char tag)
 {
     return pycc_ext_user_classes[tag];
+}
+
+/*
+ * The CPython class `isinstance` tests a pycc exception class of `tag`
+ * against: the builtin one, or the class a module registered for it, or
+ * NULL for the exception groups (which have no exact counterpart here). The
+ * generated `pycc_ext_exception_class_named` maps a name to its tag.
+ */
+static PyObject *pycc_ext_builtin_exception_class(int tag);
+
+static PyObject *pycc_ext_exception_class_for_tag(int tag)
+{
+    if (tag == 0) {
+        return PyExc_Exception;
+    }
+    if (tag == 23 || tag == 24) {
+        return NULL;
+    }
+    PyObject *builtin = pycc_ext_builtin_exception_class(tag);
+    if (builtin != NULL) {
+        return builtin;
+    }
+    return (tag >= 0 && tag < 256) ? pycc_ext_user_exception_class((unsigned char)tag) : NULL;
 }
 
 /*

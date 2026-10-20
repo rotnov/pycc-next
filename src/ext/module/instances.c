@@ -558,6 +558,14 @@ static int pycc_ext_obj_isinstance_compiled_in(PyccExtModule *m, PyObject *o, co
         PyErr_SetString(PyExc_SystemError, "pycc_ext_obj_isinstance_compiled: NULL operand");
         return -1;
     }
+    /* An exception class compiled code names is tested as the CPython class
+     * that stands for it: a caught exception is a CPython object. */
+    {
+        PyObject *exception_class = m->exception_class_named(name);
+        if (exception_class != NULL) {
+            return PyObject_IsInstance(o, exception_class);
+        }
+    }
     if (PyType_GetSlot(Py_TYPE(o), Py_tp_dealloc) == (void *)pycc_ext_instance_dealloc) {
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
@@ -691,6 +699,53 @@ static int pycc_ext_obj_unbox_instance_in(PyccExtModule *m, PyObject *o, const c
         PyErr_Format(PyExc_TypeError,
                      "narrowed object must be a compiled %s.%s instance, not %U",
                      m->name, class_name, type_name);
+    }
+    Py_DECREF(type_name);
+    return -1;
+}
+
+/*
+ * Non-strict mode: a CPython object passed by compiled code for a parameter
+ * annotated with the regular class `class_name` compiled in module `m`
+ * (`EXT_OBJ_COERCE_INSTANCE_SYMBOL` in `pycc_codegen`'s `object_coerce`):
+ * the argument ingress's admission (`pycc_ext_unpack_instance_in`), its
+ * `TypeError` naming the call's argument as `what` (`f() argument 2`).
+ * `*out` is a new reference the parameter slot owns.
+ */
+static int pycc_ext_obj_coerce_instance_in(PyccExtModule *m, PyObject *o, const char *class_name,
+                                           const char *what, void **out)
+{
+    PyObject *type_name;
+    void *inst = NULL;
+    const unsigned char *cls;
+    size_t len = 0;
+    int carrier;
+
+    if (o == NULL || class_name == NULL || what == NULL || out == NULL) {
+        return -1;
+    }
+    carrier = PyType_GetSlot(Py_TYPE(o), Py_tp_dealloc) == (void *)pycc_ext_instance_dealloc;
+    if (carrier) {
+        inst = ((PyccExtInstance *)o)->inst;
+        if (inst != NULL) {
+            cls = pycc_rt_ext_instance_class(inst, &len);
+            if (m->carrier_class_isinstance(cls, len, class_name)) {
+                pycc_rt_instance_incref(inst);
+                *out = inst;
+                return 0;
+            }
+        }
+    }
+    type_name = PyType_GetFullyQualifiedName(Py_TYPE(o));
+    if (type_name == NULL) {
+        return -1;
+    }
+    if (carrier && inst == NULL) {
+        PyErr_Format(PyExc_TypeError, "%s: the %U object is uninitialized (its __init__ never ran)",
+                     what, type_name);
+    } else {
+        PyErr_Format(PyExc_TypeError, "%s must be %s.%s, not %U", what, m->name, class_name,
+                     type_name);
     }
     Py_DECREF(type_name);
     return -1;

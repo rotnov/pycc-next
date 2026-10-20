@@ -41,6 +41,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   module's `int` function is 14x faster than calling the object (0.69 s -> 0.05 s for 2M
   calls); mistune and pydantic, whose hot code is methods of their classes, are
   unchanged (65.48M against 65.42M instructions per `mistune.html` pass).
+- Non-strict `--ext`: an exception class with a constructor of its own runs in CPython
+  when compiled code raises or catches it, instead of every function raising it
+  falling back; compiled code passing a CPython object to a parameter annotated with a
+  class compiled in the module converts it to the instance its carrier holds
+  (`TypeError: f() argument 1 must be mod.C, not int` otherwise) instead of the caller
+  falling back. pydantic: 1029 of 1249 functions native (1025).
+
 - v0.8 accept 3 (compiled frames are real frames): on CPython 3.13 a compiled function
   of an `--ext` module or an embedded program runs in a real CPython frame, so
   `sys._getframe(n)` (`f_code`, `f_lineno`, `f_back`, `f_globals`), `inspect.stack()`,
@@ -131,6 +138,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- Non-strict `--ext`: `isinstance(e, Exception)` (or any builtin exception class) of a
+  CPython exception object answered `False`; it is now CPython's own test.
 - A container attribute (a native `list`, `dict`, `set` or tuple) of a compiled class in a
   non-strict `--ext` module is a CPython object when code holding the instance as a
   CPython object uses it -- the module's fallback code, a lifted body, and under

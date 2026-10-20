@@ -514,6 +514,9 @@ impl Plan {
         // round may be consequences of it, so the rewrite is compiled
         // before any of them is absorbed.
         let mut nested_units = BTreeSet::new();
+        // The exception classes this round makes run in CPython
+        // (`exception_with_constructor`): every failure naming one is its.
+        let mut constructed = BTreeSet::new();
         for failure in failures {
             if self.nest(rendered, failure)
                 && let Some(unit) = self.owner_of(rendered, failure)
@@ -528,7 +531,10 @@ impl Plan {
             {
                 continue;
             }
-            if self.class_without_attribute(failure) || self.receiving_generators(failure) {
+            if self.class_without_attribute(failure)
+                || self.receiving_generators(failure)
+                || self.exception_with_constructor(failure, &mut constructed)
+            {
                 continue;
             }
             if self.erase_annotation(rendered, failure)
@@ -650,6 +656,49 @@ impl Plan {
             index,
             format!("code outside the class uses an attribute `{attr}` it does not declare"),
         );
+        true
+    }
+
+    /// Makes an exception class with a constructor of its own run in CPython
+    /// when compiled code raises or constructs it (`C0001`: pycc raises an
+    /// exception by its type and message only, so the class's own state
+    /// would be lost), returning whether it did (this round, `constructed`).
+    /// The code raising it stays compiled and raises the CPython class's
+    /// instance, as CPython does.
+    fn exception_with_constructor(
+        &mut self,
+        failure: &Failure,
+        constructed: &mut BTreeSet<usize>,
+    ) -> bool {
+        if failure.diagnostic.code != "C0001" {
+            return false;
+        }
+        let Some(rest) = failure.diagnostic.message.strip_prefix("exception class `") else {
+            return false;
+        };
+        let Some((class, rest)) = rest.split_once('`') else {
+            return false;
+        };
+        if !rest.starts_with(" declares or inherits an `__init__`") {
+            return false;
+        }
+        let Some(index) = (0..self.top).find(|index| {
+            matches!(&self.stmts[*index].kind, Kind::Class(name) if name == class)
+        }) else {
+            return false;
+        };
+        if constructed.contains(&index) {
+            return true;
+        }
+        if self.fallback.contains_key(&index) {
+            return false;
+        }
+        self.fallback.insert(
+            index,
+            "an exception class with a constructor of its own, which compiled code raises"
+                .to_string(),
+        );
+        constructed.insert(index);
         true
     }
 

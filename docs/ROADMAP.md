@@ -517,12 +517,19 @@ Accept:
    compiled again without the rewrite before it may fall back. Measured: 2M calls of
    another module's `int` function from a compiled loop 0.69 s -> 0.05 s (CPython 0.10
    s); pydantic built whole (15 interleaved runs, best / median ms, against the first
-   stage): import 78.5 / 101.6 against 75.9 / 97.1, define 11.5 / 13.2 against 10.8 /
-   12.9, schema 19.1 / 23.0 against 18.3 / 23.6, round-trips 16.1 / 20.2 against
-   15.8 / 20.1 (CPython 64.8 / 83.5, 8.4 / 9.5, 13.3 / 16.7, 14.4 / 18.6): unchanged,
-   1025 of 1249 functions native, its suite as before. What runs hot in both packages
-   is methods of classes CPython runs (accept 4's note): the next stage is native
-   instances and classes across modules.
+   stage; the numbers first recorded here had measured the first stage's binary
+   twice): import 81.4 / 98.9 against 85.7 / 100.3, define 10.4 / 12.7 against 9.9 /
+   12.5, schema 18.5 / 23.9 against 17.4 / 22.3, round-trips 17.8 / 20.2 against
+   17.5 / 20.8 (CPython 62.0 / 82.5, 7.3 / 8.9, 12.5 / 16.3, 14.9 / 18.7): unchanged,
+   its suite as before. 1029 of 1249 functions native again: an exception class with
+   a constructor of its own now runs in CPython itself when compiled code raises it
+   (the functions raising and catching it stay compiled), `isinstance` of a caught
+   exception against a builtin exception class is CPython's test (it answered `False`
+   for a CPython exception object before), and compiled code passing a CPython object
+   to a parameter annotated with a class compiled in the module converts it to the
+   carrier's instance (`TypeError` otherwise) instead of the caller falling back. What
+   runs hot in both packages is methods of classes CPython runs (accept 4's note): the
+   next stage is native instances and classes across modules.
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions

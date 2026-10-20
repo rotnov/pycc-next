@@ -85,6 +85,21 @@ pub(crate) fn admits_coercion(from: &Ty, to: &Ty) -> bool {
         && (matches!(to, Ty::Int | Ty::Float | Ty::Bool | Ty::Str) || is_coercible_frozenset(to))
 }
 
+/// Whether a CPython object reaches a call argument of type `to`, an
+/// instance of a class compiled in this module, through the run-time
+/// conversion: only in non-strict mode, and only for a class whose
+/// instances cross the boundary as carriers (not an exception or an enum
+/// class). The argument is the carrier's own instance, or a `TypeError`
+/// names the class (`pycc_ext_obj_coerce_instance`).
+pub(crate) fn admits_instance_coercion(env: &crate::Environment, from: &Ty, to: &Ty) -> bool {
+    is_non_strict()
+        && *from == Ty::Object
+        && matches!(to, Ty::Instance(class)
+            if env.classes.get(class.as_str()).is_some_and(|def| {
+                def.exception_type_tag.is_none() && !def.is_enum && def.type_param.is_none()
+            }))
+}
+
 /// Whether an object reaches a slot of type `ty` through the run-time
 /// conversion as a copy: a `frozenset[str]` or `frozenset[int]`, or a
 /// `tuple[str, ...]`, whose immutability makes a native copy of a CPython

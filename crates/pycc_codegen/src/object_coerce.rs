@@ -25,7 +25,8 @@ pub const EXT_OBJ_COERCE_SYMBOL: &str = "pycc_ext_obj_coerce";
 /// `ObjSubscript`), so its `ty()` -- which panics on malformed hand-built
 /// MIR that `emit_expr` reports with its own message -- is not asked.
 pub(crate) fn coerces_into(value: &MirExpr, slot_ty: &Ty) -> bool {
-    (matches!(slot_ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str) || coercible_frozenset(slot_ty))
+    (matches!(slot_ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Instance(_))
+        || coercible_frozenset(slot_ty))
         && !matches!(value, MirExpr::Subscript { .. })
         && value.ty() == Ty::Object
 }
@@ -51,6 +52,11 @@ pub(crate) fn emit_coerced<'ctx>(
     slot_ty: &Ty,
     what: &str,
 ) -> Scalar<'ctx> {
+    if let Ty::Instance(class) = slot_ty {
+        return emit_instance_conversion(
+            context, builder, module, rt, user_functions, locals, value, class, what,
+        );
+    }
     let kind = match slot_ty {
         Ty::Int => 0,
         Ty::Float => 1,
@@ -165,4 +171,78 @@ fn emit_conversion<'ctx>(
         Ty::VarTuple(_) => Scalar::List(loaded.into_pointer_value()),
         _ => Scalar::Str(loaded.into_pointer_value()),
     }
+}
+
+/// The module-unit entry converting a CPython object to an instance of a
+/// class compiled in this module (`pycc_ext_obj_coerce_instance`): `int
+/// f(PyObject *o, const char *class_name, const char *what, void **out)`.
+pub const EXT_OBJ_COERCE_INSTANCE_SYMBOL: &str = "pycc_ext_obj_coerce_instance";
+
+/// Non-strict mode: evaluates `value` (an object passed for a parameter of
+/// the compiled class `class`) and reads it as the instance its carrier
+/// holds, a new reference the parameter slot owns, or raises `TypeError`
+/// naming `what` (`f() argument 1`).
+#[allow(clippy::too_many_arguments)]
+fn emit_instance_conversion<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    value: &MirExpr,
+    class: &str,
+    what: &str,
+) -> Scalar<'ctx> {
+    let object = emit_expr(context, builder, module, rt, user_functions, locals, value);
+    let held = crate::object_release::hold(context, module, rt, value, &object);
+    let edge = ForeignFailEdge::for_current(builder);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let out = super::build_at_entry_block(builder, edge.function(), |b| {
+        b.build_alloca(ptr, "object_coerce_instance_out")
+            .expect("build_alloca should not fail")
+    });
+    let i32_type = context.i32_type();
+    let coerce = shim_fn(
+        module,
+        EXT_OBJ_COERCE_INSTANCE_SYMBOL,
+        i32_type.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false),
+    );
+    let class_ptr = builder
+        .build_global_string_ptr(class, "pycc_coerce_class")
+        .expect("build_global_string_ptr should not fail")
+        .as_pointer_value();
+    let what_ptr = builder
+        .build_global_string_ptr(what, "pycc_coerce_what")
+        .expect("build_global_string_ptr should not fail")
+        .as_pointer_value();
+    let status = builder
+        .build_call(
+            coerce,
+            &[
+                crate::foreign_attr::expect_object_pointer(object).into(),
+                class_ptr.into(),
+                what_ptr.into(),
+                out.into(),
+            ],
+            "object_coerce_instance",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_coerce_instance")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_coerce_instance returns int")
+        .into_int_value();
+    held.release(builder, rt);
+    route_negative(
+        context,
+        builder,
+        module,
+        rt,
+        edge,
+        status,
+        "object_coerce_instance",
+    );
+    let loaded = builder
+        .build_load(ptr, out, "object_coerce_instance_value")
+        .expect("build_load should not fail");
+    Scalar::Instance(loaded.into_pointer_value())
 }

@@ -345,7 +345,8 @@ pub(crate) fn check_call_args(
             is_assignable(arg_ty.clone(), param_ty.clone())
         } || args.get(i).map_or(Ok(false), |arg| {
             crate::object_box::admits_value(env, arg, arg_ty, param_ty)
-        })? || crate::non_strict::admits_coercion(arg_ty, param_ty);
+        })? || crate::non_strict::admits_coercion(arg_ty, param_ty)
+            || crate::non_strict::admits_instance_coercion(env, arg_ty, param_ty);
         if !assignable {
             let diagnostic = Diagnostic::error(
                 "T0021",

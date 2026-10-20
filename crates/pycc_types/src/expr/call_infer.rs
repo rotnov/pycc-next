@@ -832,6 +832,7 @@ pub(crate) fn infer_call_expr(
         if !class::is_assignable_env(env, arg_ty, param_ty)
             && !crate::object_box::admits_value(env, &args[i], arg_ty, param_ty)?
             && !crate::non_strict::admits_coercion(arg_ty, param_ty)
+            && !crate::non_strict::admits_instance_coercion(env, arg_ty, param_ty)
         {
             // #380 (PR-20): if the mismatch involves a protocol,
             // produce a detailed T0046 conformance error.
