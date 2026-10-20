@@ -602,7 +602,10 @@ Accept:
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.
 
 Progress:
-- Accept 2 (in progress): the `...` literal (a bare `...` statement is a no-op; the value
+- Accept 2 **Met 2026-10-20** (CI run 39500973184 on 926c692, all four jobs green):
+  pydantic 2.13.5 1029/1249 functions native (`bench/pydantic_check.py`), its suite
+  unchanged; methods of CPython-run classes call their compiled bodies with no forwarder
+  frame (`src/ext/module/forward.c`, with accept 3). History: the `...` literal (a bare `...` statement is a no-op; the value
   is the `Ellipsis` object), `hash()` of a CPython object and function-local imports of
   CPython modules compile natively, and in non-strict code a nested `def` or `lambda`
   used as a value runs in CPython alone, its body compiled and its enclosing function
