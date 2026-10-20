@@ -498,6 +498,31 @@ Accept:
    without it on the path) and passes 5758. So the import gains about 15 ms
    (more than the 7.8 ms of extension creation measured before: one `dlopen`, one
    runtime mapped), and the rest is unchanged, as the code each module runs is.
+   **Progress 2026-10-21** (not met): (c)'s second stage -- native calls between the
+   modules. Decisions, with the guru advisor: each member build writes the interface of
+   what it compiled (its published module functions of scalar and object signatures,
+   `crate::package_build::interface`) once its MIR exists, before codegen, and the
+   package build starts a member once the interfaces of the members it imports from at
+   module level exist (not under `if TYPE_CHECKING:`; members of one import cycle keep
+   calling each other through CPython), the busiest producers first; each consumer
+   records the content hash of what it read and the link refuses a mismatch. In a
+   non-strict `--ext` member every module-level import runs in CPython (an imported
+   name is a module variable Python code reads), so the guard is on the consumer's own
+   dict entry, synced through the dict's version tag: a call `f(a, b)` with exactly
+   `f`'s parameters becomes a call of a synthetic `_pycc_sib_f` with `f`'s compiled
+   signature whose body calls the object, and codegen picks `f`'s compiled function
+   while the dict binds the object `f`'s module published (its interface table,
+   refilled by a reload) -- one indirect call, arguments marshalled once. A statement
+   that a call's native result breaks (a native `str` among objects in a display) is
+   compiled again without the rewrite before it may fall back. Measured: 2M calls of
+   another module's `int` function from a compiled loop 0.69 s -> 0.05 s (CPython 0.10
+   s); pydantic built whole (15 interleaved runs, best / median ms, against the first
+   stage): import 78.5 / 101.6 against 75.9 / 97.1, define 11.5 / 13.2 against 10.8 /
+   12.9, schema 19.1 / 23.0 against 18.3 / 23.6, round-trips 16.1 / 20.2 against
+   15.8 / 20.1 (CPython 64.8 / 83.5, 8.4 / 9.5, 13.3 / 16.7, 14.4 / 18.6): unchanged,
+   1025 of 1249 functions native, its suite as before. What runs hot in both packages
+   is methods of classes CPython runs (accept 4's note): the next stage is native
+   instances and classes across modules.
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions
@@ -554,6 +579,17 @@ Accept:
    65.3M instructions per `mistune.html` pass (65.2M), 0.96x and 0.90x (best of 5,
    noisy host): the modules still reach each other's instances through CPython,
    which the next stages (native calls, then native classes across modules) change.
+   **Progress 2026-10-21** (not met): with native calls between the modules (accept 1's
+   second stage) 12 imported helpers of mistune are called natively, 386 of 413
+   functions native, the build 5.9 s locally (CI bound 10 s), 65.48M instructions per
+   pass against 65.42M without them: unchanged. Of the attribute operations its parse
+   executes (line counts of the CPython run times each line's attribute uses), 38% are
+   on `self` (the CPython-run parsers and renderers), 24% on `state` (the native
+   `BlockState`/`InlineState`, reached through CPython from the other modules) and 39%
+   on other objects. So native instances of another module's classes (next) alone
+   cannot give 2x; the parsers themselves must become native classes too (constrained
+   `TypeVar` in `Generic[...]`, a subscripted base from another module,
+   `super().__init__()`).
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.

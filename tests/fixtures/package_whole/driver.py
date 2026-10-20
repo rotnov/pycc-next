@@ -94,6 +94,29 @@ again = importlib.reload(state)
 print(again is state, state.COUNTER, state.bump(), state.limit())
 print(importlib.import_module("pkw.sub.circle") is circle)
 
+# Calls into other modules (native in the compiled tree while the names bind the
+# published functions), then through rebound names, then after a reload.
+import traceback  # noqa: E402
+
+import pkw.calls as calls  # noqa: E402
+import pkw.util as util  # noqa: E402
+
+print(calls.use(2, "ab"), calls.loop(10), calls.keyword("x"), calls.private("p"))
+print(calls.token("u", [1]))
+for call, arg in [(calls.failing, "k"), (calls.div, 0.0)]:
+    try:
+        call(arg) if call is calls.failing else call(1.0, arg)
+    except (KeyError, ZeroDivisionError) as e:
+        print(type(e).__name__, e, [f.name for f in traceback.extract_tb(e.__traceback__)][1:])
+calls.shout = lambda s: "patched " + s
+calls._shout = lambda s: "hidden " + s
+print(calls.use(1, "q"), calls.private("p"), calls.keyword("y"))
+calls.shout = util.shout
+calls._shout = util.shout
+print(calls.use(1, "r"), calls.private("s"))
+reloaded = importlib.reload(util)
+print(reloaded is util, calls.scaled is util.scaled, calls.use(3, "t"), calls.loop(4))
+
 try:
     import pkw.missing  # noqa: F401
 except ModuleNotFoundError as e:
@@ -117,11 +140,15 @@ if compiled:
         base.label(3)
         circle.safe(-1)
         base.Point(1, 2).shifted(1).norm1()
+        calls.private("x")
+        calls.div(1.0, 2.0)
     before = live()
     for _ in range(1000):
         base.label(3)
         circle.safe(-1)
         base.Point(1, 2).shifted(1).norm1()
+        calls.private("x")
+        calls.div(1.0, 2.0)
     print("leaks", "none" if live() == before else f"{before} -> {live()}")
 else:
     print("leaks", "none")

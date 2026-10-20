@@ -138,6 +138,13 @@ pub fn is_public_name(name: &str) -> bool {
 /// (`pycc_ast` reserves `_pycc_`).
 pub const SITE_COPY_PREFIX: &str = "_pycc_site";
 
+/// The prefix of the function a module of a package built whole calls in
+/// place of a compiled function of another module of the package (v0.8,
+/// `pycc_codegen::SiblingTarget`): `_pycc_sib_<imported name>`. Like a
+/// per-call-site copy it is compiler-made and called directly; no source
+/// name can spell it (`pycc_ast` reserves `_pycc_`).
+pub const SIBLING_CALL_PREFIX: &str = "_pycc_sib_";
+
 /// The callee of the call `pycc_hir` lowers a `yield value` statement to
 /// (`HirStmt::ExprStmt`); not a Python identifier, so no source name can
 /// spell it.

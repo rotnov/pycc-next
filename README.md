@@ -164,8 +164,12 @@ own definitions are exported. To ship a package, build it whole: `pycc build pkg
 one copy of the runtime and one `dlopen`. Each module stays a module of its own --
 created when it is first imported, in import order, with its own `__name__`, `__spec__`,
 `__file__` (the path its own extension would have) and globals -- and the imports
-between the modules bind them through CPython (`docs/DEVIATIONS.md` lists what differs
-from separate extensions). `pycc build pkg/mod.py --ext --foreign-relative-imports`
+between the modules bind them through CPython. A call of a function another module
+compiled (`from .util import escape`, then `escape(s)`) goes to its compiled code
+directly, with native arguments and result, while the name still binds the function that
+module published; rebinding the name from Python, or reloading that module, makes the
+call a call of the object again (`docs/DEVIATIONS.md` lists what differs from separate
+extensions). `pycc build pkg/mod.py --ext --foreign-relative-imports`
 still builds one module as its own extension. Imports of anything
 else (the standard library, third-party packages) work as in a single file. Modules may import
 each other (a circular import sees the partially initialized module, as in CPython). A

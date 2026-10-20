@@ -166,6 +166,14 @@ static PyObject *pycc_ext_snapshot_classes(void)
  * store, through `pycc_ext_publish` below: before the body has reached a
  * definition, its name is simply not an attribute of the module.
  */
+#ifdef PYCC_EXT_PACKAGE_MEMBER
+/* The functions other modules of the package call natively (v0.8): their
+ * names and the table of the objects this module published for them,
+ * written beside this unit by the member build after its MIR
+ * (`crate::package_build::interface`). */
+#include "pycc_ext_interface.h"
+#endif
+
 static int pycc_ext_exec_module(PyObject *module)
 {
     void *saved_target;
@@ -378,6 +386,9 @@ static int pycc_ext_exec_module(PyObject *module)
     if (PyModule_AddFunctions(module, pycc_ext_module_hooks) != 0) {
         return -1;
     }
+#ifdef PYCC_EXT_PACKAGE_MEMBER
+    pycc_ext_interface_fill(PyModule_GetDict(module));
+#endif
     return 0;
 }
 

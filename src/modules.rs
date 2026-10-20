@@ -386,6 +386,14 @@ impl Loader {
             if self.non_strict {
                 crate::specialize::specialize_entry(&mut parsed);
             }
+            // A module of a package built whole calls its siblings'
+            // compiled functions natively (`crate::package_build`).
+            crate::package_build::apply_siblings(
+                &mut parsed,
+                &original,
+                source.len(),
+                self.non_strict,
+            );
         }
         // A native program's entry module is closed, so a dead unannotated
         // definition there can never run and is not compiled: no call site

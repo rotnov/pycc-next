@@ -3,6 +3,7 @@
 //! package unit, then one link into `PKG/__init__.abi3.so`.
 
 use super::ext_plan::write_ext_source;
+use super::package_schedule;
 use super::{
     add_linux_system_libs, add_windows_crt_math, add_windows_system_libs, c_objects,
     effective_link_target, find_pycc_rt_lib_dir, linker_command, linker_spawn_error,
@@ -25,6 +26,31 @@ pub(crate) struct PackageBuild<'a> {
     pub(crate) mode_args: Vec<OsString>,
 }
 
+/// Writes a member's interface (`crate::package_build::Interface`): its C
+/// header beside the member's module unit, then the interface file into
+/// `out`, renamed into place so a reader never sees half of it.
+pub(super) fn write_interface(
+    out: &Path,
+    obj_path: &Path,
+    member: &package_build::Member,
+    mir: &pycc_mir::MirModule,
+    published: &std::collections::BTreeSet<String>,
+) -> Result<(), ExitCode> {
+    let interface =
+        package_build::Interface::collect(&member.dotted, &member.prefix, mir, published);
+    write_ext_source(
+        &obj_path.with_file_name(package_build::INTERFACE_HEADER_NAME),
+        &interface.c_header(),
+    )?;
+    let path = out.join(package_build::INTERFACE_NAME);
+    let partial = out.join(format!("{}.partial", package_build::INTERFACE_NAME));
+    write_ext_source(&partial, &interface.to_text())?;
+    std::fs::rename(&partial, &path).map_err(|e| {
+        eprintln!("error: could not write `{}`: {e}", path.display());
+        ExitCode::from(2)
+    })
+}
+
 /// Records a member build's objects and the highest exception tag its
 /// classes took, in `out` (its output directory), for the package build.
 pub(super) fn write_member_manifest(
@@ -44,11 +70,21 @@ pub(super) fn write_member_manifest(
         manifest.push_str(&format!("{}\n", object.display()));
     }
     manifest.push_str(&format!("max_tag {max_tag}\n"));
+    // The interfaces this member compiled against, checked before the link.
+    for producer in package_build::member().map_or(&[][..], |member| &member.producers) {
+        manifest.push_str(&format!(
+            "consumed {} {}\n",
+            producer.interface.module, producer.hash
+        ));
+    }
     write_ext_source(&out.join(MEMBER_MANIFEST_NAME), &manifest)
 }
 
-/// What a finished member build left: its objects and its highest tag.
-fn read_member_manifest(dir: &Path) -> Result<(Vec<PathBuf>, u16), String> {
+/// What a finished member build left: its objects, its highest tag and
+/// the interfaces it compiled against (module, content hash).
+type MemberManifest = (Vec<PathBuf>, u16, Vec<(String, u64)>);
+
+fn read_member_manifest(dir: &Path) -> Result<MemberManifest, String> {
     let text = std::fs::read_to_string(dir.join(MEMBER_MANIFEST_NAME)).map_err(|e| {
         format!(
             "a member build left no manifest in `{}`: {e}",
@@ -57,62 +93,18 @@ fn read_member_manifest(dir: &Path) -> Result<(Vec<PathBuf>, u16), String> {
     })?;
     let mut objects = Vec::new();
     let mut max_tag = 0;
+    let mut consumed = Vec::new();
     for line in text.lines() {
-        match line.strip_prefix("max_tag ") {
-            Some(tag) => max_tag = tag.parse().unwrap_or(u16::MAX),
-            None => objects.push(PathBuf::from(line)),
+        if let Some(tag) = line.strip_prefix("max_tag ") {
+            max_tag = tag.parse().unwrap_or(u16::MAX);
+        } else if let Some(rest) = line.strip_prefix("consumed ") {
+            let (module, hash) = rest.split_once(' ').unwrap_or((rest, ""));
+            consumed.push((module.to_string(), hash.parse().unwrap_or(0)));
+        } else {
+            objects.push(PathBuf::from(line));
         }
     }
-    Ok((objects, max_tag))
-}
-
-/// One member build's outcome: its exit status, what it printed, and how
-/// long it took.
-struct MemberRun {
-    ok: bool,
-    code: u8,
-    output: Vec<u8>,
-    seconds: f64,
-}
-
-/// Runs `commands` with at most `jobs` at a time; the outcomes in order.
-fn run_all(commands: Vec<std::process::Command>, jobs: usize) -> Vec<Result<MemberRun, String>> {
-    let queue = std::sync::Mutex::new(commands.into_iter().enumerate().collect::<Vec<_>>());
-    let results = std::sync::Mutex::new(Vec::new());
-    std::thread::scope(|scope| {
-        for _ in 0..jobs.max(1) {
-            scope.spawn(|| {
-                loop {
-                    let next = queue.lock().expect("the queue lock").pop();
-                    let Some((index, mut command)) = next else {
-                        break;
-                    };
-                    let started = std::time::Instant::now();
-                    let outcome = command
-                        .stdin(std::process::Stdio::null())
-                        .output()
-                        .map(|output| {
-                            let mut text = output.stdout;
-                            text.extend(output.stderr);
-                            MemberRun {
-                                ok: output.status.success(),
-                                code: output.status.code().map_or(1, |c| c.clamp(1, 255) as u8),
-                                output: text,
-                                seconds: started.elapsed().as_secs_f64(),
-                            }
-                        })
-                        .map_err(|e| format!("could not run a member build: {e}"));
-                    results
-                        .lock()
-                        .expect("the results lock")
-                        .push((index, outcome));
-                }
-            });
-        }
-    });
-    let mut results = results.into_inner().expect("the results lock");
-    results.sort_by_key(|(index, _)| *index);
-    results.into_iter().map(|(_, outcome)| outcome).collect()
+    Ok((objects, max_tag, consumed))
 }
 
 /// `pycc build PKG --ext`: every module of the package directory into one
@@ -151,18 +143,34 @@ pub(crate) fn build_package(
     let dirs: Vec<PathBuf> = (0..modules.len())
         .map(|i| scratch.join(format!("m{i}")))
         .collect();
-    let mut commands = Vec::new();
-    for ((module, base), dir) in modules.iter().zip(&bases).zip(&dirs) {
+    for dir in &dirs {
         std::fs::create_dir_all(dir)
             .map_err(|e| fail(format!("cannot create `{}`: {e}", dir.display())))?;
-        commands.push(member_command(&exe, build, module, *base, dir));
     }
+    // Which members' interfaces each member reads (cross-module native
+    // calls): it starts once they are written.
+    // `PYCC_NO_NATIVE_SIBLINGS=1` builds without them, to measure them.
+    let producers = match std::env::var_os("PYCC_NO_NATIVE_SIBLINGS") {
+        Some(_) => vec![Vec::new(); modules.len()],
+        None => package_build::producers(&modules, &sources),
+    };
+    let command = |member: usize, available: &[usize]| {
+        let mut cmd = member_command(&exe, build, &modules[member], bases[member], &dirs[member]);
+        for &producer in available {
+            let mut entry = OsString::from(format!("{}=", modules[producer].dotted));
+            entry.push(dirs[producer].join(package_build::INTERFACE_NAME));
+            cmd.arg("--sibling-interface").arg(entry);
+        }
+        cmd
+    };
     let jobs = std::env::var("PYCC_JOBS")
         .ok()
         .and_then(|jobs| jobs.parse().ok())
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from));
     let started = std::time::Instant::now();
-    let runs = crate::timing::span("package: member builds", || run_all(commands, jobs));
+    let runs = crate::timing::span("package: member builds", || {
+        package_schedule::run_members(&dirs, &producers, jobs, &command)
+    });
     let mut objects = Vec::new();
     let mut failure = None;
     for (index, (module, run)) in modules.iter().zip(runs).enumerate() {
@@ -175,7 +183,9 @@ pub(crate) fn build_package(
             continue;
         }
         eprintln!("pycc: {}: built in {:.2}s", module.dotted, run.seconds);
-        let (member_objects, max_tag) = read_member_manifest(&dirs[index]).map_err(fail)?;
+        let (member_objects, max_tag, consumed) =
+            read_member_manifest(&dirs[index]).map_err(fail)?;
+        check_consumed(&modules, &dirs, &module.dotted, &consumed).map_err(fail)?;
         let next = bases.get(index + 1).map_or(end, |base| u16::from(*base));
         if max_tag != 0 && max_tag >= next {
             return Err(fail(format!(
@@ -246,6 +256,34 @@ pub(crate) fn build_package(
     }
 }
 
+/// Checks that every interface member `dotted` compiled against is the one
+/// its module's build left (a stale or rewritten interface would mean a
+/// call with the wrong signature).
+fn check_consumed(
+    modules: &[PackageModule],
+    dirs: &[PathBuf],
+    dotted: &str,
+    consumed: &[(String, u64)],
+) -> Result<(), String> {
+    for (module, hash) in consumed {
+        let index = modules
+            .iter()
+            .position(|candidate| &candidate.dotted == module)
+            .ok_or_else(|| {
+                format!("internal: {dotted} read the interface of unknown `{module}`")
+            })?;
+        let text = std::fs::read_to_string(dirs[index].join(package_build::INTERFACE_NAME))
+            .unwrap_or_default();
+        if package_build::content_hash(&text) != *hash {
+            return Err(format!(
+                "internal: {dotted} was compiled against another interface of {module} than \
+                 {module}'s build left"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The `pycc build` of one member: its source, its dotted name, its first
 /// exception tag, its output directory, and the package build's own flags.
 fn member_command(
@@ -278,4 +316,33 @@ fn member_command(
     // Each member keeps its scratch inside the package build's.
     cmd.env("TMPDIR", dir);
     cmd
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_member_compiled_against_another_interface_fails_the_build() {
+        let scratch = pycc_scratch::ScratchDir::new("package-consumed").unwrap();
+        let dirs = vec![scratch.join("m0"), scratch.join("m1")];
+        for dir in &dirs {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let module = |dotted: &str| PackageModule {
+            dotted: dotted.to_string(),
+            relative: String::new(),
+            path: PathBuf::new(),
+            is_package: false,
+        };
+        let modules = [module("p.a"), module("p.b")];
+        let text = "pycc-interface 1\nmodule p.a\nprefix x\n";
+        std::fs::write(dirs[0].join(package_build::INTERFACE_NAME), text).unwrap();
+        let hash = package_build::content_hash(text);
+        assert!(check_consumed(&modules, &dirs, "p.b", &[("p.a".to_string(), hash)]).is_ok());
+        let stale = check_consumed(&modules, &dirs, "p.b", &[("p.a".to_string(), hash + 1)]);
+        assert!(stale.unwrap_err().contains("another interface of p.a"));
+        let unknown = check_consumed(&modules, &dirs, "p.b", &[("p.z".to_string(), hash)]);
+        assert!(unknown.unwrap_err().contains("unknown `p.z`"));
+    }
 }

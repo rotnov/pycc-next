@@ -24,6 +24,7 @@ pub(crate) fn member_header(prefix: &str, inc: &str) -> String {
             "pycc_fn_info_table",
             "pycc_fn_info_count",
             "pycc_ext_member_def",
+            "pycc_ext_interface_table",
         ]
         .map(str::to_string),
     );

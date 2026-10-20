@@ -24,6 +24,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   and `bench/package_check.py` and `bench/pydantic_check.py` build packages whole
   (`--separate`: module by module). pydantic's `import` is about 15 ms faster than with
   one extension per module; the code each module runs is unchanged.
+- v0.8 accepts 1 and 4 (the whole-package build, second stage): calls between the
+  modules of a package built whole are native. A module's call of a function another
+  module of the package compiled (imported at module level with `from M import f`, called
+  with exactly its parameters, positionally) goes to that module's compiled function
+  directly, its arguments and result native, while the module dict still binds the name
+  to the function `M` published -- a load and a compare per call, the dict's version tag
+  keeping the read cheap; otherwise (the name rebound from Python, `M` reloaded or not
+  yet run) the call is CPython's call of the object. Each member build writes the
+  interface of what it compiled (`interface.txt`: the functions, their native signatures)
+  once its MIR exists, and the package build starts a member once the interfaces of the
+  modules it imports from at module level are written (a cycle of imports keeps calling
+  through CPython); the link refuses a member compiled against an interface its module's
+  build did not leave. A function whose compiled form needs the object's result type
+  falls back to calling the object instead of to CPython. A loop calling another
+  module's `int` function is 14x faster than calling the object (0.69 s -> 0.05 s for 2M
+  calls); mistune and pydantic, whose hot code is methods of their classes, are
+  unchanged (65.48M against 65.42M instructions per `mistune.html` pass).
 - v0.8 accept 3 (compiled frames are real frames): on CPython 3.13 a compiled function
   of an `--ext` module or an embedded program runs in a real CPython frame, so
   `sys._getframe(n)` (`f_code`, `f_lineno`, `f_back`, `f_globals`), `inspect.stack()`,

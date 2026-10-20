@@ -18,6 +18,9 @@ pub(super) struct ExtPlan {
     pub(super) artifact: std::path::PathBuf,
     pub(super) compile_args: Vec<std::ffi::OsString>,
     pub(super) link_args: Vec<std::ffi::OsString>,
+    /// The module-level functions the module publishes (a package member's
+    /// interface lists some of them).
+    pub(super) published: std::collections::BTreeSet<String>,
 }
 
 /// Resolves `OUT` against the `--ext` output contract, reporting a rejected
@@ -214,10 +217,16 @@ pub(super) fn plan_ext(
         }
         None => compile_args.push(sources[2].0.clone().into_os_string()),
     }
+    let published = exports
+        .iter()
+        .filter(|export| export.class.is_none())
+        .map(|export| export.name.clone())
+        .collect();
     Ok(ExtPlan {
         compile_args,
         link_args,
         artifact: output.artifact,
+        published,
     })
 }
 

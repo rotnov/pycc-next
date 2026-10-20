@@ -20,10 +20,19 @@
 
 mod discover;
 mod exceptions;
+mod graph;
+mod interface;
+mod siblings;
 mod unit;
 
 pub(crate) use discover::{PackageModule, discover};
 pub(crate) use exceptions::exception_tag_bases;
+pub(crate) use graph::producers;
+pub(crate) use interface::{INTERFACE_HEADER_NAME, INTERFACE_NAME, Interface, content_hash};
+pub(crate) use siblings::{
+    Producer, apply_siblings, codegen_targets, deny_failures as deny_sibling_failures,
+    report as report_siblings,
+};
 pub(crate) use unit::{MEMBERS_HEADER_NAME, member_header, members_header};
 
 use std::sync::OnceLock;
@@ -42,18 +51,36 @@ pub(crate) struct Member {
     pub(crate) dotted: String,
     /// `pycc_codegen::member_prefix(dotted)`.
     pub(crate) prefix: String,
+    /// Whether the module is a package's `__init__`.
+    pub(crate) is_package: bool,
+    /// The other modules of the package this one may call natively: their
+    /// interfaces, read when the build starts (`--sibling-interface`).
+    pub(crate) producers: Vec<Producer>,
 }
 
 static MEMBER: OnceLock<Member> = OnceLock::new();
 
-/// Makes this process a member build of `dotted` (`pycc build
-/// --package-member`; its first exception tag is set on `pycc_hir`). Set
-/// once, before the build runs.
-pub(crate) fn set_member(dotted: &str) {
+/// Makes this process a member build of `dotted`, whose source is `path`
+/// (`pycc build --package-member`; its first exception tag is set on
+/// `pycc_hir`), reading the interfaces `siblings` names
+/// (`DOTTED=PATH`). Set once, before the build runs; `Err` names an
+/// interface that cannot be read.
+pub(crate) fn set_member(
+    dotted: &str,
+    path: &std::path::Path,
+    siblings: &[String],
+) -> Result<(), String> {
+    let producers = siblings
+        .iter()
+        .map(|entry| Producer::read(entry))
+        .collect::<Result<Vec<_>, _>>()?;
     let _ = MEMBER.set(Member {
         dotted: dotted.to_string(),
         prefix: pycc_codegen::member_prefix(dotted),
+        is_package: path.file_name().is_some_and(|name| name == "__init__.py"),
+        producers,
     });
+    Ok(())
 }
 
 /// The member this process builds, if it is a member build.

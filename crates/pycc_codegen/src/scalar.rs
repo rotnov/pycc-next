@@ -268,6 +268,10 @@ pub(crate) struct UserFunction<'ctx> {
     /// statement, foreign import or enum singleton runs earlier). Every call
     /// therefore finds the slot set, and skips the null check too.
     pub(crate) bound_before_code: bool,
+    /// For the function a module of a package calls in place of another
+    /// module's compiled function: that function, and how to tell whether
+    /// the call may go to it (`crate::sibling_call`).
+    pub(crate) sibling: Option<crate::sibling_call::SiblingCallee<'ctx>>,
 }
 
 /// Part 2b of #1142 (#1164): the `locals` key under which a

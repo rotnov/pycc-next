@@ -70,6 +70,7 @@ fn main() -> ExitCode {
             excludes,
             package_member,
             exception_tag_base,
+            sibling_interfaces,
             static_libpython,
             interop,
             mode,
@@ -80,7 +81,11 @@ fn main() -> ExitCode {
             // dotted name, its user exception classes tagged from its base.
             if let Some(dotted) = &package_member {
                 let base = exception_tag_base.unwrap_or(pycc_hir::FIRST_USER_EXCEPTION_TYPE_TAG);
-                package_build::set_member(dotted);
+                if let Err(message) = package_build::set_member(dotted, &path, &sibling_interfaces)
+                {
+                    eprintln!("error: {message}");
+                    return ExitCode::from(2);
+                }
                 pycc_hir::set_exception_tag_base(base);
             }
             // Resolved here, not inside `try_build`: this consumption point

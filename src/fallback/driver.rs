@@ -259,6 +259,22 @@ fn converge<T, E>(
 ) -> Option<T> {
     let dump = std::env::var_os("PYCC_FALLBACK_DUMP").is_some();
     loop {
+        // A member of a package built whole first compiles a failing
+        // statement without its native calls to its siblings
+        // (`crate::package_build`), before letting it fall back.
+        if crate::package_build::deny_sibling_failures(
+            failures
+                .iter()
+                .filter_map(|failure| failure.diagnostic.span.map(|s| s.start).or(failure.origin)),
+        ) {
+            match attempt() {
+                Ok(value) => return Some(value),
+                Err(failure) => {
+                    failures = split(&failure)?;
+                    continue;
+                }
+            }
+        }
         if !plan.absorb(rendered.as_ref(), &failures) {
             if dump {
                 eprintln!("--- fallback loop stuck on ---");

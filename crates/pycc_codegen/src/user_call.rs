@@ -72,7 +72,12 @@ pub(crate) fn build_call_to_with_leading_args<'ctx>(
     leading_args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
     args: &[MirExpr],
 ) -> inkwell::values::CallSiteValue<'ctx> {
-    let callee = resolve_callee(context, builder, rt, user_function);
+    let callee = match (&user_function.sibling, user_function.direct_value) {
+        (Some(sibling), Some(own)) => {
+            crate::sibling_call::resolve(context, builder, module, rt, sibling, own)
+        }
+        _ => resolve_callee(context, builder, rt, user_function),
+    };
     let mut arg_values: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = leading_args.to_vec();
     // A leading argument (an instance the caller keeps: `__init__`'s fresh
     // `self`, a `__hash__`/`__eq__` operand) goes to a parameter slot that
@@ -146,7 +151,11 @@ pub(crate) fn marshal_args<'ctx>(
                     locals,
                     a,
                     param_ty,
-                    &format!("{callee_name}() argument {}", index + 1),
+                    &format!(
+                        "{}() argument {}",
+                        crate::sibling_call::display_name(callee_name),
+                        index + 1
+                    ),
                 );
                 return match scalar {
                     Scalar::Int(v) | Scalar::Num(v) | Scalar::Bool(v) => v.into(),

@@ -13,7 +13,9 @@
 //! files read with `importlib.resources`,
 //! classes subclassed from another module (`ABC`, `Generic`), an exception
 //! class of one module caught as its builtin base by another module's
-//! compiled `except` -- and no leak. The oracle is CPython: `driver.py` runs
+//! compiled `except`, calls of functions compiled in other modules (native
+//! while the names bind them, through the objects once Python code rebinds
+//! the names or reloads the module that defined them) -- and no leak. The oracle is CPython: `driver.py` runs
 //! against the sources and against the compiled tree, and the outputs must
 //! be byte-identical. The textkit fixture of `tests/package_ext.rs` is built
 //! whole too.
@@ -132,9 +134,28 @@ fn the_package_matches_cpython(release: bool) {
         "pkw.sub.circle",
         "pkw.cyc_a",
         "pkw.state",
+        "pkw.util",
+        "pkw.calls",
     ] {
         assert!(
             report.contains(&format!("pycc: {module}: built in ")),
+            "{report}"
+        );
+    }
+    // Calls of functions other modules compiled go to them natively.
+    for (name, module) in [
+        ("scaled", "pkw.util"),
+        ("shout", "pkw.util"),
+        ("_shout", "pkw.util"),
+        ("note", "pkw.util"),
+        ("fails", "pkw.util"),
+        ("label", "pkw.base"),
+        ("check", "pkw.base"),
+    ] {
+        assert!(
+            report.contains(&format!(
+                "native call: `{name}` calls `{module}`'s compiled function"
+            )),
             "{report}"
         );
     }

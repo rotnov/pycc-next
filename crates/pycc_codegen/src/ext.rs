@@ -85,6 +85,9 @@ pub struct CompileOptions {
     /// (`crate::member_symbols`). `None` for a module that is an extension
     /// of its own.
     pub symbol_prefix: Option<String>,
+    /// The functions of the other modules of its package such a member
+    /// calls natively (`crate::sibling_call`); empty otherwise.
+    pub sibling_targets: Vec<crate::SiblingTarget>,
 }
 
 /// The symbol the module body is emitted under in `ext` mode: the fixed C

@@ -141,6 +141,16 @@ pub enum Command {
         /// tag the module's own exception classes take.
         #[arg(long, hide = true, requires = "package_member")]
         exception_tag_base: Option<u8>,
+        /// Internal (the package build's member builds): `DOTTED=PATH`, the
+        /// interface of another module of the package this module may call
+        /// natively. Repeatable.
+        #[arg(
+            long = "sibling-interface",
+            value_name = "DOTTED=PATH",
+            hide = true,
+            requires = "package_member"
+        )]
+        sibling_interfaces: Vec<String>,
         /// Link libpython into the executable from the embed interpreter's
         /// static archive instead of bundling its shared library, and
         /// export its C-API symbols so a standard-library extension loads

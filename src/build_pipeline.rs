@@ -22,6 +22,7 @@ use std::process::ExitCode;
 mod c_objects;
 mod ext_plan;
 mod package_link;
+mod package_schedule;
 use ext_plan::{plan_ext, resolve_ext_output};
 pub(crate) use package_link::{PackageBuild, build_package};
 mod object_cache;
@@ -158,6 +159,14 @@ pub(crate) fn try_build(
     // before the link, so every embedded-only line runs ahead of the shared
     // link site below (§4.6 of the #1028 plan).
     let mir = crate::timing::span("mir", || pycc_mir::build(&typed_hir));
+    // A member publishes its interface as soon as its MIR exists, so the
+    // members calling it can start while it is still in codegen.
+    if let (Some(member), Some(plan)) = (member, &ext_plan) {
+        package_link::write_interface(out, obj_path, member, &mir, &plan.published)?;
+        if crate::fallback::reporting() {
+            crate::package_build::report_siblings(&typed_hir);
+        }
+    }
     // Non-strict code can hold CPython objects without any foreign import
     // (an untyped `[]`, a fallback-free module whose values are objects);
     // such a program needs the interpreter too.
@@ -243,6 +252,10 @@ pub(crate) fn try_build(
                     position_sites: pycc_hir::positions::position_sites(),
                     global_sync: (ext.is_some() || embedded) && crate::mode::non_strict_for(path),
                     symbol_prefix: member.map(|member| member.prefix.clone()),
+                    sibling_targets: match member {
+                        Some(_) => crate::package_build::codegen_targets(),
+                        None => Vec::new(),
+                    },
                 },
             )
         });

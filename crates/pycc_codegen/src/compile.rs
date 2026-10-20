@@ -147,6 +147,12 @@ fn compile_module(
         declare_functions::declare_user_functions(&context, &module, mir, &slice_widened);
 
     declare_functions::mark_single_defs(mir, &mut user_functions, &function_defs_in_order, &def_counts);
+    sibling_call::attach(
+        &context,
+        &module,
+        &options.sibling_targets,
+        &mut user_functions,
+    );
 
     // #1050: an `ext` artifact's generated C reaches an export whose
     // signature carries a `tuple` through a scalar-only thunk rather than

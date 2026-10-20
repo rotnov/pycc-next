@@ -101,8 +101,9 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                 // dispatch directly through `direct_value` instead of
                 // through the indirect function-pointer slot.
                 // A per-call-site helper copy (issue #7) is one too.
-                let is_monomorphized =
-                    name.starts_with("0gen_") || name.starts_with(pycc_hir::SITE_COPY_PREFIX);
+                let is_monomorphized = name.starts_with("0gen_")
+                    || name.starts_with(pycc_hir::SITE_COPY_PREFIX)
+                    || name.starts_with(pycc_hir::SIBLING_CALL_PREFIX);
                 if is_monomorphized {
                     UserFunction {
                         param_tys: params.iter().map(|(_, ty)| ty.clone()).collect(),
@@ -112,6 +113,7 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                         direct_value: Some(f),
                         single_def: None,
                         bound_before_code: false,
+                        sibling: None,
                     }
                 } else {
                     let fn_ptr_type = context.ptr_type(inkwell::AddressSpace::default());
@@ -162,6 +164,7 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                         direct_value: None,
                         single_def: None,
                         bound_before_code: false,
+                        sibling: None,
                     }
                 }
             });
