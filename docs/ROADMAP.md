@@ -623,7 +623,19 @@ Accept:
    **Progress 2026-10-21** (not met): `BlockState` and `InlineState` are read natively
    in the modules that import them (accept 1's third stage, first part): 63.33M
    instructions per pass (64.51M). The parsers and renderers, whose classes CPython
-   still creates, are next.
+   still creates, were to be next; an experiment decided against it (decision, with the
+   guru advisor: measure one parser native before building what all of them need).
+   Hand-editing mistune so that `BlockParser` compiles as a native class in one module
+   (its base `Parser` merged in, its object class attributes moved to module globals,
+   five shapes pycc does not compile yet rewritten) gives the same output and 63.45M
+   instructions per pass against 63.48M with `BlockParser` created by CPython (CPython
+   runs the sources in 57.19M): the parser classes are not where the time goes. The
+   cost is spread over CPython objects the parse builds and reads (token dicts, `re`
+   match objects, about 11.6M in `re` itself), so 2x on mistune (28.4M per pass) is out
+   of reach of native classes; cross-module bases, object class attributes and
+   constrained `TypeVar` bases are not built for it. Fixed on the way, each general:
+   `super(C, obj)` in a method of a class CPython creates (394 of 413 functions native),
+   and objects reaching `int | None`-style slots.
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.

@@ -77,12 +77,16 @@ pub(crate) fn empty_display_untyped() -> bool {
 
 /// Whether a value of type `from` reaches a parameter or return slot of type
 /// `to` through the run-time conversion: only in non-strict mode, and only
-/// from `object` to one of the four scalars or a `frozenset` of `str` or
-/// `int` ([`is_coercible_frozenset`]).
+/// from `object` to one of the four scalars, one of them or `None`
+/// (`int | None`), or a `frozenset` of `str` or `int`
+/// ([`is_coercible_frozenset`]).
 pub(crate) fn admits_coercion(from: &Ty, to: &Ty) -> bool {
     is_non_strict()
         && *from == Ty::Object
-        && (matches!(to, Ty::Int | Ty::Float | Ty::Bool | Ty::Str) || is_coercible_frozenset(to))
+        && (matches!(to, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)
+            || is_coercible_frozenset(to)
+            || matches!(to, Ty::Optional(inner)
+                if matches!(**inner, Ty::Int | Ty::Float | Ty::Bool | Ty::Str)))
 }
 
 /// Whether a CPython object reaches a call argument of type `to`, an
@@ -816,8 +820,14 @@ mod tests {
         set_non_strict(true);
         for to in [Ty::Int, Ty::Float, Ty::Bool, Ty::Str] {
             assert!(admits_coercion(&Ty::Object, &to), "{to:?}");
+            let optional = Ty::Optional(Box::new(to));
+            assert!(admits_coercion(&Ty::Object, &optional), "{optional:?}");
         }
         assert!(!admits_coercion(&Ty::Object, &Ty::List(Box::new(Ty::Int))));
+        assert!(!admits_coercion(
+            &Ty::Object,
+            &Ty::Optional(Box::new(Ty::List(Box::new(Ty::Int))))
+        ));
         assert!(!admits_coercion(&Ty::Int, &Ty::Str));
         set_non_strict(false);
     }

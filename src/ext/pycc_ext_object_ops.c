@@ -183,6 +183,15 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
     int admitted;
     double as_double;
 
+    /* A kind with 256 added: an `X | None` slot, whose `None` is answered
+     * `1` with `*out` untouched. */
+    if (kind >= 256) {
+        if (o == Py_None) {
+            return 1;
+        }
+        kind -= 256;
+    }
+
     /*
      * Kinds 9 and 10: a `frozenset[str]` / `frozenset[int]` slot. A CPython
      * `set` or `frozenset` of such elements becomes a fresh native set (a

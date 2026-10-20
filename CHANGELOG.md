@@ -64,6 +64,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `BlockState` and `InlineState` read natively in its parser and renderer modules,
   63.33M instructions per `mistune.html` pass (64.51M), 387 of 413 functions native;
   pydantic unchanged (its classes are created by CPython).
+- Non-strict: `super(C, obj)` (the explicit form) in a method of a class CPython creates
+  is CPython's `super`, called from the compiled body, instead of the method falling
+  back. mistune: 394 of 413 functions native (387).
+- Non-strict: a CPython object returned from, or passed to, a compiled function as
+  `int | None`, `float | None`, `bool | None` or `str | None` is `None` or converted to
+  the scalar (`TypeError` otherwise), instead of the function falling back.
 
 - v0.8 accept 3 (compiled frames are real frames): on CPython 3.13 a compiled function
   of an `--ext` module or an embedded program runs in a real CPython frame, so

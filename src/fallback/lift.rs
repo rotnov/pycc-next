@@ -29,7 +29,8 @@
 //!   the module's namespace. A body that reads `__class__` or calls
 //!   `super()` with no arguments receives the class too: the forwarder
 //!   passes its own `__class__` cell, and `super()` becomes
-//!   `super(__pycc_class__, self)`. A class-private attribute (`self.__x`)
+//!   `super(__pycc_class__, self)`; an explicit `super(C, obj)` is
+//!   CPython's `super` called with its arguments. A class-private attribute (`self.__x`)
 //!   is written mangled (`self._C__x`), as CPython compiles it in the class
 //!   body.
 //!
@@ -459,6 +460,20 @@ impl<'a> Visitor<'a> for BodyScan<'_> {
                     pycc_ast::expr_range(expr),
                     format!("{BUILTINS}.super({CLASS_PARAM}, {})", self.receiver),
                 ));
+            }
+            // `super(C, obj)` names what it binds: CPython's `super`, called
+            // as any CPython callable, needs no class cell.
+            Expr::Call(call)
+                if matches!(&*call.func, Expr::Name(n) if n.id.as_str() == "super")
+                    && call.arguments.args.len() == 2
+                    && call.arguments.keywords.is_empty()
+                    && !self.locals.contains("super") =>
+            {
+                self.edits.push((
+                    pycc_ast::expr_range(&call.func),
+                    format!("{BUILTINS}.super"),
+                ));
+                visitor::walk_expr(self, expr);
             }
             Expr::Name(name) if name.id.as_str() == "__class__" => {
                 if self.depth > 0 {
