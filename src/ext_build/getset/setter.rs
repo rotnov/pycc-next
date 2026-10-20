@@ -64,9 +64,19 @@ fn unpack_value(
         Ty::Str => ("void *v;", call("str"), "word = (long long)(intptr_t)v;"),
         // An initialized carrier of this module whose class has the declared
         // class on its MRO, as for a parameter of that class (#1449).
+        // Another module's class (a package built whole): that module's own
+        // conversion.
         Ty::Instance(declared) => (
             "void *v;",
-            format!("pycc_ext_unpack_instance(value, \"{fn_name}\", 0, \"{declared}\", &v)"),
+            crate::package_build::sibling_unpack_instance(
+                "value",
+                &format!("{fn_name}() argument 1"),
+                declared,
+                "v",
+            )
+            .unwrap_or_else(|| {
+                format!("pycc_ext_unpack_instance(value, \"{fn_name}\", 0, \"{declared}\", &v)")
+            }),
             "word = (long long)(intptr_t)v;",
         ),
         // A typed numpy array attribute (`pycc_hir::ndarray`), an object

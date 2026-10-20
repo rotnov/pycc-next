@@ -251,7 +251,23 @@ impl Finder<'_, '_> {
         if uses_class {
             list.push(format!("{CLASS_PARAM}: object"));
         }
-        list.extend(params.iter().map(|p| format!("{p}: object")));
+        // A parameter annotated with a class another module of a package
+        // built whole compiled keeps that annotation, which reads it
+        // natively (`crate::package_build`'s sibling classes).
+        let annotated = |param: &str| {
+            def.parameters
+                .posonlyargs
+                .iter()
+                .chain(&def.parameters.args)
+                .chain(&def.parameters.kwonlyargs)
+                .find(|p| p.parameter.name.as_str() == param)
+                .and_then(|p| p.parameter.annotation.as_deref())
+                .and_then(crate::package_build::sibling_lifted_annotation)
+        };
+        list.extend(params.iter().map(|p| {
+            let ty = annotated(p).unwrap_or_else(|| "object".to_string());
+            format!("{p}: {ty}")
+        }));
         edits.push((
             parameters.start..signature_end,
             format!("({}{}) -> object", list.join(", "), "\n".repeat(lines)),

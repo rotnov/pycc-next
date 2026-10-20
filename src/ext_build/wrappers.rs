@@ -586,10 +586,22 @@ pub(crate) fn unpack_args(
             // the argument must be an instance of, which the shim checks
             // against the instance's run-time MRO. A refusal leaves nothing
             // owed, so only the earlier slots' cleanup runs.
-            BoundaryCarrier::Instance(class) => out.push_str(&format!(
-                "    if (pycc_ext_unpack_instance({arg}, \"{source_name}\", {index}, \"{class}\", \
-                 &a{index}) != 0) {{\n{cleanup}{fail}    }}\n"
-            )),
+            // Another module's class (a package built whole): that module's
+            // own conversion.
+            BoundaryCarrier::Instance(class) => match crate::package_build::sibling_unpack_instance(
+                &arg,
+                &format!("{source_name}() argument {}", index + 1),
+                class,
+                &format!("a{index}"),
+            ) {
+                Some(call) => out.push_str(&format!(
+                    "    if ({call} != 0) {{\n{cleanup}{fail}    }}\n"
+                )),
+                None => out.push_str(&format!(
+                    "    if (pycc_ext_unpack_instance({arg}, \"{source_name}\", {index}, \
+                     \"{class}\", &a{index}) != 0) {{\n{cleanup}{fail}    }}\n"
+                )),
+            },
             BoundaryCarrier::Tuple(elements) => {
                 let elements_len = elements.len();
                 out.push_str(&format!(

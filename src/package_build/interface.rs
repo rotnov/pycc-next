@@ -22,10 +22,18 @@
 //! ([`Interface::c_header`]), and a caller calls natively only while its own
 //! global still binds that object (`crate::package_build::siblings`).
 //!
+//! Each class whose instances another module may read natively is listed
+//! too ([`InterfaceClass`]): its slots, in the order its layout holds them
+//! and with their types, and its compiled methods with their signatures
+//! (the symbol is the producer's prefix and `pyfn_<Class.method>`). A
+//! consumer declares a class of the same shape and calls those methods
+//! (`crate::package_build::siblings`).
+//!
 //! The text is the contract: [`content_hash`] of it is recorded by every
 //! consumer and checked by the package build before the link.
 
 use pycc_hir::Ty;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The interface file a member build writes into its output directory.
 pub(crate) const INTERFACE_NAME: &str = "interface.txt";
@@ -44,6 +52,27 @@ pub(crate) struct InterfaceFn {
     pub(crate) ret: Ty,
 }
 
+/// One compiled method of an [`InterfaceClass`].
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InterfaceMethod {
+    /// Its name in the class.
+    pub(crate) name: String,
+    /// The compiled function (`Class.method`).
+    pub(crate) function: String,
+    /// The parameters after `self`.
+    pub(crate) params: Vec<Ty>,
+    pub(crate) ret: Ty,
+}
+
+/// One class whose instances other modules may read natively.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InterfaceClass {
+    pub(crate) name: String,
+    /// The slots, in layout order.
+    pub(crate) slots: Vec<(String, Ty)>,
+    pub(crate) methods: Vec<InterfaceMethod>,
+}
+
 /// A member's interface.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Interface {
@@ -52,6 +81,67 @@ pub(crate) struct Interface {
     /// Its symbol prefix (`pycc_codegen::member_prefix`).
     pub(crate) prefix: String,
     pub(crate) functions: Vec<InterfaceFn>,
+    pub(crate) classes: Vec<InterfaceClass>,
+}
+
+/// The spelling of a slot or method type of an [`InterfaceClass`], or
+/// `None` for one it does not carry: [`interface_ty`]'s, `list[T]`,
+/// `set[T]`, `dict[K,V]`, `T|None`, and `@C` for an instance of a listed
+/// class `C` (`listed`). No spelling holds a space.
+pub(crate) fn class_ty(ty: &Ty, listed: &dyn Fn(&str) -> bool) -> Option<String> {
+    Some(match ty {
+        Ty::List(inner) => format!("list[{}]", class_ty(inner, listed)?),
+        Ty::Set(inner) => format!("set[{}]", class_ty(inner, listed)?),
+        Ty::Dict(pair) => format!(
+            "dict[{},{}]",
+            class_ty(&pair.0, listed)?,
+            class_ty(&pair.1, listed)?
+        ),
+        Ty::Optional(inner) if !matches!(inner.as_ref(), Ty::None | Ty::Optional(_)) => {
+            format!("{}|None", class_ty(inner, listed)?)
+        }
+        Ty::Instance(class) if listed(class) => format!("@{class}"),
+        other => interface_ty(other)?.to_string(),
+    })
+}
+
+/// Reads a [`class_ty`] spelling.
+fn parse_class_ty(text: &str) -> Option<Ty> {
+    if let Some(inner) = text.strip_suffix("|None") {
+        return Some(Ty::Optional(Box::new(parse_class_ty(inner)?)));
+    }
+    if let Some(class) = text.strip_prefix('@') {
+        return (!class.is_empty()).then(|| Ty::Instance(Box::new(class.to_string())));
+    }
+    let generic = |head: &str| {
+        text.strip_prefix(head)
+            .and_then(|rest| rest.strip_prefix('['))
+            .and_then(|rest| rest.strip_suffix(']'))
+    };
+    if let Some(inner) = generic("list") {
+        return Some(Ty::List(Box::new(parse_class_ty(inner)?)));
+    }
+    if let Some(inner) = generic("set") {
+        return Some(Ty::Set(Box::new(parse_class_ty(inner)?)));
+    }
+    if let Some(inner) = generic("dict") {
+        // The comma at bracket depth 0 separates the key from the value.
+        let mut depth = 0usize;
+        let split = inner.char_indices().find_map(|(at, c)| {
+            match c {
+                '[' => depth += 1,
+                ']' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => return Some(at),
+                _ => {}
+            }
+            None
+        })?;
+        return Some(Ty::Dict(Box::new((
+            parse_class_ty(&inner[..split])?,
+            parse_class_ty(&inner[split + 1..])?,
+        ))));
+    }
+    parse_ty(text)
 }
 
 /// The spelling of a type an interface may carry, or `None` for one it
@@ -100,6 +190,121 @@ impl InterfaceFn {
     }
 }
 
+/// A compiled function's parameters, return type and body.
+type Signature<'a> = (&'a [(String, Ty)], &'a Ty, &'a [pycc_mir::MirStmt]);
+
+/// The classes of `mir` other modules may read natively: a class with a
+/// carrier (`carriers`, so its instances cross into CPython as objects of
+/// its own type) that has no base, no subclass, no type parameter and is
+/// no enum, exception or protocol -- an instance of it typed as it is one
+/// of it, of its layout -- whose slots all have a [`class_ty`] spelling.
+/// Each lists its compiled methods (not the dunders) of listable
+/// signatures, defined once (`counts`) and called with their parameters
+/// alone.
+fn collect_classes(
+    mir: &pycc_mir::MirModule,
+    carriers: &BTreeSet<String>,
+    counts: &std::collections::HashMap<&str, usize>,
+) -> Vec<InterfaceClass> {
+    let subclassed: BTreeSet<&str> = mir
+        .class_defs
+        .iter()
+        .flat_map(|(name, def)| def.mro.iter().filter(move |base| *base != name))
+        .map(String::as_str)
+        .collect();
+    let mut listed: BTreeSet<String> = mir
+        .class_defs
+        .iter()
+        .filter(|(name, def)| {
+            carriers.contains(name)
+                && def.bases.is_empty()
+                && def.type_param.is_none()
+                && !def.is_enum
+                && !def.is_protocol
+                && def.exception_type_tag.is_none()
+                && !subclassed.contains(name.as_str())
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    // A slot may hold an instance of another listed class only: drop the
+    // classes with a slot no spelling covers until none is left.
+    loop {
+        let before = listed.len();
+        let snapshot = listed.clone();
+        let known = |class: &str| snapshot.contains(class);
+        listed.retain(|name| {
+            let def = &mir
+                .class_defs
+                .iter()
+                .find(|(n, _)| n == name)
+                .expect("a class")
+                .1;
+            def.attrs
+                .iter()
+                .all(|(_, ty)| class_ty(ty, &known).is_some())
+        });
+        if listed.len() == before {
+            break;
+        }
+    }
+    let functions: BTreeMap<&str, Signature<'_>> = mir
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            pycc_mir::MirItem::Function {
+                name,
+                params,
+                return_ty,
+                body,
+            } => Some((
+                name.as_str(),
+                (params.as_slice(), return_ty, body.as_slice()),
+            )),
+            _ => None,
+        })
+        .collect();
+    let known = |class: &str| listed.contains(class);
+    let mut classes = Vec::new();
+    for (name, def) in &mir.class_defs {
+        if !listed.contains(name) {
+            continue;
+        }
+        let mut methods = Vec::new();
+        for (method, function) in &def.methods {
+            if method.starts_with("__") || counts.get(function.as_str()) != Some(&1) {
+                continue;
+            }
+            let Some(&(params, ret, body)) = functions.get(function.as_str()) else {
+                continue;
+            };
+            let Some(((_, receiver), rest)) = params.split_first() else {
+                continue;
+            };
+            let spelled = |ty: &Ty| class_ty(ty, &known).is_some();
+            if *receiver != Ty::Instance(Box::new(name.clone()))
+                || !rest.iter().all(|(_, ty)| *ty != Ty::None && spelled(ty))
+                || !spelled(ret)
+                || !pycc_mir::multi_return::out_tys(body).is_empty()
+                || pycc_codegen::body_returns_buffer_slice(body)
+            {
+                continue;
+            }
+            methods.push(InterfaceMethod {
+                name: method.clone(),
+                function: function.clone(),
+                params: rest.iter().map(|(_, ty)| ty.clone()).collect(),
+                ret: ret.clone(),
+            });
+        }
+        classes.push(InterfaceClass {
+            name: name.clone(),
+            slots: def.attrs.clone(),
+            methods,
+        });
+    }
+    classes
+}
+
 impl Interface {
     /// The interface of the member `module` (symbol prefix `prefix`) whose
     /// MIR is `mir`: every function `published` names that
@@ -109,7 +314,8 @@ impl Interface {
         module: &str,
         prefix: &str,
         mir: &pycc_mir::MirModule,
-        published: &std::collections::BTreeSet<String>,
+        published: &BTreeSet<String>,
+        carriers: &BTreeSet<String>,
     ) -> Self {
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for item in &mir.items {
@@ -117,6 +323,7 @@ impl Interface {
                 *counts.entry(name.as_str()).or_insert(0) += 1;
             }
         }
+        let classes = collect_classes(mir, carriers, &counts);
         let mut functions = Vec::new();
         for item in &mir.items {
             let pycc_mir::MirItem::Function {
@@ -146,6 +353,7 @@ impl Interface {
             module: module.to_string(),
             prefix: prefix.to_string(),
             functions,
+            classes,
         }
     }
 
@@ -165,6 +373,27 @@ impl Interface {
                 interface_ty(&function.ret).expect("listed types have a spelling")
             ));
         }
+        let listed = |_: &str| true;
+        let spell = |ty: &Ty| class_ty(ty, &listed).expect("listed types have a spelling");
+        for class in &self.classes {
+            out.push_str(&format!("class {}\n", class.name));
+            for (name, ty) in &class.slots {
+                out.push_str(&format!("slot {name} {}\n", spell(ty)));
+            }
+            for method in &class.methods {
+                out.push_str(&format!(
+                    "method {} {} {}",
+                    method.name,
+                    method.function,
+                    spell(&method.ret)
+                ));
+                for param in &method.params {
+                    out.push(' ');
+                    out.push_str(&spell(param));
+                }
+                out.push('\n');
+            }
+        }
         out
     }
 
@@ -178,8 +407,37 @@ impl Interface {
         let mut module = None;
         let mut prefix = None;
         let mut functions = Vec::new();
+        let mut classes: Vec<InterfaceClass> = Vec::new();
         for line in lines {
-            if let Some(rest) = line.strip_prefix("module ") {
+            if let Some(name) = line.strip_prefix("class ") {
+                classes.push(InterfaceClass {
+                    name: name.to_string(),
+                    slots: Vec::new(),
+                    methods: Vec::new(),
+                });
+            } else if let Some(rest) = line.strip_prefix("slot ") {
+                let class = classes.last_mut().ok_or_else(|| bad(line))?;
+                let (name, ty) = rest.split_once(' ').ok_or_else(|| bad(line))?;
+                let ty = parse_class_ty(ty).ok_or_else(|| bad(line))?;
+                class.slots.push((name.to_string(), ty));
+            } else if let Some(rest) = line.strip_prefix("method ") {
+                let class = classes.last_mut().ok_or_else(|| bad(line))?;
+                let mut words = rest.split(' ');
+                let (Some(name), Some(function), Some(ret)) =
+                    (words.next(), words.next(), words.next())
+                else {
+                    return Err(bad(line));
+                };
+                let params = words
+                    .map(|param| parse_class_ty(param).ok_or_else(|| bad(line)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                class.methods.push(InterfaceMethod {
+                    name: name.to_string(),
+                    function: function.to_string(),
+                    params,
+                    ret: parse_class_ty(ret).ok_or_else(|| bad(line))?,
+                });
+            } else if let Some(rest) = line.strip_prefix("module ") {
                 module = Some(rest.to_string());
             } else if let Some(rest) = line.strip_prefix("prefix ") {
                 prefix = Some(rest.to_string());
@@ -204,6 +462,7 @@ impl Interface {
             module: module.ok_or("an interface without its module")?,
             prefix: prefix.ok_or("an interface without its prefix")?,
             functions,
+            classes,
         })
     }
 
@@ -259,7 +518,84 @@ mod tests {
                     ret: Ty::None,
                 },
             ],
+            classes: vec![],
         }
+    }
+
+    fn with_class() -> Interface {
+        Interface {
+            classes: vec![InterfaceClass {
+                name: "State".to_string(),
+                slots: vec![
+                    ("src".to_string(), Ty::Str),
+                    (
+                        "env".to_string(),
+                        Ty::Dict(Box::new((Ty::Str, Ty::List(Box::new(Ty::Int))))),
+                    ),
+                    (
+                        "parent".to_string(),
+                        Ty::Optional(Box::new(Ty::Instance(Box::new("State".to_string())))),
+                    ),
+                    ("seen".to_string(), Ty::Set(Box::new(Ty::Object))),
+                ],
+                methods: vec![
+                    InterfaceMethod {
+                        name: "get".to_string(),
+                        function: "State.get".to_string(),
+                        params: vec![Ty::Int, Ty::Str],
+                        ret: Ty::Optional(Box::new(Ty::Str)),
+                    },
+                    InterfaceMethod {
+                        name: "clear".to_string(),
+                        function: "State.clear".to_string(),
+                        params: vec![],
+                        ret: Ty::None,
+                    },
+                ],
+            }],
+            ..sample()
+        }
+    }
+
+    #[test]
+    fn a_class_round_trips_through_the_text() {
+        let text = with_class().to_text();
+        assert!(
+            text.ends_with(
+                "class State\nslot src str\nslot env dict[str,list[int]]\n\
+                 slot parent @State|None\nslot seen set[object]\n\
+                 method get State.get str|None int str\nmethod clear State.clear None\n"
+            ),
+            "{text}"
+        );
+        assert_eq!(Interface::parse(&text).unwrap(), with_class());
+        for bad in [
+            "slot x int\n",
+            "class C\nslot x\n",
+            "class C\nslot x list[\n",
+            "class C\nmethod m\n",
+            "class C\nmethod m C.m int frozenset[int]\n",
+            "class C\nslot x dict[int]\n",
+            "class C\nslot x @\n",
+        ] {
+            let text = format!("pycc-interface 1\nmodule m\nprefix p\n{bad}");
+            assert!(Interface::parse(&text).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn class_types_spell_only_what_a_class_carries() {
+        let listed = |class: &str| class == "A";
+        assert_eq!(
+            class_ty(&Ty::Instance(Box::new("A".to_string())), &listed).as_deref(),
+            Some("@A")
+        );
+        assert_eq!(
+            class_ty(&Ty::Instance(Box::new("B".to_string())), &listed),
+            None
+        );
+        assert_eq!(class_ty(&Ty::Optional(Box::new(Ty::None)), &listed), None);
+        assert_eq!(class_ty(&Ty::Tuple(Box::new(vec![Ty::Int])), &listed), None);
     }
 
     #[test]

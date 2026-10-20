@@ -84,8 +84,17 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                 format!("pyfn_{name}__redef_{count}")
             };
             *count += 1;
-            let f = module.add_function(&mangled, fn_type, None);
-            if leaf_inline::is_tiny_leaf(body) {
+            // A sibling class's method is another module's compiled
+            // function, declared here and never defined
+            // (`crate::sibling_class`).
+            let producer = crate::sibling_class::producer_method(name);
+            let f = match &producer {
+                Some(symbol) => module.get_function(symbol).unwrap_or_else(|| {
+                    module.add_function(symbol, fn_type, Some(Linkage::External))
+                }),
+                None => module.add_function(&mangled, fn_type, None),
+            };
+            if producer.is_none() && leaf_inline::is_tiny_leaf(body) {
                 leaf_inline::mark(context, f);
             }
             function_defs_in_order.push((name.as_str(), f));
@@ -103,7 +112,8 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                 // A per-call-site helper copy (issue #7) is one too.
                 let is_monomorphized = name.starts_with("0gen_")
                     || name.starts_with(pycc_hir::SITE_COPY_PREFIX)
-                    || name.starts_with(pycc_hir::SIBLING_CALL_PREFIX);
+                    || name.starts_with(pycc_hir::SIBLING_CALL_PREFIX)
+                    || producer.is_some();
                 if is_monomorphized {
                     UserFunction {
                         param_tys: params.iter().map(|(_, ty)| ty.clone()).collect(),

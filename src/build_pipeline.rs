@@ -162,7 +162,7 @@ pub(crate) fn try_build(
     // A member publishes its interface as soon as its MIR exists, so the
     // members calling it can start while it is still in codegen.
     if let (Some(member), Some(plan)) = (member, &ext_plan) {
-        package_link::write_interface(out, obj_path, member, &mir, &plan.published)?;
+        package_link::write_interface(out, obj_path, member, &mir, plan)?;
         if crate::fallback::reporting() {
             crate::package_build::report_siblings(&typed_hir);
         }
@@ -254,6 +254,10 @@ pub(crate) fn try_build(
                     symbol_prefix: member.map(|member| member.prefix.clone()),
                     sibling_targets: match member {
                         Some(_) => crate::package_build::codegen_targets(),
+                        None => Vec::new(),
+                    },
+                    sibling_classes: match member {
+                        Some(_) => crate::package_build::sibling_classes(),
                         None => Vec::new(),
                     },
                 },

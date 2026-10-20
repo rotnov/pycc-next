@@ -88,6 +88,10 @@ pub struct CompileOptions {
     /// The functions of the other modules of its package such a member
     /// calls natively (`crate::sibling_call`); empty otherwise.
     pub sibling_targets: Vec<crate::SiblingTarget>,
+    /// The classes of the other modules of its package whose instances
+    /// such a member reads natively (`crate::sibling_class`); empty
+    /// otherwise.
+    pub sibling_classes: Vec<crate::SiblingClass>,
 }
 
 /// The symbol the module body is emitted under in `ext` mode: the fixed C

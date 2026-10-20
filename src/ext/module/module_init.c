@@ -182,6 +182,11 @@ static int pycc_ext_exec_module(PyObject *module)
     int status;
     long long exec_status;
 
+    /* An instance of one of this module's classes that another module of
+     * the extension hands CPython finds this module's carrier type. */
+    if (pycc_ext_register_module_in(&pycc_ext_mod) != 0) {
+        return -1;
+    }
     /* Native stdin/stdout share CPython's `sys` streams from here on. */
     pycc_rt_io_install(pycc_ext_io_write, pycc_ext_io_read, pycc_ext_io_flush);
     /* An instance's `o` slots are counted with CPython's own counts. */

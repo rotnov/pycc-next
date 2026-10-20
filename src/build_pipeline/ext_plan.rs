@@ -21,6 +21,9 @@ pub(super) struct ExtPlan {
     /// The module-level functions the module publishes (a package member's
     /// interface lists some of them).
     pub(super) published: std::collections::BTreeSet<String>,
+    /// The classes whose instances cross into CPython as objects of their
+    /// own type (a package member's interface lists some of them).
+    pub(super) carriers: std::collections::BTreeSet<String>,
 }
 
 /// Resolves `OUT` against the `--ext` output contract, reporting a rejected
@@ -66,6 +69,10 @@ pub(super) fn plan_ext(
     obj_path: &Path,
 ) -> Result<ExtPlan, ExitCode> {
     let platform = ext_build::ExtLinkPlatform::resolve(target);
+    // A package member's sibling classes are another module's: it neither
+    // publishes them nor gives them a CPython type (`crate::package_build`).
+    let without_stubs = crate::package_build::without_sibling_classes(typed_hir);
+    let typed_hir = without_stubs.as_ref().unwrap_or(typed_hir);
     // A package member (`crate::package_build`) has no artifact of its own:
     // its module name is its dotted name, and the package build links it.
     let member = crate::package_build::member();
@@ -167,6 +174,11 @@ pub(super) fn plan_ext(
         &getsets,
         &slots,
     );
+    // The other modules' conversions its wrappers call for their classes.
+    let inc_body = format!(
+        "{}{inc_body}",
+        crate::package_build::sibling_c_declarations()
+    );
     // #1194: the Python wrappers of the signatures the boundary cannot bind
     // alone, planned from the entry source exactly as the loader planned
     // their compiled entries (`pycc_ast::split_ext_signatures`).
@@ -227,6 +239,7 @@ pub(super) fn plan_ext(
         link_args,
         artifact: output.artifact,
         published,
+        carriers: carriers.iter().map(|carrier| carrier.class.clone()).collect(),
     })
 }
 

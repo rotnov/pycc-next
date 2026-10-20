@@ -262,11 +262,12 @@ fn converge<T, E>(
         // A member of a package built whole first compiles a failing
         // statement without its native calls to its siblings
         // (`crate::package_build`), before letting it fall back.
-        if crate::package_build::deny_sibling_failures(
-            failures
-                .iter()
-                .filter_map(|failure| failure.diagnostic.span.map(|s| s.start).or(failure.origin)),
-        ) {
+        if crate::package_build::deny_sibling_failures(failures.iter().map(|failure| {
+            (
+                failure.diagnostic.span.map(|s| s.start).or(failure.origin),
+                failure.diagnostic.message.as_str(),
+            )
+        })) {
             match attempt() {
                 Ok(value) => return Some(value),
                 Err(failure) => {

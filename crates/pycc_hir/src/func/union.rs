@@ -7,7 +7,8 @@
 //! CPython object in non-strict mode (CPython's value is whichever member it
 //! is) and `T0048` in strict mode.
 
-use super::{annotation_to_ty, is_int_float_union_names, is_non_strict};
+use super::annotation::is_int_float_union_names;
+use super::{annotation_to_ty, is_non_strict};
 use crate::Ty;
 use crate::class::ClassAnnotationInfo;
 use pycc_ast::Expr;

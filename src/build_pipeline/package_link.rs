@@ -34,10 +34,15 @@ pub(super) fn write_interface(
     obj_path: &Path,
     member: &package_build::Member,
     mir: &pycc_mir::MirModule,
-    published: &std::collections::BTreeSet<String>,
+    plan: &super::ext_plan::ExtPlan,
 ) -> Result<(), ExitCode> {
-    let interface =
-        package_build::Interface::collect(&member.dotted, &member.prefix, mir, published);
+    let interface = package_build::Interface::collect(
+        &member.dotted,
+        &member.prefix,
+        mir,
+        &plan.published,
+        &plan.carriers,
+    );
     write_ext_source(
         &obj_path.with_file_name(package_build::INTERFACE_HEADER_NAME),
         &interface.c_header(),

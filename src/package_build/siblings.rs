@@ -98,16 +98,23 @@ fn statement_key(stmt: &Stmt) -> String {
     }
 }
 
-/// The fallback loop's hook: when one of the frontend's failures (at the
-/// source offsets `offsets` of the module the last attempt compiled) lies
-/// in a top-level statement whose calls were rewritten, the next attempt
+/// The fallback loop's hook: when one of the frontend's failures (at its
+/// source offset of the module the last attempt compiled, with its
+/// message) involves a sibling class, the next attempt reads that class
+/// through CPython (`super::sibling_classes`); otherwise, when one lies in
+/// a top-level statement whose calls were rewritten, the next attempt
 /// leaves that statement's calls as written instead of the statement
-/// falling back. Whether any statement was newly left alone.
-pub(crate) fn deny_failures(offsets: impl IntoIterator<Item = u32>) -> bool {
+/// falling back. Whether anything was newly left alone.
+pub(crate) fn deny_failures<'a>(
+    failures: impl IntoIterator<Item = (Option<u32>, &'a str)> + Clone,
+) -> bool {
+    if super::sibling_classes::deny_failures(failures.clone()) {
+        return true;
+    }
     let rewritten = REWRITTEN.lock().expect("the rewritten lock");
     let mut denied = DENIED.lock().expect("the denied lock");
     let mut new = false;
-    for at in offsets {
+    for at in failures.into_iter().filter_map(|(at, _)| at) {
         for (range, key) in rewritten.iter() {
             if range.contains(&at) && denied.insert(key.clone()) {
                 new = true;
@@ -364,6 +371,7 @@ pub(crate) fn apply_siblings(
 ) {
     let mut targets = TARGETS.lock().expect("the targets lock");
     targets.clear();
+    super::sibling_classes::clear();
     let Some(member) = super::member() else {
         return;
     };
@@ -371,9 +379,6 @@ pub(crate) fn apply_siblings(
         return;
     }
     let found = candidates(member, original);
-    if found.is_empty() {
-        return;
-    }
     let calls = Calls {
         producers: &member.producers,
         candidates: found,
@@ -397,10 +402,15 @@ pub(crate) fn apply_siblings(
     }
     drop(rewritten);
     let used = calls.used.borrow();
-    if used.is_empty() {
+    let classes = super::sibling_classes::stubs(member);
+    super::sibling_classes::functions(&mut parsed.body, member);
+    if used.is_empty() && classes.is_empty() {
         return;
     }
     let mut source = format!("#{}\n", " ".repeat(source_len.saturating_sub(1)));
+    for (_, _, class) in &classes {
+        source.push_str(class);
+    }
     for local in used.iter() {
         let candidate = calls.candidates[local];
         let producer = &member.producers[candidate.producer];
@@ -415,8 +425,9 @@ pub(crate) fn apply_siblings(
         });
     }
     let added = pycc_parser::parse_all(&source)
-        .expect("the added functions are well-formed Python")
+        .expect("the added functions and classes are well-formed Python")
         .body;
+    super::sibling_classes::record(&added, &classes);
     let at = insertion_point(&parsed.body);
     parsed.body.splice(at..at, added);
 }
@@ -427,6 +438,7 @@ pub(crate) fn report(typed: &pycc_hir::HirModule) {
     let Some(member) = super::member() else {
         return;
     };
+    super::sibling_classes::report(typed);
     let compiled: BTreeSet<&str> = typed
         .items
         .iter()
@@ -531,6 +543,7 @@ mod tests {
                     params: vec![pycc_hir::Ty::Int],
                     ret: pycc_hir::Ty::Int,
                 }],
+                classes: vec![],
             },
             hash: 0,
         }];

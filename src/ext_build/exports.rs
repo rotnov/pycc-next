@@ -116,6 +116,14 @@ pub(crate) fn carrier_class_names(module: &HirModule) -> BTreeSet<String> {
     collect_carrier_classes(module)
         .into_iter()
         .map(|carrier| carrier.class)
+        // Another module's classes a package member reads natively, whose
+        // carriers that module's conversions take (`crate::package_build`).
+        .filter(|class| !class.starts_with(pycc_hir::SIBLING_CLASS_PREFIX))
+        .chain(
+            crate::package_build::sibling_classes()
+                .into_iter()
+                .map(|sibling| sibling.class),
+        )
         .collect()
 }
 

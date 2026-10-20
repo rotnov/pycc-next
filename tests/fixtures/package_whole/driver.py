@@ -117,6 +117,27 @@ print(calls.use(1, "r"), calls.private("s"))
 reloaded = importlib.reload(util)
 print(reloaded is util, calls.scaled is util.scaled, calls.use(3, "t"), calls.loop(4))
 
+# Instances of another module's class, read natively in the compiled tree.
+import pkw.cursor as cursor  # noqa: E402
+import pkw.scan as scan  # noqa: E402
+
+cur = cursor.make("one two  three")
+print(scan.words(cur), cur.pos, scan.marks(cur), scan.same(cur) is cur)
+kid = scan.child_of(cur)
+print(type(kid) is cursor.Cursor, kid.depth, kid.pos, kid.parent is cur, scan.depth_chain(kid),
+      scan.depth_chain(scan.child_of(kid)), scan.child_of(kid).parent is kid)
+fresh = cursor.Cursor("walk this")
+print(scan.Walker().walk(fresh, 4), fresh.pos, scan.Walker().walk(fresh, 99), fresh.at_end())
+holder = scan.Holder(fresh)
+print(holder.at(), holder.c is fresh)
+holder.c = cur
+print(holder.at(), holder.c is cur)
+for bad in (5, "text", None):
+    try:
+        scan.words(bad)
+    except (TypeError, AttributeError):
+        print("refused", type(bad).__name__)
+
 try:
     import pkw.missing  # noqa: F401
 except ModuleNotFoundError as e:
@@ -136,19 +157,23 @@ if compiled:
         return (lib.pycc_rt_str_live_objects(), lib.pycc_rt_instance_live_objects(),
                 lib.pycc_rt_exception_live_objects())
 
-    for _ in range(100):
+    def work():
         base.label(3)
         circle.safe(-1)
         base.Point(1, 2).shifted(1).norm1()
         calls.private("x")
         calls.div(1.0, 2.0)
+        c = cursor.make("a b c")
+        scan.words(c)
+        scan.depth_chain(scan.child_of(scan.child_of(c)))
+        scan.Walker().walk(cursor.Cursor("xyz"), 2)
+        scan.Holder(c).at()
+
+    for _ in range(100):
+        work()
     before = live()
     for _ in range(1000):
-        base.label(3)
-        circle.safe(-1)
-        base.Point(1, 2).shifted(1).norm1()
-        calls.private("x")
-        calls.div(1.0, 2.0)
+        work()
     print("leaks", "none" if live() == before else f"{before} -> {live()}")
 else:
     print("leaks", "none")

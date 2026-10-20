@@ -136,6 +136,8 @@ fn the_package_matches_cpython(release: bool) {
         "pkw.state",
         "pkw.util",
         "pkw.calls",
+        "pkw.cursor",
+        "pkw.scan",
     ] {
         assert!(
             report.contains(&format!("pycc: {module}: built in ")),
@@ -159,6 +161,11 @@ fn the_package_matches_cpython(release: bool) {
             "{report}"
         );
     }
+    // Instances of a class another module compiled are read natively.
+    assert!(
+        report.contains("native class: instances of `pkw.cursor.Cursor` are read natively"),
+        "{report}"
+    );
     remove_sources(&built.join("pkw"));
     let mut left = Vec::new();
     files(&built.join("pkw"), &built.join("pkw"), &mut left);

@@ -530,6 +530,29 @@ Accept:
    carrier's instance (`TypeError` otherwise) instead of the caller falling back. What
    runs hot in both packages is methods of classes CPython runs (accept 4's note): the
    next stage is native instances and classes across modules.
+   **Progress 2026-10-21** (not met): (c)'s third stage, first part -- native instances
+   of another module's classes. Decisions, with the guru advisor: instances first (they
+   pay in the lifted method bodies already, and the classes of the next part need them),
+   then other modules' classes as bases, by compiling the base's methods into the
+   derived class as D-254 already compiles inherited methods, with a real CPython base
+   on the derived type. The interface lists each compiled class with no base and no
+   subclass (an instance typed as it has its layout): its slots in layout order and
+   types, its compiled methods' signatures. A consumer importing it at module level gets
+   a *sibling class* `_pycc_sibc_C` of the same layout (an `__init__` assigning the
+   slots in order) whose methods are declared and never compiled: codegen calls the
+   producer's `pyfn_C.m`, and the conversions between an instance and a CPython object go
+   to the producer's entries under the class's own name (`isinstance`, unboxing,
+   coercion: the producer owns the carrier type); an instance packed into CPython finds
+   the carrier type of the module owning its class through the extension's list of
+   module records. An annotation naming the imported class resolves to the sibling class
+   (`pycc_hir::set_sibling_class_names`), in compiled functions and in the compiled
+   bodies of methods whose `def` CPython runs. Soundness: after the type check the
+   sibling class's slots and method signatures must equal the interface's, or that
+   class is read through CPython again; a failure inside a function taking such a
+   parameter makes that function read it through CPython (one more attempt), as stage
+   two does for calls. mistune: 63.33M instructions per `mistune.html` pass (64.51M),
+   387 of 413 functions native, its suite passing; pydantic unchanged (1029 of 1249,
+   its suite as before), its classes being created by CPython.
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions
@@ -597,6 +620,10 @@ Accept:
    cannot give 2x; the parsers themselves must become native classes too (constrained
    `TypeVar` in `Generic[...]`, a subscripted base from another module,
    `super().__init__()`).
+   **Progress 2026-10-21** (not met): `BlockState` and `InlineState` are read natively
+   in the modules that import them (accept 1's third stage, first part): 63.33M
+   instructions per pass (64.51M). The parsers and renderers, whose classes CPython
+   still creates, are next.
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.

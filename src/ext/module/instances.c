@@ -478,6 +478,91 @@ static PyObject *pycc_ext_carrier_type(PyccExtModule *m, const unsigned char *na
 }
 
 /*
+ * v0.8 (the whole-package build): the record of every module of this
+ * extension whose body has started, so an instance of a class one module
+ * compiled that another module's code hands CPython (it reads the class's
+ * instances natively, `pycc_codegen`'s `sibling_class`) is carried by the
+ * type of the module owning the class. Grows only; one copy per extension,
+ * as this unit is.
+ */
+static PyccExtModule **pycc_ext_modules = NULL;
+static size_t pycc_ext_module_count = 0;
+static size_t pycc_ext_module_capacity = 0;
+
+/* Enters `m` once. Returns 0, or -1 with a `MemoryError` set. */
+static int pycc_ext_register_module_in(PyccExtModule *m)
+{
+    PyccExtModule **grown;
+    size_t i;
+
+    for (i = 0; i < pycc_ext_module_count; i++) {
+        if (pycc_ext_modules[i] == m) {
+            return 0;
+        }
+    }
+    if (pycc_ext_module_count == pycc_ext_module_capacity) {
+        pycc_ext_module_capacity = pycc_ext_module_capacity == 0 ? 8 : 2 * pycc_ext_module_capacity;
+        grown = (PyccExtModule **)PyMem_Realloc(
+            pycc_ext_modules, pycc_ext_module_capacity * sizeof(PyccExtModule *));
+        if (grown == NULL) {
+            PyErr_NoMemory();
+            return -1;
+        }
+        pycc_ext_modules = grown;
+    }
+    pycc_ext_modules[pycc_ext_module_count++] = m;
+    return 0;
+}
+
+/* Whether `m` compiles the class `name`/`len` (a layout descriptor's, not
+ * NUL-terminated): its generated carrier table holds it. */
+static int pycc_ext_owns_class(PyccExtModule *m, const unsigned char *name, size_t len)
+{
+    char small[128];
+    char *text = len < sizeof(small) ? small : (char *)PyMem_Malloc(len + 1);
+    int owns;
+
+    if (text == NULL) {
+        return 0;
+    }
+    memcpy(text, name, len);
+    text[len] = '\0';
+    owns = m->carrier_class_isinstance(name, len, text) == 1;
+    if (text != small) {
+        PyMem_Free(text);
+    }
+    return owns;
+}
+
+/* The module whose carrier type carries an instance of the class
+ * `name`/`len` that code of `m` hands CPython: `m` when it compiles the
+ * class (or no module of the extension does), else the one module of the
+ * extension that does; NULL with a `SystemError` when several do. */
+static PyccExtModule *pycc_ext_class_owner(PyccExtModule *m, const unsigned char *name,
+                                           size_t len)
+{
+    PyccExtModule *owner = NULL;
+    size_t i;
+
+    if (pycc_ext_owns_class(m, name, len)) {
+        return m;
+    }
+    for (i = 0; i < pycc_ext_module_count; i++) {
+        if (pycc_ext_modules[i] != m && pycc_ext_owns_class(pycc_ext_modules[i], name, len)) {
+            if (owner != NULL) {
+                PyErr_Format(PyExc_SystemError,
+                             "modules %s and %s both compile a class %.*s; an instance of it "
+                             "cannot cross into CPython from %s",
+                             owner->name, pycc_ext_modules[i]->name, (int)len, name, m->name);
+                return NULL;
+            }
+            owner = pycc_ext_modules[i];
+        }
+    }
+    return owner != NULL ? owner : m;
+}
+
+/*
  * #1435: the packer for a pycc class instance passed as an argument to a
  * call on a CPython object (`EXT_OBJ_PACK_INSTANCE_SYMBOL`). The packer
  * contract of its scalar neighbours above: it borrows the instance and
@@ -514,6 +599,10 @@ static PyObject *pycc_ext_obj_pack_instance_in(PyccExtModule *m, void *inst)
         return carrier;
     }
     name = pycc_rt_ext_instance_class(inst, &len);
+    m = pycc_ext_class_owner(m, name, len);
+    if (m == NULL) {
+        return NULL;
+    }
     type = pycc_ext_carrier_type(m, name, len);
     if (type == NULL) {
         return NULL;

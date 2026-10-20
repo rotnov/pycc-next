@@ -168,8 +168,12 @@ between the modules bind them through CPython. A call of a function another modu
 compiled (`from .util import escape`, then `escape(s)`) goes to its compiled code
 directly, with native arguments and result, while the name still binds the function that
 module published; rebinding the name from Python, or reloading that module, makes the
-call a call of the object again (`docs/DEVIATIONS.md` lists what differs from separate
-extensions). `pycc build pkg/mod.py --ext --foreign-relative-imports`
+call a call of the object again. A parameter annotated with a class another module
+compiled (`from .core import State`, then `def scan(state: State)`, also in a method of a
+class CPython creates) holds that module's instance natively: its fields are read and
+stored in place and its compiled methods are called directly, instead of through
+CPython's attribute protocol, and an object of another type passed for it is a
+`TypeError` (`docs/DEVIATIONS.md` lists what differs from separate extensions). `pycc build pkg/mod.py --ext --foreign-relative-imports`
 still builds one module as its own extension. Imports of anything
 else (the standard library, third-party packages) work as in a single file. Modules may import
 each other (a circular import sees the partially initialized module, as in CPython). A

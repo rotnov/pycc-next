@@ -47,6 +47,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   class compiled in the module converts it to the instance its carrier holds
   (`TypeError: f() argument 1 must be mod.C, not int` otherwise) instead of the caller
   falling back. pydantic: 1029 of 1249 functions native (1025).
+- v0.8 accepts 1 and 4 (the whole-package build, third stage, first part): instances of
+  another module's classes are native. A member's interface lists the compiled classes
+  (no base, no subclass) whose instances other modules may read: their slots in layout
+  order with their types, and their compiled methods' signatures. A module importing
+  such a class at module level (`from .core import State`) gets a class of the same
+  layout standing for it, whose methods are the other module's compiled ones; a
+  parameter annotated with the imported class -- of a compiled function, or of a method
+  body whose `def` CPython runs -- is converted once, on entry, by the other module (its
+  carrier type, its `TypeError`), and every read of it is a slot read, every call of one
+  of its methods a direct call. An instance handed back to CPython gets the carrier type
+  of the module owning its class. A difference between the two classes after the type
+  check, or a failure a function taking such a parameter cannot compile, makes that
+  class or that function read the instance through CPython again
+  (`PYCC_NO_SIBLING_CLASSES=1` turns the stage off, for measurement). mistune:
+  `BlockState` and `InlineState` read natively in its parser and renderer modules,
+  63.33M instructions per `mistune.html` pass (64.51M), 387 of 413 functions native;
+  pydantic unchanged (its classes are created by CPython).
 
 - v0.8 accept 3 (compiled frames are real frames): on CPython 3.13 a compiled function
   of an `--ext` module or an embedded program runs in a real CPython frame, so

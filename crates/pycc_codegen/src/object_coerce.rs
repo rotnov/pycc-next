@@ -203,13 +203,15 @@ fn emit_instance_conversion<'ctx>(
             .expect("build_alloca should not fail")
     });
     let i32_type = context.i32_type();
+    // Another module's class: its own entry tests its own type.
+    let (symbol, class) = crate::sibling_class::route(EXT_OBJ_COERCE_INSTANCE_SYMBOL, class);
     let coerce = shim_fn(
         module,
-        EXT_OBJ_COERCE_INSTANCE_SYMBOL,
+        &symbol,
         i32_type.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false),
     );
     let class_ptr = builder
-        .build_global_string_ptr(class, "pycc_coerce_class")
+        .build_global_string_ptr(&class, "pycc_coerce_class")
         .expect("build_global_string_ptr should not fail")
         .as_pointer_value();
     let what_ptr = builder

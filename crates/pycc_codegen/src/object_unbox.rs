@@ -105,13 +105,15 @@ pub(crate) fn emit_unboxed<'ctx>(
             builder.build_call(unbox, &[object_ptr.into(), out.into()], "object_unbox")
         }
         Some(class) => {
+            // Another module's class: its own entry tests its own type.
+            let (symbol, class) = crate::sibling_class::route(symbol, class);
             let name_ptr = builder
-                .build_global_string_ptr(class, &format!("pycc_unbox_class_{class}"))
+                .build_global_string_ptr(&class, &format!("pycc_unbox_class_{class}"))
                 .expect("build_global_string_ptr should not fail")
                 .as_pointer_value();
             let unbox = shim_fn(
                 module,
-                symbol,
+                &symbol,
                 i32_type.fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
             );
             builder.build_call(

@@ -423,8 +423,11 @@ pub(crate) fn collect_carrier_classes(module: &HirModule) -> Vec<ExtCarrierClass
     module
         .class_defs
         .iter()
-        .filter(|(_, def)| {
-            !def.is_enum
+        .filter(|(class, def)| {
+            // Another module's class a package member reads natively has
+            // that module's carrier type (`crate::package_build`).
+            !class.starts_with(pycc_hir::SIBLING_CLASS_PREFIX)
+                && !def.is_enum
                 && def.exception_type_tag.is_none()
                 && !def
                     .mro

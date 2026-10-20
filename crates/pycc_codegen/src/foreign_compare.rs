@@ -405,13 +405,16 @@ pub(super) fn emit_isinstance<'ctx>(
         IsInstanceClass::Builtin(selector) => (ptr.const_null(), selector),
         IsInstanceClass::Object(class) => (expect_object_pointer(class), 0),
         IsInstanceClass::Compiled(name) => {
+            // Another module's class: its own entry tests its own type.
+            let (symbol, name) =
+                crate::sibling_class::route(EXT_OBJ_ISINSTANCE_COMPILED_SYMBOL, &name);
             let name_ptr = builder
                 .build_global_string_ptr(&name, &format!("pycc_isinstance_class_{name}"))
                 .expect("build_global_string_ptr should not fail")
                 .as_pointer_value();
             let compiled = shim_fn(
                 module,
-                EXT_OBJ_ISINSTANCE_COMPILED_SYMBOL,
+                &symbol,
                 i32_type.fn_type(&[ptr.into(), ptr.into()], false),
             );
             let status = builder

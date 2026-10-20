@@ -145,6 +145,43 @@ pub const SITE_COPY_PREFIX: &str = "_pycc_site";
 /// name can spell it (`pycc_ast` reserves `_pycc_`).
 pub const SIBLING_CALL_PREFIX: &str = "_pycc_sib_";
 
+/// The prefix of the class a module of a package built whole declares in
+/// place of a compiled class of another module of the package whose
+/// instances it reads natively (v0.8, `pycc_codegen::SiblingClass`):
+/// `_pycc_sibc_<class>`. Its slots are the other module's, in the same
+/// order and of the same types; its methods are the other module's
+/// compiled ones, which codegen calls directly. No source name can spell
+/// it (`pycc_ast` reserves `_pycc_`).
+pub const SIBLING_CLASS_PREFIX: &str = "_pycc_sibc_";
+
+thread_local! {
+    /// Imported names an annotation resolves to a sibling class
+    /// ([`SIBLING_CLASS_PREFIX`]) of the module being lowered, or to
+    /// `object` (`None`).
+    static SIBLING_CLASS_NAMES: std::cell::RefCell<Vec<(String, Option<String>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Makes an annotation naming `name` (a name a foreign import binds to a
+/// class another module of the package compiled) resolve to the sibling
+/// class `class`, or to `object` when `class` is `None` (the class is read
+/// through CPython), for each `(name, class)` pair, on this thread until
+/// the next call.
+pub fn set_sibling_class_names(names: Vec<(String, Option<String>)>) {
+    SIBLING_CLASS_NAMES.with(|cell| *cell.borrow_mut() = names);
+}
+
+/// What an annotation naming `name` resolves to, if
+/// [`set_sibling_class_names`] named it: `Some(None)` for `object`.
+pub(crate) fn sibling_class_for(name: &str) -> Option<Option<String>> {
+    SIBLING_CLASS_NAMES.with(|cell| {
+        cell.borrow()
+            .iter()
+            .find(|(local, _)| local == name)
+            .map(|(_, class)| class.clone())
+    })
+}
+
 /// The callee of the call `pycc_hir` lowers a `yield value` statement to
 /// (`HirStmt::ExprStmt`); not a Python identifier, so no source name can
 /// spell it.
