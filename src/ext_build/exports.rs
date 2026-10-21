@@ -276,7 +276,8 @@ pub(crate) fn collect_exports_naming_gaps(
 /// copy of the caller's container, which mutating it would not change.
 fn shares_no_container(ty: &Ty) -> bool {
     match ty {
-        Ty::Object | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Num => true,
+        // An instance crosses as its carrier, shared rather than copied.
+        Ty::Object | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Num | Ty::Instance(_) | Ty::None => true,
         Ty::Optional(inner) => shares_no_container(inner),
         _ => false,
     }
@@ -345,6 +346,14 @@ pub(crate) fn collect_exports_excluding(
                 .class_defs
                 .iter()
                 .any(|(held, def)| held == class && def.exception_type_tag.is_some())
+        {
+            continue;
+        }
+        // A private class's methods are published only with the class
+        // (non-strict mode, `super::constructors::is_private_class_published`).
+        if let ExportName::Method { class, .. } = &spelling
+            && !pycc_hir::is_public_name(class)
+            && !super::constructors::is_private_class_published(class)
         {
             continue;
         }

@@ -451,7 +451,13 @@ fn the_export_predicate_admits_every_method_kind_a_mangled_name_can_carry_a_rece
 
 #[test]
 fn the_export_predicate_applies_the_public_name_rule_to_both_segments() {
-    assert!(!crate::is_ext_exportable_name("_Grid.scale.static"));
+    // A private class's members: non-strict mode publishes the class (v0.9),
+    // so they are admitted in every mode, the superset direction; a
+    // class-private (`__C`) or compiler (`_pycc_`) class never is.
+    assert!(crate::is_ext_exportable_name("_Grid.scale.static"));
+    assert!(crate::is_ext_exportable_name("_Grid.scale"));
+    assert!(!crate::is_ext_exportable_name("__Grid.scale"));
+    assert!(!crate::is_ext_exportable_name("_pycc_sibc_Grid.scale"));
     assert!(!crate::is_ext_exportable_name("Grid._scale.static"));
     // A private module-level function: non-strict mode publishes it, so it
     // is admitted in every mode (the superset direction); a compiler name

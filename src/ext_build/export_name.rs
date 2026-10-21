@@ -143,7 +143,13 @@ pub(crate) fn classify_export_name(name: &str) -> Option<ExportName> {
     {
         return Some(ExportName::ModuleLevel);
     }
-    if class_or_fn.is_empty() || !is_public_name(class_or_fn) {
+    // A private class (`_Node._m`, `_Node.render`) is admitted lexically
+    // like a private method: the driver publishes it in non-strict mode
+    // only (`class_publishable`).
+    let private_class = segments.clone().next().is_some()
+        && is_private_method_name(class_or_fn)
+        && !pycc_ast::is_reserved_name(class_or_fn);
+    if class_or_fn.is_empty() || !(is_public_name(class_or_fn) || private_class) {
         return None;
     }
     // A function or class of another project module of the program (v0.3

@@ -89,6 +89,17 @@ pub(crate) fn compare_link_ty(
         ) {
             // Two class instances: identity, a pointer comparison.
             return Ok(Ty::Bool);
+        } else if matches!(
+            (left_ty, right_ty),
+            (Ty::Object, Ty::Instance(_)) | (Ty::Instance(_), Ty::Object)
+        ) && crate::foreign::is_object_operand(
+            env,
+            if *left_ty == Ty::Object { right_ty } else { left_ty },
+        ) {
+            // v0.9: a CPython object against a compiled instance (a
+            // sentinel, `result is _NOT_FOUND`): the object is the instance
+            // only when it is the instance's carrier (`pycc_mir`).
+            return Ok(Ty::Bool);
         } else {
             return crate::foreign::compare::general_identity_ty(op, left_ty, right_ty);
         };

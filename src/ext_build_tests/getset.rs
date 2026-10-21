@@ -142,6 +142,7 @@ fn each_slot_getter_packs_its_word_and_the_table_is_installed() {
              {\"b\", pycc_ext_get_1_P_1_b, pycc_ext_set_1_P_1_b, NULL, NULL},\n    \
              {\"s\", pycc_ext_get_1_P_1_s, pycc_ext_set_1_P_1_s, NULL, NULL},\n    \
              {\"o\", pycc_ext_get_1_P_1_o, pycc_ext_set_1_P_1_o, NULL, NULL},\n    \
+             {\"__dict__\", pycc_ext_dict_P, NULL, NULL, NULL},\n    \
              {NULL, NULL, NULL, NULL, NULL},\n};\n"
         ),
         "{inc}"

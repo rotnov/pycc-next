@@ -120,6 +120,21 @@ pub(crate) fn resolve_class_slots(
             // A container code outside the class reads through
             // CPython is a CPython object (`pycc_hir::external_slot_ty`).
             let found = found.map(|found| pycc_hir::external_slot_ty(attr, found));
+            // Non-strict mode (#3): a list (dict) of objects is a CPython
+            // list (dict) -- `Resolution::into_expr` builds the `[]` (`{}`)
+            // stored into the slot as one -- so the slot is that object.
+            let found = found.map(|found| match &found {
+                Ty::List(element) if crate::non_strict::is_non_strict() && super::holds_objects(element) => {
+                    Ty::Object
+                }
+                Ty::Dict(pair)
+                    if crate::non_strict::is_non_strict()
+                        && (pair.0 == Ty::Object || pair.1 == Ty::Object) =>
+                {
+                    Ty::Object
+                }
+                _ => found,
+            });
             if let Some(found) = found {
                 attrs[i].1 = found;
                 // A later attribute's value may read this one

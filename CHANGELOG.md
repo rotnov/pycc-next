@@ -19,6 +19,30 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   compiled -- an unannotated or private method, say -- still does), and CPython code
   reading `type(obj).method` of a compiled instance finds the method (issue #9).
 
+### Changed (v0.9: native hot state in `--non-strict`)
+
+- A class whose list or dict attribute holds CPython objects (`self._stack = []`, then
+  `self._stack.append(item)`) stays a native class: the attribute is a CPython list or
+  dict, shared with Python code that reads or stores through it. It used to send the
+  whole class to CPython.
+- An instance attribute holding a CPython object is called like a method
+  (`self.escape(s)`, `self.resolve(ctx, name)`), and a compiled instance is tested for
+  identity against a CPython object (`result is _NOT_FOUND`); a private helper called
+  with instances of several classes (`_format(self)` in each node class), or returning an
+  object on one path and an instance on another, takes and returns objects. Each sent its
+  class or function to CPython before.
+- `--ext --non-strict`: a private class (`_Node`) is published like a public one, with its
+  methods (private ones and ones taking instances or only `None` too), so Python code
+  holding one of its instances calls them; an instance's `__dict__` (`vars()`) is a new
+  dict of its attributes. A class defining the descriptor protocol (`__get__`, `__set__`,
+  `__delete__`, `__set_name__`) runs in CPython: a compiled instance as a class attribute
+  took no part in the protocol.
+- A module attribute read from compiled code is cached even when the module's dict key is
+  a `str` equal to, not identical with, the name read (a non-strict module's compiled
+  globals store such keys): `defaults.STRING_ENCODING` from another module of the package
+  was a full `getattr` with two failed lookups each time (pystache's `Renderer()` 35k ->
+  6.9k instructions).
+
 ## [0.8.0] - 2026-10-21
 
 Library code faster than CPython -- the goal, **not met**. Accepts 2 and 3 are met;

@@ -832,6 +832,28 @@ pub(crate) fn collect_call_constraints(
         {
             continue;
         }
+        // v0.9: nor does a fresh container display passed where another
+        // call site (or a `None` default) already makes the parameter an
+        // object (`_format(self, exclude=['template'])`): the display is
+        // built as the CPython container, which nothing else shares.
+        if crate::non_strict::is_non_strict()
+            && matches!(
+                args.get(index),
+                Some(HirExpr::ListLiteral(_) | HirExpr::DictLiteral(_) | HirExpr::SetLiteral(_))
+            )
+            && matches!(
+                parameter.clone().map(Some).unwrap_or_else(|var| {
+                    super::unify::resolved_term(Err(var), parents, concrete)
+                }),
+                Some(Ty::Object | Ty::None)
+            )
+        {
+            if let Err(var) = parameter {
+                let at = super::unify::root(parents, *var);
+                concrete[at] = Some(Ty::Object);
+            }
+            continue;
+        }
         if let Some(arg) = arg
             && matches!((&arg, parameter), (Err(_), _) | (_, Err(_)))
         {

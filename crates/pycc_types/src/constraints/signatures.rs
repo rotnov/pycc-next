@@ -581,7 +581,10 @@ fn solve_all(
     propagate_binop_constraints(&constraints.deferred.binops, &mut parents, &mut concrete)?;
     for var in &constraints.opaque_returns {
         let return_root = root(&mut parents, *var);
-        if concrete[return_root] == Some(Ty::None) {
+        // v0.9: so is one another `return` types as an instance (a
+        // sentinel, `return _NOT_FOUND`): the instance crosses as its
+        // carrier.
+        if matches!(concrete[return_root], Some(Ty::None | Ty::Instance(_))) {
             concrete[return_root] = Some(Ty::Object);
         }
     }
@@ -620,6 +623,16 @@ fn solve_all(
                     &non_scalar_local_roots,
                 )
                 .or_else(object_when_non_strict)
+                // v0.9: a parameter only `None` reaches (a `None` default no
+                // call overrides) is a CPython object in non-strict mode, so
+                // Python code calling the published method may pass anything.
+                .map(|ty| {
+                    if ty == Ty::None && crate::non_strict::is_non_strict() {
+                        Ty::Object
+                    } else {
+                        ty
+                    }
+                })
                 .ok_or_else(|| {
                     if super::public_inference::reports_missing_annotation(name) {
                         return super::public_inference::at_function(hir, name, super::public_inference::parameter_needs_annotation(name, param_name));

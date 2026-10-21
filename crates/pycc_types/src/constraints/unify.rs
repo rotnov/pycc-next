@@ -267,6 +267,15 @@ pub(super) fn merge_inferred_types(left: Ty, right: Ty) -> Option<Ty> {
         // and as a scalar (a helper called with an object and with an
         // `int`) is the object, which holds either.
         Some(Ty::Object)
+    } else if crate::non_strict::is_non_strict()
+        && [&left, &right]
+            .iter()
+            .all(|ty| matches!(ty, Ty::Object | Ty::Instance(_)))
+    {
+        // v0.9: so is one inferred as instances of two classes, or as an
+        // instance and an object (a helper called with each node class,
+        // `_format(self)`): the instance crosses as its carrier.
+        Some(Ty::Object)
     } else {
         // A term inferred both as `None` and as a value (a helper parameter
         // defaulting to `None` and called with an `int`, a helper that

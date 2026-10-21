@@ -25,6 +25,13 @@ fn python() -> Command {
 /// `hits` when the fixture reads attributes the caches must answer (with
 /// the caches off, none is answered either way).
 fn matches_cpython(fixture: &str, hits: bool) {
+    matches_cpython_hitting(fixture, usize::from(hits));
+}
+
+/// [`matches_cpython`], the caches answering at least `min_hits` reads
+/// (`0`: not checked).
+fn matches_cpython_hitting(fixture: &str, min_hits: usize) {
+    let hits = min_hits > 0;
     let dir = ScratchDir::new(fixture).expect("scratch");
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/{fixture}.py"));
     let module = format!("{fixture}_ext");
@@ -46,7 +53,8 @@ fn matches_cpython(fixture: &str, hits: bool) {
     let probe = format!(
         "import ctypes, sys\nimport {module}\n\
          hits = ctypes.CDLL({module}.__file__).pycc_ext_attr_cache_hits()\n\
-         print('HITS', hits > 0, file=sys.stderr)\n"
+         print('HITS', hits > 0, file=sys.stderr)\n\
+         print('COUNT', hits, file=sys.stderr)\n"
     );
     for off in [false, true] {
         let mut run = python();
@@ -66,6 +74,14 @@ fn matches_cpython(fixture: &str, hits: bool) {
         if off || hits {
             let expected = if off { "HITS False" } else { "HITS True" };
             assert!(stderr.contains(expected), "caches off: {off}\n{stderr}");
+        }
+        if !off && hits {
+            let count: usize = stderr
+                .lines()
+                .find_map(|line| line.strip_prefix("COUNT "))
+                .and_then(|n| n.trim().parse().ok())
+                .expect("the probe prints the hit count");
+            assert!(count >= min_hits, "{count} hits, at least {min_hits} expected\n{stderr}");
         }
     }
 }
@@ -110,4 +126,14 @@ fn membership_in_a_set_display_of_literals() {
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn an_empty_literal_and_its_neighbour_compare_apart() {
     matches_cpython("text_literal_compare", false);
+}
+
+/// v0.9: a module attribute whose dict key is a `str` equal to the read's
+/// name but not the same object -- what a non-strict module's compiled
+/// global stores (`ns['LIMIT'] = LIMIT`) insert -- is cached too: every
+/// read in the loop is a hit, and a rebinding is still seen.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn module_attributes_stored_by_compiled_code_are_cached() {
+    matches_cpython_hitting("attr_cache_module_keys", 400);
 }

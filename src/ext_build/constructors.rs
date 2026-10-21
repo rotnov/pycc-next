@@ -160,9 +160,20 @@ pub(crate) fn instance_shape_admissible(class_def: &HirClassDef, class: &str) ->
 /// [`collect_class_publications`]' third condition holds for any of them before
 /// this predicate's answer could matter.
 pub(crate) fn class_publishable(class_def: &HirClassDef, class: &str) -> bool {
-    is_public_name(class)
+    (is_public_name(class) || is_private_class_published(class))
         && pycc_ast::namespace::split_module_global(class).is_none()
         && class_def.exception_type_tag.is_none()
+}
+
+/// v0.9: in non-strict mode a private class (`_Node`, one leading underscore,
+/// not a compiler name) is published too -- the module attribute its `class`
+/// statement binds in CPython, and the carrier type its escaping instances
+/// cross as, which must answer `node.render(...)` from CPython code as an
+/// instance of the Python class does.
+pub(crate) fn is_private_class_published(class: &str) -> bool {
+    super::export_name::is_private_method_name(class)
+        && !pycc_ast::is_reserved_name(class)
+        && pycc_types::non_strict_checked()
 }
 
 /// Whether `class`'s own shape admits instance exports **and** the host can

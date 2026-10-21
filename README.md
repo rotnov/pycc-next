@@ -429,7 +429,11 @@ and setuptools): that is the test harness, not a change to the packages.
   each of its methods' bodies is still compiled: the `def` in the class body forwards
   to a compiled function (`self` crosses as the CPython instance, `super()` and
   `__class__` keep working), so Python code subclassing the class, metaclass hooks and
-  `__init_subclass__` behave as in CPython. In an `--ext` module a compiled class whose
+  `__init_subclass__` behave as in CPython. What does not send a class to CPython: a list
+  or dict attribute holding CPython objects (a CPython list or dict, shared with Python
+  code), an attribute holding a callable called like a method (`self.escape(s)`), an
+  instance tested with `is` against an object (a sentinel), a private class (published,
+  with its methods, in an `--ext` module). In an `--ext` module a compiled class whose
   method cannot compile stays a native class, that method attached to it as a CPython
   function. A decorated top-level function keeps its `def` (decorators, defaults,
   signature) in CPython and its body compiled. `--report-fallbacks` reports each

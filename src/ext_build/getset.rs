@@ -460,6 +460,31 @@ pub(crate) fn getset_c(table: &ExtClassGetsets, emitted: &mut Vec<String>) -> St
             }
         }
     }
+    // v0.9: `instance.__dict__` (`vars(instance)`), as a Python instance
+    // answers it: a new dict of the assigned slots, in layout order (the
+    // order `__init__` first assigns them). It is a snapshot: a store into
+    // it does not reach the instance (`docs/DEVIATIONS.md`).
+    let dict_symbol = format!("pycc_ext_dict_{class}");
+    out.push_str(&format!(
+        "static PyObject *{dict_symbol}(PyObject *self, void *closure)\n{{\n    \
+         PyObject *dict = PyDict_New();\n    PyObject *value;\n    (void)closure;\n    \
+         if (dict == NULL) {{\n        return NULL;\n    }}\n"
+    ));
+    for getset in &table.getsets {
+        if let ExtGetset::Slot { .. } = getset {
+            let name = getset.name();
+            out.push_str(&format!(
+                "    value = {}(self, NULL);\n    if (value == NULL) {{\n        \
+                 if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {{\n            \
+                 Py_DECREF(dict);\n            return NULL;\n        }}\n        \
+                 PyErr_Clear();\n    }} else if (PyDict_SetItemString(dict, \"{name}\", value) < 0) {{\n        \
+                 Py_DECREF(value);\n        Py_DECREF(dict);\n        return NULL;\n    }} else {{\n        \
+                 Py_DECREF(value);\n    }}\n",
+                getter_symbol(class, name)
+            ));
+        }
+    }
+    out.push_str("    return dict;\n}\n\n");
     out.push_str(&format!(
         "static PyGetSetDef pycc_ext_type_getset_{class}[] = {{\n"
     ));
@@ -476,6 +501,11 @@ pub(crate) fn getset_c(table: &ExtClassGetsets, emitted: &mut Vec<String>) -> St
         out.push_str(&format!(
             "    {{\"{name}\", {}, {setter}, NULL, NULL}},\n",
             getter_symbol(class, name)
+        ));
+    }
+    if !table.getsets.iter().any(|getset| getset.name() == "__dict__") {
+        out.push_str(&format!(
+            "    {{\"__dict__\", {dict_symbol}, NULL, NULL, NULL}},\n"
         ));
     }
     out.push_str("    {NULL, NULL, NULL, NULL, NULL},\n};\n\n");

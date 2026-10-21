@@ -1033,7 +1033,11 @@ pub fn is_ext_exportable_name(name: &str) -> bool {
     {
         return true;
     }
-    if first.starts_with('_') || first.is_empty() {
+    // A private class's methods (`_Node.render`), which the driver
+    // publishes in non-strict mode only: admitted in every mode, the
+    // superset direction.
+    let private_class = first.starts_with('_') && !first.starts_with("__") && !first.starts_with("_pycc_");
+    if (first.starts_with('_') && !private_class) || first.is_empty() {
         return false;
     }
     let Some(second) = segments.next() else {

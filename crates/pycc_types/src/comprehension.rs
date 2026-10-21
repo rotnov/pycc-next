@@ -165,7 +165,7 @@ fn object_comp_container_ty(
     {
         return Ok(Ty::List(Box::new(elt_ty)));
     }
-    if !crate::foreign::is_packable_operand(&elt_ty) {
+    if !crate::foreign::is_object_operand(env, &elt_ty) {
         return Err(crate::foreign::object_operation_unsupported(&format!(
             "collecting a `{}` element into a CPython {kind}",
             elt_ty.name()

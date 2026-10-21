@@ -130,7 +130,16 @@ pub(super) fn lower_object_compare(
         // A `None` operand of a rich comparison (`o == None`) is CPython's
         // `Py_None`; an identity test keeps its own `None` operand.
         let (left, right) = if matches!(op, CmpOpKind::Is | CmpOpKind::IsNot) {
-            (left, right)
+            // v0.9: a compiled instance against an object is compared as
+            // its carrier, the object CPython code holds for it.
+            let carried = |side: MirExpr| {
+                if matches!(side.ty(), Ty::Instance(_)) {
+                    MirExpr::ObjectBox(Box::new(side))
+                } else {
+                    side
+                }
+            };
+            (carried(left), carried(right))
         } else {
             (
                 crate::obj_arith::display_element(left),

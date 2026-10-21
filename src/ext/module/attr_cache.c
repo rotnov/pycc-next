@@ -234,8 +234,14 @@ static PyObject *pycc_ext_ic_module_value(PyObject *obj, Py_ssize_t index, PyObj
     return entries[2 * index] == key ? entries[2 * index + 1] : NULL;
 }
 
-/* The index of `name` among module `obj`'s dict entries, or -1. */
-static Py_ssize_t pycc_ext_ic_module_index(PyObject *obj, PyObject *name)
+/*
+ * The index of `name` among module `obj`'s dict entries, or -1; `*key` is
+ * the dict's own key object there (borrowed), which a hit compares by
+ * identity. It is `name` itself unless the key was stored as another `str`
+ * of the same text -- a compiled module's `ns['X'] = X` stores a key that
+ * is not interned, which CPython's own lookups find by equality.
+ */
+static Py_ssize_t pycc_ext_ic_module_index(PyObject *obj, PyObject *name, PyObject **key)
 {
     char *keys = pycc_ext_ic_module_keys(obj);
     PyObject **entries;
@@ -248,6 +254,24 @@ static Py_ssize_t pycc_ext_ic_module_index(PyObject *obj, PyObject *name)
     n = pycc_ext_ic_nentries(keys);
     for (i = 0; i < n; i++) {
         if (entries[2 * i] == name && entries[2 * i + 1] != NULL) {
+            *key = name;
+            return i;
+        }
+    }
+    for (i = 0; i < n; i++) {
+        PyObject *held = entries[2 * i];
+        int equal;
+
+        if (held == NULL || entries[2 * i + 1] == NULL || !PyUnicode_CheckExact(held)) {
+            continue;
+        }
+        equal = PyUnicode_Compare(held, name) == 0;
+        if (PyErr_Occurred()) {
+            PyErr_Clear();
+            return -1;
+        }
+        if (equal) {
+            *key = held;
             return i;
         }
     }
@@ -380,7 +404,8 @@ static void pycc_ext_ic_probe(void)
     ok &= module != NULL && PyObject_SetAttr(module, name_b, b) == 0
           && PYCC_IC_FIELD(module, PYCC_IC_MODULE_DICT, PyObject *) == PyModule_GetDict(module);
     if (ok) {
-        Py_ssize_t index = pycc_ext_ic_module_index(module, name_b);
+        PyObject *key = NULL;
+        Py_ssize_t index = pycc_ext_ic_module_index(module, name_b, &key);
 
         ok &= index >= 0 && pycc_ext_ic_module_value(module, index, name_b) == b;
     }
@@ -579,7 +604,7 @@ static long pycc_ext_ic_fill(PyObject *obj, const char *spelling, PyObject *name
     PyTypeObject *type = Py_TYPE(obj);
     int cacheable = pycc_ext_ic_cacheable(obj);
     int shape = cacheable & ~PYCC_IC_HOOKED;
-    PyObject *holder, *found = NULL;
+    PyObject *holder, *found = NULL, *key = NULL;
     Py_ssize_t index;
     int held;
 
@@ -591,8 +616,8 @@ static long pycc_ext_ic_fill(PyObject *obj, const char *spelling, PyObject *name
         if (held != 0) {
             return held < 0 ? -1 : pycc_ext_ic_store(type, spelling, PYCC_IC_NONE, 0, 0, NULL, NULL);
         }
-        index = pycc_ext_ic_module_index(obj, name);
-        return index < 0 ? -1 : pycc_ext_ic_store(type, spelling, PYCC_IC_MODULE, 0, index, name, NULL);
+        index = pycc_ext_ic_module_index(obj, name, &key);
+        return index < 0 ? -1 : pycc_ext_ic_store(type, spelling, PYCC_IC_MODULE, 0, index, key, NULL);
     }
     if (cacheable == 0) {
         return pycc_ext_ic_store(type, spelling, PYCC_IC_NONE, 0, 0, NULL, NULL);

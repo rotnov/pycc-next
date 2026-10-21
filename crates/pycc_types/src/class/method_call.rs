@@ -147,9 +147,27 @@ pub(crate) fn resolve_method_call(
     }
     // `obj.f(args)` where `f` is an instance attribute holding a function
     // value: a call of that value.
-    if let Ok(Ty::Callable(sig)) = super::resolve_attr_get(env, base_ty, method) {
-        check_call_args(env, method, args, arg_tys, &sig.0, true)?;
-        return Ok(sig.1.clone());
+    match super::resolve_attr_get(env, base_ty, method) {
+        Ok(Ty::Callable(sig)) => {
+            check_call_args(env, method, args, arg_tys, &sig.0, true)?;
+            return Ok(sig.1.clone());
+        }
+        // v0.9: ... or holding a CPython object (a callable a caller passed
+        // in, `self.escape(s)`): a call of that object, each argument
+        // boxed as for any object call.
+        Ok(Ty::Object) => {
+            for (arg, ty) in args.iter().zip(arg_tys) {
+                if !crate::foreign::is_object_operand(env, ty) && *ty != Ty::None {
+                    crate::non_strict::request_container_widen(arg, ty);
+                    return Err(crate::foreign::object_operation_unsupported(&format!(
+                        "passing a `{}` argument to a CPython object's call",
+                        ty.name()
+                    )));
+                }
+            }
+            return Ok(Ty::Object);
+        }
+        _ => {}
     }
     Err(t0044_unknown_member("method", class_name, method))
 }

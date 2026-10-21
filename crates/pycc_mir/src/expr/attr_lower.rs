@@ -570,7 +570,7 @@ pub(crate) fn lower_method_call_expr(
         mro_class_def(mro_class, classes)
             .attrs
             .iter()
-            .any(|(name, ty)| name == method && matches!(ty, Ty::Callable(_)))
+            .any(|(name, ty)| name == method && matches!(ty, Ty::Callable(_) | Ty::Object))
     });
     if !defines_method && holds_function {
         let call = HirExpr::ExprCall {

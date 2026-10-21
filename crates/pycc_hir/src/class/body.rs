@@ -545,6 +545,26 @@ pub(super) fn walk_class_body(input: &ClassBodyInput<'_>) -> Result<ClassBodyOut
         // case and the more specific "not supported yet" message it replaces
         // would have described a program CPython never gets to run.
         reject_reserved_method_name(&method_name, &kind, method_def.range.into())?;
+        // v0.9: in non-strict mode an instance may be a class attribute of a
+        // class CPython creates, where Python's descriptor protocol calls
+        // `__get__`/`__set__`/`__delete__`/`__set_name__` implicitly; a
+        // compiled class's carrier type has no descriptor slots, so a class
+        // defining one runs in CPython (its methods compiled).
+        if signatures.non_strict()
+            && matches!(
+                method_name.as_str(),
+                "__get__" | "__set__" | "__delete__" | "__set_name__"
+            )
+        {
+            return Err(unsupported(
+                format!(
+                    "a `def {method_name}` (the descriptor protocol) in a compiled class is not \
+                     supported yet: Python calls it implicitly when an instance is a class \
+                     attribute, and a compiled class's instances do not take part in the protocol"
+                ),
+                std::ops::Range::<u32>::from(method_def.range),
+            ));
+        }
         // #436: `@staticmethod` and `@classmethod` on `__init__` are
         // rejected -- a constructor must be a regular instance method.
         // #380 (PR-20): `@abstractmethod` on `__init__` is also rejected

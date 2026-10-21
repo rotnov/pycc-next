@@ -845,8 +845,45 @@ Accept:
    infer (with a guarded object fallback where they escape to CPython), including classes
    whose bases come from another module of the package, `Generic[...]` bases with plain or
    constrained `TypeVar`s, and `lambda`s in class bodies (deferred from v0.8).
+   **Progress 2026-10-21** (not met), step 1 -- the general reasons a library class went
+   to CPython. Design, with the guru advisor: make the classes native first, then type-
+   guarded native dispatch on object receivers whose run-time class is a compiled class
+   (keyed by the carrier type pointer, filled lazily per site, candidates with object
+   parameters first), rather than unions of instance types. Done: a list or dict slot
+   holding objects is a CPython list or dict (it was `list[object]` while `[]` built a
+   CPython list, a mismatch that sent the class to CPython); an object-typed attribute
+   called like a method (`self.escape(s)`); `obj is instance` (a sentinel) through the
+   instance's carrier; a helper called with instances of several classes, or returning an
+   instance on one path and an object on another, takes and returns objects; a fresh
+   display passed where a parameter is an object; a parameter only `None` reaches is an
+   object. Correctness for escaping instances: a private class is published in
+   non-strict mode with its methods (also private ones taking instances or `None`), so
+   Python code holding a node calls `node.render(...)`; a carrier answers `__dict__`
+   (a snapshot); a class defining the descriptor protocol (`__get__`, `__set__`,
+   `__delete__`, `__set_name__`) runs in CPython, since a carrier takes no part in it.
+   A module-attribute cache bug: a dict key equal to but not identical with the name
+   read (what a non-strict module's compiled globals store) never filled the cache, so
+   `defaults.X` from another module was a full lookup with two failed probes every time
+   (pystache's `Renderer()`: 35k -> 6.9k instructions). pystache: `RenderEngine`,
+   `Loader`, `ParsedTemplate` and every node class native (105 -> 108 of 111 functions);
+   `ContextStack` (`*args`), `_Parser` (a class attribute default of an instance
+   attribute), `Renderer` (bound methods as values) and the exception classes (a base
+   from another module) still run in CPython. pydantic unchanged (1029 of 1249, its suite
+   0 failures), mistune unchanged.
 2. **Template engine >= 2x:** pystache 0.6.8 (chosen by the v0.8 accept 4 rule) runs its
    own benchmark >= 2x faster than CPython (median of interleaved runs) and passes its suite.
+   **Progress 2026-10-21** (not met): 0.61x -> 0.69x after accept 1's step 1 (0.089 s
+   against 0.062 s, 3 interleaved runs). What any compile of pystache leaves to CPython,
+   measured (callgrind, CPython on the sources, per round of the benchmark's two examples,
+   of 505K instructions): the regex searches 83K (the fixed part); `match.start`/`end`
+   and `groupdict` 40K; `_compile_template_re` per parse (`re.escape` twice, `%`
+   formatting, `re.compile`'s cache hit hashing a ~300-character pattern) 35K; 13
+   `html.escape` calls 42K -- `html.escape` and `re.escape` on a `str` can be compiled
+   natively with CPython's results, so the fixed floor is ~110-130K and 2x needs the
+   rest under ~125K. The compiled tree spends 650K: it removed 134K of interpreter
+   work but pays as much in C-API calls (object method calls through CPython, Python
+   frames for the lifted closures and lambdas, boxing), so the next steps remove those:
+   native dispatch on compiled instances, native closures, native `html.escape`.
 3. **Markdown >= 1.5x:** mistune 3.3.4 renders `benchmark/cases` >= 1.5x faster than
    CPython and passes its suite.
 4. **pydantic no slower:** every phase of `bench/pydantic_check.py --time` (import, define,
