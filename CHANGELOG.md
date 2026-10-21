@@ -4,6 +4,21 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+
+- CI compares strict mode with `mypy --strict` (2.3.1, pinned by hash) over the 200 corpus
+  programs (`bench/mypy_parity.py`): every program `pycc check` refuses must be rejected by
+  mypy too, or be listed in `docs/DEVIATIONS.md` with a reason. Today 9 refusals: mypy
+  rejects 8; the ninth (049) passes mypy only through `Any`.
+
+### Fixed
+
+- `--non-strict` native builds publish their compiled classes in `__main__`, as `--ext`
+  modules do: a module-level statement running in CPython no longer sends every class of
+  the module to CPython (issue #8; a class with a member Python code could not use
+  compiled -- an unannotated or private method, say -- still does), and CPython code
+  reading `type(obj).method` of a compiled instance finds the method (issue #9).
+
 ## [0.8.0] - 2026-10-21
 
 Library code faster than CPython -- the goal, **not met**. Accepts 2 and 3 are met;

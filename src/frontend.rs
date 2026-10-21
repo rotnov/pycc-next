@@ -332,10 +332,11 @@ pub(crate) fn check_frontend(path: &Path, interop: InteropCli) -> Result<(), Fro
 }
 
 /// What a native build (an embedded executable) publishes to its fallback
-/// code: its module-level functions, not its classes.
+/// code: its module-level functions and its classes (issue #8), in
+/// `__main__` (`crate::build_pipeline`).
 const NATIVE_PUBLISHES: crate::fallback::Publishes = crate::fallback::Publishes {
     functions: true,
-    classes: false,
+    classes: true,
     infers_unannotated: true,
     variables: false,
     foreign_relative_imports: false,

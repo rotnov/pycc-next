@@ -22,7 +22,7 @@ class P:
 
 
 # Instances reach fallback code (the lambda) without the class name being
-# read there: the class runs in CPython too.
+# read there: the class stays compiled, published (issue #8).
 ps = [P(1), P(2)]
 print((lambda: [p.v for p in ps])())
 if M > 100:

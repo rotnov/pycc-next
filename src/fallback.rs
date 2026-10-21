@@ -49,6 +49,7 @@ mod driver;
 mod exceptions;
 mod function_values;
 mod lift;
+mod members;
 mod names;
 mod nested;
 mod package_bases;
@@ -153,6 +154,10 @@ struct TopStmt {
     /// An exception class the artifact would publish without its own
     /// members (`exceptions`): Python code never sees it compiled.
     hidden_members: bool,
+    /// A class an embedded executable would publish without some of its
+    /// members (`members`): it runs in CPython once the module has any
+    /// fallback code (`cascade`).
+    unpublished_members: bool,
     /// The names its class statements' bases read (`class C(B)`, at any
     /// depth outside a function): a compiled class Python code subclasses
     /// runs in CPython (`cascade`), since a published class is not a base
@@ -256,6 +261,12 @@ impl Plan {
         } else {
             BTreeSet::new()
         };
+        // An embedded build publishes its classes but not every member.
+        let unpublished_members = if publishes.classes && publishes.infers_unannotated {
+            members::with_unpublished_members(&module.body)
+        } else {
+            BTreeSet::new()
+        };
         let stmts = module
             .body
             .iter()
@@ -290,6 +301,8 @@ impl Plan {
                         && !wrapped.contains(def.name.as_str())),
                 hidden_members: matches!(stmt, Stmt::ClassDef(class)
                     if hidden_members.contains(class.name.as_str())),
+                unpublished_members: matches!(stmt, Stmt::ClassDef(class)
+                    if unpublished_members.contains(class.name.as_str())),
                 bases: names::base_names(stmt),
             })
             .collect::<Vec<_>>();
@@ -317,7 +330,9 @@ impl Plan {
             if found.is_empty() {
                 continue;
             }
-            if let Stmt::ClassDef(class) = stmt {
+            // Only an `--ext` module attaches a method to its compiled class
+            // (an embedded build's fallback rewrite has no forwarders for it).
+            if !publishes.infers_unannotated && let Stmt::ClassDef(class) = stmt {
                 attach::analyze(class, &mut found);
             }
             // Once split, CPython runs the statement without the lifted
@@ -339,6 +354,7 @@ impl Plan {
                     declares: names::all_global_declarations(&analyzed),
                     defaults: false,
                     hidden_members: false,
+                    unpublished_members: false,
                     bases: BTreeSet::new(),
                 });
                 lifts.push(lift);

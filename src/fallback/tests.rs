@@ -6,7 +6,7 @@ use pycc_diag::Span;
 
 const NATIVE: Publishes = Publishes {
     functions: true,
-    classes: false,
+    classes: true,
     infers_unannotated: true,
     variables: false,
     foreign_relative_imports: false,
@@ -161,12 +161,21 @@ fn a_plan_renders_fallback_code_as_an_exec_in_the_namespace() {
 
 #[test]
 fn a_compiled_definition_fallback_code_cannot_see_falls_back_too() {
-    let source = "class K:\n    pass\n\ndef _h():\n    return 1\n\ndef f():\n    return (lambda: (K, _h()))()\n";
+    let source = "class K:\n    pass\n\ndef _h():\n    return 1\n\ndef f():\n    return (lambda: (K, _h()))()\n\n\
+                  class L:\n    def m(self):\n        return 1\n";
+    // A native build publishes `K` (issue #8), but not `L`'s unannotated
+    // method, and an `L` may reach the fallback code through any value.
     let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
     plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
     let report = plan.report_lines().join("\n");
-    assert!(report.contains("class `K`"), "{report}");
+    assert!(!report.contains("class `K`"), "{report}");
+    assert!(report.contains("class `L` at m.py:10 runs in CPython"), "{report}");
     assert!(report.contains("function `_h`"), "{report}");
+    let unpublished = Publishes { classes: false, ..NATIVE };
+    let mut plan = Plan::new(source, "m.py", unpublished).expect("parses");
+    plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
+    let report = plan.report_lines().join("\n");
+    assert!(report.contains("class `K`"), "{report}");
     let ext = Publishes {
         functions: true,
         classes: true,
@@ -178,7 +187,65 @@ fn a_compiled_definition_fallback_code_cannot_see_falls_back_too() {
     plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
     let report = plan.report_lines().join("\n");
     assert!(!report.contains("class `K`"), "{report}");
+    assert!(!report.contains("class `L`"), "{report}");
     assert!(report.contains("function `_h`"), "{report}");
+    // Without fallback code no class falls back.
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.cascade();
+    assert!(plan.report_lines().is_empty());
+}
+
+#[test]
+fn a_native_build_publishes_a_class_only_with_members_python_code_can_use() {
+    let unpublished = |class: &str| {
+        let source = format!("class C:\n{class}\n");
+        members::with_unpublished_members(&stmts(&source)).contains("C")
+    };
+    for published in [
+        "    pass",
+        "    \"doc\"\n    n = 1\n    m: int = -2\n    s = 'x'\n    t: str",
+        "    def __init__(self, x: int) -> None:\n        self.x = x",
+        "    def f(self, a: int, /, b: str) -> int:\n        return a",
+        "    @staticmethod\n    def g(a: int) -> int:\n        return a",
+        "    @classmethod\n    def h(cls) -> int:\n        return 1",
+        "    @property\n    def p(self) -> int:\n        return 1",
+        "    def __repr__(self) -> str:\n        return ''\n    def __lt__(self, o: 'C') -> bool:\n        return True",
+    ] {
+        assert!(!unpublished(published), "{published}");
+    }
+    for hidden in [
+        "    n = [1]",
+        "    if True:\n        pass",
+        "    def f(self, a):\n        return a",
+        "    def f(self, a: int):\n        return a",
+        "    def f(self, a: int = 1) -> int:\n        return a",
+        "    def f(self, *a: int) -> int:\n        return 1",
+        "    def f(self, *, a: int) -> int:\n        return a",
+        "    def f(self, **a: int) -> int:\n        return 1",
+        "    def _f(self) -> int:\n        return 1",
+        "    def __len__(self) -> int:\n        return 1",
+        "    @functools.cache\n    def f(self) -> int:\n        return 1",
+        "    @staticmethod\n    def g(a) -> int:\n        return 1",
+        "    def __init__(self, x) -> None:\n        self.x = x",
+    ] {
+        assert!(unpublished(hidden), "{hidden}");
+    }
+    // The class statement itself, and a class built on one hiding members.
+    let classes = members::with_unpublished_members(&stmts(
+        "@dataclass\nclass D:\n    x: int\n\n\
+         class E(Enum):\n    A = 1\n\n\
+         class M(metaclass=Meta):\n    pass\n\n\
+         class H:\n    def _f(self) -> int:\n        return 1\n\n\
+         class S(H):\n    pass\n\n\
+         class B:\n    pass\n\n\
+         class Ok(B, object):\n    pass\n\n\
+         class Err(ValueError):\n    pass\n\n\
+         class Later(Undefined):\n    pass\n",
+    ));
+    assert_eq!(
+        classes.into_iter().collect::<Vec<_>>(),
+        ["D", "E", "H", "Later", "M", "S"]
+    );
 }
 
 #[test]

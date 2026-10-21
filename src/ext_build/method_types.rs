@@ -350,7 +350,7 @@ fn publish_class_c(publications: &[ExtPublishedClass]) -> String {
 /// exception set (a raising `__class__`, say). A name with no published
 /// descendant -- a private class, one exporting no method that the host
 /// cannot construct either, every class of
-/// an embedded build, which publishes nothing -- has no type object to test
+/// a strict embedded build, which publishes none -- has no type object to test
 /// against, and falls through to [`UNPUBLISHED_CLASS_ISINSTANCE`], which
 /// answers `0` once it has looked up `__class__` as CPython would.
 ///

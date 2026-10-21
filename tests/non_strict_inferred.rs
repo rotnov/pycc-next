@@ -131,11 +131,12 @@ fn builtin_values_exit_and_scalar_methods_go_through_cpython() {
     }
     // Exits with status 3, as CPython does.
     let report = matches_cpython("non_strict_builtin_values.py");
-    // The lambda statements fall back, and the class whose instances they
-    // receive; `defaultdict(int)`, `l = len`, `"\n".join(objects)`,
-    // `.format`, `.bit_length()` and `exit` stay compiled.
-    assert!(report.contains("class `P`"), "{report}");
-    assert_eq!(report.matches("fallback:").count(), 3, "{report}");
+    // The lambda statements fall back; the class whose instances they
+    // receive stays compiled, published in `__main__` (issue #8);
+    // `defaultdict(int)`, `l = len`, `"\n".join(objects)`, `.format`,
+    // `.bit_length()` and `exit` stay compiled.
+    assert!(!report.contains("class `P`"), "{report}");
+    assert_eq!(report.matches("fallback:").count(), 2, "{report}");
 }
 
 #[test]

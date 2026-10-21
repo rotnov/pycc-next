@@ -156,6 +156,7 @@ impl Plan {
             declares: names::all_global_declarations(&analyzed),
             defaults: false,
             hidden_members: false,
+            unpublished_members: false,
             bases: BTreeSet::new(),
         });
         self.ast.push(analyzed);

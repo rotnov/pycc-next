@@ -110,6 +110,14 @@ pub(crate) fn with_fallback<T, E>(
         return first;
     };
     plan.set_entry(path);
+    // An embedded build publishes its classes once it has fallback code
+    // (issue #8): as in an `--ext` module, the container slots fallback code
+    // holding an instance may use are CPython objects.
+    if publishes.classes && publishes.infers_unannotated {
+        pycc_hir::set_external_attribute_reads(super::package_bases::attributes_used_in_package(
+            path, false,
+        ));
+    }
     // With annotation aliases substituted (`annotations`), the failures of
     // the source as written may be ones the substitution removes: the loop
     // starts from the rewrite's own.

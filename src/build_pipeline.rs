@@ -425,7 +425,7 @@ fn link_windows_stub(stub: &embed::StubLink, target: Option<&str>) -> Result<(),
 fn embed_exports_or_exit(
     entry: &Path,
     typed_hir: &pycc_hir::HirModule,
-) -> Result<Vec<ext_build::ExtExport>, ExitCode> {
+) -> Result<EmbedExports, ExitCode> {
     // #1470: an uninstallable comparison or hash dunder is a span-less
     // `C0003`, reported as `plan_ext` reports one, before the probe.
     let report = |gaps| {
@@ -436,25 +436,71 @@ fn embed_exports_or_exit(
         ))
     };
     embed::embed_slot_dunders(typed_hir).map_err(|gaps| ExitCode::from(report(gaps)))?;
-    // A program with non-strict fallback code (#12) publishes its compiled
-    // module-level functions in `__main__`, so the fallback code can call
-    // them, as an `--ext` module's code can.
-    if !crate::fallback::active() {
-        return Ok(Vec::new());
+    // Only non-strict code hands a compiled instance to CPython code.
+    if !crate::mode::non_strict_for(entry) {
+        return Ok(EmbedExports::default());
     }
     let source = crate::fallback::entry_source(entry);
     // Inferred functions are not published (`crate::fallback`).
-    let inferred = crate::fallback::inferred_functions(&source);
-    let mut exports = ext_build::collect_exports_excluding(
-        typed_hir,
-        &std::collections::BTreeSet::new(),
-        &inferred,
-    )
-    .map_err(|gaps| ExitCode::from(report(gaps.into_iter().map(|(_, d)| d).collect())))?;
-    exports.retain(|export| export.class.is_none());
+    let mut excluded = crate::fallback::inferred_functions(&source);
+    let mut exports = if crate::fallback::active() {
+        // A program with non-strict fallback code (#12) publishes its
+        // compiled module-level functions and classes in `__main__`, so the
+        // fallback code can call them and use their instances, as an
+        // `--ext` module's code can (issue #8). The frontend made every
+        // export gap a failure of its statement, which then fell back.
+        ext_build::collect_exports_excluding(
+            typed_hir,
+            &std::collections::BTreeSet::new(),
+            &excluded,
+        )
+        .map_err(|gaps| ExitCode::from(report(gaps.into_iter().map(|(_, d)| d).collect())))?
+    } else {
+        // Without fallback code, CPython code meets a compiled instance
+        // only as a value compiled code hands it (`type(obj).method`, issue
+        // #9): its class is published with the methods the boundary
+        // carries, and no module-level function. Codegen emits no export
+        // thunk here (nothing checked the module's signatures against the
+        // boundary), so a method needing one is not published either.
+        let exports = loop {
+            match ext_build::collect_exports_excluding(
+                typed_hir,
+                &std::collections::BTreeSet::new(),
+                &excluded,
+            ) {
+                Ok(exports) => break exports,
+                Err(gaps) => excluded.extend(gaps.into_iter().map(|(name, _)| name)),
+            }
+        };
+        exports
+            .into_iter()
+            .filter(|export| {
+                export.class.is_some()
+                    && !pycc_codegen::ext_thunk_required(
+                        &export.name,
+                        &export.params,
+                        &export.return_ty,
+                        export.returns_buffer_slice,
+                    )
+            })
+            .collect()
+    };
     let signatures = ext_build::SourceSignatures::from_source(&source);
     ext_build::bind_keyword_names(typed_hir, &signatures, &mut exports);
-    Ok(exports)
+    Ok(EmbedExports {
+        exports,
+        classes: true,
+    })
+}
+
+/// What an embedded build publishes in `__main__`: [`embed_exports_or_exit`].
+#[derive(Default)]
+pub(crate) struct EmbedExports {
+    /// The compiled functions and methods.
+    pub(crate) exports: Vec<ext_build::ExtExport>,
+    /// Whether its classes are published (a non-strict program, whose
+    /// instances may reach CPython code).
+    pub(crate) classes: bool,
 }
 
 

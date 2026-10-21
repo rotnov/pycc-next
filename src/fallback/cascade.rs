@@ -168,12 +168,25 @@ impl Plan {
                         }
                         // An instance of a compiled class may reach fallback
                         // code through any value without its name being
-                        // read, and an unpublished class's instances have no
-                        // attributes Python code can see.
+                        // read: an unpublished class's instances have no
+                        // attributes Python code can see, and an embedded
+                        // build's published class may lack some (`members`).
                         Kind::Class(name)
                             if !self.publishes.classes && !self.fallback.is_empty() =>
                         {
                             name
+                        }
+                        Kind::Class(name)
+                            if stmt.unpublished_members && !self.fallback.is_empty() =>
+                        {
+                            return Some((
+                                index,
+                                format!(
+                                    "fallback code may hold an instance of `{name}`, which \
+                                     Python code cannot use compiled (a member is unannotated, \
+                                     private, decorated or a dunder the class does not publish)"
+                                ),
+                            ));
                         }
                         Kind::Def(..) | Kind::Class(_) => return None,
                     };

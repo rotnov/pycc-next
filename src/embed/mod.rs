@@ -506,7 +506,7 @@ pub(crate) fn plan_embed(
     out: &Path,
     entry: &Path,
     typed_hir: &pycc_hir::HirModule,
-    exports: &[ext_build::ExtExport],
+    exports: &crate::build_pipeline::EmbedExports,
     toolchain: &EmbedToolchain,
     platform: EmbedPlatform,
     host: (&str, &str),
@@ -558,12 +558,23 @@ pub(crate) fn plan_embed(
     // CPython code as an object (an `object` parameter, a CPython
     // container) answers `obj.field` there with its compiled slot.
     let getsets = ext_build::collect_carrier_getsets(typed_hir, &carriers);
+    // A non-strict program's classes, with their methods and constructors
+    // (issues #8 and #9): what an `--ext` module publishes.
+    let (publications, ctors) = if exports.classes {
+        let publications = ext_build::collect_class_publications(typed_hir, &exports.exports);
+        let mut ctors = ext_build::collect_constructors(typed_hir, &publications);
+        let signatures = ext_build::SourceSignatures::from_source(&crate::fallback::entry_source(entry));
+        ext_build::bind_ctor_keyword_names(typed_hir, &signatures, &mut ctors);
+        (publications, ctors)
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let exports_inc = ext_build::generate_exports_inc_with_slots(
         "__main__",
-        exports,
+        &exports.exports,
         &classes,
-        &[],
-        &[],
+        &publications,
+        &ctors,
         &carriers,
         &getsets,
         &slots,

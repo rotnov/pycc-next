@@ -30,8 +30,8 @@
 //! touches is a method of the class or a field the carrier exposes (an
 //! `int`, `float`, `bool`, `str`, object or instance field). Anything else
 //! sends the class to CPython with its other methods compiled (`lift`).
-//! An embedded executable does not publish its classes, so there every
-//! failing method splits its class.
+//! An embedded executable publishes its classes but has no attached
+//! methods, so there every failing method splits its class.
 
 use super::lift::Lift;
 use pycc_ast::visitor::{self, Visitor};
