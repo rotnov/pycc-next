@@ -90,6 +90,12 @@ fn module_attributes_rebound_deleted_and_called() {
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_method_is_loaded_before_its_arguments_run() {
+    matches_cpython("attr_cache_calls", true);
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn cached_reads_keep_references_balanced() {
     matches_cpython("attr_cache_leaks", true);
 }

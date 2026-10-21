@@ -89,7 +89,11 @@ fn run(dir: &Path, optimize: bool) -> Output {
 }
 
 fn compiled_at_import(output: &Output) -> String {
-    text(&output.stderr).lines().next().unwrap_or_default().to_string()
+    text(&output.stderr)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[test]
@@ -116,7 +120,12 @@ fn an_ext_module_imports_its_fallback_code_without_compiling_it() {
     for optimize in [false, true] {
         let ours = run(&compiled, optimize);
         let oracle = run(&plain, optimize);
-        assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
+        assert_eq!(
+            text(&ours.stdout),
+            text(&oracle.stdout),
+            "{}",
+            text(&ours.stderr)
+        );
         assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
         // Unoptimized, every chunk is unmarshalled; under `-O` (whose
         // `assert`s the embedded code still holds) each is compiled from
@@ -132,12 +141,18 @@ fn an_ext_module_imports_its_fallback_code_without_compiling_it() {
 
 /// A constant set display (`{1, 8, 0}`) in fallback code iterates in the
 /// source's order: `marshal` rebuilds a frozenset constant in its own
-/// iteration order, so a chunk holding one is compiled at import instead
-/// (the differential fuzzer's finding).
+/// iteration order, so the build records each constant's elements in
+/// source order and the import rebuilds it as the compiler does (the
+/// differential fuzzer's finding), with no `compile()` at import. Checked
+/// under several hash seeds, `str` and `int` elements, a nested function's
+/// constant and a membership test.
 #[test]
 fn a_constant_set_display_in_fallback_code_keeps_the_sources_order() {
     let module = "def f(p0: tuple, p1: tuple) -> dict:\n    s: str = {1, 8, 0}\n    \
-                  print(s, {3, 70, 1, 900}, frozenset({5, 37, 2}))\n\n\nf(6, 5)\n";
+                  print(s, {3, 70, 1, 900}, frozenset({5, 37, 2}))\n    \
+                  print({'d', 'a', 'c', 'b', 'e'}, {1, 9, 17, 25, 33, 2})\n    \
+                  def g(k):\n        return [x for x in {'zz', 'k', 'q', 'aa'}], k in {9, 33, 1}\n    \
+                  print(g(9))\n\n\nf(6, 5)\n";
     let compiled = ScratchDir::new("precompiled_sets").expect("scratch");
     let source = compiled.join("m.py");
     std::fs::write(&source, module).expect("write the module");
@@ -152,14 +167,33 @@ fn a_constant_set_display_in_fallback_code_keeps_the_sources_order() {
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new("precompiled_sets_src").expect("scratch");
     std::fs::write(plain.join("m.py"), module).expect("write the module");
-    let import = |dir: &Path| {
-        python()
-            .args(["-c", "import m"])
-            .current_dir(dir)
-            .output()
-            .expect("python should spawn")
-    };
-    let (ours, oracle) = (import(&compiled), import(&plain));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
-    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+    let driver = "import builtins, sys\ncalls = []\nreal = builtins.compile\n\
+                  def counting(source, filename, *args, **kwargs):\n    \
+                  calls.append(filename)\n    return real(source, filename, *args, **kwargs)\n\
+                  builtins.compile = counting\nimport m\nbuiltins.compile = real\n\
+                  print('compiled at import:', len(calls), file=sys.stderr)\n";
+    for seed in ["0", "1", "7", "12345"] {
+        let import = |dir: &Path| {
+            python()
+                .args(["-B", "-c", driver])
+                .env("PYTHONHASHSEED", seed)
+                .current_dir(dir)
+                .output()
+                .expect("python should spawn")
+        };
+        let (ours, oracle) = (import(&compiled), import(&plain));
+        assert_eq!(
+            text(&ours.stdout),
+            text(&oracle.stdout),
+            "seed {seed}: {}",
+            text(&ours.stderr)
+        );
+        assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+        assert_eq!(
+            compiled_at_import(&ours),
+            "compiled at import: 0",
+            "seed {seed}: {}",
+            text(&ours.stderr)
+        );
+    }
 }

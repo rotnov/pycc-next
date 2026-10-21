@@ -31,10 +31,14 @@
 //!
 //! **Why the lookup is a separate step.** CPython resolves a call's
 //! callable before it evaluates the arguments, so `obj.missing(1 // 0)`
-//! raises `AttributeError` rather than `ZeroDivisionError`. `emit_lookup`
-//! therefore emits `pycc_ext_obj_getattr` and its NULL check, and
-//! `emit_expr`'s own arm runs it before the argument expressions; a fused
-//! shim that did the load itself would necessarily run it last. The price
+//! raises `AttributeError` rather than `ZeroDivisionError`. A positional
+//! method call therefore emits `pycc_ext_obj_load_method` ([`emit_load_method`],
+//! CPython's own `LOAD_ATTR` of a method: the function and its receiver when
+//! the receiver's class holds it, no bound method made) and its NULL check
+//! before the argument expressions, and [`emit_call_loaded`] after them; a
+//! keyword call loads the bound method with `pycc_ext_obj_getattr`
+//! (`emit_lookup`). A fused shim that did the load itself would necessarily
+//! run it last. The price
 //! is a second NULL check and a second failure edge. The bound method still
 //! never becomes a pycc value -- it is an LLVM temporary that
 //! `pycc_ext_obj_call` releases -- so it does not join the boundary's
@@ -484,6 +488,122 @@ pub(super) fn emit_lookup<'ctx>(
         "foreign_call_lookup",
     );
     bound
+}
+
+/// The lookup half of a positional method call, as CPython's `LOAD_ATTR`
+/// of a method: [`crate::ext::EXT_OBJ_LOAD_METHOD_SYMBOL`] answers the
+/// callable and, for a method of the receiver's class the attribute caches
+/// hold, the receiver to pass first (both new references; the receiver
+/// `NULL` otherwise), with no bound method made. [`emit_call_loaded`]
+/// consumes both.
+pub(super) fn emit_load_method<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    base: Scalar<'ctx>,
+    method: &str,
+) -> (
+    inkwell::values::PointerValue<'ctx>,
+    inkwell::values::PointerValue<'ctx>,
+) {
+    let edge = ForeignFailEdge::for_current(builder);
+    let base_ptr = expect_object_pointer(base);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let self_slot = alloca_in_entry_block(context, builder, edge.function(), 1);
+    let name = builder
+        .build_global_string_ptr(method, &format!("pycc_foreign_method_{method}"))
+        .expect("build_global_string_ptr should not fail")
+        .as_pointer_value();
+    let load = shim_fn(
+        module,
+        crate::ext::EXT_OBJ_LOAD_METHOD_SYMBOL,
+        ptr.fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
+    );
+    let callable = builder
+        .build_call(
+            load,
+            &[base_ptr.into(), name.into(), self_slot.into()],
+            "foreign_call_bound",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_load_method")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_load_method returns PyObject *")
+        .into_pointer_value();
+    route_null(
+        context,
+        builder,
+        module,
+        rt,
+        edge,
+        callable,
+        "foreign_call_lookup",
+    );
+    let receiver = builder
+        .build_load(ptr, self_slot, "foreign_call_self")
+        .expect("build_load should not fail")
+        .into_pointer_value();
+    (callable, receiver)
+}
+
+/// Marshals `args` and calls what [`emit_load_method`] loaded:
+/// [`crate::ext::EXT_OBJ_CALL_LOADED_SYMBOL`], which consumes `callable`,
+/// `receiver` (stored ahead of the arguments) and every packed argument.
+pub(super) fn emit_call_loaded<'ctx>(
+    context: &'ctx Context,
+    builder: &Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    callable: inkwell::values::PointerValue<'ctx>,
+    receiver: inkwell::values::PointerValue<'ctx>,
+    args: &[Scalar<'ctx>],
+) -> Scalar<'ctx> {
+    let edge = ForeignFailEdge::for_current(builder);
+    let ptr = context.ptr_type(inkwell::AddressSpace::default());
+    let i64_type = context.i64_type();
+    // Slot 0 holds the receiver (or NULL) ahead of the arguments, so the
+    // call needs no copy to put it first.
+    let stack = alloca_in_entry_block(context, builder, edge.function(), args.len() + 1);
+    builder
+        .build_store(stack, receiver)
+        .expect("build_store should not fail");
+    for (index, value) in args.iter().enumerate() {
+        let packed = emit_pack(context, builder, module, *value, "foreign_call_arg");
+        let slot = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    ptr,
+                    stack,
+                    &[i64_type.const_int(index as u64 + 1, false)],
+                    "foreign_call_arg_slot",
+                )
+                .expect("build_in_bounds_gep should not fail")
+        };
+        builder
+            .build_store(slot, packed)
+            .expect("build_store should not fail");
+    }
+    let call = shim_fn(
+        module,
+        crate::ext::EXT_OBJ_CALL_LOADED_SYMBOL,
+        ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into()], false),
+    );
+    let result = builder
+        .build_call(
+            call,
+            &[
+                callable.into(),
+                stack.into(),
+                i64_type.const_int(args.len() as u64, false).into(),
+            ],
+            "foreign_call",
+        )
+        .expect("build_call should not fail for pycc_ext_obj_call_loaded")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_obj_call_loaded returns PyObject *")
+        .into_pointer_value();
+    route_null(context, builder, module, rt, edge, result, "foreign_call");
+    Scalar::Object(result)
 }
 
 /// `base.method(args)` as one `pycc_ext_obj_call_method` call: no bound

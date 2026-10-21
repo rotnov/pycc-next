@@ -224,6 +224,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   define+schema 167.4M to 157.1M (CPython 151.2M); a cached `o.x` 4.5 ns (was 12.4,
   CPython 15.8), `o.get()` 28.4 ns (was 37.1, CPython 31.2); pystache's benchmark 12%
   faster.
+- Non-strict `--ext`: `o.m(args)` whose arguments run code loads the method before them
+  as CPython's `LOAD_ATTR` does (`pycc_ext_obj_load_method`): a method the attribute
+  caches hold for `o`'s class is called as the function with `o` first, so no bound
+  method is made, and the call (`pycc_ext_obj_call_loaded`) finds the receiver in the
+  argument array's first slot, with no copy. pydantic define+schema: 157.1M to 154.8M
+  instructions per repetition (CPython 151.2M).
+- A fallback chunk holding a `frozenset` constant (a set display such as
+  `x in {"a", "b"}`) ships pre-compiled too: the build records each constant's elements
+  in source order, and the import rebuilds each as CPython 3.13's compiler builds it, so
+  it iterates as a fresh compile's does under every hash seed; only a chunk with two
+  displays of the same elements in different orders is still compiled at import.
+  pydantic's import no longer compiles `json_schema`'s 73 KB chunk: 519.6M to 478.2M
+  instructions for the whole import (CPython from `.pyc`: 442.9M).
 
 ## [0.7.0] - 2026-10-17
 

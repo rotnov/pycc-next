@@ -140,20 +140,29 @@ pub(super) fn emit_method_call<'ctx>(
         held_base.release(builder, rt);
         return result;
     }
-    let bound = emit_bound_method(
+    // The method is loaded before the arguments, as CPython's `LOAD_ATTR`
+    // loads it: the function and the receiver when the receiver's class
+    // holds it, so no bound method is made. Both are held across the
+    // arguments and consumed by the call.
+    let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
+    let held_base = object_release::hold(context, module, rt, base, &base_scalar);
+    let (callable, receiver) =
+        foreign_call::emit_load_method(context, builder, module, rt, base_scalar, method);
+    held_base.release(builder, rt);
+    let held_callable = object_release::hold_new_reference(context, module, rt, callable);
+    let held_receiver = object_release::hold_new_reference(context, module, rt, receiver);
+    let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
+    held_receiver.consumed(rt);
+    held_callable.consumed(rt);
+    let result = foreign_call::emit_call_loaded(
         context,
         builder,
         module,
         rt,
-        user_functions,
-        locals,
-        base,
-        method,
+        callable,
+        receiver,
+        &args.scalars,
     );
-    let held_bound = object_release::hold_new_reference(context, module, rt, bound);
-    let args = emit_object_args(context, builder, module, rt, user_functions, locals, args);
-    held_bound.consumed(rt);
-    let result = foreign_call::emit_call(context, builder, module, rt, bound, &args.scalars);
     args.release(context, builder, rt);
     result
 }

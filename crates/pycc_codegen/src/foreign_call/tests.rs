@@ -173,7 +173,7 @@ fn computed_argument() -> MirExpr {
 /// CPython resolves a call's callable before it evaluates the
 /// arguments, so `obj.missing(1 // 0)` raises `AttributeError` rather
 /// than `ZeroDivisionError`. This pins that order where it is decided:
-/// the `pycc_ext_obj_getattr` call site must precede every packer call
+/// the `pycc_ext_obj_load_method` call site must precede every packer call
 /// site in the emitted entry function.
 #[test]
 fn the_callable_is_resolved_before_any_argument_is_packed() {
@@ -182,7 +182,7 @@ fn the_callable_is_resolved_before_any_argument_is_packed() {
         call("gc", "set_threshold", vec![computed_argument()]),
     );
     let lookup_at = ir
-        .find(EXT_OBJ_GETATTR_SYMBOL)
+        .find(crate::ext::EXT_OBJ_LOAD_METHOD_SYMBOL)
         .unwrap_or_else(|| panic!("no method lookup was emitted: {ir}"));
     let pack_at = ir
         .find(EXT_OBJ_PACK_INT_SYMBOL)

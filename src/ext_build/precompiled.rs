@@ -29,31 +29,65 @@ use std::process::Stdio;
 
 /// What the target interpreter compiled: its magic number and each
 /// chunk's marshalled code object (`None` for one it refused to compile,
-/// which then fails at import exactly as `compile()` did).
+/// which then fails at import exactly as `compile()` did), and, for a chunk
+/// whose code holds `frozenset` constants, their elements in source order
+/// (a marshalled tuple of tuples, `ORDERS_FIX` in `PRECOMPILED_C`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Precompiled {
     pub(crate) magic: u32,
     pub(crate) code: Vec<Option<Vec<u8>>>,
+    pub(crate) orders: Vec<Option<Vec<u8>>>,
 }
 
 /// The script compiling the chunks of its stdin (JSON) to marshalled code.
-/// A chunk whose code holds a `frozenset` constant of two or more elements
-/// is left to `compile()` at import: `marshal` rebuilds a frozenset in its
-/// iteration order, so the set display it folds (`{1, 8, 0}`) would iterate
-/// in another order than the source's, as a `.pyc` does.
-const COMPILE_SCRIPT: &str = "import sys,json,marshal,importlib.util,__future__\n\
-    def sets(co):\n\
-    \x20 return any((isinstance(k,frozenset) and len(k)>1) or (hasattr(k,'co_consts') and sets(k)) for k in co.co_consts)\n\
+///
+/// `marshal` rebuilds a `frozenset` in its iteration order, so a set display
+/// the compiler folds (`{1, 8, 0}`) would iterate in another order than a
+/// fresh compile's, as from a `.pyc`. For a chunk holding such constants the
+/// script also writes each one's elements in source order -- the order the
+/// compiler built it from, found as the one set display of the chunk with
+/// those elements (`ast.literal_eval` of each element) -- in the order a
+/// depth-first walk of the constants meets them; the import rebuilds each
+/// from them (`ORDERS_FIX`). A chunk where some constant has no such
+/// display, or several in different orders, is left to `compile()` at
+/// import, as before.
+const COMPILE_SCRIPT: &str = "import sys,json,marshal,importlib.util,__future__,ast\n\
+    def walk(co,acc):\n\
+    \x20 for k in co.co_consts:\n\
+    \x20   if type(k) is frozenset and len(k)>1: acc.append(k)\n\
+    \x20   elif hasattr(k,'co_consts'): walk(k,acc)\n\
+    def displays(src):\n\
+    \x20 out=[]\n\
+    \x20 for n in ast.walk(ast.parse(src)):\n\
+    \x20   if isinstance(n,ast.Set):\n\
+    \x20     try: out.append(tuple(ast.literal_eval(e) for e in n.elts))\n\
+    \x20     except Exception: pass\n\
+    \x20 return out\n\
+    def orders(src,co):\n\
+    \x20 sets=[]\n\
+    \x20 walk(co,sets)\n\
+    \x20 if not sets: return None\n\
+    \x20 shown=displays(src)\n\
+    \x20 out=[]\n\
+    \x20 for k in sets:\n\
+    \x20   found={t for t in shown if frozenset(t)==k}\n\
+    \x20   if len(found)!=1: raise ValueError\n\
+    \x20   out.append(found.pop())\n\
+    \x20 return marshal.dumps(tuple(out)).hex()\n\
     chunks=json.loads(sys.stdin.buffer.read())\n\
-    out=[]\n\
+    code=[]\n\
+    sets=[]\n\
     for c in chunks:\n\
     \x20 try:\n\
     \x20   f=__future__.annotations.compiler_flag if c['future'] else 0\n\
     \x20   co=compile(c['source'],c['filename'],'exec',f,True,0)\n\
-    \x20   out.append(None if sets(co) else marshal.dumps(co).hex())\n\
+    \x20   o=orders(c['source'],co)\n\
+    \x20   code.append(marshal.dumps(co).hex())\n\
+    \x20   sets.append(o)\n\
     \x20 except Exception:\n\
-    \x20   out.append(None)\n\
-    sys.stdout.write(json.dumps({'magic':int.from_bytes(importlib.util.MAGIC_NUMBER,'little'),'code':out}))\n";
+    \x20   code.append(None)\n\
+    \x20   sets.append(None)\n\
+    sys.stdout.write(json.dumps({'magic':int.from_bytes(importlib.util.MAGIC_NUMBER,'little'),'code':code,'orders':sets}))\n";
 
 /// Compiles `chunks` with `interpreter`; `None` when it cannot run or
 /// answers something this build cannot read.
@@ -91,17 +125,25 @@ pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Pr
 fn parse(stdout: &[u8], count: usize) -> Option<Precompiled> {
     let value: serde_json::Value = serde_json::from_slice(stdout).ok()?;
     let magic = u32::try_from(value.get("magic")?.as_u64()?).ok()?;
-    let code = value
-        .get("code")?
-        .as_array()?
-        .iter()
-        .map(|entry| match entry {
-            serde_json::Value::Null => Some(None),
-            serde_json::Value::String(hex) => decode_hex(hex).map(Some),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    (code.len() == count && magic != 0).then_some(Precompiled { magic, code })
+    let entries = |key: &str| {
+        value
+            .get(key)?
+            .as_array()?
+            .iter()
+            .map(|entry| match entry {
+                serde_json::Value::Null => Some(None),
+                serde_json::Value::String(hex) => decode_hex(hex).map(Some),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+    };
+    let code = entries("code")?;
+    let orders = entries("orders")?;
+    (code.len() == count && orders.len() == count && magic != 0).then_some(Precompiled {
+        magic,
+        code,
+        orders,
+    })
 }
 
 fn decode_hex(hex: &str) -> Option<Vec<u8>> {
@@ -155,19 +197,23 @@ pub(crate) fn install(inc: String, chunks: &[CodeChunk], compiled: Option<&Preco
     head.push_str(
         "static const struct pycc_ext_chunk {\n    const char *source;\n    \
          Py_ssize_t source_len;\n    const char *filename;\n    int future_annotations;\n    \
-         const char *code;\n    Py_ssize_t code_len;\n} pycc_ext_chunks[] = {\n",
+         const char *code;\n    Py_ssize_t code_len;\n    const char *orders;\n    \
+         Py_ssize_t orders_len;\n} pycc_ext_chunks[] = {\n",
     );
     for (index, chunk) in chunks.iter().enumerate() {
         let code = compiled.and_then(|compiled| compiled.code.get(index)?.as_deref());
+        let orders = compiled.and_then(|compiled| compiled.orders.get(index)?.as_deref());
         let _ = writeln!(
             head,
-            "    {{{},\n     {}, {}, {},\n     {},\n     {}}},",
+            "    {{{},\n     {}, {}, {},\n     {},\n     {},\n     {}, {}}},",
             c_bytes(chunk.source.as_bytes()),
             chunk.source.len(),
             c_bytes(chunk.filename.as_bytes()),
             i32::from(chunk.future_annotations),
             code.map_or_else(|| "NULL".to_string(), c_bytes),
             code.map_or(0, <[u8]>::len),
+            orders.map_or_else(|| "NULL".to_string(), c_bytes),
+            orders.map_or(0, <[u8]>::len),
         );
     }
     let _ = writeln!(
@@ -193,6 +239,66 @@ const PRECOMPILED_C: &str = r#"/*
  */
 static int pycc_ext_chunk_usable = -1;
 static PyObject *pycc_ext_chunk_loads = NULL;
+/* `fix(code, orders)` of `ORDERS_FIX`, made once; NULL when unavailable. */
+static PyObject *pycc_ext_chunk_fix = NULL;
+
+/*
+ * Rebuilds a chunk's `frozenset` constants from their elements in source
+ * order (`COMPILE_SCRIPT`'s `orders`, met in the same depth-first walk of
+ * the constants) as CPython 3.13's compiler builds one -- a frozenset of
+ * the display's elements, rebuilt once more from its own iteration when the
+ * code's constants are merged -- so each iterates as a fresh compile's
+ * does; any mismatch raises, and the chunk is compiled instead.
+ */
+static const char pycc_ext_orders_fix[] =
+    "def fix(co, orders):\n"
+    "    it = iter(orders)\n"
+    "    def walk(c):\n"
+    "        consts = list(c.co_consts)\n"
+    "        changed = False\n"
+    "        for i, k in enumerate(consts):\n"
+    "            if type(k) is frozenset and len(k) > 1:\n"
+    "                s = frozenset(tuple(frozenset(next(it))))\n"
+    "                if s != k:\n"
+    "                    raise ValueError('pycc: a frozenset constant does not match')\n"
+    "                consts[i] = s\n"
+    "                changed = True\n"
+    "            elif type(k) is type(c):\n"
+    "                n = walk(k)\n"
+    "                if n is not k:\n"
+    "                    consts[i] = n\n"
+    "                    changed = True\n"
+    "        return c.replace(co_consts=tuple(consts)) if changed else c\n"
+    "    out = walk(co)\n"
+    "    if next(it, None) is not None:\n"
+    "        raise ValueError('pycc: frozenset orders left over')\n"
+    "    return out\n";
+
+/* `pycc_ext_chunk_fix`, made from `pycc_ext_orders_fix`; NULL (no
+ * exception left set) when it cannot be. */
+static PyObject *pycc_ext_chunk_fixer(void)
+{
+    PyObject *code, *ns;
+
+    if (pycc_ext_chunk_fix != NULL) {
+        return pycc_ext_chunk_fix;
+    }
+    code = Py_CompileString(pycc_ext_orders_fix, "<pycc precompiled>", Py_file_input);
+    ns = code == NULL ? NULL : PyDict_New();
+    if (ns != NULL && PyDict_SetItemString(ns, "__builtins__", PyEval_GetBuiltins()) == 0) {
+        PyObject *done = PyEval_EvalCode(code, ns, ns);
+
+        Py_XDECREF(done);
+        if (done != NULL) {
+            pycc_ext_chunk_fix = PyDict_GetItemString(ns, "fix");
+            Py_XINCREF(pycc_ext_chunk_fix);
+        }
+    }
+    Py_XDECREF(ns);
+    Py_XDECREF(code);
+    PyErr_Clear();
+    return pycc_ext_chunk_fix;
+}
 
 static int pycc_ext_chunks_usable(void)
 {
@@ -300,6 +406,24 @@ static PyObject *pycc_ext_chunk_code(Py_ssize_t index)
         }
         code = PyObject_CallFunctionObjArgs(pycc_ext_chunk_loads, view, NULL);
         Py_DECREF(view);
+        if (code != NULL && chunk->orders != NULL) {
+            PyObject *fix = pycc_ext_chunk_fixer();
+            PyObject *orders = NULL;
+            PyObject *fixed = NULL;
+
+            view = fix == NULL ? NULL
+                               : PyMemoryView_FromMemory((char *)chunk->orders, chunk->orders_len, PyBUF_READ);
+            if (view != NULL) {
+                orders = PyObject_CallFunctionObjArgs(pycc_ext_chunk_loads, view, NULL);
+                Py_DECREF(view);
+            }
+            if (orders != NULL) {
+                fixed = PyObject_CallFunctionObjArgs(fix, code, orders, NULL);
+                Py_DECREF(orders);
+            }
+            Py_DECREF(code);
+            code = fixed;
+        }
         if (code != NULL) {
             return code;
         }
@@ -378,6 +502,7 @@ mod tests {
         let compiled = Precompiled {
             magic: 3571,
             code: vec![Some(vec![0xe3, b'"', b'a']), None],
+            orders: vec![Some(vec![0xa9]), None],
         };
         let out = install(
             INC.to_string(),
@@ -388,8 +513,8 @@ mod tests {
         assert!(head > out.find("PYCC_EXT_MODULE_NAME_STR").unwrap());
         assert!(head < out.find("BODY").unwrap());
         assert!(out.contains("pycc_ext_chunk_magic = 3571L;"), "{out}");
-        assert!(out.contains("{\"\\012\\012x = \\042\\077\\134\\042\\012\",\n     11, \"/p/m.py\", 0,\n     \"\\343\\042a\",\n     3},"), "{out}");
-        assert!(out.contains("{\"y = 1\\012\",\n     6, \"/p/m.py\", 0,\n     NULL,\n     0},"), "{out}");
+        assert!(out.contains("{\"\\012\\012x = \\042\\077\\134\\042\\012\",\n     11, \"/p/m.py\", 0,\n     \"\\343\\042a\",\n     3,\n     \"\\251\", 1},"), "{out}");
+        assert!(out.contains("{\"y = 1\\012\",\n     6, \"/p/m.py\", 0,\n     NULL,\n     0,\n     NULL, 0},"), "{out}");
         assert!(out.contains("pycc_ext_chunk_count = 2;"), "{out}");
     }
 
@@ -397,7 +522,7 @@ mod tests {
     fn without_compiled_code_only_the_source_is_embedded() {
         let out = install(INC.to_string(), &[chunk("y = 1\n")], None);
         assert!(out.contains("pycc_ext_chunk_magic = 0L;"), "{out}");
-        assert!(out.contains("NULL,\n     0},"), "{out}");
+        assert!(out.contains("NULL,\n     0,\n     NULL, 0},"), "{out}");
     }
 
     #[test]
@@ -411,32 +536,45 @@ mod tests {
     #[test]
     fn the_answer_parses_only_when_complete() {
         assert_eq!(
-            parse(br#"{"magic": 3571, "code": ["e3ff", null]}"#, 2),
+            parse(br#"{"magic": 3571, "code": ["e3ff", null], "orders": [null, "a9"]}"#, 2),
             Some(Precompiled {
                 magic: 3571,
-                code: vec![Some(vec![0xe3, 0xff]), None]
+                code: vec![Some(vec![0xe3, 0xff]), None],
+                orders: vec![None, Some(vec![0xa9])],
             })
         );
-        assert_eq!(parse(br#"{"magic": 3571, "code": ["e3ff"]}"#, 2), None);
-        assert_eq!(parse(br#"{"magic": 3571, "code": ["e3f"]}"#, 1), None);
-        assert_eq!(parse(br#"{"magic": 3571, "code": ["zz"]}"#, 1), None);
-        assert_eq!(parse(br#"{"magic": 0, "code": []}"#, 0), None);
+        assert_eq!(parse(br#"{"magic": 3571, "code": ["e3ff"], "orders": [null]}"#, 2), None);
+        assert_eq!(parse(br#"{"magic": 3571, "code": ["e3ff"]}"#, 1), None);
+        assert_eq!(parse(br#"{"magic": 3571, "code": ["e3f"], "orders": [null]}"#, 1), None);
+        assert_eq!(parse(br#"{"magic": 3571, "code": ["zz"], "orders": [null]}"#, 1), None);
+        assert_eq!(parse(br#"{"magic": 0, "code": [], "orders": []}"#, 0), None);
         assert_eq!(parse(b"not json", 0), None);
-        assert_eq!(parse(br#"{"magic": 1, "code": [1]}"#, 1), None);
+        assert_eq!(parse(br#"{"magic": 1, "code": [1], "orders": [null]}"#, 1), None);
     }
 
     #[test]
     fn a_real_interpreter_compiles_the_chunks() {
         let Some(compiled) = precompile(
             OsStr::new(super::super::DEFAULT_PYTHON),
-            &[chunk("x = 1\n"), chunk("def (:\n")],
+            &[
+                chunk("x = 1\n"),
+                chunk("def (:\n"),
+                chunk("def f(k):\n    return k in {3, 1, 2}\n"),
+                chunk("a = {1, 2, 3}\nb = {3, 2, 1}\n"),
+            ],
         ) else {
             // No interpreter on this host: the build embeds the source only.
             return;
         };
         assert_ne!(compiled.magic, 0);
         assert!(compiled.code[0].as_ref().is_some_and(|code| !code.is_empty()));
+        assert_eq!(compiled.orders[0], None);
         assert_eq!(compiled.code[1], None);
+        // A set display's constant comes with its source order; two
+        // displays of the same elements in different orders leave the
+        // chunk to `compile()`.
+        assert!(compiled.code[2].is_some() && compiled.orders[2].is_some());
+        assert_eq!((&compiled.code[3], &compiled.orders[3]), (&None, &None));
     }
 
     #[test]

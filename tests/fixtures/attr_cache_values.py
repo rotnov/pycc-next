@@ -80,6 +80,16 @@ def main():
     out.append(read_x(p))
     del Point.x
     out.append(read_x(p))
+    # The compiled method's code replaced in place: the class is unchanged.
+    norm = Point.__dict__["norm"]
+    saved = norm.__code__
+    out.append(call_norm(p))
+    ns = {}
+    exec("def other(self):\n    return 'swapped'\n", ns)
+    norm.__code__ = ns["other"].__code__
+    out.append(call_norm(p))
+    norm.__code__ = saved
+    out.append(call_norm(p))
     # Method replaced on the class.
     Point.norm = lambda self: "new"
     out.append((call_norm(p), call_norm(Sub(1, 1))))

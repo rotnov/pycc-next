@@ -245,6 +245,21 @@ pub const EXT_OBJ_CALL_SYMBOL: &str = "pycc_ext_obj_call";
 /// arguments whose evaluation can neither raise nor run code.
 pub const EXT_OBJ_CALL_METHOD_SYMBOL: &str = "pycc_ext_obj_call_method";
 
+/// `PyObject *pycc_ext_obj_load_method(PyObject *obj, const char *name,
+/// PyObject **self_out)`: `obj.name` loaded before a call's arguments are
+/// evaluated, as CPython's `LOAD_ATTR` of a method does -- a cached method
+/// of `obj`'s class as the function itself with `*self_out` a new reference
+/// to `obj` (no bound method made), else the attribute with `*self_out`
+/// NULL. A new reference, or `NULL` with the exception set.
+pub const EXT_OBJ_LOAD_METHOD_SYMBOL: &str = "pycc_ext_obj_load_method";
+
+/// `PyObject *pycc_ext_obj_call_loaded(PyObject *callable, PyObject **stack,
+/// long long nargs)`: the call of what [`EXT_OBJ_LOAD_METHOD_SYMBOL`]
+/// loaded, `stack[0]` its receiver (passed first when not NULL) and
+/// `stack[1..=nargs]` the packed arguments; `callable` and every slot
+/// consumed on every path.
+pub const EXT_OBJ_CALL_LOADED_SYMBOL: &str = "pycc_ext_obj_call_loaded";
+
 /// The fixed C shim's direct-call helper (#1313): `f(args)` where `f` is
 /// any name typed `object` -- a foreign binding, such as `from itertools
 /// import product` followed by `product("ab", "cd")`, or a `for` loop

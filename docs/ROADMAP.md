@@ -589,6 +589,46 @@ Accept:
    11.12 ms, schema 21.37 -> 20.91 ms; CPython 9.05 / 16.74 ms in the same session:
    about 0.81x both): the compiled tree also misses the instruction cache more
    (cachegrind: 3.15M L1i misses per define+schema round against CPython's 1.99M).
+   Then: a method call whose arguments run code loads the method first as `LOAD_ATTR`
+   does (function plus receiver, no bound method); a fallback chunk holding a
+   `frozenset` constant ships pre-compiled, each constant rebuilt at import from its
+   source order as the compiler builds it (pydantic compiled `json_schema`'s 73 KB
+   chunk at every import). Per lever, callgrind instructions per repetition:
+
+   | lever | define | define+schema | import (whole process) |
+   |---|---|---|---|
+   | start (CPython) | 41.6M (34.1M) | 167.4M (151.2M) | 519.6M (442.9M) |
+   | attribute caches, in-place str compare | -1.4M | -10.3M with the next row | -- |
+   | set display of literals built once per site | -2.3M | (above) | -- |
+   | method loaded before its arguments | -0.1M | -2.3M | -- |
+   | `frozenset` chunks pre-compiled | -- | -- | -41.4M |
+   | tried, reverted: hot runtime functions grouped (`__attribute__((hot))`) | L1i misses unchanged (0.17M vs 0.18M) | | |
+   | tried, reverted: a forwarder's slot called directly from the cached call | no gain (the slot lookup cost more; such calls mostly come the bound-method way) | | |
+   | end | 37.8M (0.90x) | 154.8M (0.98x) | 478.2M (0.93x) |
+
+   Wall time, median of interleaved fresh-process runs (`bench/pydantic_check.py`'s
+   timing loop, 11 runs; CPython vs compiled): import 86.8 vs 90.4 ms (0.96x), define
+   8.75 vs 12.30 ms (0.71x), schema 16.64 vs 20.59 ms (0.81x), round-trips 18.71 vs 20.46
+   ms (0.91x); a second session (20 runs, REPEAT 30) gave import 0.90x, define 0.77x,
+   schema 0.84x. Assessment, with the guru advisor: define and schema do not reach
+   1.0x, and no lever left in this architecture can. Per define+schema repetition the
+   extension's own code is ~43M instructions (7.75M compiled bodies, 18.8M of runtime
+   helpers, the caches, forwarders and wrappers) and libpython's work (114M) is about
+   CPython's non-interpreter share, so the compiled code replaces the interpreter's
+   specialized bytecode at roughly 1.1x its instruction count, with a larger footprint
+   (L1i misses 0.88M against 0.62M per define round, D1 0.41M against 0.32M; a cycle
+   model from cachegrind's counts gives 0.83x, as measured). 1.0x needs ~20% fewer
+   cycles: the extension's share would have to fall from ~43M to under ~10M while the
+   fixed libpython and pydantic-core work stays -- the object operations themselves
+   would have to disappear, which pydantic's metaclass- and dict-driven definition
+   code does not let an ahead-of-time compiler do; CPython 3.13's specializing
+   interpreter is already inline-cached C with no marshalling per operation. What
+   would meet the bar is a typed native path for the definition machinery (field,
+   decorator and config collection as native dicts and lists with compiled `str` keys),
+   strict-mode work for another milestone. Import is within reach (0.90-0.96x); what
+   is left there is CPython's own work on the mirrored imports (an import a compiled
+   module binds natively runs again in CPython when fallback code reads its name:
+   876 `__import__` calls against CPython's 280) and the extension's load.
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions

@@ -164,6 +164,79 @@ PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **
 }
 
 /*
+ * `obj.name` loaded to be called, before the arguments are evaluated
+ * (`EXT_OBJ_LOAD_METHOD_SYMBOL`): CPython's own `LOAD_ATTR` of a method. A
+ * method the attribute caches answer for `obj`'s class (`attr_cache.c`) is
+ * returned as the function itself, with `*self_out` a new reference to
+ * `obj`, so no bound method is made; anything else is `obj.name` as
+ * `pycc_ext_obj_getattr` reads it, `*self_out` NULL. `obj` is borrowed.
+ * Returns a new reference, or NULL with the exception set (`*self_out`
+ * NULL). `pycc_ext_obj_call_loaded` consumes both.
+ */
+PyObject *pycc_ext_obj_load_method(PyObject *obj, const char *name, PyObject **self_out)
+{
+    PyObject *attr_name;
+    PyObject *method;
+    int with_self = 0;
+
+    *self_out = NULL;
+    if (obj == NULL) {
+        return NULL;
+    }
+    method = pycc_ext_ic_method(obj, name, NULL, &with_self);
+    if (method == NULL) {
+        attr_name = pycc_ext_attr_name(name);
+        if (attr_name == NULL) {
+            return NULL;
+        }
+        method = pycc_ext_ic_method(obj, name, attr_name, &with_self);
+    }
+    if (method != NULL) {
+        if (with_self) {
+            *self_out = Py_NewRef(obj);
+        }
+        return Py_NewRef(method);
+    }
+    return pycc_ext_obj_getattr(obj, name);
+}
+
+/*
+ * The call of what `pycc_ext_obj_load_method` loaded
+ * (`EXT_OBJ_CALL_LOADED_SYMBOL`): `stack[0]` is the receiver or NULL and
+ * `stack[1..nargs]` the packed arguments, so `callable(*stack)` when there
+ * is a receiver and `callable(*stack[1:])` otherwise, with no copy (the
+ * offset flag lets the callee use `stack[0]` as scratch, as CPython's own
+ * calls allow). `callable` and every slot are consumed on every path, as by
+ * `pycc_ext_obj_call`; a NULL argument is a failed packer whose exception
+ * is already set. Returns a new reference or NULL with the exception set.
+ */
+PyObject *pycc_ext_obj_call_loaded(PyObject *callable, PyObject **stack, long long nargs)
+{
+    PyObject *self = stack[0];
+    PyObject *result = NULL;
+    long long i;
+    int packed = callable != NULL;
+
+    for (i = 1; i <= nargs; i++) {
+        if (stack[i] == NULL) {
+            packed = 0;
+        }
+    }
+    if (packed && self != NULL) {
+        result = PyObject_Vectorcall(callable, stack, (size_t)(nargs + 1), NULL);
+    } else if (packed) {
+        result = PyObject_Vectorcall(callable, stack + 1, (size_t)nargs | PY_VECTORCALL_ARGUMENTS_OFFSET,
+                                     NULL);
+    }
+    Py_XDECREF(callable);
+    Py_XDECREF(self);
+    for (i = 1; i <= nargs; i++) {
+        Py_XDECREF(stack[i]);
+    }
+    return result;
+}
+
+/*
  * Part 2 of #1026, PR 2b of #1081: argument marshalling for
  * `pycc_ext_obj_call` below.
  *

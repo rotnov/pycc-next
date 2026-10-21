@@ -316,9 +316,10 @@ fn a_failure_inside_a_module_level_try_releases_before_the_handler() {
 
 /// `copy.m(copy.a)`: the receiver, a module global followed by an argument
 /// that runs code, is pinned (`operand_pin`) and released once the lookup is
-/// done or fails; the bound method is held across the argument (so the
-/// argument's failure releases it) and then consumed by the call (so the
-/// call's failure does not release it); the produced argument is held
+/// done or fails; the loaded method and its receiver
+/// (`pycc_ext_obj_load_method`) are held across the argument (so the
+/// argument's failure releases both) and then consumed by the call (so the
+/// call's failure does not release them); the produced argument is held
 /// across the call and released after it. The argument's own load pins
 /// `copy` too.
 #[test]
@@ -338,8 +339,8 @@ fn a_method_call_holds_its_bound_method_and_its_produced_argument() {
     assert_eq!(arg.len(), 1, "{ir}");
     assert_eq!(
         releases(arg[0]),
-        2,
-        "the bound method and the argument load's pinned `copy`: {ir}"
+        3,
+        "the loaded method, its receiver and the argument load's pinned `copy`: {ir}"
     );
     let call = blocks(&ir, "foreign_call_fail");
     assert_eq!(call.len(), 1, "{ir}");
@@ -394,9 +395,9 @@ fn an_inert_method_call_holds_a_produced_receiver_across_the_call() {
 /// Module-global operands only: the receiver is pinned across the lookup
 /// (`operand_pin`; released after it and on its failure edge), the
 /// argument stays borrowed (the call packs a reference of its own), and the
-/// consumed bound method is released only where the call never runs -- the
-/// argument read's own `NameError` exit (`global_unbound`). The one other
-/// release is the discarded result's.
+/// consumed loaded method and receiver are released only where the call
+/// never runs -- the argument read's own `NameError` exit
+/// (`global_unbound`). The one other release is the discarded result's.
 #[test]
 fn borrowed_arguments_and_a_consumed_bound_method_are_never_released() {
     let ir = discard_ir(
@@ -417,8 +418,11 @@ fn borrowed_arguments_and_a_consumed_bound_method_are_never_released() {
         .iter()
         .map(|block| releases(block))
         .sum();
-    assert_eq!(unbound, 1, "the bound method, on the argument's exit: {ir}");
-    assert_eq!(releases(&ir), 4, "{ir}");
+    assert_eq!(
+        unbound, 2,
+        "the loaded method and receiver, on the argument's exit: {ir}"
+    );
+    assert_eq!(releases(&ir), 5, "{ir}");
 }
 
 /// A produced value that is bound or returned is not a temporary: it is
@@ -762,29 +766,34 @@ fn a_native_raise_in_an_argument_releases_the_bound_method() {
             values: vec![native_raise(z())],
         }))
     };
-    // (label, call, releases on the native unwind, on the call's failure).
+    // (label, call, unwind guards, releases on the native unwind, on the
+    // call's failure). A positional call holds the loaded method and its
+    // receiver; a keyword call, the bound method.
     let cases = [
         (
             "release_native_arg",
             method_call(vec![native_raise(z())]),
             1,
+            2,
             0,
         ),
         (
             "release_native_later_arg",
             method_call(vec![attr("a"), native_raise(z())]),
             2,
+            3,
             1,
         ),
-        ("release_native_keyword", keyword_call(Vec::new()), 1, 0),
+        ("release_native_keyword", keyword_call(Vec::new()), 1, 1, 0),
         (
             "release_native_keyword_after_arg",
             keyword_call(vec![attr("a")]),
             2,
+            2,
             1,
         ),
     ];
-    for (label, call, unwind_releases, call_releases) in cases {
+    for (label, call, guards, unwind_releases, call_releases) in cases {
         let ir = functions_ir(
             label,
             vec![MirItem::Function {
@@ -800,7 +809,7 @@ fn a_native_raise_in_an_argument_releases_the_bound_method() {
         // taken while the bound method is held releases it, and the
         // native raise's guard is the last one before the call.
         let unwind = blocks(&ir, "effect_exc_unwind");
-        assert_eq!(unwind.len(), unwind_releases, "{label}\n{ir}");
+        assert_eq!(unwind.len(), guards, "{label}\n{ir}");
         for block in &unwind {
             let bound = format!("{RELEASE}ptr %foreign_call_bound)");
             assert_eq!(block.matches(&bound).count(), 1, "{label}\n{ir}");
@@ -861,7 +870,11 @@ fn a_module_level_native_raise_in_an_argument_releases_the_bound_method() {
     );
     let unwind = blocks(&ir, "effect_exc_unwind");
     assert_eq!(unwind.len(), 1, "{ir}");
-    assert_eq!(releases(unwind[0]), 1, "the bound method\n{ir}");
+    assert_eq!(
+        releases(unwind[0]),
+        2,
+        "the loaded method and its receiver\n{ir}"
+    );
 }
 
 #[path = "object_release_iteration_tests.rs"]
