@@ -123,3 +123,17 @@ Each entry: what differs, why, and whether it is planned to go away.
 | Windows: a native program's standard streams in rare encodings | a `PYTHONIOENCODING` codec other than UTF-8, ASCII, Latin-1 or a Windows code page writes UTF-8; the `namereplace` error handler acts as `strict`; a code page other than 1252 encodes through Windows' own table (CPython's `encodings` table differs in a few unassigned positions); an undecodable stdin byte reads as U+FFFD | starts with `LookupError: unknown encoding`; `\N{...}`; its own table; a lone surrogate (`surrogateescape`) | not planned: `\r\n`, UTF-8 on a console, UTF-8 mode, `PYTHONIOENCODING` with UTF-8/ASCII/Latin-1/cp1252 and the `strict`/`ignore`/`replace`/`backslashreplace`/`xmlcharrefreplace` handlers, the ANSI code page and `UnicodeEncodeError` match CPython (`tests/text_stdio.rs`) |
 | Windows: `--static-libpython` | refused | n/a | CPython for Windows ships no static library |
 | Windows: the compiler's allocator | the system allocator (Linux and macOS: mimalloc) | n/a | LLVM's Windows release links the static C runtime, which mimalloc's object cannot link with; compile time only |
+
+## Strict refusals mypy accepts
+
+Strict mode refuses what a type checker refuses (v0.9 accept 5): `bench/mypy_parity.py`
+runs `pycc check` and `mypy --strict` (the version pinned in
+`.github/mypy-requirements.txt`) over the corpus programs (`tests/corpus/codecontests/problems`),
+and CI fails on a strict refusal mypy accepts that this table does not list, and on a row
+that no longer holds. Where mypy's acceptance comes from `Any`, pycc types the value as
+`object` and refuses operations on it that strict mode does not compile -- `Any` does not
+sneak through. Each row names the source of the `Any`.
+
+| Program | Reason |
+|---|---|
+| 049 | `Any` from a rebound builtin: the module binds `input = sys.stdin.buffer.readline`, which mypy types as `(def (int =) -> bytes) \| Any`, so `arr = list(input())` is `list[Any]` and every later use passes. pycc types the CPython value as `object`, so `arr` is `list[object]`, and strict mode refuses `chr()` of an object (C0001) and `list[int]` + the object `list(accumulate(arr))` (T0021); non-strict mode compiles the program |

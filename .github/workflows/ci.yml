@@ -77,6 +77,16 @@ jobs:
       # print exactly what CPython prints (wrong output = miscompilation).
       - name: Corpus (non-strict)
         run: scripts/ci_corpus.sh -j 4 --flags=--non-strict --require-correct
+      # Strict mode refuses what a type checker refuses (v0.9 accept 5): every
+      # corpus program `pycc check` refuses must be rejected by `mypy --strict`
+      # too, or be listed with a reason in docs/DEVIATIONS.md. mypy is pinned by
+      # version and wheel hash, in a venv of its own.
+      - name: Strict refusals against mypy --strict
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mypy"
+          "$RUNNER_TEMP/mypy/bin/pip" install -q --only-binary=:all: --require-hashes -r .github/mypy-requirements.txt
+          python3 bench/mypy_parity.py --mypy "$RUNNER_TEMP/mypy/bin/python -m mypy"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
