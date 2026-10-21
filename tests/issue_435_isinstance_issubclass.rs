@@ -38,7 +38,7 @@ fn isinstance_true_for_same_class() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"True\n",
+        pycc_scratch::lf(&output.stdout), b"True\n",
         "isinstance(D(), D) should be True"
     );
 }
@@ -64,7 +64,7 @@ fn isinstance_true_for_base_class() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"True\n",
+        pycc_scratch::lf(&output.stdout), b"True\n",
         "isinstance(D(), B) should be True"
     );
 }
@@ -89,7 +89,7 @@ fn isinstance_false_for_unrelated_class() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"False\n",
+        pycc_scratch::lf(&output.stdout), b"False\n",
         "isinstance(D(), C) should be False"
     );
 }
@@ -115,7 +115,7 @@ fn isinstance_false_for_subclass() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"False\n",
+        pycc_scratch::lf(&output.stdout), b"False\n",
         "isinstance(B(), D) should be False"
     );
 }
@@ -136,7 +136,7 @@ fn isinstance_with_int() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"True\n",
+        pycc_scratch::lf(&output.stdout), b"True\n",
         "isinstance(5, int) should be True"
     );
 }
@@ -157,7 +157,7 @@ fn isinstance_with_bool_as_int() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"True\n",
+        pycc_scratch::lf(&output.stdout), b"True\n",
         "isinstance(True, int) should be True"
     );
 }
@@ -178,7 +178,7 @@ fn isinstance_with_str() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"True\n",
+        pycc_scratch::lf(&output.stdout), b"True\n",
         "isinstance(\"hi\", str) should be True"
     );
 }
@@ -204,7 +204,7 @@ fn isinstance_with_tuple_of_classes() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"True\n",
+        pycc_scratch::lf(&output.stdout), b"True\n",
         "isinstance(D(), (B, C)) should be True"
     );
 }
@@ -229,7 +229,7 @@ fn isinstance_with_tuple_no_match() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"False\n",
+        pycc_scratch::lf(&output.stdout), b"False\n",
         "isinstance(D(), (C,)) should be False"
     );
 }
@@ -256,7 +256,7 @@ fn isinstance_wrong_arg_count() {
         !output.status.success(),
         "pycc build should fail for isinstance with wrong arg count"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for wrong arg count, got: {stderr}"
@@ -281,7 +281,7 @@ fn isinstance_unknown_class() {
         !output.status.success(),
         "pycc build should fail for isinstance with unknown class"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0001"),
         "should report T0001 for unknown class, got: {stderr}"
@@ -306,7 +306,7 @@ fn isinstance_non_class_second_arg() {
         !output.status.success(),
         "pycc build should fail for isinstance with non-class second arg"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for non-class second arg, got: {stderr}"
@@ -334,7 +334,7 @@ fn isinstance_with_call_expression_is_rejected() {
         !output.status.success(),
         "pycc build should fail for isinstance with call expression"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "should report C0001 for call expression, got: {stderr}"
@@ -363,7 +363,7 @@ fn user_defined_isinstance_takes_priority_over_builtin() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"5\n",
+        pycc_scratch::lf(&output.stdout), b"5\n",
         "user-defined isinstance(2, 3) should return 5"
     );
 }
@@ -389,7 +389,7 @@ fn user_defined_issubclass_takes_priority_over_builtin() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"20\n",
+        pycc_scratch::lf(&output.stdout), b"20\n",
         "user-defined issubclass(4, 5) should return 20"
     );
 }
@@ -417,7 +417,7 @@ fn issubclass_true_for_same_class() {
         "pycc build should succeed for issubclass(D, D)"
     );
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"True\n", "issubclass(D, D) should be True");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n", "issubclass(D, D) should be True");
 }
 
 /// #435: `issubclass(D, B)` returns True when D extends B.
@@ -439,7 +439,7 @@ fn issubclass_true_for_base_class() {
         "pycc build should succeed for issubclass(D, B)"
     );
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"True\n", "issubclass(D, B) should be True");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n", "issubclass(D, B) should be True");
 }
 
 /// #435: `issubclass(D, C)` returns False when D and C are unrelated.
@@ -462,7 +462,7 @@ fn issubclass_false_for_unrelated() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"False\n",
+        pycc_scratch::lf(&output.stdout), b"False\n",
         "issubclass(D, C) should be False"
     );
 }
@@ -483,7 +483,7 @@ fn issubclass_bool_is_int() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"True\n",
+        pycc_scratch::lf(&output.stdout), b"True\n",
         "issubclass(bool, int) should be True"
     );
 }
@@ -508,7 +508,7 @@ fn issubclass_with_tuple() {
     );
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"True\n",
+        pycc_scratch::lf(&output.stdout), b"True\n",
         "issubclass(D, (B, C)) should be True"
     );
 }
@@ -535,7 +535,7 @@ fn issubclass_wrong_arg_count() {
         !output.status.success(),
         "pycc build should fail for issubclass with wrong arg count"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for wrong arg count, got: {stderr}"
@@ -556,7 +556,7 @@ fn issubclass_non_class_first_arg() {
         !output.status.success(),
         "pycc build should fail for issubclass with non-class first arg"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for non-class first arg, got: {stderr}"
@@ -581,7 +581,7 @@ fn issubclass_unknown_class() {
         !output.status.success(),
         "pycc build should fail for issubclass with unknown class"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0001"),
         "should report T0001 for unknown class, got: {stderr}"
@@ -616,7 +616,7 @@ fn init_subclass_with_pass_body_is_accepted() {
         "pycc build should succeed for __init_subclass__ with pass body"
     );
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"1\n", "program should run correctly");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n", "program should run correctly");
 }
 
 /// #435 (Part B): `__init_subclass__` with a non-trivial (side-effecting)
@@ -643,7 +643,7 @@ fn init_subclass_with_non_trivial_body_is_rejected() {
         !output.status.success(),
         "pycc build should fail for __init_subclass__ with non-trivial body"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "should report C0001 for non-trivial __init_subclass__, got: {stderr}"
@@ -676,7 +676,7 @@ fn init_subclass_inherited_from_base() {
         "pycc build should succeed for inherited __init_subclass__"
     );
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"1\n", "program should run correctly");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n", "program should run correctly");
 }
 
 /// #435 (Part B): `__init_subclass__` with a docstring body is accepted
@@ -701,7 +701,7 @@ fn init_subclass_with_docstring_body_is_accepted() {
         "pycc build should succeed for __init_subclass__ with docstring body"
     );
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"1\n", "program should run correctly");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n", "program should run correctly");
 }
 
 // ===========================================================================
@@ -730,7 +730,7 @@ fn set_name_method_is_accepted() {
         "pycc build should succeed for __set_name__ method"
     );
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"1\n", "program should run correctly");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n", "program should run correctly");
 }
 
 // ===========================================================================
@@ -756,7 +756,7 @@ fn class_getitem_method_is_accepted() {
         "pycc build should succeed for __class_getitem__ method"
     );
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"1\n", "program should run correctly");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n", "program should run correctly");
 }
 
 /// #435 (Part D): `ClassName[int]` as a type annotation works — it resolves
@@ -781,7 +781,7 @@ fn class_getitem_allows_subscript_syntax() {
         "pycc build should succeed for ClassName[int] annotation"
     );
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"1\n", "program should run correctly");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n", "program should run correctly");
 }
 
 // ===========================================================================
@@ -804,7 +804,7 @@ fn isinstance_with_empty_tuple_is_rejected() {
         !output.status.success(),
         "pycc build should fail for isinstance with empty tuple"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for empty tuple, got: {stderr}"
@@ -829,7 +829,7 @@ fn issubclass_with_empty_tuple_is_rejected() {
         !output.status.success(),
         "pycc build should fail for issubclass with empty tuple"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for empty tuple, got: {stderr}"
@@ -856,7 +856,7 @@ fn isinstance_with_list_builtin_is_rejected() {
         !output.status.success(),
         "pycc build should fail for isinstance with list builtin"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0001"),
         "should report T0001 for unknown class 'list', got: {stderr}"

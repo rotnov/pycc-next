@@ -43,7 +43,7 @@ fn compiles_local_variable_arithmetic_comparisons_and_floor_division() {
     let bin_path = dir.join("locals_arith");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn reassigning_a_local_reuses_its_existing_alloca() {
     let bin_path = dir.join("reassign_local");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn compiles_and_runs_add_sub_mul_mod_and_pow_binops() {
     let bin_path = dir.join("int_binops");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"7\n7\n42\n1\n32\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n7\n42\n1\n32\n");
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn ge_and_ne_execute_with_the_correct_boolean_value_for_int() {
     let bin_path = dir.join("ge_ne_values");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\nFalse\nTrue\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\nFalse\nTrue\n");
 }
 
 #[test]
@@ -289,7 +289,7 @@ fn a_nan_float_is_not_equal_to_itself_and_is_truthy() {
     let bin_path = dir.join("nan_comparisons");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nnan_is_truthy\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nnan_is_truthy\n");
 }
 
 #[test]
@@ -366,7 +366,7 @@ fn adding_a_bool_left_operand_to_an_int_promotes_bool_to_int() {
     let bin_path = dir.join("binop_bool_left_promotes");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -403,7 +403,7 @@ fn adding_an_int_and_a_bool_right_operand_promotes_bool_to_int() {
     let bin_path = dir.join("binop_bool_right_promotes");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -699,7 +699,7 @@ fn printing_a_mistyped_compare_expression_prints_the_actual_runtime_value() {
     let bin_path = dir.join("print_mistyped_compare_prints_actual_value");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -756,5 +756,5 @@ fn compiles_a_loop_whose_accumulator_overflows_into_a_bigint() {
     let bin_path = dir.join("bigint_overflow_loop");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, format!("{expected}\n").into_bytes());
+    assert_eq!(pycc_scratch::lf(&output.stdout), format!("{expected}\n").into_bytes());
 }

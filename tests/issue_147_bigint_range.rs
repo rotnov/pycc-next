@@ -55,10 +55,10 @@ fn assert_runs_and_prints(case: &str, source: &str, expected: &str) {
         Some(0),
         "{case} should run to completion, got {:?}: {}",
         run.status.code(),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         expected,
         "{case} printed the wrong output"
     );
@@ -86,9 +86,9 @@ fn assert_clean_value_error(case: &str, source: &str, message: &str) {
         Some(101),
         "{case} should hit the driver's mapped exit-101 boundary, got {:?}: {}",
         run.status.code(),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
-    let stderr = String::from_utf8_lossy(&run.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr));
     assert!(
         stderr.contains(message),
         "{case} should report {message:?}, got: {stderr}"

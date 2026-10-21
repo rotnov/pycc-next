@@ -242,13 +242,13 @@ fn the_fixture_builds_a_native_executable_whose_stdout_is_the_published_transcri
         .output()
         .expect("native executable runs");
     assert_eq!(run.status.code(), Some(0), "{run:?}");
-    assert!(run.stderr.is_empty(), "unexpected stderr: {run:?}");
+    assert!(pycc_scratch::lf(&run.stderr).is_empty(), "unexpected stderr: {run:?}");
     assert_eq!(
-        run.stdout,
+        pycc_scratch::lf(&run.stdout),
         EXPECTED_STDOUT.as_bytes(),
         "stdout transcript drift"
     );
-    assert_eq!(run.stdout.len(), 26, "published stdout byte count drift");
+    assert_eq!(pycc_scratch::lf(&run.stdout).len(), 26, "published stdout byte count drift");
 }
 
 #[test]

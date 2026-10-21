@@ -42,12 +42,12 @@ fn assert_runs(tag: &str, source: &str, expected_stdout: &str) {
     assert!(
         build.status.success(),
         "pycc build should succeed for {tag}:\n{}",
-        String::from_utf8_lossy(&build.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stdout))
     );
     let run = Command::new(&out).output().unwrap();
     assert!(run.status.success(), "compiled program {tag} should exit 0");
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         expected_stdout,
         "stdout for {tag}"
     );
@@ -62,7 +62,7 @@ fn assert_rejected(tag: &str, source: &str, code: &str, needle: &str) {
         .args(["check", src.to_str().unwrap()])
         .output()
         .unwrap();
-    let rendered = String::from_utf8_lossy(&out.stdout).to_string();
+    let rendered = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stdout)).to_string();
     assert!(
         !out.status.success(),
         "pycc check should reject {tag}, but it succeeded"

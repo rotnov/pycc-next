@@ -68,6 +68,7 @@ mod itertools;
 /// Standard input and output, shared with CPython's `sys` streams when an
 /// interpreter is present.
 mod io;
+mod text_stdio;
 /// `list[T]`'s one generic runtime object, `PyListObj`.
 mod list;
 /// The float functions of `math`.

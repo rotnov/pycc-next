@@ -24,8 +24,8 @@ fn pycc() -> Command {
 fn rendered(output: &Output) -> String {
     format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
     .replace("\r\n", "\n")
 }

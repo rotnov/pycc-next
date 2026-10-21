@@ -36,7 +36,7 @@ fn pycc() -> Command {
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 fn write(path: &Path, bytes: &[u8]) {
@@ -280,7 +280,7 @@ fn a_locked_closure_runs_from_the_sidecar_and_matches_cpython() {
         ])
         .output()
         .expect("spawn the venv interpreter");
-    let site = PathBuf::from(String::from_utf8_lossy(&site.stdout).trim());
+    let site = PathBuf::from(pycc_scratch::lf(&*String::from_utf8_lossy(&site.stdout)).trim());
     tiny_closure(&site);
     std::fs::write(
         dir.join("m.py"),
@@ -305,8 +305,8 @@ fn a_locked_closure_runs_from_the_sidecar_and_matches_cpython() {
         .output()
         .expect("the embedded binary runs");
     assert_eq!(embedded.status.code(), Some(0), "{}", stderr_of(&embedded));
-    let stdout = String::from_utf8_lossy(&embedded.stdout).replace("\r\n", "\n");
-    let oracle_stdout = String::from_utf8_lossy(&oracle.stdout).replace("\r\n", "\n");
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&embedded.stdout)).replace("\r\n", "\n");
+    let oracle_stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&oracle.stdout)).replace("\r\n", "\n");
     let mut lines = stdout.lines();
     let mut oracle_lines = oracle_stdout.lines();
     assert_eq!(lines.next(), Some("tinypkg 42"), "{stdout}");
@@ -404,7 +404,7 @@ fn an_optional_import_matches_cpython_absent_and_installed() {
         ])
         .output()
         .expect("spawn the venv interpreter");
-    let site = PathBuf::from(String::from_utf8_lossy(&site.stdout).trim());
+    let site = PathBuf::from(pycc_scratch::lf(&*String::from_utf8_lossy(&site.stdout)).trim());
     std::fs::write(dir.join("m.py"), OPTIONAL_PROGRAM).expect("write");
     for (installed, expected) in [(false, "fallback\n"), (true, "tinypkg 42\n")] {
         if installed {
@@ -428,10 +428,10 @@ fn an_optional_import_matches_cpython_absent_and_installed() {
             .expect("the embedded binary runs");
         assert_eq!(embedded.status.code(), Some(0), "{}", stderr_of(&embedded));
         assert_eq!(oracle.status.code(), Some(0), "{}", stderr_of(&oracle));
-        let stdout = String::from_utf8_lossy(&embedded.stdout).replace("\r\n", "\n");
+        let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&embedded.stdout)).replace("\r\n", "\n");
         assert_eq!(stdout, expected);
         assert_eq!(
-            String::from_utf8_lossy(&oracle.stdout).replace("\r\n", "\n"),
+            pycc_scratch::lf(&*String::from_utf8_lossy(&oracle.stdout)).replace("\r\n", "\n"),
             expected
         );
     }

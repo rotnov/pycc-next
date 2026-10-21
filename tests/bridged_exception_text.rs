@@ -101,7 +101,7 @@ fn a_caught_cpython_exception_shows_its_text_when_it_is_read() {
         .arg(compiled.join("m"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     std::fs::write(compiled.join("helper.py"), HELPER).expect("write the helper");
     let plain = ScratchDir::new("bridged_text_src").expect("scratch");
@@ -109,7 +109,7 @@ fn a_caught_cpython_exception_shows_its_text_when_it_is_read() {
     std::fs::write(plain.join("helper.py"), HELPER).expect("write the helper");
     let ours = run(&compiled);
     let oracle = run(&plain);
-    assert_eq!(oracle.status.code(), Some(0), "{}", text(&oracle.stderr));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
-    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+    assert_eq!(oracle.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(ours.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }

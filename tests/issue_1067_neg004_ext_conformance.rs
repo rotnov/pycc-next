@@ -403,7 +403,7 @@ fn a_built_ext_module_refuses_every_non_conforming_call_shape_at_the_boundary() 
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
         .arg("-c")
@@ -414,7 +414,7 @@ fn a_built_ext_module_refuses_every_non_conforming_call_shape_at_the_boundary() 
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }

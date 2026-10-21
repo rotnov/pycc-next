@@ -25,13 +25,13 @@ fn python() -> Command {
 }
 
 fn rendered(output: &Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    text.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     text.replace("\r\n", "\n")
 }
 
 fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 /// Builds `source` natively, runs it, and asserts its stdout equals
@@ -642,7 +642,7 @@ fn an_uncaught_eq_raise_reports_the_exception_like_cpython() {
     assert_eq!(stdout(&run), stdout(&oracle));
     assert_eq!(stdout(&run), "1\n");
     let last_line = |output: &Output| {
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
             .lines()
             .last()
             .map(str::to_owned)

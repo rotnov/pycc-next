@@ -44,7 +44,7 @@ fn check_build_and_run(label: &str, source: &str) -> std::process::Output {
         checked.status.code(),
         Some(0),
         "`pycc check` rejected {label}: {}",
-        String::from_utf8_lossy(&checked.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&checked.stdout))
     );
     let out = dir.join(label);
     let status = Command::new(pycc_bin())
@@ -80,7 +80,7 @@ fn check_error(label: &str, source: &str) -> String {
         Some(1),
         "`pycc build` disagreed with `pycc check` on {label}"
     );
-    String::from_utf8(output.stdout).expect("diagnostics are UTF-8")
+    String::from_utf8(pycc_scratch::lf(&output.stdout)).expect("diagnostics are UTF-8")
 }
 
 /// The JSON rendering of `pycc check`'s diagnostics for `source`. The human
@@ -97,7 +97,7 @@ fn check_error_json(label: &str, source: &str) -> String {
         Some(1),
         "{label} should be a compile error"
     );
-    String::from_utf8(output.stdout).expect("diagnostics are UTF-8")
+    String::from_utf8(pycc_scratch::lf(&output.stdout)).expect("diagnostics are UTF-8")
 }
 
 /// The motivating case of #927/#1021: the annotation on the assignment is the
@@ -119,7 +119,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"), "2\n");
 }
 
 /// The dict half of the same path, with a `d[k] = v` producer that is a
@@ -139,7 +139,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"), "2\n");
 }
 
 /// No annotation anywhere: the element type comes from a forward scan of the
@@ -163,7 +163,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n");
 }
 
 /// The dict forward-scan case: `d[k] = v` is the producer.
@@ -181,7 +181,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n");
 }
 
 /// Resolution from another binding of the same name: the environment already
@@ -204,7 +204,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// `for x in xs` over a list that is still empty at runtime. Before #1021 the
@@ -227,7 +227,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n");
 }
 
 /// Branch collision resolves first-wins within the scope: both `[]` nodes take
@@ -276,7 +276,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 /// The rewrite recurses into every block statement the pass models, not only
@@ -307,7 +307,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"4\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"4\n");
 }
 
 /// Source 2 is *order-insensitive*, not a backward scan: the whole-function
@@ -331,7 +331,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// #1021 review round 1: an annotated empty container seeds the pre-pass
@@ -357,7 +357,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// #1021 bot review round: the rewrite walk reaches every `try` suite. Before
@@ -396,7 +396,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 /// The `match` half of the same defect: a `case` body is a nested statement
@@ -422,7 +422,7 @@ print(f(9))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n1\n");
 }
 
 /// `except*` is a separate `HirStmt` variant with the same field shape, so it
@@ -449,7 +449,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// Review round 4: `nested_bodies` and `rewrite_body` must enumerate a
@@ -529,7 +529,7 @@ print(_pick())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n");
 }
 
 /// The carrier above is gated on `is_private_solver_scalar`, exactly as
@@ -557,7 +557,7 @@ print(_pick())
     );
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("IndexError: pop from empty list"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("IndexError: pop from empty list"),
         "{output:?}"
     );
 }
@@ -585,7 +585,7 @@ print(_pick())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// The dict arm of the same seeding, through a global used as the key. `{}`
@@ -608,7 +608,7 @@ print(_pick())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// A global initialized from an annotated helper. This is what forced the
@@ -638,7 +638,7 @@ print(_pick())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 /// A `str` global resolves the container to `list[str]`, exactly the type
@@ -660,7 +660,7 @@ fn a_str_global_producer_resolves_exactly_as_the_non_empty_spelling_does() {
         );
         let output = check_build_and_run(label, &source);
         assert!(output.status.success());
-        assert_eq!(output.stdout, b"s\n");
+        assert_eq!(pycc_scratch::lf(&output.stdout), b"s\n");
     }
 }
 
@@ -688,7 +688,7 @@ print(f())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
     let non_empty = check_build_and_run(
         "sticky_reassignment_non_empty_list",
         "\
@@ -702,7 +702,7 @@ print(f())
 ",
     );
     assert!(non_empty.status.success());
-    assert_eq!(non_empty.stdout, output.stdout);
+    assert_eq!(pycc_scratch::lf(&non_empty.stdout), pycc_scratch::lf(&output.stdout));
 }
 
 /// Review round 5, third finding: a `def` that shadows an earlier value of
@@ -735,10 +735,10 @@ print(f())
         .unwrap();
     assert_eq!(checked.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&checked.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&checked.stdout))
             .contains("error[C0001]: rebinding `helper`, which a module-level `def` also binds"),
         "{}",
-        String::from_utf8_lossy(&checked.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&checked.stdout))
     );
     let out = dir.join("prog");
     let status = Command::new(pycc_bin())
@@ -748,7 +748,7 @@ print(f())
     assert!(status.success());
     let output = Command::new(&out).output().unwrap();
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"), "2\n");
 }
 
 /// Review round 6, first finding: an annotated assignment records the
@@ -785,7 +785,7 @@ print(f())
 ",
     );
     assert!(non_empty.status.success());
-    assert_eq!(non_empty.stdout, output.stdout);
+    assert_eq!(pycc_scratch::lf(&non_empty.stdout), pycc_scratch::lf(&output.stdout));
 }
 
 /// The #380 protocol carve-out of the same rule: `check_stmt_in_function`'s
@@ -809,7 +809,7 @@ fn a_protocol_annotated_producer_resolves_exactly_as_the_non_empty_spelling_does
         );
         let output = check_build_and_run(label, &source);
         assert!(output.status.success());
-        assert_eq!(output.stdout, b"circle\n");
+        assert_eq!(pycc_scratch::lf(&output.stdout), b"circle\n");
     }
 }
 
@@ -849,7 +849,7 @@ print(f())
 ",
     );
     assert!(non_empty.status.success());
-    assert_eq!(non_empty.stdout, output.stdout);
+    assert_eq!(pycc_scratch::lf(&non_empty.stdout), pycc_scratch::lf(&output.stdout));
 }
 
 /// #1021 review round 7: an unannotated private helper's parameter has no
@@ -877,7 +877,7 @@ print(_f(1))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
     let non_empty = check_build_and_run(
         "placeholder_producer_non_empty_list",
         "\
@@ -908,7 +908,7 @@ print(_f(1))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"), "2\n");
 }
 
 /// Round 8. The two inferred sources read the flat whole-function
@@ -950,7 +950,7 @@ print(f(1))
 ",
     );
     assert!(non_empty.status.success());
-    assert_eq!(String::from_utf8_lossy(&non_empty.stdout), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&non_empty.stdout)), "2\n");
 }
 
 /// The dict half of the same defect, with the same control: the wrapper
@@ -986,7 +986,7 @@ print(f(1))
 ",
     );
     assert!(non_empty.status.success());
-    assert_eq!(String::from_utf8_lossy(&non_empty.stdout), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&non_empty.stdout)), "2\n");
 }
 
 /// The annotation source keeps its `Optional` resolutions: the type is
@@ -1043,7 +1043,7 @@ print(b.go())
 ",
     );
     assert!(run.status.success());
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "1\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)), "1\n");
 }
 
 /// The dict half, and the control that fixes the class seeding as the cause:
@@ -1082,7 +1082,7 @@ print(plain())
 ",
     );
     assert!(run.status.success());
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "7\n5\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)), "7\n5\n");
 }
 
 /// The rest of `resolve_super_method_call`'s environment assumptions, swept
@@ -1125,7 +1125,7 @@ print(d.go())
 ",
     );
     assert!(run.status.success());
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)), "2\n");
 }
 
 /// The non-call `super()` form, which reaches `resolve_super_attr_get` --
@@ -1156,7 +1156,7 @@ print(b.go())
 ",
     );
     assert!(run.status.success());
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "4\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)), "4\n");
 }
 
 /// Review round 12: a producer whose callee is an *unannotated private
@@ -1213,7 +1213,7 @@ print(a.go())
         );
         assert!(output.status.success(), "{label}");
         assert_eq!(
-            output.stdout,
+            pycc_scratch::lf(&output.stdout),
             b"1
 ",
             "{label}"
@@ -1253,7 +1253,7 @@ print(a.go())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"), "2\n");
 }
 
 /// #1021 bot review round 14: `bind_local_types_in_body` records every target
@@ -1274,7 +1274,7 @@ fn a_producer_reading_a_maybe_bound_name_resolves_like_the_display() {
         );
         let output = check_build_and_run(label, &source);
         assert!(output.status.success(), "{label}");
-        assert_eq!(output.stdout, b"s\n", "{label}");
+        assert_eq!(pycc_scratch::lf(&output.stdout), b"s\n", "{label}");
     }
 }
 
@@ -1300,7 +1300,7 @@ print(go(True))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// `T0003`'s help suggests annotating the assignment target, a remedy that
@@ -1322,7 +1322,7 @@ fn the_t0003_help_names_a_remedy_that_works_in_the_position_it_is_raised() {
         "xs: list[int] = []\nprint(len(xs))\n",
     );
     assert!(annotated_at_module_level.status.success());
-    assert_eq!(annotated_at_module_level.stdout, b"0\n");
+    assert_eq!(pycc_scratch::lf(&annotated_at_module_level.stdout), b"0\n");
     let dict_at_module_level =
         check_error_json("t0003_help_module_dict", "d = {}\nprint(d[0])\n");
     assert!(
@@ -1384,7 +1384,7 @@ print(go(0))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)), "2\n");
 }
 
 /// The reference spelling of the same program. `xs = [v]` compiles and runs,
@@ -1413,7 +1413,7 @@ print(go())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"), "2\n");
 }
 
 /// #1445: the flat binder walks every `try` suite, so the round-15 program
@@ -1464,7 +1464,7 @@ print(go())
     ] {
         let output = check_build_and_run(label, source);
         assert!(output.status.success());
-        assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "2\n");
+        assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"), "2\n");
     }
 }
 
@@ -1489,7 +1489,7 @@ print(go(0))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)), "2\n");
 }
 
 /// The dict arm of the same rule: `d["k"] = v` (an `int`) and a later
@@ -1513,7 +1513,7 @@ print(go(0))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "2\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)), "2\n");
 }
 
 /// The symmetric half: the *key* is the part that does not infer. Without
@@ -1599,7 +1599,7 @@ print(go(False))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// The reference spelling of the program above: `xs = [v]` carries no empty
@@ -1640,7 +1640,7 @@ print(go(False))
         output.status.code(),
         Some(0),
         "the reference spelling must still check: {}",
-        String::from_utf8_lossy(&output.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
     );
 }
 
@@ -1664,7 +1664,7 @@ print(go())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n1\n3\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)), "0\n1\n3\n");
 }
 
 /// The same program with the second loop deleted: one binding site, so the
@@ -1687,7 +1687,7 @@ print(go())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 /// A value-less annotation reaches the checker as `Environment::declare`, which
@@ -1716,7 +1716,7 @@ print(go())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 /// The reference spelling of the program above, which carries no empty literal
@@ -1746,7 +1746,7 @@ print(go())
         output.status.code(),
         Some(0),
         "the reference spelling must check: {}",
-        String::from_utf8_lossy(&output.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
     );
 }
 

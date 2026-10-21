@@ -68,7 +68,7 @@ fn null_instance_classmethod_codegens_and_runs() {
     let bin_path = dir.join("null_instance_classmethod");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn enum_member_singleton_init_emits_and_runs() {
     let bin_path = dir.join("enum_member_init");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn str_valued_enum_member_singleton_init_emits_and_runs() {
     let bin_path = dir.join("str_enum_member_init");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"axial\nradial\nAXIAL\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"axial\nradial\nAXIAL\n");
 }
 
 // -- #380: default_value_for_type covers every Mir Ty variant --------
@@ -336,7 +336,7 @@ fn seq_with_valid_statements_compiles_and_runs() {
     let bin_path = dir.join("seq_valid");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"10\n20\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"10\n20\n");
 }
 
 // -- #381: None singleton pattern comparison in emit_expr ---------------
@@ -384,5 +384,5 @@ fn none_singleton_comparison_emits_zero_carrier() {
     let bin_path = dir.join("none_singleton_cmp");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }

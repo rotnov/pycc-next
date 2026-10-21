@@ -219,7 +219,7 @@ fn check_json(dir: &Path, name: &str, source: &str) -> serde_json::Value {
         .current_dir(dir)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert_eq!(output.status.code(), Some(1), "{name}: {stdout}");
     let first = stdout
         .lines()
@@ -291,7 +291,7 @@ fn a_dependency_diagnostic_points_into_the_dependency() {
         .current_dir(&*dir)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert_eq!(output.status.code(), Some(1), "{stdout}");
     assert_eq!(
         stdout,

@@ -39,9 +39,9 @@ fn fixture(dir: &Path, as_name: &str) -> PathBuf {
 }
 
 fn assert_matches(ours: &Output, oracle: &Output) {
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
     assert_eq!(ours.status.code(), oracle.status.code());
-    assert_eq!(last_line(&ours.stderr), last_line(&oracle.stderr));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&oracle.stderr)));
 }
 
 /// What runs in CPython, from `--report-fallbacks`: only the methods using
@@ -83,8 +83,8 @@ fn build(source: &Path, out: &Path, ext: bool) -> String {
         .arg(out)
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    text(&build.stderr)
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    text(&pycc_scratch::lf(&build.stderr))
 }
 
 #[test]

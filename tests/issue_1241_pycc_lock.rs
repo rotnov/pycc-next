@@ -29,7 +29,7 @@ use std::process::{Command, Output};
 mod sha256;
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
 }
 
 /// A fake interpreter: `script` answers both probes, `site` is its
@@ -624,7 +624,7 @@ fn a_real_venv_is_locked_and_checked() {
         ])
         .output()
         .expect("spawn the venv interpreter");
-    let site = PathBuf::from(String::from_utf8_lossy(&site.stdout).trim());
+    let site = PathBuf::from(pycc_scratch::lf(&*String::from_utf8_lossy(&site.stdout)).trim());
     tiny_closure(&site);
     std::fs::write(dir.join("m.py"), "import tinypkg\n").expect("write");
     let python = FakePython {
@@ -642,7 +642,7 @@ fn a_real_venv_is_locked_and_checked() {
         ])
         .output()
         .expect("spawn the base interpreter");
-    let tags = String::from_utf8_lossy(&tags.stdout).into_owned();
+    let tags = pycc_scratch::lf(&*String::from_utf8_lossy(&tags.stdout));
     let mut tags = tags.lines();
     let (version, cache_tag) = (tags.next().unwrap(), tags.next().unwrap());
     assert!(

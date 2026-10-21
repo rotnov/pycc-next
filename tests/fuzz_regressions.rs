@@ -20,7 +20,7 @@ fn text(bytes: &[u8]) -> String {
 
 /// stdout, the last stderr line without a `module.` prefix, and the status.
 fn observed(output: &Output, module: &str) -> (String, String, Option<i32>) {
-    let last = text(&output.stderr)
+    let last = text(&pycc_scratch::lf(&output.stderr))
         .lines()
         .last()
         .unwrap_or_default()
@@ -29,7 +29,7 @@ fn observed(output: &Output, module: &str) -> (String, String, Option<i32>) {
         .strip_prefix(&format!("{module}."))
         .map(str::to_string)
         .unwrap_or(last);
-    (text(&output.stdout), last, output.status.code())
+    (text(&pycc_scratch::lf(&output.stdout)), last, output.status.code())
 }
 
 /// Builds `tests/fixtures/<name>.py` in every mode and compares each run with

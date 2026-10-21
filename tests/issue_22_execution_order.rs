@@ -33,7 +33,7 @@ fn call_before_def_is_a_compile_error() {
         Some(1),
         "pycc check should reject call-before-def with exit code 1"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("cannot call function `foo` before its definition"),
         "stdout should mention call-before-def, got: {stdout}"
@@ -86,7 +86,7 @@ fn redefinition_affects_only_subsequent_calls() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"1\n2\n",
+        pycc_scratch::lf(&output.stdout), b"1\n2\n",
         "redefinition should print 1 then 2, matching CPython"
     );
 }
@@ -110,7 +110,7 @@ fn recursion_after_binding_works() {
     assert!(status.success(), "pycc build should succeed for recursion");
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"5\n", "recursion should print 5");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n", "recursion should print 5");
 }
 
 /// Issue #22: a function body may call a sibling defined later in the
@@ -136,7 +136,7 @@ fn function_body_calls_sibling_defined_later() {
     );
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n", "sibling call should print 42");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n", "sibling call should print 42");
 }
 
 /// Issue #22: a function body may call a sibling defined earlier in the
@@ -161,7 +161,7 @@ fn function_body_calls_sibling_defined_earlier() {
     );
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n", "sibling call should print 42");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n", "sibling call should print 42");
 }
 
 /// Issue #22: the redefinition regression fixture in
@@ -190,7 +190,7 @@ fn redefinition_fixture_matches_cpython() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"1\n2\n",
+        pycc_scratch::lf(&output.stdout), b"1\n2\n",
         "redefinition fixture should print 1 then 2"
     );
 }
@@ -219,7 +219,7 @@ fn incompatible_redefinition_is_a_check_error() {
         Some(1),
         "pycc check should reject incompatible redefinition with exit code 1"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("cannot redefine function `foo` with a different signature"),
         "stdout should mention incompatible redefinition, got: {stdout}"
@@ -283,7 +283,7 @@ fn incompatible_redefinition_with_unannotated_first_definition_is_a_check_error(
         "pycc check should reject an unannotated-first-definition incompatible \
          redefinition with exit code 1"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("cannot redefine function `_foo` with a different signature"),
         "stdout should mention incompatible redefinition, got: {stdout}"
@@ -334,7 +334,7 @@ fn incompatible_redefinition_with_different_return_type_is_rejected() {
         Some(1),
         "pycc check should reject redefinition with a different return type"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("cannot redefine function `foo` with a different signature"),
         "stdout should mention incompatible redefinition, got: {stdout}"
@@ -365,7 +365,7 @@ fn compatible_redefinition_with_same_signature_still_works() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"1\n2\n",
+        pycc_scratch::lf(&output.stdout), b"1\n2\n",
         "compatible redefinition should print 1 then 2"
     );
 }
@@ -395,7 +395,7 @@ fn multiple_calls_to_same_function_work() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"6\n3\n4\n",
+        pycc_scratch::lf(&output.stdout), b"6\n3\n4\n",
         "multiple calls should produce correct output"
     );
 }
@@ -426,7 +426,7 @@ fn generic_function_calls_dispatch_directly() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"1\nhi\n2\n",
+        pycc_scratch::lf(&output.stdout), b"1\nhi\n2\n",
         "generic function should produce correct output"
     );
 }

@@ -51,7 +51,7 @@ struct Outcome {
 
 impl Outcome {
     fn both(&self) -> String {
-        format!("{}{}", self.stdout, self.stderr)
+        format!("{}{}", pycc_scratch::lf(&self.stdout), pycc_scratch::lf(&self.stderr))
     }
 }
 
@@ -75,10 +75,10 @@ fn pycc_in(dir: &Path, subcommand: &str) -> Outcome {
         .expect("pycc should spawn");
     Outcome {
         code: output.status.code().expect("pycc must exit normally"),
-        stdout: String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        stdout: pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"),
         // The linker may warn about deployment targets on some hosts; that is
         // a property of the machine, not of the program.
-        stderr: String::from_utf8_lossy(&output.stderr)
+        stderr: pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
             .replace("\r\n", "\n")
             .lines()
             .filter(|line| !line.starts_with("ld: warning"))
@@ -110,11 +110,11 @@ fn twins_print(category: &str, files: &[(&str, &str)], expected: &str) {
         twin.both()
     );
     assert_eq!(
-        program.stdout, expected,
+        pycc_scratch::lf(&program.stdout), expected,
         "P of `{category}` must print CPython's output"
     );
     assert_eq!(
-        twin.stdout, expected,
+        pycc_scratch::lf(&twin.stdout), expected,
         "the twin of `{category}` must print the same"
     );
 }
@@ -1131,8 +1131,8 @@ fn an_ext_build_of_the_four_methods_reports_no_container_diagnostic() {
         .expect("pycc should spawn");
     let reported = format!(
         "{}{}",
-        String::from_utf8_lossy(&build.stdout),
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     // The last needle is the removed class-body refusal's wording, split so
     // the stale-reference sweep for that refusal does not match this test.
@@ -1171,7 +1171,7 @@ fn the_four_methods_are_callable_through_an_ext_build() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
         .arg("-c")
@@ -1192,7 +1192,7 @@ assert s.pop() == 4, s.pop()
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }

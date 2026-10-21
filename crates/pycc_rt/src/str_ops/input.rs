@@ -37,7 +37,10 @@ pub extern "C" fn pycc_rt_input() -> *mut PyStrObj {
 /// `input(prompt)`: writes `prompt` (no newline) first.
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_input_prompt(prompt: *mut PyStrObj) -> *mut PyStrObj {
-    crate::io::out(bytes_of(prompt));
+    if !crate::io::out(bytes_of(prompt)) {
+        // The prompt's write raised (it is pending): nothing is read.
+        return crate::str_index::empty_str();
+    }
     input_line()
 }
 
@@ -80,7 +83,10 @@ pub extern "C" fn pycc_rt_stdin_readlines() -> *mut PyListObj {
 #[unsafe(no_mangle)]
 pub extern "C" fn pycc_rt_stdout_write(s: *mut PyStrObj) -> i64 {
     let text = text_of(s);
-    crate::io::out_str(text);
+    if !crate::io::out_str(text) {
+        // Raised (pending); the caller's guard takes the exception edge.
+        return tag_smallint(0);
+    }
     tag_smallint(char_len(text) as i64)
 }
 

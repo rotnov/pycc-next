@@ -37,7 +37,7 @@ fn property_getter_builds_and_runs_correctly() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"42\n",
+        pycc_scratch::lf(&output.stdout), b"42\n",
         "property getter should return the backing slot value"
     );
 }
@@ -66,7 +66,7 @@ fn property_setter_builds_and_runs_correctly() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"0\n99\n",
+        pycc_scratch::lf(&output.stdout), b"0\n99\n",
         "property setter should update the backing slot via the setter method"
     );
 }
@@ -91,7 +91,7 @@ fn read_only_property_assignment_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for assigning to a read-only property"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0044") && stderr.contains("read-only"),
         "expected T0044 read-only diagnostic, got stderr: {stderr}"
@@ -119,7 +119,7 @@ fn property_setter_type_mismatch_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for a property setter type mismatch"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "expected T0021 type mismatch diagnostic, got stderr: {stderr}"
@@ -150,7 +150,7 @@ fn property_getter_readable_from_another_method() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"7\n",
+        pycc_scratch::lf(&output.stdout), b"7\n",
         "property read from a method body should return the backing slot value"
     );
 }
@@ -179,7 +179,7 @@ fn property_setter_writable_from_another_method() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"5\n",
+        pycc_scratch::lf(&output.stdout), b"5\n",
         "property write from a method body should update the backing slot"
     );
 }
@@ -208,7 +208,7 @@ fn property_on_a_generic_class_builds_and_runs_correctly() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"42\n",
+        pycc_scratch::lf(&output.stdout), b"42\n",
         "property on a generic class should return the backing slot value"
     );
 }
@@ -237,7 +237,7 @@ fn property_setter_on_a_generic_class_builds_and_runs_correctly() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"42\n99\n",
+        pycc_scratch::lf(&output.stdout), b"42\n99\n",
         "property setter on a generic class should update the backing slot"
     );
 }

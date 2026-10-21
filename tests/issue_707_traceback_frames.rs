@@ -35,7 +35,7 @@ fn assert_traceback_matches_cpython(dir: &std::path::Path, src_name: &str, sourc
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&out).current_dir(dir).output().unwrap();
     let cpython = Command::new(python())
@@ -48,11 +48,11 @@ fn assert_traceback_matches_cpython(dir: &std::path::Path, src_name: &str, sourc
         "expected non-zero exit for uncaught exception"
     );
     assert_eq!(run.status.code(), cpython.status.code());
-    // Line content: a native program writes `\n`, CPython on Windows `\r\n`.
-    let err = String::from_utf8_lossy(&run.stderr).replace("\r\n", "\n");
+    // Line content: both sides write `\r\n` on Windows.
+    let err = pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).replace("\r\n", "\n");
     assert_eq!(
         err,
-        String::from_utf8_lossy(&cpython.stderr).replace("\r\n", "\n")
+        pycc_scratch::lf(&*String::from_utf8_lossy(&cpython.stderr)).replace("\r\n", "\n")
     );
     err
 }
@@ -222,7 +222,7 @@ fn a_frame_whose_source_is_gone_shows_no_source_lines() {
     let path = base.join("gone.py");
     let path = path.display();
     assert_eq!(
-        String::from_utf8_lossy(&run.stderr),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)),
         format!(
             "Traceback (most recent call last):\n  File \"{path}\", line 4, in <module>\n  \
              File \"{path}\", line 2, in boom\nValueError: bad\n"

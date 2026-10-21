@@ -72,11 +72,11 @@ fn assert_native_matches(name: &str, args: &[&str]) {
     let source = fixture(&format!("{name}.py"));
     let out = dir.join("prog");
     let build = pycc_build(args, &source, &out);
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = Command::new(&out).output().expect("run");
     let oracle = Command::new(python()).arg(&source).output().expect("python");
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
     assert_eq!(ours.status.code(), oracle.status.code());
 }
 
@@ -119,7 +119,7 @@ fn build_typed_pkg(dir: &Path) -> String {
             &source,
             &ext.join("pkg").join(module),
         );
-        report.push_str(&text(&build.stderr));
+        report.push_str(&text(&pycc_scratch::lf(&build.stderr)));
         assert!(build.status.success(), "{module}: {report}");
     }
     for module in ["_core", "_types", "__init__"] {
@@ -163,9 +163,9 @@ fn a_typed_package_builds_unchanged_and_matches_cpython() {
             .expect("python")
     };
     let (ours, oracle) = (run("ext"), run("src"));
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
-    assert!(ours.status.success(), "{}", text(&ours.stderr));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn a_mistyped_scalar_argument_runs_as_cpython_runs_it() {
         &fixture_dir.join("m.py"),
         &dir.join("m"),
     );
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     // Every function compiles: a mistyped call is the only CPython run.
     assert!(!report.contains("fallback:"), "{report}");
@@ -191,7 +191,7 @@ fn a_mistyped_scalar_argument_runs_as_cpython_runs_it() {
             .expect("python")
     };
     let (ours, oracle) = (run(&dir), run(&fixture_dir));
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
-    assert!(ours.status.success(), "{}", text(&ours.stderr));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }

@@ -67,7 +67,7 @@ fn assert_constant_memory(name: &str, body: &str) {
             .args(["--release", "--non-strict", "--report-fallbacks"])
             .output()
             .expect("pycc should spawn");
-        let report = String::from_utf8_lossy(&built.stderr);
+        let report = pycc_scratch::lf(&*String::from_utf8_lossy(&built.stderr));
         assert!(built.status.success(), "{name}: {report}");
         assert!(!report.contains("fallback:"), "{name}: {report}");
         let (out, peak) = run_measured(&bin);

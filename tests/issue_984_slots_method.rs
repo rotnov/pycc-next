@@ -77,7 +77,7 @@ fn check(tag: &str, source: &str) -> (bool, String) {
         .unwrap();
     (
         out.status.success(),
-        String::from_utf8_lossy(&out.stdout).to_string(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&out.stdout)).to_string(),
     )
 }
 

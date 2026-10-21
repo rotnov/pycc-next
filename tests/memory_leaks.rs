@@ -460,7 +460,7 @@ fn assert_fixture_matches_cpython(dir: &Path, name: &str) -> PathBuf {
         assert!(
             output.status.success(),
             "{}",
-            String::from_utf8_lossy(&output.stderr)
+            pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
         );
         let (out, _) = run_measured(&bin);
         assert_eq!(
@@ -491,7 +491,7 @@ fn assert_memcheck_clean(bin: &Path) {
         output.status.success(),
         "memcheck errors in {}:\n{}",
         bin.display(),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 
@@ -608,7 +608,7 @@ fn an_object_index_runs_in_constant_memory() {
             .arg(&bin)
             .output()
             .expect("pycc should spawn");
-        let report = String::from_utf8_lossy(&output.stderr);
+        let report = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
         assert!(output.status.success(), "{report}");
         assert!(!report.contains("fallback:"), "{report}");
         let (out, peak) = run_measured(&bin);
@@ -661,7 +661,7 @@ fn an_object_comprehension_runs_in_constant_memory() {
             .arg(&bin)
             .output()
             .expect("pycc should spawn");
-        let report = String::from_utf8_lossy(&output.stderr);
+        let report = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
         assert!(output.status.success(), "{report}");
         assert!(!report.contains("fallback:"), "{report}");
         let (out, peak) = run_measured(&bin);
@@ -711,7 +711,7 @@ fn percent_formatting_runs_in_constant_memory() {
             .arg(&bin)
             .output()
             .expect("pycc should spawn");
-        let report = String::from_utf8_lossy(&output.stderr);
+        let report = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
         assert!(output.status.success(), "{report}");
         assert!(!report.contains("fallback:"), "{report}");
         let (out, peak) = run_measured(&bin);
@@ -765,7 +765,7 @@ fn object_stdlib_calls_run_in_constant_memory() {
             .arg(&bin)
             .output()
             .expect("pycc should spawn");
-        let report = String::from_utf8_lossy(&output.stderr);
+        let report = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
         assert!(output.status.success(), "{report}");
         assert!(!report.contains("fallback:"), "{report}");
         let (out, peak) = run_measured(&bin);

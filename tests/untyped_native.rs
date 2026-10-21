@@ -42,11 +42,11 @@ fn pycc(args: &[&str], source: &Path, out: &Path) -> Output {
 
 /// Same stdout, exit status and last stderr line (the exception).
 fn assert_same(ours: &Output, oracle: &Output) {
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout));
-    assert_eq!(ours.status.code(), oracle.status.code(), "{}", text(&ours.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
+    assert_eq!(ours.status.code(), oracle.status.code(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
     assert_eq!(
-        text(&ours.stderr).lines().last(),
-        text(&oracle.stderr).lines().last()
+        text(&pycc_scratch::lf(&ours.stderr)).lines().last(),
+        text(&pycc_scratch::lf(&oracle.stderr)).lines().last()
     );
 }
 
@@ -76,8 +76,8 @@ fn build_specialized(dir: &Path) -> String {
         &build_src,
         &ext.join("m"),
     );
-    let report = text(&build.stderr);
-    assert!(build.status.success(), "{report}{}", text(&build.stdout));
+    let report = text(&pycc_scratch::lf(&build.stderr));
+    assert!(build.status.success(), "{report}{}", text(&pycc_scratch::lf(&build.stdout)));
     report
 }
 
@@ -100,7 +100,7 @@ fn untyped_ext_functions_run_native_with_cpython_results() {
     }
     let ours = run_python(&dir.join("ext"), "d.py");
     let oracle = run_python(&dir.join("src"), "d.py");
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
     assert_same(&ours, &oracle);
 }
 
@@ -110,8 +110,8 @@ fn specialized_calls_leak_nothing() {
     let dir = ScratchDir::new("untyped_native_leaks").expect("scratch");
     build_specialized(&dir);
     let probe = run_python(&dir.join("ext"), "l.py");
-    assert!(probe.status.success(), "{}", text(&probe.stderr));
-    assert_eq!(text(&probe.stdout), "ok\n");
+    assert!(probe.status.success(), "{}", text(&pycc_scratch::lf(&probe.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&probe.stdout)), "ok\n");
 }
 
 /// The specialization of a function that does not type-check with the
@@ -129,7 +129,7 @@ fn a_refused_specialization_is_dropped_not_fallen_back() {
     std::fs::write(dir.join("m.py"), source).expect("write");
     std::fs::write(src.join("m.py"), source).expect("write");
     let build = pycc(&["--ext", "--non-strict", "--report-fallbacks"], &dir.join("m.py"), &ext.join("m"));
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     assert!(!report.contains("fallback:"), "{report}");
     assert!(report.contains("not specialized: `f`"), "{report}");
@@ -160,7 +160,7 @@ fn widening_a_rebound_name_is_per_function() {
         .arg(dir.join("w"))
         .output()
         .expect("pycc");
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     assert!(!report.contains("fallback:"), "{report}");
     let ours = Command::new(dir.join("w")).output().expect("run");
@@ -190,7 +190,7 @@ fn native_str_indexing_by_code_point_matches_cpython() {
     let source = dir.join("s.py");
     std::fs::copy(fixture("str_unicode_index.py"), &source).expect("copy");
     let build = pycc(&["--release"], &source, &dir.join("s"));
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = Command::new(dir.join("s")).output().expect("run");
     let oracle = Command::new(python()).arg(&source).output().expect("python");
     assert_eq!(oracle.status.code(), Some(1));

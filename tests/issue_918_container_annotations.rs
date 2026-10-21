@@ -51,7 +51,7 @@ print(len(xs))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"6\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"6\n3\n");
 }
 
 #[test]
@@ -69,7 +69,7 @@ print(len(d))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"7\n9\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n9\n2\n");
 }
 
 #[test]
@@ -85,7 +85,7 @@ print(count(s))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 #[test]
@@ -106,7 +106,7 @@ print(second(t))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"42\nTrue\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\nTrue\n");
 }
 
 #[test]
@@ -128,7 +128,7 @@ print(total(xs))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"9\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"9\n");
 }
 
 #[test]
@@ -145,7 +145,7 @@ print(run())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"60\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"60\n");
 }
 
 #[test]
@@ -179,5 +179,5 @@ use(Impl())
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }

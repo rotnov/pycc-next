@@ -54,7 +54,7 @@ sink(source())
 ";
     let output = build_and_run("none_parameter_abi", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"None\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n");
 }
 
 /// #167: D-075 promises the canonical `None` unit carrier crossing the user
@@ -82,5 +82,5 @@ sink(source())
 ";
     let output = build_and_run("none_carrier_truthiness", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n");
 }

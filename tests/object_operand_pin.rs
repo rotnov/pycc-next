@@ -37,12 +37,12 @@ fn python() -> Command {
 }
 
 fn checked(output: Output, what: &str) -> String {
-    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n");
     assert!(
         output.status.success(),
         "{what} failed: {:?}\nstdout: {stdout}\nstderr: {}",
         output.status,
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
     stdout
 }

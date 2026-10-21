@@ -41,8 +41,8 @@ fn succeeded(output: &Output, what: &str) {
     assert!(
         output.status.success(),
         "{what} failed:\nstdout: {}\nstderr: {}",
-        text(&output.stdout),
-        text(&output.stderr)
+        text(&pycc_scratch::lf(&output.stdout)),
+        text(&pycc_scratch::lf(&output.stderr))
     );
 }
 
@@ -91,8 +91,8 @@ fn assert_native_matches_cpython(name: &str, flags: &[&str]) {
     let ours = Command::new(&bin).output().expect("the program runs");
     succeeded(&ours, "the compiled program");
     assert_eq!(
-        text(&ours.stdout),
-        text(&theirs.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&theirs.stdout)),
         "{name} {flags:?}: stdout differs from CPython"
     );
     assert_memcheck_clean(&bin);
@@ -154,7 +154,7 @@ fn assert_ext_matches_source(module: &str, driver: &str, flags: &[&str]) {
             .output()
             .expect("python3 runs");
         succeeded(&output, driver);
-        text(&output.stdout)
+        text(&pycc_scratch::lf(&output.stdout))
     };
     assert_eq!(run(&built), run(&source), "{module}: --ext differs from CPython");
 }
@@ -210,7 +210,7 @@ fn a_strict_variadic_tuple_parameter_refuses_other_values_with_type_error() {
         .expect("python3 runs");
     succeeded(&run, "the refusal driver");
     assert_eq!(
-        text(&run.stdout),
+        text(&pycc_scratch::lf(&run.stdout)),
         "stem() argument 1 must be tuple, not list\n\
          stem() argument 1 must be a tuple of str, not one holding int\n\
          stem() argument 1 must be tuple, not str\n\
@@ -225,7 +225,7 @@ fn check_fails(source: &str) -> String {
     std::fs::write(&src, source).expect("write the subject");
     let output = pycc().arg("check").arg(&src).output().expect("pycc should spawn");
     assert!(!output.status.success(), "`pycc check` accepted:\n{source}");
-    format!("{}{}", text(&output.stdout), text(&output.stderr))
+    format!("{}{}", text(&pycc_scratch::lf(&output.stdout)), text(&pycc_scratch::lf(&output.stderr)))
 }
 
 /// A variadic tuple of `int`/`float`/`bool` is not native yet (those

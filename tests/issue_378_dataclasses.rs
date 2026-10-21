@@ -31,7 +31,7 @@ fn build_and_run(dir: &std::path::Path, src: &std::path::Path, bin_name: &str) -
         return (false, Vec::new());
     }
     let output = Command::new(&out).output().unwrap();
-    (output.status.success(), output.stdout)
+    (output.status.success(), pycc_scratch::lf(&output.stdout))
 }
 
 fn check_fails(dir: &std::path::Path, src: &std::path::Path) -> bool {

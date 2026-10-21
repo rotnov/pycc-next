@@ -57,7 +57,7 @@ fn assert_rejected(tag: &str, source: &str, code: &str, needle: &str) {
         .args(["check", src.to_str().unwrap()])
         .output()
         .unwrap();
-    let rendered = String::from_utf8_lossy(&out.stdout).to_string();
+    let rendered = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stdout)).to_string();
     assert!(
         !out.status.success(),
         "pycc check should reject {tag}, but it succeeded:\n{rendered}"
@@ -84,7 +84,7 @@ fn assert_accepted(tag: &str, source: &str) {
     assert!(
         out.status.success(),
         "pycc check should accept {tag}, got:\n{}",
-        String::from_utf8_lossy(&out.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&out.stdout))
     );
 }
 
@@ -221,7 +221,7 @@ fn a_non_integer_binding_is_rejected_without_naming_a_concrete_type() {
                 .args(["check", src.to_str().unwrap()])
                 .output()
                 .unwrap();
-            let rendered = String::from_utf8_lossy(&out.stdout).to_string();
+            let rendered = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stdout)).to_string();
             assert!(
                 !rendered.contains("object is not callable"),
                 "diagnostic for {tag} must not name a concrete bound type, got:\n{rendered}"

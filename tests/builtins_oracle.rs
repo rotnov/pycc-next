@@ -15,7 +15,7 @@ fn text(bytes: &[u8]) -> String {
 }
 
 fn last_stderr_line(output: &Output) -> String {
-    text(&output.stderr)
+    text(&pycc_scratch::lf(&output.stderr))
         .lines()
         .last()
         .unwrap_or_default()
@@ -50,13 +50,13 @@ fn assert_matches_cpython(name: &str) {
     assert!(
         build.status.success(),
         "pycc build of {name} failed:\n{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     let run = run_with_stdin(&mut Command::new(&binary), stdin);
     let oracle = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     let cpython = run_with_stdin(Command::new(oracle).arg(&fixture), stdin);
-    assert_eq!(text(&run.stdout), text(&cpython.stdout), "{name}: stdout");
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&cpython.stdout)), "{name}: stdout");
     assert_eq!(
         last_stderr_line(&run),
         last_stderr_line(&cpython),

@@ -36,7 +36,7 @@ fn a_missing_input_file_is_a_clean_error_not_a_panic() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("could not read"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("could not read"));
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn build_and_run_explicit_call_to_main() {
     assert!(status.success());
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn defining_main_without_calling_it_produces_no_output() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"",
+        pycc_scratch::lf(&output.stdout), b"",
         "must match CPython's actual output for this source"
     );
 }
@@ -118,7 +118,7 @@ fn build_and_run_a_function_reading_a_module_level_global_it_does_not_assign() {
     assert!(status.success());
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n");
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn build_and_run_top_level_print_with_no_main() {
     assert!(status.success());
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn run_subcommand_builds_and_executes_in_one_step() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn run_subcommand_accepts_zero_trailing_args_after_the_separator() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn run_subcommand_accepts_multiple_trailing_args() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn run_subcommand_accepts_unicode_trailing_args() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn run_subcommand_accepts_dash_prefixed_trailing_args_without_a_cli_error() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn run_subcommand_propagates_a_build_failure() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("L0001"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("L0001"));
 }
 
 #[cfg(unix)]
@@ -291,7 +291,7 @@ fn build_rejects_a_module_value_binding_that_shadows_a_function_call() {
     // `report_build_failure` renders compile diagnostics to stderr
     // (`eprint!`), unlike `pycc check`'s stdout rendering.
     // Since issue #1 the rebinding itself is refused, before the call.
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("error[C0001]: rebinding `helper`, which a module-level `def` also binds"),
         "build must fail with the rebinding diagnostic, got: {stderr}"
@@ -357,9 +357,9 @@ fn version_reports_the_llvm_that_llvm_config_reports() {
         eprintln!("skipping: {} is not runnable here", config.display());
         return;
     };
-    let real = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let real = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stdout)).trim().to_string();
     let output = Command::new(pycc_bin()).arg("version").output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains(&format!("LLVM {real})")),
         "expected LLVM {real}, got: {stdout}"
@@ -385,7 +385,7 @@ fn version_verbose_reports_compiler_llvm_and_tier1_targets() {
          x86_64-apple-darwin\n  aarch64-apple-darwin\n  x86_64-pc-windows-msvc\n",
         expected_version_summary_line()
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)), expected);
 }
 
 #[test]
@@ -397,7 +397,7 @@ fn version_without_verbose_prints_only_the_summary_line() {
     let output = Command::new(pycc_bin()).args(["version"]).output().unwrap();
     assert!(output.status.success());
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
         expected_version_summary_line()
     );
 }
@@ -418,7 +418,7 @@ fn init_scaffolds_pycc_toml_and_main_py_in_the_current_directory() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Created pycc.toml and src/main.py"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("Created pycc.toml and src/main.py"));
 
     // A substring check on the raw name (rather than an exact
     // `name = "..."` slice) avoids coupling this end-to-end test to the
@@ -450,7 +450,7 @@ fn init_refuses_when_pycc_toml_exists_as_a_directory() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("error: pycc init failed"));
     assert!(stderr.contains("`pycc.toml` already exists"));
 }
@@ -470,7 +470,7 @@ fn init_refuses_to_overwrite_an_existing_project() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("error: pycc init failed"));
     assert!(stderr.contains("`pycc.toml` already exists"));
     assert_eq!(
@@ -495,7 +495,7 @@ fn init_refuses_when_only_pycc_toml_exists() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("`pycc.toml` already exists"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("`pycc.toml` already exists"));
     assert_eq!(
         std::fs::read_to_string(dir.join("pycc.toml")).unwrap(),
         "user toml"
@@ -517,7 +517,7 @@ fn init_refuses_when_only_main_py_exists() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("`src/main.py` already exists"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("`src/main.py` already exists"));
     assert_eq!(
         std::fs::read_to_string(dir.join("src").join("main.py")).unwrap(),
         "user code"
@@ -538,7 +538,7 @@ fn init_refuses_when_src_is_a_plain_file() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("`src` exists and is not a directory")
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("`src` exists and is not a directory")
     );
     assert!(!dir.join("pycc.toml").exists());
 }
@@ -568,7 +568,7 @@ fn init_rolls_back_main_py_when_a_late_write_fails() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("error: pycc init failed"));
     // Positive proof main.py genuinely existed and was cleanly removed
     // (not that it never existed) -- see the unit-level twin in
@@ -654,9 +654,9 @@ fn init_reports_an_unavailable_cwd_without_panicking() {
         Some(2),
         "expected exit 2, got {:?}; stderr: {}",
         output.status.code(),
-        String::from_utf8_lossy(&output.stderr),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)),
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("error: pycc init failed"),
         "expected the init-failed prefix, got: {stderr}",
@@ -673,7 +673,7 @@ fn init_reports_an_unavailable_cwd_without_panicking() {
         !stderr.contains("RUST_BACKTRACE"),
         "the failure must not include a backtrace hint: {stderr}",
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         !stdout.contains("Created"),
         "no success message should appear on failure: {stdout}",
@@ -707,7 +707,7 @@ fn build_reports_a_missing_linker_driver_without_panicking() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("error: could not run the linker driver"),
         "expected the actionable diagnostic, got: {stderr}"
@@ -733,7 +733,7 @@ fn run_reports_a_missing_linker_driver_without_panicking() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("error: could not run the linker driver"));
     assert!(!stderr.contains("panicked"));
 }
@@ -749,7 +749,7 @@ fn a_syntax_error_is_a_compile_error_exit_code_1() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("L0001"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("L0001"));
 }
 
 #[test]
@@ -763,7 +763,7 @@ fn a_type_error_is_a_compile_error_exit_code_1() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("T0021"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("T0021"));
 }
 
 #[test]
@@ -777,7 +777,7 @@ fn an_unannotated_public_function_is_a_compile_error_exit_code_1() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("T0001"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("T0001"));
 }
 
 #[test]
@@ -795,7 +795,7 @@ fn defining_a_function_under_any_name_without_calling_it_succeeds() {
         .unwrap();
     assert!(status.success());
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
 }
 
 #[test]
@@ -811,7 +811,7 @@ fn calling_an_undefined_function_is_a_compile_error() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("does_not_exist"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("does_not_exist"));
 }
 
 /// `--target x86_64-apple-darwin`'s pycc_rt build (`rustup target add
@@ -869,7 +869,7 @@ fn build_and_run_cross_compiled_to_a_different_tier_1_target() {
     assert!(status.success());
 
     let file_output = Command::new("file").arg(&out).output().unwrap();
-    let description = String::from_utf8_lossy(&file_output.stdout);
+    let description = pycc_scratch::lf(&*String::from_utf8_lossy(&file_output.stdout));
     assert!(
         description.contains("x86_64"),
         "expected an x86_64 binary, got: {description}"
@@ -877,7 +877,7 @@ fn build_and_run_cross_compiled_to_a_different_tier_1_target() {
 
     // Runs via Rosetta 2 on this arm64 dev host / CI runner.
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 /// Not real cross-compilation (the triple matches this runner's own arch)
@@ -927,7 +927,7 @@ fn build_and_run_with_target_set_to_the_host_s_own_triple_on_linux() {
     assert!(status.success());
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -979,7 +979,7 @@ fn targeting_a_valid_triple_with_no_local_pycc_rt_build_is_a_clean_error() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("no pycc_rt build found"));
     // The end-to-end path (driver -> `error: ...` -> exit 2) also carries
     // the CARGO_TARGET_DIR recovery clause (#869).
@@ -1000,7 +1000,7 @@ fn check_subcommand_reports_no_issues_on_valid_code() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
 }
 
 #[test]
@@ -1017,7 +1017,7 @@ fn check_subcommand_infers_a_private_helper_signature() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
 }
 
 #[test]
@@ -1035,7 +1035,7 @@ fn check_subcommand_honors_an_annotated_private_local_without_widening_its_sourc
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
 }
 
 #[test]
@@ -1076,7 +1076,7 @@ fn annotated_private_local_does_not_widen_an_independently_returned_bool() {
     assert!(status.success());
     let output = Command::new(out).output().unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -1094,7 +1094,7 @@ fn check_subcommand_still_rejects_annotated_private_local_narrowing() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("T0025"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("T0025"));
 }
 
 #[test]
@@ -1111,7 +1111,7 @@ fn check_subcommand_rejects_conflicting_private_helper_constraints() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("T0021"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("T0021"));
 }
 
 #[test]
@@ -1128,7 +1128,7 @@ fn check_subcommand_propagates_an_annotated_binary_result() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
 }
 
 #[test]
@@ -1147,7 +1147,7 @@ fn check_subcommand_rejects_true_division_with_an_int_result_annotation() {
     assert_eq!(output.status.code(), Some(1));
     // `value` is typed `int` by the call site, so the division's `float`
     // meets the declared `int` at the `return`.
-    assert!(String::from_utf8_lossy(&output.stdout).contains("T0022"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("T0022"));
 }
 
 #[test]
@@ -1172,7 +1172,7 @@ fn check_subcommand_rejects_known_string_operands_for_an_int_result() {
             .unwrap();
         assert_eq!(output.status.code(), Some(1), "{name}");
         assert!(
-            String::from_utf8_lossy(&output.stdout).contains("T0021"),
+            pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("T0021"),
             "{name}"
         );
     }
@@ -1188,7 +1188,7 @@ fn check_subcommand_reports_t0001_on_an_unannotated_public_function() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("T0001"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("T0001"));
 }
 
 #[test]
@@ -1201,7 +1201,7 @@ fn check_subcommand_supports_json_error_format() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(parsed["code"], "T0001");
 }
@@ -1213,8 +1213,8 @@ fn check_subcommand_rejects_an_unknown_error_format() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(pycc_scratch::lf(&output.stdout).is_empty());
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("invalid value 'xml'"));
     assert!(stderr.contains("[possible values: human, json]"));
 }
@@ -1237,7 +1237,7 @@ fn explain_subcommand_prints_a_human_explanation_for_a_known_code() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(0), "code {code}");
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
         assert!(
             stdout.contains(code),
             "stdout for {code} should contain its own code: {stdout}"
@@ -1252,7 +1252,7 @@ fn explain_subcommand_human_output_contains_the_explanation_text() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(stdout.contains("T0001 (error): public function missing annotation"));
     assert!(stdout.contains("Example:"));
     assert!(stdout.contains("def add(a: int, b: int) -> int:"));
@@ -1266,7 +1266,7 @@ fn explain_subcommand_supports_json_format_for_every_domain_representative_code(
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(0), "code {code}");
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
         let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
             .unwrap_or_else(|e| panic!("code {code} produced invalid JSON: {e}\n{stdout}"));
         assert_eq!(parsed["format_version"], 1, "code {code}");
@@ -1283,8 +1283,8 @@ fn explain_subcommand_rejects_an_unknown_format() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(pycc_scratch::lf(&output.stdout).is_empty());
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("invalid value 'xml'"));
     assert!(stderr.contains("[possible values: human, json]"));
 }
@@ -1296,8 +1296,8 @@ fn explain_subcommand_rejects_an_unrecognized_code() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(pycc_scratch::lf(&output.stdout).is_empty());
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("unknown diagnostic code"));
 }
 
@@ -1312,8 +1312,8 @@ fn explain_subcommand_rejects_an_unrecognized_code_with_plain_stderr_even_in_jso
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(pycc_scratch::lf(&output.stdout).is_empty());
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("unknown diagnostic code"));
     assert!(serde_json::from_str::<serde_json::Value>(stderr.trim()).is_err());
 }
@@ -1463,7 +1463,7 @@ fn check_subcommand_reports_a_clean_error_on_a_missing_file() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("could not read"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("could not read"));
 }
 
 #[test]
@@ -1476,7 +1476,7 @@ fn check_subcommand_reports_a_syntax_error() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("L0001"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("L0001"));
 }
 
 #[test]
@@ -1494,7 +1494,7 @@ fn check_subcommand_reports_a_type_error() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("T0021"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("T0021"));
 }
 
 #[test]
@@ -1513,7 +1513,7 @@ fn a_top_level_return_is_a_clean_error_not_a_panic() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("T0024"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("T0024"));
 }
 
 #[test]
@@ -1567,7 +1567,7 @@ fn a_bad_temporary_directory_is_an_environment_error_exit_code_2() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("could not create a scratch directory")
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("could not create a scratch directory")
     );
 }
 
@@ -1593,7 +1593,7 @@ fn a_bad_temporary_directory_makes_run_an_environment_error_exit_code_2() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("could not create a scratch directory")
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("could not create a scratch directory")
     );
 }
 
@@ -1641,7 +1641,7 @@ fn successful_build_and_run_leave_no_temporary_files_behind() {
         .output()
         .unwrap();
     assert!(run_output.status.success());
-    assert_eq!(run_output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&run_output.stdout), b"42\n");
 
     let leftovers: Vec<_> = std::fs::read_dir(&tmp)
         .unwrap()
@@ -1760,8 +1760,8 @@ fn check_accepts_every_staged_file_in_one_invocation() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
+    assert!(pycc_scratch::lf(&output.stdout).is_empty());
+    assert!(pycc_scratch::lf(&output.stderr).is_empty());
 }
 
 #[test]
@@ -1779,8 +1779,8 @@ fn check_reports_capability_errors_and_continues_the_batch() {
         .arg(&syntax_error)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
 
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout.contains("error[C0001]"));
@@ -1808,8 +1808,8 @@ fn check_accepts_a_pep_263_latin_1_source_file() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
+    assert!(pycc_scratch::lf(&output.stdout).is_empty());
+    assert!(pycc_scratch::lf(&output.stderr).is_empty());
 }
 
 #[test]
@@ -1838,8 +1838,8 @@ fn check_accepts_python_normalized_encoding_separators() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
+    assert!(pycc_scratch::lf(&output.stdout).is_empty());
+    assert!(pycc_scratch::lf(&output.stderr).is_empty());
 }
 
 #[test]
@@ -1853,7 +1853,7 @@ fn check_rejects_collapsed_utf8_separators_when_a_bom_is_present() {
         .arg(&src)
         .output()
         .unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
 
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr.contains("UTF-8 BOM conflicts with the declared source encoding"));
@@ -1874,7 +1874,7 @@ fn check_normalizes_python_universal_newlines_before_rendering_diagnostics() {
             .arg(&src)
             .output()
             .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
 
         assert_eq!(output.status.code(), Some(1));
         assert!(stdout.contains(&format!("{}:2:1", rendered_diagnostic_path(&src))));
@@ -1894,7 +1894,7 @@ fn check_reports_a_malformed_encoded_source_as_an_input_error() {
         .arg(&src)
         .output()
         .unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
 
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr.contains("could not read"));
@@ -1912,7 +1912,7 @@ fn check_rejects_a_codec_without_python_compatible_mappings() {
         .arg(&src)
         .output()
         .unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
 
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr.contains("unknown source encoding `gbk`"));
@@ -1930,7 +1930,7 @@ fn check_accepts_a_staged_filename_that_starts_with_a_hyphen() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(output.stderr.is_empty());
+    assert!(pycc_scratch::lf(&output.stderr).is_empty());
 }
 
 #[test]
@@ -1943,10 +1943,10 @@ fn check_help_flags_show_help_instead_of_becoming_filenames() {
 
         assert!(output.status.success(), "flag: {flag}");
         assert!(
-            String::from_utf8_lossy(&output.stdout).contains("Usage:"),
+            pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).contains("Usage:"),
             "flag: {flag}"
         );
-        assert!(output.stderr.is_empty(), "flag: {flag}");
+        assert!(pycc_scratch::lf(&output.stderr).is_empty(), "flag: {flag}");
     }
 }
 
@@ -1965,7 +1965,7 @@ fn check_accepts_a_non_utf8_staged_path_losslessly() {
         .arg(&src)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
 
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout.contains("error[L0001]"));
@@ -2023,7 +2023,7 @@ fn run_accepts_a_non_utf8_source_path_losslessly() {
         .unwrap();
 
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -2038,8 +2038,8 @@ fn check_reports_every_failure_and_io_errors_take_exit_code_precedence() {
         .arg(&missing)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
 
     assert_eq!(output.status.code(), Some(2));
     assert!(stdout.contains(&rendered_diagnostic_path(&invalid)));
@@ -2061,7 +2061,7 @@ fn check_aligns_a_diagnostic_caret_after_tab_indentation() {
         .arg(&src)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
 
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout.contains(&format!("{}:2:2", rendered_diagnostic_path(&src))));
@@ -2087,7 +2087,7 @@ fn check_uses_unicode_display_width_for_diagnostic_carets() {
             .arg(&src)
             .output()
             .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
 
         assert_eq!(output.status.code(), Some(1));
         assert!(stdout.contains(expected), "stdout: {stdout}");
@@ -2106,7 +2106,7 @@ fn check_sizes_the_diagnostic_gutter_for_three_digit_line_numbers() {
         .arg(&src)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
 
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout.contains(&format!("{}:100:1", rendered_diagnostic_path(&src))));
@@ -2119,5 +2119,5 @@ fn check_without_files_is_a_clean_invocation_error() {
     let output = Command::new(pycc_bin()).arg("check").output().unwrap();
 
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("at least one Python file"));
+    assert!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("at least one Python file"));
 }

@@ -38,11 +38,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn write(path: &Path, bytes: &[u8]) {
@@ -209,7 +209,7 @@ fn oracle(python: &Path, dir: &Path) -> Output {
 fn assert_same(app: &Output, oracle: &Output) {
     assert_eq!(app.status.code(), Some(0), "{}", stderr_of(app));
     assert_eq!(stdout_of(app), stdout_of(oracle), "{}", stderr_of(app));
-    assert_eq!(app.stdout, oracle.stdout);
+    assert_eq!(pycc_scratch::lf(&app.stdout), pycc_scratch::lf(&oracle.stdout));
 }
 
 /// `_json` is imported directly, because `json` falls back to pure Python

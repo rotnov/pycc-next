@@ -140,7 +140,7 @@ fn oracle_python_bin() -> PathBuf {
         .output()
         .unwrap_or_else(|e| panic!("nbody benchmark oracle `{}` not found: {e}", bin.display()));
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).trim(),
         "True",
         "the nbody benchmark oracle `{}` must be CPython 3.13 or newer",
         bin.display()
@@ -149,8 +149,8 @@ fn oracle_python_bin() -> PathBuf {
 }
 
 /// CPython's stdio layer translates `\n` to `\r\n` on Windows even when
-/// stdout is piped/redirected (D-082); `pycc_rt`'s `println!`-based `print()`
-/// never does. Duplicated from `tests/conformance.rs::strip_windows_
+/// stdout is piped/redirected (D-082); as does a native program's `print()`;
+/// compared as line content. Duplicated from `tests/conformance.rs::strip_windows_
 /// newline_translation` rather than shared -- this file's own established
 /// convention, see `oracle_python_bin`'s doc comment above.
 fn strip_windows_newline_translation(bytes: Vec<u8>) -> Vec<u8> {
@@ -459,8 +459,8 @@ fn nbody_release_binary_meets_required_speedup_over_cpython() {
     // newline_translation` is duplicated from `tests/conformance.rs` rather
     // than shared (this file's own established convention, see
     // `oracle_python_bin`'s doc comment above) -- CPython's stdio layer
-    // translates `\n` to `\r\n` on Windows even when piped (D-082), which
-    // `pycc_rt`'s `println!`-based `print()` never does, so the oracle's
+    // translates `\n` to `\r\n` on Windows even when piped (D-082),
+    // as a native program's `print()` does too; each
     // side needs the same normalization before tokenizing either side's
     // output into floats. D-097's original version compared raw bytes for
     // exact equality; CI on `windows-latest` refuted that (see this
@@ -488,9 +488,9 @@ fn nbody_release_binary_meets_required_speedup_over_cpython() {
         cpython_check_output.status.success(),
         "cpython oracle exited non-zero during the correctness check"
     );
-    let pycc_values = parse_three_floats(&pycc_check_output.stdout);
+    let pycc_values = parse_three_floats(&pycc_scratch::lf(&pycc_check_output.stdout));
     let cpython_values = parse_three_floats(&strip_windows_newline_translation(
-        cpython_check_output.stdout,
+        pycc_scratch::lf(&cpython_check_output.stdout),
     ));
     assert_relative_eq(pycc_values, cpython_values);
 

@@ -62,10 +62,10 @@ fn assert_runs_and_prints(case: &str, source: &str, expected: &str) {
         Some(0),
         "{case} should run to completion, got {:?}: {}",
         run.status.code(),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         expected,
         "{case} printed the wrong output"
     );

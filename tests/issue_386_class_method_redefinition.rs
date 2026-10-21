@@ -39,7 +39,7 @@ fn method_redefinition_rebinds_to_the_latest_definition() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"2\n",
+        pycc_scratch::lf(&output.stdout), b"2\n",
         "the latest definition should be called, printing 2"
     );
 }
@@ -69,7 +69,7 @@ fn three_redefinitions_of_the_same_method_keep_rebinding() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"3\n",
+        pycc_scratch::lf(&output.stdout), b"3\n",
         "the third definition should win, printing 3"
     );
 }
@@ -100,7 +100,7 @@ fn method_called_from_another_method_sees_latest_binding() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"2\n",
+        pycc_scratch::lf(&output.stdout), b"2\n",
         "caller should see the latest val binding, printing 2"
     );
 }
@@ -126,7 +126,7 @@ fn init_redefinition_is_a_check_error() {
         Some(1),
         "pycc check should reject __init__ redefinition with exit code 1"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("redefining `__init__` in the same class body is not supported yet"),
         "stdout should mention __init__ redefinition, got: {stdout}"
@@ -179,7 +179,7 @@ fn incompatible_method_redefinition_is_a_check_error() {
         Some(1),
         "pycc check should reject incompatible method redefinition with exit code 1"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("cannot redefine function `C.foo` with a different signature"),
         "stdout should mention incompatible method redefinition, got: {stdout}"
@@ -237,7 +237,7 @@ fn redefinition_with_different_parameter_names_does_not_false_positive() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"12\n",
+        pycc_scratch::lf(&output.stdout), b"12\n",
         "the latest definition should be called, printing 12"
     );
 }

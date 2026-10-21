@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn rendered(output: &Output) -> String {
@@ -16,7 +16,7 @@ fn rendered(output: &Output) -> String {
         "status: {}\nstdout:\n{}\nstderr:\n{}",
         output.status,
         stdout(output),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 
@@ -138,7 +138,7 @@ fn a_negative_base_of_a_square_root_still_raises() {
     assert_eq!(run.status.code(), Some(1), "{}", rendered(&run));
     assert_eq!(stdout(&run), "2.0\n0.0\n0.0\n1.4142135623730951\n");
     assert!(
-        String::from_utf8_lossy(&run.stderr).contains("RuntimeError"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).contains("RuntimeError"),
         "{}",
         rendered(&run)
     );

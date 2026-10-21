@@ -14,7 +14,7 @@ fn text(bytes: &[u8]) -> String {
 }
 
 fn last_stderr_line(output: &Output) -> String {
-    text(&output.stderr)
+    text(&pycc_scratch::lf(&output.stderr))
         .lines()
         .last()
         .unwrap_or_default()
@@ -38,8 +38,8 @@ fn pycc(args: &[&std::ffi::OsStr]) -> Output {
 
 fn assert_same(name: &str, mode: &str, run: &Output, cpython: &Output) {
     assert_eq!(
-        text(&run.stdout),
-        text(&cpython.stdout),
+        text(&pycc_scratch::lf(&run.stdout)),
+        text(&pycc_scratch::lf(&cpython.stdout)),
         "{name} ({mode}): stdout"
     );
     assert_eq!(
@@ -77,8 +77,8 @@ fn assert_matches_cpython(name: &str) {
         assert!(
             build.status.success(),
             "pycc build ({mode}) of {name} failed:\n{}{}",
-            text(&build.stdout),
-            text(&build.stderr)
+            text(&pycc_scratch::lf(&build.stdout)),
+            text(&pycc_scratch::lf(&build.stderr))
         );
         let run = Command::new(&binary).output().expect("binary runs");
         assert_same(name, mode, &run, &cpython);
@@ -97,8 +97,8 @@ fn assert_matches_cpython(name: &str) {
     assert!(
         build.status.success(),
         "pycc build --ext of {name} failed:\n{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     let run = Command::new(oracle())
         .current_dir(&ext_dir)
@@ -115,7 +115,7 @@ fn assert_check_fails(name: &str, source: &str, expected: &str) {
     let path = dir.join(format!("{name}.py"));
     std::fs::write(&path, source).expect("write source");
     let check = pycc(&["check".as_ref(), path.as_os_str()]);
-    let stderr = text(&check.stderr) + &text(&check.stdout);
+    let stderr = text(&pycc_scratch::lf(&check.stderr)) + &text(&pycc_scratch::lf(&check.stdout));
     assert!(!check.status.success(), "{name}: pycc check should fail");
     assert!(
         stderr.contains(expected),

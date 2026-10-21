@@ -29,7 +29,7 @@ fn pycc() -> Command {
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
 }
 
 fn source(dir: &Path, body: &str) -> PathBuf {
@@ -141,7 +141,7 @@ fn a_program_without_a_cpython_import_stays_native_with_no_sidecar() {
     // included (no `.exe` suffix is appended).
     let exe = dir.join("app");
     let run = Command::new(&exe).output().expect("the native binary runs");
-    assert_eq!(run.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&run.stdout), b"42\n");
     #[cfg(not(windows))]
     {
         let nm = Command::new("nm")
@@ -150,7 +150,7 @@ fn a_program_without_a_cpython_import_stays_native_with_no_sidecar() {
             .output()
             .expect("nm runs");
         assert!(nm.status.success(), "{}", stderr_of(&nm));
-        let undefined = String::from_utf8_lossy(&nm.stdout);
+        let undefined = pycc_scratch::lf(&*String::from_utf8_lossy(&nm.stdout));
         for symbol in undefined.split_whitespace() {
             let name = symbol.trim_start_matches('_');
             assert!(
@@ -210,7 +210,7 @@ fn build_embedded(dir: &Path, body: &str) -> PathBuf {
         .output()
         .expect("the oracle runs");
     assert_eq!(
-        String::from_utf8_lossy(&version.stdout).trim(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&version.stdout)).trim(),
         format!("Python {recorded}")
     );
     executable
@@ -229,12 +229,12 @@ fn cpython(python: &Path, script: &Path, envs: &[(&str, &Path)]) -> Output {
 #[cfg(not(windows))]
 fn assert_same(pycc_run: &Output, cpython_run: &Output) {
     assert_eq!(
-        String::from_utf8_lossy(&pycc_run.stdout),
-        String::from_utf8_lossy(&cpython_run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&pycc_run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&cpython_run.stdout)),
         "stderr: {}",
         stderr_of(pycc_run)
     );
-    assert_eq!(pycc_run.stdout, cpython_run.stdout);
+    assert_eq!(pycc_scratch::lf(&pycc_run.stdout), pycc_scratch::lf(&cpython_run.stdout));
     assert_eq!(pycc_run.status.code(), cpython_run.status.code());
 }
 
@@ -400,7 +400,7 @@ fn the_embeddable_root_list_matches_cpython_byte_for_byte() {
         ])
         .output()
         .expect("the oracle lists its roots");
-    let expected: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+    let expected: Vec<String> = pycc_scratch::lf(&*String::from_utf8_lossy(&listed.stdout))
         .lines()
         .map(str::to_owned)
         .collect();

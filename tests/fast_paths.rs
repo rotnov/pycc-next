@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn rendered(output: &Output) -> String {
@@ -19,7 +19,7 @@ fn rendered(output: &Output) -> String {
         "status: {}\nstdout:\n{}\nstderr:\n{}",
         output.status,
         stdout(output),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 

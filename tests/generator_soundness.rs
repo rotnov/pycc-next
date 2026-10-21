@@ -56,8 +56,8 @@ fn build_and_run(dir: &ScratchDir, path: &Path, release: bool) -> Output {
     assert!(
         build.status.success(),
         "{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     Command::new(&out).output().expect("the program runs")
 }
@@ -72,8 +72,8 @@ fn sends_and_helper_stop_iterations_match_cpython() {
         let dir = ScratchDir::new("generator_soundness").expect("scratch");
         let ours = build_and_run(&dir, &fixture(name), release);
         let theirs = python().arg(fixture(name)).output().expect("python3 runs");
-        assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs");
-        assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
+        assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)), "stdout differs");
+        assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)));
         assert_eq!(ours.status.code(), theirs.status.code());
     }
 }
@@ -88,8 +88,8 @@ fn a_function_returning_a_generator_is_not_one() {
         let dir = ScratchDir::new("generator_returned").expect("scratch");
         let ours = build_and_run(&dir, &fixture(name), release);
         let theirs = python().arg(fixture(name)).output().expect("python3 runs");
-        assert!(theirs.status.success(), "{}", text(&theirs.stderr));
-        assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs");
+        assert!(theirs.status.success(), "{}", text(&pycc_scratch::lf(&theirs.stderr)));
+        assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)), "stdout differs");
         assert_eq!(ours.status.code(), theirs.status.code());
     }
 }
@@ -109,7 +109,7 @@ fn sending_none_to_a_generator_taking_ints_is_a_type_error() {
         .arg(&path)
         .output()
         .expect("pycc should spawn");
-    let output = format!("{}{}", text(&out.stdout), text(&out.stderr));
+    let output = format!("{}{}", text(&pycc_scratch::lf(&out.stdout)), text(&pycc_scratch::lf(&out.stderr)));
     assert!(!out.status.success(), "{output}");
     assert!(
         output.contains("error[T0021]: `send()` to a generator taking `int` values, got `None`"),
@@ -153,11 +153,11 @@ def main() -> None:\n    a = gs()\n    b = gn()\n    try:\n        next(a)\n    
             let path = dir.join("subject.py");
             std::fs::write(&path, format!("{GENERATORS}{body}")).expect("write");
             let ours = build_and_run(&dir, &path, release);
-            assert_eq!(text(&ours.stdout), "", "{body}");
+            assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), "", "{body}");
             assert!(
-                last_line(&ours.stderr).starts_with(message),
+                last_line(&pycc_scratch::lf(&ours.stderr)).starts_with(message),
                 "{body}: {}",
-                text(&ours.stderr)
+                text(&pycc_scratch::lf(&ours.stderr))
             );
             assert_eq!(ours.status.code(), Some(1), "{body}");
         }
@@ -170,16 +170,16 @@ def main() -> None:\n    a = gs()\n    b = gn()\n    try:\n        next(a)\n    
 fn none_typed_slots_match_cpython_in_both_profiles() {
     let name = "generator_none_slots.py";
     let theirs = python().arg(fixture(name)).output().expect("python3 runs");
-    assert!(theirs.status.success(), "{}", text(&theirs.stderr));
+    assert!(theirs.status.success(), "{}", text(&pycc_scratch::lf(&theirs.stderr)));
     for release in [false, true] {
         let dir = ScratchDir::new("generator_soundness_none").expect("scratch");
         let ours = build_and_run(&dir, &fixture(name), release);
         assert_eq!(
-            text(&ours.stdout),
-            text(&theirs.stdout),
+            text(&pycc_scratch::lf(&ours.stdout)),
+            text(&pycc_scratch::lf(&theirs.stdout)),
             "stdout differs (release: {release})"
         );
-        assert!(ours.status.success(), "{}", text(&ours.stderr));
+        assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
         let Ok(memcheck) = Command::new("valgrind")
             .args(["-q", "--error-exitcode=99", "--leak-check=no"])
             .arg(dir.join("prog"))
@@ -191,7 +191,7 @@ fn none_typed_slots_match_cpython_in_both_profiles() {
         assert!(
             memcheck.status.success(),
             "memcheck (release: {release}): {}",
-            text(&memcheck.stderr)
+            text(&pycc_scratch::lf(&memcheck.stderr))
         );
     }
 }

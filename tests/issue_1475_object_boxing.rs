@@ -32,11 +32,11 @@ fn host_python() -> Command {
 }
 
 fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 fn write(dir: &Path, file: &str, body: &str) -> PathBuf {
@@ -451,7 +451,7 @@ fn a_native_value_boxes_into_a_foreign_annotation_in_an_embedded_executable() {
         .output()
         .expect("CPython runs the oracle program");
     assert_eq!(stdout_of(&oracle), "3\n1/2\nNone\n2.5 s True\n2\ns\nNone\n");
-    assert_eq!(embedded.stdout, oracle.stdout);
+    assert_eq!(pycc_scratch::lf(&embedded.stdout), pycc_scratch::lf(&oracle.stdout));
 }
 
 /// Builds `body` as an `--ext` module with no interpreter reachable, so the

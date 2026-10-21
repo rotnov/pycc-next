@@ -73,20 +73,20 @@ fn matches_cpython(name: &str, flags: &[&str], stdin: &str) -> String {
         assert!(
             build.status.success(),
             "{}{}",
-            text(&build.stdout),
-            text(&build.stderr)
+            text(&pycc_scratch::lf(&build.stdout)),
+            text(&pycc_scratch::lf(&build.stderr))
         );
-        report = text(&build.stderr);
+        report = text(&pycc_scratch::lf(&build.stderr));
         let ours = run_with_stdin(Command::new(&out), stdin);
         let mut theirs = python();
         theirs.arg(fixture(name));
         let theirs = run_with_stdin(theirs, stdin);
         assert_eq!(
-            text(&ours.stdout),
-            text(&theirs.stdout),
+            text(&pycc_scratch::lf(&ours.stdout)),
+            text(&pycc_scratch::lf(&theirs.stdout)),
             "stdout differs ({name})"
         );
-        assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr), "{name}");
+        assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)), "{name}");
         assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
     }
     report
@@ -110,8 +110,8 @@ fn ext_matches_cpython(name: &str, source: &str, program: &str) {
     assert!(
         build.status.success(),
         "{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     std::fs::remove_file(built.join(format!("{name}.py"))).expect("remove the source");
     let run = |dir: &Path| {
@@ -125,12 +125,12 @@ fn ext_matches_cpython(name: &str, source: &str, program: &str) {
     let ours = run(&built);
     let theirs = run(&plain);
     assert_eq!(
-        text(&ours.stdout),
-        text(&theirs.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&theirs.stdout)),
         "stdout differs: {}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
-    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)));
     assert_eq!(ours.status.code(), theirs.status.code());
 }
 
@@ -143,7 +143,7 @@ fn check(source: &str) -> String {
         .arg(&path)
         .output()
         .expect("pycc should spawn");
-    format!("{}{}", text(&out.stdout), text(&out.stderr))
+    format!("{}{}", text(&pycc_scratch::lf(&out.stdout)), text(&pycc_scratch::lf(&out.stderr)))
 }
 
 /// Functions rebinding module globals they declare `global` (augmented,

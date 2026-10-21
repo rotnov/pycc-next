@@ -46,8 +46,8 @@ fn assert_checks(entry: &Path) {
         .arg(entry.to_str().unwrap())
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stderr = String::from_utf8_lossy(&result.stderr);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout));
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr));
     assert!(
         result.status.success(),
         "pycc check should accept the program, got {:?}\nstdout: {stdout}\nstderr: {stderr}",
@@ -65,8 +65,8 @@ fn assert_runs_and_prints(entry: &Path, expected_stdout: &str) {
         .arg(entry.to_str().unwrap())
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stderr = String::from_utf8_lossy(&result.stderr);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout));
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr));
     assert!(
         result.status.success(),
         "pycc run should succeed, got {:?}\nstdout: {stdout}\nstderr: {stderr}",
@@ -167,8 +167,8 @@ fn a_non_conforming_argument_is_still_t0021() {
         .unwrap();
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr))
     );
     assert_eq!(
         result.status.code(),

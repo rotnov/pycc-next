@@ -57,8 +57,8 @@ print(xs[4611686018427387904])
     );
     let stderr_and_stdout = format!(
         "{}{}",
-        String::from_utf8_lossy(&check_output.stdout),
-        String::from_utf8_lossy(&check_output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&check_output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&check_output.stderr))
     );
     assert!(
         stderr_and_stdout.contains("T0051"),

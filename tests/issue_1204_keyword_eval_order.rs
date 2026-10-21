@@ -34,7 +34,7 @@ fn build_and_run(dir: &ScratchDir, name: &str, source: &str) -> String {
         output.status.success(),
         "the built program failed for {name}"
     );
-    String::from_utf8(output.stdout).unwrap()
+    String::from_utf8(pycc_scratch::lf(&output.stdout)).unwrap()
 }
 
 /// `g` announces each value it produces, so the output records the order
@@ -50,8 +50,8 @@ fn an_out_of_order_keyword_call_with_side_effects_keeps_the_capability_rejection
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let mut rendered = String::from_utf8_lossy(&output.stdout).into_owned();
-    rendered.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut rendered = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    rendered.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     assert!(
         rendered.contains("error[C0001]: keyword call arguments are not supported yet")
             && rendered.contains("bad.py:8:1"),

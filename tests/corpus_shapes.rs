@@ -65,15 +65,15 @@ fn matches_cpython(name: &str, flags: &[&str], stdin: &str) {
     assert!(
         build.status.success(),
         "{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     let ours = run_with_stdin(Command::new(&out), stdin);
     let mut theirs = python();
     theirs.arg(fixture(name));
     let theirs = run_with_stdin(theirs, stdin);
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs");
-    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)), "stdout differs");
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)));
     assert_eq!(ours.status.code(), theirs.status.code());
 }
 
@@ -190,7 +190,7 @@ fn a_name_holding_two_types_at_one_read_is_still_refused() {
     .unwrap();
     let output = pycc().arg("check").arg(&source).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    let text = text(&output.stdout);
+    let text = text(&pycc_scratch::lf(&output.stdout));
     assert!(text.contains("T0023"), "{text}");
 }
 
@@ -207,7 +207,7 @@ fn a_local_shadowing_math_refuses_a_table_typed_math_call() {
     .unwrap();
     let output = pycc().arg("check").arg(&source).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    let text = text(&output.stdout);
+    let text = text(&pycc_scratch::lf(&output.stdout));
     assert!(text.contains("C0001"), "{text}");
     assert!(text.contains("not the stdlib `math` module"), "{text}");
 }

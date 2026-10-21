@@ -34,8 +34,8 @@ fn last_line(bytes: &[u8]) -> String {
 }
 
 fn assert_same_as_cpython(ours: &Output, theirs: &Output) {
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs");
-    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)), "stdout differs");
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)));
     assert_eq!(ours.status.code(), theirs.status.code());
 }
 
@@ -53,7 +53,7 @@ fn every_list_element_type_matches_cpython() {
         ])
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = Command::new(&out).output().expect("the program should run");
     let theirs = python()
         .arg(fixture())
@@ -80,7 +80,7 @@ fn every_list_element_type_matches_cpython_inside_an_ext_module() {
         .arg("--ext")
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = python()
         .args(["-c", "import generic_list"])
         .current_dir(&*dir)
@@ -105,7 +105,7 @@ fn check_fails(label: &str, source: &str) -> String {
         .output()
         .expect("pycc should spawn");
     assert!(!output.status.success(), "{source} was accepted");
-    text(&output.stdout) + &text(&output.stderr)
+    text(&pycc_scratch::lf(&output.stdout)) + &text(&pycc_scratch::lf(&output.stderr))
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn a_float_list_benchmark_shape_matches_cpython() {
         .arg("--release")
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = Command::new(&out).output().expect("the program should run");
     let theirs = python().arg(&path).output().expect("python3 should spawn");
     assert_same_as_cpython(&ours, &theirs);

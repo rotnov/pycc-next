@@ -174,9 +174,9 @@ jobs:
     timeout-minutes: 240
     # Git Bash, so the same scripts as on Linux and macOS run here.
     defaults: { run: { shell: bash } }
-    # The CPython oracle in UTF-8 mode: piped, it would otherwise encode
-    # stdout in the ANSI code page, where pycc's programs write UTF-8
-    # (docs/DEVIATIONS.md).
+    # UTF-8 mode, for CPython and the native programs alike (without it both
+    # write the ANSI code page): the tests compare with UTF-8 text, and
+    # tests/text_stdio.rs checks the ANSI code page itself.
     env: { PYTHONUTF8: "1" }
     steps:
       - uses: actions/checkout@v4

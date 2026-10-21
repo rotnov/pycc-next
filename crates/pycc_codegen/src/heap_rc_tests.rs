@@ -38,10 +38,10 @@ fn run_memcheck_clean(name: &str, body: Vec<MirStmt>) -> Vec<u8> {
         assert!(
             checked.status.success(),
             "memcheck errors:\n{}",
-            String::from_utf8_lossy(&checked.stderr)
+            pycc_scratch::lf(&*String::from_utf8_lossy(&checked.stderr))
         );
     }
-    plain.stdout
+    pycc_scratch::lf(&plain.stdout)
 }
 
 /// `xs.append((xs := [...]) and "d")`-shaped MIR: the walrus inside the

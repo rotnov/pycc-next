@@ -22,7 +22,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn rendered(output: &Output) -> String {
@@ -30,7 +30,7 @@ fn rendered(output: &Output) -> String {
         "status: {}\nstdout:\n{}\nstderr:\n{}",
         output.status,
         stdout(output),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 
@@ -92,13 +92,13 @@ fn an_uncaught_bigint_error_matches_cpython() {
         assert_eq!(compiled.status.code(), Some(1), "{}", rendered(&compiled));
         assert_eq!(oracle.status.code(), Some(1), "{}", rendered(&oracle));
         assert_eq!(stdout(&compiled), stdout(&oracle), "{name}");
-        let stderr = String::from_utf8_lossy(&compiled.stderr);
+        let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&compiled.stderr));
         assert_eq!(
             stderr.trim_end().lines().last(),
             Some(last_line),
             "{stderr}"
         );
-        let oracle_stderr = String::from_utf8_lossy(&oracle.stderr);
+        let oracle_stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&oracle.stderr));
         assert_eq!(oracle_stderr.trim_end().lines().last(), Some(last_line));
     }
 }

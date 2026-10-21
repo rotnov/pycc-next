@@ -62,13 +62,13 @@ fn the_reproduction_checks_clean_and_runs() {
     let checked = check(&entry);
     assert_eq!(checked.status.code(), Some(0));
     assert!(
-        checked.stdout.is_empty(),
+        pycc_scratch::lf(&checked.stdout).is_empty(),
         "{}",
-        String::from_utf8_lossy(&checked.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&checked.stdout))
     );
     let output = build_and_run(&dir, &entry, "basic");
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"21\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"21\n");
 }
 
 #[test]
@@ -88,7 +88,7 @@ print(7 / 2)
     assert_eq!(check(&entry).status.code(), Some(0));
     let output = build_and_run(&dir, &entry, "multi");
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3.5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3.5\n");
 }
 
 /// A project directory with its own `__future__.py`: before D-229 the
@@ -110,9 +110,9 @@ fn a_sibling_dunder_future_module_is_never_loaded() {
         checked.status.code(),
         Some(0),
         "{}",
-        String::from_utf8_lossy(&checked.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&checked.stdout))
     );
     let output = build_and_run(&dir, &entry, "main");
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }

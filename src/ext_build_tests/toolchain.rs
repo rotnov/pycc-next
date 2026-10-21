@@ -518,7 +518,7 @@ fn a_shadow_sysconfig_in_the_build_directory_never_runs_during_the_probe() {
         .current_dir(&*dir)
         .output()
         .expect("run the host interpreter");
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     let ran = dir.join("sysconfig.py.ran").exists();
     assert!(output.status.success(), "{output:?}");
     assert!(!ran, "the planted sysconfig.py executed");

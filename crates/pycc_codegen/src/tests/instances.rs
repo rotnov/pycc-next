@@ -39,7 +39,7 @@ fn dict_literal_construction_codegens_and_runs() {
     let bin_path = dir.join("dict_literal_and_len");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn class_instantiation_attribute_and_method_call_codegens_and_runs() {
     let bin_path = dir.join("class_instantiation_attribute_and_method_call");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n2\n");
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn bool_float_and_str_typed_attribute_slots_round_trip_correctly() {
     let bin_path = dir.join("bool_float_str_attribute_slots");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n2.5\nhi\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n2.5\nhi\n");
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn a_str_attribute_read_twice_and_then_reassigned_does_not_use_after_free() {
     let bin_path = dir.join("str_attribute_read_twice_and_reassigned");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"hi\nhi\nbye\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"hi\nhi\nbye\n");
 }
 
 #[test]
@@ -620,7 +620,7 @@ fn a_function_returning_an_instance_codegens_and_runs() {
     let bin_path = dir.join("a_function_returning_an_instance");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n");
 }
 
 #[test]
@@ -695,7 +695,7 @@ fn instantiating_a_class_at_module_scope_with_a_truthiness_check_codegens_and_ru
     let bin_path = dir.join("class_instance_truthiness");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]

@@ -25,13 +25,13 @@ fn check(label: &str, flags: &[&str]) {
         .args(flags)
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    assert!(!text(&build.stderr).contains("fallback:"), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    assert!(!text(&pycc_scratch::lf(&build.stderr)).contains("fallback:"), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let run = Command::new(&binary).output().expect("the binary runs");
     let oracle = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     let expected = Command::new(oracle).arg(&fixture).output().expect("python3 should spawn");
-    assert!(run.status.success(), "{}", text(&run.stderr));
-    assert_eq!(text(&run.stdout), text(&expected.stdout));
+    assert!(run.status.success(), "{}", text(&pycc_scratch::lf(&run.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&expected.stdout)));
 }
 
 #[test]

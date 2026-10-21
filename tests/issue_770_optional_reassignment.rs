@@ -49,16 +49,16 @@ fn assert_builds_and_prints(tag: &str, source: &str, expected: &str) {
     assert!(
         build.status.success(),
         "pycc build should succeed for `{tag}`; stderr: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&out).output().unwrap();
     assert!(
         run.status.success(),
         "the built binary for `{tag}` should run successfully; stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         expected,
         "unexpected stdout for `{tag}`"
     );

@@ -37,12 +37,12 @@ fn build_and_run(category: &str, source: &str) -> String {
         .arg(&exe)
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{source}: {}", text(&build.stderr));
+    assert!(build.status.success(), "{source}: {}", text(&pycc_scratch::lf(&build.stderr)));
     let run: Output = Command::new(&exe)
         .output()
         .expect("the program should spawn");
-    assert!(run.status.success(), "{source}: {}", text(&run.stderr));
-    text(&run.stdout)
+    assert!(run.status.success(), "{source}: {}", text(&pycc_scratch::lf(&run.stderr)));
+    text(&pycc_scratch::lf(&run.stdout))
 }
 
 fn fixture(name: &str) -> String {
@@ -117,12 +117,12 @@ fn an_imported_base_runs_the_subclass_override() {
         .arg(&exe)
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let run = Command::new(&exe)
         .output()
         .expect("the program should spawn");
-    assert!(run.status.success(), "{}", text(&run.stderr));
-    assert_eq!(text(&run.stdout), "1 2\n");
+    assert!(run.status.success(), "{}", text(&pycc_scratch::lf(&run.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "1 2\n");
 }
 
 /// A copy's diagnostic is attributed to the file that defines the origin
@@ -152,7 +152,7 @@ fn a_copy_diagnostic_names_the_origin_file() {
         .output()
         .expect("pycc should spawn");
     assert!(!output.status.success());
-    let rendered = format!("{}{}", text(&output.stdout), text(&output.stderr));
+    let rendered = format!("{}{}", text(&pycc_scratch::lf(&output.stdout)), text(&pycc_scratch::lf(&output.stderr)));
     assert!(rendered.contains("\"T0022\""), "{rendered}");
     assert!(
         rendered.contains("while compiling `A.me` inherited by subclass `B`"),
@@ -199,8 +199,8 @@ fn check_json_fails(category: &str, source: &str) -> String {
         .output()
         .expect("pycc should spawn");
     assert!(!output.status.success(), "{source} was accepted");
-    let mut rendered = text(&output.stdout);
-    rendered.push_str(&text(&output.stderr));
+    let mut rendered = text(&pycc_scratch::lf(&output.stdout));
+    rendered.push_str(&text(&pycc_scratch::lf(&output.stderr)));
     rendered
 }
 
@@ -282,12 +282,12 @@ fn an_exception_raised_in_a_copy_names_the_method_frame() {
         .arg(&exe)
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let run = Command::new(&exe)
         .output()
         .expect("the program should spawn");
     assert_eq!(run.status.code(), Some(1));
-    let stderr = text(&run.stderr);
+    let stderr = text(&pycc_scratch::lf(&run.stderr));
     assert!(stderr.contains("in g\n"), "{stderr}");
     assert!(stderr.ends_with("ValueError: boom\n"), "{stderr}");
 }
@@ -339,15 +339,15 @@ fn a_hosted_subclass_runs_its_receiver_exact_copies() {
         .arg("--ext")
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
         .arg("-c")
         .arg(EXT_SCRIPT)
         .current_dir(&*dir)
         .output()
         .expect("python3 should spawn");
-    assert!(run.status.success(), "{}", text(&run.stderr));
-    assert_eq!(text(&run.stdout), "2 1 7 1 20 10\n3 1 2 1 False\n");
+    assert!(run.status.success(), "{}", text(&pycc_scratch::lf(&run.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "2 1 7 1 20 10\n3 1 2 1 False\n");
 }
 
 const STR_MIXIN: &str =

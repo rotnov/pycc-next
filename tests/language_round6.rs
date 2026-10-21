@@ -63,11 +63,11 @@ fn last_line(bytes: &[u8]) -> String {
 
 fn same_run(ours: &Output, theirs: &Output, name: &str) {
     assert_eq!(
-        without_addresses(&text(&ours.stdout)),
-        without_addresses(&text(&theirs.stdout)),
+        without_addresses(&text(&pycc_scratch::lf(&ours.stdout))),
+        without_addresses(&text(&pycc_scratch::lf(&theirs.stdout))),
         "stdout differs ({name})"
     );
-    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr), "{name}");
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)), "{name}");
     assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
 }
 
@@ -92,10 +92,10 @@ fn matches_cpython(name: &str, flags: &[&str]) -> String {
         assert!(
             build.status.success(),
             "{}{}",
-            text(&build.stdout),
-            text(&build.stderr)
+            text(&pycc_scratch::lf(&build.stdout)),
+            text(&pycc_scratch::lf(&build.stderr))
         );
-        report = text(&build.stderr);
+        report = text(&pycc_scratch::lf(&build.stderr));
         let ours = Command::new(&out).output().expect("the program runs");
         let theirs = python().arg(fixture(name)).output().expect("python3 runs");
         same_run(&ours, &theirs, name);
@@ -123,8 +123,8 @@ fn ext_matches_cpython(module: &str, driver: &str) {
     assert!(
         build.status.success(),
         "{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     std::fs::remove_file(built.join(format!("{module}.py"))).expect("remove the source");
     let run = |dir: &Path| {
@@ -138,12 +138,12 @@ fn ext_matches_cpython(module: &str, driver: &str) {
     let ours = run(&built);
     let theirs = run(&plain);
     assert_eq!(
-        text(&ours.stdout),
-        text(&theirs.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&theirs.stdout)),
         "stdout differs: {}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
-    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)));
     assert_eq!(ours.status.code(), theirs.status.code());
 }
 
@@ -167,7 +167,7 @@ fn check(source: &str) -> String {
         .arg(&path)
         .output()
         .expect("pycc should spawn");
-    format!("{}{}", text(&out.stdout), text(&out.stderr))
+    format!("{}{}", text(&pycc_scratch::lf(&out.stdout)), text(&pycc_scratch::lf(&out.stderr)))
 }
 
 /// `send()`/`throw()`/`close()`, `yield` as a value, `return value`,

@@ -29,7 +29,7 @@ fn pycc() -> Command {
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
 }
 
 fn build_ext(dir: &Path, module: &str, body: &str) {
@@ -56,7 +56,7 @@ fn run_python(dir: &Path, script: &str) {
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         stderr_of(&run)
     );
 }

@@ -36,13 +36,13 @@ fn matches_cpython(fixture: &str, hits: bool) {
         .arg(dir.join(&module))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     std::fs::remove_file(dir.join(format!("{module}.py"))).expect("remove the source");
     let oracle = python()
         .arg(&source)
         .output()
         .expect("python3 should spawn");
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
     let probe = format!(
         "import ctypes, sys\nimport {module}\n\
          hits = ctypes.CDLL({module}.__file__).pycc_ext_attr_cache_hits()\n\
@@ -57,10 +57,10 @@ fn matches_cpython(fixture: &str, hits: bool) {
             run.env_remove("PYCC_NO_ATTR_CACHE");
         }
         let ours = run.output().expect("python3 should spawn");
-        let stderr = text(&ours.stderr);
+        let stderr = text(&pycc_scratch::lf(&ours.stderr));
         assert_eq!(
-            text(&ours.stdout),
-            text(&oracle.stdout),
+            text(&pycc_scratch::lf(&ours.stdout)),
+            text(&pycc_scratch::lf(&oracle.stdout)),
             "caches off: {off}\n{stderr}"
         );
         if off || hits {

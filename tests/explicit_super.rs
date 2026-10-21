@@ -27,7 +27,7 @@ fn an_explicit_super_in_a_lifted_method_compiles() {
         .arg(dir.join("supers"))
         .output()
         .expect("pycc should spawn");
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     assert!(!report.contains("method `Child."), "{report}");
     let oracle = python()
@@ -41,9 +41,9 @@ fn an_explicit_super_in_a_lifted_method_compiles() {
         .output()
         .expect("python3 should spawn");
     assert_eq!(
-        text(&ours.stdout),
-        text(&oracle.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&oracle.stdout)),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
 }

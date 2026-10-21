@@ -20,8 +20,10 @@
 //! provably dead (see the sweep module's docs for the exact safety bar).
 
 mod sweep;
+mod text_mode;
 
 pub use sweep::{SweepReport, sweep_stale_roots};
+pub use text_mode::{LineText, lf};
 
 use std::fs::File;
 use std::io;

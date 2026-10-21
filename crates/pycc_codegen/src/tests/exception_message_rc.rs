@@ -132,9 +132,9 @@ fn run(mir: &MirModule, stem: &str) -> Output {
 }
 
 fn assert_output(output: &Output, stdout: &str, exit_code: i32) {
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
         stdout,
         "stderr: {stderr}"
     );
@@ -398,7 +398,7 @@ fn an_uncaught_reraise_after_printing_the_binding_renders_the_message() {
     ))]);
     let output = run(&mir, "exception_message_uncaught_reraise");
     assert_output(&output, "boom\n", 1);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.ends_with("ValueError: boom\n"),
         "unexpected stderr: {stderr}"
@@ -433,7 +433,7 @@ fn a_cause_with_a_local_message_owns_its_own_reference() {
     ]);
     let output = run(&mir, "exception_message_local_cause");
     assert_output(&output, "", 1);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("KeyError: 'cause'\n"),
         "unexpected stderr: {stderr}"

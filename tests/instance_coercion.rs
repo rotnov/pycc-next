@@ -30,7 +30,7 @@ fn an_object_passed_for_a_compiled_class_parameter_is_its_instance() {
         .arg(dir.join("coerced"))
         .output()
         .expect("pycc should spawn");
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     assert!(!report.contains("function `via`"), "{report}");
     let oracle = python()
@@ -48,12 +48,12 @@ fn an_object_passed_for_a_compiled_class_parameter_is_its_instance() {
         .output()
         .expect("python3 should spawn");
     assert_eq!(
-        text(&ours.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
         format!(
             "{}use() argument 1 must be coerced.Conf, not int\n",
-            text(&oracle.stdout)
+            text(&pycc_scratch::lf(&oracle.stdout))
         ),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
 }

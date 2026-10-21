@@ -42,7 +42,7 @@ fn frozenset_constants_take_the_native_specialization() {
         .env("PYCC_DUMP_LLVM", &ll)
         .output()
         .expect("pycc should spawn");
-    let report = text(&out.stderr);
+    let report = text(&pycc_scratch::lf(&out.stderr));
     assert!(out.status.success(), "{report}");
     assert!(
         report.contains("specialized: `skip_chars` runs natively when called with chars: frozenset[str]"),
@@ -71,7 +71,7 @@ fn frozenset_constants_take_the_native_specialization() {
             .expect("python")
     };
     let (ours, oracle) = (run(&ext), run(&src));
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-    assert!(ours.status.success(), "{}", text(&ours.stderr));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+    assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
 }

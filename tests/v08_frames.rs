@@ -59,23 +59,23 @@ fn compiled_frames_behave_as_cpython_frames() {
         .arg(compiled.join("v08_frames_ext"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = run_driver(&compiled, &compiled);
     let oracle = run_driver(&plain, &plain);
     assert_eq!(
-        text(&ours.stdout),
-        text(&oracle.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&oracle.stdout)),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
     assert_eq!(
         ours.status.code(),
         oracle.status.code(),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
     if cfg!(unix) {
-        assert!(text(&ours.stdout).contains("memory constant"));
+        assert!(text(&pycc_scratch::lf(&ours.stdout)).contains("memory constant"));
     }
 }
 
@@ -98,14 +98,14 @@ fn an_embedded_programs_traceback_matches_cpython() {
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = Command::new(dir.join("app"))
         .current_dir(&*dir)
         .output()
         .unwrap();
     let oracle = python().current_dir(&*dir).arg("app.py").output().unwrap();
     assert_eq!(ours.status.code(), oracle.status.code());
-    assert_eq!(text(&ours.stderr), text(&oracle.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stderr)), text(&pycc_scratch::lf(&oracle.stderr)));
 }
 
 /// A native program prints CPython's traceback, its source lines read from
@@ -130,7 +130,7 @@ fn a_native_programs_traceback_reads_its_source_at_run_time() {
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let binary = std::fs::read(dir.join("app")).unwrap();
     for needle in ["pycc-v08-marker-in-a-comment", "total += ratio(100, x)"] {
         assert!(
@@ -141,9 +141,9 @@ fn a_native_programs_traceback_reads_its_source_at_run_time() {
     let ours = Command::new(dir.join("app")).current_dir(&*dir).output().unwrap();
     let oracle = python().current_dir(&*dir).arg("app.py").output().unwrap();
     assert_eq!(ours.status.code(), oracle.status.code());
-    let expected = text(&oracle.stderr);
+    let expected = text(&pycc_scratch::lf(&oracle.stderr));
     assert!(expected.contains("pycc-v08-marker-in-a-comment"), "{expected}");
-    assert_eq!(text(&ours.stderr), expected);
+    assert_eq!(text(&pycc_scratch::lf(&ours.stderr)), expected);
     // Without the source file: the File lines and the exception only.
     std::fs::remove_file(&source).unwrap();
     let ours = Command::new(dir.join("app")).current_dir(&*dir).output().unwrap();
@@ -152,5 +152,5 @@ fn a_native_programs_traceback_reads_its_source_at_run_time() {
         .filter(|line| !line.starts_with("    "))
         .map(|line| format!("{line}\n"))
         .collect();
-    assert_eq!(text(&ours.stderr), kept);
+    assert_eq!(text(&pycc_scratch::lf(&ours.stderr)), kept);
 }

@@ -43,15 +43,15 @@ fn run(tag: &str, rest: &str) -> String {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&binary).output().expect("the binary runs");
     assert!(
         run.status.success(),
         "{}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
-    String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n")
 }
 
 /// The receiver runs before the arguments and the call, and a receiver

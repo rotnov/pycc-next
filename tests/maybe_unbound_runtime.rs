@@ -40,8 +40,8 @@ fn build_and_run(dir: &Path, source: &Path, flags: &[&str]) -> Output {
     assert!(
         build.status.success(),
         "pycc build {flags:?} failed:\n{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     Command::new(&binary).output().expect("the binary runs")
 }
@@ -54,11 +54,11 @@ fn last_line(bytes: &[u8]) -> String {
 fn possibly_unbound_reads_raise_like_cpython() {
     let dir = ScratchDir::new("maybe_unbound_fixture").expect("scratch");
     let expected = Command::new(oracle()).arg(fixture()).output().expect("python3");
-    assert!(expected.status.success(), "{}", text(&expected.stderr));
+    assert!(expected.status.success(), "{}", text(&pycc_scratch::lf(&expected.stderr)));
     for flags in [&[][..], &["--non-strict"][..]] {
         let run = build_and_run(&dir, &fixture(), flags);
-        assert!(run.status.success(), "{flags:?}: {}", text(&run.stderr));
-        assert_eq!(text(&run.stdout), text(&expected.stdout), "{flags:?}");
+        assert!(run.status.success(), "{flags:?}: {}", text(&pycc_scratch::lf(&run.stderr)));
+        assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&expected.stdout)), "{flags:?}");
     }
 }
 
@@ -78,9 +78,9 @@ fn an_uncaught_unbound_read_ends_the_program_like_cpython() {
         std::fs::write(&source_path, source).expect("write the source");
         let run = build_and_run(&dir, &source_path, &[]);
         let expected = Command::new(oracle()).arg(&source_path).output().expect("python3");
-        assert_eq!(text(&run.stdout), text(&expected.stdout), "{name}");
+        assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&expected.stdout)), "{name}");
         assert_eq!(run.status.code(), Some(1), "{name}");
-        assert_eq!(last_line(&run.stderr), last_line(&expected.stderr), "{name}");
+        assert_eq!(last_line(&pycc_scratch::lf(&run.stderr)), last_line(&pycc_scratch::lf(&expected.stderr)), "{name}");
     }
 }
 
@@ -98,7 +98,7 @@ fn a_possibly_unbound_name_shadowing_a_builtin_keeps_t0041() {
         std::fs::write(&path, source).expect("write the source");
         let check = pycc().arg("check").arg(&path).output().expect("pycc should spawn");
         assert!(!check.status.success(), "{source}");
-        let rendered = format!("{}{}", text(&check.stdout), text(&check.stderr));
+        let rendered = format!("{}{}", text(&pycc_scratch::lf(&check.stdout)), text(&pycc_scratch::lf(&check.stderr)));
         assert!(rendered.contains("error[T0041]"), "{source}: {rendered}");
     }
 }

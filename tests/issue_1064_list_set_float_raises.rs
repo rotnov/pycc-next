@@ -59,13 +59,13 @@ fn build_and_run(tag: &str, source: &str) -> (bool, String, String) {
     assert!(
         build.status.success(),
         "build failed: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&out).output().unwrap();
     (
         run.status.success(),
-        String::from_utf8_lossy(&run.stdout).to_string(),
-        String::from_utf8_lossy(&run.stderr).to_string(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).to_string(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).to_string(),
     )
 }
 
@@ -407,7 +407,7 @@ fn the_converted_raises_reach_a_cpython_host_as_catchable_exceptions() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let script = "import pycc_1064_mod as m\n\
          try:\n\
@@ -440,7 +440,7 @@ fn the_converted_raises_reach_a_cpython_host_as_catchable_exceptions() {
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }

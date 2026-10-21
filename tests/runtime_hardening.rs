@@ -47,15 +47,15 @@ fn build(dir: &ScratchDir, source: &Path) -> PathBuf {
     assert!(
         build.status.success(),
         "{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     out
 }
 
 fn assert_same(ours: &Output, theirs: &Output) {
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs");
-    assert_eq!(ours.status.code(), theirs.status.code(), "{}", text(&ours.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)), "stdout differs");
+    assert_eq!(ours.status.code(), theirs.status.code(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }
 
 /// Builds fixture `name`, runs it and CPython with `seed` as
@@ -105,7 +105,7 @@ fn str_hashes_are_randomized_per_process_by_default() {
             .output()
             .expect("the program should run");
         assert!(out.status.success());
-        text(&out.stdout)
+        text(&pycc_scratch::lf(&out.stdout))
     };
     let first = run();
     assert!(
@@ -141,7 +141,7 @@ fn comparing_containers_of_instances_is_a_compile_error() {
             .arg(dir.join(name))
             .output()
             .expect("pycc should spawn");
-        let stdout = text(&out.stdout) + &text(&out.stderr);
+        let stdout = text(&pycc_scratch::lf(&out.stdout)) + &text(&pycc_scratch::lf(&out.stderr));
         assert!(!out.status.success(), "{name}: {stdout}");
         assert!(
             stdout.contains("error[T0021]")

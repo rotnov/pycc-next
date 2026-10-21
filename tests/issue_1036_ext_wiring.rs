@@ -36,7 +36,7 @@ fn write(dir: &Path, body: &str) -> std::path::PathBuf {
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
 }
 
 /// An include directory that exists but holds no `Python.h`, so the build
@@ -187,7 +187,7 @@ fn a_native_build_of_the_same_source_is_unaffected_by_the_new_flag() {
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", stderr_of(&build));
     let run = Command::new(&out).output().expect("the binary should run");
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)), "42\n");
 }
 
 /// The three review findings whose symptoms only exist in a *loaded*
@@ -242,7 +242,7 @@ fn a_built_ext_module_keeps_its_globals_collapses_a_rebind_and_preserves_oserror
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         stderr_of(&run)
     );
 }
@@ -298,7 +298,7 @@ fn a_built_ext_module_imports_and_answers_through_the_int_boundary() {
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         stderr_of(&run)
     );
 }

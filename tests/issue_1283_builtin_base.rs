@@ -49,7 +49,7 @@ fn assert_check_matches(stem: &str, extra: &[&str], extension: &str) {
         .output()
         .unwrap();
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
         expected,
         "{stem}: output did not match its .{extension} fixture"
     );
@@ -118,10 +118,10 @@ fn cpython_accepts_the_frozenset_subclass_and_pycc_refuses_it_honestly() {
         .expect("python3 should spawn");
     // CPython's text-mode stdout writes `\r\n` on Windows.
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         "ok\n",
         "stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 
     let dir = ScratchDir::new("1283_ext").expect("scratch");
@@ -138,8 +138,8 @@ fn cpython_accepts_the_frozenset_subclass_and_pycc_refuses_it_honestly() {
         .expect("pycc should spawn");
     let output = format!(
         "{}{}",
-        String::from_utf8_lossy(&build.stdout),
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     assert_eq!(build.status.code(), Some(1), "{output}");
     assert_eq!(

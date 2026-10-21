@@ -73,5 +73,5 @@ fn build_with_a_relative_path_and_neighboring_pycc_toml_still_produces_a_running
     );
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }

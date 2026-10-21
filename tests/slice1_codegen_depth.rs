@@ -202,7 +202,7 @@ while i < 11:
 ";
     let output = build_and_run("fib_recursive", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n");
 }
 
 #[test]
@@ -227,7 +227,7 @@ print(fib_iter(100))
 ";
     let output = build_and_run("fib_iterative_bigint", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"354224848179261915075\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"354224848179261915075\n");
 }
 
 #[test]
@@ -243,7 +243,7 @@ print(2.0 ** 0.5)
 ";
     let output = build_and_run("power_expression_libm", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1024\n1.4142135623730951\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1024\n1.4142135623730951\n");
 }
 
 #[test]
@@ -268,7 +268,7 @@ print(\"b\" != \"c\")
     let output = build_and_run("float_str_ge_ne_values", source);
     assert!(output.status.success());
     assert_eq!(
-        output.stdout,
+        pycc_scratch::lf(&output.stdout),
         b"True\nFalse\nFalse\nTrue\nTrue\nFalse\nFalse\nTrue\n"
     );
 }
@@ -281,7 +281,7 @@ print(1.0 // 0.1)
 ";
     let output = build_and_run("numeric_runtime_edges", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"9000000000000000000\n9.0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"9000000000000000000\n9.0\n");
 }
 
 #[test]
@@ -307,7 +307,7 @@ for value in range(0, 2, false_int()):
         !output.status.success(),
         "a marker-bearing False range step must fail as numeric zero"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("range() arg 3 must not be zero"),
         "expected pycc_rt's honest zero-step message, got: {stderr}"
@@ -328,7 +328,7 @@ print(minimum // (0 - 1))
 ";
     let output = build_and_run("floor_div_promotes", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"4611686018427387904\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"4611686018427387904\n");
 }
 
 #[test]
@@ -350,7 +350,7 @@ print(0.0 ** (0.0 - 1e309))
 ";
     let output = build_and_run("float_pow_non_finite", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1.0\ninf\ninf\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1.0\ninf\ninf\n");
 }
 
 #[test]
@@ -374,7 +374,7 @@ fizzbuzz(15)
     let output = build_and_run("fizzbuzz", source);
     assert!(output.status.success());
     assert_eq!(
-        output.stdout,
+        pycc_scratch::lf(&output.stdout),
         b"1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz\n"
     );
 }
@@ -403,7 +403,7 @@ for j in range(1, 4):
 ";
     let output = build_and_run("for_range_basic", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"10\n1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"10\n1\n2\n3\n");
 }
 
 #[test]
@@ -424,7 +424,7 @@ print(f\"{label} = {n}\")
 ";
     let output = build_and_run("fstring_basic", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"answer = 7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"answer = 7\n");
 }
 
 #[test]
@@ -454,7 +454,7 @@ print(\"x\", 1, 2.5, True)
 ";
     let output = build_and_run("print_multi_arg_mixed_types", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"x 1 2.5 True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"x 1 2.5 True\n");
 }
 
 #[test]
@@ -471,7 +471,7 @@ print(float(2.5))
 ";
     let output = build_and_run("float_int_bool_float", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3.0\n1.0\n2.5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3.0\n1.0\n2.5\n");
 }
 
 #[test]
@@ -488,7 +488,7 @@ print(f(float(3)))
 ";
     let output = build_and_run("float_nested_call_argument", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3.0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3.0\n");
 }
 
 #[test]
@@ -505,7 +505,7 @@ print(to_float(3))
 ";
     let output = build_and_run("float_d086_boundary", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3.0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3.0\n");
 }
 
 #[test]
@@ -525,7 +525,7 @@ print(float(5))
 ";
     let output = build_and_run("float_user_defined_shadow", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"6\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"6\n");
 }
 
 #[test]
@@ -551,9 +551,9 @@ print(float(fib_iter(100)) == 354224848179261915075.0, fib_iter(100) + 1.5 > 3.5
     assert!(
         output.status.success(),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "True True\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)), "True True\n");
 }
 
 #[test]
@@ -618,7 +618,7 @@ print(f\"{returns_none()}\")
     // `0`/`1`/`2`, because range consumes its bool operands numerically rather
     // than forwarding their identity.
     assert_eq!(
-        output.stdout,
+        pycc_scratch::lf(&output.stdout),
         b"5\nglobal\n2\nTrue\nFalse\n4\n9\n11\n0\n1\n2\nTrue\nNone\n"
     );
 }
@@ -670,12 +670,12 @@ captured = read_value(False)
     let output = build_and_run("maybe_bound_integer_local", source);
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains(
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains(
             "UnboundLocalError: cannot access local variable 'value' where it is not associated \
              with a value"
         ),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 
@@ -693,12 +693,12 @@ captured = read_label(False)
     let output = build_and_run("maybe_bound_string_local", source);
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains(
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains(
             "UnboundLocalError: cannot access local variable 'label' where it is not associated \
              with a value"
         ),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 
@@ -713,11 +713,11 @@ print(item)
     // empty), so its read is checked at run time: CPython's `NameError`.
     let output = build_and_run("empty_range_target", source);
     assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
+    assert!(pycc_scratch::lf(&output.stdout).is_empty());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("NameError: name 'item' is not defined"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).contains("NameError: name 'item' is not defined"),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 
@@ -735,7 +735,7 @@ print(empty)
 ";
     let output = build_and_run("range_target_pre_bound", source_pre_bound);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n");
 
     let source_loop_only = "\
 for i in range(3):
@@ -744,7 +744,7 @@ print(i)
 ";
     let output = build_and_run("range_target_loop_only", source_loop_only);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"0\n1\n2\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n1\n2\n2\n");
 }
 
 #[test]
@@ -823,7 +823,7 @@ while row < height:
 ";
     let output = build_and_run("mandelbrot_ascii", source);
     assert!(output.status.success());
-    let text = String::from_utf8(output.stdout).expect("output should be valid UTF-8");
+    let text = String::from_utf8(pycc_scratch::lf(&output.stdout)).expect("output should be valid UTF-8");
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 20, "expected exactly `height` printed lines");
     let palette: &[char] = &[' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
@@ -855,7 +855,7 @@ fn pep_0526_annotated_assignments_compile_and_run_correctly() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", fixture.display()));
     let output = build_and_run("pep_0526_var_annotations", &source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 #[test]
@@ -882,7 +882,7 @@ _run()
 ";
     let output = build_and_run("list_int_thin_slice", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"4\n10\n40\n10\n20\n30\n40\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"4\n10\n40\n10\n20\n30\n40\n");
 }
 
 #[test]
@@ -913,7 +913,7 @@ print(_total())
 ";
     let output = build_and_run("list_module_global", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"4\n3\n10\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"4\n3\n10\n");
 }
 
 #[test]
@@ -923,7 +923,7 @@ fn none_typed_list_append_result_from_issue_242_matches_cpython() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", fixture.display()));
     let output = build_and_run("issue_242_none_local", &source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"None\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n");
 }
 
 #[test]
@@ -936,7 +936,7 @@ fn issue_145_print_evaluates_all_args_before_output() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", fixture.display()));
     let output = build_and_run("issue_145_print_arg_order", &source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n1 3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n1 3\n");
 }
 
 #[test]
@@ -957,7 +957,7 @@ print(_first())
 ";
     let output = build_and_run("issue_239_list_subscript", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -974,7 +974,7 @@ print(_first())
 ";
     let output = build_and_run("issue_239_list_subscript_annotated", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -997,7 +997,7 @@ print(_pop())
 ";
     let output = build_and_run("issue_239_list_pop", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -1010,7 +1010,7 @@ print(len(xs))
 ";
     let output = build_and_run("none_typed_module_global", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"None\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n2\n");
 }
 
 #[test]
@@ -1026,7 +1026,7 @@ _run()
 ";
     let output = build_and_run("none_typed_set_add_result", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"None\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n2\n");
 }
 
 #[test]
@@ -1088,7 +1088,7 @@ _run()
 ";
     let output = build_and_run("list_iteration_rereads_len", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n3\n");
 }
 
 #[test]
@@ -1112,7 +1112,7 @@ for v in xs:
 ";
     let output = build_and_run("list_iteration_name_rebound", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n");
 }
 
 #[test]
@@ -1127,7 +1127,7 @@ print(i)
 ";
     let output = build_and_run("list_target_lifetime", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n2\n3\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n3\n3\n");
 }
 
 #[test]
@@ -1141,7 +1141,7 @@ fn converting_a_list_to_str_renders_it_like_cpython() {
         let source = format!("def _run() -> None:\n    xs = [1, 2]\n    {expression}\n\n_run()\n");
         let output = build_and_run(label, &source);
         assert!(output.status.success(), "`{expression}` must run");
-        assert_eq!(output.stdout, b"[1, 2]\n", "`{expression}`");
+        assert_eq!(pycc_scratch::lf(&output.stdout), b"[1, 2]\n", "`{expression}`");
     }
 }
 
@@ -1159,9 +1159,9 @@ def _run() -> None:
 _run()
 ";
     let output = build_and_run("list_append_bigint_stores", source);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{}", pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
         "9000000000000000000 [1, 9000000000000000000]\n"
     );
 }
@@ -1181,8 +1181,8 @@ _run()
 ";
     let output = build_and_run("list_index_out_of_range", source);
     assert!(!output.status.success(), "`xs[-4]` is out of range");
-    assert_eq!(output.stdout, b"3\n");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("IndexError: list index out of range"),
         "expected CPython's bounds message, got: {stderr}"
@@ -1210,7 +1210,7 @@ print(f())
 ";
     let output = build_and_run("pep_0526_bool_initializer_widens_to_int", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n");
 }
 
 #[test]
@@ -1229,7 +1229,7 @@ print(x[\"b\"])
 ";
     let output = build_and_run("dict_literal_len_and_get", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n2\n");
 }
 
 #[test]
@@ -1249,7 +1249,7 @@ print(len(x))
 ";
     let output = build_and_run("dict_set_item_update_and_append", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"5\n1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n1\n2\n");
 }
 
 #[test]
@@ -1268,7 +1268,7 @@ for k in x:
 ";
     let output = build_and_run("dict_module_global_iteration_order", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"b\na\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"b\na\n");
 }
 
 #[test]
@@ -1308,7 +1308,7 @@ print(len(d))
 ";
     let output = build_and_run("dict_variable_key_survives_reassignment", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n");
 }
 
 #[test]
@@ -1325,9 +1325,9 @@ print(len(d))
 ";
     let output = build_and_run("dict_grows_during_for_k_in_d_iteration", source);
     assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stdout, b"a\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"a\n");
     assert!(
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
             .contains("RuntimeError: dictionary changed size during iteration")
     );
 }
@@ -1352,7 +1352,7 @@ print(len(x))
 ";
     let output = build_and_run("set_literal_len_dedup", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 #[test]
@@ -1367,7 +1367,7 @@ for v in x:
 ";
     let output = build_and_run("set_for_iteration_order", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n");
 }
 
 // -- PR-12 Task 9 (D-118): `list[int]` slicing end to end through the real
@@ -1390,7 +1390,7 @@ for v in ys:
 ";
     let output = build_and_run("slice_basic_explicit_bounds", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n20\n30\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n20\n30\n");
 }
 
 #[test]
@@ -1414,7 +1414,7 @@ for v in c:
     let output = build_and_run("slice_every_omitted_bound_form", source);
     assert!(output.status.success());
     assert_eq!(
-        output.stdout,
+        pycc_scratch::lf(&output.stdout),
         b"10\n20\n30\n30\n40\n50\n10\n20\n30\n40\n50\n"
     );
 }
@@ -1435,7 +1435,7 @@ for v in zs:
 ";
     let output = build_and_run("slice_step_greater_than_one", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"0\n2\n4\n0\n2\n4\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n2\n4\n0\n2\n4\n");
 }
 
 #[test]
@@ -1457,7 +1457,7 @@ for v in ys:
 ";
     let output = build_and_run("slice_independent_of_mutation", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n2\n3\n99\n1\n2\n3\n77\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n3\n99\n1\n2\n3\n77\n");
 }
 
 #[test]
@@ -1490,7 +1490,7 @@ for v in ys:
 ";
     let output = build_and_run("slice_omitted_stop_reflects_start_side_effect", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n1\n2\n99\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n1\n2\n99\n");
 }
 
 #[test]
@@ -1504,5 +1504,5 @@ print(len(ys), ys)
 ";
     let output = build_and_run("slice_negative_start", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1 [3]\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1 [3]\n");
 }

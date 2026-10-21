@@ -36,7 +36,7 @@ fn text(bytes: &[u8]) -> String {
 }
 
 fn rendered(output: &Output) -> String {
-    format!("{}{}", text(&output.stdout), text(&output.stderr))
+    format!("{}{}", text(&pycc_scratch::lf(&output.stdout)), text(&pycc_scratch::lf(&output.stderr)))
 }
 
 /// The last line of a traceback: the exception CPython reports.
@@ -70,8 +70,8 @@ fn native_matches_cpython(case: &str, extra: &[&str]) {
         .output()
         .expect("python3 should spawn");
     assert_eq!(
-        text(&compiled.stdout),
-        text(&oracle.stdout),
+        text(&pycc_scratch::lf(&compiled.stdout)),
+        text(&pycc_scratch::lf(&oracle.stdout)),
         "{case} {extra:?}"
     );
     assert_eq!(
@@ -81,8 +81,8 @@ fn native_matches_cpython(case: &str, extra: &[&str]) {
     );
     if !oracle.status.success() {
         assert_eq!(
-            exception_line(&compiled.stderr),
-            exception_line(&oracle.stderr),
+            exception_line(&pycc_scratch::lf(&compiled.stderr)),
+            exception_line(&pycc_scratch::lf(&oracle.stderr)),
             "{case} {extra:?}"
         );
     }
@@ -112,12 +112,12 @@ fn ext_matches_cpython(case: &str) {
         .current_dir(fixture(case))
         .output()
         .expect("python3 should spawn");
-    assert_eq!(text(&compiled.stdout), text(&oracle.stdout), "{case}");
+    assert_eq!(text(&pycc_scratch::lf(&compiled.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{case}");
     assert_eq!(compiled.status.code(), oracle.status.code(), "{case}");
     if !oracle.status.success() {
         assert_eq!(
-            exception_line(&compiled.stderr),
-            exception_line(&oracle.stderr),
+            exception_line(&pycc_scratch::lf(&compiled.stderr)),
+            exception_line(&pycc_scratch::lf(&oracle.stderr)),
             "{case}"
         );
     }

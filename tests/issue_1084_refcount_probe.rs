@@ -58,11 +58,11 @@ fn normalize_newlines(bytes: &[u8]) -> String {
 }
 
 fn stdout_of(output: &Output) -> String {
-    normalize_newlines(&output.stdout)
+    normalize_newlines(&pycc_scratch::lf(&output.stdout))
 }
 
 fn stderr_of(output: &Output) -> String {
-    normalize_newlines(&output.stderr)
+    normalize_newlines(&pycc_scratch::lf(&output.stderr))
 }
 
 /// Every exported attribute is mortal, for the PEP 683 reason in this file's

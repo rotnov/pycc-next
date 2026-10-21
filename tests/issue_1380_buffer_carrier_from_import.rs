@@ -29,11 +29,11 @@ fn oracle() -> Command {
 }
 
 fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 /// Writes each `(relative path, text)` file under `dir`, creating parents.

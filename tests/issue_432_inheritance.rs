@@ -37,7 +37,7 @@ fn method_override_resolves_to_derived_class() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"2\n",
+        pycc_scratch::lf(&output.stdout), b"2\n",
         "the derived class's override should be called"
     );
 }
@@ -67,7 +67,7 @@ fn inherited_method_is_callable_on_derived_instance() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"10\n11\n",
+        pycc_scratch::lf(&output.stdout), b"10\n11\n",
         "the inherited method should return the base class's attribute, and the derived method should use it too"
     );
 }
@@ -95,7 +95,7 @@ fn inherited_init_is_used_for_instantiation() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"42\n84\n",
+        pycc_scratch::lf(&output.stdout), b"42\n84\n",
         "inherited __init__ should initialize the base attribute, and both inherited and derived methods should work"
     );
 }
@@ -124,7 +124,7 @@ fn inherited_attribute_is_accessible_on_derived_instance() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"10\n99\n100\n",
+        pycc_scratch::lf(&output.stdout), b"10\n99\n100\n",
         "inherited attribute should be writable and readable on the derived instance"
     );
 }
@@ -152,7 +152,7 @@ fn override_decorator_on_valid_override_builds_and_runs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"2\n",
+        pycc_scratch::lf(&output.stdout), b"2\n",
         "the @override-decorated method should be called"
     );
 }
@@ -177,7 +177,7 @@ fn override_decorator_on_nonexistent_method_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for @override on a non-existent method"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0031"),
         "stderr should contain T0031, got: {stderr}"
@@ -203,7 +203,7 @@ fn unknown_base_class_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for an unknown base class"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "stderr should contain C0001, got: {stderr}"
@@ -231,12 +231,12 @@ fn class_without_init_and_no_base_init_builds_and_runs() {
     assert!(
         output.status.success(),
         "pycc build should succeed for a class without __init__, got: {}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 
     let run = Command::new(&out).output().unwrap();
     assert_eq!(
-        run.stdout, b"1\n",
+        pycc_scratch::lf(&run.stdout), b"1\n",
         "the implicitly-constructed instance should dispatch its own method"
     );
 }
@@ -265,7 +265,7 @@ fn diamond_inheritance_resolves_via_c3_mro() {
     let output = Command::new(&out).output().unwrap();
     // C3 MRO for D is [D, B, C, A]. B.f is found first (before C.f).
     assert_eq!(
-        output.stdout, b"2\n",
+        pycc_scratch::lf(&output.stdout), b"2\n",
         "D's MRO is [D, B, C, A], so B.f should be called"
     );
 }
@@ -295,7 +295,7 @@ fn inherited_method_reads_correct_slot_with_derived_attrs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"Rex\nRex\nLabrador\n",
+        pycc_scratch::lf(&output.stdout), b"Rex\nRex\nLabrador\n",
         "inherited method speak() should read the correct slot (name, not breed)"
     );
 }
@@ -318,7 +318,7 @@ fn generic_class_with_bases_is_rejected() {
         !output.status.success(),
         "pycc check should fail for a generic class with base classes"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("generic class") && stdout.contains("base classes"),
         "error should mention generic class with base classes, got: {stdout}"

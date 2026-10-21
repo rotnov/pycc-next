@@ -110,7 +110,7 @@ fn bare_except_codegen_builds_and_runs() {
     let bin_path = dir.join("bare_except");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"caught\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"caught\n");
     assert!(output.status.success());
 }
 
@@ -340,7 +340,7 @@ fn a_successful_multi_member_exception_group_construction_compiles_and_runs() {
     let bin_path = dir.join("successful_multi_member_exception_group");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"multi\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"multi\n");
     assert!(output.status.success());
 }
 
@@ -579,7 +579,7 @@ fn a_try_star_with_a_bound_handler_else_and_finally_compiles_and_runs() {
     let bin_path = dir.join("try_star_bound_handler_else_finally");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"boom\nfinally\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"boom\nfinally\n");
     assert!(output.status.success());
 }
 
@@ -621,7 +621,7 @@ fn a_try_star_else_that_falls_through_branches_to_finally() {
     let bin_path = dir.join("try_star_else_falls_through");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"try\nelse\nfinally\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"try\nelse\nfinally\n");
     assert!(output.status.success());
 }
 
@@ -781,7 +781,7 @@ fn a_try_star_without_a_finally_reraises_an_unmatched_remainder() {
     let bin_path = dir.join("try_star_no_finally_reraise");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
     assert!(
         !output.status.success(),
         "an unmatched remainder must propagate uncaught"

@@ -77,7 +77,7 @@ fn compiles_bool_arithmetic_promoted_to_int() {
     let bin_path = dir.join("bool_arith");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn compiles_an_if_test_on_a_float_expression() {
         let bin_path = dir.join("float_truthy");
         link_object_with_runtime(&obj_path, &bin_path);
         let output = Command::new(&bin_path).output().expect("binary should run");
-        assert_eq!(output.stdout, expected.as_bytes(), "test value {test}");
+        assert_eq!(pycc_scratch::lf(&output.stdout), expected.as_bytes(), "test value {test}");
     }
 }
 
@@ -571,7 +571,7 @@ fn a_repeated_string_prints_its_repetition() {
     let bin_path = dir.join("str_repeat_prints");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"ababab\n\nab\n\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"ababab\n\nab\n\n");
 }
 
 #[test]
@@ -651,7 +651,7 @@ fn a_string_comparison_result_is_correct_at_runtime() {
         link_object_with_runtime(&obj_path, &bin_path);
         let output = Command::new(&bin_path).output().expect("binary should run");
         assert_eq!(
-            output.stdout,
+            pycc_scratch::lf(&output.stdout),
             expected.as_bytes(),
             "comparing {left:?} < {right:?}"
         );
@@ -786,7 +786,7 @@ fn compiles_an_if_test_on_a_string_expression() {
         let bin_path = dir.join("str_truthy");
         link_object_with_runtime(&obj_path, &bin_path);
         let output = Command::new(&bin_path).output().expect("binary should run");
-        assert_eq!(output.stdout, expected.as_bytes(), "test value {test:?}");
+        assert_eq!(pycc_scratch::lf(&output.stdout), expected.as_bytes(), "test value {test:?}");
     }
 }
 

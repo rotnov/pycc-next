@@ -64,7 +64,7 @@ fn a_range_sourced_dict_comprehension_with_an_fstring_key_computes_every_entry()
     let bin_path = dir.join("dictcomp_range_fstring_key");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n0\n1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n0\n1\n2\n");
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn a_dict_sourced_dict_comprehension_builds_an_independent_copy_and_leaves_the_s
     let bin_path = dir.join("dictcomp_dict_source_independent_copy");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"10\n20\n2\n1\n1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"10\n20\n2\n1\n1\n2\n");
 }
 
 #[test]
@@ -230,7 +230,7 @@ fn a_list_sourced_dict_comprehension_with_a_filter_only_keeps_matching_entries()
     let bin_path = dir.join("dictcomp_list_with_filter");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n20\n30\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n20\n30\n");
 }
 
 #[test]
@@ -308,7 +308,7 @@ fn a_set_sourced_dict_comprehension_with_a_filter_only_keeps_matching_entries() 
     let bin_path = dir.join("dictcomp_set_with_filter");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n5\n6\n7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n5\n6\n7\n");
 }
 
 #[test]
@@ -380,7 +380,7 @@ fn a_dict_sourced_dict_comprehension_that_rebinds_its_own_source_name_reads_the_
     let bin_path = dir.join("dictcomp_self_referential_rebind");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n9\n9\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n9\n9\n");
 }
 
 #[test]
@@ -475,5 +475,5 @@ fn a_range_sourced_dict_comprehension_whose_bound_reads_its_own_rebound_target_u
     let bin_path = dir.join("dictcomp_self_referential_range_bound");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n0\n1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n0\n1\n2\n");
 }

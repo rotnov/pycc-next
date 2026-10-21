@@ -81,20 +81,20 @@ fn matches_cpython(name: &str, flags: &[&str]) -> String {
         assert!(
             build.status.success(),
             "{}{}",
-            text(&build.stdout),
-            text(&build.stderr)
+            text(&pycc_scratch::lf(&build.stdout)),
+            text(&pycc_scratch::lf(&build.stderr))
         );
-        report = text(&build.stderr);
+        report = text(&pycc_scratch::lf(&build.stderr));
         let ours = run_with_stdin(Command::new(&out), name);
         let mut oracle = python();
         oracle.arg(fixture(name));
         let theirs = run_with_stdin(oracle, name);
         assert_eq!(
-            text(&ours.stdout),
-            text(&theirs.stdout),
+            text(&pycc_scratch::lf(&ours.stdout)),
+            text(&pycc_scratch::lf(&theirs.stdout)),
             "stdout differs ({name})"
         );
-        assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr), "{name}");
+        assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)), "{name}");
         assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
     }
     report
@@ -119,7 +119,7 @@ fn refused(tag: &str, source: &str, flags: &[&str], code: &str, needle: &str) {
         .arg(&path)
         .output()
         .expect("pycc should spawn");
-    let rendered = text(&output.stdout);
+    let rendered = text(&pycc_scratch::lf(&output.stdout));
     assert_eq!(output.status.code(), Some(1), "{tag}: {rendered}");
     assert_eq!(rendered.matches("error[").count(), 1, "{tag}: {rendered}");
     assert!(
@@ -206,7 +206,7 @@ fn an_ext_module_keeps_t0001_for_an_unannotated_public_function() {
         .arg("--ext")
         .output()
         .expect("pycc should spawn");
-    let rendered = format!("{}{}", text(&output.stdout), text(&output.stderr));
+    let rendered = format!("{}{}", text(&pycc_scratch::lf(&output.stdout)), text(&pycc_scratch::lf(&output.stderr)));
     assert_eq!(output.status.code(), Some(1), "{rendered}");
     assert!(
         rendered.contains("parameter `x` of public function `f` needs a type annotation"),
@@ -253,12 +253,12 @@ fn a_definition_only_fallback_code_reads_is_kept() {
     assert!(
         build.status.success(),
         "{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     let ours = Command::new(&out).output().expect("the program runs");
     let theirs = python().arg(&path).output().expect("python3 runs");
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)));
     assert_eq!(ours.status.code(), theirs.status.code());
 }
 

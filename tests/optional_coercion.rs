@@ -29,7 +29,7 @@ fn an_object_reaches_an_optional_scalar_slot() {
         .arg(dir.join("optional_coerced"))
         .output()
         .expect("pycc should spawn");
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     for name in ["lookup", "name_of", "ratio", "flag", "via"] {
         assert!(!report.contains(&format!("function `{name}`")), "{report}");
@@ -49,12 +49,12 @@ fn an_object_reaches_an_optional_scalar_slot() {
         .output()
         .expect("python3 should spawn");
     assert_eq!(
-        text(&ours.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
         format!(
             "{}return value must be int, not str\n",
-            text(&oracle.stdout)
+            text(&pycc_scratch::lf(&oracle.stdout))
         ),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
 }

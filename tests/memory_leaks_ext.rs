@@ -27,7 +27,7 @@ fn a_hosted_loop_calling_compiled_functions_runs_in_constant_memory() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
         .arg("-c")
@@ -36,10 +36,10 @@ fn a_hosted_loop_calling_compiled_functions_runs_in_constant_memory() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
+        run.status.success() && matches!(&pycc_scratch::lf(&run.stdout)[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }
 
@@ -69,7 +69,7 @@ fn a_local_read_from_an_object_slot_outlives_the_instance() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let driver = "import pycc_memory_obj_slot as m\nfor _ in range(50):\n    \
                   r = m.take([1, 2, 3])\n    assert r == [1, 2, 3], r\nprint('ok')\n";
@@ -80,10 +80,10 @@ fn a_local_read_from_an_object_slot_outlives_the_instance() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
+        run.status.success() && matches!(&pycc_scratch::lf(&run.stdout)[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }
 
@@ -107,7 +107,7 @@ fn temporaries_live_when_an_exception_unwinds_are_released() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
         .arg("-c")
@@ -116,10 +116,10 @@ fn temporaries_live_when_an_exception_unwinds_are_released() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
+        run.status.success() && matches!(&pycc_scratch::lf(&run.stdout)[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }
 
@@ -249,7 +249,7 @@ fn generator_throw_paths_release_their_frames() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     std::fs::remove_file(&src).expect("remove the source");
     let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
@@ -259,10 +259,10 @@ fn generator_throw_paths_release_their_frames() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
+        run.status.success() && matches!(&pycc_scratch::lf(&run.stdout)[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }
 
@@ -460,7 +460,7 @@ fn exceptions_crossing_the_boundary_are_freed() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()))
         .arg("-c")
@@ -469,10 +469,10 @@ fn exceptions_crossing_the_boundary_are_freed() {
         .output()
         .expect("python3 should spawn");
     assert!(
-        run.status.success() && matches!(&run.stdout[..], b"ok\n" | b"ok\r\n"),
+        run.status.success() && matches!(&pycc_scratch::lf(&run.stdout)[..], b"ok\n" | b"ok\r\n"),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }
 

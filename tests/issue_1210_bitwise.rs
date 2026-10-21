@@ -19,8 +19,8 @@ fn pycc() -> Command {
 }
 
 fn rendered(output: &Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    text.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     text.replace("\r\n", "\n")
 }
 
@@ -152,9 +152,9 @@ fn an_uncaught_negative_shift_count_exits_with_value_error() {
          print(\"after\")\n",
     );
     assert_eq!(run.status.code(), Some(1), "{}", rendered(&run));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "before\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)), "before\n");
     assert!(
-        String::from_utf8_lossy(&run.stderr).contains("ValueError: negative shift count"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).contains("ValueError: negative shift count"),
         "{}",
         rendered(&run)
     );
@@ -177,7 +177,7 @@ fn a_value_bitwise_or_is_an_integer_expression() {
     );
     assert!(run.status.success(), "{}", rendered(&run));
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         "6\n6\n24 3 2 1\nFalse True False\nTrue 1 2\n"
     );
 }
@@ -237,7 +237,7 @@ fn hosted_bitwise_exports_match_cpython() {
         .expect("python3 should spawn");
     assert!(run.status.success(), "{}", rendered(&run));
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         "ok\n"
     );
 }

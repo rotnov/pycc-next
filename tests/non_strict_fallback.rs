@@ -37,13 +37,13 @@ fn fixture(dir: &Path, as_name: &str) -> PathBuf {
 /// The same run as CPython's: stdout, exit status and the exception line.
 fn assert_matches(ours: &Output, oracle: &Output) {
     assert_eq!(
-        text(&ours.stdout),
-        text(&oracle.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&oracle.stdout)),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
     assert_eq!(ours.status.code(), oracle.status.code());
-    assert_eq!(last_line(&ours.stderr), last_line(&oracle.stderr));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&oracle.stderr)));
 }
 
 /// Which top-level definitions fell back, from `--report-fallbacks`.
@@ -84,8 +84,8 @@ fn compiled_and_fallback_code_match_cpython_in_a_native_build() {
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    assert_report(&text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    assert_report(&text(&pycc_scratch::lf(&build.stderr)));
     let ours = Command::new(dir.join("app"))
         .output()
         .expect("run the build");
@@ -105,8 +105,8 @@ fn compiled_and_fallback_code_match_cpython_in_an_ext_module() {
         .arg(compiled.join("fbm"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    assert_report(&text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    assert_report(&text(&pycc_scratch::lf(&build.stderr)));
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new("fallback_ext_src").expect("scratch");
     fixture(&plain, "fbm.py");
@@ -143,7 +143,7 @@ fn a_function_the_boundary_cannot_publish_falls_back() {
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}{}", text(&build.stdout), text(&build.stderr));
+    assert!(build.status.success(), "{}{}", text(&pycc_scratch::lf(&build.stdout)), text(&pycc_scratch::lf(&build.stderr)));
     let run = |command: &mut Command| {
         let mut child = command
             .stdin(std::process::Stdio::piped())
@@ -183,8 +183,8 @@ fn a_module_level_fallback_block_shares_globals_with_compiled_code() {
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    let report = text(&build.stderr);
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(report.contains("fallback: statement at"), "{report}");
     assert!(!fell_back(&report, "inc"), "{report}");
     let ours = Command::new(dir.join("app"))
@@ -206,20 +206,20 @@ fn strict_mode_still_refuses_what_non_strict_runs_in_cpython() {
     let strict = pycc().arg("check").arg(&source).output().expect("spawn");
     assert_eq!(strict.status.code(), Some(1));
     assert!(
-        text(&strict.stdout).contains("error[C0001]"),
+        text(&pycc_scratch::lf(&strict.stdout)).contains("error[C0001]"),
         "{}",
-        text(&strict.stdout)
+        text(&pycc_scratch::lf(&strict.stdout))
     );
     let lenient = pycc()
         .args(["check", "--non-strict", "--report-fallbacks"])
         .arg(&source)
         .output()
         .expect("spawn");
-    assert!(lenient.status.success(), "{}", text(&lenient.stdout));
+    assert!(lenient.status.success(), "{}", text(&pycc_scratch::lf(&lenient.stdout)));
     assert!(
-        text(&lenient.stderr).contains("lifted: lambda `f.<locals>.<lambda>`"),
+        text(&pycc_scratch::lf(&lenient.stderr)).contains("lifted: lambda `f.<locals>.<lambda>`"),
         "{}",
-        text(&lenient.stderr)
+        text(&pycc_scratch::lf(&lenient.stderr))
     );
 }
 
@@ -236,8 +236,8 @@ fn a_syntax_error_is_reported_in_non_strict_mode() {
         .expect("spawn");
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        text(&output.stdout).contains("error[L0001]"),
+        text(&pycc_scratch::lf(&output.stdout)).contains("error[L0001]"),
         "{}",
-        text(&output.stdout)
+        text(&pycc_scratch::lf(&output.stdout))
     );
 }

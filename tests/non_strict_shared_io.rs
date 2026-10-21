@@ -64,16 +64,16 @@ fn oracle() -> Output {
     let mut command = python();
     command.arg(source);
     let output = run_with_stdin(command);
-    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(output.status.success(), "{}", text(&pycc_scratch::lf(&output.stderr)));
     output
 }
 
 fn assert_same(ours: &Output, oracle: &Output) {
     assert_eq!(
-        text(&ours.stdout),
-        text(&oracle.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&oracle.stdout)),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
     assert_eq!(ours.status.code(), oracle.status.code());
 }
@@ -89,8 +89,8 @@ fn native_and_fallback_io_interleave_like_cpython_in_an_embedded_build() {
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    let report = text(&build.stderr);
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    let report = text(&pycc_scratch::lf(&build.stderr));
     for name in ["ask", "echo_rest"] {
         assert!(
             report.contains(&format!("fallback: function `{name}` at ")),
@@ -112,7 +112,7 @@ fn native_and_fallback_io_interleave_like_cpython_in_an_ext_module() {
         .arg(dir.join("shared_io_mod"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     // No `-u`: the host's block-buffered `sys.stdout` is the only buffer.
     let mut host = python();

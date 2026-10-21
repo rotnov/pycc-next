@@ -36,11 +36,11 @@ fn host_python() -> Command {
 }
 
 fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 fn write(dir: &Path, file: &str, body: &str) -> PathBuf {
@@ -264,7 +264,7 @@ fn keys_and_comparisons_match_cpython_in_an_embedded_executable() {
         stdout_of(&oracle),
         "True True False False False\n7 8 2\n0 none False\n"
     );
-    assert_eq!(embedded.stdout, oracle.stdout);
+    assert_eq!(pycc_scratch::lf(&embedded.stdout), pycc_scratch::lf(&oracle.stdout));
 }
 
 /// An embedded executable installs the same slots, so a dunder it cannot

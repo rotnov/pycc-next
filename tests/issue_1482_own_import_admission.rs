@@ -22,11 +22,11 @@ fn pycc() -> Command {
 }
 
 fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 fn rendered(output: &Output) -> String {
@@ -166,7 +166,7 @@ fn calls_above_the_import_match_cpython_in_an_embedded_executable() {
     let (embedded, oracle) = run_both("embed_1482_own_import", EMBEDDED);
     assert_eq!(embedded.status.code(), Some(0), "{}", stderr_of(&embedded));
     assert_eq!(stdout_of(&oracle), "1\n1\n2\n");
-    assert_eq!(embedded.stdout, oracle.stdout);
+    assert_eq!(pycc_scratch::lf(&embedded.stdout), pycc_scratch::lf(&oracle.stdout));
 }
 
 /// Builds `source` into an embedded executable in a fresh scratch directory

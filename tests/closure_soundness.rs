@@ -44,7 +44,7 @@ fn build_and_compare(source: &str, flags: &[&str]) -> Option<()> {
         .output()
         .expect("pycc should spawn");
     if !build.status.success() {
-        let report = format!("{}{}", text(&build.stdout), text(&build.stderr));
+        let report = format!("{}{}", text(&pycc_scratch::lf(&build.stdout)), text(&pycc_scratch::lf(&build.stderr)));
         assert!(
             report.contains("error[") && build.status.code() == Some(1),
             "{source}\n{report}"
@@ -53,10 +53,10 @@ fn build_and_compare(source: &str, flags: &[&str]) -> Option<()> {
     }
     let ours = Command::new(&out).output().expect("the program should run");
     let theirs = python().arg(&path).output().expect("python3 should spawn");
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{source}");
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)), "{source}");
     assert_eq!(
-        last_line(&ours.stderr),
-        last_line(&theirs.stderr),
+        last_line(&pycc_scratch::lf(&ours.stderr)),
+        last_line(&pycc_scratch::lf(&theirs.stderr)),
         "{source}"
     );
     assert_eq!(ours.status.code(), theirs.status.code(), "{source}");
@@ -162,7 +162,7 @@ fn reserved_names_are_refused_or_run_in_cpython() {
             .arg(dir.join("subject"))
             .output()
             .expect("pycc should spawn");
-        let report = format!("{}{}", text(&build.stdout), text(&build.stderr));
+        let report = format!("{}{}", text(&pycc_scratch::lf(&build.stdout)), text(&pycc_scratch::lf(&build.stderr)));
         assert_eq!(build.status.code(), Some(1), "{source}\n{report}");
         assert!(report.contains("error[E0109]"), "{source}\n{report}");
         assert!(

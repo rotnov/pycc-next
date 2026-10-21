@@ -121,7 +121,7 @@ fn a_return_inside_a_for_range_body_returns_immediately_without_looping() {
     let bin_path = dir.join("for_range_return_inside_body");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n");
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn a_bool_argument_widens_to_int_when_the_parameter_is_declared_int() {
     let bin_path = dir.join("bool_arg_widens_to_int");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -237,7 +237,7 @@ fn a_bool_return_value_widens_to_int_when_the_function_declares_int() {
     let bin_path = dir.join("bool_return_widens_to_int");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn reassigning_an_int_local_with_a_bool_value_widens_it_to_int() {
     let bin_path = dir.join("reassign_bool_into_int");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -308,7 +308,7 @@ fn an_explicit_int_boundary_preserves_bool_identity_in_an_int_slot() {
     let bin_path = dir.join("int_boundary_bool_identity");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -356,7 +356,7 @@ fn bool_identity_survives_nested_int_forwarding_and_fstring_formatting() {
     let bin_path = dir.join("bool_identity_nested_fstring");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"value=True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"value=True\n");
 }
 
 #[test]
@@ -392,7 +392,7 @@ fn a_bool_dict_value_round_trips_with_identity_preserved() {
     let bin_path = dir.join("bool_dict_value_identity");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -418,7 +418,7 @@ fn a_print_call_used_as_a_value_prints_and_yields_none() {
     let bin_path = dir.join("print_result_nested");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]

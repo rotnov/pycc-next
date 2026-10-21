@@ -25,7 +25,7 @@ use std::process::{Command, Output};
 mod sha256;
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 fn write(path: &Path, bytes: &[u8]) {
@@ -94,7 +94,7 @@ fn query(python: &Path, code: &str) -> String {
         .output()
         .expect("spawn the interpreter");
     assert!(output.status.success(), "{}", stderr_of(&output));
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).trim().to_string()
 }
 
 /// Compiles `source` into the shared library `out`, linking `libs`, which
@@ -202,8 +202,8 @@ fn a_closure_needing_outside_natives_runs_from_the_sidecar_and_matches_cpython()
         .output()
         .expect("the embedded binary runs");
     assert_eq!(embedded.status.code(), Some(0), "{}", stderr_of(&embedded));
-    let stdout = String::from_utf8_lossy(&embedded.stdout).replace("\r\n", "\n");
-    let oracle_stdout = String::from_utf8_lossy(&oracle.stdout).replace("\r\n", "\n");
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&embedded.stdout)).replace("\r\n", "\n");
+    let oracle_stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&oracle.stdout)).replace("\r\n", "\n");
     assert_eq!(stdout, "42\n");
     assert_eq!(stdout, oracle_stdout);
 }

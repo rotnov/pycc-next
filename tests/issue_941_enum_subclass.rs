@@ -45,8 +45,8 @@ fn assert_enum_subclass_rejected(
         cmd.args(["-o", out.to_str().unwrap()]);
     }
     let result = cmd.output().unwrap();
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr));
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout));
     let combined = format!("{stdout}{stderr}");
     assert_eq!(
         result.status.code(),

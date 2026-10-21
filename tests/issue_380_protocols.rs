@@ -21,10 +21,10 @@ fn build_and_run(dir: &std::path::Path, name: &str, source: &str) -> (bool, Vec<
         .output()
         .unwrap();
     if !status.status.success() {
-        return (false, status.stdout, status.stderr);
+        return (false, pycc_scratch::lf(&status.stdout), pycc_scratch::lf(&status.stderr));
     }
     let run = Command::new(&out).output().unwrap();
-    (true, run.stdout, run.stderr)
+    (true, pycc_scratch::lf(&run.stdout), pycc_scratch::lf(&run.stderr))
 }
 
 // ===========================================================================
@@ -191,7 +191,7 @@ s: Drawable = Square()
         !out.status.success(),
         "pycc build should fail for non-conforming class"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stderr));
     assert!(
         stderr.contains("T0046"),
         "should emit T0046, got stderr: {stderr}"
@@ -234,7 +234,7 @@ s: IntProducer = StrProducer()
         !out.status.success(),
         "pycc build should fail for wrong return type"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stderr));
     assert!(
         stderr.contains("T0046"),
         "should emit T0046, got stderr: {stderr}"
@@ -271,7 +271,7 @@ n: Named = Anon()
         !out.status.success(),
         "pycc build should fail for missing attribute"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stderr));
     assert!(
         stderr.contains("T0046"),
         "should emit T0046, got stderr: {stderr}"
@@ -374,7 +374,7 @@ print(isinstance(c, Drawable))
         !out.status.success(),
         "pycc build should fail for isinstance against non-runtime_checkable protocol"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stderr));
     assert!(
         stderr.contains("runtime_checkable"),
         "should mention runtime_checkable, got: {stderr}"
@@ -414,7 +414,7 @@ print(issubclass(Circle, Drawable))
         !out.status.success(),
         "pycc build should fail for issubclass with a protocol"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stderr));
     assert!(
         stderr.contains("issubclass") && stderr.contains("protocol"),
         "should mention issubclass and protocol, got: {stderr}"
@@ -587,7 +587,7 @@ c = Cat()
         !out.status.success(),
         "pycc build should fail for unoverridden abstract method"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stderr));
     assert!(
         stderr.contains("abstract"),
         "should mention abstract, got: {stderr}"
@@ -624,7 +624,7 @@ a = Animal()
         !out.status.success(),
         "pycc build should fail for instantiating an abstract class"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stderr));
     assert!(
         stderr.contains("abstract"),
         "should mention abstract, got: {stderr}"
@@ -744,7 +744,7 @@ class C:
         !out.status.success(),
         "pycc build should fail for @runtime_checkable on non-protocol"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stderr));
     assert!(
         stderr.contains("runtime_checkable") && stderr.contains("protocol"),
         "should mention runtime_checkable and protocol, got: {stderr}"

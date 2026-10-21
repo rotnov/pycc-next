@@ -64,23 +64,23 @@ fn matches_cpython(name: &str) -> String {
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = run_with_stdin(Command::new(dir.join("app")), &stdin);
     let mut python = Command::new("python3");
     python.arg(&source);
     let oracle = run_with_stdin(python, &stdin);
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
     assert_eq!(
         ours.status.code(),
         oracle.status.code(),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
     assert_eq!(
-        text(&ours.stderr).lines().last(),
-        text(&oracle.stderr).lines().last()
+        text(&pycc_scratch::lf(&ours.stderr)).lines().last(),
+        text(&pycc_scratch::lf(&oracle.stderr)).lines().last()
     );
-    text(&build.stderr)
+    text(&pycc_scratch::lf(&build.stderr))
 }
 
 #[test]

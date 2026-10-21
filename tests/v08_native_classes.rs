@@ -43,9 +43,9 @@ fn fixture(name: &str, dir: &Path, as_name: &str) -> PathBuf {
 }
 
 fn assert_matches(ours: &Output, oracle: &Output) {
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
-    assert_eq!(ours.status.code(), oracle.status.code(), "{}", text(&ours.stderr));
-    assert_eq!(last_line(&ours.stderr), last_line(&oracle.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(ours.status.code(), oracle.status.code(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&oracle.stderr)));
 }
 
 /// Builds `source` with `flags`, asserting it builds and that no function,
@@ -59,7 +59,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
         .arg(out)
         .output()
         .expect("pycc should spawn");
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     for unit in ["fallback: function", "fallback: method", "fallback: class"] {
         assert!(!report.contains(unit), "nothing should run in CPython:\n{report}");
@@ -132,7 +132,7 @@ fn annotated_attribute_stores_strict() {
         .current_dir(&*dir)
         .output()
         .expect("python should spawn");
-    assert_eq!(text(&run.stdout), "c4:9 2\n", "{}", text(&run.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "c4:9 2\n", "{}", text(&pycc_scratch::lf(&run.stderr)));
     let bad = dir.join("bad.py");
     std::fs::write(
         &bad,
@@ -141,7 +141,7 @@ fn annotated_attribute_stores_strict() {
     )
     .unwrap();
     let check = pycc().arg("check").arg(&bad).output().expect("pycc should spawn");
-    let message = text(&check.stderr) + &text(&check.stdout);
+    let message = text(&pycc_scratch::lf(&check.stderr)) + &text(&pycc_scratch::lf(&check.stdout));
     assert!(!check.status.success(), "{message}");
     assert!(message.contains("T0025"), "{message}");
     assert!(message.contains("bad.py:6:"), "{message}");
@@ -191,8 +191,8 @@ fn inline_object_counts_balance_and_free() {
         .current_dir(&*oracle_dir)
         .output()
         .expect("python should spawn");
-    assert_eq!(text(&run.stdout), text(&oracle.stdout), "{}", text(&run.stderr));
-    assert_eq!(text(&run.stdout), "3999\n0 1000\n199999\n0 51000\nTrue\n");
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&run.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "3999\n0 1000\n199999\n0 51000\nTrue\n");
 }
 
 /// A non-strict function or method returning `T | None` is published
@@ -227,10 +227,10 @@ fn optional_results_cross_the_boundary() {
         .output()
         .expect("python should spawn");
     assert_eq!(
-        text(&run.stdout),
+        text(&pycc_scratch::lf(&run.stdout)),
         "1 3 None 4\na-b-c None 4 None\nTrue\n",
         "{}",
-        text(&run.stderr)
+        text(&pycc_scratch::lf(&run.stderr))
     );
 }
 
@@ -297,6 +297,6 @@ fn container_attributes_another_module_uses_are_shared() {
         .current_dir(&*dir)
         .output()
         .expect("python should spawn");
-    let expected = text(&oracle.stdout).replace("\nfunction\n", "\nmethod_descriptor\n");
-    assert_eq!(text(&ours.stdout), expected, "{}", text(&ours.stderr));
+    let expected = text(&pycc_scratch::lf(&oracle.stdout)).replace("\nfunction\n", "\nmethod_descriptor\n");
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), expected, "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }

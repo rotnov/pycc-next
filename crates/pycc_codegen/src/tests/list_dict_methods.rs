@@ -55,7 +55,7 @@ fn a_slice_with_all_three_bounds_present_returns_the_expected_sub_range() {
     let bin_path = dir.join("slice_all_bounds_present");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"20\n30\n40\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"20\n30\n40\n");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn a_slice_with_every_bound_omitted_defaults_to_the_whole_list_stepped_by_one() 
     let bin_path = dir.join("slice_all_bounds_omitted");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"10\n20\n30\n40\n50\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"10\n20\n30\n40\n50\n");
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn a_slice_with_only_a_step_present_skips_every_other_element() {
     let bin_path = dir.join("slice_step_only");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n2\n4\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n2\n4\n");
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn a_sliced_list_is_a_genuinely_independent_allocation_from_its_base() {
     let bin_path = dir.join("slice_result_is_independent");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n2\n3\n99\n1\n2\n3\n77\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n3\n99\n1\n2\n3\n77\n");
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn a_list_sourced_slice_that_rebinds_its_own_source_name_reads_the_pre_existing_
     let bin_path = dir.join("slice_self_referential_rebind");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n3\n");
 }
 
 // -- PR-12 Task 11 (D-119): `list.pop()`/`dict.get(key, default)`/
@@ -251,7 +251,7 @@ fn list_pop_removes_and_returns_the_last_element_and_shrinks_len() {
     let bin_path = dir.join("list_pop_basic");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n2\n");
 }
 
 #[test]
@@ -301,7 +301,7 @@ fn pop_twice_on_the_same_list_in_one_statement_removes_in_order() {
     let bin_path = dir.join("list_pop_twice_same_statement");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"5\n4\n1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n4\n1\n2\n3\n");
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn dict_get_or_default_on_a_present_key_returns_the_stored_value_codegens_and_ru
     let bin_path = dir.join("dict_get_or_default_present");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -368,7 +368,7 @@ fn dict_get_or_default_on_a_missing_key_returns_the_default_codegens_and_runs() 
     let bin_path = dir.join("dict_get_or_default_missing");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"-1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"-1\n");
 }
 
 #[test]
@@ -420,7 +420,7 @@ fn dict_get_or_default_nested_in_its_own_default_argument_resolves_correctly() {
     let bin_path = dir.join("dict_get_or_default_nested_default");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -470,7 +470,7 @@ fn function_redefinition_uses_unique_mangled_names() {
     // The second definition (which returns its argument) is the one
     // bound at call time, so foo(42) should print 42.
     assert_eq!(
-        output.stdout,
+        pycc_scratch::lf(&output.stdout),
         b"42
 "
     );
@@ -528,5 +528,5 @@ fn set_add_grows_the_set_and_a_repeated_value_still_dedups_codegens_and_runs() {
     let bin_path = dir.join("set_add_grows_and_dedups");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n3\n");
 }

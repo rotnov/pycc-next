@@ -41,11 +41,11 @@ fn check(paths: &[&str], json: bool) -> Output {
 }
 
 fn stdout(output: &Output) -> String {
-    String::from_utf8(output.stdout.clone()).unwrap()
+    String::from_utf8(pycc_scratch::lf(&output.stdout).clone()).unwrap()
 }
 
 fn stderr(output: &Output) -> String {
-    String::from_utf8(output.stderr.clone()).unwrap()
+    String::from_utf8(pycc_scratch::lf(&output.stderr).clone()).unwrap()
 }
 
 fn read_fixture(name: &str) -> String {

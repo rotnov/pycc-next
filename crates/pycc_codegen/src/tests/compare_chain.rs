@@ -58,7 +58,7 @@ fn a_chain_with_an_int_temporary_middle_operand_verifies_and_runs() {
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n"),
         "True\nFalse\nFalse\n"
     );
 }

@@ -333,14 +333,14 @@ mod negative_control {
             .args(SYSTEM_LIBS)
             .output()
             .expect("spawn cc");
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
         assert!(output.status.success(), "link {tag} failed: {stderr}");
         let run = Command::new(&exe).arg(module).output().expect("run");
         let code = run.status.code();
         assert!(
             matches!(code, Some(0 | 1)),
             "{tag}: unexpected exit {code:?}: {}",
-            String::from_utf8_lossy(&run.stderr)
+            pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
         );
         code == Some(0)
     }

@@ -35,7 +35,7 @@ fn dict_get_codegens_and_runs() {
     let bin_path = dir.join("dict_get");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn dict_set_item_updates_an_existing_key_in_place() {
     let bin_path = dir.join("dict_set_update");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"5\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n1\n");
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn dict_set_item_appends_a_new_key() {
     let bin_path = dir.join("dict_set_append");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn for_k_in_dict_iterates_keys_in_insertion_order() {
     let bin_path = dir.join("for_dict_iteration");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"b\na\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"b\na\n");
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn reassigning_the_for_dict_loop_variable_inside_the_body_does_not_corrupt_the_d
     let bin_path = dir.join("for_dict_var_reassignment");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"z\n1\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"z\n1\n1\n");
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn set_literal_construction_dedups_and_reports_correct_len() {
     let bin_path = dir.join("set_literal_and_len");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 #[test]
@@ -306,7 +306,7 @@ fn for_x_in_set_iterates_in_cpython_order() {
     let bin_path = dir.join("for_set_iteration");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n");
 }
 
 #[test]

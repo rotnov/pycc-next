@@ -43,7 +43,7 @@ fn compiles_a_function_call_with_real_arguments_and_a_return_value() {
     let bin_path = dir.join("call_with_args");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n");
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn a_multi_argument_call_binds_each_parameter_in_the_right_order() {
     let bin_path = dir.join("call_arg_order");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n");
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn compiles_a_recursive_function_with_an_early_return() {
     let bin_path = dir.join("recursive_fact");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"120\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"120\n");
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn a_function_returning_from_both_if_and_else_branches_compiles_and_runs() {
     let bin_path = dir.join("if_else_both_return");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn a_none_typed_call_result_can_be_stored_and_printed() {
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"None\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n");
 }
 
 #[test]
@@ -638,7 +638,7 @@ fn run_container_return(label: &str, ty: Ty, literal: MirExpr, probe: MirExpr) -
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
     assert!(output.status.success(), "{label} should exit successfully");
-    output.stdout
+    pycc_scratch::lf(&output.stdout)
 }
 
 #[test]

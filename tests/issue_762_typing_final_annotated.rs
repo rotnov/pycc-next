@@ -52,7 +52,7 @@ fn typing_final_and_annotated_import_check_succeeds() {
     assert!(
         output.status.success(),
         "pycc check should succeed for `from typing import Final, Annotated`; stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 
@@ -72,7 +72,7 @@ fn typing_final_and_annotated_import_build_and_run_succeeds() {
     assert!(
         build.status.success(),
         "pycc build should succeed for `from typing import Final, Annotated`; stderr: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&out).output().unwrap();
     assert!(
@@ -80,7 +80,7 @@ fn typing_final_and_annotated_import_build_and_run_succeeds() {
         "the built binary should run successfully"
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         "100\n42\n",
         "MAX_CONNECTIONS then scale(21) should print 100 then 42"
     );
@@ -103,8 +103,8 @@ fn typing_unregistered_symbol_import_still_rejected() {
     );
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
     assert!(
         combined.contains("C0002"),

@@ -59,8 +59,8 @@ fn build(dir: &Path, flags: &[&str]) -> String {
         .arg(ext.join("m"))
         .output()
         .expect("pycc should spawn");
-    let report = text(&out.stderr);
-    assert!(out.status.success(), "{report}{}", text(&out.stdout));
+    let report = text(&pycc_scratch::lf(&out.stderr));
+    assert!(out.status.success(), "{report}{}", text(&pycc_scratch::lf(&out.stdout)));
     report
 }
 
@@ -86,9 +86,9 @@ fn bytearray_loops_run_native_with_cpython_results() {
         }
         let ours = run_python(&dir.join("ext"), "d.py");
         let oracle = run_python(&dir.join("src"), "d.py");
-        assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-        assert!(ours.status.success(), "{}", text(&ours.stderr));
-        assert_eq!(text(&ours.stdout), text(&oracle.stdout));
+        assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+        assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+        assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
     }
 }
 
@@ -98,8 +98,8 @@ fn bytearray_specializations_leak_nothing() {
     let dir = ScratchDir::new("untyped_bytearray_leaks").expect("scratch");
     build(&dir, &["--release"]);
     let probe = run_python(&dir.join("ext"), "l.py");
-    assert!(probe.status.success(), "{}", text(&probe.stderr));
-    assert_eq!(text(&probe.stdout), "ok\n");
+    assert!(probe.status.success(), "{}", text(&pycc_scratch::lf(&probe.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&probe.stdout)), "ok\n");
 }
 
 /// A specialization whose body calls a builtin the original calls through
@@ -126,7 +126,7 @@ fn a_specialization_calls_builtins_natively_when_it_can() {
         .env("PYCC_DUMP_LLVM", &ll)
         .output()
         .expect("pycc should spawn");
-    let report = text(&out.stderr);
+    let report = text(&pycc_scratch::lf(&out.stderr));
     assert!(out.status.success(), "{report}");
     assert!(report.contains("specialized: `f` runs natively when called with s: bytearray, k: int"), "{report}");
     assert!(report.contains("specialized: `g` runs natively when called with s: str, k: int"), "{report}");
@@ -149,6 +149,6 @@ fn a_specialization_calls_builtins_natively_when_it_can() {
             .expect("python")
     };
     let (ours, oracle) = (run(&ext), run(&src));
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }

@@ -55,21 +55,91 @@ fn flush_hook() -> Option<FlushHook> {
     (!p.is_null()).then(|| unsafe { std::mem::transmute::<*mut (), FlushHook>(p) })
 }
 
-/// Writes `bytes` to standard output.
-pub(crate) fn out(bytes: &[u8]) {
+/// Writes `bytes` to standard output; false when the write raised (the
+/// exception is then pending).
+///
+/// Nothing is written while an exception is pending: CPython would not have
+/// reached this write -- an earlier write of the same `print` raised (CPython's
+/// `print` stops there), or an operation raised whose exception the next
+/// checkpoint observes. (`finally` blocks and handlers run with none
+/// pending.)
+pub(crate) fn out(bytes: &[u8]) -> bool {
+    if crate::pycc_rt_exception_active() != 0 {
+        return false;
+    }
     match write_hook() {
-        Some(write) => {
-            unsafe { write(bytes.as_ptr(), bytes.len()) };
+        Some(write) => unsafe { write(bytes.as_ptr(), bytes.len()) == 0 },
+        None => native_out(bytes),
+    }
+}
+
+#[cfg(not(windows))]
+fn native_out(bytes: &[u8]) -> bool {
+    let _ = std::io::stdout().lock().write_all(bytes);
+    true
+}
+
+/// CPython's text-mode stdout on Windows (`crate::text_stdio`): `\n` is
+/// written as `\r\n`, in UTF-8 on a console and otherwise in the encoding
+/// CPython would pick; an unencodable character raises CPython's
+/// `UnicodeEncodeError` and writes nothing of `bytes`.
+#[cfg(windows)]
+fn native_out(bytes: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(bytes);
+    match native::codec(crate::text_stdio::Stream::Stdout).encode(&text) {
+        Ok(encoded) => {
+            let _ = std::io::stdout().lock().write_all(&encoded);
+            true
         }
-        None => {
-            // On Windows too the bytes are written as they are: a native
-            // program's `\n` stays `\n`, where CPython's text-mode stdout
-            // writes `\r\n` (docs/DEVIATIONS.md).
-            let _ = std::io::stdout().lock().write_all(bytes);
+        Err(error) => {
+            crate::raise_builtin(
+                crate::exception::EXCEPTION_TYPE_VALUE_ERROR,
+                "UnicodeEncodeError",
+                &error.message(),
+            );
+            false
         }
     }
 }
 
+/// Writes `text` and a newline to standard error as CPython's text-mode
+/// `sys.stderr` does (on Windows: `\r\n`, `backslashreplace`).
+pub(crate) fn err_line(text: &str) {
+    #[cfg(windows)]
+    {
+        let line = format!("{text}\n");
+        if let Ok(encoded) = native::codec(crate::text_stdio::Stream::Stderr).encode(&line) {
+            let _ = std::io::stderr().lock().write_all(&encoded);
+        }
+    }
+    #[cfg(not(windows))]
+    eprintln!("{text}");
+}
+
+/// Each standard stream's codec, resolved once from the environment.
+#[cfg(windows)]
+mod native {
+    use crate::text_stdio::{Stream, StreamCodec, is_console, process_env, stream_codec};
+    use std::sync::OnceLock;
+
+    pub(super) fn codec(stream: Stream) -> &'static StreamCodec {
+        static CODECS: OnceLock<[StreamCodec; 3]> = OnceLock::new();
+        let codecs = CODECS.get_or_init(|| {
+            let env = process_env();
+            [Stream::Stdin, Stream::Stdout, Stream::Stderr]
+                .map(|s| stream_codec(&env, s, is_console(s)))
+        });
+        &codecs[stream as usize]
+    }
+
+    /// Whether stdin is a console (Rust's stdin then reads it as UTF-8).
+    pub(super) fn stdin_is_console() -> bool {
+        static CONSOLE: OnceLock<bool> = OnceLock::new();
+        *CONSOLE.get_or_init(|| is_console(Stream::Stdin))
+    }
+}
+
+#[cfg(any(windows, test))]
 /// What CPython's universal-newline stdin reads for the bytes `buf`: on
 /// Windows a `\r\n` line ending is read as `\n`, as is a lone `\r`. Pure, so
 /// every host tests it; applied only on Windows.
@@ -94,16 +164,26 @@ fn from_crlf(buf: Vec<u8>) -> Vec<u8> {
     out
 }
 
-/// Stdin bytes as text, with Windows line endings translated.
+/// Stdin bytes as text: on Windows decoded as CPython decodes a redirected
+/// stdin (a console reads as UTF-8), then with its line endings translated.
 fn native_text(buf: Vec<u8>) -> *mut PyStrObj {
-    let buf = if cfg!(windows) { from_crlf(buf) } else { buf };
+    #[cfg(windows)]
+    let buf = {
+        let text = if native::stdin_is_console() {
+            String::from_utf8_lossy(&buf).into_owned()
+        } else {
+            native::codec(crate::text_stdio::Stream::Stdin)
+                .codec
+                .decode(&buf)
+        };
+        from_crlf(text.into_bytes())
+    };
     new_pystr(String::from_utf8_lossy(&buf).as_bytes())
 }
 
-
-/// Writes `text` to standard output.
-pub(crate) fn out_str(text: &str) {
-    out(text.as_bytes());
+/// Writes `text` to standard output; false when the write raised.
+pub(crate) fn out_str(text: &str) -> bool {
+    out(text.as_bytes())
 }
 
 /// Flushes standard output.

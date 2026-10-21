@@ -38,8 +38,8 @@ fn last_line(bytes: &[u8]) -> String {
 }
 
 fn assert_same_as_cpython(ours: &Output, theirs: &Output) {
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "stdout differs");
-    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)), "stdout differs");
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)));
     assert_eq!(ours.status.code(), theirs.status.code());
 }
 
@@ -60,8 +60,8 @@ fn matches_cpython(name: &str, flags: &[&str]) {
     assert!(
         build.status.success(),
         "{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     let ours = Command::new(&out).output().expect("the program should run");
     let theirs = python()

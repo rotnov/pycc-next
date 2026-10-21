@@ -432,7 +432,7 @@ fn math_sqrt_call_codegens_and_runs() {
     let bin_path = dir.join("math_sqrt_call");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1.4142135623730951\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1.4142135623730951\n");
 }
 
 #[test]
@@ -453,7 +453,7 @@ fn math_pi_codegens_and_runs() {
     let bin_path = dir.join("math_pi");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3.141592653589793\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3.141592653589793\n");
 }
 
 #[test]
@@ -486,7 +486,7 @@ fn float_call_codegens_and_runs() {
     let bin_path = dir.join("float_call");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3.0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3.0\n");
 }
 
 #[test]
@@ -528,5 +528,5 @@ fn a_user_defined_float_function_codegens_and_runs_instead_of_the_builtin() {
     let bin_path = dir.join("user_defined_float_call");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"6\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"6\n");
 }

@@ -37,7 +37,7 @@ fn super_init_no_args_builds_and_runs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"1\n",
+        pycc_scratch::lf(&output.stdout), b"1\n",
         "super().__init__() should initialize the base class attribute"
     );
 }
@@ -65,7 +65,7 @@ fn super_init_with_args_builds_and_runs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"10\n20\n",
+        pycc_scratch::lf(&output.stdout), b"10\n20\n",
         "super().__init__(x) should pass the argument to the base class"
     );
 }
@@ -94,7 +94,7 @@ fn super_method_call_builds_and_runs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"42\n",
+        pycc_scratch::lf(&output.stdout), b"42\n",
         "super().method() should call the base class method on self"
     );
 }
@@ -126,7 +126,7 @@ fn three_level_super_chain_builds_and_runs() {
     let output = Command::new(&out).output().unwrap();
     // C.describe() → B.describe() + 100 → A.describe() + 10 + 100 → 3 + 10 + 100 = 113
     assert_eq!(
-        output.stdout, b"113\n",
+        pycc_scratch::lf(&output.stdout), b"113\n",
         "3-level super() chain should build up the sum correctly"
     );
 }
@@ -156,8 +156,8 @@ fn super_instance_attr_read_is_a_check_error() {
     );
     let rendered = format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
     assert!(
         rendered.contains("T0047"),
@@ -178,8 +178,8 @@ fn super_instance_attr_read_is_a_check_error() {
         .unwrap();
     let json_rendered = format!(
         "{}{}",
-        String::from_utf8_lossy(&json.stdout),
-        String::from_utf8_lossy(&json.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&json.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&json.stderr))
     );
     assert!(
         json_rendered.contains("`<receiver>.x`"),
@@ -203,7 +203,7 @@ fn super_outside_method_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for super() outside a method body"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "should report C0001 for bare super(), got: {stderr}"
@@ -232,7 +232,7 @@ fn super_with_arguments_is_a_build_error() {
     );
     // super(A, self) is not a zero-arg super() call, so it falls through
     // to the known-but-unsupported builtin path (C0001).
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "should report C0001 for super() with arguments, got: {stderr}"
@@ -259,7 +259,7 @@ fn super_method_not_in_base_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for super().nonexistent()"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0044"),
         "should report T0044 for super().nonexistent(), got: {stderr}"
@@ -286,7 +286,7 @@ fn super_init_type_mismatch_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for super().__init__() with wrong argument type"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for type mismatch, got: {stderr}"
@@ -313,7 +313,7 @@ fn super_init_wrong_arity_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for super().__init__() with wrong arity"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for wrong arity, got: {stderr}"
@@ -343,7 +343,7 @@ fn super_method_with_args_builds_and_runs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"105\n",
+        pycc_scratch::lf(&output.stdout), b"105\n",
         "super().method(args) should pass arguments to the base method"
     );
 }
@@ -370,7 +370,7 @@ fn super_method_with_unbound_arg_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for super().__init__() with an unbound argument"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for unbound argument, got: {stderr}"
@@ -398,7 +398,7 @@ fn super_in_class_with_no_base_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for super() in a class with no base"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0044"),
         "should report T0044 for super() with no base class, got: {stderr}"
@@ -434,7 +434,7 @@ fn super_property_read_builds_and_runs() {
     // `b.x` uses B's own override (0); `super().x` skips B and calls A's
     // getter (7), exactly as CPython resolves the descriptor along the MRO.
     assert_eq!(
-        output.stdout, b"0\n7\n",
+        pycc_scratch::lf(&output.stdout), b"0\n7\n",
         "super().<property> should call the base class's getter, not the override"
     );
 }
@@ -469,7 +469,7 @@ fn super_in_diamond_follows_the_receivers_mro() {
     // compiled for the `D` receiver. That copy's super().f continues after
     // B in D's MRO -> [C, A]; C has f, so C.f. Result: "D->B->C".
     assert_eq!(
-        output.stdout, b"D->B->C\n",
+        pycc_scratch::lf(&output.stdout), b"D->B->C\n",
         "diamond super() continues along the receiver's MRO, as CPython does"
     );
 }

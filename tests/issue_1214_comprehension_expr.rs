@@ -21,8 +21,8 @@ fn pycc() -> Command {
 }
 
 fn rendered(output: &Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    text.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     text.replace("\r\n", "\n")
 }
 
@@ -49,11 +49,11 @@ fn build_and_run(category: &str, source: &str) -> Output {
 fn assert_uncaught(run: &Output, stdout: &str, exception: &str) {
     assert_eq!(run.status.code(), Some(1), "{}", rendered(run));
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         stdout
     );
     assert!(
-        String::from_utf8_lossy(&run.stderr).contains(exception),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).contains(exception),
         "{}",
         rendered(run)
     );
@@ -113,7 +113,7 @@ fn a_comprehension_rerun_in_a_loop_rebuilds_its_container_each_time() {
     );
     assert!(run.status.success(), "{}", rendered(&run));
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         "1000000\n2\n"
     );
 }
@@ -129,7 +129,7 @@ fn set_and_dict_comprehension_arguments_run_to_the_cpython_output() {
     );
     assert_eq!(run.status.code(), Some(0), "{}", rendered(&run));
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         "3 2\n3 3\n"
     );
 }
@@ -174,7 +174,7 @@ fn same_offset_comprehensions_in_two_modules_link_and_run() {
     let run = run.unwrap_or_else(|| panic!("{}", rendered(&build)));
     assert_eq!(run.status.code(), Some(0), "{}", rendered(&run));
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         "2\n"
     );
 }
@@ -198,7 +198,7 @@ fn same_offset_comprehension_variables_of_different_types_link_and_run() {
     let run = run.unwrap_or_else(|| panic!("{}", rendered(&build)));
     assert_eq!(run.status.code(), Some(0), "{}", rendered(&run));
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         "4\n"
     );
 }

@@ -25,8 +25,8 @@ fn fixture() -> PathBuf {
 
 fn oracle() -> String {
     let expected = Command::new(python()).arg(fixture()).output().expect("python3 should spawn");
-    assert!(expected.status.success(), "{}", text(&expected.stderr));
-    text(&expected.stdout)
+    assert!(expected.status.success(), "{}", text(&pycc_scratch::lf(&expected.stderr)));
+    text(&pycc_scratch::lf(&expected.stdout))
 }
 
 #[test]
@@ -41,11 +41,11 @@ fn native_non_strict_build_matches_cpython() {
         .args(["--release", "--non-strict", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    assert!(!text(&build.stderr).contains("fallback:"), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    assert!(!text(&pycc_scratch::lf(&build.stderr)).contains("fallback:"), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let run = Command::new(&binary).output().expect("the binary runs");
-    assert!(run.status.success(), "{}", text(&run.stderr));
-    assert_eq!(text(&run.stdout), oracle());
+    assert!(run.status.success(), "{}", text(&pycc_scratch::lf(&run.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), oracle());
 }
 
 fn build_ext(dir: &Path, module: &str, source: &Path) {
@@ -57,8 +57,8 @@ fn build_ext(dir: &Path, module: &str, source: &Path) {
         .args(["--ext", "--non-strict", "--release", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    assert!(!text(&build.stderr).contains("fallback:"), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    assert!(!text(&pycc_scratch::lf(&build.stderr)).contains("fallback:"), "{}", text(&pycc_scratch::lf(&build.stderr)));
 }
 
 #[test]
@@ -74,8 +74,8 @@ fn ext_module_matches_cpython() {
         .current_dir(&*dir)
         .output()
         .expect("python3 should spawn");
-    assert!(run.status.success(), "{}", text(&run.stderr));
-    assert_eq!(text(&run.stdout), oracle());
+    assert!(run.status.success(), "{}", text(&pycc_scratch::lf(&run.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), oracle());
 }
 
 const PROBE: &str = r#"from __future__ import annotations
@@ -139,13 +139,13 @@ fn native_str_locals_leak_nothing_from_a_cpython_host() {
         .current_dir(&*dir)
         .output()
         .expect("python3 should spawn");
-    assert!(run.status.success(), "{}{}", text(&run.stdout), text(&run.stderr));
+    assert!(run.status.success(), "{}{}", text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&run.stderr)));
     // The same driver against the source gives the same output.
     let plain = Command::new(python())
         .args(["-c", DRIVER])
         .current_dir(dir.join("src"))
         .output()
         .expect("python3 should spawn");
-    assert!(plain.status.success(), "{}", text(&plain.stderr));
-    assert_eq!(text(&run.stdout), text(&plain.stdout));
+    assert!(plain.status.success(), "{}", text(&pycc_scratch::lf(&plain.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&plain.stdout)));
 }

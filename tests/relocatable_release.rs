@@ -47,7 +47,7 @@ fn packaged(scratch: &Path) -> PathBuf {
 }
 
 fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
 }
 
 fn python() -> String {
@@ -78,7 +78,7 @@ fn run_ok(cmd: &mut Command) -> Vec<u8> {
         cmd,
         stderr(&output)
     );
-    output.stdout
+    pycc_scratch::lf(&output.stdout)
 }
 
 fn work_dir(scratch: &Path, name: &str, file: &str, source: &str) -> PathBuf {

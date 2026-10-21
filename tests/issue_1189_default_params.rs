@@ -33,7 +33,7 @@ fn build_and_run(dir: &ScratchDir, name: &str, source: &str) -> String {
         output.status.success(),
         "the built program failed for {name}"
     );
-    String::from_utf8(output.stdout).unwrap()
+    String::from_utf8(pycc_scratch::lf(&output.stdout)).unwrap()
 }
 
 /// `pycc check`'s combined stdout and stderr, which must be a failure.
@@ -44,8 +44,8 @@ fn check_err(dir: &ScratchDir, name: &str, source: &str) -> String {
         .output()
         .unwrap();
     assert!(!output.status.success(), "`pycc check` unexpectedly passed");
-    let mut rendered = String::from_utf8_lossy(&output.stdout).into_owned();
-    rendered.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut rendered = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    rendered.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     rendered
 }
 

@@ -20,12 +20,12 @@ fn text(bytes: &[u8]) -> String {
 
 /// stdout, the last stderr line and the status.
 fn observed(output: &Output) -> (String, String, Option<i32>) {
-    let last = text(&output.stderr)
+    let last = text(&pycc_scratch::lf(&output.stderr))
         .lines()
         .last()
         .unwrap_or_default()
         .to_string();
-    (text(&output.stdout), last, output.status.code())
+    (text(&pycc_scratch::lf(&output.stdout)), last, output.status.code())
 }
 
 #[test]
@@ -153,9 +153,9 @@ fn an_ext_module_called_with_other_types_matches_cpython() {
                 .expect("python3 runs")
         };
         let (ours, oracle) = (run("ext"), run("src"));
-        assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-        assert!(ours.status.success(), "{}", text(&ours.stderr));
-        assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{flags:?}");
+        assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+        assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+        assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{flags:?}");
     }
 }
 
@@ -170,6 +170,6 @@ fn proven_smallint_functions_leak_nothing() {
         .current_dir(dir.join("ext"))
         .output()
         .expect("python3 runs");
-    assert!(out.status.success(), "{}", text(&out.stderr));
-    assert_eq!(text(&out.stdout), "ok\n");
+    assert!(out.status.success(), "{}", text(&pycc_scratch::lf(&out.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&out.stdout)), "ok\n");
 }

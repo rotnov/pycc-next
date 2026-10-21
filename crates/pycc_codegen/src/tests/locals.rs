@@ -113,7 +113,7 @@ fn a_walrus_in_an_if_test_predeclares_its_storage_slot_and_runs() {
     let bin_path = dir.join("walrus_in_if_test");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n");
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn a_walrus_with_an_optional_int_value_and_a_repeated_target_name_predeclare_cor
     let bin_path = dir.join("walrus_optional_and_repeated_name");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nTrue\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nTrue\n2\n");
 }
 
 #[test]
@@ -373,7 +373,7 @@ fn a_function_parameter_can_be_reassigned_read_back_and_printed() {
     let bin_path = dir.join("param_reference_reads_back");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"8\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"8\n");
 }
 
 #[test]
@@ -426,7 +426,7 @@ fn a_function_reads_a_module_level_global_it_does_not_itself_assign() {
     let bin_path = dir.join("function_reads_module_global");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n");
 }
 
 #[test]
@@ -466,7 +466,7 @@ fn an_int_local_first_assigned_inside_an_if_body_is_readable_after_the_if() {
     let bin_path = dir.join("int_first_assign_in_if_body");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -507,7 +507,7 @@ fn an_int_local_assigned_in_both_branches_of_an_if_else_is_readable_after_the_if
     let bin_path = dir.join("int_first_assign_in_if_else_both");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -805,7 +805,7 @@ fn an_int_local_assigned_in_both_branches_of_a_functions_own_leading_if_else() {
     let bin_path = dir.join("int_first_assign_in_fn_leading_if_else");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -851,5 +851,5 @@ fn a_float_local_first_assigned_inside_a_function_uses_preclassified_storage() {
     let bin_path = dir.join("float_first_assign_in_fn");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2.5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2.5\n");
 }

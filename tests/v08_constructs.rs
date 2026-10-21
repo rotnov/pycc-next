@@ -39,9 +39,9 @@ fn fixture(name: &str, dir: &Path, as_name: &str) -> PathBuf {
 }
 
 fn assert_matches(ours: &Output, oracle: &Output) {
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
-    assert_eq!(ours.status.code(), oracle.status.code(), "{}", text(&ours.stderr));
-    assert_eq!(last_line(&ours.stderr), last_line(&oracle.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(ours.status.code(), oracle.status.code(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&oracle.stderr)));
 }
 
 /// Builds `source` with `flags`, asserting it builds and that no function,
@@ -56,7 +56,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
         .arg(out)
         .output()
         .expect("pycc should spawn");
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     for unit in ["fallback: function", "fallback: method", "fallback: class"] {
         assert!(!report.contains(unit), "no function should run in CPython:\n{report}");
@@ -123,7 +123,7 @@ fn ellipsis_strict() {
         .current_dir(&*dir)
         .output()
         .expect("python should spawn");
-    assert_eq!(text(&run.stdout), "None Ellipsis True False\n", "{}", text(&run.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "None Ellipsis True False\n", "{}", text(&pycc_scratch::lf(&run.stderr)));
     let native_source = dir.join("n.py");
     std::fs::write(&native_source, "def stub(x: int) -> None:\n    ...\n\n\ndef f() -> None:\n    x = ...\n").unwrap();
     let native = pycc()
@@ -131,7 +131,7 @@ fn ellipsis_strict() {
         .arg(&native_source)
         .output()
         .expect("pycc should spawn");
-    let stderr = text(&native.stderr) + &text(&native.stdout);
+    let stderr = text(&pycc_scratch::lf(&native.stderr)) + &text(&pycc_scratch::lf(&native.stdout));
     assert!(!native.status.success());
     assert!(stderr.contains("an `...` ellipsis literal used as a value"), "{stderr}");
     assert!(stderr.contains("n.py:6:"), "{stderr}");
@@ -185,14 +185,14 @@ fn local_import_strict_and_leak_free() {
         .current_dir(&*dir)
         .output()
         .expect("python should spawn");
-    assert_eq!(text(&run.stdout), "34\n100000\n0 0\n", "{}", text(&run.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "34\n100000\n0 0\n", "{}", text(&pycc_scratch::lf(&run.stderr)));
     let program = dir.join("main.py");
     let mut text_source = std::fs::read_to_string(&source).unwrap();
     text_source.push_str("\nprint(dump(3), many(10))\n");
     std::fs::write(&program, text_source).unwrap();
     build(&program, &dir.join("app"), &[]);
     let ours = Command::new(dir.join("app")).output().expect("run the build");
-    assert_eq!(text(&ours.stdout), "34 10\n", "{}", text(&ours.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), "34 10\n", "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }
 
 /// A relative function-local import (`--foreign-relative-imports`) runs
@@ -224,10 +224,10 @@ fn relative_local_import_resolves_against_the_package() {
             .output()
             .expect("python should spawn");
         assert_eq!(
-            text(&run.stdout),
+            text(&pycc_scratch::lf(&run.stdout)),
             "6 ImportError: No module named 'pkg.nope'\n",
             "{flags:?}: {}",
-            text(&run.stderr)
+            text(&pycc_scratch::lf(&run.stderr))
         );
     }
 }
@@ -358,7 +358,7 @@ fn closures_and_cells_do_not_leak() {
         .current_dir(&*dir)
         .output()
         .expect("python should spawn");
-    assert_eq!(text(&run.stdout), "20000\n0 0\n", "{}", text(&run.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "20000\n0 0\n", "{}", text(&pycc_scratch::lf(&run.stderr)));
 }
 
 #[test]
@@ -402,5 +402,5 @@ fn rebinding_nested_def_cells_do_not_leak() {
         .current_dir(&*dir)
         .output()
         .expect("python should spawn");
-    assert_eq!(text(&run.stdout), "200010000\n0 0\n", "{}", text(&run.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "200010000\n0 0\n", "{}", text(&pycc_scratch::lf(&run.stderr)));
 }

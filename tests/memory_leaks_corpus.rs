@@ -48,7 +48,7 @@ fn run_with_input(program: &Path, input: &[u8]) -> (Vec<u8>, i64) {
         program.display(),
         measured.status
     );
-    (memory_support::lf(measured.stdout), measured.peak_kb)
+    (memory_support::lf(pycc_scratch::lf(&measured.stdout)), measured.peak_kb)
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn object_any_all_and_tuple_iteration_run_in_constant_memory() {
             .arg(&bin)
             .output()
             .expect("pycc should spawn");
-        let report = String::from_utf8_lossy(&output.stderr);
+        let report = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
         assert!(output.status.success(), "{report}");
         assert!(!report.contains("fallback:"), "{report}");
         let (out, peak) = memory_support::run_measured(&bin);

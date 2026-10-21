@@ -43,19 +43,19 @@ fn pycc(args: &[&str], source: &Path, out: &Path) -> Output {
 
 /// Same stdout, exit status and exception line.
 fn assert_same(ours: &Output, oracle: &Output) {
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
     assert_eq!(
         ours.status.code(),
         oracle.status.code(),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
     assert_eq!(
-        text(&ours.stderr).lines().last(),
-        text(&oracle.stderr).lines().last()
+        text(&pycc_scratch::lf(&ours.stderr)).lines().last(),
+        text(&pycc_scratch::lf(&oracle.stderr)).lines().last()
     );
     assert_eq!(
-        text(&oracle.stderr).lines().last(),
+        text(&pycc_scratch::lf(&oracle.stderr)).lines().last(),
         Some("IndexError: list index out of range")
     );
 }
@@ -67,7 +67,7 @@ fn boxed_tuple_returns_build_natively_next_to_fallback_code() {
     let source = dir.join("m.py");
     std::fs::copy(fixture(), &source).expect("copy the fixture");
     let build = pycc(&["--non-strict", "--report-fallbacks"], &source, &dir.join("app"));
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     // Only the `eval` statement runs in CPython: every function compiles.
     assert_eq!(report.matches("fallback:").count(), 1, "{report}");
@@ -88,7 +88,7 @@ fn boxed_tuple_returns_build_as_an_ext_module() {
     let source = src_dir.join("m.py");
     std::fs::copy(fixture(), &source).expect("copy the fixture");
     let build = pycc(&["--non-strict", "--ext"], &source, &ext_dir.join("m"));
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let import = |dir: &Path| {
         Command::new(python())
             .args(["-c", "import m"])

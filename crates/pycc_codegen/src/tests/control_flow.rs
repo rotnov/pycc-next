@@ -41,7 +41,7 @@ fn compiles_an_if_else_choosing_the_correct_branch_at_runtime() {
     let bin_path = dir.join("if_else");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"10\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"10\n");
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn an_if_whose_both_branches_return_terminates_its_unreachable_merge() {
     let bin_path = dir.join("if_both_branches_return");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn compiles_an_if_with_no_else_and_a_false_test_prints_nothing() {
     let bin_path = dir.join("if_no_else");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn compiles_a_while_loop_that_counts_down() {
     let bin_path = dir.join("while_countdown");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n2\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n2\n1\n");
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn compiles_a_while_loop_using_a_bare_int_condition_via_truthy() {
     let bin_path = dir.join("while_int_truthy");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n2\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n2\n1\n");
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn emit_expr_evaluates_not_over_a_non_literal_int_operand() {
     let bin_path = dir.join("not_over_int_name");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\n");
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn a_while_loop_body_that_always_returns_skips_its_own_trailing_branch() {
     let bin_path = dir.join("while_body_always_returns");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn compiles_a_for_range_loop_with_a_positive_step() {
     let bin_path = dir.join("for_range_pos");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n2\n4\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n2\n4\n");
 }
 
 #[test]
@@ -418,7 +418,7 @@ fn a_second_top_level_for_range_loop_reusing_a_loop_variable_name_is_not_redecla
     let bin_path = dir.join("for_range_reused_loop_var");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n1\n0\n1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n1\n0\n1\n2\n");
 }
 
 #[test]
@@ -447,7 +447,7 @@ fn compiles_a_for_range_loop_with_a_negative_step() {
     let bin_path = dir.join("for_range_neg");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n2\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n2\n1\n");
 }
 
 #[test]
@@ -552,7 +552,7 @@ fn for_range_with_a_bool_start_stop_and_step_all_widen_to_int() {
     let bin_path = dir.join("for_range_bool_start_stop_step");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n3\n");
 }
 
 #[test]
@@ -585,7 +585,7 @@ fn for_range_with_a_bool_stop_widens_to_int() {
     let bin_path = dir.join("for_range_bool_stop");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n");
 }
 
 #[test]
@@ -646,7 +646,7 @@ fn for_range_normalizes_int_typed_bool_markers_before_the_induction_phi() {
     let bin_path = dir.join("for_range_encoded_bool_markers");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n");
 }
 
 #[test]
@@ -708,7 +708,7 @@ fn compiles_nested_control_flow_with_a_statement_after_it_in_the_same_body() {
     let bin_path = dir.join("nested_control_flow_resume");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n100\n1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n100\n1\n2\n");
 }
 
 // The four tests below are not in the brief's own Step 3 list -- added

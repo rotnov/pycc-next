@@ -75,15 +75,15 @@ fn build_and_run(dir: &std::path::Path, stem: &str, source: &str) -> String {
     assert!(
         build.status.success(),
         "pycc build should succeed for `{stem}`; stderr: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&exe).output().unwrap();
     assert!(
         run.status.success(),
         "`{stem}` should exit successfully; stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
-    String::from_utf8_lossy(&run.stdout).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout))
 }
 
 /// #767: `pycc check` accepts `from typing import cast` together with
@@ -100,7 +100,7 @@ fn typing_cast_import_and_calls_check_successfully() {
     assert!(
         output.status.success(),
         "pycc check should succeed for `from typing import cast`; stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 
@@ -165,7 +165,7 @@ fn a_down_cast_to_a_derived_class_is_rejected_before_build() {
         !check.status.success(),
         "pycc check should reject a down-cast to a class with extra attributes"
     );
-    let stdout = String::from_utf8_lossy(&check.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&check.stdout));
     assert!(
         stdout.contains("C0001") && stdout.contains("narrow the value's attribute layout"),
         "expected a C0001 layout-narrowing diagnostic, got: {stdout}"
@@ -222,7 +222,7 @@ fn an_up_cast_across_an_overridden_method_is_rejected_before_build() {
         !check.status.success(),
         "pycc check should reject an up-cast across an overridden method"
     );
-    let stdout = String::from_utf8_lossy(&check.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&check.stdout));
     assert!(
         stdout.contains("C0001")
             && stdout.contains("`describe`")

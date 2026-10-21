@@ -38,7 +38,7 @@ fn quick_start_fixture_builds_and_prints_the_documented_sequence() {
     // which is always `\n`-terminated.
     let expected = include_str!("fixtures/quick_start.expected.txt").replace("\r\n", "\n");
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
         expected,
         "quick_start fixture stdout must match the README/site documented output"
     );

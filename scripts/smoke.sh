@@ -47,8 +47,8 @@ clean() {
     fi
     env -i PATH="$PATH" HOME="$work/home" ${PYCC_PYTHON:+PYCC_PYTHON="$PYCC_PYTHON"} "$@"
 }
-# Line endings aside: on Windows CPython writes \r\n, a native program \n
-# (docs/DEVIATIONS.md).
+# Line content: both write \r\n on Windows, which $(...) keeps but tr drops
+# (tests/text_stdio.rs compares the bytes).
 same() {
     a=$(printf '%s' "$1" | tr -d '\r')
     b=$(printf '%s' "$2" | tr -d '\r')

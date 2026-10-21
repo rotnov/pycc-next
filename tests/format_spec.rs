@@ -37,11 +37,11 @@ fn build_and_run(dir: &Path, source: &Path, flags: &[&str]) -> Output {
     assert!(
         build.status.success(),
         "pycc build {flags:?} failed:\n{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     if flags.contains(&"--report-fallbacks") {
-        assert!(!text(&build.stderr).contains("fallback:"), "{}", text(&build.stderr));
+        assert!(!text(&pycc_scratch::lf(&build.stderr)).contains("fallback:"), "{}", text(&pycc_scratch::lf(&build.stderr)));
     }
     Command::new(&binary).output().expect("the binary runs")
 }
@@ -54,11 +54,11 @@ fn cpython(source: &Path) -> Output {
 fn format_specs_and_printf_match_cpython() {
     let dir = ScratchDir::new("format_spec").expect("scratch");
     let expected = cpython(&fixture());
-    assert!(expected.status.success(), "{}", text(&expected.stderr));
+    assert!(expected.status.success(), "{}", text(&pycc_scratch::lf(&expected.stderr)));
     for flags in [&[][..], &["--non-strict", "--report-fallbacks"][..]] {
         let run = build_and_run(&dir, &fixture(), flags);
-        assert!(run.status.success(), "{flags:?}: {}", text(&run.stderr));
-        assert_eq!(text(&run.stdout), text(&expected.stdout), "{flags:?}");
+        assert!(run.status.success(), "{flags:?}: {}", text(&pycc_scratch::lf(&run.stderr)));
+        assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&expected.stdout)), "{flags:?}");
     }
 }
 
@@ -76,10 +76,10 @@ fn a_printf_conversion_of_the_wrong_type_is_refused_in_strict_mode() {
     .expect("write the source");
     let check = pycc().arg("check").arg(&source).output().expect("pycc should spawn");
     assert!(!check.status.success());
-    let rendered = format!("{}{}", text(&check.stdout), text(&check.stderr));
+    let rendered = format!("{}{}", text(&pycc_scratch::lf(&check.stdout)), text(&pycc_scratch::lf(&check.stderr)));
     assert!(rendered.contains("error[T0021]"), "{rendered}");
     let run = build_and_run(&dir, &source, &["--non-strict"]);
-    assert_eq!(text(&run.stdout), text(&cpython(&source).stdout));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&cpython(&source).stdout));
 }
 
 /// A spec with a nested replacement field is not compiled in strict mode
@@ -91,8 +91,8 @@ fn a_nested_spec_field_is_refused_in_strict_mode() {
     std::fs::write(&source, "w = 6\nx = 2.5\nprint(f\"[{x:>{w}}]\")\n").expect("write the source");
     let check = pycc().arg("check").arg(&source).output().expect("pycc should spawn");
     assert!(!check.status.success());
-    let rendered = format!("{}{}", text(&check.stdout), text(&check.stderr));
+    let rendered = format!("{}{}", text(&pycc_scratch::lf(&check.stdout)), text(&pycc_scratch::lf(&check.stderr)));
     assert!(rendered.contains("error[C0001]") && rendered.contains("nested field"), "{rendered}");
     let run = build_and_run(&dir, &source, &["--non-strict"]);
-    assert_eq!(text(&run.stdout), "[   2.5]\n");
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "[   2.5]\n");
 }

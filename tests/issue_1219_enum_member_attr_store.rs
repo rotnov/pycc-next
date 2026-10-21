@@ -29,8 +29,8 @@ fn write(dir: &ScratchDir, index: usize, store: &str) -> std::path::PathBuf {
 }
 
 fn rendered(output: &Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    text.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     text
 }
 
@@ -70,7 +70,7 @@ fn cpython_raises_attribute_error_for_every_refused_store() {
                 .output()
                 .expect("python3 should spawn");
         assert!(!output.status.success(), "{store}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
         assert!(
             stderr.contains(&format!(
                 "AttributeError: <enum 'Enum'> cannot set attribute '{attr}'"

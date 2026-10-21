@@ -66,7 +66,7 @@ fn assert_runtime_abort(case: &str, source: &str, message: &str) {
     assert!(
         check.status.success(),
         "pycc check should accept {case}: {}",
-        String::from_utf8_lossy(&check.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&check.stderr))
     );
 
     let run = Command::new(pycc_bin())
@@ -78,9 +78,9 @@ fn assert_runtime_abort(case: &str, source: &str, message: &str) {
         Some(101),
         "{case} should hit the documented exit-101 boundary, got {:?}: {}",
         run.status.code(),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
-    let stderr = String::from_utf8_lossy(&run.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr));
     assert!(
         stderr.contains(message),
         "{case} should report {message:?}, got: {stderr}"
@@ -119,8 +119,8 @@ fn assert_compile_time_boundary_rejection(case: &str, source: &str) {
     );
     let text = format!(
         "{}{}",
-        String::from_utf8_lossy(&check.stdout),
-        String::from_utf8_lossy(&check.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&check.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&check.stderr))
     );
     assert!(
         text.contains("T0051"),
@@ -206,10 +206,10 @@ fn an_oversized_literal_as_a_range_argument_no_longer_hits_the_runtime_int_bound
         Some(0),
         "a bigint range should run to completion since #147, got {:?}: {}",
         run.status.code(),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         "4611686018427387904\n4611686018427387905\n"
     );
 }
@@ -233,11 +233,11 @@ fn assert_matches_cpython(case: &str, source: &str) {
         run.status.code(),
         Some(0),
         "{}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
-        String::from_utf8_lossy(&oracle.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&oracle.stdout)).replace("\r\n", "\n"),
         "{case}"
     );
 }

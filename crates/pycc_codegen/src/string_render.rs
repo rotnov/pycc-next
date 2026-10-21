@@ -281,6 +281,11 @@ pub(super) fn emit_print_call<'ctx>(
     builder
         .build_call(rt.print_newline, &[], "print_end")
         .expect("build_call should not fail for a well-formed print newline");
+    // A write can raise: `sys.stdout.write` raising through the CPython
+    // hook, or on Windows an unencodable character (`UnicodeEncodeError`).
+    // The runtime writes nothing more while that exception is pending, so
+    // the `print` stops at the failed write, as CPython's does.
+    crate::exception::guard_statement_effects(context, builder, rt);
 }
 
 /// One `{expr}` part of `emit_expr`'s `MirExpr::FString` arm: evaluates the

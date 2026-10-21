@@ -34,13 +34,13 @@ fn build_and_run(slug: &str, source: &str, expected_stdout: &str) {
     assert!(
         build.status.success(),
         "pycc build should succeed, got: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
 
     let run = Command::new(&out).output().unwrap();
     assert!(run.status.success(), "the built program should exit 0");
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         expected_stdout,
         "unexpected program output"
     );
@@ -59,7 +59,7 @@ fn build_fails_with(slug: &str, source: &str, expected_fragment: &str) {
         .output()
         .unwrap();
     assert!(!build.status.success(), "pycc build should fail");
-    let stderr = String::from_utf8_lossy(&build.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr));
     assert!(
         stderr.contains(expected_fragment),
         "stderr should contain {expected_fragment:?}, got: {stderr}"
@@ -226,14 +226,14 @@ fn a_raisable_class_over_a_synthesized_ancestor_constructor_now_raises() {
     assert!(
         build.status.success(),
         "#966: the raise now compiles, got: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&out).output().unwrap();
     assert!(
         !run.status.success(),
         "an uncaught raise must not exit successfully"
     );
-    let stderr = String::from_utf8_lossy(&run.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr));
     assert!(
         stderr.contains("MyError: boom"),
         "the program must actually raise `MyError`, got stderr: {stderr}"

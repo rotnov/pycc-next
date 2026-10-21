@@ -47,7 +47,7 @@ fn bare_type_checking_guard_with_an_unsupported_body_checks_successfully() {
         output.status.success(),
         "pycc check should succeed for a bare `if TYPE_CHECKING:` guard with an \
          otherwise-unsupported body; stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 
@@ -69,7 +69,7 @@ fn qualified_type_checking_guard_with_an_unsupported_body_checks_successfully() 
         output.status.success(),
         "pycc check should succeed for a qualified `typing.TYPE_CHECKING` guard with an \
          otherwise-unsupported body; stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 
@@ -94,16 +94,16 @@ fn the_else_branch_of_a_type_checking_guard_builds_and_runs() {
     assert!(
         build.status.success(),
         "pycc build should succeed; stderr: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&exe).output().unwrap();
     assert!(
         run.status.success(),
         "the built binary should exit successfully; stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         "else\n",
         "only the live `else` branch should ever execute"
     );
@@ -129,16 +129,16 @@ fn elif_type_checking_guard_with_an_unsupported_body_builds_and_runs() {
     assert!(
         build.status.success(),
         "pycc build should succeed; stderr: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&exe).output().unwrap();
     assert!(
         run.status.success(),
         "the built binary should exit successfully; stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         "else\n",
         "only the final live `else` branch should ever execute"
     );
@@ -166,16 +166,16 @@ fn a_bare_type_checking_guard_with_no_else_builds_and_runs() {
     assert!(
         build.status.success(),
         "pycc build should succeed for a bare `if TYPE_CHECKING:` with no `else`; stderr: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&exe).output().unwrap();
     assert!(
         run.status.success(),
         "the built binary should exit successfully; stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         "ran\n",
         "the folded guard's empty body/orelse must be a genuine no-op, and the \
          statement after the guard must still execute"
@@ -201,7 +201,7 @@ fn type_checking_used_as_a_value_is_rejected_before_build() {
         !check.status.success(),
         "pycc check should reject `typing.TYPE_CHECKING` used as a value"
     );
-    let stdout = String::from_utf8_lossy(&check.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&check.stdout));
     assert!(
         stdout.contains("T0021") && stdout.contains("compile-time marker"),
         "expected a T0021 compile-time-marker diagnostic, got: {stdout}"

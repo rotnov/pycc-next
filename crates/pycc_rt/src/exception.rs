@@ -602,11 +602,11 @@ fn exception_print_and_exit(obj: *mut PyExceptionObj) -> ! {
     // Whatever was printed reaches stdout before the traceback and exit.
     crate::io::flush();
     if obj.is_null() {
-        eprintln!("Exception");
+        crate::io::err_line("Exception");
         std::process::exit(1);
     }
     let exc = unsafe { &*obj };
-    eprintln!("{}", render_exception_chain(exc));
+    crate::io::err_line(&render_exception_chain(exc));
     std::process::exit(1);
 }
 
@@ -653,12 +653,12 @@ pub(crate) fn is_named(obj: *mut PyExceptionObj, name: &str) -> bool {
 /// closed on deallocation) the way CPython's unraisable hook does.
 pub(crate) fn report_unraisable(obj: *mut PyExceptionObj, what: &str) {
     crate::io::flush();
-    eprintln!("Exception ignored in: <{what} object>");
+    crate::io::err_line(&format!("Exception ignored in: <{what} object>"));
     if obj.is_null() {
-        eprintln!("Exception");
+        crate::io::err_line("Exception");
     } else {
         // SAFETY: a non-null `obj` is a live exception object.
-        eprintln!("{}", render_exception_chain(unsafe { &*obj }));
+        crate::io::err_line(&render_exception_chain(unsafe { &*obj }));
     }
 }
 

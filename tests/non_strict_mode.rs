@@ -59,7 +59,7 @@ fn untyped_program_matches_cpython_in_a_native_build() {
         .arg(dir.join("app"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let ours = Command::new(dir.join("app"))
         .output()
         .expect("run the build");
@@ -67,10 +67,10 @@ fn untyped_program_matches_cpython_in_a_native_build() {
         .arg(&source)
         .output()
         .expect("python3 should spawn");
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout));
-    assert_eq!(ours.status.code(), Some(1), "{}", text(&ours.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
+    assert_eq!(ours.status.code(), Some(1), "{}", text(&pycc_scratch::lf(&ours.stderr)));
     assert_eq!(oracle.status.code(), Some(1));
-    assert_eq!(last_line(&ours.stderr), last_line(&oracle.stderr));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&oracle.stderr)));
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn the_same_program_is_rejected_in_strict_mode() {
         .output()
         .expect("pycc should spawn");
     assert_eq!(output.status.code(), Some(1));
-    let rendered = text(&output.stdout);
+    let rendered = text(&pycc_scratch::lf(&output.stdout));
     assert!(
         rendered.contains(
             "error[T0001]: parameter `a` of public function `add` needs a type annotation"
@@ -97,7 +97,7 @@ fn non_strict_check_accepts_the_program() {
         .arg(fixture("non_strict_untyped.py"))
         .output()
         .expect("pycc should spawn");
-    assert!(output.status.success(), "{}", text(&output.stdout));
+    assert!(output.status.success(), "{}", text(&pycc_scratch::lf(&output.stdout)));
 }
 
 /// `[tool.pycc] strict = false` in a neighbouring `pyproject.toml` selects
@@ -119,7 +119,7 @@ fn a_project_file_next_to_the_entry_selects_non_strict() {
         assert_eq!(strict.status.code(), Some(1), "{file}");
         std::fs::write(dir.join(file), contents).expect("write the project file");
         let output = pycc().arg("check").arg(&source).output().expect("spawn");
-        assert!(output.status.success(), "{file}: {}", text(&output.stdout));
+        assert!(output.status.success(), "{file}: {}", text(&pycc_scratch::lf(&output.stdout)));
     }
 }
 
@@ -163,7 +163,7 @@ fn untyped_ext_module_matches_its_source() {
         .arg(compiled.join("m"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new("non_strict_ext_src").expect("scratch");
     copy_into(&plain, "non_strict_ext.py", "m.py");
@@ -176,8 +176,8 @@ fn untyped_ext_module_matches_its_source() {
     };
     let ours = run(&compiled);
     let oracle = run(&plain);
-    assert!(ours.status.success(), "{}", text(&ours.stderr));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout));
+    assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
 }
 
 /// What non-strict mode cannot compile yet falls back to CPython (#12,
@@ -196,14 +196,14 @@ fn an_unsupported_construct_is_a_c0001_without_the_fallback() {
         .expect("pycc should spawn");
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        text(&output.stdout).contains("error[C0001]"),
+        text(&pycc_scratch::lf(&output.stdout)).contains("error[C0001]"),
         "{}",
-        text(&output.stdout)
+        text(&pycc_scratch::lf(&output.stdout))
     );
     let fallback = pycc()
         .args(["check", "--non-strict"])
         .arg(&source)
         .output()
         .expect("pycc should spawn");
-    assert!(fallback.status.success(), "{}", text(&fallback.stdout));
+    assert!(fallback.status.success(), "{}", text(&pycc_scratch::lf(&fallback.stdout)));
 }

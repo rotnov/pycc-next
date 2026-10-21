@@ -100,7 +100,7 @@ fn the_partitions_link_into_the_program_the_whole_module_is() {
         assert!(status.success());
         let out = std::process::Command::new(&exe).output().unwrap();
         assert!(out.status.success());
-        String::from_utf8(out.stdout).unwrap()
+        String::from_utf8(pycc_scratch::lf(&out.stdout)).unwrap()
     };
     let whole = {
         let context = Context::create();

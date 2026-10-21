@@ -25,8 +25,8 @@ fn pycc() -> Command {
 }
 
 fn rendered(output: &Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    text.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     text.replace("\r\n", "\n")
 }
 
@@ -73,7 +73,7 @@ fn assert_prints(source: &str, expected: &str) {
             rendered(&run)
         );
         assert_eq!(
-            String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+            pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
             expected,
             "{source} (release={release}) printed the wrong output"
         );

@@ -76,8 +76,8 @@ fn assert_enum_call_rejected_in(
         cmd.args(["-o", out.to_str().unwrap()]);
     }
     let result = cmd.output().unwrap();
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr));
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout));
     let combined = format!("{stdout}{stderr}");
     assert_eq!(
         result.status.code(),
@@ -137,9 +137,9 @@ fn a_by_value_enum_call_looks_the_member_up() {
         .args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
         .output()
         .unwrap();
-    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    assert!(build.status.success(), "{}", pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr)));
     let run = Command::new(&out).output().unwrap();
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "1 a\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)), "1 a\n");
 }
 
 /// `raise Color()` is a call expression like any other to the scan, so it
@@ -234,8 +234,8 @@ fn a_call_to_a_def_bound_name_before_the_enum_class_reports_the_collision_only()
         .unwrap();
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr))
     );
     assert_eq!(result.status.code(), Some(1), "got: {combined}");
     assert!(
@@ -268,8 +268,8 @@ fn a_call_to_an_import_bound_name_before_the_enum_class_reports_the_collision_on
         .unwrap();
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr))
     );
     assert_eq!(result.status.code(), Some(1), "got: {combined}");
     assert!(
@@ -302,8 +302,8 @@ fn a_call_after_an_identical_repeated_import_is_reported_at_the_call() {
         .unwrap();
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr))
     );
     assert_eq!(result.status.code(), Some(1), "got: {combined}");
     assert!(
@@ -338,8 +338,8 @@ fn a_call_after_a_two_path_import_of_one_enum_falls_back_to_the_type_checker_gua
         .unwrap();
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr))
     );
     assert_eq!(result.status.code(), Some(1), "got: {combined}");
     assert!(

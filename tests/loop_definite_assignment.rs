@@ -38,8 +38,8 @@ fn assert_success(output: &Output, what: &str) {
     assert!(
         output.status.success(),
         "{what} failed:\n{}{}",
-        text(&output.stdout),
-        text(&output.stderr)
+        text(&pycc_scratch::lf(&output.stdout)),
+        text(&pycc_scratch::lf(&output.stderr))
     );
 }
 
@@ -49,7 +49,7 @@ fn cpython_stdout() -> String {
         .output()
         .expect("python3 should spawn");
     assert_success(&run, "CPython");
-    text(&run.stdout)
+    text(&pycc_scratch::lf(&run.stdout))
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn loop_exits_bind_like_cpython_native() {
     assert_success(&build, "pycc build");
     let run = Command::new(&binary).output().expect("the binary runs");
     assert_success(&run, "the native binary");
-    assert_eq!(text(&run.stdout), cpython_stdout());
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), cpython_stdout());
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn loop_exits_bind_like_cpython_as_an_extension() {
         .output()
         .expect("python3 should spawn");
     assert_success(&cpython, "CPython importing the source");
-    assert_eq!(text(&run.stdout), text(&cpython.stdout));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&cpython.stdout)));
 }
 
 /// `source` compiles, and running it matches CPython: the same stdout, exit
@@ -132,11 +132,11 @@ fn assert_unbound_like_cpython(tag: &str, source: &str, name: &str) {
         .output()
         .expect("python3 should spawn");
     let last = |bytes: &[u8]| text(bytes).trim_end().lines().last().unwrap_or("").to_string();
-    assert_eq!(text(&run.stdout), text(&cpython.stdout), "{tag}");
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&cpython.stdout)), "{tag}");
     assert_eq!(run.status.code(), Some(1), "{tag}");
     assert_eq!(cpython.status.code(), Some(1), "{tag}");
-    assert_eq!(last(&run.stderr), last(&cpython.stderr), "{tag}");
-    assert!(last(&run.stderr).contains(&format!("'{name}'")), "{tag}");
+    assert_eq!(last(&pycc_scratch::lf(&run.stderr)), last(&pycc_scratch::lf(&cpython.stderr)), "{tag}");
+    assert!(last(&pycc_scratch::lf(&run.stderr)).contains(&format!("'{name}'")), "{tag}");
 }
 
 /// `pycc check` on `source` fails with `T0041` naming `name`.
@@ -150,7 +150,7 @@ fn assert_maybe_unbound(tag: &str, source: &str, name: &str) {
         .output()
         .expect("pycc should spawn");
     // Diagnostics may go to either stream.
-    let stderr = format!("{}{}", text(&out.stdout), text(&out.stderr));
+    let stderr = format!("{}{}", text(&pycc_scratch::lf(&out.stdout)), text(&pycc_scratch::lf(&out.stderr)));
     assert!(!out.status.success(), "{tag}: expected T0041, check passed");
     assert!(
         stderr.contains(&format!(
@@ -248,7 +248,7 @@ fn a_module_scope_handler_as_name_is_unbound_after_a_break() {
         .arg(&src)
         .output()
         .expect("pycc should spawn");
-    let stderr = format!("{}{}", text(&out.stdout), text(&out.stderr));
+    let stderr = format!("{}{}", text(&pycc_scratch::lf(&out.stdout)), text(&pycc_scratch::lf(&out.stderr)));
     assert!(!out.status.success(), "expected T0041, check passed");
     assert!(
         stderr.contains("error[T0041]") && stderr.contains("`e`"),

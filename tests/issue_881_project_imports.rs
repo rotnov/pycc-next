@@ -30,7 +30,7 @@ struct Run {
 
 impl Run {
     fn both(&self) -> String {
-        format!("{}{}", self.stdout, self.stderr)
+        format!("{}{}", pycc_scratch::lf(&self.stdout), pycc_scratch::lf(&self.stderr))
     }
 }
 
@@ -43,8 +43,8 @@ fn run(args: &[&str], cwd: Option<&Path>) -> Run {
     let output = command.output().expect("the pycc binary must run");
     Run {
         code: output.status.code().expect("pycc must exit normally"),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stdout: pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        stderr: pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)),
     }
 }
 
@@ -94,7 +94,7 @@ fn the_reproduction_builds_and_runs() {
     let output = Command::new(&binary)
         .output()
         .expect("the program must run");
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "42");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).trim(), "42");
 }
 
 #[test]

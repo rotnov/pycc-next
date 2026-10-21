@@ -33,7 +33,7 @@ fn text(bytes: &[u8]) -> String {
 }
 
 fn rendered(output: &Output) -> String {
-    format!("{}{}", text(&output.stdout), text(&output.stderr))
+    format!("{}{}", text(&pycc_scratch::lf(&output.stdout)), text(&pycc_scratch::lf(&output.stderr)))
 }
 
 /// The last line of a traceback: the exception CPython reports.
@@ -44,7 +44,7 @@ fn exception_line(stderr: &[u8]) -> String {
 /// Compares stdout, the exit status and (on failure) the reported
 /// exception of `compiled` with `oracle`.
 fn assert_same(label: &str, compiled: &Output, oracle: &Output) {
-    assert_eq!(text(&compiled.stdout), text(&oracle.stdout), "{label}");
+    assert_eq!(text(&pycc_scratch::lf(&compiled.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{label}");
     assert_eq!(
         compiled.status.code(),
         oracle.status.code(),
@@ -53,8 +53,8 @@ fn assert_same(label: &str, compiled: &Output, oracle: &Output) {
     );
     if !oracle.status.success() {
         assert_eq!(
-            exception_line(&compiled.stderr),
-            exception_line(&oracle.stderr),
+            exception_line(&pycc_scratch::lf(&compiled.stderr)),
+            exception_line(&pycc_scratch::lf(&oracle.stderr)),
             "{label}"
         );
     }

@@ -25,8 +25,8 @@ fn python() -> String {
 fn text(output: &Output) -> String {
     format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 
@@ -37,7 +37,7 @@ fn run_ok(cmd: &mut Command) -> String {
         "{cmd:?} failed:\n{}",
         text(&output)
     );
-    String::from_utf8_lossy(&output.stdout).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout))
 }
 
 fn write(dir: &Path, rel: &str, contents: &str) {

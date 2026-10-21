@@ -53,16 +53,16 @@ fn build_and_run(dir: &std::path::Path, stem: &str, source: &str) -> String {
     assert!(
         build.status.success(),
         "pycc build should succeed for `{stem}`; stdout: {} stderr: {}",
-        String::from_utf8_lossy(&build.stdout),
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&exe).output().unwrap();
     assert!(
         run.status.success(),
         "`{stem}` should exit successfully; stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
-    String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n")
 }
 
 /// #1378: the import line checks clean. Before this change it failed with
@@ -76,7 +76,7 @@ fn the_legacy_typing_import_line_checks_successfully() {
     assert!(
         output.status.success(),
         "pycc check should accept the legacy typing aliases; stdout: {}",
-        String::from_utf8_lossy(&output.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout))
     );
 }
 

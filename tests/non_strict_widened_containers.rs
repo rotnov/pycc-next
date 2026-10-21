@@ -46,14 +46,14 @@ fn assert_compiled_like_cpython(stem: &str, stdin: &str) {
         .args(["--release", "--non-strict", "--report-fallbacks"])
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    assert!(!text(&build.stderr).contains("fallback:"), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    assert!(!text(&pycc_scratch::lf(&build.stderr)).contains("fallback:"), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let oracle = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     let expected = run(Command::new(oracle).arg(&fixture), stdin);
-    assert!(expected.status.success(), "{}", text(&expected.stderr));
+    assert!(expected.status.success(), "{}", text(&pycc_scratch::lf(&expected.stderr)));
     let actual = run(&mut Command::new(&binary), stdin);
-    assert!(actual.status.success(), "{}", text(&actual.stderr));
-    assert_eq!(text(&actual.stdout), text(&expected.stdout));
+    assert!(actual.status.success(), "{}", text(&pycc_scratch::lf(&actual.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&actual.stdout)), text(&pycc_scratch::lf(&expected.stdout)));
 }
 
 #[test]

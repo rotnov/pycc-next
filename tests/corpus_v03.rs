@@ -86,21 +86,21 @@ fn matches_cpython(name: &str, flags: &[&str]) -> String {
     assert!(
         build.status.success(),
         "{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     let ours = run_with_stdin(Command::new(&out), name);
     let mut oracle = python();
     oracle.arg(fixture(name));
     let theirs = run_with_stdin(oracle, name);
     assert_eq!(
-        text(&ours.stdout),
-        text(&theirs.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&theirs.stdout)),
         "stdout differs ({name})"
     );
-    assert_eq!(last_line(&ours.stderr), last_line(&theirs.stderr), "{name}");
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&theirs.stderr)), "{name}");
     assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
-    text(&build.stderr)
+    text(&pycc_scratch::lf(&build.stderr))
 }
 
 #[test]

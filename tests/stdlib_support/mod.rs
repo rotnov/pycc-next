@@ -20,7 +20,11 @@ pub fn fixture(name: &str) -> PathBuf {
 }
 
 pub fn python() -> PathBuf {
-    let default = if cfg!(windows) { "python.exe" } else { "python3" };
+    let default = if cfg!(windows) {
+        "python.exe"
+    } else {
+        "python3"
+    };
     PathBuf::from(std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| default.into()))
 }
 
@@ -29,7 +33,11 @@ fn text(bytes: &[u8]) -> String {
 }
 
 pub fn rendered(output: &Output) -> String {
-    format!("{}{}", text(&output.stdout), text(&output.stderr))
+    format!(
+        "{}{}",
+        text(&pycc_scratch::lf(&output.stdout)),
+        text(&pycc_scratch::lf(&output.stderr))
+    )
 }
 
 /// The observable result of a run: stdout, the last stderr line (the
@@ -44,8 +52,8 @@ pub struct Outcome {
 
 pub fn outcome(output: &Output) -> Outcome {
     Outcome {
-        stdout: text(&output.stdout),
-        error: text(&output.stderr)
+        stdout: text(&pycc_scratch::lf(&output.stdout)),
+        error: text(&pycc_scratch::lf(&output.stderr))
             .lines()
             .last()
             .unwrap_or_default()

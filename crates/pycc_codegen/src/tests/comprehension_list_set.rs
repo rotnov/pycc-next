@@ -68,7 +68,7 @@ fn a_range_sourced_list_comprehension_with_no_filter_computes_every_element() {
     let bin_path = dir.join("listcomp_range_no_filter");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n2\n4\n6\n8\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n2\n4\n6\n8\n");
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn a_list_sourced_list_comprehension_with_a_filter_only_keeps_matching_elements(
     let bin_path = dir.join("listcomp_list_with_filter");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n4\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n4\n");
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn a_list_sourced_list_comprehension_that_rebinds_its_own_source_name_reads_the_
     let bin_path = dir.join("listcomp_self_referential_source");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n4\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n4\n");
 }
 
 #[test]
@@ -270,7 +270,7 @@ fn a_range_sourced_list_comprehension_whose_bound_reads_its_own_rebound_target_u
     let bin_path = dir.join("listcomp_self_referential_range_bound");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n2\n4\n6\n8\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n2\n4\n6\n8\n");
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn a_list_comprehensions_elt_reading_its_own_rebound_target_reads_the_pre_existi
     let bin_path = dir.join("listcomp_self_referential_elt");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n1\n");
 }
 
 #[test]
@@ -378,7 +378,7 @@ fn a_set_sourced_list_comprehension_with_no_filter_visits_every_element() {
     let bin_path = dir.join("listcomp_set_no_filter");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n3\n");
 }
 
 #[test]
@@ -445,7 +445,7 @@ fn an_empty_range_sourced_list_comprehension_produces_a_genuinely_valid_empty_li
     let bin_path = dir.join("listcomp_range_empty");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n9\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n9\n");
 }
 
 #[test]
@@ -502,7 +502,7 @@ fn a_dict_sourced_list_comprehension_binds_its_key_without_crashing() {
     let bin_path = dir.join("listcomp_dict_source_no_crash");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"7\n7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n7\n");
 }
 
 // ---- PR-12 Task 5b: `SetCompAssign` codegen tests ----
@@ -560,7 +560,7 @@ fn a_range_sourced_set_comprehension_with_a_filter_only_keeps_matching_elements(
     let bin_path = dir.join("setcomp_range_with_filter");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n2\n4\n6\n8\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n2\n4\n6\n8\n");
 }
 
 #[test]
@@ -609,7 +609,7 @@ fn a_list_sourced_set_comprehension_with_no_filter_deduplicates_repeated_element
     let bin_path = dir.join("setcomp_list_no_filter_dedup");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n1\n2\n3\n");
 }
 
 #[test]
@@ -670,7 +670,7 @@ fn a_set_sourced_set_comprehension_that_rebinds_its_own_source_name_reads_the_pr
     let bin_path = dir.join("setcomp_self_referential_rebind");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n3\n");
 }
 
 #[test]
@@ -742,7 +742,7 @@ fn a_range_sourced_set_comprehension_whose_bound_reads_its_own_rebound_target_us
     let bin_path = dir.join("setcomp_self_referential_range_bound");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n2\n4\n6\n8\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n2\n4\n6\n8\n");
 }
 
 #[test]
@@ -798,5 +798,5 @@ fn a_dict_sourced_set_comprehension_binds_its_key_without_crashing() {
     let bin_path = dir.join("setcomp_dict_source_no_crash");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n7\n");
 }

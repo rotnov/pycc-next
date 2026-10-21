@@ -118,7 +118,7 @@ fn compiles_an_f_string_interpolating_a_none_returning_call_as_none() {
     let bin_path = dir.join("fstring_none_call_as_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"None\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n");
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn interpolating_a_none_returning_call_in_an_f_string_renders_none_not_false() {
     let bin_path = dir.join("fstring_none_call_renders_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"got: None\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"got: None\n");
 }
 
 #[test]
@@ -270,5 +270,5 @@ fn interpolating_a_none_typed_parameter_renders_none() {
     let bin_path = dir.join("fstring_none_typed_parameter");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"None\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n");
 }

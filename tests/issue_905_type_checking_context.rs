@@ -42,7 +42,7 @@ fn assert_check_reports_l0001(scratch: &str, name: &str, source: &str, expected_
         !output.status.success(),
         "pycc check should reject a context violation hidden behind a `TYPE_CHECKING` guard"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("error[L0001]") && stdout.contains(expected_message),
         "expected an L0001 mentioning {expected_message:?}; got:\n{stdout}"
@@ -62,7 +62,7 @@ fn assert_check_succeeds(scratch: &str, name: &str, source: &str) {
         output.status.success(),
         "pycc check should still accept a `TYPE_CHECKING` guard whose body only contains \
          constructs pycc does not implement; stdout:\n{}",
-        String::from_utf8_lossy(&output.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout))
     );
 }
 
@@ -190,16 +190,16 @@ fn a_legal_guarded_body_still_builds_and_runs() {
     assert!(
         build.status.success(),
         "pycc build should succeed; stderr: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&exe).output().unwrap();
     assert!(
         run.status.success(),
         "the built binary should exit successfully; stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         "2\n",
         "the folded guard must stay a no-op"
     );

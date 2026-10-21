@@ -66,7 +66,7 @@ fn optional_float_annotated_assignment_constructs_a_present_struct_and_reads_its
     let bin_path = dir.join("optional_float_present_is_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"False\nTrue\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"False\nTrue\n");
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn optional_bool_annotated_assignment_constructs_a_present_struct_and_reads_its_
     let bin_path = dir.join("optional_bool_present_is_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"False\nTrue\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"False\nTrue\n");
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn optional_float_annotated_assignment_with_bare_none_constructs_an_absent_struc
     let bin_path = dir.join("optional_float_absent_is_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\n");
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn optional_bool_annotated_assignment_with_bare_none_constructs_an_absent_struct
     let bin_path = dir.join("optional_bool_absent_is_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\n");
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn optional_float_truthiness_follows_cpython_for_present_and_absent_values() {
     let bin_path = dir.join("optional_float_truthiness");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n0\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n0\n1\n");
 }
 
 #[test]
@@ -319,7 +319,7 @@ fn optional_bool_truthiness_follows_cpython_for_present_and_absent_values() {
     let bin_path = dir.join("optional_bool_truthiness");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n0\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n0\n1\n");
 }
 
 #[test]
@@ -370,7 +370,7 @@ fn optional_float_narrowed_read_of_a_present_value_prints_the_payload() {
     let bin_path = dir.join("optional_float_narrowed");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"5.5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5.5\n");
 }
 
 #[test]
@@ -417,7 +417,7 @@ fn optional_bool_narrowed_read_of_a_present_value_prints_the_payload() {
     let bin_path = dir.join("optional_bool_narrowed");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -473,7 +473,7 @@ fn an_optional_bool_function_that_raises_before_returning_still_produces_a_valid
     let bin_path = dir.join("optional_bool_exceptional_exit");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -556,7 +556,7 @@ fn optional_bool_absent_value_truthiness_and_narrowed_unwrap_are_both_correct() 
     let bin_path = dir.join("optional_bool_absent_end_to_end");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n");
 }
 
 #[test]
@@ -725,7 +725,7 @@ fn optional_float_bare_none_argument_constructs_a_correctly_typed_absent_struct(
     let bin_path = dir.join("optional_float_bare_none_argument");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\n");
 }
 
 #[test]
@@ -780,7 +780,7 @@ fn optional_bool_bare_none_argument_constructs_a_correctly_typed_absent_struct()
     let bin_path = dir.join("optional_bool_bare_none_argument");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\n");
 }
 
 #[test]
@@ -833,5 +833,5 @@ fn optional_float_bare_none_return_constructs_a_correctly_typed_absent_struct() 
     let bin_path = dir.join("optional_float_bare_none_return");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\n");
 }

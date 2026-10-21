@@ -51,7 +51,7 @@ fn check_error(label: &str, source: &str) -> String {
         Some(1),
         "{label} should be a compile error"
     );
-    String::from_utf8(output.stdout).expect("diagnostics are UTF-8")
+    String::from_utf8(pycc_scratch::lf(&output.stdout)).expect("diagnostics are UTF-8")
 }
 
 #[test]
@@ -69,7 +69,7 @@ print(len(build()))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n1\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n1\n3\n");
 }
 
 #[test]
@@ -86,7 +86,7 @@ print(len(d))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"7\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n2\n");
 }
 
 #[test]
@@ -102,7 +102,7 @@ print(len(s))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 #[test]
@@ -122,7 +122,7 @@ print(t[2])
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"4\nTrue\n2.5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"4\nTrue\n2.5\n");
 }
 
 #[test]
@@ -148,7 +148,7 @@ print(xs[1])
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n2\n4\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n2\n4\n");
 }
 
 #[test]
@@ -166,7 +166,7 @@ print(len(pick(0)))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n1\n");
 }
 
 #[test]
@@ -185,7 +185,7 @@ print(1)
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -206,7 +206,7 @@ print(b.items()[0])
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"2\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n2\n");
 }
 
 #[test]
@@ -240,7 +240,7 @@ print(size(Box()))
 ",
     );
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 #[test]
@@ -304,5 +304,5 @@ fn an_empty_list_literal_return_takes_the_return_annotation() {
         "def f() -> list[int]:\n    return []\n\n\nprint(len(f()), f())\n",
     );
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "0 []\n");
+    assert_eq!(pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)), "0 []\n");
 }

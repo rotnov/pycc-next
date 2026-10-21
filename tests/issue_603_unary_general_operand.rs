@@ -53,12 +53,12 @@ fn build_and_run(case: &str, source: &str) -> String {
         output.status.success(),
         "pycc build should succeed for {case}, got {:?}: {}",
         output.status.code(),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 
     let run = Command::new(&out).output().unwrap();
     assert!(run.status.success(), "compiled program failed for {case}");
-    String::from_utf8(run.stdout).unwrap()
+    String::from_utf8(pycc_scratch::lf(&run.stdout)).unwrap()
 }
 
 /// Run `pycc check` on `source` and return its combined diagnostic output,
@@ -76,8 +76,8 @@ fn check_err(case: &str, source: &str) -> String {
     );
     format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 

@@ -33,14 +33,14 @@ fn build_and_run(dir: &std::path::Path, src_name: &str, source: &str) -> (bool, 
         return (
             false,
             Vec::new(),
-            String::from_utf8_lossy(&output.stderr).to_string(),
+            pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).to_string(),
         );
     }
     let run = Command::new(&out).output().unwrap();
     (
         run.status.success(),
-        run.stdout.clone(),
-        String::from_utf8_lossy(&run.stderr).to_string(),
+        pycc_scratch::lf(&run.stdout).clone(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).to_string(),
     )
 }
 
@@ -52,8 +52,8 @@ fn check_only(dir: &std::path::Path, src_name: &str, source: &str) -> (bool, Str
         .unwrap();
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
     (output.status.success(), combined)
 }
@@ -193,8 +193,8 @@ fn bigint_zero_step_range_is_caught_in_a_try_except() {
 // -- `try`) is observed only at the next enclosing checkpoint, not --
 // -- immediately -- the same D-173/`float_div` scope characteristic --
 // -- documented in `crates/pycc_rt/src/lib.rs` above `range_continue`. This --
-// -- pins the exact observed shape so a later change cannot silently widen --
-// -- or narrow that scope without updating this test. --
+// -- pins the exact observed shape: the `print` after the loop runs but --
+// -- writes nothing while the exception is pending (CPython prints nothing). --
 
 #[test]
 fn uncaught_zero_step_range_inside_a_function_body_is_observed_at_the_next_checkpoint() {
@@ -209,10 +209,10 @@ fn uncaught_zero_step_range_inside_a_function_body_is_observed_at_the_next_check
         "expected non-zero exit for an uncaught zero-step range"
     );
     assert_eq!(
-        out, b"after loop\n",
-        "the statement after the loop, still inside f's own body with no \
-         enclosing try, must run to completion before the pending exception \
-         is observed at the next checkpoint"
+        out, b"",
+        "the print after the loop, still inside f's own body with no \
+         enclosing try, writes nothing while the exception is pending, \
+         which the print's own guard then observes"
     );
     assert!(
         err.contains("ValueError: range() arg 3 must not be zero"),

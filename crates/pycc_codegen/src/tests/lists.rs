@@ -56,7 +56,7 @@ fn a_return_inside_a_for_list_body_returns_immediately_without_looping() {
     let bin_path = dir.join("for_list_return_inside_body");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn a_return_inside_a_for_set_body_returns_immediately_without_looping() {
     let bin_path = dir.join("for_set_return_inside_body");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn a_for_list_loop_visits_every_element_in_order() {
     let bin_path = dir.join("for_list_visits_every_element");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n3\n");
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn a_for_list_loop_keeps_its_per_iteration_length_read_under_release_optimizatio
     let bin_path = dir.join("for_list_release");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n3\n");
 }
 
 #[test]
@@ -298,7 +298,7 @@ fn appending_to_a_list_validates_and_preserves_the_encoded_value() {
     let bin_path = dir.join("list_append_round_trip");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"4\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"4\n");
 }
 
 #[test]
@@ -336,7 +336,7 @@ fn a_module_level_list_binding_gets_a_null_initialized_pointer_global() {
     let bin_path = dir.join("module_level_list_global");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n");
 }
 
 #[test]
@@ -399,5 +399,5 @@ fn a_bool_list_element_keeps_its_identity_in_encoded_storage() {
     let bin_path = dir.join("bool_list_element_identity");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }

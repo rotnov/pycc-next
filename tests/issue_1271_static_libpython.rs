@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 fn write(path: &Path, bytes: &[u8]) {

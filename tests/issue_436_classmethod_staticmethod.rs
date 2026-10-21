@@ -35,7 +35,7 @@ fn static_method_call_through_class_builds_and_runs() {
     );
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"43\n", "C.create(42) should return 43");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"43\n", "C.create(42) should return 43");
 }
 
 /// #436: a `@staticmethod` called through an instance. The instance is
@@ -60,7 +60,7 @@ fn static_method_call_through_instance_builds_and_runs() {
     );
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"30\n", "c.combine(10, 20) should return 30");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"30\n", "c.combine(10, 20) should return 30");
 }
 
 /// #436: a basic `@classmethod` called through the class name. The
@@ -87,7 +87,7 @@ fn class_method_call_through_class_builds_and_runs() {
     );
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n", "C.greet(21) should return 42");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n", "C.greet(21) should return 42");
 }
 
 /// #436: a `@classmethod` called through an instance. The instance is
@@ -112,7 +112,7 @@ fn class_method_call_through_instance_builds_and_runs() {
     );
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n", "c.greet(21) should return 42");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n", "c.greet(21) should return 42");
 }
 
 /// #436: a `@classmethod` that uses `cls` to read an instance attribute.
@@ -139,7 +139,7 @@ fn class_method_using_cls_attribute_builds_and_runs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"99\n",
+        pycc_scratch::lf(&output.stdout), b"99\n",
         "c.fetch_x() should return 99 (the instance's x attribute via cls)"
     );
 }
@@ -166,7 +166,7 @@ fn static_method_with_no_parameters_builds_and_runs() {
     );
 
     let output = Command::new(&out).output().unwrap();
-    assert_eq!(output.stdout, b"42\n", "C.answer() should return 42");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n", "C.answer() should return 42");
 }
 
 /// #436: an inherited `@staticmethod`. A derived class calls a static
@@ -192,7 +192,7 @@ fn inherited_static_method_builds_and_runs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"107\n",
+        pycc_scratch::lf(&output.stdout), b"107\n",
         "Derived.helper(7) should return 107 (inherited from Base)"
     );
 }
@@ -220,7 +220,7 @@ fn inherited_class_method_builds_and_runs() {
 
     let output = Command::new(&out).output().unwrap();
     assert_eq!(
-        output.stdout, b"205\n",
+        pycc_scratch::lf(&output.stdout), b"205\n",
         "Derived.helper(5) should return 205 (inherited from Base)"
     );
 }
@@ -245,7 +245,7 @@ fn staticmethod_on_init_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for @staticmethod on __init__"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "should report C0001 for @staticmethod on __init__, got: {stderr}"
@@ -272,7 +272,7 @@ fn classmethod_on_init_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for @classmethod on __init__"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "should report C0001 for @classmethod on __init__, got: {stderr}"
@@ -299,7 +299,7 @@ fn static_method_wrong_argument_types_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for wrong static method argument types"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for wrong static method argument types, got: {stderr}"
@@ -327,7 +327,7 @@ fn class_method_wrong_argument_types_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for wrong class method argument types"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0021"),
         "should report T0021 for wrong class method argument types, got: {stderr}"
@@ -357,7 +357,7 @@ fn static_method_declaring_self_is_a_check_error() {
         !output.status.success(),
         "pycc build should fail for a static method declaring self"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("T0001"),
         "should report T0001 for an unannotated self in a public static method, got: {stderr}"
@@ -384,7 +384,7 @@ fn class_method_without_cls_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for a class method without cls"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "should report C0001 for a class method without cls, got: {stderr}"
@@ -411,7 +411,7 @@ fn static_method_collides_with_regular_method_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for @staticmethod colliding with a regular method"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001") && stderr.contains("cannot share a name"),
         "should report C0001 with collision message, got: {stderr}"
@@ -438,7 +438,7 @@ fn class_method_collides_with_regular_method_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for @classmethod colliding with a regular method"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001") && stderr.contains("cannot share a name"),
         "should report C0001 with collision message, got: {stderr}"
@@ -465,7 +465,7 @@ fn static_method_collides_with_class_method_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for @staticmethod colliding with @classmethod"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001") && stderr.contains("cannot share a name"),
         "should report C0001 with collision message, got: {stderr}"
@@ -492,7 +492,7 @@ fn regular_method_collides_with_static_method_is_a_build_error() {
         !output.status.success(),
         "pycc build should fail for a regular method colliding with @staticmethod"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001") && stderr.contains("cannot share a name"),
         "should report C0001 with collision message, got: {stderr}"

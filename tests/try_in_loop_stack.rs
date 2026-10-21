@@ -43,22 +43,22 @@ fn a_try_in_a_long_loop_runs_in_a_debug_build() {
     assert!(
         build.status.success(),
         "pycc build failed:\n{}{}",
-        text(&build.stdout),
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stdout)),
+        text(&pycc_scratch::lf(&build.stderr))
     );
     let run = Command::new(&binary).output().expect("the binary runs");
     assert!(
         run.status.success(),
         "the debug binary failed ({:?}):\n{}{}",
         run.status,
-        text(&run.stdout),
-        text(&run.stderr)
+        text(&pycc_scratch::lf(&run.stdout)),
+        text(&pycc_scratch::lf(&run.stderr))
     );
     let oracle = std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into());
     let cpython = Command::new(oracle)
         .arg(&fixture)
         .output()
         .expect("python3 should spawn");
-    assert!(cpython.status.success(), "{}", text(&cpython.stderr));
-    assert_eq!(text(&run.stdout), text(&cpython.stdout));
+    assert!(cpython.status.success(), "{}", text(&pycc_scratch::lf(&cpython.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), text(&pycc_scratch::lf(&cpython.stdout)));
 }

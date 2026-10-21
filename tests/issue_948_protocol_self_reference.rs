@@ -82,8 +82,8 @@ fn assert_self_return_rejected(
         cmd.args(["-o", out.to_str().unwrap()]);
     }
     let result = cmd.output().unwrap();
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr));
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout));
     let combined = format!("{stdout}{stderr}");
     assert_eq!(
         result.status.code(),
@@ -198,8 +198,8 @@ fn a_self_referential_protocol_parameter_conforms_and_runs() {
         .arg(entry.to_str().unwrap())
         .output()
         .unwrap();
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stderr));
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&result.stdout));
     assert!(
         result.status.success(),
         "pycc run should succeed, got {:?}\nstdout: {stdout}\nstderr: {stderr}",

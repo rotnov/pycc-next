@@ -54,9 +54,9 @@ fn fixture(name: &str, dir: &Path, as_name: &str) -> PathBuf {
 }
 
 fn assert_matches(ours: &Output, oracle: &Output) {
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
-    assert_eq!(ours.status.code(), oracle.status.code(), "{}", text(&ours.stderr));
-    assert_eq!(last_line(&ours.stderr), last_line(&oracle.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(ours.status.code(), oracle.status.code(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&oracle.stderr)));
 }
 
 /// Builds `source` with `flags`, asserting it builds and that no function,
@@ -70,7 +70,7 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
         .arg(out)
         .output()
         .expect("pycc should spawn");
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     for unit in ["fallback: function", "fallback: method", "fallback: class"] {
         assert!(!report.contains(unit), "no function should run in CPython:\n{report}");
@@ -178,7 +178,7 @@ print('ok' if before == after else (before, after))\n";
         .current_dir(&*dir)
         .output()
         .expect("python should spawn");
-    assert_eq!(text(&run.stdout), "ok\n", "{}", text(&run.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&run.stdout)), "ok\n", "{}", text(&pycc_scratch::lf(&run.stderr)));
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn unmodeled_typing_names_stay_refused_in_strict_mode() {
     std::fs::write(&source, "from typing import Match\n\n\ndef f(x: int) -> int:\n    return x\n")
         .unwrap();
     let check = pycc().arg("check").arg(&source).output().expect("pycc should spawn");
-    let stderr = text(&check.stderr) + &text(&check.stdout);
+    let stderr = text(&pycc_scratch::lf(&check.stderr)) + &text(&pycc_scratch::lf(&check.stdout));
     assert!(!check.status.success(), "{stderr}");
     assert!(
         stderr.contains("module `typing` has no importable symbol named `Match`"),
@@ -229,14 +229,14 @@ fn unmodeled_typing_names_stay_refused_in_strict_mode() {
     )
     .unwrap();
     let check = pycc().arg("check").arg(&source).output().expect("pycc should spawn");
-    let stderr = text(&check.stderr) + &text(&check.stdout);
+    let stderr = text(&pycc_scratch::lf(&check.stderr)) + &text(&pycc_scratch::lf(&check.stdout));
     assert!(!check.status.success(), "{stderr}");
     assert!(stderr.contains("`Optional[...]` takes exactly one type argument"), "{stderr}");
     let source = dir.join("u.py");
     std::fs::write(&source, "from typing import Union\n\n\ndef f(x: Union[int, str]) -> int:\n    return 1\n")
         .unwrap();
     let check = pycc().arg("check").arg(&source).output().expect("pycc should spawn");
-    let stderr = text(&check.stderr) + &text(&check.stdout);
+    let stderr = text(&pycc_scratch::lf(&check.stderr)) + &text(&pycc_scratch::lf(&check.stdout));
     assert!(!check.status.success(), "{stderr}");
     assert!(stderr.contains("T0048"), "{stderr}");
 }

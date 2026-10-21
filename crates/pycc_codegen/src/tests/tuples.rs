@@ -67,7 +67,7 @@ fn tuple_construction_and_literal_index_reads_codegen_and_run() {
     let bin_path = dir.join("tuple_literal_and_reads");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\nTrue\n2.5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\nTrue\n2.5\n");
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn a_function_local_tuple_codegens_and_runs_through_its_alloca_slot() {
     let bin_path = dir.join("tuple_local_slot");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"20\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"20\n");
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn an_inline_tuple_literal_can_be_subscripted_without_a_named_binding() {
     let bin_path = dir.join("tuple_inline_subscript");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"8\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"8\n");
 }
 
 #[test]

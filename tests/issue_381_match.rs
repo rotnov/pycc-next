@@ -24,14 +24,14 @@ fn build_and_run(dir: &std::path::Path, src_name: &str, source: &str) -> (bool, 
         return (
             false,
             Vec::new(),
-            String::from_utf8_lossy(&output.stderr).to_string(),
+            pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).to_string(),
         );
     }
     let run = Command::new(&out).output().unwrap();
     (
         run.status.success(),
-        run.stdout.clone(),
-        String::from_utf8_lossy(&run.stderr).to_string(),
+        pycc_scratch::lf(&run.stdout).clone(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).to_string(),
     )
 }
 
@@ -43,8 +43,8 @@ fn check_only(dir: &std::path::Path, src_name: &str, source: &str) -> (bool, Str
         .unwrap();
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
     (output.status.success(), combined)
 }

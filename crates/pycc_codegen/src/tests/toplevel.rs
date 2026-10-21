@@ -100,7 +100,7 @@ fn defining_main_without_calling_it_produces_no_output() {
     let bin_path = dir.join("slice0_uncalled_main");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn compiles_an_explicit_call_to_main_to_a_running_binary() {
     let bin_path = dir.join("slice0");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn monomorphized_generic_function_dispatches_directly_without_fn_ptr_global() {
     let bin_path = dir.join("monomorphized_direct_dispatch");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"7\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"7\n");
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn compiles_top_level_statement_with_no_main() {
     let bin_path = dir.join("slice0_toplevel");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"42\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"42\n");
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn a_no_op_statement_compiles_and_produces_no_observable_output() {
     let bin_path = dir.join("slice0_no_op");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn top_level_statements_run_in_order_including_a_call_to_main() {
     let bin_path = dir.join("slice0_combined");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n2\n");
 }
 
 #[test]

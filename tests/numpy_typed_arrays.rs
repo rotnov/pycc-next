@@ -33,8 +33,8 @@ fn text(bytes: &[u8]) -> String {
 }
 
 fn rendered(output: &Output) -> String {
-    let mut out = text(&output.stdout);
-    out.push_str(&text(&output.stderr));
+    let mut out = text(&pycc_scratch::lf(&output.stdout));
+    out.push_str(&text(&pycc_scratch::lf(&output.stderr)));
     out
 }
 
@@ -164,7 +164,7 @@ fn the_oracle_fixture_matches_cpython_as_an_ext_module() {
     assert!(expected.status.success(), "{}", rendered(&expected));
     let actual = python_in(&out_dir, &["-c", "import nta"]);
     assert!(actual.status.success(), "{}", rendered(&actual));
-    assert_eq!(text(&actual.stdout), text(&expected.stdout));
+    assert_eq!(text(&pycc_scratch::lf(&actual.stdout)), text(&pycc_scratch::lf(&expected.stdout)));
 }
 
 /// What the `--ext` boundary does with arrays from Python: a write is
@@ -224,7 +224,7 @@ fn the_ext_boundary_checks_dtype_and_dimensions_and_shares_the_array() {
     let output = python_in(&dir.join("ext"), &["-c", script]);
     assert!(output.status.success(), "{}", rendered(&output));
     assert_eq!(
-        text(&output.stdout),
+        text(&pycc_scratch::lf(&output.stdout)),
         "[[0.0, 1.0, 2.0], [10.0, 11.0, 12.0]]\n\
          [[0.0, 1.0, 2.0], [10.0, 11.0, 12.0]]\n\
          10 [0, 2, 4, 6]\n\
@@ -273,7 +273,7 @@ fn the_oracle_fixture_matches_cpython_as_an_embedded_executable() {
         .output()
         .expect("program should spawn");
     assert!(actual.status.success(), "{}", rendered(&actual));
-    assert_eq!(text(&actual.stdout), text(&expected.stdout));
+    assert_eq!(text(&pycc_scratch::lf(&actual.stdout)), text(&pycc_scratch::lf(&expected.stdout)));
 }
 
 /// An uncaught out-of-range index ends the program with numpy's message
@@ -305,7 +305,7 @@ fn an_uncaught_index_error_carries_numpys_message() {
         &["-c", "import numpy as np, ndu; ndu.get(np.zeros(3), -4)"],
     );
     assert_eq!(output.status.code(), Some(1));
-    let err = text(&output.stderr);
+    let err = text(&pycc_scratch::lf(&output.stderr));
     assert!(
         err.trim_end()
             .ends_with("IndexError: index -4 is out of bounds for axis 0 with size 3"),
@@ -371,7 +371,7 @@ fn an_array_changed_by_cpython_code_is_rechecked() {
         .expect("python should spawn");
     assert!(output.status.success(), "{}", rendered(&output));
     assert_eq!(
-        text(&output.stdout),
+        text(&pycc_scratch::lf(&output.stdout)),
         "IndexError: index 3 is out of bounds for axis 0 with size 1\n\
          TypeError: expected numpy.ndarray[float64, 1-D], got an array of dtype bool\n\
          3.0\n\
@@ -442,7 +442,7 @@ fn int64_elements_join_int_arithmetic_unencoded() {
     );
     assert!(output.status.success(), "{}", rendered(&output));
     assert_eq!(
-        text(&output.stdout),
+        text(&pycc_scratch::lf(&output.stdout)),
         "4611686018427387906 [3, 2, 4611686018427387906]\n"
     );
 }

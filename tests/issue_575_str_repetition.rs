@@ -45,7 +45,7 @@ fn build_and_run(case: &str, source: &str) -> Vec<u8> {
         output.status.success(),
         "pycc build should succeed for {case}, got {:?}: {}",
         output.status.code(),
-        String::from_utf8_lossy(&output.stdout)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout))
     );
 
     Command::new(&out).output().unwrap().stdout
@@ -143,8 +143,8 @@ fn multiplying_two_strings_is_still_a_type_error() {
     );
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
     assert!(
         combined.contains("T0021"),

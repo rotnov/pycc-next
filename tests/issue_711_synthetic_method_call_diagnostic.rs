@@ -32,8 +32,8 @@ fn check_error(tag: &str, source: &str) -> String {
     assert!(!output.status.success(), "expected `{tag}` to be rejected");
     format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 

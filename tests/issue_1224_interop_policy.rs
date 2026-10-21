@@ -69,11 +69,11 @@ fn run(dir: &ScratchDir, flags: &[&str]) -> Output {
 }
 
 fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 /// Asserts `check` rejects the program with exactly one `I0402` whose
@@ -311,7 +311,7 @@ fn a_native_module_import_stays_native_under_pure_and_deny() {
                 .output()
                 .expect("nm runs");
             assert!(nm.status.success(), "{}", stderr_of(&nm));
-            for symbol in String::from_utf8_lossy(&nm.stdout).split_whitespace() {
+            for symbol in pycc_scratch::lf(&*String::from_utf8_lossy(&nm.stdout)).split_whitespace() {
                 assert!(
                     !symbol.trim_start_matches('_').starts_with("Py"),
                     "a native build must not reference CPython: {symbol}"

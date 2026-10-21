@@ -24,13 +24,13 @@ fn python() -> Command {
 }
 
 fn rendered(output: &Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    text.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     text.replace("\r\n", "\n")
 }
 
 fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 /// Builds `source` into `dir/app`, runs it, and returns its standard output.
@@ -187,5 +187,5 @@ fn iterating_a_container_attribute_directly_checks() {
         .arg(&path)
         .output()
         .expect("pycc should spawn");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert!(output.status.success(), "{}", pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)));
 }

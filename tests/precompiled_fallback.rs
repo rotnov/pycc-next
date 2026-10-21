@@ -89,7 +89,7 @@ fn run(dir: &Path, optimize: bool) -> Output {
 }
 
 fn compiled_at_import(output: &Output) -> String {
-    text(&output.stderr)
+    text(&pycc_scratch::lf(&output.stderr))
         .lines()
         .next()
         .unwrap_or_default()
@@ -108,11 +108,11 @@ fn an_ext_module_imports_its_fallback_code_without_compiling_it() {
         .arg(compiled.join("m"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     assert!(
-        text(&build.stderr).contains("class `Counted`"),
+        text(&pycc_scratch::lf(&build.stderr)).contains("class `Counted`"),
         "the class runs in CPython: {}",
-        text(&build.stderr)
+        text(&pycc_scratch::lf(&build.stderr))
     );
     let plain = ScratchDir::new("precompiled_ext_src").expect("scratch");
     std::fs::write(plain.join("m.py"), MODULE).expect("write the module");
@@ -121,20 +121,20 @@ fn an_ext_module_imports_its_fallback_code_without_compiling_it() {
         let ours = run(&compiled, optimize);
         let oracle = run(&plain, optimize);
         assert_eq!(
-            text(&ours.stdout),
-            text(&oracle.stdout),
+            text(&pycc_scratch::lf(&ours.stdout)),
+            text(&pycc_scratch::lf(&oracle.stdout)),
             "{}",
-            text(&ours.stderr)
+            text(&pycc_scratch::lf(&ours.stderr))
         );
-        assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+        assert_eq!(ours.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&ours.stderr)));
         // Unoptimized, every chunk is unmarshalled; under `-O` (whose
         // `assert`s the embedded code still holds) each is compiled from
         // the embedded source, as before.
         let count = compiled_at_import(&ours);
         if optimize {
-            assert_ne!(count, "compiled at import: 0", "{}", text(&ours.stderr));
+            assert_ne!(count, "compiled at import: 0", "{}", text(&pycc_scratch::lf(&ours.stderr)));
         } else {
-            assert_eq!(count, "compiled at import: 0", "{}", text(&ours.stderr));
+            assert_eq!(count, "compiled at import: 0", "{}", text(&pycc_scratch::lf(&ours.stderr)));
         }
     }
 }
@@ -163,7 +163,7 @@ fn a_constant_set_display_in_fallback_code_keeps_the_sources_order() {
         .arg(compiled.join("m"))
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     std::fs::remove_file(&source).expect("import the artifact, not the source");
     let plain = ScratchDir::new("precompiled_sets_src").expect("scratch");
     std::fs::write(plain.join("m.py"), module).expect("write the module");
@@ -183,17 +183,17 @@ fn a_constant_set_display_in_fallback_code_keeps_the_sources_order() {
         };
         let (ours, oracle) = (import(&compiled), import(&plain));
         assert_eq!(
-            text(&ours.stdout),
-            text(&oracle.stdout),
+            text(&pycc_scratch::lf(&ours.stdout)),
+            text(&pycc_scratch::lf(&oracle.stdout)),
             "seed {seed}: {}",
-            text(&ours.stderr)
+            text(&pycc_scratch::lf(&ours.stderr))
         );
-        assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+        assert_eq!(ours.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&ours.stderr)));
         assert_eq!(
             compiled_at_import(&ours),
             "compiled at import: 0",
             "seed {seed}: {}",
-            text(&ours.stderr)
+            text(&pycc_scratch::lf(&ours.stderr))
         );
     }
 }

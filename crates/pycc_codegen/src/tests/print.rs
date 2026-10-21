@@ -19,7 +19,7 @@ fn compiles_a_zero_argument_print_producing_just_a_newline() {
     let bin_path = dir.join("print_zero_args");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"\n");
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn compiles_a_multi_argument_print_with_mixed_types_space_separated() {
     let bin_path = dir.join("print_mixed_multi");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1 2.5 True hi\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1 2.5 True hi\n");
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn compiles_print_of_a_bool_false() {
     let bin_path = dir.join("print_false");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"False\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"False\n");
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn compiles_print_of_a_void_returning_call_as_none() {
     let bin_path = dir.join("print_none_from_call");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"None\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n");
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn compiles_print_evaluating_all_args_before_output_with_a_side_effecting_call()
     let bin_path = dir.join("print_eval_order_side_effect");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n1 3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n1 3\n");
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn returning_a_void_returning_call_result_from_a_none_returning_function_runs_th
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"");
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn printing_a_none_typed_parameter_renders_none() {
     let bin_path = dir.join("print_none_typed_parameter");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"None\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"None\n");
 }
 
 #[test]
@@ -344,5 +344,5 @@ fn a_bare_return_with_no_value_exits_a_none_returning_function_early() {
     let bin_path = dir.join("bare_return_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }

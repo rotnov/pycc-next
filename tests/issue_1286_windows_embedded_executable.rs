@@ -35,11 +35,11 @@ fn pycc() -> Command {
 }
 
 fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
 }
 
 /// Drops the `\r` of every `\r\n` pair (D-082).
@@ -134,14 +134,14 @@ fn cpython(dir: &Path) -> Output {
 
 fn assert_same(embedded: &Output, oracle: &Output) {
     assert_eq!(
-        String::from_utf8_lossy(&normalized(&embedded.stdout)),
-        String::from_utf8_lossy(&normalized(&oracle.stdout)),
+        String::from_utf8_lossy(&normalized(&pycc_scratch::lf(&embedded.stdout))),
+        String::from_utf8_lossy(&normalized(&pycc_scratch::lf(&oracle.stdout))),
         "stdout differs; embedded stderr: {}",
         stderr_of(embedded)
     );
     assert_eq!(
-        String::from_utf8_lossy(&normalized(&embedded.stderr)),
-        String::from_utf8_lossy(&normalized(&oracle.stderr)),
+        String::from_utf8_lossy(&normalized(&pycc_scratch::lf(&embedded.stderr))),
+        String::from_utf8_lossy(&normalized(&pycc_scratch::lf(&oracle.stderr))),
         "stderr differs"
     );
     assert_eq!(embedded.status.code(), oracle.status.code());
@@ -260,7 +260,7 @@ fn a_relocated_windows_embedded_executable_runs_with_a_scrubbed_path() {
         .output()
         .expect("the relocated executable runs");
     assert_eq!(run.status.code(), Some(0), "{}", stderr_of(&run));
-    let stdout = String::from_utf8_lossy(&normalized(&run.stdout)).into_owned();
+    let stdout = String::from_utf8_lossy(&normalized(&pycc_scratch::lf(&run.stdout))).into_owned();
     let lines: Vec<&str> = stdout.lines().collect();
     assert!(lines.len() > 3, "{stdout}");
     let spawned = app.to_string_lossy().to_lowercase();

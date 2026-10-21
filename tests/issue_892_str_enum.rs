@@ -31,7 +31,7 @@ fn build_and_run(dir: &std::path::Path, src: &std::path::Path, bin_name: &str) -
         return (false, Vec::new());
     }
     let output = Command::new(&out).output().unwrap();
-    (output.status.success(), output.stdout)
+    (output.status.success(), pycc_scratch::lf(&output.stdout))
 }
 
 fn rejection_message(dir: &std::path::Path, src: &std::path::Path) -> String {
@@ -41,7 +41,7 @@ fn rejection_message(dir: &std::path::Path, src: &std::path::Path) -> String {
         .output()
         .unwrap();
     assert!(!output.status.success(), "fixture should not compile");
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
 }
 
 /// #892: a plain `Enum` whose members are string literals.

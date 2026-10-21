@@ -79,7 +79,7 @@ fn build_pycc_codegen_at(root: &std::path::Path, release: bool) {
         "building pycc_codegen at {} failed ({})\n--- stderr ---\n{}",
         root.display(),
         output.status,
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
 }
 

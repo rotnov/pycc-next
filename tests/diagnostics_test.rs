@@ -47,7 +47,7 @@ fn assert_diagnostic_matches_fixture(fixture_stem: &str) {
         .current_dir(repo_root)
         .output()
         .unwrap();
-    let actual = String::from_utf8_lossy(&output.stdout);
+    let actual = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     bless(&expected_path, &actual);
     assert_eq!(
         actual, expected,
@@ -75,7 +75,7 @@ fn assert_json_diagnostic_matches_fixture(fixture_stem: &str) {
         .current_dir(repo_root)
         .output()
         .unwrap();
-    let actual = String::from_utf8_lossy(&output.stdout);
+    let actual = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     bless(&expected_path, &actual);
     assert_eq!(
         actual, expected,
@@ -112,7 +112,7 @@ fn assert_check_snapshots(source: &str, expected_stem: &str, extra_args: &[&str]
             command.args(["--error-format", "json"]);
         }
         let output = command.output().unwrap();
-        let actual = String::from_utf8_lossy(&output.stdout);
+        let actual = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
         bless(&expected_path, &actual);
         assert_eq!(
             actual, expected,

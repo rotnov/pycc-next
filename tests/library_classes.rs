@@ -41,9 +41,9 @@ fn fixture(dir: &Path, as_name: &str) -> PathBuf {
 }
 
 fn assert_matches(ours: &Output, oracle: &Output) {
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
     assert_eq!(ours.status.code(), oracle.status.code());
-    assert_eq!(last_line(&ours.stderr), last_line(&oracle.stderr));
+    assert_eq!(last_line(&pycc_scratch::lf(&ours.stderr)), last_line(&pycc_scratch::lf(&oracle.stderr)));
 }
 
 fn build(source: &Path, out: &Path, ext: bool) -> String {
@@ -58,8 +58,8 @@ fn build(source: &Path, out: &Path, ext: bool) -> String {
         .arg(out)
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    text(&build.stderr)
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    text(&pycc_scratch::lf(&build.stderr))
 }
 
 /// Every method and function of the fixture compiles, but for the nested
@@ -166,7 +166,7 @@ fn python_code_subclasses_the_library_classes() {
 fn a_generator_sent_other_values_runs_in_cpython() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sent_generator.py");
     let oracle = python().arg(&source).output().expect("python should spawn");
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
     let dir = ScratchDir::new("sent_generator").expect("scratch");
     let report = build(&source, &dir.join("app"), false);
     assert!(report.contains("fallback: function `acc`"), "{report}");

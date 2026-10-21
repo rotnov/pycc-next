@@ -84,8 +84,8 @@ fn build_module(dir: &Path, module: &str, script: &str, flags: &[&str]) -> Strin
         .arg(ext.join("m"))
         .output()
         .expect("pycc should spawn");
-    let report = text(&out.stderr);
-    assert!(out.status.success(), "{report}{}", text(&out.stdout));
+    let report = text(&pycc_scratch::lf(&out.stderr));
+    assert!(out.status.success(), "{report}{}", text(&pycc_scratch::lf(&out.stdout)));
     report
 }
 
@@ -104,9 +104,9 @@ fn untyped_constructs_compile_with_cpython_results() {
         assert!(!report.contains("fallback: class `Decoder`"), "{report}");
         let ours = run_python(&dir.join("ext"), "d.py");
         let oracle = run_python(&dir.join("src"), "d.py");
-        assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-        assert!(ours.status.success(), "{}", text(&ours.stderr));
-        assert_eq!(text(&ours.stdout), text(&oracle.stdout));
+        assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+        assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+        assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
     }
 }
 
@@ -116,8 +116,8 @@ fn untyped_constructs_leak_nothing() {
     let dir = ScratchDir::new("untyped_classes_leaks").expect("scratch");
     build(&dir, "untyped_classes_leaks.py", &["--release"]);
     let probe = run_python(&dir.join("ext"), "d.py");
-    assert!(probe.status.success(), "{}", text(&probe.stderr));
-    assert_eq!(text(&probe.stdout), "ok\n");
+    assert!(probe.status.success(), "{}", text(&pycc_scratch::lf(&probe.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&probe.stdout)), "ok\n");
 }
 
 /// `tests/fixtures/untyped_readers.py`: a binary format reader's shapes
@@ -137,9 +137,9 @@ fn a_reader_compiles_with_cpython_results() {
         );
         let ours = run_python(&dir.join("ext"), "d.py");
         let oracle = run_python(&dir.join("src"), "d.py");
-        assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-        assert!(ours.status.success(), "{}", text(&ours.stderr));
-        assert_eq!(text(&ours.stdout), text(&oracle.stdout));
+        assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+        assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+        assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
     }
 }
 
@@ -149,8 +149,8 @@ fn a_reader_leaks_nothing() {
     let dir = ScratchDir::new("untyped_readers_leaks").expect("scratch");
     build_module(&dir, "untyped_readers.py", "untyped_readers_leaks.py", &["--release"]);
     let probe = run_python(&dir.join("ext"), "d.py");
-    assert!(probe.status.success(), "{}", text(&probe.stderr));
-    assert_eq!(text(&probe.stdout), "ok\n");
+    assert!(probe.status.success(), "{}", text(&pycc_scratch::lf(&probe.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&probe.stdout)), "ok\n");
 }
 
 #[test]
@@ -172,12 +172,12 @@ fn run_as_program(module: &str) {
         .arg(dir.join("prog"))
         .output()
         .expect("pycc should spawn");
-    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(out.status.success(), "{}", text(&pycc_scratch::lf(&out.stderr)));
     let ours = Command::new(dir.join("prog")).output().expect("program");
     let oracle = run_python(&dir, "prog.py");
-    assert!(oracle.status.success(), "{}", text(&oracle.stderr));
-    assert!(ours.status.success(), "{}", text(&ours.stderr));
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout));
+    assert!(oracle.status.success(), "{}", text(&pycc_scratch::lf(&oracle.stderr)));
+    assert!(ours.status.success(), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)));
 }
 
 /// Strict mode has no CPython object to hold a `bytes` value in: the
@@ -194,7 +194,7 @@ fn strict_mode_refuses_a_bytes_literal() {
         .output()
         .expect("pycc should spawn");
     assert!(!out.status.success());
-    let stderr = text(&out.stderr) + &text(&out.stdout);
+    let stderr = text(&pycc_scratch::lf(&out.stderr)) + &text(&pycc_scratch::lf(&out.stdout));
     assert!(stderr.contains("C0001"), "{stderr}");
     assert!(stderr.contains("a bytes literal"), "{stderr}");
     assert!(stderr.contains("prog.py:2:9"), "{stderr}");

@@ -26,8 +26,8 @@ fn pycc() -> Command {
 }
 
 fn rendered(output: &Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    text.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     text.replace("\r\n", "\n")
 }
 
@@ -74,7 +74,7 @@ fn assert_prints(source: &str, expected: &str) {
             rendered(&run)
         );
         assert_eq!(
-            String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+            pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
             expected,
             "{source} (release={release}) printed the wrong output"
         );
@@ -274,7 +274,7 @@ fn a_conditional_expression_over_cpython_objects_runs_in_the_host() {
         .expect("python3 should spawn");
     assert!(run.status.success(), "{}", rendered(&run));
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         "1/2 1/2 | 2/3 1/2 | 0 0\n100001\n"
     );
 }

@@ -33,8 +33,8 @@ fn check_error(tag: &str, source: &str) -> String {
     assert!(!output.status.success(), "expected `{tag}` to be rejected");
     format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 
@@ -65,14 +65,14 @@ fn build_and_run(tag: &str, source: &str) -> (bool, String, String) {
         return (
             false,
             String::new(),
-            String::from_utf8_lossy(&build.stderr).into_owned(),
+            pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr)),
         );
     }
     let output = Command::new(&out).output().unwrap();
     (
         output.status.success(),
-        String::from_utf8_lossy(&output.stdout).into_owned(),
-        String::from_utf8_lossy(&output.stderr).into_owned(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)),
     )
 }
 
@@ -114,7 +114,7 @@ fn a_plain_instance_under_run_reports_c0001_and_does_not_panic() {
         .output()
         .unwrap();
     assert!(!output.status.success(), "`pycc run` must fail");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("C0001"),
         "expected C0001 on stderr, got: {stderr}"
@@ -356,7 +356,7 @@ fn a_class_under_a_builtin_exception_name_gets_the_rename_help() {
         !output.status.success(),
         "expected the program to be rejected"
     );
-    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let text = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         text.contains("\"code\":\"C0001\""),
         "expected C0001, got: {text}"

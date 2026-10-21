@@ -32,7 +32,7 @@ fn functions_raising_an_exception_class_with_a_constructor_stay_compiled() {
         .arg(dir.join("excmod"))
         .output()
         .expect("pycc should spawn");
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     assert!(
         report.contains("class `MissingRef` at ")
@@ -52,6 +52,6 @@ fn functions_raising_an_exception_class_with_a_constructor_stay_compiled() {
         .current_dir(&*dir)
         .output()
         .expect("python3 should spawn");
-    assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&oracle.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
     assert!(ours.status.success());
 }

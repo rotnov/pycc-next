@@ -96,7 +96,7 @@ fn oracle_python_bin() -> PathBuf {
         .output()
         .unwrap_or_else(|e| panic!("conformance oracle `{}` not found: {e}", bin.display()));
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).trim(),
         "True",
         "the conformance oracle `{}` must be CPython 3.13 or newer",
         bin.display()
@@ -112,20 +112,17 @@ fn oracle_is_3_14() -> bool {
         .args(["-c", "import sys; print(sys.version_info >= (3, 14))"])
         .output()
         .expect("the oracle runs");
-    String::from_utf8_lossy(&output.stdout).trim() == "True"
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).trim() == "True"
 }
 
 /// CPython's own stdio layer translates `\n` to `\r\n` on Windows even when
 /// stdout is piped/redirected to a child-process capture like `Command::output()`
 /// uses here (`sys.stdout`'s `TextIOWrapper` opens with `newline=None` there;
 /// see CPython's bpo-11990 and bpo-13119, both intentional, stable behavior
-/// since 3.2.4/3.3). `pycc_rt`'s `println!`/`print!`-based `print()` never
-/// performs any such translation on any target. That translation is a
-/// platform-specific quirk of CPython's own C runtime, not part of the
-/// Python language's `print()` semantics, so it is stripped out of the
-/// oracle's output before comparing -- this keeps the assertion checking
-/// actual program-output content, not which OS's libc happened to run the
-/// oracle (D-082).
+/// since 3.2.4/3.3), and so does a native program's `print()`
+/// (`pycc_rt::text_stdio`). The comparison here is of line content, so both
+/// sides are read with `\r\n` as `\n` (`pycc_scratch::lf`, and this for the
+/// oracle); `tests/text_stdio.rs` compares the raw bytes.
 fn strip_windows_newline_translation(bytes: Vec<u8>) -> Vec<u8> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut iter = bytes.into_iter().peekable();
@@ -192,8 +189,8 @@ fn run_conformance_fixture_with_profile(
     );
 
     (
-        pycc_output.stdout,
-        strip_windows_newline_translation(cpython_output.stdout),
+        pycc_scratch::lf(&pycc_output.stdout),
+        strip_windows_newline_translation(pycc_scratch::lf(&cpython_output.stdout)),
     )
 }
 
@@ -765,7 +762,7 @@ fn pep_0570_pos_only_keyword_rejected_produces_t0021() {
         !output.status.success(),
         "`pycc check` should reject tests/fixtures/pep_0570_pos_only_keyword_rejected.py"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("T0021"),
         "expected a T0021 diagnostic, got: {stdout}"

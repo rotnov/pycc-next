@@ -48,7 +48,7 @@ print(len(xs))
 ";
     let output = build_and_run("list_pop_basic", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n2\n");
 }
 
 #[test]
@@ -78,9 +78,9 @@ except IndexError as e:
     assert!(
         output.status.success(),
         "popping from an empty list must raise a catchable IndexError: {}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
-    assert_eq!(output.stdout, b"pop from empty list\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"pop from empty list\n");
 }
 
 #[test]
@@ -102,7 +102,7 @@ for v in xs:
 ";
     let output = build_and_run("list_pop_twice_same_statement", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"5\n4\n1\n2\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n4\n1\n2\n3\n");
 }
 
 #[test]
@@ -122,7 +122,7 @@ print(d.get(\"z\", 99))
 ";
     let output = build_and_run("dict_get_or_default_basic", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n99\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n99\n");
 }
 
 #[test]
@@ -142,7 +142,7 @@ print(y)
 ";
     let output = build_and_run("dict_get_or_default_nested_default", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"1\n");
 }
 
 #[test]
@@ -161,7 +161,7 @@ print(len(s))
 ";
     let output = build_and_run("set_add_grows_and_dedups", source);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"3\n3\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"3\n3\n");
 }
 
 #[test]
@@ -193,7 +193,7 @@ print(len(s))
         "growing a set from inside its own `for` loop must raise, not loop forever or silently \
          extend the iteration"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("RuntimeError: Set changed size during iteration"),
         "expected CPython's own resize message, got: {stderr}"

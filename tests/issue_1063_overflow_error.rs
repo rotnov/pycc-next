@@ -52,13 +52,13 @@ fn build_and_run(tag: &str, source: &str) -> (bool, String, String) {
     assert!(
         build.status.success(),
         "build failed: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&out).output().unwrap();
     (
         run.status.success(),
-        String::from_utf8_lossy(&run.stdout).to_string(),
-        String::from_utf8_lossy(&run.stderr).to_string(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).to_string(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).to_string(),
     )
 }
 
@@ -73,8 +73,8 @@ fn check_error(tag: &str, source: &str) -> String {
     assert!(!output.status.success(), "expected `{tag}` to be rejected");
     format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 
@@ -149,7 +149,7 @@ fn a_float_power_that_overflows_raises_before_the_next_statement() {
         .expect("python3 runs");
     assert_eq!(
         stdout.replace("\r\n", "\n"),
-        String::from_utf8_lossy(&oracle.stdout).replace("\r\n", "\n")
+        pycc_scratch::lf(&*String::from_utf8_lossy(&oracle.stdout)).replace("\r\n", "\n")
     );
 }
 
@@ -257,7 +257,7 @@ fn a_built_ext_module_raises_the_right_cpython_class_from_every_converted_pow_pa
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let script = "import pycc_overflow_mod as m\n\
          # The conformant arms keep CPython's own classes.\n\
@@ -295,8 +295,8 @@ fn a_built_ext_module_raises_the_right_cpython_class_from_every_converted_pow_pa
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }
 
@@ -333,7 +333,7 @@ fn an_ext_export_that_handles_a_pow_raise_itself_observes_it_at_the_pow() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let script = "import pycc_residual_mod as m\n\
          assert m.on_time(2.0, 1024.0) == -1.0, m.on_time(2.0, 1024.0)\n\
@@ -352,7 +352,7 @@ fn an_ext_export_that_handles_a_pow_raise_itself_observes_it_at_the_pow() {
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
 }

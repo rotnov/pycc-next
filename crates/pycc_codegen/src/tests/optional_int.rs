@@ -113,7 +113,7 @@ fn optional_int_annotated_assignment_constructs_a_present_struct_and_reads_its_p
     let bin_path = dir.join("optional_int_present_is_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"False\nTrue\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"False\nTrue\n");
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn optional_int_annotated_assignment_with_bare_none_constructs_an_absent_struct(
     let bin_path = dir.join("optional_int_absent_is_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\n");
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn optional_int_reassignment_from_present_to_absent_updates_the_is_none_reading(
     let bin_path = dir.join("optional_int_reassign_to_none");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"False\nTrue\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"False\nTrue\n");
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn optional_int_truthiness_follows_cpython_for_present_and_absent_values() {
     let bin_path = dir.join("optional_int_truthiness");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"0\n0\n1\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"0\n0\n1\n");
 }
 
 /// Issue #769 (Part 2 of #747): `x: int | None = 5; if x is not None:
@@ -301,7 +301,7 @@ fn optional_int_narrowed_read_of_a_present_smallint_prints_the_payload() {
     let bin_path = dir.join("optional_int_narrowed_smallint");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"5\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"5\n");
 }
 
 /// Issue #769 (Part 2 of #747), the mandatory bigint case: `x: int | None
@@ -352,7 +352,7 @@ fn optional_int_narrowed_read_of_a_present_bigint_prints_the_payload() {
     let bin_path = dir.join("optional_int_narrowed_bigint");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"9223372036854775807\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"9223372036854775807\n");
 }
 
 /// Issue #769 (Part 2 of #747), the retain-in-practice half of the mandatory
@@ -422,7 +422,7 @@ fn a_narrowed_bigint_duplicated_into_a_second_binding_survives_the_original_slot
     let bin_path = dir.join("optional_int_narrowed_bigint_survives_reassign");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"9223372036854775807\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"9223372036854775807\n");
 }
 
 /// Issue #769 (Part 2 of #747): `emit_expr`'s `OptionalUnwrap` arm's own
@@ -498,7 +498,7 @@ fn an_optional_int_parameter_and_return_value_round_trip_through_a_function_call
     let bin_path = dir.join("optional_int_call_roundtrip");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\n");
 }
 
 #[test]
@@ -558,7 +558,7 @@ fn an_optional_int_function_that_raises_before_returning_still_produces_a_valid_
     let bin_path = dir.join("optional_int_exceptional_exit");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"2\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"2\n");
 }
 
 #[test]
@@ -651,7 +651,7 @@ fn is_none_on_a_ty_none_typed_non_optional_operand_reads_the_ty_none_arm() {
     let bin_path = dir.join("optional_is_none_ty_none_operand");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"True\nFalse\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"True\nFalse\n");
 }
 
 #[test]
@@ -714,7 +714,7 @@ fn optional_int_annotated_assignment_inside_a_function_body_uses_the_alloca_stor
     let bin_path = dir.join("optional_int_function_local_alloca");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"False\nTrue\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"False\nTrue\n");
 }
 
 #[test]
@@ -761,5 +761,5 @@ fn none_is_operand_reads_the_right_hand_side_when_none_is_written_on_the_left() 
     let bin_path = dir.join("optional_none_is_x_ordering");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"False\nTrue\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"False\nTrue\n");
 }

@@ -45,7 +45,7 @@ fn assert_rejected(tag: &str, source: &str, code: &str, needle: &str) {
         .args(["check", src.to_str().unwrap()])
         .output()
         .unwrap();
-    let rendered = String::from_utf8_lossy(&out.stdout).to_string();
+    let rendered = pycc_scratch::lf(&*String::from_utf8_lossy(&out.stdout)).to_string();
     assert!(
         !out.status.success(),
         "{tag}: pycc check should reject the program, but it succeeded"
@@ -69,7 +69,7 @@ fn assert_runs(tag: &str, source: &str, expected_stdout: &str) {
     assert!(
         build.status.success(),
         "{tag}: pycc build should succeed, got: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
 
     let run = Command::new(&out).output().unwrap();
@@ -78,7 +78,7 @@ fn assert_runs(tag: &str, source: &str, expected_stdout: &str) {
         "{tag}: the built program should exit 0"
     );
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
         expected_stdout,
         "{tag}: unexpected program output"
     );
@@ -101,14 +101,14 @@ fn assert_runtime_abort(tag: &str, source: &str, message: &str) {
     assert!(
         check.status.success(),
         "{tag}: pycc check should accept the program: {}",
-        String::from_utf8_lossy(&check.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&check.stderr))
     );
 
     let run = Command::new(pycc_bin())
         .args(["run", src.to_str().unwrap()])
         .output()
         .unwrap();
-    let stderr = String::from_utf8_lossy(&run.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr));
     assert_eq!(
         run.status.code(),
         Some(101),

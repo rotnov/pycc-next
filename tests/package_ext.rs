@@ -87,10 +87,10 @@ fn build_package(dir: &Path) -> String {
         assert!(
             build.status.success(),
             "{module}: {}{}",
-            text(&build.stdout),
-            text(&build.stderr)
+            text(&pycc_scratch::lf(&build.stdout)),
+            text(&pycc_scratch::lf(&build.stderr))
         );
-        report.push_str(&text(&build.stderr));
+        report.push_str(&text(&pycc_scratch::lf(&build.stderr)));
     }
     for module in MODULES {
         std::fs::remove_file(package.join(format!("{module}.py"))).expect("remove a source");
@@ -120,9 +120,9 @@ fn a_package_built_module_by_module_matches_cpython() {
     }
     let ours = run_driver(&built);
     let theirs = run_driver(&plain);
-    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
-    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+    assert_eq!(theirs.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&theirs.stderr)));
+    assert_eq!(text(&pycc_scratch::lf(&ours.stdout)), text(&pycc_scratch::lf(&theirs.stdout)), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert_eq!(ours.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&ours.stderr)));
 }
 
 /// A package `__init__` artifact needs a directory that names the package:
@@ -142,6 +142,6 @@ fn a_package_init_outside_an_identifier_directory_is_refused() {
         .output()
         .expect("pycc should spawn");
     assert!(!build.status.success());
-    let err = text(&build.stderr);
+    let err = text(&pycc_scratch::lf(&build.stderr));
     assert!(err.contains("derives the module name `__init__`"), "{err}");
 }

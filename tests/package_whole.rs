@@ -124,8 +124,8 @@ fn the_package_matches_cpython(release: bool) {
     copy_tree(&fixture.join("pkw"), &built.join("pkw"));
     copy_tree(&fixture.join("pkw"), &plain.join("pkw"));
     let build = build_whole(&built, "pkw", if release { &["--release"] } else { &[] });
-    let report = text(&build.stderr);
-    assert!(build.status.success(), "{}{report}", text(&build.stdout));
+    let report = text(&pycc_scratch::lf(&build.stderr));
+    assert!(build.status.success(), "{}{report}", text(&pycc_scratch::lf(&build.stdout)));
     // Every module was built, as a member of the one extension.
     for module in [
         "pkw",
@@ -179,16 +179,16 @@ fn the_package_matches_cpython(release: bool) {
     assert_eq!(left, [artifact(), "sub/data.txt"]);
     let driver = fixture.join("driver.py");
     let theirs = run(&driver, &plain);
-    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
+    assert_eq!(theirs.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&theirs.stderr)));
     let ours = run(&driver, &built);
     assert_eq!(
-        text(&ours.stdout),
-        text(&theirs.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&theirs.stdout)),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
-    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
-    assert!(text(&ours.stdout).contains("leaks none"));
+    assert_eq!(ours.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&ours.stderr)));
+    assert!(text(&pycc_scratch::lf(&ours.stdout)).contains("leaks none"));
 }
 
 #[test]
@@ -214,17 +214,17 @@ fn the_textkit_package_built_whole_matches_cpython() {
     copy_tree(&fixture.join("textkit"), &built.join("textkit"));
     copy_tree(&fixture.join("textkit"), &plain.join("textkit"));
     let build = build_whole(&built, "textkit", &["--release"]);
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     remove_sources(&built.join("textkit"));
     let driver = fixture.join("driver.py");
     let theirs = run(&driver, &plain);
     let ours = run(&driver, &built);
-    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
+    assert_eq!(theirs.status.code(), Some(0), "{}", text(&pycc_scratch::lf(&theirs.stderr)));
     assert_eq!(
-        text(&ours.stdout),
-        text(&theirs.stdout),
+        text(&pycc_scratch::lf(&ours.stdout)),
+        text(&pycc_scratch::lf(&theirs.stdout)),
         "{}",
-        text(&ours.stderr)
+        text(&pycc_scratch::lf(&ours.stderr))
     );
 }
 
@@ -250,7 +250,7 @@ fn an_excluded_module_stays_python() {
     )
     .expect("write");
     let build = build_whole(&dir, "pke", &["--exclude", "tests"]);
-    let report = text(&build.stderr);
+    let report = text(&pycc_scratch::lf(&build.stderr));
     assert!(build.status.success(), "{report}");
     assert!(report.contains("pycc: pke.core: built in"), "{report}");
     assert!(!report.contains("pke.tests"), "{report}");
@@ -266,10 +266,10 @@ fn an_excluded_module_stays_python() {
         .output()
         .expect("python3 should spawn");
     assert_eq!(
-        text(&check.stdout),
+        text(&pycc_scratch::lf(&check.stdout)),
         "42 _PyccFinder True\n",
         "{}",
-        text(&check.stderr)
+        text(&pycc_scratch::lf(&check.stderr))
     );
 }
 
@@ -290,7 +290,7 @@ fn a_package_build_refuses_what_it_cannot_build() {
             .output()
             .expect("spawn");
         assert_eq!(out.status.code(), Some(2));
-        text(&out.stderr)
+        text(&pycc_scratch::lf(&out.stderr))
     };
     let init = package.join("__init__");
     let err = run(&[package.as_os_str(), "-o".as_ref(), init.as_os_str()]);
@@ -345,7 +345,7 @@ fn a_member_build_defines_only_prefixed_symbols() {
         ])
         .output()
         .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
     let manifest = std::fs::read_to_string(out.join("member.txt")).expect("the manifest");
     let objects: Vec<&str> = manifest
         .lines()
@@ -360,8 +360,8 @@ fn a_member_build_defines_only_prefixed_symbols() {
             .arg(object)
             .output()
             .expect("nm should spawn");
-        assert!(nm.status.success(), "{}", text(&nm.stderr));
-        for line in text(&nm.stdout).lines() {
+        assert!(nm.status.success(), "{}", text(&pycc_scratch::lf(&nm.stderr)));
+        for line in text(&pycc_scratch::lf(&nm.stdout)).lines() {
             let fields: Vec<&str> = line.split_whitespace().collect();
             // An undefined symbol has no address.
             let [_, kind, name] = fields[..] else {

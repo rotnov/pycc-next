@@ -27,7 +27,7 @@ fn object_dict_comprehensions_match_cpython_without_fallback() {
         .output()
         .expect("pycc spawns");
     assert!(build.status.success(), "{}", support::rendered(&build));
-    let stderr = String::from_utf8_lossy(&build.stderr);
+    let stderr = pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr));
     assert!(!stderr.contains("fallback:"), "{stderr}");
     let run = std::process::Command::new(&out).output().expect("the program spawns");
     assert_eq!(support::outcome(&run), expected);

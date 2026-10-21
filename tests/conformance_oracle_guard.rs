@@ -953,8 +953,8 @@ fn a_profile_helper_call_without_arguments_is_rejected() {
 #[test]
 fn the_real_harness_rejects_the_issue_224_helper_mutation() {
     let mutated = harness().replacen(
-        "    (\n        pycc_output.stdout,\n        strip_windows_newline_translation(cpython_output.stdout),\n    )",
-        "    (pycc_output.stdout.clone(), pycc_output.stdout)",
+        "    (\n        pycc_scratch::lf(&pycc_output.stdout),\n        strip_windows_newline_translation(pycc_scratch::lf(&cpython_output.stdout)),\n    )",
+        "    (pycc_scratch::lf(&pycc_output.stdout), pycc_scratch::lf(&pycc_output.stdout))",
         1,
     );
     assert_ne!(

@@ -32,7 +32,7 @@ fn build_and_run(dir: &ScratchDir, name: &str, source: &str) -> String {
         output.status.success(),
         "the built program failed for {name}"
     );
-    String::from_utf8(output.stdout).unwrap()
+    String::from_utf8(pycc_scratch::lf(&output.stdout)).unwrap()
 }
 
 const BODY: &str = "def describe(width: int, height: int) -> None:\n    print(width)\n    print(height)\n    print(width * height)\n\n";
@@ -61,8 +61,8 @@ fn an_unexpected_keyword_argument_fails_check_with_t0021() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let mut rendered = String::from_utf8_lossy(&output.stdout).into_owned();
-    rendered.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut rendered = pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout));
+    rendered.push_str(&pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)));
     assert!(
         rendered.contains("T0021")
             && rendered.contains("`describe` got an unexpected keyword argument `depth`"),

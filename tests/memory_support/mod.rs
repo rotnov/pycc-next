@@ -80,7 +80,7 @@ pub fn build_with(dir: &Path, name: &str, source: &str, flags: &[&str]) -> PathB
     assert!(
         output.status.success(),
         "{name}: {}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
     bin
 }
@@ -117,7 +117,7 @@ pub fn run_measured(bin: &Path) -> (Vec<u8>, i64) {
         bin.display(),
         measured.status
     );
-    (lf(measured.stdout), measured.peak_kb)
+    (lf(pycc_scratch::lf(&measured.stdout)), measured.peak_kb)
 }
 
 /// The peak resident set, in kilobytes, of `command`, which must exit with
@@ -392,9 +392,9 @@ pub fn cpython(src: &Path) -> Vec<u8> {
     assert!(
         output.status.success(),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     );
-    lf(output.stdout)
+    lf(pycc_scratch::lf(&output.stdout))
 }
 
 /// `bytes` with `\r\n` as `\n`: on Windows CPython (and a program writing

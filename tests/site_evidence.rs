@@ -42,8 +42,8 @@ fn language_snapshot() -> Vec<u8> {
 
 fn assert_transcript(output: &Output, exit: i32, stdout: &[u8]) {
     assert_eq!(output.status.code(), Some(exit), "{output:?}");
-    assert!(output.stderr.is_empty(), "unexpected stderr: {output:?}");
-    assert_eq!(output.stdout, stdout, "stdout transcript drift");
+    assert!(pycc_scratch::lf(&output.stderr).is_empty(), "unexpected stderr: {output:?}");
+    assert_eq!(pycc_scratch::lf(&output.stdout), stdout, "stdout transcript drift");
 }
 
 /// The oracle: `PYCC_PYTHON`, default `python3` (`python.exe` on Windows).
@@ -60,10 +60,10 @@ fn oracle() -> std::path::PathBuf {
 
 /// Accepts exactly `Python 3.N.M\n` with `N >= 13` and plain release digits.
 fn check_oracle_version(output: &Output) -> Result<(), String> {
-    if output.status.code() != Some(0) || !output.stderr.is_empty() {
+    if output.status.code() != Some(0) || !pycc_scratch::lf(&output.stderr).is_empty() {
         return Err(format!("oracle version probe failed: {output:?}"));
     }
-    let text = canonical_lf(&output.stdout);
+    let text = canonical_lf(&pycc_scratch::lf(&output.stdout));
     let accepted = std::str::from_utf8(&text)
         .ok()
         .and_then(|text| text.strip_prefix("Python 3."))
@@ -76,7 +76,7 @@ fn check_oracle_version(output: &Output) -> Result<(), String> {
     if !accepted {
         return Err(format!(
             "oracle must be a CPython 3.13+ release, found {:?}",
-            String::from_utf8_lossy(&output.stdout)
+            pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout))
         ));
     }
     Ok(())
@@ -113,13 +113,13 @@ fn language_commands_match_cpython_and_canonical_stdout() {
         .output()
         .expect("could not execute pinned CPython fixture");
     assert_eq!(cpython_output.status.code(), Some(0), "{cpython_output:?}");
-    assert!(cpython_output.stderr.is_empty(), "{cpython_output:?}");
-    let cpython_stdout = canonical_lf(&cpython_output.stdout);
+    assert!(pycc_scratch::lf(&cpython_output.stderr).is_empty(), "{cpython_output:?}");
+    let cpython_stdout = canonical_lf(&pycc_scratch::lf(&cpython_output.stdout));
     let expected = language_snapshot();
     assert_transcript(&pycc_output, 0, &expected);
     assert_eq!(cpython_stdout, expected, "CPython snapshot drift");
     assert_eq!(
-        pycc_output.stdout, cpython_stdout,
+        pycc_scratch::lf(&pycc_output.stdout), cpython_stdout,
         "independent oracle diff"
     );
 }
@@ -145,7 +145,7 @@ fn diagnostics_commands_match_human_and_json_snapshots() {
 
     // Bind the documented meaning as well as serialization. Human output has
     // no help line; its caret underlines the offending argument (#10).
-    let diagnostic: serde_json::Value = serde_json::from_slice(&structured.stdout).unwrap();
+    let diagnostic: serde_json::Value = serde_json::from_slice(&pycc_scratch::lf(&structured.stdout)).unwrap();
     let message = "range stop expects `int`, got `str`";
     assert_eq!(
         diagnostic,
@@ -156,7 +156,7 @@ fn diagnostics_commands_match_human_and_json_snapshots() {
                        "len": 7, "label": "expected `int`, found `str`"}]
         })
     );
-    let human_text = std::str::from_utf8(&human.stdout).unwrap();
+    let human_text = pycc_scratch::lf(std::str::from_utf8(&human.stdout).unwrap());
     assert!(human_text.starts_with(&format!("error[T0021]: {message}\n")));
     assert!(human_text.contains(&format!(" --> {DIAGNOSTIC_SOURCE}:1:19\n")));
     assert!(human_text.ends_with("  |                   ^^^^^^^ expected `int`, found `str`\n"));
@@ -186,7 +186,7 @@ fn version_probe_rejects_old_malformed_output_and_failed_process() {
     // Synthetic version bytes test the validator, not a CPython execution.
     let mut probe = pycc(&["--help"]);
     assert_eq!(probe.status.code(), Some(0));
-    assert!(probe.stderr.is_empty());
+    assert!(pycc_scratch::lf(&probe.stderr).is_empty());
     for valid in [
         b"Python 3.14.7\n".as_slice(),
         b"Python 3.14.7\r\n",
@@ -220,7 +220,7 @@ fn version_probe_rejects_old_malformed_output_and_failed_process() {
             .unwrap_err()
             .contains("probe failed")
     );
-    probe.stderr.clear();
+    pycc_scratch::lf(&probe.stderr).clear();
     probe.status = pycc(&["check", DIAGNOSTIC_SOURCE]).status;
     assert!(
         check_oracle_version(&probe)

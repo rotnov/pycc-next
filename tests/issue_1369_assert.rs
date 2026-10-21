@@ -52,13 +52,13 @@ fn build_and_run(tag: &str, source: &str) -> (bool, String, String) {
     assert!(
         build.status.success(),
         "build failed: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&out).output().unwrap();
     (
         run.status.success(),
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
-        String::from_utf8_lossy(&run.stderr).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).replace("\r\n", "\n"),
     )
 }
 
@@ -73,8 +73,8 @@ fn check_error(tag: &str, source: &str) -> String {
     assert!(!output.status.success(), "expected `{tag}` to be rejected");
     format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 
@@ -83,11 +83,11 @@ fn python() -> Command {
 }
 
 fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)).replace("\r\n", "\n")
 }
 
 fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+    pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr)).replace("\r\n", "\n")
 }
 
 /// Builds `body` as the extension module `module` inside `dir`, with

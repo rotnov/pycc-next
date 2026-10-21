@@ -52,13 +52,13 @@ fn build_and_run(tag: &str, source: &str) -> (bool, String, String) {
     assert!(
         build.status.success(),
         "build failed: {}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let run = Command::new(&out).output().unwrap();
     (
         run.status.success(),
-        String::from_utf8_lossy(&run.stdout).to_string(),
-        String::from_utf8_lossy(&run.stderr).to_string(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).to_string(),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr)).to_string(),
     )
 }
 
@@ -73,8 +73,8 @@ fn check_error(tag: &str, source: &str) -> String {
     assert!(!output.status.success(), "expected `{tag}` to be rejected");
     format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&output.stderr))
     )
 }
 
@@ -289,7 +289,7 @@ fn a_built_ext_module_raises_the_right_cpython_import_error_classes() {
     assert!(
         build.status.success(),
         "{}",
-        String::from_utf8_lossy(&build.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&build.stderr))
     );
     let script = "import pycc_import_error_mod as m\n\
          for n in (0, 1, 2):\n\
@@ -309,13 +309,13 @@ fn a_built_ext_module_raises_the_right_cpython_import_error_classes() {
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stderr))
     );
     // The host interpreter's text-mode stdout translates `\n` to `\r\n` on
     // Windows, the same normalization `tests/issue_1114_numpy_oracle.rs` applies.
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        pycc_scratch::lf(&*String::from_utf8_lossy(&run.stdout)).replace("\r\n", "\n"),
         "ImportError Exception 'plain' True\n\
          ModuleNotFoundError ImportError \"No module named 'zz'\" True\n\
          PluginMissing ImportError 'plug' True\n"

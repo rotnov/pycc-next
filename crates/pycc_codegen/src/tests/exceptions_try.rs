@@ -536,7 +536,7 @@ fn raise_from_codegen_builds_and_runs() {
     let bin_path = dir.join("raise_from");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"caught\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"caught\n");
     assert!(output.status.success());
 }
 
@@ -610,7 +610,7 @@ fn try_with_no_handlers_branches_to_finally() {
     let bin_path = dir.join("try_no_handlers");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"finally\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"finally\n");
     assert!(
         !output.status.success(),
         "uncaught exception should exit non-zero"
@@ -668,7 +668,7 @@ fn try_with_multiple_handlers_dispatches_to_next() {
     let bin_path = dir.join("try_multi_dispatch");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"key\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"key\n");
     assert!(output.status.success());
 }
 
@@ -723,7 +723,7 @@ fn a_multi_tag_handler_ors_every_tag_it_accepts() {
     let bin_path = dir.join("try_multi_tag");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"app\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"app\n");
     assert!(output.status.success());
 }
 
@@ -775,7 +775,7 @@ fn a_multi_tag_handler_declines_a_tag_outside_its_set() {
     let bin_path = dir.join("try_multi_tag_miss");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"bare\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"bare\n");
     assert!(output.status.success());
 }
 
@@ -833,7 +833,7 @@ fn a_pep_758_multi_type_handler_ors_every_named_types_tag_independently() {
         link_object_with_runtime(&obj_path, &bin_path);
         let output = Command::new(&bin_path).output().expect("binary should run");
         assert_eq!(
-            output.stdout, b"multi\n",
+            pycc_scratch::lf(&output.stdout), b"multi\n",
             "raised tag {raised_tag} ({class_name})"
         );
         assert!(output.status.success());
@@ -882,7 +882,7 @@ fn try_else_body_falls_through_to_finally() {
     let bin_path = dir.join("try_else_falls_through");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"try\nelse\nfinally\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"try\nelse\nfinally\n");
     assert!(output.status.success());
 }
 
@@ -929,7 +929,7 @@ fn print_of_a_caught_exception_binding_prints_its_message() {
     let bin_path = dir.join("exception_message_print");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"boom\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"boom\n");
 }
 
 #[test]
@@ -973,5 +973,5 @@ fn fstring_interpolation_of_a_caught_exception_binding_renders_its_message() {
     let bin_path = dir.join("exception_message_fstring");
     link_object_with_runtime(&obj_path, &bin_path);
     let output = Command::new(&bin_path).output().expect("binary should run");
-    assert_eq!(output.stdout, b"boom\n");
+    assert_eq!(pycc_scratch::lf(&output.stdout), b"boom\n");
 }
