@@ -13,6 +13,12 @@ use super::*;
 // attribute or property declared in a base class is found when
 // accessed on a derived class instance. The slot index is computed
 // from the MRO's flat attribute layout (`mro_attrs`).
+/// v0.9: the attributes a compiled instance answers through its carrier in
+/// non-strict mode: its class and its `__dict__` snapshot.
+pub(crate) fn is_carrier_dunder(attr: &str) -> bool {
+    pycc_hir::is_non_strict_program() && matches!(attr, "__class__" | "__dict__")
+}
+
 pub(crate) fn lower_attr_get_expr(
     expr: &HirExpr,
     scopes: &[HashMap<String, Ty>],
@@ -192,6 +198,15 @@ pub(crate) fn lower_attr_get_expr(
     // interceptions already decline it on their own scope guards.
     // It must come before `class_def_of`, whose `Ty::Object` input
     // would reach `class.rs`'s internal-error panic.
+    // v0.9: `self.__class__` / `self.__dict__` of a compiled instance, read
+    // through its carrier (`pycc_types::class::resolve_attr_get`).
+    if matches!(base.ty(), Ty::Instance(_)) && is_carrier_dunder(attr) {
+        return MirExpr::ObjAttrGet {
+            base: Box::new(MirExpr::ObjectBox(Box::new(base))),
+            attr: attr.clone(),
+            ty: Ty::Object,
+        };
+    }
     if base.ty() == Ty::Object {
         return MirExpr::ObjAttrGet {
             base: Box::new(base),

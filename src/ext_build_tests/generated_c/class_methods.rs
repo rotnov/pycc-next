@@ -305,6 +305,7 @@ fn grid_ctor(params: Vec<Ty>, slot_names: &[&str]) -> ExtCtor {
         slot_names: slot_names.iter().map(ToString::to_string).collect(),
         slot_kinds: "i".repeat(slot_names.len()),
         keyword_names: None,
+        vararg: None,
     }
 }
 

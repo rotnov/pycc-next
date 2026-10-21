@@ -3,7 +3,7 @@
 //! bodies are unchanged.
 
 use super::*;
-use crate::HirItem;
+use crate::{CompIter, HirItem};
 use crate::expr::keyword_bind::SignatureTable;
 
 #[test]

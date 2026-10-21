@@ -682,6 +682,22 @@ fn check_raise_operand(
             .iter()
             .map(|arg| infer_expr_in(env, local_names, arg))
             .collect::<Result<Vec<_>, _>>()?;
+        // Non-strict mode: the native exception carries a `str` message
+        // only, and a CPython object argument (`raise MissingError(name)`)
+        // is its `args[0]` as it is -- CPython builds that exception.
+        if crate::non_strict::is_non_strict() && arg_tys.contains(&Ty::Object) {
+            return Err(crate::locate::place_expr(
+                Diagnostic::error(
+                    "C0001",
+                    format!(
+                        "raising `{callee}` with a CPython object argument is not supported \
+                         yet: the compiled exception carries a `str` message"
+                    ),
+                    Span::new(0, 0),
+                ),
+                expr,
+            ));
+        }
         // `param_tys[0]` is always `self`, never part of the caller-supplied
         // argument list -- mirrors `resolve_instantiation`'s identical slice.
         super::class::check_call_args(env, callee, args, &arg_tys, &param_tys[1..], false)?;

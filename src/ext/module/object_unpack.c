@@ -210,3 +210,78 @@ static PyObject *pycc_ext_call_unpacking(PyObject *callable, PyObject **args, lo
     Py_XDECREF(kwargs);
     return result;
 }
+
+/* v0.9: binds a call of a compiled constructor `def __init__(self, a, b,
+ * *rest)` (`qualname` names it, `names` its `fixed` parameters before
+ * `*rest`) as CPython binds it (`ceval.c`'s `initialize_locals`), with its
+ * messages: a keyword names a fixed parameter not already given
+ * positionally, and every fixed parameter must be given. `bound` receives
+ * `fixed` borrowed references, `*rest` a new reference to the tuple of the
+ * positional arguments past them. 0, or -1 with the `TypeError` set. */
+static int pycc_ext_bind_star(PyObject *args, PyObject *kwds, const char *qualname,
+                              const char *const *names, Py_ssize_t fixed, PyObject **bound,
+                              PyObject **rest)
+{
+    Py_ssize_t given = PyTuple_Size(args);
+    Py_ssize_t pos = 0;
+    Py_ssize_t missing = 0;
+    Py_ssize_t seen = 0;
+    Py_ssize_t i;
+    PyObject *key;
+    PyObject *value;
+    PyObject *list;
+
+    for (i = 0; i < fixed; i++) {
+        bound[i] = i < given ? PyTuple_GetItem(args, i) : NULL;
+    }
+    while (kwds != NULL && PyDict_Next(kwds, &pos, &key, &value)) {
+        for (i = 0; i < fixed; i++) {
+            if (PyUnicode_Check(key) && PyUnicode_CompareWithASCIIString(key, names[i]) == 0) {
+                break;
+            }
+        }
+        if (i == fixed) {
+            PyErr_Format(PyExc_TypeError, "%s() got an unexpected keyword argument '%S'",
+                         qualname, key);
+            return -1;
+        }
+        if (bound[i] != NULL) {
+            PyErr_Format(PyExc_TypeError, "%s() got multiple values for argument '%s'", qualname,
+                         names[i]);
+            return -1;
+        }
+        bound[i] = value;
+    }
+    for (i = 0; i < fixed; i++) {
+        missing += bound[i] == NULL;
+    }
+    if (missing > 0) {
+        /* `format_missing`: 'a' / 'a' and 'b' / 'a', 'b', and 'c'. */
+        list = PyUnicode_FromString("");
+        for (i = 0; i < fixed && list != NULL; i++) {
+            PyObject *next;
+            if (bound[i] != NULL) {
+                continue;
+            }
+            seen++;
+            if (seen == 1) {
+                next = PyUnicode_FromFormat("%U'%s'", list, names[i]);
+            } else if (seen < missing) {
+                next = PyUnicode_FromFormat("%U, '%s'", list, names[i]);
+            } else {
+                next = PyUnicode_FromFormat(missing == 2 ? "%U and '%s'" : "%U, and '%s'", list,
+                                            names[i]);
+            }
+            Py_DECREF(list);
+            list = next;
+        }
+        if (list != NULL) {
+            PyErr_Format(PyExc_TypeError, "%s() missing %zd required positional argument%s: %U",
+                         qualname, missing, missing == 1 ? "" : "s", list);
+            Py_DECREF(list);
+        }
+        return -1;
+    }
+    *rest = PyTuple_GetSlice(args, given < fixed ? given : fixed, given);
+    return *rest == NULL ? -1 : 0;
+}

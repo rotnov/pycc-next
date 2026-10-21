@@ -116,6 +116,7 @@ pub(crate) fn lower_call_expr(
     // A call of a variable holding a function value.
     if let Some(Ty::Callable(sig)) = scopes.iter().rev().find_map(|scope| scope.get(callee)) {
         let ty = sig.1.clone();
+        let params = sig.0.clone();
         return MirExpr::CallClosure {
             callee: Box::new(lower_expr(
                 &HirExpr::Name(callee.clone()),
@@ -123,9 +124,18 @@ pub(crate) fn lower_call_expr(
                 classes,
                 current_class,
             )),
+            // A native value passed to an `object` parameter is boxed.
             args: args
                 .iter()
-                .map(|a| lower_expr(a, scopes, classes, current_class))
+                .zip(&params)
+                .map(|(a, param)| {
+                    let arg = lower_expr(a, scopes, classes, current_class);
+                    if *param == Ty::Object {
+                        crate::object_box::box_into(crate::obj_arith::object_arg(arg), param)
+                    } else {
+                        arg
+                    }
+                })
                 .collect(),
             ty,
         };

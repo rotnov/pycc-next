@@ -55,11 +55,11 @@ pub(crate) fn install(inc: String, signatures: &[ExtSignature], first_chunk: usi
     if signatures.is_empty() {
         return inc;
     }
-    let methods: Vec<(usize, &str, &str)> = signatures
+    let methods: Vec<(usize, &str, &str, bool)> = signatures
         .iter()
-        .filter_map(|signature| signature.method())
+        .filter_map(|signature| Some((signature.method()?, signature.static_method)))
         .enumerate()
-        .map(|(slot, (class, method))| (slot, class, method))
+        .map(|(slot, ((class, method), is_static))| (slot, class, method, is_static))
         .collect();
     let mut head = String::from("#define PYCC_EXT_HAS_SIGNATURES 1\n\n");
     let _ = writeln!(
@@ -69,7 +69,7 @@ pub(crate) fn install(inc: String, signatures: &[ExtSignature], first_chunk: usi
         methods.len().max(1)
     );
     head.push_str(FORWARD_C);
-    for (slot, _, _) in &methods {
+    for (slot, _, _, _) in &methods {
         let _ = writeln!(
             head,
             "static PyObject *{}(PyObject *self, PyObject *const *args, Py_ssize_t nargs,\n\
@@ -106,11 +106,17 @@ pub(crate) fn install(inc: String, signatures: &[ExtSignature], first_chunk: usi
         .and_then(|start| inc[start..].find("\n\n").map(|end| start + end + 2))
         .expect("the generated companion defines the module name first");
     let mut out = format!("{}{head}{}", &inc[..at], &inc[at..]);
-    for (slot, class, method) in methods {
+    for (slot, class, method, is_static) in methods {
         let table = format!("static PyMethodDef pycc_ext_type_methods_{class}[] = {{\n");
         if let Some(start) = out.find(&table) {
+            // A static method's row hands the forwarder `self == NULL`.
+            let flags = if is_static {
+                "METH_FASTCALL | METH_KEYWORDS | METH_STATIC"
+            } else {
+                "METH_FASTCALL | METH_KEYWORDS"
+            };
             let row = format!(
-                "    {{{}, (PyCFunction)(void (*)(void)){}, METH_FASTCALL | METH_KEYWORDS, NULL}},\n",
+                "    {{{}, (PyCFunction)(void (*)(void)){}, {flags}, NULL}},\n",
                 c_name(method),
                 forwarder(slot)
             );
@@ -120,7 +126,8 @@ pub(crate) fn install(inc: String, signatures: &[ExtSignature], first_chunk: usi
     out
 }
 
-/// `pycc_ext_sig_forward`: calls method wrapper `index` with `self` first.
+/// `pycc_ext_sig_forward`: calls method wrapper `index` with `self` first
+/// -- none for a static method, whose row hands it `NULL`.
 const FORWARD_C: &str = r#"static PyObject *pycc_ext_sig_forward(Py_ssize_t index, PyObject *self,
                                       PyObject *const *args, Py_ssize_t nargs,
                                       PyObject *kwnames)
@@ -135,6 +142,9 @@ const FORWARD_C: &str = r#"static PyObject *pycc_ext_sig_forward(Py_ssize_t inde
         PyErr_SetString(PyExc_RuntimeError,
                         "pycc: a method was called before its class statement ran");
         return NULL;
+    }
+    if (self == NULL) {
+        return PyObject_Vectorcall(wrapper, args, (size_t)nargs, kwnames);
     }
     stack = (PyObject **)PyMem_Malloc((size_t)(count + 1) * sizeof(PyObject *));
     if (stack == NULL) {
@@ -222,6 +232,7 @@ mod tests {
             qualname: qualname.to_string(),
             entry: format!("_pycc_sig_{}", qualname.replace('.', "_d")),
             wrapper: "def _pycc_make(e):\n    return e\n".to_string(),
+            static_method: false,
         }
     }
 

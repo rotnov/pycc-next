@@ -47,6 +47,7 @@ fn a_constructible_class_yields_one_constructor_descriptor_with_the_carried_tail
             slot_names: vec!["w".to_string(), "h".to_string()],
             slot_kinds: "ii".to_string(),
             keyword_names: None,
+            vararg: None,
         }]
     );
     // #1442: both `int` slots are carriable, so both are descriptors,
@@ -242,6 +243,7 @@ fn an_implicit_object_init_is_still_resolved_when_it_is_the_only_one() {
             slot_names: vec!["w".to_string(), "h".to_string()],
             slot_kinds: "ii".to_string(),
             keyword_names: None,
+            vararg: None,
         }]
     );
     // #1442: both `int` slots are carriable, so both are descriptors,

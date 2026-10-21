@@ -8,6 +8,9 @@
 use super::{BuiltinSig, boxes_as_object, is_intlike, sig};
 use crate::Ty;
 
+/// `pycc_ast::desugar::signatures::MARK_TUPLE`.
+const MARK_TUPLE: &str = "__pycc_mark_tuple";
+
 /// The CPython-backed signature of builtin `name` over `args`, when one of
 /// the arms below claims the call.
 pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String>> {
@@ -33,6 +36,13 @@ pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, 
     }
     if let (super::EXC_OBJECT, [exc @ Ty::Instance(_)]) = (name, args) {
         return Some(Ok(sig("pycc_ext_obj_exc_object", std::slice::from_ref(exc), Ty::Object)));
+    }
+    // v0.9: a function's `*args` that is a CPython object (an unannotated
+    // vararg of a published function): `pycc_mir` rebinds it to
+    // `tuple(args)`, so a call from compiled code (which passes a list)
+    // hands the body a tuple, as CPython does.
+    if let (MARK_TUPLE, [Ty::Object]) = (name, args) {
+        return Some(Ok(sig("pycc_ext_obj_tuple", &[Ty::Object], Ty::None)));
     }
     // Non-strict mode: `itertools.accumulate(xs)` over a CPython object runs
     // CPython's own, its result a CPython iterator.

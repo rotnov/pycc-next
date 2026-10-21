@@ -42,11 +42,11 @@ const EXC_OBJECT: &str = "__pycc_exc_object";
 
 /// Whether `ty`, an `except` clause's type, is what a handler holds as
 /// written: a bare name, or a tuple of them.
-fn names_a_class(ty: &Expr) -> bool {
+fn names_a_class(ty: &Expr, object_name: &dyn Fn(&str) -> bool) -> bool {
+    let class_name = |e: &Expr| matches!(e, Expr::Name(name) if !object_name(name.id.as_str()));
     match ty {
-        Expr::Name(_) => true,
-        Expr::Tuple(tuple) => tuple.elts.iter().all(|e| matches!(e, Expr::Name(_))),
-        _ => false,
+        Expr::Tuple(tuple) => tuple.elts.iter().all(class_name),
+        other => class_name(other),
     }
 }
 
@@ -55,12 +55,20 @@ fn names_a_class(ty: &Expr) -> bool {
 /// names too (`except (ValueError, zlib.error):`) the objects' match, then
 /// `isinstance` with the names. Every object of the tuple is evaluated, as
 /// CPython evaluates the whole tuple; a name evaluates to its class.
-fn object_test(caught: &str, ty: &Expr, range: TextRange) -> Expr {
+fn object_test(
+    caught: &str,
+    ty: &Expr,
+    range: TextRange,
+    object_name: &dyn Fn(&str) -> bool,
+) -> Expr {
     let Expr::Tuple(tuple) = ty else {
         return call_name(EXC_MATCH, vec![load(caught, range), ty.clone()], range);
     };
     let (names, objects): (Vec<&Expr>, Vec<&Expr>) =
-        tuple.elts.iter().partition(|e| matches!(e, Expr::Name(_)));
+        tuple
+            .elts
+            .iter()
+            .partition(|e| matches!(e, Expr::Name(name) if !object_name(name.id.as_str())));
     if names.is_empty() {
         return call_name(EXC_MATCH, vec![load(caught, range), ty.clone()], range);
     }
@@ -85,8 +93,14 @@ fn object_test(caught: &str, ty: &Expr, range: TextRange) -> Expr {
 
 /// `try_stmt` with its object clauses rewritten (module doc), or `None`
 /// when it has none (or is a `try`/`except*`, or cannot be rewritten).
+/// `object_name` answers whether a bare name is a CPython object (an
+/// imported exception class, `except KeyNotFoundError:`), whose clause is
+/// tested at run time like an attribute's.
 #[must_use]
-pub fn object_except_handlers(try_stmt: &StmtTry) -> Option<StmtTry> {
+pub fn object_except_handlers(
+    try_stmt: &StmtTry,
+    object_name: &dyn Fn(&str) -> bool,
+) -> Option<StmtTry> {
     if try_stmt.is_star {
         return None;
     }
@@ -97,7 +111,7 @@ pub fn object_except_handlers(try_stmt: &StmtTry) -> Option<StmtTry> {
     let handlers: Vec<ExceptHandlerExceptHandler> = try_stmt.handlers.iter().map(clause).collect();
     let first = handlers
         .iter()
-        .position(|h| h.type_.as_deref().is_some_and(|ty| !names_a_class(ty)))?;
+        .position(|h| h.type_.as_deref().is_some_and(|ty| !names_a_class(ty, object_name)))?;
     let range = handlers[first].range;
     let caught = format!("__pycc_exc_{}", u32::from(range.start()));
     let mut tests: Vec<(Option<Expr>, Vec<Stmt>)> = Vec::new();
@@ -108,7 +122,7 @@ pub fn object_except_handlers(try_stmt: &StmtTry) -> Option<StmtTry> {
             catch_all = true;
             break;
         };
-        if names_a_class(ty) {
+        if names_a_class(ty, object_name) {
             if h.name.is_some() {
                 return None;
             }
@@ -116,7 +130,7 @@ pub fn object_except_handlers(try_stmt: &StmtTry) -> Option<StmtTry> {
             tests.push((Some(test), h.body.to_vec()));
             continue;
         }
-        let test = object_test(&caught, ty, h.range);
+        let test = object_test(&caught, ty, h.range, object_name);
         let mut body = Vec::with_capacity(h.body.len() + 1);
         if let Some(name) = &h.name {
             body.push(super::build::assign(

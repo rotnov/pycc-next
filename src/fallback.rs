@@ -148,8 +148,10 @@ struct TopStmt {
     opaque: BTreeSet<String>,
     /// The names it declares `global` at any depth.
     declares: BTreeSet<String>,
-    /// A function with a parameter default: the published callable cannot
-    /// apply defaults yet (#1194), so Python code never calls it compiled.
+    /// A function with a parameter default, `*args`, `**kwargs` or a
+    /// keyword-only or positional-only parameter and no published wrapper:
+    /// the published callable cannot bind it (#1194), so Python code never
+    /// calls it compiled.
     defaults: bool,
     /// An exception class the artifact would publish without its own
     /// members (`exceptions`): Python code never sees it compiled.
@@ -296,8 +298,11 @@ impl Plan {
                     names::opaque_bound_names(stmt)
                 },
                 declares: names::all_global_declarations(stmt),
+                // Any signature the published callable cannot bind alone:
+                // a default, `*args`, `**kwargs`, a keyword-only or
+                // positional-only parameter.
                 defaults: matches!(stmt, Stmt::FunctionDef(def)
-                    if def.parameters.iter_non_variadic_params().any(|p| p.default.is_some())
+                    if pycc_ast::ext_needs_wrapper(&def.parameters)
                         && !wrapped.contains(def.name.as_str())),
                 hidden_members: matches!(stmt, Stmt::ClassDef(class)
                     if hidden_members.contains(class.name.as_str())),

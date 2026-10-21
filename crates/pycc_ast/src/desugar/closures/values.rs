@@ -21,10 +21,40 @@ use std::collections::{HashMap, HashSet};
 
 /// Whether the nested function `def` may be made a value: its own shape.
 pub(super) fn value_shape(def: &StmtFunctionDef) -> bool {
-    def.parameters
-        .args
+    // Non-strict mode: an unannotated parameter is a CPython object
+    // (`object_params`), as any caller -- CPython code included -- may pass.
+    // A value takes its flattened parameters, so an unannotated (object)
+    // `*args`/`**kwargs` -- which a CPython caller would bind -- stays nested.
+    let non_strict = crate::desugar::dataclasses::is_non_strict();
+    let parameters = &def.parameters;
+    parameters
+        .vararg
         .iter()
-        .all(|p| p.default.is_none() && p.parameter.annotation.is_some())
+        .chain(&parameters.kwarg)
+        .all(|p| p.annotation.is_some())
+        && parameters
+            .args
+            .iter()
+            .all(|p| p.default.is_none() && (non_strict || p.parameter.annotation.is_some()))
+}
+
+/// Non-strict mode: annotates `def`'s unannotated parameters and return
+/// `object`, so the function value's type admits whatever its callers pass
+/// and it crosses into CPython as a callable
+/// (`pycc_types::foreign::is_boxable_callable`).
+pub(super) fn object_params(def: &mut StmtFunctionDef) {
+    if !crate::desugar::dataclasses::is_non_strict() {
+        return;
+    }
+    let range = def.range;
+    if def.returns.is_none() {
+        def.returns = Some(Box::new(crate::desugar::build::load("object", range)));
+    }
+    for p in def.parameters.args.iter_mut() {
+        if p.parameter.annotation.is_none() {
+            p.parameter.annotation = Some(Box::new(crate::desugar::build::load("object", range)));
+        }
+    }
 }
 
 /// Whether the function `name` defined by top-level statement `def_index`

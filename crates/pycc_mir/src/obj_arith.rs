@@ -81,6 +81,14 @@ pub(crate) fn display_element(element: MirExpr) -> MirExpr {
     if element.ty() == Ty::None {
         return MirExpr::ObjectBox(Box::new(element));
     }
+    // A native dict, set or tuple display (`pycc_types`' fresh display):
+    // built as the CPython container, as an argument is.
+    if matches!(
+        element,
+        MirExpr::DictLiteral(_) | MirExpr::SetLiteral { .. } | MirExpr::TupleLiteral(_)
+    ) {
+        return object_arg(element);
+    }
     object_operand(element)
 }
 

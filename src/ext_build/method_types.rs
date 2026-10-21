@@ -575,15 +575,54 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
     ));
     out.push_str(&arg_slot_locals(&slots));
     out.push_str(&fnptr_null_guard(&symbol, source_name, "-1"));
-    match &prologue {
-        Some(prologue) => out.push_str(&prologue.body),
-        None => out.push_str(&format!(
+    // v0.9: `def __init__(self, a, *items)` (non-strict): the last carried
+    // parameter is the CPython tuple of the positional arguments past the
+    // fixed ones, and the call -- keywords included -- is bound as CPython
+    // binds it (`pycc_ext_bind_star`).
+    let star = ctor
+        .vararg
+        .as_ref()
+        .filter(|_| ctor.defaults.iter().all(Option::is_none) && prologue.is_none());
+    match (&prologue, star) {
+        (Some(prologue), _) => out.push_str(&prologue.body),
+        (None, Some(_)) => {}
+        (None, None) => out.push_str(&format!(
             "    if (kwds != NULL && PyDict_Size(kwds) != 0) {{\n        \
              PyErr_SetString(PyExc_TypeError, \"{source_name}() takes no keyword arguments\");\n        \
              return -1;\n    }}\n"
         )),
     }
-    if ctor.defaults.is_empty() {
+    if let Some(names) = star {
+        let fixed = arity - 1;
+        let table: Vec<String> = names
+            .iter()
+            .map(|name| keywords::c_name(name))
+            .chain(std::iter::once("NULL".to_string()))
+            .collect();
+        out.push_str(&format!(
+            "    static const char *const pycc_names[] = {{{table}}};\n    \
+             PyObject *pycc_bound[{size}];\n    \
+             PyObject *pycc_rest;\n    \
+             if (pycc_ext_bind_star(args, kwds, {qualname}, pycc_names, {fixed}, pycc_bound, \
+             &pycc_rest) < 0) {{\n        return -1;\n    }}\n",
+            table = table.join(", "),
+            size = fixed.max(1),
+            qualname = keywords::c_name(source_name),
+        ));
+        out.push_str(&unpack_args(
+            &slots,
+            source_name,
+            &|index| {
+                if index == fixed {
+                    "pycc_rest".to_string()
+                } else {
+                    format!("pycc_bound[{index}]")
+                }
+            },
+            "        Py_DECREF(pycc_rest);\n        return -1;\n",
+        ));
+        out.push_str("    Py_DECREF(pycc_rest);\n");
+    } else if ctor.defaults.is_empty() {
         out.push_str(&format!(
             "    if ({count} != {arity}) {{\n        PyErr_Format(PyExc_TypeError, \
              \"{source_name}() takes exactly {arity} argument{plural} (%zd given)\", \
@@ -602,12 +641,14 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
             },
         ));
     }
-    out.push_str(&unpack_args(
-        &slots,
-        source_name,
-        &|index| defaults::arg_expr(&ctor.defaults, index, item(index)),
-        "        return -1;\n",
-    ));
+    if star.is_none() {
+        out.push_str(&unpack_args(
+            &slots,
+            source_name,
+            &|index| defaults::arg_expr(&ctor.defaults, index, item(index)),
+            "        return -1;\n",
+        ));
+    }
     out.push_str(&format!(
         "    inst = pycc_rt_instance_new({slot_count}, \"{layout_literal}\", {layout_len});\n"
     ));

@@ -234,16 +234,41 @@ fn unbindable_signatures(source: &str) -> Option<Vec<(pycc_diag::Diagnostic, Opt
                         // A constructor binds defaults and keywords itself
                         // (`ext_build::constructors`), but no other shape.
                         let p = &def.parameters;
+                        // An unannotated `*items` alone (no defaults, no
+                        // keywords) is bound by `tp_init` itself: the
+                        // tuple of the extra positional arguments
+                        // (`ext_build::constructors::marks_vararg`).
+                        let star_only = p
+                            .vararg
+                            .as_ref()
+                            .is_some_and(|v| v.annotation.is_none())
+                            && p.kwarg.is_none()
+                            && p.kwonlyargs.is_empty()
+                            && p.posonlyargs.is_empty()
+                            && p.args.iter().all(|a| a.default.is_none());
                         let init_unbound = name == "__init__"
+                            && !star_only
                             && (!p.posonlyargs.is_empty()
                                 || !p.kwonlyargs.is_empty()
                                 || p.vararg.is_some()
                                 || p.kwarg.is_some());
-                        if (init_unbound
-                            || published(name)
-                                && pycc_ast::ext_needs_wrapper(&def.parameters)
-                                && !planned.contains(&qualname))
-                            && def.decorator_list.is_empty()
+                        // A static or class method's row binds plain
+                        // positional arguments and keywords, never a
+                        // `*args` or `**kwargs` of its own: one no wrapper
+                        // publishes (`pycc_ast::ext_signatures`) is refused.
+                        let variadic_unbound = !def.decorator_list.is_empty()
+                            && def.decorator_list.iter().all(|d| {
+                                matches!(&d.expression, pycc_ast::Expr::Name(n)
+                                    if matches!(n.id.as_str(), "staticmethod" | "classmethod"))
+                            })
+                            && (p.vararg.is_some() || p.kwarg.is_some())
+                            && !planned.contains(&qualname);
+                        if variadic_unbound
+                            || (init_unbound
+                                || published(name)
+                                    && pycc_ast::ext_needs_wrapper(&def.parameters)
+                                    && !planned.contains(&qualname))
+                                && def.decorator_list.is_empty()
                         {
                             out.push(refusal(&qualname, def.range));
                         }

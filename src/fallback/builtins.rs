@@ -29,6 +29,15 @@ const FRAME_BUILTINS: &[&str] = &[
     "breakpoint",
 ];
 
+/// Whether failure `message` names a builtin use the rewrite reaches
+/// through CPython: a call of a builtin pycc does not compile for its
+/// arguments, or a builtin read as a value.
+pub(super) fn reached_through_builtins(message: &str) -> bool {
+    message.starts_with("call to builtin `")
+        || between(message, "name `", "` is not defined")
+            .is_some_and(|name| VALUE_BUILTINS.contains(&name))
+}
+
 /// The builtin values a bare name may be rewritten to, when pycc reports
 /// the name undefined.
 const VALUE_BUILTINS: &[&str] = &[
@@ -136,8 +145,11 @@ impl Plan {
         let exception = ["Error", "Exception", "Warning"]
             .iter()
             .any(|suffix| name.ends_with(suffix));
+        // `vars(o)` and `dir(o)` read `o`, not the caller's frame.
+        let reads_frame = FRAME_BUILTINS.contains(&name)
+            && !(matches!(name, "vars" | "dir") && self.call_has_argument(at, name));
         if !(name.starts_with(|c: char| c.is_ascii_lowercase()) || exception)
-            || FRAME_BUILTINS.contains(&name)
+            || reads_frame
             || !self.name_at(at, name, true)
         {
             return Vec::new();
@@ -157,6 +169,16 @@ impl Plan {
 
     /// Whether the source at `at` is the identifier `name` (followed by a
     /// call's `(` when `call`).
+    /// Whether the call of `name` at `at` passes an argument (`f(x)`, not
+    /// `f()`).
+    fn call_has_argument(&self, at: u32, name: &str) -> bool {
+        self.source
+            .get(at as usize..)
+            .and_then(|s| s.strip_prefix(name))
+            .and_then(|after| after.trim_start().strip_prefix('('))
+            .is_some_and(|args| !args.trim_start().starts_with(')'))
+    }
+
     fn name_at(&self, at: u32, name: &str, call: bool) -> bool {
         let Some(after) = self.source.get(at as usize..).and_then(|s| s.strip_prefix(name)) else {
             return false;

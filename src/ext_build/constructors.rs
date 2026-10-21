@@ -291,6 +291,10 @@ fn ctor_descriptor(module: &HirModule, class: &str) -> Option<ExtCtor> {
         slot_names: instance_slot_names(module, class_def),
         slot_kinds: instance_slot_kinds(module, class_def),
         keyword_names: None,
+        vararg: carried
+            .split_last()
+            .filter(|((param, ty), _)| *ty == Ty::Object && marks_vararg(body, param))
+            .map(|(_, fixed)| fixed.iter().map(|(param, _)| param.clone()).collect()),
     })
 }
 
@@ -417,6 +421,26 @@ pub(crate) struct ExtCtor {
     /// keywords (#1461), meaning exactly what [`ExtExport::keyword_names`]
     /// means; `None` keeps the hand-written keyword refusal.
     pub(crate) keyword_names: Option<Vec<String>>,
+    /// v0.9: the last parameter is the constructor's `*args` (a CPython
+    /// object in non-strict mode): `Py_tp_init` passes it the tuple of the
+    /// positional arguments past the others, whose names (`Some`) word the
+    /// `TypeError` of a call missing one.
+    pub(crate) vararg: Option<Vec<String>>,
+}
+
+/// v0.9: whether `body` (a flattened function's, `pycc_ast::desugar::
+/// signatures`) opens by marking its parameter `param` as its `*args`
+/// (source positions aside, after a docstring).
+pub(crate) fn marks_vararg(body: &[pycc_hir::HirStmt], param: &str) -> bool {
+    let mut stmts = body
+        .iter()
+        .filter(|stmt| !matches!(stmt, pycc_hir::HirStmt::Pos(_)))
+        .take(2);
+    stmts.any(|stmt| {
+        matches!(stmt, pycc_hir::HirStmt::ExprStmt(pycc_hir::HirExpr::Call { callee, args })
+            if callee == "__pycc_mark_tuple"
+                && matches!(args.as_slice(), [pycc_hir::HirExpr::Name(n)] if n == param))
+    })
 }
 
 /// The constructible classes among the published ones, in publication order.

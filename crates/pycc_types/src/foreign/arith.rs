@@ -153,7 +153,13 @@ pub(crate) fn object_display_ty<'a>(
     // values crosses as a CPython iterator over it.
     // A fresh native list nothing else holds (`(text, [])`) is copied into
     // the CPython one as it is boxed, which no alias can observe.
-    let fresh = |element: &HirExpr, ty: &Ty| crate::object_box::fresh_container(env, element, ty);
+    // So is a dict, set or tuple display of packable values (v0.9:
+    // `f(a, None, {"b": 2})`'s extra positionals), built as the CPython one.
+    let fresh = |element: &HirExpr, ty: &Ty| {
+        crate::object_box::fresh_container(env, element, ty)
+            || (!matches!(element, HirExpr::ListLiteral(_))
+                && crate::object_box::display_boxable(element, ty))
+    };
     // A name holding a native container there becomes an `object` itself
     // (widening), so the container it builds is the CPython one.
     for (element, ty) in elements.iter().zip(&tys) {

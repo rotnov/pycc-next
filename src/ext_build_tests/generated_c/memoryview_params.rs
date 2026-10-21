@@ -59,6 +59,7 @@ fn a_constructor_buffer_parameter_its_body_stores_into_is_acquired_writable() {
             slot_names: vec!["w".to_string()],
             slot_kinds: "i".to_string(),
             keyword_names: None,
+            vararg: None,
         }],
         &[],
     );

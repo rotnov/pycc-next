@@ -109,6 +109,12 @@ impl Plan {
         // that `def` is the smallest enclosing function, so it alone runs
         // in CPython (its body compiled on its own, where it may compile).
         let inner = !unsupported && !value;
+        // A builtin the rewrite reaches through CPython (`type(node) is
+        // str` in a compiled nested function): that one use, not the
+        // function, goes to CPython (`builtins`).
+        if inner && super::builtins::reached_through_builtins(message) {
+            return false;
+        }
         let Some(at) = self.source_start(rendered, failure) else {
             return false;
         };

@@ -270,11 +270,12 @@ pub(super) fn merge_inferred_types(left: Ty, right: Ty) -> Option<Ty> {
     } else if crate::non_strict::is_non_strict()
         && [&left, &right]
             .iter()
-            .all(|ty| matches!(ty, Ty::Object | Ty::Instance(_)))
+            .all(|ty| matches!(ty, Ty::Object | Ty::Instance(_)) || crate::foreign::is_boxable_callable(ty))
     {
         // v0.9: so is one inferred as instances of two classes, or as an
         // instance and an object (a helper called with each node class,
-        // `_format(self)`): the instance crosses as its carrier.
+        // `_format(self)`): the instance crosses as its carrier, a function
+        // value of object parameters as a CPython callable over it.
         Some(Ty::Object)
     } else {
         // A term inferred both as `None` and as a value (a helper parameter

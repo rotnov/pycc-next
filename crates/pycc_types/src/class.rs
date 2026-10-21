@@ -404,6 +404,15 @@ pub(crate) fn resolve_attr_get(
         return Err(t0043_not_an_instance("read an attribute", base_ty));
     };
     let class_def = expect_class(env, class_name);
+    // v0.9: `self.__class__` / `self.__dict__`, read through the instance's
+    // carrier in non-strict mode (`pycc_mir`).
+    if crate::non_strict::is_non_strict()
+        && matches!(attr, "__class__" | "__dict__")
+        && !class_def.mro.iter().any(|c| expect_class(env, c).attrs.iter().any(|(n, _)| n == attr))
+        && crate::foreign::is_object_operand(env, base_ty)
+    {
+        return Ok(Ty::Object);
+    }
     // #432/#377: walk the MRO for property lookup first (matching CPython's
     // descriptor protocol precedence — a property descriptor intercepts
     // attribute access before `__dict__`), across ALL classes in the MRO,

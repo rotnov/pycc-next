@@ -115,7 +115,11 @@ pub(crate) fn call_value(
     }
     for (index, (arg, param)) in args.iter().zip(&sig.0).enumerate() {
         let actual = infer_expr_in(env, local_names, arg)?;
-        if !crate::class::is_assignable_env(env, &actual, param) {
+        // An `object` parameter (a non-strict value's unannotated one)
+        // takes any native value `object` boxes (`pycc_mir` boxes it).
+        if !crate::class::is_assignable_env(env, &actual, param)
+            && !crate::object_box::admits_value(env, arg, &actual, param)?
+        {
             return Err(Diagnostic::error(
                 "T0021",
                 format!(

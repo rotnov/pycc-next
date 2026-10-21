@@ -42,6 +42,25 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   globals store such keys): `defaults.STRING_ENCODING` from another module of the package
   was a full `getattr` with two failed lookups each time (pystache's `Renderer()` 35k ->
   6.9k instructions).
+- `*args` and `**kwargs` of CPython objects (unannotated, non-strict) keep a class or
+  function native: a constructor `def __init__(self, a, *items)` binds Python's call as
+  CPython does (keywords naming `a`, CPython's `TypeError` messages); a `@staticmethod`
+  or module function with `*args`/`**kwargs` is published through a wrapper of its
+  declared signature, as a function with defaults already was. Each sent the class to
+  CPython, or ran the function's `def` in CPython. Also native now: `except` naming an
+  imported exception class (`from json import JSONDecodeError`), dict and set displays as
+  elements of an object display, and `obj.__class__` / `obj.__dict__` of a compiled
+  instance. pystache's `ContextStack` is native; its benchmark 783k -> 734k instructions
+  per round (CPython: 505k).
+- A nested function with unannotated parameters used as a value (`map(get_text, parts)`,
+  `return resolve`, `sorted(xs, key=step)`) is a native closure over the enclosing
+  variables it reads, as an annotated one already was: its parameters and return are
+  CPython objects, so CPython code calls it with no Python frame. It used to run its
+  `def` in CPython on every call of the enclosing function. pystache's benchmark 734k ->
+  488k instructions per round (CPython 505k), 0.62x -> 0.74x by wall time.
+- Fixed: raising a compiled exception class with a CPython object argument (`raise
+  MissingError(name)` in non-strict code) failed the build in code generation; the
+  function raising it now runs in CPython, which keeps the object in `args`.
 
 ## [0.8.0] - 2026-10-21
 

@@ -60,6 +60,9 @@ pub struct ExtSignature {
     /// evaluated in the module's namespace when the source runs) and of
     /// `__qualname__` [`ExtSignature::qualname`].
     pub wrapper: String,
+    /// Whether the method is a `@staticmethod`: its row is `METH_STATIC`
+    /// and the wrapper takes no receiver.
+    pub static_method: bool,
 }
 
 impl ExtSignature {
@@ -314,8 +317,13 @@ fn plan_def(
     defers_annotations: bool,
 ) -> Option<Planned> {
     let name = def.name.as_str();
+    // A `@staticmethod` of a class: published through a `METH_STATIC` row
+    // calling the wrapper without a receiver.
+    let static_method = class.is_some()
+        && matches!(def.decorator_list.as_slice(),
+            [d] if matches!(&d.expression, Expr::Name(n) if n.id.as_str() == "staticmethod"));
     if def.is_async
-        || !def.decorator_list.is_empty()
+        || !(def.decorator_list.is_empty() || static_method)
         || (name.starts_with('_')
             // A private module-level function is published in non-strict
             // mode (CPython code imports `from m import _helper`), so it
@@ -371,14 +379,14 @@ fn plan_def(
     // A method's receiver: its first parameter, positional-or-keyword and
     // without a default.
     let (receiver, regular) = match class {
-        Some(_) => {
+        Some(_) if !static_method => {
             let (first, rest) = parameters.args.split_first()?;
             if !parameters.posonlyargs.is_empty() || first.default.is_some() {
                 return None;
             }
             (Some(first.parameter.name.to_string()), rest)
         }
-        None => (None, &parameters.args[..]),
+        _ => (None, &parameters.args[..]),
     };
     let posonly = parameters
         .posonlyargs
@@ -400,12 +408,23 @@ fn plan_def(
         None if non_strict => "object".to_string(),
         None => return None,
     };
+    // A `*args`/`**kwargs` element: a scalar type, or (`None`) a CPython
+    // object -- non-strict mode, unannotated -- passed through as it is.
+    let variadic = |p: &ruff_python_ast::Parameter| -> Option<(String, Option<Element>)> {
+        let annotation = p.annotation.as_deref();
+        let element = match Element::of(annotation) {
+            Some(element) => Some(element),
+            None if non_strict && annotation.is_none() => None,
+            None => return None,
+        };
+        Some((p.name.to_string(), element))
+    };
     let vararg = match &parameters.vararg {
-        Some(v) => Some((v.name.to_string(), Element::of(v.annotation.as_deref())?)),
+        Some(v) => Some(variadic(v)?),
         None => None,
     };
     let kwarg = match &parameters.kwarg {
-        Some(k) => Some((k.name.to_string(), Element::of(k.annotation.as_deref())?)),
+        Some(k) => Some(variadic(k)?),
         None => None,
     };
     let positional: Vec<&Param> = posonly.iter().chain(&regular).collect();
@@ -422,7 +441,11 @@ fn plan_def(
         .iter()
         .map(|p| entry_param(p, &mut params, &mut body))
         .collect();
-    if let Some((v, element)) = &vararg {
+    if let Some((v, None)) = &vararg {
+        params.push(format!("{v}: object"));
+        call.push(format!("*{v}"));
+    }
+    if let Some((v, Some(element))) = &vararg {
         params.push(format!("{v}: object"));
         let ty = element.name();
         let _ = writeln!(body, "    _pycc_r: list[{ty}] = []");
@@ -439,20 +462,24 @@ fn plan_def(
     if let Some((_, element)) = &kwarg {
         params.push("_pycc_kk: object".to_string());
         params.push("_pycc_kv: object".to_string());
-        let ty = element.name();
-        let _ = writeln!(body, "    _pycc_k: dict[str, {ty}] = {{}}");
+        let (declared, value) = match element {
+            Some(element) => {
+                let ty = element.name();
+                (format!(": dict[str, {ty}]"), format!("{ty}(_pycc_kv[_pycc_j])"))
+            }
+            None => (String::new(), "_pycc_kv[_pycc_j]".to_string()),
+        };
+        let _ = writeln!(body, "    _pycc_k{declared} = {{}}");
         let _ = writeln!(body, "    _pycc_j = 0");
         let _ = writeln!(body, "    while _pycc_j < len(_pycc_kk):");
-        let _ = writeln!(
-            body,
-            "        _pycc_k[str(_pycc_kk[_pycc_j])] = {ty}(_pycc_kv[_pycc_j])"
-        );
+        let _ = writeln!(body, "        _pycc_k[str(_pycc_kk[_pycc_j])] = {value}");
         let _ = writeln!(body, "        _pycc_j += 1");
         call.push("**_pycc_k".to_string());
     }
-    let callee = match &receiver {
-        Some(receiver) => format!("{receiver}.{name}"),
-        None => name.to_string(),
+    let callee = match (&receiver, class) {
+        (Some(receiver), _) => format!("{receiver}.{name}"),
+        (None, Some(class)) => format!("{class}.{name}"),
+        (None, None) => name.to_string(),
     };
     let call = format!("{callee}({})", call.join(", "));
     if returns == "None" {
@@ -498,7 +525,11 @@ fn plan_def(
         ));
     }
     match &vararg {
-        Some((v, element)) => {
+        Some((v, None)) => {
+            declared.push(format!("*{v}"));
+            passed.push(v.clone());
+        }
+        Some((v, Some(element))) => {
             declared.push(format!("*{v}"));
             passed.push(v.clone());
             let _ = writeln!(
@@ -518,10 +549,12 @@ fn plan_def(
     for p in &kwonly {
         declared.push(wrapper_param(p, None, &qualname, &mut passed, &mut checks));
     }
-    if let Some((k, element)) = &kwarg {
+    if let Some((k, _)) = &kwarg {
         declared.push(format!("**{k}"));
         passed.push(format!("_pycc_tuple({k})"));
         passed.push(format!("_pycc_tuple({k}.values())"));
+    }
+    if let Some((k, Some(element))) = &kwarg {
         let _ = writeln!(
             checks,
             "        for _pycc_n, _pycc_x in {k}.items():\n            \
@@ -555,10 +588,15 @@ fn plan_def(
                 element.exact("_pycc_x")
             )
         };
+        // An object element needs no test.
         let variadic: Vec<String> = vararg
             .iter()
-            .map(|(v, element)| every(v.clone(), *element))
-            .chain(kwarg.iter().map(|(k, element)| every(format!("{k}.values()"), *element)))
+            .filter_map(|(v, element)| Some(every(v.clone(), (*element)?)))
+            .chain(
+                kwarg
+                    .iter()
+                    .filter_map(|(k, element)| Some(every(format!("{k}.values()"), (*element)?))),
+            )
             .collect();
         guard(def, source, defers_annotations, &params, &variadic, &twin_args.join(", "))
     } else {
@@ -611,6 +649,7 @@ fn plan_def(
             qualname,
             entry,
             wrapper,
+            static_method,
         },
         entry_source,
     })
@@ -749,8 +788,14 @@ fn plan(module: &ModModule, source: &str, non_strict: bool) -> Vec<(usize, Plann
                     out.push((index, planned));
                 }
             }
+            // A private class is published in non-strict mode
+            // (`ext_build::constructors::is_private_class_published`).
             Stmt::ClassDef(class)
-                if !class.name.starts_with('_') && class.decorator_list.is_empty() =>
+                if (!class.name.starts_with('_')
+                    || non_strict
+                        && !class.name.starts_with("__")
+                        && !class.name.starts_with("_pycc"))
+                    && class.decorator_list.is_empty() =>
             {
                 for item in &class.body {
                     if let Stmt::FunctionDef(def) = item

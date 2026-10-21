@@ -870,6 +870,18 @@ Accept:
    attribute), `Renderer` (bound methods as values) and the exception classes (a base
    from another module) still run in CPython. pydantic unchanged (1029 of 1249, its suite
    0 failures), mistune unchanged.
+   Step 2 -- `*args`/`**kwargs` of objects: a constructor `def __init__(self, a, *items)`
+   is bound by `Py_tp_init` as CPython binds it (keywords, CPython's messages); a
+   `@staticmethod` or module function with unannotated `*args`/`**kwargs` is published
+   through a wrapper of its declared signature (a static method's row is `METH_STATIC`);
+   `except` naming an imported exception class; dict/set displays inside an object
+   display; `obj.__class__` and `obj.__dict__` of a compiled instance. pystache's
+   `ContextStack` native; benchmark 783k -> 734k instructions per round (CPython 505k).
+   Step 3 -- native closures with object parameters: a nested function with unannotated
+   parameters used as a value is lifted to a native closure over its stable captures
+   (parameters and return `object`, so it crosses into CPython as a callable). pystache's
+   `get_unicode` (`map(get_unicode, ...)`), `resolve_context` and the other returned
+   closures native: Python frames per round 127 -> 52, 734k -> 488k instructions.
 2. **Template engine >= 2x:** pystache 0.6.8 (chosen by the v0.8 accept 4 rule) runs its
    own benchmark >= 2x faster than CPython (median of interleaved runs) and passes its suite.
    **Progress 2026-10-21** (not met): 0.61x -> 0.69x after accept 1's step 1 (0.089 s
@@ -884,6 +896,17 @@ Accept:
    work but pays as much in C-API calls (object method calls through CPython, Python
    frames for the lifted closures and lambdas, boxing), so the next steps remove those:
    native dispatch on compiled instances, native closures, native `html.escape`.
+   After step 2 (`ContextStack` native): 0.62x by wall time this run (0.100 s against
+   0.062 s, 9 interleaved runs; the machine was noisier than for step 1), 734k against
+   505k instructions per round. After step 3 (native closures): 0.74x (0.081 s against
+   0.060 s, 15 interleaved runs) at 488k instructions per round against CPython's 505k:
+   fewer instructions than CPython but slower. callgrind's cache simulation points at the
+   instruction footprint (2.99M against 1.63M I1 misses over 100 rounds, import
+   included, so an upper bound); the next steps (decided with the guru advisor) shrink
+   the hot code touched per round -- shared helpers for per-site sequences, cold error
+   paths -- then remove the remaining 52 Python frames per round (`html.escape`,
+   module-level lambdas, Python signature wrappers), each judged by interleaved wall
+   time.
 3. **Markdown >= 1.5x:** mistune 3.3.4 renders `benchmark/cases` >= 1.5x faster than
    CPython and passes its suite.
 4. **pydantic no slower:** every phase of `bench/pydantic_check.py --time` (import, define,

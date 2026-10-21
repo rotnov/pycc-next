@@ -67,7 +67,6 @@ fn build(source: &Path, out: &Path, flags: &[&str]) -> String {
     report
 }
 
-#[allow(dead_code)]
 fn native(name: &str, flags: &[&str]) {
     let dir = ScratchDir::new(&format!("{name}_native")).expect("scratch");
     let source = fixture(name, &dir, "m.py");
@@ -116,4 +115,114 @@ fn callable_slots_sentinels_and_mixed_helpers_ext() {
 #[test]
 fn callable_slots_sentinels_and_mixed_helpers_ext_release() {
     ext("v09_callable_slots", &["--release"]);
+}
+
+/// `except` naming an imported exception class (`from json import
+/// JSONDecodeError`) tests the caught exception against the CPython class at
+/// run time (`pycc_ast::object_except_handlers`), as an attribute
+/// (`except json.JSONDecodeError`) already did.
+#[test]
+fn imported_exception_classes_in_except_native() {
+    native("v09_imported_except", &[]);
+}
+
+#[test]
+fn imported_exception_classes_in_except_ext() {
+    ext("v09_imported_except", &[]);
+}
+
+/// Builds fixture `name` as `m` with `--ext --non-strict` and runs fixture
+/// `host` (Python code importing `m`) against the artifact and against the
+/// source: the same output and failure.
+fn ext_hosted(name: &str, host: &str, flags: &[&str]) {
+    let compiled = ScratchDir::new(&format!("{name}_hosted")).expect("scratch");
+    let source = fixture(name, &compiled, "m.py");
+    let mut all = vec!["--ext", "--non-strict"];
+    all.extend_from_slice(flags);
+    build(&source, &compiled.join("m"), &all);
+    std::fs::remove_file(&source).expect("import the artifact, not the source");
+    fixture(host, &compiled, "host.py");
+    let plain = ScratchDir::new(&format!("{name}_hosted_src")).expect("scratch");
+    fixture(name, &plain, "m.py");
+    fixture(host, &plain, "host.py");
+    let run = |dir: &Path| {
+        python()
+            .arg("host.py")
+            .current_dir(dir)
+            .output()
+            .expect("python should spawn")
+    };
+    assert_matches(&run(&compiled), &run(&plain));
+}
+
+/// `*args` / `**kwargs` of CPython objects: a constructor's `*items`
+/// (`Py_tp_init` binds the call as CPython does, keywords included), a
+/// static method's and a module function's (published through a wrapper
+/// of the declared signature, `pycc_ast::ext_signatures`).
+#[test]
+fn object_varargs_native() {
+    native("v09_varargs", &[]);
+}
+
+#[test]
+fn object_varargs_from_python_ext() {
+    ext_hosted("v09_varargs", "v09_varargs_host", &[]);
+}
+
+/// A nested function with unannotated parameters used as a value -- passed
+/// to `map`, returned, called by CPython's `sorted` -- is a native closure
+/// over its stable captures, its parameters CPython objects
+/// (`pycc_ast::desugar::closures::values`).
+#[test]
+fn closure_values_native() {
+    native("v09_closure_values", &[]);
+}
+
+#[test]
+fn closure_values_ext() {
+    ext("v09_closure_values", &[]);
+}
+
+#[test]
+fn closure_values_ext_release() {
+    ext("v09_closure_values", &["--release"]);
+}
+
+/// Raising a compiled exception class with a CPython object argument
+/// (`raise MissingError(name)`) is built by CPython, which keeps the object
+/// in `args`: the function raising it runs in CPython (it failed codegen).
+#[test]
+fn raise_of_a_compiled_exception_with_an_object_argument_ext() {
+    let compiled = ScratchDir::new("v09_raise_object_ext").expect("scratch");
+    let source = fixture("v09_raise_object", &compiled, "m.py");
+    let build = pycc()
+        .args(["build", "--ext", "--non-strict", "--report-fallbacks"])
+        .arg(&source)
+        .arg("-o")
+        .arg(compiled.join("m"))
+        .output()
+        .expect("pycc should spawn");
+    let report = text(&pycc_scratch::lf(&build.stderr));
+    assert!(build.status.success(), "{report}");
+    assert!(
+        report.contains("raising `MissingError` with a CPython object argument"),
+        "{report}"
+    );
+    std::fs::remove_file(&source).expect("import the artifact, not the source");
+    let plain = ScratchDir::new("v09_raise_object_src").expect("scratch");
+    fixture("v09_raise_object", &plain, "m.py");
+    let host = "import m\ntry:\n    m.lookup({}, 5)\nexcept m.MissingError as e:\n    print(repr(e), e.args)\n";
+    let run = |dir: &Path| {
+        python()
+            .args(["-c", host])
+            .current_dir(dir)
+            .output()
+            .expect("python should spawn")
+    };
+    assert_matches(&run(&compiled), &run(&plain));
+}
+
+#[test]
+fn object_varargs_from_python_ext_release() {
+    ext_hosted("v09_varargs", "v09_varargs_host", &["--release"]);
 }

@@ -74,6 +74,29 @@ pub(super) fn lower_stmt(
         {
             crate::generator::lower_yield_from_stmt(&args[0], scopes, classes, current_class)
         }
+        // v0.9: a `*args` that is a CPython object becomes `tuple(args)`
+        // (`pycc_hir::builtins::object_calls`).
+        HirStmt::ExprStmt(pycc_hir::HirExpr::Call { callee, args })
+            if callee == "__pycc_mark_tuple"
+                && matches!(args.as_slice(), [pycc_hir::HirExpr::Name(name)]
+                    if crate::lookup(scopes, name) == Ty::Object) =>
+        {
+            let pycc_hir::HirExpr::Name(name) = &args[0] else {
+                unreachable!("matched above")
+            };
+            lower_stmt(
+                &HirStmt::Assign {
+                    target: name.clone(),
+                    value: pycc_hir::HirExpr::Call {
+                        callee: "tuple".to_string(),
+                        args: args.clone(),
+                    },
+                },
+                scopes,
+                classes,
+                current_class,
+            )
+        }
         HirStmt::ExprStmt(expr) => {
             // PEP 572 (#774): bind before lowering the whole expression --
             // see `pre_bind_named_expr_targets`'s own doc comment for why a

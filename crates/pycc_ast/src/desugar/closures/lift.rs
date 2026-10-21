@@ -161,6 +161,9 @@ pub(super) fn lift_function(def: &mut StmtFunctionDef, owner: &str, fresh: &Fres
     for candidate in &chosen {
         let lift = &lifts[candidate.name.as_str()];
         let mut lifted_def: StmtFunctionDef = (*candidate).clone();
+        if count_uses(&body, candidate.name.as_str()).other != 0 {
+            values::object_params(&mut lifted_def);
+        }
         let range = lifted_def.range;
         let mut params: Vec<ParameterWithDefault> = lift
             .captures
