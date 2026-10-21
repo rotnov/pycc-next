@@ -856,3 +856,12 @@ Accept:
    over the corpus; every strict refusal is a program mypy also rejects (or is listed in
    DEVIATIONS with a reason), and `--non-strict` stays 200/200, 0 wrong, 0 fallback
    statements. Issues #8 and #9 are fixed.
+   **Met 2026-10-21:** CI run 39585350033 (all four jobs green), step "Strict refusals
+   against mypy --strict" (`bench/mypy_parity.py`, mypy 2.3.1 pinned by hash in
+   `.github/mypy-requirements.txt`): pycc strict refuses 9 of the 200 programs and mypy
+   rejects 8 of them (016, 056, 057, 100, 123, 130, 184, 200); the ninth, 049, passes mypy
+   only through `Any` (it rebinds the builtin `input`) and is listed in DEVIATIONS ("Strict
+   refusals mypy accepts"). 113 programs mypy rejects and pycc accepts, almost all for
+   annotations pycc infers. "Corpus (non-strict)": 200/200, 0 wrong, 0/1191 top-level
+   statements in CPython. Issues #8 and #9: commit fec07f2 (a non-strict native build
+   publishes its classes in `__main__`), `tests/issue_8_9_native_classes.rs`.
