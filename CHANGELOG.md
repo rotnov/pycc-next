@@ -91,6 +91,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   whose receiver's class has a compiled subclass resolving the method to another body
   now calls a dispatcher that tests the receiver's run-time class and runs that body
   (`pycc_mir::dispatch`); a class nobody overrides pays nothing.
+- Python code may subclass a published compiled class (it raised `type '...' is not an
+  acceptable base type`): a compiled call of a method or property the Python subclass
+  overrides runs the override, an instance compiled code holds keeps its Python object
+  (type and `__dict__`) alive, the garbage collector frees the two when nothing compiled
+  holds the instance, and `copy.copy` keeps the subclass. A compiled class a sibling
+  module of a package built whole subclasses now stays native (it ran in CPython),
+  unless it publishes only part of itself or has a class-level `None` default its
+  instances would shadow.
+- Fixed: a class attribute bound to `None` or a `bytes` literal (`template = None`) of a
+  published compiled class was missing from the class Python code sees.
 - Fixed: raising a compiled exception class with a CPython object argument (`raise
   MissingError(name)` in non-strict code) failed the build in code generation; the
   function raising it now runs in CPython, which keeps the object in `args`.

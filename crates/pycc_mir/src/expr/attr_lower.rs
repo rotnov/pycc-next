@@ -244,7 +244,7 @@ pub(crate) fn lower_attr_get_expr(
                 getter,
                 scopes,
                 classes,
-                crate::dispatch::getter_of,
+                crate::dispatch::Member::Getter,
             );
             return MirExpr::Call {
                 callee: getter,

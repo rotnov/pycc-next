@@ -17,6 +17,17 @@ pub(crate) fn emit_call_expr<'ctx>(
     };
     // `print(...)` in a value position (`print(a) if c else
     // print(b)`): print, then yield its `None` result.
+    if callee == pycc_mir::dispatch::INSTANCE_PY_OVERRIDE {
+        return emit_instance_py_override(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            args,
+        );
+    }
     if callee == pycc_mir::dispatch::INSTANCE_CLASS_IS {
         return emit_instance_class_is(context, builder, module, rt, user_functions, locals, args);
     }
@@ -304,6 +315,118 @@ fn emit_instance_class_is<'ctx>(
     Scalar::Bool(
         builder
             .build_int_z_extend(truth, context.i8_type(), "class_is_i8")
+            .expect("a zero extension is well formed"),
+    )
+}
+
+/// The byte offset of an instance's carrier word (`pycc_rt::instance`'s
+/// `PyInstanceObj::carrier`, after the descriptor pointer and length),
+/// whose low bit flags an instance a Python subclass's object carries.
+const INSTANCE_CARRIER_OFFSET: u64 = 16;
+
+/// A dispatcher's Python-override test (`pycc_mir::dispatch`): the
+/// carrier word's strong flag, read inline, and only when it is set the
+/// shim's `pycc_ext_instance_py_override(recv, "member")`.
+fn emit_instance_py_override<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    args: &[MirExpr],
+) -> Scalar<'ctx> {
+    let [receiver, MirExpr::StringLiteral(member)] = args else {
+        panic!("pycc_codegen: internal error: an override test takes a receiver and a name")
+    };
+    let Scalar::Instance(receiver) =
+        emit_expr(context, builder, module, rt, user_functions, locals, receiver)
+    else {
+        panic!("pycc_codegen: internal error: an override test's receiver is an instance")
+    };
+    let i8_type = context.i8_type();
+    let i64_type = context.i64_type();
+    let word_ptr = unsafe {
+        builder
+            .build_gep(
+                i8_type,
+                receiver,
+                &[i64_type.const_int(INSTANCE_CARRIER_OFFSET, false)],
+                "carrier_word_ptr",
+            )
+            .expect("a byte offset into an instance is well formed")
+    };
+    let word = builder
+        .build_load(i64_type, word_ptr, "carrier_word")
+        .expect("the carrier word loads")
+        .into_int_value();
+    let flag = builder
+        .build_and(word, i64_type.const_int(1, false), "strong_flag")
+        .expect("a mask is well formed");
+    let strong = builder
+        .build_int_compare(inkwell::IntPredicate::NE, flag, i64_type.const_zero(), "strong")
+        .expect("a comparison is well formed");
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("an override test is emitted inside a function");
+    let entry = builder.get_insert_block().expect("a current block");
+    let slow = context.append_basic_block(function, "py_override");
+    let join = context.append_basic_block(function, "py_override_done");
+    builder
+        .build_conditional_branch(strong, slow, join)
+        .expect("a branch is well formed");
+    builder.position_at_end(slow);
+    let global_name = format!("pycc_dispatch_member.{member}");
+    let name = match module.get_global(&global_name) {
+        Some(existing) => existing.as_pointer_value(),
+        None => {
+            let bytes = context.const_string(member.as_bytes(), true);
+            let global = module.add_global(bytes.get_type(), None, &global_name);
+            global.set_initializer(&bytes);
+            global.set_constant(true);
+            global.set_linkage(inkwell::module::Linkage::Private);
+            global.as_pointer_value()
+        }
+    };
+    let helper = module
+        .get_function("pycc_ext_instance_py_override")
+        .unwrap_or_else(|| {
+            let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
+            module.add_function(
+                "pycc_ext_instance_py_override",
+                context
+                    .i32_type()
+                    .fn_type(&[ptr_type.into(), ptr_type.into()], false),
+                None,
+            )
+        });
+    let found = builder
+        .build_call(helper, &[receiver.into(), name.into()], "py_override")
+        .expect("a call is well formed")
+        .try_as_basic_value()
+        .expect_basic("pycc_ext_instance_py_override returns an int")
+        .into_int_value();
+    let found = builder
+        .build_int_compare(
+            inkwell::IntPredicate::NE,
+            found,
+            context.i32_type().const_zero(),
+            "py_override_bool",
+        )
+        .expect("a comparison is well formed");
+    let slow_end = builder.get_insert_block().expect("a current block");
+    builder
+        .build_unconditional_branch(join)
+        .expect("a branch is well formed");
+    builder.position_at_end(join);
+    let phi = builder
+        .build_phi(context.bool_type(), "py_override_phi")
+        .expect("a phi is well formed");
+    phi.add_incoming(&[(&context.bool_type().const_zero(), entry), (&found, slow_end)]);
+    Scalar::Bool(
+        builder
+            .build_int_z_extend(phi.as_basic_value().into_int_value(), i8_type, "py_override_i8")
             .expect("a zero extension is well formed"),
     )
 }

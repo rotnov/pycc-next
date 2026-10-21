@@ -83,8 +83,8 @@ fn the_ext_carrier_accessors_round_trip() {
     let name = unsafe { pycc_rt_ext_instance_class(q, &mut len) };
     assert_eq!(unsafe { std::slice::from_raw_parts(name, len) }, b"Q");
     assert!(unsafe { pycc_rt_ext_instance_carrier(q) }.is_null());
-    let mut host = 0u8;
-    let carrier = (&mut host as *mut u8).cast::<c_void>();
+    let mut host = 0u64;
+    let carrier = (&mut host as *mut u64).cast::<c_void>();
     unsafe { pycc_rt_ext_instance_set_carrier(q, carrier) };
     assert_eq!(unsafe { pycc_rt_ext_instance_carrier(q) }, carrier);
     unsafe { pycc_rt_ext_instance_set_carrier(q, std::ptr::null_mut()) };
@@ -99,8 +99,8 @@ fn the_ext_instance_copy_clones_the_slots() {
     static LAYOUT: &[u8] = b"Q\0n\0m";
     let q = unsafe { pycc_rt_instance_new(2, LAYOUT.as_ptr(), LAYOUT.len()) };
     unsafe { pycc_rt_instance_set_slot(q, 0, 41) };
-    let mut host = 0u8;
-    unsafe { pycc_rt_ext_instance_set_carrier(q, (&mut host as *mut u8).cast::<c_void>()) };
+    let mut host = 0u64;
+    unsafe { pycc_rt_ext_instance_set_carrier(q, (&mut host as *mut u64).cast::<c_void>()) };
     assert!(unsafe { pycc_rt_ext_instance_copy(q, b"w".as_ptr(), 1) }.is_null());
     assert!(unsafe { pycc_rt_ext_instance_copy(std::ptr::null_mut(), b"".as_ptr(), 0) }.is_null());
     let copy = unsafe { pycc_rt_ext_instance_copy(q, b"ww".as_ptr(), 2) };

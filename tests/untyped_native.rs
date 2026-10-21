@@ -169,9 +169,13 @@ fn widening_a_rebound_name_is_per_function() {
     let ir = std::fs::read_to_string(dir.join("w.ll.pre.ll"))
         .expect("IR")
         .replace("\r\n", "\n");
+    // The definition, not a call (a dispatcher, `pycc_mir::dispatch`,
+    // calls a method before the method's own definition).
     let body = |name: &str| -> String {
         let start = ir
-            .find(&format!("@pyfn_{name}("))
+            .match_indices(&format!("@pyfn_{name}("))
+            .map(|(at, _)| at)
+            .find(|at| ir[..*at].rsplit('\n').next().is_some_and(|line| line.starts_with("define")))
             .unwrap_or_else(|| panic!("no {name}"));
         let end = ir[start..].find("\n}\n").expect("end") + start;
         ir[start..end].to_string()

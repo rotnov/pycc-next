@@ -329,14 +329,12 @@ assert sys.getrefcount(grid.Grid) == before, (before, sys.getrefcount(grid.Grid)
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn the_published_type_still_refuses_subclassing_over_an_immutable_template() {
-    // Becoming constructible does not make the type subclassable by a host:
-    // a host subclass could override a method the compiled bodies resolved
-    // statically. Since v0.9 the template carries `Py_TPFLAGS_BASETYPE` so
-    // the public class can be made over it, and its `__init_subclass__`
-    // refuses every other subclass -- of the public class and of the
-    // template alike -- with CPython's own wording. The template stays
-    // `Py_TPFLAGS_IMMUTABLETYPE`; the public class is a CPython class
+fn the_published_type_is_subclassable_over_an_immutable_template() {
+    // Since v0.9 Python code may subclass a published class (and its
+    // template): the template carries `Py_TPFLAGS_BASETYPE`, and a compiled
+    // call of a method the subclass overrides runs the override
+    // (`pycc_mir::dispatch`, `tests/v09_native_state.rs`). The template
+    // stays `Py_TPFLAGS_IMMUTABLETYPE`; the public class is a CPython class
     // (`tests/issue_1143_ext_methods.rs`).
     let dir = ScratchDir::new("ext_1145_flags").expect("scratch");
     build_ext(&dir, "grid", GRID);
@@ -345,12 +343,8 @@ fn the_published_type_still_refuses_subclassing_over_an_immutable_template() {
         "\
 import grid
 for base in (grid.Grid, grid.Grid.__mro__[1]):
-    try:
-        type('Sub', (base,), {})
-    except TypeError as e:
-        assert 'is not an acceptable base type' in str(e), e
-    else:
-        raise AssertionError('subclassing should be refused')
+    sub = type('Sub', (base,), {})
+    assert issubclass(sub, base), sub
 try:
     grid.Grid.__mro__[1].other = 1
 except TypeError:

@@ -258,6 +258,9 @@ fn link_frontend(
     // program this thread links, so a previous program's mode never leaks.
     pycc_types::set_non_strict(non_strict);
     pycc_ast::start_program(non_strict);
+    // v0.9: an `--ext` module's or a non-strict program's classes are
+    // published, so CPython code may subclass them (`pycc_mir::dispatch`).
+    pycc_hir::set_host_classes(ext_module || non_strict);
     let program: LoadedProgram =
         modules::load_with(path, module_name, relative_imports, ext_module, non_strict)?;
     // The entry module is lowered last, after its dependencies.

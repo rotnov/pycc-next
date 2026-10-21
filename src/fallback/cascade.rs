@@ -5,6 +5,27 @@
 use super::*;
 
 impl Plan {
+    /// The module's exception classes: a class statement with a builtin
+    /// exception base, or with one of these as a base.
+    fn exception_classes(&self) -> BTreeSet<String> {
+        let mut found: BTreeSet<String> = BTreeSet::new();
+        loop {
+            let before = found.len();
+            for stmt in &self.stmts {
+                if let Kind::Class(name) = &stmt.kind
+                    && stmt.bases.iter().any(|base| {
+                        pycc_hir::is_builtin_exception_class(base) || found.contains(base)
+                    })
+                {
+                    found.insert(name.clone());
+                }
+            }
+            if found.len() == before {
+                return found;
+            }
+        }
+    }
+
     /// Adds the statements whose compiled form Python code could not see:
     /// a compiled import, function or class that fallback code reads
     /// (unless the module publishes the function or class).
@@ -102,8 +123,21 @@ impl Plan {
                 self.fallback.extend(rebound);
                 continue;
             }
-            // A compiled class fallback code subclasses: CPython accepts no
-            // published class as a base.
+            // A compiled class the module's own fallback code subclasses runs
+            // in CPython too: the subclass's methods, compiled as lifted
+            // bodies, cannot read the compiled class as a value (`super(Base,
+            // self)`). A sibling module's subclass (`package_bases`) reads it
+            // as an imported object, so since v0.9 only a compiled exception
+            // class it subclasses runs in CPython (`pycc_mir::dispatch` runs a
+            // Python subclass's overrides).
+            let exceptions = self.exception_classes();
+            // A sibling module's subclass needs the class published whole:
+            // one with a member the boundary does not publish (an abstract
+            // method, a private method, a non-literal class attribute), or
+            // with a class-level default its instances shadow
+            // (`with_instance_defaults`), runs in CPython for it.
+            let mut partial = members::with_unpublished_members(&self.ast);
+            partial.extend(members::with_instance_defaults(&self.ast));
             let subclassed: BTreeSet<&String> = self
                 .fallback
                 .keys()
@@ -146,7 +180,10 @@ impl Plan {
                                 ),
                             ));
                         }
-                        Kind::Class(name) if self.package_bases.contains_key(name) => {
+                        Kind::Class(name)
+                            if self.package_bases.contains_key(name)
+                                && (exceptions.contains(name) || partial.contains(name)) =>
+                        {
                             return Some((
                                 index,
                                 format!(

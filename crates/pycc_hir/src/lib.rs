@@ -473,6 +473,26 @@ pub fn is_non_strict_program() -> bool {
     NON_STRICT_PROGRAM.with(std::cell::Cell::get)
 }
 
+thread_local! {
+    static HOST_CLASSES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Records whether CPython code can subclass the classes of the program
+/// this thread compiles (v0.9): an `--ext` module's or a non-strict
+/// program's, whose classes are published. The driver sets it before
+/// lowering; `pycc_mir`'s dispatchers then run a Python subclass's
+/// overrides.
+pub fn set_host_classes(host: bool) {
+    HOST_CLASSES.with(|cell| cell.set(host));
+}
+
+/// Whether CPython code can subclass the program's classes
+/// ([`set_host_classes`]).
+#[must_use]
+pub fn host_classes() -> bool {
+    HOST_CLASSES.with(std::cell::Cell::get)
+}
+
 /// Whether `T | None` holds a `T` as a pointer that is null for `None`: a
 /// `str`, a list, dict or set, a variadic or boxed tuple, or a class
 /// instance. Every one is one pointer word whose reference counting is

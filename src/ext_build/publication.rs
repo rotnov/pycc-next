@@ -196,10 +196,15 @@ pub(crate) fn collect_class_publications(
 /// v0.9: records each published class's statement arguments (`(Generic[T],
 /// Base)`, `()` for none) from the module's source, so the module makes the
 /// published class with its real bases when the statement runs
-/// (`pycc_ext_make_public_class`). A class keeps `None` -- published with no
-/// bases of its own, as before -- when a base names a class of this module
-/// that is not published (the statement could not name it), when it is an
-/// enum, or when the source does not parse.
+/// (`pycc_ext_make_public_class`), followed by `, {...}`: the class-body
+/// attributes bound to a `None` or `bytes` literal (`template = None`),
+/// which the compiler keeps in a hidden global (`pycc_hir`'s
+/// `hoist_class_attr`) rather than as a published constant, so Python code
+/// reading the class (a subclass's `self.template`) sees them. A class
+/// keeps `None` -- published with no bases of its own, as before -- when a
+/// base names a class of this module that is not published (the statement
+/// could not name it), when it is an enum, or when the source does not
+/// parse.
 pub(crate) fn attach_class_bases(
     publications: &mut [ExtPublishedClass],
     module: &HirModule,
@@ -233,7 +238,7 @@ pub(crate) fn attach_class_bases(
         if unnamable {
             continue;
         }
-        entry.bases = Some(match &class.arguments {
+        let arguments = match &class.arguments {
             Some(arguments) => {
                 let range: std::ops::Range<u32> = arguments.range.into();
                 source
@@ -242,7 +247,29 @@ pub(crate) fn attach_class_bases(
                     .to_string()
             }
             None => "()".to_string(),
-        });
+        };
+        let mut literals = String::new();
+        for member in &class.body {
+            let pycc_ast::Stmt::Assign(assign) = member else {
+                continue;
+            };
+            let ([pycc_ast::Expr::Name(target)], value) =
+                (assign.targets.as_slice(), assign.value.as_ref())
+            else {
+                continue;
+            };
+            if !matches!(
+                value,
+                pycc_ast::Expr::NoneLiteral(_) | pycc_ast::Expr::BytesLiteral(_)
+            ) {
+                continue;
+            }
+            let range: std::ops::Range<u32> = pycc_ast::Ranged::range(value).into();
+            if let Some(text) = source.get(range.start as usize..range.end as usize) {
+                literals.push_str(&format!("{:?}: {text}, ", target.id.as_str()));
+            }
+        }
+        entry.bases = Some(format!("{arguments}, {{{literals}}}"));
     }
 }
 

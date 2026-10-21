@@ -72,17 +72,26 @@ fn class_name(layout: &'static [u8]) -> &'static [u8] {
         .expect("split yields at least one field")
 }
 
+/// The low bit of the carrier word: the carrier is an instance of a Python
+/// subclass of the compiled class (v0.9), and the link is *strong* -- the
+/// object's type and `__dict__` are part of the instance's state, so
+/// compiled code holding the instance must keep that very object alive
+/// rather than re-box the instance as a plain compiled-class carrier. A
+/// carrier is a `PyObject *`, so its low bit is free.
+const STRONG: usize = 1;
+
 /// The carrier currently recorded for `instance`, or null.
 ///
 /// # Safety
 /// `instance` must point at a live `PyInstanceObj`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_ext_instance_carrier(instance: *mut PyInstanceObj) -> *mut c_void {
-    unsafe { &*instance }.carrier.get()
+    let word = unsafe { &*instance }.carrier.get() as usize;
+    (word & !STRONG) as *mut c_void
 }
 
 /// Records `carrier` (or null, to clear it) as the host object standing
-/// for `instance`.
+/// for `instance`, as a weak link.
 ///
 /// # Safety
 /// `instance` must point at a live `PyInstanceObj`.
@@ -92,6 +101,45 @@ pub unsafe extern "C" fn pycc_rt_ext_instance_set_carrier(
     carrier: *mut c_void,
 ) {
     unsafe { &*instance }.carrier.set(carrier);
+}
+
+/// Records `carrier`, an instance of a Python subclass, as the host object
+/// standing for `instance`, flagged [`STRONG`]: the shim took a reference
+/// to it, which it drops when it clears the link.
+///
+/// # Safety
+/// `instance` must point at a live `PyInstanceObj` and `carrier` be
+/// pointer-aligned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_ext_instance_set_carrier_strong(
+    instance: *mut PyInstanceObj,
+    carrier: *mut c_void,
+) {
+    unsafe { &*instance }
+        .carrier
+        .set((carrier as usize | STRONG) as *mut c_void);
+}
+
+/// Whether `instance`'s carrier is an instance of a Python subclass, linked
+/// strongly ([`pycc_rt_ext_instance_set_carrier_strong`]).
+///
+/// # Safety
+/// `instance` must point at a live `PyInstanceObj`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_ext_instance_carrier_is_strong(
+    instance: *mut PyInstanceObj,
+) -> bool {
+    unsafe { &*instance }.carrier.get() as usize & STRONG != 0
+}
+
+/// The reference count of `instance`, for the shim's garbage-collector
+/// traversal of a strongly linked carrier.
+///
+/// # Safety
+/// `instance` must point at a live `PyInstanceObj`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_ext_instance_refcount(instance: *mut PyInstanceObj) -> i64 {
+    unsafe { &*instance }.rc
 }
 
 #[cfg(test)]
@@ -129,11 +177,33 @@ mod tests {
     fn carrier_starts_null_and_round_trips() {
         let instance = unsafe { pycc_rt_instance_new(1, std::ptr::null(), 0) };
         assert!(unsafe { pycc_rt_ext_instance_carrier(instance) }.is_null());
-        let mut host = 0u8;
-        let carrier = (&mut host as *mut u8).cast::<c_void>();
+        let mut host = 0u64;
+        let carrier = (&mut host as *mut u64).cast::<c_void>();
         unsafe { pycc_rt_ext_instance_set_carrier(instance, carrier) };
         assert_eq!(unsafe { pycc_rt_ext_instance_carrier(instance) }, carrier);
         unsafe { pycc_rt_ext_instance_set_carrier(instance, std::ptr::null_mut()) };
         assert!(unsafe { pycc_rt_ext_instance_carrier(instance) }.is_null());
+    }
+
+    #[test]
+    fn a_strong_carrier_reads_back_unflagged_and_reports_its_flag() {
+        let instance = unsafe { pycc_rt_instance_new(1, std::ptr::null(), 0) };
+        let mut host = 0u64;
+        let carrier = (&mut host as *mut u64).cast::<c_void>();
+        unsafe { pycc_rt_ext_instance_set_carrier_strong(instance, carrier) };
+        assert_eq!(unsafe { pycc_rt_ext_instance_carrier(instance) }, carrier);
+        assert!(unsafe { pycc_rt_ext_instance_carrier_is_strong(instance) });
+        assert_eq!(unsafe { pycc_rt_ext_instance_refcount(instance) }, 1);
+        unsafe { pycc_rt_ext_instance_set_carrier(instance, carrier) };
+        assert!(!unsafe { pycc_rt_ext_instance_carrier_is_strong(instance) });
+    }
+
+    #[test]
+    fn class_is_compares_the_descriptor_name_exactly() {
+        static LAYOUT: &[u8] = b"Point\0x\0y";
+        let instance = unsafe { pycc_rt_instance_new(2, LAYOUT.as_ptr(), LAYOUT.len()) };
+        assert!(unsafe { pycc_rt_instance_class_is(instance, b"Point".as_ptr(), 5) });
+        assert!(!unsafe { pycc_rt_instance_class_is(instance, b"Poin".as_ptr(), 4) });
+        assert!(!unsafe { pycc_rt_instance_class_is(instance, b"Point3".as_ptr(), 6) });
     }
 }

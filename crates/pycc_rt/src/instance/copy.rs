@@ -185,8 +185,8 @@ mod tests {
     #[test]
     fn the_copy_shares_the_layout_and_has_no_carrier() {
         let instance = new_instance(2);
-        let mut host = 0u8;
-        let carrier = (&mut host as *mut u8).cast::<std::ffi::c_void>();
+        let mut host = 0u64;
+        let carrier = (&mut host as *mut u64).cast::<std::ffi::c_void>();
         unsafe { pycc_rt_ext_instance_set_carrier(instance, carrier) };
         let copy = copy_of(instance, b"ww");
         assert!(unsafe { pycc_rt_ext_instance_carrier(copy) }.is_null());

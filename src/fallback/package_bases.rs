@@ -1,17 +1,13 @@
 //! The entry module's classes that other modules of its package subclass
 //! (`--ext --foreign-relative-imports`, #12).
 //!
-//! An `--ext` module publishes a compiled class as a type CPython does not
-//! accept as a base: every `self.m()` in a compiled body is bound to the
-//! compiled method at compile time, so an override in a Python subclass
-//! would be ignored. A class some module of the same package subclasses
-//! (`class H(GetCoreSchemaHandler)` in a sibling of `annotated_handlers`)
-//! therefore runs in CPython, its methods compiled (`lift`), and is a real
-//! Python class. The package's modules are read from the source tree the
-//! artifact is built from. A subclass outside the package, or one whose
-//! base is chosen at run time, is not seen: it still raises CPython's
-//! `TypeError` (not an acceptable base type) at class creation, never runs
-//! wrongly (`docs/DEVIATIONS.md`).
+//! Since v0.9 Python code may subclass a published compiled class, and a
+//! compiled call runs the subclass's overrides (`pycc_mir::dispatch`), so a
+//! class some module of the same package subclasses (`class
+//! H(GetCoreSchemaHandler)` in a sibling of `annotated_handlers`) stays
+//! compiled -- except a compiled exception class, which runs in CPython, its
+//! methods compiled (`lift`) (`crate::fallback::cascade`). The package's
+//! modules are read from the source tree the artifact is built from.
 
 use pycc_ast::{Expr, Stmt};
 use std::collections::{BTreeMap, BTreeSet};

@@ -18,6 +18,9 @@ static void pycc_ext_instance_dealloc(PyObject *self)
 {
     PyTypeObject *tp = Py_TYPE(self);
     void *inst = ((PyccExtInstance *)self)->inst;
+    if (PyType_IS_GC(tp)) {
+        PyObject_GC_UnTrack(self);
+    }
     /* #1435: an instance that outlives its carrier must not keep naming it.
      * Cleared only when the back-pointer is this carrier: a carrier that a
      * later `tp_init` superseded (see `pycc_ext_carrier_bind`) no longer
@@ -60,9 +63,11 @@ static int pycc_ext_carrier_types_ready(PyccExtModule *m)
  * runs, so a later crossing finds the type that carries the class's
  * methods rather than creating one with only `__copy__`. Returns 0, or -1
  * with a CPython exception set. */
+static int pycc_ext_note_compiled_class(PyObject *cls);
+
 static int pycc_ext_carrier_register_in(PyccExtModule *m, const char *class_name, PyObject *type)
 {
-    if (pycc_ext_carrier_types_ready(m) < 0) {
+    if (pycc_ext_carrier_types_ready(m) < 0 || pycc_ext_note_compiled_class(type) < 0) {
         return -1;
     }
     return PyDict_SetItemString(m->carrier_types, class_name, type);
@@ -74,19 +79,70 @@ static int pycc_ext_carrier_register_in(PyccExtModule *m, const char *class_name
  * (`obj.__init__(...)`) replaces the instance; the one it replaces stops
  * naming `self`, because nothing would clear that link once `self` dies and
  * the old instance may still be reachable from compiled code. */
+static int pycc_ext_is_compiled_class(PyObject *cls);
+
 static void pycc_ext_carrier_bind(PyObject *self, void *inst)
 {
     void *previous = ((PyccExtInstance *)self)->inst;
+    int previous_strong = 0;
     if (previous != NULL && pycc_rt_ext_instance_carrier(previous) == (void *)self) {
+        previous_strong = pycc_rt_ext_instance_carrier_is_strong(previous);
         pycc_rt_ext_instance_set_carrier(previous, NULL);
     }
     ((PyccExtInstance *)self)->inst = inst;
-    pycc_rt_ext_instance_set_carrier(inst, self);
+    /* v0.9: the object of a Python subclass of a compiled class carries
+     * state of its own -- its type, its `__dict__` -- so the instance keeps
+     * it alive (a strong link) for as long as compiled code holds the
+     * instance; the cycle is the template's to collect
+     * (`pycc_ext_carrier_traverse`). */
+    if (pycc_ext_is_compiled_class((PyObject *)Py_TYPE(self))) {
+        pycc_rt_ext_instance_set_carrier(inst, self);
+        PyObject_GC_UnTrack(self);
+    } else {
+        Py_INCREF(self);
+        pycc_rt_ext_instance_set_carrier_strong(inst, self);
+    }
     /* The carrier adopted the reference `tp_init` built `inst` with, and
      * drops the one it held to the instance it replaces. */
     if (previous != NULL) {
         pycc_rt_instance_decref(previous);
     }
+    if (previous_strong) {
+        Py_DECREF(self);
+    }
+}
+
+/*
+ * v0.9: garbage collection of a Python subclass's object and the instance
+ * it carries, which hold each other (`pycc_ext_carrier_bind`). The cycle is
+ * the object's own reference held by its instance, reported to the
+ * collector exactly while nothing else -- no compiled code -- holds the
+ * instance (its count is the object's one reference); `tp_clear` breaks
+ * it. Installed on the templates without `Py_TPFLAGS_HAVE_GC`, so a
+ * compiled class's own objects stay untracked: only a Python subclass,
+ * which CPython makes a collected type for its `__dict__`, reaches them,
+ * through `subtype_traverse`.
+ */
+static int pycc_ext_carrier_traverse(PyObject *self, visitproc visit, void *arg)
+{
+    void *inst = ((PyccExtInstance *)self)->inst;
+    if (inst != NULL && pycc_rt_ext_instance_carrier_is_strong(inst)
+        && pycc_rt_ext_instance_carrier(inst) == (void *)self
+        && pycc_rt_ext_instance_refcount(inst) == 1) {
+        Py_VISIT(self);
+    }
+    return 0;
+}
+
+static int pycc_ext_carrier_clear(PyObject *self)
+{
+    void *inst = ((PyccExtInstance *)self)->inst;
+    if (inst != NULL && pycc_rt_ext_instance_carrier_is_strong(inst)
+        && pycc_rt_ext_instance_carrier(inst) == (void *)self) {
+        pycc_rt_ext_instance_set_carrier(inst, self);
+        Py_DECREF(self);
+    }
+    return 0;
 }
 
 /*
@@ -110,15 +166,22 @@ static PyObject *pycc_ext_template_root = NULL;
 
 static PyType_Slot pycc_ext_template_root_slots[] = {
     {Py_tp_dealloc, (void *)pycc_ext_instance_dealloc},
+    {Py_tp_traverse, (void *)pycc_ext_carrier_traverse},
+    {Py_tp_clear, (void *)pycc_ext_carrier_clear},
     {0, NULL},
 };
 
+/* `Py_TPFLAGS_HAVE_GC`, which every template and published class
+ * inherits, so a Python subclass's `subtype_traverse` reaches
+ * `pycc_ext_carrier_traverse`; a compiled class's own object is untracked
+ * as soon as it is made (`pycc_ext_untrack_compiled`), so it costs the
+ * collector nothing. */
 static PyType_Spec pycc_ext_template_root_spec = {
     "pycc.compiled",
     0,
     0,
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_IMMUTABLETYPE
-        | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+        | Py_TPFLAGS_DISALLOW_INSTANTIATION | Py_TPFLAGS_HAVE_GC,
     pycc_ext_template_root_slots,
 };
 
@@ -144,16 +207,83 @@ static int pycc_ext_is_carrier_type(PyTypeObject *type)
                && PyType_IsSubtype(type, (PyTypeObject *)pycc_ext_template_root));
 }
 
-/* Whether a published class is being made from its template: its
- * `__init_subclass__` lets exactly that subclass through. */
+/* Whether a published class is being made from its template. */
 static int pycc_ext_making_public_class = 0;
 
+/* v0.9: every class this artifact compiled -- the root, each template and
+ * hidden carrier type (`pycc_ext_carrier_register_in`), each published
+ * class made from a template -- so a Python subclass of one is told apart
+ * from the classes whose methods are compiled. Held for the rest of the
+ * process, as the carrier types are. */
+static PyObject *pycc_ext_compiled_classes = NULL;
+
+static int pycc_ext_note_compiled_class(PyObject *cls)
+{
+    if (pycc_ext_compiled_classes == NULL) {
+        pycc_ext_compiled_classes = PySet_New(NULL);
+        if (pycc_ext_compiled_classes == NULL) {
+            return -1;
+        }
+    }
+    return PySet_Add(pycc_ext_compiled_classes, cls);
+}
+
+static int pycc_ext_is_compiled_class(PyObject *cls)
+{
+    return cls == pycc_ext_template_root
+           || (pycc_ext_compiled_classes != NULL
+               && PySet_Contains(pycc_ext_compiled_classes, cls) == 1);
+}
+
 /*
- * A template's `__init_subclass__`: the published class made from it calls
- * the next one along its MRO (`Generic`'s, which records the type
- * parameters); any other subclass -- Python code subclassing a compiled
- * class -- is refused as a type without `Py_TPFLAGS_BASETYPE` is, because
- * compiled methods bind their calls to the class's own methods statically.
+ * v0.9: whether the object carrying `inst` -- an instance of a Python
+ * subclass of a compiled class -- resolves `name` to an attribute of a
+ * class that is not compiled: a Python override, which a compiled call of
+ * the method must run instead of the compiled body. The first class along
+ * the object's MRO whose `__dict__` holds `name` decides. 0 for an instance
+ * no Python subclass carries; never sets an exception.
+ */
+PYCC_SHIM int pycc_ext_instance_py_override(void *inst, const char *name)
+{
+    PyObject *carrier;
+    PyObject *mro;
+    PyObject *key;
+    Py_ssize_t i;
+    int found = 0;
+
+    if (!pycc_rt_ext_instance_carrier_is_strong(inst)) {
+        return 0;
+    }
+    carrier = (PyObject *)pycc_rt_ext_instance_carrier(inst);
+    mro = PyObject_GetAttrString((PyObject *)Py_TYPE(carrier), "__mro__");
+    key = PyUnicode_InternFromString(name);
+    if (mro == NULL || key == NULL || !PyTuple_Check(mro)) {
+        Py_XDECREF(mro);
+        Py_XDECREF(key);
+        PyErr_Clear();
+        return 0;
+    }
+    for (i = 0; i < PyTuple_Size(mro); i++) {
+        PyObject *cls = PyTuple_GetItem(mro, i);
+        PyObject *dict = PyObject_GetAttrString(cls, "__dict__");
+        int has = dict == NULL ? 0 : PyMapping_HasKey(dict, key);
+        Py_XDECREF(dict);
+        if (has) {
+            found = !pycc_ext_is_compiled_class(cls);
+            break;
+        }
+    }
+    Py_DECREF(mro);
+    Py_DECREF(key);
+    PyErr_Clear();
+    return found;
+}
+
+/*
+ * A template's `__init_subclass__`: calls the next one along the subclass's
+ * MRO past the root (`Generic`'s, which records the type parameters), for
+ * the published class made from it and, since v0.9, for a Python subclass
+ * too, whose overrides compiled calls run (`pycc_ext_instance_py_override`).
  */
 static PyObject *pycc_ext_template_init_subclass(PyObject *cls, PyObject *args, PyObject *kwargs)
 {
@@ -171,20 +301,6 @@ static PyObject *pycc_ext_template_init_subclass(PyObject *cls, PyObject *args, 
     if (!PyTuple_Check(mro) || PyTuple_Size(mro) < 3) {
         Py_DECREF(mro);
         PyErr_SetString(PyExc_SystemError, "pycc: a compiled class's subclass has no MRO");
-        return NULL;
-    }
-    if (!pycc_ext_making_public_class) {
-        PyObject *base = PyTuple_GetItem(mro, 1);
-        PyObject *module = PyObject_GetAttrString(base, "__module__");
-        PyObject *qualname = PyObject_GetAttrString(base, "__qualname__");
-
-        if (module != NULL && qualname != NULL) {
-            PyErr_Format(PyExc_TypeError, "type '%U.%U' is not an acceptable base type",
-                         module, qualname);
-        }
-        Py_XDECREF(module);
-        Py_XDECREF(qualname);
-        Py_DECREF(mro);
         return NULL;
     }
     /* `super(root, cls).__init_subclass__(*args, **kwargs)`: every
@@ -217,7 +333,8 @@ static PyObject *pycc_ext_class_maker = NULL;
 static const char *const pycc_ext_class_maker_lines[] = {
     "_skip = frozenset(('__module__', '__qualname__', '__doc__', '__dict__', '__weakref__',\n",
     "                    '__init_subclass__', '__new__', '__slots__'))\n",
-    "def _pycc_make_class(template, name, module, args, kwargs, _types=__import__('types')):\n",
+    "def _pycc_make_class(template, name, module, args, kwargs, literals,\n",
+    "                     _types=__import__('types')):\n",
     "    bases = tuple(args)\n",
     "    resolved = tuple(_types.resolve_bases(bases))\n",
     "    full = (template,) + resolved\n",
@@ -225,6 +342,8 @@ static const char *const pycc_ext_class_maker_lines[] = {
     "    ns['__module__'] = module\n",
     "    ns['__qualname__'] = name\n",
     "    ns['__slots__'] = ()\n",
+    "    for key, value in literals.items():\n",
+    "        ns.setdefault(key, value)\n",
     "    for key, value in template.__dict__.items():\n",
     "        if key not in _skip:\n",
     "            ns.setdefault(key, value)\n",
@@ -298,8 +417,9 @@ static PyObject *pycc_ext_make_public_class_in(PyccExtModule *m, PyObject *modul
     PyObject *modname;
     PyObject *call;
     PyObject *code;
+    PyObject *evaluated;
     PyObject *pair;
-    PyObject *stack[5];
+    PyObject *stack[6];
     PyObject *cls;
     size_t len;
     char *source;
@@ -317,9 +437,15 @@ static PyObject *pycc_ext_make_public_class_in(PyccExtModule *m, PyObject *modul
     memcpy(source + sizeof prefix - 1, arguments, len + 1);
     code = Py_CompileString(source, "<pycc class bases>", Py_eval_input);
     PyMem_Free(source);
-    pair = code == NULL ? NULL : PyEval_EvalCode(code, dict, dict);
+    evaluated = code == NULL ? NULL : PyEval_EvalCode(code, dict, dict);
     Py_XDECREF(code);
+    /* `((args, kwargs), literals)`: the statement's arguments and its
+     * class-body literals (`attach_class_bases`). */
+    pair = evaluated != NULL && PyTuple_Check(evaluated) && PyTuple_Size(evaluated) == 2
+        ? PyTuple_GetItem(evaluated, 0)
+        : NULL;
     if (pair == NULL) {
+        Py_XDECREF(evaluated);
         /* A base only the compiler resolves (a strict module's `Generic[T]`,
          * whose `typing` import binds nothing at run time, or a base
          * published as its template, which `Box[int]` cannot subscript):
@@ -332,7 +458,7 @@ static PyObject *pycc_ext_make_public_class_in(PyccExtModule *m, PyObject *modul
     call = modname == NULL ? NULL : PyUnicode_FromString(name);
     if (call == NULL) {
         Py_XDECREF(modname);
-        Py_DECREF(pair);
+        Py_DECREF(evaluated);
         return NULL;
     }
     stack[0] = template;
@@ -340,8 +466,9 @@ static PyObject *pycc_ext_make_public_class_in(PyccExtModule *m, PyObject *modul
     stack[2] = modname;
     stack[3] = PyTuple_GetItem(pair, 0);
     stack[4] = PyTuple_GetItem(pair, 1);
+    stack[5] = PyTuple_GetItem(evaluated, 1);
     pycc_ext_making_public_class++;
-    cls = PyObject_Vectorcall(maker, stack, 5, NULL);
+    cls = PyObject_Vectorcall(maker, stack, 6, NULL);
     pycc_ext_making_public_class--;
     if (cls == NULL) {
         /* Bases CPython cannot combine with the template (a layout or
@@ -351,8 +478,10 @@ static PyObject *pycc_ext_make_public_class_in(PyccExtModule *m, PyObject *modul
     }
     Py_DECREF(call);
     Py_DECREF(modname);
-    Py_DECREF(pair);
-    if (cls != NULL && pycc_ext_carrier_register_in(m, name, cls) < 0) {
+    Py_DECREF(evaluated);
+    if (cls != NULL
+        && (pycc_ext_carrier_register_in(m, name, cls) < 0
+            || pycc_ext_note_compiled_class(cls) < 0)) {
         Py_CLEAR(cls);
     }
     return cls;
@@ -670,8 +799,37 @@ static PyObject *pycc_ext_instance_copy_in(PyccExtModule *m, PyObject *self)
         return NULL;
     }
     ((PyccExtInstance *)carrier)->inst = clone;
+    if (pycc_ext_is_compiled_class((PyObject *)tp)) {
+        if (clone != NULL) {
+            pycc_rt_ext_instance_set_carrier(clone, carrier);
+        }
+        if (PyType_IS_GC(tp)) {
+            PyObject_GC_UnTrack(carrier);
+        }
+        return carrier;
+    }
+    /* v0.9: a Python subclass's object: the clone is linked strongly, as
+     * `pycc_ext_carrier_bind` links one, and gets a shallow copy of the
+     * object's `__dict__`, as `copy.copy` of a Python object does. */
     if (clone != NULL) {
-        pycc_rt_ext_instance_set_carrier(clone, carrier);
+        Py_INCREF(carrier);
+        pycc_rt_ext_instance_set_carrier_strong(clone, carrier);
+    }
+    {
+        PyObject *dict = PyObject_GetAttrString(self, "__dict__");
+        PyObject *copied = dict == NULL ? NULL : PyDict_Copy(dict);
+        Py_XDECREF(dict);
+        if (copied == NULL) {
+            PyErr_Clear();
+        }
+        else {
+            int failed = PyObject_SetAttrString(carrier, "__dict__", copied);
+            Py_DECREF(copied);
+            if (failed < 0) {
+                Py_DECREF(carrier);
+                return NULL;
+            }
+        }
     }
     return carrier;
 }
@@ -883,6 +1041,9 @@ static PyObject *pycc_ext_obj_pack_instance_in(PyccExtModule *m, void *inst)
     }
     ((PyccExtInstance *)carrier)->inst = inst;
     pycc_rt_ext_instance_set_carrier(inst, carrier);
+    if (PyType_IS_GC((PyTypeObject *)type)) {
+        PyObject_GC_UnTrack(carrier);
+    }
     /* `inst` is borrowed; the new carrier owns a reference of its own. */
     pycc_rt_instance_incref(inst);
     return carrier;

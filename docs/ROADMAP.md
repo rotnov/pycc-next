@@ -911,6 +911,14 @@ Accept:
    per (class, method) testing the receiver's run-time class. Fixes a pre-existing
    divergence (a subclass instance passed where its base is annotated ran the base's
    bodies) and is the mechanism cross-module bases build on.
+   Step 7a (guru: Python-run subclasses first, as the fallback arm of native
+   cross-module subclasses): Python subclasses of published compiled classes. A
+   dispatcher's first arm tests the instance's strong-carrier flag inline and runs a
+   Python override through CPython; the instance keeps its subclass object alive, the
+   cycle collected through the template's `tp_traverse` (templates are GC types whose
+   own objects are untracked at creation, so compiled classes' objects cost the
+   collector nothing). A compiled base a sibling module subclasses stays native, its
+   subclass a CPython class with compiled methods.
 2. **Template engine >= 2x:** pystache 0.6.8 (chosen by the v0.8 accept 4 rule) runs its
    own benchmark >= 2x faster than CPython (median of interleaved runs) and passes its suite.
    **Progress 2026-10-21** (not met): 0.61x -> 0.69x after accept 1's step 1 (0.089 s

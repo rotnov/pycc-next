@@ -179,6 +179,12 @@ extern void pycc_rt_str_incref(void *s);
 extern const unsigned char *pycc_rt_ext_instance_class(void *instance, size_t *len);
 extern void *pycc_rt_ext_instance_carrier(void *instance);
 extern void pycc_rt_ext_instance_set_carrier(void *instance, void *carrier);
+/* v0.9: the strong link of an instance a Python subclass's object carries
+ * (`pycc_ext_carrier_bind`), and the instance's count, which the template's
+ * garbage-collector traversal reads. */
+extern void pycc_rt_ext_instance_set_carrier_strong(void *instance, void *carrier);
+extern _Bool pycc_rt_ext_instance_carrier_is_strong(void *instance);
+extern long long pycc_rt_ext_instance_refcount(void *instance);
 
 /* `copy.copy` of a carrier (#1455). The clone of an instance with the slot
  * references a per-class kind string calls for (`s`/`i` taken by `pycc_rt`,

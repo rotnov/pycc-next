@@ -109,6 +109,9 @@ fn compile_module(
     rt.nothrow
         .borrow_mut()
         .insert(pycc_mir::dispatch::INSTANCE_CLASS_IS.to_string());
+    rt.nothrow
+        .borrow_mut()
+        .insert(pycc_mir::dispatch::INSTANCE_PY_OVERRIDE.to_string());
     let _pins = operand_pin::plan_module(&rt, mir);
     rt.frames.set_files(
         options.source_files.clone(),

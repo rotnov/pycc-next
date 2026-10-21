@@ -36,6 +36,14 @@ use crate::{HirClassDef, MirExpr, MirItem, MirStmt, Ty};
 /// call. `$` never starts a Python name, so no user function can claim it.
 pub const INSTANCE_CLASS_IS: &str = "$instance_class_is";
 
+/// The callee of a dispatcher's Python-override test:
+/// `$instance_py_override(recv, "member")`, true when the receiver is
+/// carried by an instance of a Python subclass whose class resolves the
+/// member to an attribute it defines in Python (`pycc_codegen` tests the
+/// instance's strong-carrier flag inline, then calls the shim's
+/// `pycc_ext_instance_py_override`).
+pub const INSTANCE_PY_OVERRIDE: &str = "$instance_py_override";
+
 /// The marker segment of a dispatcher's name (`C.m.0dispatch`).
 pub const DISPATCH_SEGMENT: &str = "0dispatch";
 
@@ -47,6 +55,21 @@ struct Dispatcher {
     params: Vec<Ty>,
     ret: Ty,
     arms: Vec<(String, String)>,
+    /// The member a Python subclass may override, and how CPython reaches
+    /// it; `None` when its values cannot cross ([`crosses`]).
+    python: Option<(String, Member)>,
+}
+
+/// What a dispatched member is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Member {
+    /// A regular method, called.
+    Method,
+    /// A `@property`'s getter, read.
+    Getter,
+    /// A comparison dunder reached through an operator, which a Python
+    /// override does not take part in yet.
+    Dunder,
 }
 
 thread_local! {
@@ -107,23 +130,31 @@ pub(crate) fn route(
     scopes: &[HashMap<String, Ty>],
     classes: &HashMap<String, HirClassDef>,
 ) -> String {
-    route_member(class_def, method, callee, scopes, classes, method_of)
+    route_member(class_def, method, callee, scopes, classes, Member::Method)
 }
 
-/// Finds a member on a class's MRO: its `(owner, mangled)`.
-pub(crate) type Resolver =
-    fn(&HirClassDef, &str, &HashMap<String, HirClassDef>) -> Option<(String, String)>;
+/// Whether a value of `ty` crosses into and out of CPython for a Python
+/// override's call: a parameter is packed, the result converted back.
+fn crosses(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Object | Ty::Instance(_)
+    )
+}
 
-/// [`route`] for a member `resolve` finds on a class's MRO (a regular
-/// method, a property's getter).
+/// [`route`] for a member of kind `kind`.
 pub(crate) fn route_member(
     class_def: &HirClassDef,
     member: &str,
     callee: String,
     scopes: &[HashMap<String, Ty>],
     classes: &HashMap<String, HirClassDef>,
-    resolve: Resolver,
+    kind: Member,
 ) -> String {
+    let resolve = match kind {
+        Member::Getter => getter_of,
+        Member::Method | Member::Dunder => method_of,
+    };
     if !pycc_hir::is_refcounted_class(class_def) || class_def.is_enum {
         return callee;
     }
@@ -164,7 +195,14 @@ pub(crate) fn route_member(
             _ => {}
         }
     }
-    if arms.is_empty() {
+    // v0.9: CPython code may subclass a published class; the override of
+    // a Python subclass runs through CPython, its values crossing.
+    let python = (pycc_hir::host_classes()
+        && kind != Member::Dunder
+        && (ret == Ty::None || crosses(&ret))
+        && params[1..].iter().all(crosses))
+    .then(|| (member.to_string(), kind));
+    if arms.is_empty() && python.is_none() {
         return callee;
     }
     let name = format!("{}.{member}.{DISPATCH_SEGMENT}", class_def.name);
@@ -176,6 +214,7 @@ pub(crate) fn route_member(
                 params,
                 ret,
                 arms,
+                python,
             },
         );
     });
@@ -229,6 +268,10 @@ fn dispatcher_item(name: &str, dispatcher: &Dispatcher) -> MirItem {
         }
     };
     let mut body = call(&dispatcher.default);
+    let receiver = || MirExpr::Name {
+        name: params[0].0.clone(),
+        ty: params[0].1.clone(),
+    };
     for (class, target) in dispatcher.arms.iter().rev() {
         body = vec![MirStmt::If {
             test: MirExpr::Call {
@@ -243,6 +286,38 @@ fn dispatcher_item(name: &str, dispatcher: &Dispatcher) -> MirItem {
                 ty: Ty::Bool,
             },
             body: call(target),
+            orelse: body,
+        }];
+    }
+    // The Python override test runs first: a Python subclass's instance
+    // carries the class name of the compiled class it derives from.
+    if let Some((member, kind)) = &dispatcher.python {
+        let boxed = Box::new(MirExpr::ObjectBox(Box::new(receiver())));
+        let value = match kind {
+            Member::Getter => MirExpr::ObjAttrGet {
+                base: boxed,
+                attr: member.clone(),
+                ty: Ty::Object,
+            },
+            Member::Method | Member::Dunder => MirExpr::ObjMethodCall {
+                base: boxed,
+                method: member.clone(),
+                args: args()[1..].to_vec(),
+            },
+        };
+        // The return converts the object to the declared type, raising
+        // `TypeError` for another (`pycc_codegen`'s `object_coerce`).
+        let arm = match &dispatcher.ret {
+            Ty::None => vec![MirStmt::ExprStmt(value), MirStmt::Return(None)],
+            _ => vec![MirStmt::Return(Some(value))],
+        };
+        body = vec![MirStmt::If {
+            test: MirExpr::Call {
+                callee: INSTANCE_PY_OVERRIDE.to_string(),
+                args: vec![receiver(), MirExpr::StringLiteral(member.clone())],
+                ty: Ty::Bool,
+            },
+            body: arm,
             orelse: body,
         }];
     }

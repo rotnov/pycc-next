@@ -350,3 +350,69 @@ fn subclass_overrides_dispatch_strict_ext() {
     assert_matches(&ours, &run(&plain));
     assert_eq!(text(&ours.stdout), "derived3 derived3 derived3 base2 base\n");
 }
+
+/// Builds fixture `name` as `m` with `--ext` and `flags` (no
+/// `--non-strict` unless given) and runs fixture `host` against the
+/// artifact and against the source.
+fn ext_hosted_with(name: &str, host: &str, flags: &[&str]) {
+    let compiled = ScratchDir::new(&format!("{name}_hosted_with")).expect("scratch");
+    let source = fixture(name, &compiled, "m.py");
+    let mut all = vec!["--ext"];
+    all.extend_from_slice(flags);
+    build(&source, &compiled.join("m"), &all);
+    std::fs::remove_file(&source).expect("import the artifact, not the source");
+    fixture(host, &compiled, "host.py");
+    let plain = ScratchDir::new(&format!("{name}_hosted_with_src")).expect("scratch");
+    fixture(name, &plain, "m.py");
+    fixture(host, &plain, "host.py");
+    let run = |dir: &Path| {
+        python()
+            .arg("host.py")
+            .current_dir(dir)
+            .output()
+            .expect("python should spawn")
+    };
+    assert_matches(&run(&compiled), &run(&plain));
+}
+
+/// Python subclasses of a compiled class (v0.9): compiled calls run their
+/// overrides (methods, properties, `super()` chains), `copy.copy` keeps
+/// the subclass and its `__dict__`, an instance compiled code holds keeps
+/// its object alive, and the collector frees one nothing holds.
+#[test]
+fn python_subclasses_strict_ext() {
+    ext_hosted_with("v09_pysub", "v09_pysub_host", &[]);
+}
+
+#[test]
+fn python_subclasses_from_python_ext() {
+    ext_hosted("v09_pysub", "v09_pysub_host", &[]);
+}
+
+#[test]
+fn python_subclasses_from_python_ext_release() {
+    ext_hosted("v09_pysub", "v09_pysub_host", &["--release"]);
+}
+
+/// The one difference: a Python override whose result is not the compiled
+/// method's declared type raises where a compiled caller reads it.
+#[test]
+fn a_python_override_of_another_type_raises_where_compiled_code_reads_it() {
+    let compiled = ScratchDir::new("v09_pysub_bad").expect("scratch");
+    let source = fixture("v09_pysub", &compiled, "m.py");
+    build(&source, &compiled.join("m"), &["--ext"]);
+    std::fs::remove_file(&source).expect("import the artifact");
+    let host = "import m\nclass Bad(m.Base):\n    def size(self):\n        return 'x'\n\
+                try:\n    m.show_it(Bad(1))\nexcept TypeError as e:\n    print('TypeError', e)\n";
+    let out = python()
+        .args(["-c", host])
+        .current_dir(&*compiled)
+        .output()
+        .expect("python should spawn");
+    assert_eq!(
+        text(&out.stdout),
+        "base:1:B1\nTypeError return value must be int, not str\n",
+        "{}",
+        text(&out.stderr)
+    );
+}

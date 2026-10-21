@@ -85,7 +85,14 @@ pub(crate) fn instance_compare_callee(
                 classes,
             );
             // v0.9: a subclass overriding the dunder (`crate::dispatch`).
-            let callee = crate::dispatch::route(class_def, method, callee, scopes, classes);
+            let callee = crate::dispatch::route_member(
+                class_def,
+                method,
+                callee,
+                scopes,
+                classes,
+                crate::dispatch::Member::Dunder,
+            );
             return Some((callee, *negate));
         }
     }

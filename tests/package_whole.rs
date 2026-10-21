@@ -162,11 +162,13 @@ fn the_package_matches_cpython(release: bool) {
         );
     }
     // A class another module subclasses through a third module's re-export
-    // runs in CPython.
+    // stays native since v0.9: the subclass is a CPython class over it,
+    // whose overrides compiled calls run (`pycc_mir::dispatch`).
     assert!(
-        report.contains("`pkw.sub.tagged.Bold` of the package subclasses `Tag`"),
+        !report.contains("of the package subclasses `Tag`"),
         "{report}"
     );
+    assert!(report.contains("class `Bold` at"), "{report}");
     // Instances of a class another module compiled are read natively.
     assert!(
         report.contains("native class: instances of `pkw.cursor.Cursor` are read natively"),

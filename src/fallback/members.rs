@@ -112,3 +112,25 @@ fn is_literal(expr: &Expr) -> bool {
         _ => false,
     }
 }
+
+/// The module-level classes with a class attribute bound to `None` or a
+/// `bytes` literal: Python code may read it through the class (published
+/// with the class since v0.9, `crate::ext_build::attach_class_bases`), but
+/// the published instance has no `__dict__` to shadow it with an instance
+/// attribute, which such a default usually exists for (`spec.template =
+/// ...` with `template = None` in the class body).
+pub(super) fn with_instance_defaults(body: &[Stmt]) -> BTreeSet<String> {
+    body.iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::ClassDef(class)
+                if class.body.iter().any(|member| {
+                    matches!(member, Stmt::Assign(assign)
+                        if matches!(&*assign.value, Expr::NoneLiteral(_) | Expr::BytesLiteral(_)))
+                }) =>
+            {
+                Some(class.name.to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}

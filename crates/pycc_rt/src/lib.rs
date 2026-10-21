@@ -130,7 +130,9 @@ pub use hash::{
     pycc_rt_hash_str, pycc_rt_hash_tuple, pycc_rt_hash_tuple_object,
 };
 pub use instance::{
-    PyInstanceObj, pycc_rt_ext_instance_carrier, pycc_rt_ext_instance_class,
+    PyInstanceObj, pycc_rt_ext_instance_carrier, pycc_rt_ext_instance_carrier_is_strong,
+    pycc_rt_ext_instance_class, pycc_rt_ext_instance_refcount,
+    pycc_rt_ext_instance_set_carrier_strong,
     pycc_rt_ext_instance_copy, pycc_rt_ext_instance_delete_slot, pycc_rt_ext_instance_set_carrier,
     pycc_rt_ext_instance_store_slot, pycc_rt_instance_get_slot, pycc_rt_instance_get_slot_checked,
     pycc_rt_instance_class_is, pycc_rt_instance_new, pycc_rt_instance_set_slot,
