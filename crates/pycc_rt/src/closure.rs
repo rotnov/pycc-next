@@ -146,6 +146,10 @@ pub extern "C" fn pycc_rt_closure_repr(obj: *mut PyClosureObj) -> *mut crate::Py
 mod tests {
     use super::*;
 
+    /// Held by every test that creates a function value: `CLOSURES_LIVE` is one counter
+    /// for the process, and tests run in parallel threads.
+    static LIVE_COUNT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     unsafe extern "C" fn count_drop(obj: *mut PyClosureObj) {
         // SAFETY: the test's object has one captured word.
         unsafe {
@@ -156,6 +160,9 @@ mod tests {
 
     #[test]
     fn the_last_release_runs_drop_and_frees() {
+        let _serial = LIVE_COUNT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let before = pycc_rt_closure_live_objects();
         let obj = pycc_rt_closure_new(std::ptr::null(), Some(count_drop), 1, std::ptr::null());
         unsafe { pycc_rt_closure_incref(obj) };
@@ -169,6 +176,9 @@ mod tests {
 
     #[test]
     fn a_function_value_renders_its_qualname_and_address() {
+        let _serial = LIVE_COUNT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let obj = pycc_rt_closure_new(std::ptr::null(), None, 0, c"f.<locals>.g".as_ptr().cast());
         assert_eq!(
             closure_repr(obj),
