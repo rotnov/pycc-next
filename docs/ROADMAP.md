@@ -932,6 +932,9 @@ Accept:
    `Generic[ST]` with private members and `getattr` dispatch, pydantic's handlers are
    private-member heavy. Also deferred: exception classes over package bases (PEP 697
    layouts) and bases that publish only part of themselves.
+   **Met 2026-10-21 in this exact form:** CI run 39652820996 on 69eb20c, green on all
+   four jobs (`tests/v09_native_state.rs`: dispatchers, Python subclasses, instance
+   defaults; pystache's suite with `TemplateSpec` native).
 2. **Template engine >= 2x:** pystache 0.6.8 (chosen by the v0.8 accept 4 rule) runs its
    own benchmark >= 2x faster than CPython (median of interleaved runs) and passes its suite.
    **Progress 2026-10-21** (not met): 0.61x -> 0.69x after accept 1's step 1 (0.089 s
@@ -977,9 +980,21 @@ Accept:
    this evidence.
 3. **Markdown >= 1.5x:** mistune 3.3.4 renders `benchmark/cases` >= 1.5x faster than
    CPython and passes its suite.
+   **Measured 2026-10-21, not met for v0.9:** its suite passes compiled; `mistune.html`
+   of every `benchmark/cases` document x20 runs at 1.05x (0.124 s against 0.131 s) and
+   the benchmark's full parser with every plugin at 0.84x (0.141 s against 0.119 s),
+   medians of 11 interleaved runs on main at 69eb20c (`bench/package_check.py mistune
+   --time --runs 11`). Its hot classes stay CPython classes: the parsers derive from
+   `Parser(Generic[ST])` with private members and its renderers dispatch through
+   `getattr`, which accept 1's work does not make native (see accept 1's note).
 4. **pydantic no slower:** every phase of `bench/pydantic_check.py --time` (import, define,
    schema, round-trips) >= 1.0x CPython's median; its suite fails no test that passes
    against its sources.
+   **Measured 2026-10-21, not met for v0.9:** the suite fails no test that passes against
+   the sources, but the phases run at import 0.85x, define 0.72x, schema 0.74x,
+   round-trips 0.97x (medians of 11 interleaved runs on main at 69eb20c,
+   `bench/pydantic_check.py --time --runs 11`); 1036 of 1249 functions are native, the
+   same count as before v0.9's work, which targeted pystache's and mistune's classes.
 5. **Strict refuses exactly what a type checker refuses:** a CI check runs `mypy --strict`
    over the corpus; every strict refusal is a program mypy also rejects (or is listed in
    DEVIATIONS with a reason), and `--non-strict` stays 200/200, 0 wrong, 0 fallback
