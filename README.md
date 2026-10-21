@@ -39,7 +39,7 @@ Caught **before** it runs. Not in CI logs. Not in production. At compile time.
 - 🤝 **Plays with the ecosystem.** Target: a CPython extension module you `import`, calling numpy and torch as usual.
 - 🧪 **CPython is the judge.** Correct means: same output, same exceptions as CPython 3.13.
 
-## Status: 0.8, honestly 🧭
+## Status: 0.9, honestly 🧭
 
 Works today: strict type checking with Rust-style diagnostics pointing at the offending
 code; native compilation via LLVM; classes, exceptions, generators, closures, lists,
@@ -49,7 +49,10 @@ programs of several modules and packages; `@dataclass` (with `fields()`/`asdict(
 `astuple()`/`replace()`), `enum.Enum`/`IntEnum`/`StrEnum`, sorting and hashing instances,
 `functools.cache`/`lru_cache`; reference-counted memory;
 CPython extension modules; `--non-strict` for untyped code, including classes inheriting
-library classes, falling back to CPython one function or method at a time; a real
+library classes, falling back to CPython one function or method at a time, with a
+library's own classes native there too (native closures, `*args`/`**kwargs`, `Generic[T]`
+classes, Python subclasses of compiled classes); strict refusals checked against
+`mypy --strict` in CI; a real
 `int | float` type; `pip install` through the `pycc.build` PEP 517 backend. Linux
 (x86_64, aarch64), macOS (arm64) and Windows (x86_64, MSVC). 10,000+ tests.
 
@@ -60,11 +63,11 @@ pycc-next):
 
 | program | CPython 3.13 | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
 |---|---|---|---|---|---|
-| fib(32) | 0.200s | 0.011s | 0.007s | **18.4x faster** | 1.5x slower |
-| mandelbrot | 1.177s | 0.039s | 0.031s | **30.6x faster** | 1.3x slower |
-| nbody | 2.220s | 0.065s | 0.025s | **34.2x faster** | 2.6x slower |
-| sieve | 1.090s | 0.058s | 0.020s | **18.9x faster** | 2.9x slower |
-| spectral_norm | 0.884s | 0.013s | 0.010s | **66.2x faster** | 1.4x slower |
+| fib(32) | 0.254s | 0.012s | 0.007s | **20.5x faster** | 1.7x slower |
+| mandelbrot | 1.443s | 0.039s | 0.037s | **36.9x faster** | 1.1x slower |
+| nbody | 2.380s | 0.066s | 0.025s | **35.9x faster** | 2.7x slower |
+| sieve | 1.509s | 0.051s | 0.022s | **29.8x faster** | 2.3x slower |
+| spectral_norm | 0.843s | 0.015s | 0.010s | **57.5x faster** | 1.5x slower |
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
@@ -74,17 +77,21 @@ values that strict mode refuses, as a type checker does: a list whose elements c
 type (a `str` element replaced by an `int`), an `int | None` used as an `int` without a
 `None` test, a variable rebound to another type on some paths only.
 
-**Library code is still not faster than CPython** — that was v0.8's goal, and it was not
-met. pydantic 2.13.5 built `--ext --non-strict` as one whole-package extension
-(`bench/pydantic_check.py --time`, 1029 of 1249 functions native, its own suite failing no
-test more than against its sources) runs, against CPython on its sources: import 0.96x,
-model definition ~0.75x, `model_json_schema()` ~0.8x, validation round-trips 0.91x. mistune
-3.3.4 runs about CPython's instruction count (58.0M vs 57.2M per pass) and pystache 0.6.8
-its own benchmark at 0.69x. Compiled code over CPython objects (dicts, `re` matches,
-classes a metaclass builds) does each object operation at about the interpreter's cost and
-no less; the speed is in typed native data (diff-match-patch and pypng ~12x), and making
-libraries' hot data typed and native is v0.9's goal. The analysis is in [ROADMAP v0.8 accepts 1 and
-4](docs/ROADMAP.md).
+**Library code is still not faster than CPython** -- v0.8's goal, reshaped for v0.9 around
+typed native hot data, and still not met. v0.9 made libraries' own classes native in
+`--non-strict` (native closures, `*args`/`**kwargs`, `Generic[T]` classes CPython creates
+over compiled templates, Python subclasses of compiled classes whose overrides compiled code
+calls, call-site method caches), and the numbers moved less than the work suggests.
+pystache 0.6.8 runs 586k instructions per round of its own benchmark (783k before v0.9;
+CPython 505k) and 0.74x by wall time; about 158k of CPython's 505k is regex and match work
+no compile of pystache removes, so 2x would need everything else under ~94k. mistune 3.3.4
+runs at about CPython's speed (0.86x-1.05x for `mistune.html`, 0.84x-0.97x for the full
+parser, across runs on a shared machine). pydantic 2.13.5 built whole (1036 of 1249
+functions native, its own suite failing no test more than against its sources): import
+0.91x-0.98x, model definition ~0.79x, `model_json_schema()` ~0.8x, round-trips 0.94x of
+CPython's speed. Compiled code over CPython objects does each object operation at about the
+interpreter's cost; the speed is in typed code (the table above, diff-match-patch and pypng
+~12x). The analysis is in [ROADMAP v0.9 accepts 2-4](docs/ROADMAP.md).
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 

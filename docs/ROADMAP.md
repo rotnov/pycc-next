@@ -830,7 +830,7 @@ Progress:
   after): import 0.74x -> 0.80x, define 0.67x -> 0.66x, schema 0.67x -> 0.66x,
   round-trips 0.94x -> 0.95x.
 
-## v0.9 — Typed hot data, native end to end
+## v0.9 — Typed hot data, native end to end (released 2026-10-21)
 
 v0.8 showed where the speed is: code over typed native data runs many times faster than
 CPython (diff-match-patch ~12x, pypng ~12x), while dynamic code over CPython objects stays
@@ -838,6 +838,10 @@ at about CPython's speed however it is compiled (pydantic define/schema ~0.8x, m
 pystache ~0.7x; the analysis is in v0.8 accepts 1 and 4). v0.9 makes libraries' hot state
 typed and native: their own classes, lists and dicts become native values that compiled
 code of every module of the package reads directly.
+
+Released as 0.9.0 with accepts 1 (in its stated exact form) and 5 met; accepts 2, 3 and 4
+are not met (pystache, mistune and pydantic stay below their bars; the evidence is in each
+accept's note below).
 
 Accept:
 1. **Native hot state in `--non-strict`:** instances of a package's own classes, and lists
@@ -987,6 +991,9 @@ Accept:
    --time --runs 11`). Its hot classes stay CPython classes: the parsers derive from
    `Parser(Generic[ST])` with private members and its renderers dispatch through
    `getattr`, which accept 1's work does not make native (see accept 1's note).
+   - Amendment (2026-10-21, release re-measurement, 15 interleaved runs, twice):
+     `mistune.html` 1.00x and 0.86x, the full parser 0.97x and 0.93x -- about CPython's
+     speed, within this shared machine's noise. Still not met.
 4. **pydantic no slower:** every phase of `bench/pydantic_check.py --time` (import, define,
    schema, round-trips) >= 1.0x CPython's median; its suite fails no test that passes
    against its sources.
@@ -995,6 +1002,13 @@ Accept:
    round-trips 0.97x (medians of 11 interleaved runs on main at 69eb20c,
    `bench/pydantic_check.py --time --runs 11`); 1036 of 1249 functions are native, the
    same count as before v0.9's work, which targeted pystache's and mistune's classes.
+   - Amendment (2026-10-21, release re-measurement): the import 0.85x above was noise,
+     not a regression. Medians of 21 interleaved runs, main (7784571) and v0.8.0 built and
+     measured back to back on the same machine, twice: main import 0.98x / 0.91x, define
+     0.80x / 0.78x, schema 0.83x / 0.77x, round-trips 0.94x / 0.94x; v0.8.0 import 0.92x /
+     0.97x, define 0.74x / 0.77x, schema 0.79x / 0.75x, round-trips 0.95x / 0.90x.
+     Instructions of `import pydantic; from pydantic import BaseModel` against the built
+     trees (callgrind): 375.6M on main, 372.1M on v0.8.0 (+0.9%). Still not met.
 5. **Strict refuses exactly what a type checker refuses:** a CI check runs `mypy --strict`
    over the corpus; every strict refusal is a program mypy also rejects (or is listed in
    DEVIATIONS with a reason), and `--non-strict` stays 200/200, 0 wrong, 0 fallback

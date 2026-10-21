@@ -4,6 +4,50 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-21
+
+Typed hot data, native end to end -- accepts 1 (in its stated exact form) and 5 are met;
+accepts 2, 3 and 4 are **not met**. What shipped: a library's own classes stay native in
+`--non-strict` where they went to CPython before -- object-holding list and dict
+attributes, callable attributes, sentinels, `*args`/`**kwargs` of objects, native closures
+over nested functions used as values, `Generic[...]` classes and class-body lambdas, a
+published compiled class made by CPython from its statement's real bases over a compiled
+template, Python subclasses of compiled classes whose overrides compiled calls run, and
+per-(class, method) dispatchers that fix a pre-existing bug (a subclass instance typed as
+its base ran the base's methods). Also: native `html.escape`/`re.escape`, two-way set
+associative attribute caches, per-call-site method caches, a CI check of strict refusals
+against `mypy --strict`, and issues #8/#9 (classes of a non-strict native build published
+in `__main__`). pystache 0.6.8's benchmark went from 783k to 586k instructions per round
+(CPython 505k) but runs at 0.74x of CPython's speed by wall time; about 158k of CPython's
+505k is regex and match work no compile removes, and the rest of the compiled cost is
+crossing the CPython boundary. mistune 3.3.4 runs at about CPython's speed (`mistune.html`
+0.86x-1.05x, the full parser 0.84x-0.97x across runs today), pydantic 2.13.5 at import
+0.91x-0.98x, model definition 0.78x-0.80x, `model_json_schema()` 0.77x-0.83x, round-trips
+0.94x (medians of 21 interleaved fresh-process runs, two sessions). The pydantic import
+0.85x measured earlier for v0.9 accept 4 was noise: v0.8.0 and this release measured
+back to back give 0.92x/0.97x and 0.98x/0.91x, and `import pydantic` costs 375.6M
+instructions against v0.8.0's 372.1M (+0.9%). Prebuilt archives: Linux x86_64, Linux
+aarch64, macOS arm64, Windows x86_64.
+
+Benchmarks (`python3 bench/run.py`, best of 7, shared 4-core Xeon 2.1 GHz, Linux x86_64;
+process start included except for the numpy kernels):
+
+| program | CPython | pycc-next | Rust | pycc vs CPython | pycc vs Rust |
+|---|---|---|---|---|---|
+| collections_bfs | 0.914s | 0.122s | 0.051s | **7.5x faster** | 2.39x slower |
+| fib | 0.254s | 0.012s | 0.007s | **20.5x faster** | 1.72x slower |
+| mandelbrot | 1.443s | 0.039s | 0.037s | **36.9x faster** | 1.07x slower |
+| nbody | 2.380s | 0.066s | 0.025s | **35.9x faster** | 2.68x slower |
+| prefix_sum_np (kernel) | 2.630s | 0.035s | 0.018s | **74.7x faster** | 1.98x slower |
+| sieve | 1.509s | 0.051s | 0.022s | **29.8x faster** | 2.26x slower |
+| spectral_norm | 0.843s | 0.015s | 0.010s | **57.5x faster** | 1.50x slower |
+| stencil2d (kernel) | 3.528s | 0.008s | 0.003s | **454.3x faster** | 2.38x slower |
+
+pycc-next's own times are within noise of 0.8.0's (CPython's times moved more on a shared
+machine: treat differences under ~20% as noise; a first run gave collections_bfs 0.160s,
+re-run 0.126s against v0.8.0's 0.129s built on the same machine). Windows is not
+benchmarked.
+
 ### Added
 
 - CI compares strict mode with `mypy --strict` (2.3.1, pinned by hash) over the 200 corpus
@@ -114,6 +158,36 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - Fixed: raising a compiled exception class with a CPython object argument (`raise
   MissingError(name)` in non-strict code) failed the build in code generation; the
   function raising it now runs in CPython, which keeps the object in `args`.
+
+### Known gaps
+
+- v0.9 accept 2 (not met): pystache 0.6.8 runs its own benchmark at 0.74x of CPython's
+  speed, not >= 2x (586k against 505k instructions per round; 2x needs <= ~252k, and ~158k
+  of CPython's work -- regex searches, `match` methods, `re.compile`'s cache lookup -- stays
+  CPython's whatever compiles pystache). Closing the gap needs the template's data to stay
+  native end to end.
+- v0.9 accept 3 (not met): mistune 3.3.4 runs at about CPython's speed, not >= 1.5x
+  (`mistune.html` 0.86x-1.05x, the full parser 0.84x-0.97x); its parsers derive from
+  `Parser(Generic[ST])` with private members and its renderers dispatch through `getattr`,
+  which stay CPython classes.
+- v0.9 accept 4 (not met): compiled pydantic 2.13.5 is slower than CPython on its sources
+  in every phase -- import 0.91x-0.98x, define 0.78x-0.80x, schema 0.77x-0.83x,
+  round-trips 0.94x; its suite fails no test that passes against the sources.
+- v0.9 accept 1 is met in its stated exact form: a compiled class over a compiled base of
+  another module is a CPython class over the base's layout (native-native subclassing
+  across modules, exception classes over package bases and bases that publish only part
+  of themselves are deferred).
+- Open rows of `docs/DEVIATIONS.md`, among them: an `int` beyond 63 bits as a slice bound
+  and `int ** negative int`; container element and key types strict mode refuses
+  (`T0034`-`T0039`); unsupported constructs refused in strict mode (`C0001`) or run in
+  CPython under `--non-strict`; a compiled frame's `f_locals` is empty, `sys.settrace`/
+  `setprofile` see no compiled frame's events, and CPython versions other than 3.13 keep
+  frameless compiled functions; reference cycles are never freed and `__del__` is never
+  called; a big `int` held by a tuple is never released; `raise X from None` keeps
+  `__suppress_context__` false; enum members at the `--ext` boundary (`C0003`); one strict
+  refusal mypy accepts only through `Any` (corpus 049); Windows: rare `PYTHONIOENCODING`
+  codecs write UTF-8, `--static-libpython` is refused, the compiler uses the system
+  allocator. See `docs/DEVIATIONS.md` for every known difference from CPython 3.13.
 
 ## [0.8.0] - 2026-10-21
 
