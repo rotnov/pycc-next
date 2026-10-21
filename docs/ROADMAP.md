@@ -378,12 +378,16 @@ Accept:
    (016, 056, 100, 123, 184), a variable rebound to another type on some paths (200) and
    iterator objects as values (057).
 
-## v0.8 — Library code faster than CPython
+## v0.8 — Library code faster than CPython (released 2026-10-21)
 
 v0.7 made real libraries compile (pydantic: 809/1249 functions native, its suite passing)
 but the compiled tree is slower than CPython running the sources (import 0.40x, model
 definition 0.70x, `model_json_schema()` 0.70x, round-trips 0.91x). v0.8 makes compiled
 library code a speed-up, not only a correctness result.
+
+Released as 0.8.0 with accepts 2 and 3 met and accepts 1, 4 and 5 not met (Windows
+parity holds; the corpus stops at 191/200 strict). Accepts 1, 4 and 5's corpus half are
+carried into v0.9 as reshaped goals (see v0.9).
 
 Accept:
 1. **pydantic faster than CPython:** `bench/pydantic_check.py --time` on pydantic 2.13.5

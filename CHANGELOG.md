@@ -4,6 +4,57 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-21
+
+Library code faster than CPython -- the goal, **not met**. Accepts 2 and 3 are met;
+accepts 1 and 4 are not, and accept 5 is met for Windows only. What shipped: whole-package
+builds (`pycc build PKG --ext`: every module of a package in one extension, one runtime
+copy, one `dlopen`, each module still its own module object), native calls between a
+package's modules (a loop calling another module's function: 0.69 s -> 0.05 s for 2M
+calls) and native instances of another module's classes; compiled functions running in
+real CPython 3.13 frames (`sys._getframe`, `inspect.stack()`, `warnings` `stacklevel`,
+full tracebacks; pydantic's own suite fails no test more than against its sources, from
+20); the common fallback constructs (`...`, function-local `import`, nested `def`,
+`lambda`, `hash()`) compiled, methods of CPython-run classes called with no forwarder
+frame, and pydantic 2.13.5 at 1029 of 1249 functions native (809); attribute reads and
+method calls on CPython objects cached as CPython 3.13's specializing interpreter caches
+them; inline reference counting in `--release` `--ext` modules; pre-compiled fallback
+code at import; Windows native programs writing CPython's text-mode stdout and stderr;
+strict lists of a fixed shape (corpus strict 191/200). Two real packages join the checks:
+mistune 3.3.4 and pystache 0.6.8, their suites passing compiled.
+
+Why the speed goal was not met (`docs/ROADMAP.md`, v0.8 accepts 1 and 4): compiled code
+over CPython objects does each object operation at about the interpreter's own cost and
+no less. pydantic's define+schema runs 154.8M instructions per repetition against
+CPython's 151.2M, but with more instruction-cache misses (a cycle model from cachegrind
+gives 0.83x, as measured); wall time, median of interleaved fresh-process runs: import
+0.96x, define 0.71x-0.77x, schema 0.81x-0.84x, round-trips 0.91x of CPython's speed. The
+1.3x define/schema bar was withdrawn with that analysis. mistune runs 58.0M instructions
+per `mistune.html` pass against CPython's 57.2M (making its block parser fully native
+saved 0.03M: the time is in token dicts and `re`); pystache, chosen for accept 4 by a
+rule fixed before measuring, runs its own benchmark at 0.69x. v0.9 carries these goals,
+reshaped around typed native hot data. Prebuilt archives: Linux x86_64, Linux aarch64,
+macOS arm64, Windows x86_64.
+
+Benchmarks (`python3 bench/run.py`, best of 7, shared 4-core Xeon 2.1 GHz, Linux x86_64;
+process start included except for the numpy kernels):
+
+| program | CPython | pycc-next | Rust | pycc vs CPython | pycc vs Rust |
+|---|---|---|---|---|---|
+| collections_bfs | 0.818s | 0.113s | 0.050s | **7.2x faster** | 2.25x slower |
+| fib | 0.200s | 0.011s | 0.007s | **18.4x faster** | 1.49x slower |
+| mandelbrot | 1.177s | 0.039s | 0.031s | **30.6x faster** | 1.26x slower |
+| nbody | 2.220s | 0.065s | 0.025s | **34.2x faster** | 2.63x slower |
+| prefix_sum_np (kernel) | 2.669s | 0.031s | 0.015s | **87.5x faster** | 2.08x slower |
+| sieve | 1.090s | 0.058s | 0.020s | **18.9x faster** | 2.86x slower |
+| spectral_norm | 0.884s | 0.013s | 0.010s | **66.2x faster** | 1.35x slower |
+| stencil2d (kernel) | 3.173s | 0.007s | 0.003s | **462.1x faster** | 2.24x slower |
+
+Against 0.7.0's table pycc-next's own times are the same or slightly lower
+(collections_bfs 0.131s -> 0.113s, spectral_norm 0.017s -> 0.013s); CPython's times moved
+too on a shared machine, so treat differences under ~20% as noise. Windows is not
+benchmarked.
+
 ### Added
 
 - v0.8 accept 5 (Windows parity): a native program on Windows writes its stdout and
@@ -266,6 +317,36 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interned names and read a function's `__dict__` in place without creating one.
   pydantic's import: 478.2M to 455.7M instructions (CPython 442.9M); wall time 0.96x
   CPython's median.
+
+### Known gaps
+
+- v0.8 accept 1 (not met): compiled pydantic 2.13.5 is not faster than CPython on its
+  sources -- import 0.96x, model definition 0.71x-0.77x, `model_json_schema()`
+  0.81x-0.84x, round-trips 0.91x (median of interleaved fresh-process runs). The 1.3x
+  define/schema bar is withdrawn (`docs/ROADMAP.md`); "every phase >= 1.0x" is v0.9
+  accept 4.
+- v0.8 accept 4 (not met): no fourth package runs >= 2x CPython's speed -- mistune 3.3.4
+  about 1x by instructions (58.0M against 57.2M per `mistune.html` pass), pystache 0.6.8
+  0.69x on its own benchmark. Both pass their suites compiled; v0.9 accepts 2 and 3 set
+  pystache >= 2x and mistune >= 1.5x through typed native hot data.
+- v0.8 accept 5 (corpus half not met): strict mode compiles 191 of the 200 corpus
+  programs, not 193; the nine left are programs a type checker rejects (a `str` element
+  replaced by an `int` and summed, a `list | set` name reaching `|=`, an `int | None` used
+  as an `int` with no `None` test). v0.9 accept 5 replaces the count with "strict refuses
+  exactly what `mypy --strict` refuses". `--non-strict`: 200/200, 0 wrong, 0 fallback
+  statements.
+- Open rows of `docs/DEVIATIONS.md`, among them: an `int` beyond 63 bits as a slice bound
+  and `int ** negative int`; container element and key types strict mode refuses
+  (`T0034`-`T0039`); unsupported constructs refused in strict mode (`C0001`) or run in
+  CPython under `--non-strict`; a compiled frame's `f_locals` is empty, `sys.settrace`/
+  `setprofile` see no compiled frame's events, and CPython versions other than 3.13 keep
+  frameless compiled functions; a published native class is not subclassable from Python
+  outside its package; reference cycles are never freed and `__del__` is never called; a
+  big `int` held by a tuple is never released; `raise X from None` keeps
+  `__suppress_context__` false; enum members at the `--ext` boundary (`C0003`); Windows:
+  rare `PYTHONIOENCODING` codecs write UTF-8, `--static-libpython` is refused, the
+  compiler uses the system allocator. See `docs/DEVIATIONS.md` for every known difference
+  from CPython 3.13.
 
 ## [0.7.0] - 2026-10-17
 
