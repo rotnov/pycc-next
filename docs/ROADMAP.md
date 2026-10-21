@@ -894,6 +894,17 @@ Accept:
    hashing to one entry evicted each other on every read, refilling by an MRO walk:
    up to 57k instructions per round, depending on layout). 611k -> 582k instructions,
    Python frames 52 -> 40 per round.
+   Step 5 (design with the guru advisor: CPython makes each published class): a
+   published compiled class is created when its statement runs, by its metaclass, from
+   the statement's real bases and a compiled template (methods, carrier layout, slots;
+   every template derives from one root so multiple inheritance keeps one layout), and
+   is entered as its instances' carrier type. `Generic[...]` bases with plain,
+   constrained or bounded type variables (non-strict) and `lambda`s in class bodies
+   (methods, `staticmethod(lambda ...)`, `classmethod(lambda ...)`) are native; a
+   compiled subclass is a CPython subclass of its compiled base. Still open in
+   accept 1: bases from another module of the package (the template must extend the
+   base's layout) and exception classes over such bases, Python subclasses of compiled
+   classes.
 2. **Template engine >= 2x:** pystache 0.6.8 (chosen by the v0.8 accept 4 rule) runs its
    own benchmark >= 2x faster than CPython (median of interleaved runs) and passes its suite.
    **Progress 2026-10-21** (not met): 0.61x -> 0.69x after accept 1's step 1 (0.089 s

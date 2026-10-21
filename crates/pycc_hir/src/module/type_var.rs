@@ -11,9 +11,10 @@
 //! marked imported, so `strip_imported` keeps it out of
 //! `HirModule::type_aliases` and it never crosses a module boundary.
 //!
-//! Only the plain form is admitted: one positional string literal equal to
-//! the bound name, and no further arguments or keywords. A constrained or
-//! bounded `TypeVar` is refused rather than erased with its bound unchecked.
+//! Only the plain form is admitted in strict mode: one positional string
+//! literal equal to the bound name, and no further arguments or keywords. A
+//! constrained or bounded `TypeVar` is refused there rather than erased with
+//! its bound unchecked; non-strict mode erases it too (v0.9).
 
 use super::ModuleState;
 use crate::class::generic_base::names_typing_symbol;
@@ -43,10 +44,16 @@ pub(super) fn lower_type_var_decl(
         ));
     };
     let name = target.id.as_str();
-    let [Expr::StringLiteral(literal)] = &call.arguments.args[..] else {
-        return Err(plain_form_only(name, assign.range.into()));
+    // v0.9, non-strict mode: a constrained or bounded type variable
+    // (`TypeVar("N", int, float)`, `bound=...`) is erased like a plain one --
+    // CPython checks neither at run time -- and CPython makes the object.
+    let constrained_ok = crate::is_non_strict_program();
+    let literal = match &call.arguments.args[..] {
+        [Expr::StringLiteral(literal)] => literal,
+        [Expr::StringLiteral(literal), ..] if constrained_ok => literal,
+        _ => return Err(plain_form_only(name, assign.range.into())),
     };
-    if !call.arguments.keywords.is_empty() {
+    if !call.arguments.keywords.is_empty() && !constrained_ok {
         return Err(plain_form_only(name, assign.range.into()));
     }
     let spelled = literal.value.to_str();

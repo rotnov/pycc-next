@@ -561,9 +561,11 @@ pub(crate) fn plan_embed(
     // A non-strict program's classes, with their methods and constructors
     // (issues #8 and #9): what an `--ext` module publishes.
     let (publications, ctors) = if exports.classes {
-        let publications = ext_build::collect_class_publications(typed_hir, &exports.exports);
+        let mut publications = ext_build::collect_class_publications(typed_hir, &exports.exports);
         let mut ctors = ext_build::collect_constructors(typed_hir, &publications);
-        let signatures = ext_build::SourceSignatures::from_source(&crate::fallback::entry_source(entry));
+        let entry_source = crate::fallback::entry_source(entry);
+        ext_build::attach_class_bases(&mut publications, typed_hir, &entry_source);
+        let signatures = ext_build::SourceSignatures::from_source(&entry_source);
         ext_build::bind_ctor_keyword_names(typed_hir, &signatures, &mut ctors);
         (publications, ctors)
     } else {

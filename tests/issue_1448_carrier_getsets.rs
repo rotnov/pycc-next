@@ -306,7 +306,7 @@ const EXT_ONLY_OUT: &str = "base 0\n\
     private TypeError _P.x() argument 1: 'str' object cannot be interpreted as an integer\n\
     private 7\n\
     bare Bare False\n\
-    bare AttributeError 'pycc_carrier_getset_mod.Bare' object has no attribute 'items'\n";
+    bare AttributeError 'Bare' object has no attribute 'items'\n";
 
 fn run(script: &str, path_entry: &Path, cwd: &Path) -> Output {
     host_python()

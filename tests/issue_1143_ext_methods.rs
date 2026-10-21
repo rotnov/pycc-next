@@ -17,7 +17,7 @@
 //! `mod.Class.method` and really passes the null receiver a
 //! `@classmethod`'s compiled body expects. Instantiation of that type
 //! object was refused in PR 1 and is not any more -- see
-//! `the_published_type_is_immutable_and_now_constructible` below and
+//! `the_published_type_is_a_cpython_class_over_an_immutable_template_and_constructible` below and
 //! `tests/issue_1145_ext_instance_methods.rs`.
 
 use pycc_scratch::ScratchDir;
@@ -108,9 +108,12 @@ assert not hasattr(grid, 'make'), dir(grid)
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn the_published_type_is_immutable_and_now_constructible() {
-    // `Py_TPFLAGS_IMMUTABLETYPE` is unchanged since PR 1: a mutable type
-    // would let a host add a method the compiler never saw.
+fn the_published_type_is_a_cpython_class_over_an_immutable_template_and_constructible() {
+    // `Py_TPFLAGS_IMMUTABLETYPE` stays on the compiled template, but since
+    // v0.9 the module attribute is the public class made over it at the
+    // class statement (`pycc_ext_make_public_class_in`), mutable as a
+    // CPython class is: a host store is seen by Python code, while compiled
+    // static calls keep calling the compiled body (docs/DEVIATIONS.md).
     //
     // `Py_TPFLAGS_DISALLOW_INSTANTIATION` is *not* unchanged. PR 1 set it
     // because instance methods were unimplemented, so an instance would have
@@ -128,12 +131,15 @@ fn the_published_type_is_immutable_and_now_constructible() {
 import grid
 instance = grid.Grid()
 assert type(instance) is grid.Grid, type(instance)
+grid.Grid.other = 1
+assert grid.Grid.other == 1 and instance.other == 1
+template = grid.Grid.__mro__[1]
 try:
-    grid.Grid.other = 1
+    template.other = 1
 except TypeError:
     pass
 else:
-    raise AssertionError('the type should be immutable')
+    raise AssertionError('the template should be immutable')
 ",
     );
 }

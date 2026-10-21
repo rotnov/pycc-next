@@ -140,6 +140,10 @@ pub(crate) struct SignatureTable {
     /// objects, so an `except` naming one tests the caught exception against
     /// the object at run time (`pycc_ast::object_except_handlers`).
     foreign_import_names: HashSet<String>,
+    /// v0.9: the class names bound once by a top-level `class` statement
+    /// with a `Generic[...]` base, whose type parameter pycc erases
+    /// (`class::generic_base`): `C[T](args)` constructs a `C`.
+    legacy_generic_names: HashSet<String>,
 }
 
 impl SignatureTable {
@@ -168,6 +172,7 @@ impl SignatureTable {
         let mut by_name = HashMap::new();
         let mut class_like_names = HashSet::new();
         let mut foreign_import_names = HashSet::new();
+        let mut legacy_generic_names = HashSet::new();
         for stmt in body {
             match stmt {
                 Stmt::FunctionDef(def) if bound_once(def.name.as_str()) => {
@@ -177,6 +182,16 @@ impl SignatureTable {
                 }
                 Stmt::ClassDef(def) if bound_once(def.name.as_str()) => {
                     class_like_names.insert(def.name.as_str().to_string());
+                    let generic = def.arguments.as_ref().is_some_and(|arguments| {
+                        arguments.args.iter().any(|base| {
+                            matches!(base, pycc_ast::Expr::Subscript(sub)
+                                if matches!(&*sub.value, pycc_ast::Expr::Name(n) if n.id.as_str() == "Generic")
+                                    || matches!(&*sub.value, pycc_ast::Expr::Attribute(a) if a.attr.as_str() == "Generic"))
+                        })
+                    });
+                    if generic && def.type_params.is_none() {
+                        legacy_generic_names.insert(def.name.as_str().to_string());
+                    }
                 }
                 Stmt::ImportFrom(import) if is_project_import(import) => {
                     for alias in &import.names {
@@ -207,6 +222,7 @@ impl SignatureTable {
             rebound,
             class_like_names,
             foreign_import_names,
+            legacy_generic_names,
             object_receivers: false,
             non_strict: false,
             container_method_names: crate::expr::receiver_dispatch::defined_container_method_names(
@@ -247,6 +263,12 @@ impl SignatureTable {
     /// module that is not a project module (see the field's documentation).
     pub(crate) fn is_foreign_import(&self, name: &str) -> bool {
         self.foreign_import_names.contains(name)
+    }
+
+    /// v0.9: whether `name` is a class with a `Generic[...]` base (see the
+    /// field's documentation).
+    pub(crate) fn is_legacy_generic(&self, name: &str) -> bool {
+        self.legacy_generic_names.contains(name)
     }
 
     /// Issue #1188: every container method name some class reachable from

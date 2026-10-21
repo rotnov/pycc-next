@@ -71,6 +71,22 @@ PYCC_ENTRY int pycc_ext_publish(const char *name)
             PyErr_Format(PyExc_SystemError, "pycc: class '%s' has no type object", name);
             return -1;
         }
+        /* v0.9: the class itself, made from its template with the
+         * statement's bases (`pycc_ext_make_public_class_in`), replaces the
+         * template in this exec's snapshot and the class's static. */
+        if (pycc_ext_publish_class_bases(name) != NULL) {
+            PyObject *public_class = pycc_ext_make_public_class_in(
+                &pycc_ext_mod, module, name, type, pycc_ext_publish_class_bases(name));
+            PyObject *previous = *class_slot;
+
+            if (public_class == NULL || PyDict_SetItemString(classes, name, public_class) < 0) {
+                Py_XDECREF(public_class);
+                return -1;
+            }
+            *class_slot = public_class;
+            Py_XDECREF(previous);
+            return PyModule_AddObjectRef(module, name, public_class);
+        }
         return PyModule_AddObjectRef(module, name, type);
     }
     modname = PyModule_GetNameObject(module);

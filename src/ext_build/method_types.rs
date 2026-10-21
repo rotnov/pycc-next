@@ -185,6 +185,13 @@ pub(crate) fn method_types_c(
             "    {\"__copy__\", (PyCFunction)(void (*)(void))pycc_ext_instance_copy, \
              METH_NOARGS, NULL},\n",
         );
+        // v0.9: the template's `__init_subclass__`, which lets only the
+        // published class made from it through (`pycc_ext_publish`).
+        out.push_str(
+            "    {\"__init_subclass__\", \
+             (PyCFunction)(void (*)(void))pycc_ext_template_init_subclass, \
+             METH_VARARGS | METH_KEYWORDS | METH_CLASS, NULL},\n",
+        );
         out.push_str("    {NULL, NULL, 0, NULL},\n};\n\n");
         if let Some(ctor) = ctor {
             out.push_str(&tp_init_c(ctor));
@@ -237,11 +244,15 @@ pub(crate) fn method_types_c(
         // A non-constructible class keeps the `DISALLOW_INSTANTIATION` flag
         // Part 1 emitted; a constructible one must not refuse its own
         // constructor.
+        // v0.9: a template the published class derives from (and, for a
+        // class without bases of its own, the published class itself), so
+        // `Py_TPFLAGS_BASETYPE`; its `__init_subclass__` refuses any other
+        // subclass.
         let flags = match ctor {
-            Some(_) => "Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE",
+            Some(_) => "Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_BASETYPE",
             None => {
                 "Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION | \
-                 Py_TPFLAGS_IMMUTABLETYPE"
+                 Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_BASETYPE"
             }
         };
         out.push_str(&format!(
@@ -264,9 +275,23 @@ pub(crate) fn method_types_c(
         out.push_str("    (void)module;\n    return 0;\n}\n");
         return out;
     }
-    out.push_str("    PyObject *type;\n");
-    for published in publications {
+    out.push_str("    PyObject *type;\n    PyObject *base;\n");
+    // v0.9: base templates first, each template deriving from its first
+    // published compiled base's (or from the root carrier type), so
+    // templates combined by multiple inheritance share their layout.
+    for published in template_order(publications) {
         let class = &published.class;
+        let base = published.mro.iter().skip(1).find_map(|ancestor| {
+            publications
+                .iter()
+                .find(|other| other.class == *ancestor)
+                .map(|other| format!("pycc_ext_type_object_{}", other.class))
+        });
+        out.push_str(&match base {
+            Some(base) => format!("    base = {base};\n"),
+            None => "    base = pycc_ext_template_base();\n".to_string(),
+        });
+        out.push_str("    if (base == NULL) {\n        return -1;\n    }\n");
         // The carrier-type cache (#1435) takes its own reference, so on a
         // failing arm the local one is released, which keeps a failed
         // registration from leaking the type. On success the local
@@ -281,7 +306,7 @@ pub(crate) fn method_types_c(
             out.push_str(&richcompare::unhashable_fixup(entry, &array));
         }
         out.push_str(&format!(
-            "    type = PyType_FromSpec(&pycc_ext_type_spec_{class});\n    \
+            "    type = PyType_FromSpecWithBases(&pycc_ext_type_spec_{class}, base);\n    \
              if (type == NULL) {{\n        return -1;\n    }}\n{constants}    \
              if (pycc_ext_carrier_register(\"{class}\", type) < 0) {{\n        \
              Py_DECREF(type);\n        return -1;\n    }}\n    \
@@ -325,7 +350,56 @@ fn publish_class_c(publications: &[ExtPublishedClass]) -> String {
         ));
     }
     out.push_str("    (void)name;\n    return NULL;\n}\n\n");
+    // v0.9: each published class's statement arguments, from which the
+    // module makes the class when the statement runs.
+    out.push_str(&format!("{PUBLISH_CLASS_BASES_DECL}\n{{\n"));
+    for published in publications {
+        if let Some(bases) = &published.bases {
+            out.push_str(&format!(
+                "    if (strcmp(name, \"{}\") == 0) {{\n        return {};\n    }}\n",
+                published.class,
+                keywords::c_name(bases)
+            ));
+        }
+    }
+    out.push_str("    (void)name;\n    return NULL;\n}\n\n");
     out
+}
+
+/// The generated lookup of a published class's statement arguments
+/// (`ExtPublishedClass::bases`), which the shim's `pycc_ext_publish` calls:
+/// `NULL` for a class published with no bases of its own.
+pub(crate) const PUBLISH_CLASS_BASES_DECL: &str =
+    "static const char *pycc_ext_publish_class_bases(const char *name)";
+
+/// `publications` with every class after the published classes its MRO
+/// names, so a template's base template exists when it is created.
+fn template_order(publications: &[ExtPublishedClass]) -> Vec<&ExtPublishedClass> {
+    let mut ordered: Vec<&ExtPublishedClass> = Vec::new();
+    while ordered.len() < publications.len() {
+        let before = ordered.len();
+        for published in publications {
+            if ordered.iter().any(|done| done.class == published.class) {
+                continue;
+            }
+            let ready = published.mro.iter().skip(1).all(|ancestor| {
+                !publications.iter().any(|other| other.class == *ancestor)
+                    || ordered.iter().any(|done| done.class == *ancestor)
+            });
+            if ready {
+                ordered.push(published);
+            }
+        }
+        if ordered.len() == before {
+            // A cycle cannot come from a linear MRO; keep the rest in order.
+            for published in publications {
+                if !ordered.iter().any(|done| done.class == published.class) {
+                    ordered.push(published);
+                }
+            }
+        }
+    }
+    ordered
 }
 
 /// The generated `isinstance` against a class compiled in this module

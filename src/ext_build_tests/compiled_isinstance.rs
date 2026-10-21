@@ -20,6 +20,7 @@ fn the_compiled_class_isinstance_tests_each_published_type_whose_mro_names_the_c
         methods: vec![static_export(class, "m", vec![], Ty::Int)],
         mro: mro.iter().map(|name| name.to_string()).collect(),
         constants: Vec::new(),
+        bases: None,
     };
     let c = compiled_class_isinstance_c(&[
         published("Base", &["Base", "object"]),

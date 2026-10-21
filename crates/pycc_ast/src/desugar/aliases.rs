@@ -265,7 +265,7 @@ fn parameters(args: Vec<ParameterWithDefault>, range: TextRange) -> Parameters {
     }
 }
 
-fn inferred_def(name: &str, params: Parameters, body: Expr, range: TextRange) -> Stmt {
+pub(super) fn inferred_def(name: &str, params: Parameters, body: Expr, range: TextRange) -> Stmt {
     annotated_def(name, params, body, load(INFER_MARKER, range), range)
 }
 

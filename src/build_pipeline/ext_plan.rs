@@ -159,7 +159,9 @@ pub(super) fn plan_ext(
     // `collect_class_publications` copies the method exports.
     let signatures = ext_build::SourceSignatures::from_source(&entry_source);
     ext_build::bind_keyword_names(typed_hir, &signatures, &mut exports);
-    let publications = ext_build::collect_class_publications(typed_hir, &exports);
+    let mut publications = ext_build::collect_class_publications(typed_hir, &exports);
+    // v0.9: each published class is made with its statement's real bases.
+    ext_build::attach_class_bases(&mut publications, typed_hir, &entry_source);
     let mut ctors = ext_build::collect_constructors(typed_hir, &publications);
     ext_build::bind_ctor_keyword_names(typed_hir, &signatures, &mut ctors);
     // #1448: every carrier type's descriptor table, published or not.

@@ -305,10 +305,12 @@ import my as inner
 /// for one value. Every compiled static -- each class's type object, the
 /// carrier cache, every `fnptr_` slot -- is one per process, so after the
 /// inner exec compiled code constructs and recognises that exec's `C`.
-/// Each module binds its own exec's class, as before #1199, so
-/// `outer.make()` is not an instance of `outer.C`; CPython builds outer's
-/// own `C` there.
-fn assert_each_module_binds_its_own_exec_class(label: &str, module: &str) {
+/// Each module binds its own exec's class, as before #1199. Since v0.9 the
+/// class statement makes the public class and stores it in the type static
+/// too, so compiled code constructs the class of whichever class statement
+/// ran last: `expected` is that process-wide answer, while CPython builds
+/// each module's own `C`.
+fn assert_each_module_binds_its_own_exec_class(label: &str, module: &str, expected: &str) {
     let fixture = Fixture::new(label, module, NESTED_EXEC_HELPER);
     let driver = "import my\nimport cb\n\
                   outer, inner = cb.outer, cb.inner\n\
@@ -319,10 +321,7 @@ fn assert_each_module_binds_its_own_exec_class(label: &str, module: &str) {
     let oracle = fixture.run(&fixture.src, driver);
     assert_ok(&compiled);
     assert_ok(&oracle);
-    assert_eq!(
-        stdout_of(&compiled),
-        "False True False\nFalse True True 5 5\n"
-    );
+    assert_eq!(stdout_of(&compiled), expected);
     assert_eq!(
         stdout_of(&oracle),
         "False True False\nTrue False True 5 5\n"
@@ -331,7 +330,8 @@ fn assert_each_module_binds_its_own_exec_class(label: &str, module: &str) {
 
 /// The cycle runs before the outer class statement, so the outer module
 /// binds `C` after the inner exec replaced the type static: it binds the
-/// type its own exec snapshotted, not the replacement.
+/// type its own exec snapshotted, not the replacement, and its class
+/// statement -- the last to run -- is the class compiled code constructs.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn a_nested_exec_before_the_class_statement_leaves_each_module_its_own_class() {
@@ -351,6 +351,7 @@ class C:
     def get(self) -> int:
         return self.v
 "#,
+        "False True False\nTrue False False 5 5\n",
     );
 }
 
@@ -375,6 +376,7 @@ def make() -> object:
 
 import cb
 "#,
+        "False True False\nFalse True True 5 5\n",
     );
 }
 

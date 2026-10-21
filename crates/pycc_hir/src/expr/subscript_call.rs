@@ -45,6 +45,19 @@ pub(super) fn lower(
     imports: &[ImportBinding],
     signatures: &SignatureTable,
 ) -> Result<HirExpr, Diagnostic> {
+    // v0.9: `C[int](args)` of a class with a `Generic[...]` base, whose type
+    // parameter is erased: the `C` that `C[int]` calls.
+    if let Expr::Name(base) = sub.value.as_ref()
+        && signatures.is_legacy_generic(base.id.as_str())
+        && call.arguments.keywords.is_empty()
+        && matches!(sub.slice.as_ref(), Expr::Name(_) | Expr::Attribute(_) | Expr::StringLiteral(_))
+    {
+        let args = lower_args(call, in_function, class_name, imports, signatures)?;
+        return Ok(HirExpr::Call {
+            callee: base.id.as_str().to_string(),
+            args,
+        });
+    }
     if let Expr::Name(base) = sub.value.as_ref()
         && (signatures.is_class_like(base.id.as_str()) || is_scalar_type_name(&sub.slice))
     {

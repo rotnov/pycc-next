@@ -263,8 +263,8 @@ const DEVIATION_DRIVER: &str = "import pycc_inst_dev_mod as mod\n\
     e = mod.Esc(seen.append)\n\
     print(seen[0] is e, type(seen[0]) is mod.Esc)\n";
 
-/// `isinstance` against a base: CPython `True` (published carrier types are
-/// flat); attribute read through `R`'s carrier: CPython `True`, and since
+/// `isinstance` against a base: CPython `True`, and since v0.9 pycc's too
+/// (a published class is made with its real bases); attribute read through `R`'s carrier: CPython `True`, and since
 /// #1442 pycc's too (a constructible class's type carries a descriptor
 /// per field, writable for a slot since Part 1 of #1443); attribute read
 /// through `Same`'s carrier: CPython `True`, and since #1448 pycc's too --
@@ -278,7 +278,7 @@ const DEVIATION_DRIVER: &str = "import pycc_inst_dev_mod as mod\n\
 /// `self` escaping during `__init__`:
 /// CPython `True True` (the escape is packed before `tp_init` links the
 /// host's object, so it gets its own carrier of the same type).
-const DEVIATION_PINNED: &str = "False\nTrue\nTrue\nTrue\nFalse\nFalse True\n";
+const DEVIATION_PINNED: &str = "True\nTrue\nTrue\nTrue\nFalse\nFalse True\n";
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]

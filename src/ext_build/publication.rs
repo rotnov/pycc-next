@@ -37,6 +37,11 @@ pub(crate) struct ExtPublishedClass {
     /// them from Python as CPython does. A class attribute compiled code
     /// folds is a constant, so the copy never goes stale.
     pub(crate) constants: Vec<(String, pycc_hir::ClassAttrValue)>,
+    /// v0.9: the class statement's arguments as source text (`(Generic[T],
+    /// Base)`), which the module evaluates when the statement runs to make
+    /// the published class with its real bases ([`attach_class_bases`]);
+    /// `None` publishes it with no bases of its own.
+    pub(crate) bases: Option<String>,
 }
 
 /// The published classes and, for each, its MRO-resolved method set.
@@ -181,10 +186,64 @@ pub(crate) fn collect_class_publications(
                 methods,
                 mro: class_def.mro.clone(),
                 constants: class_constants(module, class_def),
+                bases: None,
             });
         }
     }
     published
+}
+
+/// v0.9: records each published class's statement arguments (`(Generic[T],
+/// Base)`, `()` for none) from the module's source, so the module makes the
+/// published class with its real bases when the statement runs
+/// (`pycc_ext_make_public_class`). A class keeps `None` -- published with no
+/// bases of its own, as before -- when a base names a class of this module
+/// that is not published (the statement could not name it), when it is an
+/// enum, or when the source does not parse.
+pub(crate) fn attach_class_bases(
+    publications: &mut [ExtPublishedClass],
+    module: &HirModule,
+    source: &str,
+) {
+    let Ok(parsed) = pycc_parser::parse_all(source) else {
+        return;
+    };
+    let published: Vec<String> = publications.iter().map(|p| p.class.clone()).collect();
+    for stmt in &parsed.body {
+        let pycc_ast::Stmt::ClassDef(class) = stmt else {
+            continue;
+        };
+        let Some(entry) = publications
+            .iter_mut()
+            .find(|entry| entry.class == class.name.as_str())
+        else {
+            continue;
+        };
+        let compiled = |name: &str| module.class_defs.iter().find(|(held, _)| held == name);
+        if compiled(class.name.as_str()).is_some_and(|(_, def)| def.is_enum) {
+            continue;
+        }
+        let unnamable = class.arguments.as_ref().is_some_and(|arguments| {
+            arguments.args.iter().any(|base| {
+                matches!(base, pycc_ast::Expr::Name(n)
+                    if compiled(n.id.as_str()).is_some()
+                        && !published.iter().any(|p| p == n.id.as_str()))
+            })
+        });
+        if unnamable {
+            continue;
+        }
+        entry.bases = Some(match &class.arguments {
+            Some(arguments) => {
+                let range: std::ops::Range<u32> = arguments.range.into();
+                source
+                    .get(range.start as usize..range.end as usize)
+                    .unwrap_or("()")
+                    .to_string()
+            }
+            None => "()".to_string(),
+        });
+    }
 }
 
 /// The literal class attributes `class_def` reads through its MRO, each

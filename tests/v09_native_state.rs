@@ -248,6 +248,48 @@ fn lambda_alias_from_python_ext() {
     ext_hosted("v09_escapes", "v09_escapes_host", &[]);
 }
 
+/// `name = lambda ...`, `staticmethod(lambda ...)` and `classmethod(lambda
+/// ...)` in a class body are methods of a native class
+/// (`pycc_ast::desugar::class_lambdas`).
+#[test]
+fn class_body_lambdas_native() {
+    native("v09_class_lambdas", &[]);
+}
+
+#[test]
+fn class_body_lambdas_ext() {
+    ext("v09_class_lambdas", &[]);
+}
+
+#[test]
+fn class_body_lambdas_from_python_ext() {
+    ext_hosted("v09_class_lambdas", "v09_class_lambdas_host", &[]);
+}
+
+/// `Generic[...]` bases with plain and constrained type variables, and a
+/// compiled base: the published classes are made with their real bases
+/// (`pycc_ext_make_public_class_in`), so CPython code sees `Generic`'s
+/// machinery and the compiled subclass relation.
+#[test]
+fn generic_and_compiled_bases_native() {
+    native("v09_generic", &[]);
+}
+
+#[test]
+fn generic_and_compiled_bases_ext() {
+    ext("v09_generic", &[]);
+}
+
+#[test]
+fn generic_and_compiled_bases_from_python_ext() {
+    ext_hosted("v09_generic", "v09_generic_host", &[]);
+}
+
+#[test]
+fn generic_and_compiled_bases_from_python_ext_release() {
+    ext_hosted("v09_generic", "v09_generic_host", &["--release"]);
+}
+
 #[test]
 fn object_varargs_from_python_ext_release() {
     ext_hosted("v09_varargs", "v09_varargs_host", &["--release"]);

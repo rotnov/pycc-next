@@ -56,9 +56,9 @@ def re_all(items):
 
 
 samples = ["plain", "a<b>&c", "\"q\" 'x'", "", "café <中>", "<<&&>>"]
-print(esc_all(samples))
+print(ascii(esc_all(samples)))  # ascii: a native build on Windows prints cp1252
 print(rebound("abc"), identity("plain"), identity("a<b"), bad(3))
-print(re_all(samples + ["a.b*c", "(x|y)\t\n#~ &", "a", "\u00e9t\u00e9"]))
+print(ascii(re_all(samples + ["a.b*c", "(x|y)\t\n#~ &", "a", "\u00e9t\u00e9"])))
 print(re.escape(b"a.b"), re.escape(Tagged("1+1")))
 print(re.compile(re.escape("1+1=2")).match("1+1=2") is not None)
 t = Tagged("x<y")

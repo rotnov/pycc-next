@@ -294,6 +294,7 @@ show("private", lambda: rc.give_private(lambda p: (type(p).__name__, p == 3, p !
 show("private self", lambda: rc.give_private(lambda p: p == p, 1))
 nc = rc.make_nc()
 show("unpublished self", lambda: nc == nc)
+show("reflected", lambda: (rc.Base(1) == rc.Over(1), rc.Over(1) == rc.Base(1)))
 "#;
 
 const DRIVER_OUT: &str = "issue (True, False)\n\
@@ -325,14 +326,12 @@ const DRIVER_OUT: &str = "issue (True, False)\n\
     dataclass hash TypeError\n\
     private ('_P', False, True)\n\
     private self True\n\
-    unpublished self True\n";
+    unpublished self True\n\
+    reflected (False, False)\n";
 
 /// Each line differs from CPython by design (D-244's #1427 amendment);
 /// [`CPYTHON_EXT_ONLY_OUT`] is CPython's answer to the same lines.
 ///
-/// - `reflected`: published types are flat, so `Over`'s type is no
-///   subtype of `Base`'s and the host never tries the subclass's reflected
-///   `__eq__` first.
 /// - `typed other`: a comparison whose parameter is annotated with a
 ///   compiled class answers `NotImplemented` for an operand of any other
 ///   type without running the body (as a `@dataclass`'s `__eq__` does), so
@@ -349,12 +348,14 @@ const DRIVER_OUT: &str = "issue (True, False)\n\
 ///   field) while the module, unlike CPython's, has no `NC` attribute.
 ///   (Since #1448 a hidden carrier type also carries its field
 ///   descriptors, so `private self` and `unpublished self`, whose compiled
-///   bodies read `other.v`, moved to [`DRIVER`].)
+///   bodies read `other.v`, moved to [`DRIVER`]. Since v0.9 a published
+///   class is made with its real bases, so `Over`'s class is a subclass of
+///   `Base`'s and the host tries the subclass's reflected `__eq__` first as
+///   CPython does: `reflected` moved to [`DRIVER`] too.)
 /// - `uninitialized`: an object `tp_init` never filled has no instance for
 ///   the compiled method to run on: `TypeError: H.__hash__() called on an
 ///   uninitialized instance`, where CPython's body raises `AttributeError`.
-const EXT_ONLY_DRIVER: &str = r#"show("reflected", lambda: (rc.Base(1) == rc.Over(1), rc.Over(1) == rc.Base(1)))
-show("typed other", lambda: rc.TypedBare(1) == 3)
+const EXT_ONLY_DRIVER: &str = r#"show("typed other", lambda: rc.TypedBare(1) == 3)
 show("typed none", lambda: rc.TypedNone(1) == None)
 show("scalar other", lambda: rc.IntEq(1) == "x")
 n = rc.make_nc()
@@ -363,15 +364,13 @@ u = rc.H.__new__(rc.H)
 show("uninitialized", lambda: (hash(u), u == rc.H(1)))
 "#;
 
-const EXT_ONLY_OUT: &str = "reflected (True, False)\n\
-    typed other False\n\
+const EXT_ONLY_OUT: &str = "typed other False\n\
     typed none False\n\
     scalar other TypeError\n\
     unpublished ('NC', False, False)\n\
     uninitialized TypeError\n";
 
-const CPYTHON_EXT_ONLY_OUT: &str = "reflected (False, False)\n\
-    typed other AttributeError\n\
+const CPYTHON_EXT_ONLY_OUT: &str = "typed other AttributeError\n\
     typed none True\n\
     scalar other False\n\
     unpublished ('NC', True, False)\n\

@@ -349,7 +349,8 @@ fn an_unpublished_class_gets_a_hidden_carrier_type_registered_up_front() {
     // `PyObject_HashNotImplemented` before the spec is read; a hashable
     // one's array is left alone.
     assert!(inc.contains(
-        "    pycc_ext_unhashable_slots(pycc_ext_type_slots_Eq);\n    type = PyType_FromSpec(&pycc_ext_type_spec_Eq);"
+        "    pycc_ext_unhashable_slots(pycc_ext_type_slots_Eq);\n    \
+         type = PyType_FromSpecWithBases(&pycc_ext_type_spec_Eq, base);"
     ));
     assert!(!inc.contains("pycc_ext_unhashable_slots(pycc_ext_carrier_slots__Private)"));
     assert!(!inc.contains("pycc_ext_unhashable_slots(pycc_ext_type_slots_HashOnly)"));

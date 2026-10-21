@@ -120,7 +120,10 @@ fn an_unparsable_or_silent_source_enables_nothing() {
     let (exports, ctors, inc) = bound(MODULE, &broken);
     assert!(exports.iter().all(|export| export.keyword_names.is_none()));
     assert!(ctors.iter().all(|ctor| ctor.keyword_names.is_none()));
-    assert!(!inc.contains("METH_KEYWORDS"), "{inc}");
+    // The template's `__init_subclass__` row binds keywords as CPython's
+    // own does; no compiled export does.
+    let exports_only = inc.replace("METH_VARARGS | METH_KEYWORDS | METH_CLASS", "");
+    assert!(!exports_only.contains("METH_KEYWORDS"), "{inc}");
     assert!(!inc.contains("kwnames"), "{inc}");
     assert!(!inc.contains("kw_slots"), "{inc}");
 }

@@ -61,7 +61,11 @@ fn an_exported_method_gets_a_method_table_a_slot_table_and_a_non_instantiable_sp
              {\"make\", (PyCFunction)(void (*)(void))pycc_ext_wrap_0m4_Grid4_make11_classmethod, \
              METH_FASTCALL | METH_CLASS, NULL},\n    \
              {\"__copy__\", (PyCFunction)(void (*)(void))pycc_ext_instance_copy, \
-             METH_NOARGS, NULL},\n    {NULL, NULL, 0, NULL},\n};\n"
+             METH_NOARGS, NULL},\n    \
+             {\"__init_subclass__\", (PyCFunction)(void (*)(void))\
+             pycc_ext_template_init_subclass, \
+             METH_VARARGS | METH_KEYWORDS | METH_CLASS, NULL},\n    \
+             {NULL, NULL, 0, NULL},\n};\n"
         ),
         "{inc}"
     );
@@ -77,24 +81,27 @@ fn an_exported_method_gets_a_method_table_a_slot_table_and_a_non_instantiable_sp
     );
     // `basicsize` is the carrier's, because an instance crossing as a call
     // argument is boxed in this type (#1435); `Py_TPFLAGS_DISALLOW_INSTANTIATION`
-    // plus `Py_TPFLAGS_IMMUTABLETYPE` are what make `mod.Grid()` and
-    // `mod.Grid.scale = ...` both `TypeError`.
+    // makes `mod.Grid()` a `TypeError`, and the template stays
+    // `Py_TPFLAGS_IMMUTABLETYPE` under the public class made over it (v0.9).
     assert!(
         inc.contains(
             "static PyType_Spec pycc_ext_type_spec_Grid = {\n    \
              PYCC_EXT_MODULE_NAME_STR \".Grid\",\n    sizeof(PyccExtInstance),\n    0,\n    \
              Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION | \
-             Py_TPFLAGS_IMMUTABLETYPE,\n    pycc_ext_type_slots_Grid,\n};\n"
+             Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_BASETYPE,\n    pycc_ext_type_slots_Grid,\n};\n"
         ),
         "{inc}"
     );
     // The type enters the shim's carrier-type cache, and a failure releases
     // the local reference. It is not added to the module here (#1199):
-    // `pycc_ext_publish` binds it from its static once its class statement
-    // has run.
+    // `pycc_ext_publish` makes the public class over it once its class
+    // statement has run. With no published compiled base its base is the
+    // root `pycc.compiled`.
     assert!(
         inc.contains(
-            "    type = PyType_FromSpec(&pycc_ext_type_spec_Grid);\n    \
+            "    base = pycc_ext_template_base();\n    \
+             if (base == NULL) {\n        return -1;\n    }\n    \
+             type = PyType_FromSpecWithBases(&pycc_ext_type_spec_Grid, base);\n    \
              if (type == NULL) {\n        return -1;\n    }\n    \
              if (pycc_ext_carrier_register(\"Grid\", type) < 0) {\n        \
              Py_DECREF(type);\n        return -1;\n    }\n    \
@@ -431,19 +438,20 @@ fn a_constructible_class_gets_a_tp_init_three_slots_and_a_carrier_sized_spec() {
         ),
         "{inc}"
     );
-    // `DISALLOW_INSTANTIATION` is gone, while `IMMUTABLETYPE` stays and `BASETYPE` is still absent: a host may
-    // build an instance but may neither rebind the type's attributes nor
-    // subclass it.
+    // `DISALLOW_INSTANTIATION` is gone and `IMMUTABLETYPE` stays on the
+    // template; `BASETYPE` lets the public class be made over it (v0.9),
+    // while the template's `__init_subclass__` still refuses any other
+    // subclass.
     assert!(
         inc.contains(
             "static PyType_Spec pycc_ext_type_spec_Grid = {\n    \
              PYCC_EXT_MODULE_NAME_STR \".Grid\",\n    sizeof(PyccExtInstance),\n    0,\n    \
-             Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE,\n    \
+             Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_BASETYPE,\n    \
              pycc_ext_type_slots_Grid,\n};\n"
         ),
         "{inc}"
     );
-    assert!(!inc.contains("Py_TPFLAGS_BASETYPE"), "{inc}");
+    assert!(inc.contains("pycc_ext_template_init_subclass"), "{inc}");
 }
 
 #[test]
@@ -554,7 +562,7 @@ fn a_published_class_with_no_constructor_descriptor_is_a_non_instantiable_carrie
             "static PyType_Spec pycc_ext_type_spec_Grid = {\n    \
              PYCC_EXT_MODULE_NAME_STR \".Grid\",\n    sizeof(PyccExtInstance),\n    0,\n    \
              Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION | \
-             Py_TPFLAGS_IMMUTABLETYPE,\n    pycc_ext_type_slots_Grid,\n};\n"
+             Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_BASETYPE,\n    pycc_ext_type_slots_Grid,\n};\n"
         ),
         "{without}"
     );

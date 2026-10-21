@@ -434,7 +434,8 @@ and setuptools): that is the test harness, not a change to the packages.
   code), an attribute holding a callable called like a method (`self.escape(s)`), an
   instance tested with `is` against an object (a sentinel), a private class (published,
   with its methods, in an `--ext` module), `*args`/`**kwargs` of objects in a constructor,
-  a static method or a function (bound for Python callers as CPython binds them). In an `--ext` module a compiled class whose
+  a static method or a function (bound for Python callers as CPython binds them), a
+  `Generic[...]` base, a `lambda` bound in the class body. In an `--ext` module a compiled class whose
   method cannot compile stays a native class, that method attached to it as a CPython
   function. A decorated top-level function keeps its `def` (decorators, defaults,
   signature) in CPython and its body compiled. `--report-fallbacks` reports each

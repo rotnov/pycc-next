@@ -444,6 +444,17 @@ impl Plan {
             {
                 return self.binds_alone(index);
             }
+            // A type variable (`T = TypeVar("T")`), which compiled code only
+            // records at compile time (`pycc_hir`'s `type_var`): CPython
+            // makes the module's `T`, which `Generic[T]` and Python code read.
+            Stmt::Assign(assign)
+                if matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)])
+                    && matches!(&*assign.value, pycc_ast::Expr::Call(call)
+                        if matches!(&*call.func, pycc_ast::Expr::Name(f) if f.id.as_str() == "TypeVar")
+                            || matches!(&*call.func, pycc_ast::Expr::Attribute(a) if a.attr.as_str() == "TypeVar")) =>
+            {
+                return self.binds_alone(index);
+            }
             Stmt::Assign(assign) => {
                 return matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)])
                     && matches!(&*assign.value, pycc_ast::Expr::Attribute(attr)

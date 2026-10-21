@@ -559,7 +559,7 @@ pub(crate) use signatures::{install as install_signatures, signature_chunk};
 pub(crate) use precompiled::{install as install_precompiled, precompile};
 
 use publication::namespace_owner;
-pub(crate) use publication::{ExtPublishedClass, collect_class_publications};
+pub(crate) use publication::{ExtPublishedClass, attach_class_bases, collect_class_publications};
 mod wrappers;
 pub(crate) use wrappers::*;
 mod shim_split;

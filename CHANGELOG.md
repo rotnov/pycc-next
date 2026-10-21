@@ -71,6 +71,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   walked the MRO again. Which keys collided depended on the artifact's layout (pystache:
   up to 57k instructions per round of its benchmark). pystache with the three entries
   above: 611k -> 582k instructions per round, Python frames per round 52 -> 40.
+- A lambda bound in a class body (`key = lambda self, x: ...`, `staticmethod(lambda
+  x: ...)`, `classmethod(lambda cls, x: ...)`) is a method of the native class; it used
+  to send the class to CPython (non-strict mode).
+- A published compiled class is made when its `class` statement runs, by its metaclass,
+  from its statement's real bases and a compiled template carrying its methods and
+  instance layout: CPython runs the class machinery (MRO, `__init_subclass__`,
+  `__mro_entries__`), so `class Box(Generic[T])` -- with a plain, constrained or bounded
+  type variable (non-strict) -- is native and CPython code sees `Box[int]`,
+  `__parameters__` and `__orig_bases__`, and a compiled subclass is a CPython subclass of
+  its compiled base (`issubclass(Derived, Base)`). Such classes ran in CPython, and
+  `Box[int](x)` in compiled code crashed the compiler. The public class is mutable as a
+  CPython class is (the template stays immutable and still refuses Python subclasses);
+  an attribute error names the class as CPython does (`'Conf' object has no attribute`).
 - Fixed: raising a compiled exception class with a CPython object argument (`raise
   MissingError(name)` in non-strict code) failed the build in code generation; the
   function raising it now runs in CPython, which keeps the object in `args`.

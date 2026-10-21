@@ -89,6 +89,275 @@ static void pycc_ext_carrier_bind(PyObject *self, void *inst)
     }
 }
 
+/*
+ * v0.9: published classes with their real bases. Each published class's
+ * `PyType_FromSpec` type is a *template* -- its layout (a carrier), slots,
+ * methods and field descriptors -- and the class CPython code sees is made
+ * from it when the class statement runs (`pycc_ext_publish`): its
+ * metaclass called with `(template, *bases)`, the statement's own bases
+ * evaluated in the module's namespace and resolved as `__build_class__`
+ * resolves them (`__mro_entries__`, `__orig_bases__`, the metaclass and its
+ * `__prepare__`), `__slots__ = ()` so instances keep the template's layout.
+ * CPython runs the class machinery -- the MRO, `__init_subclass__`
+ * (`Generic`'s), `__set_name__` -- and the class is entered as its
+ * instances' carrier type. Every template derives from one root carrier
+ * type (or from its compiled base's template), so templates of classes
+ * combined by multiple inheritance share their instance layout.
+ */
+
+/* The root of every template: the carrier layout, nothing else. */
+static PyObject *pycc_ext_template_root = NULL;
+
+static PyType_Slot pycc_ext_template_root_slots[] = {
+    {Py_tp_dealloc, (void *)pycc_ext_instance_dealloc},
+    {0, NULL},
+};
+
+static PyType_Spec pycc_ext_template_root_spec = {
+    "pycc.compiled",
+    0,
+    0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_IMMUTABLETYPE
+        | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    pycc_ext_template_root_slots,
+};
+
+/* The base a template without a published compiled base derives from (a
+ * borrowed reference), or NULL with an exception set. */
+static PyObject *pycc_ext_template_base(void)
+{
+    if (pycc_ext_template_root == NULL) {
+        pycc_ext_template_root_spec.basicsize = (int)sizeof(PyccExtInstance);
+        pycc_ext_template_root = PyType_FromSpec(&pycc_ext_template_root_spec);
+    }
+    return pycc_ext_template_root;
+}
+
+/* Whether `type` is a carrier type of this artifact: one whose instances
+ * deallocate through this file's `pycc_ext_instance_dealloc` (a template,
+ * a hidden carrier type), or a published class made from a template, whose
+ * own deallocator is CPython's `subtype_dealloc`. */
+static int pycc_ext_is_carrier_type(PyTypeObject *type)
+{
+    return PyType_GetSlot(type, Py_tp_dealloc) == (void *)pycc_ext_instance_dealloc
+           || (pycc_ext_template_root != NULL
+               && PyType_IsSubtype(type, (PyTypeObject *)pycc_ext_template_root));
+}
+
+/* Whether a published class is being made from its template: its
+ * `__init_subclass__` lets exactly that subclass through. */
+static int pycc_ext_making_public_class = 0;
+
+/*
+ * A template's `__init_subclass__`: the published class made from it calls
+ * the next one along its MRO (`Generic`'s, which records the type
+ * parameters); any other subclass -- Python code subclassing a compiled
+ * class -- is refused as a type without `Py_TPFLAGS_BASETYPE` is, because
+ * compiled methods bind their calls to the class's own methods statically.
+ */
+static PyObject *pycc_ext_template_init_subclass(PyObject *cls, PyObject *args, PyObject *kwargs)
+{
+    PyObject *mro;
+    PyObject *template;
+    PyObject *super;
+    PyObject *next;
+    PyObject *result;
+    PyObject *base_args[2];
+
+    mro = PyObject_GetAttrString(cls, "__mro__");
+    if (mro == NULL) {
+        return NULL;
+    }
+    if (!PyTuple_Check(mro) || PyTuple_Size(mro) < 3) {
+        Py_DECREF(mro);
+        PyErr_SetString(PyExc_SystemError, "pycc: a compiled class's subclass has no MRO");
+        return NULL;
+    }
+    if (!pycc_ext_making_public_class) {
+        PyObject *base = PyTuple_GetItem(mro, 1);
+        PyObject *module = PyObject_GetAttrString(base, "__module__");
+        PyObject *qualname = PyObject_GetAttrString(base, "__qualname__");
+
+        if (module != NULL && qualname != NULL) {
+            PyErr_Format(PyExc_TypeError, "type '%U.%U' is not an acceptable base type",
+                         module, qualname);
+        }
+        Py_XDECREF(module);
+        Py_XDECREF(qualname);
+        Py_DECREF(mro);
+        return NULL;
+    }
+    /* `super(root, cls).__init_subclass__(*args, **kwargs)`: every
+     * template's hook shares this body, so the call skips past the root
+     * every template derives from, to the bases CPython code wrote
+     * (`Generic`'s hook). */
+    template = pycc_ext_template_root;
+    base_args[0] = template;
+    base_args[1] = cls;
+    super = PyObject_Vectorcall((PyObject *)&PySuper_Type, base_args, 2, NULL);
+    Py_DECREF(mro);
+    if (super == NULL) {
+        return NULL;
+    }
+    next = PyObject_GetAttrString(super, "__init_subclass__");
+    Py_DECREF(super);
+    if (next == NULL) {
+        return NULL;
+    }
+    result = PyObject_Call(next, args, kwargs);
+    Py_DECREF(next);
+    return result;
+}
+
+/* The function that makes a published class from its template (Python:
+ * `types.resolve_bases` and `types.prepare_class` are `__build_class__`'s
+ * own rules), compiled once. */
+static PyObject *pycc_ext_class_maker = NULL;
+
+static const char *const pycc_ext_class_maker_lines[] = {
+    "_skip = frozenset(('__module__', '__qualname__', '__doc__', '__dict__', '__weakref__',\n",
+    "                    '__init_subclass__', '__new__', '__slots__'))\n",
+    "def _pycc_make_class(template, name, module, args, kwargs, _types=__import__('types')):\n",
+    "    bases = tuple(args)\n",
+    "    resolved = tuple(_types.resolve_bases(bases))\n",
+    "    full = (template,) + resolved\n",
+    "    meta, ns, kwds = _types.prepare_class(name, full, dict(kwargs))\n",
+    "    ns['__module__'] = module\n",
+    "    ns['__qualname__'] = name\n",
+    "    ns['__slots__'] = ()\n",
+    "    for key, value in template.__dict__.items():\n",
+    "        if key not in _skip:\n",
+    "            ns.setdefault(key, value)\n",
+    "    if resolved != bases:\n",
+    "        ns['__orig_bases__'] = bases\n",
+    "    return meta(name, full, ns, **kwds)\n",
+    NULL,
+};
+
+static PyObject *pycc_ext_get_class_maker(void)
+{
+    PyObject *globals;
+    PyObject *code;
+    PyObject *result;
+
+    if (pycc_ext_class_maker != NULL) {
+        return pycc_ext_class_maker;
+    }
+    globals = PyDict_New();
+    if (globals == NULL) {
+        return NULL;
+    }
+    if (PyDict_SetItemString(globals, "__builtins__", PyEval_GetBuiltins()) < 0) {
+        Py_DECREF(globals);
+        return NULL;
+    }
+    {
+        char source[4096];
+        size_t used = 0;
+        const char *const *line;
+
+        source[0] = '\0';
+        for (line = pycc_ext_class_maker_lines; *line != NULL; line++) {
+            size_t len = strlen(*line);
+            if (used + len + 1 > sizeof source) {
+                break;
+            }
+            memcpy(source + used, *line, len + 1);
+            used += len;
+        }
+        code = Py_CompileString(source, "<pycc class>", Py_file_input);
+    }
+    result = code == NULL ? NULL : PyEval_EvalCode(code, globals, globals);
+    Py_XDECREF(code);
+    if (result == NULL) {
+        Py_DECREF(globals);
+        return NULL;
+    }
+    Py_DECREF(result);
+    pycc_ext_class_maker = PyDict_GetItemString(globals, "_pycc_make_class");
+    Py_XINCREF(pycc_ext_class_maker);
+    Py_DECREF(globals);
+    if (pycc_ext_class_maker == NULL) {
+        PyErr_SetString(PyExc_SystemError, "pycc: the class maker defined nothing");
+    }
+    return pycc_ext_class_maker;
+}
+
+/*
+ * The published class `name` of `module`, made from `template` with the
+ * class statement's arguments `arguments` (their source text, parentheses
+ * included), evaluated in the module's namespace; entered as the class's
+ * carrier type. A new reference, or NULL with an exception set.
+ */
+static PyObject *pycc_ext_make_public_class_in(PyccExtModule *m, PyObject *module,
+                                               const char *name, PyObject *template,
+                                               const char *arguments)
+{
+    PyObject *maker = pycc_ext_get_class_maker();
+    PyObject *dict = PyModule_GetDict(module);
+    PyObject *modname;
+    PyObject *call;
+    PyObject *code;
+    PyObject *pair;
+    PyObject *stack[5];
+    PyObject *cls;
+    size_t len;
+    char *source;
+    static const char prefix[] = "(lambda *a, **k: (a, k))";
+
+    if (maker == NULL || dict == NULL) {
+        return NULL;
+    }
+    len = strlen(arguments);
+    source = (char *)PyMem_Malloc(sizeof prefix + len);
+    if (source == NULL) {
+        return PyErr_NoMemory();
+    }
+    memcpy(source, prefix, sizeof prefix - 1);
+    memcpy(source + sizeof prefix - 1, arguments, len + 1);
+    code = Py_CompileString(source, "<pycc class bases>", Py_eval_input);
+    PyMem_Free(source);
+    pair = code == NULL ? NULL : PyEval_EvalCode(code, dict, dict);
+    Py_XDECREF(code);
+    if (pair == NULL) {
+        /* A base only the compiler resolves (a strict module's `Generic[T]`,
+         * whose `typing` import binds nothing at run time, or a base
+         * published as its template, which `Box[int]` cannot subscript):
+         * the class is published as its template, with no bases of its
+         * own, as before v0.9. */
+        PyErr_Clear();
+        return Py_NewRef(template);
+    }
+    modname = PyModule_GetNameObject(module);
+    call = modname == NULL ? NULL : PyUnicode_FromString(name);
+    if (call == NULL) {
+        Py_XDECREF(modname);
+        Py_DECREF(pair);
+        return NULL;
+    }
+    stack[0] = template;
+    stack[1] = call;
+    stack[2] = modname;
+    stack[3] = PyTuple_GetItem(pair, 0);
+    stack[4] = PyTuple_GetItem(pair, 1);
+    pycc_ext_making_public_class++;
+    cls = PyObject_Vectorcall(maker, stack, 5, NULL);
+    pycc_ext_making_public_class--;
+    if (cls == NULL) {
+        /* Bases CPython cannot combine with the template (a layout or
+         * metaclass conflict): published as the template, as above. */
+        PyErr_Clear();
+        cls = Py_NewRef(template);
+    }
+    Py_DECREF(call);
+    Py_DECREF(modname);
+    Py_DECREF(pair);
+    if (cls != NULL && pycc_ext_carrier_register_in(m, name, cls) < 0) {
+        Py_CLEAR(cls);
+    }
+    return cls;
+}
+
 /* Generated companion: module name macros, per-export wrappers, method table. */
 /*
  * Part 2b of #1142 (#1164): the buffer egress, defined below but called from
@@ -655,7 +924,7 @@ static int pycc_ext_obj_isinstance_compiled_in(PyccExtModule *m, PyObject *o, co
             return PyObject_IsInstance(o, exception_class);
         }
     }
-    if (PyType_GetSlot(Py_TYPE(o), Py_tp_dealloc) == (void *)pycc_ext_instance_dealloc) {
+    if (pycc_ext_is_carrier_type(Py_TYPE(o))) {
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
@@ -691,7 +960,7 @@ static int pycc_ext_unpack_instance_in(PyccExtModule *m, PyObject *obj, const ch
     void *inst = NULL;
     const unsigned char *cls;
     size_t len = 0;
-    int carrier = PyType_GetSlot(Py_TYPE(obj), Py_tp_dealloc) == (void *)pycc_ext_instance_dealloc;
+    int carrier = pycc_ext_is_carrier_type(Py_TYPE(obj));
 
     if (carrier) {
         inst = ((PyccExtInstance *)obj)->inst;
@@ -762,7 +1031,7 @@ static int pycc_ext_obj_unbox_instance_in(PyccExtModule *m, PyObject *o, const c
     if (o == NULL || class_name == NULL || out == NULL) {
         return -1;
     }
-    carrier = PyType_GetSlot(Py_TYPE(o), Py_tp_dealloc) == (void *)pycc_ext_instance_dealloc;
+    carrier = pycc_ext_is_carrier_type(Py_TYPE(o));
     if (carrier) {
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
@@ -813,7 +1082,7 @@ static int pycc_ext_obj_coerce_instance_in(PyccExtModule *m, PyObject *o, const 
     if (o == NULL || class_name == NULL || what == NULL || out == NULL) {
         return -1;
     }
-    carrier = PyType_GetSlot(Py_TYPE(o), Py_tp_dealloc) == (void *)pycc_ext_instance_dealloc;
+    carrier = pycc_ext_is_carrier_type(Py_TYPE(o));
     if (carrier) {
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
@@ -856,7 +1125,7 @@ static int pycc_ext_slot_operand_is_in(PyccExtModule *m, PyObject *other, const 
     const unsigned char *cls;
     size_t len = 0;
 
-    if (PyType_GetSlot(Py_TYPE(other), Py_tp_dealloc) != (void *)pycc_ext_instance_dealloc) {
+    if (!pycc_ext_is_carrier_type(Py_TYPE(other))) {
         return 0;
     }
     inst = ((PyccExtInstance *)other)->inst;

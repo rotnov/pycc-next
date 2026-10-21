@@ -309,6 +309,11 @@ impl<'a> Scan<'a> {
             }
             Stmt::ClassDef(class) => {
                 for base in class.bases() {
+                    // `Box[int]` subclasses `Box` (its `__mro_entries__`).
+                    let base = match base {
+                        Expr::Subscript(subscript) => &*subscript.value,
+                        base => base,
+                    };
                     if let Some(dotted) = self.dotted(base) {
                         self.bases
                             .push((dotted, format!("{}.{}", self.qual, class.name.as_str())));
