@@ -194,7 +194,8 @@ pub(crate) fn method_types_c(
         );
         out.push_str("    {NULL, NULL, 0, NULL},\n};\n\n");
         if let Some(ctor) = ctor {
-            out.push_str(&tp_init_c(ctor));
+            out.push_str(&tp_new_c(ctor, &published.defaults));
+            out.push_str(&tp_init_c(ctor, &published.defaults));
         }
         // #1448: after `tp_init` and before the slots, the order a
         // constructible class's text has had since #1427.
@@ -211,13 +212,14 @@ pub(crate) fn method_types_c(
              {{Py_tp_methods, pycc_ext_type_methods_{class}}},\n"
         ));
         if ctor.is_some() {
-            // `PyType_GenericNew` directly rather than a generated
-            // `tp_new`: it zeroes the whole object, so `inst` starts NULL
-            // and `mod.Class.__new__(mod.Class)` -- which never runs
-            // `tp_init` -- yields a carrier the wrappers' NULL guard
-            // refuses rather than one holding indeterminate storage.
+            // `PyType_GenericNew` zeroes the whole object, so for the class
+            // itself `inst` starts NULL and `mod.Class.__new__(mod.Class)`
+            // -- which never runs `tp_init` -- yields a carrier the
+            // wrappers' NULL guard refuses rather than one holding
+            // indeterminate storage. A Python subclass's object also gets
+            // an instance with every slot unassigned (`tp_new_c`).
             out.push_str(&format!(
-                "    {{Py_tp_new, PyType_GenericNew}},\n    \
+                "    {{Py_tp_new, pycc_ext_tp_new_{class}}},\n    \
                  {{Py_tp_init, pycc_ext_tp_init_{class}}},\n"
             ));
         }
@@ -591,7 +593,53 @@ pub(crate) fn carrier_class_isinstance_c(classes: &[ExtCarrierClass]) -> String 
 ///
 /// The `pycc_rt_instance_new` allocation is released when the constructor
 /// raises, and otherwise owned by the carrier (`pycc_ext_carrier_bind`).
-fn tp_init_c(ctor: &ExtCtor) -> String {
+/// The layout descriptor `pycc_rt_instance_new` is passed for `ctor`'s
+/// class (#1388), as a C string literal, with its length.
+fn layout_literal(ctor: &ExtCtor) -> (String, usize) {
+    // The class name, then each slot name, NUL-separated. `\000` rather
+    // than `\0`, so a following character can never extend the octal
+    // escape; the length is passed explicitly, since the descriptor holds
+    // NULs.
+    let mut layout = ctor.class.clone();
+    for name in &ctor.slot_names {
+        layout.push('\0');
+        layout.push_str(name);
+    }
+    // The slot kinds (`pycc_rt::rc`), exactly as `MirExpr::Instantiate`'s
+    // descriptor records them: what freeing the instance releases.
+    layout.push('\0');
+    layout.push_str(&ctor.slot_kinds);
+    (layout.replace('\0', "\\000"), layout.len())
+}
+
+/// v0.9: `Py_tp_new` of a constructible class. `PyType_GenericNew`, and
+/// for a Python subclass's object an instance with every slot unassigned:
+/// a subclass whose `__init__` does not call the class's still stores its
+/// attributes (the slots' setters) and reads its class-level defaults.
+fn tp_new_c(ctor: &ExtCtor, defaults: &[String]) -> String {
+    let class = &ctor.class;
+    let (literal, len) = layout_literal(ctor);
+    // The instance defaults among the slots, stored as `__init__` would
+    // store them first.
+    let mut stores = String::new();
+    for name in defaults.iter().filter(|name| ctor.slot_names.contains(name)) {
+        stores.push_str(&format!(
+            "        pycc_ext_store_instance_default(self, {}, 0);\n",
+            super::c_string_literal(name)
+        ));
+    }
+    format!(
+        "static PyObject *pycc_ext_tp_new_{class}(PyTypeObject *type, PyObject *args, \
+         PyObject *kwds)\n{{\n    \
+         PyObject *self = PyType_GenericNew(type, args, kwds);\n    \
+         if (self != NULL && !pycc_ext_is_compiled_class((PyObject *)type)) {{\n        \
+         pycc_ext_carrier_bind(self, pycc_rt_instance_new({count}, \"{literal}\", {len}));\n\
+         {stores}    }}\n    return self;\n}}\n\n",
+        count = ctor.slot_names.len()
+    )
+}
+
+fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
     let class = &ctor.class;
     let arity = ctor.params.len();
     let slots: Vec<_> = super::slot_carriers(&ctor.params, &ctor.param_writable);
@@ -607,21 +655,8 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
     };
     let slot_count = ctor.slot_names.len();
     // #1388: the layout descriptor `pycc_rt_instance_new` words an unassigned
-    // slot's `AttributeError` with -- the class name, then each slot name,
-    // NUL-separated. `\000` rather than `\0`, so a following character can
-    // never extend the octal escape; the length is passed explicitly, since
-    // the descriptor holds NULs.
-    let mut layout = ctor.class.clone();
-    for name in &ctor.slot_names {
-        layout.push('\0');
-        layout.push_str(name);
-    }
-    // The slot kinds (`pycc_rt::rc`), exactly as `MirExpr::Instantiate`'s
-    // descriptor records them: what freeing the instance releases.
-    layout.push('\0');
-    layout.push_str(&ctor.slot_kinds);
-    let layout_len = layout.len();
-    let layout_literal = layout.replace('\0', "\\000");
+    // slot's `AttributeError` with ([`layout_literal`]).
+    let (layout_literal, layout_len) = layout_literal(ctor);
     // The method part of #1140, exactly as `wrapper_for` applies it: keyed
     // by the class rather than the compiled `__init__` name, because two
     // classes that inherit one `__init__` each get their own `Py_tp_init`.
@@ -765,7 +800,22 @@ fn tp_init_c(ctor: &ExtCtor) -> String {
     ));
     // #1435: storing the instance also links it to `self`, so `self`
     // handed out by one of its methods is this very object.
-    out.push_str("    pycc_ext_carrier_bind(self, inst);\n    return 0;\n}\n\n");
+    out.push_str("    pycc_ext_carrier_bind(self, inst);\n");
+    // v0.9: a Python subclass's object reads a default its class body
+    // rebinds (`pycc_ext_store_instance_default`).
+    let rebound: Vec<&String> =
+        defaults.iter().filter(|name| ctor.slot_names.contains(name)).collect();
+    if !rebound.is_empty() {
+        out.push_str("    if (!pycc_ext_is_compiled_class((PyObject *)Py_TYPE(self))) {\n");
+        for name in rebound {
+            out.push_str(&format!(
+                "        pycc_ext_store_instance_default(self, {}, 1);\n",
+                super::c_string_literal(name)
+            ));
+        }
+        out.push_str("    }\n");
+    }
+    out.push_str("    return 0;\n}\n\n");
     out
 }
 

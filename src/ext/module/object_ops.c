@@ -111,7 +111,7 @@ PyObject *pycc_ext_obj_getattr(PyObject *obj, const char *name)
  */
 #define PYCC_EXT_METHOD_STACK 8
 PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **args,
-                                   long long nargs)
+                                   long long nargs, PyccExtCallSite *site)
 {
     PyObject *stack[PYCC_EXT_METHOD_STACK + 1];
     PyObject *attr_name;
@@ -125,6 +125,23 @@ PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **
     for (i = 0; i < nargs; i++) {
         if (args[i] == NULL) {
             packed = 0;
+        }
+    }
+    if (self != NULL && packed && nargs <= PYCC_EXT_METHOD_STACK) {
+        /* v0.9: the call site's own cache (`pycc_ext_site_method`). */
+        method = pycc_ext_site_method(site, self);
+        if (method != NULL) {
+            stack[0] = self;
+            for (i = 0; i < nargs; i++) {
+                stack[i + 1] = args[i];
+            }
+            Py_INCREF(method);
+            result = pycc_ext_site_call(site, method, stack, nargs);
+            Py_DECREF(method);
+            for (i = 0; i < nargs; i++) {
+                Py_DECREF(args[i]);
+            }
+            return result;
         }
     }
     if (self != NULL && packed) {
@@ -146,6 +163,9 @@ PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **
                 result = with_self ? PyObject_Vectorcall(method, stack, (size_t)(nargs + 1), NULL)
                                    : PyObject_Vectorcall(method, stack + 1, (size_t)nargs, NULL);
                 Py_DECREF(method);
+                if (with_self) {
+                    pycc_ext_site_fill(site, self, name);
+                }
             } else {
                 result = PyObject_VectorcallMethod(attr_name, stack, (size_t)(nargs + 1), NULL);
             }
@@ -173,7 +193,8 @@ PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **
  * Returns a new reference, or NULL with the exception set (`*self_out`
  * NULL). `pycc_ext_obj_call_loaded` consumes both.
  */
-PyObject *pycc_ext_obj_load_method(PyObject *obj, const char *name, PyObject **self_out)
+PyObject *pycc_ext_obj_load_method(PyObject *obj, const char *name, PyObject **self_out,
+                                   PyccExtCallSite *site)
 {
     PyObject *attr_name;
     PyObject *method;
@@ -182,6 +203,12 @@ PyObject *pycc_ext_obj_load_method(PyObject *obj, const char *name, PyObject **s
     *self_out = NULL;
     if (obj == NULL) {
         return NULL;
+    }
+    /* v0.9: the call site's own cache (`pycc_ext_site_method`). */
+    method = pycc_ext_site_method(site, obj);
+    if (method != NULL) {
+        *self_out = Py_NewRef(obj);
+        return Py_NewRef(method);
     }
     method = pycc_ext_ic_method(obj, name, NULL, &with_self);
     if (method == NULL) {
@@ -194,6 +221,7 @@ PyObject *pycc_ext_obj_load_method(PyObject *obj, const char *name, PyObject **s
     if (method != NULL) {
         if (with_self) {
             *self_out = Py_NewRef(obj);
+            pycc_ext_site_fill(site, obj, name);
         }
         return Py_NewRef(method);
     }
@@ -210,7 +238,8 @@ PyObject *pycc_ext_obj_load_method(PyObject *obj, const char *name, PyObject **s
  * `pycc_ext_obj_call`; a NULL argument is a failed packer whose exception
  * is already set. Returns a new reference or NULL with the exception set.
  */
-PyObject *pycc_ext_obj_call_loaded(PyObject *callable, PyObject **stack, long long nargs)
+PyObject *pycc_ext_obj_call_loaded(PyObject *callable, PyObject **stack, long long nargs,
+                                   PyccExtCallSite *site)
 {
     PyObject *self = stack[0];
     PyObject *result = NULL;
@@ -222,7 +251,11 @@ PyObject *pycc_ext_obj_call_loaded(PyObject *callable, PyObject **stack, long lo
             packed = 0;
         }
     }
-    if (packed && self != NULL) {
+    if (packed && self != NULL && site != NULL && site->fast != NULL
+        && pycc_ext_site_method(site, self) == callable) {
+        /* The method the site's cache loaded (`pycc_ext_obj_load_method`). */
+        result = pycc_ext_site_call(site, callable, stack, nargs);
+    } else if (packed && self != NULL) {
         result = PyObject_Vectorcall(callable, stack, (size_t)(nargs + 1), NULL);
     } else if (packed) {
         result = PyObject_Vectorcall(callable, stack + 1, (size_t)nargs | PY_VECTORCALL_ARGUMENTS_OFFSET,

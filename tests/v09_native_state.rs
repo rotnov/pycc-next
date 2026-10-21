@@ -416,3 +416,23 @@ fn a_python_override_of_another_type_raises_where_compiled_code_reads_it() {
         text(&out.stderr)
     );
 }
+
+/// Class-level `None` defaults instances shadow (`template = None`, then
+/// `spec.template = ...`) are instance slots initialized to the default,
+/// with the class keeping the attribute (`pycc_ast`'s instance defaults):
+/// compiled reads and stores, Python stores, class reads, and a Python
+/// subclass whose `__init__` never runs the class's.
+#[test]
+fn instance_defaults_native() {
+    native("v09_defaults", &[]);
+}
+
+#[test]
+fn instance_defaults_from_python_ext() {
+    ext_hosted("v09_defaults", "v09_defaults_host", &[]);
+}
+
+#[test]
+fn instance_defaults_from_python_ext_release() {
+    ext_hosted("v09_defaults", "v09_defaults_host", &["--release"]);
+}

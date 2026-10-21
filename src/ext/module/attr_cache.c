@@ -862,3 +862,115 @@ long long pycc_ext_attr_cache_hits(void)
 {
     return pycc_ext_ic_hits;
 }
+
+/*
+ * v0.9: the per-call-site cache of `obj.name(args)` (`EXT_OBJ_CALL_METHOD`
+ * and the load/call pair): the class the site last saw, by its version
+ * tag, and what the class's attribute cache answered for the name -- a
+ * method of the class, called with `obj` first. A hit is two compares
+ * against the site's own record instead of the shared table's hashing.
+ * Only a class whose instances have no dict caches here (a compiled
+ * class's carrier, a class with `__slots__`), so no instance attribute can
+ * shadow the method. A method descriptor with a `METH_FASTCALL` C function
+ * (a compiled class's method wrapper) is called through that function
+ * directly, as `method_descriptor`'s vectorcall calls it. The record is
+ * static storage codegen gives each call site, zero at first.
+ */
+typedef struct {
+    PyObject *type;
+    unsigned long long version;
+    PyObject *method;
+    void *fast;
+} PyccExtCallSite;
+
+/* `method_descriptor`'s layout (`PyMethodDescrObject`): its `PyMethodDef *`
+ * after the common descriptor fields, checked on `str.join`. */
+#define PYCC_IC_METHOD_DESCR_DEF 40
+static PyObject *pycc_ext_site_descr_type = NULL;
+static int pycc_ext_site_descr_ok = 0;
+
+static void pycc_ext_site_probe(void)
+{
+    PyObject *join;
+
+    if (pycc_ext_site_descr_ok != 0) {
+        return;
+    }
+    pycc_ext_site_descr_ok = -1;
+    join = PyObject_GetAttrString((PyObject *)&PyUnicode_Type, "join");
+    if (join == NULL) {
+        PyErr_Clear();
+        return;
+    }
+    {
+        PyMethodDef *def = PYCC_IC_FIELD(join, PYCC_IC_METHOD_DESCR_DEF, PyMethodDef *);
+        if (def != NULL && def->ml_name != NULL && strcmp(def->ml_name, "join") == 0) {
+            pycc_ext_site_descr_type = (PyObject *)Py_TYPE(join);
+            pycc_ext_site_descr_ok = 1;
+        }
+    }
+    Py_DECREF(join);
+}
+
+/* The method `site` holds for `obj`'s class, or NULL (borrowed). */
+static PyObject *pycc_ext_site_method(PyccExtCallSite *site, PyObject *obj)
+{
+    PyTypeObject *type = Py_TYPE(obj);
+
+    if (site == NULL || site->type != (PyObject *)type || pycc_ext_ic_state <= 0
+        || site->version != PYCC_IC_TAG(type)) {
+        return NULL;
+    }
+    return site->method;
+}
+
+/* Fills `site` for `obj.spelling(...)` from the class's attribute cache,
+ * once the generic path has filled that. Never sets an exception. */
+static void pycc_ext_site_fill(PyccExtCallSite *site, PyObject *obj, const char *spelling)
+{
+    PyTypeObject *type = Py_TYPE(obj);
+    unsigned long flags = PyType_GetFlags(type);
+    PyObject *method;
+    int with_self = 0;
+
+    if (site == NULL || pycc_ext_ic_state <= 0
+        || (flags & (PYCC_IC_INLINE_VALUES | PYCC_IC_MANAGED_DICT)) != 0
+        || PYCC_IC_FIELD(type, PYCC_IC_TP_DICTOFFSET, Py_ssize_t) != 0
+        || PYCC_IC_TAG(type) == 0) {
+        return;
+    }
+    method = pycc_ext_ic_method(obj, spelling, NULL, &with_self);
+    if (method == NULL || !with_self) {
+        return;
+    }
+    pycc_ext_site_probe();
+    site->fast = NULL;
+    if (pycc_ext_site_descr_ok > 0 && (PyObject *)Py_TYPE(method) == pycc_ext_site_descr_type) {
+        PyMethodDef *def = PYCC_IC_FIELD(method, PYCC_IC_METHOD_DESCR_DEF, PyMethodDef *);
+        if (def != NULL && (def->ml_flags & ~METH_COEXIST) == METH_FASTCALL) {
+            site->fast = (void *)def->ml_meth;
+        }
+    }
+    site->type = (PyObject *)type;
+    site->version = PYCC_IC_TAG(type);
+    site->method = method;
+}
+
+/* Calls what `site` holds for `self` with `stack[1..nargs]` (`stack[0]` is
+ * `self`); a new reference, or NULL with the exception set. */
+static PyObject *pycc_ext_site_call(PyccExtCallSite *site, PyObject *method, PyObject **stack,
+                                    long long nargs)
+{
+    PyObject *result;
+
+    if (site->fast == NULL) {
+        return PyObject_Vectorcall(method, stack, (size_t)(nargs + 1), NULL);
+    }
+    if (Py_EnterRecursiveCall(" while calling a Python object")) {
+        return NULL;
+    }
+    result = ((PyObject * (*)(PyObject *, PyObject *const *, Py_ssize_t)) site->fast)(
+        stack[0], stack + 1, (Py_ssize_t)nargs);
+    Py_LeaveRecursiveCall();
+    return result;
+}

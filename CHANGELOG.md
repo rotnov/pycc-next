@@ -101,6 +101,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   instances would shadow.
 - Fixed: a class attribute bound to `None` or a `bytes` literal (`template = None`) of a
   published compiled class was missing from the class Python code sees.
+- A class-level `None` default its instances shadow (`template = None` in the class body,
+  `spec.template = "..."` later) is an instance slot `__init__` initializes, so the class
+  stays native (non-strict); the published class keeps the default, and a Python
+  subclass whose `__init__` does not run the class's starts with it too. pystache's
+  `TemplateSpec`, which its sibling modules subclass, is now native.
+- A method call on a CPython object (`node.render(engine, context)` on a node read from a
+  list) keeps a cache per call site: when the object's class has no instance dict (a
+  compiled class's carrier, a class with `__slots__`), a hit is two compares and calls
+  the compiled method's wrapper directly instead of through the shared attribute cache
+  and `method_descriptor`'s dispatch (pystache: 591k -> 586k instructions per round).
 - Fixed: raising a compiled exception class with a CPython object argument (`raise
   MissingError(name)` in non-strict code) failed the build in code generation; the
   function raising it now runs in CPython, which keeps the object in `args`.

@@ -490,6 +490,20 @@ pub(super) fn emit_lookup<'ctx>(
     bound
 }
 
+/// v0.9: the static record of one method call site's cache
+/// (`PyccExtCallSite` in the shim's `attr_cache.c`: four words, zero at
+/// first), passed to the method-call entries.
+fn call_site_record<'ctx>(
+    context: &'ctx Context,
+    module: &inkwell::module::Module<'ctx>,
+) -> inkwell::values::PointerValue<'ctx> {
+    let ty = context.i64_type().array_type(4);
+    let global = module.add_global(ty, None, "pycc_call_site");
+    global.set_initializer(&ty.const_zero());
+    global.set_linkage(inkwell::module::Linkage::Private);
+    global.as_pointer_value()
+}
+
 /// The lookup half of a positional method call, as CPython's `LOAD_ATTR`
 /// of a method: [`crate::ext::EXT_OBJ_LOAD_METHOD_SYMBOL`] answers the
 /// callable and, for a method of the receiver's class the attribute caches
@@ -506,6 +520,7 @@ pub(super) fn emit_load_method<'ctx>(
 ) -> (
     inkwell::values::PointerValue<'ctx>,
     inkwell::values::PointerValue<'ctx>,
+    inkwell::values::PointerValue<'ctx>,
 ) {
     let edge = ForeignFailEdge::for_current(builder);
     let base_ptr = expect_object_pointer(base);
@@ -518,12 +533,13 @@ pub(super) fn emit_load_method<'ctx>(
     let load = shim_fn(
         module,
         crate::ext::EXT_OBJ_LOAD_METHOD_SYMBOL,
-        ptr.fn_type(&[ptr.into(), ptr.into(), ptr.into()], false),
+        ptr.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false),
     );
+    let site = call_site_record(context, module);
     let callable = builder
         .build_call(
             load,
-            &[base_ptr.into(), name.into(), self_slot.into()],
+            &[base_ptr.into(), name.into(), self_slot.into(), site.into()],
             "foreign_call_bound",
         )
         .expect("build_call should not fail for pycc_ext_obj_load_method")
@@ -543,12 +559,14 @@ pub(super) fn emit_load_method<'ctx>(
         .build_load(ptr, self_slot, "foreign_call_self")
         .expect("build_load should not fail")
         .into_pointer_value();
-    (callable, receiver)
+    (callable, receiver, site)
 }
 
 /// Marshals `args` and calls what [`emit_load_method`] loaded:
 /// [`crate::ext::EXT_OBJ_CALL_LOADED_SYMBOL`], which consumes `callable`,
-/// `receiver` (stored ahead of the arguments) and every packed argument.
+/// `receiver` (stored ahead of the arguments) and every packed argument;
+/// `site` is the call site's cache record [`emit_load_method`] passed too.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_call_loaded<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -556,6 +574,7 @@ pub(super) fn emit_call_loaded<'ctx>(
     rt: &RtFns<'ctx>,
     callable: inkwell::values::PointerValue<'ctx>,
     receiver: inkwell::values::PointerValue<'ctx>,
+    site: inkwell::values::PointerValue<'ctx>,
     args: &[Scalar<'ctx>],
 ) -> Scalar<'ctx> {
     let edge = ForeignFailEdge::for_current(builder);
@@ -586,7 +605,7 @@ pub(super) fn emit_call_loaded<'ctx>(
     let call = shim_fn(
         module,
         crate::ext::EXT_OBJ_CALL_LOADED_SYMBOL,
-        ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into()], false),
+        ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into(), ptr.into()], false),
     );
     let result = builder
         .build_call(
@@ -595,6 +614,7 @@ pub(super) fn emit_call_loaded<'ctx>(
                 callable.into(),
                 stack.into(),
                 i64_type.const_int(args.len() as u64, false).into(),
+                site.into(),
             ],
             "foreign_call",
         )
@@ -633,10 +653,11 @@ pub(super) fn emit_method_call_fused<'ctx>(
         module,
         crate::ext::EXT_OBJ_CALL_METHOD_SYMBOL,
         ptr.fn_type(
-            &[ptr.into(), ptr.into(), ptr.into(), i64_type.into()],
+            &[ptr.into(), ptr.into(), ptr.into(), i64_type.into(), ptr.into()],
             false,
         ),
     );
+    let site = call_site_record(context, module);
     let result = builder
         .build_call(
             call,
@@ -645,6 +666,7 @@ pub(super) fn emit_method_call_fused<'ctx>(
                 name.into(),
                 arg_array.into(),
                 i64_type.const_int(args.len() as u64, false).into(),
+                site.into(),
             ],
             "foreign_call",
         )

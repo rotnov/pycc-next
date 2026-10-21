@@ -432,7 +432,7 @@ fn a_constructible_class_gets_a_tp_init_three_slots_and_a_carrier_sized_spec() {
         inc.contains(
             "static PyType_Slot pycc_ext_type_slots_Grid[] = {\n    \
              {Py_tp_methods, pycc_ext_type_methods_Grid},\n    \
-             {Py_tp_new, PyType_GenericNew},\n    \
+             {Py_tp_new, pycc_ext_tp_new_Grid},\n    \
              {Py_tp_init, pycc_ext_tp_init_Grid},\n    \
              {Py_tp_dealloc, pycc_ext_instance_dealloc},\n    {0, NULL},\n};\n"
         ),

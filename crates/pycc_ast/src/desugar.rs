@@ -65,6 +65,7 @@
 mod aliases;
 mod ann_attrs;
 mod class_lambdas;
+mod instance_defaults;
 mod class_of_self;
 mod build;
 mod builtin_defaults;
@@ -114,6 +115,7 @@ pub use closures::qualname::function_qualname;
 pub use dataclasses::start_program;
 pub use aliases::module_lambda_aliases;
 pub use intrinsics::set_intrinsic_hints;
+pub use instance_defaults::rewritten_classes as instance_default_classes;
 
 /// Replaces each module-level `if` whose test is known before the program
 /// runs by the branch that runs (see [`static_branches`]). [`desugar`] runs
@@ -203,6 +205,7 @@ pub fn desugar(module: &mut ModModule) {
         range_values::range_values(&mut body);
         chr_ranges::native_chr_calls(&mut body);
         class_lambdas::class_lambdas(&mut body);
+        instance_defaults::instance_defaults(&mut body);
         class_attrs::mutable_class_attrs(&mut body);
         dataclasses::expand_dataclasses(&mut body);
         enums::enum_lookups(&mut body);

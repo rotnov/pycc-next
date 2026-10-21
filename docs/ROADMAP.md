@@ -919,6 +919,19 @@ Accept:
    own objects are untracked at creation, so compiled classes' objects cost the
    collector nothing). A compiled base a sibling module subclasses stays native, its
    subclass a CPython class with compiled methods.
+   Step 8: class-level `None` defaults that instances shadow become instance slots
+   initialized by `__init__` (the published class keeps the default), which makes
+   pystache's `TemplateSpec` native with its sibling-module subclasses over it.
+   Accept 1's cross-module clause, in its exact form: a compiled class whose base is a
+   compiled class of another module of the package compiles with the base native and
+   the subclass a CPython class over the base's layout plus a `__dict__`, its methods
+   compiled as lifted bodies, with CPython's real MRO (pystache's `TemplateSpec`
+   subclasses exercise it in its suite). Native-native subclassing across modules is
+   deferred (guru ruling): no cross-module relation in pystache, mistune or pydantic
+   qualifies -- pystache's other one is an exception class, mistune's bases are
+   `Generic[ST]` with private members and `getattr` dispatch, pydantic's handlers are
+   private-member heavy. Also deferred: exception classes over package bases (PEP 697
+   layouts) and bases that publish only part of themselves.
 2. **Template engine >= 2x:** pystache 0.6.8 (chosen by the v0.8 accept 4 rule) runs its
    own benchmark >= 2x faster than CPython (median of interleaved runs) and passes its suite.
    **Progress 2026-10-21** (not met): 0.61x -> 0.69x after accept 1's step 1 (0.089 s
@@ -945,6 +958,23 @@ Accept:
    run-time class is a compiled class (`node.render(engine, context)` on a node read
    from a list of objects): ~60k instructions per round in the runtime's call path plus
    CPython's -- the guarded devirtualization planned next.
+   **Decision 2026-10-21: not met for v0.9; the floor, measured.** After accept 1's
+   steps 5-8 and the per-call-site method cache (the last lever, guru ruling): 586k
+   instructions per round against CPython's 505k (0.86x by instructions; 0.73x-0.94x
+   by wall time on this loaded machine, interleaved medians). The benchmark round's
+   work that stays CPython's whatever compiles pystache (callgrind on CPython running
+   the sources, per round): the regex searches 83k; `match.start`/`end`/`groupdict`
+   40k; `_compile_template_re` per parse 35k (`%` formatting and `re.compile`'s cache
+   lookup of a ~300-character pattern; its `re.escape` calls are native now) -- a
+   floor of ~158k. `html.escape` (42k in CPython) is native and no longer part of it.
+   2x needs at most ~252k per round, so everything compiled code itself spends would
+   have to fit in ~94k; it spends ~428k, mostly crossing the CPython boundary rather
+   than computing: method calls on objects (the per-site cache took ~5k of them),
+   `str` copies at each crossing, the template context's lookups through CPython
+   dicts and `getattr`, and the remaining Python frames of lifted closures. Closing
+   that gap needs the template's data (context stacks, parsed nodes, the rendered
+   parts) to stay native end to end, a v0.10-scale change; the accept stays open with
+   this evidence.
 3. **Markdown >= 1.5x:** mistune 3.3.4 renders `benchmark/cases` >= 1.5x faster than
    CPython and passes its suite.
 4. **pydantic no slower:** every phase of `bench/pydantic_check.py --time` (import, define,

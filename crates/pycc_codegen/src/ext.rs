@@ -242,11 +242,12 @@ pub const EXT_OBJ_CALL_SYMBOL: &str = "pycc_ext_obj_call";
 /// `self` borrowed, the packed arguments consumed, a new reference or
 /// `NULL` with the exception set (`src/ext/module/object_ops.c`). The lookup
 /// follows the arguments, so `foreign_call_emit` uses it only for
-/// arguments whose evaluation can neither raise nor run code.
+/// arguments whose evaluation can neither raise nor run code. The last
+/// argument is the call site's cache record (v0.9, `PyccExtCallSite`).
 pub const EXT_OBJ_CALL_METHOD_SYMBOL: &str = "pycc_ext_obj_call_method";
 
 /// `PyObject *pycc_ext_obj_load_method(PyObject *obj, const char *name,
-/// PyObject **self_out)`: `obj.name` loaded before a call's arguments are
+/// PyObject **self_out, PyccExtCallSite *site)`: `obj.name` loaded before a call's arguments are
 /// evaluated, as CPython's `LOAD_ATTR` of a method does -- a cached method
 /// of `obj`'s class as the function itself with `*self_out` a new reference
 /// to `obj` (no bound method made), else the attribute with `*self_out`
@@ -254,7 +255,8 @@ pub const EXT_OBJ_CALL_METHOD_SYMBOL: &str = "pycc_ext_obj_call_method";
 pub const EXT_OBJ_LOAD_METHOD_SYMBOL: &str = "pycc_ext_obj_load_method";
 
 /// `PyObject *pycc_ext_obj_call_loaded(PyObject *callable, PyObject **stack,
-/// long long nargs)`: the call of what [`EXT_OBJ_LOAD_METHOD_SYMBOL`]
+/// long long nargs, PyccExtCallSite *site)`: the call of what
+/// [`EXT_OBJ_LOAD_METHOD_SYMBOL`]
 /// loaded, `stack[0]` its receiver (passed first when not NULL) and
 /// `stack[1..=nargs]` the packed arguments; `callable` and every slot
 /// consumed on every path.

@@ -174,8 +174,10 @@ static PyType_Slot pycc_ext_template_root_slots[] = {
 /* `Py_TPFLAGS_HAVE_GC`, which every template and published class
  * inherits, so a Python subclass's `subtype_traverse` reaches
  * `pycc_ext_carrier_traverse`; a compiled class's own object is untracked
- * as soon as it is made (`pycc_ext_untrack_compiled`), so it costs the
- * collector nothing. */
+ * as soon as it is made (`tp_init`, a crossing, a copy), so the collector
+ * never scans it. Every carrier now carries the GC pre-header (two words)
+ * and goes through the GC allocator: an allocation-heavy benchmark that
+ * regresses should look here first. */
 static PyType_Spec pycc_ext_template_root_spec = {
     "pycc.compiled",
     0,
@@ -233,6 +235,72 @@ static int pycc_ext_is_compiled_class(PyObject *cls)
     return cls == pycc_ext_template_root
            || (pycc_ext_compiled_classes != NULL
                && PySet_Contains(pycc_ext_compiled_classes, cls) == 1);
+}
+
+/*
+ * v0.9: a Python subclass's object that never runs the compiled class's
+ * `__init__` starts with the class's instance default `name` (`None`,
+ * `pycc_ast`'s instance defaults) in the slot -- or with the value the
+ * subclass's own class body rebinds `name` to, which CPython reads before
+ * the base's, so compiled code reading the slot reads it too; called again
+ * once the compiled `__init__` ran for the object (`rebound_only`), which
+ * stored the class's default. Never sets an exception.
+ */
+PYCC_SHIM void pycc_ext_store_instance_default(PyObject *self, const char *name, int rebound_only)
+{
+    PyObject *mro = PyObject_GetAttrString((PyObject *)Py_TYPE(self), "__mro__");
+    PyObject *value = NULL;
+    Py_ssize_t i;
+
+    if (mro == NULL || !PyTuple_Check(mro)) {
+        Py_XDECREF(mro);
+        PyErr_Clear();
+        return;
+    }
+    for (i = 0; i < PyTuple_Size(mro); i++) {
+        PyObject *cls = PyTuple_GetItem(mro, i);
+        PyObject *dict = PyObject_GetAttrString(cls, "__dict__");
+        PyObject *found = dict == NULL ? NULL : PyMapping_GetItemString(dict, name);
+        Py_XDECREF(dict);
+        if (found == NULL) {
+            PyErr_Clear();
+            continue;
+        }
+        if (!pycc_ext_is_compiled_class(cls)) {
+            /* The subclass's value, kept for the compiled slot below. */
+            if (value == NULL) {
+                value = found;
+            }
+            else {
+                Py_DECREF(found);
+            }
+            continue;
+        }
+        /* The compiled class's slot descriptor (`_SlotDefault` or the
+         * template's `getset_descriptor`) stores the value. After the
+         * compiled `__init__` ran (`rebound_only`), only a subclass's value
+         * replaces the default it stored, never a value it stored. */
+        if (rebound_only) {
+            PyObject *current = value == NULL ? NULL
+                : PyObject_CallMethod(found, "__get__", "OO", self, (PyObject *)Py_TYPE(self));
+            int keep = current == NULL || current != Py_None;
+            Py_XDECREF(current);
+            if (keep) {
+                Py_DECREF(found);
+                break;
+            }
+        }
+        {
+            PyObject *stored = PyObject_CallMethod(found, "__set__", "OO", self,
+                                                   value != NULL ? value : Py_None);
+            Py_XDECREF(stored);
+        }
+        Py_DECREF(found);
+        break;
+    }
+    Py_XDECREF(value);
+    Py_DECREF(mro);
+    PyErr_Clear();
 }
 
 /*
@@ -333,6 +401,22 @@ static PyObject *pycc_ext_class_maker = NULL;
 static const char *const pycc_ext_class_maker_lines[] = {
     "_skip = frozenset(('__module__', '__qualname__', '__doc__', '__dict__', '__weakref__',\n",
     "                    '__init_subclass__', '__new__', '__slots__'))\n",
+    "class _SlotDefault:\n",
+    "    __slots__ = ('slot', 'default')\n",
+    "    def __init__(self, slot, default):\n",
+    "        self.slot = slot\n",
+    "        self.default = default\n",
+    "    def __get__(self, obj, owner=None):\n",
+    "        if obj is None:\n",
+    "            return self.default\n",
+    "        try:\n",
+    "            return self.slot.__get__(obj, owner)\n",
+    "        except (AttributeError, TypeError):\n",
+    "            return self.default\n",
+    "    def __set__(self, obj, value):\n",
+    "        self.slot.__set__(obj, value)\n",
+    "    def __delete__(self, obj):\n",
+    "        self.slot.__delete__(obj)\n",
     "def _pycc_make_class(template, name, module, args, kwargs, literals,\n",
     "                     _types=__import__('types')):\n",
     "    bases = tuple(args)\n",
@@ -343,6 +427,9 @@ static const char *const pycc_ext_class_maker_lines[] = {
     "    ns['__qualname__'] = name\n",
     "    ns['__slots__'] = ()\n",
     "    for key, value in literals.items():\n",
+    "        slot = template.__dict__.get(key)\n",
+    "        if type(slot).__name__ == 'getset_descriptor':\n",
+    "            value = _SlotDefault(slot, value)\n",
     "        ns.setdefault(key, value)\n",
     "    for key, value in template.__dict__.items():\n",
     "        if key not in _skip:\n",

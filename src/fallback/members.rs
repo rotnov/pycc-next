@@ -114,13 +114,19 @@ fn is_literal(expr: &Expr) -> bool {
 }
 
 /// The module-level classes with a class attribute bound to `None` or a
-/// `bytes` literal: Python code may read it through the class (published
-/// with the class since v0.9, `crate::ext_build::attach_class_bases`), but
-/// the published instance has no `__dict__` to shadow it with an instance
-/// attribute, which such a default usually exists for (`spec.template =
-/// ...` with `template = None` in the class body).
+/// `bytes` literal that does not become an instance slot
+/// (`pycc_ast::instance_default_classes`): Python code may read it through
+/// the class (published with the class since v0.9,
+/// `crate::ext_build::attach_class_bases`), but the published instance has
+/// no `__dict__` to shadow it with an instance attribute, which such a
+/// default usually exists for (`spec.template = ...` with `template = None`
+/// in the class body).
 pub(super) fn with_instance_defaults(body: &[Stmt]) -> BTreeSet<String> {
+    // The classes `pycc_ast`'s instance-defaults pass makes the defaults
+    // instance slots of are published whole.
+    let rewritten = pycc_ast::instance_default_classes(body);
     body.iter()
+        .filter(|stmt| !matches!(stmt, Stmt::ClassDef(class) if rewritten.contains(class.name.as_str())))
         .filter_map(|stmt| match stmt {
             Stmt::ClassDef(class)
                 if class.body.iter().any(|member| {

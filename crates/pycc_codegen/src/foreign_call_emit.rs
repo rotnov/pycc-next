@@ -146,7 +146,7 @@ pub(super) fn emit_method_call<'ctx>(
     // arguments and consumed by the call.
     let base_scalar = emit_expr(context, builder, module, rt, user_functions, locals, base);
     let held_base = object_release::hold(context, module, rt, base, &base_scalar);
-    let (callable, receiver) =
+    let (callable, receiver, site) =
         foreign_call::emit_load_method(context, builder, module, rt, base_scalar, method);
     held_base.release(builder, rt);
     let held_callable = object_release::hold_new_reference(context, module, rt, callable);
@@ -161,6 +161,7 @@ pub(super) fn emit_method_call<'ctx>(
         rt,
         callable,
         receiver,
+        site,
         &args.scalars,
     );
     args.release(context, builder, rt);

@@ -42,6 +42,11 @@ pub(crate) struct ExtPublishedClass {
     /// the published class with its real bases ([`attach_class_bases`]);
     /// `None` publishes it with no bases of its own.
     pub(crate) bases: Option<String>,
+    /// v0.9: the class-body attributes bound to `None` that are instance
+    /// slots (`pycc_ast`'s instance defaults): a Python subclass's object
+    /// that never runs the class's `__init__` stores them first
+    /// (`method_types`' `tp_new`).
+    pub(crate) defaults: Vec<String>,
 }
 
 /// The published classes and, for each, its MRO-resolved method set.
@@ -187,6 +192,7 @@ pub(crate) fn collect_class_publications(
                 mro: class_def.mro.clone(),
                 constants: class_constants(module, class_def),
                 bases: None,
+                defaults: Vec::new(),
             });
         }
     }
@@ -267,6 +273,9 @@ pub(crate) fn attach_class_bases(
             let range: std::ops::Range<u32> = pycc_ast::Ranged::range(value).into();
             if let Some(text) = source.get(range.start as usize..range.end as usize) {
                 literals.push_str(&format!("{:?}: {text}, ", target.id.as_str()));
+            }
+            if matches!(value, pycc_ast::Expr::NoneLiteral(_)) {
+                entry.defaults.push(target.id.to_string());
             }
         }
         entry.bases = Some(format!("{arguments}, {{{literals}}}"));
