@@ -11,6 +11,11 @@ use crate::Ty;
 /// `pycc_ast::desugar::signatures::MARK_TUPLE`.
 const MARK_TUPLE: &str = "__pycc_mark_tuple";
 
+/// `pycc_ast::desugar::intrinsics::HTML_ESCAPE`.
+const HTML_ESCAPE: &str = "__pycc_html_escape";
+/// `pycc_ast::desugar::intrinsics::RE_ESCAPE`.
+const RE_ESCAPE: &str = "__pycc_re_escape";
+
 /// The CPython-backed signature of builtin `name` over `args`, when one of
 /// the arms below claims the call.
 pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String>> {
@@ -41,6 +46,24 @@ pub(super) fn object_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, 
     // vararg of a published function): `pycc_mir` rebinds it to
     // `tuple(args)`, so a call from compiled code (which passes a list)
     // hands the body a tuple, as CPython does.
+    // v0.9: `html.escape(s, quote)` and `re.escape(s)` by a callee that may
+    // be CPython's own (`pycc_ast::desugar::intrinsics`): computed natively
+    // when it is.
+    if let (HTML_ESCAPE, [Ty::Object, s, q, Ty::Int]) = (name, args)
+        && boxes_as_object(s)
+        && boxes_as_object(q)
+    {
+        return Some(Ok(sig(
+            "pycc_ext_obj_html_escape",
+            &[Ty::Object, Ty::Object, Ty::Object, Ty::Int],
+            Ty::Object,
+        )));
+    }
+    if let (RE_ESCAPE, [Ty::Object, s]) = (name, args)
+        && boxes_as_object(s)
+    {
+        return Some(Ok(sig("pycc_ext_obj_re_escape", &[Ty::Object, Ty::Object], Ty::Object)));
+    }
     if let (MARK_TUPLE, [Ty::Object]) = (name, args) {
         return Some(Ok(sig("pycc_ext_obj_tuple", &[Ty::Object], Ty::None)));
     }

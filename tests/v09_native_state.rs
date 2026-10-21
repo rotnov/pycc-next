@@ -222,6 +222,32 @@ fn raise_of_a_compiled_exception_with_an_object_argument_ext() {
     assert_matches(&run(&compiled), &run(&plain));
 }
 
+/// `html.escape` / `re.escape` through a name their import binds: computed
+/// natively when the callee is CPython's own function and the argument a
+/// `str`, CPython's call otherwise (`pycc_ast::desugar::intrinsics`).
+#[test]
+fn escapes_native() {
+    native("v09_escapes", &[]);
+}
+
+#[test]
+fn escapes_ext() {
+    ext("v09_escapes", &[]);
+}
+
+#[test]
+fn escapes_ext_release() {
+    ext("v09_escapes", &["--release"]);
+}
+
+/// A module-level `name = lambda ...` of an `--ext` module is published as
+/// the function compiled code makes of it (`crate::fallback`'s lambda
+/// aliases), binding keywords as the lambda does.
+#[test]
+fn lambda_alias_from_python_ext() {
+    ext_hosted("v09_escapes", "v09_escapes_host", &[]);
+}
+
 #[test]
 fn object_varargs_from_python_ext_release() {
     ext_hosted("v09_varargs", "v09_varargs_host", &["--release"]);

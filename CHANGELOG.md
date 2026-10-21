@@ -50,14 +50,27 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   CPython, or ran the function's `def` in CPython. Also native now: `except` naming an
   imported exception class (`from json import JSONDecodeError`), dict and set displays as
   elements of an object display, and `obj.__class__` / `obj.__dict__` of a compiled
-  instance. pystache's `ContextStack` is native; its benchmark 783k -> 734k instructions
-  per round (CPython: 505k).
+  instance. pystache's `ContextStack` is native.
 - A nested function with unannotated parameters used as a value (`map(get_text, parts)`,
   `return resolve`, `sorted(xs, key=step)`) is a native closure over the enclosing
   variables it reads, as an annotated one already was: its parameters and return are
   CPython objects, so CPython code calls it with no Python frame. It used to run its
-  `def` in CPython on every call of the enclosing function. pystache's benchmark 734k ->
-  488k instructions per round (CPython 505k), 0.62x -> 0.74x by wall time.
+  `def` in CPython on every call of the enclosing function. With the previous entry,
+  pystache's benchmark 783k -> 611k instructions per round in steady state (CPython 505k;
+  the 488k first reported for this step was a measurement artefact: the run subtracted
+  as the baseline compiled the tests' bytecode), Python frames per round 127 -> 52.
+- `html.escape(s[, quote])` and `re.escape(s)`, called through a name their import binds
+  (`from html import escape` in a `try` included) or as `html.escape(...)`, are computed
+  natively for a `str` when the callee is CPython's own function (checked by identity at
+  each call), with CPython's results; any other callee or argument is CPython's call.
+- `--ext --non-strict`: a module-level `name = lambda ...` is published as the function
+  compiled code makes of it, so Python code calls it compiled (with keywords, as the
+  lambda binds them); it used to be CPython's own lambda.
+- The attribute caches of CPython objects are two-way set associative: two attribute
+  reads whose keys hashed to one entry evicted each other on every use, and each miss
+  walked the MRO again. Which keys collided depended on the artifact's layout (pystache:
+  up to 57k instructions per round of its benchmark). pystache with the three entries
+  above: 611k -> 582k instructions per round, Python frames per round 52 -> 40.
 - Fixed: raising a compiled exception class with a CPython object argument (`raise
   MissingError(name)` in non-strict code) failed the build in code generation; the
   function raising it now runs in CPython, which keeps the object in `args`.

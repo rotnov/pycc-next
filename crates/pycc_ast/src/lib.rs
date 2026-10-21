@@ -14,7 +14,7 @@ mod string_annotation;
 mod unused_defs;
 pub use unused_defs::drop_unused_defs;
 pub use desugar::{
-    start_program,
+    start_program, module_lambda_aliases, set_intrinsic_hints,
     CLOSURE_MARKER, ExtSignature, INFER_MARKER, body_yields, desugar, desugar_computed_aug_target, desugar_with, expand_dataclasses,
     ext_entry_name, ext_entry_target, fold_static_branches,
     ext_needs_wrapper, ext_signatures, find_yield, function_qualname, object_except_handlers, split_ext_generators,

@@ -8,7 +8,10 @@
  * `pycc_ext_attr_name` keeps it; the class by its version tag, which
  * CPython clears whenever the class or any base changes and never reuses
  * for another class state), so a call site seeing several classes keeps
- * one entry for each.
+ * one entry for each. The table is two-way set associative: two keys whose
+ * hash lands on one set (a hash of addresses, so which keys collide depends
+ * on the artifact's layout) each keep an entry instead of evicting each
+ * other on every use, which made a refill -- an MRO walk -- of every read.
  *
  * A class is cacheable when its attribute lookup is `object`'s -- its
  * `tp_getattro` is `PyObject_GenericGetAttr`, or the slot CPython installs
@@ -128,11 +131,52 @@ static struct {
     descrgetfunc bind;   /* a method's `tp_descr_get` */
 } pycc_ext_ics[PYCC_IC_SLOTS];
 
-static size_t pycc_ext_ic_slot(const char *spelling, unsigned int tag)
+/* Per set, the way the next new entry replaces (the one not filled last). */
+static unsigned char pycc_ext_ic_victim[PYCC_IC_SLOTS / 2];
+
+/* The first slot of the set of `(spelling, tag)`; the set is it and the
+ * next one. */
+static size_t pycc_ext_ic_set(const char *spelling, unsigned int tag)
 {
     uint64_t key = (uint64_t)(uintptr_t)spelling ^ ((uint64_t)tag * 0xD6E8FEB86659FD93ull);
 
-    return (size_t)((key * 0x9E3779B97F4A7C15ull) >> (64 - PYCC_IC_SLOT_BITS)) & (PYCC_IC_SLOTS - 1);
+    return (size_t)((key * 0x9E3779B97F4A7C15ull) >> (64 - PYCC_IC_SLOT_BITS)) & (PYCC_IC_SLOTS - 2);
+}
+
+/* The slot holding the entry of `(spelling, tag)`, or -1. */
+static long pycc_ext_ic_slot(const char *spelling, unsigned int tag)
+{
+    size_t set = pycc_ext_ic_set(spelling, tag);
+
+    if (pycc_ext_ics[set].spelling == spelling && pycc_ext_ics[set].tag == tag) {
+        return (long)set;
+    }
+    if (pycc_ext_ics[set + 1].spelling == spelling && pycc_ext_ics[set + 1].tag == tag) {
+        return (long)set + 1;
+    }
+    return -1;
+}
+
+/* The slot a new entry of `(spelling, tag)` takes: its own, an empty way, or
+ * the way not filled last. */
+static size_t pycc_ext_ic_slot_for_store(const char *spelling, unsigned int tag)
+{
+    long held = pycc_ext_ic_slot(spelling, tag);
+    size_t set = pycc_ext_ic_set(spelling, tag);
+    size_t way;
+
+    if (held >= 0) {
+        return (size_t)held;
+    }
+    if (pycc_ext_ics[set].spelling == NULL) {
+        way = 0;
+    } else if (pycc_ext_ics[set + 1].spelling == NULL) {
+        way = 1;
+    } else {
+        way = pycc_ext_ic_victim[set / 2];
+    }
+    pycc_ext_ic_victim[set / 2] = (unsigned char)(way ^ 1);
+    return set + way;
 }
 
 /* The inline values of `obj`, whose class keeps them (3.13: right after the
@@ -574,7 +618,7 @@ static long pycc_ext_ic_store(PyTypeObject *type, const char *spelling, int kind
     if (tag == 0) {
         return -1;
     }
-    slot = pycc_ext_ic_slot(spelling, tag);
+    slot = pycc_ext_ic_slot_for_store(spelling, tag);
     if (pycc_ext_ics[slot].kind == PYCC_IC_MODULE) {
         released = pycc_ext_ics[slot].object;
     }
@@ -665,12 +709,8 @@ static long pycc_ext_ic_fill(PyObject *obj, const char *spelling, PyObject *name
 static long pycc_ext_ic_find(PyObject *obj, const char *spelling)
 {
     unsigned int tag = PYCC_IC_TAG(Py_TYPE(obj));
-    size_t slot = pycc_ext_ic_slot(spelling, tag);
 
-    if (tag != 0 && pycc_ext_ics[slot].spelling == spelling && pycc_ext_ics[slot].tag == tag) {
-        return (long)slot;
-    }
-    return -1;
+    return tag == 0 ? -1 : pycc_ext_ic_slot(spelling, tag);
 }
 
 /* Whether a method entry still holds for `obj` (module comment). */
@@ -718,10 +758,10 @@ static PyObject *pycc_ext_ic_call_read(PyObject *obj, size_t slot)
 static PyObject *pycc_ext_ic_try(PyObject *obj, const char *spelling)
 {
     unsigned int tag = PYCC_IC_TAG(Py_TYPE(obj));
-    size_t slot = pycc_ext_ic_slot(spelling, tag);
+    long slot = tag == 0 ? -1 : pycc_ext_ic_slot(spelling, tag);
     PyObject *value;
 
-    if (pycc_ext_ics[slot].spelling != spelling || pycc_ext_ics[slot].tag != tag || tag == 0) {
+    if (slot < 0) {
         return PYCC_IC_MISS;
     }
     switch (pycc_ext_ics[slot].kind) {

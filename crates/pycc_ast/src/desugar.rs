@@ -84,6 +84,7 @@ mod ext_generators;
 mod ext_signatures;
 mod globals;
 mod helpers;
+mod intrinsics;
 mod item_dunders;
 mod iter_alias;
 mod itertools;
@@ -110,6 +111,8 @@ use ruff_python_ast::{Expr, ModModule, Stmt};
 
 pub use closures::qualname::function_qualname;
 pub use dataclasses::start_program;
+pub use aliases::module_lambda_aliases;
+pub use intrinsics::set_intrinsic_hints;
 
 /// Replaces each module-level `if` whose test is known before the program
 /// runs by the branch that runs (see [`static_branches`]). [`desugar`] runs
@@ -210,6 +213,7 @@ pub fn desugar(module: &mut ModModule) {
         ndarray_ndim::close_ndims(&mut body);
         exit::sys_exit_calls(&mut body);
         pure_calls::drop_effectless_calls(&mut body);
+        intrinsics::native_intrinsics(&mut body);
         aliases::builtin_aliases(&mut body);
         aliases::stream_aliases(&mut body);
         builtin_defaults::inline_builtin_defaults(&mut body);

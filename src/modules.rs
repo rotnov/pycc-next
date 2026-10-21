@@ -402,6 +402,13 @@ impl Loader {
             pycc_ast::fold_static_branches(&mut parsed);
             pycc_ast::drop_unused_defs(&mut parsed);
         }
+        // The imports a statement CPython runs binds (`from html import
+        // escape` in a `try`), hidden by the fallback rewrite.
+        if copied.is_some()
+            && let Ok(original_module) = pycc_parser::parse_all(&original)
+        {
+            pycc_ast::set_intrinsic_hints(&original_module.body);
+        }
         pycc_ast::desugar(&mut parsed);
         if is_entry && let Some(message) = self.entry_package_collision() {
             let diagnostic = Diagnostic::error("C0001", message, Span::new(0, 0));

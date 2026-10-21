@@ -269,6 +269,14 @@ impl Plan {
         } else {
             BTreeSet::new()
         };
+        // v0.9: an `--ext` module publishes the function compiled code
+        // makes of a module-level `name = lambda ...`, as it publishes a
+        // `def`: Python code calls it compiled, with no Python frame.
+        let lambda_aliases = if publishes.variables && !publishes.infers_unannotated {
+            pycc_ast::module_lambda_aliases(&module.body)
+        } else {
+            BTreeSet::new()
+        };
         let stmts = module
             .body
             .iter()
@@ -278,6 +286,15 @@ impl Plan {
                 kind: match stmt {
                     Stmt::FunctionDef(def) => {
                         Kind::Def(def.name.as_str().to_string(), unannotated(def))
+                    }
+                    Stmt::Assign(assign)
+                        if matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(n)]
+                            if lambda_aliases.contains(n.id.as_str())) =>
+                    {
+                        let [pycc_ast::Expr::Name(n)] = assign.targets.as_slice() else {
+                            unreachable!("matched above")
+                        };
+                        Kind::Def(n.id.to_string(), true)
                     }
                     Stmt::ClassDef(class) => Kind::Class(class.name.as_str().to_string()),
                     Stmt::Import(_) | Stmt::ImportFrom(_) => Kind::Import,

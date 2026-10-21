@@ -294,6 +294,31 @@ fn annotated_def(
     })
 }
 
+/// The names of the top-level `name = lambda ...` statements
+/// [`module_level_defs`] turns into a `def`: compiled code defines a
+/// function of that name.
+pub fn module_lambda_aliases(body: &[Stmt]) -> std::collections::BTreeSet<String> {
+    let rebound = rebound_names(body);
+    body.iter()
+        .filter_map(|stmt| {
+            let Stmt::Assign(assign) = stmt else {
+                return None;
+            };
+            let [Expr::Name(target)] = assign.targets.as_slice() else {
+                return None;
+            };
+            let Expr::Lambda(lambda) = assign.value.as_ref() else {
+                return None;
+            };
+            let variadic = lambda.parameters.as_ref().is_some_and(|p| {
+                p.vararg.is_some() || p.kwarg.is_some() || !p.kwonlyargs.is_empty()
+            });
+            (!variadic && rebound.get(target.id.as_str()).copied().unwrap_or(0) == 1)
+                .then(|| target.id.to_string())
+        })
+        .collect()
+}
+
 /// Turns each top-level `name = lambda ...` and `name = sys.stdin.readline`
 /// (or another [`SysFn`]) into a `def`, when `name` is bound nowhere else.
 pub(crate) fn module_level_defs(body: &mut [Stmt], sys: &SysNames) {

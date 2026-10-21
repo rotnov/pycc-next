@@ -93,9 +93,25 @@ impl SourceSignatures {
 
     pub(crate) fn collect(module: &ModModule) -> Self {
         let mut table = Self::default();
+        // A module-level `name = lambda ...` compiled code defines as a
+        // function (`pycc_ast::module_lambda_aliases`) binds its call as the
+        // lambda's signature.
+        let lambda_aliases = pycc_ast::module_lambda_aliases(&module.body);
         for stmt in &module.body {
             match stmt {
                 Stmt::FunctionDef(def) => table.insert(def.name.to_string(), &def.parameters),
+                Stmt::Assign(assign) => {
+                    if let ([pycc_ast::Expr::Name(target)], pycc_ast::Expr::Lambda(lambda)) =
+                        (assign.targets.as_slice(), assign.value.as_ref())
+                        && lambda_aliases.contains(target.id.as_str())
+                    {
+                        let empty = Parameters::default();
+                        table.insert(
+                            target.id.to_string(),
+                            lambda.parameters.as_deref().unwrap_or(&empty),
+                        );
+                    }
+                }
                 Stmt::ClassDef(class) => {
                     for member in &class.body {
                         if let Stmt::FunctionDef(def) = member {
