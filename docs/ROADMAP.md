@@ -825,3 +825,30 @@ Progress:
   `bench/pydantic_check.py --time` (15 runs, CPython/compiled median ratio, before ->
   after): import 0.74x -> 0.80x, define 0.67x -> 0.66x, schema 0.67x -> 0.66x,
   round-trips 0.94x -> 0.95x.
+
+## v0.9 — Typed hot data, native end to end
+
+v0.8 showed where the speed is: code over typed native data runs many times faster than
+CPython (diff-match-patch ~12x, pypng ~12x), while dynamic code over CPython objects stays
+at about CPython's speed however it is compiled (pydantic define/schema ~0.8x, mistune ~1x,
+pystache ~0.7x; the analysis is in v0.8 accepts 1 and 4). v0.9 makes libraries' hot state
+typed and native: their own classes, lists and dicts become native values that compiled
+code of every module of the package reads directly.
+
+Accept:
+1. **Native hot state in `--non-strict`:** instances of a package's own classes, and lists
+   and `str`-keyed dicts built by its compiled code, are native when their element types
+   infer (with a guarded object fallback where they escape to CPython), including classes
+   whose bases come from another module of the package, `Generic[...]` bases with plain or
+   constrained `TypeVar`s, and `lambda`s in class bodies (deferred from v0.8).
+2. **Template engine >= 2x:** pystache 0.6.8 (chosen by the v0.8 accept 4 rule) runs its
+   own benchmark >= 2x faster than CPython (median of interleaved runs) and passes its suite.
+3. **Markdown >= 1.5x:** mistune 3.3.4 renders `benchmark/cases` >= 1.5x faster than
+   CPython and passes its suite.
+4. **pydantic no slower:** every phase of `bench/pydantic_check.py --time` (import, define,
+   schema, round-trips) >= 1.0x CPython's median; its suite fails no test that passes
+   against its sources.
+5. **Strict refuses exactly what a type checker refuses:** a CI check runs `mypy --strict`
+   over the corpus; every strict refusal is a program mypy also rejects (or is listed in
+   DEVIATIONS with a reason), and `--non-strict` stays 200/200, 0 wrong, 0 fallback
+   statements. Issues #8 and #9 are fixed.
