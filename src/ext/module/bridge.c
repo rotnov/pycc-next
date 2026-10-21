@@ -32,6 +32,7 @@
 #define Py_LIMITED_API 0x030D0000
 #include <Python.h>
 #include <string.h>
+#include <stdlib.h>
 
 /*
  * Inline reference counting (v0.8). Under `Py_LIMITED_API >= 3.12` the

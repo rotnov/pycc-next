@@ -207,6 +207,24 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   return the string itself when they change nothing (CPython does too), and `find`,
   `rfind`, `in`, `replace`, `count` and `split` search with SIMD `memchr`/`memmem`.
 
+- Non-strict `--ext`: attribute reads and method calls on CPython objects are cached as
+  CPython 3.13's specializing interpreter caches them (`src/ext/module/attr_cache.c`):
+  per attribute name and class version tag, an instance value (by its index in the
+  class's shared keys), a `__slots__` member, a `property` getter, a method of a class
+  whose instances keep their attributes inline or have no dict (functions and builtin
+  methods, called with the object first, no bound method made) and a module attribute
+  (by its entry in the module dict), with the guards CPython's own `LOAD_ATTR` forms
+  check, so a hit skips `PyObject_GetAttr` and `PyObject_VectorcallMethod`. The 3.13
+  layouts read are checked against objects made at first use, and any mismatch (or
+  another CPython version, or `PYCC_NO_ATTR_CACHE=1`) leaves the caches off. `o == "lit"`
+  reads a compact ASCII `str`'s length, hash and text in place, and `x in {"a", "b"}`
+  (a set display of literals, which CPython folds into a frozenset constant) builds the
+  set once per site instead of a set and a frozenset at every test. Measured on
+  pydantic's define phase: 41.6M to 37.9M instructions per repetition (CPython 34.1M);
+  define+schema 167.4M to 157.1M (CPython 151.2M); a cached `o.x` 4.5 ns (was 12.4,
+  CPython 15.8), `o.get()` 28.4 ns (was 37.1, CPython 31.2); pystache's benchmark 12%
+  faster.
+
 ## [0.7.0] - 2026-10-17
 
 Real-world Python: frameworks, Windows. All five v0.7 goals are met. Windows x86_64 is a

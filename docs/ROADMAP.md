@@ -576,6 +576,19 @@ Accept:
    two does for calls. mistune: 63.33M instructions per `mistune.html` pass (64.51M),
    387 of 413 functions native, its suite passing; pydantic unchanged (1029 of 1249,
    its suite as before), its classes being created by CPython.
+   **Progress 2026-10-21** (not met), toward the amended bar: the per-operation lever,
+   first step -- CPython 3.13's attribute specializations as runtime caches (with the
+   guru advisor: the guards of `LOAD_ATTR_INSTANCE_VALUE`/`_SLOT`/`_PROPERTY`/
+   `_METHOD_*`/`_MODULE`, per attribute name and class version tag, layouts checked at
+   first use; `src/ext/module/attr_cache.c`), `o == "lit"` read in place for a compact
+   ASCII `str`, and a set display of literals in a membership test built once per site
+   (it was a set and a frozenset per test: 2.3M of define's instructions). Callgrind,
+   (5 reps - 1 rep) / 4, `PYTHONHASHSEED=0`: define 41.6M -> 37.9M per repetition
+   (CPython 34.1M, 0.90x); define+schema 167.4M -> 157.1M (CPython 151.2M, 0.96x). Wall
+   time moves less than instructions (12 interleaved runs, REPEAT 40: define 11.84 ->
+   11.12 ms, schema 21.37 -> 20.91 ms; CPython 9.05 / 16.74 ms in the same session:
+   about 0.81x both): the compiled tree also misses the instruction cache more
+   (cachegrind: 3.15M L1i misses per define+schema round against CPython's 1.99M).
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions

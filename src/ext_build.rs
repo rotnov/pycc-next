@@ -55,6 +55,7 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/global_sync.c"),
     include_str!("ext/module/import_io.c"),
     include_str!("ext/module/object_unpack.c"),
+    include_str!("ext/module/attr_cache.c"),
     include_str!("ext/module/object_ops.c"),
     include_str!("ext/module/object_index.c"),
     include_str!("ext/module/object_convert.c"),
@@ -504,8 +505,9 @@ pub(crate) fn ext_export_args(platform: ExtLinkPlatform, map: &Path) -> Vec<OsSt
 }
 
 /// The runtime's live-object counters, which a host (and the leak tests)
-/// reads from an extension module with `ctypes`.
-pub(crate) const RUNTIME_COUNTERS: [&str; 10] = [
+/// reads from an extension module with `ctypes`, and the attribute caches'
+/// hit count (`src/ext/module/attr_cache.c`).
+pub(crate) const RUNTIME_COUNTERS: [&str; 11] = [
     "pycc_rt_str_live_objects",
     "pycc_rt_list_live_objects",
     "pycc_rt_dict_live_objects",
@@ -516,6 +518,7 @@ pub(crate) const RUNTIME_COUNTERS: [&str; 10] = [
     "pycc_rt_gen_live_objects",
     "pycc_rt_num_box_live_objects",
     "pycc_rt_buffer_live_views",
+    "pycc_ext_attr_cache_hits",
 ];
 
 mod carrier;

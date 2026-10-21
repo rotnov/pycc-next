@@ -40,8 +40,9 @@
  * The interned `str` of an attribute name the compiled code spells, by the
  * spelling's address, so a lookup in a loop neither decodes nor hashes the
  * name again. Every spelling is a constant of the generated code (callers
- * are `pycc_ext_obj_getattr` and `pycc_ext_obj_call_method`, whose name
- * arguments codegen emits as private string constants), which lives as long
+ * are `pycc_ext_obj_getattr`, `pycc_ext_obj_call_method`,
+ * `pycc_ext_obj_setattr` and `pycc_ext_obj_delattr`, whose name arguments
+ * codegen emits as private string constants), which lives as long
  * as the module and is never reused for another text: one address names one
  * text, so a hit is decided by the address alone. A slot holds one name; a
  * colliding name replaces it. Borrowed; NULL with an exception set when the
@@ -78,15 +79,20 @@ static PyObject *pycc_ext_attr_name(const char *spelling)
 PyObject *pycc_ext_obj_getattr(PyObject *obj, const char *name)
 {
     PyObject *attr_name;
+    PyObject *value;
 
     if (obj == NULL) {
         return NULL;
+    }
+    value = pycc_ext_ic_try(obj, name);
+    if (value != PYCC_IC_MISS) {
+        return value;
     }
     attr_name = pycc_ext_attr_name(name);
     if (attr_name == NULL) {
         return NULL;
     }
-    return PyObject_GetAttr(obj, attr_name);
+    return pycc_ext_ic_getattr_slow(obj, name, attr_name);
 }
 
 /*
@@ -110,9 +116,11 @@ PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **
     PyObject *stack[PYCC_EXT_METHOD_STACK + 1];
     PyObject *attr_name;
     PyObject *bound;
+    PyObject *method;
     PyObject *result = NULL;
     long long i;
     int packed = 1;
+    int with_self = 1;
 
     for (i = 0; i < nargs; i++) {
         if (args[i] == NULL) {
@@ -120,13 +128,27 @@ PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **
         }
     }
     if (self != NULL && packed) {
-        attr_name = pycc_ext_attr_name(name);
-        if (attr_name != NULL && nargs <= PYCC_EXT_METHOD_STACK) {
+        /* A hit needs no interned name (`attr_cache.c`). */
+        method = nargs <= PYCC_EXT_METHOD_STACK ? pycc_ext_ic_method(self, name, NULL, &with_self) : NULL;
+        attr_name = method != NULL ? NULL : pycc_ext_attr_name(name);
+        if ((method != NULL || attr_name != NULL) && nargs <= PYCC_EXT_METHOD_STACK) {
             stack[0] = self;
             for (i = 0; i < nargs; i++) {
                 stack[i + 1] = args[i];
             }
-            result = PyObject_VectorcallMethod(attr_name, stack, (size_t)(nargs + 1), NULL);
+            if (method == NULL) {
+                method = pycc_ext_ic_method(self, name, attr_name, &with_self);
+            }
+            if (method != NULL) {
+                /* A cached method or module attribute (`attr_cache.c`), held
+                 * for the call. */
+                Py_INCREF(method);
+                result = with_self ? PyObject_Vectorcall(method, stack, (size_t)(nargs + 1), NULL)
+                                   : PyObject_Vectorcall(method, stack + 1, (size_t)nargs, NULL);
+                Py_DECREF(method);
+            } else {
+                result = PyObject_VectorcallMethod(attr_name, stack, (size_t)(nargs + 1), NULL);
+            }
         } else if (attr_name != NULL) {
             bound = PyObject_GetAttr(self, attr_name);
             if (bound != NULL) {
@@ -959,13 +981,14 @@ PyObject *pycc_ext_obj_build_list(PyObject **items, long long n)
  * `o` is borrowed; `value` is a packer's new reference, consumed on every
  * path. A NULL `value` is a failed packer (an out-of-range bigint's
  * `OverflowError`, say) whose exception is already set, and it must not
- * reach `PyObject_SetAttrString`: a NULL value there *deletes* the
+ * reach `PyObject_SetAttr`: a NULL value there *deletes* the
  * attribute. A NULL `o` is guarded as `pycc_ext_obj_getattr` guards it.
  * Returns `0`, or `-1` with the exception set -- whatever the object's own
  * `__setattr__`, a read-only property or a `__slots__` layout raises.
  */
 int pycc_ext_obj_setattr(PyObject *o, const char *name, PyObject *value)
 {
+    PyObject *attr_name;
     int status;
 
     if (value == NULL) {
@@ -975,7 +998,8 @@ int pycc_ext_obj_setattr(PyObject *o, const char *name, PyObject *value)
         Py_DECREF(value);
         return -1;
     }
-    status = PyObject_SetAttrString(o, name, value);
+    attr_name = pycc_ext_attr_name(name);
+    status = attr_name == NULL ? -1 : PyObject_SetAttr(o, attr_name, value);
     Py_DECREF(value);
     return status;
 }
@@ -988,10 +1012,13 @@ int pycc_ext_obj_setattr(PyObject *o, const char *name, PyObject *value)
  */
 int pycc_ext_obj_delattr(PyObject *o, const char *name)
 {
+    PyObject *attr_name;
+
     if (o == NULL) {
         return -1;
     }
-    return PyObject_DelAttrString(o, name);
+    attr_name = pycc_ext_attr_name(name);
+    return attr_name == NULL ? -1 : PyObject_DelAttr(o, attr_name);
 }
 
 /*

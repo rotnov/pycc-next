@@ -2,8 +2,9 @@
 //! mode): `kind not in (1, 2, 3, 4)` with a CPython object `kind` boxes the
 //! display into a CPython tuple at every evaluation otherwise.
 //!
-//! The display is a tuple or list of literals (`int`s in the smallint range,
-//! `str`, `float`, `bool`, `None`). The membership test only reads it --
+//! The display is a tuple, list or set of literals (`int`s in the smallint
+//! range, `str`, `float`, `bool`, `None`); CPython folds the set into a
+//! frozenset constant. The membership test only reads it --
 //! `PySequence_Contains` compares each element with the item, and nothing
 //! can reach the container itself -- and its elements are immutable, so one
 //! object built at the site's first evaluation answers every later test the
@@ -16,21 +17,35 @@ use crate::foreign_fail::{ForeignFailEdge, route_null};
 
 /// Whether `container` (an `ObjContains` container) is such a display.
 pub(crate) fn is_constant_sequence(container: &MirExpr) -> bool {
-    let MirExpr::ObjectBox(inner) = container else {
-        return false;
-    };
-    let elements = match inner.as_ref() {
-        MirExpr::TupleLiteral(es) | MirExpr::ListLiteral(es) => es,
+    let elements = match container {
+        MirExpr::ObjectBox(inner) => match inner.as_ref() {
+            MirExpr::TupleLiteral(es) | MirExpr::ListLiteral(es) => es,
+            // A set display of literals (`kind in {"a", "b"}`), which
+            // CPython folds into a frozenset constant: the set built once
+            // is only read by the membership test, as that constant is.
+            MirExpr::SetLiteral { elements, .. } => elements,
+            _ => return false,
+        },
+        MirExpr::ObjDisplay {
+            kind: pycc_mir::ObjDisplayKind::Set | pycc_mir::ObjDisplayKind::ConstantSet,
+            elements,
+        } => elements,
         _ => return false,
     };
     !elements.is_empty()
-        && elements.iter().all(|e| match e {
-            MirExpr::IntLiteral(n) => crate::int_const::fits_tagged_smallint(*n).is_some(),
-            MirExpr::StringLiteral(_)
-            | MirExpr::FloatLiteral(_)
-            | MirExpr::BoolLiteral(_)
-            | MirExpr::NoneLiteral => true,
-            _ => false,
+        && elements.iter().all(|e| {
+            let e = match e {
+                MirExpr::ObjectBox(inner) => inner.as_ref(),
+                other => other,
+            };
+            match e {
+                MirExpr::IntLiteral(n) => crate::int_const::fits_tagged_smallint(*n).is_some(),
+                MirExpr::StringLiteral(_)
+                | MirExpr::FloatLiteral(_)
+                | MirExpr::BoolLiteral(_)
+                | MirExpr::NoneLiteral => true,
+                _ => false,
+            }
         })
 }
 
