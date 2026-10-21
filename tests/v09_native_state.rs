@@ -294,3 +294,59 @@ fn generic_and_compiled_bases_from_python_ext_release() {
 fn object_varargs_from_python_ext_release() {
     ext_hosted("v09_varargs", "v09_varargs_host", &["--release"]);
 }
+
+/// A subclass instance reaching a base-typed compiled value -- an `--ext`
+/// parameter, `Base.method(obj)` from Python, an `object` narrowed by
+/// `isinstance` -- runs the subclass's overrides (`pycc_mir::dispatch`);
+/// it used to run the base's bodies.
+#[test]
+fn subclass_overrides_dispatch_native() {
+    native("v09_dispatch", &[]);
+}
+
+#[test]
+fn subclass_overrides_dispatch_from_python_ext() {
+    ext_hosted("v09_dispatch", "v09_dispatch_host", &[]);
+}
+
+#[test]
+fn subclass_overrides_dispatch_from_python_ext_release() {
+    ext_hosted("v09_dispatch", "v09_dispatch_host", &["--release"]);
+}
+
+/// The same in a strict module: a parameter annotated with the base runs
+/// the subclass instance's override, while `Base.name(d)` from Python runs
+/// the base's own body, as CPython's explicit class call does.
+#[test]
+fn subclass_overrides_dispatch_strict_ext() {
+    let source = "class Base:\n    def __init__(self, n: int) -> None:\n        self.n = n\n\n    \
+                  def name(self) -> str:\n        return \"base\"\n\n    \
+                  def show(self) -> str:\n        return self.name() + str(self.n)\n\n\n\
+                  class Derived(Base):\n    def name(self) -> str:\n        return \"derived\"\n\n\n\
+                  def show_it(b: Base) -> str:\n    return b.show()\n";
+    let host = "import m\nd = m.Derived(3)\nprint(m.show_it(d), d.show(), m.Base.show(d), \
+                m.show_it(m.Base(2)), m.Base.name(d))\n";
+    let compiled = ScratchDir::new("v09_dispatch_strict").expect("scratch");
+    std::fs::write(compiled.join("m.py"), source).expect("write the module");
+    let build = pycc()
+        .args(["build", "--ext"])
+        .arg(compiled.join("m.py"))
+        .arg("-o")
+        .arg(compiled.join("m"))
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&build.stderr));
+    std::fs::remove_file(compiled.join("m.py")).expect("import the artifact");
+    let plain = ScratchDir::new("v09_dispatch_strict_src").expect("scratch");
+    std::fs::write(plain.join("m.py"), source).expect("write the module");
+    let run = |dir: &Path| {
+        python()
+            .args(["-c", host])
+            .current_dir(dir)
+            .output()
+            .expect("python should spawn")
+    };
+    let ours = run(&compiled);
+    assert_matches(&ours, &run(&plain));
+    assert_eq!(text(&ours.stdout), "derived3 derived3 derived3 base2 base\n");
+}

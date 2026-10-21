@@ -105,6 +105,10 @@ fn compile_module(
     *rt.exception_classes.borrow_mut() = heap_rc::exception_classes(&mir.class_defs);
     *rt.assigned_slots.borrow_mut() = assigned_slots::AssignedSlots::analyze(mir, options.ext);
     *rt.nothrow.borrow_mut() = nothrow::nothrow_functions(mir);
+    // A dispatcher's class test never raises.
+    rt.nothrow
+        .borrow_mut()
+        .insert(pycc_mir::dispatch::INSTANCE_CLASS_IS.to_string());
     let _pins = operand_pin::plan_module(&rt, mir);
     rt.frames.set_files(
         options.source_files.clone(),

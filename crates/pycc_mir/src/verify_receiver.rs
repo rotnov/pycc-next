@@ -55,6 +55,11 @@ pub(crate) fn verify(module: &MirModule, classes: &HashMap<String, HirClassDef>)
         .collect();
     for item in &module.items {
         let (name, body): (&str, &[MirStmt]) = match item {
+            // A dispatcher calls each subclass's body with the base-typed
+            // receiver by design (`crate::dispatch`).
+            MirItem::Function { name, .. } if crate::dispatch::default_of(name).is_some() => {
+                continue;
+            }
             MirItem::Function { name, body, .. } => (name, body),
             MirItem::TopLevelStmt(stmt) => ("<module>", std::slice::from_ref(stmt)),
             MirItem::ForeignImport { .. } => continue,
@@ -155,6 +160,11 @@ impl Verifier<'_> {
         let Some(receiver) = self.class(receiver_name) else {
             return;
         };
+        // v0.9: a dispatcher runs, for an exact receiver, the body the
+        // static class resolves to (`crate::dispatch`).
+        if let Some(default) = crate::dispatch::default_of(callee) {
+            return self.check_call(&default, receiver_ty);
+        }
         let (generic, spelled) = match callee.strip_prefix("0gen_") {
             Some(rest) => (true, rest),
             None => (false, callee),

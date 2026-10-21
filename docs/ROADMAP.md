@@ -905,6 +905,12 @@ Accept:
    accept 1: bases from another module of the package (the template must extend the
    base's layout) and exception classes over such bases, Python subclasses of compiled
    classes.
+   Step 6 (guru ruling: virtual dispatch for the override set the build knows, realized
+   as dispatch to D-254's receiver-exact bodies): a method call whose receiver's class
+   has a compiled subclass resolving the method to another body calls one dispatcher
+   per (class, method) testing the receiver's run-time class. Fixes a pre-existing
+   divergence (a subclass instance passed where its base is annotated ran the base's
+   bodies) and is the mechanism cross-module bases build on.
 2. **Template engine >= 2x:** pystache 0.6.8 (chosen by the v0.8 accept 4 rule) runs its
    own benchmark >= 2x faster than CPython (median of interleaved runs) and passes its suite.
    **Progress 2026-10-21** (not met): 0.61x -> 0.69x after accept 1's step 1 (0.089 s

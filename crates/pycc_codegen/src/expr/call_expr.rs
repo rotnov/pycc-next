@@ -17,6 +17,9 @@ pub(crate) fn emit_call_expr<'ctx>(
     };
     // `print(...)` in a value position (`print(a) if c else
     // print(b)`): print, then yield its `None` result.
+    if callee == pycc_mir::dispatch::INSTANCE_CLASS_IS {
+        return emit_instance_class_is(context, builder, module, rt, user_functions, locals, args);
+    }
     if callee == "print" {
         string_render::emit_print_call(context, builder, module, rt, user_functions, locals, args);
         return crate::call_result::none_scalar(context);
@@ -254,6 +257,55 @@ pub(crate) fn emit_call_expr<'ctx>(
         args,
     );
     crate::call_result::call_result_scalar(context, call_site, ty)
+}
+
+/// A dispatcher's run-time class test (`pycc_mir::dispatch`):
+/// `pycc_rt_instance_class_is(recv, name, len)` against the class name's
+/// bytes, interned once per name.
+fn emit_instance_class_is<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    args: &[MirExpr],
+) -> Scalar<'ctx> {
+    let [receiver, MirExpr::StringLiteral(class)] = args else {
+        panic!("pycc_codegen: internal error: a class test takes a receiver and a class name")
+    };
+    let Scalar::Instance(receiver) =
+        emit_expr(context, builder, module, rt, user_functions, locals, receiver)
+    else {
+        panic!("pycc_codegen: internal error: a class test's receiver is an instance")
+    };
+    let global_name = format!("pycc_dispatch_class.{class}");
+    let len = context.i64_type().const_int(class.len() as u64, false);
+    let name = match module.get_global(&global_name) {
+        Some(existing) => existing.as_pointer_value(),
+        None => {
+            crate::exception_value::emit_str_bytes_constant(context, module, class, &global_name).0
+        }
+    };
+    let answer = builder
+        .build_call(
+            rt.instance_class_is,
+            &[receiver.into(), name.into(), len.into()],
+            "class_is",
+        )
+        .expect("build_call should not fail for a well-formed class test")
+        .try_as_basic_value()
+        .expect_basic("pycc_rt_instance_class_is returns a value")
+        .into_int_value();
+    let zero = context.i8_type().const_zero();
+    let truth = builder
+        .build_int_compare(inkwell::IntPredicate::NE, answer, zero, "class_is_bool")
+        .expect("an i8 comparison is well formed");
+    Scalar::Bool(
+        builder
+            .build_int_z_extend(truth, context.i8_type(), "class_is_i8")
+            .expect("a zero extension is well formed"),
+    )
 }
 
 pub(crate) fn emit_f_string_expr<'ctx>(

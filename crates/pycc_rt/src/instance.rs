@@ -90,6 +90,7 @@ const _: () = {
 mod carrier;
 pub use carrier::{
     pycc_rt_ext_instance_carrier, pycc_rt_ext_instance_class, pycc_rt_ext_instance_set_carrier,
+    pycc_rt_instance_class_is,
 };
 mod copy;
 pub use copy::pycc_rt_ext_instance_copy;

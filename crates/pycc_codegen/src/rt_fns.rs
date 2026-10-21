@@ -279,6 +279,10 @@ pub(super) struct RtFns<'ctx> {
     pub(super) instance_new: FunctionValue<'ctx>,
     pub(super) instance_get_slot_checked: FunctionValue<'ctx>,
     pub(super) instance_set_slot: FunctionValue<'ctx>,
+    /// `pycc_rt_instance_class_is(instance, name, len) -> bool`: the
+    /// run-time class test of a dispatched method call (v0.9,
+    /// `pycc_mir::dispatch`).
+    pub(super) instance_class_is: FunctionValue<'ctx>,
     /// `pycc_rt_raise_name_error(name, len)`: makes CPython's
     /// `NameError: name '<name>' is not defined` the pending exception and
     /// returns. Issue #22's call-before-`def` path raises it and unwinds
@@ -844,6 +848,12 @@ pub(super) fn declare_rt_functions<'ctx>(
         instance_get_slot_checked: declare(
             "pycc_rt_instance_get_slot_checked",
             i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+        ),
+        instance_class_is: declare(
+            "pycc_rt_instance_class_is",
+            context
+                .i8_type()
+                .fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false),
         ),
         instance_set_slot: declare(
             "pycc_rt_instance_set_slot",

@@ -237,6 +237,15 @@ pub(crate) fn lower_attr_get_expr(
                 classes,
             );
             let ty = lookup(scopes, &format!("$fn:{getter}"));
+            // v0.9: a subclass overriding the property (`crate::dispatch`).
+            let getter = crate::dispatch::route_member(
+                class_def,
+                attr,
+                getter,
+                scopes,
+                classes,
+                crate::dispatch::getter_of,
+            );
             return MirExpr::Call {
                 callee: getter,
                 args: vec![base],

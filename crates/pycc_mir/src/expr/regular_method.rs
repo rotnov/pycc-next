@@ -58,6 +58,9 @@ pub(super) fn lower_regular_method_call(
     // #1337 (D-254): the receiver-exact copy when one exists.
     let mangled = exact_callee(&class_def.name, owner, mangled, scopes, classes);
     let ty = lookup(scopes, &format!("$fn:{mangled}"));
+    // v0.9: a receiver that may be a subclass instance overriding the
+    // method calls through its class's dispatcher.
+    let mangled = crate::dispatch::route(class_def, method, mangled, scopes, classes);
     let mut call_args = Vec::with_capacity(args.len() + omitted.len() + 1);
     call_args.push(base);
     call_args.extend(

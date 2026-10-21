@@ -13,6 +13,7 @@ mod class;
 use class::eval_isinstance_protocol;
 use class::{class_def_of, mro_attrs};
 mod dict_add;
+pub mod dispatch;
 mod exception;
 mod exception_isinstance;
 mod generator;
@@ -383,6 +384,7 @@ pub fn build(hir: &HirModule) -> MirModule {
     // recursive call" shape, but never mutated the way `scopes` is (a
     // class's declared shape does not change while lowering a module).
     let classes: HashMap<String, HirClassDef> = hir.class_defs.iter().cloned().collect();
+    dispatch::reset();
     // Part 2 of #1026 (#1081): a foreign import's local name is a *value*
     // binding of type `object` for the rest of the module, so `lower_expr`'s
     // `HirExpr::Name` arm can resolve it through `lookup` like any other.
@@ -477,6 +479,9 @@ pub fn build(hir: &HirModule) -> MirModule {
         .map(|item| item.expect("every HIR item is either a function or a top-level statement"))
         .collect();
     splice_foreign_imports(&mut items, &hir.imports);
+    // v0.9: the run-time dispatchers the method calls above routed to,
+    // first, so they are bound before any code of the module runs.
+    items.splice(0..0, dispatch::items());
     let mut module = MirModule {
         items,
         class_defs: hir.class_defs.clone(),

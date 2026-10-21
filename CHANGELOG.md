@@ -84,6 +84,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `Box[int](x)` in compiled code crashed the compiler. The public class is mutable as a
   CPython class is (the template stays immutable and still refuses Python subclasses);
   an attribute error names the class as CPython does (`'Conf' object has no attribute`).
+- Fixed: a subclass instance reaching compiled code typed with its base class -- an
+  `--ext` parameter annotated `Base`, `Base.show(obj)` called from Python, an `object`
+  narrowed by `isinstance(o, Base)` -- ran the base's methods where the subclass
+  overrides them (`show_it(Derived(3))` gave `base3`, CPython `derived3`). A method call
+  whose receiver's class has a compiled subclass resolving the method to another body
+  now calls a dispatcher that tests the receiver's run-time class and runs that body
+  (`pycc_mir::dispatch`); a class nobody overrides pays nothing.
 - Fixed: raising a compiled exception class with a CPython object argument (`raise
   MissingError(name)` in non-strict code) failed the build in code generation; the
   function raising it now runs in CPython, which keeps the object in `args`.

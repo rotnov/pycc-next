@@ -46,6 +46,24 @@ pub unsafe extern "C" fn pycc_rt_ext_instance_class(
     name.as_ptr()
 }
 
+/// Whether `instance` was constructed as the class named by the `len` bytes
+/// at `name` (v0.9): the run-time class test of a dispatched method call
+/// (`pycc_mir::dispatch`), compared by name because an instance a host
+/// constructed carries the shim's copy of the descriptor, not codegen's.
+///
+/// # Safety
+/// `instance` must point at a live `PyInstanceObj` and `name` at `len`
+/// readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_instance_class_is(
+    instance: *const PyInstanceObj,
+    name: *const u8,
+    len: usize,
+) -> bool {
+    let wanted = unsafe { std::slice::from_raw_parts(name, len) };
+    class_name(unsafe { &*instance }.layout()) == wanted
+}
+
 /// Field 0 of a layout descriptor.
 fn class_name(layout: &'static [u8]) -> &'static [u8] {
     layout
