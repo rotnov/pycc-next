@@ -261,11 +261,23 @@ impl Plan {
     /// an `--ext` module the code object of a new chunk of `chunks`
     /// (`CodeChunk`), elsewhere `compile()`d where it runs.
     pub(super) fn exec_text(&self, chunks: &mut Vec<CodeChunk>, source: &str) -> String {
+        self.exec_text_as(chunks, source, &self.display, self.defers_annotations)
+    }
+
+    /// [`Self::exec_text`] of `source` compiled as file `filename`, with
+    /// `from __future__ import annotations` when `future`.
+    pub(super) fn exec_text_as(
+        &self,
+        chunks: &mut Vec<CodeChunk>,
+        source: &str,
+        filename: &str,
+        future: bool,
+    ) -> String {
         if self.publishes.variables {
             chunks.push(CodeChunk {
                 source: source.to_string(),
-                filename: self.display.clone(),
-                future_annotations: self.defers_annotations,
+                filename: filename.to_string(),
+                future_annotations: future,
             });
             return format!(
                 "{BUILTINS}.exec({NS}[\"{CODE_HOOK}\"]({}), {NS})",
@@ -275,8 +287,12 @@ impl Plan {
         format!(
             "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",
             py_str(source),
-            py_str(&self.display),
-            self.compile_flags()
+            py_str(filename),
+            if future {
+                self.compile_flags()
+            } else {
+                String::new()
+            }
         )
     }
 

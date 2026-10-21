@@ -7,11 +7,13 @@
 //! import cost pydantic's import more than all of CPython's own work, which
 //! a `.pyc` cache saves CPython. Instead, the build compiles every chunk
 //! (`crate::fallback::CodeChunk`) once with the target interpreter and
-//! embeds the `marshal`led code object, with the interpreter's bytecode
-//! magic number; the rewrite reads each code object through the module's
-//! `__pycc_code__` hook (`PRECOMPILED_C`), present in the namespace only
-//! while the body runs. The hook unmarshals the embedded code when the
-//! running interpreter has the same magic number and runs unoptimized
+//! embeds the module's code objects as one `marshal`led table, with the
+//! interpreter's bytecode magic number (one table, so `marshal` shares the
+//! names and constants the chunks repeat and each is read and interned once);
+//! the rewrite reads each code object through the module's `__pycc_code__`
+//! hook (`PRECOMPILED_C`), present in the namespace only while the body runs.
+//! The hook unmarshals the table on its first call, when the running
+//! interpreter has the same magic number and runs unoptimized
 //! (`-O` strips `assert`s at compile time), and otherwise compiles the
 //! embedded source exactly as the rewrite did before: same file name, same
 //! `from __future__ import annotations` flag, so `co_filename`, line
@@ -27,16 +29,17 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::process::Stdio;
 
-/// What the target interpreter compiled: its magic number and each
-/// chunk's marshalled code object (`None` for one it refused to compile,
-/// which then fails at import exactly as `compile()` did), and, for a chunk
-/// whose code holds `frozenset` constants, their elements in source order
-/// (a marshalled tuple of tuples, `ORDERS_FIX` in `PRECOMPILED_C`).
+/// What the target interpreter compiled: its magic number, the
+/// `marshal`led table of every chunk's entry -- its code object and, when
+/// its code holds `frozenset` constants, their elements in source order (a
+/// tuple of tuples, for [`ORDERS_FIX`]), or `None` for a chunk it refused to
+/// compile, which then fails at import exactly as `compile()` did -- followed
+/// by [`ORDERS_FIX`]'s code object, and which chunks have an entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Precompiled {
     pub(crate) magic: u32,
-    pub(crate) code: Vec<Option<Vec<u8>>>,
-    pub(crate) orders: Vec<Option<Vec<u8>>>,
+    pub(crate) table: Vec<u8>,
+    pub(crate) present: Vec<bool>,
 }
 
 /// The script compiling the chunks of its stdin (JSON) to marshalled code.
@@ -73,27 +76,58 @@ const COMPILE_SCRIPT: &str = "import sys,json,marshal,importlib.util,__future__,
     \x20   found={t for t in shown if frozenset(t)==k}\n\
     \x20   if len(found)!=1: raise ValueError\n\
     \x20   out.append(found.pop())\n\
-    \x20 return marshal.dumps(tuple(out)).hex()\n\
-    chunks=json.loads(sys.stdin.buffer.read())\n\
-    code=[]\n\
-    sets=[]\n\
+    \x20 return tuple(out)\n\
+    given=json.loads(sys.stdin.buffer.read())\n\
+    chunks=given['chunks']\n\
+    table=[]\n\
     for c in chunks:\n\
     \x20 try:\n\
     \x20   f=__future__.annotations.compiler_flag if c['future'] else 0\n\
     \x20   co=compile(c['source'],c['filename'],'exec',f,True,0)\n\
-    \x20   o=orders(c['source'],co)\n\
-    \x20   code.append(marshal.dumps(co).hex())\n\
-    \x20   sets.append(o)\n\
+    \x20   table.append((co,orders(c['source'],co)))\n\
     \x20 except Exception:\n\
-    \x20   code.append(None)\n\
-    \x20   sets.append(None)\n\
-    sys.stdout.write(json.dumps({'magic':int.from_bytes(importlib.util.MAGIC_NUMBER,'little'),'code':code,'orders':sets}))\n";
+    \x20   table.append(None)\n\
+    present=[t is not None for t in table]\n\
+    table.append(compile(given['fix'],'<pycc precompiled>','exec',0,True,0))\n\
+    sys.stdout.write(json.dumps({'magic':int.from_bytes(importlib.util.MAGIC_NUMBER,'little'),'table':marshal.dumps(tuple(table)).hex(),'present':present}))\n";
+
+/// The `fix(code, orders)` an import runs on a chunk holding `frozenset`
+/// constants: rebuilds each from its elements in source order
+/// (`COMPILE_SCRIPT`'s `orders`, met in the same depth-first walk of the
+/// constants) as CPython 3.13's compiler builds one -- a frozenset of the
+/// display's elements, rebuilt once more from its own iteration when the
+/// code's constants are merged -- so it iterates as a fresh compile's does;
+/// any mismatch raises, and the chunk is compiled instead. Compiled with the
+/// chunks, its code object is the table's last entry.
+const ORDERS_FIX: &str = "def fix(co, orders):
+    it = iter(orders)
+    def walk(c):
+        consts = list(c.co_consts)
+        changed = False
+        for i, k in enumerate(consts):
+            if type(k) is frozenset and len(k) > 1:
+                s = frozenset(tuple(frozenset(next(it))))
+                if s != k:
+                    raise ValueError('pycc: a frozenset constant does not match')
+                consts[i] = s
+                changed = True
+            elif type(k) is type(c):
+                n = walk(k)
+                if n is not k:
+                    consts[i] = n
+                    changed = True
+        return c.replace(co_consts=tuple(consts)) if changed else c
+    out = walk(co)
+    if next(it, None) is not None:
+        raise ValueError('pycc: frozenset orders left over')
+    return out
+";
 
 /// Compiles `chunks` with `interpreter`; `None` when it cannot run or
 /// answers something this build cannot read.
 pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Precompiled> {
-    let input = serde_json::to_vec(
-        &chunks
+    let input = serde_json::to_vec(&serde_json::json!({
+        "chunks": chunks
             .iter()
             .map(|chunk| {
                 serde_json::json!({
@@ -103,7 +137,8 @@ pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Pr
                 })
             })
             .collect::<Vec<_>>(),
-    )
+        "fix": ORDERS_FIX,
+    }))
     .ok()?;
     let mut child = super::probe_command(interpreter, COMPILE_SCRIPT)
         .stdin(Stdio::piped())
@@ -125,24 +160,17 @@ pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Pr
 fn parse(stdout: &[u8], count: usize) -> Option<Precompiled> {
     let value: serde_json::Value = serde_json::from_slice(stdout).ok()?;
     let magic = u32::try_from(value.get("magic")?.as_u64()?).ok()?;
-    let entries = |key: &str| {
-        value
-            .get(key)?
-            .as_array()?
-            .iter()
-            .map(|entry| match entry {
-                serde_json::Value::Null => Some(None),
-                serde_json::Value::String(hex) => decode_hex(hex).map(Some),
-                _ => None,
-            })
-            .collect::<Option<Vec<_>>>()
-    };
-    let code = entries("code")?;
-    let orders = entries("orders")?;
-    (code.len() == count && orders.len() == count && magic != 0).then_some(Precompiled {
+    let table = decode_hex(value.get("table")?.as_str()?)?;
+    let present = value
+        .get("present")?
+        .as_array()?
+        .iter()
+        .map(serde_json::Value::as_bool)
+        .collect::<Option<Vec<_>>>()?;
+    (present.len() == count && magic != 0).then_some(Precompiled {
         magic,
-        code,
-        orders,
+        table,
+        present,
     })
 }
 
@@ -194,26 +222,30 @@ pub(crate) fn install(inc: String, chunks: &[CodeChunk], compiled: Option<&Preco
          * (0: none embedded). */\nstatic const long pycc_ext_chunk_magic = {}L;\n",
         compiled.map_or(0, |compiled| compiled.magic)
     );
+    let table = compiled.map_or(&[][..], |compiled| compiled.table.as_slice());
+    let _ = writeln!(
+        head,
+        "/* The marshalled table of the chunks' code objects. */\n\
+         static const char pycc_ext_chunk_table_data[] =\n    {};\n\
+         static const Py_ssize_t pycc_ext_chunk_table_len = {};\n",
+        c_bytes(table),
+        table.len()
+    );
     head.push_str(
         "static const struct pycc_ext_chunk {\n    const char *source;\n    \
          Py_ssize_t source_len;\n    const char *filename;\n    int future_annotations;\n    \
-         const char *code;\n    Py_ssize_t code_len;\n    const char *orders;\n    \
-         Py_ssize_t orders_len;\n} pycc_ext_chunks[] = {\n",
+         int precompiled;\n} pycc_ext_chunks[] = {\n",
     );
     for (index, chunk) in chunks.iter().enumerate() {
-        let code = compiled.and_then(|compiled| compiled.code.get(index)?.as_deref());
-        let orders = compiled.and_then(|compiled| compiled.orders.get(index)?.as_deref());
+        let present = compiled.is_some_and(|compiled| compiled.present.get(index) == Some(&true));
         let _ = writeln!(
             head,
-            "    {{{},\n     {}, {}, {},\n     {},\n     {},\n     {}, {}}},",
+            "    {{{},\n     {}, {}, {}, {}}},",
             c_bytes(chunk.source.as_bytes()),
             chunk.source.len(),
             c_bytes(chunk.filename.as_bytes()),
             i32::from(chunk.future_annotations),
-            code.map_or_else(|| "NULL".to_string(), c_bytes),
-            code.map_or(0, <[u8]>::len),
-            orders.map_or_else(|| "NULL".to_string(), c_bytes),
-            orders.map_or(0, <[u8]>::len),
+            i32::from(present),
         );
     }
     let _ = writeln!(
@@ -239,42 +271,14 @@ const PRECOMPILED_C: &str = r#"/*
  */
 static int pycc_ext_chunk_usable = -1;
 static PyObject *pycc_ext_chunk_loads = NULL;
-/* `fix(code, orders)` of `ORDERS_FIX`, made once; NULL when unavailable. */
+/* The unmarshalled table (`pycc_ext_chunk_table_data`), from the hook's
+ * first call until the body has run. */
+static PyObject *pycc_ext_chunk_table = NULL;
+/* `fix(code, orders)` (`ORDERS_FIX` in `src/ext_build/precompiled.rs`),
+ * made once from the table's last entry; NULL when unavailable. */
 static PyObject *pycc_ext_chunk_fix = NULL;
 
-/*
- * Rebuilds a chunk's `frozenset` constants from their elements in source
- * order (`COMPILE_SCRIPT`'s `orders`, met in the same depth-first walk of
- * the constants) as CPython 3.13's compiler builds one -- a frozenset of
- * the display's elements, rebuilt once more from its own iteration when the
- * code's constants are merged -- so each iterates as a fresh compile's
- * does; any mismatch raises, and the chunk is compiled instead.
- */
-static const char pycc_ext_orders_fix[] =
-    "def fix(co, orders):\n"
-    "    it = iter(orders)\n"
-    "    def walk(c):\n"
-    "        consts = list(c.co_consts)\n"
-    "        changed = False\n"
-    "        for i, k in enumerate(consts):\n"
-    "            if type(k) is frozenset and len(k) > 1:\n"
-    "                s = frozenset(tuple(frozenset(next(it))))\n"
-    "                if s != k:\n"
-    "                    raise ValueError('pycc: a frozenset constant does not match')\n"
-    "                consts[i] = s\n"
-    "                changed = True\n"
-    "            elif type(k) is type(c):\n"
-    "                n = walk(k)\n"
-    "                if n is not k:\n"
-    "                    consts[i] = n\n"
-    "                    changed = True\n"
-    "        return c.replace(co_consts=tuple(consts)) if changed else c\n"
-    "    out = walk(co)\n"
-    "    if next(it, None) is not None:\n"
-    "        raise ValueError('pycc: frozenset orders left over')\n"
-    "    return out\n";
-
-/* `pycc_ext_chunk_fix`, made from `pycc_ext_orders_fix`; NULL (no
+/* `pycc_ext_chunk_fix`, made by running the table's last entry; NULL (no
  * exception left set) when it cannot be. */
 static PyObject *pycc_ext_chunk_fixer(void)
 {
@@ -283,7 +287,7 @@ static PyObject *pycc_ext_chunk_fixer(void)
     if (pycc_ext_chunk_fix != NULL) {
         return pycc_ext_chunk_fix;
     }
-    code = Py_CompileString(pycc_ext_orders_fix, "<pycc precompiled>", Py_file_input);
+    code = PyTuple_GetItem(pycc_ext_chunk_table, pycc_ext_chunk_count);
     ns = code == NULL ? NULL : PyDict_New();
     if (ns != NULL && PyDict_SetItemString(ns, "__builtins__", PyEval_GetBuiltins()) == 0) {
         PyObject *done = PyEval_EvalCode(code, ns, ns);
@@ -295,7 +299,6 @@ static PyObject *pycc_ext_chunk_fixer(void)
         }
     }
     Py_XDECREF(ns);
-    Py_XDECREF(code);
     PyErr_Clear();
     return pycc_ext_chunk_fix;
 }
@@ -388,6 +391,49 @@ static PyObject *pycc_ext_chunk_compile(const struct pycc_ext_chunk *chunk)
     return result;
 }
 
+/* The code object of chunk `index` from the table (unmarshalled on the
+ * first call), its `frozenset` constants rebuilt in source order; NULL with
+ * no exception set when it cannot be had that way. */
+static PyObject *pycc_ext_chunk_precompiled(Py_ssize_t index)
+{
+    PyObject *entry, *code, *orders, *fix;
+
+    if (pycc_ext_chunk_table == NULL) {
+        PyObject *view = PyMemoryView_FromMemory((char *)pycc_ext_chunk_table_data,
+                                                 pycc_ext_chunk_table_len, PyBUF_READ);
+
+        if (view != NULL) {
+            pycc_ext_chunk_table = PyObject_CallFunctionObjArgs(pycc_ext_chunk_loads, view, NULL);
+            Py_DECREF(view);
+        }
+        if (pycc_ext_chunk_table != NULL
+            && (!PyTuple_Check(pycc_ext_chunk_table)
+                || PyTuple_Size(pycc_ext_chunk_table) != pycc_ext_chunk_count + 1)) {
+            Py_CLEAR(pycc_ext_chunk_table);
+        }
+        if (pycc_ext_chunk_table == NULL) {
+            PyErr_Clear();
+            return NULL;
+        }
+    }
+    entry = PyTuple_GetItem(pycc_ext_chunk_table, index);
+    if (entry == NULL || !PyTuple_Check(entry) || PyTuple_Size(entry) != 2) {
+        PyErr_Clear();
+        return NULL;
+    }
+    code = PyTuple_GetItem(entry, 0);
+    orders = PyTuple_GetItem(entry, 1);
+    if (orders == Py_None) {
+        return Py_NewRef(code);
+    }
+    fix = pycc_ext_chunk_fixer();
+    code = fix == NULL ? NULL : PyObject_CallFunctionObjArgs(fix, code, orders, NULL);
+    if (code == NULL) {
+        PyErr_Clear();
+    }
+    return code;
+}
+
 /* The code object of chunk `index`; NULL with an exception set. */
 static PyObject *pycc_ext_chunk_code(Py_ssize_t index)
 {
@@ -398,37 +444,13 @@ static PyObject *pycc_ext_chunk_code(Py_ssize_t index)
         return NULL;
     }
     chunk = &pycc_ext_chunks[index];
-    if (chunk->code != NULL && pycc_ext_chunks_usable()) {
-        PyObject *view = PyMemoryView_FromMemory((char *)chunk->code, chunk->code_len, PyBUF_READ);
-        PyObject *code;
-        if (view == NULL) {
-            return NULL;
-        }
-        code = PyObject_CallFunctionObjArgs(pycc_ext_chunk_loads, view, NULL);
-        Py_DECREF(view);
-        if (code != NULL && chunk->orders != NULL) {
-            PyObject *fix = pycc_ext_chunk_fixer();
-            PyObject *orders = NULL;
-            PyObject *fixed = NULL;
+    if (chunk->precompiled && pycc_ext_chunks_usable()) {
+        PyObject *code = pycc_ext_chunk_precompiled(index);
 
-            view = fix == NULL ? NULL
-                               : PyMemoryView_FromMemory((char *)chunk->orders, chunk->orders_len, PyBUF_READ);
-            if (view != NULL) {
-                orders = PyObject_CallFunctionObjArgs(pycc_ext_chunk_loads, view, NULL);
-                Py_DECREF(view);
-            }
-            if (orders != NULL) {
-                fixed = PyObject_CallFunctionObjArgs(fix, code, orders, NULL);
-                Py_DECREF(orders);
-            }
-            Py_DECREF(code);
-            code = fixed;
-        }
         if (code != NULL) {
             return code;
         }
         /* Unreadable after all: compile the source instead. */
-        PyErr_Clear();
     }
     return pycc_ext_chunk_compile(chunk);
 }
@@ -472,6 +494,9 @@ static void pycc_ext_code_remove(PyObject *module)
     if (PyDict_DelItemString(dict, "__pycc_code__") != 0) {
         PyErr_Clear();
     }
+    /* No chunk is read after the body: the code objects it made live on in
+     * what it defined. */
+    Py_CLEAR(pycc_ext_chunk_table);
     PyErr_SetRaisedException(raised);
 }
 
@@ -501,20 +526,35 @@ mod tests {
     fn chunks_are_embedded_after_the_module_name_with_their_code() {
         let compiled = Precompiled {
             magic: 3571,
-            code: vec![Some(vec![0xe3, b'"', b'a']), None],
-            orders: vec![Some(vec![0xa9]), None],
+            table: vec![0xa9, b'"', b'a'],
+            present: vec![true, false],
         };
         let out = install(
             INC.to_string(),
             &[chunk("\n\nx = \"?\\\"\n"), chunk("y = 1\n")],
             Some(&compiled),
         );
-        let head = out.find("#define PYCC_EXT_HAS_PRECOMPILED").expect("the macro");
+        let head = out
+            .find("#define PYCC_EXT_HAS_PRECOMPILED")
+            .expect("the macro");
         assert!(head > out.find("PYCC_EXT_MODULE_NAME_STR").unwrap());
         assert!(head < out.find("BODY").unwrap());
         assert!(out.contains("pycc_ext_chunk_magic = 3571L;"), "{out}");
-        assert!(out.contains("{\"\\012\\012x = \\042\\077\\134\\042\\012\",\n     11, \"/p/m.py\", 0,\n     \"\\343\\042a\",\n     3,\n     \"\\251\", 1},"), "{out}");
-        assert!(out.contains("{\"y = 1\\012\",\n     6, \"/p/m.py\", 0,\n     NULL,\n     0,\n     NULL, 0},"), "{out}");
+        assert!(
+            out.contains("pycc_ext_chunk_table_data[] =\n    \"\\251\\042a\";"),
+            "{out}"
+        );
+        assert!(out.contains("pycc_ext_chunk_table_len = 3;"), "{out}");
+        assert!(
+            out.contains(
+                "{\"\\012\\012x = \\042\\077\\134\\042\\012\",\n     11, \"/p/m.py\", 0, 1},"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("{\"y = 1\\012\",\n     6, \"/p/m.py\", 0, 0},"),
+            "{out}"
+        );
         assert!(out.contains("pycc_ext_chunk_count = 2;"), "{out}");
     }
 
@@ -522,7 +562,8 @@ mod tests {
     fn without_compiled_code_only_the_source_is_embedded() {
         let out = install(INC.to_string(), &[chunk("y = 1\n")], None);
         assert!(out.contains("pycc_ext_chunk_magic = 0L;"), "{out}");
-        assert!(out.contains("NULL,\n     0,\n     NULL, 0},"), "{out}");
+        assert!(out.contains("pycc_ext_chunk_table_len = 0;"), "{out}");
+        assert!(out.contains("0, 0},"), "{out}");
     }
 
     #[test]
@@ -536,20 +577,37 @@ mod tests {
     #[test]
     fn the_answer_parses_only_when_complete() {
         assert_eq!(
-            parse(br#"{"magic": 3571, "code": ["e3ff", null], "orders": [null, "a9"]}"#, 2),
+            parse(
+                br#"{"magic": 3571, "table": "a9ff", "present": [true, false]}"#,
+                2
+            ),
             Some(Precompiled {
                 magic: 3571,
-                code: vec![Some(vec![0xe3, 0xff]), None],
-                orders: vec![None, Some(vec![0xa9])],
+                table: vec![0xa9, 0xff],
+                present: vec![true, false],
             })
         );
-        assert_eq!(parse(br#"{"magic": 3571, "code": ["e3ff"], "orders": [null]}"#, 2), None);
-        assert_eq!(parse(br#"{"magic": 3571, "code": ["e3ff"]}"#, 1), None);
-        assert_eq!(parse(br#"{"magic": 3571, "code": ["e3f"], "orders": [null]}"#, 1), None);
-        assert_eq!(parse(br#"{"magic": 3571, "code": ["zz"], "orders": [null]}"#, 1), None);
-        assert_eq!(parse(br#"{"magic": 0, "code": [], "orders": []}"#, 0), None);
+        assert_eq!(
+            parse(br#"{"magic": 3571, "table": "a9", "present": [true]}"#, 2),
+            None
+        );
+        assert_eq!(
+            parse(br#"{"magic": 3571, "table": "a9f", "present": [true]}"#, 1),
+            None
+        );
+        assert_eq!(
+            parse(br#"{"magic": 3571, "table": "zz", "present": [true]}"#, 1),
+            None
+        );
+        assert_eq!(
+            parse(br#"{"magic": 3571, "table": "a9", "present": [1]}"#, 1),
+            None
+        );
+        assert_eq!(
+            parse(br#"{"magic": 0, "table": "", "present": []}"#, 0),
+            None
+        );
         assert_eq!(parse(b"not json", 0), None);
-        assert_eq!(parse(br#"{"magic": 1, "code": [1], "orders": [null]}"#, 1), None);
     }
 
     #[test]
@@ -567,18 +625,18 @@ mod tests {
             return;
         };
         assert_ne!(compiled.magic, 0);
-        assert!(compiled.code[0].as_ref().is_some_and(|code| !code.is_empty()));
-        assert_eq!(compiled.orders[0], None);
-        assert_eq!(compiled.code[1], None);
+        assert!(!compiled.table.is_empty());
         // A set display's constant comes with its source order; two
         // displays of the same elements in different orders leave the
-        // chunk to `compile()`.
-        assert!(compiled.code[2].is_some() && compiled.orders[2].is_some());
-        assert_eq!((&compiled.code[3], &compiled.orders[3]), (&None, &None));
+        // chunk to `compile()`, as does a syntax error.
+        assert_eq!(compiled.present, vec![true, false, true, false]);
     }
 
     #[test]
     fn an_interpreter_that_cannot_run_compiles_nothing() {
-        assert_eq!(precompile(OsStr::new("/nonexistent/python3"), &[chunk("x = 1\n")]), None);
+        assert_eq!(
+            precompile(OsStr::new("/nonexistent/python3"), &[chunk("x = 1\n")]),
+            None
+        );
     }
 }

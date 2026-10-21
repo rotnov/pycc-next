@@ -95,6 +95,20 @@ static const char *const pycc_fwd_wrapper_attrs[3][4] = {
 
 #define PYCC_FUNC_FIELD(func, offset) (*(PyObject **)((char *)(func) + (offset)))
 
+/* `PyFunctionObject.func_dict` in CPython 3.13 (checked by the probe). */
+#define PYCC_FUNC_DICT 88
+
+/* `obj.name` for a `name` spelled by a constant of this unit, with the
+ * name interned once (`pycc_ext_attr_name`): patching reads a handful of
+ * attributes of every compiled method's forwarder. A new reference, or
+ * NULL with an exception set. */
+static PyObject *pycc_fwd_getattr(PyObject *obj, const char *name)
+{
+    PyObject *attr_name = pycc_ext_attr_name(name);
+
+    return attr_name == NULL ? NULL : PyObject_GetAttr(obj, attr_name);
+}
+
 /*
  * Checks the `PyFunctionObject` mirror against a function made now, and
  * keeps the interpreter's own vectorcall of Python functions. Leaves
@@ -132,6 +146,11 @@ static void pycc_forward_probe(void)
     Py_XDECREF(attr);
     attr = PyObject_GetAttrString(f, "__kwdefaults__");
     ok &= attr != NULL && attr == PYCC_FUNC_FIELD(f, PYCC_FUNC_KWDEFAULTS);
+    Py_XDECREF(attr);
+    /* No `__dict__` until one is asked for; then the field holds it. */
+    ok &= PYCC_FUNC_FIELD(f, PYCC_FUNC_DICT) == NULL;
+    attr = PyObject_GetAttrString(f, "__dict__");
+    ok &= attr != NULL && attr == PYCC_FUNC_FIELD(f, PYCC_FUNC_DICT);
     Py_XDECREF(attr);
     ok &= PYCC_FUNC_FIELD(f, PYCC_FUNC_CLOSURE) == NULL;
     ok &= PYCC_FUNC_FIELD(f, PYCC_FUNC_VECTORCALL) != NULL
@@ -410,7 +429,7 @@ static PyObject *pycc_fwd_call_in(PyccExtModule *m, int index, PyObject *func,
 /* An int attribute of `code`, or -1. */
 static int pycc_fwd_code_int(PyObject *code, const char *name)
 {
-    PyObject *value = PyObject_GetAttrString(code, name);
+    PyObject *value = pycc_fwd_getattr(code, name);
     long out = value != NULL ? PyLong_AsLong(value) : -1;
 
     Py_XDECREF(value);
@@ -435,8 +454,8 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
         return;
     }
     code = PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE);
-    names = PyObject_GetAttrString(code, "co_names");
-    freevars = PyObject_GetAttrString(code, "co_freevars");
+    names = pycc_fwd_getattr(code, "co_names");
+    freevars = pycc_fwd_getattr(code, "co_freevars");
     if (names == NULL || freevars == NULL || PyTuple_Size(names) != 1
         || PyTuple_Size(freevars) > 1) {
         goto done;
@@ -470,7 +489,7 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
         }
         slot->cell = Py_NewRef(PyTuple_GetItem(closure, 0));
     }
-    slot->names = PyObject_GetAttrString(code, "co_varnames");
+    slot->names = pycc_fwd_getattr(code, "co_varnames");
     if (slot->names == NULL || PyTuple_Size(slot->names) < slot->argcount + slot->kwonly) {
         Py_XDECREF(slot->names);
         Py_XDECREF(slot->cell);
@@ -508,7 +527,7 @@ static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int dep
 static void pycc_fwd_walk_attr(PyccExtModule *m, PyObject *ns, PyObject *obj, const char *name,
                                int depth)
 {
-    PyObject *inner = PyObject_GetAttrString(obj, name);
+    PyObject *inner = pycc_fwd_getattr(obj, name);
 
     if (inner != NULL && inner != obj && inner != Py_None) {
         pycc_fwd_walk(m, ns, inner, depth + 1);
@@ -527,14 +546,27 @@ static void pycc_fwd_walk_dict(PyccExtModule *m, PyObject *ns, PyObject *obj, in
     PyObject *dict;
     int i;
 
-    dict = PyObject_GenericGetDict(obj, NULL);
+    /* A function without a `__dict__` yet has none of them, and asking for
+     * it would make one. */
+    if (Py_TYPE(obj) == (PyTypeObject *)pycc_frames_function_type) {
+        dict = PYCC_FUNC_FIELD(obj, PYCC_FUNC_DICT);
+        if (dict == NULL) {
+            return;
+        }
+        Py_INCREF(dict);
+    } else {
+        dict = PyObject_GenericGetDict(obj, NULL);
+    }
     if (dict == NULL || !PyDict_Check(dict)) {
         Py_XDECREF(dict);
         PyErr_Clear();
         return;
     }
     for (i = 0; keys[i] != NULL; i++) {
-        PyObject *inner = PyDict_GetItemString(dict, keys[i]);
+        PyObject *key = pycc_ext_attr_name(keys[i]);
+        PyObject *inner = key == NULL ? NULL : PyDict_GetItemWithError(dict, key);
+
+        PyErr_Clear();
 
         if (inner != NULL && inner != obj) {
             Py_INCREF(inner);
@@ -596,7 +628,7 @@ static PyObject *pycc_fwd_resolve(PyObject *ns, PyObject *qualname)
         if (i == 0) {
             next = Py_XNewRef(PyDict_GetItemWithError(ns, part));
         } else {
-            PyObject *dict = PyType_Check(obj) ? PyObject_GetAttrString(obj, "__dict__") : NULL;
+            PyObject *dict = PyType_Check(obj) ? pycc_fwd_getattr(obj, "__dict__") : NULL;
 
             next = NULL;
             if (dict != NULL && PyMapping_GetOptionalItem(dict, part, &next) < 0) {

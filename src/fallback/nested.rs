@@ -436,9 +436,11 @@ impl Plan {
              {CELL_FN} = __pycc_fallback_types.CellType\n\
 "
         );
+        // Pre-compiled like every chunk in an `--ext` module (compiling it
+        // at import cost pydantic ~2M instructions per module).
         let mut out = format!(
-            "; {BUILTINS}.exec({BUILTINS}.compile({}, \"<pycc fallback>\", \"exec\"), {NS})",
-            py_str(&helpers)
+            "; {}",
+            self.exec_text_as(chunks, &helpers, "<pycc fallback>", false)
         );
         for (id, nested) in live {
             out.push_str("; ");

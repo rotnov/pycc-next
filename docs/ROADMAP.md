@@ -602,9 +602,13 @@ Accept:
    | set display of literals built once per site | -2.3M | (above) | -- |
    | method loaded before its arguments | -0.1M | -2.3M | -- |
    | `frozenset` chunks pre-compiled | -- | -- | -41.4M |
+   | one marshalled table of chunks per module | -- | -- | -5.2M |
+   | forwarders: interned attribute names, a function's `__dict__` read in place (none created) | -- | -- | -4.1M |
+   | the nested-function helpers chunk pre-compiled | -- | -- | -11.2M |
+   | the `frozenset` fixer shipped compiled in the table | -- | -- | -2.0M |
    | tried, reverted: hot runtime functions grouped (`__attribute__((hot))`) | L1i misses unchanged (0.17M vs 0.18M) | | |
    | tried, reverted: a forwarder's slot called directly from the cached call | no gain (the slot lookup cost more; such calls mostly come the bound-method way) | | |
-   | end | 37.8M (0.90x) | 154.8M (0.98x) | 478.2M (0.93x) |
+   | end | 37.8M (0.90x) | 154.8M (0.98x) | 455.7M (0.97x) |
 
    Wall time, median of interleaved fresh-process runs (`bench/pydantic_check.py`'s
    timing loop, 11 runs; CPython vs compiled): import 86.8 vs 90.4 ms (0.96x), define
@@ -625,10 +629,16 @@ Accept:
    interpreter is already inline-cached C with no marshalling per operation. What
    would meet the bar is a typed native path for the definition machinery (field,
    decorator and config collection as native dicts and lists with compiled `str` keys),
-   strict-mode work for another milestone. Import is within reach (0.90-0.96x); what
-   is left there is CPython's own work on the mirrored imports (an import a compiled
-   module binds natively runs again in CPython when fallback code reads its name:
-   876 `__import__` calls against CPython's 280) and the extension's load.
+   strict-mode work for another milestone. Import, after the four import rows of the
+   table (31 interleaved fresh-process runs, median / best ms, CPython vs compiled):
+   73.9 / 58.8 vs 77.2 / 62.3 (0.96x) with the collector on, 67.0 / 52.8 vs 71.4 / 57.5
+   (0.94x) with it off -- short of 1.0x. The mirrored imports (an import a compiled
+   module binds natively runs again in CPython when fallback code reads its name) turned
+   out cheap: 296 such chunks at 0.3-0.5 us each. The 12.8M instructions left are
+   spread thin: 8.8M of libpython work on the extension's behalf (attribute reads by
+   name, module-dict stores, object setup -- no function above 1.7M), 2.0M of the
+   extension's own code, 0.55M of relocations, and the extension (10.5 MB) is mapped
+   and faulted in where CPython reads small `.pyc` files.
 2. **The common fallback constructs compile:** the `...` literal, function-local
    `import`, nested `def` (closures, decorated wrappers such as `functools.wraps`),
    `lambda` and `hash()` of an object compile natively; pydantic >= 1000/1249 functions
@@ -737,6 +747,20 @@ Accept:
    method call 0.69x, a call with arguments 0.56x, an attribute store 0.58x, a dict
    display 0.76x; a `dict` read 1.9x, `isinstance` 16x), which is accept 1's amended
    lever.
+   **Progress 2026-10-21** (not met), after accept 1's per-operation lever (attribute
+   caches, in-place `str` compares, set displays built once, methods loaded before
+   their arguments): pystache 0.77M instructions per round (CPython 0.50M, 0.65x by
+   instructions; its benchmark 0.0821 s against 0.0935 s before the caches, CPython
+   0.0566 s, 0.69x); mistune 58.0M per `mistune.html` pass (CPython 57.2M). Neither is
+   near 2x, for accept 1's reason: their hot code is object-protocol work (pystache's
+   context-stack lookups, `re` matches and dict displays), which compiled code now does
+   at about the interpreter's own cost and no faster. Its six fallbacks (an `except` of
+   another module's exception class, identity tests against a `NotFound` sentinel) are
+   language gaps worth closing for nativeness, not a 2x lever. Not met: what would meet
+   it is typed native representations of that hot state -- pystache's context stack
+   and parsed template nodes, mistune's tokens, as compiled classes, lists and dicts
+   with native `str` keys instead of CPython objects -- strict-mode work for a later
+   milestone, as for accept 1.
 5. **Windows parity and corpus:** native programs on Windows write CPython's text-mode
    stdout (`\r\n`, the console encoding), removing that DEVIATIONS row; corpus strict
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.

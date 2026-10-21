@@ -237,6 +237,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   displays of the same elements in different orders is still compiled at import.
   pydantic's import no longer compiles `json_schema`'s 73 KB chunk: 519.6M to 478.2M
   instructions for the whole import (CPython from `.pyc`: 442.9M).
+- Import of an extension with fallback code costs less: a module's pre-compiled chunks
+  are one `marshal`led table (one load, not one per chunk), whose last entry is the
+  `frozenset` fixer's code object (it was compiled at import); the nested-function
+  helpers chunk is pre-compiled like the others; method forwarders read attributes by
+  interned names and read a function's `__dict__` in place without creating one.
+  pydantic's import: 478.2M to 455.7M instructions (CPython 442.9M); wall time 0.96x
+  CPython's median.
 
 ## [0.7.0] - 2026-10-17
 
