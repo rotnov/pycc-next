@@ -773,7 +773,8 @@ Progress:
   `UnicodeEncodeError` on an unencodable character -- and reads a redirected stdin in
   the same codec (`crates/pycc_rt/src/text_stdio.rs`; `tests/text_stdio.rs` compares raw
   bytes with CPython on the Windows runner, ANSI code page and five `PYTHONIOENCODING`
-  values included: CI run 39538085571). The DEVIATIONS row is replaced by a narrow one
+  values included: CI run 39543283114 on 5bc2d2c, all four jobs green). The DEVIATIONS
+  row is replaced by a narrow one
   (rare codecs). Tests compare captured output as line content (`pycc_scratch::lf`).
   Corpus: strict 190 -> 191 (`[name, index]` displays are lists of a fixed shape,
   `Ty::ShapedList`, which 070 needs); `--non-strict` 200/200, 0 wrong, 0 of 1191
