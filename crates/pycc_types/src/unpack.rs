@@ -35,6 +35,9 @@ pub(crate) fn infer_unpack(
     match infer_expr_in(env, local_names, value)? {
         Ty::Tuple(elems) if elems.len() == arity => Ok(Ty::Tuple(elems)),
         Ty::Tuple(elems) => Err(arity_mismatch(elems.len(), arity)),
+        // A list of a fixed shape: its length is its shape's.
+        Ty::ShapedList(elems) if elems.len() == arity => Ok(Ty::ShapedList(elems)),
+        Ty::ShapedList(elems) => Err(arity_mismatch(elems.len(), arity)),
         Ty::Object => Ok(Ty::Object),
         // A list's length is checked at run time (`pycc_rt_list_unpack`).
         // So is a `tuple[T, ...]`'s, the same run-time object.

@@ -151,7 +151,7 @@ mod init_params;
 mod object_slot;
 mod producer;
 mod solved_signatures;
-mod unify;
+pub(crate) mod unify;
 mod diagnostics;
 mod ty_queries;
 

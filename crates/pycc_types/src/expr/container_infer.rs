@@ -48,6 +48,11 @@ pub(crate) fn infer_list_literal_expr(
             Some(expected) if pycc_hir::optional_element_join(expected, &this_ty).is_some() => {
                 elem_ty = pycc_hir::optional_element_join(expected, &this_ty);
             }
+            // `[name, index]`: elements of different types make a list of a
+            // fixed shape (`Ty::ShapedList`), in strict mode.
+            Some(_) if shaped_list_ty(env, local_names, elements).is_some() => {
+                return Ok(shaped_list_ty(env, local_names, elements).expect("checked"));
+            }
             Some(expected) => {
                 // Exact `Ty` equality, not `is_assignable`'s
                 // bool-is-an-int-subtype rule used elsewhere in this
@@ -87,6 +92,21 @@ pub(crate) fn infer_list_literal_expr(
     // rendered diagnostic is unchanged.
     pycc_hir::check_container_ty(&list_ty, Span::new(0, 0))?;
     Ok(list_ty)
+}
+
+/// The type of a list display whose elements have different types, a
+/// [`Ty::ShapedList`], when every element is something a list can hold and
+/// the shape is a boxed tuple's (it is erased to that tuple); `None` in
+/// non-strict mode, where such a display is the CPython list.
+fn shaped_list_ty(env: &Environment, local_names: &[&str], elements: &[HirExpr]) -> Option<Ty> {
+    if pycc_hir::is_non_strict_program() || elements.len() < 2 {
+        return None;
+    }
+    let types: Vec<Ty> = elements
+        .iter()
+        .map(|element| infer_expr_in(env, local_names, element).ok())
+        .collect::<Option<_>>()?;
+    pycc_hir::is_shaped_list_display(&types).then(|| Ty::ShapedList(Box::new(types)))
 }
 
 // PR-11 Task 3 (D-123): mirrors `ListLiteral`'s own homogeneity
@@ -453,7 +473,8 @@ pub(crate) fn infer_subscript_expr(
         // tuple's element type at position `k` is only knowable
         // when `k` is known at compile time, so every failure shape
         // (non-literal, negative, out-of-range) shares one code.
-        Ty::Tuple(elems) => {
+        // A list of a fixed shape indexes as its tuple does.
+        Ty::Tuple(elems) | Ty::ShapedList(elems) => {
             // A computed `int` index into a tuple whose elements share one
             // `int`/`bool`/`float` type (`t[k]` over `(True, False, True)`):
             // every position has that type. Non-strict mode: so does an

@@ -15,6 +15,20 @@ pub(crate) fn lower_list_literal_expr(
         .iter()
         .map(|e| lower_expr(e, scopes, classes, current_class))
         .collect();
+    // `[name, index]`: elements of different types are a list of a fixed
+    // shape (`pycc_hir::Ty::ShapedList`, which `pycc_types` erased to its
+    // tuple): the tuple object of the elements, flagged as a list.
+    let tys: Vec<Ty> = elements.iter().map(MirExpr::ty).collect();
+    if pycc_hir::is_shaped_list_display(&tys) {
+        let tuple = MirExpr::TupleLiteral(elements);
+        let sig = pycc_hir::builtins::resolve_call("__pycc_shaped_list", &[tuple.ty()])
+            .and_then(Result::ok)
+            .expect("a shaped list display is a boxed tuple's shape");
+        return MirExpr::RtCall(Box::new(crate::RtCallExpr {
+            sig,
+            args: vec![tuple],
+        }));
+    }
     // `["a", None]`: a `T | None` list, natively -- in strict mode; a
     // non-strict program builds such a display as the CPython list, as
     // `pycc_types` types it there.

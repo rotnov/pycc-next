@@ -542,6 +542,9 @@ pub(crate) fn default_value_for_type<'ctx>(
             .ptr_type(inkwell::AddressSpace::default())
             .const_null()
             .into(),
+        pycc_mir::Ty::ShapedList(_) => {
+            unreachable!("pycc_types erases a shaped list to its tuple")
+        }
         pycc_mir::Ty::Tuple(elems) if pycc_hir::tuple_is_boxed(&elems) => context
             .ptr_type(inkwell::AddressSpace::default())
             .const_null()

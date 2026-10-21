@@ -143,7 +143,7 @@ fn renders_natively(ty: &Ty) -> bool {
         Ty::List(elem) | Ty::VarTuple(elem) | Ty::Set(elem) | Ty::FrozenSet(elem) => {
             renders_natively(elem)
         }
-        Ty::Tuple(elements) => elements.iter().all(renders_natively),
+        Ty::Tuple(elements) | Ty::ShapedList(elements) => elements.iter().all(renders_natively),
         Ty::Dict(kv) => renders_natively(&kv.0) && renders_natively(&kv.1),
         _ => false,
     }
@@ -199,7 +199,7 @@ fn orderable(elem: &Ty) -> bool {
     match elem {
         Ty::Int | Ty::Bool | Ty::Float | Ty::Num | Ty::Str => true,
         Ty::List(inner) | Ty::VarTuple(inner) => orderable(inner),
-        Ty::Tuple(elements) => elements.iter().all(orderable),
+        Ty::Tuple(elements) | Ty::ShapedList(elements) => elements.iter().all(orderable),
         _ => false,
     }
 }
@@ -216,7 +216,7 @@ pub fn value_comparable(elem: &Ty) -> bool {
         Ty::List(inner) | Ty::VarTuple(inner) | Ty::Set(inner) | Ty::FrozenSet(inner) => {
             value_comparable(inner)
         }
-        Ty::Tuple(elements) => elements.iter().all(value_comparable),
+        Ty::Tuple(elements) | Ty::ShapedList(elements) => elements.iter().all(value_comparable),
         Ty::Dict(kv) => value_comparable(&kv.1),
         _ => true,
     }
@@ -494,6 +494,11 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         ("__pycc_mark_tuple", [Ty::List(_)]) => {
             sig("pycc_rt_list_mark_tuple", &[args[0].clone()], Ty::None)
         }
+        // A list display of a fixed shape (`Ty::ShapedList`, erased to its
+        // tuple): the tuple object flagged to be the list it is.
+        ("__pycc_shaped_list", [t @ Ty::Tuple(elements)]) if crate::tuple_is_boxed(elements) => {
+            sig("pycc_rt_tuple_mark_list", std::slice::from_ref(t), t.clone())
+        }
         // `collections.Counter` / `defaultdict` (`pycc_ast::desugar::collections`).
         ("__pycc_counter", [d @ Ty::Dict(kv)]) if kv.1 == Ty::Int => {
             sig("pycc_rt_counter_new", std::slice::from_ref(d), d.clone())
@@ -594,6 +599,13 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
         }
         ("str", [list @ Ty::List(_)]) if renders_natively(list) => {
             sig("pycc_rt_list_repr", std::slice::from_ref(list), str_)
+        }
+        // A boxed tuple object renders as a tuple, or as a list when it is
+        // one of a fixed shape (`Ty::ShapedList`, erased to its tuple).
+        ("str" | "repr", [t @ (Ty::Tuple(elements) | Ty::ShapedList(elements))])
+            if crate::tuple_is_boxed(elements) && renders_natively(t) =>
+        {
+            sig("pycc_rt_list_repr", std::slice::from_ref(t), str_)
         }
         ("str", [dict @ Ty::Dict(_)]) => sig("pycc_rt_dict_repr", std::slice::from_ref(dict), str_),
         // A pointer-represented `T | None`: `"None"` or `str(T)`.

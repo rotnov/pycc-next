@@ -376,6 +376,7 @@ pub(crate) fn collect_call_constraints(
                     | Ty::FrozenSet(_)
                     | Ty::Object
                     | Ty::Tuple(_)
+                    | Ty::ShapedList(_)
             )
         {
             return Err(Diagnostic::error(

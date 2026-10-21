@@ -139,7 +139,7 @@ fn a_heterogeneous_list_literal_is_still_rejected_when_the_solver_path_runs_firs
                 target: "xs".to_string(),
                 value: HirExpr::ListLiteral(vec![
                     HirExpr::IntLiteral(1),
-                    HirExpr::StringLiteral("two".to_string()),
+                    HirExpr::BoolLiteral(true),
                 ]),
             }),
             HirItem::Function {

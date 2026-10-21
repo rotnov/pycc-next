@@ -115,8 +115,8 @@ const CASES: &[Case] = &[
         )
     },
     Case {
-        label: "expected `int`, found `str`",
-        ..case("T0032", "xs = [1, \"two\", 3]\n", "\"two\"")
+        label: "expected `int`, found `bool`",
+        ..case("T0032", "xs = [1, True, 3]\n", "True")
     },
     Case {
         label: "unsupported on this type",

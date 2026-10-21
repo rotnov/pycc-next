@@ -766,6 +766,26 @@ Accept:
    >= 193/200, `--non-strict` 200/200, 0 wrong, 0 fallback statements.
 
 Progress:
+- Accept 5 **not met** (2026-10-21): the Windows half holds, the corpus half stops at
+  191/200 strict. Windows: a native program writes CPython 3.13's text-mode stdout and
+  stderr -- `\r\n`; UTF-8 on a console; otherwise `PYTHONIOENCODING`, UTF-8 mode, or the
+  ANSI code page with CPython's `cp1252` table, `surrogateescape`/`backslashreplace`,
+  `UnicodeEncodeError` on an unencodable character -- and reads a redirected stdin in
+  the same codec (`crates/pycc_rt/src/text_stdio.rs`; `tests/text_stdio.rs` compares raw
+  bytes with CPython on the Windows runner, ANSI code page and five `PYTHONIOENCODING`
+  values included: CI run 39538085571). The DEVIATIONS row is replaced by a narrow one
+  (rare codecs). Tests compare captured output as line content (`pycc_scratch::lf`).
+  Corpus: strict 190 -> 191 (`[name, index]` displays are lists of a fixed shape,
+  `Ty::ShapedList`, which 070 needs); `--non-strict` 200/200, 0 wrong, 0 of 1191
+  statements in CPython. Design, agreed with the guru advisor: strict mode compiles a
+  union only where every operation on it is valid for every arm (as `int | float`
+  is), so the remaining nine stay refused -- each is a program a type checker rejects:
+  a `str` element replaced by an `int` and then summed (130) or accumulated (049), a
+  `list | set` name whose list arm reaches `|=` (200), `[0] + [None] * n` receiving
+  `str` elements and then joined (123), and an `int | None` used as an `int` with no
+  `None` test (016, 056, 057's `group[-1][0] - left`, 100, 184). The
+  193 bar needs two of those to compile, which would be strict typing weakened; the
+  item stays open on that.
 - Accept 2 **Met 2026-10-20** (CI run 39500973184 on 926c692, all four jobs green):
   pydantic 2.13.5 1029/1249 functions native (`bench/pydantic_check.py`), its suite
   unchanged; methods of CPython-run classes call their compiled bodies with no forwarder

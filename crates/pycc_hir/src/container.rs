@@ -144,6 +144,9 @@ pub enum DisplayKind {
 /// only in non-strict mode) and `pycc_mir` (which builds it) share this one
 /// rule, so the checked type and the built node always agree.
 pub fn display_is_object(kind: DisplayKind, elements: &[Ty]) -> bool {
+    if kind == DisplayKind::List && is_shaped_list_display(elements) {
+        return false;
+    }
     // An empty display reaches this rule only when the empty-container
     // pre-pass found no native element type for it (`pycc_types` refuses it
     // with `T0003` in strict mode).
@@ -278,7 +281,7 @@ pub fn check_container_ty(ty: &Ty, span: Span) -> Result<(), Diagnostic> {
         }
         Ty::Set(element) => check_set_element(ty, element, "set", span),
         Ty::FrozenSet(element) => check_set_element(ty, element, "frozenset", span),
-        Ty::Tuple(elements) => {
+        Ty::Tuple(elements) | Ty::ShapedList(elements) => {
             for element in elements.iter() {
                 check_tuple_element_ty(element, span)?;
             }
@@ -321,6 +324,32 @@ pub fn is_optional_element_ty(element: &Ty) -> bool {
         if is_list_element_ty(inner) && (**inner == Ty::Int || crate::is_pointer_optional_inner(inner)))
 }
 
+/// Whether a list display of elements of types `elements` is a list of a
+/// fixed shape ([`Ty::ShapedList`]): in strict mode, two or more elements
+/// a list can hold whose types do not join into one element type (equal,
+/// or `int | float`), forming a boxed tuple's shape. `pycc_types` types
+/// such a display and `pycc_mir` builds it by this one rule.
+#[must_use]
+pub fn is_shaped_list_display(elements: &[Ty]) -> bool {
+    if crate::is_non_strict_program() || elements.len() < 2 {
+        return false;
+    }
+    let mut joined = elements[0].clone();
+    let uniform = elements[1..].iter().all(|ty| {
+        if *ty == joined {
+            return true;
+        }
+        match crate::num_join(&joined, ty) {
+            Some(num) => {
+                joined = num;
+                true
+            }
+            None => false,
+        }
+    });
+    !uniform && elements.iter().all(is_list_element_ty) && tuple_is_boxed(elements)
+}
+
 /// Whether `element` can be stored as one native container word: `int`,
 /// `float`, `bool`, `str`, a user-class instance, or (recursively) a list,
 /// a non-empty tuple, a dict or a set whose own element types are
@@ -336,7 +365,9 @@ pub fn is_list_element_ty(element: &Ty) -> bool {
         | Ty::Instance(_)
         | Ty::Callable(_) => true,
         Ty::List(inner) => is_list_element_ty(inner),
-        Ty::Tuple(elements) => !elements.is_empty() && elements.iter().all(is_list_element_ty),
+        Ty::Tuple(elements) | Ty::ShapedList(elements) => {
+            !elements.is_empty() && elements.iter().all(is_list_element_ty)
+        }
         Ty::VarTuple(element) => is_held_var_tuple_element_ty(element),
         Ty::Dict(pair) => is_hashable_ty(&pair.0) && is_list_element_ty(&pair.1),
         Ty::Set(inner) | Ty::FrozenSet(inner) => is_hashable_ty(inner),

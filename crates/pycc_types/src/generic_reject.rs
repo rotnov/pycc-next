@@ -22,7 +22,7 @@ pub(crate) fn ty_contains_param(ty: &Ty) -> bool {
             ty_contains_param(&sig.0) || ty_contains_param(&sig.1) || ty_contains_param(&sig.2)
         }
         Ty::Dict(kv) => ty_contains_param(&kv.0) || ty_contains_param(&kv.1),
-        Ty::Tuple(elems) => elems.iter().any(ty_contains_param),
+        Ty::Tuple(elems) | Ty::ShapedList(elems) => elems.iter().any(ty_contains_param),
         Ty::Callable(sig) => sig.0.iter().any(ty_contains_param) || ty_contains_param(&sig.1),
         // D-154: an instance's payload is only its class's name, never a
         // `Ty::Param` (or anything else `Ty`-shaped) -- a class-typed
@@ -112,7 +112,7 @@ pub(crate) fn scan_signature_ty_for_param(
             scan_signature_ty_for_param(&kv.0, false, found)?;
             scan_signature_ty_for_param(&kv.1, false, found)
         }
-        Ty::Tuple(elems) => {
+        Ty::Tuple(elems) | Ty::ShapedList(elems) => {
             for elem in elems.iter() {
                 scan_signature_ty_for_param(elem, false, found)?;
             }

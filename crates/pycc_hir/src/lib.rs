@@ -56,7 +56,8 @@ pub use class::{
 pub use compare_chain::{CompareLink, chain_as_conjunction, compare_chain_operands};
 pub use container::{
     DisplayKind, check_container_ty, check_tuple_element_ty, display_is_object,
-    empty_object_constructor, homogeneous_tuple_element, is_hashable_ty, is_list_element_ty, object_comp_collects_natively,
+    empty_object_constructor, homogeneous_tuple_element, is_hashable_ty, is_list_element_ty,
+    is_shaped_list_display, object_comp_collects_natively,
     is_var_tuple_element_ty, sequence_element, set_element_message, tuple_fits_var_tuple,
     tuple_is_boxed,
 };
@@ -341,6 +342,19 @@ pub enum Ty {
     /// numbers above as the authoritative facts and this paragraph's
     /// mechanism as a plausible, not proven, explanation.
     Tuple(Box<Vec<Ty>>),
+    /// A list display whose elements have different types (`[name, i]`, a
+    /// `str` and an `int`): a list whose positions keep fixed types, the
+    /// shape (v0.8 accept 5). Only `pycc_types` sees it. What it admits is
+    /// what is valid for every list of that shape: a literal index, `len`,
+    /// comparison with a list of the same shape (lexicographic, CPython's
+    /// list `<`), `str`/`repr`/`print`, unpacking, and being an element of
+    /// a list (which sorts). A store, a method, iteration, `+`/`*`, hashing
+    /// and a CPython boundary are refused. After the check it is erased to
+    /// [`Ty::Tuple`] ([`erase_shaped_lists`]): its run-time object is a
+    /// tuple object flagged to render and compare as the list it is. Only a
+    /// boxed shape ([`tuple_is_boxed`]) is one; `[1, 2.5]` stays
+    /// `list[int | float]`.
+    ShapedList(Box<Vec<Ty>>),
     /// A single-class instance (no inheritance in this PR -- see D-154,
     /// "class instance layout"). Carries only the originating class's name,
     /// not its shape: attribute-name -> slot-index mapping and method
@@ -539,6 +553,10 @@ impl Ty {
             Ty::VarTuple(elem) => format!("tuple[{}, ...]", elem.name()),
             Ty::Tuple(elems) => format!(
                 "tuple[{}]",
+                elems.iter().map(Ty::name).collect::<Vec<_>>().join(", ")
+            ),
+            Ty::ShapedList(elems) => format!(
+                "list[{}] (a fixed shape)",
                 elems.iter().map(Ty::name).collect::<Vec<_>>().join(", ")
             ),
             Ty::Instance(class_name) => class_name.to_string(),

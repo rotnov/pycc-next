@@ -41,7 +41,7 @@ mod sites;
 mod sources;
 mod store;
 mod unread_default;
-pub(super) mod walk;
+pub(crate) mod walk;
 use store::{Shape, Store};
 use walk::all_stmts_mut;
 use sites::{number_sites, restore_sites, site_number};

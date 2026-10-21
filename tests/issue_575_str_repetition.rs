@@ -48,7 +48,7 @@ fn build_and_run(case: &str, source: &str) -> Vec<u8> {
         pycc_scratch::lf(&*String::from_utf8_lossy(&output.stdout))
     );
 
-    Command::new(&out).output().unwrap().stdout
+    pycc_scratch::lf(&Command::new(&out).output().unwrap().stdout)
 }
 
 /// `str * int` executes natively instead of hitting the retired D-072

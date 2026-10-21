@@ -6,6 +6,24 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Added
 
+- v0.8 accept 5 (Windows parity): a native program on Windows writes its stdout and
+  stderr as CPython 3.13's text-mode streams do -- `\n` as `\r\n`, UTF-8 on a console,
+  otherwise the encoding of `PYTHONIOENCODING` (`encoding[:errors]`), of UTF-8 mode
+  (`PYTHONUTF8=1`), of `PYTHONLEGACYWINDOWSSTDIO`'s console code page, else of the ANSI
+  code page (CPython's own `cp1252` table), stdout with `surrogateescape` and stderr
+  with `backslashreplace`; an unencodable character raises CPython's
+  `UnicodeEncodeError` (a `ValueError`) with its message, and the `print` stops at that
+  write. A redirected stdin is decoded with the same codec (`pycc_rt::text_stdio`,
+  `tests/text_stdio.rs`). The DEVIATIONS row is gone; a narrow one keeps rare codecs.
+  Tests compare captured output as line content through `pycc_scratch::lf`.
+- v0.8 accept 5 (corpus): in strict mode a list display of elements of different types
+  (`[name, index]`) is a list of that fixed shape (`Ty::ShapedList`): a literal index,
+  `len`, `==`/`<` with a list of the same shape, sorting a list of them, `str`/`repr`/
+  `print`, f-strings and unpacking behave as CPython's list; a store, a method,
+  iteration, `+`/`*`, hashing and a CPython boundary are compile errors. Its run-time
+  object is the tuple object of its elements flagged as a list. `str()`/`repr()` of a
+  boxed tuple compile too. Strict corpus 191/200 (190).
+
 - v0.8 accepts 1 and 4 (the whole-package build, first stage): `pycc build PKG --ext -o
   PKG/__init__` compiles every module of a package directory (and of its subpackages;
   `--exclude MODULE` keeps a module or subpackage in Python) into one extension,
@@ -165,6 +183,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Fixed
 
+- A `print` whose write raised (a `sys.stdout.write` raising through the CPython hook)
+  went on writing its remaining arguments and newline before the exception was
+  observed; it now stops at the failed write, as CPython's does, and nothing is written
+  while an exception is pending.
 - Non-strict `--ext`: a class that a module of its package subclasses through a
   re-export in a module other than a package `__init__.py` (`from .init import C`,
   `init` importing it from the module defining it) is created by CPython, as a

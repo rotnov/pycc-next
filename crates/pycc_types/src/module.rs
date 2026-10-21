@@ -226,7 +226,9 @@ fn resolve_prepared(
     // identical and is guaranteed to resolve to the same concrete
     // signature. A second check here would be unreachable dead code.
     let monomorphized = monomorphize(&resolved_hir).map_err(module_level)?;
-    unroll_enum_loops(monomorphized).map_err(module_level)
+    let mut resolved = unroll_enum_loops(monomorphized).map_err(module_level)?;
+    crate::shaped_list::erase_module(&mut resolved);
+    Ok(resolved)
 }
 
 /// Whether the checker's signatures for `folded` confirm every guard

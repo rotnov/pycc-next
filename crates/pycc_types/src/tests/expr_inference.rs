@@ -112,23 +112,37 @@ fn a_homogeneous_int_list_literal_infers_list_of_int() {
 }
 
 #[test]
-fn a_heterogeneous_list_literal_is_rejected_as_t0032() {
+fn a_heterogeneous_list_literal_is_a_list_of_a_fixed_shape() {
+    // v0.8 accept 5: elements of different types a list can hold, forming a
+    // boxed tuple's shape, make a `Ty::ShapedList` (strict mode).
     let env = Environment::new();
     let expr = HirExpr::ListLiteral(vec![
         HirExpr::IntLiteral(1),
         HirExpr::StringLiteral("two".to_string()),
         HirExpr::IntLiteral(3),
     ]);
+    assert_eq!(
+        infer_expr(&env, &expr).unwrap(),
+        Ty::ShapedList(Box::new(vec![Ty::Int, Ty::Str, Ty::Int]))
+    );
+}
+
+#[test]
+fn a_heterogeneous_list_literal_of_scalars_is_rejected_as_t0032() {
+    // `int`/`bool`/`float` elements form an unboxed tuple's shape, which no
+    // list of a fixed shape is; the message is the one baked into
+    // `tests/diagnostics/d0032_heterogeneous_list_literal.expected.txt`.
+    let env = Environment::new();
+    let expr = HirExpr::ListLiteral(vec![
+        HirExpr::IntLiteral(1),
+        HirExpr::BoolLiteral(true),
+        HirExpr::IntLiteral(3),
+    ]);
     let err = infer_expr(&env, &expr).unwrap_err();
     assert_eq!(err.code, "T0032");
-    // Exact match, not a substring check: this is the same message text
-    // baked into `tests/diagnostics/d0032_heterogeneous_list_literal
-    // .expected.txt`, which can't currently run end-to-end (`pycc_mir`
-    // is still non-exhaustive against Task 7's HIR forms) -- this unit
-    // test is what actually guards that fixture's wording today.
     assert_eq!(
         err.message,
-        "list element type mismatch: expected int (from the first element), found str"
+        "list element type mismatch: expected int (from the first element), found bool"
     );
 }
 

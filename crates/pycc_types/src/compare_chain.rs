@@ -323,7 +323,13 @@ fn container_compare_ty(op: CmpOp, left: &Ty, right: &Ty) -> Option<Result<Ty, D
     let container = |ty: &Ty| {
         matches!(
             ty,
-            Ty::List(_) | Ty::Tuple(_) | Ty::VarTuple(_) | Ty::Dict(_) | Ty::Set(_) | Ty::FrozenSet(_)
+            Ty::List(_)
+                | Ty::Tuple(_)
+                | Ty::ShapedList(_)
+                | Ty::VarTuple(_)
+                | Ty::Dict(_)
+                | Ty::Set(_)
+                | Ty::FrozenSet(_)
         )
     };
     if !container(left) || !container(right) {
@@ -386,7 +392,9 @@ fn numerically_alike(left: &Ty, right: &Ty) -> bool {
     let item = |a: &Ty, b: &Ty| a == b || (number(a) && number(b)) || numerically_alike(a, b);
     match (left, right) {
         (Ty::List(a), Ty::List(b)) | (Ty::VarTuple(a), Ty::VarTuple(b)) => item(a, b),
-        (Ty::Tuple(xs), Ty::Tuple(ys)) => xs.iter().zip(ys.iter()).all(|(a, b)| item(a, b)),
+        (Ty::Tuple(xs), Ty::Tuple(ys)) | (Ty::ShapedList(xs), Ty::ShapedList(ys)) => {
+            xs.iter().zip(ys.iter()).all(|(a, b)| item(a, b))
+        }
         (Ty::Tuple(xs), Ty::VarTuple(e)) | (Ty::VarTuple(e), Ty::Tuple(xs)) => {
             xs.iter().all(|a| item(a, e))
         }
@@ -398,7 +406,7 @@ fn ordered(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Bool | Ty::Float | Ty::Num | Ty::Str => true,
         Ty::List(elem) | Ty::VarTuple(elem) => ordered(elem),
-        Ty::Tuple(elements) => elements.iter().all(ordered),
+        Ty::Tuple(elements) | Ty::ShapedList(elements) => elements.iter().all(ordered),
         _ => false,
     }
 }

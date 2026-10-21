@@ -34,7 +34,7 @@ Every code: stable forever, documented via `pycc explain`, covered by at least o
 | `T0026` | error | a later plain or annotated assignment is incompatible with an earlier value-less declaration (`x: int` with no `= ...`) |
 | `T0030` | error | non-exhaustive `match` (missing cases listed) |
 | `T0031` | error | `@override` without matching base method |
-| `T0032` | error | list literal elements must all share one type |
+| `T0032` | error | list literal elements must all share one type -- in strict mode a display of two or more elements of different types a list can hold, not all `int`/`float`/`bool`, is a list of that fixed shape instead (`[name, index]`, v0.8) |
 | `T0033` | error | value does not support list/dict/set/frozenset operations (subscript, slicing, item assignment, `for`, `.append()`, `.pop()`, `.get()`, `.add()`, `len()`), or `len()` called with the wrong number of arguments |
 | `T0034` | error | list codegen only supports `list[int]` in v0.2 (D-105) — gates both an inferred list-literal element type and a written `list[T]` annotation (D-228) |
 | `T0035` | error | dict literal key/value pairs must all share one key type and one value type |

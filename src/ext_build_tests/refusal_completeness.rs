@@ -259,6 +259,9 @@ fn expected_to_carry(ty: &Ty) -> bool {
         | Ty::Optional(_)
         | Ty::Generator(_)
         | Ty::Callable(_) => false,
+        // A list of a fixed shape is erased to its tuple before the
+        // boundary is built, and is refused at a CPython boundary.
+        Ty::ShapedList(_) => false,
         // Part 1 of #1027: admitted at a parameter position, and refused at
         // a return position by `into_scalar` answering `None` for its
         // carrier -- which is the asymmetry this predicate deliberately
@@ -321,6 +324,7 @@ fn no_type_outside_the_admitted_set_is_carried_at_a_parameter_position() {
         Ty::VarTuple(Box::new(Ty::Str)),
         Ty::VarTuple(Box::new(Ty::List(Box::new(Ty::Int)))),
         Ty::VarTuple(Box::new(Ty::Instance(name()))),
+        Ty::ShapedList(Box::new(vec![Ty::Str, Ty::Int])),
     ];
     for ty in samples {
         assert_eq!(carries_param(&ty), expected_to_carry(&ty), "{ty:?}");

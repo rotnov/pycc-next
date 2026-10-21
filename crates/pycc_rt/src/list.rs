@@ -552,14 +552,41 @@ pub unsafe extern "C" fn pycc_rt_list_elem_kind(list: *mut PyListObj, index: i64
 }
 
 /// Whether `xs` is a tuple object (it has per-element kinds, or is a
-/// homogeneous tuple held as a list).
+/// homogeneous tuple held as a list) -- not a list of a fixed shape, which
+/// is a tuple object flagged [`SHAPED_LIST`].
 ///
 /// # Safety
 /// `list` must be a live `PyListObj` pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_list_is_tuple(list: *mut PyListObj) -> i64 {
     let list = unsafe { &*list };
-    i64::from(!list.kinds.is_null() || list.frozen)
+    i64::from(renders_as_tuple(list))
+}
+
+/// [`PyListObj::flavor`] of a list display of elements of different types
+/// (`[name, index]`, `pycc_hir::Ty::ShapedList`): a tuple object, whose
+/// per-element kinds it needs, that renders and is a list. The type checker
+/// admits no operation on it that would treat it otherwise (no store, no
+/// method, no hashing).
+pub(crate) const SHAPED_LIST: u8 = 2;
+
+/// Whether `list` renders as a tuple.
+fn renders_as_tuple(list: &PyListObj) -> bool {
+    (list.kind == crate::value::TUPLE_OBJECT || list.frozen) && list.flavor != SHAPED_LIST
+}
+
+/// The tuple object `tuple` flagged as the list of a fixed shape it is
+/// ([`SHAPED_LIST`]), returned as a new reference.
+///
+/// # Safety
+/// `tuple` must be a live, fresh tuple object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_tuple_mark_list(tuple: *mut PyListObj) -> *mut PyListObj {
+    unsafe {
+        crate::rc::pycc_rt_list_incref(tuple);
+        (*tuple).flavor = SHAPED_LIST;
+    }
+    tuple
 }
 
 /// `len(xs)` as a raw count.
@@ -870,7 +897,7 @@ pub(crate) fn sequence_repr(list: &PyListObj, out: &mut String) -> bool {
     if list.flavor == deque::DEQUE {
         return deque::repr(list, out);
     }
-    let tuple = list.kind == crate::value::TUPLE_OBJECT || list.frozen;
+    let tuple = renders_as_tuple(list);
     out.push(if tuple { '(' } else { '[' });
     let items = list.kinded_items();
     for (i, (kind, word)) in items.iter().enumerate() {

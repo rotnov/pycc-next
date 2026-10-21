@@ -347,7 +347,8 @@ pub(crate) fn infer_call_expr(
         // (`pycc_mir` folds the call to the constant; reading a name has
         // no effect to keep).
         let named_tuple =
-            matches!(arg_tys[0], Ty::Tuple(_)) && matches!(args.first(), Some(HirExpr::Name(_)));
+            matches!(arg_tys[0], Ty::Tuple(_) | Ty::ShapedList(_))
+                && matches!(args.first(), Some(HirExpr::Name(_)));
         if !named_tuple
             && !matches!(
                 arg_tys[0],

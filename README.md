@@ -69,9 +69,10 @@ pycc-next):
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
 wrong outputs (CI-gated), every top-level statement native (0 of 1191 in CPython
-fallback); strict mode compiles and passes 190/200 unchanged — most of the rest use
-dynamic values (mixed-type containers, an `int | None` used as an `int` without a `None`
-test, a variable rebound to another type on some paths only) that strict mode refuses.
+fallback); strict mode compiles and passes 191/200 unchanged — the rest use dynamic
+values that strict mode refuses, as a type checker does: a list whose elements change
+type (a `str` element replaced by an `int`), an `int | None` used as an `int` without a
+`None` test, a variable rebound to another type on some paths only.
 
 **Library code is not faster yet.** pydantic 2.13.5 built `--ext --non-strict`
 (`bench/pydantic_check.py --time`, 809 of 1249 functions native, 5742 of its tests
@@ -386,6 +387,10 @@ and setuptools): that is the test harness, not a change to the packages.
   dict display's values: one tagged machine word (an `int`, or a `float` held inline
   for magnitudes between about `1e-77` and `1e77`), with CPython's semantics for
   whichever it holds. Pure `int` and pure `float` code is unchanged.
+  A list display of elements of different types (`[name, index]`) is a list of that
+  fixed shape: a literal index, `len`, comparison and sorting (lexicographic, as
+  CPython's lists), printing and unpacking work on it; storing into it, its methods,
+  iterating over it, `+`/`*`, hashing and passing it to CPython are compile errors.
 - **Non-strict**: `pycc build|run|check --non-strict`, or `[tool.pycc] strict = false`
   in a `pyproject.toml` next to the entry file (`[build] strict = false` in a
   `pycc.toml` works too). A missing annotation and `Any` become a CPython object
@@ -522,7 +527,10 @@ needs Windows 10 or newer and, at build time:
   time; `PYCC_PYTHON`, default `python.exe`. Extension modules are abi3 `.pyd` files
   (`pycc build m.py -o m --ext` writes `m.pyd`), loaded by CPython 3.13 and newer. A
   program that embeds CPython is an `OUT.exe` stub with its interpreter in `OUT.pycc\`
-  (`docs/DEVIATIONS.md` lists the Windows gaps).
+  (`docs/DEVIATIONS.md` lists the Windows gaps). A native program writes stdout and
+  stderr as CPython does there: `\r\n` line endings, UTF-8 on a console, otherwise the
+  encoding CPython picks (`PYTHONIOENCODING`, UTF-8 mode with `PYTHONUTF8=1`, else the
+  ANSI code page, raising `UnicodeEncodeError` for a character it cannot encode).
 
 On macOS a browser download is quarantined by Gatekeeper; clear the flag once
 after unpacking (`xattr -dr com.apple.quarantine pycc-vX.Y.Z-aarch64-macos`) or
