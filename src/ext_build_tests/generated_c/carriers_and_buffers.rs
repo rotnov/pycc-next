@@ -282,10 +282,12 @@ fn a_caller_owned_buffer_returning_method_uses_the_declared_parameter_index() {
             method: Some("row".to_string()),
             returns_buffer_slice: false,
             receiver: ExtReceiver::SelfInstance,
+            param_names: crate::ext_build::test_param_names(&[Ty::MemoryView]),
             params: vec![Ty::MemoryView],
             param_writable: vec![false],
             return_ty: Ty::MemoryView,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -318,10 +320,12 @@ fn a_buffer_returning_method_packs_through_the_same_arm() {
             method: Some("make".to_string()),
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[]),
             params: vec![],
             param_writable: vec![],
             return_ty: Ty::MemoryView,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -346,10 +350,12 @@ fn memoryview_slice_inc(name: &str, count: usize) -> String {
             method: None,
             returns_buffer_slice: true,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::MemoryView; count]),
             params: vec![Ty::MemoryView; count],
             param_writable: vec![false; count],
             return_ty: Ty::MemoryView,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     )
 }
@@ -491,7 +497,7 @@ fn a_source_level_default_does_not_reach_the_generated_wrapper() {
     assert_eq!(exports[0].params, vec![Ty::Int, Ty::Int], "{exports:?}");
     let inc = generate_exports_inc("m", &exports, &[], &flat_publications(&exports), &[], &[]);
     assert!(
-        inc.contains("add() takes exactly 2 arguments (%zd given)"),
+        inc.contains("pycc_ext_arity_error(\"add\", pycc_ext_kwnames_wrap_add, 2, 2, 0, nargs);"),
         "{inc}"
     );
     assert!(

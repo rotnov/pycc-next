@@ -593,23 +593,24 @@ pub(crate) fn carrier_class_isinstance_c(classes: &[ExtCarrierClass]) -> String 
 ///
 /// The `pycc_rt_instance_new` allocation is released when the constructor
 /// raises, and otherwise owned by the carrier (`pycc_ext_carrier_bind`).
-/// The layout descriptor `pycc_rt_instance_new` is passed for `ctor`'s
-/// class (#1388), as a C string literal, with its length.
-fn layout_literal(ctor: &ExtCtor) -> (String, usize) {
-    // The class name, then each slot name, NUL-separated. `\000` rather
-    // than `\0`, so a following character can never extend the octal
-    // escape; the length is passed explicitly, since the descriptor holds
-    // NULs.
-    let mut layout = ctor.class.clone();
-    for name in &ctor.slot_names {
-        layout.push('\0');
-        layout.push_str(name);
-    }
-    // The slot kinds (`pycc_rt::rc`), exactly as `MirExpr::Instantiate`'s
-    // descriptor records them: what freeing the instance releases.
-    layout.push('\0');
-    layout.push_str(&ctor.slot_kinds);
-    (layout.replace('\0', "\\000"), layout.len())
+/// The instance is made from `ctor`'s class record (v0.10,
+/// `pycc_codegen::record_symbol`), which compiled code defines and which
+/// every instance of the class -- compiled code's, the host's -- points
+/// at: its descriptor (#1388) and its run-time class.
+fn record_declaration(ctor: &ExtCtor) -> String {
+    format!(
+        "extern const unsigned char {}[];\n",
+        pycc_codegen::record_symbol(&ctor.class)
+    )
+}
+
+/// The C expression allocating an instance of `ctor`'s class.
+fn instance_of_record(ctor: &ExtCtor) -> String {
+    format!(
+        "pycc_ext_instance_of_record({}, {})",
+        ctor.slot_names.len(),
+        pycc_codegen::record_symbol(&ctor.class)
+    )
 }
 
 /// v0.9: `Py_tp_new` of a constructible class. `PyType_GenericNew`, and
@@ -618,7 +619,6 @@ fn layout_literal(ctor: &ExtCtor) -> (String, usize) {
 /// attributes (the slots' setters) and reads its class-level defaults.
 fn tp_new_c(ctor: &ExtCtor, defaults: &[String]) -> String {
     let class = &ctor.class;
-    let (literal, len) = layout_literal(ctor);
     // The instance defaults among the slots, stored as `__init__` would
     // store them first.
     let mut stores = String::new();
@@ -629,13 +629,14 @@ fn tp_new_c(ctor: &ExtCtor, defaults: &[String]) -> String {
         ));
     }
     format!(
-        "static PyObject *pycc_ext_tp_new_{class}(PyTypeObject *type, PyObject *args, \
+        "{declaration}static PyObject *pycc_ext_tp_new_{class}(PyTypeObject *type, PyObject *args, \
          PyObject *kwds)\n{{\n    \
          PyObject *self = PyType_GenericNew(type, args, kwds);\n    \
          if (self != NULL && !pycc_ext_is_compiled_class((PyObject *)type)) {{\n        \
-         pycc_ext_carrier_bind(self, pycc_rt_instance_new({count}, \"{literal}\", {len}));\n\
+         pycc_ext_carrier_bind(self, {instance});\n\
          {stores}    }}\n    return self;\n}}\n\n",
-        count = ctor.slot_names.len()
+        declaration = record_declaration(ctor),
+        instance = instance_of_record(ctor)
     )
 }
 
@@ -653,10 +654,6 @@ fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
     } else {
         format!("void *, {carried}")
     };
-    let slot_count = ctor.slot_names.len();
-    // #1388: the layout descriptor `pycc_rt_instance_new` words an unassigned
-    // slot's `AttributeError` with ([`layout_literal`]).
-    let (layout_literal, layout_len) = layout_literal(ctor);
     // The method part of #1140, exactly as `wrapper_for` applies it: keyed
     // by the class rather than the compiled `__init__` name, because two
     // classes that inherit one `__init__` each get their own `Py_tp_init`.
@@ -666,18 +663,32 @@ fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
     // same call to the uncompiled `__init__`; every other constructor keeps
     // the hand-written refusal below byte for byte.
     let prologue = ctor.keyword_names.as_deref().map(|names| {
-        keywords::tp_init_prologue(&default_prefix, source_name, names, &ctor.defaults)
+        keywords::tp_init_prologue(
+            &default_prefix,
+            source_name,
+            ctor.keyword_receiver.as_deref(),
+            names,
+            &ctor.defaults,
+        )
     });
     let (count, item): (String, &dyn Fn(usize) -> String) = match &prologue {
         Some(prologue) => {
             out.push_str(&prologue.before);
             (keywords::tp_init_count(arity), &keywords::tp_init_item)
         }
-        None => ("PyTuple_Size(args)".to_string(), &|index| {
-            format!("PyTuple_GetItem(args, {index})")
-        }),
+        None => {
+            // #10: the parameter names the arity message reads; a `*args`
+            // constructor binds through its own table instead.
+            if ctor.vararg.is_none() || ctor.defaults.iter().any(Option::is_some) {
+                out.push_str(&keywords::names_table(&default_prefix, &ctor.param_names));
+            }
+            ("PyTuple_Size(args)".to_string(), &|index| {
+                format!("PyTuple_GetItem(args, {index})")
+            })
+        }
     };
     out.push_str(&format!("extern void *fnptr_{symbol};\n"));
+    out.push_str(&record_declaration(ctor));
     out.push_str(&format!(
         "static int pycc_ext_tp_init_{class}(PyObject *self, PyObject *args, PyObject *kwds)\n\
          {{\n    void *inst;\n"
@@ -712,11 +723,15 @@ fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
             "    static const char *const pycc_names[] = {{{table}}};\n    \
              PyObject *pycc_bound[{size}];\n    \
              PyObject *pycc_rest;\n    \
-             if (pycc_ext_bind_star(args, kwds, {qualname}, pycc_names, {fixed}, pycc_bound, \
+             if (pycc_ext_bind_star(args, kwds, {qualname}, {receiver}, pycc_names, {fixed}, pycc_bound, \
              &pycc_rest) < 0) {{\n        return -1;\n    }}\n",
             table = table.join(", "),
             size = fixed.max(1),
             qualname = keywords::c_name(source_name),
+            receiver = ctor
+                .keyword_receiver
+                .as_deref()
+                .map_or_else(|| "NULL".to_string(), keywords::c_name),
         ));
         out.push_str(&unpack_args(
             &slots,
@@ -731,17 +746,12 @@ fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
             "        Py_DECREF(pycc_rest);\n        return -1;\n",
         ));
         out.push_str("    Py_DECREF(pycc_rest);\n");
-    } else if ctor.defaults.is_empty() {
-        out.push_str(&format!(
-            "    if ({count} != {arity}) {{\n        PyErr_Format(PyExc_TypeError, \
-             \"{source_name}() takes exactly {arity} argument{plural} (%zd given)\", \
-             {count});\n        return -1;\n    }}\n",
-            plural = if arity == 1 { "" } else { "s" },
-        ));
     } else {
-        out.push_str(&defaults::range_arity_check(
+        out.push_str(&defaults::arity_check(
             source_name,
             &default_prefix,
+            arity,
+            1,
             &ctor.defaults,
             &defaults::ArgSource {
                 count: &count,
@@ -758,9 +768,7 @@ fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
             "        return -1;\n",
         ));
     }
-    out.push_str(&format!(
-        "    inst = pycc_rt_instance_new({slot_count}, \"{layout_literal}\", {layout_len});\n"
-    ));
+    out.push_str(&format!("    inst = {};\n", instance_of_record(ctor)));
     let mut call_args = vec!["inst".to_string()];
     for (index, slot) in slots.iter().enumerate() {
         // Deliberately two arms where `wrapper_for` has three.

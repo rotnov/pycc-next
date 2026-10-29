@@ -27,7 +27,7 @@
 //! the same cached objects through [`keyword_default_fills`].
 //!
 //! A module-level export's defaults are not recorded anywhere this module
-//! can read, so it keeps the exact arity check -- and, since its source
+//! can read, so it keeps a fixed arity -- and, since its source
 //! `def` then declares defaults the export does not carry, keyword calls
 //! stay refused (`super::keywords`); #1194 tracks that half.
 
@@ -76,27 +76,41 @@ pub(crate) struct ArgSource<'a> {
     pub(crate) fail: &'a str,
 }
 
-/// The range arity check and one `PyObject *v{index}` local per defaulted
-/// parameter, holding either the host's argument or the default object.
+/// The arity check of a generated entry point and one `PyObject *v{index}`
+/// local per defaulted parameter, holding either the host's argument or the
+/// default object.
+///
+/// A call outside `required..=arity` raises CPython's own wording (#10):
+/// `pycc_ext_arity_error` reads the parameter names from the entry point's
+/// `pycc_ext_kwnames_{prefix}` table ([`super::keywords::names_table`]),
+/// and `receiver` is 1 when CPython counts a bound `self`/`cls` in the
+/// message. `defaults` is empty for an entry point without defaults, whose
+/// every parameter is then required.
 ///
 /// `prefix` makes the file-static default objects' names unique across the
 /// generated file (one wrapper or one `Py_tp_init` each). The caller must
-/// emit [`default_object_helpers`] with the same `prefix` before the entry
-/// point, and read a defaulted argument through [`arg_expr`].
-pub(crate) fn range_arity_check(
+/// emit [`default_object_helpers`] and the name table with the same
+/// `prefix` before the entry point, and read a defaulted argument through
+/// [`arg_expr`].
+pub(crate) fn arity_check(
     source_name: &str,
     prefix: &str,
+    arity: usize,
+    receiver: usize,
     defaults: &[Option<HirExpr>],
     source: &ArgSource<'_>,
 ) -> String {
-    let arity = defaults.len();
-    let required = required_count(defaults);
+    let required = if defaults.is_empty() {
+        arity
+    } else {
+        required_count(defaults)
+    };
     let count = source.count;
     let fail = source.fail;
     let mut out = format!(
         "    if ({count} < {required} || {count} > {arity}) {{\n        \
-         PyErr_Format(PyExc_TypeError, \"{source_name}() takes from {required} to {arity} \
-         arguments (%zd given)\", {count});\n{fail}    }}\n"
+         pycc_ext_arity_error(\"{source_name}\", pycc_ext_kwnames_{prefix}, {arity}, {required}, \
+         {receiver}, {count});\n{fail}    }}\n"
     );
     for (index, default) in defaults.iter().enumerate() {
         let Some(default) = default else { continue };
@@ -114,7 +128,7 @@ pub(crate) fn range_arity_check(
 }
 
 /// The `PyObject *` argument `index` is read from: `v{index}` for a
-/// defaulted parameter (see [`range_arity_check`]), the host's own argument
+/// defaulted parameter (see [`arity_check`]), the host's own argument
 /// otherwise.
 pub(crate) fn arg_expr(defaults: &[Option<HirExpr>], index: usize, item: String) -> String {
     match defaults.get(index) {
@@ -127,7 +141,7 @@ pub(crate) fn arg_expr(defaults: &[Option<HirExpr>], index: usize, item: String)
 /// parameter that stores the parameter's default object into a `kw_slots`
 /// entry the host left unfilled.
 ///
-/// The same objects [`range_arity_check`] substitutes for an omitted
+/// The same objects [`arity_check`] substitutes for an omitted
 /// trailing argument, under the same `prefix`, so a default reached through
 /// a keyword call and one reached through a short positional call are the
 /// one cached object. After these fills every slot is set, which is what

@@ -37,6 +37,7 @@
 //! a value is called with its flat parameters (`docs/DEVIATIONS.md`).
 
 mod emit;
+mod messages;
 mod splice;
 
 use super::Fresh;

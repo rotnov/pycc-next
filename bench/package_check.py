@@ -39,6 +39,7 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
                                       [--max-build-seconds S] [--jobs N]
                                       [--instructions] [--separate] [--json PATH]
+                                      [--competitors]
   PACKAGE  names from PACKAGES (default: all of them).
   --time   also time each package's hot paths compiled and in CPython (pypng:
            its 256x256 filter image, and every PngSuite image its tests use).
@@ -48,7 +49,16 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            in alternating order. Prints the median and min-max per tree and
            the ratio of the medians.
   --json PATH
-           write `--time`'s samples and their summaries (`bench/stats.py`).
+           write `--time`'s samples and their summaries (`bench/stats.py`), and
+           `--competitors`' builds.
+  --competitors
+           also build the package's modules, unchanged, with Cython and with mypyc
+           (`bench/competitors.py`; Cython in its default mode, then, should that not
+           build or pass the suite, with annotations ignored), each in a copy of the
+           CPython tree, run the package's suite against each, and with `--time`
+           time every tree that passes it beside the other two, interleaved. A
+           competitor that does not build, fails the suite or fails a workload is
+           reported and not timed; it does not fail the check (CPython is the oracle).
   --instructions
            also count, under valgrind's callgrind, the instructions one call
            of each package's hot path executes against the compiled modules
@@ -93,6 +103,7 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bench"))
+import competitors  # noqa: E402
 import stats  # noqa: E402
 # The compiler's file name in a Cargo profile directory.
 PYCC_EXE = "pycc.exe" if os.name == "nt" else "pycc"
@@ -614,6 +625,60 @@ def count_defs(src: str) -> int:
 
 # `--time`'s measurements, for `--json`.
 TIMINGS: list[dict] = []
+# `--competitors`' builds, for `--json`.
+BUILDS: list[dict] = []
+
+
+def competitor_trees(pkg: Package, a: argparse.Namespace, plain: pathlib.Path,
+                     tmp: pathlib.Path, cwd: pathlib.Path, single: bool,
+                     names: str) -> dict[str, pathlib.Path]:
+    """Builds the package's modules with Cython and with mypyc (`bench/competitors.py`),
+    each in a copy of the CPython tree, and runs the package's own suite against what
+    was built. Returns the trees that built and pass it, by tool. Cython is tried in its
+    default mode first and, should that not build or pass, with annotations ignored."""
+    out = {}
+    dotted = dict(zip(pkg.modules, names.split(",")))
+    attempts = [("cython", True), ("cython", False), ("mypyc", None)]
+    for tool, typing in attempts:
+        if tool in out:
+            continue
+        # The build sees only the package (a tree's other files, a `pyproject.toml`
+        # among them, would configure setuptools); the tree is the CPython tree with
+        # the built package in its place.
+        top = pkg.layout[0][0]
+        work = tmp / f"{tool}-{typing}-build"
+        work.mkdir()
+        if single:
+            shutil.copyfile(plain / top, work / top)
+        else:
+            shutil.copytree(plain / top, work / top, symlinks=True,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        base = work if single else work / top
+        files = [base / m for m in pkg.modules]
+        b = competitors.cython(work, files, typing, a.jobs) if tool == "cython" \
+            else competitors.mypyc(work, files)
+        competitors.remove_compiled_sources(work, b)
+        tree = tmp / f"{tool}-{typing}"
+        shutil.copytree(plain, tree, symlinks=True,
+                        ignore=lambda d, names: [n for n in names if n == "__pycache__"
+                                                 or (pathlib.Path(d) == plain and n == top)])
+        shutil.copytree(work, tree, symlinks=True, dirs_exist_ok=True)
+        base = tree if single else tree / top
+        res = {"package": pkg.name, "version": pkg.version} | b.as_json()
+        BUILDS.append(res)
+        print(f"  {tool} ({b.mode}): {b.summary()} in {b.seconds:.1f}s")
+        if b.error or not b.compiled:
+            continue
+        compiled = ",".join(dotted[m] for m in pkg.modules
+                            if (base / m).relative_to(tree).as_posix() in b.compiled)
+        r = python(CHECK_COMPILED + pkg.tests, str(tree), "compiled", compiled, cwd=cwd)
+        tail = (r.stderr.strip().splitlines() or ["?"])[-1]
+        print(f"  test suite ({tool}): {tail}")
+        res["tests"] = "pass" if r.returncode == 0 else f"fail: {tail[:200]}"
+        if r.returncode == 0:
+            out[tool] = tree
+            res["timed"] = True
+    return out
 
 
 def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
@@ -733,31 +798,47 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             print(f"FAIL: {pkg.name}'s own tests fail against the {label} modules")
             return False
 
+    others = competitor_trees(pkg, a, plain, tmp, cwd, single, names) if a.competitors else {}
     if a.time:
-        trees = {"cpython": plain, "compiled": built}
+        trees = {"cpython": plain, "compiled": built, **others}
         for speed_label, speed in ((pkg.speed_label, pkg.speed), *pkg.more_speed):
             samples: dict[str, list[float]] = {label: [] for label in trees}
+            dropped: dict[str, str] = {}
             # One discarded warm-up process per tree (file cache, the sources'
             # `.pyc`s), then `--runs` rounds of one fresh process per tree each.
             warm = [list(trees)] if a.runs > 1 else []
             for i, order in enumerate(warm + stats.interleaved(a.runs, list(trees))):
                 for label in order:
+                    if label in dropped:
+                        continue
                     r = python(speed, str(trees[label]), "1", cwd=cwd)
                     if r.returncode != 0:
                         print(r.stdout + r.stderr)
+                        if label in others:
+                            # A competitor's failure is its own, not pycc-next's.
+                            dropped[label] = "the workload fails: " + \
+                                (r.stderr.strip().splitlines() or ["?"])[-1][:200]
+                            continue
                         return False
                     if i >= len(warm):
                         samples[label].append(float(r.stdout))
-            times = {label: stats.summary(xs) for label, xs in samples.items()}
+            times = {label: stats.summary(xs) for label, xs in samples.items()
+                     if label not in dropped}
             ratio = times["cpython"]["median"] / times["compiled"]["median"]
             print(f"  {speed_label}: CPython {times['cpython']['median']:.3f}s "
                   f"({times['cpython']['min']:.3f}-{times['cpython']['max']:.3f}), "
                   f"compiled {times['compiled']['median']:.3f}s "
                   f"({times['compiled']['min']:.3f}-{times['compiled']['max']:.3f}) "
                   f"({ratio:.2f}x, medians of {a.runs})")
+            for label in others:
+                t = times.get(label)
+                print(f"  {speed_label}: {label} " + (dropped[label] if t is None else
+                      f"{t['median']:.3f}s ({t['min']:.3f}-{t['max']:.3f})"))
             TIMINGS.append({"package": pkg.name, "version": pkg.version,
                             "workload": speed_label, "runs": a.runs,
-                            "seconds": times, "ratio": ratio})
+                            "seconds": times, "ratio": ratio, "not_timed": dropped,
+                            "modes": {b["tool"]: b["mode"] for b in BUILDS
+                                      if b["package"] == pkg.name and b.get("timed")}})
     if a.instructions:
         per_call = instructions_per_call(pkg, built, cwd)
         if per_call is None:
@@ -807,6 +888,7 @@ def main() -> int:
     ap.add_argument("--instructions", action="store_true")
     ap.add_argument("--separate", action="store_true")
     ap.add_argument("--json")
+    ap.add_argument("--competitors", action="store_true")
     a = ap.parse_args()
     for name in a.packages:
         if name not in PACKAGES:
@@ -824,7 +906,10 @@ def main() -> int:
                 shutil.rmtree(tmp, ignore_errors=True)
     print("OK" if ok else "FAIL")
     if a.json:
-        pathlib.Path(a.json).write_text(json.dumps({"packages": TIMINGS}, indent=1))
+        doc: dict = {"packages": TIMINGS}
+        if a.competitors:
+            doc["competitors"] = {"versions": competitors.versions(), "builds": BUILDS}
+        pathlib.Path(a.json).write_text(json.dumps(doc, indent=1))
     return 0 if ok else 1
 
 

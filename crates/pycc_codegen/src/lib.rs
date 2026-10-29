@@ -81,6 +81,8 @@ mod closure;
 mod closure_tests;
 mod ext;
 mod ext_publish;
+mod class_record;
+pub use class_record::{CLASS_RECORD_HEADER, CLASS_RECORD_PREFIX, record_symbol};
 mod member_symbols;
 mod sibling_call;
 mod sibling_class;

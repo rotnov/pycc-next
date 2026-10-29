@@ -19,10 +19,12 @@ fn scalar_export(name: &str) -> ExtExport {
         method: None,
         returns_buffer_slice: false,
         receiver: ExtReceiver::None,
+        param_names: crate::ext_build::test_param_names(&[Ty::Int]),
         params: vec![Ty::Int],
         param_writable: vec![false],
         return_ty: Ty::Int,
         keyword_names: None,
+        keyword_receiver: None,
     }
 }
 
@@ -267,7 +269,12 @@ fn a_published_class_is_registered_but_bound_only_through_its_publication() {
             "{line:?} precedes the guard:\n{init}"
         );
     }
-    for later in ["kwds", "pycc_ext_unpack_", "pycc_rt_instance_new", "fnptr_"] {
+    for later in [
+        "kwds",
+        "pycc_ext_unpack_",
+        "pycc_ext_instance_of_record",
+        "fnptr_",
+    ] {
         assert!(init[at..].contains(later), "{later:?} missing:\n{init}");
     }
 }

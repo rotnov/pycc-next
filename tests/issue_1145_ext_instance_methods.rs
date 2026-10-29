@@ -182,11 +182,10 @@ for call in (lambda: grid.Grid(1), lambda: grid.Grid(1, 2, 3)):
         messages.append(str(exc))
     else:
         raise AssertionError('a wrong arity should be refused')
-for message in messages:
-    assert 'Grid.__init__() takes exactly 2 arguments' in message, message
-    assert '0m' not in message, message
-assert '(1 given)' in messages[0], messages[0]
-assert '(3 given)' in messages[1], messages[1]
+assert messages == [
+    \"Grid.__init__() missing 1 required positional argument: 'h'\",
+    'Grid.__init__() takes 3 positional arguments but 4 were given',
+], messages
 ",
     );
 }

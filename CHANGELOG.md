@@ -11,6 +11,21 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   runs, published as medians with min-max, the runner's CPU and the run count (job
   summary, `bench-<os>` artifact). Published speed numbers cite a run of it (v0.10
   accept 4).
+- Cython 3.3.0 and mypyc (mypy 2.3.1) as benchmark competitors (`bench/competitors.py`,
+  pinned in `.github/competitor-requirements.txt`): `bench/run.py` and
+  `package_check.py`/`pydantic_check.py --time --competitors` build the same unmodified
+  sources with each and time what builds and passes; the published result has Cython and
+  mypyc columns, pycc vs each, the Cython mode, and every build that failed with why.
+  CPython stays the correctness oracle.
+- The differential fuzzer's `call_errors` block: calls with missing, extra, unknown,
+  misspelled and repeated arguments, and missing attributes of classes and instances.
+- `--non-strict`: a function's `str`-keyed dict display holding CPython objects
+  (`{"first": None, "n": 0}`) is a native dict when the dict never escapes the function
+  -- it is only read, stored into, tested for a key, measured, iterated or tested for
+  truth; returned, passed, stored elsewhere, compared or printed, it stays CPython's
+  `dict`, so identity, views, pickling and `repr` are CPython's wherever CPython can see
+  it (v0.10 accept 2). Equal identifier-like `str` literals share one native object, and
+  native `str`-keyed dicts read a key's cached hash in place.
 
 ### Changed
 - `bench/run.py` reports the median and min-max of interleaved fresh-process runs
@@ -40,15 +55,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   function key with an effect keys a copy of the input, `.sort` with a nested function
   key runs as written, and with a key only a literal `reverse=` is rewritten (CPython
   evaluates every argument before the first key call).
-
-### Added
-- `--non-strict`: a function's `str`-keyed dict display holding CPython objects
-  (`{"first": None, "n": 0}`) is a native dict when the dict never escapes the function
-  -- it is only read, stored into, tested for a key, measured, iterated or tested for
-  truth; returned, passed, stored elsewhere, compared or printed, it stays CPython's
-  `dict`, so identity, views, pickling and `repr` are CPython's wherever CPython can see
-  it (v0.10 accept 2). Equal identifier-like `str` literals share one native object, and
-  native `str`-keyed dicts read a key's cached hash in place.
+- A published compiled function, method or constructor (`--ext`, and a `--non-strict`
+  native build's `__main__`) called with the wrong arguments raises CPython 3.13's exact
+  `TypeError`: `missing 1 required positional argument: 'x'`, `takes from 2 to 3
+  positional arguments but 4 were given`, and an unknown keyword's `Did you mean 'by'?`
+  (also in compiled code's own keyword binding) -- issue #10.
+- An f-string `=` field (`f"{x=}"`) in a `--non-strict` statement running in CPython
+  printed the rewritten global read instead of `x=`.
 
 ## [0.9.0] - 2026-10-21
 

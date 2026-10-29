@@ -56,25 +56,30 @@ classes, Python subclasses of compiled classes); strict refusals checked against
 `int | float` type; `pip install` through the `pycc.build` PEP 517 backend. Linux
 (x86_64, aarch64), macOS (arm64) and Windows (x86_64, MSVC). 10,000+ tests.
 
-**Speed** ([bench run 40866079503](https://github.com/rotnov/pycc-next/actions/runs/40866079503)
-at 3f9e371: the CI benchmark workflow `bench.yml` on GitHub's ubuntu-24.04 runner, Xeon
-Platinum 8370C 2.8 GHz, 4 vCPUs; `python3 bench/run.py --runs 11`, median (min-max) of 11
-interleaved fresh-process runs, process start included; the Rust twins build with `rustc
--O` for the default target CPU and black-box their inputs, like the Python programs'
-inputs are opaque to pycc-next):
+**Speed** ([bench run 40885134107](https://github.com/rotnov/pycc-next/actions/runs/40885134107)
+at 8012352: the CI benchmark workflow `bench.yml` on GitHub's ubuntu-24.04 runner, AMD
+EPYC 9V45, 4 vCPUs; `python3 bench/run.py --runs 11`, median (min-max) of 11 interleaved
+fresh-process runs, process start included. The same unmodified programs built with
+Cython 3.3.0 (`cythonize -3`, default directives, so the annotations are honored; `-O2`)
+and mypyc (mypy 2.3.1, its defaults) run as `python -c "import prog"`; the Rust twins
+build with `rustc -O` for the default target CPU and black-box their inputs, like the
+Python programs' inputs are opaque to pycc-next):
 
-| program | CPython 3.13 | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
-|---|---|---|---|---|---|
-| fib(32) | 0.262s (0.257-0.277) | 0.012s (0.011-0.012) | 0.007s (0.007-0.007) | **22.8x faster** | 1.73x slower |
-| mandelbrot | 1.619s (1.618-1.629) | 0.056s (0.056-0.056) | 0.051s (0.051-0.051) | **29.0x faster** | 1.10x slower |
-| nbody | 2.607s (2.585-2.665) | 0.077s (0.077-0.077) | 0.029s (0.029-0.030) | **33.9x faster** | 2.66x slower |
-| sieve | 1.268s (1.223-1.367) | 0.048s (0.047-0.050) | 0.024s (0.024-0.024) | **26.6x faster** | 2.00x slower |
-| spectral_norm | 1.210s (1.188-1.231) | 0.017s (0.017-0.020) | 0.009s (0.009-0.011) | **69.7x faster** | 1.83x slower |
-| collections_bfs | 1.112s (1.098-1.130) | 0.138s (0.138-0.139) | 0.051s (0.051-0.053) | **8.0x faster** | 2.69x slower |
+| program | CPython 3.13 | pycc-next | Cython | mypyc | Rust (`-O`) | vs CPython | vs Cython | vs mypyc | vs Rust |
+|---|---|---|---|---|---|---|---|---|---|
+| fib(32) | 0.148s (0.147-0.153) | 0.008s (0.008-0.009) | 0.087s (0.084-0.090) | 0.019s (0.018-0.020) | 0.005s (0.005-0.005) | **17.8x faster** | 10.5x faster | 2.27x faster | 1.62x slower |
+| mandelbrot | 1.073s (1.059-1.593) | 0.031s (0.030-0.049) | 0.084s (0.082-0.127) | 0.040s (0.039-0.059) | 0.029s (0.029-0.031) | **34.9x faster** | 2.73x faster | 1.30x faster | 1.04x slower |
+| nbody | 1.737s (1.685-1.789) | 0.045s (0.044-0.046) | 2.717s (2.600-3.160) | 1.383s (1.340-1.478) | 0.022s (0.021-0.022) | **38.7x faster** | 60.6x faster | 30.8x faster | 2.07x slower |
+| sieve | 0.659s (0.636-0.679) | 0.026s (0.025-0.027) | 0.449s (0.431-0.466) | 0.081s (0.076-0.090) | 0.011s (0.010-0.011) | **25.1x faster** | 17.1x faster | 3.09x faster | 2.50x slower |
+| spectral_norm | 0.748s (0.741-0.786) | 0.010s (0.009-0.010) | 0.806s (0.772-0.846) | 0.059s (0.057-0.061) | 0.007s (0.006-0.007) | **78.4x faster** | 84.4x faster | 6.16x faster | 1.40x slower |
+| collections_bfs | 0.679s (0.664-0.691) | 0.091s (0.089-0.092) | 0.622s (0.605-0.631) | 0.437s (0.429-0.447) | 0.032s (0.031-0.032) | **7.5x faster** | 6.85x faster | 4.81x faster | 2.87x slower |
 
-The same run's arm64 leg (ubuntu-24.04-arm, Neoverse-N2) is in its job summary and
-`bench-ubuntu-24.04-arm` artifact (e.g. nbody 36.7x, spectral_norm 94.3x faster than
-CPython there). Every speed number below cites this run unless it says otherwise.
+Cython compiling plain typed Python (no `cdef`) is 0.6-1.7x CPython's speed except on
+mandelbrot (12.8x); with annotations ignored it is about the same, mandelbrot included. mypyc is the closer competitor on integer code (fib, sieve, mandelbrot
+within 1.3-3.1x of pycc-next). The run's job summary also has the arm64 leg
+(ubuntu-24.04-arm), the Cython-mode table, and what did not compile with which tool and
+why. Numbers below cite [bench run 40866079503](https://github.com/rotnov/pycc-next/actions/runs/40866079503)
+(Xeon Platinum 8370C) unless they say otherwise.
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
@@ -98,6 +103,21 @@ against its sources): import 0.93x, model definition 0.79x, `model_json_schema()
 round-trips 0.91x of CPython's speed (medians of 15 interleaved runs). Compiled code over CPython objects does each object operation at about the
 interpreter's cost; the speed is in typed code (the table above, diff-match-patch and pypng
 ~12x and ~15x). The analysis is in [ROADMAP v0.9 accepts 2-4](docs/ROADMAP.md).
+
+**Against Cython and mypyc on the same packages** (bench run 40885134107, ubuntu-24.04,
+medians of 11; pydantic of 15): each tool builds the packages' modules unchanged, and is
+timed only where the package's own test suite passes against its build. pycc-next is
+faster than Cython on diff-match-patch (10.3x), pypng (9.7x and 2.2x) and tomli (1.22x),
+and **slower** than Cython on pystache (1.66x) and on pydantic (Cython, with annotations
+ignored, is 1.25x faster at model definition and 1.58x at `model_json_schema()`; import
+and round-trips about equal). **mypyc beats pycc-next on tomli** (0.014s against 0.020s,
+1.42x). mypyc does not compile diff-match-patch, pypng, mistune, pystache or pydantic
+(mypy errors in their unmodified sources), nor run `prefix_sum_np` (a numpy scalar where an
+`int` is annotated); Cython's builds of mistune fail its suite (at import), its default
+mode crashes on pydantic and fails one tomli test, so those numbers are Cython with
+annotations ignored. The arm64 leg (Neoverse-N2) shows the same: mypyc 1.44x faster than
+pycc-next on tomli, Cython 1.57x on pystache and 1.04-1.29x on pydantic's phases. The job
+summary lists every build with its reason.
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
