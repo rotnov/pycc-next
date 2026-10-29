@@ -211,25 +211,146 @@ static PyObject *pycc_ext_call_unpacking(PyObject *callable, PyObject **args, lo
     return result;
 }
 
+/* #10: CPython 3.13's argument-binding `TypeError`s for a published
+ * compiled function, method or constructor (`ceval.c`'s `missing_arguments`
+ * and `too_many_positional`), word for word. `names` holds the `arity`
+ * positional parameter names, the receiver excluded; `receiver` is 1 when
+ * CPython counts a bound `self` or `cls` in "takes N positional arguments"
+ * (an instance method, a classmethod, `__init__`) and 0 otherwise.
+ *
+ * `pycc_ext_missing_error` reports the parameters among the first
+ * `required` that are not filled: a slot of `slots` left NULL, or with
+ * `slots` NULL every index from `nargs` on. The list reads `'a'`, `'a' and
+ * 'b'`, `'a', 'b', and 'c'`. */
+static void pycc_ext_missing_error(const char *fn_name, const char *const *names,
+                                   Py_ssize_t required, PyObject *const *slots, Py_ssize_t nargs)
+{
+    Py_ssize_t i;
+    Py_ssize_t missing = 0;
+    Py_ssize_t seen = 0;
+    PyObject *list;
+
+    for (i = 0; i < required; i++) {
+        missing += slots != NULL ? slots[i] == NULL : i >= nargs;
+    }
+    list = PyUnicode_FromString("");
+    for (i = 0; i < required && list != NULL; i++) {
+        PyObject *next;
+        if (slots != NULL ? slots[i] != NULL : i < nargs) {
+            continue;
+        }
+        seen++;
+        if (seen == 1) {
+            next = PyUnicode_FromFormat("%U'%s'", list, names[i]);
+        } else if (seen < missing) {
+            next = PyUnicode_FromFormat("%U, '%s'", list, names[i]);
+        } else {
+            next = PyUnicode_FromFormat(missing == 2 ? "%U and '%s'" : "%U, and '%s'", list,
+                                        names[i]);
+        }
+        Py_DECREF(list);
+        list = next;
+    }
+    if (list != NULL) {
+        PyErr_Format(PyExc_TypeError, "%s() missing %zd required positional argument%s: %U",
+                     fn_name, missing, missing == 1 ? "" : "s", list);
+        Py_DECREF(list);
+    }
+}
+
+/* CPython 3.13's "Did you mean" for an unexpected keyword `key`: the
+ * closest of the receiver (`receiver`, or NULL) and the `arity` parameter
+ * names, by the interpreter's own `_suggestions._generate_suggestions`
+ * (what `initialize_locals` calls). A new reference, or NULL -- with no
+ * exception set -- when nothing is close enough or the lookup fails. */
+static PyObject *pycc_ext_keyword_suggestion(const char *receiver, const char *const *names,
+                                             Py_ssize_t arity, PyObject *key)
+{
+    PyObject *module;
+    PyObject *candidates;
+    PyObject *found = NULL;
+    Py_ssize_t i;
+
+    if (!PyUnicode_Check(key)) {
+        return NULL;
+    }
+    candidates = PyList_New(0);
+    if (candidates == NULL) {
+        PyErr_Clear();
+        return NULL;
+    }
+    for (i = -1; i < arity; i++) {
+        const char *name = i < 0 ? receiver : names[i];
+        PyObject *text;
+        if (name == NULL) {
+            continue;
+        }
+        text = PyUnicode_FromString(name);
+        if (text == NULL || PyList_Append(candidates, text) < 0) {
+            Py_XDECREF(text);
+            Py_DECREF(candidates);
+            PyErr_Clear();
+            return NULL;
+        }
+        Py_DECREF(text);
+    }
+    module = PyImport_ImportModule("_suggestions");
+    if (module != NULL) {
+        found = PyObject_CallMethod(module, "_generate_suggestions", "OO", candidates, key);
+        Py_DECREF(module);
+    }
+    Py_DECREF(candidates);
+    if (found == NULL) {
+        PyErr_Clear();
+        return NULL;
+    }
+    if (found == Py_None) {
+        Py_DECREF(found);
+        return NULL;
+    }
+    return found;
+}
+
+/* The error of a keyword-free call whose `nargs` positional arguments fall
+ * outside `required..=arity`. */
+static void pycc_ext_arity_error(const char *fn_name, const char *const *names, Py_ssize_t arity,
+                                 Py_ssize_t required, Py_ssize_t receiver, Py_ssize_t nargs)
+{
+    if (nargs > arity) {
+        Py_ssize_t given = nargs + receiver;
+        const char *verb = given == 1 ? "was" : "were";
+        if (required < arity) {
+            PyErr_Format(PyExc_TypeError,
+                         "%s() takes from %zd to %zd positional arguments but %zd %s given",
+                         fn_name, required + receiver, arity + receiver, given, verb);
+        } else {
+            Py_ssize_t takes = arity + receiver;
+            PyErr_Format(PyExc_TypeError, "%s() takes %zd positional argument%s but %zd %s given",
+                         fn_name, takes, takes == 1 ? "" : "s", given, verb);
+        }
+        return;
+    }
+    pycc_ext_missing_error(fn_name, names, required, NULL, nargs);
+}
+
 /* v0.9: binds a call of a compiled constructor `def __init__(self, a, b,
  * *rest)` (`qualname` names it, `names` its `fixed` parameters before
- * `*rest`) as CPython binds it (`ceval.c`'s `initialize_locals`), with its
+ * `*rest`, `receiver` the spelling of its `self`, offered as a "Did you
+ * mean") as CPython binds it (`ceval.c`'s `initialize_locals`), with its
  * messages: a keyword names a fixed parameter not already given
  * positionally, and every fixed parameter must be given. `bound` receives
  * `fixed` borrowed references, `*rest` a new reference to the tuple of the
  * positional arguments past them. 0, or -1 with the `TypeError` set. */
 static int pycc_ext_bind_star(PyObject *args, PyObject *kwds, const char *qualname,
+                              const char *receiver,
                               const char *const *names, Py_ssize_t fixed, PyObject **bound,
                               PyObject **rest)
 {
     Py_ssize_t given = PyTuple_Size(args);
     Py_ssize_t pos = 0;
-    Py_ssize_t missing = 0;
-    Py_ssize_t seen = 0;
     Py_ssize_t i;
     PyObject *key;
     PyObject *value;
-    PyObject *list;
 
     for (i = 0; i < fixed; i++) {
         bound[i] = i < given ? PyTuple_GetItem(args, i) : NULL;
@@ -241,8 +362,16 @@ static int pycc_ext_bind_star(PyObject *args, PyObject *kwds, const char *qualna
             }
         }
         if (i == fixed) {
-            PyErr_Format(PyExc_TypeError, "%s() got an unexpected keyword argument '%S'",
-                         qualname, key);
+            PyObject *suggestion = pycc_ext_keyword_suggestion(receiver, names, fixed, key);
+            if (suggestion != NULL) {
+                PyErr_Format(PyExc_TypeError,
+                             "%s() got an unexpected keyword argument '%S'. Did you mean '%S'?",
+                             qualname, key, suggestion);
+                Py_DECREF(suggestion);
+            } else {
+                PyErr_Format(PyExc_TypeError, "%s() got an unexpected keyword argument '%S'",
+                             qualname, key);
+            }
             return -1;
         }
         if (bound[i] != NULL) {
@@ -253,34 +382,10 @@ static int pycc_ext_bind_star(PyObject *args, PyObject *kwds, const char *qualna
         bound[i] = value;
     }
     for (i = 0; i < fixed; i++) {
-        missing += bound[i] == NULL;
-    }
-    if (missing > 0) {
-        /* `format_missing`: 'a' / 'a' and 'b' / 'a', 'b', and 'c'. */
-        list = PyUnicode_FromString("");
-        for (i = 0; i < fixed && list != NULL; i++) {
-            PyObject *next;
-            if (bound[i] != NULL) {
-                continue;
-            }
-            seen++;
-            if (seen == 1) {
-                next = PyUnicode_FromFormat("%U'%s'", list, names[i]);
-            } else if (seen < missing) {
-                next = PyUnicode_FromFormat("%U, '%s'", list, names[i]);
-            } else {
-                next = PyUnicode_FromFormat(missing == 2 ? "%U and '%s'" : "%U, and '%s'", list,
-                                            names[i]);
-            }
-            Py_DECREF(list);
-            list = next;
+        if (bound[i] == NULL) {
+            pycc_ext_missing_error(qualname, names, fixed, bound, 0);
+            return -1;
         }
-        if (list != NULL) {
-            PyErr_Format(PyExc_TypeError, "%s() missing %zd required positional argument%s: %U",
-                         qualname, missing, missing == 1 ? "" : "s", list);
-            Py_DECREF(list);
-        }
-        return -1;
     }
     *rest = PyTuple_GetSlice(args, given < fixed ? given : fixed, given);
     return *rest == NULL ? -1 : 0;

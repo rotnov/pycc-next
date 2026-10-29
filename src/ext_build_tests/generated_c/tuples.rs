@@ -13,17 +13,19 @@ fn a_tuple_parameter_is_checked_once_then_unpacked_element_by_element() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Tuple(Box::new(vec![Ty::Int, Ty::Float]))]),
             params: vec![Ty::Tuple(Box::new(vec![Ty::Int, Ty::Float]))],
             param_writable: vec![false; 1],
             return_ty: Ty::Int,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     // One `tuple` argument, so the arity message still says one: the
     // wrapper's argument space is the Python one and never the flattened C
     // one (#1050).
     assert!(
-        inc.contains("takes exactly 1 argument (%zd given)"),
+        inc.contains("if (nargs < 1 || nargs > 1) {"),
         "{inc}"
     );
     // Shape and length first -- that check is what makes every
@@ -71,10 +73,12 @@ fn a_tuple_return_arrives_through_out_pointers_and_is_packed_afterwards() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Int]),
             params: vec![Ty::Int],
             param_writable: vec![false; 1],
             return_ty: Ty::Tuple(Box::new(vec![Ty::Int, Ty::Bool])),
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -146,10 +150,12 @@ fn a_tuple_return_retains_each_int_element_before_packing_it() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[]),
             params: vec![],
             param_writable: vec![],
             return_ty: Ty::Tuple(Box::new(vec![Ty::Int, Ty::Bool, Ty::Float])),
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -182,10 +188,12 @@ fn a_one_element_tuple_keeps_its_tuple_shape_in_both_directions() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Tuple(Box::new(vec![Ty::Int]))]),
             params: vec![Ty::Tuple(Box::new(vec![Ty::Int]))],
             param_writable: vec![false; 1],
             return_ty: Ty::Tuple(Box::new(vec![Ty::Int])),
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -210,6 +218,10 @@ fn several_tuple_parameters_keep_one_local_namespace_each() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[
+                Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])),
+                Ty::Tuple(Box::new(vec![Ty::Float, Ty::Bool])),
+            ]),
             params: vec![
                 Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])),
                 Ty::Tuple(Box::new(vec![Ty::Float, Ty::Bool])),
@@ -217,6 +229,7 @@ fn several_tuple_parameters_keep_one_local_namespace_each() {
             param_writable: vec![false; 2],
             return_ty: Ty::Float,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     // `a{argument}_{element}` and never a single running counter: the second
@@ -244,7 +257,7 @@ fn several_tuple_parameters_keep_one_local_namespace_each() {
         "{inc}"
     );
     assert!(
-        inc.contains("takes exactly 2 arguments (%zd given)"),
+        inc.contains("if (nargs < 2 || nargs > 2) {"),
         "{inc}"
     );
 }
@@ -263,10 +276,12 @@ fn an_earlier_str_argument_is_released_when_a_later_tuple_is_refused() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Str, Ty::Tuple(Box::new(vec![Ty::Int]))]),
             params: vec![Ty::Str, Ty::Tuple(Box::new(vec![Ty::Int]))],
             param_writable: vec![false; 2],
             return_ty: Ty::Str,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -300,10 +315,12 @@ fn a_nullary_export_returning_a_tuple_declares_only_its_out_pointers() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[]),
             params: Vec::new(),
             param_writable: Vec::new(),
             return_ty: Ty::Tuple(Box::new(vec![Ty::Float, Ty::Float])),
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     // The combined list is non-empty even though the export takes nothing,
@@ -318,7 +335,7 @@ fn a_nullary_export_returning_a_tuple_declares_only_its_out_pointers() {
         "{inc}"
     );
     assert!(
-        inc.contains("takes exactly 0 arguments (%zd given)"),
+        inc.contains("if (nargs < 0 || nargs > 0) {"),
         "{inc}"
     );
     // `pack_float` takes no function name: `PyFloat_FromDouble` cannot fail
@@ -348,10 +365,12 @@ fn the_thunk_is_declared_as_a_function_and_called_without_a_cast() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int]))]),
             params: vec![Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int]))],
             param_writable: vec![false; 1],
             return_ty: Ty::Tuple(Box::new(vec![Ty::Int, Ty::Int])),
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -382,10 +401,12 @@ fn the_thunk_is_declared_as_a_function_and_called_without_a_cast() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Int]),
             params: vec![Ty::Int],
             param_writable: vec![false; 1],
             return_ty: Ty::Int,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(scalar.contains("extern void *fnptr_square;"), "{scalar}");
@@ -407,10 +428,12 @@ fn a_tuple_carrying_export_returning_none_assigns_nothing_and_fabricates_none() 
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Tuple(Box::new(vec![Ty::Int, Ty::Bool]))]),
             params: vec![Ty::Tuple(Box::new(vec![Ty::Int, Ty::Bool]))],
             param_writable: vec![false; 1],
             return_ty: Ty::None,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(

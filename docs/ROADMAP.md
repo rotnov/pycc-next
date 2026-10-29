@@ -1035,13 +1035,51 @@ Accept:
    type-attribute `AttributeError`s match CPython 3.13 word for word), and the differential
    fuzzer generates calls with missing/extra/keyword arguments and missing attributes on
    classes and instances, comparing exception messages; 0 findings in a 30-minute run.
+   **Met 2026-10-29:** a published function, method or constructor (`--ext`, a
+   `--non-strict` native build's `__main__`) raises CPython's `missing ... argument`,
+   `takes N positional arguments but M were given` and `Did you mean 'x'?` texts, and
+   compiled classes and instances CPython's `AttributeError`s
+   (`tests/issue_10_error_texts.rs`). The fuzzer's `call_errors` block calls with
+   missing, extra, unknown, misspelled and repeated arguments and reads missing
+   attributes; the nightly-fuzz workflow dispatched on the change (run 40881731071,
+   e34d5cf) compared 2996 programs in 1801 s (376 with the block) with 0 findings, after
+   the block's first findings were fixed with fixtures in `tests/fuzz_regressions.rs`.
+   CI run 40881711412 green on all four jobs at e34d5cf. DEVIATIONS lists what stays
+   different: an unbound method called with no or a foreign receiver, an instance field
+   read through its class.
 2. **Native `str`-keyed dicts:** in `--non-strict`, dicts with `str` keys built or received
    by compiled code are native when their value types infer, with a guarded CPython-dict
    fallback when they escape or arrive from CPython code; iteration order, views, mutation
    during iteration errors, `==`, `repr`, pickling and identity match CPython.
+   **Realization (guru ruling, 2026-10-29):** escape is decided per allocation site at
+   build time (the non-strict widening that already makes a typed dict meeting an object a
+   CPython dict from creation); a dict that may escape is a CPython dict from creation,
+   and every CPython dict -- built escaping, or received -- is accessed through direct
+   dict-API calls under an exact-dict guard, so identity, views, pickling and iteration
+   errors are CPython's by construction for every dict CPython can see. No run-time
+   materialize-and-forward. What stays to do: a non-escaping `str`-keyed dict whose values
+   are objects (`{"type": "text", "raw": s}`) is a native dict too.
+   **Progress 2026-10-29:** step 1, the exact-dict guard on `d[k]`, `k in d` and
+   `d[k] = v` of CPython dicts, and literals crossing as CPython's interned strings
+   (`tests/v10_dicts.rs`): 275 -> 179 instructions for a compiled `d['raw']` on a
+   received dict. pystache 584k -> 580k per round, mistune 58.7M -> 57.7M
+   per pass (CPython 509.6k and 57.3M, `PYTHONHASHSEED=0`): dicts are not where either
+   package spends (accept 3's note).
 3. **Template and Markdown >= 1.2x:** pystache 0.6.8 and mistune 3.3.4 each run their own
    benchmark >= 1.2x faster than CPython (median of the CI benchmark job, accept 4), with
    their suites passing.
+   **Profile 2026-10-29** (callgrind, main 97e5e9f, per round, `PYTHONHASHSEED=0`):
+   pystache 580k against CPython's 510k, of which parsing (`parse()` alone) 238k against
+   214k and rendering with the call plumbing 342k against 295k; 1.2x needs 424k in all.
+   The plumbing of `render(**kwargs)` -> `Renderer.render(*context, **kwargs)` ->
+   `_render_string` -> `_render_final` -> `ContextStack.create` and the per-render
+   `Renderer`/`RenderEngine` construction is ~110k: `Renderer` is a CPython class
+   because the package's tests subclass it and its members (private methods, defaults,
+   `*args`/`**kwargs`) are not published. mistune 58.7M against 57.2M per pass:
+   CPython's interpreter is ~22M of its time and compiled code's boundary costs about as
+   much (calls and method caches ~4M, attribute lookups 0.7M, `str` crossings ~1.6M,
+   dict operations ~1.1M); its renderers are CPython classes, so its tokens cross into
+   CPython at once.
 4. **Trustworthy numbers:** a CI benchmark workflow runs `bench/run.py`, the package
    `--time` checks and `bench/pydantic_check.py --time` on a GitHub-hosted runner with
    interleaved fresh-process runs, and publishes median and spread as an artifact; every
@@ -1066,3 +1104,28 @@ Accept:
    the package are native (layout-pointer dispatch across modules, no CPython class in
    between), and compiled exception classes can derive from package exception bases
    (PEP 697); each with oracle tests vs CPython.
+
+## v0.11 — Imports faster than CPython
+
+v0.10's CI benchmark job put pydantic's import at 0.93x CPython (455.7M instructions vs
+442.9M); the rest is a 10.5 MB extension to load, ~8.8M instructions of libpython object
+creation (functions, classes, forwarders, signatures) and ~296 fallback chunks run at
+import. v0.11 makes importing compiled packages at least as fast as importing their sources,
+then faster, without changing what Python code can observe.
+
+Accept:
+1. **pydantic import >= 1.0x**, then **>= 1.2x** as a stretch: median of the CI benchmark
+   job (`bench.yml`) for `import pydantic; from pydantic import BaseModel`, compiled tree vs
+   CPython from `.pyc`, same pydantic-core wheel; its suite fails no test that passes
+   against its sources.
+2. **Smaller, faster-loading extensions:** whole-package builds use LTO across the
+   package's modules, identical-code folding and cold sections for error and fallback
+   paths; the pydantic extension's size and load-time relocations are measured and reduced,
+   with no runtime instruction-count regression on the CI bounds.
+3. **Less work at import:** fewer fallback chunks executed at import (functions and classes
+   created natively where possible), and lazy creation of module-level objects only where
+   it is unobservable to Python code (module `__dict__` contents, `dir()`, `inspect`,
+   pickling, import side-effect order and exceptions match CPython); every laziness rule is
+   documented with its observability argument and covered by oracle tests.
+4. **General, not pydantic-only:** mistune's and pystache's import times are measured in
+   the CI benchmark job and are no slower than CPython's; no package check regresses.

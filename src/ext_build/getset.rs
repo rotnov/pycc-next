@@ -115,7 +115,7 @@ pub(crate) enum ExtGetset {
         /// from. It is never in the export set ([`super::collect_exports_with_hooks`]
         /// excludes a getter as representation), so the wrapper is emitted
         /// here and nowhere else.
-        getter: ExtExport,
+        getter: Box<ExtExport>,
         /// What a host store or `del` runs (#1458).
         setter: PropertySetter,
     },
@@ -258,7 +258,7 @@ pub(crate) fn collect_getsets(
                 };
                 out.push(ExtGetset::Property {
                     name: prop.name.clone(),
-                    getter: export,
+                    getter: Box::new(export),
                     setter,
                 });
             }
@@ -291,10 +291,12 @@ fn getter_export(
         returns_buffer_slice: false,
         receiver: ExtReceiver::SelfInstance,
         params: Vec::new(),
+        param_names: Vec::new(),
         param_writable: Vec::new(),
         defaults: Vec::new(),
         return_ty: return_ty.clone(),
         keyword_names: None,
+        keyword_receiver: None,
     })
 }
 
@@ -322,7 +324,7 @@ fn setter_export(
     })?;
     // The frontend refuses a setter that is not exactly `(self, value)`
     // (`C0001`), so the value is the second parameter.
-    let (_, value_ty) = params.get(1)?;
+    let (value_name, value_ty) = params.get(1)?;
     (carried(value_ty, carrier_classes)
         && (*return_ty == Ty::None || carried(return_ty, carrier_classes)))
     .then(|| ExtExport {
@@ -332,10 +334,12 @@ fn setter_export(
         returns_buffer_slice: false,
         receiver: ExtReceiver::SelfInstance,
         params: vec![value_ty.clone()],
+        param_names: vec![value_name.clone()],
         param_writable: vec![false],
         defaults: Vec::new(),
         return_ty: return_ty.clone(),
         keyword_names: None,
+        keyword_receiver: None,
     })
 }
 

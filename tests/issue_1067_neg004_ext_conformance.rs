@@ -168,13 +168,13 @@ refuse(m.take_int, (None,), {}, TypeError,
 
 # Shapes 4-5 and 17: arity. Checked before any argument is read, because
 # reading `args[1]` of a one-argument call is out of bounds, not a
-# `TypeError`. pycc-authored text, including the singular/plural split.
+# `TypeError`. CPython's own text (#10), including the singular/plural split.
 refuse(m.two, (1,), {}, TypeError,
-       'two() takes exactly 2 arguments (1 given)', True, (1, 2), 3)
+       "two() missing 1 required positional argument: 'b'", True, (1, 2), 3)
 refuse(m.two, (1, 2, 3), {}, TypeError,
-       'two() takes exactly 2 arguments (3 given)', True, (1, 2), 3)
+       'two() takes 2 positional arguments but 3 were given', True, (1, 2), 3)
 refuse(m.take_int, (), {}, TypeError,
-       'take_int() takes exactly 1 argument (0 given)', True, (1,), 2)
+       "take_int() missing 1 required positional argument: 'x'", True, (1,), 2)
 
 # Shape 6: keyword arguments. Since #1461 a keyword naming a parameter is
 # bound as CPython binds it (`m.two(a=1, b=2)` returns 3), so the refused
