@@ -579,12 +579,18 @@ pub(crate) fn emit_instantiate_expr<'ctx>(
     let count = context.i64_type().const_int(slot_names.len() as u64, false);
     // The class's record (`crate::class_record`): its descriptor's address
     // is the instance's run-time class.
-    let record = rt
-        .class_records
-        .borrow()
-        .get(class_name.as_str())
-        .copied()
-        .filter(|record| record.slots() == slot_names.len());
+    // The record of the class the instance is typed as, which is the class
+    // named only when it is not a generic class's specialization: a
+    // specialization's instance is named as the generic class but its slots
+    // are the specialization's (their kinds are what freeing releases), so
+    // it keeps an interned descriptor of its own.
+    let record = match &inst.ty {
+        Ty::Instance(class) if class.as_str() == class_name.as_str() => {
+            rt.class_records.borrow().get(class.as_str()).copied()
+        }
+        _ => None,
+    }
+    .filter(|record| record.slots() == slot_names.len());
     let (layout, layout_len) = match record {
         Some(record) => (record.descriptor(context), record.len(context)),
         None => attr_slot::instance_layout_constant(
