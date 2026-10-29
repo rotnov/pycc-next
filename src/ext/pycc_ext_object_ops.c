@@ -80,7 +80,8 @@ int pycc_ext_obj_setitem(PyObject *o, PyObject *k, PyObject *v)
     int status = -1;
 
     if (o != NULL && k != NULL && v != NULL) {
-        status = PyObject_SetItem(o, k, v);
+        /* An exact dict stores through the dict API (`pycc_ext_obj_getitem`). */
+        status = PyDict_CheckExact(o) ? PyDict_SetItem(o, k, v) : PyObject_SetItem(o, k, v);
     }
     Py_XDECREF(k);
     Py_XDECREF(v);

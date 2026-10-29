@@ -64,6 +64,17 @@ impl Drop for PyStrObj {
     }
 }
 
+/// Whether `s` is immortal (a literal or a shared one-character string,
+/// `crate::str_index::retain_immortal`): the `--ext` shim interns such a
+/// string's CPython twin, as CPython interns its code constants.
+///
+/// # Safety
+/// `s` must be a live `str`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_str_is_immortal(s: *mut PyStrObj) -> i32 {
+    i32::from(unsafe { &*s }.rc.get() >= crate::str_index::IMMORTAL / 2)
+}
+
 /// The CPython `str` `s` shares (borrowed), or null (`PyStrObj::foreign`).
 ///
 /// # Safety

@@ -35,11 +35,40 @@
  * returning NULL without setting a second one leaves exactly one exception
  * pending.
  */
+/*
+ * `KeyError(k)` as an exact dict's `__getitem__` raises it: the key is the
+ * exception's one argument even when it is a tuple.
+ */
+static void pycc_ext_dict_key_error(PyObject *k)
+{
+    PyObject *args = PyTuple_Pack(1, k);
+
+    if (args != NULL) {
+        PyErr_SetObject(PyExc_KeyError, args);
+        Py_DECREF(args);
+    }
+}
+
+/*
+ * An exact `dict` (built by CPython or by compiled code, or received) is read
+ * through the dict API rather than the object protocol (v0.10 accept 2): the
+ * result and the `KeyError` are what `dict.__getitem__` gives, and a
+ * subclass (`__missing__`, `OrderedDict`) still takes `PyObject_GetItem`.
+ */
 PyObject *pycc_ext_obj_getitem(PyObject *o, PyObject *k)
 {
     PyObject *result;
 
-    result = (o == NULL || k == NULL) ? NULL : PyObject_GetItem(o, k);
+    if (o != NULL && k != NULL && PyDict_CheckExact(o)) {
+        result = PyDict_GetItemWithError(o, k);
+        if (result != NULL) {
+            Py_INCREF(result);
+        } else if (!PyErr_Occurred()) {
+            pycc_ext_dict_key_error(k);
+        }
+    } else {
+        result = (o == NULL || k == NULL) ? NULL : PyObject_GetItem(o, k);
+    }
     Py_XDECREF(k);
     return result;
 }
@@ -145,7 +174,14 @@ int pycc_ext_obj_contains(PyObject *container, PyObject *item)
 {
     int result;
 
-    result = (container == NULL || item == NULL) ? -1 : PySequence_Contains(container, item);
+    if (container == NULL || item == NULL) {
+        result = -1;
+    } else if (PyDict_CheckExact(container)) {
+        /* `k in d` of an exact dict (see `pycc_ext_obj_getitem`). */
+        result = PyDict_Contains(container, item);
+    } else {
+        result = PySequence_Contains(container, item);
+    }
     Py_XDECREF(item);
     return result;
 }
