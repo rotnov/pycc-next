@@ -143,6 +143,20 @@ pub(super) fn rewrite_key_call(
         return None;
     }
     let (key, reverse) = key_and_reverse(call_expr)?;
+    // CPython evaluates every argument before calling the key, and the
+    // rewrite below calls it while building the pairs, ahead of `reverse`:
+    // with a key, only a literal `reverse` (which evaluating cannot be
+    // seen) is rewritten.
+    if key.is_some()
+        && reverse.is_some_and(|r| {
+            !matches!(
+                r,
+                Expr::BooleanLiteral(_) | Expr::NumberLiteral(_) | Expr::NoneLiteral(_)
+            )
+        })
+    {
+        return None;
+    }
     let range = call_expr.range;
     let reverse = reverse.cloned().unwrap_or_else(|| {
         Expr::BooleanLiteral(ruff_python_ast::ExprBooleanLiteral {

@@ -110,3 +110,23 @@ fn closure_rebound_after_def_non_strict() {
     native("v10_closure_late", &["--non-strict"]);
     ext("v10_closure_late", &[]);
 }
+
+/// `reverse=` is evaluated before any key call, and a raising one stops
+/// them all (such a call is not rewritten, so part of the function may run
+/// in CPython: only the output is compared).
+#[test]
+fn key_calls_follow_every_argument_non_strict() {
+    let dir = ScratchDir::new("v10_closure_key_order").expect("scratch");
+    let source = fixture("v10_closure_key_order", &dir, "m.py");
+    let build = pycc()
+        .args(["build", "--non-strict"])
+        .arg(&source)
+        .arg("-o")
+        .arg(dir.join("app"))
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&build.stderr));
+    let ours = Command::new(dir.join("app")).output().expect("run the build");
+    let oracle = python().arg(&source).output().expect("python should spawn");
+    assert_matches(&ours, &oracle);
+}
