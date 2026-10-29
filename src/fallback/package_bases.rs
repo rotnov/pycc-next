@@ -50,43 +50,10 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>)> {
         return Vec::new();
     };
     let (entry, target, parsed) = (&package.entry, &package.target, &package.parsed);
-    // Each module's module-level re-exports: `(module, name)` -> the
-    // `(module, name)` it imports, so `from pkg import C` resolves to the
-    // module defining `C`, through a package `__init__.py` or any other
-    // module re-exporting it (`pkg/__init__.py` importing from `pkg.init`,
-    // which imports from `pkg.spec`).
-    let mut exports: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
-    for (_, qual, is_package, module) in parsed {
-        let scan = Scan::new(qual, *is_package);
-        for stmt in &module.body {
-            if let Stmt::ImportFrom(import) = stmt
-                && let Some(from) =
-                    scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
-            {
-                for alias in &import.names {
-                    let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-                    exports.insert((qual.clone(), local), (from.clone(), alias.name.to_string()));
-                }
-            }
-        }
-    }
+    let exports = re_exports(parsed);
     // Every class statement of the other modules: its resolved bases (as
     // `module.name`) and the names its body defines.
-    let resolve = |base: &str| -> Option<String> {
-        let (module, name) = base.rsplit_once('.')?;
-        let (mut module, mut name) = (module.to_string(), name.to_string());
-        // Through a few re-exports at most.
-        for _ in 0..4 {
-            match exports.get(&(module.clone(), name.clone())) {
-                Some((m, n)) if (m, n) != (&module, &name) => {
-                    module = m.clone();
-                    name = n.clone();
-                }
-                _ => break,
-            }
-        }
-        Some(format!("{module}.{name}"))
-    };
+    let resolve = |base: &str| resolve_export(&exports, base);
     let mut classes: Vec<(String, Vec<String>, BTreeSet<String>)> = Vec::new();
     for (file, qual, is_package, module) in parsed {
         if file == entry {
@@ -435,6 +402,120 @@ impl<'a> Scan<'a> {
             _ => {}
         }
     }
+}
+
+/// Each module's module-level re-exports: `(module, name)` -> the
+/// `(module, name)` it imports, so `from pkg import C` resolves to the
+/// module defining `C`, through a package `__init__.py` or any other module
+/// re-exporting it (`pkg/__init__.py` importing from `pkg.init`, which
+/// imports from `pkg.spec`).
+type Exports = BTreeMap<(String, String), (String, String)>;
+
+fn re_exports(parsed: &[(PathBuf, String, bool, pycc_ast::ModModule)]) -> Exports {
+    let mut exports: Exports = BTreeMap::new();
+    for (_, qual, is_package, module) in parsed {
+        let scan = Scan::new(qual, *is_package);
+        for stmt in &module.body {
+            if let Stmt::ImportFrom(import) = stmt
+                && let Some(from) =
+                    scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
+            {
+                for alias in &import.names {
+                    let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
+                    exports.insert((qual.clone(), local), (from.clone(), alias.name.to_string()));
+                }
+            }
+        }
+    }
+    exports
+}
+
+/// The `module.name` the dotted name `base` reads, through a few
+/// re-exports at most.
+fn resolve_export(exports: &Exports, base: &str) -> Option<String> {
+    let (module, name) = base.rsplit_once('.')?;
+    let (mut module, mut name) = (module.to_string(), name.to_string());
+    for _ in 0..4 {
+        match exports.get(&(module.clone(), name.clone())) {
+            Some((m, n)) if (m, n) != (&module, &name) => {
+                module = m.clone();
+                name = n.clone();
+            }
+            _ => break,
+        }
+    }
+    Some(format!("{module}.{name}"))
+}
+
+/// v0.10 accept 5: the names `entry` binds to an exception class of another
+/// module of its package (`from .common import PystacheError`), each with
+/// whether that class or an ancestor may have a native layout
+/// (`exc_layout`): an exception class of `entry` deriving from one that may
+/// gets no layout of its own, since its instances must stay its base's.
+/// Syntactic, like the rest of this module.
+pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, bool> {
+    let mut out = BTreeMap::new();
+    let Some(package) = Package::read(entry) else {
+        return out;
+    };
+    let exports = re_exports(&package.parsed);
+    let mut scans: BTreeMap<&str, (Scan<'_>, &pycc_ast::ModModule)> = BTreeMap::new();
+    for (_, qual, is_package, module) in &package.parsed {
+        let mut scan = Scan::new(qual, *is_package);
+        scan.body(&module.body);
+        scans.insert(qual.as_str(), (scan, module));
+    }
+    // Whether `module.name` is an exception class, and whether its chain
+    // may have a layout (`None`: not an exception class).
+    fn classify(
+        scans: &BTreeMap<&str, (Scan<'_>, &pycc_ast::ModModule)>,
+        exports: &Exports,
+        dotted: &str,
+        depth: usize,
+    ) -> Option<bool> {
+        let dotted = resolve_export(exports, dotted)?;
+        let (module, name) = dotted.rsplit_once('.')?;
+        if depth > 8 {
+            return None;
+        }
+        let (scan, parsed) = scans.get(module)?;
+        let class = parsed.body.iter().find_map(|stmt| match stmt {
+            Stmt::ClassDef(class) if class.name.as_str() == name => Some(class),
+            _ => None,
+        })?;
+        let mut exception = false;
+        let mut may_layout = !super::exc_layout::fields_of(class).is_empty();
+        for base in class.bases() {
+            if let Expr::Name(base) = base
+                && pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base.id.as_str())
+                && !scan.bound.contains_key(base.id.as_str())
+            {
+                exception = true;
+                continue;
+            }
+            match scan.dotted(base).and_then(|b| classify(scans, exports, &b, depth + 1)) {
+                Some(layout) => {
+                    exception = true;
+                    may_layout |= layout;
+                }
+                // A base of unknown kind may be a layout class.
+                None => may_layout = true,
+            }
+        }
+        exception.then_some(may_layout)
+    }
+    let Some((scan, _)) = scans.get(package.target.as_str()) else {
+        return out;
+    };
+    for (local, dotted) in &scan.bound {
+        if dotted.starts_with(&format!("{}.", package.target)) {
+            continue;
+        }
+        if let Some(layout) = classify(&scans, &exports, dotted, 0) {
+            out.insert(local.clone(), layout);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

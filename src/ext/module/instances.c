@@ -774,7 +774,7 @@ static int pycc_ext_obj_isinstance_compiled_in(PyccExtModule *m, PyObject *o, co
         }
     }
     if (pycc_ext_is_carrier_type(Py_TYPE(o))) {
-        inst = ((PyccExtInstance *)o)->inst;
+        inst = pycc_ext_inst_of(o);
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
             return pycc_ext_record_isinstance(m, cls, len, name);
@@ -812,7 +812,7 @@ static int pycc_ext_unpack_instance_in(PyccExtModule *m, PyObject *obj, const ch
     int carrier = pycc_ext_is_carrier_type(Py_TYPE(obj));
 
     if (carrier) {
-        inst = ((PyccExtInstance *)obj)->inst;
+        inst = pycc_ext_inst_of(obj);
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
             if (pycc_ext_record_isinstance(m, cls, len, class_name)) {
@@ -882,7 +882,7 @@ static int pycc_ext_obj_unbox_instance_in(PyccExtModule *m, PyObject *o, const c
     }
     carrier = pycc_ext_is_carrier_type(Py_TYPE(o));
     if (carrier) {
-        inst = ((PyccExtInstance *)o)->inst;
+        inst = pycc_ext_inst_of(o);
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
             if (pycc_ext_record_isinstance(m, cls, len, class_name)) {
@@ -933,7 +933,7 @@ static int pycc_ext_obj_coerce_instance_in(PyccExtModule *m, PyObject *o, const 
     }
     carrier = pycc_ext_is_carrier_type(Py_TYPE(o));
     if (carrier) {
-        inst = ((PyccExtInstance *)o)->inst;
+        inst = pycc_ext_inst_of(o);
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
             if (pycc_ext_record_isinstance(m, cls, len, class_name)) {
@@ -977,7 +977,7 @@ static int pycc_ext_slot_operand_is_in(PyccExtModule *m, PyObject *other, const 
     if (!pycc_ext_is_carrier_type(Py_TYPE(other))) {
         return 0;
     }
-    inst = ((PyccExtInstance *)other)->inst;
+    inst = pycc_ext_inst_of(other);
     if (inst == NULL) {
         return 1;
     }

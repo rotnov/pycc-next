@@ -107,6 +107,7 @@ pub(crate) fn generate_exports_inc_with_slots(
     out.push_str(&method_types_c(publications, ctors, getsets, slots));
     out.push_str(&carrier_class_isinstance_c(carriers));
     out.push_str(&carrier_class_copy_kinds_c(carriers));
+    out.push_str(&exc_layouts::exc_layouts_c(carriers, getsets));
     out.push_str(&forward_trampolines_c(exports));
     out
 }

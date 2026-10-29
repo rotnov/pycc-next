@@ -46,6 +46,7 @@ mod attach;
 mod builtins;
 mod cascade;
 mod driver;
+mod exc_layout;
 mod exceptions;
 mod function_values;
 mod lift;
@@ -57,6 +58,7 @@ pub(crate) use package_bases::overridden_in_package;
 mod render;
 mod report;
 
+pub(crate) use exc_layout::LAYOUT_PREFIX;
 pub(crate) use lift::LIFT_PREFIX;
 pub(crate) use driver::{can_fall_back, with_fallback};
 pub(crate) use render::{CodeChunk, Rendered};
@@ -237,6 +239,10 @@ pub(crate) struct Plan {
     /// The classes other modules of the entry's package subclass
     /// (`package_bases`): they run in CPython (`cascade`).
     package_bases: BTreeMap<String, String>,
+    /// v0.10: the names the entry binds to an exception class of another
+    /// module of its package, and whether that class's chain may have a
+    /// native layout (`package_bases::exceptions_from_package`).
+    package_exceptions: BTreeMap<String, bool>,
     /// The nested `def`s and `lambda`s of compiled functions that CPython
     /// runs, their enclosing functions compiled (`nested`).
     nested: Vec<nested::Nested>,
@@ -406,6 +412,7 @@ impl Plan {
             top,
             lifts,
             package_bases: BTreeMap::new(),
+            package_exceptions: BTreeMap::new(),
             nested: Vec::new(),
         })
     }
@@ -416,6 +423,9 @@ impl Plan {
     pub(crate) fn set_entry(&mut self, path: &Path) {
         if self.publishes.foreign_relative_imports {
             self.package_bases = package_bases::subclassed_in_package(path);
+        }
+        if self.publishes.classes {
+            self.package_exceptions = package_bases::exceptions_from_package(path);
         }
         self.set_entry_dir(path.parent().map(Path::to_path_buf));
     }

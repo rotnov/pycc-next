@@ -399,6 +399,7 @@ fn pack_slot_word(class: &str, name: &str, ty: &Ty) -> String {
 /// error, so each wrapper is rendered once per artifact.
 pub(crate) fn getset_c(table: &ExtClassGetsets, emitted: &mut Vec<String>) -> String {
     let class = &table.class;
+    let shown = shown_class(class);
     let mut out = String::new();
     for getset in &table.getsets {
         let name = getset.name();
@@ -416,10 +417,10 @@ pub(crate) fn getset_c(table: &ExtClassGetsets, emitted: &mut Vec<String>) -> St
                 };
                 out.push_str(&format!(
                     "static PyObject *{symbol}(PyObject *self, void *closure)\n{{\n    \
-                     void *inst = ((PyccExtInstance *)self)->inst;\n    long long word;\n\
+                     void *inst = pycc_ext_inst_of(self);\n    long long word;\n\
                      {float_local}    (void)closure;\n    if (inst == NULL) {{\n        \
                      PyErr_SetString(PyExc_AttributeError, \
-                     \"'{class}' object has no attribute '{name}'\");\n        \
+                     \"'{shown}' object has no attribute '{name}'\");\n        \
                      return NULL;\n    }}\n    \
                      word = pycc_rt_instance_get_slot_checked(inst, {index});\n    \
                      if (pycc_rt_ext_pending_type() >= 0) {{\n        \
@@ -445,9 +446,9 @@ pub(crate) fn getset_c(table: &ExtClassGetsets, emitted: &mut Vec<String>) -> St
                 // never filled behave as they do for any missing attribute.
                 out.push_str(&format!(
                     "static PyObject *{symbol}(PyObject *self, void *closure)\n{{\n    \
-                     (void)closure;\n    if (((PyccExtInstance *)self)->inst == NULL) {{\n        \
+                     (void)closure;\n    if (pycc_ext_inst_of(self) == NULL) {{\n        \
                      PyErr_SetString(PyExc_AttributeError, \
-                     \"'{class}' object has no attribute '{name}'\");\n        \
+                     \"'{shown}' object has no attribute '{name}'\");\n        \
                      return NULL;\n    }}\n    \
                      return pycc_ext_wrap_{wrapped}(self, NULL, 0);\n}}\n\n",
                     wrapped = pycc_codegen::mangle_ext_name(&getter.name)
@@ -514,4 +515,14 @@ pub(crate) fn getset_c(table: &ExtClassGetsets, emitted: &mut Vec<String>) -> St
     }
     out.push_str("    {NULL, NULL, NULL, NULL, NULL},\n};\n\n");
     out
+}
+
+/// The name a descriptor's error message gives class `class`: the
+/// exception class a hidden layout class (`fallback::exc_layout`) declares
+/// the layout of, else `class`.
+pub(crate) fn shown_class(class: &str) -> &str {
+    class
+        .strip_prefix(crate::fallback::LAYOUT_PREFIX)
+        .and_then(|rest| rest.strip_suffix("__"))
+        .unwrap_or(class)
 }

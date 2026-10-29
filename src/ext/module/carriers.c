@@ -258,7 +258,9 @@ static int pycc_ext_is_carrier_type(PyTypeObject *type)
 {
     return PyType_GetSlot(type, Py_tp_dealloc) == (void *)pycc_ext_instance_dealloc
            || (pycc_ext_template_root != NULL
-               && PyType_IsSubtype(type, (PyTypeObject *)pycc_ext_template_root));
+               && PyType_IsSubtype(type, (PyTypeObject *)pycc_ext_template_root))
+           || ((PyType_GetFlags(type) & Py_TPFLAGS_BASE_EXC_SUBCLASS) != 0
+               && pycc_ext_exc_template_for(type) != NULL);
 }
 
 /* Whether a published class is being made from its template. */

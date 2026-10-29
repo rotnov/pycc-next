@@ -37,6 +37,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   at; a run-time class test is a pointer compare, and a subclass compiled over another
   module's class carries a vtable that module's per-(class, method) dispatchers read.
 
+- Exception classes with members of their own have a native layout in a `--non-strict`
+  `--ext` module (v0.10 accept 5): CPython still makes the class from its statement (so
+  `args`, `str`, tracebacks, pickling and class-statement hooks are CPython's), over a
+  PEP 697 template whose objects carry a native instance; the attributes its methods
+  store from parameters live there, read and stored natively by the compiled methods
+  and through the template's descriptors by Python code, a layout class over another of
+  its module extending its instance; in a package built whole an exception class may
+  derive from another module's. Functions raising and catching them stay compiled.
+
 ### Changed
 - `C.__new__(C)` of a published compiled class makes an object whose attributes are all
   unassigned (reading one raises CPython's `AttributeError`) instead of an uninitialized

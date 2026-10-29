@@ -145,6 +145,10 @@ impl Plan {
                     out.ranges[unit] = at..out.text.len() as u32;
                     out.text.push('\n');
                 }
+                // v0.10: the hidden classes declaring the native layouts of
+                // exception classes (`exc_layout`), before any method
+                // annotated with one.
+                out.text.push_str(&self.layout_classes());
             }
             if self.is_split(index) {
                 cursor = self.render_split(index, &mut out, &globals, &native, &mut prefix);
@@ -348,9 +352,14 @@ impl Plan {
         }
         edits.extend(self.nested_edits(index));
         if let Some(lift) = self.lift(index) {
-            edits.extend(lift.edits.iter().map(|(range, text)| names::Edit {
-                range: range.clone(),
-                text: text.clone(),
+            let lift_edits = if self.lift_has_view(index) {
+                self.view_edits(index)
+            } else {
+                lift.edits.clone()
+            };
+            edits.extend(lift_edits.into_iter().map(|(range, text)| names::Edit {
+                range,
+                text,
                 mirror: None,
             }));
         }

@@ -71,6 +71,10 @@ typedef struct PycFwdSlot {
     int varargs;
     int varkw;
     int simple; /* positional parameters only, no `__class__` */
+    /* v0.10: the compiled body takes the receiver twice, the second time
+     * as the native view of an exception class's layout
+     * (`src/fallback/exc_layout.rs`). */
+    int view;
     /* `co_varnames`' parameter names (borrowed from `names`). */
     PyObject *varnames[PYCC_FWD_MAX_PARAMS];
     /* The positional defaults last seen (owned) and their items. */
@@ -80,6 +84,9 @@ typedef struct PycFwdSlot {
 } PycFwdSlot;
 
 static vectorcallfunc pycc_fwd_original = NULL;
+/* Whether the forwarders `__pycc_forward__` patches now pass the receiver
+ * twice (a `!`-marked qualified name). */
+static int pycc_fwd_view_mode = 0;
 /* `"__pycc_lift"`, the prefix of a lift's name (`src/fallback/lift.rs`). */
 static PyObject *pycc_fwd_prefix = NULL;
 /* `"."`, which separates a qualified name's parts. */
@@ -215,6 +222,28 @@ static void pycc_fwd_drop_entry(PycFwdSlot *slot)
 static PyObject *pycc_fwd_target(PycFwdSlot *slot, PyObject *const *args, Py_ssize_t n)
 {
     PyObject *result;
+    PyObject *viewed[PYCC_FWD_MAX_PARAMS + 3];
+
+    if (slot->view) {
+        /* The receiver follows the class, when the body takes it, and is
+         * passed again right after itself. */
+        Py_ssize_t at = slot->cell != NULL ? 1 : 0;
+        Py_ssize_t i;
+
+        if (n <= at || n + 1 > PYCC_FWD_MAX_PARAMS + 3) {
+            PyErr_SetString(PyExc_SystemError, "pycc: a view forwarder without its receiver");
+            return NULL;
+        }
+        for (i = 0; i <= at; i++) {
+            viewed[i] = args[i];
+        }
+        viewed[at + 1] = args[at];
+        for (i = at + 1; i < n; i++) {
+            viewed[i + 1] = args[i];
+        }
+        args = viewed;
+        n += 1;
+    }
 
     if (slot->entry == NULL) {
         return PyObject_Vectorcall(slot->target, args, (size_t)n, NULL);
@@ -506,6 +535,7 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
     slot->code = Py_NewRef(code);
     slot->target = Py_NewRef(target);
     slot->simple = slot->kwonly == 0 && !slot->varargs && !slot->varkw && slot->cell == NULL;
+    slot->view = pycc_fwd_view_mode;
     if (PyCFunction_GetFlags(target) == METH_FASTCALL) {
         slot->self = PyCFunction_GetSelf(target);
         slot->entry = (PyObject * (*)(PyObject *, PyObject *const *, Py_ssize_t))
@@ -522,6 +552,7 @@ done:
 }
 
 static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth);
+
 
 /* Walks `obj.<name>` when `obj` has it. */
 static void pycc_fwd_walk_attr(PyccExtModule *m, PyObject *ns, PyObject *obj, const char *name,
@@ -666,12 +697,29 @@ static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssiz
         Py_RETURN_NONE;
     }
     for (i = 0; i < nargs; i++) {
-        PyObject *obj = pycc_fwd_resolve(ns, args[i]);
+        PyObject *name = args[i];
+        PyObject *obj;
 
+        /* `!C.m`: a method of an exception class with a native layout,
+         * whose compiled body takes the receiver twice. */
+        pycc_fwd_view_mode = PyUnicode_Check(name) && PyUnicode_GetLength(name) > 1
+                             && PyUnicode_ReadChar(name, 0) == '!';
+        if (pycc_fwd_view_mode) {
+            name = PyUnicode_Substring(name, 1, PyUnicode_GetLength(name));
+            if (name == NULL) {
+                PyErr_Clear();
+                continue;
+            }
+        } else {
+            Py_INCREF(name);
+        }
+        obj = pycc_fwd_resolve(ns, name);
+        Py_DECREF(name);
         if (obj != NULL) {
             pycc_fwd_walk(m, ns, obj, 0);
             Py_DECREF(obj);
         }
+        pycc_fwd_view_mode = 0;
         PyErr_Clear();
     }
     Py_RETURN_NONE;
@@ -708,6 +756,9 @@ static int pycc_ext_forward_install(PyccExtModule *m, PyObject *module)
     }
     status = PyDict_SetItemString(PyModule_GetDict(module), "__pycc_forward__", hook);
     Py_DECREF(hook);
+    if (status == 0) {
+        status = pycc_ext_exc_hook_install(m, module);
+    }
     return status;
 }
 
@@ -717,6 +768,9 @@ static void pycc_ext_forward_remove(PyObject *module)
     PyObject *raised = PyErr_GetRaisedException();
 
     if (PyDict_DelItemString(PyModule_GetDict(module), "__pycc_forward__") != 0) {
+        PyErr_Clear();
+    }
+    if (PyDict_DelItemString(PyModule_GetDict(module), "__pycc_exc_bases__") != 0) {
         PyErr_Clear();
     }
     PyErr_SetRaisedException(raised);

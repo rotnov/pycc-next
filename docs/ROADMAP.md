@@ -1117,7 +1117,23 @@ Accept:
    a foreign arm: a receiver whose record carries a vtable runs its entry, or the member
    through CPython when the entry is null; a call on a value typed with the sibling class
    runs that dispatcher (`tests/v010_subclasses.rs`). Open: a subclass of such a subclass
-   in a third module (it runs as a Python subclass), and the exception half.
+   in a third module (it runs as a Python subclass).
+   **Progress 2026-10-29** -- the exception half, single module (design, guru ruling:
+   CPython makes the class from its statement, the template first among its bases): an
+   exception class with members of its own keeps `lift`'s split (CPython runs the
+   statement, its methods compiled), and the attributes its methods store from
+   parameters go in a native layout -- a hidden compiled class declares it, the
+   statement's bases pass through `__pycc_exc_bases__`, which puts a PEP 697 template
+   over the exception base first (its objects' payload holds the native instance; its
+   `tp_new` runs the exception base's, then binds an unassigned instance; its
+   descriptors, `__reduce__`, deallocator, traverse and clear chain to the base's), and
+   each lifted method takes the object's native view as a second receiver
+   (`tests/v010_exceptions.rs`). Across the modules of a package built whole, a
+   syntactic scan tells which bases are another module's exception classes and
+   whether their chain may have a layout: over one without, a class gets a layout of
+   its own (pystache's `KeyNotFoundError(PystacheError)` shape); over a layout class it
+   keeps that class's, its own attributes in `__dict__` (`tests/fixtures/v010_exc_pkg`).
+   Open: a layout extending another module's.
 
 ## v0.11 — Imports faster than CPython
 

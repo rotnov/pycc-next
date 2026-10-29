@@ -94,7 +94,7 @@ fn each_slot_getter_packs_its_word_and_the_table_is_installed() {
     let getter = |name: &str, index: usize, pack: &str| {
         format!(
             "static PyObject *pycc_ext_get_1_P_1_{name}(PyObject *self, void *closure)\n{{\n    \
-             void *inst = ((PyccExtInstance *)self)->inst;\n    long long word;\n{local}    \
+             void *inst = pycc_ext_inst_of(self);\n    long long word;\n{local}    \
              (void)closure;\n    if (inst == NULL) {{\n        \
              PyErr_SetString(PyExc_AttributeError, \"'P' object has no attribute '{name}'\");\n        \
              return NULL;\n    }}\n    word = pycc_rt_instance_get_slot_checked(inst, {index});\n    \
@@ -166,7 +166,7 @@ fn each_slot_getter_packs_its_word_and_the_table_is_installed() {
 fn an_int_slot_setter_unpacks_by_the_parameter_row_and_stores_by_kind() {
     let (_, inc) = ext_build("1443_setter_int", SCALARS);
     let setter = "static int pycc_ext_set_1_P_1_n(PyObject *self, PyObject *value, void *closure)\n{\n    \
-                  void *inst = ((PyccExtInstance *)self)->inst;\n    long long v;\n    long long word;\n    \
+                  void *inst = pycc_ext_inst_of(self);\n    long long v;\n    long long word;\n    \
                   (void)closure;\n    if (inst == NULL) {\n        if (value == NULL) {\n            \
                   PyErr_SetString(PyExc_AttributeError, \"'P' object has no attribute 'n'\");\n        \
                   } else {\n            \
@@ -399,7 +399,7 @@ fn a_compiled_property_setter_calls_the_setter_wrapper() {
             "static int pycc_ext_set_{len}_{class}_1_n(PyObject *self, PyObject *value, void *closure)\n{{\n    \
              PyObject *result;\n    (void)closure;\n    if (value == NULL) {{\n        \
              PyErr_SetString(PyExc_AttributeError, \"property 'n' of '{class}' object has no deleter\");\n        \
-             return -1;\n    }}\n    if (((PyccExtInstance *)self)->inst == NULL) {{\n        \
+             return -1;\n    }}\n    if (pycc_ext_inst_of(self) == NULL) {{\n        \
              PyErr_SetString(PyExc_AttributeError, \
              \"cannot set 'n' on a '{class}' object whose __init__ never ran\");\n        \
              return -1;\n    }}\n    result = pycc_ext_wrap_0m4_Base1_n6_setter(self, &value, 1);\n    \
@@ -513,7 +513,7 @@ fn an_inherited_property_s_wrapper_is_rendered_once() {
     for class in ["Base", "Derived"] {
         let shim = format!(
             "static PyObject *pycc_ext_get_{len}_{class}_3_top(PyObject *self, void *closure)\n{{\n    \
-             (void)closure;\n    if (((PyccExtInstance *)self)->inst == NULL) {{\n        \
+             (void)closure;\n    if (pycc_ext_inst_of(self) == NULL) {{\n        \
              PyErr_SetString(PyExc_AttributeError, \"'{class}' object has no attribute 'top'\");\n        \
              return NULL;\n    }}\n    return pycc_ext_wrap_0m4_Base3_top(self, NULL, 0);\n}}\n\n",
             len = class.len()
@@ -621,7 +621,7 @@ fn a_same_module_instance_slot_and_property_get_a_descriptor() {
 fn an_instance_slot_getter_packs_through_the_instance_egress() {
     let (_, inc) = ext_build("1453_instance_fields_c", INSTANCE_FIELDS);
     let getter = "static PyObject *pycc_ext_get_2_St_10_parse_conf(PyObject *self, void *closure)\n{\n    \
-                  void *inst = ((PyccExtInstance *)self)->inst;\n    long long word;\n    \
+                  void *inst = pycc_ext_inst_of(self);\n    long long word;\n    \
                   (void)closure;\n    if (inst == NULL) {\n        \
                   PyErr_SetString(PyExc_AttributeError, \"'St' object has no attribute 'parse_conf'\");\n        \
                   return NULL;\n    }\n    word = pycc_rt_instance_get_slot_checked(inst, 0);\n    \

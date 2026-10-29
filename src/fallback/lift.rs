@@ -94,16 +94,36 @@ pub(super) struct Lift {
     /// How the method attaches to its compiled class when it falls back
     /// alone (`attach`), if it can.
     pub(super) attach: Option<super::attach::Attach>,
+    /// v0.10: the compiled function's parameter list (`name: annotation`),
+    /// the index in `edits` of the signature edit it renders, and how many
+    /// line breaks that edit keeps: a method of an exception class with a
+    /// native layout (`exc_layout`) gets its view parameter inserted.
+    pub(super) signature: (Vec<String>, usize, usize),
+    /// The index in the parameter list of the receiver (the `def`'s first
+    /// parameter), when the `def` takes one and is no `staticmethod` or
+    /// `classmethod`, and its body never rebinds it.
+    pub(super) receiver: Option<usize>,
+    /// Each `receiver.attr` the body reads, stores or deletes outside any
+    /// nested scope: the range of the receiver's name, and `attr` as
+    /// written.
+    pub(super) receiver_attrs: Vec<(Range<u32>, String)>,
 }
 
 impl Lift {
-    /// The forwarder replacing the body in CPython code.
-    fn forwarder(&self) -> String {
+    /// The forwarder replacing the body in CPython code. `view`: the
+    /// receiver is passed twice, the second time for the view parameter
+    /// (`exc_layout`).
+    pub(super) fn forwarder_with(&self, view: bool) -> String {
         let mut args: Vec<&str> = Vec::new();
         if self.uses_class {
             args.push("__class__");
         }
-        args.extend(self.params.iter().map(String::as_str));
+        for (at, param) in self.params.iter().enumerate() {
+            args.push(param);
+            if view && at == 0 {
+                args.push(param);
+            }
+        }
         format!("return {}({})", self.name, args.join(", "))
     }
 }
@@ -220,6 +240,7 @@ impl Finder<'_, '_> {
             refused: false,
             uses_class: false,
             edits: Vec::new(),
+            receiver_attrs: Vec::new(),
         };
         for stmt in &def.body {
             scan.visit_stmt(stmt);
@@ -229,6 +250,15 @@ impl Finder<'_, '_> {
         }
         let uses_class = scan.uses_class;
         let plain_body = scan.edits.is_empty();
+        let receiver_attrs = std::mem::take(&mut scan.receiver_attrs);
+        // A receiver the body rebinds is not the object its view holds.
+        let receiverless = def.decorator_list.iter().any(|decorator| {
+            matches!(&decorator.expression, Expr::Name(n)
+                if matches!(n.id.as_str(), "staticmethod" | "classmethod"))
+        });
+        let rebinds = params
+            .first()
+            .is_some_and(|receiver| names::bound_names(&def.body).contains(receiver));
         let index = *self.next;
         *self.next += 1;
         let name = format!("{LIFT_PREFIX}{index}_{}__", def.name.as_str());
@@ -269,6 +299,9 @@ impl Finder<'_, '_> {
             let ty = annotated(p).unwrap_or_else(|| "object".to_string());
             format!("{p}: {ty}")
         }));
+        let receiver = (class.is_some() && !params.is_empty() && !receiverless && !rebinds)
+            .then_some(usize::from(uses_class));
+        let signature = (list.clone(), edits.len(), lines);
         edits.push((
             parameters.start..signature_end,
             format!("({}{}) -> object", list.join(", "), "\n".repeat(lines)),
@@ -288,6 +321,9 @@ impl Finder<'_, '_> {
             plain_body,
             colon: signature_end,
             attach: None,
+            signature,
+            receiver,
+            receiver_attrs,
         };
         self.found.push((lift, Stmt::FunctionDef(analyzed(def))));
     }
@@ -393,6 +429,8 @@ struct BodyScan<'p> {
     refused: bool,
     uses_class: bool,
     edits: Vec<(Range<u32>, String)>,
+    /// `receiver.attr` outside nested scopes (`Lift::receiver_attrs`).
+    receiver_attrs: Vec<(Range<u32>, String)>,
 }
 
 /// Whether CPython mangles `name` in a class body: `__x`, not `__x__`.
@@ -494,6 +532,13 @@ impl<'a> Visitor<'a> for BodyScan<'_> {
                 }
             }
             Expr::Attribute(attr) => {
+                if self.depth == 0
+                    && let Expr::Name(name) = &*attr.value
+                    && name.id.as_str() == self.receiver
+                {
+                    self.receiver_attrs
+                        .push((pycc_ast::expr_range(&attr.value), attr.attr.as_str().to_string()));
+                }
                 self.mangle(
                     attr.attr.as_str(),
                     attr.attr.range.start().to_u32()..attr.attr.range.end().to_u32(),
@@ -641,6 +686,13 @@ impl Plan {
         let src = &self.source;
         let mut out = String::new();
         let mut cursor = range.start as usize;
+        // v0.10: a layout class's bases go through the shim's hook
+        // (`exc_layout`).
+        if let Some((start, end, text)) = self.layout_bases_edit(index) {
+            out.push_str(&src[cursor..start]);
+            out.push_str(&text);
+            cursor = end;
+        }
         for unit in self.lifts_of(index) {
             if self.fallback.contains_key(&unit) {
                 continue;
@@ -648,7 +700,7 @@ impl Plan {
             let lift = self.lift(unit).expect("a lift");
             let (start, end) = (lift.body.start as usize, lift.body.end as usize);
             out.push_str(&src[cursor..start]);
-            out.push_str(&lift.forwarder());
+            out.push_str(&lift.forwarder_with(self.lift_has_view(unit)));
             out.push_str(&"\n".repeat(src[start..end].matches('\n').count()));
             cursor = end;
         }
@@ -662,20 +714,25 @@ impl Plan {
     /// (`src/ext/module/forward.c`), so a call reaches the compiled body
     /// with no forwarder frame. Empty when no lift of it compiled.
     pub(super) fn forward_call(&self, index: usize) -> String {
-        let mut names: Vec<&str> = Vec::new();
+        let mut names: Vec<(&str, bool)> = Vec::new();
         for unit in self.lifts_of(index) {
             if self.fallback.contains_key(&unit) {
                 continue;
             }
             let lift = self.lift(unit).expect("a lift");
-            if !names.contains(&lift.qualname.as_str()) {
-                names.push(&lift.qualname);
+            if !names.iter().any(|(name, _)| *name == lift.qualname.as_str()) {
+                names.push((&lift.qualname, self.lift_has_view(unit)));
             }
         }
         if names.is_empty() {
             return String::new();
         }
-        let quoted: Vec<String> = names.iter().map(|name| format!("\"{name}\"")).collect();
+        // A method with a view parameter is marked `!`: its trampoline
+        // passes the receiver twice (`forward.c`).
+        let quoted: Vec<String> = names
+            .iter()
+            .map(|(name, view)| format!("\"{}{name}\"", if *view { "!" } else { "" }))
+            .collect();
         format!("{FORWARD_HOOK}({})\n", quoted.join(", "))
     }
 }

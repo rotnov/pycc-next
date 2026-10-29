@@ -745,6 +745,104 @@ typedef struct {
 } PyccExtInstance;
 
 /*
+ * v0.10 accept 5: the native layout of an exception class CPython makes
+ * (`src/fallback/exc_layout.rs`), as the generated companion describes it
+ * (`exc_layouts_c` in `src/ext_build/exc_layouts.rs`): the hidden class
+ * declaring it, its record, its slot count and its field descriptors. The
+ * class's objects carry the native instance in a PEP 697 payload of a
+ * template over the exception base (`exc_templates.c`), not in a
+ * `PyccExtInstance`.
+ */
+typedef struct PyccExtExcLayout {
+    const char *hidden;
+    const unsigned char *record;
+    long long slot_count;
+    PyGetSetDef *getsets;
+} PyccExtExcLayout;
+
+/* Each exception template (`exc_templates.c`) -> the template whose PEP 697
+ * payload its objects' instance pointer is in (itself, or the base
+ * template a subclass's inherits), and each object type seen -> its most
+ * derived template (or None: no template). Created with the first
+ * template; read only for an exception type (`pycc_ext_inst_slot`). */
+static PyObject *pycc_ext_exc_payload_of = NULL;
+static PyObject *pycc_ext_exc_template_of = NULL;
+
+/* The most derived exception template in `tp`'s MRO (borrowed), or NULL. */
+static PyObject *pycc_ext_exc_template_for(PyTypeObject *tp)
+{
+    PyObject *found;
+    PyObject *mro;
+    Py_ssize_t n;
+    Py_ssize_t i;
+    if (pycc_ext_exc_template_of == NULL) {
+        return NULL;
+    }
+    found = PyDict_GetItemWithError(pycc_ext_exc_template_of, (PyObject *)tp);
+    if (found != NULL) {
+        return found == Py_None ? NULL : found;
+    }
+    if (PyErr_Occurred()) {
+        PyErr_Clear();
+        return NULL;
+    }
+    mro = PyObject_GetAttrString((PyObject *)tp, "__mro__");
+    if (mro == NULL) {
+        PyErr_Clear();
+        return NULL;
+    }
+    found = Py_None;
+    n = PyTuple_Check(mro) ? PyTuple_Size(mro) : 0;
+    for (i = 0; i < n; i++) {
+        PyObject *c = PyTuple_GetItem(mro, i);
+        if (PyDict_Contains(pycc_ext_exc_payload_of, c) == 1) {
+            found = c;
+            break;
+        }
+    }
+    Py_DECREF(mro);
+    if (PyDict_SetItem(pycc_ext_exc_template_of, (PyObject *)tp, found) < 0) {
+        PyErr_Clear();
+    }
+    return found == Py_None ? NULL : found;
+}
+
+/*
+ * Where an object's native instance pointer is: a `PyccExtInstance`'s
+ * field, or, for an object of an exception class with a native layout, the
+ * PEP 697 payload of its template (`PyObject_GetTypeData`, never an offset
+ * computed from `tp_basicsize`, which CPython grows for `__weakref__`).
+ * NULL for an exception object of no such class. An exception type is
+ * told apart by its `Py_TPFLAGS_BASE_EXC_SUBCLASS`, which no other carrier
+ * type has, so every other carrier pays one flag test.
+ */
+static void **pycc_ext_inst_slot(PyObject *o)
+{
+    PyObject *tmpl;
+    PyObject *payload;
+    if ((PyType_GetFlags(Py_TYPE(o)) & Py_TPFLAGS_BASE_EXC_SUBCLASS) == 0) {
+        return &((PyccExtInstance *)o)->inst;
+    }
+    tmpl = pycc_ext_exc_template_for(Py_TYPE(o));
+    if (tmpl == NULL) {
+        return NULL;
+    }
+    payload = PyDict_GetItemWithError(pycc_ext_exc_payload_of, tmpl);
+    if (payload == NULL) {
+        PyErr_Clear();
+        return NULL;
+    }
+    return (void **)PyObject_GetTypeData(o, (PyTypeObject *)payload);
+}
+
+/* The native instance `o` carries (borrowed), or NULL. */
+static void *pycc_ext_inst_of(PyObject *o)
+{
+    void **slot = pycc_ext_inst_slot(o);
+    return slot == NULL ? NULL : *slot;
+}
+
+/*
  * Non-strict mode: a fresh native container copied into the CPython one
  * (`EXT_OBJ_PACK_LIST_SYMBOL` in `crates/pycc_codegen/src/ext.rs`). The
  * front end admits this only for a value nothing else holds yet -- a

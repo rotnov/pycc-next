@@ -37,9 +37,16 @@ pub(crate) fn split(name: &str) -> Option<(String, &str)> {
     Some((module, rest.strip_prefix('_')?))
 }
 
-/// The plain name: `Point` for `0m6helper_Point`, `name` otherwise.
+/// The plain name: `Point` for `0m6helper_Point`, `name` otherwise; and
+/// (v0.10) `Owned` for `__pycc_excl_Owned__`, the hidden class declaring
+/// the native layout of the exception class `Owned` (`pycc`'s
+/// `fallback::exc_layout`), whose attributes CPython code sees on the
+/// exception's objects.
 pub(crate) fn plain(name: &str) -> &str {
-    split(name).map_or(name, |(_, plain)| plain)
+    let name = split(name).map_or(name, |(_, plain)| plain);
+    name.strip_prefix("__pycc_excl_")
+        .and_then(|rest| rest.strip_suffix("__"))
+        .unwrap_or(name)
 }
 
 /// The module-qualified name CPython shows for a class: `helper.Point` for
@@ -74,6 +81,9 @@ mod tests {
         assert_eq!(split("0m9short_x"), None);
         assert_eq!(plain("0m6helper_Point"), "Point");
         assert_eq!(plain("Point"), "Point");
+        assert_eq!(plain("__pycc_excl_Owned__"), "Owned");
+        assert_eq!(plain("0m6helper___pycc_excl_E__"), "E");
+        assert_eq!(plain("__pycc_excl_"), "__pycc_excl_");
         assert_eq!(with_module("0m6helper_Point"), "helper.Point");
         assert_eq!(with_module("Point"), "__main__.Point");
         assert_eq!(exception("0m3pkg3sub_E"), "pkg.sub.E");
