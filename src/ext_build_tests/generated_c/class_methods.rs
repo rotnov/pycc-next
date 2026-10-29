@@ -361,6 +361,7 @@ fn a_constructible_class_gets_a_tp_init_three_slots_and_a_carrier_sized_spec() {
     assert!(
         inc.contains(
             "extern void *fnptr_0m4_Grid8___init__;\n\
+             extern const unsigned char pycc_class_Grid[];\n\
              static int pycc_ext_tp_init_Grid(PyObject *self, PyObject *args, PyObject *kwds)\n\
              {\n    void *inst;\n    long long a0;\n    long long a1;\n"
         ),
@@ -408,7 +409,7 @@ fn a_constructible_class_gets_a_tp_init_three_slots_and_a_carrier_sized_spec() {
     // instance first -- the same shape `MirExpr::Instantiate` emits.
     assert!(
         inc.contains(
-            "    inst = pycc_rt_instance_new(2, \"Grid\\000w\\000h\\000ii\", 11);\n    \
+            "    inst = pycc_ext_instance_of_record(2, pycc_class_Grid);\n    \
              pycc_rt_instance_incref(inst);\n    \
              ((void (*)(void *, long long, long long))fnptr_0m4_Grid8___init__)\
              (inst, a0, a1);\n"
@@ -477,7 +478,7 @@ fn a_zero_argument_constructor_declares_a_receiver_only_parameter_list() {
     );
     assert!(
         inc.contains(
-            "    inst = pycc_rt_instance_new(0, \"Grid\\000\", 5);\n    \
+            "    inst = pycc_ext_instance_of_record(0, pycc_class_Grid);\n    \
              pycc_rt_instance_incref(inst);\n    \
              ((void (*)(void *))fnptr_0m4_Grid8___init__)(inst);\n"
         ),

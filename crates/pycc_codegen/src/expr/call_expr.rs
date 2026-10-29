@@ -290,6 +290,32 @@ fn emit_instance_class_is<'ctx>(
     else {
         panic!("pycc_codegen: internal error: a class test's receiver is an instance")
     };
+    // One load and one compare against the class's record
+    // (`crate::class_record`): its layout pointer is the instance's class.
+    if let Some(record) = rt.class_records.borrow().get(class.as_str()).copied() {
+        let ptr = context.ptr_type(inkwell::AddressSpace::default());
+        let layout = builder
+            .build_load(ptr, receiver, "class_is_layout")
+            .expect("a layout load is well formed")
+            .into_pointer_value();
+        let same = builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                builder
+                    .build_ptr_to_int(layout, context.i64_type(), "class_is_have")
+                    .expect("a pointer cast is well formed"),
+                builder
+                    .build_ptr_to_int(record.descriptor(context), context.i64_type(), "class_is_want")
+                    .expect("a pointer cast is well formed"),
+                "class_is_same",
+            )
+            .expect("a pointer comparison is well formed");
+        return Scalar::Bool(
+            builder
+                .build_int_z_extend(same, context.i8_type(), "class_is_i8")
+                .expect("a zero extension is well formed"),
+        );
+    }
     let global_name = format!("pycc_dispatch_class.{class}");
     let len = context.i64_type().const_int(class.len() as u64, false);
     let name = match module.get_global(&global_name) {
@@ -551,18 +577,29 @@ pub(crate) fn emit_instantiate_expr<'ctx>(
         ..
     } = inst.as_ref();
     let count = context.i64_type().const_int(slot_names.len() as u64, false);
-    let (layout, layout_len) = attr_slot::instance_layout_constant(
-        context,
-        module,
-        class_name,
-        slot_names,
-        match &inst.ty {
-            Ty::Instance(class) => rt.rc_class_kinds.borrow().get(class.as_str()).cloned(),
-            _ => None,
-        }
-        .filter(|kinds| kinds.len() == slot_names.len())
-        .as_deref(),
-    );
+    // The class's record (`crate::class_record`): its descriptor's address
+    // is the instance's run-time class.
+    let record = rt
+        .class_records
+        .borrow()
+        .get(class_name.as_str())
+        .copied()
+        .filter(|record| record.slots() == slot_names.len());
+    let (layout, layout_len) = match record {
+        Some(record) => (record.descriptor(context), record.len(context)),
+        None => attr_slot::instance_layout_constant(
+            context,
+            module,
+            class_name,
+            slot_names,
+            match &inst.ty {
+                Ty::Instance(class) => rt.rc_class_kinds.borrow().get(class.as_str()).cloned(),
+                _ => None,
+            }
+            .filter(|kinds| kinds.len() == slot_names.len())
+            .as_deref(),
+        ),
+    };
     let instance_ptr = builder
         .build_call(
             rt.instance_new,

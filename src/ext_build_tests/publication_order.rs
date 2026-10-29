@@ -267,7 +267,12 @@ fn a_published_class_is_registered_but_bound_only_through_its_publication() {
             "{line:?} precedes the guard:\n{init}"
         );
     }
-    for later in ["kwds", "pycc_ext_unpack_", "pycc_rt_instance_new", "fnptr_"] {
+    for later in [
+        "kwds",
+        "pycc_ext_unpack_",
+        "pycc_ext_instance_of_record",
+        "fnptr_",
+    ] {
         assert!(init[at..].contains(later), "{later:?} missing:\n{init}");
     }
 }

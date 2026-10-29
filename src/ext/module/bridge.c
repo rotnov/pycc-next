@@ -160,6 +160,14 @@ extern void *pycc_rt_set_freeze(void *s);
  * parameter slot owns, and an instance a compiled function returns is one
  * the caller owns. */
 extern void *pycc_rt_instance_new(long long slot_count, const char *layout, size_t layout_len);
+/* v0.10: an instance of the class whose record (`pycc_codegen`'s
+ * `class_record`) is `record`: its descriptor -- the instance's run-time
+ * class -- follows a 32-byte header whose last word is its length. */
+static void *pycc_ext_instance_of_record(long long slot_count, const unsigned char *record)
+{
+    return pycc_rt_instance_new(slot_count, (const char *)record + 32,
+                                (size_t)((const long long *)record)[3]);
+}
 extern void pycc_rt_instance_incref(void *instance);
 extern void pycc_rt_instance_decref(void *instance);
 /* The read half of the instance boundary (#1442): the generated read-only
