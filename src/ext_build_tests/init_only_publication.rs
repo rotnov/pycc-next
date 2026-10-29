@@ -59,7 +59,7 @@ fn an_init_only_class_is_published_with_only_the_copy_row_and_a_constructor() {
     );
 
     // The rendered type: a method table holding only the shared `__copy__`
-    // (#1455), `__reduce__` (v0.10) and the template's `__init_subclass__`, a real `tp_init`,
+    // (#1455), `__reduce_ex__` and `__getstate__` (v0.10) and the template's `__init_subclass__`, a real `tp_init`,
     // the slot descriptors, no `DISALLOW_INSTANTIATION`, and (#1199) a
     // publication-table entry under the class's own name, which binds the
     // module attribute once the class statement has run.
@@ -67,8 +67,10 @@ fn an_init_only_class_is_published_with_only_the_copy_row_and_a_constructor() {
     for needle in [
         "static PyMethodDef pycc_ext_type_methods_ParseConf[] = {\n    \
          {\"__copy__\", (PyCFunction)(void (*)(void))pycc_ext_instance_copy, METH_NOARGS, NULL},\n    \
-         {\"__reduce__\", (PyCFunction)(void (*)(void))pycc_ext_instance_reduce, METH_NOARGS, \
+         {\"__reduce_ex__\", (PyCFunction)(void (*)(void))pycc_ext_instance_reduce, METH_O, \
          NULL},\n    \
+         {\"__getstate__\", (PyCFunction)(void (*)(void))pycc_ext_instance_getstate, \
+         METH_NOARGS, NULL},\n    \
          {\"__init_subclass__\", (PyCFunction)(void (*)(void))pycc_ext_template_init_subclass, \
          METH_VARARGS | METH_KEYWORDS | METH_CLASS, NULL},\n    \
          {NULL, NULL, 0, NULL},\n};",

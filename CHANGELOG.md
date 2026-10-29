@@ -20,10 +20,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - The differential fuzzer's `call_errors` block: calls with missing, extra, unknown,
   misspelled and repeated arguments, and missing attributes of classes and instances.
 
-- Instances of published compiled classes pickle (v0.10): `__reduce__` reconstructs them
-  through their class's `__new__` and sets each assigned attribute, every protocol, with
-  `copy.deepcopy`, shared references, nested instances and Python subclasses; one with an
-  attribute Python code cannot see refuses with a `TypeError` naming it.
+- Instances of published compiled classes pickle (v0.10), as `object.__reduce_ex__` pickles
+  an object: `copyreg.__newobj__` with `__getnewargs_ex__` / `__getnewargs__`'s arguments and
+  `__getstate__`'s state (by default `object.__getstate__`'s plus each assigned compiled
+  attribute), every protocol, with `copy.deepcopy`, shared references, nested instances and
+  Python subclasses (their `__slots__`, `__new__`, `__getstate__` / `__setstate__`); one
+  with an attribute Python code cannot see refuses with a `TypeError` naming it.
 
 ### Changed
 - `bench/run.py` reports the median and min-max of interleaved fresh-process runs

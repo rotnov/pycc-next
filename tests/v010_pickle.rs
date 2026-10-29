@@ -1,10 +1,11 @@
 //! Pickling compiled instances (v0.10): a published compiled class's
 //! instances pickle and unpickle as CPython's do (every protocol,
 //! `copy.deepcopy`, shared references, nested instances, unassigned
-//! attributes, Python subclasses with a `__dict__`), through the shim's
-//! `__reduce__` (`pycc_ext_instance_reduce`). `tests/fixtures/
-//! v010_pickle_host.py` runs against the module built with `--ext
-//! --non-strict` and against its source.
+//! attributes, Python subclasses with their `__dict__`, `__slots__`,
+//! `__new__`, `__getstate__` and `__setstate__`), through the shim's
+//! `__reduce_ex__` (`pycc_ext_instance_reduce`) and default `__getstate__`.
+//! `tests/fixtures/v010_pickle_host.py` runs against the module built with
+//! `--ext --non-strict` and against its source.
 
 use pycc_scratch::ScratchDir;
 use std::path::{Path, PathBuf};
@@ -105,10 +106,12 @@ fn pickling_does_not_leak() {
     build(&compiled, &["--non-strict"]);
     let out = run(
         &compiled,
-        "import ctypes, pickle, m\nlib = ctypes.CDLL(m.__file__)\n\
-         live = lambda: (lib.pycc_rt_str_live_objects(), lib.pycc_rt_instance_live_objects())\n\
+        "import ctypes, gc, pickle, m\nlib = ctypes.CDLL(m.__file__)\n\
+         live = lambda: (gc.collect(), lib.pycc_rt_str_live_objects(), lib.pycc_rt_instance_live_objects())[1:]\n\
+         class S(m.Point):\n    __slots__ = ('extra',)\n\
          def work():\n    r = m.Ring(m.Point(1, 2.0, 'r', False), 7)\n    \
-         pickle.loads(pickle.dumps([r, r, m.Lazy(0), m.Lazy(3)])); m.total_ring(r)\n\
+         s = S(2, 1.0, 's', True); s.extra = [r]\n    \
+         pickle.loads(pickle.dumps([r, r, m.Lazy(0), m.Lazy(3), s])); m.total_ring(r)\n\
          for _ in range(100):\n    work()\nbefore = live()\nfor _ in range(1000):\n    work()\n\
          print('leaks', 'none' if live() == before else (before, live()))\n",
     );

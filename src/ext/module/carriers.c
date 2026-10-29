@@ -242,29 +242,50 @@ static int pycc_ext_is_compiled_class(PyObject *cls)
 }
 
 /*
- * v0.10: pickling a compiled instance. `__reduce__` answers
- * `(copyreg.__newobj__, (type(self), "__pycc_restore__"), (dict, slots))`:
- * unpickling calls the type's `tp_new` with that one argument, which makes
- * the object with an instance whose slots are all unassigned
- * (`pycc_ext_restoring`; a constructor call passing the same argument runs
- * `tp_init` after it, which replaces that instance), then sets each slot
- * that was assigned through its setter (pickle's state protocol) and, for a
- * Python subclass's object, restores its `__dict__`. A slot whose value the
- * setter does not take fails unpickling with its `TypeError`.
+ * v0.10: pickling a compiled instance, as CPython's `object.__reduce_ex__`
+ * pickles an object (`reduce_newobj`). `__reduce__` answers
+ * `(copyreg.__newobj__, (type(self), *newargs), self.__getstate__())`, the
+ * new arguments from `__getnewargs_ex__` / `__getnewargs__` when the type
+ * defines them (`copyreg.__newobj_ex__` for keyword arguments). Unpickling
+ * calls `cls.__new__(cls, *newargs)`: a compiled class's `tp_new` called
+ * with no arguments makes the object with an instance whose slots are all
+ * unassigned (`pycc_ext_restoring`; a constructor call without arguments
+ * runs `tp_init` after it, which replaces that instance), so a user-defined
+ * `__new__` sees what it sees in CPython. The state is `__getstate__`'s:
+ * the shared default below is `object.__getstate__`'s (a Python subclass's
+ * `__dict__` and its own `__slots__`) with the compiled attributes added to
+ * the slot state, which pickle sets through their setters; a subclass that
+ * defines `__getstate__` / `__setstate__` has them used as in CPython.
  */
-static int pycc_ext_restoring(PyObject *args)
+static int pycc_ext_restoring(PyObject *args, PyObject *kwds)
 {
-    PyObject *marker;
-    if (args == NULL || !PyTuple_Check(args) || PyTuple_Size(args) != 1) {
-        return 0;
-    }
-    marker = PyTuple_GetItem(args, 0);
-    return PyUnicode_Check(marker) && PyUnicode_CompareWithASCIIString(marker, "__pycc_restore__") == 0;
+    return (args == NULL || (PyTuple_Check(args) && PyTuple_Size(args) == 0))
+           && (kwds == NULL || (PyDict_Check(kwds) && PyDict_Size(kwds) == 0));
 }
 
 static PyObject *pycc_ext_newobj = NULL;
+static PyObject *pycc_ext_newobj_ex = NULL;
+static PyObject *pycc_ext_object_getstate = NULL;
 
-static PyObject *pycc_ext_instance_reduce_in(PyccExtModule *m, PyObject *self)
+/* `TypeError: cannot pickle '<qualified name>' object<detail>`, with the
+ * attribute `name` Python code cannot see when it is not NULL. */
+static void pycc_ext_refuse_pickle(PyObject *self, const char *detail, PyObject *name)
+{
+    PyObject *type_name = PyType_GetFullyQualifiedName(Py_TYPE(self));
+    if (type_name == NULL) {
+        return;
+    }
+    if (name != NULL) {
+        PyErr_Format(PyExc_TypeError,
+                     "cannot pickle '%U' object: its attribute '%U' is not visible to Python",
+                     type_name, name);
+    } else {
+        PyErr_Format(PyExc_TypeError, "cannot pickle '%U' object%s", type_name, detail);
+    }
+    Py_DECREF(type_name);
+}
+
+static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
 {
     void *inst = ((PyccExtInstance *)self)->inst;
     const unsigned char *layout;
@@ -273,8 +294,9 @@ static PyObject *pycc_ext_instance_reduce_in(PyccExtModule *m, PyObject *self)
     size_t len = 0;
     long long count;
     long long i;
-    PyObject *slots = NULL;
+    PyObject *base = NULL;
     PyObject *dict = NULL;
+    PyObject *slots = NULL;
     PyObject *result = NULL;
     const char *kinds = NULL;
     size_t nkinds = 0;
@@ -303,19 +325,31 @@ static PyObject *pycc_ext_instance_reduce_in(PyccExtModule *m, PyObject *self)
             return NULL;
         }
     }
-    if (pycc_ext_newobj == NULL) {
-        PyObject *copyreg = PyImport_ImportModule("copyreg");
-        if (copyreg == NULL) {
-            return NULL;
-        }
-        pycc_ext_newobj = PyObject_GetAttrString(copyreg, "__newobj__");
-        Py_DECREF(copyreg);
-        if (pycc_ext_newobj == NULL) {
+    if (pycc_ext_object_getstate == NULL) {
+        pycc_ext_object_getstate =
+            PyObject_GetAttrString((PyObject *)&PyBaseObject_Type, "__getstate__");
+        if (pycc_ext_object_getstate == NULL) {
             return NULL;
         }
     }
-    slots = PyDict_New();
+    /* `object.__getstate__`: None, the `__dict__`, or `(dict, slots)` for a
+     * Python subclass's own `__slots__` (the compiled classes declare
+     * `__slots__ = ()`). */
+    base = PyObject_CallFunctionObjArgs(pycc_ext_object_getstate, self, NULL);
+    if (base == NULL) {
+        return NULL;
+    }
+    if (PyTuple_Check(base) && PyTuple_Size(base) == 2) {
+        dict = PyTuple_GetItem(base, 0);
+        slots = PyDict_Copy(PyTuple_GetItem(base, 1));
+    } else {
+        dict = base;
+        slots = PyDict_New();
+    }
+    Py_INCREF(dict);
+    Py_DECREF(base);
     if (slots == NULL) {
+        Py_DECREF(dict);
         return NULL;
     }
     /* The slot names follow the class name in the descriptor, NUL-
@@ -338,14 +372,8 @@ static PyObject *pycc_ext_instance_reduce_in(PyccExtModule *m, PyObject *self)
         /* A slot Python code cannot see (no descriptor on the class: a
          * container of native values, say) cannot be pickled. */
         if (PyObject_HasAttrWithError((PyObject *)Py_TYPE(self), key) != 1) {
-            PyObject *type_name =
-                PyErr_Occurred() ? NULL : PyType_GetFullyQualifiedName(Py_TYPE(self));
-            if (type_name != NULL) {
-                PyErr_Format(PyExc_TypeError,
-                             "cannot pickle '%U' object: its attribute '%U' is not visible "
-                             "to Python",
-                             type_name, key);
-                Py_DECREF(type_name);
+            if (!PyErr_Occurred()) {
+                pycc_ext_refuse_pickle(self, "", key);
             }
             Py_DECREF(key);
             goto done;
@@ -368,17 +396,207 @@ static PyObject *pycc_ext_instance_reduce_in(PyccExtModule *m, PyObject *self)
         Py_DECREF(key);
         field = next;
     }
-    if (!pycc_ext_is_compiled_class((PyObject *)Py_TYPE(self))) {
-        dict = PyObject_GenericGetDict(self, NULL);
+    if (PyDict_Size(slots) == 0) {
+        result = Py_NewRef(dict);
+    } else {
+        result = PyTuple_Pack(2, dict, slots);
+    }
+done:
+    Py_DECREF(dict);
+    Py_DECREF(slots);
+    return result;
+}
+
+/* `copyreg.<name>`, cached in `*slot`. */
+static PyObject *pycc_ext_copyreg(PyObject **slot, const char *name)
+{
+    if (*slot == NULL) {
+        PyObject *copyreg = PyImport_ImportModule("copyreg");
+        if (copyreg == NULL) {
+            return NULL;
+        }
+        *slot = PyObject_GetAttrString(copyreg, name);
+        Py_DECREF(copyreg);
+    }
+    return *slot;
+}
+
+/* The new arguments `reduce_newobj` passes: `__getnewargs_ex__`'s pair,
+ * else `__getnewargs__`'s tuple, else none. Stores new references. */
+static int pycc_ext_newargs(PyObject *self, PyObject **newargs, PyObject **kwargs)
+{
+    PyObject *hook = NULL;
+    *newargs = NULL;
+    *kwargs = NULL;
+    if (PyObject_GetOptionalAttrString(self, "__getnewargs_ex__", &hook) < 0) {
+        return -1;
+    }
+    if (hook != NULL) {
+        PyObject *pair = PyObject_CallNoArgs(hook);
+        Py_DECREF(hook);
+        if (pair == NULL) {
+            return -1;
+        }
+        if (!PyTuple_Check(pair) || PyTuple_Size(pair) != 2
+            || !PyTuple_Check(PyTuple_GetItem(pair, 0))
+            || !PyDict_Check(PyTuple_GetItem(pair, 1))) {
+            PyErr_SetString(PyExc_TypeError,
+                            "__getnewargs_ex__ should return a tuple of length 2 holding a "
+                            "tuple and a dict");
+            Py_DECREF(pair);
+            return -1;
+        }
+        *newargs = Py_NewRef(PyTuple_GetItem(pair, 0));
+        *kwargs = Py_NewRef(PyTuple_GetItem(pair, 1));
+        Py_DECREF(pair);
+        return 0;
+    }
+    if (PyObject_GetOptionalAttrString(self, "__getnewargs__", &hook) < 0) {
+        return -1;
+    }
+    if (hook == NULL) {
+        *newargs = PyTuple_New(0);
+        return *newargs == NULL ? -1 : 0;
+    }
+    *newargs = PyObject_CallNoArgs(hook);
+    Py_DECREF(hook);
+    if (*newargs == NULL) {
+        return -1;
+    }
+    if (!PyTuple_Check(*newargs)) {
+        PyErr_SetString(PyExc_TypeError, "__getnewargs__ should return a tuple");
+        Py_CLEAR(*newargs);
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *pycc_ext_object_reduce = NULL;
+
+/* Whether a Python class in `cls`'s MRO, before the compiled class, defines
+ * `__getstate__` (otherwise the compiled class's default is the one). */
+static int pycc_ext_getstate_overridden(PyObject *cls)
+{
+    PyObject *mro = PyObject_GetAttrString(cls, "__mro__");
+    Py_ssize_t n;
+    Py_ssize_t i;
+    int found = 0;
+    if (mro == NULL) {
+        return -1;
+    }
+    n = PyTuple_Check(mro) ? PyTuple_Size(mro) : 0;
+    for (i = 0; i < n && found == 0; i++) {
+        PyObject *c = PyTuple_GetItem(mro, i);
+        PyObject *dict;
+        if (pycc_ext_is_compiled_class(c)) {
+            break;
+        }
+        dict = PyObject_GetAttrString(c, "__dict__");
         if (dict == NULL) {
-            PyErr_Clear();
+            found = -1;
+            break;
+        }
+        found = PyMapping_HasKeyStringWithError(dict, "__getstate__");
+        Py_DECREF(dict);
+    }
+    Py_DECREF(mro);
+    return found;
+}
+
+/* `__reduce_ex__(proto)`: a subclass's own `__reduce__` wins, as in
+ * `object.__reduce_ex__`; protocols 0 and 1 refuse an object whose class
+ * declares `__slots__` without a `__getstate__` of its own, as
+ * `copyreg._reduce_ex` does. */
+static PyObject *pycc_ext_instance_reduce_in(PyObject *self, PyObject *proto)
+{
+    PyObject *cls = (PyObject *)Py_TYPE(self);
+    PyObject *reduce;
+    PyObject *newargs;
+    PyObject *kwargs;
+    PyObject *callable;
+    PyObject *call_args = NULL;
+    PyObject *state = NULL;
+    PyObject *result = NULL;
+    Py_ssize_t n;
+    Py_ssize_t i;
+    long protocol;
+
+    if (pycc_ext_object_reduce == NULL) {
+        pycc_ext_object_reduce =
+            PyObject_GetAttrString((PyObject *)&PyBaseObject_Type, "__reduce__");
+        if (pycc_ext_object_reduce == NULL) {
+            return NULL;
         }
     }
-    result = Py_BuildValue("(O(Os)(OO))", pycc_ext_newobj, (PyObject *)Py_TYPE(self),
-                           "__pycc_restore__", dict != NULL ? dict : Py_None, slots);
+    reduce = PyObject_GetAttrString(cls, "__reduce__");
+    if (reduce == NULL) {
+        return NULL;
+    }
+    Py_DECREF(reduce);
+    if (reduce != pycc_ext_object_reduce) {
+        return PyObject_CallMethod(self, "__reduce__", NULL);
+    }
+    protocol = PyLong_AsLong(proto);
+    if (protocol == -1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    if (protocol < 2) {
+        PyObject *declared = NULL;
+        int truthy;
+        int overridden = pycc_ext_getstate_overridden(cls);
+        if (overridden < 0) {
+            return NULL;
+        }
+        if (PyObject_GetOptionalAttrString(self, "__slots__", &declared) < 0) {
+            return NULL;
+        }
+        truthy = declared != NULL ? PyObject_IsTrue(declared) : 0;
+        Py_XDECREF(declared);
+        if (truthy < 0) {
+            return NULL;
+        }
+        if (!overridden && truthy) {
+            PyErr_SetString(PyExc_TypeError, "a class that defines __slots__ without "
+                                             "defining __getstate__ cannot be pickled");
+            return NULL;
+        }
+    }
+    if (pycc_ext_newargs(self, &newargs, &kwargs) < 0) {
+        return NULL;
+    }
+    if (kwargs != NULL && PyDict_Size(kwargs) > 0) {
+        callable = pycc_ext_copyreg(&pycc_ext_newobj_ex, "__newobj_ex__");
+        if (callable == NULL) {
+            goto done;
+        }
+        call_args = PyTuple_Pack(3, cls, newargs, kwargs);
+    } else {
+        callable = pycc_ext_copyreg(&pycc_ext_newobj, "__newobj__");
+        if (callable == NULL) {
+            goto done;
+        }
+        n = PyTuple_Size(newargs);
+        call_args = PyTuple_New(n + 1);
+        if (call_args != NULL) {
+            PyTuple_SetItem(call_args, 0, Py_NewRef(cls));
+            for (i = 0; i < n; i++) {
+                PyTuple_SetItem(call_args, i + 1, Py_NewRef(PyTuple_GetItem(newargs, i)));
+            }
+        }
+    }
+    if (call_args == NULL) {
+        goto done;
+    }
+    state = PyObject_CallMethod(self, "__getstate__", NULL);
+    if (state == NULL) {
+        goto done;
+    }
+    result = PyTuple_Pack(3, callable, call_args, state);
 done:
-    Py_XDECREF(dict);
-    Py_DECREF(slots);
+    Py_XDECREF(state);
+    Py_XDECREF(call_args);
+    Py_XDECREF(kwargs);
+    Py_DECREF(newargs);
     return result;
 }
 

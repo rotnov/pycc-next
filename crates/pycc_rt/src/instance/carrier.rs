@@ -143,7 +143,7 @@ pub unsafe extern "C" fn pycc_rt_ext_instance_refcount(instance: *mut PyInstance
 }
 
 /// The number of slots of `instance` (v0.10): the slot names its layout
-/// descriptor lists after the class name, which the shim's `__reduce__`
+/// descriptor lists after the class name, which the shim's `__getstate__`
 /// reads.
 ///
 /// # Safety

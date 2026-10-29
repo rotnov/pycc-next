@@ -34,3 +34,76 @@ s = Sub(1, 2.0, "s", False)
 s.extra = "x"
 t = pickle.loads(pickle.dumps(s))
 print(type(t).__name__, t.show(), t.extra)
+
+
+class SlotSub(m.Point):
+    """A Python subclass's own `__slots__` pickle with the compiled attributes."""
+
+    __slots__ = ("extra",)
+
+
+class Hooked(m.Point):
+    """`__getstate__` / `__setstate__` of a subclass are used, in their format."""
+
+    def __getstate__(self):
+        return {"label": self.label, "x": self.x}
+
+    def __setstate__(self, state):
+        self.label = state["label"] + "!"
+        self.x = state["x"] * 2
+        self.y = 0.5
+        self.on = True
+
+
+class Newed(m.Point):
+    """A `__new__` taking only the class sees no extra argument on unpickling."""
+
+    def __new__(cls):
+        return super().__new__(cls)
+
+    def __init__(self):
+        super().__init__(5, 1.0, "n", False)
+
+
+class Tagged(m.Point):
+    """`__getnewargs_ex__` feeds `__new__` as in CPython."""
+
+    def __new__(cls, tag, *, mark="-"):
+        obj = super().__new__(cls)
+        obj.tag = tag + mark
+        return obj
+
+    def __init__(self, tag, *, mark="-"):
+        super().__init__(len(tag), 0.25, tag, True)
+
+    def __getnewargs_ex__(self):
+        return (self.label,), {"mark": "+"}
+
+
+ss = SlotSub(2, 0.5, "ss", True)
+ss.extra = [1, 2]
+for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+    try:
+        back = pickle.loads(pickle.dumps(ss, proto))
+    except TypeError as e:
+        print(proto, "TypeError", e)
+    else:
+        print(proto, type(back).__name__, back.show(), back.extra)
+deep = copy.deepcopy(ss)
+print(deep.show(), deep.extra, deep.extra is ss.extra)
+bare = SlotSub(4, 1.0, "bare", False)
+print(hasattr(pickle.loads(pickle.dumps(bare)), "extra"))
+h = Hooked(3, 2.0, "h", False)
+for back in (pickle.loads(pickle.dumps(h)), copy.deepcopy(h), pickle.loads(pickle.dumps(h, 0))):
+    print(type(back).__name__, back.show())
+n = Newed()
+for back in (pickle.loads(pickle.dumps(n)), copy.deepcopy(n), pickle.loads(pickle.dumps(n, 1))):
+    print(type(back).__name__, back.show())
+tg = Tagged("tg")
+for back in (pickle.loads(pickle.dumps(tg)), copy.deepcopy(tg)):
+    print(type(back).__name__, back.show(), back.tag)
+fresh = m.Point.__new__(m.Point)
+try:
+    fresh.x
+except AttributeError:
+    print("AttributeError")
