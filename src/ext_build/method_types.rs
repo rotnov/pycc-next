@@ -623,10 +623,12 @@ fn instance_of_record(ctor: &ExtCtor) -> String {
     )
 }
 
-/// v0.9: `Py_tp_new` of a constructible class. `PyType_GenericNew`, and
-/// for a Python subclass's object an instance with every slot unassigned:
-/// a subclass whose `__init__` does not call the class's still stores its
-/// attributes (the slots' setters) and reads its class-level defaults.
+/// v0.9: `Py_tp_new` of a constructible class. `PyType_GenericNew` and an
+/// instance with every slot unassigned: a Python subclass whose `__init__`
+/// does not call the class's still stores its attributes (the slots'
+/// setters) and reads its class-level defaults, and (v0.10) an object
+/// unpickled through `__new__`, whatever its arguments, gets its state set;
+/// a constructor call's `tp_init` replaces the instance.
 fn tp_new_c(ctor: &ExtCtor, defaults: &[String]) -> String {
     let class = &ctor.class;
     // The instance defaults among the slots, stored as `__init__` would
@@ -642,8 +644,7 @@ fn tp_new_c(ctor: &ExtCtor, defaults: &[String]) -> String {
         "{declaration}static PyObject *pycc_ext_tp_new_{class}(PyTypeObject *type, PyObject *args, \
          PyObject *kwds)\n{{\n    \
          PyObject *self = PyType_GenericNew(type, args, kwds);\n    \
-         if (self != NULL && (!pycc_ext_is_compiled_class((PyObject *)type) \
-         || pycc_ext_restoring(args, kwds))) {{\n        \
+         if (self != NULL) {{\n        \
          pycc_ext_carrier_bind(self, {instance});\n\
          {stores}    }}\n    return self;\n}}\n\n",
         declaration = record_declaration(ctor),

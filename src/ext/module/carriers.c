@@ -168,7 +168,55 @@ static int pycc_ext_carrier_clear(PyObject *self)
 /* The root of every template: the carrier layout, nothing else. */
 static PyObject *pycc_ext_template_root = NULL;
 
+/*
+ * v0.10: `cls.__pycc_reconstruct__()`, what protocols 0 and 1 unpickle a
+ * compiled instance through in place of `copyreg._reconstructor`: the
+ * object made by the `tp_new` of the first compiled class in `cls`'s MRO,
+ * with an unassigned instance, without calling a Python subclass's
+ * `__new__` (as `object.__new__(cls)` does for a source class). A class
+ * method of the root, so pickle saves it as `getattr(cls, name)`.
+ */
+static PyObject *pycc_ext_reconstruct(PyObject *cls, PyObject *unused)
+{
+    PyObject *mro = PyObject_GetAttrString(cls, "__mro__");
+    PyObject *result = NULL;
+    Py_ssize_t n;
+    Py_ssize_t i;
+    (void)unused;
+    if (mro == NULL) {
+        return NULL;
+    }
+    n = PyTuple_Check(mro) ? PyTuple_Size(mro) : 0;
+    for (i = 0; i < n; i++) {
+        PyObject *c = PyTuple_GetItem(mro, i);
+        newfunc make;
+        if (c == pycc_ext_template_root || !pycc_ext_is_compiled_class(c)) {
+            continue;
+        }
+        make = (newfunc)PyType_GetSlot((PyTypeObject *)c, Py_tp_new);
+        if (make != NULL) {
+            PyObject *none = PyTuple_New(0);
+            if (none != NULL) {
+                result = make((PyTypeObject *)cls, none, NULL);
+                Py_DECREF(none);
+            }
+            Py_DECREF(mro);
+            return result;
+        }
+    }
+    Py_DECREF(mro);
+    PyErr_SetString(PyExc_TypeError, "__pycc_reconstruct__ needs a constructible compiled class");
+    return NULL;
+}
+
+static PyMethodDef pycc_ext_template_root_methods[] = {
+    {"__pycc_reconstruct__", (PyCFunction)(void (*)(void))pycc_ext_reconstruct,
+     METH_NOARGS | METH_CLASS, NULL},
+    {NULL, NULL, 0, NULL},
+};
+
 static PyType_Slot pycc_ext_template_root_slots[] = {
+    {Py_tp_methods, (void *)pycc_ext_template_root_methods},
     {Py_tp_dealloc, (void *)pycc_ext_instance_dealloc},
     {Py_tp_traverse, (void *)pycc_ext_carrier_traverse},
     {Py_tp_clear, (void *)pycc_ext_carrier_clear},
@@ -247,21 +295,18 @@ static int pycc_ext_is_compiled_class(PyObject *cls)
  * `(copyreg.__newobj__, (type(self), *newargs), self.__getstate__())`, the
  * new arguments from `__getnewargs_ex__` / `__getnewargs__` when the type
  * defines them (`copyreg.__newobj_ex__` for keyword arguments). Unpickling
- * calls `cls.__new__(cls, *newargs)`: a compiled class's `tp_new` called
- * with no arguments makes the object with an instance whose slots are all
- * unassigned (`pycc_ext_restoring`; a constructor call without arguments
- * runs `tp_init` after it, which replaces that instance), so a user-defined
- * `__new__` sees what it sees in CPython. The state is `__getstate__`'s:
- * the shared default below is `object.__getstate__`'s (a Python subclass's
- * `__dict__` and its own `__slots__`) with the compiled attributes added to
- * the slot state, which pickle sets through their setters; a subclass that
- * defines `__getstate__` / `__setstate__` has them used as in CPython.
+ * calls `cls.__new__(cls, *newargs)`: a compiled class's `tp_new` makes the
+ * object with an instance whose slots are all unassigned, whatever its
+ * arguments (a constructor call runs `tp_init` after it, which replaces
+ * that instance), so a user-defined `__new__` sees what it sees in CPython.
+ * Protocols 0 and 1 reduce as `copyreg._reduce_ex` does, through
+ * `pycc_ext_reconstruct` in place of `copyreg._reconstructor`. The state is
+ * `__getstate__`'s: the shared default below is `object.__getstate__`'s (a
+ * Python subclass's `__dict__` and its own `__slots__`) with the compiled
+ * attributes added to the slot state, which pickle sets through their
+ * setters; a subclass that defines `__getstate__` / `__setstate__` has them
+ * used as in CPython.
  */
-static int pycc_ext_restoring(PyObject *args, PyObject *kwds)
-{
-    return (args == NULL || (PyTuple_Check(args) && PyTuple_Size(args) == 0))
-           && (kwds == NULL || (PyDict_Check(kwds) && PyDict_Size(kwds) == 0));
-}
 
 static PyObject *pycc_ext_newobj = NULL;
 static PyObject *pycc_ext_newobj_ex = NULL;
@@ -560,6 +605,28 @@ static PyObject *pycc_ext_instance_reduce_in(PyObject *self, PyObject *proto)
                                              "defining __getstate__ cannot be pickled");
             return NULL;
         }
+        /* `copyreg._reduce_ex`'s `(_reconstructor, (cls, object, None),
+         * state)`: the object is made without the class's `__new__` and
+         * without new arguments (`pycc_ext_reconstruct`), the state set
+         * only when it is true. */
+        callable = PyObject_GetAttrString(cls, "__pycc_reconstruct__");
+        if (callable == NULL) {
+            return NULL;
+        }
+        state = PyObject_CallMethod(self, "__getstate__", NULL);
+        if (state == NULL) {
+            Py_DECREF(callable);
+            return NULL;
+        }
+        truthy = PyObject_IsTrue(state);
+        if (truthy > 0) {
+            result = Py_BuildValue("(O()O)", callable, state);
+        } else if (truthy == 0) {
+            result = Py_BuildValue("(O())", callable);
+        }
+        Py_DECREF(state);
+        Py_DECREF(callable);
+        return result;
     }
     if (pycc_ext_newargs(self, &newargs, &kwargs) < 0) {
         return NULL;

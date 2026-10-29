@@ -24,7 +24,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   an object: `copyreg.__newobj__` with `__getnewargs_ex__` / `__getnewargs__`'s arguments and
   `__getstate__`'s state (by default `object.__getstate__`'s plus each assigned compiled
   attribute), every protocol, with `copy.deepcopy`, shared references, nested instances and
-  Python subclasses (their `__slots__`, `__new__`, `__getstate__` / `__setstate__`); one
+  Python subclasses (their `__slots__`, `__new__`, `__getstate__` / `__setstate__`),
+  protocols 0 and 1 as `copyreg._reduce_ex`; one
   with an attribute Python code cannot see refuses with a `TypeError` naming it.
 
 ### Changed

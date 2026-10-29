@@ -100,8 +100,22 @@ n = Newed()
 for back in (pickle.loads(pickle.dumps(n)), copy.deepcopy(n), pickle.loads(pickle.dumps(n, 1))):
     print(type(back).__name__, back.show())
 tg = Tagged("tg")
-for back in (pickle.loads(pickle.dumps(tg)), copy.deepcopy(tg)):
+# Protocols 0 and 1 make the object without `__new__` (`copyreg._reconstructor`).
+for back in [pickle.loads(pickle.dumps(tg, proto)) for proto in range(6)] + [copy.deepcopy(tg)]:
     print(type(back).__name__, back.show(), back.tag)
+
+
+class Args(m.Point):
+    """`__getnewargs__`'s arguments reach the compiled class's own `__new__`."""
+
+    def __getnewargs__(self):
+        return (self.x,)
+
+
+ar = Args(7, 3.5, "ar", False)
+for back in [pickle.loads(pickle.dumps(ar, proto)) for proto in range(6)] + [copy.deepcopy(ar)]:
+    print(type(back).__name__, back.show())
+print(type(m.Point.__new__(m.Point, 1, 2)).__name__)
 fresh = m.Point.__new__(m.Point)
 try:
     fresh.x
