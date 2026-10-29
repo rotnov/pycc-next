@@ -185,6 +185,14 @@ pub(crate) fn method_types_c(
             "    {\"__copy__\", (PyCFunction)(void (*)(void))pycc_ext_instance_copy, \
              METH_NOARGS, NULL},\n",
         );
+        // v0.10: pickling (`pycc_ext_instance_reduce`), constructible
+        // classes only: unpickling makes the object through `tp_new`.
+        if ctor.is_some() {
+            out.push_str(
+                "    {\"__reduce__\", (PyCFunction)(void (*)(void))pycc_ext_instance_reduce, \
+                 METH_NOARGS, NULL},\n",
+            );
+        }
         // v0.9: the template's `__init_subclass__`, which lets only the
         // published class made from it through (`pycc_ext_publish`).
         out.push_str(
@@ -632,7 +640,8 @@ fn tp_new_c(ctor: &ExtCtor, defaults: &[String]) -> String {
         "{declaration}static PyObject *pycc_ext_tp_new_{class}(PyTypeObject *type, PyObject *args, \
          PyObject *kwds)\n{{\n    \
          PyObject *self = PyType_GenericNew(type, args, kwds);\n    \
-         if (self != NULL && !pycc_ext_is_compiled_class((PyObject *)type)) {{\n        \
+         if (self != NULL && (!pycc_ext_is_compiled_class((PyObject *)type) \
+         || pycc_ext_restoring(args))) {{\n        \
          pycc_ext_carrier_bind(self, {instance});\n\
          {stores}    }}\n    return self;\n}}\n\n",
         declaration = record_declaration(ctor),

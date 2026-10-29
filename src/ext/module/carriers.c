@@ -242,6 +242,147 @@ static int pycc_ext_is_compiled_class(PyObject *cls)
 }
 
 /*
+ * v0.10: pickling a compiled instance. `__reduce__` answers
+ * `(copyreg.__newobj__, (type(self), "__pycc_restore__"), (dict, slots))`:
+ * unpickling calls the type's `tp_new` with that one argument, which makes
+ * the object with an instance whose slots are all unassigned
+ * (`pycc_ext_restoring`; a constructor call passing the same argument runs
+ * `tp_init` after it, which replaces that instance), then sets each slot
+ * that was assigned through its setter (pickle's state protocol) and, for a
+ * Python subclass's object, restores its `__dict__`. A slot whose value the
+ * setter does not take fails unpickling with its `TypeError`.
+ */
+static int pycc_ext_restoring(PyObject *args)
+{
+    PyObject *marker;
+    if (args == NULL || !PyTuple_Check(args) || PyTuple_Size(args) != 1) {
+        return 0;
+    }
+    marker = PyTuple_GetItem(args, 0);
+    return PyUnicode_Check(marker) && PyUnicode_CompareWithASCIIString(marker, "__pycc_restore__") == 0;
+}
+
+static PyObject *pycc_ext_newobj = NULL;
+
+static PyObject *pycc_ext_instance_reduce_in(PyccExtModule *m, PyObject *self)
+{
+    void *inst = ((PyccExtInstance *)self)->inst;
+    const unsigned char *layout;
+    const unsigned char *end;
+    const unsigned char *field;
+    size_t len = 0;
+    long long count;
+    long long i;
+    PyObject *slots = NULL;
+    PyObject *dict = NULL;
+    PyObject *result = NULL;
+    const char *kinds = NULL;
+    size_t nkinds = 0;
+    const char *refused = NULL;
+
+    if (inst == NULL) {
+        PyObject *type_name = PyType_GetFullyQualifiedName(Py_TYPE(self));
+        if (type_name != NULL) {
+            PyErr_Format(PyExc_TypeError, "cannot pickle an uninitialized '%U' object",
+                         type_name);
+            Py_DECREF(type_name);
+        }
+        return NULL;
+    }
+    /* A class `copy.copy` refuses (a generic class's specializations share
+     * one layout) is refused here too, for the same reason. */
+    {
+        const unsigned char *cls = pycc_rt_ext_instance_class(inst, &len);
+        if (m->carrier_class_copy_kinds(cls, len, &kinds, &nkinds, &refused) == 0) {
+            PyObject *type_name = PyType_GetFullyQualifiedName(Py_TYPE(self));
+            if (type_name != NULL) {
+                PyErr_Format(PyExc_TypeError, "cannot pickle '%U' object: %s", type_name,
+                             refused);
+                Py_DECREF(type_name);
+            }
+            return NULL;
+        }
+    }
+    if (pycc_ext_newobj == NULL) {
+        PyObject *copyreg = PyImport_ImportModule("copyreg");
+        if (copyreg == NULL) {
+            return NULL;
+        }
+        pycc_ext_newobj = PyObject_GetAttrString(copyreg, "__newobj__");
+        Py_DECREF(copyreg);
+        if (pycc_ext_newobj == NULL) {
+            return NULL;
+        }
+    }
+    slots = PyDict_New();
+    if (slots == NULL) {
+        return NULL;
+    }
+    /* The slot names follow the class name in the descriptor, NUL-
+     * separated; each assigned one's value is read as Python reads it. */
+    layout = pycc_rt_ext_instance_layout(inst, &len);
+    count = pycc_rt_ext_instance_slot_count(inst);
+    end = layout + len;
+    field = (const unsigned char *)memchr(layout, 0, len);
+    for (i = 0; i < count && field != NULL && field < end; i++) {
+        PyObject *key;
+        PyObject *value;
+        const unsigned char *next;
+        field += 1;
+        next = (const unsigned char *)memchr(field, 0, (size_t)(end - field));
+        key = PyUnicode_FromStringAndSize((const char *)field,
+                                          (Py_ssize_t)((next != NULL ? next : end) - field));
+        if (key == NULL) {
+            goto done;
+        }
+        /* A slot Python code cannot see (no descriptor on the class: a
+         * container of native values, say) cannot be pickled. */
+        if (PyObject_HasAttrWithError((PyObject *)Py_TYPE(self), key) != 1) {
+            PyObject *type_name =
+                PyErr_Occurred() ? NULL : PyType_GetFullyQualifiedName(Py_TYPE(self));
+            if (type_name != NULL) {
+                PyErr_Format(PyExc_TypeError,
+                             "cannot pickle '%U' object: its attribute '%U' is not visible "
+                             "to Python",
+                             type_name, key);
+                Py_DECREF(type_name);
+            }
+            Py_DECREF(key);
+            goto done;
+        }
+        value = PyObject_GetAttr(self, key);
+        if (value == NULL) {
+            if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+                Py_DECREF(key);
+                goto done;
+            }
+            PyErr_Clear();
+        } else {
+            int stored = PyDict_SetItem(slots, key, value);
+            Py_DECREF(value);
+            if (stored < 0) {
+                Py_DECREF(key);
+                goto done;
+            }
+        }
+        Py_DECREF(key);
+        field = next;
+    }
+    if (!pycc_ext_is_compiled_class((PyObject *)Py_TYPE(self))) {
+        dict = PyObject_GenericGetDict(self, NULL);
+        if (dict == NULL) {
+            PyErr_Clear();
+        }
+    }
+    result = Py_BuildValue("(O(Os)(OO))", pycc_ext_newobj, (PyObject *)Py_TYPE(self),
+                           "__pycc_restore__", dict != NULL ? dict : Py_None, slots);
+done:
+    Py_XDECREF(dict);
+    Py_DECREF(slots);
+    return result;
+}
+
+/*
  * v0.9: a Python subclass's object that never runs the compiled class's
  * `__init__` starts with the class's instance default `name` (`None`,
  * `pycc_ast`'s instance defaults) in the slot -- or with the value the

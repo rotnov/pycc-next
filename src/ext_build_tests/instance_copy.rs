@@ -124,13 +124,15 @@ fn a_class_binding_a_copy_protocol_name_is_refused_naming_it() {
 fn every_published_method_table_carries_the_shared_copy_row() {
     let (_, _, inc) = ext_build("copy_rows", KINDS);
     let row = "    {\"__copy__\", (PyCFunction)(void (*)(void))pycc_ext_instance_copy, \
-               METH_NOARGS, NULL},\n    {\"__init_subclass__\", (PyCFunction)(void (*)(void))\
-               pycc_ext_template_init_subclass, METH_VARARGS | METH_KEYWORDS | METH_CLASS, \
-               NULL},\n    {NULL, NULL, 0, NULL},\n};\n";
+               METH_NOARGS, NULL},\n";
+    let tail = "    {\"__init_subclass__\", (PyCFunction)(void (*)(void))\
+                pycc_ext_template_init_subclass, METH_VARARGS | METH_KEYWORDS | METH_CLASS, \
+                NULL},\n    {NULL, NULL, 0, NULL},\n};\n";
     for class in ["Q", "P", "Sub", "WithCopy", "DeepOnly"] {
         let table = format!("static PyMethodDef pycc_ext_type_methods_{class}[] = {{\n");
         let at = inc.find(&table).unwrap_or_else(|| panic!("{class}: {inc}"));
         assert!(inc[at..].contains(row), "{class}: {inc}");
+        assert!(inc[at..].contains(tail), "{class}: {inc}");
     }
     // The lookup follows the isinstance table in the companion.
     let isinstance = inc.find(CARRIER_CLASS_ISINSTANCE_DECL).unwrap();

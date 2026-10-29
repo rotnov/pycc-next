@@ -142,6 +142,32 @@ pub unsafe extern "C" fn pycc_rt_ext_instance_refcount(instance: *mut PyInstance
     unsafe { &*instance }.rc
 }
 
+/// The number of slots of `instance` (v0.10): the slot names its layout
+/// descriptor lists after the class name, which the shim's `__reduce__`
+/// reads.
+///
+/// # Safety
+/// `instance` must point at a live `PyInstanceObj`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_ext_instance_slot_count(instance: *mut PyInstanceObj) -> i64 {
+    unsafe { &*instance }.slot_count as i64
+}
+
+/// The whole layout descriptor of `instance` (v0.10), its length through
+/// `len`: the class name, then the slot names, NUL-separated.
+///
+/// # Safety
+/// `instance` must point at a live `PyInstanceObj`; `len` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_ext_instance_layout(
+    instance: *mut PyInstanceObj,
+    len: *mut usize,
+) -> *const u8 {
+    let layout = unsafe { &*instance }.layout();
+    unsafe { *len = layout.len() };
+    layout.as_ptr()
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::pycc_rt_instance_new;

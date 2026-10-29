@@ -75,6 +75,12 @@ static int pycc_ext_slot_operand_is(PyObject *other, const char *class_name)
     return pycc_ext_slot_operand_is_in(&pycc_ext_mod, other, class_name);
 }
 
+static PyObject *pycc_ext_instance_reduce(PyObject *self, PyObject *unused)
+{
+    (void)unused;
+    return pycc_ext_instance_reduce_in(&pycc_ext_mod, self);
+}
+
 static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
 {
     (void)unused;

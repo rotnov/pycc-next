@@ -91,6 +91,7 @@ mod carrier;
 pub use carrier::{
     pycc_rt_ext_instance_carrier, pycc_rt_ext_instance_carrier_is_strong,
     pycc_rt_ext_instance_class, pycc_rt_ext_instance_refcount, pycc_rt_ext_instance_set_carrier,
+    pycc_rt_ext_instance_layout, pycc_rt_ext_instance_slot_count,
     pycc_rt_ext_instance_set_carrier_strong, pycc_rt_instance_class_is,
 };
 mod copy;

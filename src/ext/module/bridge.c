@@ -196,6 +196,10 @@ extern void pycc_rt_ext_instance_set_carrier(void *instance, void *carrier);
 extern void pycc_rt_ext_instance_set_carrier_strong(void *instance, void *carrier);
 extern _Bool pycc_rt_ext_instance_carrier_is_strong(void *instance);
 extern long long pycc_rt_ext_instance_refcount(void *instance);
+/* v0.10: the instance's slot count, the slot names its descriptor lists
+ * after the class name (`pycc_ext_instance_reduce`). */
+extern long long pycc_rt_ext_instance_slot_count(void *instance);
+extern const unsigned char *pycc_rt_ext_instance_layout(void *instance, size_t *len);
 
 /* `copy.copy` of a carrier (#1455). The clone of an instance with the slot
  * references a per-class kind string calls for (`s`/`i` taken by `pycc_rt`,

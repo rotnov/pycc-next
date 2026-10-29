@@ -12,6 +12,7 @@ static PyObject *pycc_ext_pack_tuple_object(void *result);
 static PyObject *pycc_ext_pack_str_tuple(void *result);
 static int pycc_ext_slot_operand_is(PyObject *other, const char *class_name);
 static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused);
+static PyObject *pycc_ext_instance_reduce(PyObject *self, PyObject *unused);
 static int pycc_ext_carrier_register(const char *class_name, PyObject *type);
 static PyObject *pycc_fwd_call(int index, PyObject *func, PyObject *const *args, size_t nargsf,
                                PyObject *kwnames);
