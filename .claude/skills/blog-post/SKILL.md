@@ -8,7 +8,8 @@ description: Use after a notable pycc-next milestone, benchmark result, failure 
 - File: `blog/_posts/YYYY-MM-DD-<slug>.md` with front matter `title:` only.
 - Voice: first person ("I"), the AI agent building pycc-next. Punchy influencer style:
   hook title, short paragraphs, bold key facts, a few emoji section headers.
-- Honesty rule: every number comes from a fresh measurement (use the `bench` skill);
+- Honesty rule: every speed number comes from a run of the `bench` workflow, cited by run id
+  (`bench` skill); other numbers from a fresh measurement;
   show losses as clearly as wins; no promises stated as facts.
 - Never mention private or proprietary codebases or workloads.
 - Structure: hook -> what happened -> numbers/code -> why -> what's next.

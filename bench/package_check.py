@@ -38,10 +38,17 @@ Packages:
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
                                       [--max-build-seconds S] [--jobs N]
-                                      [--instructions] [--separate]
+                                      [--instructions] [--separate] [--json PATH]
   PACKAGE  names from PACKAGES (default: all of them).
   --time   also time each package's hot paths compiled and in CPython (pypng:
            its 256x256 filter image, and every PngSuite image its tests use).
+           Every timing is a fresh `-I` process (one untimed call, then one
+           timed); after one discarded warm-up process per tree (when N > 1),
+           N (`--runs`) rounds run the CPython and the compiled tree once each,
+           in alternating order. Prints the median and min-max per tree and
+           the ratio of the medians.
+  --json PATH
+           write `--time`'s samples and their summaries (`bench/stats.py`).
   --instructions
            also count, under valgrind's callgrind, the instructions one call
            of each package's hot path executes against the compiled modules
@@ -72,6 +79,7 @@ import argparse
 import concurrent.futures
 import dataclasses
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -84,6 +92,8 @@ import time
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "bench"))
+import stats  # noqa: E402
 # The compiler's file name in a Cargo profile directory.
 PYCC_EXE = "pycc.exe" if os.name == "nt" else "pycc"
 
@@ -109,7 +119,7 @@ class Package:
     # Code run in the isolated interpreter, with the tree as argv[1]: runs the suite.
     tests: str
     # Code timing the hot path, with the tree as argv[1] and the run count as argv[2];
-    # prints the best time in seconds.
+    # prints the best time in seconds (`--time` passes 1: one untimed call, one timed).
     speed: str
     speed_label: str
     # Code calling the hot path argv[2] times, with the tree as argv[1], for
@@ -602,6 +612,10 @@ def count_defs(src: str) -> int:
     return len(re.findall(r"^\s*def ", src, re.M))
 
 
+# `--time`'s measurements, for `--json`.
+TIMINGS: list[dict] = []
+
+
 def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
     print(f"{pkg.name} {pkg.version}")
     archive = fetch(pkg, pathlib.Path(a.cache))
@@ -720,17 +734,30 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             return False
 
     if a.time:
+        trees = {"cpython": plain, "compiled": built}
         for speed_label, speed in ((pkg.speed_label, pkg.speed), *pkg.more_speed):
-            times = {}
-            for label, tree in (("cpython", plain), ("compiled", built)):
-                r = python(speed, str(tree), str(a.runs), cwd=cwd)
-                if r.returncode != 0:
-                    print(r.stdout + r.stderr)
-                    return False
-                times[label] = float(r.stdout)
-            print(f"  {speed_label}: CPython {times['cpython']:.3f}s, "
-                  f"compiled {times['compiled']:.3f}s "
-                  f"({times['cpython'] / times['compiled']:.2f}x)")
+            samples: dict[str, list[float]] = {label: [] for label in trees}
+            # One discarded warm-up process per tree (file cache, the sources'
+            # `.pyc`s), then `--runs` rounds of one fresh process per tree each.
+            warm = [list(trees)] if a.runs > 1 else []
+            for i, order in enumerate(warm + stats.interleaved(a.runs, list(trees))):
+                for label in order:
+                    r = python(speed, str(trees[label]), "1", cwd=cwd)
+                    if r.returncode != 0:
+                        print(r.stdout + r.stderr)
+                        return False
+                    if i >= len(warm):
+                        samples[label].append(float(r.stdout))
+            times = {label: stats.summary(xs) for label, xs in samples.items()}
+            ratio = times["cpython"]["median"] / times["compiled"]["median"]
+            print(f"  {speed_label}: CPython {times['cpython']['median']:.3f}s "
+                  f"({times['cpython']['min']:.3f}-{times['cpython']['max']:.3f}), "
+                  f"compiled {times['compiled']['median']:.3f}s "
+                  f"({times['compiled']['min']:.3f}-{times['compiled']['max']:.3f}) "
+                  f"({ratio:.2f}x, medians of {a.runs})")
+            TIMINGS.append({"package": pkg.name, "version": pkg.version,
+                            "workload": speed_label, "runs": a.runs,
+                            "seconds": times, "ratio": ratio})
     if a.instructions:
         per_call = instructions_per_call(pkg, built, cwd)
         if per_call is None:
@@ -779,6 +806,7 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     ap.add_argument("--instructions", action="store_true")
     ap.add_argument("--separate", action="store_true")
+    ap.add_argument("--json")
     a = ap.parse_args()
     for name in a.packages:
         if name not in PACKAGES:
@@ -795,6 +823,8 @@ def main() -> int:
             if not a.keep:
                 shutil.rmtree(tmp, ignore_errors=True)
     print("OK" if ok else "FAIL")
+    if a.json:
+        pathlib.Path(a.json).write_text(json.dumps({"packages": TIMINGS}, indent=1))
     return 0 if ok else 1
 
 

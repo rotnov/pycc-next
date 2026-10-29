@@ -6,7 +6,9 @@ description: Use when cutting a pycc-next release (version bump, changelog, tag,
 # Release
 
 1. `main` is green in CI and `cargo test --release --workspace` passes locally.
-2. Run the `bench` skill; put the table in the release notes.
+2. Run the `bench` workflow on the release commit (`gh workflow run bench.yml --ref main`;
+   pushing the tag runs it again) and put its tables in the release notes, citing the run
+   id and the runner's CPU (`bench` skill). No speed number from a local run.
 3. Bump `version` in the root `Cargo.toml`, in `python/pyproject.toml` and in
    `python/pycc/__init__.py` (the `pycc.build` backend ships with the same version;
    `python/tests` fails on a mismatch); `cargo build --release` to refresh `Cargo.lock`.
@@ -31,7 +33,7 @@ description: Use when cutting a pycc-next release (version bump, changelog, tag,
    archives and creates one GitHub Release holding them. Verify the release exists and a tarball
    runs on a machine without the checkout: download, unpack,
    `scripts/smoke.sh pycc-vX.Y.Z-<platform>`.
-7. Publish a launch post (`blog-post` skill).
+7. Publish a launch post (`blog-post` skill); its speed numbers cite the same `bench` run.
 8. A broken pre-release (`vX.Y.Z-suffix`) is removed with the `release-delete` workflow
    (`workflow_dispatch` on `main`, input `tag`); it deletes the release and its tag and
    refuses final versions.

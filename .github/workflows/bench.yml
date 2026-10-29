@@ -1,0 +1,83 @@
+name: bench
+# The published speed numbers (ROADMAP v0.10 accept 4): every speed number in
+# README, CHANGELOG, release notes and blog posts cites a run of this workflow.
+# Wall time on a shared GitHub-hosted runner is noisy, so every measurement is
+# repeated in fresh processes, the sides (CPython, pycc-next, Rust) interleaved
+# round by round, and the median is published with its spread (min-max, and the
+# quartiles in the JSON) and the runner's CPU model. This is not a gate: the
+# regression gates are the instruction-count bounds in ci.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      runs: { description: "Interleaved runs per measurement", default: "11" }
+      pydantic_runs: { description: "Interleaved runs of the pydantic workload", default: "15" }
+  push:
+    tags: ["v*"]
+  # Weekly, Monday 04:23 UTC.
+  schedule:
+    - cron: "23 4 * * 1"
+permissions: { contents: read }
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    permissions: { contents: read }
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      RUNS: ${{ inputs.runs || '11' }}
+      PYDANTIC_RUNS: ${{ inputs.pydantic_runs || '15' }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      # numpy for bench/run.py's numpy programs; pydantic-core and pydantic's
+      # other runtime dependencies for the pydantic workload. Both pinned by
+      # version and wheel hash.
+      - name: Install pinned Python dependencies
+        run: |
+          python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt
+          python3 -m pip install --only-binary=:all: --require-hashes --no-deps -r .github/bench-requirements.txt
+      - name: Install LLVM 22
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo 'deb https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -q && sudo apt-get install -y -q llvm-22-dev libpolly-22-dev clang-22 libzstd-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Runner
+        run: |
+          mkdir -p bench-out
+          { lscpu; echo; nproc; uptime; } | tee bench-out/runner.txt
+      # Programs: CPython vs pycc-next vs the Rust twins, outputs checked.
+      - name: bench/run.py
+        run: python3 bench/run.py --runs "$RUNS" --json bench-out/run.json
+      # Real packages' hot paths, CPython vs the compiled package (their own
+      # test suites pass against the compiled modules first).
+      - name: bench/package_check.py --time
+        if: ${{ !cancelled() }}
+        run: >-
+          python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache
+          --time --runs "$RUNS" --json bench-out/packages.json
+      - name: bench/pydantic_check.py --time
+        if: ${{ !cancelled() }}
+        run: python3 bench/pydantic_check.py --time --runs "$PYDANTIC_RUNS" --json bench-out/pydantic.json
+      - name: Publish
+        if: ${{ !cancelled() }}
+        run: |
+          python3 bench/publish.py --run bench-out/run.json --packages bench-out/packages.json \
+            --pydantic bench-out/pydantic.json --json bench-out/bench.json --md bench-out/bench.md
+          cat bench-out/bench.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: bench-${{ matrix.os }}
+          path: bench-out
+          if-no-files-found: error

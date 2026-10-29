@@ -12,12 +12,12 @@ not native; a class statement CPython runs with its methods compiled reports onl
 header, so its methods count as native. The archive is untrusted data and is handled
 as in `bench/package_check.py` (checked members, the `data` extraction filter).
 
-This is the one-off v0.7 accept-4 measurement, not a CI gate.
+v0.7 accept 4's measurement, not a CI gate; `.github/workflows/bench.yml` runs `--time`.
 
 Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
                                        [--jobs N] [--tests PYTHON]
                                        [--time [PYTHON]] [--runs N] [--repeat R]
-                                       [--separate] [MODULE ...]
+                                       [--separate] [--json PATH] [MODULE ...]
   MODULE   build only the modules whose path contains one of these strings
            (implies --separate).
   --separate
@@ -40,6 +40,9 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
            (`--runs`, default 15) runs per tree, interleaved in alternating order,
            each phase repeated R (`--repeat`, default 20) times per run. Prints the
            best and the median per phase and the ratio of the medians.
+  --json PATH
+           with --time, also write every sample per phase and tree and their
+           summaries (`bench/stats.py`).
 """
 import argparse
 import concurrent.futures
@@ -55,6 +58,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import package_check  # noqa: E402
+import stats  # noqa: E402
 
 PYDANTIC = package_check.Package(
     name="pydantic",
@@ -165,6 +169,7 @@ def main() -> int:
     p.add_argument("--runs", type=int, default=15)
     p.add_argument("--repeat", type=int, default=20)
     p.add_argument("--separate", action="store_true")
+    p.add_argument("--json")
     a = p.parse_args()
     archive = package_check.fetch(PYDANTIC, pathlib.Path(a.cache))
     with tempfile.TemporaryDirectory() as tmp_name:
@@ -215,8 +220,18 @@ def main() -> int:
             work = tmp / "work"
             work.mkdir()
             python = str(pathlib.Path(a.time).absolute()) if "/" in a.time else a.time
-            report(time_trees(python, {"compiled": tree, "CPython": plain}, work,
-                              a.runs, a.repeat))
+            times = time_trees(python, {"compiled": tree, "CPython": plain}, work,
+                               a.runs, a.repeat)
+            report(times)
+            if a.json:
+                pathlib.Path(a.json).write_text(json.dumps({"pydantic": {
+                    "version": PYDANTIC.version, "runs": a.runs, "repeat": a.repeat,
+                    "native": f"{total - fell_total}/{total}",
+                    "phases": {ph: {"seconds": {side: stats.summary([r[ph] for r in rs])
+                                                for side, rs in times.items()},
+                                    "ratio": statistics.median(r[ph] for r in times["CPython"])
+                                    / statistics.median(r[ph] for r in times["compiled"])}
+                               for ph in PHASES}}}, indent=1))
             sys.stdout.flush()
             if not a.tests:
                 return 1 if failed else 0

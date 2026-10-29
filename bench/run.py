@@ -1,8 +1,13 @@
 """Benchmark pycc-next against CPython and hand-written Rust.
 
-Usage: python3 bench/run.py [--pycc target/release/pycc] [--runs 7]
+Usage: python3 bench/run.py [--pycc target/release/pycc] [--runs 11] [--json PATH] [NAME ...]
        python3 bench/run.py --build-only [--max-build-seconds S] [NAME ...]
 Prints a markdown table; every program's output is checked against CPython.
+Each program runs `--runs` rounds; a round starts CPython, the pycc-next binary and
+the Rust twin once each, as fresh processes, in an order rotated by one per round
+(interleaved, so drift in a shared machine's load hits all three alike). The table
+shows each side's median and, in parentheses, its min-max; the ratios are of the
+medians. `--json PATH` also writes every sample and its summary (`bench/stats.py`).
 With --build-only, only builds each program and prints how long `pycc build`
 took; with --max-build-seconds, a build slower than S seconds fails (v0.5
 accept 4: 2 on the CI Linux runner).
@@ -20,6 +25,7 @@ Rust twin report the time of their compute section on stderr as
 (marked "kernel"), since loading numpy is not part of what is compared.
 """
 import argparse
+import json
 import pathlib
 import re
 import shutil
@@ -29,21 +35,22 @@ import tempfile
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import stats  # noqa: E402
 KERNEL = re.compile(r"kernel_seconds=([0-9.eE+-]+)")
 
 
-def best(cmd: list[str], runs: int, cwd: pathlib.Path | None = None) -> tuple[float, str, float | None]:
-    """Best wall time, stdout, and best reported kernel time (or None)."""
-    out, times, kernels = "", [], []
-    for _ in range(runs):
-        t = time.perf_counter()
-        done = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=cwd)
-        times.append(time.perf_counter() - t)
-        out = done.stdout
-        found = KERNEL.search(done.stderr)
-        if found:
-            kernels.append(float(found.group(1)))
-    return min(times), out, (min(kernels) if kernels and len(kernels) == runs else None)
+def once(cmd: list[str], cwd: pathlib.Path | None = None) -> tuple[float, str, float | None]:
+    """Wall time, stdout, and the reported kernel time (or None) of one run."""
+    t = time.perf_counter()
+    done = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=cwd)
+    seconds = time.perf_counter() - t
+    found = KERNEL.search(done.stderr)
+    return seconds, done.stdout, (float(found.group(1)) if found else None)
+
+
+def fmt(s: dict[str, float]) -> str:
+    return f"{s['median']:.3f}s ({s['min']:.3f}-{s['max']:.3f})"
 
 
 def build(pycc: str, src: pathlib.Path, tmp: pathlib.Path, name: str,
@@ -96,7 +103,8 @@ def build_times(args: argparse.Namespace, names: list[str], tmp: pathlib.Path) -
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pycc", default=str(HERE.parent / "target/release/pycc"))
-    ap.add_argument("--runs", type=int, default=7)
+    ap.add_argument("--runs", type=int, default=11)
+    ap.add_argument("--json")
     ap.add_argument("names", nargs="*")
     ap.add_argument("--build-only", action="store_true")
     ap.add_argument("--max-build-seconds", type=float)
@@ -111,33 +119,51 @@ def main() -> int:
     print("| program | CPython | pycc-next | Rust | pycc vs CPython | pycc vs Rust |")
     print("|---|---|---|---|---|---|")
     failed = False
+    results = []
     try:
         for name in names:
             src = HERE / "py" / f"{name}.py"
-            t_py, ref, k_py = best([sys.executable, str(src)], args.runs)
+            cmds = {"cpython": [sys.executable, str(src)]}
             exe, log, _ = build(args.pycc, src, tmp, name)
             if exe is None:
-                print(f"| {name} | {t_py:.3f}s | compile error | | | |")
+                print(f"| {name} | | compile error | | | |")
                 print(log, file=sys.stderr)
                 failed = True
+                results.append({"program": name, "error": "compile error"})
                 continue
-            t_pc, out, k_pc = best([str(exe)], args.runs)
-            ok = out == ref
-            failed |= not ok
+            cmds["pycc"] = [str(exe)]
             rs = HERE / "rs" / f"{name}.rs"
-            t_rs, k_rs = None, None
             if rs.exists():
                 subprocess.run(["rustc", "-O", str(rs), "-o", str(tmp / f"{name}_rs")], check=True)
-                t_rs, _, k_rs = best([str(tmp / f"{name}_rs")], args.runs)
-            label = name
-            if k_py is not None and k_pc is not None and (t_rs is None or k_rs is not None):
-                label, t_py, t_pc, t_rs = f"{name} (kernel)", k_py, k_pc, k_rs
-            rs_col = f"{t_rs:.3f}s" if t_rs else "-"
-            vs_rs = f"{t_pc / t_rs:.2f}x slower" if t_rs else "-"
+                cmds["rust"] = [str(tmp / f"{name}_rs")]
+            walls = {side: [] for side in cmds}
+            kernels = {side: [] for side in cmds}
+            outs = {}
+            for order in stats.interleaved(args.runs, list(cmds)):
+                for side in order:
+                    seconds, out, kernel = once(cmds[side])
+                    walls[side].append(seconds)
+                    outs[side] = out
+                    if kernel is not None:
+                        kernels[side].append(kernel)
+            ok = outs["pycc"] == outs["cpython"]
+            failed |= not ok
+            kernel = all(len(kernels[side]) == args.runs for side in cmds)
+            times = {side: stats.summary(kernels[side] if kernel else walls[side]) for side in cmds}
+            label = f"{name} (kernel)" if kernel else name
+            py, pc, rust = times["cpython"], times["pycc"], times.get("rust")
+            rs_col = fmt(rust) if rust else "-"
+            vs_rs = f"{pc['median'] / rust['median']:.2f}x slower" if rust else "-"
             mark = "" if ok else " (OUTPUT MISMATCH)"
-            print(f"| {label} | {t_py:.3f}s | {t_pc:.3f}s{mark} | {rs_col} | **{t_py / t_pc:.1f}x faster** | {vs_rs} |")
+            print(f"| {label} | {fmt(py)} | {fmt(pc)}{mark} | {rs_col} | "
+                  f"**{py['median'] / pc['median']:.1f}x faster** | {vs_rs} |")
+            sys.stdout.flush()
+            results.append({"program": name, "kernel": kernel, "output_matches": ok,
+                            "runs": args.runs, "seconds": times})
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    if args.json:
+        pathlib.Path(args.json).write_text(json.dumps({"programs": results}, indent=1))
     return 1 if failed else 0
 
 
