@@ -835,11 +835,22 @@ static void **pycc_ext_inst_slot(PyObject *o)
     return (void **)PyObject_GetTypeData(o, (PyTypeObject *)payload);
 }
 
-/* The native instance `o` carries (borrowed), or NULL. */
+static void *pycc_ext_exc_bind(PyObject *self, void **slot);
+
+/* The native instance `o` carries (borrowed), or NULL. An object of an
+ * exception class with a native layout gets its instance here the first
+ * time (`pycc_ext_exc_bind` in `exc_templates.c`): CPython made it, with
+ * whichever `__new__` its class's MRO names. */
 static void *pycc_ext_inst_of(PyObject *o)
 {
     void **slot = pycc_ext_inst_slot(o);
-    return slot == NULL ? NULL : *slot;
+    if (slot == NULL) {
+        return NULL;
+    }
+    if (*slot == NULL && (PyType_GetFlags(Py_TYPE(o)) & Py_TPFLAGS_BASE_EXC_SUBCLASS) != 0) {
+        return pycc_ext_exc_bind(o, slot);
+    }
+    return *slot;
 }
 
 /*

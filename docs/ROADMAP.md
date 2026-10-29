@@ -1124,9 +1124,11 @@ Accept:
    statement, its methods compiled), and the attributes its methods store from
    parameters go in a native layout -- a hidden compiled class declares it, the
    statement's bases pass through `__pycc_exc_bases__`, which puts a PEP 697 template
-   over the exception base first (its objects' payload holds the native instance; its
-   `tp_new` runs the exception base's, then binds an unassigned instance; its
-   descriptors, `__reduce__`, deallocator, traverse and clear chain to the base's), and
+   over the exception base first (its objects' payload holds the native instance, bound
+   unassigned on first native use; it inherits the base's `tp_new`, so `__new__` resolves
+   along the MRO as for the source class; its descriptors, `__reduce__`, deallocator,
+   traverse and clear chain to the base's; a name any base binds at class level, such as
+   `OSError.errno`, stays CPython's), and
    each lifted method takes the object's native view as a second receiver
    (`tests/v010_exceptions.rs`). Across the modules of a package built whole, a
    syntactic scan tells which bases are another module's exception classes and

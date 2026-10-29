@@ -101,4 +101,20 @@ except* m.Owned as eg:
     print("group", [x.describe() for x in eg.exceptions])
 except* m.Coded as eg:
     print("group", [x.code for x in eg.exceptions])
+for n in (0, 2):
+    print(m.probe(n))
+ch = m.Checked(3)
+print(ch.show(), ch.origin, ch.code, ch.args, mro(m.Validated))
+try:
+    m.Checked(-1)
+except ValueError as err:
+    print("ValueError", err)
+v = m.Validated(4, "v")
+print(v.show(), v.origin, v.label, v.args, str(v))
+nf = m.NoFile(2, "/p")
+print(str(nf), nf.errno, nf.strerror, nf.args, nf.path, nf.show())
+nf.errno = 5
+print(str(nf), nf.show())
+back = pickle.loads(pickle.dumps(nf))
+print(type(back).__name__, str(back), back.errno, back.path)
 print(sys.getrefcount(e) > 0)

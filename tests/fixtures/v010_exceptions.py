@@ -59,6 +59,60 @@ class Tag(Owned):
     pass
 
 
+class Checked(Exception):
+    """A `__new__` of its own, which validates and sets an attribute: it runs,
+    as the MRO names it, before the layout's instance exists."""
+
+    def __new__(cls, code, *rest):
+        if code < 0:
+            raise ValueError("negative code")
+        self = super().__new__(cls, code, *rest)
+        self.origin = "new"
+        return self
+
+    def __init__(self, code: int) -> None:
+        super().__init__(code)
+        self.code = code
+
+    def show(self) -> str:
+        return self.origin + ":" + str(self.code)
+
+
+class Validated(Checked):
+    """A layout over one whose base defines `__new__`."""
+
+    def __init__(self, code: int, label: str) -> None:
+        super().__init__(code)
+        self.label = label
+
+    def show(self) -> str:
+        return super().show() + "/" + self.label
+
+
+class NoFile(OSError):
+    """`errno` is `OSError`'s descriptor, which `str()` reads: the store stays
+    CPython's; `path` is native."""
+
+    def __init__(self, code: int, path: str) -> None:
+        super().__init__(code, "no such thing")
+        self.errno = code
+        self.path = path
+
+    def show(self) -> str:
+        return self.path + ":" + str(self.errno)
+
+
+def probe(n: int) -> str:
+    try:
+        if n > 0:
+            raise NoFile(n, "/x")
+        raise Validated(n, "zero")
+    except NoFile as e:
+        return e.show() + " " + str(e)
+    except Checked as e:
+        return e.show()
+
+
 def fail(n: int) -> None:
     if n > 10:
         raise Deeper(n, "deep", n // 10)

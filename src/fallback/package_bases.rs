@@ -447,13 +447,24 @@ fn resolve_export(exports: &Exports, base: &str) -> Option<String> {
     Some(format!("{module}.{name}"))
 }
 
+/// v0.10 accept 5: an exception class of another module of the package, as
+/// a class of the entry deriving from it sees it (`exc_layout`).
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct PackageException {
+    /// Whether it or an ancestor may have a native layout: a class deriving
+    /// from it gets no layout of its own, since its instances must stay its
+    /// base's.
+    pub(super) may_layout: bool,
+    /// The names bound at class level along its MRO (`None`: a class in it
+    /// is of unknown body), which a layout over it leaves to CPython.
+    pub(super) names: Option<BTreeSet<String>>,
+}
+
 /// v0.10 accept 5: the names `entry` binds to an exception class of another
 /// module of its package (`from .common import PystacheError`), each with
-/// whether that class or an ancestor may have a native layout
-/// (`exc_layout`): an exception class of `entry` deriving from one that may
-/// gets no layout of its own, since its instances must stay its base's.
+/// what a class of `entry` deriving from it sees ([`PackageException`]).
 /// Syntactic, like the rest of this module.
-pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, bool> {
+pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, PackageException> {
     let mut out = BTreeMap::new();
     let Some(package) = Package::read(entry) else {
         return out;
@@ -465,14 +476,13 @@ pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, bool> {
         scan.body(&module.body);
         scans.insert(qual.as_str(), (scan, module));
     }
-    // Whether `module.name` is an exception class, and whether its chain
-    // may have a layout (`None`: not an exception class).
+    // What `module.name` is as an exception class (`None`: none).
     fn classify(
         scans: &BTreeMap<&str, (Scan<'_>, &pycc_ast::ModModule)>,
         exports: &Exports,
         dotted: &str,
         depth: usize,
-    ) -> Option<bool> {
+    ) -> Option<PackageException> {
         let dotted = resolve_export(exports, dotted)?;
         let (module, name) = dotted.rsplit_once('.')?;
         if depth > 8 {
@@ -484,25 +494,42 @@ pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, bool> {
             _ => None,
         })?;
         let mut exception = false;
-        let mut may_layout = !super::exc_layout::fields_of(class).is_empty();
+        // Conservative: a store of a name a base binds is no layout
+        // attribute, which only makes `may_layout` true more often.
+        let mut may_layout =
+            !super::exc_layout::fields_of(class, &BTreeSet::new()).is_empty();
+        let mut names = super::exc_layout::class_names(class);
         for base in class.bases() {
             if let Expr::Name(base) = base
                 && pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base.id.as_str())
                 && !scan.bound.contains_key(base.id.as_str())
             {
                 exception = true;
+                if let Some(names) = &mut names {
+                    names.extend(
+                        super::exc_names::builtin_exception_names(base.id.as_str())
+                            .map(str::to_string),
+                    );
+                }
                 continue;
             }
             match scan.dotted(base).and_then(|b| classify(scans, exports, &b, depth + 1)) {
-                Some(layout) => {
+                Some(base) => {
                     exception = true;
-                    may_layout |= layout;
+                    may_layout |= base.may_layout;
+                    match (&mut names, base.names) {
+                        (Some(names), Some(more)) => names.extend(more),
+                        _ => names = None,
+                    }
                 }
                 // A base of unknown kind may be a layout class.
-                None => may_layout = true,
+                None => {
+                    may_layout = true;
+                    names = None;
+                }
             }
         }
-        exception.then_some(may_layout)
+        exception.then_some(PackageException { may_layout, names })
     }
     let Some((scan, _)) = scans.get(package.target.as_str()) else {
         return out;
@@ -511,8 +538,8 @@ pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, bool> {
         if dotted.starts_with(&format!("{}.", package.target)) {
             continue;
         }
-        if let Some(layout) = classify(&scans, &exports, dotted, 0) {
-            out.insert(local.clone(), layout);
+        if let Some(class) = classify(&scans, &exports, dotted, 0) {
+            out.insert(local.clone(), class);
         }
     }
     out

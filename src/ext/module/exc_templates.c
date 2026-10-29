@@ -8,12 +8,17 @@
  * exception base (a negative `basicsize`: its objects carry one more word,
  * the native instance pointer, wherever CPython puts it) -- or, over a base
  * whose objects already carry one, a type adding nothing to the layout. Its
- * slots: a `tp_new` that makes the object with the exception base's own
- * `tp_new` (so `args` is set as CPython sets it) and gives it an instance
- * of the class's layout with every attribute unassigned; the layout's field
- * descriptors; a `__reduce__` adding the native attributes to what the
- * bases' answer; and the deallocator, traverse and clear that release the
- * instance and chain to the exception base's.
+ * slots: the layout's field descriptors; a `__reduce__` adding the native
+ * attributes to what the bases' answer; and the deallocator, traverse and
+ * clear that release the instance and chain to the exception base's.
+ *
+ * It has no `tp_new` of its own and no `__new__` in its dictionary: it
+ * inherits the exception base's, so CPython looks `__new__` up along the
+ * class's MRO past it, as for the source class (a Python base's own
+ * `__new__` runs), and `BaseException.__new__`'s safety check finds the
+ * class's `tp_new` to be the static base's. An object gets its instance of
+ * the class's layout, every attribute unassigned, when native code first
+ * asks for it (`pycc_ext_exc_bind`, from `pycc_ext_inst_of`).
  *
  * The object and its instance hold each other, as a Python subclass's
  * object of a compiled class and its instance do (`pycc_ext_carrier_bind`):
@@ -68,37 +73,21 @@ static const PyccExtExcLayout *pycc_ext_exc_layout_for(PyTypeObject *tp)
     return (const PyccExtExcLayout *)PyCapsule_GetPointer(capsule, PYCC_EXC_LAYOUT_CAPSULE);
 }
 
-static PyObject *pycc_ext_exc_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+/* The instance of the layout of `self`'s class, every attribute unassigned,
+ * stored in `self`'s payload `slot` (still empty) and holding `self`
+ * strongly (borrowed; NULL when the class has no layout). */
+static void *pycc_ext_exc_bind(PyObject *self, void **slot)
 {
-    PyTypeObject *base = pycc_ext_exc_static_base(type);
-    newfunc make = (newfunc)PyType_GetSlot(base, Py_tp_new);
-    const PyccExtExcLayout *layout;
-    PyObject *self;
-    void **slot;
+    const PyccExtExcLayout *layout = pycc_ext_exc_layout_for(Py_TYPE(self));
     void *inst;
-    if (make == NULL) {
-        PyErr_Format(PyExc_TypeError, "cannot create '%s' instances", "exception");
+    if (layout == NULL) {
         return NULL;
-    }
-    self = make(type, args, kwds);
-    if (self == NULL) {
-        return NULL;
-    }
-    layout = pycc_ext_exc_layout_for(Py_TYPE(self));
-    slot = pycc_ext_inst_slot(self);
-    if (layout == NULL || slot == NULL) {
-        Py_DECREF(self);
-        PyErr_SetString(PyExc_SystemError, "pycc: an exception layout's object has no payload");
-        return NULL;
-    }
-    if (*slot != NULL) {
-        return self;
     }
     inst = pycc_ext_instance_of_record(layout->slot_count, layout->record);
     *slot = inst;
     Py_INCREF(self);
     pycc_rt_ext_instance_set_carrier_strong(inst, self);
-    return self;
+    return inst;
 }
 
 static void pycc_ext_exc_dealloc(PyObject *self)
@@ -108,12 +97,17 @@ static void pycc_ext_exc_dealloc(PyObject *self)
         (destructor)PyType_GetSlot(pycc_ext_exc_static_base(tp), Py_tp_dealloc);
     void **slot = pycc_ext_inst_slot(self);
     void *inst = slot == NULL ? NULL : *slot;
-    PyObject_GC_UnTrack(self);
     if (inst != NULL) {
         if (pycc_rt_ext_instance_carrier(inst) == (void *)self) {
             pycc_rt_ext_instance_set_carrier(inst, NULL);
         }
         *slot = NULL;
+    }
+    /* The base's deallocator untracks the object, `OSError`'s without a
+     * check (`_PyObject_GC_UNTRACK`): it must be tracked, as
+     * `subtype_dealloc` leaves it before calling a collected base's. */
+    if (!PyObject_GC_IsTracked(self)) {
+        PyObject_GC_Track(self);
     }
     base_dealloc(self);
     Py_DECREF(tp);
@@ -126,7 +120,8 @@ static int pycc_ext_exc_traverse(PyObject *self, visitproc visit, void *arg)
 {
     traverseproc base_traverse =
         (traverseproc)PyType_GetSlot(pycc_ext_exc_static_base(Py_TYPE(self)), Py_tp_traverse);
-    void *inst = pycc_ext_inst_of(self);
+    void **slot = pycc_ext_inst_slot(self);
+    void *inst = slot == NULL ? NULL : *slot;
     if (inst != NULL && pycc_rt_ext_instance_carrier_is_strong(inst)
         && pycc_rt_ext_instance_carrier(inst) == (void *)self
         && pycc_rt_ext_instance_refcount(inst) == 1) {
@@ -139,7 +134,8 @@ static int pycc_ext_exc_clear(PyObject *self)
 {
     inquiry base_clear =
         (inquiry)PyType_GetSlot(pycc_ext_exc_static_base(Py_TYPE(self)), Py_tp_clear);
-    void *inst = pycc_ext_inst_of(self);
+    void **slot = pycc_ext_inst_slot(self);
+    void *inst = slot == NULL ? NULL : *slot;
     if (inst != NULL && pycc_rt_ext_instance_carrier_is_strong(inst)
         && pycc_rt_ext_instance_carrier(inst) == (void *)self) {
         pycc_rt_ext_instance_set_carrier(inst, self);
@@ -304,18 +300,17 @@ static PyObject *pycc_ext_exc_template(const PyccExtExcLayout *layout, PyObject 
             getsets[kept++] = layout->getsets[i];
         }
     }
-    slots[0].slot = Py_tp_new;
-    slots[0].pfunc = (void *)pycc_ext_exc_new;
-    slots[1].slot = Py_tp_dealloc;
-    slots[1].pfunc = (void *)pycc_ext_exc_dealloc;
-    slots[2].slot = Py_tp_traverse;
-    slots[2].pfunc = (void *)pycc_ext_exc_traverse;
-    slots[3].slot = Py_tp_clear;
-    slots[3].pfunc = (void *)pycc_ext_exc_clear;
-    slots[4].slot = Py_tp_getset;
-    slots[4].pfunc = (void *)getsets;
-    slots[5].slot = Py_tp_methods;
-    slots[5].pfunc = (void *)pycc_ext_exc_methods;
+    /* No `Py_tp_new`: the base's is inherited (the header comment). */
+    slots[0].slot = Py_tp_dealloc;
+    slots[0].pfunc = (void *)pycc_ext_exc_dealloc;
+    slots[1].slot = Py_tp_traverse;
+    slots[1].pfunc = (void *)pycc_ext_exc_traverse;
+    slots[2].slot = Py_tp_clear;
+    slots[2].pfunc = (void *)pycc_ext_exc_clear;
+    slots[3].slot = Py_tp_getset;
+    slots[3].pfunc = (void *)getsets;
+    slots[4].slot = Py_tp_methods;
+    slots[4].pfunc = (void *)pycc_ext_exc_methods;
     /* Over a base whose objects already carry an instance pointer (a
      * layout class's), the template adds nothing: the instance it gives
      * them is of its own, larger layout, in the same word. */

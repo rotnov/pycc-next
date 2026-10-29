@@ -47,6 +47,7 @@ mod builtins;
 mod cascade;
 mod driver;
 mod exc_layout;
+mod exc_names;
 mod exceptions;
 mod function_values;
 mod lift;
@@ -241,8 +242,9 @@ pub(crate) struct Plan {
     package_bases: BTreeMap<String, String>,
     /// v0.10: the names the entry binds to an exception class of another
     /// module of its package, and whether that class's chain may have a
-    /// native layout (`package_bases::exceptions_from_package`).
-    package_exceptions: BTreeMap<String, bool>,
+    /// native layout, and the names its MRO binds at class level
+    /// (`package_bases::exceptions_from_package`).
+    package_exceptions: BTreeMap<String, package_bases::PackageException>,
     /// The nested `def`s and `lambda`s of compiled functions that CPython
     /// runs, their enclosing functions compiled (`nested`).
     nested: Vec<nested::Nested>,

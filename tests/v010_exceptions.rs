@@ -105,7 +105,7 @@ fn the_layout_is_native() {
         .expect("pycc should spawn");
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
-    for function in ["fail", "run", "churn"] {
+    for function in ["fail", "run", "churn", "probe"] {
         assert!(!report.contains(&format!("function `{function}`")), "{report}");
     }
     std::fs::remove_file(&source).expect("import the artifact");
@@ -114,12 +114,14 @@ fn the_layout_is_native() {
         "import m\ne = m.Deeper(1, 'w', 2)\n\
          print('code' in e.__dict__, 'depth' in e.__dict__, \
          [c.__name__ for c in type(e).__mro__ if c.__module__ == 'pycc'])\n\
-         e.code = 'x'\nprint(repr(e.code), e.__dict__)\n",
+         e.code = 'x'\nprint(repr(e.code), e.__dict__)\n\
+         f = m.NoFile(2, 'p')\nprint('path' in f.__dict__, str(f), f.errno)\n",
     );
     assert_eq!(
         text(&out.stdout),
         "False False ['exception_layout', 'exception_layout']\n\
-         'x' {}\n",
+         'x' {}\n\
+         False [Errno 2] no such thing 2\n",
         "{}",
         text(&out.stderr)
     );

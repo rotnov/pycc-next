@@ -26,9 +26,11 @@
 //!   `str(self)`) stays the CPython object.
 //!
 //! An attribute is in the layout only when every store of it the class
-//! makes is of that form, it is no class attribute and its name is not
-//! private; a class defining `__setattr__`, `__getattribute__`,
-//! `__delattr__` or `__slots__` gets no layout.
+//! makes is of that form, no class along its MRO binds the name at class
+//! level (`OSError.errno`, a base's property: `exc_names` for the builtin
+//! classes) and the name is neither private nor a dunder; a class defining
+//! `__setattr__`, `__getattribute__`, `__delattr__` or `__slots__`, or with
+//! a class of unknown body in its MRO, gets no layout.
 
 use super::*;
 use pycc_ast::{Expr, StmtClassDef};
@@ -81,6 +83,9 @@ impl Plan {
     pub(super) fn exc_layouts(&self) -> Vec<Layout> {
         // The module's exception classes so far, and what each carries.
         let mut states: BTreeMap<String, State> = BTreeMap::new();
+        // Every top-level class so far -> the names bound at class level
+        // along its MRO, `None` when a class in it is of unknown body.
+        let mut chains: BTreeMap<String, Option<BTreeSet<String>>> = BTreeMap::new();
         let mut layouts: Vec<Layout> = Vec::new();
         for index in 0..self.top {
             let Kind::Class(name) = &self.stmts[index].kind else {
@@ -88,20 +93,43 @@ impl Plan {
             };
             let range = &self.stmts[index].range;
             let Some(class) = self.class_source(range) else {
+                chains.insert(name.clone(), None);
                 continue;
             };
             // The state each exception base gives: a builtin one none, one
             // of this module its own, another module's `Blocked` when its
             // chain may have a layout. A base of any other kind is no
-            // exception class's.
+            // exception class's. Each base also gives the names its MRO
+            // binds, which the layout leaves to CPython.
             let mut exception = false;
             let mut inherited: Vec<usize> = Vec::new();
             let mut blocked = false;
+            let mut bound: Option<BTreeSet<String>> = class_names(&class);
             for base in class.bases() {
                 let Expr::Name(base) = base else {
+                    bound = None;
                     continue;
                 };
                 let base = base.id.as_str();
+                let names: Option<BTreeSet<String>> = if let Some(chain) = chains.get(base) {
+                    chain.clone()
+                } else if let Some(package) = self.package_exceptions.get(base) {
+                    package.names.clone()
+                } else if pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base) {
+                    Some(
+                        exc_names::builtin_exception_names(base)
+                            .map(str::to_string)
+                            .collect(),
+                    )
+                } else if base == "object" {
+                    Some(BTreeSet::new())
+                } else {
+                    None
+                };
+                match (&mut bound, names) {
+                    (Some(bound), Some(names)) => bound.extend(names),
+                    _ => bound = None,
+                }
                 if let Some(state) = states.get(base) {
                     exception = true;
                     match state {
@@ -109,13 +137,14 @@ impl Plan {
                         State::Layout(at) => inherited.push(*at),
                         State::Blocked => blocked = true,
                     }
-                } else if let Some(may_layout) = self.package_exceptions.get(base) {
+                } else if let Some(package) = self.package_exceptions.get(base) {
                     exception = true;
-                    blocked |= *may_layout;
+                    blocked |= package.may_layout;
                 } else if pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base) {
                     exception = true;
                 }
             }
+            chains.insert(name.clone(), bound.clone());
             if !exception {
                 continue;
             }
@@ -125,8 +154,13 @@ impl Plan {
             } else {
                 let base = inherited.first().copied();
                 let fields = base.map(|at| layouts[at].fields.clone()).unwrap_or_default();
-                let own: Vec<(String, String)> = if self.is_split(index) {
-                    fields_of(&class)
+                // A class whose MRO holds a class of unknown body gets no
+                // layout of its own: a binding there could take its
+                // attributes' stores.
+                let own: Vec<(String, String)> = if let (true, Some(bound)) =
+                    (self.is_split(index), &bound)
+                {
+                    fields_of(&class, bound)
                         .into_iter()
                         .filter(|(field, _)| !fields.contains(field))
                         .collect()
@@ -184,10 +218,19 @@ impl Plan {
                 let Kind::Class(class) = &self.stmts[layout.owner].kind else {
                     return false;
                 };
+                // Not `__new__`, `__init_subclass__` or `__class_getitem__`:
+                // CPython makes them static or class methods, so their first
+                // parameter is no instance.
                 lift.qualname
                     .strip_prefix(class.as_str())
                     .and_then(|rest| rest.strip_prefix('.'))
-                    .is_some_and(|method| !method.contains('.'))
+                    .is_some_and(|method| {
+                        !method.contains('.')
+                            && !matches!(
+                                method,
+                                "__new__" | "__init_subclass__" | "__class_getitem__"
+                            )
+                    })
             })
     }
 
@@ -275,10 +318,12 @@ impl Plan {
 /// The scalar annotations a layout attribute may take.
 const SCALARS: [&str; 4] = ["int", "float", "str", "bool"];
 
-/// The attributes of exception class `class` that go in its layout, with
-/// their types, in first-store order (the module doc's rule).
-pub(super) fn fields_of(class: &StmtClassDef) -> Vec<(String, String)> {
-    let mut excluded: BTreeSet<String> = BTreeSet::new();
+/// The names class `class` binds in its own body (its methods, nested
+/// classes and class attributes), or `None` when it defines `__setattr__`,
+/// `__getattribute__`, `__delattr__` or `__slots__`: its attribute access is
+/// its own, and neither it nor a subclass gets a layout.
+pub(super) fn class_names(class: &StmtClassDef) -> Option<BTreeSet<String>> {
+    let mut names: BTreeSet<String> = BTreeSet::new();
     for stmt in &class.body {
         match stmt {
             Stmt::FunctionDef(def) => {
@@ -286,29 +331,47 @@ pub(super) fn fields_of(class: &StmtClassDef) -> Vec<(String, String)> {
                     def.name.as_str(),
                     "__setattr__" | "__getattribute__" | "__delattr__"
                 ) {
-                    return Vec::new();
+                    return None;
                 }
-                excluded.insert(def.name.as_str().to_string());
+                names.insert(def.name.as_str().to_string());
             }
             Stmt::ClassDef(inner) => {
-                excluded.insert(inner.name.as_str().to_string());
+                names.insert(inner.name.as_str().to_string());
             }
             _ => {
                 let bound = names::bound_names(std::slice::from_ref(stmt));
                 if bound.contains("__slots__") {
-                    return Vec::new();
+                    return None;
                 }
-                excluded.extend(bound);
+                names.extend(bound);
             }
         }
     }
+    Some(names)
+}
+
+/// The attributes of exception class `class` that go in its layout, with
+/// their types, in first-store order (the module doc's rule). `inherited`
+/// holds every name its bases bind at class level along its MRO (a
+/// builtin's `errno`, a base's property): a store of one goes through
+/// CPython's binding, so it stays on the CPython object.
+pub(super) fn fields_of(
+    class: &StmtClassDef,
+    inherited: &BTreeSet<String>,
+) -> Vec<(String, String)> {
+    let Some(excluded) = class_names(class) else {
+        return Vec::new();
+    };
     let mut found: Vec<(String, String)> = Vec::new();
     let mut poisoned: BTreeSet<String> = BTreeSet::new();
     for stmt in &class.body {
         let Stmt::FunctionDef(def) = stmt else {
             continue;
         };
-        let receiverless = def.decorator_list.iter().any(|decorator| {
+        let receiverless = matches!(
+            def.name.as_str(),
+            "__new__" | "__init_subclass__" | "__class_getitem__"
+        ) || def.decorator_list.iter().any(|decorator| {
             matches!(&decorator.expression, Expr::Name(n)
                 if matches!(n.id.as_str(), "staticmethod" | "classmethod"))
         });
@@ -351,7 +414,10 @@ pub(super) fn fields_of(class: &StmtClassDef) -> Vec<(String, String)> {
     for (field, ty) in found {
         if poisoned.contains(&field)
             || excluded.contains(&field)
-            || (field.starts_with("__") && !field.ends_with("__"))
+            || inherited.contains(&field)
+            // A private name (CPython mangles it) or a dunder one (the
+            // object's own machinery: `__notes__`, `__cause__`, ...).
+            || field.starts_with("__")
             || out.iter().any(|(seen, _)| *seen == field)
         {
             continue;
