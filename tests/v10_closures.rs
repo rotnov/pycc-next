@@ -208,3 +208,12 @@ fn a_key_stop_iteration_propagates_as_it_is() {
     native("v10_minmax_stop", &["--non-strict"]);
     ext("v10_minmax_stop", &[]);
 }
+
+/// A `min`/`max` key lambda reading a local rebound later compiles in
+/// strict mode and reads the value the local holds during the call.
+#[test]
+fn a_min_max_key_reads_a_later_rebound_local_during_the_call() {
+    native("v10_minmax_rebound_capture", &[]);
+    native("v10_minmax_rebound_capture", &["--non-strict"]);
+    ext("v10_minmax_rebound_capture", &[]);
+}
