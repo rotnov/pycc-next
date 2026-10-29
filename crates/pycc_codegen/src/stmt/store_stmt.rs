@@ -38,6 +38,21 @@ pub(crate) fn emit_expr_stmt_stmt<'ctx>(
     else {
         unreachable!()
     };
+    // A dispatcher's vtable call of a method returning `None` (v0.10).
+    if callee == pycc_mir::dispatch::INSTANCE_VT_CALL {
+        crate::vtable_call::emit_call(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            args,
+            &pycc_mir::Ty::None,
+        );
+        guard_statement_effects(context, builder, rt);
+        return Ok(());
+    }
     let user_function = user_functions
         .get(callee.as_str())
         .ok_or_else(|| format!("pycc_codegen v0.1: call to undefined function `{callee}`"))?;

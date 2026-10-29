@@ -89,7 +89,7 @@ fn the_instance_helpers_are_declared_above_the_include_and_defined_below_it() {
     // uninitialized carrier with its own message.
     for needle in [
         "int carrier = pycc_ext_is_carrier_type(Py_TYPE(obj));\n",
-        "            if (m->carrier_class_isinstance(cls, len, class_name)) {\n",
+        "            if (pycc_ext_record_isinstance(m, cls, len, class_name)) {\n",
         "                pycc_rt_instance_incref(inst);\n                *out = inst;\n                return 0;\n",
         "is uninitialized (its __init__ never \"\n                     \"ran)\"",
         "\"%s() argument %zd must be %s.%s, not %U\"",

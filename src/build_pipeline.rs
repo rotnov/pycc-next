@@ -158,11 +158,18 @@ pub(crate) fn try_build(
     // An embedded build's sidecar is assembled here, before codegen and
     // before the link, so every embedded-only line runs ahead of the shared
     // link site below (§4.6 of the #1028 plan).
+    // v0.10: the members subclasses in the package's other modules may
+    // override, which this member's calls dispatch on the receiver's class
+    // record (`pycc_mir::dispatch`).
+    pycc_mir::dispatch::set_foreign_overrides(match member {
+        Some(_) => crate::fallback::overridden_in_package(path),
+        None => Default::default(),
+    });
     let mir = crate::timing::span("mir", || pycc_mir::build(&typed_hir));
     // A member publishes its interface as soon as its MIR exists, so the
     // members calling it can start while it is still in codegen.
     if let (Some(member), Some(plan)) = (member, &ext_plan) {
-        package_link::write_interface(out, obj_path, member, &mir, plan)?;
+        package_link::write_interface(out, obj_path, member, &mir, plan, &typed_hir)?;
         if crate::fallback::reporting() {
             crate::package_build::report_siblings(&typed_hir);
         }

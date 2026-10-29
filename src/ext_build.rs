@@ -537,6 +537,14 @@ pub(crate) use constructors::*;
 mod exports;
 pub(crate) use exports::*;
 mod defaults;
+
+/// Whether the compiled function `name` (a method, its receiver first) has
+/// a parameter with a default.
+pub(crate) fn has_defaults(module: &HirModule, name: &str) -> bool {
+    defaults::carried_defaults(module, name, true)
+        .iter()
+        .any(Option::is_some)
+}
 pub(crate) use carrier::*;
 mod export_name;
 mod exports_inc;

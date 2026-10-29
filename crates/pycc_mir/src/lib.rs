@@ -481,6 +481,9 @@ pub fn build(hir: &HirModule) -> MirModule {
     splice_foreign_imports(&mut items, &hir.imports);
     // v0.9: the run-time dispatchers the method calls above routed to,
     // first, so they are bound before any code of the module runs.
+    // v0.10: and one for each method a subclass another module of the
+    // package compiled may override, which that module calls.
+    dispatch::route_planned(&scopes, &classes);
     items.splice(0..0, dispatch::items());
     let mut module = MirModule {
         items,

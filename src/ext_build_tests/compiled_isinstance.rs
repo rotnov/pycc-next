@@ -151,7 +151,7 @@ fn the_shim_answers_a_carrier_before_the_published_family() {
         .unwrap();
     let body = &shim[definition..];
     let carrier = body
-        .find("return m->carrier_class_isinstance(cls, len, name);")
+        .find("return pycc_ext_record_isinstance(m, cls, len, name);")
         .unwrap();
     let family = body
         .find("return m->compiled_class_isinstance(o, name);")

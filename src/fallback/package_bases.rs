@@ -20,8 +20,34 @@ use std::path::{Path, PathBuf};
 /// (`import pkg.m` then `pkg.m.C`, `from . import m` then `m.C`) -- each
 /// with the first subclass found (`pkg.n.D`), for the report.
 pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
+    let mut found = BTreeMap::new();
+    for (name, subclass, _) in package_subclasses(entry) {
+        found.entry(name).or_insert(subclass);
+    }
+    found
+}
+
+/// v0.10: the names (methods and class attributes) that the classes of
+/// other modules of `entry`'s package deriving from each class of `entry`
+/// -- directly or through other such classes, at any depth -- define in
+/// their bodies: the members a compiled call on an instance of the class
+/// must dispatch, since the instance may be one of those subclasses'
+/// (`pycc_mir::dispatch`'s foreign arm). Syntactic: a name it lists that
+/// no subclass overrides only costs that call a test.
+pub(crate) fn overridden_in_package(entry: &Path) -> BTreeMap<String, BTreeSet<String>> {
+    let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (name, _, defines) in package_subclasses(entry) {
+        out.entry(name).or_default().extend(defines);
+    }
+    out
+}
+
+/// Each class of `entry` that a class statement of another module of its
+/// package lists as a base, with that subclass (`pkg.n.D`) and the names
+/// the subclass and its own subclasses (in any module but `entry`) define.
+fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>)> {
     let Some(package) = Package::read(entry) else {
-        return BTreeMap::new();
+        return Vec::new();
     };
     let (entry, target, parsed) = (&package.entry, &package.target, &package.parsed);
     // Each module's module-level re-exports: `(module, name)` -> the
@@ -44,31 +70,67 @@ pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
             }
         }
     }
-    let mut found = BTreeMap::new();
+    // Every class statement of the other modules: its resolved bases (as
+    // `module.name`) and the names its body defines.
+    let resolve = |base: &str| -> Option<String> {
+        let (module, name) = base.rsplit_once('.')?;
+        let (mut module, mut name) = (module.to_string(), name.to_string());
+        // Through a few re-exports at most.
+        for _ in 0..4 {
+            match exports.get(&(module.clone(), name.clone())) {
+                Some((m, n)) if (m, n) != (&module, &name) => {
+                    module = m.clone();
+                    name = n.clone();
+                }
+                _ => break,
+            }
+        }
+        Some(format!("{module}.{name}"))
+    };
+    let mut classes: Vec<(String, Vec<String>, BTreeSet<String>)> = Vec::new();
     for (file, qual, is_package, module) in parsed {
         if file == entry {
             continue;
         }
         let mut scan = Scan::new(qual, *is_package);
         scan.body(&module.body);
-        for (base, subclass) in scan.bases {
-            let Some((module, name)) = base.rsplit_once('.') else {
+        let mut bases: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (base, subclass) in &scan.bases {
+            if let Some(base) = resolve(base) {
+                bases.entry(subclass.clone()).or_default().push(base);
+            }
+        }
+        for (class, defines) in scan.defines {
+            let bases = bases.remove(&class).unwrap_or_default();
+            classes.push((class, bases, defines));
+        }
+    }
+    let prefix = format!("{target}.");
+    let mut found = Vec::new();
+    for (class, bases, defines) in &classes {
+        for base in bases {
+            let Some(name) = base.strip_prefix(&prefix).filter(|n| !n.contains('.')) else {
                 continue;
             };
-            let (mut module, mut name) = (module.to_string(), name.to_string());
-            // Through a few re-exports at most.
-            for _ in 0..4 {
-                match exports.get(&(module.clone(), name.clone())) {
-                    Some((m, n)) if (m, n) != (&module, &name) => {
-                        module = m.clone();
-                        name = n.clone();
+            // The subclass's names, and those of every class deriving from
+            // it, to a fixpoint.
+            let mut reached: BTreeSet<&str> = BTreeSet::from([class.as_str()]);
+            let mut names = defines.clone();
+            loop {
+                let before = reached.len();
+                for (other, other_bases, other_defines) in &classes {
+                    if !reached.contains(other.as_str())
+                        && other_bases.iter().any(|b| reached.contains(b.as_str()))
+                    {
+                        reached.insert(other);
+                        names.extend(other_defines.iter().cloned());
                     }
-                    _ => break,
+                }
+                if reached.len() == before {
+                    break;
                 }
             }
-            if module == *target {
-                found.entry(name).or_insert(subclass);
-            }
+            found.push((name.to_string(), class.clone(), names));
         }
     }
     found
@@ -225,6 +287,9 @@ struct Scan<'a> {
     /// Every base of a class statement as a dotted name, with the class
     /// listing it.
     bases: Vec<(String, String)>,
+    /// The names each class statement's body binds (its methods and class
+    /// attributes), by the class's dotted name.
+    defines: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl<'a> Scan<'a> {
@@ -234,6 +299,7 @@ impl<'a> Scan<'a> {
             is_package,
             bound: BTreeMap::new(),
             bases: Vec::new(),
+            defines: BTreeMap::new(),
         }
     }
 
@@ -315,6 +381,30 @@ impl<'a> Scan<'a> {
                             .push((dotted, format!("{}.{}", self.qual, class.name.as_str())));
                     }
                 }
+                let defined = self
+                    .defines
+                    .entry(format!("{}.{}", self.qual, class.name.as_str()))
+                    .or_default();
+                for member in &class.body {
+                    match member {
+                        Stmt::FunctionDef(def) => {
+                            defined.insert(def.name.to_string());
+                        }
+                        Stmt::Assign(assign) => {
+                            for target in &assign.targets {
+                                if let Expr::Name(name) = target {
+                                    defined.insert(name.id.to_string());
+                                }
+                            }
+                        }
+                        Stmt::AnnAssign(assign) => {
+                            if let Expr::Name(name) = &*assign.target {
+                                defined.insert(name.id.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 self.body(&class.body);
             }
             Stmt::FunctionDef(def) => self.body(&def.body),
@@ -346,3 +436,7 @@ impl<'a> Scan<'a> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "package_bases_tests.rs"]
+mod tests;

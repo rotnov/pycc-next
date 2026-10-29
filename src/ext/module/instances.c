@@ -601,6 +601,34 @@ static int pycc_ext_register_module_in(PyccExtModule *m)
     return 0;
 }
 
+/*
+ * v0.10: whether an instance whose class record's descriptor is `cls`/`len`
+ * (`pycc_rt_ext_instance_class`; the record's header precedes it,
+ * `pycc_codegen`'s `class_record`) is an instance of the class `name` of
+ * `m`, by `m`'s generated table -- and, for a class another module of the
+ * package compiled over one of `m`'s classes (its record carries a vtable),
+ * by its bases' records, the nearest of `m`'s answering. Same 1/0 contract
+ * as the table.
+ */
+static int pycc_ext_record_isinstance(PyccExtModule *m, const unsigned char *cls, size_t len,
+                                      const char *name)
+{
+    int answer = m->carrier_class_isinstance(cls, len, name);
+    while (answer == 0 && cls != NULL && len != 0) {
+        const void *const *header = (const void *const *)(cls - 32);
+        const unsigned char *base = (const unsigned char *)header[0];
+        const unsigned char *end;
+        if (header[1] == NULL || base == NULL) {
+            break;
+        }
+        len = (size_t)((const long long *)(base - 32))[3];
+        end = (const unsigned char *)memchr(base, 0, len);
+        cls = base;
+        answer = m->carrier_class_isinstance(cls, end != NULL ? (size_t)(end - base) : len, name);
+    }
+    return answer;
+}
+
 /* Whether `m` compiles the class `name`/`len` (a layout descriptor's, not
  * NUL-terminated): its generated carrier table holds it. */
 static int pycc_ext_owns_class(PyccExtModule *m, const unsigned char *name, size_t len)
@@ -749,7 +777,7 @@ static int pycc_ext_obj_isinstance_compiled_in(PyccExtModule *m, PyObject *o, co
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
-            return m->carrier_class_isinstance(cls, len, name);
+            return pycc_ext_record_isinstance(m, cls, len, name);
         }
     }
     return m->compiled_class_isinstance(o, name);
@@ -787,7 +815,7 @@ static int pycc_ext_unpack_instance_in(PyccExtModule *m, PyObject *obj, const ch
         inst = ((PyccExtInstance *)obj)->inst;
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
-            if (m->carrier_class_isinstance(cls, len, class_name)) {
+            if (pycc_ext_record_isinstance(m, cls, len, class_name)) {
                 /* A reference of its own for the receiver: a parameter
                  * slot or the narrowed read owns what it is given. */
                 pycc_rt_instance_incref(inst);
@@ -857,7 +885,7 @@ static int pycc_ext_obj_unbox_instance_in(PyccExtModule *m, PyObject *o, const c
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
-            if (m->carrier_class_isinstance(cls, len, class_name)) {
+            if (pycc_ext_record_isinstance(m, cls, len, class_name)) {
                 /* A reference of its own for the receiver: a parameter
                  * slot or the narrowed read owns what it is given. */
                 pycc_rt_instance_incref(inst);
@@ -908,7 +936,7 @@ static int pycc_ext_obj_coerce_instance_in(PyccExtModule *m, PyObject *o, const 
         inst = ((PyccExtInstance *)o)->inst;
         if (inst != NULL) {
             cls = pycc_rt_ext_instance_class(inst, &len);
-            if (m->carrier_class_isinstance(cls, len, class_name)) {
+            if (pycc_ext_record_isinstance(m, cls, len, class_name)) {
                 pycc_rt_instance_incref(inst);
                 *out = inst;
                 return 0;
@@ -954,7 +982,7 @@ static int pycc_ext_slot_operand_is_in(PyccExtModule *m, PyObject *other, const 
         return 1;
     }
     cls = pycc_rt_ext_instance_class(inst, &len);
-    return m->carrier_class_isinstance(cls, len, class_name);
+    return pycc_ext_record_isinstance(m, cls, len, class_name);
 }
 
 /*

@@ -334,7 +334,17 @@ impl<'a> Rewriter<'_> {
                     self.visit_decorator(decorator);
                 }
                 if let Some(arguments) = &class.arguments {
-                    self.visit_arguments(arguments);
+                    // v0.10: a base naming a class another module of the
+                    // package compiled, read natively, stays a bare name:
+                    // `pycc_hir` resolves it to its sibling class.
+                    for base in arguments.args.iter() {
+                        if !crate::package_build::sibling_base(base) {
+                            self.visit_expr(base);
+                        }
+                    }
+                    for keyword in arguments.keywords.iter() {
+                        self.visit_expr(&keyword.value);
+                    }
                 }
                 self.scopes.push(Scope {
                     kind: ScopeKind::Class,

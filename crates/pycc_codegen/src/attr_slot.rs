@@ -43,12 +43,23 @@ pub(crate) fn instance_layout_constant<'ctx>(
     // in a Python identifier, so the mapping keeps distinct descriptors
     // distinct.
     let global_name = format!("pycc_instance_layout.{}", layout.replace('\0', "/"));
-    if let Some(existing) = module.get_global(&global_name) {
-        return (existing.as_pointer_value(), len);
-    }
-    let (ptr, _) =
-        crate::exception_value::emit_str_bytes_constant(context, module, &layout, &global_name);
-    (ptr, len)
+    // A record (`crate::class_record`) of its own, so every instance's
+    // descriptor follows a record header.
+    let global = module.get_global(&global_name).unwrap_or_else(|| {
+        let null = context.ptr_type(inkwell::AddressSpace::default()).const_null();
+        let global =
+            crate::class_record::record_global(
+                context,
+                module,
+                &global_name,
+                &layout,
+                null,
+                None,
+            );
+        global.set_linkage(inkwell::module::Linkage::Private);
+        global
+    });
+    (crate::class_record::descriptor_of(context, global), len)
 }
 
 /// Reinterprets a raw `i64` slot word as the `Scalar` its declared attribute `ty` names (D-154, Part 1 of

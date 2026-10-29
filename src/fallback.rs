@@ -53,6 +53,7 @@ mod members;
 mod names;
 mod nested;
 mod package_bases;
+pub(crate) use package_bases::overridden_in_package;
 mod render;
 mod report;
 
