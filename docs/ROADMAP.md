@@ -1022,3 +1022,32 @@ Accept:
    annotations pycc infers. "Corpus (non-strict)": 200/200, 0 wrong, 0/1191 top-level
    statements in CPython. Issues #8 and #9: commit fec07f2 (a non-strict native build
    publishes its classes in `__main__`), `tests/issue_8_9_native_classes.rs`.
+
+## v0.10 — Native dicts, exact errors, trustworthy numbers
+
+v0.9 left libraries' hot state in CPython dicts (pystache's context stack, mistune's
+tokens) and its speed numbers came from a shared VM. v0.10 makes `str`-keyed dicts native,
+closes the error-text gaps, finishes the deferred class work, and moves published timings
+to a reproducible CI benchmark job.
+
+Accept:
+1. **Exact error texts:** issue #10 is fixed (argument-binding `TypeError`s and
+   type-attribute `AttributeError`s match CPython 3.13 word for word), and the differential
+   fuzzer generates calls with missing/extra/keyword arguments and missing attributes on
+   classes and instances, comparing exception messages; 0 findings in a 30-minute run.
+2. **Native `str`-keyed dicts:** in `--non-strict`, dicts with `str` keys built or received
+   by compiled code are native when their value types infer, with a guarded CPython-dict
+   fallback when they escape or arrive from CPython code; iteration order, views, mutation
+   during iteration errors, `==`, `repr`, pickling and identity match CPython.
+3. **Template and Markdown >= 1.2x:** pystache 0.6.8 and mistune 3.3.4 each run their own
+   benchmark >= 1.2x faster than CPython (median of the CI benchmark job, accept 4), with
+   their suites passing.
+4. **Trustworthy numbers:** a CI benchmark workflow runs `bench/run.py`, the package
+   `--time` checks and `bench/pydantic_check.py --time` on a GitHub-hosted runner with
+   interleaved fresh-process runs, and publishes median and spread as an artifact; every
+   speed number in README, CHANGELOG and blog posts cites such a run. Instruction-count
+   bounds stay the regression gate.
+5. **Deferred class work:** compiled subclasses of compiled classes from another module of
+   the package are native (layout-pointer dispatch across modules, no CPython class in
+   between), and compiled exception classes can derive from package exception bases
+   (PEP 697); each with oracle tests vs CPython.
