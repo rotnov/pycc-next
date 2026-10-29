@@ -24,6 +24,9 @@ pub(super) struct ExtPlan {
     /// The classes whose instances cross into CPython as objects of their
     /// own type (a package member's interface lists some of them).
     pub(super) carriers: std::collections::BTreeSet<String>,
+    /// v0.10: each constructor whose host call binds keywords, and the
+    /// names it binds (a package member's interface lists them).
+    pub(super) init_names: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// Resolves `OUT` against the `--ext` output contract, reporting a rejected
@@ -157,7 +160,13 @@ pub(super) fn plan_ext(
     // #1461: which exports a host call may name keywords for is read from
     // the entry source itself (see `ext_build::keywords`), and bound before
     // `collect_class_publications` copies the method exports.
-    let signatures = ext_build::SourceSignatures::from_source(&entry_source);
+    let mut signatures = ext_build::SourceSignatures::from_source(&entry_source);
+    // v0.10: the sibling classes standing for another module's (a package
+    // member's): a subclass inheriting one's constructor binds keywords
+    // as the other module's does.
+    signatures.extend(ext_build::SourceSignatures::from_source(
+        &crate::package_build::stub_sources(),
+    ));
     ext_build::bind_keyword_names(typed_hir, &signatures, &mut exports);
     let mut publications = ext_build::collect_class_publications(typed_hir, &exports);
     // v0.9: each published class is made with its statement's real bases.
@@ -242,6 +251,10 @@ pub(super) fn plan_ext(
         artifact: output.artifact,
         published,
         carriers: carriers.iter().map(|carrier| carrier.class.clone()).collect(),
+        init_names: ctors
+            .iter()
+            .filter_map(|ctor| Some((ctor.name.clone(), ctor.keyword_names.clone()?)))
+            .collect(),
     })
 }
 

@@ -172,6 +172,29 @@ pub fn set_sibling_class_names(names: Vec<(String, Option<String>)>) {
     SIBLING_CLASS_NAMES.with(|cell| *cell.borrow_mut() = names);
 }
 
+thread_local! {
+    /// The sibling classes a class of the module being lowered may derive
+    /// from (v0.10): those whose `__init__` is the other module's.
+    static SIBLING_BASES: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Makes the sibling classes `bases` ones a class statement of the module
+/// may list as a base (through the name its import binds), on this thread
+/// until the next call.
+pub fn set_sibling_bases(bases: Vec<String>) {
+    SIBLING_BASES.with(|cell| *cell.borrow_mut() = bases);
+}
+
+/// The sibling class a class statement's base `name` resolves to, if it is
+/// one [`set_sibling_bases`] admits.
+pub(crate) fn sibling_base_for(name: &str) -> Option<String> {
+    let class = sibling_class_for(name)??;
+    SIBLING_BASES
+        .with(|cell| cell.borrow().contains(&class))
+        .then_some(class)
+}
+
 /// What an annotation naming `name` resolves to, if
 /// [`set_sibling_class_names`] named it: `Some(None)` for `object`.
 pub(crate) fn sibling_class_for(name: &str) -> Option<Option<String>> {

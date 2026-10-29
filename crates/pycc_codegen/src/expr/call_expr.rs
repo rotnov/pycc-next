@@ -28,6 +28,32 @@ pub(crate) fn emit_call_expr<'ctx>(
             args,
         );
     }
+    if callee == pycc_mir::dispatch::INSTANCE_FOREIGN {
+        return crate::vtable_call::emit_foreign(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            args,
+        );
+    }
+    if callee == pycc_mir::dispatch::INSTANCE_VT_HAS {
+        return crate::vtable_call::emit_has(context, builder, module, rt, user_functions, locals, args);
+    }
+    if callee == pycc_mir::dispatch::INSTANCE_VT_CALL {
+        return crate::vtable_call::emit_call(
+            context,
+            builder,
+            module,
+            rt,
+            user_functions,
+            locals,
+            args,
+            ty,
+        );
+    }
     if callee == pycc_mir::dispatch::INSTANCE_CLASS_IS {
         return emit_instance_class_is(context, builder, module, rt, user_functions, locals, args);
     }

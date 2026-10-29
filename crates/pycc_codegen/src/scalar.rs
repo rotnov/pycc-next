@@ -224,6 +224,7 @@ pub(crate) enum Scalar<'ctx> {
     MemoryView(PointerValue<'ctx>),
 }
 
+#[derive(Clone)]
 pub(crate) struct UserFunction<'ctx> {
     pub(crate) param_tys: Vec<pycc_mir::Ty>,
     /// Issue #22: the global function-pointer slot for this function name.

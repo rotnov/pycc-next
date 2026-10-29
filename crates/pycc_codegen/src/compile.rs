@@ -103,13 +103,6 @@ fn compile_module(
         .set(float_fast::target_libm_is_glibc(target_triple));
     *rt.rc_class_kinds.borrow_mut() = heap_rc::rc_class_kinds(&mir.class_defs);
     *rt.exception_classes.borrow_mut() = heap_rc::exception_classes(&mir.class_defs);
-    *rt.class_records.borrow_mut() = crate::class_record::emit_records(
-        &context,
-        &module,
-        &mir.class_defs,
-        &rt.rc_class_kinds.borrow(),
-        &rt.exception_classes.borrow(),
-    );
     *rt.assigned_slots.borrow_mut() = assigned_slots::AssignedSlots::analyze(mir, options.ext);
     *rt.nothrow.borrow_mut() = nothrow::nothrow_functions(mir);
     // A dispatcher's class test never raises.
@@ -119,6 +112,12 @@ fn compile_module(
     rt.nothrow
         .borrow_mut()
         .insert(pycc_mir::dispatch::INSTANCE_PY_OVERRIDE.to_string());
+    for test in [
+        pycc_mir::dispatch::INSTANCE_FOREIGN,
+        pycc_mir::dispatch::INSTANCE_VT_HAS,
+    ] {
+        rt.nothrow.borrow_mut().insert(test.to_string());
+    }
     let _pins = operand_pin::plan_module(&rt, mir);
     rt.frames.set_files(
         options.source_files.clone(),
@@ -169,6 +168,47 @@ fn compile_module(
         &options.sibling_targets,
         &mut user_functions,
     );
+    // The class records, once every function is declared: a vtable names
+    // functions.
+    {
+        let value = |name: &str| {
+            function_defs_in_order
+                .iter()
+                .find(|(defined, _)| *defined == name)
+                .map(|(_, f)| *f)
+        };
+        let signatures: HashMap<&str, (Vec<pycc_mir::Ty>, pycc_mir::Ty)> = mir
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MirItem::Function {
+                    name,
+                    params,
+                    return_ty,
+                    ..
+                } => Some((
+                    name.as_str(),
+                    (
+                        params.iter().skip(1).map(|(_, ty)| ty.clone()).collect(),
+                        return_ty.clone(),
+                    ),
+                )),
+                _ => None,
+            })
+            .collect();
+        let signature = |name: &str| signatures.get(name).cloned();
+        *rt.class_records.borrow_mut() = crate::class_record::emit_records(
+            &context,
+            &module,
+            &mir.class_defs,
+            &rt.rc_class_kinds.borrow(),
+            &rt.exception_classes.borrow(),
+            &crate::class_record::Functions {
+                value: &value,
+                signature: &signature,
+            },
+        );
+    }
 
     // #1050: an `ext` artifact's generated C reaches an export whose
     // signature carries a `tuple` through a scalar-only thunk rather than

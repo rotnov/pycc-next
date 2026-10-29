@@ -1144,6 +1144,20 @@ Accept:
    the package are native (layout-pointer dispatch across modules, no CPython class in
    between), and compiled exception classes can derive from package exception bases
    (PEP 697); each with oracle tests vs CPython.
+   **Progress 2026-10-29** -- the cross-module half (design, guru ruling: the plan gives
+   the base module the *set* of overridden names, the subclass's own class record holds
+   the *targets*): every class has a record, one named descriptor global its instances
+   point at (a run-time class test is a pointer compare);
+   a member compiles `class Square(Shape)` over the sibling class standing for
+   `base.Shape` (its slots and, from `base`'s interface, its `__init__` and each method's
+   index in `Shape`'s method table), and `Square`'s record carries a vtable of its
+   resolved methods (null for an override of another signature) whose `base` is
+   `base`'s record. `base`, told by a syntactic scan of the package which names its
+   classes' subclasses elsewhere define, gives each such (class, method) a dispatcher with
+   a foreign arm: a receiver whose record carries a vtable runs its entry, or the member
+   through CPython when the entry is null; a call on a value typed with the sibling class
+   runs that dispatcher (`tests/v010_subclasses.rs`). Open: a subclass of such a subclass
+   in a third module (it runs as a Python subclass), and the exception half.
 
 ## v0.11 — Imports faster than CPython
 

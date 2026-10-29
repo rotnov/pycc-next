@@ -35,6 +35,7 @@ pub(super) fn write_interface(
     member: &package_build::Member,
     mir: &pycc_mir::MirModule,
     plan: &super::ext_plan::ExtPlan,
+    typed_hir: &pycc_hir::HirModule,
 ) -> Result<(), ExitCode> {
     let interface = package_build::Interface::collect(
         &member.dotted,
@@ -42,6 +43,8 @@ pub(super) fn write_interface(
         mir,
         &plan.published,
         &plan.carriers,
+        &|name| ext_build::has_defaults(typed_hir, name),
+        &|name| plan.init_names.get(name).cloned(),
     );
     write_ext_source(
         &obj_path.with_file_name(package_build::INTERFACE_HEADER_NAME),

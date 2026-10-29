@@ -62,6 +62,30 @@ pub(crate) struct InterfaceMethod {
     /// The parameters after `self`.
     pub(crate) params: Vec<Ty>,
     pub(crate) ret: Ty,
+    /// v0.10: its index in the class's method table, the entry a subclass
+    /// another module compiles fills in its record's vtable
+    /// (`pycc_mir::dispatch`).
+    pub(crate) index: usize,
+    /// v0.10: the function a call of the method on an instance of the
+    /// class runs: its dispatcher (`Class.method.0dispatch`) when the
+    /// module has one, which also runs the overrides of subclasses other
+    /// modules compiled, else `function`.
+    pub(crate) entry: String,
+}
+
+/// v0.10: the constructor of an [`InterfaceClass`], which a subclass
+/// another module compiles over the class runs (`super().__init__(...)`,
+/// or inherited).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InterfaceInit {
+    /// The compiled function (`Class.__init__`).
+    pub(crate) function: String,
+    /// The parameters after `self`.
+    pub(crate) params: Vec<Ty>,
+    /// Their source names, when a host call may name them as keywords
+    /// (the producer's constructor binds keywords: `ext_build::keywords`):
+    /// a subclass inheriting the constructor binds them as it does.
+    pub(crate) names: Option<Vec<String>>,
 }
 
 /// One class whose instances other modules may read natively.
@@ -71,6 +95,13 @@ pub(crate) struct InterfaceClass {
     /// The slots, in layout order.
     pub(crate) slots: Vec<(String, Ty)>,
     pub(crate) methods: Vec<InterfaceMethod>,
+    /// v0.10: the length of the class's method table: the vtable a
+    /// subclass another module compiles gives its record.
+    pub(crate) entries: usize,
+    /// v0.10: its `__init__`, when the class has one of listable
+    /// parameters without defaults: only then can another module compile a
+    /// subclass over it.
+    pub(crate) init: Option<InterfaceInit>,
 }
 
 /// A member's interface.
@@ -205,6 +236,8 @@ fn collect_classes(
     mir: &pycc_mir::MirModule,
     carriers: &BTreeSet<String>,
     counts: &std::collections::HashMap<&str, usize>,
+    has_defaults: &dyn Fn(&str) -> bool,
+    init_names: &dyn Fn(&str) -> Option<Vec<String>>,
 ) -> Vec<InterfaceClass> {
     let subclassed: BTreeSet<&str> = mir
         .class_defs
@@ -270,8 +303,11 @@ fn collect_classes(
             continue;
         }
         let mut methods = Vec::new();
-        for (method, function) in &def.methods {
-            if method.starts_with("__") || counts.get(function.as_str()) != Some(&1) {
+        let mut init = None;
+        for (index, (method, function)) in def.methods.iter().enumerate() {
+            if (method.starts_with("__") && method != "__init__")
+                || counts.get(function.as_str()) != Some(&1)
+            {
                 continue;
             }
             let Some(&(params, ret, body)) = functions.get(function.as_str()) else {
@@ -281,6 +317,21 @@ fn collect_classes(
                 continue;
             };
             let spelled = |ty: &Ty| class_ty(ty, &known).is_some();
+            if method == "__init__" {
+                if *receiver == Ty::Instance(Box::new(name.clone()))
+                    && *ret == Ty::None
+                    && rest.iter().all(|(_, ty)| *ty != Ty::None && spelled(ty))
+                    && pycc_mir::multi_return::out_tys(body).is_empty()
+                    && !has_defaults(function)
+                {
+                    init = Some(InterfaceInit {
+                        function: function.clone(),
+                        params: rest.iter().map(|(_, ty)| ty.clone()).collect(),
+                        names: init_names(function).filter(|names| names.len() == rest.len()),
+                    });
+                }
+                continue;
+            }
             if *receiver != Ty::Instance(Box::new(name.clone()))
                 || !rest.iter().all(|(_, ty)| *ty != Ty::None && spelled(ty))
                 || !spelled(ret)
@@ -289,17 +340,29 @@ fn collect_classes(
             {
                 continue;
             }
+            let dispatcher = format!(
+                "{name}.{method}.{}",
+                pycc_mir::dispatch::DISPATCH_SEGMENT
+            );
             methods.push(InterfaceMethod {
                 name: method.clone(),
                 function: function.clone(),
                 params: rest.iter().map(|(_, ty)| ty.clone()).collect(),
                 ret: ret.clone(),
+                index,
+                entry: if functions.contains_key(dispatcher.as_str()) {
+                    dispatcher
+                } else {
+                    function.clone()
+                },
             });
         }
         classes.push(InterfaceClass {
             name: name.clone(),
             slots: def.attrs.clone(),
             methods,
+            entries: def.methods.len(),
+            init,
         });
     }
     classes
@@ -316,6 +379,8 @@ impl Interface {
         mir: &pycc_mir::MirModule,
         published: &BTreeSet<String>,
         carriers: &BTreeSet<String>,
+        has_defaults: &dyn Fn(&str) -> bool,
+        init_names: &dyn Fn(&str) -> Option<Vec<String>>,
     ) -> Self {
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for item in &mir.items {
@@ -323,7 +388,7 @@ impl Interface {
                 *counts.entry(name.as_str()).or_insert(0) += 1;
             }
         }
-        let classes = collect_classes(mir, carriers, &counts);
+        let classes = collect_classes(mir, carriers, &counts, has_defaults, init_names);
         let mut functions = Vec::new();
         for item in &mir.items {
             let pycc_mir::MirItem::Function {
@@ -376,7 +441,20 @@ impl Interface {
         let listed = |_: &str| true;
         let spell = |ty: &Ty| class_ty(ty, &listed).expect("listed types have a spelling");
         for class in &self.classes {
-            out.push_str(&format!("class {}\n", class.name));
+            out.push_str(&format!("class {}\nentries {}\n", class.name, class.entries));
+            if let Some(init) = &class.init {
+                out.push_str(&format!("init {}", init.function));
+                for (at, param) in init.params.iter().enumerate() {
+                    out.push(' ');
+                    // `name:type` when the names bind keywords.
+                    if let Some(names) = &init.names {
+                        out.push_str(&names[at]);
+                        out.push(':');
+                    }
+                    out.push_str(&spell(param));
+                }
+                out.push('\n');
+            }
             for (name, ty) in &class.slots {
                 out.push_str(&format!("slot {name} {}\n", spell(ty)));
             }
@@ -392,6 +470,7 @@ impl Interface {
                     out.push_str(&spell(param));
                 }
                 out.push('\n');
+                out.push_str(&format!("vt {} {}\n", method.index, method.entry));
             }
         }
         out
@@ -414,7 +493,46 @@ impl Interface {
                     name: name.to_string(),
                     slots: Vec::new(),
                     methods: Vec::new(),
+                    entries: 0,
+                    init: None,
                 });
+            } else if let Some(rest) = line.strip_prefix("init ") {
+                let class = classes.last_mut().ok_or_else(|| bad(line))?;
+                let mut words = rest.split(' ');
+                let function = words.next().filter(|f| !f.is_empty()).ok_or_else(|| bad(line))?;
+                let mut params = Vec::new();
+                let mut names = Vec::new();
+                for word in words {
+                    let (name, ty) = match word.split_once(':') {
+                        Some((name, ty)) => (Some(name.to_string()), ty),
+                        None => (None, word),
+                    };
+                    names.push(name);
+                    params.push(parse_class_ty(ty).ok_or_else(|| bad(line))?);
+                }
+                let names = if !names.is_empty() && names.iter().all(Option::is_some) {
+                    Some(names.into_iter().flatten().collect())
+                } else if names.iter().all(Option::is_none) {
+                    None
+                } else {
+                    return Err(bad(line));
+                };
+                class.init = Some(InterfaceInit {
+                    function: function.to_string(),
+                    params,
+                    names,
+                });
+            } else if let Some(rest) = line.strip_prefix("entries ") {
+                let class = classes.last_mut().ok_or_else(|| bad(line))?;
+                class.entries = rest.parse().map_err(|_| bad(line))?;
+            } else if let Some(rest) = line.strip_prefix("vt ") {
+                let method = classes
+                    .last_mut()
+                    .and_then(|class| class.methods.last_mut())
+                    .ok_or_else(|| bad(line))?;
+                let (index, entry) = rest.split_once(' ').ok_or_else(|| bad(line))?;
+                method.index = index.parse().map_err(|_| bad(line))?;
+                method.entry = entry.to_string();
             } else if let Some(rest) = line.strip_prefix("slot ") {
                 let class = classes.last_mut().ok_or_else(|| bad(line))?;
                 let (name, ty) = rest.split_once(' ').ok_or_else(|| bad(line))?;
@@ -436,6 +554,8 @@ impl Interface {
                     function: function.to_string(),
                     params,
                     ret: parse_class_ty(ret).ok_or_else(|| bad(line))?,
+                    index: usize::MAX,
+                    entry: function.to_string(),
                 });
             } else if let Some(rest) = line.strip_prefix("module ") {
                 module = Some(rest.to_string());
@@ -544,14 +664,24 @@ mod tests {
                         function: "State.get".to_string(),
                         params: vec![Ty::Int, Ty::Str],
                         ret: Ty::Optional(Box::new(Ty::Str)),
+                        index: 1,
+                        entry: "State.get.0dispatch".to_string(),
                     },
                     InterfaceMethod {
                         name: "clear".to_string(),
                         function: "State.clear".to_string(),
                         params: vec![],
                         ret: Ty::None,
+                        index: 2,
+                        entry: "State.clear".to_string(),
                     },
                 ],
+                entries: 3,
+                init: Some(InterfaceInit {
+                    function: "State.__init__".to_string(),
+                    params: vec![Ty::Str],
+                    names: Some(vec!["src".to_string()]),
+                }),
             }],
             ..sample()
         }
@@ -562,9 +692,10 @@ mod tests {
         let text = with_class().to_text();
         assert!(
             text.ends_with(
-                "class State\nslot src str\nslot env dict[str,list[int]]\n\
+                "class State\nentries 3\ninit State.__init__ src:str\nslot src str\nslot env dict[str,list[int]]\n\
                  slot parent @State|None\nslot seen set[object]\n\
-                 method get State.get str|None int str\nmethod clear State.clear None\n"
+                 method get State.get str|None int str\nvt 1 State.get.0dispatch\n\
+                 method clear State.clear None\nvt 2 State.clear\n"
             ),
             "{text}"
         );
@@ -577,6 +708,15 @@ mod tests {
             "class C\nmethod m C.m int frozenset[int]\n",
             "class C\nslot x dict[int]\n",
             "class C\nslot x @\n",
+            "class C\nentries x\n",
+            "init C.__init__\n",
+            "class C\ninit\n",
+            "class C\ninit C.__init__ list[\n",
+            "class C\ninit C.__init__ a:int str\n",
+            "class C\ninit C.__init__ a:list[\n",
+            "vt 1 C.m\n",
+            "class C\nmethod m C.m int\nvt x C.m\n",
+            "class C\nmethod m C.m int\nvt 1\n",
         ] {
             let text = format!("pycc-interface 1\nmodule m\nprefix p\n{bad}");
             assert!(Interface::parse(&text).is_err(), "{bad}");

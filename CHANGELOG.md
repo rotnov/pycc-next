@@ -37,6 +37,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `__setattr__`, `__slots__`, `copyreg.dispatch_table`); one with an attribute Python code
   cannot see refuses with a `TypeError` naming it.
 
+- Compiled subclasses of compiled classes of another module of a package built whole are
+  native (v0.10 accept 5): `class Square(Shape)` with `Shape` imported from `.base` is
+  compiled over `base`'s instance layout, and `base`'s compiled methods run `Square`'s
+  overrides. Every class has a *record*, one named descriptor global its instances point
+  at; a run-time class test is a pointer compare, and a subclass compiled over another
+  module's class carries a vtable that module's per-(class, method) dispatchers read.
+
 ### Changed
 - `C.__new__(C)` of a published compiled class makes an object whose attributes are all
   unassigned (reading one raises CPython's `AttributeError`) instead of an uninitialized

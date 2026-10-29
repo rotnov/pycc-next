@@ -73,6 +73,16 @@ static DENIED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 /// The sibling classes the last [`stubs`] added.
 static ADDED: Mutex<Vec<Added>> = Mutex::new(Vec::new());
 
+/// The source of the sibling classes added to the module being built, which
+/// the `--ext` boundary reads their constructors' keyword names from
+/// (`ext_build::SourceSignatures`).
+static SOURCES: Mutex<String> = Mutex::new(String::new());
+
+/// The source of the sibling classes the module being built holds.
+pub(crate) fn stub_sources() -> String {
+    SOURCES.lock().expect("the sources lock").clone()
+}
+
 /// The functions (by [`function_key`]) whose annotations read no class
 /// natively ([`deny_failures`]).
 static DENIED_FUNCTIONS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
@@ -236,6 +246,9 @@ fn closure(producers: &[Producer], class: ClassRef) -> Option<Vec<ClassRef>> {
                 instances(param, &mut named);
             }
         }
+        for param in listed.init.iter().flat_map(|init| &init.params) {
+            instances(param, &mut named);
+        }
         for name in named {
             let index = interface.classes.iter().position(|c| c.name == name)?;
             let found = ClassRef {
@@ -278,24 +291,73 @@ fn python_ty(ty: &Ty) -> String {
     }
 }
 
-/// The sibling class standing for `class` (module docs).
+/// The prefix of the functions giving a sibling class's slots their types
+/// when its `__init__` is the other module's (reserved, as every `_pycc_`
+/// name is).
+const SLOT_TYPE_PREFIX: &str = "_pycc_sibs_";
+
+/// The sibling class standing for `class` (module docs). v0.10: when the
+/// interface lists the class's `__init__`, the sibling class's has its
+/// parameters -- a call of it (a subclass's `super().__init__(...)`, an
+/// inherited constructor) runs the other module's -- and its body, never
+/// compiled, gives each slot its type through a function of that type
+/// added before the class.
 fn stub_source(class: &InterfaceClass) -> String {
     let stub = stub_name(&class.name);
-    let params: Vec<String> = class
-        .slots
-        .iter()
-        .enumerate()
-        .map(|(i, (_, ty))| format!(", {PARAM_PREFIX}{i}: {}", python_ty(ty)))
-        .collect();
-    let mut out = format!(
-        "class {stub}:\n    def __init__(self{}) -> None:\n",
-        params.concat()
-    );
-    if class.slots.is_empty() {
-        out.push_str("        pass\n");
-    }
-    for (i, (slot, _)) in class.slots.iter().enumerate() {
-        out.push_str(&format!("        self.{slot} = {PARAM_PREFIX}{i}\n"));
+    let mut out = String::new();
+    match &class.init {
+        Some(init) => {
+            for (i, (_, ty)) in class.slots.iter().enumerate() {
+                out.push_str(&format!(
+                    "def {SLOT_TYPE_PREFIX}{}_{i}() -> {}:\n    raise TypeError(\"{}\")\n",
+                    class.name,
+                    python_ty(ty),
+                    pycc_hir::SIBLING_CLASS_PREFIX
+                ));
+            }
+            // The other module's own parameter names when its constructor
+            // binds keywords, so an inherited constructor binds them too.
+            let params: Vec<String> = init
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, ty)| match &init.names {
+                    Some(names) => format!(", {}: {}", names[i], python_ty(ty)),
+                    None => format!(", {PARAM_PREFIX}{i}: {}", python_ty(ty)),
+                })
+                .collect();
+            out.push_str(&format!(
+                "class {stub}:\n    def __init__(self{}) -> None:\n",
+                params.concat()
+            ));
+            if class.slots.is_empty() {
+                out.push_str("        pass\n");
+            }
+            for (i, (slot, _)) in class.slots.iter().enumerate() {
+                out.push_str(&format!(
+                    "        self.{slot} = {SLOT_TYPE_PREFIX}{}_{i}()\n",
+                    class.name
+                ));
+            }
+        }
+        None => {
+            let params: Vec<String> = class
+                .slots
+                .iter()
+                .enumerate()
+                .map(|(i, (_, ty))| format!(", {PARAM_PREFIX}{i}: {}", python_ty(ty)))
+                .collect();
+            out.push_str(&format!(
+                "class {stub}:\n    def __init__(self{}) -> None:\n",
+                params.concat()
+            ));
+            if class.slots.is_empty() {
+                out.push_str("        pass\n");
+            }
+            for (i, (slot, _)) in class.slots.iter().enumerate() {
+                out.push_str(&format!("        self.{slot} = {PARAM_PREFIX}{i}\n"));
+            }
+        }
     }
     for method in &class.methods {
         let params: Vec<String> = method
@@ -341,6 +403,15 @@ pub(super) fn stubs(member: &Member) -> Vec<(String, ClassRef, String)> {
         }
     }
     pycc_hir::set_sibling_class_names(names);
+    // v0.10: the sibling classes a class of the module may derive from --
+    // the ones whose `__init__` is the other module's.
+    pycc_hir::set_sibling_bases(
+        added
+            .iter()
+            .filter(|(_, class, _)| producer_class(&member.producers, *class).init.is_some())
+            .map(|(stub, _, _)| stub.clone())
+            .collect(),
+    );
     // A class's annotations name the classes defined before it: each class
     // after those its types hold (a cycle keeps its order, and fails).
     let mut ordered: Vec<(String, ClassRef, String)> = Vec::new();
@@ -360,6 +431,9 @@ pub(super) fn stubs(member: &Member) -> Vec<(String, ClassRef, String)> {
                         .iter()
                         .for_each(|ty| instances(ty, &mut named));
                 }
+                for param in listed.init.iter().flat_map(|init| &init.params) {
+                    instances(param, &mut named);
+                }
                 named.iter().all(|name| {
                     let other = stub_name(name);
                     other == *stub || ordered.iter().any(|(done, _, _)| *done == other)
@@ -374,6 +448,8 @@ pub(super) fn stubs(member: &Member) -> Vec<(String, ClassRef, String)> {
 /// Records where the sibling classes `added` landed in the module
 /// compiled, `body`.
 pub(super) fn record(body: &[Stmt], added: &[(String, ClassRef, String)]) {
+    *SOURCES.lock().expect("the sources lock") =
+        added.iter().map(|(_, _, source)| source.as_str()).collect();
     let mut out = ADDED.lock().expect("the added lock");
     out.clear();
     for stmt in body {
@@ -395,8 +471,10 @@ pub(super) fn record(body: &[Stmt], added: &[(String, ClassRef, String)]) {
 /// Forgets the sibling classes of an earlier module (nothing is added).
 pub(super) fn clear() {
     ADDED.lock().expect("the added lock").clear();
+    SOURCES.lock().expect("the sources lock").clear();
     FUNCTIONS.lock().expect("the functions lock").clear();
     pycc_hir::set_sibling_class_names(Vec::new());
+    pycc_hir::set_sibling_bases(Vec::new());
 }
 
 /// What names a function of the module compiled for [`DENIED_FUNCTIONS`]:
@@ -660,6 +738,39 @@ pub(crate) fn codegen_classes() -> Vec<pycc_codegen::SiblingClass> {
                             format!("{}pyfn_{}", producer.prefix, method.function),
                         )
                     })
+                    .chain(class.init.iter().map(|init| {
+                        (
+                            format!("{}.__init__", entry.stub),
+                            format!("{}pyfn_{}", producer.prefix, init.function),
+                        )
+                    }))
+                    .collect(),
+                entries_of: class
+                    .methods
+                    .iter()
+                    .map(|method| {
+                        (
+                            format!("{}.{}", entry.stub, method.name),
+                            format!("{}pyfn_{}", producer.prefix, method.entry),
+                        )
+                    })
+                    .collect(),
+                record: format!(
+                    "{}{}",
+                    producer.prefix,
+                    pycc_codegen::record_symbol(&class.name)
+                ),
+                entries: class.entries,
+                vtable: class
+                    .methods
+                    .iter()
+                    .map(|method| {
+                        (
+                            method.index,
+                            format!("{}.{}", entry.stub, method.name),
+                            format!("{}pyfn_{}", producer.prefix, method.function),
+                        )
+                    })
                     .collect(),
             }
         })
@@ -712,8 +823,13 @@ pub(crate) fn without_stubs(typed: &pycc_hir::HirModule) -> Option<pycc_hir::Hir
         return None;
     }
     let mut out = typed.clone();
-    out.items
-        .retain(|item| !matches!(item, pycc_hir::HirItem::Function { name, .. } if stub(name)));
+    // v0.10: a constructor stays, which a subclass compiled over the class
+    // inherits: its `tp_init` calls the other module's (`fnptr_`, bound by
+    // codegen to it).
+    out.items.retain(|item| {
+        !matches!(item, pycc_hir::HirItem::Function { name, .. }
+            if stub(name) && !name.ends_with(".__init__"))
+    });
     Some(out)
 }
 
@@ -721,6 +837,20 @@ pub(crate) fn without_stubs(typed: &pycc_hir::HirModule) -> Option<pycc_hir::Hir
 /// module-level import binds, or that name as a string) is read natively:
 /// it is spelled so in the compiled body's signature, where it resolves to
 /// the sibling class.
+/// v0.10: whether a class statement's base `base` names a class another
+/// module of the package compiled that a class of this module can be
+/// compiled over: read natively, and with its `__init__` listed.
+pub(crate) fn sibling_base(base: &pycc_ast::Expr) -> bool {
+    let Some(member) = super::member() else {
+        return false;
+    };
+    lifted_annotation(base).is_some_and(|name| {
+        member.classes.get(&name).is_some_and(|class| {
+            producer_class(&member.producers, *class).init.is_some()
+        })
+    })
+}
+
 pub(crate) fn lifted_annotation(annotation: &pycc_ast::Expr) -> Option<String> {
     let member = super::member()?;
     let name = match annotation {
@@ -785,12 +915,18 @@ mod tests {
                             function: "State.get".to_string(),
                             params: vec![Ty::Int],
                             ret: Ty::Str,
+                            index: 1,
+                            entry: "State.get".to_string(),
                         }],
+                        entries: 2,
+                        init: None,
                     },
                     InterfaceClass {
                         name: "Env".to_string(),
                         slots: vec![],
                         methods: vec![],
+                        entries: 1,
+                        init: None,
                     },
                 ],
             },

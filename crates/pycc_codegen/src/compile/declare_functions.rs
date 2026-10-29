@@ -115,6 +115,19 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                     || name.starts_with(pycc_hir::SIBLING_CALL_PREFIX)
                     || producer.is_some();
                 if is_monomorphized {
+                    // v0.10: a sibling class's method is bound for the
+                    // generated C too (`fnptr_<name>`, the constructor of a
+                    // subclass compiled over it that inherits its
+                    // `__init__`), to the other module's function.
+                    if producer.is_some() {
+                        let fn_ptr_type = context.ptr_type(inkwell::AddressSpace::default());
+                        let slot = module.add_global(
+                            fn_ptr_type,
+                            None,
+                            &format!("fnptr_{}", mangle_ext_name(name)),
+                        );
+                        slot.set_initializer(&f.as_global_value().as_pointer_value());
+                    }
                     UserFunction {
                         param_tys: params.iter().map(|(_, ty)| ty.clone()).collect(),
                         fn_ptr_global: None,
@@ -179,6 +192,25 @@ pub(super) fn declare_user_functions<'a, 'ctx>(
                 }
             });
         }
+    }
+    // v0.10: a sibling class's method called on a value typed with the
+    // sibling class runs the other module's entry for it (its dispatcher,
+    // `pycc_mir::dispatch::ENTRY_SEGMENT`), of the method's signature.
+    for (entry, method, symbol) in crate::sibling_class::producer_entries() {
+        let Some(own) = user_functions.get(method.as_str()) else {
+            continue;
+        };
+        let fn_type = own.fn_type;
+        let f = module
+            .get_function(&symbol)
+            .unwrap_or_else(|| module.add_function(&symbol, fn_type, Some(Linkage::External)));
+        let mut called = own.clone();
+        called.direct_value = Some(f);
+        called.fn_ptr_global = None;
+        called.single_def = None;
+        // The names are few (a sibling class's methods) and live for the
+        // build.
+        user_functions.insert(Box::leak(entry.into_boxed_str()), called);
     }
     (user_functions, function_defs_in_order, def_counts)
 }
