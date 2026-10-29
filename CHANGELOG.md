@@ -61,7 +61,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   - **`min`/`max`:** each key is compared as soon as it is computed, as in CPython.
     Instance keys are compared through the class's `__lt__`/`__gt__` while the pairs
     are pulled from a generator, so key calls, comparisons and their exceptions
-    interleave as CPython's do. Keys of numbers, `str` or tuples of them (immutable
+    interleave as CPython's do (a `StopIteration` a key raises propagates as it is,
+    not as PEP 479's `RuntimeError`). Keys of numbers, `str` or tuples of them (immutable
     values whose comparison runs no code) are all computed first, which nothing can
     tell apart. Any other key (a list, a CPython object) is `C0001` in strict mode and
     runs in CPython in non-strict mode.

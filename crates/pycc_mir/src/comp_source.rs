@@ -154,6 +154,7 @@ pub(crate) fn gen_to_list(generator: MirExpr) -> MirExpr {
     MirExpr::GenToList {
         generator: Box::new(generator),
         ty: Ty::List(Box::new(sig.0)),
+        raw: false,
     }
 }
 

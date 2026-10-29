@@ -389,6 +389,39 @@ pub unsafe extern "C" fn pycc_rt_gen_resume(g: *mut PyGenObj) -> i8 {
     }
 }
 
+/// [`pycc_rt_gen_resume`] without PEP 479's conversion: a `StopIteration`
+/// the body raised stays pending as it is. For a generator pycc makes of a
+/// call's arguments (a keyed `min`/`max`'s pairs, `pycc_ast::desugar::keys`),
+/// whose body is the call's own key calls: CPython runs them in no generator.
+///
+/// # Safety
+/// `g` must be a live generator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_gen_resume_raw(g: *mut PyGenObj) -> i8 {
+    // SAFETY (caller): `g` is live.
+    unsafe {
+        match (*g).state {
+            DONE => return STEP_FINISHED,
+            RUNNING => {
+                raise_builtin(
+                    EXCEPTION_TYPE_VALUE_ERROR,
+                    "ValueError",
+                    "generator already executing",
+                );
+                return STEP_FINISHED;
+            }
+            _ => {}
+        }
+        match run(g, 0) {
+            STEP_RETURNED => {
+                drop_return_value(g);
+                STEP_FINISHED
+            }
+            answer => answer,
+        }
+    }
+}
+
 /// `next(g)`: [`pycc_rt_gen_resume`], raising `StopIteration` when the
 /// generator is exhausted without an exception of its own.
 ///
