@@ -240,7 +240,7 @@ static const char *const pycc_ext_copy_hooks[] = {
     "__getnewargs_ex__", "__new__", "__setattr__", "__getattribute__", NULL,
 };
 
-/* Whether a Python class of `type`'s MRO, before the compiled classes,
+/* Whether a Python class of `type`'s MRO (but `object`, wherever it sits)
  * defines a copy hook or non-empty `__slots__` (-1 on error). */
 static int pycc_ext_copy_hooked(PyObject *type)
 {
@@ -257,8 +257,8 @@ static int pycc_ext_copy_hooked(PyObject *type)
         PyObject *dict;
         PyObject *declared;
         const char *const *hook;
-        if (pycc_ext_is_compiled_type(c)) {
-            break;
+        if (pycc_ext_is_compiled_type(c) || c == (PyObject *)&PyBaseObject_Type) {
+            continue;
         }
         dict = PyObject_GetAttrString(c, "__dict__");
         if (dict == NULL) {
@@ -377,7 +377,7 @@ static int pycc_ext_copy_route(PyObject *self, PyObject **reductor, int *by_redu
     return 0;
 }
 
-static PyObject *pycc_ext_instance_copy_in(PyccExtModule *m, PyObject *self)
+static PyObject *pycc_ext_instance_copy_default(PyccExtModule *m, PyObject *self)
 {
     PyTypeObject *tp = Py_TYPE(self);
     void *inst = ((PyccExtInstance *)self)->inst;
@@ -481,6 +481,17 @@ static PyObject *pycc_ext_instance_copy_in(PyccExtModule *m, PyObject *self)
         }
     }
     return carrier;
+}
+
+static PyObject *pycc_ext_instance_copy_in(PyccExtModule *m, PyObject *self)
+{
+    PyObject *hook = pycc_ext_object_position_hook(self, "__copy__");
+    if (hook != NULL) {
+        PyObject *result = PyObject_CallNoArgs(hook);
+        Py_DECREF(hook);
+        return result;
+    }
+    return PyErr_Occurred() ? NULL : pycc_ext_instance_copy_default(m, self);
 }
 
 

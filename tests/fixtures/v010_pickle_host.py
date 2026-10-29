@@ -198,6 +198,70 @@ for back in (pickle.loads(pickle.dumps(ring)), copy.copy(ring), copy.deepcopy(ri
 del copyreg.dispatch_table[m.Ring]
 print(copy.copy(ring).start is ring.start, pickle.loads(pickle.dumps(ring)).step)
 print(sorted(m.Point(1, 2.0, "s", True).__getstate__().items()))
+
+
+# Mixins listed after the compiled base: their hooks win over the shared
+# defaults, which stand where `object`'s do.
+class StateMixin:
+    def __getstate__(self):
+        return {"label": "mixed " + self.label, "x": self.x, "y": self.y, "on": self.on}
+
+    def __setstate__(self, state):
+        for key, value in state.items():
+            setattr(self, key, value)
+        self.extra = "restored"
+
+
+class ReduceExMixin:
+    def __reduce_ex__(self, proto):
+        return (WithReduceEx, (proto, 0.5, "mixin", True))
+
+
+class ReduceMixin:
+    def __reduce__(self):
+        return (WithReduce, (7, 0.5, "reduced", False))
+
+
+class CopyMixin:
+    def __copy__(self):
+        return "mixin copy"
+
+    def __deepcopy__(self, memo):
+        return "mixin deepcopy"
+
+
+class NewArgsMixin:
+    def __getnewargs__(self):
+        return ("unused",)
+
+
+class WithState(m.Point, StateMixin):
+    pass
+
+
+class WithReduceEx(m.Point, ReduceExMixin):
+    pass
+
+
+class WithReduce(m.Point, ReduceMixin):
+    pass
+
+
+class WithCopy(m.Point, CopyMixin):
+    pass
+
+
+class WithNewArgs(m.Point, NewArgsMixin):
+    pass
+
+
+for obj in (WithState(1, 1.5, "ws", True), WithReduceEx(2, 1.5, "wr", True),
+            WithReduce(3, 1.5, "wd", True), WithNewArgs(4, 1.5, "wn", False)):
+    for back in (pickle.loads(pickle.dumps(obj, 0)), pickle.loads(pickle.dumps(obj)),
+                 copy.copy(obj), copy.deepcopy(obj)):
+        print(type(back).__name__, back.show(), getattr(back, "extra", "-"))
+wc = WithCopy(5, 1.5, "wc", True)
+print(copy.copy(wc), copy.deepcopy(wc), pickle.loads(pickle.dumps(wc)).show())
 fresh = m.Point.__new__(m.Point)
 try:
     fresh.x

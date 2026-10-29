@@ -301,6 +301,67 @@ static int pycc_ext_is_compiled_type(PyObject *cls)
 }
 
 /*
+ * v0.10: the shared pickling and copying defaults the compiled classes
+ * carry (`__reduce_ex__`, `__getstate__`, `__setstate__`, `__copy__`) stand
+ * where CPython's sit for the source class: at `object`, the end of the MRO.
+ * A Python class after the compiled ones in `type(self).__mro__` (a mixin
+ * listed after the compiled base) that defines `name` therefore wins: this
+ * answers its `name` bound to `self` (a new reference), or NULL with no
+ * exception set when none does. Classes before the first compiled one are
+ * not consulted: one defining `name` is found before the default is, and
+ * reaches it only through `super()`.
+ */
+static PyObject *pycc_ext_object_position_hook(PyObject *self, const char *name)
+{
+    PyObject *mro = PyObject_GetAttrString((PyObject *)Py_TYPE(self), "__mro__");
+    Py_ssize_t n;
+    Py_ssize_t i;
+    int past_compiled = 0;
+    if (mro == NULL) {
+        return NULL;
+    }
+    n = PyTuple_Check(mro) ? PyTuple_Size(mro) : 0;
+    for (i = 0; i < n; i++) {
+        PyObject *c = PyTuple_GetItem(mro, i);
+        PyObject *dict;
+        PyObject *hook;
+        descrgetfunc get;
+        if (pycc_ext_is_compiled_type(c)) {
+            past_compiled = 1;
+            continue;
+        }
+        if (!past_compiled || c == (PyObject *)&PyBaseObject_Type) {
+            continue;
+        }
+        dict = PyObject_GetAttrString(c, "__dict__");
+        if (dict == NULL) {
+            Py_DECREF(mro);
+            return NULL;
+        }
+        hook = PyMapping_GetItemString(dict, name);
+        Py_DECREF(dict);
+        if (hook == NULL) {
+            if (!PyErr_ExceptionMatches(PyExc_KeyError)) {
+                Py_DECREF(mro);
+                return NULL;
+            }
+            PyErr_Clear();
+            continue;
+        }
+        Py_DECREF(mro);
+        get = (descrgetfunc)PyType_GetSlot(Py_TYPE(hook), Py_tp_descr_get);
+        if (get != NULL) {
+            PyObject *bound = get(hook, self, (PyObject *)Py_TYPE(self));
+            Py_DECREF(hook);
+            return bound;
+        }
+        return hook;
+    }
+    Py_DECREF(mro);
+    return NULL;
+}
+
+/*
  * v0.10: pickling a compiled instance, as CPython's `object.__reduce_ex__`
  * pickles an object (`reduce_newobj`). `__reduce__` answers
  * `(copyreg.__newobj__, (type(self), *newargs), self.__getstate__())`, the
@@ -416,7 +477,7 @@ static PyObject *pycc_ext_compiled_field(PyObject *self, PyObject *key)
  * empty, paired with a Python subclass's own `__slots__` values when it has
  * any. `pycc_ext_instance_setstate` is its mirror.
  */
-static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
+static PyObject *pycc_ext_instance_getstate_default(PyccExtModule *m, PyObject *self)
 {
     void *inst = ((PyccExtInstance *)self)->inst;
     const unsigned char *layout;
@@ -549,7 +610,7 @@ done:
  * `__dict__` directly; a slot entry is set with `setattr`, as pickle sets
  * one.
  */
-static PyObject *pycc_ext_instance_setstate_in(PyObject *self, PyObject *state)
+static PyObject *pycc_ext_instance_setstate_default(PyObject *self, PyObject *state)
 {
     PyObject *dict_state = state;
     PyObject *slot_state = NULL;
@@ -699,7 +760,7 @@ static int pycc_ext_newargs(PyObject *self, PyObject **newargs, PyObject **kwarg
 
 static PyObject *pycc_ext_object_reduce = NULL;
 
-/* Whether a Python class in `cls`'s MRO, before the compiled class, defines
+/* Whether a Python class in `cls`'s MRO (but `object`) defines
  * `__getstate__` (otherwise the compiled class's default is the one). */
 static int pycc_ext_getstate_overridden(PyObject *cls)
 {
@@ -714,8 +775,8 @@ static int pycc_ext_getstate_overridden(PyObject *cls)
     for (i = 0; i < n && found == 0; i++) {
         PyObject *c = PyTuple_GetItem(mro, i);
         PyObject *dict;
-        if (pycc_ext_is_compiled_type(c)) {
-            break;
+        if (pycc_ext_is_compiled_type(c) || c == (PyObject *)&PyBaseObject_Type) {
+            continue;
         }
         dict = PyObject_GetAttrString(c, "__dict__");
         if (dict == NULL) {
@@ -733,7 +794,7 @@ static int pycc_ext_getstate_overridden(PyObject *cls)
  * `object.__reduce_ex__`; protocols 0 and 1 refuse an object whose class
  * declares `__slots__` without a `__getstate__` of its own, as
  * `copyreg._reduce_ex` does. */
-static PyObject *pycc_ext_instance_reduce_in(PyObject *self, PyObject *proto)
+static PyObject *pycc_ext_instance_reduce_default(PyObject *self, PyObject *proto)
 {
     PyObject *cls = (PyObject *)Py_TYPE(self);
     PyObject *reduce;
@@ -846,6 +907,41 @@ done:
     Py_XDECREF(kwargs);
     Py_DECREF(newargs);
     return result;
+}
+
+/* The defaults' entry points, at `object`'s position in the MRO
+ * (`pycc_ext_object_position_hook`). */
+static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
+{
+    PyObject *hook = pycc_ext_object_position_hook(self, "__getstate__");
+    if (hook != NULL) {
+        PyObject *result = PyObject_CallNoArgs(hook);
+        Py_DECREF(hook);
+        return result;
+    }
+    return PyErr_Occurred() ? NULL : pycc_ext_instance_getstate_default(m, self);
+}
+
+static PyObject *pycc_ext_instance_setstate_in(PyObject *self, PyObject *state)
+{
+    PyObject *hook = pycc_ext_object_position_hook(self, "__setstate__");
+    if (hook != NULL) {
+        PyObject *result = PyObject_CallFunctionObjArgs(hook, state, NULL);
+        Py_DECREF(hook);
+        return result;
+    }
+    return PyErr_Occurred() ? NULL : pycc_ext_instance_setstate_default(self, state);
+}
+
+static PyObject *pycc_ext_instance_reduce_in(PyObject *self, PyObject *proto)
+{
+    PyObject *hook = pycc_ext_object_position_hook(self, "__reduce_ex__");
+    if (hook != NULL) {
+        PyObject *result = PyObject_CallFunctionObjArgs(hook, proto, NULL);
+        Py_DECREF(hook);
+        return result;
+    }
+    return PyErr_Occurred() ? NULL : pycc_ext_instance_reduce_default(self, proto);
 }
 
 /*

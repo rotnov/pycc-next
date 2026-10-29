@@ -302,7 +302,7 @@ fn the_shim_installs_the_shared_copy_on_every_carrier_type() {
         .unwrap();
     assert!(declared < include && include < defined);
     let defined = shim
-        .find("static PyObject *pycc_ext_instance_copy_in(PyccExtModule *m, PyObject *self)\n{")
+        .find("static PyObject *pycc_ext_instance_copy_default(PyccExtModule *m, PyObject *self)\n{")
         .unwrap();
     let body = &shim[defined..];
     let body = &body[..body.find("\n}\n").unwrap()];
