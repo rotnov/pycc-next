@@ -51,12 +51,16 @@ pub(super) fn with_unpublished_members(body: &[Stmt]) -> BTreeSet<String> {
 /// exception or an earlier class of the module (`classes`) publishing every
 /// member, and every member of its own body published.
 fn all_published(class: &StmtClassDef, classes: &BTreeSet<&str>, unpublished: &BTreeSet<String>) -> bool {
-    let bases_published = class.bases().iter().all(|base| match base {
+    let bases_published = class.bases().iter().all(|expr| match expr {
         Expr::Name(base) => {
             let base = base.id.as_str();
             base == "object"
                 || pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base)
                 || classes.contains(base) && !unpublished.contains(base)
+                // v0.10: a class another module of the package compiled
+                // and publishes whole (a class subclassed in its package
+                // runs in CPython there otherwise), read natively.
+                || crate::package_build::sibling_base(expr)
         }
         _ => false,
     });

@@ -29,6 +29,21 @@ pub struct SiblingClass {
     /// Each method of the sibling class (`_pycc_sibc_<Class>.m`) with the
     /// other module's compiled function it calls (`<prefix>pyfn_<Class.m>`).
     pub methods: Vec<(String, String)>,
+    /// v0.10: each method's entry there -- its dispatcher, which runs the
+    /// overrides of subclasses wherever they were compiled -- which a call
+    /// on a value typed with the sibling class runs (`<method>.0entry`,
+    /// `pycc_mir::dispatch::ENTRY_SEGMENT`).
+    pub entries_of: Vec<(String, String)>,
+    /// v0.10: the class record of the class it stands for
+    /// (`<prefix>pycc_class_<Class>`), the base of a subclass compiled
+    /// over it.
+    pub record: String,
+    /// v0.10: the length of that class's method table, and each listed
+    /// method's index in it with the sibling class's method and the other
+    /// module's body (`<prefix>pyfn_<Class.m>`): the vtable a subclass
+    /// compiled over it fills (`crate::class_record`).
+    pub entries: usize,
+    pub vtable: Vec<(usize, String, String)>,
 }
 
 thread_local! {
@@ -53,6 +68,31 @@ pub(crate) fn route(symbol: &str, class: &str) -> (String, String) {
                 || (symbol.to_string(), class.to_string()),
                 |sibling| (format!("{}{symbol}", sibling.prefix), sibling.real.clone()),
             )
+    })
+}
+
+/// The sibling class `class`, if it is one.
+pub(crate) fn get(class: &str) -> Option<SiblingClass> {
+    CLASSES.with(|cell| cell.borrow().iter().find(|sibling| sibling.class == class).cloned())
+}
+
+/// v0.10: each sibling class method's entry (`<method>.0entry`), with the
+/// method and the other module's function a call of it runs on a value
+/// typed with the sibling class.
+pub(crate) fn producer_entries() -> Vec<(String, String, String)> {
+    CLASSES.with(|cell| {
+        cell.borrow()
+            .iter()
+            .flat_map(|sibling| {
+                sibling.entries_of.iter().map(|(method, entry)| {
+                    (
+                        format!("{method}.{}", pycc_mir::dispatch::ENTRY_SEGMENT),
+                        method.clone(),
+                        entry.clone(),
+                    )
+                })
+            })
+            .collect()
     })
 }
 
@@ -87,6 +127,10 @@ mod tests {
                 "_pycc_sibc_S.get".to_string(),
                 "pycc_P1p1c_pyfn_S.get".to_string(),
             )],
+            entries_of: vec![],
+            record: "pycc_P1p1c_pycc_class_S".to_string(),
+            entries: 1,
+            vtable: vec![],
         }]);
         assert_eq!(
             route("pycc_ext_obj_unbox_instance", "_pycc_sibc_S"),

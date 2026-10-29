@@ -26,7 +26,7 @@
 //! copy (`pycc_hir::inherited_copy_origin`).
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::receiver_exact::exact_callee;
 use crate::{HirClassDef, MirExpr, MirItem, MirStmt, Ty};
@@ -47,6 +47,27 @@ pub const INSTANCE_PY_OVERRIDE: &str = "$instance_py_override";
 /// The marker segment of a dispatcher's name (`C.m.0dispatch`).
 pub const DISPATCH_SEGMENT: &str = "0dispatch";
 
+/// The callee of a dispatcher's foreign-class test (v0.10):
+/// The marker segment of a call of a sibling class's method on a value
+/// typed with the sibling class (v0.10, `C.m.0entry`): the other module's
+/// entry for the method, its dispatcher, which runs every override
+/// wherever it was compiled (`pycc_codegen`'s `sibling_class`).
+pub const ENTRY_SEGMENT: &str = "0entry";
+
+/// The callee of a dispatcher's foreign-class test (v0.10):
+/// `$instance_foreign(recv)`, true when the receiver's class record
+/// carries a vtable -- a compiled subclass another module of the package
+/// compiled (`pycc_codegen`'s `class_record`).
+pub const INSTANCE_FOREIGN: &str = "$instance_foreign";
+
+/// `$instance_vt_has(recv, k)`: whether the receiver's vtable fills entry
+/// `k` (the member's index in its class's method table).
+pub const INSTANCE_VT_HAS: &str = "$instance_vt_has";
+
+/// `$instance_vt_call("C.m", k, recv, args...)`: calls entry `k` of the
+/// receiver's vtable, a function of `C.m`'s signature.
+pub const INSTANCE_VT_CALL: &str = "$instance_vt_call";
+
 /// One dispatcher: its default callee, its signature, and one arm per
 /// subclass.
 #[derive(Debug, Clone)]
@@ -58,7 +79,15 @@ struct Dispatcher {
     /// The member a Python subclass may override, and how CPython reaches
     /// it; `None` when its values cannot cross ([`crosses`]).
     python: Option<(String, Member)>,
+    /// v0.10: a compiled subclass another module of the package compiled
+    /// may override the member ([`set_foreign_overrides`]): the member's
+    /// vtable index (`None` when only CPython reaches it), and how CPython
+    /// reaches it (`None` when its values cannot cross).
+    foreign: Option<Foreign>,
 }
+
+/// A dispatcher's foreign arm ([`Dispatcher::foreign`]).
+type Foreign = (Option<usize>, Option<(String, Member)>);
 
 /// What a dispatched member is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +104,36 @@ pub(crate) enum Member {
 thread_local! {
     static DISPATCHERS: RefCell<BTreeMap<String, Dispatcher>> =
         const { RefCell::new(BTreeMap::new()) };
+    static FOREIGN: RefCell<BTreeMap<String, BTreeSet<String>>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
+
+/// v0.10 (a package built whole): the members that compiled subclasses in
+/// other modules of the package may define, by the class of this module
+/// they derive from. A call of one of them on an instance of that class (or
+/// of one of its bases) dispatches on the receiver's class record: a
+/// foreign record's vtable entry, else CPython's lookup on its carrier.
+/// Set on this thread until the next call.
+pub fn set_foreign_overrides(overrides: BTreeMap<String, BTreeSet<String>>) {
+    FOREIGN.with(|cell| *cell.borrow_mut() = overrides);
+}
+
+/// Whether a subclass another module compiled may override `member` of a
+/// `class_def` receiver.
+fn foreign_override(
+    class_def: &HirClassDef,
+    member: &str,
+    classes: &HashMap<String, HirClassDef>,
+) -> bool {
+    FOREIGN.with(|cell| {
+        cell.borrow().iter().any(|(class, names)| {
+            names.contains(member)
+                && (*class == class_def.name
+                    || classes
+                        .get(class)
+                        .is_some_and(|def| def.mro.contains(&class_def.name)))
+        })
+    })
 }
 
 /// Forgets the dispatchers of the module lowered before.
@@ -158,6 +217,15 @@ pub(crate) fn route_member(
     if !pycc_hir::is_refcounted_class(class_def) || class_def.is_enum {
         return callee;
     }
+    // v0.10: a receiver typed with a sibling class (another module's class
+    // a package member reads natively) runs that module's entry for the
+    // method, which dispatches on every subclass, wherever compiled.
+    if kind == Member::Method
+        && class_def.name.starts_with(pycc_hir::SIBLING_CLASS_PREFIX)
+        && callee.starts_with(&format!("{}.", class_def.name))
+    {
+        return format!("{callee}.{ENTRY_SEGMENT}");
+    }
     let Some((params, ret)) = signature(&callee, scopes) else {
         return callee;
     };
@@ -202,7 +270,24 @@ pub(crate) fn route_member(
         && (ret == Ty::None || crosses(&ret))
         && params[1..].iter().all(crosses))
     .then(|| (member.to_string(), kind));
-    if arms.is_empty() && python.is_none() {
+    // v0.10: a subclass another module of the package compiled. A regular
+    // method of a base-less class has a vtable index -- its position in the
+    // class's method table, which that module's record fills
+    // (`pycc_codegen`'s `class_record`); any other member is reached
+    // through CPython.
+    let foreign = foreign_override(class_def, member, classes)
+        .then(|| {
+            let index = (kind == Member::Method && class_def.mro.len() == 1)
+                .then(|| class_def.methods.iter().position(|(name, _)| name == member))
+                .flatten();
+            let reach = (kind != Member::Dunder
+                && (ret == Ty::None || crosses(&ret))
+                && params[1..].iter().all(crosses))
+            .then(|| (member.to_string(), kind));
+            (index, reach)
+        })
+        .filter(|(index, reach)| index.is_some() || reach.is_some());
+    if arms.is_empty() && python.is_none() && foreign.is_none() {
         return callee;
     }
     let name = format!("{}.{member}.{DISPATCH_SEGMENT}", class_def.name);
@@ -215,10 +300,33 @@ pub(crate) fn route_member(
                 ret,
                 arms,
                 python,
+                foreign,
             },
         );
     });
     name
+}
+
+/// v0.10: registers the dispatcher of each method [`set_foreign_overrides`]
+/// names on a class of this module, whether or not a call of it routed
+/// there: another module of the package calls it (its interface lists it,
+/// `crate::package_build::interface`), and its foreign arm is what runs the
+/// overrides compiled there.
+pub(crate) fn route_planned(scopes: &[HashMap<String, Ty>], classes: &HashMap<String, HirClassDef>) {
+    let planned: Vec<(String, String)> = FOREIGN.with(|cell| {
+        cell.borrow()
+            .iter()
+            .flat_map(|(class, names)| names.iter().map(move |name| (class.clone(), name.clone())))
+            .collect()
+    });
+    for (class, member) in planned {
+        let Some(def) = classes.get(&class) else {
+            continue;
+        };
+        if let Some((_, mangled)) = def.methods.iter().find(|(name, _)| *name == member) {
+            route(def, &member, mangled.clone(), scopes, classes);
+        }
+    }
 }
 
 /// The default callee of the dispatcher `name`, for the receiver-exact
@@ -289,28 +397,77 @@ fn dispatcher_item(name: &str, dispatcher: &Dispatcher) -> MirItem {
             orelse: body,
         }];
     }
-    // The Python override test runs first: a Python subclass's instance
-    // carries the class name of the compiled class it derives from.
-    if let Some((member, kind)) = &dispatcher.python {
+    // The member reached through CPython on the receiver's carrier.
+    let through_cpython = |member: &str, kind: Member| -> Vec<MirStmt> {
         let boxed = Box::new(MirExpr::ObjectBox(Box::new(receiver())));
         let value = match kind {
             Member::Getter => MirExpr::ObjAttrGet {
                 base: boxed,
-                attr: member.clone(),
+                attr: member.to_string(),
                 ty: Ty::Object,
             },
             Member::Method | Member::Dunder => MirExpr::ObjMethodCall {
                 base: boxed,
-                method: member.clone(),
+                method: member.to_string(),
                 args: args()[1..].to_vec(),
             },
         };
         // The return converts the object to the declared type, raising
         // `TypeError` for another (`pycc_codegen`'s `object_coerce`).
-        let arm = match &dispatcher.ret {
+        match &dispatcher.ret {
             Ty::None => vec![MirStmt::ExprStmt(value), MirStmt::Return(None)],
             _ => vec![MirStmt::Return(Some(value))],
+        }
+    };
+    // v0.10: a receiver whose class another module of the package compiled
+    // (its record carries a vtable) runs its vtable entry, or -- an entry
+    // that module left empty, an override of another signature -- the
+    // member CPython finds on its carrier.
+    if let Some((index, reach)) = &dispatcher.foreign {
+        let mut foreign = match reach {
+            Some((member, kind)) => through_cpython(member, *kind),
+            None => body.clone(),
         };
+        if let Some(index) = index {
+            let mut vt_args = vec![
+                MirExpr::StringLiteral(dispatcher.default.clone()),
+                MirExpr::IntLiteral(*index as i64),
+            ];
+            vt_args.extend(args());
+            let call = MirExpr::Call {
+                callee: INSTANCE_VT_CALL.to_string(),
+                args: vt_args,
+                ty: dispatcher.ret.clone(),
+            };
+            let run = if dispatcher.ret == Ty::None {
+                vec![MirStmt::ExprStmt(call), MirStmt::Return(None)]
+            } else {
+                vec![MirStmt::Return(Some(call))]
+            };
+            foreign = vec![MirStmt::If {
+                test: MirExpr::Call {
+                    callee: INSTANCE_VT_HAS.to_string(),
+                    args: vec![receiver(), MirExpr::IntLiteral(*index as i64)],
+                    ty: Ty::Bool,
+                },
+                body: run,
+                orelse: foreign,
+            }];
+        }
+        body = vec![MirStmt::If {
+            test: MirExpr::Call {
+                callee: INSTANCE_FOREIGN.to_string(),
+                args: vec![receiver()],
+                ty: Ty::Bool,
+            },
+            body: foreign,
+            orelse: body,
+        }];
+    }
+    // The Python override test runs first: a Python subclass's instance
+    // carries the class name of the compiled class it derives from.
+    if let Some((member, kind)) = &dispatcher.python {
+        let arm = through_cpython(member, *kind);
         body = vec![MirStmt::If {
             test: MirExpr::Call {
                 callee: INSTANCE_PY_OVERRIDE.to_string(),
@@ -328,3 +485,7 @@ fn dispatcher_item(name: &str, dispatcher: &Dispatcher) -> MirItem {
         body,
     }
 }
+
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod tests;

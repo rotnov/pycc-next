@@ -84,6 +84,17 @@ pub(crate) fn lower_class(
     // arguments (e.g. `metaclass=Meta`) and every other non-name base
     // (`class C(SomeMod.Base):`, `class C(Base[int]):`) are still rejected.
     let mut bases = generic_base::lower_base_names(def, imports, type_vars, type_param.is_some())?;
+    // A package built whole (v0.10): a base naming a class another module
+    // of the package compiled, imported by name, is its sibling class
+    // (`crate::SIBLING_CLASS_PREFIX`), so the subclass is compiled over the
+    // other module's layout.
+    for base in &mut bases {
+        if let Some(stub) = crate::sibling_base_for(base)
+            && defined_classes.iter().any(|(name, _)| *name == stub)
+        {
+            *base = stub;
+        }
+    }
     let class_name = def.name.to_string();
     // #379 (PR-19): PEP 435 enum detection. A class whose single base is
     // the bare name `Enum` (`class Color(Enum):`) is an enum class. `Enum`
@@ -197,6 +208,29 @@ pub(crate) fn lower_class(
         module_items,
         def.range.into(),
     )?;
+    // v0.10: a class compiled over another module's class keeps that
+    // class's slots at the start of its layout, where that module's
+    // compiled methods read them -- single inheritance only.
+    let over_sibling = |base: &String| {
+        base.starts_with(crate::SIBLING_CLASS_PREFIX)
+            || defined_classes.iter().any(|(name, def)| {
+                name == base
+                    && def
+                        .mro
+                        .iter()
+                        .any(|entry| entry.starts_with(crate::SIBLING_CLASS_PREFIX))
+            })
+    };
+    if bases.len() > 1 && bases.iter().any(over_sibling) {
+        return Err(unsupported(
+            format!(
+                "class `{class_name}` combines a class another module of the package compiled \
+                 with other bases -- a class is compiled over such a class only by single \
+                 inheritance"
+            ),
+            def.range,
+        ));
+    }
     // #380 (PR-20): protocol inheritance detection. A class that inherits
     // from a user-defined protocol (`class Q(P):` where `P` is a protocol)
     // is itself a protocol. This check runs after the `Protocol` marker
