@@ -105,19 +105,46 @@ pub(super) fn rewrite(hir: &HirModule) -> Option<(HirModule, BTreeSet<usize>)> {
     Some((module, marked))
 }
 
-/// A non-empty dict display whose keys are distinct `str` literals. A
-/// repeated key stays a CPython display: CPython evaluates every value before
-/// it stores any, so an overwritten value is released only after the later
-/// values ran, while the native dict would release it at its insert.
+/// A non-empty dict display whose keys are distinct `str` literals and whose
+/// values are inert ([`inert_value`]). A repeated key stays a CPython display:
+/// CPython evaluates every value before it stores any, so an overwritten value
+/// is released only after the later values ran, while the native dict would
+/// release it at its insert.
 fn is_str_keyed_display(expr: &HirExpr) -> bool {
     let HirExpr::DictLiteral(pairs) = expr else {
         return false;
     };
     let mut seen = BTreeSet::new();
     !pairs.is_empty()
-        && pairs
+        && pairs.iter().all(|(key, value)| {
+            matches!(key, HirExpr::StringLiteral(s) if seen.insert(s.clone())) && inert_value(value)
+        })
+}
+
+/// A display value whose evaluation runs no code and cannot raise: a name,
+/// a literal, or a display of such values. With any other value a raise or a
+/// finalizer mid-display could observe the native dict releasing its values
+/// in an order CPython's display would not (it releases unconsumed values in
+/// reverse evaluation order).
+fn inert_value(value: &HirExpr) -> bool {
+    match value {
+        HirExpr::Name(_)
+        | HirExpr::IntLiteral(_)
+        | HirExpr::FloatLiteral(_)
+        | HirExpr::BoolLiteral(_)
+        | HirExpr::StringLiteral(_)
+        | HirExpr::NoneLiteral
+        | HirExpr::EmptyList(_)
+        | HirExpr::EmptySet(_)
+        | HirExpr::EmptyDict(_) => true,
+        HirExpr::ListLiteral(items) | HirExpr::TupleLiteral(items) | HirExpr::ObjectList(items) => {
+            items.iter().all(inert_value)
+        }
+        HirExpr::DictLiteral(pairs) => pairs
             .iter()
-            .all(|(key, _)| matches!(key, HirExpr::StringLiteral(s) if seen.insert(s.clone())))
+            .all(|(key, value)| inert_value(key) && inert_value(value)),
+        _ => false,
+    }
 }
 
 /// The names a top-level statement binds (any name a function might also

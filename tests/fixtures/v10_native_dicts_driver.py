@@ -67,6 +67,28 @@ def bad_key(obj):
 
 
 print(bad_key(obj), m.bad_key(obj, False))
+
+
+order = []
+
+
+class Logged:
+    def __init__(self, name):
+        self.name = name
+
+    def __del__(self):
+        order.append(self.name)
+
+
+def fail():
+    raise ValueError('value')
+
+
+try:
+    m.raising_value(Logged, fail)
+except ValueError:
+    pass
+print(order)
 before = (sys.getrefcount(obj), live_dicts())
 for _ in range(1000):
     m.tally([obj, obj])

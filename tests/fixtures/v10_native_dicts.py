@@ -139,3 +139,10 @@ def bad_key(obj, fail):
     d = {'a': obj}
     d[raising_key(fail)] = obj
     return len(d)
+
+
+def raising_value(make, fail):
+    # A value that runs code keeps CPython's display: when a later value
+    # raises, CPython releases the earlier ones in reverse order.
+    d = {'a': make('a'), 'b': make('b'), 'c': fail()}
+    return len(d)
