@@ -127,6 +127,9 @@ pub(crate) fn lower_call_expr(
             lowered
                 .into_iter()
                 .map(|(key, value)| {
+                    // A narrowed read stays the object it is (its identity
+                    // and its subclass), as the CPython display keeps it.
+                    let value = crate::obj_arith::display_element(value);
                     let value = if value.ty() == Ty::Object {
                         value
                     } else {

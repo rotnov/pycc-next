@@ -117,3 +117,11 @@ def duplicated(make, observe):
     # the overwritten value's `__del__` runs after `observe()`.
     d = {'x': make(), 'x': None, 'y': observe()}
     return len(d), d['y']
+
+
+def narrowed(v):
+    # A value narrowed by `isinstance` keeps its identity and its subclass.
+    if isinstance(v, float):
+        d = {'x': v, 'other': None}
+        return d['x'] is v, type(d['x']).__name__
+    return None

@@ -50,6 +50,13 @@ class Noisy:
 
 print(m.duplicated(Noisy, lambda: list(log)), log)
 
+
+class Real(float):
+    pass
+
+
+print(m.narrowed(2.5), m.narrowed(Real(1.5)), m.narrowed('s'))
+
 before = (sys.getrefcount(obj), live_dicts())
 for _ in range(1000):
     m.tally([obj, obj])
