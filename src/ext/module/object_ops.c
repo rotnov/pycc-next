@@ -325,11 +325,31 @@ PyObject *pycc_ext_obj_pack_bool(char value)
     return PyBool_FromLong(value != 0);
 }
 
+/* Whether `bytes` would be interned by CPython as a code constant (`len`
+ * of 0 or 1 included, both singletons in CPython): all ASCII letters, digits
+ * and `_`. */
+static int pycc_ext_name_chars(const unsigned char *bytes, size_t len)
+{
+    size_t i;
+
+    if (len <= 1) {
+        return len == 0 || bytes[0] < 0x80;
+    }
+    for (i = 0; i < len; i++) {
+        unsigned char c = bytes[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /*
  * Borrowing, unlike `pycc_ext_pack_str` above: see the block comment on
  * `pycc_ext_obj_pack_int`. The `PyStrObj` stays owned by the compiled
  * module body, and `PyUnicode_FromStringAndSize` copies the bytes, so the
- * CPython string is an independent object with no shared identity (#1043).
+ * CPython string is an independent object with no shared identity (#1043),
+ * but a literal's (below).
  */
 PyObject *pycc_ext_obj_pack_str(void *value)
 {
@@ -353,6 +373,15 @@ PyObject *pycc_ext_obj_pack_str(void *value)
     bytes = pycc_rt_ext_str_bytes(value, &len);
     packed = PyUnicode_FromStringAndSize((const char *)bytes, (Py_ssize_t)len);
     if (packed != NULL) {
+        /* A literal's text CPython would have interned as a code constant
+         * (its characters all ASCII letters, digits and `_`, as CPython's
+         * `all_name_chars`; and a one-character string, a singleton in
+         * CPython) crosses as the interned string: `'raw' is 'raw'` holds
+         * across the boundary as in CPython, and a dict or attribute lookup
+         * keyed by it finds the key by identity, not by comparing text. */
+        if (pycc_rt_str_is_immortal(value) && pycc_ext_name_chars(bytes, len)) {
+            PyUnicode_InternInPlace(&packed);
+        }
         Py_INCREF(packed);
         pycc_rt_str_set_foreign(value, packed);
     }

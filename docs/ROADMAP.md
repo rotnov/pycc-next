@@ -1039,9 +1039,35 @@ Accept:
    by compiled code are native when their value types infer, with a guarded CPython-dict
    fallback when they escape or arrive from CPython code; iteration order, views, mutation
    during iteration errors, `==`, `repr`, pickling and identity match CPython.
+   **Realization (guru ruling, 2026-10-29):** escape is decided per allocation site at
+   build time (the non-strict widening that already makes a typed dict meeting an object a
+   CPython dict from creation); a dict that may escape is a CPython dict from creation,
+   and every CPython dict -- built escaping, or received -- is accessed through direct
+   dict-API calls under an exact-dict guard, so identity, views, pickling and iteration
+   errors are CPython's by construction for every dict CPython can see. No run-time
+   materialize-and-forward. What stays to do: a non-escaping `str`-keyed dict whose values
+   are objects (`{"type": "text", "raw": s}`) is a native dict too.
+   **Progress 2026-10-29:** step 1, the exact-dict guard on `d[k]`, `k in d` and
+   `d[k] = v` of CPython dicts, and literals crossing as CPython's interned strings
+   (`tests/v10_dicts.rs`): 275 -> 179 instructions for a compiled `d['raw']` on a
+   received dict. pystache 584k -> 580k per round, mistune 58.7M -> 57.7M
+   per pass (CPython 509.6k and 57.3M, `PYTHONHASHSEED=0`): dicts are not where either
+   package spends (accept 3's note).
 3. **Template and Markdown >= 1.2x:** pystache 0.6.8 and mistune 3.3.4 each run their own
    benchmark >= 1.2x faster than CPython (median of the CI benchmark job, accept 4), with
    their suites passing.
+   **Profile 2026-10-29** (callgrind, main 97e5e9f, per round, `PYTHONHASHSEED=0`):
+   pystache 580k against CPython's 510k, of which parsing (`parse()` alone) 238k against
+   214k and rendering with the call plumbing 342k against 295k; 1.2x needs 424k in all.
+   The plumbing of `render(**kwargs)` -> `Renderer.render(*context, **kwargs)` ->
+   `_render_string` -> `_render_final` -> `ContextStack.create` and the per-render
+   `Renderer`/`RenderEngine` construction is ~110k: `Renderer` is a CPython class
+   because the package's tests subclass it and its members (private methods, defaults,
+   `*args`/`**kwargs`) are not published. mistune 58.7M against 57.2M per pass:
+   CPython's interpreter is ~22M of its time and compiled code's boundary costs about as
+   much (calls and method caches ~4M, attribute lookups 0.7M, `str` crossings ~1.6M,
+   dict operations ~1.1M); its renderers are CPython classes, so its tokens cross into
+   CPython at once.
 4. **Trustworthy numbers:** a CI benchmark workflow runs `bench/run.py`, the package
    `--time` checks and `bench/pydantic_check.py --time` on a GitHub-hosted runner with
    interleaved fresh-process runs, and publishes median and spread as an artifact; every
