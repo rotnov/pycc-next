@@ -130,3 +130,12 @@ fn key_calls_follow_every_argument_non_strict() {
     let oracle = python().arg(&source).output().expect("python should spawn");
     assert_matches(&ours, &oracle);
 }
+
+/// `sorted` keys a copy of its input: a nested function key that changes
+/// the list does not change what is sorted.
+#[test]
+fn sorted_keys_a_copy_of_its_input() {
+    native("v10_closure_key_snapshot", &[]);
+    native("v10_closure_key_snapshot", &["--non-strict"]);
+    ext("v10_closure_key_snapshot", &[]);
+}

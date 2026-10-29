@@ -92,6 +92,12 @@ pub(super) fn apply(f: &Expr, fresh: &Fresh, range: TextRange) -> Option<(String
     }
 }
 
+/// Whether `f` is a nested function used as a value (`__pycc_closure__(...)`).
+fn is_closure_value(f: &Expr) -> bool {
+    matches!(f, Expr::Call(call)
+        if matches!(call.func.as_ref(), Expr::Name(n) if n.id.as_str() == crate::CLOSURE_MARKER))
+}
+
 /// The `key`/`reverse` keywords of a call (`key=None` counts as absent), or
 /// `None` when it has any other keyword.
 fn key_and_reverse(call_expr: &ExprCall) -> Option<(Option<&Expr>, Option<&Expr>)> {
@@ -180,6 +186,16 @@ pub(super) fn rewrite_key_call(
             }
             match func.id.as_str() {
                 "sorted" => {
+                    // A nested function key may change the list it reads
+                    // while the pairs are built (`xs[1] = 0`); `sorted` keys
+                    // a copy of its input, so the pairs iterate one.
+                    let snapshot;
+                    let xs = if key.is_some_and(is_closure_value) && !shadowed("list") {
+                        snapshot = call_name("list", vec![xs.clone()], range);
+                        &snapshot
+                    } else {
+                        xs
+                    };
                     let pairs = pairs(xs, key, fresh, range)?;
                     Some(call_name(
                         "__pycc_sorted_keyed",
@@ -203,7 +219,9 @@ pub(super) fn rewrite_key_call(
             if attr.attr.as_str() == "sort" && call_expr.arguments.args.is_empty() =>
         {
             let xs = attr.value.as_ref();
-            if !is_rereadable(xs) {
+            // `list.sort` empties the list while it calls the key, which a
+            // nested function key could see; such a call stays as written.
+            if !is_rereadable(xs) || key.is_some_and(is_closure_value) {
                 return None;
             }
             let pairs = pairs(xs, key, fresh, range)?;
