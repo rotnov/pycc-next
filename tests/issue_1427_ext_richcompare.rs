@@ -352,9 +352,10 @@ const DRIVER_OUT: &str = "issue (True, False)\n\
 ///   class is made with its real bases, so `Over`'s class is a subclass of
 ///   `Base`'s and the host tries the subclass's reflected `__eq__` first as
 ///   CPython does: `reflected` moved to [`DRIVER`] too.)
-/// - `uninitialized`: an object `tp_init` never filled has no instance for
-///   the compiled method to run on: `TypeError: H.__hash__() called on an
-///   uninitialized instance`, where CPython's body raises `AttributeError`.
+/// - `uninitialized`: since v0.10 an object `tp_init` never filled carries
+///   an instance with every slot unassigned, so the compiled body raises
+///   `AttributeError` as CPython's does (the shared output); kept here for
+///   the shape of the driver.
 const EXT_ONLY_DRIVER: &str = r#"show("typed other", lambda: rc.TypedBare(1) == 3)
 show("typed none", lambda: rc.TypedNone(1) == None)
 show("scalar other", lambda: rc.IntEq(1) == "x")
@@ -368,7 +369,7 @@ const EXT_ONLY_OUT: &str = "typed other False\n\
     typed none False\n\
     scalar other TypeError\n\
     unpublished ('NC', False, False)\n\
-    uninitialized TypeError\n";
+    uninitialized AttributeError\n";
 
 const CPYTHON_EXT_ONLY_OUT: &str = "typed other AttributeError\n\
     typed none True\n\

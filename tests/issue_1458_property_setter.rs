@@ -23,8 +23,10 @@
 //! never ran. [`EXT_ONLY_DRIVER`] pins the documented differences (D-244's
 //! #1458 amendment): a value outside the parameter row is refused with that
 //! row's error; a setter whose value type the boundary does not carry
-//! (`list[int]`) leaves the property read-only; and a carrier whose
-//! `__init__` never ran cannot be stored into.
+//! (`list[int]`) leaves the property read-only. (Since v0.10 a carrier
+//! whose `__init__` never ran holds an instance with every slot unassigned,
+//! so the setter runs on it and fails on the field `__init__` would have
+//! set, as in CPython.)
 //!
 //! The hosted test is `#[ignore]`d and contributes no line coverage; the
 //! Tier-1 `native-build-test` leg runs it with
@@ -262,7 +264,7 @@ const EXT_ONLY_OUT: &str = "TypeError Box.n() argument 1: 'str' object cannot be
     TypeError Box.leaf() argument 1 must be pycc_prop_set_mod.Leaf, not object\n\
     AttributeError attribute 'count' of 'pycc_prop_set_mod.Box' objects is not writable\n\
     2361183241434822606848 0.5 False a Leaf 0\n\
-    AttributeError cannot set 'n' on a 'Box' object whose __init__ never ran\n";
+    AttributeError 'Box' object has no attribute 'sets'\n";
 
 /// What CPython answers for the lines [`EXT_ONLY_DRIVER`] pins, so the
 /// divergence is stated, not inferred: the setter runs on any value (and
