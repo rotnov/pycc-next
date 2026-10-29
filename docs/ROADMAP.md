@@ -1066,3 +1066,28 @@ Accept:
    the package are native (layout-pointer dispatch across modules, no CPython class in
    between), and compiled exception classes can derive from package exception bases
    (PEP 697); each with oracle tests vs CPython.
+
+## v0.11 — Imports faster than CPython
+
+v0.10's CI benchmark job put pydantic's import at 0.93x CPython (455.7M instructions vs
+442.9M); the rest is a 10.5 MB extension to load, ~8.8M instructions of libpython object
+creation (functions, classes, forwarders, signatures) and ~296 fallback chunks run at
+import. v0.11 makes importing compiled packages at least as fast as importing their sources,
+then faster, without changing what Python code can observe.
+
+Accept:
+1. **pydantic import >= 1.0x**, then **>= 1.2x** as a stretch: median of the CI benchmark
+   job (`bench.yml`) for `import pydantic; from pydantic import BaseModel`, compiled tree vs
+   CPython from `.pyc`, same pydantic-core wheel; its suite fails no test that passes
+   against its sources.
+2. **Smaller, faster-loading extensions:** whole-package builds use LTO across the
+   package's modules, identical-code folding and cold sections for error and fallback
+   paths; the pydantic extension's size and load-time relocations are measured and reduced,
+   with no runtime instruction-count regression on the CI bounds.
+3. **Less work at import:** fewer fallback chunks executed at import (functions and classes
+   created natively where possible), and lazy creation of module-level objects only where
+   it is unobservable to Python code (module `__dict__` contents, `dir()`, `inspect`,
+   pickling, import side-effect order and exceptions match CPython); every laziness rule is
+   documented with its observability argument and covered by oracle tests.
+4. **General, not pydantic-only:** mistune's and pystache's import times are measured in
+   the CI benchmark job and are no slower than CPython's; no package check regresses.
