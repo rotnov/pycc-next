@@ -442,8 +442,60 @@ impl<'a> Rewriter<'_> {
                 results.push(&comp.value);
                 self.comprehension(&comp.generators, &results);
             }
+            Expr::FString(fstring) => {
+                let before = self.edits.len();
+                visitor::walk_expr(self, expr);
+                self.keep_debug_texts(fstring, before);
+            }
             _ => visitor::walk_expr(self, expr),
         }
+    }
+
+    /// `f"{x=}"` prints the source text of its field, so a field whose
+    /// names this pass rewrote (`__pycc_fallback_ns['x']`) keeps the text
+    /// as written: it becomes literal text before the field, and the `=`
+    /// becomes the `!r` it implies (none with a conversion or a format
+    /// spec). A debug text holding a quote or a backslash is left alone
+    /// (it cannot be copied into the literal part as is).
+    fn keep_debug_texts(&mut self, fstring: &pycc_ast::ExprFString, before: usize) {
+        let mut fixes = Vec::new();
+        for part in fstring.value.iter() {
+            let pycc_ast::FStringPart::FString(f) = part else {
+                continue;
+            };
+            for element in f.elements.iter() {
+                let pycc_ast::InterpolatedStringElement::Interpolation(interp) = element else {
+                    continue;
+                };
+                let Some(debug) = &interp.debug_text else {
+                    continue;
+                };
+                let text = debug.as_str();
+                let expr = pycc_ast::expr_range(&interp.expression);
+                let rewritten = self.edits[before..]
+                    .iter()
+                    .any(|e| expr.start <= e.range.start && e.range.end <= expr.end);
+                if !rewritten || text.contains(['\'', '"', '\\']) {
+                    continue;
+                }
+                let open = interp.range.start().to_u32();
+                let debug_end = open + 1 + text.len() as u32;
+                let literal = text.replace('{', "{{").replace('}', "}}");
+                let implied = interp.conversion == pycc_ast::ConversionFlag::None
+                    && interp.format_spec.is_none();
+                fixes.push(Edit {
+                    range: open..open,
+                    text: literal,
+                    mirror: None,
+                });
+                fixes.push(Edit {
+                    range: expr.end..debug_end,
+                    text: if implied { "!r" } else { "" }.to_string(),
+                    mirror: None,
+                });
+            }
+        }
+        self.edits.extend(fixes);
     }
 }
 

@@ -395,3 +395,14 @@ fn key_error_for_a_non_str_key_in_an_embedding_program() {
 fn an_unexpected_keyword_suggests_a_close_parameter() {
     assert_matches_cpython("fuzz_unexpected_keyword_suggestion");
 }
+
+/// An f-string `=` field over a module global that a `--non-strict`
+/// statement running in CPython reads from the namespace dictionary prints
+/// the field's source text, not the rewritten read.
+#[test]
+fn an_fstring_debug_field_keeps_its_text_in_fallback_code() {
+    let source = fixture("fuzz_fstring_debug_fallback_global.py");
+    let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
+    let got = support::run_native("fuzz_fstring_debug", &source, &["--release", "--non-strict"]);
+    assert_eq!(got, expected);
+}
