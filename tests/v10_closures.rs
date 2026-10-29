@@ -113,11 +113,24 @@ fn closure_rebound_after_def_non_strict() {
 
 /// `reverse=` is evaluated before any key call, and a raising one stops
 /// them all (such a call is not rewritten, so part of the function may run
-/// in CPython: only the output is compared).
+/// in CPython: only the output is compared, [`output_matches`]).
 #[test]
 fn key_calls_follow_every_argument_non_strict() {
-    let dir = ScratchDir::new("v10_closure_key_order").expect("scratch");
-    let source = fixture("v10_closure_key_order", &dir, "m.py");
+    output_matches("v10_closure_key_order");
+}
+
+/// A `sorted` call with a nested function key is not rewritten where the
+/// program shadows `list`.
+#[test]
+fn a_shadowed_list_keeps_sorted_as_written() {
+    output_matches("v10_closure_key_shadowed");
+}
+
+/// `name`'s `--non-strict` native build prints what CPython prints (part of
+/// it may run in CPython).
+fn output_matches(name: &str) {
+    let dir = ScratchDir::new(name).expect("scratch");
+    let source = fixture(name, &dir, "m.py");
     let build = pycc()
         .args(["build", "--non-strict"])
         .arg(&source)

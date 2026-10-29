@@ -188,9 +188,14 @@ pub(super) fn rewrite_key_call(
                 "sorted" => {
                     // A nested function key may change the list it reads
                     // while the pairs are built (`xs[1] = 0`); `sorted` keys
-                    // a copy of its input, so the pairs iterate one.
+                    // a copy of its input, so the pairs iterate one (made by
+                    // the `list` builtin: a call is left alone where a
+                    // binding of the program shadows it).
                     let snapshot;
-                    let xs = if key.is_some_and(is_closure_value) && !shadowed("list") {
+                    let xs = if key.is_some_and(is_closure_value) {
+                        if shadowed("list") {
+                            return None;
+                        }
                         snapshot = call_name("list", vec![xs.clone()], range);
                         &snapshot
                     } else {
