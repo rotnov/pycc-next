@@ -455,8 +455,11 @@ impl<'a> Rewriter<'_> {
     /// names this pass rewrote (`__pycc_fallback_ns['x']`) keeps the text
     /// as written: it becomes literal text before the field, and the `=`
     /// becomes the `!r` it implies (none with a conversion or a format
-    /// spec). A debug text holding a quote or a backslash is left alone
-    /// (it cannot be copied into the literal part as is).
+    /// spec). The `=` is the last one of the debug text, which runs past a
+    /// parenthesized expression's own range (`{(x)=}`). A line break in the
+    /// text is escaped for the literal part; a debug text holding a quote or a
+    /// backslash, or a line break in a raw f-string, is left alone (it cannot
+    /// be copied into the literal part as is).
     fn keep_debug_texts(&mut self, fstring: &pycc_ast::ExprFString, before: usize) {
         let mut fixes = Vec::new();
         for part in fstring.value.iter() {
@@ -475,12 +478,23 @@ impl<'a> Rewriter<'_> {
                 let rewritten = self.edits[before..]
                     .iter()
                     .any(|e| expr.start <= e.range.start && e.range.end <= expr.end);
-                if !rewritten || text.contains(['\'', '"', '\\']) {
+                let breaks = text.contains(['\n', '\r']);
+                if !rewritten
+                    || text.contains(['\'', '"', '\\'])
+                    || (breaks && f.flags.prefix().is_raw())
+                {
                     continue;
                 }
+                let Some(equals) = text.trim_end().strip_suffix('=').map(str::len) else {
+                    continue;
+                };
                 let open = interp.range.start().to_u32();
                 let debug_end = open + 1 + text.len() as u32;
-                let literal = text.replace('{', "{{").replace('}', "}}");
+                let literal = text
+                    .replace('{', "{{")
+                    .replace('}', "}}")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r");
                 let implied = interp.conversion == pycc_ast::ConversionFlag::None
                     && interp.format_spec.is_none();
                 fixes.push(Edit {
@@ -489,7 +503,7 @@ impl<'a> Rewriter<'_> {
                     mirror: None,
                 });
                 fixes.push(Edit {
-                    range: expr.end..debug_end,
+                    range: open + 1 + equals as u32..debug_end,
                     text: if implied { "!r" } else { "" }.to_string(),
                     mirror: None,
                 });
