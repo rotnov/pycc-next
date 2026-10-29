@@ -47,55 +47,12 @@ impl Rewriter<'_> {
         super::keys::apply(f, self.fresh, range)
     }
 
-    /// The `map`/`filter` arguments of `outer` its call consumes whole at once
-    /// (`tuple(...)`, `"sep".join(...)`, a `*` argument) made comprehensions
-    /// ([`Self::map_or_filter`]); `list(...)` is `visit_expr`'s.
-    fn consume_whole(&self, outer: &mut ExprCall) {
-        let whole = match outer.func.as_ref() {
-            Expr::Name(n) => n.id.as_str() == "tuple" && self.builtin("tuple"),
-            Expr::Attribute(a) => {
-                a.attr.as_str() == "join" && matches!(a.value.as_ref(), Expr::StringLiteral(_))
-            }
-            _ => false,
-        };
-        if whole
-            && outer.arguments.keywords.is_empty()
-            && let [Expr::Call(inner)] = &*outer.arguments.args
-            && let Some(comp) = self.map_or_filter(inner)
-        {
-            outer.arguments.args[0] = comp;
-        }
-        for arg in outer.arguments.args.iter_mut() {
-            if let Expr::Starred(starred) = arg
-                && let Expr::Call(inner) = starred.value.as_ref()
-                && let Some(comp) = self.map_or_filter(inner)
-            {
-                *starred.value = comp;
-            }
-        }
-    }
-
     /// `map(f, xs)` -> `[f(v) for v in xs]`; `filter(f, xs)` ->
-    /// `[v for v in xs if f(v)]` (`filter(None, xs)` tests `v` itself), where
-    /// the result is consumed whole at once with no code of the program in
-    /// between, so each call of `f` is made when CPython makes it: the
-    /// argument of `list(...)`/`tuple(...)`/`"sep".join(...)`, a `*` call
-    /// argument and the value of an unpacking assignment (and a `for` loop's
-    /// `map`, made a loop over its input) ([`Self::consume_whole`]).
+    /// `[v for v in xs if f(v)]` (`filter(None, xs)` tests `v` itself), made
+    /// eagerly (`docs/DEVIATIONS.md`). A nested function used as a value
+    /// (`__pycc_closure__(...)`) is left to CPython's lazy `map`/`filter`:
+    /// the state it captures may change before the result is consumed.
     fn map_or_filter(&self, call_expr: &ExprCall) -> Option<Expr> {
-        self.map_or_filter_in(call_expr, false)
-    }
-
-    /// [`Self::map_or_filter`] of any other `map`/`filter`, made a list
-    /// eagerly as before v0.10 (`docs/DEVIATIONS.md`), except of a nested
-    /// function used as a value (`__pycc_closure__(...)`): that one stays a
-    /// lazy CPython `map`, as the state the function reads may change
-    /// before the result is consumed.
-    fn lazy_map_or_filter(&self, call_expr: &ExprCall) -> Option<Expr> {
-        self.map_or_filter_in(call_expr, true)
-    }
-
-    fn map_or_filter_in(&self, call_expr: &ExprCall, lazy: bool) -> Option<Expr> {
         let Expr::Name(func) = call_expr.func.as_ref() else {
             return None;
         };
@@ -105,9 +62,8 @@ impl Rewriter<'_> {
         if !call_expr.arguments.keywords.is_empty() || matches!(xs, Expr::Starred(_)) {
             return None;
         }
-        if lazy
-            && matches!(f, Expr::Call(c)
-                if matches!(c.func.as_ref(), Expr::Name(n) if n.id.as_str() == crate::CLOSURE_MARKER))
+        if matches!(f, Expr::Call(c)
+            if matches!(c.func.as_ref(), Expr::Name(n) if n.id.as_str() == crate::CLOSURE_MARKER))
         {
             return None;
         }
@@ -422,58 +378,7 @@ impl Rewriter<'_> {
 }
 
 impl Transformer for Rewriter<'_> {
-    fn visit_stmt(&self, stmt: &mut Stmt) {
-        // `a, b = map(int, line.split())` (`Self::map_or_filter`).
-        if let Stmt::Assign(assign) = stmt
-            && let [Expr::Tuple(_) | Expr::List(_)] = &*assign.targets
-            && let Expr::Call(inner) = assign.value.as_ref()
-            && let Some(comp) = self.map_or_filter(inner)
-        {
-            *assign.value = comp;
-        }
-        // `for x in map(f, xs): body` -> `for v in xs: x = f(v); body`: each
-        // call made when the loop asks for the next item, as CPython makes
-        // it. `f` is read at each item, so a name the loop rebinds stays as
-        // written.
-        if let Stmt::For(for_stmt) = stmt
-            && !for_stmt.is_async
-            && let Expr::Call(inner) = for_stmt.iter.as_ref()
-            && matches!(inner.func.as_ref(), Expr::Name(n) if n.id.as_str() == "map")
-            && !inner
-                .arguments
-                .args
-                .first()
-                .is_some_and(|f| matches!(f, Expr::Name(n) if stored_names(&for_stmt.body).contains(n.id.as_str())))
-            && let Some(Expr::ListComp(comp)) = self.map_or_filter(inner)
-            && let [generator] = &*comp.generators
-            && generator.ifs.is_empty()
-        {
-            let range = for_stmt.range;
-            let target = std::mem::replace(&mut *for_stmt.target, generator.target.clone());
-            *for_stmt.iter = generator.iter.clone();
-            for_stmt
-                .body
-                .insert(0, super::build::assign(target, (*comp.elt).clone(), range));
-        }
-        transformer::walk_stmt(self, stmt);
-    }
-
     fn visit_expr(&self, expr: &mut Expr) {
-        if let Expr::Call(outer) = expr {
-            self.consume_whole(outer);
-        }
-        // `list(map(f, xs))`, `list(filter(f, xs))` (`Self::map_or_filter`).
-        if let Expr::Call(outer) = expr
-            && matches!(outer.func.as_ref(), Expr::Name(n) if n.id.as_str() == "list")
-            && self.builtin("list")
-            && outer.arguments.keywords.is_empty()
-            && let [Expr::Call(inner)] = &*outer.arguments.args
-            && let Some(comp) = self.map_or_filter(inner)
-        {
-            *expr = comp;
-            transformer::walk_expr(self, expr);
-            return;
-        }
         // `sys` stream operations first: their callee chain contains
         // `sys.stdin`, which on its own means something else.
         if let Expr::Call(call_expr) = expr
@@ -520,7 +425,7 @@ impl Transformer for Rewriter<'_> {
         let replacement = match expr {
             Expr::Call(call_expr) => {
                 super::keys::rewrite_key_call(call_expr, self.fresh, &|name| !self.builtin(name))
-                    .or_else(|| self.lazy_map_or_filter(call_expr))
+                    .or_else(|| self.map_or_filter(call_expr))
                     .or_else(|| super::str_format::rewrite(call_expr, &|name| self.builtin(name)))
                     .or_else(|| {
                         let starred = self.starred_print(call_expr);

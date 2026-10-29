@@ -17,7 +17,9 @@
 //! ```
 //!
 //! The list operand is held on the pending-release stack across the loop,
-//! so an unwinding comparison releases a fresh one.
+//! so an unwinding comparison releases a fresh one. A keyed `min`/`max`
+//! pulls its pairs from a generator instead, comparing each key as it is
+//! computed (`emit_streamed_extreme`).
 //!
 //! `element in set` for a `set[C]` (`MirExpr::InstanceSetContains`) is here
 //! too: the set insertion's probe without the insertion
@@ -59,6 +61,196 @@ fn call<'ctx>(
         .basic()
 }
 
+/// `min(xs, key=f)` / `max(xs, key=f)` with instance keys over a generator
+/// of `(key, element)` pairs (`pycc_ast::desugar::keys`): each pair is
+/// pulled (one key call), then its key compared with the best one so far,
+/// as CPython's `min`/`max` do:
+///
+/// ```text
+/// holder = []                                  ; the best pair, then the new one
+/// loop:
+///   pull a pair or goto done                   ; the key call, an exception unwinds
+///   append it to holder
+///   if len(holder) == 2:
+///     better = callee(new key, best key)       ; or swapped; an exception unwinds
+///     pycc_rt_order_stream_settle(holder, better)
+///   goto loop
+/// done:
+///   result = pycc_rt_order_stream_finish(holder) ; guarded: empty
+/// ```
+///
+/// The generator and the holder are held on the pending-release stack
+/// across the loop.
+fn emit_streamed_extreme<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    module: &inkwell::module::Module<'ctx>,
+    rt: &RtFns<'ctx>,
+    user_functions: &HashMap<&str, UserFunction<'ctx>>,
+    locals: &HashMap<String, StorageSlot<'ctx>>,
+    order: &pycc_mir::InstanceOrderExpr,
+) -> Scalar<'ctx> {
+    let i64_type = context.i64_type();
+    let i8_type = context.i8_type();
+    let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
+    let pycc_mir::Ty::Generator(sig) = order.list.ty() else {
+        unreachable!("a streamed ordering pulls from a generator")
+    };
+    let pair_ty = sig.0.clone();
+    let pycc_mir::Ty::Tuple(pair_items) = &pair_ty else {
+        panic!("pycc_codegen: internal error: a keyed `min`/`max` pulls `(key, element)` pairs")
+    };
+    let mark = heap_rc::pending_mark(rt);
+    let (object, fresh) =
+        crate::generator::operand(context, builder, module, rt, user_functions, locals, &order.list);
+    let holder = crate::list::build_list_new(context, builder, rt, &pair_ty, 2);
+    heap_rc::hold_owned(rt, heap_rc::HeapKind::List, holder);
+    let key = runtime(
+        context,
+        module,
+        "pycc_rt_order_stream_key",
+        Some(i64_type.into()),
+        &[ptr_type.into(), i64_type.into()],
+    );
+    let settle = runtime(
+        context,
+        module,
+        "pycc_rt_order_stream_settle",
+        None,
+        &[ptr_type.into(), i8_type.into()],
+    );
+    let finish = runtime(
+        context,
+        module,
+        "pycc_rt_order_stream_finish",
+        Some(i64_type.into()),
+        &[ptr_type.into(), i64_type.into(), i8_type.into()],
+    );
+
+    let function = builder
+        .get_insert_block()
+        .and_then(|block| block.get_parent())
+        .expect("an ordering is emitted inside a function");
+    let test_bb = context.append_basic_block(function, "stream_test");
+    let got_bb = context.append_basic_block(function, "stream_got");
+    let compare_bb = context.append_basic_block(function, "stream_compare");
+    let raise_bb = context.append_basic_block(function, "stream_raise");
+    let settle_bb = context.append_basic_block(function, "stream_settle");
+    let done_bb = context.append_basic_block(function, "stream_done");
+    builder
+        .build_unconditional_branch(test_bb)
+        .expect("build_unconditional_branch should not fail");
+
+    builder.position_at_end(test_bb);
+    crate::generator::resume_branch(context, builder, rt, object, got_bb, done_bb);
+
+    builder.position_at_end(got_bb);
+    let pair = crate::generator::load_value(context, builder, object, &pair_ty);
+    // The holder adopts the reference the generator handed over (a tuple
+    // held by value is boxed, as `list(gen)` stores it).
+    let word = match pair {
+        Scalar::Tuple(tuple) => {
+            let boxed = crate::containers::box_struct_tuple(context, builder, rt, pair_items, tuple);
+            builder
+                .build_ptr_to_int(boxed, i64_type, "stream_pair_word")
+                .expect("build_ptr_to_int should not fail for a pointer")
+        }
+        other => crate::attr_slot::scalar_to_slot_word(context, builder, other),
+    };
+    crate::list::build_list_append(builder, rt, holder, word);
+    let len = crate::list::build_list_len(context, builder, holder);
+    let two = builder
+        .build_int_compare(IntPredicate::EQ, len, i64_type.const_int(2, false), "stream_two")
+        .expect("build_int_compare should not fail");
+    builder
+        .build_conditional_branch(two, compare_bb, test_bb)
+        .expect("build_conditional_branch should not fail");
+
+    builder.position_at_end(compare_bb);
+    let key_at = |index: u64, name: &str| {
+        let word = call(builder, key, &[holder.into(), i64_type.const_int(index, false).into()])
+            .expect("pycc_rt_order_stream_key returns an i64")
+            .into_int_value();
+        builder
+            .build_int_to_ptr(word, ptr_type, name)
+            .expect("build_int_to_ptr should not fail")
+    };
+    let (new_key, best_key) = (key_at(1, "stream_new_key"), key_at(0, "stream_best_key"));
+    // `new < best` for `min`, `new > best` for `max` (or the reflected
+    // method with the operands swapped).
+    let (first, second) = if order.swap {
+        (best_key, new_key)
+    } else {
+        (new_key, best_key)
+    };
+    let user_function = &user_functions[order.callee.as_str()];
+    let result = build_call_to_with_leading_args(
+        context,
+        builder,
+        module,
+        rt,
+        user_functions,
+        locals,
+        user_function,
+        &order.callee,
+        &[first.into(), second.into()],
+        &[],
+    )
+    .try_as_basic_value()
+    .expect_basic("a comparison method returns a `bool`")
+    .into_int_value();
+    let pending = emit_exception_pending(context, builder, rt, "stream_exc");
+    let raised = builder
+        .build_int_compare(IntPredicate::NE, pending, i8_type.const_zero(), "stream_raised")
+        .expect("build_int_compare should not fail");
+    let better = builder
+        .build_int_compare(
+            IntPredicate::NE,
+            result,
+            result.get_type().const_zero(),
+            "stream_better",
+        )
+        .expect("build_int_compare should not fail");
+    let better = builder
+        .build_int_z_extend(better, i8_type, "stream_better_byte")
+        .expect("build_int_z_extend should not fail");
+    builder
+        .build_conditional_branch(raised, raise_bb, settle_bb)
+        .expect("build_conditional_branch should not fail");
+
+    builder.position_at_end(raise_bb);
+    crate::exception::jump_to_exception_target(context, builder, rt);
+
+    builder.position_at_end(settle_bb);
+    call(builder, settle, &[holder.into(), better.into()]);
+    builder
+        .build_unconditional_branch(test_bb)
+        .expect("build_unconditional_branch should not fail");
+
+    builder.position_at_end(done_bb);
+    let word = call(
+        builder,
+        finish,
+        &[
+            holder.into(),
+            i64_type
+                .const_int(crate::list::list_kind(rt, &order.elem), false)
+                .into(),
+            i8_type
+                .const_int(u64::from(order.kind == pycc_mir::OrderKind::Max), false)
+                .into(),
+        ],
+    )
+    .expect("pycc_rt_order_stream_finish returns an i64")
+    .into_int_value();
+    // An empty generator raised CPython's `ValueError`.
+    guard_statement_effects(context, builder, rt);
+    heap_rc::emit_decref(context, builder, rt, heap_rc::HeapKind::List, holder);
+    crate::generator::release_operand(context, builder, rt, object, fresh, mark);
+    heap_rc::truncate_pending(rt, mark);
+    crate::list::word_element(context, builder, rt, &order.elem, word)
+}
+
 /// Emits `order` (see the module doc) and returns its value.
 pub(super) fn emit_instance_order<'ctx>(
     context: &'ctx Context,
@@ -69,6 +261,9 @@ pub(super) fn emit_instance_order<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     order: &pycc_mir::InstanceOrderExpr,
 ) -> Scalar<'ctx> {
+    if matches!(order.list.ty(), pycc_mir::Ty::Generator(_)) {
+        return emit_streamed_extreme(context, builder, module, rt, user_functions, locals, order);
+    }
     let i64_type = context.i64_type();
     let i8_type = context.i8_type();
     let ptr_type = context.ptr_type(inkwell::AddressSpace::default());

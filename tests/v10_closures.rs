@@ -1,8 +1,8 @@
 //! v0.10: nested functions used as values. A capture every binding of
 //! which precedes the `def` (a parameter normalized first) is bound when
-//! the value is made, and `list(map(...))`/`list(filter(...))`/
-//! `sorted(key=...)` of such a value call its lifted function directly
-//! (`pycc_ast::desugar::keys::apply`)
+//! the value is made, and `sorted(key=...)` of such a value calls its
+//! lifted function directly (`pycc_ast::desugar::keys::apply`); `map`/
+//! `filter` of one run CPython's lazy builtins over the compiled function
 //! instead of handing a function object to CPython's builtin. The oracle is
 //! `python3` running the fixture: strict and `--non-strict` native builds
 //! and the `--non-strict --ext` module must print the same, with no
@@ -177,4 +177,24 @@ fn sorted_keys_a_copy_made_before_any_key_call() {
 #[test]
 fn a_lazy_map_reads_state_when_consumed() {
     output_matches("v10_closure_map_lazy");
+}
+
+/// `map`/`filter` of a nested function used as a value are CPython's: a
+/// `StopIteration` it raises ends `list(map(...))`, and starred or unpacked
+/// maps call it only as far as they are consumed.
+#[test]
+fn map_and_filter_of_a_closure_are_cpythons() {
+    output_matches("v10_closure_map");
+    native("v10_closure_map", &["--non-strict"]);
+    ext("v10_closure_map", &[]);
+}
+
+/// `min`/`max` with a key returning class instances compare each key as it
+/// is computed: key calls and comparisons interleave as in CPython, and an
+/// exception from either stops the loop where CPython's stops.
+#[test]
+fn min_max_instance_keys_compare_as_computed() {
+    native("v10_minmax_instance_keys", &[]);
+    native("v10_minmax_instance_keys", &["--non-strict"]);
+    ext("v10_minmax_instance_keys", &[]);
 }

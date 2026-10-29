@@ -58,6 +58,8 @@ pub fn is_generator_consumer(callee: &str) -> bool {
             | "all"
             | "tuple"
             | "__pycc_counter_of"
+            | "__pycc_min_keyed"
+            | "__pycc_max_keyed"
     )
 }
 
@@ -71,6 +73,15 @@ pub(crate) fn consumer_arg_tys(callee: &str, arg_tys: &[Ty]) -> Option<Vec<Ty>> 
     // it (`pycc_hir::builtins::resolve_call`).
     if matches!(callee, "min" | "max")
         && matches!(arg_tys, [Ty::Generator(sig)] if sig.0 == Ty::Object)
+    {
+        return None;
+    }
+    // Keyed `min`/`max` pairs (`pycc_ast::desugar::keys`): only keys whose
+    // comparison runs no code are compared after the pairs list is made;
+    // instance keys are compared as each pair is pulled
+    // (`crate::instance_order`), and any other key is refused.
+    if matches!(callee, "__pycc_min_keyed" | "__pycc_max_keyed")
+        && !matches!(arg_tys, [Ty::Generator(sig)] if crate::instance_order::inert_pair(&sig.0))
     {
         return None;
     }

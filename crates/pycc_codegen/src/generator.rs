@@ -34,7 +34,10 @@
 mod consume;
 mod protocol;
 
-pub(crate) use consume::{emit_any_all, emit_for_gen_stmt, emit_next, emit_to_list, release_owned};
+pub(crate) use consume::{
+    emit_any_all, emit_for_gen_stmt, emit_next, emit_to_list, operand, release_operand, release_owned,
+    resume_branch,
+};
 pub(crate) use protocol::emit_gen_return;
 
 /// A generator-protocol expression: `MirExpr::GenYield`, `GenYieldFrom`,

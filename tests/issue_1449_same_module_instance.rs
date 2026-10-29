@@ -190,7 +190,7 @@ const REFUSAL_DRIVER: &str = "import pycc_same_mod_inst_a as mod\n\
     \x20   try:\n\
     \x20       s.take(bad)\n\
     \x20       print('admitted')\n\
-    \x20   except TypeError as e:\n\
+    \x20   except (TypeError, AttributeError) as e:\n\
     \x20       print(e)\n\
     for call in (lambda: mod.St(mod.Other(1), 2), lambda: mod.conf_n(3), \
     lambda: mod.St.peek(other.Conf(1))):\n\
@@ -206,8 +206,7 @@ const REFUSAL_PINNED: &str = "St.take() argument 1 must be pycc_same_mod_inst_a.
     St.take() argument 1 must be pycc_same_mod_inst_a.Conf, not int\n\
     St.take() argument 1 must be pycc_same_mod_inst_a.Conf, not NoneType\n\
     St.take() argument 1 must be pycc_same_mod_inst_a.Conf, not object\n\
-    St.take() argument 1: the pycc_same_mod_inst_a.Conf object is uninitialized (its __init__ \
-    never ran)\n\
+    'Conf' object has no attribute 'n'\n\
     St.take() argument 1 must be pycc_same_mod_inst_a.Conf, not pycc_same_mod_inst_b.Conf\n\
     St.__init__() argument 1 must be pycc_same_mod_inst_a.Conf, not pycc_same_mod_inst_a.Other\n\
     conf_n() argument 1 must be pycc_same_mod_inst_a.Conf, not int\n\

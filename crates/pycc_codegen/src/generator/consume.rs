@@ -6,7 +6,7 @@ use super::*;
 /// Resumes the generator `object` and branches on the answer: to `got`
 /// with a value in its value area, to `done` once it is exhausted. An
 /// exception the body raised leaves through the innermost exception target.
-fn resume_branch<'ctx>(
+pub(crate) fn resume_branch<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
@@ -153,7 +153,7 @@ pub(crate) fn emit_for_gen_stmt<'ctx>(
 
 /// The generator operand of a consumer, and whether the consumer must
 /// release it once done (a fresh one: `next(make())`).
-pub(super) fn operand<'ctx>(
+pub(crate) fn operand<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     module: &inkwell::module::Module<'ctx>,
@@ -181,7 +181,7 @@ pub(super) fn operand<'ctx>(
 }
 
 /// Releases a fresh generator operand held by [`operand`].
-pub(super) fn release_operand<'ctx>(
+pub(crate) fn release_operand<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,

@@ -13,11 +13,12 @@
 //!   (CPython lists the whole input before the first key call)
 //! * `xs.sort(key=f, reverse=r)` -> `__pycc_sort_keyed(xs, [(f(v), v) for v in xs], r)`
 //!   (`xs` a name or attribute chain, so reading it twice is unobservable)
-//! * `min(xs, key=f)` / `max(xs, key=f)` -> `__pycc_min_keyed([(f(v), v) for v in xs])`;
-//!   CPython compares each key as soon as it computes it, which only keys of
-//!   immutable builtin values cannot tell apart, so the checker admits only
-//!   those (`pycc_hir::builtins::resolve_call`) and, as a listed deviation,
-//!   instances of a compiled class (`pycc_types::instance_order`).
+//! * `min(xs, key=f)` / `max(xs, key=f)` -> `__pycc_min_keyed(((f(v), v) for v in xs))`:
+//!   CPython compares each key as soon as it computes it, and so does the
+//!   loop over instance keys pulling one pair at a time
+//!   (`pycc_codegen::instance_order`); keys of immutable builtin values,
+//!   whose comparison runs no code, are compared after the pairs list is
+//!   made (`pycc_hir::builtins::resolve_call`); any other key is refused.
 
 use super::Fresh;
 use super::build::{call, call_name, list_comp, load, store, tuple};
@@ -222,7 +223,20 @@ pub(super) fn rewrite_key_call(
                     ))
                 }
                 "min" | "max" if key.is_some() && call_expr.arguments.keywords.len() == 1 => {
-                    let pairs = pairs(xs, key, fresh, range)?;
+                    // A generator of the pairs: the builtin pulls one pair
+                    // (one key call) at a time and compares it, as CPython
+                    // does (`pycc_types` materializes it for keys whose
+                    // comparison runs no code).
+                    let Expr::ListComp(comp) = pairs(xs, key, fresh, range)? else {
+                        unreachable!("`pairs` builds a list comprehension")
+                    };
+                    let pairs = Expr::Generator(ruff_python_ast::ExprGenerator {
+                        node_index: Default::default(),
+                        range,
+                        elt: comp.elt,
+                        generators: comp.generators,
+                        parenthesized: true,
+                    });
                     let name = if func.id.as_str() == "min" {
                         "__pycc_min_keyed"
                     } else {

@@ -76,6 +76,8 @@ fn is_consumer(callee: &str) -> bool {
             | "all"
             | "tuple"
             | "__pycc_counter_of"
+            | "__pycc_min_keyed"
+            | "__pycc_max_keyed"
     )
 }
 

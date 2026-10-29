@@ -27,7 +27,21 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   it (v0.10 accept 2). Equal identifier-like `str` literals share one native object, and
   native `str`-keyed dicts read a key's cached hash in place.
 
+- Instances of published compiled classes pickle (v0.10), as `object.__reduce_ex__` pickles
+  an object: `copyreg.__newobj__` with `__getnewargs_ex__` / `__getnewargs__`'s arguments and
+  the state `object.__getstate__` gives the source class (each assigned compiled attribute
+  as stored, a subclass's `__dict__` and `__slots__`), restored as pickle restores it, at
+  every protocol (0 and 1 as `copyreg._reduce_ex`), with `copy.deepcopy`, shared
+  references, nested instances and Python subclasses and their hooks (`__reduce__`,
+  `__reduce_ex__`, `__getstate__`, `__setstate__`, `__new__`, `__getattribute__`,
+  `__setattr__`, `__slots__`, `copyreg.dispatch_table`); one with an attribute Python code
+  cannot see refuses with a `TypeError` naming it.
+
 ### Changed
+- `C.__new__(C)` of a published compiled class makes an object whose attributes are all
+  unassigned (reading one raises CPython's `AttributeError`) instead of an uninitialized
+  carrier that compiled methods, setters and argument checks refused with a `TypeError`;
+  `copy.copy` of a Python subclass's object that hooks the copy protocol goes through it.
 - `bench/run.py` reports the median and min-max of interleaved fresh-process runs
   (default 11) instead of the best of 7; `bench/package_check.py --time` times each run
   in a fresh process, alternating CPython and the compiled tree; all three timing
@@ -41,25 +55,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - A nested function used as a value is a native closure also when a variable it reads
   is rebound before its `def` and never after (`template = str(template)`, then
   `def piece(item): ...`), in strict and non-strict mode; it ran its `def` in CPython
-  (or was `C0001` in strict mode). `list(map(f, xs))`, `list(filter(f, xs))` and
-  `sorted(xs, key=f)` of such a closure call it directly in a comprehension instead of
-  passing a function object to CPython's builtin (pystache's `ParsedTemplate.render`).
+  (or was `C0001` in strict mode). `sorted(xs, key=f)` of such a closure calls it
+  directly in a comprehension instead of passing a function object to CPython's
+  builtin; `map`/`filter` of one run CPython's lazy builtins over the compiled
+  function.
 
 ### Fixed
-- `key=` and `map`/`filter` functions are called when CPython calls them.
-  - **`map`/`filter` of a nested function used as a value:** stays lazy. It is made a
-    comprehension only when consumed whole at once (the argument of `list(...)`,
-    `tuple(...)` or `"sep".join(...)`, a `*` argument, the value of an unpacking
-    assignment). A `for` loop's `map` of any function is made a loop over its input
-    that calls the function per item. The function then reads its captured state as
-    it is when each item is consumed.
+- `key=` functions are called when CPython calls them.
   - **`sorted(xs, key=f)`:** keys a copy of its whole input. An input that raises part
     way raises before the first key call, and a key that changes the input (directly
     or through a property getter) does not change what is sorted.
-  - **`min`/`max`:** a key's keys are all computed first only when they are numbers,
-    `str` or tuples of them. These are immutable values whose comparison runs no code,
-    so CPython's compare-as-you-go cannot tell the difference. Any other key (a list,
-    a CPython object) is `C0001` in strict mode and runs in CPython in non-strict mode.
+  - **`min`/`max`:** each key is compared as soon as it is computed, as in CPython.
+    Instance keys are compared through the class's `__lt__`/`__gt__` while the pairs
+    are pulled from a generator, so key calls, comparisons and their exceptions
+    interleave as CPython's do. Keys of numbers, `str` or tuples of them (immutable
+    values whose comparison runs no code) are all computed first, which nothing can
+    tell apart. Any other key (a list, a CPython object) is `C0001` in strict mode and
+    runs in CPython in non-strict mode.
   - **`.sort` and `reverse=`:** `.sort` with a nested-function key runs as written, and
     with a key only a literal `reverse=` is rewritten (CPython evaluates every argument
     before the first key call).

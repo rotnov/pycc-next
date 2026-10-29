@@ -193,9 +193,10 @@ assert messages == [
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn a_method_on_an_instance_that_never_ran_tp_init_raises_instead_of_crashing() {
-    // `PyType_GenericNew` zeroes the carrier and never runs `tp_init`, so
-    // the wrapper's `self_inst` is really NULL here. Without the guard this
-    // is a null dereference inside the compiled body, not a `TypeError`.
+    // `__new__` never runs `tp_init`: since v0.10 `tp_new` binds an
+    // instance with every slot unassigned (unpickling sets its state), so
+    // the compiled body raises CPython's `AttributeError` rather than
+    // dereferencing anything.
     let dir = ScratchDir::new("ext_1145_new").expect("scratch");
     build_ext(&dir, "grid", GRID);
     run_python(
@@ -205,10 +206,10 @@ import grid
 raw = grid.Grid.__new__(grid.Grid)
 try:
     raw.area()
-except TypeError as exc:
-    assert 'uninitialized instance' in str(exc), str(exc)
+except AttributeError as exc:
+    assert str(exc) == \"'Grid' object has no attribute 'w'\", str(exc)
 else:
-    raise AssertionError('an uninitialized instance should be refused')
+    raise AssertionError('an unassigned attribute should be refused')
 ",
     );
 }

@@ -268,8 +268,8 @@ const EXT_ONLY_OUT: &str = "TypeError cannot copy 'pycc_copy_mod.WithCopy' objec
     TypeError cannot copy 'pycc_copy_mod.G' object: its generic specializations share one instance layout\n\
     None\n\
     TypeError cannot copy 'pycc_copy_mod.WithCopy' object: its compiled __copy__ is not published\n\
-    TypeError cannot pickle 'pycc_copy_mod.Conf' object\n\
-    TypeError cannot pickle 'pycc_copy_mod.Conf' object\n\
+    TypeError cannot pickle 'pycc_copy_mod.Conf' object: its attribute 'xs' is not visible to Python\n\
+    TypeError cannot pickle 'pycc_copy_mod.Conf' object: its attribute 'xs' is not visible to Python\n\
     True False\n\
     0\n";
 
