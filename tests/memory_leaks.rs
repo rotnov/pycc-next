@@ -154,6 +154,18 @@ def mklist(i: int) -> list[int]:
     return [i, i + 1]
 
 
+class Rk:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def __lt__(self, other: "Rk") -> bool:
+        return self.n < other.n
+
+
+def rk(v: int) -> Rk:
+    return Rk(-v)
+
+
 def bump(v: int) -> int:
     w = v + 1
     return w
@@ -248,6 +260,13 @@ macro_rules! probe {
 #[path = "memory_leaks/stdlib.rs"]
 mod stdlib;
 
+// `min`/`max` with instance keys pull and compare one pair at a time,
+// releasing the losers; an empty input raises after the loop.
+probe!(
+    min_max_instance_keys,
+    "total += min(mklist(i), key=rk) + max(mklist(i), key=rk)\ntry:\n    \
+     min([v for v in mklist(i) if v < 0], key=rk)\nexcept ValueError:\n    total += 1"
+);
 // `str` temporaries consumed without being stored.
 probe!(
     str_compared_with_a_literal,
@@ -752,7 +771,7 @@ fn object_stdlib_calls_run_in_constant_memory() {
                  ys = sorted(xs, key=lambda t: t[0])\n    \
                  heapq.heappush(h, (i % 7, i))\n    \
                  if len(h) > 5:\n        heapq.heappop(h)\n    \
-                 total += bisect_left(ys, xs[0]) + len(min(xs, key=len))\n\
+                 total += bisect_left(ys, xs[0]) + len(sorted(xs, key=len)[0])\n\
                  print(total, xs, h)\n"
             ),
         )

@@ -77,6 +77,17 @@ pub(super) fn pending_builtin_call(
     {
         return None;
     }
+    // Non-strict: a keyed `sorted`/`min`/`max` over a function whose result
+    // is not known yet (a nested function key, lifted with object
+    // parameters) may sort through CPython, so its result is an object
+    // until the check phase types it; left unanswered, a `return` of it
+    // would take another `return`'s type (`r = sorted(...)`, `return "V"`,
+    // `return r`) and fail its run-time conversion.
+    if matches!(callee, "__pycc_sorted_keyed" | "__pycc_min_keyed" | "__pycc_max_keyed")
+        && crate::non_strict::is_non_strict()
+    {
+        return Some(Some(Ok(Ty::Object)));
+    }
     Some(pycc_hir::builtins::fixed_return(callee).map(Ok))
 }
 

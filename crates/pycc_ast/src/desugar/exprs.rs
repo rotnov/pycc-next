@@ -48,7 +48,10 @@ impl Rewriter<'_> {
     }
 
     /// `map(f, xs)` -> `[f(v) for v in xs]`; `filter(f, xs)` ->
-    /// `[v for v in xs if f(v)]` (`filter(None, xs)` tests `v` itself).
+    /// `[v for v in xs if f(v)]` (`filter(None, xs)` tests `v` itself), made
+    /// eagerly (`docs/DEVIATIONS.md`). A nested function used as a value
+    /// (`__pycc_closure__(...)`) is left to CPython's lazy `map`/`filter`:
+    /// the state it captures may change before the result is consumed.
     fn map_or_filter(&self, call_expr: &ExprCall) -> Option<Expr> {
         let Expr::Name(func) = call_expr.func.as_ref() else {
             return None;
@@ -57,6 +60,11 @@ impl Rewriter<'_> {
             return None;
         };
         if !call_expr.arguments.keywords.is_empty() || matches!(xs, Expr::Starred(_)) {
+            return None;
+        }
+        if matches!(f, Expr::Call(c)
+            if matches!(c.func.as_ref(), Expr::Name(n) if n.id.as_str() == crate::CLOSURE_MARKER))
+        {
             return None;
         }
         let range = call_expr.range;

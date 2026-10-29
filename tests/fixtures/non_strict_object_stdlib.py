@@ -1,5 +1,6 @@
-# Non-strict mode: `key=`/`reverse=` sorting and `min`/`max`, and the
-# `heapq`/`bisect` functions, over a CPython object run CPython's own.
+# Non-strict mode: `key=`/`reverse=` sorting, and the `heapq`/`bisect`
+# functions, over a CPython object run CPython's own; `min`/`max` with a key
+# of CPython objects run in CPython, comparing each key as it is computed.
 import heapq
 import json
 from bisect import bisect_left, insort
@@ -17,8 +18,8 @@ words = json.loads('["pear", "fig", "apple", "kiwi"]')
 print(min(words, key=len), max(words, key=len))
 try:
     min(json.loads("[]"), key=len)
-except ValueError as e:
-    print("ValueError", e)
+except ValueError as err:
+    print("ValueError", err)
 
 h = json.loads("[]")
 for v in [5, 1, 4, 1]:
