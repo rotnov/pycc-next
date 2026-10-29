@@ -785,6 +785,18 @@ pub(crate) fn infer_call_expr(
         if is_known_callable_builtin(callee) {
             return Err(unsupported_callable_builtin(callee));
         }
+        // `pycc_ast::desugar::keys` computes every key first, which only an
+        // immutable builtin key cannot tell from CPython's compare-as-you-go
+        // (`pycc_hir::builtins::resolve_call`).
+        if matches!(callee.as_str(), "__pycc_min_keyed" | "__pycc_max_keyed") {
+            return Err(Diagnostic::error(
+                "C0001",
+                "`min`/`max` with a `key=` whose keys are not numbers, `str` or tuples of \
+                 them is not supported yet (CPython compares each key as soon as it computes \
+                 it)",
+                Span::new(0, 0),
+            ));
+        }
         return Err(Diagnostic::error(
             "T0021",
             format!("call to undefined function `{callee}`"),

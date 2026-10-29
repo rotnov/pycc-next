@@ -360,7 +360,14 @@ fn non_strict_keyed_sorting_and_heaps_over_objects_are_cpythons() {
         "non_strict_object_stdlib.py",
         &["--non-strict", "--report-fallbacks"],
     );
-    assert!(!report.contains("fallback:"), "{report}");
+    // `min`/`max` with a key of CPython objects compare each key as CPython
+    // computes it, so those statements run in CPython; nothing else does.
+    let fallbacks: Vec<&str> = report.lines().filter(|l| l.contains("fallback:")).collect();
+    assert_eq!(fallbacks.len(), 2, "{report}");
+    assert!(
+        fallbacks.iter().all(|l| l.contains("`min`/`max` with a `key=`")),
+        "{report}"
+    );
 }
 
 #[test]

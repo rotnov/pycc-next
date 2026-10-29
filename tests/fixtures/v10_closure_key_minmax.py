@@ -1,7 +1,7 @@
-# v0.10: `min`/`max` compare each element right after computing its key,
-# so a nested function key with an effect (here it changes a key it
-# returned earlier) sees CPython's order of calls; the call is not
-# rewritten into keys-first form.
+# v0.10: `min`/`max` compare each element right after computing its key.
+# Computing every key first is unobservable only for keys of immutable
+# builtin values; a key that changes a key it returned earlier (a list), or
+# a key of CPython objects, keeps the call as written.
 
 
 def smallest(xs):

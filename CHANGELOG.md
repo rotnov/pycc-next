@@ -36,18 +36,26 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `def piece(item): ...`), in strict and non-strict mode; it ran its `def` in CPython
   (or was `C0001` in strict mode). `list(map(f, xs))`, `list(filter(f, xs))` and
   `sorted(xs, key=f)` of such a closure call it directly in a comprehension instead of
-  passing a function object to CPython's builtin (pystache's `ParsedTemplate.render`);
-  so do a lazy `map`/`filter` and a `min`/`max` key when the function has no effect
-  other code can see (`pycc_ast::desugar::pure_keys`).
+  passing a function object to CPython's builtin (pystache's `ParsedTemplate.render`).
 
 ### Fixed
-- A `min`/`max` key or a lazy `map`/`filter` function that has an effect (a store, a
-  method call, a call of anything but an effect-free builtin) is called as CPython
-  calls it: the rewrite that computed every key before the first comparison (and `map`
-  eagerly) applies only to effect-free functions and lambdas. A `sorted` nested
-  function key with an effect keys a copy of the input, `.sort` with a nested function
-  key runs as written, and with a key only a literal `reverse=` is rewritten (CPython
-  evaluates every argument before the first key call).
+- `key=` and `map`/`filter` functions are called when CPython calls them.
+  - **`map`/`filter` of a nested function used as a value:** stays lazy. It is made a
+    comprehension only when consumed whole at once (the argument of `list(...)`,
+    `tuple(...)` or `"sep".join(...)`, a `*` argument, the value of an unpacking
+    assignment). A `for` loop's `map` of any function is made a loop over its input
+    that calls the function per item. The function then reads its captured state as
+    it is when each item is consumed.
+  - **`sorted(xs, key=f)`:** keys a copy of its whole input. An input that raises part
+    way raises before the first key call, and a key that changes the input (directly
+    or through a property getter) does not change what is sorted.
+  - **`min`/`max`:** a key's keys are all computed first only when they are numbers,
+    `str` or tuples of them. These are immutable values whose comparison runs no code,
+    so CPython's compare-as-you-go cannot tell the difference. Any other key (a list,
+    a CPython object) is `C0001` in strict mode and runs in CPython in non-strict mode.
+  - **`.sort` and `reverse=`:** `.sort` with a nested-function key runs as written, and
+    with a key only a literal `reverse=` is rewritten (CPython evaluates every argument
+    before the first key call).
 - A published compiled function, method or constructor (`--ext`, and a `--non-strict`
   native build's `__main__`) called with the wrong arguments raises CPython 3.13's exact
   `TypeError`: `missing 1 required positional argument: 'x'`, `takes from 2 to 3
