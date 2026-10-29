@@ -86,7 +86,7 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             default.as_deref(),
             ty,
         ),
-        MirExpr::GenToList { generator, ty } => crate::generator::emit_to_list(
+        MirExpr::GenToList { generator, ty, raw } => crate::generator::emit_to_list(
             context,
             builder,
             module,
@@ -95,6 +95,7 @@ pub(crate) fn emit_expr_unchecked<'ctx>(
             locals,
             generator,
             ty,
+            *raw,
         ),
         MirExpr::MakeClosure {
             function, captures, ..

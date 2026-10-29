@@ -198,3 +198,13 @@ fn min_max_instance_keys_compare_as_computed() {
     native("v10_minmax_instance_keys", &["--non-strict"]);
     ext("v10_minmax_instance_keys", &[]);
 }
+
+/// A `StopIteration` a `min`/`max` key raises propagates as it is, for
+/// instance keys and for keys compared after the pairs are made: the pairs'
+/// generator is pycc's own, so PEP 479 does not turn it into `RuntimeError`.
+#[test]
+fn a_key_stop_iteration_propagates_as_it_is() {
+    native("v10_minmax_stop", &[]);
+    native("v10_minmax_stop", &["--non-strict"]);
+    ext("v10_minmax_stop", &[]);
+}

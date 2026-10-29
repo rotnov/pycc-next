@@ -70,6 +70,7 @@ fn call<'ctx>(
 /// holder = []                                  ; the best pair, then the new one
 /// loop:
 ///   pull a pair or goto done                   ; the key call, an exception unwinds
+///                                              ; (a StopIteration as it is)
 ///   append it to holder
 ///   if len(holder) == 2:
 ///     better = callee(new key, best key)       ; or swapped; an exception unwinds
@@ -142,7 +143,18 @@ fn emit_streamed_extreme<'ctx>(
         .expect("build_unconditional_branch should not fail");
 
     builder.position_at_end(test_bb);
-    crate::generator::resume_branch(context, builder, rt, object, got_bb, done_bb);
+    // The pairs' generator runs the key calls; a `StopIteration` one raises
+    // propagates as it is (`pycc_rt_gen_resume_raw`), as from CPython's
+    // `min`/`max`.
+    crate::generator::resume_branch_with(
+        context,
+        builder,
+        rt,
+        rt.gens.resume_raw,
+        object,
+        got_bb,
+        done_bb,
+    );
 
     builder.position_at_end(got_bb);
     let pair = crate::generator::load_value(context, builder, object, &pair_ty);

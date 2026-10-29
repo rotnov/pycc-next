@@ -711,6 +711,10 @@ pub enum MirExpr {
     GenToList {
         generator: Box<MirExpr>,
         ty: Ty,
+        /// Resumes it without PEP 479's conversion of a `StopIteration`:
+        /// the pairs pycc makes of a keyed `min`/`max`'s argument, whose key
+        /// calls CPython runs in no generator.
+        raw: bool,
     },
     /// `any(gen)` / `all(gen)`: resumes the generator only until the first
     /// deciding value.

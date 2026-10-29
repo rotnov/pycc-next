@@ -36,7 +36,7 @@ mod protocol;
 
 pub(crate) use consume::{
     emit_any_all, emit_for_gen_stmt, emit_next, emit_to_list, operand, release_operand, release_owned,
-    resume_branch,
+    resume_branch_with,
 };
 pub(crate) use protocol::emit_gen_return;
 
@@ -155,6 +155,8 @@ const DONE: u64 = 2;
 pub(crate) struct GenFns<'ctx> {
     pub(crate) new: FunctionValue<'ctx>,
     pub(crate) resume: FunctionValue<'ctx>,
+    /// `pycc_rt_gen_resume_raw`: `resume` without PEP 479's conversion.
+    pub(crate) resume_raw: FunctionValue<'ctx>,
     pub(crate) step: FunctionValue<'ctx>,
     pub(crate) can_send: FunctionValue<'ctx>,
     pub(crate) throw: FunctionValue<'ctx>,
@@ -201,6 +203,10 @@ impl<'ctx> GenFns<'ctx> {
             ),
             resume: declare(
                 "pycc_rt_gen_resume",
+                i8_type.fn_type(&[ptr_type.into()], false),
+            ),
+            resume_raw: declare(
+                "pycc_rt_gen_resume_raw",
                 i8_type.fn_type(&[ptr_type.into()], false),
             ),
             repr: declare(

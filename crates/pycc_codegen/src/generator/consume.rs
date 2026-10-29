@@ -6,7 +6,7 @@ use super::*;
 /// Resumes the generator `object` and branches on the answer: to `got`
 /// with a value in its value area, to `done` once it is exhausted. An
 /// exception the body raised leaves through the innermost exception target.
-pub(crate) fn resume_branch<'ctx>(
+fn resume_branch<'ctx>(
     context: &'ctx Context,
     builder: &inkwell::builder::Builder<'ctx>,
     rt: &RtFns<'ctx>,
@@ -14,8 +14,24 @@ pub(crate) fn resume_branch<'ctx>(
     got: BasicBlock<'ctx>,
     done: BasicBlock<'ctx>,
 ) {
+    resume_branch_with(context, builder, rt, rt.gens.resume, object, got, done);
+}
+
+/// [`resume_branch`] through `resume`: `pycc_rt_gen_resume`, or
+/// `pycc_rt_gen_resume_raw` for a generator pycc makes of a call's own
+/// argument (a keyed `min`/`max`'s pairs), whose `StopIteration` CPython
+/// would not convert.
+pub(crate) fn resume_branch_with<'ctx>(
+    context: &'ctx Context,
+    builder: &inkwell::builder::Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    resume: FunctionValue<'ctx>,
+    object: PointerValue<'ctx>,
+    got: BasicBlock<'ctx>,
+    done: BasicBlock<'ctx>,
+) {
     let answer = builder
-        .build_call(rt.gens.resume, &[object.into()], "gen_resume")
+        .build_call(resume, &[object.into()], "gen_resume")
         .expect("build_call should not fail for pycc_rt_gen_resume")
         .try_as_basic_value()
         .expect_basic("pycc_rt_gen_resume returns an i8")
@@ -292,6 +308,7 @@ pub(crate) fn emit_to_list<'ctx>(
     locals: &HashMap<String, StorageSlot<'ctx>>,
     generator: &MirExpr,
     ty: &Ty,
+    raw: bool,
 ) -> Scalar<'ctx> {
     let element = list::element_ty(ty).clone();
     let mark = heap_rc::pending_mark(rt);
@@ -314,7 +331,8 @@ pub(crate) fn emit_to_list<'ctx>(
         .build_unconditional_branch(test_bb)
         .expect("build_unconditional_branch should not fail");
     builder.position_at_end(test_bb);
-    resume_branch(context, builder, rt, object, got_bb, done_bb);
+    let resume = if raw { rt.gens.resume_raw } else { rt.gens.resume };
+    resume_branch_with(context, builder, rt, resume, object, got_bb, done_bb);
     builder.position_at_end(got_bb);
     let value = load_value(context, builder, object, &element);
     // The list adopts the reference the generator handed over.

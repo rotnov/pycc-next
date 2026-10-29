@@ -34,6 +34,7 @@ pub(crate) fn lower_generator_consumer(
         ("list", Some(Ty::Generator(element))) if args.len() == 1 => Ok(MirExpr::GenToList {
             generator: Box::new(args.remove(0)),
             ty: Ty::List(Box::new(element.0)),
+            raw: false,
         }),
         ("any" | "all", Some(Ty::Generator(_))) if args.len() == 1 => Ok(MirExpr::GenAnyAll {
             generator: Box::new(args.remove(0)),
@@ -52,6 +53,7 @@ pub(crate) fn lower_generator_consumer(
                 Ty::Generator(element) => MirExpr::GenToList {
                     generator: Box::new(arg),
                     ty: Ty::List(Box::new(element.0)),
+                    raw: matches!(callee, "__pycc_min_keyed" | "__pycc_max_keyed"),
                 },
                 _ => arg,
             })

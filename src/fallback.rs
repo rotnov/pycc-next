@@ -722,15 +722,28 @@ impl Plan {
         if failure.diagnostic.code != "C0001" {
             return false;
         }
-        let Some(rest) = failure.diagnostic.message.strip_prefix("exception class `") else {
+        // The class's own `__init__` calling `super().__init__(...)` on the
+        // builtin exception (`pycc_types`' `super_call`) is the same
+        // capability gap, met in its body rather than at a `raise`.
+        let message = &failure.diagnostic.message;
+        let class = if let Some(rest) = message.strip_prefix("exception class `") {
+            let Some((class, rest)) = rest.split_once('`') else {
+                return false;
+            };
+            if !rest.starts_with(" declares or inherits an `__init__`") {
+                return false;
+            }
+            class
+        } else if let Some(rest) =
+            message.strip_prefix("`super().__init__(...)` in exception class `")
+        {
+            let Some((class, _)) = rest.split_once('`') else {
+                return false;
+            };
+            class
+        } else {
             return false;
         };
-        let Some((class, rest)) = rest.split_once('`') else {
-            return false;
-        };
-        if !rest.starts_with(" declares or inherits an `__init__`") {
-            return false;
-        }
         let Some(index) = (0..self.top).find(|index| {
             matches!(&self.stmts[*index].kind, Kind::Class(name) if name == class)
         }) else {
