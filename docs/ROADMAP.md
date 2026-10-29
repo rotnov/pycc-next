@@ -1047,6 +1047,21 @@ Accept:
    interleaved fresh-process runs, and publishes median and spread as an artifact; every
    speed number in README, CHANGELOG and blog posts cites such a run. Instruction-count
    bounds stay the regression gate.
+   **Met 2026-10-29:** `.github/workflows/bench.yml` (`workflow_dispatch`, release tags,
+   weekly; `contents: read`) runs on ubuntu-24.04 and ubuntu-24.04-arm: `bench/run.py`
+   (CPython, pycc-next and the Rust twin as fresh processes, interleaved per round), the
+   five packages' `--time` checks (mistune and pystache among them; one fresh process per
+   tree and round, alternating, after a discarded warm-up) and `bench/pydantic_check.py
+   --time`, and publishes medians with min-max (quartiles and every sample in the JSON),
+   the runner's CPU model and the run count as the job summary and the `bench-<os>`
+   artifact (`bench/publish.py`). Run 40866079503 at 3f9e371 green on both runners
+   (x86_64: Xeon Platinum 8370C, 11 runs; pydantic 15). README's speed tables and package
+   numbers cite it; the `bench`, `release` and `blog-post` skills require every speed
+   number published from now on (README, CHANGELOG, release notes, blog posts) to cite
+   such a run. CHANGELOG sections and blog posts of released versions stay as published:
+   dated records measured before the workflow existed. That run, for accept 3's baseline:
+   pystache's benchmark 0.63x, mistune `mistune.html` 0.83x and the full parser 0.79x;
+   pydantic import 0.93x, define 0.79x, schema 0.82x, round-trips 0.91x.
 5. **Deferred class work:** compiled subclasses of compiled classes from another module of
    the package are native (layout-pointer dispatch across modules, no CPython class in
    between), and compiled exception classes can derive from package exception bases
