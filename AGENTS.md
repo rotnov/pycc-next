@@ -12,7 +12,12 @@ default; `--non-strict` falls back to `PyObject*` (CPython C API) for unprovable
   tests fail only when running as root; everything else must pass.
 - Design wrong -> rewrite the module; design right but incomplete -> extend. Split files
   over ~1000 lines you touch. Delete dead code.
-- One writer per working tree. Push small commits to `main`; keep CI green.
+- One writer per working tree. Every change goes through a pull request from its own
+  branch: never push to `main`. Open the PR early, keep it small, and merge it (merge commit)
+  only when the required checks — `test (ubuntu-24.04)`, `test (ubuntu-24.04-arm)`,
+  `macos`, `windows` — are green on its head and review threads are answered. Several
+  agents work in parallel on separate branches; rebase or merge `main` into your branch
+  when it conflicts. If `main` turns red after a merge, fixing it is the next PR.
 - Wait on long commands by running them in the foreground (or as a tracked background
   task), never with `until ! pgrep -f <pattern>` loops: the pattern matches the loop itself.
 - Durable artifacts in English.

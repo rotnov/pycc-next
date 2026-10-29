@@ -15,7 +15,8 @@ description: Use when cutting a pycc-next release (version bump, changelog, tag,
 4. Add `## [X.Y.Z] - YYYY-MM-DD` to `CHANGELOG.md` (Added / Changed / Fixed / Known gaps -
    copy open rows from `docs/DEVIATIONS.md` into Known gaps). The release workflow uses
    this section as the release notes.
-5. Commit and push. Then run the `release` workflow with `workflow_dispatch` on `main`,
+5. Commit on a release branch, open a pull request and merge it once its required checks
+   are green (AGENTS.md). Then run the `release` workflow with `workflow_dispatch` on `main`,
    input `version: vX.Y.Z` (GitHub creates the tag; pushing tags from a cloud agent session
    is blocked by its git proxy). `git push origin vX.Y.Z` from a normal checkout also works.
 6. The `release` workflow's read-only build matrix tests and packages
