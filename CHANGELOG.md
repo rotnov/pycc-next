@@ -22,13 +22,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 - Instances of published compiled classes pickle (v0.10), as `object.__reduce_ex__` pickles
   an object: `copyreg.__newobj__` with `__getnewargs_ex__` / `__getnewargs__`'s arguments and
-  `__getstate__`'s state (by default `object.__getstate__`'s plus each assigned compiled
-  attribute), every protocol, with `copy.deepcopy`, shared references, nested instances and
-  Python subclasses (their `__slots__`, `__new__`, `__getstate__` / `__setstate__`),
-  protocols 0 and 1 as `copyreg._reduce_ex`; one
-  with an attribute Python code cannot see refuses with a `TypeError` naming it.
+  the state `object.__getstate__` gives the source class (each assigned compiled attribute
+  as stored, a subclass's `__dict__` and `__slots__`), restored as pickle restores it, at
+  every protocol (0 and 1 as `copyreg._reduce_ex`), with `copy.deepcopy`, shared
+  references, nested instances and Python subclasses and their hooks (`__reduce__`,
+  `__reduce_ex__`, `__getstate__`, `__setstate__`, `__new__`, `__getattribute__`,
+  `__setattr__`, `__slots__`, `copyreg.dispatch_table`); one with an attribute Python code
+  cannot see refuses with a `TypeError` naming it.
 
 ### Changed
+- `C.__new__(C)` of a published compiled class makes an object whose attributes are all
+  unassigned (reading one raises CPython's `AttributeError`) instead of an uninitialized
+  carrier that compiled methods, setters and argument checks refused with a `TypeError`;
+  `copy.copy` of a Python subclass's object that hooks the copy protocol goes through it.
 - `bench/run.py` reports the median and min-max of interleaved fresh-process runs
   (default 11) instead of the best of 7; `bench/package_check.py --time` times each run
   in a fresh process, alternating CPython and the compiled tree; all three timing

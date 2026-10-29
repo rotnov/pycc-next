@@ -86,6 +86,11 @@ static PyObject *pycc_ext_instance_getstate(PyObject *self, PyObject *unused)
     return pycc_ext_instance_getstate_in(&pycc_ext_mod, self);
 }
 
+static PyObject *pycc_ext_instance_setstate(PyObject *self, PyObject *state)
+{
+    return pycc_ext_instance_setstate_in(self, state);
+}
+
 static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
 {
     (void)unused;

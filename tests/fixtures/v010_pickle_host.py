@@ -121,16 +121,83 @@ print(type(m.Point.__new__(m.Point, 1, 2)).__name__)
 class Shifted(m.Point):
     """The state holds what is stored, not what `__getattribute__` answers."""
 
-    x = "class-level"
-
     def __getattribute__(self, name):
         value = super().__getattribute__(name)
         return value + 1 if name == "x" else value
 
 
 sh = Shifted(10, 0.5, "sh", True)
-for back in (pickle.loads(pickle.dumps(sh)), copy.deepcopy(sh), pickle.loads(pickle.dumps(sh, 0))):
+for back in (pickle.loads(pickle.dumps(sh)), copy.deepcopy(sh), pickle.loads(pickle.dumps(sh, 0)),
+             copy.copy(sh)):
     print(type(back).__name__, back.x, object.__getattribute__(back, "x"))
+
+
+class Doubler(m.Point):
+    """Restoring the state does not run `__setattr__` on the attributes."""
+
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value * 2 if name == "x" else value)
+
+
+db = Doubler(3, 1.0, "db", True)
+db.x = 5
+db.extra = "e"
+for back in (pickle.loads(pickle.dumps(db)), copy.deepcopy(db), pickle.loads(pickle.dumps(db, 0)),
+             copy.copy(db)):
+    print(type(back).__name__, back.show(), back.extra)
+
+
+class Reducing(m.Point):
+    """A subclass's own `__reduce__` is the reduction."""
+
+    def __reduce__(self):
+        return (Reducing, (self.x + 100, self.y, "re", self.on))
+
+
+class ReducingEx(m.Point):
+    """A subclass's own `__reduce_ex__` is the reduction, given the protocol."""
+
+    def __reduce_ex__(self, proto):
+        return (ReducingEx, (proto, 0.0, "rx", False))
+
+
+for obj in (Reducing(1, 2.0, "r", True), ReducingEx(1, 2.0, "x", True)):
+    for back in (pickle.loads(pickle.dumps(obj, 0)), pickle.loads(pickle.dumps(obj, 2)),
+                 copy.copy(obj), copy.deepcopy(obj)):
+        print(type(back).__name__, back.show())
+
+
+class Copies(m.Point):
+    """`__copy__` and `__deepcopy__` of a subclass are what `copy` calls."""
+
+    def __copy__(self):
+        return "shallow " + self.label
+
+    def __deepcopy__(self, memo):
+        return "deep " + self.label
+
+
+cp = Copies(1, 1.0, "cp", True)
+print(copy.copy(cp), copy.deepcopy(cp))
+for obj in (ss, h, n, tg, ar):
+    back = copy.copy(obj)
+    print("copy", type(back).__name__, back.show(), back is obj)
+print(copy.copy(ss).extra is ss.extra)
+
+
+def reduce_ring(ring):
+    return (m.Ring, (m.Point(9, 9.0, "dispatch", True), ring.step + 1))
+
+
+import copyreg  # noqa: E402
+
+copyreg.pickle(m.Ring, reduce_ring)
+ring = m.Ring(m.Point(1, 2.0, "r", False), 7)
+for back in (pickle.loads(pickle.dumps(ring)), copy.copy(ring), copy.deepcopy(ring)):
+    print(type(back).__name__, back.start.show(), back.step)
+del copyreg.dispatch_table[m.Ring]
+print(copy.copy(ring).start is ring.start, pickle.loads(pickle.dumps(ring)).step)
+print(sorted(m.Point(1, 2.0, "s", True).__getstate__().items()))
 fresh = m.Point.__new__(m.Point)
 try:
     fresh.x

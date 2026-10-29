@@ -186,13 +186,16 @@ pub(crate) fn method_types_c(
              METH_NOARGS, NULL},\n",
         );
         // v0.10: pickling (`pycc_ext_instance_reduce` as `__reduce_ex__`,
-        // with the default `pycc_ext_instance_getstate`), constructible
+        // with the default `pycc_ext_instance_getstate` and its mirror
+        // `pycc_ext_instance_setstate`), constructible
         // classes only: unpickling makes the object through `tp_new`.
         if ctor.is_some() {
             out.push_str(
                 "    {\"__reduce_ex__\", (PyCFunction)(void (*)(void))pycc_ext_instance_reduce, \
                  METH_O, NULL},\n    {\"__getstate__\", \
-                 (PyCFunction)(void (*)(void))pycc_ext_instance_getstate, METH_NOARGS, NULL},\n",
+                 (PyCFunction)(void (*)(void))pycc_ext_instance_getstate, METH_NOARGS, NULL},\n    \
+                 {\"__setstate__\", (PyCFunction)(void (*)(void))pycc_ext_instance_setstate, \
+                 METH_O, NULL},\n",
             );
         }
         // v0.9: the template's `__init_subclass__`, which lets only the

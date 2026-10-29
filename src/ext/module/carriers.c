@@ -289,6 +289,17 @@ static int pycc_ext_is_compiled_class(PyObject *cls)
                && PySet_Contains(pycc_ext_compiled_classes, cls) == 1);
 }
 
+/* v0.10: whether `cls` is compiled -- a compiled class, or a carrier type
+ * whose instances deallocate through this file (a hidden carrier type) --
+ * rather than a Python class in a carrier's MRO. */
+static int pycc_ext_is_compiled_type(PyObject *cls)
+{
+    return pycc_ext_is_compiled_class(cls)
+           || (PyType_Check(cls)
+               && PyType_GetSlot((PyTypeObject *)cls, Py_tp_dealloc)
+                      == (void *)pycc_ext_instance_dealloc);
+}
+
 /*
  * v0.10: pickling a compiled instance, as CPython's `object.__reduce_ex__`
  * pickles an object (`reduce_newobj`). `__reduce__` answers
@@ -330,14 +341,15 @@ static void pycc_ext_refuse_pickle(PyObject *self, const char *detail, PyObject 
     Py_DECREF(type_name);
 }
 
-/* The value of compiled attribute `key` of `self` as stored, read through
- * the compiled classes' own data descriptor (not `self`'s
- * `__getattribute__`, which a Python subclass may override, nor a
- * subclass's class attribute of the same name), as `object.__getstate__`
- * reads a `__dict__` entry directly. NULL with no exception set: no compiled
- * class of `self`'s MRO has a descriptor for it (Python code cannot see the
- * attribute); NULL with `AttributeError`: it is unassigned. */
-static PyObject *pycc_ext_compiled_field(PyObject *self, PyObject *key)
+/* The data descriptor the compiled classes of `self`'s MRO define for
+ * compiled attribute `key` (a new reference), found in their own
+ * namespaces: not through `self`'s `__getattribute__` or `__setattr__`,
+ * which a Python subclass may override, nor through a subclass's class
+ * attribute of the same name. Where the source class keeps the attribute in
+ * the instance's `__dict__`, which `object.__getstate__` and pickle's
+ * default restore read and write directly, this is the storage. NULL with
+ * no exception set: no such descriptor (Python code cannot see it). */
+static PyObject *pycc_ext_compiled_descriptor(PyObject *self, PyObject *key)
 {
     PyObject *mro = PyObject_GetAttrString((PyObject *)Py_TYPE(self), "__mro__");
     Py_ssize_t n;
@@ -350,8 +362,7 @@ static PyObject *pycc_ext_compiled_field(PyObject *self, PyObject *key)
         PyObject *c = PyTuple_GetItem(mro, i);
         PyObject *dict;
         PyObject *descr;
-        descrgetfunc get;
-        if (!pycc_ext_is_compiled_class(c)) {
+        if (!pycc_ext_is_compiled_type(c)) {
             continue;
         }
         dict = PyObject_GetAttrString(c, "__dict__");
@@ -369,23 +380,42 @@ static PyObject *pycc_ext_compiled_field(PyObject *self, PyObject *key)
             PyErr_Clear();
             continue;
         }
-        get = (descrgetfunc)PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_get);
-        if (get == NULL || PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_set) == NULL) {
+        if (PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_get) == NULL
+            || PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_set) == NULL) {
             /* A class-level default: the descriptor sits further up. */
             Py_DECREF(descr);
             continue;
         }
-        {
-            PyObject *value = get(descr, self, (PyObject *)Py_TYPE(self));
-            Py_DECREF(descr);
-            Py_DECREF(mro);
-            return value;
-        }
+        Py_DECREF(mro);
+        return descr;
     }
     Py_DECREF(mro);
     return NULL;
 }
 
+/* The stored value of compiled attribute `key` (NULL with `AttributeError`
+ * when it is unassigned; NULL with no exception: no descriptor). */
+static PyObject *pycc_ext_compiled_field(PyObject *self, PyObject *key)
+{
+    PyObject *descr = pycc_ext_compiled_descriptor(self, key);
+    PyObject *value;
+    if (descr == NULL) {
+        return NULL;
+    }
+    value = ((descrgetfunc)PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_get))(
+        descr, self, (PyObject *)Py_TYPE(self));
+    Py_DECREF(descr);
+    return value;
+}
+
+/*
+ * The shared default `__getstate__`: what `object.__getstate__` answers for
+ * the source class, whose compiled attributes live in the instance's
+ * `__dict__` -- that dictionary (each assigned compiled attribute as stored,
+ * then a Python subclass's own `__dict__` entries), or None when it is
+ * empty, paired with a Python subclass's own `__slots__` values when it has
+ * any. `pycc_ext_instance_setstate` is its mirror.
+ */
 static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
 {
     void *inst = ((PyccExtInstance *)self)->inst;
@@ -396,8 +426,10 @@ static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
     long long count;
     long long i;
     PyObject *base = NULL;
-    PyObject *dict = NULL;
+    PyObject *extra = NULL;
     PyObject *slots = NULL;
+    PyObject *fields = NULL;
+    PyObject *dict_state;
     PyObject *result = NULL;
     const char *kinds = NULL;
     size_t nkinds = 0;
@@ -433,28 +465,12 @@ static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
             return NULL;
         }
     }
-    /* `object.__getstate__`: None, the `__dict__`, or `(dict, slots)` for a
-     * Python subclass's own `__slots__` (the compiled classes declare
-     * `__slots__ = ()`). */
-    base = PyObject_CallFunctionObjArgs(pycc_ext_object_getstate, self, NULL);
-    if (base == NULL) {
-        return NULL;
-    }
-    if (PyTuple_Check(base) && PyTuple_Size(base) == 2) {
-        dict = PyTuple_GetItem(base, 0);
-        slots = PyDict_Copy(PyTuple_GetItem(base, 1));
-    } else {
-        dict = base;
-        slots = PyDict_New();
-    }
-    Py_INCREF(dict);
-    Py_DECREF(base);
-    if (slots == NULL) {
-        Py_DECREF(dict);
+    fields = PyDict_New();
+    if (fields == NULL) {
         return NULL;
     }
     /* The slot names follow the class name in the descriptor, NUL-
-     * separated; each assigned one's value is read as Python reads it. */
+     * separated; each assigned one's value is read as stored. */
     layout = pycc_rt_ext_instance_layout(inst, &len);
     count = pycc_rt_ext_instance_slot_count(inst);
     end = layout + len;
@@ -485,7 +501,7 @@ static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
             }
             PyErr_Clear();
         } else {
-            int stored = PyDict_SetItem(slots, key, value);
+            int stored = PyDict_SetItem(fields, key, value);
             Py_DECREF(value);
             if (stored < 0) {
                 Py_DECREF(key);
@@ -495,15 +511,126 @@ static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
         Py_DECREF(key);
         field = next;
     }
-    if (PyDict_Size(slots) == 0) {
-        result = Py_NewRef(dict);
+    /* `object.__getstate__`: None, a Python subclass's `__dict__`, or
+     * `(dict, slots)` for its own `__slots__` (the compiled classes declare
+     * `__slots__ = ()`). */
+    base = PyObject_CallFunctionObjArgs(pycc_ext_object_getstate, self, NULL);
+    if (base == NULL) {
+        goto done;
+    }
+    if (PyTuple_Check(base) && PyTuple_Size(base) == 2) {
+        extra = PyTuple_GetItem(base, 0);
+        slots = PyTuple_GetItem(base, 1);
     } else {
-        result = PyTuple_Pack(2, dict, slots);
+        extra = base;
+    }
+    if (extra != Py_None && PyDict_Update(fields, extra) < 0) {
+        goto done;
+    }
+    dict_state = PyDict_Size(fields) > 0 ? fields : Py_None;
+    if (slots != NULL && PyDict_Check(slots) && PyDict_Size(slots) > 0) {
+        result = PyTuple_Pack(2, dict_state, slots);
+    } else {
+        result = Py_NewRef(dict_state);
     }
 done:
-    Py_DECREF(dict);
-    Py_DECREF(slots);
+    Py_XDECREF(base);
+    Py_DECREF(fields);
     return result;
+}
+
+/*
+ * The shared default `__setstate__`, the mirror of
+ * `pycc_ext_instance_getstate_in` and of pickle's default restore (its
+ * `BUILD`, `copy._reconstruct`): `state` is a dictionary or None, or a pair
+ * of it and a slot dictionary. A dictionary entry naming a compiled
+ * attribute is stored through the compiled descriptor (where the source
+ * class's `__dict__` holds it), any other one into the instance's
+ * `__dict__` directly; a slot entry is set with `setattr`, as pickle sets
+ * one.
+ */
+static PyObject *pycc_ext_instance_setstate_in(PyObject *self, PyObject *state)
+{
+    PyObject *dict_state = state;
+    PyObject *slot_state = NULL;
+    PyObject *key;
+    PyObject *value;
+    Py_ssize_t pos = 0;
+
+    if (PyTuple_Check(state) && PyTuple_Size(state) == 2) {
+        dict_state = PyTuple_GetItem(state, 0);
+        slot_state = PyTuple_GetItem(state, 1);
+    }
+    if (dict_state != Py_None) {
+        PyObject *items;
+        PyObject *dict = NULL;
+        Py_ssize_t n;
+        Py_ssize_t i;
+        if (!PyDict_Check(dict_state)) {
+            PyErr_SetString(PyExc_TypeError, "state is not a dictionary");
+            return NULL;
+        }
+        items = PyDict_Items(dict_state);
+        if (items == NULL) {
+            return NULL;
+        }
+        n = PyList_Size(items);
+        for (i = 0; i < n; i++) {
+            PyObject *item = PyList_GetItem(items, i);
+            PyObject *descr = NULL;
+            int failed;
+            key = PyTuple_GetItem(item, 0);
+            value = PyTuple_GetItem(item, 1);
+            if (PyUnicode_Check(key)) {
+                descr = pycc_ext_compiled_descriptor(self, key);
+                if (descr == NULL && PyErr_Occurred()) {
+                    failed = -1;
+                    goto item_done;
+                }
+            }
+            if (descr != NULL) {
+                failed = ((descrsetfunc)PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_set))(
+                    descr, self, value);
+                Py_DECREF(descr);
+            } else {
+                if (dict == NULL) {
+                    dict = PyObject_GetAttrString(self, "__dict__");
+                    if (dict == NULL) {
+                        failed = -1;
+                        goto item_done;
+                    }
+                }
+                if (PyUnicode_Check(key)) {
+                    Py_INCREF(key);
+                    PyUnicode_InternInPlace(&key);
+                    failed = PyObject_SetItem(dict, key, value);
+                    Py_DECREF(key);
+                } else {
+                    failed = PyObject_SetItem(dict, key, value);
+                }
+            }
+        item_done:
+            if (failed < 0) {
+                Py_XDECREF(dict);
+                Py_DECREF(items);
+                return NULL;
+            }
+        }
+        Py_XDECREF(dict);
+        Py_DECREF(items);
+    }
+    if (slot_state != NULL && slot_state != Py_None) {
+        if (!PyDict_Check(slot_state)) {
+            PyErr_SetString(PyExc_TypeError, "slot state is not a dictionary");
+            return NULL;
+        }
+        while (PyDict_Next(slot_state, &pos, &key, &value)) {
+            if (PyObject_SetAttr(self, key, value) < 0) {
+                return NULL;
+            }
+        }
+    }
+    Py_RETURN_NONE;
 }
 
 /* `copyreg.<name>`, cached in `*slot`. */
@@ -587,7 +714,7 @@ static int pycc_ext_getstate_overridden(PyObject *cls)
     for (i = 0; i < n && found == 0; i++) {
         PyObject *c = PyTuple_GetItem(mro, i);
         PyObject *dict;
-        if (pycc_ext_is_compiled_class(c)) {
+        if (pycc_ext_is_compiled_type(c)) {
             break;
         }
         dict = PyObject_GetAttrString(c, "__dict__");
