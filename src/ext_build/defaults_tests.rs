@@ -93,11 +93,13 @@ fn every_str_byte_outside_letters_digits_and_space_is_a_fixed_width_escape() {
 }
 
 #[test]
-fn the_range_check_names_both_bounds_and_binds_each_defaulted_argument() {
+fn the_arity_check_reports_cpython_text_and_binds_each_defaulted_argument() {
     let defaults = [None, HirExpr::NoneLiteral.into(), int(3)];
-    let text = range_arity_check(
+    let text = arity_check(
         "S.feed",
         "wrap_S_feed",
+        3,
+        1,
         &defaults,
         &ArgSource {
             count: "nargs",
@@ -107,8 +109,8 @@ fn the_range_check_names_both_bounds_and_binds_each_defaulted_argument() {
     );
     assert_eq!(
         text,
-        "    if (nargs < 1 || nargs > 3) {\n        PyErr_Format(PyExc_TypeError, \
-         \"S.feed() takes from 1 to 3 arguments (%zd given)\", nargs);\n        \
+        "    if (nargs < 1 || nargs > 3) {\n        pycc_ext_arity_error(\"S.feed\", \
+         pycc_ext_kwnames_wrap_S_feed, 3, 1, 1, nargs);\n        \
          return NULL;\n    }\n\
          \x20   PyObject *v1 = nargs > 1 ? args[1] : Py_None;\n\
          \x20   PyObject *v2 = nargs > 2 ? args[2] : pycc_ext_default_wrap_S_feed_2();\n\

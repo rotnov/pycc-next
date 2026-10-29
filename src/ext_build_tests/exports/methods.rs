@@ -34,10 +34,12 @@ fn a_public_static_and_class_method_of_a_public_class_are_exported() {
                 method: Some("scale".to_string()),
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: vec!["n".to_string()],
                 params: vec![Ty::Int],
                 param_writable: vec![false; 1],
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             ExtExport {
                 defaults: Vec::new(),
@@ -46,10 +48,12 @@ fn a_public_static_and_class_method_of_a_public_class_are_exported() {
                 method: Some("make".to_string()),
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::NullCls,
+                param_names: vec!["n".to_string()],
                 params: vec![Ty::Int],
                 param_writable: vec![false; 1],
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
         ]
     );

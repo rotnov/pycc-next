@@ -22,10 +22,12 @@ fn only_a_buffer_parameter_its_body_stores_into_is_acquired_writable() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::MemoryView, Ty::MemoryView]),
             params: vec![Ty::MemoryView, Ty::MemoryView],
             param_writable: vec![false, true],
             return_ty: Ty::None,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -54,11 +56,13 @@ fn a_constructor_buffer_parameter_its_body_stores_into_is_acquired_writable() {
             defaults: Vec::new(),
             class: "Grid".to_string(),
             name: "Grid.__init__".to_string(),
+            param_names: crate::ext_build::test_param_names(&[Ty::MemoryView]),
             params: vec![Ty::MemoryView],
             param_writable: vec![true],
             slot_names: vec!["w".to_string()],
             slot_kinds: "i".to_string(),
             keyword_names: None,
+            keyword_receiver: None,
             vararg: None,
         }],
         &[],
@@ -171,7 +175,7 @@ fn a_second_memoryview_argument_that_refuses_releases_the_first() {
         "{inc}"
     );
     // One Python argument per declared parameter, not one per C slot.
-    assert!(inc.contains("if (nargs != 2)"), "{inc}");
+    assert!(inc.contains("if (nargs < 2 || nargs > 2)"), "{inc}");
 }
 
 #[test]
@@ -188,10 +192,12 @@ fn a_mixed_str_and_memoryview_signature_owes_each_slot_its_own_cleanup() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Str, Ty::MemoryView, Ty::Int]),
             params: vec![Ty::Str, Ty::MemoryView, Ty::Int],
             param_writable: vec![false; 3],
             return_ty: Ty::Int,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -231,10 +237,12 @@ fn an_export_with_no_memoryview_parameter_emits_no_release_at_all() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&[Ty::Str]),
             params: vec![Ty::Str],
             param_writable: vec![false; 1],
             return_ty: Ty::Str,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(!inc.contains("PyBuffer_Release"), "{inc}");

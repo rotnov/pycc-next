@@ -42,11 +42,13 @@ fn a_constructible_class_yields_one_constructor_descriptor_with_the_carried_tail
             // `self` is gone; the two `int`s remain, and the slot layout is
             // `flat_attr_layout`'s, not the parameter list -- they agree in
             // count here only because the fixture declares two attributes.
+            param_names: vec!["w".to_string(), "h".to_string()],
             params: vec![Ty::Int, Ty::Int],
             param_writable: vec![false; 2],
             slot_names: vec!["w".to_string(), "h".to_string()],
             slot_kinds: "ii".to_string(),
             keyword_names: None,
+            keyword_receiver: None,
             vararg: None,
         }]
     );
@@ -238,11 +240,13 @@ fn an_implicit_object_init_is_still_resolved_when_it_is_the_only_one() {
             defaults: Vec::new(),
             class: "Grid".to_string(),
             name: "Grid.__init__".to_string(),
+            param_names: crate::ext_build::test_param_names(&[]),
             params: Vec::new(),
             param_writable: Vec::new(),
             slot_names: vec!["w".to_string(), "h".to_string()],
             slot_kinds: "ii".to_string(),
             keyword_names: None,
+            keyword_receiver: None,
             vararg: None,
         }]
     );

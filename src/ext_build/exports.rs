@@ -78,6 +78,9 @@ pub(crate) struct ExtExport {
     /// different arities on the two sides of one symbol is the silent ABI
     /// mismatch the thunk exists to prevent.
     pub(crate) params: Vec<Ty>,
+    /// The carried parameters' names, parallel to [`ExtExport::params`]:
+    /// what CPython's argument-binding `TypeError`s name (#10).
+    pub(crate) param_names: Vec<String>,
     /// Per-parameter writability, parallel to [`ExtExport::params`] and
     /// carrying `true` exactly where that parameter is a `memoryview` the
     /// body stores into (Part 1 of #1142, `pycc_hir::body_stores_into`).
@@ -105,6 +108,10 @@ pub(crate) struct ExtExport {
     /// disagree. Set by [`super::keywords::bind_keyword_names`]; see that
     /// module for when an export qualifies.
     pub(crate) keyword_names: Option<Vec<String>>,
+    /// The source spelling of the receiver of a keyword-enabled method
+    /// (`self`, `cls`), which CPython offers as a "Did you mean" for an
+    /// unexpected keyword (#10); `None` without a receiver or keywords.
+    pub(crate) keyword_receiver: Option<String>,
 }
 
 /// The names of the module's classes whose instances may cross the `--ext`
@@ -477,6 +484,7 @@ pub(crate) fn collect_exports_excluding(
             method,
             receiver,
             params: carried_params.iter().map(|(_, ty)| ty.clone()).collect(),
+            param_names: carried_params.iter().map(|(name, _)| name.clone()).collect(),
             // Part 1 of #1142. The walk runs over the *post-split* carried
             // tail, so the flags line up with `params` even for a method
             // whose receiver was dropped above, and it is keyed on the
@@ -508,6 +516,7 @@ pub(crate) fn collect_exports_excluding(
             defaults: defaults::carried_defaults(module, name, receiver != ExtReceiver::None),
             return_ty: return_ty.clone(),
             keyword_names: None,
+            keyword_receiver: None,
         };
         // A module may rebind a public name -- two `def`s, a `def` over an
         // imported name, or two `@staticmethod def f` in one class body,

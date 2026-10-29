@@ -13,9 +13,11 @@ fn class_export(class: &str, method: &str, params: Vec<Ty>, return_ty: Ty) -> Ex
         returns_buffer_slice: false,
         receiver: ExtReceiver::NullCls,
         param_writable: vec![false; params.len()],
+        param_names: crate::ext_build::test_param_names(&params),
         params,
         return_ty,
         keyword_names: None,
+        keyword_receiver: None,
     }
 }
 
@@ -126,10 +128,12 @@ fn an_exported_method_is_never_a_flat_module_level_entry() {
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: crate::ext_build::test_param_names(&[Ty::Int]),
                 params: vec![Ty::Int],
                 param_writable: vec![false; 1],
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             static_export("Grid", "scale", vec![Ty::Int], Ty::Int),
         ],
@@ -250,7 +254,7 @@ fn a_method_wrapper_renders_the_source_level_spelling_in_every_host_visible_mess
         "m",
         &[static_export("Grid", "scale", vec![Ty::Int], Ty::Int)],
     );
-    assert!(inc.contains("Grid.scale() takes exactly"), "{inc}");
+    assert!(inc.contains("pycc_ext_arity_error(\"Grid.scale\""), "{inc}");
     assert!(!inc.contains("Grid.scale.static()"), "{inc}");
     assert!(!inc.contains("0m4_Grid5_scale6_static()"), "{inc}");
 }
@@ -308,10 +312,12 @@ fn grid_ctor(params: Vec<Ty>, slot_names: &[&str]) -> ExtCtor {
         class: "Grid".to_string(),
         name: "Grid.__init__".to_string(),
         param_writable: vec![false; params.len()],
+        param_names: crate::ext_build::test_param_names(&params),
         params,
         slot_names: slot_names.iter().map(ToString::to_string).collect(),
         slot_kinds: "i".repeat(slot_names.len()),
         keyword_names: None,
+        keyword_receiver: None,
         vararg: None,
     }
 }
@@ -382,8 +388,8 @@ fn a_constructible_class_gets_a_tp_init_three_slots_and_a_carrier_sized_spec() {
     );
     assert!(
         inc.contains(
-            "    if (PyTuple_Size(args) != 2) {\n        PyErr_Format(PyExc_TypeError, \
-             \"Grid.__init__() takes exactly 2 arguments (%zd given)\", \
+            "    if (PyTuple_Size(args) < 2 || PyTuple_Size(args) > 2) {\n        \
+             pycc_ext_arity_error(\"Grid.__init__\", pycc_ext_kwnames_init_Grid, 2, 2, 1, \
              PyTuple_Size(args));\n        return -1;\n    }\n"
         ),
         "{inc}"
@@ -469,8 +475,8 @@ fn a_zero_argument_constructor_declares_a_receiver_only_parameter_list() {
     );
     assert!(
         inc.contains(
-            "    if (PyTuple_Size(args) != 0) {\n        PyErr_Format(PyExc_TypeError, \
-             \"Grid.__init__() takes exactly 0 arguments (%zd given)\", \
+            "    if (PyTuple_Size(args) < 0 || PyTuple_Size(args) > 0) {\n        \
+             pycc_ext_arity_error(\"Grid.__init__\", pycc_ext_kwnames_init_Grid, 0, 0, 1, \
              PyTuple_Size(args));\n        return -1;\n    }\n"
         ),
         "{inc}"
@@ -496,7 +502,7 @@ fn a_one_argument_constructor_says_argument_in_the_singular() {
         &[],
     );
     assert!(
-        inc.contains("takes exactly 1 argument (%zd given)"),
+        inc.contains("pycc_ext_arity_error(\"Grid.__init__\", pycc_ext_kwnames_init_Grid, 1, 1, 1,"),
         "{inc}"
     );
 }

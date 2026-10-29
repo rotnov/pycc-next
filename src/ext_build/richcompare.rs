@@ -300,6 +300,7 @@ fn slot_export(
         }),
         receiver: ExtReceiver::SelfInstance,
         params: carried.iter().map(|(_, ty)| ty.clone()).collect(),
+        param_names: carried.iter().map(|(name, _)| name.clone()).collect(),
         param_writable: carried
             .iter()
             .map(|(param, ty)| {
@@ -309,6 +310,7 @@ fn slot_export(
         defaults: defaults::carried_defaults(module, item, true),
         return_ty: return_ty.clone(),
         keyword_names: None,
+        keyword_receiver: None,
     };
     // #1470: an embedded executable is compiled without export thunks, so
     // a wrapper that would call one (`wrappers::wrapper_for`'s own
