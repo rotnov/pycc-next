@@ -725,11 +725,15 @@ fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
             "    static const char *const pycc_names[] = {{{table}}};\n    \
              PyObject *pycc_bound[{size}];\n    \
              PyObject *pycc_rest;\n    \
-             if (pycc_ext_bind_star(args, kwds, {qualname}, pycc_names, {fixed}, pycc_bound, \
+             if (pycc_ext_bind_star(args, kwds, {qualname}, {receiver}, pycc_names, {fixed}, pycc_bound, \
              &pycc_rest) < 0) {{\n        return -1;\n    }}\n",
             table = table.join(", "),
             size = fixed.max(1),
             qualname = keywords::c_name(source_name),
+            receiver = ctor
+                .keyword_receiver
+                .as_deref()
+                .map_or_else(|| "NULL".to_string(), keywords::c_name),
         ));
         out.push_str(&unpack_args(
             &slots,

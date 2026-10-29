@@ -335,12 +335,14 @@ static void pycc_ext_arity_error(const char *fn_name, const char *const *names, 
 
 /* v0.9: binds a call of a compiled constructor `def __init__(self, a, b,
  * *rest)` (`qualname` names it, `names` its `fixed` parameters before
- * `*rest`) as CPython binds it (`ceval.c`'s `initialize_locals`), with its
+ * `*rest`, `receiver` the spelling of its `self`, offered as a "Did you
+ * mean") as CPython binds it (`ceval.c`'s `initialize_locals`), with its
  * messages: a keyword names a fixed parameter not already given
  * positionally, and every fixed parameter must be given. `bound` receives
  * `fixed` borrowed references, `*rest` a new reference to the tuple of the
  * positional arguments past them. 0, or -1 with the `TypeError` set. */
 static int pycc_ext_bind_star(PyObject *args, PyObject *kwds, const char *qualname,
+                              const char *receiver,
                               const char *const *names, Py_ssize_t fixed, PyObject **bound,
                               PyObject **rest)
 {
@@ -360,7 +362,7 @@ static int pycc_ext_bind_star(PyObject *args, PyObject *kwds, const char *qualna
             }
         }
         if (i == fixed) {
-            PyObject *suggestion = pycc_ext_keyword_suggestion("self", names, fixed, key);
+            PyObject *suggestion = pycc_ext_keyword_suggestion(receiver, names, fixed, key);
             if (suggestion != NULL) {
                 PyErr_Format(PyExc_TypeError,
                              "%s() got an unexpected keyword argument '%S'. Did you mean '%S'?",

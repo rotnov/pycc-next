@@ -125,6 +125,14 @@ impl SourceSignatures {
         table
     }
 
+    /// The receiver's source spelling of the compiled method `compiled`
+    /// (`self`, or what the source names it), whatever its other parameters.
+    fn receiver(&self, module: &HirModule, compiled: &str) -> Option<String> {
+        let source = inherited::source_item(module, compiled);
+        let signature = self.by_name.get(source_level_name(&source))?.as_ref()?;
+        signature.names.first().cloned()
+    }
+
     fn insert(&mut self, key: String, parameters: &Parameters) {
         self.by_name
             .entry(key)
@@ -208,7 +216,9 @@ pub(crate) fn bind_ctor_keyword_names(
             signatures.keyword_signature(module, &ctor.name, true, ctor.params.len(), &ctor.defaults);
         (ctor.keyword_receiver, ctor.keyword_names) = match bound {
             Some((receiver, names)) => (receiver, Some(names)),
-            None => (None, None),
+            // A `*args` constructor binds its keywords itself and offers
+            // its receiver as a "Did you mean" too.
+            None => (signatures.receiver(module, &ctor.name), None),
         };
     }
 }
