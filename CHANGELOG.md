@@ -26,9 +26,20 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - A nested function used as a value is a native closure also when a variable it reads
   is rebound before its `def` and never after (`template = str(template)`, then
   `def piece(item): ...`), in strict and non-strict mode; it ran its `def` in CPython
-  (or was `C0001` in strict mode). `map(f, xs)`, `filter(f, xs)` and
+  (or was `C0001` in strict mode). `list(map(f, xs))`, `list(filter(f, xs))` and
   `sorted(xs, key=f)` of such a closure call it directly in a comprehension instead of
-  passing a function object to CPython's builtin (pystache's `ParsedTemplate.render`).
+  passing a function object to CPython's builtin (pystache's `ParsedTemplate.render`);
+  so do a lazy `map`/`filter` and a `min`/`max` key when the function has no effect
+  other code can see (`pycc_ast::desugar::pure_keys`).
+
+### Fixed
+- A `min`/`max` key or a lazy `map`/`filter` function that has an effect (a store, a
+  method call, a call of anything but an effect-free builtin) is called as CPython
+  calls it: the rewrite that computed every key before the first comparison (and `map`
+  eagerly) applies only to effect-free functions and lambdas. A `sorted` nested
+  function key with an effect keys a copy of the input, `.sort` with a nested function
+  key runs as written, and with a key only a literal `reverse=` is rewritten (CPython
+  evaluates every argument before the first key call).
 
 ## [0.9.0] - 2026-10-21
 

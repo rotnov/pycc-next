@@ -22,9 +22,14 @@ pub(crate) fn rewrite_exprs(body: &mut [Stmt], sys: &SysNames, fresh: &Fresh) {
         fresh,
         shadowed: stored_names(body),
     };
+    super::keys::set_pure_functions(
+        super::pure_keys::pure_functions(body, &rewriter.shadowed),
+        rewriter.shadowed.clone(),
+    );
     for stmt in body {
         rewriter.visit_stmt(stmt);
     }
+    super::keys::set_pure_functions(HashSet::new(), HashSet::new());
 }
 
 fn binop(left: Expr, right: Expr, range: TextRange) -> Expr {
@@ -42,14 +47,25 @@ impl Rewriter<'_> {
         !self.shadowed.contains(name)
     }
 
-    /// `f` applied to a fresh comprehension variable (`keys::apply`).
-    fn apply(&self, f: &Expr, range: TextRange) -> Option<(String, Expr)> {
-        super::keys::apply(f, self.fresh, range)
+    /// `f` applied to a fresh comprehension variable (`keys::apply`,
+    /// `keys::apply_consumed`).
+    fn apply(&self, f: &Expr, range: TextRange, consumed: bool) -> Option<(String, Expr)> {
+        if consumed {
+            super::keys::apply_consumed(f, self.fresh, range)
+        } else {
+            super::keys::apply(f, self.fresh, range)
+        }
     }
 
     /// `map(f, xs)` -> `[f(v) for v in xs]`; `filter(f, xs)` ->
     /// `[v for v in xs if f(v)]` (`filter(None, xs)` tests `v` itself).
     fn map_or_filter(&self, call_expr: &ExprCall) -> Option<Expr> {
+        self.map_or_filter_in(call_expr, false)
+    }
+
+    /// [`Self::map_or_filter`]; `consumed` when the call's whole result is
+    /// consumed at once (`keys::apply_consumed`).
+    fn map_or_filter_in(&self, call_expr: &ExprCall, consumed: bool) -> Option<Expr> {
         let Expr::Name(func) = call_expr.func.as_ref() else {
             return None;
         };
@@ -76,7 +92,7 @@ impl Rewriter<'_> {
         };
         match func.id.as_str() {
             "map" if self.builtin("map") => {
-                let (var, elt) = self.apply(f, range)?;
+                let (var, elt) = self.apply(f, range, consumed)?;
                 Some(list_comp(
                     elt,
                     store(&var, range),
@@ -91,7 +107,7 @@ impl Rewriter<'_> {
                     let test = load(&var, range);
                     (var, test)
                 } else {
-                    self.apply(f, range)?
+                    self.apply(f, range, consumed)?
                 };
                 Some(list_comp(
                     load(&var, range),
@@ -371,6 +387,20 @@ impl Rewriter<'_> {
 
 impl Transformer for Rewriter<'_> {
     fn visit_expr(&self, expr: &mut Expr) {
+        // `list(map(f, xs))`, `list(filter(f, xs))`: consumed whole at once,
+        // each call made when CPython makes it, so it is the comprehension
+        // whatever `f` does (`keys::apply_consumed`).
+        if let Expr::Call(outer) = expr
+            && matches!(outer.func.as_ref(), Expr::Name(n) if n.id.as_str() == "list")
+            && self.builtin("list")
+            && outer.arguments.keywords.is_empty()
+            && let [Expr::Call(inner)] = &*outer.arguments.args
+            && let Some(comp) = self.map_or_filter_in(inner, true)
+        {
+            *expr = comp;
+            transformer::walk_expr(self, expr);
+            return;
+        }
         // `sys` stream operations first: their callee chain contains
         // `sys.stdin`, which on its own means something else.
         if let Expr::Call(call_expr) = expr

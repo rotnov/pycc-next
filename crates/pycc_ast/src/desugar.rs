@@ -93,6 +93,7 @@ mod itertools;
 mod hoist;
 mod keys;
 mod pure_calls;
+mod pure_keys;
 mod range_values;
 mod ndarray_ndim;
 mod object_except;

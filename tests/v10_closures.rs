@@ -152,3 +152,10 @@ fn sorted_keys_a_copy_of_its_input() {
     native("v10_closure_key_snapshot", &["--non-strict"]);
     ext("v10_closure_key_snapshot", &[]);
 }
+
+/// `min`/`max` with a nested function key that has an effect call it as
+/// CPython does; an effect-free one is rewritten and agrees too.
+#[test]
+fn min_max_keys_run_in_cpythons_order() {
+    output_matches("v10_closure_key_minmax");
+}
