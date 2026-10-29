@@ -217,6 +217,24 @@ pub(crate) fn resolve_super_method_call(
     let Some(mangled) = resolve(skip_implicit_init).or_else(|| resolve(false)) else {
         return Err(t0044_unknown_member("method", current_class, method));
     };
+    // `super().__init__(...)` reaching the builtin exception base: the
+    // synthetic `Exception.__init__` exists only so a `raise` can resolve a
+    // constructor (`exception::reject_own_constructor`); it is never bound
+    // as a callable, and an instance of a class with its own `__init__` has
+    // no exception state for it to set (`args`, the message). A call to it
+    // failed at run time with a `NameError` CPython never raises, so it is
+    // refused here, before any code runs.
+    if mangled == pycc_hir::EXCEPTION_INIT_MANGLED_NAME {
+        return Err(Diagnostic::error(
+            "C0001",
+            format!(
+                "`super().__init__(...)` in exception class `{current_class}` calls the builtin \
+                 exception's constructor, which pycc does not support yet: an instance of an \
+                 exception class with its own `__init__` carries no exception state"
+            ),
+            Span::new(0, 0),
+        ));
+    }
     let (param_tys, return_ty) = env.lookup_function(&mangled).unwrap();
     let method_param_tys = &param_tys[1..]; // exclude `self`
     // #1174: the fourth and last resolver exit that can hand back a

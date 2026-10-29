@@ -47,6 +47,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   (v0.10 accept 2). A compiled `d['raw']` on a received dict: 275 -> 179 instructions.
 
 ### Fixed
+- `super().__init__(...)` in an exception class with its own `__init__`, reaching the
+  builtin exception's constructor, compiled to a call that failed at run time with
+  `NameError: name 'Exception.__init__' is not defined`; it is a compile-time `C0001` now
+  (in `--non-strict` the class runs in CPython, its methods compiled, as for a raise of it).
 - A published compiled function, method or constructor (`--ext`, and a `--non-strict`
   native build's `__main__`) called with the wrong arguments raises CPython 3.13's exact
   `TypeError`: `missing 1 required positional argument: 'x'`, `takes from 2 to 3
