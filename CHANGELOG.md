@@ -41,6 +41,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   key runs as written, and with a key only a literal `reverse=` is rewritten (CPython
   evaluates every argument before the first key call).
 
+### Added
+- `--non-strict`: a function's `str`-keyed dict display holding CPython objects
+  (`{"first": None, "n": 0}`) is a native dict when the dict never escapes the function
+  -- it is only read, stored into, tested for a key, measured, iterated or tested for
+  truth; returned, passed, stored elsewhere, compared or printed, it stays CPython's
+  `dict`, so identity, views, pickling and `repr` are CPython's wherever CPython can see
+  it (v0.10 accept 2). Equal identifier-like `str` literals share one native object, and
+  native `str`-keyed dicts read a key's cached hash in place.
+
 ## [0.9.0] - 2026-10-21
 
 Typed hot data, native end to end -- accepts 1 (in its stated exact form) and 5 are met;

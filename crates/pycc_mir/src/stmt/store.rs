@@ -51,6 +51,18 @@ pub(super) fn lower_item_store(
             index: key,
             value,
         }
+    } else if matches!(&base_ty, Ty::Dict(kv) if kv.1 == Ty::Object) {
+        // A native dict of CPython objects (v0.10, `pycc_types`'
+        // `object_dicts`): a native value is stored boxed.
+        MirStmt::DictSet {
+            dict: dict.to_owned(),
+            key,
+            value: if value.ty() == Ty::Object {
+                value
+            } else {
+                MirExpr::ObjectBox(Box::new(value))
+            },
+        }
     } else if let Some(fused) = crate::dict_add::fused_dict_add(dict, &base_ty, &key, &value) {
         MirStmt::ExprStmt(fused)
     } else {

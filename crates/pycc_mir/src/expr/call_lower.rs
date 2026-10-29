@@ -97,6 +97,46 @@ pub(crate) fn lower_call_expr(
     // A nested function used as a value (`pycc_hir::CLOSURE_MARKER`): the
     // function value of `args[0]` with its first parameters bound to the
     // rest.
+    // A non-escaping `str`-keyed dict display (`pycc_hir::OBJECT_DICT_MARKER`,
+    // `pycc_types`' `object_dict_ty`): a native `dict[str, object]` when a
+    // value is a CPython object, every other value boxed, else the display.
+    if callee == pycc_hir::OBJECT_DICT_MARKER {
+        let pairs: Vec<(HirExpr, HirExpr)> = args
+            .chunks(2)
+            .map(|pair| (pair[0].clone(), pair[1].clone()))
+            .collect();
+        let lowered: Vec<(MirExpr, MirExpr)> = pairs
+            .iter()
+            .map(|(k, v)| {
+                (
+                    lower_expr(k, scopes, classes, current_class),
+                    lower_expr(v, scopes, classes, current_class),
+                )
+            })
+            .collect();
+        let tys: Vec<Ty> = lowered.iter().flat_map(|(k, v)| [k.ty(), v.ty()]).collect();
+        if !pycc_hir::display_is_object(pycc_hir::DisplayKind::Dict, &tys) {
+            return super::container_lower::lower_dict_literal_expr(
+                &HirExpr::DictLiteral(pairs),
+                scopes,
+                classes,
+                current_class,
+            );
+        }
+        return MirExpr::DictLiteral(
+            lowered
+                .into_iter()
+                .map(|(key, value)| {
+                    let value = if value.ty() == Ty::Object {
+                        value
+                    } else {
+                        MirExpr::ObjectBox(Box::new(value))
+                    };
+                    (key, value)
+                })
+                .collect(),
+        );
+    }
     if callee == pycc_hir::CLOSURE_MARKER {
         let [HirExpr::Name(function), captures @ ..] = args.as_slice() else {
             panic!("pycc_mir: internal error: a closure marker names its function first")

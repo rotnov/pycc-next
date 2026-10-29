@@ -805,6 +805,11 @@ pub(crate) fn check_dict_set(
         .with_help(format!("use a `{}` value here", key_ty.name())));
     }
     let value_ty = infer_expr_in(env, local_names, value)?;
+    // A native dict of CPython objects (v0.10, `non_strict::object_dicts`)
+    // stores any value an object call could take, boxed.
+    if *val_ty == Ty::Object && crate::foreign::is_object_operand(env, &value_ty) {
+        return Ok(());
+    }
     if !is_assignable(value_ty.clone(), val_ty.clone()) {
         non_strict::request_widen(dict, &dict_ty, &Ty::Object, |_| true);
         return Err(Diagnostic::error(

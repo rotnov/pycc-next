@@ -285,11 +285,31 @@ pub unsafe extern "C" fn pycc_rt_str_from_literal_cached(
     let mut obj = unsafe { *slot };
     if obj.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
-        obj = new_pystr(bytes);
-        STR_LIVE.fetch_sub(1, Ordering::Relaxed);
+        obj = interned_literal(bytes);
         unsafe { *slot = obj };
     }
     crate::str_index::retain_immortal(obj)
+}
+
+/// The one object every literal site of `bytes` shares when CPython would
+/// intern the text as a code constant (ASCII letters, digits and `_`, as
+/// its `all_name_chars`), so equal keys of a native dict compare by
+/// identity (`crate::value::eq`), as an interned key does in a CPython
+/// dict; a new immortal object for any other literal.
+fn interned_literal(bytes: &[u8]) -> *mut PyStrObj {
+    let fresh = || {
+        let obj = new_pystr(bytes);
+        STR_LIVE.fetch_sub(1, Ordering::Relaxed);
+        crate::str_index::retain_immortal(obj)
+    };
+    if bytes.is_empty() || !bytes.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_') {
+        return fresh();
+    }
+    static INTERNED: std::sync::Mutex<Option<std::collections::HashMap<Vec<u8>, usize>>> =
+        std::sync::Mutex::new(None);
+    let mut table = INTERNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let table = table.get_or_insert_with(std::collections::HashMap::new);
+    *table.entry(bytes.to_vec()).or_insert_with(|| fresh() as usize) as *mut PyStrObj
 }
 
 /// Concatenates two `str` objects into a brand-new one (Python's `+` on

@@ -123,6 +123,31 @@ fn check_key(env: &Environment, key_ty: &Ty, what: &str) -> Result<(), Diagnosti
     }
 }
 
+/// Non-strict mode (v0.10 accept 2): the type of a non-escaping `str`-keyed
+/// dict display (`pycc_hir::OBJECT_DICT_MARKER`, its keys and values
+/// alternating in `args`): `dict[str, object]` when it would otherwise be a
+/// CPython dict (a value is a CPython object), each other value boxed as in
+/// that display, else the display's own native type.
+pub(crate) fn object_dict_ty(
+    env: &Environment,
+    local_names: &[&str],
+    args: &[HirExpr],
+) -> Result<Ty, Diagnostic> {
+    let pairs: Vec<(HirExpr, HirExpr)> = args
+        .chunks(2)
+        .map(|pair| (pair[0].clone(), pair[1].clone()))
+        .collect();
+    match object_display_ty(env, local_names, pycc_hir::DisplayKind::Dict, args) {
+        Some(Ok(_)) => Ok(Ty::Dict(Box::new((Ty::Str, Ty::Object)))),
+        Some(Err(diagnostic)) => Err(diagnostic),
+        None => crate::expr::container_infer::infer_dict_literal_expr(
+            env,
+            local_names,
+            &HirExpr::DictLiteral(pairs),
+        ),
+    }
+}
+
 /// Non-strict mode (#3): a list, tuple, set or dict display that
 /// [`pycc_hir::display_is_object`] builds as the CPython container -- an
 /// `object` element, or elements with no native representation -- is that

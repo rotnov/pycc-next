@@ -46,6 +46,10 @@ pub(crate) fn infer_call_expr(
     if callee == pycc_hir::CLOSURE_MARKER {
         return crate::closure::closure_value(env, local_names, args);
     }
+    // A non-escaping `str`-keyed dict display (`pycc_hir::OBJECT_DICT_MARKER`).
+    if callee == pycc_hir::OBJECT_DICT_MARKER {
+        return crate::foreign::arith::object_dict_ty(env, local_names, args);
+    }
     if callee == pycc_hir::YIELD_MARKER {
         return crate::generator::yield_value(env, local_names, args);
     }

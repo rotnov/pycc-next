@@ -52,6 +52,14 @@ pub(crate) fn collect_call_constraints(
             .as_ref()
             .map_or(Ty::None, |sig| sig.1.clone()))));
     }
+    // A native `str`-keyed dict of objects (`pycc_hir::OBJECT_DICT_MARKER`):
+    // as its display, whose homogeneity is `infer_expr_in`'s job.
+    if callee == pycc_hir::OBJECT_DICT_MARKER {
+        for arg in args {
+            collect_expr_constraints(signatures, parents, concrete, deferred, env, arg)?;
+        }
+        return Ok(None);
+    }
     if callee == pycc_hir::CLOSURE_MARKER
         && let [HirExpr::Name(function), captures @ ..] = args.as_slice()
     {

@@ -19,7 +19,7 @@ mod receiver_dispatch;
 // re-destructures its own node and runs the arm body verbatim).
 mod attr_infer;
 mod call_infer;
-mod container_infer;
+pub(crate) mod container_infer;
 mod name_infer;
 
 use crate::binop::numeric_result_type;

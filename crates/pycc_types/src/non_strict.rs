@@ -178,6 +178,7 @@ pub(crate) type WidenKey = (Option<usize>, String);
 
 mod container_widen;
 mod fresh_returns;
+mod object_dicts;
 pub(crate) use container_widen::request as request_container_widen;
 pub(crate) use fresh_returns::is_fresh_returning;
 
@@ -191,6 +192,14 @@ pub(crate) fn widens_to_object(env: &crate::Environment, ty: &Ty) -> bool {
     matches!(ty, Ty::Object | Ty::None)
         || crate::foreign::is_object_operand(env, ty)
         || crate::object_box::is_boxable_generator(env, ty)
+}
+
+/// Records the checker binding `target` to `value` of type `ty`, for the
+/// native dicts of objects (`object_dicts::note_binding`).
+pub(crate) fn note_object_dict(target: &str, value: &pycc_hir::HirExpr, ty: &Ty) {
+    if is_non_strict() {
+        object_dicts::note_binding(target, value, ty);
+    }
 }
 
 pub(crate) fn request_widen(name: &str, previous: &Ty, new: &Ty, boxable: impl Fn(&Ty) -> bool) {
@@ -431,10 +440,22 @@ fn module_scope_names(hir: &HirModule) -> BTreeSet<String> {
     out
 }
 
+/// The items a failed check's diagnostics name ([`with_widening`]); `None`
+/// when one is the whole module's.
+pub(crate) trait FailedItems {
+    fn failed_items(&self) -> Option<BTreeSet<usize>>;
+}
+
+impl FailedItems for crate::module::KeyedDiagnostics {
+    fn failed_items(&self) -> Option<BTreeSet<usize>> {
+        self.iter().map(|(key, _)| key.item_index()).collect()
+    }
+}
+
 /// Runs `check` over `hir`, and in non-strict mode re-runs it with every
 /// requested name widened to `object` until it passes or a run requests no
 /// new name (its diagnostics are then the answer).
-pub(crate) fn with_widening<T, E>(
+pub(crate) fn with_widening<T, E: FailedItems>(
     hir: &HirModule,
     check: impl Fn(&HirModule) -> Result<T, E>,
 ) -> Result<T, E> {
@@ -443,12 +464,49 @@ pub(crate) fn with_widening<T, E>(
     if !is_non_strict() {
         return check(hir);
     }
+    // v0.10 accept 2: the module with its non-escaping `str`-keyed displays
+    // of objects native (`object_dicts`): checked as it is, then again with
+    // the displays the check bound to CPython dicts made native, less those
+    // of each function the checker does not admit that way.
+    if !object_dicts::find_candidates(hir) {
+        return widening_rounds(hir, &check);
+    }
+    let first = widening_rounds(hir, &check);
+    let (Ok(_), Some((mut rewritten, mut marked))) = (&first, object_dicts::rewrite(hir)) else {
+        return first;
+    };
+    loop {
+        let result = widening_rounds(&rewritten, &check);
+        let Err(error) = &result else {
+            return result;
+        };
+        let Some(failed) = error.failed_items() else {
+            break;
+        };
+        let hit: Vec<usize> = marked.intersection(&failed).copied().collect();
+        if hit.is_empty() {
+            break;
+        }
+        for index in hit {
+            object_dicts::unmark_item(&mut rewritten, index);
+            marked.remove(&index);
+        }
+        if marked.is_empty() {
+            break;
+        }
+    }
+    first
+}
+
+
+/// [`with_widening`]'s rounds over `hir` in non-strict mode.
+fn widening_rounds<T, E>(hir: &HirModule, check: &impl Fn(&HirModule) -> Result<T, E>) -> Result<T, E> {
+    fresh_returns::record(hir);
     // A name first bound to `None` and rebound to another value in the same
     // scope is widened up front: a read reached before any rebinding in
     // the checker's single pass (`last = None` before a loop that sets
     // `last = s` in one branch and reads `len(last)` in another) would
     // otherwise see `None` and never request the widening.
-    fresh_returns::record(hir);
     let mut widened = none_first_names(hir);
     let mut widened_attrs = BTreeSet::new();
     let mut current = (!widened.is_empty()).then(|| widen(hir, &widened, &widened_attrs));
@@ -711,6 +769,13 @@ fn widen_block(
     annotation: &Ty,
 ) {
     for stmt in body {
+        // A widened name's native dict of objects is the CPython dict again
+        // (`object_dicts`): widening is its escape.
+        if let HirStmt::Assign { target, value } = stmt
+            && names.contains(target)
+        {
+            object_dicts::unmark(value);
+        }
         let is_list_comp = matches!(stmt, HirStmt::ListCompAssign { .. });
         match stmt {
             HirStmt::Assign { target, value }
