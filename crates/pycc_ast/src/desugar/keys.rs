@@ -9,17 +9,20 @@
 //! variable -- handed to a native builtin that orders by the first item and
 //! keeps the second:
 //!
-//! * `sorted(xs, key=f, reverse=r)` -> `__pycc_sorted_keyed([(f(v), v) for v in xs], r)`
+//! * `sorted(xs, key=f, reverse=r)` -> `__pycc_sorted_keyed([(f(v), v) for v in [w for w in xs]], r)`
+//!   (CPython lists the whole input before the first key call)
 //! * `xs.sort(key=f, reverse=r)` -> `__pycc_sort_keyed(xs, [(f(v), v) for v in xs], r)`
 //!   (`xs` a name or attribute chain, so reading it twice is unobservable)
-//! * `min(xs, key=f)` / `max(xs, key=f)` -> `__pycc_min_keyed([(f(v), v) for v in xs])`
+//! * `min(xs, key=f)` / `max(xs, key=f)` -> `__pycc_min_keyed([(f(v), v) for v in xs])`;
+//!   CPython compares each key as soon as it computes it, which only keys of
+//!   immutable builtin values cannot tell apart, so the checker admits only
+//!   those (`pycc_hir::builtins::resolve_call`) and, as a listed deviation,
+//!   instances of a compiled class (`pycc_types::instance_order`).
 
 use super::Fresh;
 use super::build::{call, call_name, list_comp, load, store, tuple};
 use ruff_python_ast::{Expr, ExprCall, ExprContext};
 use ruff_text_size::TextRange;
-use std::cell::RefCell;
-use std::collections::HashSet;
 
 fn not(operand: Expr, range: TextRange) -> Expr {
     Expr::UnaryOp(ruff_python_ast::ExprUnaryOp {
@@ -47,74 +50,11 @@ fn is_rereadable(expr: &Expr) -> bool {
     }
 }
 
-thread_local! {
-    /// While `super::exprs` rewrites a module: its module-level functions
-    /// with no effect anything else can see, and the builtin names it
-    /// rebinds (`super::pure_keys`).
-    static PURE: RefCell<(HashSet<String>, HashSet<String>)> =
-        RefCell::new((HashSet::new(), HashSet::new()));
-}
-
-/// Records the module's effect-free functions and rebound names for
-/// [`apply`].
-pub(super) fn set_pure_functions(pure: HashSet<String>, shadowed: HashSet<String>) {
-    PURE.with(|p| *p.borrow_mut() = (pure, shadowed));
-}
-
-/// Whether calling the function `name` names has no effect anything else
-/// can see: an effect-free builtin the program does not rebind, or an
-/// effect-free module-level function (`super::pure_keys`).
-fn pure_name(name: &str) -> bool {
-    PURE.with(|p| {
-        let (functions, shadowed) = &*p.borrow();
-        functions.contains(name) || super::pure_keys::pure_builtin(name, shadowed)
-    })
-}
-
-/// `f` applied to a fresh comprehension variable, when `f` has no effect
-/// anything else can see (`super::pure_keys`), as the rewrites call it at
-/// other moments than CPython does (a `min`/`max` key before the first
-/// comparison, a lazy `map` eagerly): a one-parameter lambda is inlined (its parameter
-/// becomes the variable), a function named is called, and so is a nested
-/// function's lifted function. `None` for anything else.
+/// `f` applied to a fresh comprehension variable: a one-parameter lambda is
+/// inlined (its parameter becomes the variable), a name or attribute is
+/// called, and so is a nested function's lifted function. `None` for
+/// anything else.
 pub(super) fn apply(f: &Expr, fresh: &Fresh, range: TextRange) -> Option<(String, Expr)> {
-    apply_in(f, fresh, range, false)
-}
-
-/// [`apply`] where every call happens when CPython makes it -- the whole
-/// `map` consumed at once (`list(map(f, xs))`), or a `sorted`/`.sort` key
-/// (CPython computes every key before it orders anything) -- so `f` need
-/// not be effect-free.
-pub(super) fn apply_consumed(f: &Expr, fresh: &Fresh, range: TextRange) -> Option<(String, Expr)> {
-    apply_in(f, fresh, range, true)
-}
-
-/// Whether the key or `map`/`filter` function `f` has no effect anything
-/// else can see (`super::pure_keys`): an effect-free lambda, function named
-/// or nested function's lifted function.
-fn pure_key(f: &Expr) -> bool {
-    match f {
-        Expr::Lambda(lambda) => {
-            PURE.with(|p| super::pure_keys::pure_expr(&lambda.body, &p.borrow().1))
-        }
-        Expr::Name(name) => pure_name(name.id.as_str()),
-        Expr::Call(closure) if is_closure_value(f) => {
-            matches!(closure.arguments.args.first(), Some(Expr::Name(n)) if pure_name(n.id.as_str()))
-        }
-        _ => false,
-    }
-}
-
-/// Whether `f` is a nested function used as a value (`__pycc_closure__(...)`).
-fn is_closure_value(f: &Expr) -> bool {
-    matches!(f, Expr::Call(call)
-        if matches!(call.func.as_ref(), Expr::Name(n) if n.id.as_str() == crate::CLOSURE_MARKER))
-}
-
-fn apply_in(f: &Expr, fresh: &Fresh, range: TextRange, consumed: bool) -> Option<(String, Expr)> {
-    if !consumed && !pure_key(f) {
-        return None;
-    }
     match f {
         Expr::Lambda(lambda) => {
             let params = lambda.parameters.as_deref()?;
@@ -157,6 +97,12 @@ fn apply_in(f: &Expr, fresh: &Fresh, range: TextRange, consumed: bool) -> Option
     }
 }
 
+/// Whether `f` is a nested function used as a value (`__pycc_closure__(...)`).
+fn is_closure_value(f: &Expr) -> bool {
+    matches!(f, Expr::Call(call)
+        if matches!(call.func.as_ref(), Expr::Name(n) if n.id.as_str() == crate::CLOSURE_MARKER))
+}
+
 /// The `key`/`reverse` keywords of a call (`key=None` counts as absent), or
 /// `None` when it has any other keyword.
 fn key_and_reverse(call_expr: &ExprCall) -> Option<(Option<&Expr>, Option<&Expr>)> {
@@ -176,22 +122,14 @@ fn key_and_reverse(call_expr: &ExprCall) -> Option<(Option<&Expr>, Option<&Expr>
 }
 
 /// `[(f(v), v) for v in xs]` for the key function `key`, or `[(v, v) for v
-/// in xs]` when there is none; `in_order` when the keys are all computed
-/// before the first comparison in CPython too ([`apply_consumed`]).
-fn pairs(
-    xs: &Expr,
-    key: Option<&Expr>,
-    fresh: &Fresh,
-    range: TextRange,
-    in_order: bool,
-) -> Option<Expr> {
+/// in xs]` when there is none.
+fn pairs(xs: &Expr, key: Option<&Expr>, fresh: &Fresh, range: TextRange) -> Option<Expr> {
     let (var, key_of) = match key {
         None => {
             let var = fresh.name();
             let key_of = load(&var, range);
             (var, key_of)
         }
-        Some(f) if in_order => apply_consumed(f, fresh, range)?,
         Some(f) => apply(f, fresh, range)?,
     };
     let pair = tuple(vec![key_of, load(&var, range)], ExprContext::Load, range);
@@ -253,23 +191,30 @@ pub(super) fn rewrite_key_call(
             }
             match func.id.as_str() {
                 "sorted" => {
-                    // A nested function key with an effect may change the
-                    // list it reads while the pairs are built (`xs[1] = 0`;
-                    // the case the review found); `sorted` keys
-                    // a copy of its input, so the pairs iterate one (made by
-                    // the `list` builtin: a call is left alone where a
-                    // binding of the program shadows it).
-                    let snapshot;
-                    let xs = if key.is_some_and(|f| is_closure_value(f) && !pure_key(f)) {
-                        if shadowed("list") {
-                            return None;
-                        }
-                        snapshot = call_name("list", vec![xs.clone()], range);
-                        &snapshot
+                    // CPython's `sorted` makes a list of its whole input
+                    // before it calls the key: an input that raises part
+                    // way raises before any key call, and a key that
+                    // changes the list it reads (`xs[1] = 0`) does not
+                    // change what is sorted. So with a key the pairs iterate
+                    // a copy, `[w for w in xs]`, unless the input is a list
+                    // the expression itself builds.
+                    let copy;
+                    let xs = if key.is_some()
+                        && !matches!(xs, Expr::List(_) | Expr::ListComp(_))
+                    {
+                        let var = fresh.name();
+                        copy = list_comp(
+                            load(&var, range),
+                            store(&var, range),
+                            xs.clone(),
+                            Vec::new(),
+                            range,
+                        );
+                        &copy
                     } else {
                         xs
                     };
-                    let pairs = pairs(xs, key, fresh, range, true)?;
+                    let pairs = pairs(xs, key, fresh, range)?;
                     Some(call_name(
                         "__pycc_sorted_keyed",
                         vec![pairs, reverse],
@@ -277,9 +222,7 @@ pub(super) fn rewrite_key_call(
                     ))
                 }
                 "min" | "max" if key.is_some() && call_expr.arguments.keywords.len() == 1 => {
-                    // CPython compares each key as soon as it computes it,
-                    // so only an effect-free key is computed first.
-                    let pairs = pairs(xs, key, fresh, range, false)?;
+                    let pairs = pairs(xs, key, fresh, range)?;
                     let name = if func.id.as_str() == "min" {
                         "__pycc_min_keyed"
                     } else {
@@ -299,7 +242,7 @@ pub(super) fn rewrite_key_call(
             if !is_rereadable(xs) || key.is_some_and(is_closure_value) {
                 return None;
             }
-            let pairs = pairs(xs, key, fresh, range, true)?;
+            let pairs = pairs(xs, key, fresh, range)?;
             Some(call_name(
                 "__pycc_sort_keyed",
                 vec![xs.clone(), pairs, reverse],

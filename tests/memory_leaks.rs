@@ -752,7 +752,7 @@ fn object_stdlib_calls_run_in_constant_memory() {
                  ys = sorted(xs, key=lambda t: t[0])\n    \
                  heapq.heappush(h, (i % 7, i))\n    \
                  if len(h) > 5:\n        heapq.heappop(h)\n    \
-                 total += bisect_left(ys, xs[0]) + len(min(xs, key=len))\n\
+                 total += bisect_left(ys, xs[0]) + len(sorted(xs, key=len)[0])\n\
                  print(total, xs, h)\n"
             ),
         )

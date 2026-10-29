@@ -195,6 +195,18 @@ fn math_log(name: &str, arg: &Ty) -> Option<BuiltinSig> {
 
 /// Whether a list's elements are ordered by a natively supported `<`
 /// (`pycc_rt::value::lt`, lexicographic for lists and tuples).
+/// Whether values of `ty` are immutable builtin values that compare without
+/// running any code and without raising: numbers, `bool`, `str` and tuples
+/// of them.
+fn inert(ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Bool | Ty::Float | Ty::Num | Ty::Str => true,
+        Ty::Tuple(elements) => elements.iter().all(inert),
+        Ty::VarTuple(inner) => inert(inner),
+        _ => false,
+    }
+}
+
 fn orderable(elem: &Ty) -> bool {
     match elem {
         Ty::Int | Ty::Bool | Ty::Float | Ty::Num | Ty::Str => true,
@@ -834,12 +846,6 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             &[Ty::Object, Ty::Object, Ty::Bool],
             Ty::None,
         ),
-        ("__pycc_min_keyed", [Ty::Object]) => {
-            sig("pycc_ext_obj_min_keyed", &[Ty::Object], Ty::Object)
-        }
-        ("__pycc_max_keyed", [Ty::Object]) => {
-            sig("pycc_ext_obj_max_keyed", &[Ty::Object], Ty::Object)
-        }
         ("__pycc_heapify", [Ty::Object]) => sig("pycc_ext_obj_heapify", &[Ty::Object], Ty::None),
         ("__pycc_heappop", [Ty::Object]) => sig("pycc_ext_obj_heappop", &[Ty::Object], Ty::Object),
         (
@@ -886,9 +892,13 @@ pub fn resolve_call(name: &str, args: &[Ty]) -> Option<Result<BuiltinSig, String
             }
             sig("pycc_rt_list_sort_keyed", args, Ty::None)
         }
+        // CPython's `min`/`max` compare each key as soon as it is computed;
+        // the pairs list computes every key first, which nothing can see only
+        // when comparing keys runs no code and a key cannot change after it
+        // is made: an immutable builtin value.
         ("__pycc_min_keyed" | "__pycc_max_keyed", [Ty::List(pair)]) => {
             let (key, elem) = keyed_pair(pair)?;
-            if !orderable(key) {
+            if !inert(key) {
                 return None;
             }
             word_sig(

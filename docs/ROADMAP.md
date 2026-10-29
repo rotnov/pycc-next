@@ -1096,12 +1096,12 @@ Accept:
    CPython at once.
    **Progress 2026-10-29:** a nested function used as a value whose captures are all
    bound before its `def` (a parameter normalized first: pystache's `get_unicode`,
-   `_render_string`'s callbacks) is a native closure, and `list(map(f, xs))` and `sorted(key=)` of
-   one (or a lazy `map`/`filter` or `min`/`max` key of an effect-free one) calls its lifted function in a comprehension
-   instead of handing a function object to CPython's builtin (`tests/v10_closures.rs`):
-   pystache 580k -> 564k per round (CPython 505k); mistune unchanged (57.7M).
+   `_render_string`'s callbacks) is a native closure, and `list(map(f, xs))` and
+   `sorted(key=)` of one call its lifted function in a comprehension instead of handing a
+   function object to CPython's builtin (`tests/v10_closures.rs`):
+   pystache 580k -> 566k per round (CPython 505k); mistune unchanged (57.7M).
    **Decision 2026-10-29: not met for v0.10; what is left, estimated.** The bar is ~421k
-   instructions per round for pystache (CPython 505k / 1.2; now 564k) and ~47.5M per pass
+   instructions per round for pystache (CPython 505k / 1.2; now 566k) and ~47.5M per pass
    for mistune (57.0M / 1.2; now 57.7M). The remaining levers, each measured where it
    costs now (callgrind, `PYTHONHASHSEED=0`) and its saving estimated:
 
@@ -1116,10 +1116,9 @@ Accept:
    | mistune | tokens as native dicts (accept 2's open piece), after the renderers | dict operations ~1.3M | ~0.7M |
    | mistune | fewer `str` crossings | ~1.6M | ~0.8M |
 
-   Summed: pystache 419k-464k (1.09x-1.21x), mistune 48.2M-50.7M (1.12x-1.18x); pystache
-   reaches 1.2x only with every lever at its optimistic end, mistune not even then, and
-   the largest levers are multi-feature projects. The accept stays open with this
-   evidence.
+   Summed: pystache 421k-466k (1.08x-1.20x, just short of the 420.8k bar), mistune
+   48.2M-50.7M (1.12x-1.18x); neither reaches 1.2x even at the optimistic end, and the
+   largest levers are multi-feature projects. The accept stays open with this evidence.
 4. **Trustworthy numbers:** a CI benchmark workflow runs `bench/run.py`, the package
    `--time` checks and `bench/pydantic_check.py --time` on a GitHub-hosted runner with
    interleaved fresh-process runs, and publishes median and spread as an artifact; every

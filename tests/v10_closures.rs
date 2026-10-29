@@ -1,7 +1,8 @@
 //! v0.10: nested functions used as values. A capture every binding of
 //! which precedes the `def` (a parameter normalized first) is bound when
-//! the value is made, and `map`/`filter`/`sorted(key=...)` of such a value
-//! call its lifted function directly (`pycc_ast::desugar::keys::apply`)
+//! the value is made, and `list(map(...))`/`list(filter(...))`/
+//! `sorted(key=...)` of such a value call its lifted function directly
+//! (`pycc_ast::desugar::keys::apply`)
 //! instead of handing a function object to CPython's builtin. The oracle is
 //! `python3` running the fixture: strict and `--non-strict` native builds
 //! and the `--non-strict --ext` module must print the same, with no
@@ -119,8 +120,8 @@ fn key_calls_follow_every_argument_non_strict() {
     output_matches("v10_closure_key_order");
 }
 
-/// A `sorted` call with a nested function key is not rewritten where the
-/// program shadows `list`.
+/// A `sorted` call with a nested function key keys a copy of its input
+/// also where the program shadows `list`.
 #[test]
 fn a_shadowed_list_keeps_sorted_as_written() {
     output_matches("v10_closure_key_shadowed");
@@ -153,9 +154,27 @@ fn sorted_keys_a_copy_of_its_input() {
     ext("v10_closure_key_snapshot", &[]);
 }
 
-/// `min`/`max` with a nested function key that has an effect call it as
-/// CPython does; an effect-free one is rewritten and agrees too.
+/// `min`/`max` compare each key as CPython does: a key that changes a key
+/// it returned earlier, or one of CPython objects, keeps the call as
+/// written.
 #[test]
 fn min_max_keys_run_in_cpythons_order() {
     output_matches("v10_closure_key_minmax");
+}
+
+/// `sorted` keys a copy of its whole input: a property getter the key runs
+/// does not change what is sorted, and an input that raises part way raises
+/// before the first key call.
+#[test]
+fn sorted_keys_a_copy_made_before_any_key_call() {
+    output_matches("v10_closure_key_property");
+    output_matches("v10_closure_key_input_raises");
+    native("v10_closure_key_input_raises", &["--non-strict"]);
+    ext("v10_closure_key_input_raises", &[]);
+}
+
+/// A `map`/`filter` not consumed at once stays lazy.
+#[test]
+fn a_lazy_map_reads_state_when_consumed() {
+    output_matches("v10_closure_map_lazy");
 }
