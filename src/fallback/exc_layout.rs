@@ -31,9 +31,11 @@
 //! classes) and the name is neither private nor a dunder; a class defining
 //! `__setattr__`, `__getattribute__`, `__delattr__` or `__slots__`, a class
 //! keyword (`metaclass=`) or a class of unknown body in its MRO gets no
-//! layout, and a layout some class carrying it would show otherwise than
-//! CPython (a subclass's property of the same name, here or in another
-//! module of the package) is dropped with the chain it extends.
+//! layout, nor does a class of several bases; and a layout some class
+//! carrying it would show otherwise than CPython (a subclass's property of
+//! the same name, here or in another module of the package) or would meet
+//! another base's in (a subclass of several bases) is dropped with the
+//! chain it extends.
 
 use super::*;
 use pycc_ast::{Expr, StmtClassDef};
@@ -179,6 +181,12 @@ impl Plan {
                 continue;
             }
             inherited.dedup();
+            // A class of several bases over a layout: another base's layout
+            // (or its solid base) may conflict with it, which CPython
+            // refuses -- every layout it inherits goes.
+            if class.bases().len() > 1 && !inherited.is_empty() {
+                return Err(self.chains_of(&layouts, &inherited));
+            }
             let state = if blocked || inherited.len() > 1 {
                 State::Blocked
             } else {
@@ -187,9 +195,15 @@ impl Plan {
                 // A class whose MRO holds a class of unknown body gets no
                 // layout of its own: a binding there could take its
                 // attributes' stores.
-                let own: Vec<(String, String)> = if let (true, false, Some(bound)) =
-                    (self.is_split(index), denied.contains(&index), &bound)
-                {
+                // Nor does one of several bases: a template over the first
+                // exception base may not share a solid base with the others
+                // (`class C(KeyError, OSError)`).
+                let own: Vec<(String, String)> = if let (true, false, true, Some(bound)) = (
+                    self.is_split(index),
+                    denied.contains(&index),
+                    class.bases().len() == 1,
+                    &bound,
+                ) {
                     fields_of(&class, bound)
                         .into_iter()
                         .filter(|(field, _)| !fields.contains(field))
@@ -220,27 +234,35 @@ impl Plan {
                 // Its own MRO, and the subclasses other modules of the
                 // package derive from it.
                 let overrides = self.package_overrides.get(name);
-                let shadowed = match &bound {
+                let shadowed = self.package_multi.contains(name.as_str())
+                    || match &bound {
                     Some(bound) => layouts[at].fields.iter().any(|field| {
                         bound.contains(field) || overrides.is_some_and(|names| names.contains(field))
                     }),
                     None => true,
                 };
                 if shadowed {
-                    let mut owners = Vec::new();
-                    let mut next = Some(at);
-                    while let Some(at) = next {
-                        owners.push(layouts[at].owner);
-                        next = layouts[at].base.as_ref().and_then(|hidden| {
-                            layouts.iter().position(|layout| &layout.hidden == hidden)
-                        });
-                    }
-                    return Err(owners);
+                    return Err(self.chains_of(&layouts, &[at]));
                 }
             }
             states.insert(name.clone(), state);
         }
         Ok(layouts)
+    }
+
+    /// The owners of layouts `at` and of every layout they extend.
+    fn chains_of(&self, layouts: &[Layout], at: &[usize]) -> Vec<usize> {
+        let mut owners = Vec::new();
+        for &at in at {
+            let mut next = Some(at);
+            while let Some(at) = next {
+                owners.push(layouts[at].owner);
+                next = layouts[at].base.as_ref().and_then(|hidden| {
+                    layouts.iter().position(|layout| &layout.hidden == hidden)
+                });
+            }
+        }
+        owners
     }
 
     /// The class statement at `range` of the source, parsed on its own.

@@ -116,14 +116,15 @@ fn the_layout_is_native() {
          [c.__name__ for c in type(e).__mro__ if c.__module__ == 'pycc'])\n\
          e.code = 'x'\nprint(repr(e.code), e.__dict__)\n\
          f = m.NoFile(2, 'p')\nprint('path' in f.__dict__, str(f), f.errno)\n\
-         print([[c for c in k.__mro__ if c.__module__ == 'pycc'] for k in (m.Metered, m.Plated)])\n",
+         print([[c for c in k.__mro__ if c.__module__ == 'pycc'] \
+         for k in (m.Metered, m.Plated, m.Both, m.KeyOS)])\n",
     );
     assert_eq!(
         text(&out.stdout),
         "False False ['exception_layout', 'exception_layout']\n\
          'x' {}\n\
          False [Errno 2] no such thing 2\n\
-         [[], []]\n",
+         [[], [], [], []]\n",
         "{}",
         text(&out.stderr)
     );
@@ -218,12 +219,12 @@ fn package_matches_cpython(release: bool) {
             "import sys; sys.path.insert(0, '.')\nimport pke\n\
              k = pke.KeyMissing('a', 'b')\ns = pke.Sub(1, 'w', 'e')\n\
              print('key' in k.__dict__, 'code' in s.__dict__, 'extra' in s.__dict__)\n\
-             print('rate' in pke.common.Rated(1).__dict__)\n",
+             print('rate' in pke.common.Rated(1).__dict__, 'left' in pke.common.Lefty(1).__dict__)\n",
         )
         .current_dir(&*built)
         .output()
         .expect("python3 should spawn");
-    assert_eq!(text(&out.stdout), "False False True\nTrue\n", "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "False False True\nTrue True\n", "{}", text(&out.stderr));
 }
 
 #[test]

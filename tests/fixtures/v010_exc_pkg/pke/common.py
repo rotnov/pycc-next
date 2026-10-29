@@ -31,6 +31,16 @@ class Rated(Exception):
         return "rate " + str(self.rate)
 
 
+class Lefty(Exception):
+    """Would have a layout, but `errors.Duo` derives from it and another."""
+
+    def __init__(self, left: int) -> None:
+        self.left = left
+
+    def show(self) -> str:
+        return "left " + str(self.left)
+
+
 class Clash(Exception):
     """Named as a class of `errors` is: each has a layout of its own."""
 

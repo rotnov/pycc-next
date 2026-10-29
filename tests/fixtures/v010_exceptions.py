@@ -148,6 +148,39 @@ class Shown(Plated):
         self.stored = value
 
 
+class Left(Exception):
+    """Would have a layout, but `Both` derives from it and `Right`."""
+
+    def __init__(self, a: int) -> None:
+        self.a = a
+
+
+class Right(Exception):
+    def __init__(self, b: str) -> None:
+        self.b = b
+
+
+class Both(Left, Right):
+    """Two bases that would carry a layout each: CPython's classes."""
+
+    def __init__(self, a: int, b: str) -> None:
+        Left.__init__(self, a)
+        Right.__init__(self, b)
+
+    def show(self) -> str:
+        return str(self.a) + self.b
+
+
+class KeyOS(KeyError, OSError):
+    """Several bases of different solid bases: no layout of its own."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def show(self) -> str:
+        return "keyos " + str(self.n)
+
+
 def probe(n: int) -> str:
     try:
         if n > 0:

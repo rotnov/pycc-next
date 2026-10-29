@@ -760,51 +760,60 @@ typedef struct PyccExtExcLayout {
     PyGetSetDef *getsets;
 } PyccExtExcLayout;
 
-/* Each exception template (`exc_templates.c`) -> the template whose PEP 697
- * payload its objects' instance pointer is in (itself, or the base
- * template a subclass's inherits), and each object type seen -> its most
- * derived template (or None: no template). Created with the first
- * template; read only for an exception type (`pycc_ext_inst_slot`). */
-static PyObject *pycc_ext_exc_payload_of = NULL;
-static PyObject *pycc_ext_exc_template_of = NULL;
+static void pycc_ext_exc_dealloc(PyObject *self);
 
-/* The most derived exception template in `tp`'s MRO (borrowed), or NULL. */
-static PyObject *pycc_ext_exc_template_for(PyTypeObject *tp)
+/* The interned "__mro__", made on first use. */
+static PyObject *pycc_ext_mro_name = NULL;
+
+/*
+ * The exception templates (`exc_templates.c`) in `tp`'s MRO: the most
+ * derived (`*derived`) and the one whose PEP 697 payload holds the
+ * objects' instance pointer (`*root`: the least derived, the others adding
+ * nothing to the layout), both borrowed and NULL when there is none. A
+ * template is told by its deallocator, so nothing is cached and no table
+ * holds a type: a Python subclass is freed as any class is.
+ */
+static void pycc_ext_exc_templates_of(PyTypeObject *tp, PyTypeObject **derived,
+                                      PyTypeObject **root)
 {
-    PyObject *found;
     PyObject *mro;
     Py_ssize_t n;
     Py_ssize_t i;
-    if (pycc_ext_exc_template_of == NULL) {
-        return NULL;
-    }
-    found = PyDict_GetItemWithError(pycc_ext_exc_template_of, (PyObject *)tp);
-    if (found != NULL) {
-        return found == Py_None ? NULL : found;
-    }
-    if (PyErr_Occurred()) {
-        PyErr_Clear();
-        return NULL;
-    }
-    mro = PyObject_GetAttrString((PyObject *)tp, "__mro__");
-    if (mro == NULL) {
-        PyErr_Clear();
-        return NULL;
-    }
-    found = Py_None;
-    n = PyTuple_Check(mro) ? PyTuple_Size(mro) : 0;
-    for (i = 0; i < n; i++) {
-        PyObject *c = PyTuple_GetItem(mro, i);
-        if (PyDict_Contains(pycc_ext_exc_payload_of, c) == 1) {
-            found = c;
-            break;
+    *derived = NULL;
+    *root = NULL;
+    if (pycc_ext_mro_name == NULL) {
+        pycc_ext_mro_name = PyUnicode_InternFromString("__mro__");
+        if (pycc_ext_mro_name == NULL) {
+            PyErr_Clear();
+            return;
         }
     }
-    Py_DECREF(mro);
-    if (PyDict_SetItem(pycc_ext_exc_template_of, (PyObject *)tp, found) < 0) {
+    mro = PyObject_GetAttr((PyObject *)tp, pycc_ext_mro_name);
+    if (mro == NULL) {
         PyErr_Clear();
+        return;
     }
-    return found == Py_None ? NULL : found;
+    n = PyTuple_Check(mro) ? PyTuple_Size(mro) : 0;
+    for (i = 0; i < n; i++) {
+        PyTypeObject *c = (PyTypeObject *)PyTuple_GetItem(mro, i);
+        if (PyType_GetSlot(c, Py_tp_dealloc) == (void *)pycc_ext_exc_dealloc) {
+            if (*derived == NULL) {
+                *derived = c;
+            }
+            *root = c;
+        }
+    }
+    /* Borrowed: `tp`'s MRO holds them as long as `tp` lives. */
+    Py_DECREF(mro);
+}
+
+/* The most derived exception template in `tp`'s MRO (borrowed), or NULL. */
+static PyTypeObject *pycc_ext_exc_template_for(PyTypeObject *tp)
+{
+    PyTypeObject *derived;
+    PyTypeObject *root;
+    pycc_ext_exc_templates_of(tp, &derived, &root);
+    return derived;
 }
 
 /*
@@ -818,21 +827,16 @@ static PyObject *pycc_ext_exc_template_for(PyTypeObject *tp)
  */
 static void **pycc_ext_inst_slot(PyObject *o)
 {
-    PyObject *tmpl;
-    PyObject *payload;
+    PyTypeObject *derived;
+    PyTypeObject *root;
     if ((PyType_GetFlags(Py_TYPE(o)) & Py_TPFLAGS_BASE_EXC_SUBCLASS) == 0) {
         return &((PyccExtInstance *)o)->inst;
     }
-    tmpl = pycc_ext_exc_template_for(Py_TYPE(o));
-    if (tmpl == NULL) {
+    pycc_ext_exc_templates_of(Py_TYPE(o), &derived, &root);
+    if (root == NULL) {
         return NULL;
     }
-    payload = PyDict_GetItemWithError(pycc_ext_exc_payload_of, tmpl);
-    if (payload == NULL) {
-        PyErr_Clear();
-        return NULL;
-    }
-    return (void **)PyObject_GetTypeData(o, (PyTypeObject *)payload);
+    return (void **)PyObject_GetTypeData(o, root);
 }
 
 static void *pycc_ext_exc_bind(PyObject *self, void **slot);

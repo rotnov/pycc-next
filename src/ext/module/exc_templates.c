@@ -26,12 +26,87 @@
  * (`pycc_ext_exc_traverse`, `pycc_ext_exc_clear`).
  */
 
-/* Each template -> its layout (a capsule of the companion's entry). */
-static PyObject *pycc_ext_exc_layout_of = NULL;
-/* (layout entry, exception base) -> its template. */
-static PyObject *pycc_ext_exc_templates = NULL;
+/*
+ * Each live template and its layout. A template is not owned here: each
+ * entry watches its template through a weak reference, whose callback
+ * drops the entry when the template goes (with the last class over it), so
+ * no global holds a type. Only binding an instance and `__reduce__` look a
+ * layout up; the rest tells a template by its deallocator
+ * (`pycc_ext_exc_templates_of`).
+ */
+typedef struct {
+    PyTypeObject *tmpl;
+    const PyccExtExcLayout *layout;
+    PyObject *watch;
+} PyccExtExcEntry;
+static PyccExtExcEntry *pycc_ext_exc_entries = NULL;
+static Py_ssize_t pycc_ext_exc_entry_count = 0;
+static Py_ssize_t pycc_ext_exc_entry_cap = 0;
+/* The weak references' callback (`pycc_ext_exc_forget`), made once. */
+static PyObject *pycc_ext_exc_forget_fn = NULL;
 
-#define PYCC_EXC_LAYOUT_CAPSULE "pycc.exc_layout"
+/* The layout of template `tmpl`, or NULL. */
+static const PyccExtExcLayout *pycc_ext_exc_layout_of(PyTypeObject *tmpl)
+{
+    Py_ssize_t i;
+    for (i = 0; i < pycc_ext_exc_entry_count; i++) {
+        if (pycc_ext_exc_entries[i].tmpl == tmpl) {
+            return pycc_ext_exc_entries[i].layout;
+        }
+    }
+    return NULL;
+}
+
+/* A watched template went: its entry goes with it. */
+static PyObject *pycc_ext_exc_forget(PyObject *self, PyObject *watch)
+{
+    Py_ssize_t i;
+    (void)self;
+    for (i = 0; i < pycc_ext_exc_entry_count; i++) {
+        if (pycc_ext_exc_entries[i].watch == watch) {
+            pycc_ext_exc_entries[i] = pycc_ext_exc_entries[--pycc_ext_exc_entry_count];
+            Py_DECREF(watch);
+            break;
+        }
+    }
+    Py_RETURN_NONE;
+}
+
+static PyMethodDef pycc_ext_exc_forget_def = {
+    "__pycc_exc_forget__", (PyCFunction)pycc_ext_exc_forget, METH_O, NULL,
+};
+
+/* Records template `tmpl` of layout `layout`; 0, or -1 with an exception. */
+static int pycc_ext_exc_remember(PyTypeObject *tmpl, const PyccExtExcLayout *layout)
+{
+    PyObject *watch;
+    if (pycc_ext_exc_forget_fn == NULL) {
+        pycc_ext_exc_forget_fn = PyCFunction_NewEx(&pycc_ext_exc_forget_def, NULL, NULL);
+        if (pycc_ext_exc_forget_fn == NULL) {
+            return -1;
+        }
+    }
+    if (pycc_ext_exc_entry_count == pycc_ext_exc_entry_cap) {
+        Py_ssize_t cap = pycc_ext_exc_entry_cap == 0 ? 8 : 2 * pycc_ext_exc_entry_cap;
+        PyccExtExcEntry *grown = (PyccExtExcEntry *)PyMem_Realloc(
+            pycc_ext_exc_entries, (size_t)cap * sizeof(PyccExtExcEntry));
+        if (grown == NULL) {
+            PyErr_NoMemory();
+            return -1;
+        }
+        pycc_ext_exc_entries = grown;
+        pycc_ext_exc_entry_cap = cap;
+    }
+    watch = PyWeakref_NewRef((PyObject *)tmpl, pycc_ext_exc_forget_fn);
+    if (watch == NULL) {
+        return -1;
+    }
+    pycc_ext_exc_entries[pycc_ext_exc_entry_count].tmpl = tmpl;
+    pycc_ext_exc_entries[pycc_ext_exc_entry_count].layout = layout;
+    pycc_ext_exc_entries[pycc_ext_exc_entry_count].watch = watch;
+    pycc_ext_exc_entry_count++;
+    return 0;
+}
 
 /* The first static type of `tp`'s MRO: the exception base whose `tp_new`,
  * deallocator, traverse and clear the template's chain to (borrowed). */
@@ -60,17 +135,8 @@ static PyTypeObject *pycc_ext_exc_static_base(PyTypeObject *tp)
 /* The layout of the most derived template of `tp`, or NULL. */
 static const PyccExtExcLayout *pycc_ext_exc_layout_for(PyTypeObject *tp)
 {
-    PyObject *tmpl = pycc_ext_exc_template_for(tp);
-    PyObject *capsule;
-    if (tmpl == NULL || pycc_ext_exc_layout_of == NULL) {
-        return NULL;
-    }
-    capsule = PyDict_GetItemWithError(pycc_ext_exc_layout_of, tmpl);
-    if (capsule == NULL) {
-        PyErr_Clear();
-        return NULL;
-    }
-    return (const PyccExtExcLayout *)PyCapsule_GetPointer(capsule, PYCC_EXC_LAYOUT_CAPSULE);
+    PyTypeObject *tmpl = pycc_ext_exc_template_for(tp);
+    return tmpl == NULL ? NULL : pycc_ext_exc_layout_of(tmpl);
 }
 
 /* The instance of the layout of `self`'s class, every attribute unassigned,
@@ -127,6 +193,11 @@ static int pycc_ext_exc_traverse(PyObject *self, visitproc visit, void *arg)
         && pycc_rt_ext_instance_refcount(inst) == 1) {
         Py_VISIT(self);
     }
+    /* The object's (heap) type: `subtype_traverse` leaves it to the first
+     * base traverse other than its own, this one, and the static base's
+     * does not visit it -- unvisited, a class dropped with its last object
+     * would outlive the collection that frees the object. */
+    Py_VISIT(Py_TYPE(self));
     return base_traverse == NULL ? 0 : base_traverse(self, visit, arg);
 }
 
@@ -160,7 +231,6 @@ static PyObject *pycc_ext_exc_reduce(PyObject *self, PyTypeObject *defining, PyO
     PyObject *state;
     PyObject *merged;
     PyObject *result;
-    PyObject *capsule;
     const PyccExtExcLayout *layout;
     PyGetSetDef *def;
     Py_ssize_t n;
@@ -184,14 +254,8 @@ static PyObject *pycc_ext_exc_reduce(PyObject *self, PyTypeObject *defining, PyO
     if (state != Py_None && !PyDict_Check(state)) {
         return reduced;
     }
-    capsule = pycc_ext_exc_layout_of == NULL
-                  ? NULL
-                  : PyDict_GetItemWithError(pycc_ext_exc_layout_of, (PyObject *)defining);
-    layout = capsule == NULL ? NULL
-                             : (const PyccExtExcLayout *)PyCapsule_GetPointer(
-                                   capsule, PYCC_EXC_LAYOUT_CAPSULE);
+    layout = pycc_ext_exc_layout_of(defining);
     if (layout == NULL) {
-        PyErr_Clear();
         return reduced;
     }
     merged = state == Py_None ? PyDict_New() : PyDict_Copy(state);
@@ -246,44 +310,21 @@ static PyMethodDef pycc_ext_exc_methods[] = {
     {NULL, NULL, 0, NULL},
 };
 
-/* The template of layout `layout` over exception base `base`, made once. A
- * new reference, or NULL with an exception set. */
+/* A template of layout `layout` over exception base `base`, made for one
+ * class statement: no table holds it (or its base), so it goes with the
+ * last class over it. A new reference, or NULL with an exception set. */
 static PyObject *pycc_ext_exc_template(const PyccExtExcLayout *layout, PyObject *base)
 {
-    PyObject *key;
     PyObject *tmpl;
-    PyObject *payload;
-    PyObject *capsule;
     PyGetSetDef *getsets;
     PyType_Slot *slots;
     PyType_Spec *spec;
     Py_ssize_t count = 0;
     Py_ssize_t kept = 0;
     Py_ssize_t i;
-    if (pycc_ext_exc_templates == NULL) {
-        pycc_ext_exc_templates = PyDict_New();
-        pycc_ext_exc_layout_of = PyDict_New();
-        pycc_ext_exc_payload_of = PyDict_New();
-        pycc_ext_exc_template_of = PyDict_New();
-        if (pycc_ext_exc_templates == NULL || pycc_ext_exc_layout_of == NULL
-            || pycc_ext_exc_payload_of == NULL || pycc_ext_exc_template_of == NULL) {
-            return NULL;
-        }
-    }
-    /* Keyed by the layout entry itself: the modules of a package built
-     * whole share this table, and two of them may name a class alike. */
-    key = Py_BuildValue("(NO)", PyLong_FromVoidPtr((void *)layout), base);
-    if (key == NULL) {
-        return NULL;
-    }
-    tmpl = PyDict_GetItemWithError(pycc_ext_exc_templates, key);
-    if (tmpl != NULL || PyErr_Occurred()) {
-        Py_DECREF(key);
-        return Py_XNewRef(tmpl);
-    }
     /* The descriptors but the layout's `__dict__` snapshot, which would
      * hide the exception's own `__dict__`. Never released: the type
-     * points at them for the rest of the process. */
+     * points at them for as long as it lives. */
     while (layout->getsets != NULL && layout->getsets[count].name != NULL) {
         count++;
     }
@@ -291,7 +332,6 @@ static PyObject *pycc_ext_exc_template(const PyccExtExcLayout *layout, PyObject 
     slots = (PyType_Slot *)PyMem_Calloc(7, sizeof(PyType_Slot));
     spec = (PyType_Spec *)PyMem_Calloc(1, sizeof(PyType_Spec));
     if (getsets == NULL || slots == NULL || spec == NULL) {
-        Py_DECREF(key);
         PyErr_NoMemory();
         return NULL;
     }
@@ -314,31 +354,20 @@ static PyObject *pycc_ext_exc_template(const PyccExtExcLayout *layout, PyObject 
     /* Over a base whose objects already carry an instance pointer (a
      * layout class's), the template adds nothing: the instance it gives
      * them is of its own, larger layout, in the same word. */
-    payload = pycc_ext_exc_template_for((PyTypeObject *)base);
-    if (payload != NULL) {
-        payload = PyDict_GetItemWithError(pycc_ext_exc_payload_of, payload);
-    }
     spec->name = "pycc.exception_layout";
-    spec->basicsize = payload != NULL ? 0 : -(int)sizeof(void *);
+    spec->basicsize =
+        pycc_ext_exc_template_for((PyTypeObject *)base) != NULL ? 0 : -(int)sizeof(void *);
     spec->itemsize = 0;
     spec->flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC;
     spec->slots = slots;
     tmpl = PyType_FromMetaclass(NULL, NULL, spec, base);
     if (tmpl == NULL) {
-        Py_DECREF(key);
         return NULL;
     }
-    capsule = PyCapsule_New((void *)layout, PYCC_EXC_LAYOUT_CAPSULE, NULL);
-    if (capsule == NULL || PyDict_SetItem(pycc_ext_exc_layout_of, tmpl, capsule) < 0
-        || PyDict_SetItem(pycc_ext_exc_payload_of, tmpl, payload != NULL ? payload : tmpl) < 0
-        || PyDict_SetItem(pycc_ext_exc_templates, key, tmpl) < 0) {
-        Py_XDECREF(capsule);
-        Py_DECREF(key);
+    if (pycc_ext_exc_remember((PyTypeObject *)tmpl, layout) < 0) {
         Py_DECREF(tmpl);
         return NULL;
     }
-    Py_DECREF(capsule);
-    Py_DECREF(key);
     return tmpl;
 }
 

@@ -50,6 +50,8 @@ one, two = common.Clash(1), errors.Clash("b", "c")
 print(one.a, two.b, two.c, type(one) is not type(two), hasattr(one, "b"), hasattr(two, "a"))
 o = errors.Overrated(3)
 print(o.show(), o.rate, common.Rated(2).show(), mro(errors.Overrated))
+du = errors.Duo(4)
+print(du.show(), du.left, isinstance(du, ValueError), mro(errors.Duo))
 p = PySub("z")
 print(str(p), mro(PySub))
 try:

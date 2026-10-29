@@ -50,7 +50,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   CPython's. Where a layout cannot be proven to show what CPython would, the class stays
   CPython's alone: a class keyword (`metaclass=`), a base of unknown body, or a subclass
   (in the module or in another module of the package) binding a layout attribute at class
-  level.
+  level or listing several bases.
 
 ### Changed
 - `C.__new__(C)` of a published compiled class makes an object whose attributes are all

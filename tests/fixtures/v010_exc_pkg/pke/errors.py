@@ -1,5 +1,5 @@
 """Exception classes deriving from `common`'s."""
-from .common import Owned, PkgError, Rated
+from .common import Lefty, Owned, PkgError, Rated
 
 
 class KeyMissing(PkgError):
@@ -28,6 +28,10 @@ class Overrated(Rated):
     """`rate` is a class-level property here."""
 
     rate = property(lambda self: 99, lambda self, value: None)
+
+
+class Duo(Lefty, ValueError):
+    """Several bases, one another module's would-be layout class."""
 
 
 class Clash(Exception):

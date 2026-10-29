@@ -2,6 +2,8 @@
 as CPython code would; the output must match CPython running the source."""
 # The pickled data is this test's own round trip.
 import copy
+import gc
+import weakref
 import pickle
 import sys
 import traceback
@@ -121,4 +123,25 @@ me = m.Metered(5)
 print(me.show(), me.code, me.tagged, type(m.Metered).__name__, mro(m.Metered))
 sh = m.Shown(3)
 print(sh.show(), sh.code, sh.stored, m.Plated(4).show(), m.Plated(4).code, mro(m.Shown))
+bo = m.Both(1, "x")
+print(bo.show(), bo.a, bo.b, isinstance(bo, m.Right), mro(m.Both))
+ko = m.KeyOS(7)
+print(ko.show(), ko.n, isinstance(ko, OSError), mro(m.KeyOS))
+
+
+def make_subclass():
+    """A Python subclass made, used natively and dropped: it is freed."""
+
+    class Gone(m.Deeper):
+        pass
+
+    g = Gone(1, "g", 2)
+    g.describe()
+    m.run(15)
+    return weakref.ref(Gone)
+
+
+gone = make_subclass()
+gc.collect()
+print("subclass freed", gone() is None)
 print(sys.getrefcount(e) > 0)
