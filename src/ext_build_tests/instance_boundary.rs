@@ -19,7 +19,7 @@ fn echo_export(receiver: ExtReceiver) -> ExtExport {
         method: None,
         returns_buffer_slice: false,
         receiver,
-        param_names: crate::ext_build::test_param_names(&vec![Ty::Int, conf()]),
+        param_names: crate::ext_build::test_param_names(&[Ty::Int, conf()]),
         params: vec![Ty::Int, conf()],
         param_writable: vec![false; 2],
         return_ty: conf(),

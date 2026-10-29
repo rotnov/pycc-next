@@ -128,7 +128,7 @@ fn an_exported_method_is_never_a_flat_module_level_entry() {
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
-                param_names: crate::ext_build::test_param_names(&vec![Ty::Int]),
+                param_names: crate::ext_build::test_param_names(&[Ty::Int]),
                 params: vec![Ty::Int],
                 param_writable: vec![false; 1],
                 return_ty: Ty::Int,

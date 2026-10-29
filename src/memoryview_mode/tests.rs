@@ -30,7 +30,7 @@ fn export(name: &str, return_ty: Ty) -> crate::ext_build::ExtExport {
         method: None,
         returns_buffer_slice: false,
         receiver: crate::ext_build::ExtReceiver::None,
-        param_names: crate::ext_build::test_param_names(&Vec::new()),
+        param_names: crate::ext_build::test_param_names(&[]),
         params: Vec::new(),
         param_writable: Vec::new(),
         return_ty,

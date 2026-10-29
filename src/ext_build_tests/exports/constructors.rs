@@ -240,7 +240,7 @@ fn an_implicit_object_init_is_still_resolved_when_it_is_the_only_one() {
             defaults: Vec::new(),
             class: "Grid".to_string(),
             name: "Grid.__init__".to_string(),
-            param_names: crate::ext_build::test_param_names(&Vec::new()),
+            param_names: crate::ext_build::test_param_names(&[]),
             params: Vec::new(),
             param_writable: Vec::new(),
             slot_names: vec!["w".to_string(), "h".to_string()],

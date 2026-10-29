@@ -115,7 +115,7 @@ pub(crate) enum ExtGetset {
         /// from. It is never in the export set ([`super::collect_exports_with_hooks`]
         /// excludes a getter as representation), so the wrapper is emitted
         /// here and nowhere else.
-        getter: ExtExport,
+        getter: Box<ExtExport>,
         /// What a host store or `del` runs (#1458).
         setter: PropertySetter,
     },
@@ -258,7 +258,7 @@ pub(crate) fn collect_getsets(
                 };
                 out.push(ExtGetset::Property {
                     name: prop.name.clone(),
-                    getter: export,
+                    getter: Box::new(export),
                     setter,
                 });
             }

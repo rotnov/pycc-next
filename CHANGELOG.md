@@ -11,12 +11,23 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   runs, published as medians with min-max, the runner's CPU and the run count (job
   summary, `bench-<os>` artifact). Published speed numbers cite a run of it (v0.10
   accept 4).
+- The differential fuzzer's `call_errors` block: calls with missing, extra, unknown,
+  misspelled and repeated arguments, and missing attributes of classes and instances.
 
 ### Changed
 - `bench/run.py` reports the median and min-max of interleaved fresh-process runs
   (default 11) instead of the best of 7; `bench/package_check.py --time` times each run
   in a fresh process, alternating CPython and the compiled tree; all three timing
   scripts write `--json`.
+
+### Fixed
+- A published compiled function, method or constructor (`--ext`, and a `--non-strict`
+  native build's `__main__`) called with the wrong arguments raises CPython 3.13's exact
+  `TypeError`: `missing 1 required positional argument: 'x'`, `takes from 2 to 3
+  positional arguments but 4 were given`, and an unknown keyword's `Did you mean 'by'?`
+  (also in compiled code's own keyword binding) -- issue #10.
+- An f-string `=` field (`f"{x=}"`) in a `--non-strict` statement running in CPython
+  printed the rewritten global read instead of `x=`.
 
 ## [0.9.0] - 2026-10-21
 

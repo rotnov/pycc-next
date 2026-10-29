@@ -190,7 +190,7 @@ except TypeError as exc:
     message = str(exc)
 else:
     raise AssertionError('a wrong arity should be refused')
-assert 'Grid.scale() takes exactly 1 argument' in message, message
+assert message == 'Grid.scale() takes 1 positional argument but 2 were given', message
 assert '.static' not in message, message
 assert '0m' not in message, message
 ",

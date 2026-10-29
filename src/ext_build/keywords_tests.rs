@@ -230,7 +230,7 @@ fn a_keyword_enabled_method_wrapper_binds_before_its_arity_check() {
     let binding = format!(
         "    PyObject *kw_slots[2];\n    \
          if (kwnames != NULL && PyTuple_Size(kwnames) != 0) {{\n        \
-         if (pycc_ext_kw_bind_fastcall(\"P.add\", pycc_ext_kwnames_{prefix}, 2, 1, kw_slots, \
+         if (pycc_ext_kw_bind_fastcall(\"P.add\", \"self\", pycc_ext_kwnames_{prefix}, 2, 1, kw_slots, \
          args, nargs, kwnames) < 0) {{\n            return NULL;\n        }}\n        \
          if (kw_slots[1] == NULL) {{\n            \
          kw_slots[1] = pycc_ext_default_{prefix}_1();\n            \
@@ -262,7 +262,7 @@ fn a_keyword_enabled_method_wrapper_binds_before_its_arity_check() {
         inc.contains(&format!(
             "    PyObject *kw_slots[1];\n    \
              if (kwnames != NULL && PyTuple_Size(kwnames) != 0) {{\n        \
-             if (pycc_ext_kw_bind_fastcall(\"P.size\", pycc_ext_kwnames_wrap_{size}, 0, 0, \
+             if (pycc_ext_kw_bind_fastcall(\"P.size\", \"self\", pycc_ext_kwnames_wrap_{size}, 0, 0, \
              kw_slots, args, nargs, kwnames) < 0) {{\n"
         )),
         "{inc}"
@@ -313,7 +313,7 @@ fn a_keyword_enabled_constructor_reads_the_bound_array_once_a_keyword_was_given(
         inc.contains(
             "    PyObject *kw_slots[2];\n    int kw_bound = 0;\n    \
              if (kwds != NULL && PyDict_Size(kwds) != 0) {\n        \
-             if (pycc_ext_kw_bind_dict(\"P.__init__\", pycc_ext_kwnames_init_P, 2, 1, \
+             if (pycc_ext_kw_bind_dict(\"P.__init__\", \"self\", pycc_ext_kwnames_init_P, 2, 1, \
              kw_slots, args, kwds) < 0) {\n            return -1;\n        }\n"
         ),
         "{inc}"
