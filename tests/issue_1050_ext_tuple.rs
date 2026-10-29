@@ -182,7 +182,7 @@ fn the_tuple_parameter_refuses_a_non_tuple_and_every_wrong_arity() {
          except TypeError as e:\n        assert '() argument 1' in str(e), str(e)\n    \
          else:\n        raise AssertionError(what + ' must raise TypeError')\n\
          try:\n    m.f()\n\
-         except TypeError as e:\n    assert 'takes exactly 1 argument' in str(e), str(e)\n\
+         except TypeError as e:\n    assert str(e) == \"f() missing 1 required positional argument: 't'\", str(e)\n\
          else:\n    raise AssertionError('arity must be checked')\n\
          assert m.f((4, 5)) == 4\n\
          print('ok')\n",
@@ -198,7 +198,7 @@ fn the_tuple_parameter_refuses_a_non_tuple_and_every_wrong_arity() {
 /// numbering. So `element 2` names `t[1]`. The wrong-arity message is the
 /// other half -- it counts Python *arguments*, never the flattened C slots
 /// the thunk actually takes, so a one-argument function whose argument is a
-/// five-element tuple still says "takes exactly 1 argument".
+/// five-element tuple still says "takes 1 positional argument".
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn a_refused_element_names_its_argument_and_its_one_based_position() {
@@ -228,7 +228,7 @@ fn a_refused_element_names_its_argument_and_its_one_based_position() {
          assert 'element' not in scalar, scalar\n\
          assert scalar.startswith('place() argument 1:'), scalar\n\
          arity = message(lambda: m.wide((1, 2, 3, 4, 5), 6))\n\
-         assert 'takes exactly 1 argument' in arity, arity\n\
+         assert arity == 'wide() takes 1 positional argument but 2 were given', arity\n\
          length = message(lambda: m.wide((1, 2)))\n\
          assert length == 'wide() argument 1: expected a tuple of length 5, got 2', length\n\
          print('ok')\n",

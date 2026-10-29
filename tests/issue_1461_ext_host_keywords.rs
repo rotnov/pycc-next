@@ -298,7 +298,7 @@ attempt(lambda: m.rep(2))
 /// parameter binds through its published signature
 /// (`pycc_ast::ext_signatures`), so CPython words those errors; the
 /// argument types are still checked at the boundary.
-const EXT_ONLY_OUT: &str = "TypeError P.copy() got an unexpected keyword argument 'deepcopy_value'\n\
+const EXT_ONLY_OUT: &str = "TypeError P.copy() got an unexpected keyword argument 'deepcopy_value'. Did you mean 'deepcopy_values'?\n\
     TypeError P.add() got multiple values for argument 'self'\n\
     3\n\
     -1\n\
@@ -307,10 +307,10 @@ const EXT_ONLY_OUT: &str = "TypeError P.copy() got an unexpected keyword argumen
     ok114\n\
     TypeError view_n() argument 2: 'str' object cannot be interpreted as an integer\n\
     17\n\
-    TypeError P.__init__() takes from 1 to 2 arguments (0 given)\n\
-    TypeError P.__init__() takes from 1 to 2 arguments (3 given)\n\
+    TypeError P.__init__() missing 1 required positional argument: 'n'\n\
+    TypeError P.__init__() takes from 2 to 3 positional arguments but 4 were given\n\
     TypeError P.add() takes from 2 to 5 positional arguments but 6 were given\n\
-    TypeError rep() takes exactly 2 arguments (1 given)\n";
+    TypeError rep() missing 1 required positional argument: 'b'\n";
 
 /// What CPython answers for [`EXT_ONLY_DRIVER`], so the divergence is
 /// stated, not inferred.

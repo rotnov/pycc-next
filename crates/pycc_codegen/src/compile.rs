@@ -103,6 +103,13 @@ fn compile_module(
         .set(float_fast::target_libm_is_glibc(target_triple));
     *rt.rc_class_kinds.borrow_mut() = heap_rc::rc_class_kinds(&mir.class_defs);
     *rt.exception_classes.borrow_mut() = heap_rc::exception_classes(&mir.class_defs);
+    *rt.class_records.borrow_mut() = crate::class_record::emit_records(
+        &context,
+        &module,
+        &mir.class_defs,
+        &rt.rc_class_kinds.borrow(),
+        &rt.exception_classes.borrow(),
+    );
     *rt.assigned_slots.borrow_mut() = assigned_slots::AssignedSlots::analyze(mir, options.ext);
     *rt.nothrow.borrow_mut() = nothrow::nothrow_functions(mir);
     // A dispatcher's class test never raises.

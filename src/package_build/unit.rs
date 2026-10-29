@@ -9,10 +9,10 @@ use super::PackageModule;
 pub(crate) const MEMBERS_HEADER_NAME: &str = "pycc_pkg_members.h";
 
 /// The names a member's C unit shares with its LLVM object -- what the
-/// object defines that the unit uses (`fnptr_`/thunk names of the generated
-/// companion `inc`, the module body, its frame records) and what the unit
-/// defines for it (`pycc_codegen::MODULE_UNIT_ENTRIES`) -- each defined as
-/// its prefixed name, and the member's definition entry point.
+/// object defines that the unit uses (`fnptr_`/thunk names and class records
+/// of the generated companion `inc`, the module body, its frame records) and
+/// what the unit defines for it (`pycc_codegen::MODULE_UNIT_ENTRIES`) -- each
+/// defined as its prefixed name, and the member's definition entry point.
 pub(crate) fn member_header(prefix: &str, inc: &str) -> String {
     let mut names: Vec<String> = pycc_codegen::MODULE_UNIT_ENTRIES
         .iter()
@@ -30,7 +30,9 @@ pub(crate) fn member_header(prefix: &str, inc: &str) -> String {
     );
     let mut generated: Vec<String> = Vec::new();
     for word in inc.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
-        if (word.starts_with("fnptr_") || word.starts_with(pycc_codegen::EXT_THUNK_PREFIX))
+        if (word.starts_with("fnptr_")
+            || word.starts_with(pycc_codegen::EXT_THUNK_PREFIX)
+            || word.starts_with(pycc_codegen::CLASS_RECORD_PREFIX))
             && !generated.iter().any(|seen| seen == word)
         {
             generated.push(word.to_string());

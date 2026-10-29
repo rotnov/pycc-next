@@ -388,3 +388,61 @@ fn key_error_for_a_non_str_key_in_an_embedding_program() {
     );
     assert_eq!(got, expected);
 }
+
+/// An unknown keyword that compiled code binds itself gets CPython 3.13's
+/// "Did you mean" when a parameter name is close enough (issue #10).
+#[test]
+fn an_unexpected_keyword_suggests_a_close_parameter() {
+    assert_matches_cpython("fuzz_unexpected_keyword_suggestion");
+}
+
+/// An f-string `=` field over a module global that a `--non-strict`
+/// statement running in CPython reads from the namespace dictionary prints
+/// the field's source text, not the rewritten read.
+#[test]
+fn an_fstring_debug_field_keeps_its_text_in_fallback_code() {
+    let source = fixture("fuzz_fstring_debug_fallback_global.py");
+    let expected = support::outcome(&Command::new(python()).arg(&source).output().expect("runs"));
+    let got = support::run_native("fuzz_fstring_debug", &source, &["--release", "--non-strict"]);
+    assert_eq!(got, expected);
+}
+
+/// A `*args` constructor called from Python (`--ext --non-strict`) offers
+/// its receiver's own spelling, not `self`, as the "Did you mean" for an
+/// unknown keyword (`pycc_ext_bind_star`).
+#[test]
+fn a_star_constructor_suggests_its_own_receiver_spelling() {
+    let source = fixture("fuzz_star_init_receiver_suggestion.py");
+    let dir = ScratchDir::new("fuzz_star_receiver").expect("scratch");
+    let compiled = dir.join("compiled");
+    std::fs::create_dir_all(&compiled).expect("mkdir");
+    let build = pycc()
+        .arg("build")
+        .arg(&source)
+        .arg("-o")
+        .arg(compiled.join("star"))
+        .args(["--ext", "--non-strict"])
+        .output()
+        .expect("pycc spawns");
+    assert!(build.status.success(), "{}", rendered(&build));
+    let plain = dir.join("plain");
+    std::fs::create_dir_all(&plain).expect("mkdir");
+    std::fs::copy(&source, plain.join("star.py")).expect("copy");
+    let driver = "import star\n\
+                  for kw in ({'alpha': 1, 'ths': 2}, {'alpha': 1, 'slf': 2}, {'alpa': 1}):\n    \
+                  try:\n        star.C(**kw)\n    \
+                  except TypeError as e:\n        print('TypeError', e)\n";
+    let run = |dir: &std::path::Path| {
+        support::outcome(
+            &Command::new(python())
+                .args(["-B", "-c", driver])
+                .current_dir(dir)
+                .output()
+                .expect("python runs"),
+        )
+    };
+    let expected = run(&plain);
+    assert_eq!(expected.status, Some(0), "{expected:?}");
+    assert!(expected.stdout.contains("Did you mean 'this'?"), "{expected:?}");
+    assert_eq!(run(&compiled), expected);
+}

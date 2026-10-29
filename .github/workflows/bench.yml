@@ -2,7 +2,7 @@ name: bench
 # The published speed numbers (ROADMAP v0.10 accept 4): every speed number in
 # README, CHANGELOG, release notes and blog posts cites a run of this workflow.
 # Wall time on a shared GitHub-hosted runner is noisy, so every measurement is
-# repeated in fresh processes, the sides (CPython, pycc-next, Rust) interleaved
+# repeated in fresh processes, the sides (CPython, pycc-next, Cython, mypyc, Rust) interleaved
 # round by round, and the median is published with its spread (min-max, and the
 # quartiles in the JSON) and the runner's CPU model. This is not a gate: the
 # regression gates are the instruction-count bounds in ci.yml.
@@ -39,12 +39,13 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.13" }
       # numpy for bench/run.py's numpy programs; pydantic-core and pydantic's
-      # other runtime dependencies for the pydantic workload. Both pinned by
-      # version and wheel hash.
+      # other runtime dependencies for the pydantic workload; Cython and mypyc, the
+      # competitors (bench/competitors.py). All pinned by version and wheel hash.
       - name: Install pinned Python dependencies
         run: |
           python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt
-          python3 -m pip install --only-binary=:all: --require-hashes --no-deps -r .github/bench-requirements.txt
+          python3 -m pip install --only-binary=:all: --require-hashes --no-deps \
+            -r .github/bench-requirements.txt -r .github/competitor-requirements.txt
       - name: Install LLVM 22
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -56,19 +57,23 @@ jobs:
         run: |
           mkdir -p bench-out
           { lscpu; echo; nproc; uptime; } | tee bench-out/runner.txt
-      # Programs: CPython vs pycc-next vs the Rust twins, outputs checked.
+      # Programs: CPython vs pycc-next vs Cython vs mypyc vs the Rust twins,
+      # outputs checked.
       - name: bench/run.py
         run: python3 bench/run.py --runs "$RUNS" --json bench-out/run.json
       # Real packages' hot paths, CPython vs the compiled package (their own
-      # test suites pass against the compiled modules first).
+      # test suites pass against the compiled modules first), and vs the
+      # Cython and mypyc builds that compile and pass the suites.
       - name: bench/package_check.py --time
         if: ${{ !cancelled() }}
         run: >-
           python3 bench/package_check.py diff-match-patch tomli pypng mistune pystache
-          --time --runs "$RUNS" --json bench-out/packages.json
+          --time --competitors --runs "$RUNS" --json bench-out/packages.json
       - name: bench/pydantic_check.py --time
         if: ${{ !cancelled() }}
-        run: python3 bench/pydantic_check.py --time --runs "$PYDANTIC_RUNS" --json bench-out/pydantic.json
+        run: >-
+          python3 bench/pydantic_check.py --time --competitors --runs "$PYDANTIC_RUNS"
+          --json bench-out/pydantic.json
       - name: Publish
         if: ${{ !cancelled() }}
         run: |

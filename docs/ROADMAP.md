@@ -1035,6 +1035,18 @@ Accept:
    type-attribute `AttributeError`s match CPython 3.13 word for word), and the differential
    fuzzer generates calls with missing/extra/keyword arguments and missing attributes on
    classes and instances, comparing exception messages; 0 findings in a 30-minute run.
+   **Met 2026-10-29:** a published function, method or constructor (`--ext`, a
+   `--non-strict` native build's `__main__`) raises CPython's `missing ... argument`,
+   `takes N positional arguments but M were given` and `Did you mean 'x'?` texts, and
+   compiled classes and instances CPython's `AttributeError`s
+   (`tests/issue_10_error_texts.rs`). The fuzzer's `call_errors` block calls with
+   missing, extra, unknown, misspelled and repeated arguments and reads missing
+   attributes; the nightly-fuzz workflow dispatched on the change (run 40881731071,
+   e34d5cf) compared 2996 programs in 1801 s (376 with the block) with 0 findings, after
+   the block's first findings were fixed with fixtures in `tests/fuzz_regressions.rs`.
+   CI run 40881711412 green on all four jobs at e34d5cf. DEVIATIONS lists what stays
+   different: an unbound method called with no or a foreign receiver, an instance field
+   read through its class.
 2. **Native `str`-keyed dicts:** in `--non-strict`, dicts with `str` keys built or received
    by compiled code are native when their value types infer, with a guarded CPython-dict
    fallback when they escape or arrive from CPython code; iteration order, views, mutation

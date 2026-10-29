@@ -194,14 +194,25 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
     // the three-argument signature byte for byte. The flag side of the same
     // predicate is `keywords::method_flags`.
     let prologue = export.keyword_names.as_deref().map(|names| {
-        keywords::fastcall_prologue(&default_prefix, source_name, names, &export.defaults)
+        keywords::fastcall_prologue(
+            &default_prefix,
+            source_name,
+            export.keyword_receiver.as_deref(),
+            names,
+            &export.defaults,
+        )
     });
+    // #10: the parameter names the arity message reads, which a
+    // keyword-enabled export's binder reads too.
     let kwnames_param = match &prologue {
         Some(prologue) => {
             out.push_str(&prologue.before);
             ", PyObject *kwnames"
         }
-        None => "",
+        None => {
+            out.push_str(&keywords::names_table(&default_prefix, &export.param_names));
+            ""
+        }
     };
     out.push_str(&format!(
         "static PyObject *pycc_ext_wrap_{symbol}(PyObject *self, PyObject *const *args, \
@@ -297,25 +308,18 @@ pub(crate) fn wrapper_for(export: &ExtExport) -> String {
     if let Some(prologue) = &prologue {
         out.push_str(&prologue.body);
     }
-    if export.defaults.is_empty() {
-        out.push_str(&format!(
-            "    if (nargs != {arity}) {{\n        PyErr_Format(PyExc_TypeError, \
-             \"{source_name}() takes exactly {arity} argument{plural} (%zd given)\", nargs);\n        \
-             return NULL;\n    }}\n",
-            plural = if arity == 1 { "" } else { "s" },
-        ));
-    } else {
-        out.push_str(&defaults::range_arity_check(
-            source_name,
-            &default_prefix,
-            &export.defaults,
-            &defaults::ArgSource {
-                count: "nargs",
-                item: &|index| format!("args[{index}]"),
-                fail: "        return NULL;\n",
-            },
-        ));
-    }
+    out.push_str(&defaults::arity_check(
+        source_name,
+        &default_prefix,
+        arity,
+        usize::from(export.receiver != ExtReceiver::None),
+        &export.defaults,
+        &defaults::ArgSource {
+            count: "nargs",
+            item: &|index| format!("args[{index}]"),
+            fail: "        return NULL;\n",
+        },
+    ));
     out.push_str(&unpack_args(
         &slots,
         source_name,

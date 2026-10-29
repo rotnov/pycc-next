@@ -124,7 +124,7 @@ fn an_unparsable_or_silent_source_enables_nothing() {
     // own does; no compiled export does.
     let exports_only = inc.replace("METH_VARARGS | METH_KEYWORDS | METH_CLASS", "");
     assert!(!exports_only.contains("METH_KEYWORDS"), "{inc}");
-    assert!(!inc.contains("kwnames"), "{inc}");
+    assert!(!inc.contains("PyObject *kwnames"), "{inc}");
     assert!(!inc.contains("kw_slots"), "{inc}");
 }
 
@@ -230,7 +230,7 @@ fn a_keyword_enabled_method_wrapper_binds_before_its_arity_check() {
     let binding = format!(
         "    PyObject *kw_slots[2];\n    \
          if (kwnames != NULL && PyTuple_Size(kwnames) != 0) {{\n        \
-         if (pycc_ext_kw_bind_fastcall(\"P.add\", pycc_ext_kwnames_{prefix}, 2, 1, kw_slots, \
+         if (pycc_ext_kw_bind_fastcall(\"P.add\", \"self\", pycc_ext_kwnames_{prefix}, 2, 1, kw_slots, \
          args, nargs, kwnames) < 0) {{\n            return NULL;\n        }}\n        \
          if (kw_slots[1] == NULL) {{\n            \
          kw_slots[1] = pycc_ext_default_{prefix}_1();\n            \
@@ -262,7 +262,7 @@ fn a_keyword_enabled_method_wrapper_binds_before_its_arity_check() {
         inc.contains(&format!(
             "    PyObject *kw_slots[1];\n    \
              if (kwnames != NULL && PyTuple_Size(kwnames) != 0) {{\n        \
-             if (pycc_ext_kw_bind_fastcall(\"P.size\", pycc_ext_kwnames_wrap_{size}, 0, 0, \
+             if (pycc_ext_kw_bind_fastcall(\"P.size\", \"self\", pycc_ext_kwnames_wrap_{size}, 0, 0, \
              kw_slots, args, nargs, kwnames) < 0) {{\n"
         )),
         "{inc}"
@@ -313,7 +313,7 @@ fn a_keyword_enabled_constructor_reads_the_bound_array_once_a_keyword_was_given(
         inc.contains(
             "    PyObject *kw_slots[2];\n    int kw_bound = 0;\n    \
              if (kwds != NULL && PyDict_Size(kwds) != 0) {\n        \
-             if (pycc_ext_kw_bind_dict(\"P.__init__\", pycc_ext_kwnames_init_P, 2, 1, \
+             if (pycc_ext_kw_bind_dict(\"P.__init__\", \"self\", pycc_ext_kwnames_init_P, 2, 1, \
              kw_slots, args, kwds) < 0) {\n            return -1;\n        }\n"
         ),
         "{inc}"
@@ -339,9 +339,10 @@ fn a_keyword_enabled_constructor_reads_the_bound_array_once_a_keyword_was_given(
     );
     assert!(
         inc.contains(
-            "    if ((kw_bound ? 2 : PyTuple_Size(args)) != 2) {\n        \
-             PyErr_Format(PyExc_TypeError, \"Exact.__init__() takes exactly 2 arguments \
-             (%zd given)\", (kw_bound ? 2 : PyTuple_Size(args)));\n        return -1;\n    }\n"
+            "    if ((kw_bound ? 2 : PyTuple_Size(args)) < 2 || \
+             (kw_bound ? 2 : PyTuple_Size(args)) > 2) {\n        \
+             pycc_ext_arity_error(\"Exact.__init__\", pycc_ext_kwnames_init_Exact, 2, 2, 1, \
+             (kw_bound ? 2 : PyTuple_Size(args)));\n        return -1;\n    }\n"
         ),
         "{inc}"
     );
@@ -359,7 +360,7 @@ fn a_keyword_enabled_constructor_reads_the_bound_array_once_a_keyword_was_given(
 #[test]
 fn the_tp_init_prologue_fails_with_minus_one() {
     let defaults = [None, Some(HirExpr::IntLiteral(4))];
-    let prologue = tp_init_prologue("init_C", "C.__init__", &strings(&["a", "b"]), &defaults);
+    let prologue = tp_init_prologue("init_C", "C.__init__", Some("self"), &strings(&["a", "b"]), &defaults);
     assert!(
         prologue.body.contains(
             "            if (kw_slots[1] == NULL) {\n                return -1;\n            }\n        }\n        \
