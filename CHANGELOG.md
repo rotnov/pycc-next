@@ -11,6 +11,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   runs, published as medians with min-max, the runner's CPU and the run count (job
   summary, `bench-<os>` artifact). Published speed numbers cite a run of it (v0.10
   accept 4).
+- Cython 3.3.0 and mypyc (mypy 2.3.1) as benchmark competitors (`bench/competitors.py`,
+  pinned in `.github/competitor-requirements.txt`): `bench/run.py` and
+  `package_check.py`/`pydantic_check.py --time --competitors` build the same unmodified
+  sources with each and time what builds and passes; the published result has Cython and
+  mypyc columns, pycc vs each, the Cython mode, and every build that failed with why.
+  CPython stays the correctness oracle.
 
 ### Changed
 - `bench/run.py` reports the median and min-max of interleaved fresh-process runs
