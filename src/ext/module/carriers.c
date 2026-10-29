@@ -330,6 +330,62 @@ static void pycc_ext_refuse_pickle(PyObject *self, const char *detail, PyObject 
     Py_DECREF(type_name);
 }
 
+/* The value of compiled attribute `key` of `self` as stored, read through
+ * the compiled classes' own data descriptor (not `self`'s
+ * `__getattribute__`, which a Python subclass may override, nor a
+ * subclass's class attribute of the same name), as `object.__getstate__`
+ * reads a `__dict__` entry directly. NULL with no exception set: no compiled
+ * class of `self`'s MRO has a descriptor for it (Python code cannot see the
+ * attribute); NULL with `AttributeError`: it is unassigned. */
+static PyObject *pycc_ext_compiled_field(PyObject *self, PyObject *key)
+{
+    PyObject *mro = PyObject_GetAttrString((PyObject *)Py_TYPE(self), "__mro__");
+    Py_ssize_t n;
+    Py_ssize_t i;
+    if (mro == NULL) {
+        return NULL;
+    }
+    n = PyTuple_Check(mro) ? PyTuple_Size(mro) : 0;
+    for (i = 0; i < n; i++) {
+        PyObject *c = PyTuple_GetItem(mro, i);
+        PyObject *dict;
+        PyObject *descr;
+        descrgetfunc get;
+        if (!pycc_ext_is_compiled_class(c)) {
+            continue;
+        }
+        dict = PyObject_GetAttrString(c, "__dict__");
+        if (dict == NULL) {
+            Py_DECREF(mro);
+            return NULL;
+        }
+        descr = PyObject_GetItem(dict, key);
+        Py_DECREF(dict);
+        if (descr == NULL) {
+            if (!PyErr_ExceptionMatches(PyExc_KeyError)) {
+                Py_DECREF(mro);
+                return NULL;
+            }
+            PyErr_Clear();
+            continue;
+        }
+        get = (descrgetfunc)PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_get);
+        if (get == NULL || PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_set) == NULL) {
+            /* A class-level default: the descriptor sits further up. */
+            Py_DECREF(descr);
+            continue;
+        }
+        {
+            PyObject *value = get(descr, self, (PyObject *)Py_TYPE(self));
+            Py_DECREF(descr);
+            Py_DECREF(mro);
+            return value;
+        }
+    }
+    Py_DECREF(mro);
+    return NULL;
+}
+
 static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
 {
     void *inst = ((PyccExtInstance *)self)->inst;
@@ -416,14 +472,12 @@ static PyObject *pycc_ext_instance_getstate_in(PyccExtModule *m, PyObject *self)
         }
         /* A slot Python code cannot see (no descriptor on the class: a
          * container of native values, say) cannot be pickled. */
-        if (PyObject_HasAttrWithError((PyObject *)Py_TYPE(self), key) != 1) {
-            if (!PyErr_Occurred()) {
-                pycc_ext_refuse_pickle(self, "", key);
-            }
+        value = pycc_ext_compiled_field(self, key);
+        if (value == NULL && !PyErr_Occurred()) {
+            pycc_ext_refuse_pickle(self, "", key);
             Py_DECREF(key);
             goto done;
         }
-        value = PyObject_GetAttr(self, key);
         if (value == NULL) {
             if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
                 Py_DECREF(key);

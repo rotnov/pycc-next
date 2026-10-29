@@ -116,6 +116,21 @@ ar = Args(7, 3.5, "ar", False)
 for back in [pickle.loads(pickle.dumps(ar, proto)) for proto in range(6)] + [copy.deepcopy(ar)]:
     print(type(back).__name__, back.show())
 print(type(m.Point.__new__(m.Point, 1, 2)).__name__)
+
+
+class Shifted(m.Point):
+    """The state holds what is stored, not what `__getattribute__` answers."""
+
+    x = "class-level"
+
+    def __getattribute__(self, name):
+        value = super().__getattribute__(name)
+        return value + 1 if name == "x" else value
+
+
+sh = Shifted(10, 0.5, "sh", True)
+for back in (pickle.loads(pickle.dumps(sh)), copy.deepcopy(sh), pickle.loads(pickle.dumps(sh, 0))):
+    print(type(back).__name__, back.x, object.__getattribute__(back, "x"))
 fresh = m.Point.__new__(m.Point)
 try:
     fresh.x
