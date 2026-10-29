@@ -282,7 +282,9 @@ impl MirComprehension {
 pub struct InstanceOrderExpr {
     pub kind: OrderKind,
     /// The list ordered (a list display for `min(a, b, ...)`), or with
-    /// `keyed` its `(key, element)` pairs (`pycc_ast::desugar::keys`).
+    /// `keyed` its `(key, element)` pairs (`pycc_ast::desugar::keys`) -- for
+    /// a keyed `min`/`max`, a generator of them, compared as each is
+    /// pulled.
     pub list: MirExpr,
     /// `xs` of a keyed `xs.sort(key=...)`, evaluated before `list`.
     pub target: Option<MirExpr>,

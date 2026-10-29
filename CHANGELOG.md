@@ -67,8 +67,30 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `str` literal CPython would intern as a code constant crosses as the interned string,
   so `'raw' is key` holds as in CPython and lookups keyed by it compare by identity
   (v0.10 accept 2). A compiled `d['raw']` on a received dict: 275 -> 179 instructions.
+- A nested function used as a value is a native closure also when a variable it reads
+  is rebound before its `def` and never after (`template = str(template)`, then
+  `def piece(item): ...`), in strict and non-strict mode; it ran its `def` in CPython
+  (or was `C0001` in strict mode). `sorted(xs, key=f)` of such a closure calls it
+  directly in a comprehension instead of passing a function object to CPython's
+  builtin; `map`/`filter` of one run CPython's lazy builtins over the compiled
+  function.
 
 ### Fixed
+- `key=` functions are called when CPython calls them.
+  - **`sorted(xs, key=f)`:** keys a copy of its whole input. An input that raises part
+    way raises before the first key call, and a key that changes the input (directly
+    or through a property getter) does not change what is sorted.
+  - **`min`/`max`:** each key is compared as soon as it is computed, as in CPython.
+    Instance keys are compared through the class's `__lt__`/`__gt__` while the pairs
+    are pulled from a generator, so key calls, comparisons and their exceptions
+    interleave as CPython's do (a `StopIteration` a key raises propagates as it is,
+    not as PEP 479's `RuntimeError`). Keys of numbers, `str` or tuples of them
+    (immutable values whose comparison runs no code) are all computed first, which
+    nothing can tell apart. Any other key (a list, a CPython object) is `C0001` in
+    strict mode and runs in CPython in non-strict mode.
+  - **`.sort` and `reverse=`:** `.sort` with a nested-function key runs as written, and
+    with a key only a literal `reverse=` is rewritten (CPython evaluates every argument
+    before the first key call).
 - `super().__init__(...)` in an exception class with its own `__init__`, reaching the
   builtin exception's constructor, compiled to a call that failed at run time with
   `NameError: name 'Exception.__init__' is not defined`; it is a compile-time `C0001` now
