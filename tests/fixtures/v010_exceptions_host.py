@@ -117,4 +117,8 @@ nf.errno = 5
 print(str(nf), nf.show())
 back = pickle.loads(pickle.dumps(nf))
 print(type(back).__name__, str(back), back.errno, back.path)
+me = m.Metered(5)
+print(me.show(), me.code, me.tagged, type(m.Metered).__name__, mro(m.Metered))
+sh = m.Shown(3)
+print(sh.show(), sh.code, sh.stored, m.Plated(4).show(), m.Plated(4).code, mro(m.Shown))
 print(sys.getrefcount(e) > 0)

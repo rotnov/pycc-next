@@ -245,6 +245,11 @@ pub(crate) struct Plan {
     /// native layout, and the names its MRO binds at class level
     /// (`package_bases::exceptions_from_package`).
     package_exceptions: BTreeMap<String, package_bases::PackageException>,
+    /// v0.10: each class of the entry and the names the classes of other
+    /// modules of its package deriving from it define
+    /// (`package_bases::overridden_in_package`): a layout attribute one of
+    /// them binds at class level is no layout's (`exc_layout`).
+    package_overrides: BTreeMap<String, BTreeSet<String>>,
     /// The nested `def`s and `lambda`s of compiled functions that CPython
     /// runs, their enclosing functions compiled (`nested`).
     nested: Vec<nested::Nested>,
@@ -415,6 +420,7 @@ impl Plan {
             lifts,
             package_bases: BTreeMap::new(),
             package_exceptions: BTreeMap::new(),
+            package_overrides: BTreeMap::new(),
             nested: Vec::new(),
         })
     }
@@ -428,6 +434,7 @@ impl Plan {
         }
         if self.publishes.classes {
             self.package_exceptions = package_bases::exceptions_from_package(path);
+            self.package_overrides = package_bases::overridden_in_package(path);
         }
         self.set_entry_dir(path.parent().map(Path::to_path_buf));
     }

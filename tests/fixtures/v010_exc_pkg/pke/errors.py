@@ -1,5 +1,5 @@
 """Exception classes deriving from `common`'s."""
-from .common import Owned, PkgError
+from .common import Owned, PkgError, Rated
 
 
 class KeyMissing(PkgError):
@@ -22,6 +22,12 @@ class Sub(Owned):
 
     def describe(self) -> str:
         return super().describe() + "+" + self.extra
+
+
+class Overrated(Rated):
+    """`rate` is a class-level property here."""
+
+    rate = property(lambda self: 99, lambda self, value: None)
 
 
 class Clash(Exception):

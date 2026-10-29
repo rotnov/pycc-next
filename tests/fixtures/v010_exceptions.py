@@ -102,6 +102,52 @@ class NoFile(OSError):
         return self.path + ":" + str(self.errno)
 
 
+class Meta(type):
+    """A metaclass with a `__new__` of its own."""
+
+    def __new__(mcls, name, bases, ns):
+        ns["tagged"] = name.lower()
+        return super().__new__(mcls, name, bases, ns)
+
+
+class Metabase(Exception, metaclass=Meta):
+    pass
+
+
+class Metered(Metabase):
+    """Over a base of another metaclass: no layout, CPython's class."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(code)
+        self.code = code
+
+    def show(self) -> str:
+        return self.tagged + ":" + str(self.code)
+
+
+class Plated(Exception):
+    """Would have a layout, but `Shown` shadows `code`: CPython's class."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(code)
+        self.code = code
+
+    def show(self) -> str:
+        return "plated " + str(self.code)
+
+
+class Shown(Plated):
+    """`code` is a property here: `Plated.__init__`'s store reaches it."""
+
+    @property
+    def code(self) -> int:
+        return 42
+
+    @code.setter
+    def code(self, value: int) -> None:
+        self.stored = value
+
+
 def probe(n: int) -> str:
     try:
         if n > 0:

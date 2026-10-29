@@ -21,6 +21,16 @@ def code_of(e: Owned) -> int:
     return e.code
 
 
+class Rated(Exception):
+    """Would have a layout, but `errors.Overrated` shadows `rate`."""
+
+    def __init__(self, rate: int) -> None:
+        self.rate = rate
+
+    def show(self) -> str:
+        return "rate " + str(self.rate)
+
+
 class Clash(Exception):
     """Named as a class of `errors` is: each has a layout of its own."""
 

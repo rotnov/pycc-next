@@ -498,7 +498,12 @@ pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, PackageE
         // attribute, which only makes `may_layout` true more often.
         let mut may_layout =
             !super::exc_layout::fields_of(class, &BTreeSet::new()).is_empty();
-        let mut names = super::exc_layout::class_names(class);
+        // A class keyword (`metaclass=`): its body is not all it binds.
+        let mut names = if class.keywords().is_empty() {
+            super::exc_layout::class_names(class)
+        } else {
+            None
+        };
         for base in class.bases() {
             if let Expr::Name(base) = base
                 && pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base.id.as_str())

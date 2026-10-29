@@ -29,8 +29,11 @@
 //! makes is of that form, no class along its MRO binds the name at class
 //! level (`OSError.errno`, a base's property: `exc_names` for the builtin
 //! classes) and the name is neither private nor a dunder; a class defining
-//! `__setattr__`, `__getattribute__`, `__delattr__` or `__slots__`, or with
-//! a class of unknown body in its MRO, gets no layout.
+//! `__setattr__`, `__getattribute__`, `__delattr__` or `__slots__`, a class
+//! keyword (`metaclass=`) or a class of unknown body in its MRO gets no
+//! layout, and a layout some class carrying it would show otherwise than
+//! CPython (a subclass's property of the same name, here or in another
+//! module of the package) is dropped with the chain it extends.
 
 use super::*;
 use pycc_ast::{Expr, StmtClassDef};
@@ -80,7 +83,27 @@ impl Plan {
     /// order: top-level classes deriving from a builtin exception class or
     /// from another such class, running in CPython with their methods
     /// lifted (split), with at least one attribute of their own in it.
+    ///
+    /// Conservative: a layout must be provably what CPython would show. A
+    /// class carrying one (its own or a base's) whose MRO binds one of its
+    /// attributes at class level (a subclass's property, a mixin's class
+    /// attribute) or holds a class of unknown body makes the whole chain of
+    /// layouts it carries CPython's again, and the planning starts over
+    /// without them.
     pub(super) fn exc_layouts(&self) -> Vec<Layout> {
+        let mut denied: BTreeSet<usize> = BTreeSet::new();
+        loop {
+            match self.layouts_denying(&denied) {
+                Ok(layouts) => return layouts,
+                Err(owners) => denied.extend(owners),
+            }
+        }
+    }
+
+    /// [`Self::exc_layouts`] with the classes at `denied` given no layout
+    /// of their own: the layouts, or the owners of a chain of layouts a
+    /// class cannot carry as CPython would (never one of `denied`).
+    fn layouts_denying(&self, denied: &BTreeSet<usize>) -> Result<Vec<Layout>, Vec<usize>> {
         // The module's exception classes so far, and what each carries.
         let mut states: BTreeMap<String, State> = BTreeMap::new();
         // Every top-level class so far -> the names bound at class level
@@ -104,7 +127,14 @@ impl Plan {
             let mut exception = false;
             let mut inherited: Vec<usize> = Vec::new();
             let mut blocked = false;
-            let mut bound: Option<BTreeSet<String>> = class_names(&class);
+            // A class keyword (`metaclass=`, an `__init_subclass__`
+            // argument) is CPython's business: a metaclass may refuse the
+            // template, so neither the class nor a subclass gets a layout.
+            let mut bound: Option<BTreeSet<String>> = if class.keywords().is_empty() {
+                class_names(&class)
+            } else {
+                None
+            };
             for base in class.bases() {
                 let Expr::Name(base) = base else {
                     bound = None;
@@ -157,8 +187,8 @@ impl Plan {
                 // A class whose MRO holds a class of unknown body gets no
                 // layout of its own: a binding there could take its
                 // attributes' stores.
-                let own: Vec<(String, String)> = if let (true, Some(bound)) =
-                    (self.is_split(index), &bound)
+                let own: Vec<(String, String)> = if let (true, false, Some(bound)) =
+                    (self.is_split(index), denied.contains(&index), &bound)
                 {
                     fields_of(&class, bound)
                         .into_iter()
@@ -184,9 +214,33 @@ impl Plan {
                     State::Layout(layouts.len() - 1)
                 }
             };
+            // The layout its instances carry must be the first binding of
+            // each of its attributes along its MRO.
+            if let State::Layout(at) = state {
+                // Its own MRO, and the subclasses other modules of the
+                // package derive from it.
+                let overrides = self.package_overrides.get(name);
+                let shadowed = match &bound {
+                    Some(bound) => layouts[at].fields.iter().any(|field| {
+                        bound.contains(field) || overrides.is_some_and(|names| names.contains(field))
+                    }),
+                    None => true,
+                };
+                if shadowed {
+                    let mut owners = Vec::new();
+                    let mut next = Some(at);
+                    while let Some(at) = next {
+                        owners.push(layouts[at].owner);
+                        next = layouts[at].base.as_ref().and_then(|hidden| {
+                            layouts.iter().position(|layout| &layout.hidden == hidden)
+                        });
+                    }
+                    return Err(owners);
+                }
+            }
             states.insert(name.clone(), state);
         }
-        layouts
+        Ok(layouts)
     }
 
     /// The class statement at `range` of the source, parsed on its own.
