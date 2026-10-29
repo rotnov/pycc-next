@@ -19,6 +19,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   (default 11) instead of the best of 7; `bench/package_check.py --time` times each run
   in a fresh process, alternating CPython and the compiled tree; all three timing
   scripts write `--json`.
+- `--non-strict`: compiled code reads, tests and stores into an exact CPython `dict`
+  through the dict API (`d[k]`, `k in d`, `d[k] = v`), a subclass still through its own
+  methods (`__missing__`, overridden `__getitem__`), with `dict`'s own `KeyError`s; a
+  `str` literal CPython would intern as a code constant crosses as the interned string,
+  so `'raw' is key` holds as in CPython and lookups keyed by it compare by identity
+  (v0.10 accept 2). A compiled `d['raw']` on a received dict: 275 -> 179 instructions.
 
 ### Fixed
 - A published compiled function, method or constructor (`--ext`, and a `--non-strict`
