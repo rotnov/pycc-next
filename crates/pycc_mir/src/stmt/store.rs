@@ -57,10 +57,14 @@ pub(super) fn lower_item_store(
         MirStmt::DictSet {
             dict: dict.to_owned(),
             key,
-            value: if value.ty() == Ty::Object {
-                value
-            } else {
-                MirExpr::ObjectBox(Box::new(value))
+            value: {
+                // A narrowed read stays the object it is.
+                let value = crate::obj_arith::display_element(value);
+                if value.ty() == Ty::Object {
+                    value
+                } else {
+                    MirExpr::ObjectBox(Box::new(value))
+                }
             },
         }
     } else if let Some(fused) = crate::dict_add::fused_dict_add(dict, &base_ty, &key, &value) {

@@ -57,6 +57,16 @@ class Real(float):
 
 print(m.narrowed(2.5), m.narrowed(Real(1.5)), m.narrowed('s'))
 
+
+
+def bad_key(obj):
+    try:
+        return m.bad_key(obj, True)
+    except ValueError as e:
+        return repr(e)
+
+
+print(bad_key(obj), m.bad_key(obj, False))
 before = (sys.getrefcount(obj), live_dicts())
 for _ in range(1000):
     m.tally([obj, obj])
@@ -66,5 +76,6 @@ for _ in range(1000):
     m.grow(obj)
     m.nested(obj)
     m.rebound(True, obj)
+    bad_key(obj)
 after = (sys.getrefcount(obj), live_dicts())
 print('leaks', after[0] - before[0], after[1] - before[1])

@@ -125,3 +125,17 @@ def narrowed(v):
         d = {'x': v, 'other': None}
         return d['x'] is v, type(d['x']).__name__
     return None
+
+
+
+def raising_key(fail: bool) -> str:
+    if fail:
+        raise ValueError('key')
+    return 'b'
+
+
+def bad_key(obj, fail):
+    # The stored value is released when evaluating the key raises.
+    d = {'a': obj}
+    d[raising_key(fail)] = obj
+    return len(d)

@@ -160,7 +160,7 @@ fn native_dicts_ext_release() {
 #[test]
 fn native_dicts_are_exactly_the_non_escaping_ones() {
     let native = functions_calling("v10_native_dicts", "pycc_rt_dict_new");
-    for function in ["tally", "order", "tests", "missing", "grow", "nested", "rebound", "narrowed"] {
+    for function in ["tally", "order", "tests", "missing", "grow", "nested", "rebound", "narrowed", "bad_key"] {
         assert!(
             native.iter().any(|f| f == function),
             "{function} should build a native dict: {native:?}"
