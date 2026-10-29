@@ -56,18 +56,25 @@ classes, Python subclasses of compiled classes); strict refusals checked against
 `int | float` type; `pip install` through the `pycc.build` PEP 517 backend. Linux
 (x86_64, aarch64), macOS (arm64) and Windows (x86_64, MSVC). 10,000+ tests.
 
-**Speed** (`python3 bench/run.py`, best of 7, shared 4-core Xeon 2.1 GHz under load from
-other jobs, process start included; the Rust twins build with `rustc -O` for the default
-target CPU and black-box their inputs, like the Python programs' inputs are opaque to
-pycc-next):
+**Speed** ([bench run 40866079503](https://github.com/rotnov/pycc-next/actions/runs/40866079503)
+at 3f9e371: the CI benchmark workflow `bench.yml` on GitHub's ubuntu-24.04 runner, Xeon
+Platinum 8370C 2.8 GHz, 4 vCPUs; `python3 bench/run.py --runs 11`, median (min-max) of 11
+interleaved fresh-process runs, process start included; the Rust twins build with `rustc
+-O` for the default target CPU and black-box their inputs, like the Python programs'
+inputs are opaque to pycc-next):
 
 | program | CPython 3.13 | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
 |---|---|---|---|---|---|
-| fib(32) | 0.254s | 0.012s | 0.007s | **20.5x faster** | 1.7x slower |
-| mandelbrot | 1.443s | 0.039s | 0.037s | **36.9x faster** | 1.1x slower |
-| nbody | 2.380s | 0.066s | 0.025s | **35.9x faster** | 2.7x slower |
-| sieve | 1.509s | 0.051s | 0.022s | **29.8x faster** | 2.3x slower |
-| spectral_norm | 0.843s | 0.015s | 0.010s | **57.5x faster** | 1.5x slower |
+| fib(32) | 0.262s (0.257-0.277) | 0.012s (0.011-0.012) | 0.007s (0.007-0.007) | **22.8x faster** | 1.73x slower |
+| mandelbrot | 1.619s (1.618-1.629) | 0.056s (0.056-0.056) | 0.051s (0.051-0.051) | **29.0x faster** | 1.10x slower |
+| nbody | 2.607s (2.585-2.665) | 0.077s (0.077-0.077) | 0.029s (0.029-0.030) | **33.9x faster** | 2.66x slower |
+| sieve | 1.268s (1.223-1.367) | 0.048s (0.047-0.050) | 0.024s (0.024-0.024) | **26.6x faster** | 2.00x slower |
+| spectral_norm | 1.210s (1.188-1.231) | 0.017s (0.017-0.020) | 0.009s (0.009-0.011) | **69.7x faster** | 1.83x slower |
+| collections_bfs | 1.112s (1.098-1.130) | 0.138s (0.138-0.139) | 0.051s (0.051-0.053) | **8.0x faster** | 2.69x slower |
+
+The same run's arm64 leg (ubuntu-24.04-arm, Neoverse-N2) is in its job summary and
+`bench-ubuntu-24.04-arm` artifact (e.g. nbody 36.7x, spectral_norm 94.3x faster than
+CPython there). Every speed number below cites this run unless it says otherwise.
 
 **Real-world code** (`python3 bench/corpus.py`, 200 competitive-programming solutions,
 compared with CPython on their tests): `--non-strict` compiles and passes all 200 with 0
@@ -83,15 +90,14 @@ typed native hot data, and still not met. v0.9 made libraries' own classes nativ
 over compiled templates, Python subclasses of compiled classes whose overrides compiled code
 calls, call-site method caches), and the numbers moved less than the work suggests.
 pystache 0.6.8 runs 586k instructions per round of its own benchmark (783k before v0.9;
-CPython 505k) and 0.74x by wall time; about 158k of CPython's 505k is regex and match work
+CPython 505k) and 0.63x by wall time; about 158k of CPython's 505k is regex and match work
 no compile of pystache removes, so 2x would need everything else under ~94k. mistune 3.3.4
-runs at about CPython's speed (0.86x-1.05x for `mistune.html`, 0.84x-0.97x for the full
-parser, across runs on a shared machine). pydantic 2.13.5 built whole (1036 of 1249
-functions native, its own suite failing no test more than against its sources): import
-0.91x-0.98x, model definition ~0.79x, `model_json_schema()` ~0.8x, round-trips 0.94x of
-CPython's speed. Compiled code over CPython objects does each object operation at about the
+is slower than CPython (0.83x for `mistune.html`, 0.79x for the full parser). pydantic
+2.13.5 built whole (1036 of 1249 functions native, its own suite failing no test more than
+against its sources): import 0.93x, model definition 0.79x, `model_json_schema()` 0.82x,
+round-trips 0.91x of CPython's speed (medians of 15 interleaved runs). Compiled code over CPython objects does each object operation at about the
 interpreter's cost; the speed is in typed code (the table above, diff-match-patch and pypng
-~12x). The analysis is in [ROADMAP v0.9 accepts 2-4](docs/ROADMAP.md).
+~12x and ~15x). The analysis is in [ROADMAP v0.9 accepts 2-4](docs/ROADMAP.md).
 
 Known differences from CPython: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
@@ -132,13 +138,14 @@ def relax(src: NDArray[np.float64], dst: NDArray[np.float64]) -> None:
 - Elements read as Python `float`/`int`/`bool`, not numpy scalars: see
   [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
 
-**Speed** (`python3 bench/run.py stencil2d prefix_sum_np`, kernel time without numpy's
-import, best of 7, Xeon 2.8 GHz shared with other jobs):
+**Speed** ([bench run 40866079503](https://github.com/rotnov/pycc-next/actions/runs/40866079503),
+ubuntu-24.04, Xeon Platinum 8370C; kernel time without numpy's import, median (min-max) of
+11 interleaved fresh-process runs):
 
 | program | CPython 3.13 + numpy | pycc-next | Rust (`-O`) | vs CPython | vs Rust |
 |---|---|---|---|---|---|
-| stencil2d (200x300 Jacobi, 120 sweeps) | 4.913s | 0.011s | 0.004s | **441.6x faster** | 2.5x slower |
-| prefix_sum_np (400k `int64`, 25 rounds) | 4.048s | 0.031s | 0.017s | **129.9x faster** | 1.8x slower |
+| stencil2d (200x300 Jacobi, 120 sweeps) | 4.767s (4.744-4.977) | 0.009s (0.009-0.010) | 0.004s (0.004-0.005) | **503.9x faster** | 2.33x slower |
+| prefix_sum_np (400k `int64`, 25 rounds) | 3.528s (3.466-3.671) | 0.027s (0.027-0.028) | 0.013s (0.012-0.013) | **129.1x faster** | 2.15x slower |
 
 An `int64` element joins `x += a[i]` and comparisons as a machine integer (an `int` is
 made of it only when the result leaves the inline range), so prefix_sum_np's running sum
@@ -232,9 +239,9 @@ imports its two other modules from itself; its `tests` stay Python. Every
 function and method of the package compiles (`--report-fallbacks` reports none; the
 `__init__`'s re-exporting imports also run as CPython imports). Its untyped text
 functions run natively on `str` (guarded native specializations, see Modes): the
-package's own speed test (`diff_main` on two ~30 KB texts) takes 1.03 s compiled
-against 12.3 s in CPython (**12x faster**, best of 5; 11x-13x over repeated runs;
-v0.3 was 1.7x).
+package's own speed test (`diff_main` on two ~30 KB texts) takes 0.963 s compiled
+against 11.49 s in CPython (**11.9x faster**, bench run 40866079503, medians of 11
+interleaved runs; min-max 0.960-0.974 s and 11.36-12.10 s).
 
 tomli is typed code written for mypyc (`from __future__ import annotations`, aliases
 imported only under `if TYPE_CHECKING:`, `Final` constants, frozenset tables,
@@ -245,11 +252,9 @@ functions compile; 3 run in CPython (`--report-fallbacks`: the exception class's
 signature the boundary cannot carry (a `tuple[int, str]` result, a `frozenset`
 parameter) is compiled for the module's own callers and runs in CPython only when Python
 calls it (`twin:` in the report). `loads()` of tomli's benchmark document runs
-**1.4x-1.7x faster** than in CPython: `python3 bench/package_check.py tomli --time --runs 15`
-times 100 calls, best of 15 runs for each side on the same machine; v0.4 measured
-0.036 s compiled against 0.059 s, and the current tree 0.052 s against 0.074 s on a
-busier box (2.54M against 4.56M instructions per call under callgrind, the stable
-measure; v0.4: 2.60M; it was 0.40x before the work above).
+**1.65x faster** than in CPython: 100 calls take 0.035 s compiled against 0.058 s (bench
+run 40866079503, medians of 11 interleaved runs) -- 2.54M against 4.56M instructions per
+call under callgrind, the stable measure.
 What it takes: the parsing tables are native frozensets and the text is scanned
 natively (`while src[pos] in chars: pos += 1` is one scan); a function returning
 `pos, value` hands both back without a tuple, its callers unpacking them directly
@@ -271,9 +276,8 @@ undoes a filter on every scanline in pure-Python loops over `bytearray`s
 native specializations taking the `bytearray`s as they are, reading and writing their
 buffers in place (`--report-fallbacks`: `specialized: undo_filter_paeth ... scanline:
 bytearray, previous: bytearray, result: bytearray`). Reading a 256x256 RGB image whose rows
-use all five filter types runs **10x faster** than in CPython: `python3
-bench/package_check.py pypng --time --runs 5` measured 0.015 s against 0.157 s for five
-`Reader.read()`s. 78 of its 85 functions compile (64 before v0.7's method-level fallback, 15 in v0.5;
+use all five filter types runs **15x faster** than in CPython: 0.008 s against 0.117 s for
+five `Reader.read()`s (bench run 40866079503, medians of 11 interleaved runs). 78 of its 85 functions compile (64 before v0.7's method-level fallback, 15 in v0.5;
 `--report-fallbacks`),
 `Reader` among them: its chunk handlers, which it looks up by name
 (`getattr(self, "_process_" + kind)`), its generator methods feeding each other, the
@@ -285,8 +289,8 @@ generator expressions, a local `import`, a read of `__file__`, and a membership 
 an object in a list of tuples); the `Writer` and exception classes are created by
 CPython (a class used as a default value, a custom `__str__`, attribute bases), their
 other methods compiled. Decoding every PngSuite image its tests use (`--time`'s second
-measurement) runs **3.2x faster** than CPython (19 ms against 60 ms for five passes,
-best of 15 interleaved runs; 4.6x fewer instructions under callgrind). The filter loops'
+measurement) runs **3.2x faster** than CPython (22 ms against 71 ms for five passes, bench run
+40866079503; 4.6x fewer instructions under callgrind). The filter loops'
 `int` locals are proven to stay small (byte items, `& 0xFF`, `abs()`, `range()` bounds),
 so they compute on tagged words without overflow checks; what remains is mostly CPython
 itself (`zlib`, `struct.unpack` and `array` for the 16-bit images, the palette's tuples)
@@ -298,9 +302,9 @@ with tokens as dicts and dispatch by name (`getattr(self, name)`, a dict of lamb
 All 38 build unchanged (in parallel, as `pycc.build` builds them) and its own 1155 tests
 pass against them; 386 of its 413 functions compile (`--report-fallbacks`). It is
 **slower** than CPython: rendering every document of its own benchmark
-(`benchmark/cases`) with `mistune.html` takes 0.18 s against 0.14 s for 20 passes
-(0.78x), and its "full" parser with every plugin 0.85x (best of 5, local; 0.70x and 0.74x
-before compiled frames and inline reference counting); under callgrind 64.8M
+(`benchmark/cases`) with `mistune.html` takes 0.180 s against 0.149 s for 20 passes
+(0.83x), and its "full" parser with every plugin 0.207 s against 0.165 s (0.79x; bench run
+40866079503, medians of 11 interleaved runs); under callgrind 64.8M
 instructions per pass against CPython's 56.8M (72.2M at first). Its state classes
 (`BlockState`, `InlineState`) are native types, but its parsers and renderers are created
 by CPython (`Generic[ST]` bases with a constrained `TypeVar`, bases from another module,

@@ -4,6 +4,20 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+- The `bench` CI workflow (`.github/workflows/bench.yml`; manual, on release tags and
+  weekly, on ubuntu-24.04 and ubuntu-24.04-arm): `bench/run.py`, the real packages'
+  `--time` checks and `bench/pydantic_check.py --time` with interleaved fresh-process
+  runs, published as medians with min-max, the runner's CPU and the run count (job
+  summary, `bench-<os>` artifact). Published speed numbers cite a run of it (v0.10
+  accept 4).
+
+### Changed
+- `bench/run.py` reports the median and min-max of interleaved fresh-process runs
+  (default 11) instead of the best of 7; `bench/package_check.py --time` times each run
+  in a fresh process, alternating CPython and the compiled tree; all three timing
+  scripts write `--json`.
+
 ## [0.9.0] - 2026-10-21
 
 Typed hot data, native end to end -- accepts 1 (in its stated exact form) and 5 are met;

@@ -22,6 +22,14 @@ import sys
 
 
 def cpu_model() -> str:
+    # lscpu names Arm cores (e.g. Neoverse-N2), which /proc/cpuinfo does not.
+    try:
+        r = subprocess.run(["lscpu"], capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            if line.startswith("Model name:"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
     try:
         for line in pathlib.Path("/proc/cpuinfo").read_text().splitlines():
             if line.startswith(("model name", "Model")):
