@@ -23,6 +23,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `str` literal CPython would intern as a code constant crosses as the interned string,
   so `'raw' is key` holds as in CPython and lookups keyed by it compare by identity
   (v0.10 accept 2). A compiled `d['raw']` on a received dict: 275 -> 179 instructions.
+- A nested function used as a value is a native closure also when a variable it reads
+  is rebound before its `def` and never after (`template = str(template)`, then
+  `def piece(item): ...`), in strict and non-strict mode; it ran its `def` in CPython
+  (or was `C0001` in strict mode). `map(f, xs)`, `filter(f, xs)` and
+  `sorted(xs, key=f)` of such a closure call it directly in a comprehension instead of
+  passing a function object to CPython's builtin (pystache's `ParsedTemplate.render`).
 
 ## [0.9.0] - 2026-10-21
 

@@ -1046,13 +1046,16 @@ Accept:
    dict-API calls under an exact-dict guard, so identity, views, pickling and iteration
    errors are CPython's by construction for every dict CPython can see. No run-time
    materialize-and-forward. What stays to do: a non-escaping `str`-keyed dict whose values
-   are objects (`{"type": "text", "raw": s}`) is a native dict too.
+   are objects (`{"type": "text", "raw": s}`) is a native dict too -- open: neither
+   package has such a dict on its hot path while mistune's renderers are CPython classes
+   (accept 3's table).
    **Progress 2026-10-29:** step 1, the exact-dict guard on `d[k]`, `k in d` and
    `d[k] = v` of CPython dicts, and literals crossing as CPython's interned strings
    (`tests/v10_dicts.rs`): 275 -> 179 instructions for a compiled `d['raw']` on a
    received dict. pystache 584k -> 580k per round, mistune 58.7M -> 57.7M
-   per pass (CPython 509.6k and 57.3M, `PYTHONHASHSEED=0`): dicts are not where either
-   package spends (accept 3's note).
+   per pass (CPython 505k and 57.0M, `PYTHONHASHSEED=0`, each count after a discarded
+   warm-up run that writes the trees' `.pyc` files): dicts are not where either package
+   spends (accept 3's note).
 3. **Template and Markdown >= 1.2x:** pystache 0.6.8 and mistune 3.3.4 each run their own
    benchmark >= 1.2x faster than CPython (median of the CI benchmark job, accept 4), with
    their suites passing.
@@ -1068,6 +1071,31 @@ Accept:
    much (calls and method caches ~4M, attribute lookups 0.7M, `str` crossings ~1.6M,
    dict operations ~1.1M); its renderers are CPython classes, so its tokens cross into
    CPython at once.
+   **Progress 2026-10-29:** a nested function used as a value whose captures are all
+   bound before its `def` (a parameter normalized first: pystache's `get_unicode`,
+   `_render_string`'s callbacks) is a native closure, and `map`/`filter`/`sorted(key=)`
+   of a native closure call its lifted function in a comprehension instead of handing a
+   function object to CPython's builtin (`tests/v10_closures.rs`): pystache 580k -> 572k
+   per round (CPython 505k); mistune unchanged (57.7M).
+   **Decision 2026-10-29: not met for v0.10; what is left, estimated.** The bar is ~421k
+   instructions per round for pystache (CPython 505k / 1.2; now 572k) and ~47.5M per pass
+   for mistune (57.0M / 1.2; now 57.7M). The remaining levers, each measured where it
+   costs now (callgrind, `PYTHONHASHSEED=0`) and its saving estimated:
+
+   | Package | Lever | Costs now | Saving |
+   |---|---|---|---|
+   | pystache | `Renderer` native: publish private, defaulted and `*args`/`**kwargs` methods to the package's Python subclass, box bound methods (`self._to_unicode_hard`) into CPython calls, lambda values | its methods and the `render(**kwargs)` plumbing ~120k | 60-80k |
+   | pystache | `_Parser` native (private and non-`None` literal instance defaults) | `parse()` 238k (CPython 214k, ~158k of it CPython's own) | 15-25k |
+   | pystache | engine callbacks and context lookups as native calls once `Renderer` is native | node renders, `fetch_string`, context chain ~120k | 20-30k |
+   | pystache | per-site method cache for dict-bearing CPython classes, calling a forwarder's compiled entry directly | `Loader` and the other CPython classes' calls | 5-10k |
+   | mistune | the same per-site cache and direct forwarder entry | method calls, caches, loads ~4.6M | 1.5-2M |
+   | mistune | renderers and parsers native (`Generic[ST]` templates, a name-to-method table for `getattr(self, name)` dispatch, private members) | attribute lookups 0.7M, forwarder calls | 4-6M |
+   | mistune | tokens as native dicts (accept 2's open piece), after the renderers | dict operations ~1.3M | ~0.7M |
+   | mistune | fewer `str` crossings | ~1.6M | ~0.8M |
+
+   Summed: pystache 427k-472k (1.07x-1.18x), mistune 48.2M-50.7M (1.12x-1.18x); neither
+   reaches 1.2x even at the optimistic end, and the largest levers are multi-feature
+   projects. The accept stays open with this evidence.
 4. **Trustworthy numbers:** a CI benchmark workflow runs `bench/run.py`, the package
    `--time` checks and `bench/pydantic_check.py --time` on a GitHub-hosted runner with
    interleaved fresh-process runs, and publishes median and spread as an artifact; every

@@ -7,9 +7,9 @@
 //! (`pycc_hir::CLOSURE_MARKER`). CPython's closure reads each variable when
 //! it *runs*, so binding it early is the same only when the variable cannot
 //! change after the value is made and is already bound when it is made: a
-//! parameter the enclosing function never rebinds, or a variable one
-//! top-level statement before the `def` assigns and nothing else binds (by
-//! any binding form, see `Bindings`), with every value use of the function
+//! parameter, or a variable an unconditional top-level assignment before
+//! the `def` binds, that no statement from the `def` on binds again (by any
+//! binding form, see `Bindings`), with every value use of the function
 //! after its `def`. A variable a nested function writes (`nonlocal`) is
 //! captured as its cell, which both sides share. A function capturing
 //! anything else, with parameter defaults, or with an unannotated
@@ -82,14 +82,22 @@ pub(super) fn stable_captures(
     if sites.contains_key("*") {
         return false;
     }
+    // The binding sites before the `def`: a capture every binding of which
+    // is among them (`template = str(template)` rebinding a parameter before
+    // `render = lambda ...`) holds its final value whenever the value is
+    // made, since those statements run before the `def` and none after it.
+    let before = super::binding_sites(&body[..def_index]);
     captures.iter().all(|capture| {
         let bindings = sites.get(capture).copied().unwrap_or(0);
-        if params.contains(capture) {
-            return bindings == 0;
+        if bindings != before.get(capture).copied().unwrap_or(0) {
+            return false;
         }
-        // The one binding is an unconditional top-level assignment before
-        // the `def`, so it has run whenever the value is made.
-        bindings == 1
+        if params.contains(capture) {
+            return true;
+        }
+        // One binding is an unconditional top-level assignment before the
+        // `def`, so the variable is bound whenever the value is made.
+        bindings >= 1
             && body[..def_index].iter().any(|stmt| match stmt {
                 Stmt::Assign(a) => {
                     a.targets.len() == 1

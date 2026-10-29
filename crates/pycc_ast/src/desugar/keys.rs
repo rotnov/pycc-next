@@ -47,7 +47,8 @@ fn is_rereadable(expr: &Expr) -> bool {
 
 /// `f` applied to a fresh comprehension variable: a one-parameter lambda is
 /// inlined (its parameter becomes the variable), a name or attribute is
-/// called. `None` for anything else.
+/// called, and so is a nested function's lifted function. `None` for
+/// anything else.
 pub(super) fn apply(f: &Expr, fresh: &Fresh, range: TextRange) -> Option<(String, Expr)> {
     match f {
         Expr::Lambda(lambda) => {
@@ -68,6 +69,24 @@ pub(super) fn apply(f: &Expr, fresh: &Fresh, range: TextRange) -> Option<(String
         Expr::Name(_) | Expr::Attribute(_) => {
             let var = fresh.name();
             Some((var.clone(), call(f.clone(), vec![load(&var, range)], range)))
+        }
+        // A nested function used as a value (`__pycc_closure__(lifted,
+        // captures...)`, `super::closures`): its lifted function called with
+        // the captures first. Each capture is a name that keeps one value
+        // from before the value is made (`closures::values`), so reading it
+        // at each call is reading the value the closure bound.
+        Expr::Call(closure)
+            if matches!(closure.func.as_ref(), Expr::Name(n) if n.id.as_str() == crate::CLOSURE_MARKER)
+                && closure.arguments.keywords.is_empty()
+                && closure.arguments.args.iter().all(|a| matches!(a, Expr::Name(_))) =>
+        {
+            let [lifted, captures @ ..] = &*closure.arguments.args else {
+                return None;
+            };
+            let var = fresh.name();
+            let mut args: Vec<Expr> = captures.to_vec();
+            args.push(load(&var, range));
+            Some((var.clone(), call(lifted.clone(), args, range)))
         }
         _ => None,
     }
