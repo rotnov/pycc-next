@@ -17,7 +17,8 @@ v0.7 accept 4's measurement, not a CI gate; `.github/workflows/bench.yml` runs `
 Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
                                        [--jobs N] [--tests PYTHON]
                                        [--time [PYTHON]] [--runs N] [--repeat R]
-                                       [--separate] [--json PATH] [MODULE ...]
+                                       [--separate] [--json PATH] [--competitors]
+                                       [MODULE ...]
   MODULE   build only the modules whose path contains one of these strings
            (implies --separate).
   --separate
@@ -43,6 +44,13 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
   --json PATH
            with --time, also write every sample per phase and tree and their
            summaries (`bench/stats.py`).
+  --competitors
+           with --time, also build pydantic (but `pydantic.v1`), unchanged, with
+           Cython and with mypyc (`bench/competitors.py`; Cython in its default
+           mode, then, should that not build or run the workload, with annotations
+           ignored), and time every build that runs the workload beside the other
+           two trees, interleaved. What does not build or run is reported, not
+           timed, and does not fail the check.
 """
 import argparse
 import concurrent.futures
@@ -57,6 +65,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import competitors  # noqa: E402
 import package_check  # noqa: E402
 import stats  # noqa: E402
 
@@ -144,6 +153,40 @@ def time_trees(python: str, trees: dict[str, pathlib.Path], cwd: pathlib.Path,
     return out
 
 
+def competitor_trees(src: pathlib.Path, tmp: pathlib.Path, cwd: pathlib.Path, python: str,
+                     jobs: int) -> tuple[dict[str, pathlib.Path], list[dict]]:
+    """Builds pydantic (but `pydantic.v1`) with Cython and with mypyc
+    (`bench/competitors.py`; Cython in its default mode, then, should that not build or
+    run the workload, with annotations ignored), each in a tree of its own, and runs
+    the workload once against each. Returns the trees that ran it, by tool, and every
+    build's result."""
+    out: dict[str, pathlib.Path] = {}
+    builds = []
+    for tool, typing in (("cython", True), ("cython", False), ("mypyc", None)):
+        if tool in out:
+            continue
+        tree = tmp / f"{tool}-{typing}"
+        shutil.copytree(src / "pydantic", tree / "pydantic")
+        files = sorted(q for q in (tree / "pydantic").rglob("*.py") if "v1" not in q.parts)
+        b = competitors.cython(tree, files, typing, jobs) if tool == "cython" \
+            else competitors.mypyc(tree, files)
+        res = b.as_json()
+        builds.append(res)
+        print(f"{tool} ({b.mode}): {b.summary()} in {b.seconds:.1f}s")
+        if b.error or not b.compiled:
+            continue
+        competitors.remove_compiled_sources(tree, b)
+        r = subprocess.run([python, "-I", str(WORKLOAD), str(tree.resolve()), "1"], cwd=cwd,
+                           capture_output=True, text=True, timeout=900)
+        tail = (r.stderr.strip().splitlines() or ["?"])[-1]
+        res["workload"] = "pass" if r.returncode == 0 else f"fail: {tail[:200]}"
+        print(f"  the workload against it: {res['workload']}")
+        if r.returncode == 0:
+            out[tool] = tree
+            res["timed"] = True
+    return out, builds
+
+
 def report(times: dict[str, list[dict[str, float]]]) -> None:
     """Prints best and median per phase, in ms, and CPython's median over the
     compiled tree's (above 1: the compiled tree is faster)."""
@@ -155,6 +198,12 @@ def report(times: dict[str, list[dict[str, float]]]) -> None:
         print(f"{ph:10} {min(c):10.2f} / {statistics.median(c):8.2f} "
               f"{min(p):9.2f} / {statistics.median(p):8.2f} "
               f"{statistics.median(p) / statistics.median(c):16.2f}x")
+    for side in times:
+        if side in ("compiled", "CPython"):
+            continue
+        print(f"{side}: " + ", ".join(
+            f"{ph} {statistics.median(r[ph] for r in times[side]) * 1000:.2f} ms"
+            for ph in PHASES) + " (medians)")
 
 
 def main() -> int:
@@ -170,6 +219,7 @@ def main() -> int:
     p.add_argument("--repeat", type=int, default=20)
     p.add_argument("--separate", action="store_true")
     p.add_argument("--json")
+    p.add_argument("--competitors", action="store_true")
     a = p.parse_args()
     archive = package_check.fetch(PYDANTIC, pathlib.Path(a.cache))
     with tempfile.TemporaryDirectory() as tmp_name:
@@ -220,11 +270,16 @@ def main() -> int:
             work = tmp / "work"
             work.mkdir()
             python = str(pathlib.Path(a.time).absolute()) if "/" in a.time else a.time
-            times = time_trees(python, {"compiled": tree, "CPython": plain}, work,
+            others, builds = competitor_trees(src, tmp, work, python, a.jobs) \
+                if a.competitors else ({}, [])
+            times = time_trees(python, {"compiled": tree, "CPython": plain, **others}, work,
                                a.runs, a.repeat)
             report(times)
             if a.json:
                 pathlib.Path(a.json).write_text(json.dumps({"pydantic": {
+                    "competitors": {"versions": competitors.versions(), "builds": builds,
+                                    "modes": {b["tool"]: b["mode"] for b in builds
+                                              if b.get("timed")}},
                     "version": PYDANTIC.version, "runs": a.runs, "repeat": a.repeat,
                     "native": f"{total - fell_total}/{total}",
                     "phases": {ph: {"seconds": {side: stats.summary([r[ph] for r in rs])
