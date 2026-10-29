@@ -1,6 +1,7 @@
-# v0.10: nested functions used as values whose captures are rebound before
-# the `def` (a parameter normalized first), and handed to `map`, `filter`
-# and `sorted(key=...)`, which call the lifted function directly.
+# v0.10: nested functions whose captures are rebound before the `def` (a
+# parameter normalized first), called directly and used as a
+# `sorted(key=...)` value, which calls the lifted function directly.
+# (`map`/`filter` of one: `v10_closure_map.py`.)
 
 
 def render(template: str, items: list[str]) -> str:
@@ -9,7 +10,7 @@ def render(template: str, items: list[str]) -> str:
     def piece(item: str) -> str:
         return template + ":" + item
 
-    return ",".join(list(map(piece, items)))
+    return ",".join([piece(item) for item in items])
 
 
 def keep(prefix: str, items: list[str]) -> list[str]:
@@ -20,7 +21,7 @@ def keep(prefix: str, items: list[str]) -> list[str]:
     def starts(item: str) -> bool:
         return item[:n].lower() == prefix
 
-    return list(filter(starts, items))
+    return [item for item in items if starts(item)]
 
 
 def order(items: list[str], reverse_digits: bool) -> list[str]:
@@ -41,8 +42,8 @@ def returned(base: int) -> int:
         return x + base
 
     total = 0
-    for v in map(add, [1, 2, 3]):
-        total += v
+    for v in [1, 2, 3]:
+        total += add(v)
     return total
 
 

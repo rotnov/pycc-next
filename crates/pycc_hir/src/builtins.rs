@@ -198,7 +198,8 @@ fn math_log(name: &str, arg: &Ty) -> Option<BuiltinSig> {
 /// Whether values of `ty` are immutable builtin values that compare without
 /// running any code and without raising: numbers, `bool`, `str` and tuples
 /// of them.
-fn inert(ty: &Ty) -> bool {
+#[must_use]
+pub fn inert(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Bool | Ty::Float | Ty::Num | Ty::Str => true,
         Ty::Tuple(elements) => elements.iter().all(inert),

@@ -421,6 +421,65 @@ pub unsafe extern "C" fn pycc_rt_order_abort(state: *mut OrderState) {
     state.release();
 }
 
+/// A keyed `min`/`max` over a generator of `(key, element)` pairs
+/// (`pycc_codegen::instance_order`'s streamed loop) keeps the best pair so
+/// far, and the pair just pulled, in `holder`, a list compiled code owns.
+/// This reads the key word (borrowed) of its pair at `index`.
+///
+/// # Safety
+/// `holder` must be a live list of 2-tuples with a pair at `index`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_order_stream_key(holder: *mut PyListObj, index: i64) -> i64 {
+    let pair = unsafe { &*holder }.items()[index as usize];
+    unsafe { &*(pair as *mut PyListObj) }.kinded_items()[0].1
+}
+
+/// Keeps the pair just pulled (`holder[1]`) when `better`, else the best
+/// one so far (`holder[0]`), releasing the other.
+///
+/// # Safety
+/// `holder` must be a live list of exactly two 2-tuples.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_order_stream_settle(holder: *mut PyListObj, better: i8) {
+    let list = unsafe { &mut *holder };
+    let words = list.items().into_owned();
+    let (keep, drop) = if better != 0 {
+        (words[1], words[0])
+    } else {
+        (words[0], words[1])
+    };
+    super::ops::edit_words(list, |items| *items = vec![keep]);
+    list.release(drop);
+}
+
+/// The element of `holder`'s best pair, a new reference of `kind`; for an
+/// empty `holder` (no pair was pulled), CPython's `ValueError` (named for
+/// `max` when `max`) and `0`.
+///
+/// # Safety
+/// `holder` must be a live list of at most one 2-tuple.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pycc_rt_order_stream_finish(
+    holder: *mut PyListObj,
+    kind: i64,
+    max: i8,
+) -> i64 {
+    let list = unsafe { &*holder };
+    if list.len() == 0 {
+        let name = if max != 0 { "max" } else { "min" };
+        crate::exception::raise_builtin(
+            crate::exception::EXCEPTION_TYPE_VALUE_ERROR,
+            "ValueError",
+            &format!("{name}() iterable argument is empty"),
+        );
+        return 0;
+    }
+    let pair = list.items()[0];
+    let elem = unsafe { &*(pair as *mut PyListObj) }.kinded_items()[1].1;
+    crate::value::retain(kind, elem);
+    elem
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

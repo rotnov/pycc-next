@@ -71,12 +71,15 @@ fn order(
     }))
 }
 
-/// The `(key, element)` types of a list of pairs whose key is an instance.
+/// The `(key, element)` types of a list of pairs (or, for `min`/`max`, a
+/// generator of them, compared as each is pulled) whose key is an instance.
 fn instance_pairs(ty: &Ty) -> Option<(Ty, Ty)> {
-    let Ty::List(pair) = ty else {
-        return None;
+    let pair = match ty {
+        Ty::List(pair) => pair.as_ref(),
+        Ty::Generator(sig) => &sig.0,
+        _ => return None,
     };
-    match pair.as_ref() {
+    match pair {
         Ty::Tuple(items) if items.len() == 2 && matches!(items[0], Ty::Instance(_)) => {
             Some((items[0].clone(), items[1].clone()))
         }

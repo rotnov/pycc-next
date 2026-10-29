@@ -71,13 +71,23 @@ fn instance_list(env: &Environment, ty: &Ty) -> Option<String> {
     }
 }
 
-/// The `(key class, element)` of a list of `(key, element)` pairs whose key
-/// is an instance of a user class (`pycc_ast::desugar::keys`).
+/// Whether `pair` is a `(key, element)` pair whose key is an immutable
+/// builtin value (numbers, `bool`, `str`, tuples of them), compared without
+/// running any code.
+pub(crate) fn inert_pair(pair: &Ty) -> bool {
+    matches!(pair, Ty::Tuple(items) if items.len() == 2 && pycc_hir::builtins::inert(&items[0]))
+}
+
+/// The `(key class, element)` of a list of `(key, element)` pairs (or, for
+/// `min`/`max`, a generator of them) whose key is an instance of a user
+/// class (`pycc_ast::desugar::keys`).
 fn instance_pairs(env: &Environment, ty: &Ty) -> Option<(String, Ty)> {
-    let Ty::List(pair) = ty else {
-        return None;
+    let pair = match ty {
+        Ty::List(pair) => pair.as_ref(),
+        Ty::Generator(sig) => &sig.0,
+        _ => return None,
     };
-    match pair.as_ref() {
+    match pair {
         Ty::Tuple(items) if items.len() == 2 => {
             let class = instance_list(env, &Ty::List(Box::new(items[0].clone())))?;
             Some((class, items[1].clone()))
