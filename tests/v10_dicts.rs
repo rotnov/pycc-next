@@ -166,7 +166,7 @@ fn native_dicts_are_exactly_the_non_escaping_ones() {
             "{function} should build a native dict: {native:?}"
         );
     }
-    for function in ["returned", "passed", "stored", "compared", "pickled", "viewed"] {
+    for function in ["returned", "passed", "stored", "compared", "pickled", "viewed", "duplicated"] {
         assert!(
             !native.iter().any(|f| f == function),
             "{function} must keep CPython's dict: {native:?}"

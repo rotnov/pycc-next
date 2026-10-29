@@ -105,10 +105,19 @@ pub(super) fn rewrite(hir: &HirModule) -> Option<(HirModule, BTreeSet<usize>)> {
     Some((module, marked))
 }
 
-/// A non-empty dict display every key of which is a `str` literal.
+/// A non-empty dict display whose keys are distinct `str` literals. A
+/// repeated key stays a CPython display: CPython evaluates every value before
+/// it stores any, so an overwritten value is released only after the later
+/// values ran, while the native dict would release it at its insert.
 fn is_str_keyed_display(expr: &HirExpr) -> bool {
-    matches!(expr, HirExpr::DictLiteral(pairs)
-        if !pairs.is_empty() && pairs.iter().all(|(key, _)| matches!(key, HirExpr::StringLiteral(_))))
+    let HirExpr::DictLiteral(pairs) = expr else {
+        return false;
+    };
+    let mut seen = BTreeSet::new();
+    !pairs.is_empty()
+        && pairs
+            .iter()
+            .all(|(key, _)| matches!(key, HirExpr::StringLiteral(s) if seen.insert(s.clone())))
 }
 
 /// The names a top-level statement binds (any name a function might also

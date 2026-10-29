@@ -110,3 +110,10 @@ def viewed(obj):
     keys = d.keys()
     d['b'] = 2
     return list(keys)
+
+
+def duplicated(make, observe):
+    # A repeated key: CPython evaluates every value before it stores any, so
+    # the overwritten value's `__del__` runs after `observe()`.
+    d = {'x': make(), 'x': None, 'y': observe()}
+    return len(d), d['y']

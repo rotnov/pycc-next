@@ -40,6 +40,16 @@ print(m.compared(1))
 print(m.pickled('p'))
 print(m.viewed(obj))
 
+log = []
+
+
+class Noisy:
+    def __del__(self):
+        log.append('del')
+
+
+print(m.duplicated(Noisy, lambda: list(log)), log)
+
 before = (sys.getrefcount(obj), live_dicts())
 for _ in range(1000):
     m.tally([obj, obj])
