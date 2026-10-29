@@ -34,9 +34,12 @@ use ruff_text_size::{Ranged, TextRange};
 use std::collections::BTreeSet;
 
 /// The builtins that run a generator argument to completion (or to its
-/// first deciding value) before the caller continues.
+/// first deciding value) before the caller continues -- among them a keyed
+/// `min`/`max`'s pairs (`super::super::keys`), pulled to the end inside the
+/// call.
 pub(super) fn is_consumer(name: &str) -> bool {
-    matches!(name, "any" | "all" | "next") || super::super::comps::is_materializing_consumer(name)
+    matches!(name, "any" | "all" | "next" | "__pycc_min_keyed" | "__pycc_max_keyed")
+        || super::super::comps::is_materializing_consumer(name)
 }
 
 impl Lift<'_> {
