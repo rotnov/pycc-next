@@ -404,6 +404,9 @@ pub(super) struct RtFns<'ctx> {
     /// and the builtin ones. Their instances are the runtime's exception
     /// objects, counted through `exc_incref`/`exc_decref`.
     pub(super) exception_classes: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Every class's record (`crate::class_record`), keyed by MIR name.
+    pub(super) class_records:
+        std::cell::RefCell<HashMap<String, crate::class_record::Record<'ctx>>>,
     /// The current function's locals that hold borrowed references
     /// (`borrowed_locals`).
     pub(super) borrowed_locals: std::cell::RefCell<std::collections::HashSet<String>>,
@@ -999,6 +1002,7 @@ pub(super) fn declare_rt_functions<'ctx>(
         ),
         rc_class_kinds: std::cell::RefCell::new(HashMap::new()),
         exception_classes: std::cell::RefCell::new(Default::default()),
+        class_records: std::cell::RefCell::new(HashMap::new()),
         borrowed_locals: std::cell::RefCell::new(std::collections::HashSet::new()),
         owned_int_names: std::cell::RefCell::new(std::collections::HashSet::new()),
         int_ranges: std::cell::RefCell::new(Default::default()),
