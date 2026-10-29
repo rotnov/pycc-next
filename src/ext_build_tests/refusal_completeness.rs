@@ -217,7 +217,7 @@ fn every_admitted_argument_type_refuses_before_the_call_and_after_the_arity_chec
         // be diagnosed per slot: reading `args[1]` of a one-argument call
         // is out of bounds, not a `TypeError`. So the arity check precedes
         // every unpack, and this is the assertion that says so.
-        let arity = inc.find("if (nargs != 2)").expect("the arity check");
+        let arity = inc.find("if (nargs < 2 || nargs > 2)").expect("the arity check");
         let first = inc
             .find("pycc_ext_unpack_")
             .expect("at least one refusal arm");

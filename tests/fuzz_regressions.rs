@@ -388,3 +388,10 @@ fn key_error_for_a_non_str_key_in_an_embedding_program() {
     );
     assert_eq!(got, expected);
 }
+
+/// An unknown keyword that compiled code binds itself gets CPython 3.13's
+/// "Did you mean" when a parameter name is close enough (issue #10).
+#[test]
+fn an_unexpected_keyword_suggests_a_close_parameter() {
+    assert_matches_cpython("fuzz_unexpected_keyword_suggestion");
+}

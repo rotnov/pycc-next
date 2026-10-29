@@ -65,10 +65,12 @@ fn memoryview_inc(name: &str, count: usize, return_ty: Ty) -> String {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::MemoryView; count]),
             params: vec![Ty::MemoryView; count],
             param_writable: vec![false; count],
             return_ty,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     )
 }
@@ -86,9 +88,11 @@ fn instance_export(class: &str, method: &str, params: Vec<Ty>, return_ty: Ty) ->
         returns_buffer_slice: false,
         receiver: ExtReceiver::SelfInstance,
         param_writable: vec![false; params.len()],
+        param_names: crate::ext_build::test_param_names(&params),
         params,
         return_ty,
         keyword_names: None,
+        keyword_receiver: None,
     }
 }
 
@@ -118,8 +122,10 @@ pub(super) fn static_export(
         returns_buffer_slice: false,
         receiver: ExtReceiver::None,
         param_writable: vec![false; params.len()],
+        param_names: crate::ext_build::test_param_names(&params),
         params,
         return_ty,
         keyword_names: None,
+        keyword_receiver: None,
     }
 }

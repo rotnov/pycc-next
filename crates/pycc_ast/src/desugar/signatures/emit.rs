@@ -1,6 +1,7 @@
 //! The code a bound call becomes: an in-place call with the flat argument
 //! list, or a helper (CPython's binding at run time, in Python).
 
+use super::messages::{missing_message, multiple, posonly_message, too_many, unexpected};
 use super::{Arg, Param, Sig};
 use crate::desugar::Fresh;
 use crate::desugar::build::{attribute, call, call_name, load, string};
@@ -144,7 +145,7 @@ impl Emitter<'_> {
                 if !posonly.is_empty() {
                     return Err(posonly_message(self.qual(), &posonly.join(", ")));
                 }
-                return Err(unexpected(self.qual(), name));
+                return Err(unexpected(sig, name));
             }
         }
         if given > count && sig.vararg.is_none() {
@@ -498,7 +499,7 @@ impl Emitter<'_> {
                 let _ = writeln!(
                     out,
                     "    raise TypeError({})",
-                    py_str(&unexpected(qual, name))
+                    py_str(&unexpected(sig, name))
                 );
             }
         }
@@ -958,57 +959,4 @@ fn raise_type_error(message: Expr, range: TextRange) -> Stmt {
         exc: Some(Box::new(call_name("TypeError", vec![message], range))),
         cause: None,
     })
-}
-
-fn multiple(qual: &str, name: &str) -> String {
-    format!("{qual}() got multiple values for argument '{name}'")
-}
-
-fn unexpected(qual: &str, name: &str) -> String {
-    format!("{qual}() got an unexpected keyword argument '{name}'")
-}
-
-fn posonly_message(qual: &str, names: &str) -> String {
-    format!("{qual}() got some positional-only arguments passed as keyword arguments: '{names}'")
-}
-
-/// CPython's `too_many_positional`.
-fn too_many(sig: &Sig, given: usize, kwonly_given: usize) -> String {
-    let count = sig.positional_count();
-    let defaults = sig.positional().filter(|p| p.default.is_some()).count();
-    let (takes, plural) = if defaults > 0 {
-        (format!("from {} to {count}", count - defaults), "s")
-    } else {
-        (count.to_string(), if count == 1 { "" } else { "s" })
-    };
-    let qual = &sig.qualname;
-    if kwonly_given > 0 {
-        format!(
-            "{qual}() takes {takes} positional argument{plural} but {given} positional argument{} \
-             (and {kwonly_given} keyword-only argument{}) were given",
-            if given == 1 { "" } else { "s" },
-            if kwonly_given == 1 { "" } else { "s" }
-        )
-    } else {
-        format!(
-            "{qual}() takes {takes} positional argument{plural} but {given} {} given",
-            if given == 1 { "was" } else { "were" }
-        )
-    }
-}
-
-/// CPython's `missing_arguments`.
-fn missing_message(qual: &str, names: &[&str], kind: &str) -> String {
-    let quoted: Vec<String> = names.iter().map(|n| format!("'{n}'")).collect();
-    let list = match quoted.as_slice() {
-        [one] => one.clone(),
-        [a, b] => format!("{a} and {b}"),
-        [init @ .., last] => format!("{}, and {last}", init.join(", ")),
-        [] => String::new(),
-    };
-    format!(
-        "{qual}() missing {} required {kind} argument{}: {list}",
-        names.len(),
-        if names.len() == 1 { "" } else { "s" }
-    )
 }

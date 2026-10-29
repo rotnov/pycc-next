@@ -134,6 +134,7 @@ impl SourceSignatures {
 
     /// The carried parameter names of the compiled item `compiled` when a
     /// host call to it may bind keywords, else `None`. See the module doc.
+    #[cfg(test)]
     fn keyword_names(
         &self,
         module: &HirModule,
@@ -142,6 +143,20 @@ impl SourceSignatures {
         carried: usize,
         defaults: &[Option<HirExpr>],
     ) -> Option<Vec<String>> {
+        self.keyword_signature(module, compiled, has_receiver, carried, defaults)
+            .map(|(_, names)| names)
+    }
+
+    /// [`SourceSignatures::keyword_names`] with the receiver's source
+    /// spelling, `None` for an item without a receiver.
+    fn keyword_signature(
+        &self,
+        module: &HirModule,
+        compiled: &str,
+        has_receiver: bool,
+        carried: usize,
+        defaults: &[Option<HirExpr>],
+    ) -> Option<(Option<String>, Vec<String>)> {
         // A receiver-exact inherited copy (#1337, D-254) is compiled from
         // its origin's source, so it binds against the origin's `def`.
         let source = inherited::source_item(module, compiled);
@@ -151,7 +166,12 @@ impl SourceSignatures {
         (signature.bindable
             && signature.names.len() == carried + receiver
             && signature.defaults == carried_defaults)
-            .then(|| signature.names[receiver..].to_vec())
+            .then(|| {
+                (
+                    signature.names[..receiver].first().cloned(),
+                    signature.names[receiver..].to_vec(),
+                )
+            })
     }
 }
 
@@ -162,13 +182,17 @@ pub(crate) fn bind_keyword_names(
     exports: &mut [ExtExport],
 ) {
     for export in exports {
-        export.keyword_names = signatures.keyword_names(
+        let bound = signatures.keyword_signature(
             module,
             &export.name,
             export.receiver != ExtReceiver::None,
             export.params.len(),
             &export.defaults,
         );
+        (export.keyword_receiver, export.keyword_names) = match bound {
+            Some((receiver, names)) => (receiver, Some(names)),
+            None => (None, None),
+        };
     }
 }
 
@@ -180,8 +204,12 @@ pub(crate) fn bind_ctor_keyword_names(
     ctors: &mut [ExtCtor],
 ) {
     for ctor in ctors {
-        ctor.keyword_names =
-            signatures.keyword_names(module, &ctor.name, true, ctor.params.len(), &ctor.defaults);
+        let bound =
+            signatures.keyword_signature(module, &ctor.name, true, ctor.params.len(), &ctor.defaults);
+        (ctor.keyword_receiver, ctor.keyword_names) = match bound {
+            Some((receiver, names)) => (receiver, Some(names)),
+            None => (None, None),
+        };
     }
 }
 
@@ -213,7 +241,7 @@ pub(crate) fn c_name(name: &str) -> String {
 /// zero-parameter entry point still gets a one-element table, because C has
 /// no zero-length array; with no parameter every keyword is unexpected, so
 /// the element is never read.
-fn names_table(prefix: &str, names: &[String]) -> String {
+pub(crate) fn names_table(prefix: &str, names: &[String]) -> String {
     let entries = if names.is_empty() {
         "NULL".to_string()
     } else {
@@ -245,18 +273,20 @@ pub(crate) struct Prologue {
 pub(crate) fn fastcall_prologue(
     prefix: &str,
     source_name: &str,
+    receiver: Option<&str>,
     names: &[String],
     defaults: &[Option<HirExpr>],
 ) -> Prologue {
     let arity = names.len();
     let required = required(arity, defaults);
     let fills = super::defaults::keyword_default_fills(prefix, defaults, "        return NULL;\n");
+    let receiver = receiver.map_or_else(|| "NULL".to_string(), c_name);
     Prologue {
         before: names_table(prefix, names),
         body: format!(
             "    PyObject *kw_slots[{slots}];\n    \
              if (kwnames != NULL && PyTuple_Size(kwnames) != 0) {{\n        \
-             if (pycc_ext_kw_bind_fastcall(\"{source_name}\", pycc_ext_kwnames_{prefix}, \
+             if (pycc_ext_kw_bind_fastcall(\"{source_name}\", {receiver}, pycc_ext_kwnames_{prefix}, \
              {arity}, {required}, kw_slots, args, nargs, kwnames) < 0) {{\n            \
              return NULL;\n        }}\n{fills}        args = kw_slots;\n        \
              nargs = {arity};\n    }}\n",
@@ -272,18 +302,20 @@ pub(crate) fn fastcall_prologue(
 pub(crate) fn tp_init_prologue(
     prefix: &str,
     source_name: &str,
+    receiver: Option<&str>,
     names: &[String],
     defaults: &[Option<HirExpr>],
 ) -> Prologue {
     let arity = names.len();
     let required = required(arity, defaults);
     let fills = super::defaults::keyword_default_fills(prefix, defaults, "        return -1;\n");
+    let receiver = receiver.map_or_else(|| "NULL".to_string(), c_name);
     Prologue {
         before: names_table(prefix, names),
         body: format!(
             "    PyObject *kw_slots[{slots}];\n    int kw_bound = 0;\n    \
              if (kwds != NULL && PyDict_Size(kwds) != 0) {{\n        \
-             if (pycc_ext_kw_bind_dict(\"{source_name}\", pycc_ext_kwnames_{prefix}, \
+             if (pycc_ext_kw_bind_dict(\"{source_name}\", {receiver}, pycc_ext_kwnames_{prefix}, \
              {arity}, {required}, kw_slots, args, kwds) < 0) {{\n            \
              return -1;\n        }}\n{fills}        kw_bound = 1;\n    }}\n",
             slots = arity.max(1),

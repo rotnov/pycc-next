@@ -47,6 +47,13 @@ use std::path::{Path, PathBuf};
 /// one translation unit.
 /// Only the tests read it whole; a build compiles the two units
 /// [`shim_sources`] derives from these fragments (`shim_split`).
+/// Placeholder parameter names `a0`, `a1`, ... for a hand-built export in a
+/// test, one per parameter type.
+#[cfg(test)]
+pub(crate) fn test_param_names(params: &[Ty]) -> Vec<String> {
+    (0..params.len()).map(|index| format!("a{index}")).collect()
+}
+
 #[cfg(test)]
 pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/bridge.c"),

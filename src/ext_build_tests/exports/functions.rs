@@ -24,10 +24,12 @@ fn every_public_carriable_module_level_function_is_exported_in_source_order() {
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: vec!["x".to_string()],
                 params: vec![Ty::Int],
                 param_writable: vec![false; 1],
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             ExtExport {
                 defaults: Vec::new(),
@@ -36,10 +38,12 @@ fn every_public_carriable_module_level_function_is_exported_in_source_order() {
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: crate::ext_build::test_param_names(&Vec::new()),
                 params: Vec::new(),
                 param_writable: Vec::new(),
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             ExtExport {
                 defaults: Vec::new(),
@@ -48,10 +52,12 @@ fn every_public_carriable_module_level_function_is_exported_in_source_order() {
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: vec!["a".to_string(), "b".to_string()],
                 params: vec![Ty::Int, Ty::Int],
                 param_writable: vec![false; 2],
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             ExtExport {
                 defaults: Vec::new(),
@@ -60,10 +66,12 @@ fn every_public_carriable_module_level_function_is_exported_in_source_order() {
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: vec!["factor".to_string()],
                 params: vec![Ty::Float],
                 param_writable: vec![false; 1],
                 return_ty: Ty::Float,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             ExtExport {
                 defaults: Vec::new(),
@@ -72,10 +80,12 @@ fn every_public_carriable_module_level_function_is_exported_in_source_order() {
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: vec!["flag".to_string()],
                 params: vec![Ty::Bool],
                 param_writable: vec![false; 1],
                 return_ty: Ty::Bool,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             ExtExport {
                 defaults: Vec::new(),
@@ -84,10 +94,12 @@ fn every_public_carriable_module_level_function_is_exported_in_source_order() {
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: vec!["x".to_string()],
                 params: vec![Ty::Int],
                 param_writable: vec![false; 1],
                 return_ty: Ty::None,
                 keyword_names: None,
+                keyword_receiver: None,
             },
         ]
     );
@@ -123,10 +135,12 @@ fn a_private_name_a_method_and_a_monomorphized_specialization_are_not_exports() 
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&Vec::new()),
             params: Vec::new(),
             param_writable: Vec::new(),
             return_ty: Ty::Int,
             keyword_names: None,
+            keyword_receiver: None,
         }]
     );
 }
@@ -153,10 +167,12 @@ fn a_rebound_public_name_is_exported_once_with_the_last_definition_s_signature()
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: crate::ext_build::test_param_names(&Vec::new()),
                 params: Vec::new(),
                 param_writable: Vec::new(),
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             // Definition order, last definition's signature: the entry keeps
             // the position the name first claimed.
@@ -167,10 +183,12 @@ fn a_rebound_public_name_is_exported_once_with_the_last_definition_s_signature()
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: vec!["a".to_string(), "b".to_string()],
                 params: vec![Ty::Int, Ty::Int],
                 param_writable: vec![false; 2],
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             ExtExport {
                 defaults: Vec::new(),
@@ -179,10 +197,12 @@ fn a_rebound_public_name_is_exported_once_with_the_last_definition_s_signature()
                 method: None,
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::None,
+                param_names: crate::ext_build::test_param_names(&Vec::new()),
                 params: Vec::new(),
                 param_writable: Vec::new(),
                 return_ty: Ty::Int,
                 keyword_names: None,
+                keyword_receiver: None,
             },
         ]
     );
@@ -262,10 +282,12 @@ fn a_bool_signature_is_carried_rather_than_gapped_and_keeps_its_own_slot() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: vec!["b".to_string()],
             params: vec![Ty::Bool],
             param_writable: vec![false; 1],
             return_ty: Ty::Bool,
             keyword_names: None,
+            keyword_receiver: None,
         }]
     );
 }
@@ -287,10 +309,12 @@ fn a_str_signature_is_carried_rather_than_gapped_in_either_position() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: vec!["s".to_string()],
             params: vec![Ty::Str],
             param_writable: vec![false; 1],
             return_ty: Ty::Str,
             keyword_names: None,
+            keyword_receiver: None,
         }]
     );
 }
@@ -317,10 +341,12 @@ fn a_tuple_signature_is_carried_rather_than_gapped_in_either_position() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: vec!["t".to_string()],
             params: vec![Ty::Tuple(Box::new(vec![Ty::Int, Ty::Float]))],
             param_writable: vec![false; 1],
             return_ty: Ty::Tuple(Box::new(vec![Ty::Float, Ty::Bool])),
             keyword_names: None,
+            keyword_receiver: None,
         }]
     );
 }

@@ -281,6 +281,7 @@ fn ctor_descriptor(module: &HirModule, class: &str) -> Option<ExtCtor> {
         class: class.to_string(),
         name: name.to_string(),
         params: carried.iter().map(|(_, ty)| ty.clone()).collect(),
+        param_names: carried.iter().map(|(name, _)| name.clone()).collect(),
         param_writable: carried
             .iter()
             .map(|(param_name, ty)| {
@@ -291,6 +292,7 @@ fn ctor_descriptor(module: &HirModule, class: &str) -> Option<ExtCtor> {
         slot_names: instance_slot_names(module, class_def),
         slot_kinds: instance_slot_kinds(module, class_def),
         keyword_names: None,
+        keyword_receiver: None,
         vararg: carried
             .split_last()
             .filter(|((param, ty), _)| *ty == Ty::Object && marks_vararg(body, param))
@@ -397,6 +399,9 @@ pub(crate) struct ExtCtor {
     /// `pycc_rt_instance_new`. Their count is the arity `tp_init` checks
     /// `PyTuple_Size(args)` against.
     pub(crate) params: Vec<Ty>,
+    /// The carried parameters' names, parallel to [`ExtCtor::params`]:
+    /// what CPython's argument-binding `TypeError`s name (#10).
+    pub(crate) param_names: Vec<String>,
     /// Per-parameter writability, parallel to [`ExtCtor::params`] and
     /// meaning exactly what [`ExtExport::param_writable`] means.
     ///
@@ -421,6 +426,8 @@ pub(crate) struct ExtCtor {
     /// keywords (#1461), meaning exactly what [`ExtExport::keyword_names`]
     /// means; `None` keeps the hand-written keyword refusal.
     pub(crate) keyword_names: Option<Vec<String>>,
+    /// What [`ExtExport::keyword_receiver`] means: `__init__`'s receiver.
+    pub(crate) keyword_receiver: Option<String>,
     /// v0.9: the last parameter is the constructor's `*args` (a CPython
     /// object in non-strict mode): `Py_tp_init` passes it the tuple of the
     /// positional arguments past the others, whose names (`Some`) word the

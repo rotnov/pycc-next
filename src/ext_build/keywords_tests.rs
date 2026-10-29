@@ -124,7 +124,7 @@ fn an_unparsable_or_silent_source_enables_nothing() {
     // own does; no compiled export does.
     let exports_only = inc.replace("METH_VARARGS | METH_KEYWORDS | METH_CLASS", "");
     assert!(!exports_only.contains("METH_KEYWORDS"), "{inc}");
-    assert!(!inc.contains("kwnames"), "{inc}");
+    assert!(!inc.contains("PyObject *kwnames"), "{inc}");
     assert!(!inc.contains("kw_slots"), "{inc}");
 }
 
@@ -339,9 +339,10 @@ fn a_keyword_enabled_constructor_reads_the_bound_array_once_a_keyword_was_given(
     );
     assert!(
         inc.contains(
-            "    if ((kw_bound ? 2 : PyTuple_Size(args)) != 2) {\n        \
-             PyErr_Format(PyExc_TypeError, \"Exact.__init__() takes exactly 2 arguments \
-             (%zd given)\", (kw_bound ? 2 : PyTuple_Size(args)));\n        return -1;\n    }\n"
+            "    if ((kw_bound ? 2 : PyTuple_Size(args)) < 2 || \
+             (kw_bound ? 2 : PyTuple_Size(args)) > 2) {\n        \
+             pycc_ext_arity_error(\"Exact.__init__\", pycc_ext_kwnames_init_Exact, 2, 2, 1, \
+             (kw_bound ? 2 : PyTuple_Size(args)));\n        return -1;\n    }\n"
         ),
         "{inc}"
     );
@@ -359,7 +360,7 @@ fn a_keyword_enabled_constructor_reads_the_bound_array_once_a_keyword_was_given(
 #[test]
 fn the_tp_init_prologue_fails_with_minus_one() {
     let defaults = [None, Some(HirExpr::IntLiteral(4))];
-    let prologue = tp_init_prologue("init_C", "C.__init__", &strings(&["a", "b"]), &defaults);
+    let prologue = tp_init_prologue("init_C", "C.__init__", Some("self"), &strings(&["a", "b"]), &defaults);
     assert!(
         prologue.body.contains(
             "            if (kw_slots[1] == NULL) {\n                return -1;\n            }\n        }\n        \

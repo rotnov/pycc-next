@@ -666,16 +666,29 @@ fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
     // same call to the uncompiled `__init__`; every other constructor keeps
     // the hand-written refusal below byte for byte.
     let prologue = ctor.keyword_names.as_deref().map(|names| {
-        keywords::tp_init_prologue(&default_prefix, source_name, names, &ctor.defaults)
+        keywords::tp_init_prologue(
+            &default_prefix,
+            source_name,
+            ctor.keyword_receiver.as_deref(),
+            names,
+            &ctor.defaults,
+        )
     });
     let (count, item): (String, &dyn Fn(usize) -> String) = match &prologue {
         Some(prologue) => {
             out.push_str(&prologue.before);
             (keywords::tp_init_count(arity), &keywords::tp_init_item)
         }
-        None => ("PyTuple_Size(args)".to_string(), &|index| {
-            format!("PyTuple_GetItem(args, {index})")
-        }),
+        None => {
+            // #10: the parameter names the arity message reads; a `*args`
+            // constructor binds through its own table instead.
+            if ctor.vararg.is_none() || ctor.defaults.iter().any(Option::is_some) {
+                out.push_str(&keywords::names_table(&default_prefix, &ctor.param_names));
+            }
+            ("PyTuple_Size(args)".to_string(), &|index| {
+                format!("PyTuple_GetItem(args, {index})")
+            })
+        }
     };
     out.push_str(&format!("extern void *fnptr_{symbol};\n"));
     out.push_str(&format!(
@@ -731,17 +744,12 @@ fn tp_init_c(ctor: &ExtCtor, defaults: &[String]) -> String {
             "        Py_DECREF(pycc_rest);\n        return -1;\n",
         ));
         out.push_str("    Py_DECREF(pycc_rest);\n");
-    } else if ctor.defaults.is_empty() {
-        out.push_str(&format!(
-            "    if ({count} != {arity}) {{\n        PyErr_Format(PyExc_TypeError, \
-             \"{source_name}() takes exactly {arity} argument{plural} (%zd given)\", \
-             {count});\n        return -1;\n    }}\n",
-            plural = if arity == 1 { "" } else { "s" },
-        ));
     } else {
-        out.push_str(&defaults::range_arity_check(
+        out.push_str(&defaults::arity_check(
             source_name,
             &default_prefix,
+            arity,
+            1,
             &ctor.defaults,
             &defaults::ArgSource {
                 count: &count,

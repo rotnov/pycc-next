@@ -340,11 +340,13 @@ fn compiled_setter(name: &str, class: &str, prop: &str, ty: Ty, ret: Ty) -> Prop
         method: Some(prop.to_string()),
         returns_buffer_slice: false,
         receiver: ExtReceiver::SelfInstance,
+        param_names: vec!["v".to_string()],
         params: vec![ty],
         param_writable: vec![false],
         defaults: Vec::new(),
         return_ty: ret,
         keyword_names: None,
+        keyword_receiver: None,
     }))
 }
 
@@ -486,11 +488,13 @@ fn a_property_is_described_where_it_wins_the_namespace_walk() {
                 method: Some("top".to_string()),
                 returns_buffer_slice: false,
                 receiver: ExtReceiver::SelfInstance,
+                param_names: crate::ext_build::test_param_names(&Vec::new()),
                 params: Vec::new(),
                 param_writable: Vec::new(),
                 defaults: Vec::new(),
                 return_ty: Ty::Object,
                 keyword_names: None,
+                keyword_receiver: None,
             },
             setter: PropertySetter::Refuse,
         }

@@ -19,10 +19,12 @@ fn scalar_export(name: &str) -> ExtExport {
         method: None,
         returns_buffer_slice: false,
         receiver: ExtReceiver::None,
+        param_names: crate::ext_build::test_param_names(&vec![Ty::Int]),
         params: vec![Ty::Int],
         param_writable: vec![false],
         return_ty: Ty::Int,
         keyword_names: None,
+        keyword_receiver: None,
     }
 }
 

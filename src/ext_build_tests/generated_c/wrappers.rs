@@ -33,10 +33,12 @@ fn a_nullary_export_declares_a_void_parameter_list_and_checks_its_arity() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&Vec::new()),
             params: Vec::new(),
             param_writable: Vec::new(),
             return_ty: Ty::Int,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(inc.contains("extern void *fnptr_answer;"), "{inc}");
@@ -45,7 +47,7 @@ fn a_nullary_export_declares_a_void_parameter_list_and_checks_its_arity() {
         "{inc}"
     );
     assert!(
-        inc.contains("takes exactly 0 arguments (%zd given)"),
+        inc.contains("if (nargs < 0 || nargs > 0) {"),
         "{inc}"
     );
     assert!(
@@ -65,14 +67,16 @@ fn a_unary_export_uses_the_singular_arity_message_and_unpacks_one_argument() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Int]),
             params: vec![Ty::Int],
             param_writable: vec![false; 1],
             return_ty: Ty::Int,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
-        inc.contains("takes exactly 1 argument (%zd given)"),
+        inc.contains("if (nargs < 1 || nargs > 1) {"),
         "{inc}"
     );
     assert!(
@@ -100,14 +104,16 @@ fn a_binary_export_unpacks_each_argument_at_its_own_index() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Int, Ty::Int]),
             params: vec![Ty::Int, Ty::Int],
             param_writable: vec![false; 2],
             return_ty: Ty::Int,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
-        inc.contains("takes exactly 2 arguments (%zd given)"),
+        inc.contains("if (nargs < 2 || nargs > 2) {"),
         "{inc}"
     );
     assert!(
@@ -138,10 +144,12 @@ fn every_wrapper_checks_the_runtime_exception_flag_before_packing_a_result() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Int]),
             params: vec![Ty::Int],
             param_writable: vec![false; 1],
             return_ty: Ty::Int,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     let check = inc
@@ -167,10 +175,12 @@ fn a_float_export_carries_a_double_through_every_slot_of_the_wrapper() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Float]),
             params: vec![Ty::Float],
             param_writable: vec![false; 1],
             return_ty: Ty::Float,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(inc.contains("    double result;"), "{inc}");
@@ -202,10 +212,12 @@ fn a_bool_export_uses_a_one_byte_c_type_to_match_the_compiled_i8_slot() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Bool]),
             params: vec![Ty::Bool],
             param_writable: vec![false; 1],
             return_ty: Ty::Bool,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(inc.contains("    char result;"), "{inc}");
@@ -236,10 +248,12 @@ fn a_none_returning_export_casts_to_void_and_declares_no_result_at_all() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Int]),
             params: vec![Ty::Int],
             param_writable: vec![false; 1],
             return_ty: Ty::None,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     // LLVM emits a `None` return as `void`, so there is nothing to hold and
@@ -264,10 +278,12 @@ fn a_mixed_signature_gives_each_slot_its_own_c_type_and_unpack_helper() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Int, Ty::Float, Ty::Bool]),
             params: vec![Ty::Int, Ty::Float, Ty::Bool],
             param_writable: vec![false; 3],
             return_ty: Ty::Float,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(
@@ -306,10 +322,12 @@ fn a_none_returning_wrapper_checks_the_exception_flag_before_returning_none() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Int]),
             params: vec![Ty::Int],
             param_writable: vec![false; 1],
             return_ty: Ty::None,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     let check = inc
@@ -340,10 +358,12 @@ fn a_str_export_carries_an_opaque_pointer_in_both_positions() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Str]),
             params: vec![Ty::Str],
             param_writable: vec![false; 1],
             return_ty: Ty::Str,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     assert!(inc.contains("    void * result;\n"), "{inc}");
@@ -376,10 +396,12 @@ fn a_str_unpack_failure_releases_every_str_argument_already_taken() {
             method: None,
             returns_buffer_slice: false,
             receiver: ExtReceiver::None,
+            param_names: crate::ext_build::test_param_names(&vec![Ty::Str, Ty::Str]),
             params: vec![Ty::Str, Ty::Str],
             param_writable: vec![false; 2],
             return_ty: Ty::Str,
             keyword_names: None,
+            keyword_receiver: None,
         }],
     );
     // The first argument's own failure branch owes nothing -- nothing has

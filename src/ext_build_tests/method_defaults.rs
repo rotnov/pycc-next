@@ -72,8 +72,8 @@ fn a_defaulted_method_wrapper_accepts_the_shorter_argument_counts() {
     let inc = companion(MODULE);
     assert!(
         inc.contains(
-            "    if (nargs < 1 || nargs > 2) {\n        PyErr_Format(PyExc_TypeError, \
-             \"S.feed() takes from 1 to 2 arguments (%zd given)\", nargs);\n"
+            "    if (nargs < 1 || nargs > 2) {\n        pycc_ext_arity_error(\"S.feed\", \
+             pycc_ext_kwnames_wrap_0m1_S4_feed, 2, 1, 1, nargs);\n"
         ),
         "{inc}"
     );
@@ -100,8 +100,8 @@ fn a_defaulted_constructor_accepts_the_shorter_argument_counts() {
     assert!(
         inc.contains(
             "    if (PyTuple_Size(args) < 1 || PyTuple_Size(args) > 2) {\n        \
-             PyErr_Format(PyExc_TypeError, \"S.__init__() takes from 1 to 2 arguments \
-             (%zd given)\", PyTuple_Size(args));\n        return -1;\n    }\n"
+             pycc_ext_arity_error(\"S.__init__\", pycc_ext_kwnames_init_S, 2, 1, 1, \
+             PyTuple_Size(args));\n        return -1;\n    }\n"
         ),
         "{inc}"
     );
@@ -126,7 +126,9 @@ fn a_defaulted_constructor_accepts_the_shorter_argument_counts() {
 fn a_method_without_defaults_keeps_the_exact_arity_check() {
     let inc = companion(MODULE);
     assert!(
-        inc.contains("\"S.plain() takes exactly 1 argument (%zd given)\""),
+        inc.contains(
+            "pycc_ext_arity_error(\"S.plain\", pycc_ext_kwnames_wrap_0m1_S5_plain, 1, 1, 1, nargs);"
+        ),
         "{inc}"
     );
     let plain = companion(
@@ -134,11 +136,11 @@ fn a_method_without_defaults_keeps_the_exact_arity_check() {
          \x20   def get(self) -> int:\n        return self.n\n",
     );
     assert!(
-        plain.contains("\"P.__init__() takes exactly 1 argument (%zd given)\""),
+        plain.contains("pycc_ext_arity_error(\"P.__init__\", pycc_ext_kwnames_init_P, 1, 1, 1,"),
         "{plain}"
     );
     assert!(!plain.contains("pycc_ext_default_"), "{plain}");
-    assert!(!plain.contains("takes from"), "{plain}");
+    assert!(!plain.contains("PyObject *v1"), "{plain}");
 }
 
 #[test]
@@ -212,7 +214,7 @@ fn an_unannotated_default_generates_its_annotated_twin_s_companion() {
         // (`pycc_ast::ext_signatures`), the receiver first.
         "pycc_ext_unpack_bool(args[1], \"P.copy\", 1, ",
         // A module-level export keeps its exact arity (#1194).
-        "\"f() takes exactly 1 argument (%zd given)\"",
+        "pycc_ext_arity_error(\"f\", pycc_ext_kwnames_wrap__pycc_sig_f, 1, 1, 0, nargs);",
     ] {
         assert!(unannotated.contains(needle), "{needle}\n{unannotated}");
     }
