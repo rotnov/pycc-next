@@ -8,9 +8,7 @@
 //! [`DRIVER`] runs against the `--ext` artifact of [`MODULE`] and against
 //! the same source imported as plain Python, so CPython is the oracle for
 //! every line. The deliberate deviations are pinned separately: an `int`
-//! past 64 bits raises `OverflowError` at a narrowed read, a compiled-class
-//! carrier whose `__init__` never ran raises `TypeError` where CPython
-//! raises `AttributeError`, an object whose `__class__` property answers
+//! past 64 bits raises `OverflowError` at a narrowed read, an object whose `__class__` property answers
 //! `int` or a compiled class passes the guard but raises `TypeError` at the
 //! narrowed read, a `str` subclass handed to a native `str`
 //! parameter or flowing through a native expression (a conditional
@@ -408,8 +406,6 @@ print(type(m.pick(s, True)).__name__, m.pick(s, True) is s, type(m.annotated(s))
 
 /// The deliberate deviations, each against CPython's own answer (an `int`
 /// past 64 bits is no longer one: it narrows to a heap bigint, #1040):
-/// - a carrier whose `__init__` never ran has no native instance to hand
-///   over;
 /// - an object whose `__class__` property answers `int` or a compiled class
 ///   passes the guard but has no native representation, so the narrowed
 ///   read raises `TypeError` where CPython runs the guarded body on it;
@@ -439,7 +435,7 @@ fn the_narrowed_read_deviations_are_the_documented_ones() {
     assert_eq!(
         stdout_of(&compiled),
         "1180591620717411303425\n\
-         TypeError the narrowed narrowing.Token object is uninitialized (its __init__ never ran)\n\
+         AttributeError 'Token' object has no attribute 'value'\n\
          TypeError isinstance() held for a 'FakeInt' object, but only an int has the native \
          representation the narrowed read needs\n\
          TypeError narrowed object must be a compiled narrowing.Token instance, not FakeToken\n\

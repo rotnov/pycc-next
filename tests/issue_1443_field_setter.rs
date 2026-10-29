@@ -225,7 +225,7 @@ attempt(store(c, 'leaf', m.Leaf.__new__(m.Leaf)))
 attempt(store(c, 'leaf', m.Other(1)))
 attempt(store(c, 'xs', [1]))
 attempt(store(c, 'zzz', 1))
-print(c.n, c.f, c.b, c.s, c.leaf.k)
+print(c.n, c.f, c.b, c.s, getattr(c.leaf, 'k', 'unassigned'))
 attempt(store(m.Conf.__new__(m.Conf), 'n', 1))
 o = object()
 c = m.Conf(3, 1.5, True, "ab", o, m.Leaf(1))
@@ -245,12 +245,12 @@ const EXT_ONLY_OUT: &str = "TypeError Conf.n() argument 1: 'str' object cannot b
     TypeError Conf.b() argument 1: 'int' object cannot be interpreted as a bool\n\
     TypeError Conf.s() argument 1: 'int' object cannot be interpreted as a str\n\
     TypeError Conf.leaf() argument 1 must be pycc_field_set_mod.Leaf, not object\n\
-    TypeError Conf.leaf() argument 1: the pycc_field_set_mod.Leaf object is uninitialized (its __init__ never ran)\n\
+    ok\n\
     TypeError Conf.leaf() argument 1 must be pycc_field_set_mod.Leaf, not pycc_field_set_mod.Other\n\
     AttributeError 'Conf' object has no attribute 'xs' and no __dict__ for setting new attributes\n\
     AttributeError 'Conf' object has no attribute 'zzz' and no __dict__ for setting new attributes\n\
-    1180591620717411303424 1.5 True ab 1\n\
-    AttributeError cannot set 'n' on a 'Conf' object whose __init__ never ran\n\
+    1180591620717411303424 1.5 True ab unassigned\n\
+    ok\n\
     -1\n\
     -1\n";
 
