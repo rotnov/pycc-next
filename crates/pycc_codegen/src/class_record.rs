@@ -177,13 +177,22 @@ fn resolve<'c>(
     by_name: &HashMap<&str, &'c pycc_hir::HirClassDef>,
     functions: &Functions<'_, '_>,
 ) -> Option<(&'c str, String)> {
+    // The first class of the MRO binding the name, in any of its
+    // namespaces, wins: a static or class method, a property, a class
+    // attribute or an instance attribute there is no instance method, so
+    // the entry stays null and the call goes through CPython.
     let (owner, mangled) = class.mro.iter().find_map(|entry| {
         let def = by_name.get(entry.as_str())?;
-        def.methods
-            .iter()
-            .find(|(name, _)| name == method)
-            .map(|(_, mangled)| (def.name.as_str(), mangled.clone()))
-    })?;
+        if let Some((_, mangled)) = def.methods.iter().find(|(name, _)| name == method) {
+            return Some(Some((def.name.as_str(), mangled.clone())));
+        }
+        let other = def.static_methods.iter().any(|(name, _)| name == method)
+            || def.class_methods.iter().any(|(name, _)| name == method)
+            || def.properties.iter().any(|prop| prop.name == method)
+            || def.class_attrs.iter().any(|(name, _, _)| name == method)
+            || def.attrs.iter().any(|(name, _)| name == method);
+        other.then_some(None)
+    })??;
     let class_of = |name: &str| by_name.get(name).copied();
     let copy = pycc_hir::inherited_copy_name(class, owner, &mangled, &class_of)
         .filter(|copy| owner != class.name && (functions.value)(copy).is_some());

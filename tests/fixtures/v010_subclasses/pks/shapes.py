@@ -33,6 +33,18 @@ class Rect(Square):
         return "R" + super().describe()
 
 
+class Fixed(Shape):
+    """Overrides as a static and a class method: `base`'s calls find them."""
+
+    @staticmethod
+    def kind() -> str:
+        return "fixed"
+
+    @classmethod
+    def factor(cls) -> int:
+        return 7
+
+
 class Doubled(Plain):
     def value(self) -> int:
         return 2 * self.n

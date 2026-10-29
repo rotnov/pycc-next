@@ -133,6 +133,17 @@ impl SourceSignatures {
         signature.names.first().cloned()
     }
 
+    /// Adds `other`'s signatures (the sibling classes' of a package
+    /// member, whose names are reserved: none is the module's own).
+    pub(crate) fn extend(&mut self, other: Self) {
+        for (key, signature) in other.by_name {
+            self.by_name
+                .entry(key)
+                .and_modify(|held| *held = None)
+                .or_insert(signature);
+        }
+    }
+
     fn insert(&mut self, key: String, parameters: &Parameters) {
         self.by_name
             .entry(key)

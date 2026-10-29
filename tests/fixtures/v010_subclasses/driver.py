@@ -46,6 +46,9 @@ for obj in (sq, r, cube):
     print(type(p).__name__, p.describe(), base.describe(p), p.side, p.size, p is obj)
 d = shapes.Doubled(5)
 print(d.value(), base.Plain.value(d), isinstance(d, base.Plain))
+print(shapes.Doubled(n=4).value(), shapes.Square(name="kw", side=2).describe())
+f = shapes.Fixed("f", 2)
+print(f.describe(), base.describe(f), base.weigh(f), shapes.kinds(f), f.kind(), f.factor())
 
 
 class Tri(shapes.Square):

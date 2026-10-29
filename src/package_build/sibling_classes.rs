@@ -73,6 +73,16 @@ static DENIED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 /// The sibling classes the last [`stubs`] added.
 static ADDED: Mutex<Vec<Added>> = Mutex::new(Vec::new());
 
+/// The source of the sibling classes added to the module being built, which
+/// the `--ext` boundary reads their constructors' keyword names from
+/// (`ext_build::SourceSignatures`).
+static SOURCES: Mutex<String> = Mutex::new(String::new());
+
+/// The source of the sibling classes the module being built holds.
+pub(crate) fn stub_sources() -> String {
+    SOURCES.lock().expect("the sources lock").clone()
+}
+
 /// The functions (by [`function_key`]) whose annotations read no class
 /// natively ([`deny_failures`]).
 static DENIED_FUNCTIONS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
@@ -305,11 +315,16 @@ fn stub_source(class: &InterfaceClass) -> String {
                     pycc_hir::SIBLING_CLASS_PREFIX
                 ));
             }
+            // The other module's own parameter names when its constructor
+            // binds keywords, so an inherited constructor binds them too.
             let params: Vec<String> = init
                 .params
                 .iter()
                 .enumerate()
-                .map(|(i, ty)| format!(", {PARAM_PREFIX}{i}: {}", python_ty(ty)))
+                .map(|(i, ty)| match &init.names {
+                    Some(names) => format!(", {}: {}", names[i], python_ty(ty)),
+                    None => format!(", {PARAM_PREFIX}{i}: {}", python_ty(ty)),
+                })
                 .collect();
             out.push_str(&format!(
                 "class {stub}:\n    def __init__(self{}) -> None:\n",
@@ -433,6 +448,8 @@ pub(super) fn stubs(member: &Member) -> Vec<(String, ClassRef, String)> {
 /// Records where the sibling classes `added` landed in the module
 /// compiled, `body`.
 pub(super) fn record(body: &[Stmt], added: &[(String, ClassRef, String)]) {
+    *SOURCES.lock().expect("the sources lock") =
+        added.iter().map(|(_, _, source)| source.as_str()).collect();
     let mut out = ADDED.lock().expect("the added lock");
     out.clear();
     for stmt in body {
@@ -454,6 +471,7 @@ pub(super) fn record(body: &[Stmt], added: &[(String, ClassRef, String)]) {
 /// Forgets the sibling classes of an earlier module (nothing is added).
 pub(super) fn clear() {
     ADDED.lock().expect("the added lock").clear();
+    SOURCES.lock().expect("the sources lock").clear();
     FUNCTIONS.lock().expect("the functions lock").clear();
     pycc_hir::set_sibling_class_names(Vec::new());
     pycc_hir::set_sibling_bases(Vec::new());

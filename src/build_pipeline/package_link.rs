@@ -44,6 +44,7 @@ pub(super) fn write_interface(
         &plan.published,
         &plan.carriers,
         &|name| ext_build::has_defaults(typed_hir, name),
+        &|name| plan.init_names.get(name).cloned(),
     );
     write_ext_source(
         &obj_path.with_file_name(package_build::INTERFACE_HEADER_NAME),

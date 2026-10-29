@@ -33,7 +33,7 @@ pub(crate) use interface::{INTERFACE_HEADER_NAME, INTERFACE_NAME, Interface, con
 pub(crate) use sibling_classes::{
     c_declarations as sibling_c_declarations, c_unpack_instance as sibling_unpack_instance,
     codegen_classes as sibling_classes, lifted_annotation as sibling_lifted_annotation,
-    sibling_base,
+    sibling_base, stub_sources,
     verify as verify_sibling_classes, without_stubs as without_sibling_classes,
 };
 pub(crate) use siblings::{
