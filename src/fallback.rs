@@ -460,12 +460,7 @@ impl Plan {
             // A type variable (`T = TypeVar("T")`), which compiled code only
             // records at compile time (`pycc_hir`'s `type_var`): CPython
             // makes the module's `T`, which `Generic[T]` and Python code read.
-            Stmt::Assign(assign)
-                if matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)])
-                    && matches!(&*assign.value, pycc_ast::Expr::Call(call)
-                        if matches!(&*call.func, pycc_ast::Expr::Name(f) if f.id.as_str() == "TypeVar")
-                            || matches!(&*call.func, pycc_ast::Expr::Attribute(a) if a.attr.as_str() == "TypeVar")) =>
-            {
+            Stmt::Assign(_) if self.type_var_assignment(index).is_some() => {
                 return self.binds_alone(index);
             }
             Stmt::Assign(assign) => {
@@ -495,6 +490,26 @@ impl Plan {
             return false;
         }
         self.binds_alone(index)
+    }
+
+    /// The callee of statement `index` when it assigns a type variable to a
+    /// name (`T = TypeVar("T")`, `T = typing.TypeVar("T")`): `Some(Some(name))`
+    /// for a bare name, `Some(None)` for an attribute.
+    pub(super) fn type_var_assignment(&self, index: usize) -> Option<Option<&str>> {
+        let Stmt::Assign(assign) = &self.ast[index] else {
+            return None;
+        };
+        if !matches!(assign.targets.as_slice(), [pycc_ast::Expr::Name(_)]) {
+            return None;
+        }
+        let pycc_ast::Expr::Call(call) = &*assign.value else {
+            return None;
+        };
+        match &*call.func {
+            pycc_ast::Expr::Name(f) if f.id.as_str() == "TypeVar" => Some(Some(f.id.as_str())),
+            pycc_ast::Expr::Attribute(a) if a.attr.as_str() == "TypeVar" => Some(None),
+            _ => None,
+        }
     }
 
     /// Whether statement `index` imports a project module (a relative
