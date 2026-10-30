@@ -98,6 +98,13 @@ def asks_lifted():
 
 print("lifted", asks_lifted())
 box = m.Lifted(6)
+def asks_nested():
+    inner = m.Outer.Inner()
+    return (inner.where(), inner.twice(4), m.Outer().where(), m.Outer.static_where(),
+            m.Outer.Inner.where(inner, 0))
+
+
+print("nested", asks_nested())
 print("lifted bind", box.bind(1), box.bind(1, 5, 6, 7, c=8, z=9), box.bind(a=4, b=0))
 print("lifted call", m.Lifted.bind(box, *[1, 2, 3], **{"c": 0}), m.Lifted.where(box, 0))
 for bad in ((), (1,), (1, 2)):
