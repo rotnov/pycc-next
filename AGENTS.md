@@ -18,6 +18,14 @@ default; `--non-strict` falls back to `PyObject*` (CPython C API) for unprovable
   `macos`, `windows` — are green on its head and review threads are answered. Several
   agents work in parallel on separate branches; rebase or merge `main` into your branch
   when it conflicts. If `main` turns red after a merge, fixing it is the next PR.
+- CI runs on pull requests only, not again on `main` after a merge. So before merging, the
+  green run must be against the current `main`: if `main` moved since that run, merge
+  `main` into the branch and wait for CI again. A PR that changes only prose (`blog/`,
+  `docs/` except DEVIATIONS.md and DIAGNOSTICS.md, AGENTS.md, CLAUDE.md, `.claude/`) skips
+  the four test jobs: it merges once the `changes` job is green and they show as skipped.
+- Review findings (Codex and others): collect every finding on the current head, fix
+  them all locally, run the local gate once, then push once. Never push one fix per
+  finding; each push costs a full CI run (~35 min) and a new review.
 - Wait on long commands by running them in the foreground (or as a tracked background
   task), never with `until ! pgrep -f <pattern>` loops: the pattern matches the loop itself.
 - Durable artifacts in English.

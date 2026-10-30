@@ -1,6 +1,7 @@
 name: ci
 on:
-  push: { branches: [main] }
+  # Pull requests only: a merge to `main` is not tested again (AGENTS.md: merge only after
+  # a green run against the current `main`).
   pull_request:
   # A manual run (e.g. of a branch); `windows_only` skips the Linux and macOS
   # jobs, to iterate on the Windows job alone.
@@ -9,6 +10,28 @@ on:
       windows_only: { type: boolean, default: false, description: "Run only the Windows job" }
 permissions: { contents: read }
 jobs:
+  # Docs-only pull requests skip the heavy jobs: `code` is false when every changed file
+  # is prose that no test, build or package reads (blog, agent instructions, docs/ other
+  # than DEVIATIONS.md and DIAGNOSTICS.md, which tests read). README.md and
+  # CHANGELOG.md go into the release archives, so they still run everything.
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with: { fetch-depth: 0 }
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != pull_request ]; then echo code=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          git diff --name-only --no-renames "$(git merge-base "$BASE" "$HEAD")" "$HEAD" > changed.txt
+          code=$(awk '/^docs\/(DEVIATIONS|DIAGNOSTICS)\.md$/ || !/^(blog\/|docs\/|\.claude\/|AGENTS\.md$|CLAUDE\.md$)/' changed.txt)
+          if [ -n "$code" ]; then echo code=true; else echo code=false; fi >> "$GITHUB_OUTPUT"
+          echo "code-relevant files: ${code:-none}"
   test:
     # Linux x86_64 and aarch64 (GitHub's arm64 runner); the same LLVM, tests
     # and corpus gate on both.
@@ -16,7 +39,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm]
-    if: ${{ !inputs.windows_only }}
+    needs: changes
+    if: ${{ !inputs.windows_only && needs.changes.outputs.code == 'true' }}
     runs-on: ${{ matrix.os }}
     env: { LLVM_SYS_221_PREFIX: /usr/lib/llvm-22 }
     steps:
@@ -132,7 +156,8 @@ jobs:
   macos:
     # Apple silicon, macOS 26 -- the newest arm64 image GitHub hosts; macOS 26
     # is also the minimum the binaries target (README).
-    if: ${{ !inputs.windows_only }}
+    needs: changes
+    if: ${{ !inputs.windows_only && needs.changes.outputs.code == 'true' }}
     runs-on: macos-26
     env: { MACOSX_DEPLOYMENT_TARGET: "26.0" }
     steps:
@@ -180,6 +205,8 @@ jobs:
           if-no-files-found: ignore
   windows:
     # x86_64 Windows with the MSVC toolchain (ROADMAP v0.7 accept 1).
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: windows-2025
     timeout-minutes: 240
     # Git Bash, so the same scripts as on Linux and macOS run here.
