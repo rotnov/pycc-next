@@ -20,10 +20,14 @@ fn interface(dirs: &[PathBuf], index: usize) -> PathBuf {
     dirs[index].join(crate::package_build::INTERFACE_NAME)
 }
 
-/// The members in the order they are started when ready: the ones the most
-/// other members wait for, directly or through others, first, so no member
-/// that others wait for queues behind one nothing waits for.
-fn by_priority(producers: &[Vec<usize>]) -> Vec<usize> {
+/// The members in the order they are started when ready: by the longest
+/// chain of work that starts only after each -- its own estimated cost
+/// (`costs`, its source's size) and the longest such chain among the
+/// members reading its interface -- longest first, so the members others
+/// wait for start before the ones nothing waits for, and a large member
+/// does not start last and finish alone while the other jobs idle. Ties:
+/// the larger member first, then the earlier.
+fn by_priority(producers: &[Vec<usize>], costs: &[u64]) -> Vec<usize> {
     let count = producers.len();
     // waiters[j]: the members reading j's interface.
     let mut waiters = vec![Vec::new(); count];
@@ -32,24 +36,41 @@ fn by_priority(producers: &[Vec<usize>]) -> Vec<usize> {
             waiters[producer].push(member);
         }
     }
-    let weight = |start: usize| {
-        let mut seen = vec![false; count];
-        let mut stack = vec![start];
-        let mut total = 0;
-        while let Some(member) = stack.pop() {
-            for &waiter in &waiters[member] {
-                if !seen[waiter] {
-                    seen[waiter] = true;
-                    total += 1;
-                    stack.push(waiter);
+    let cost = |member: usize| costs.get(member).copied().unwrap_or(0);
+    // chain[m]: m's cost plus the longest chain of its waiters, found
+    // depth first; an edge back to a member still being walked (a cycle,
+    // which `producers` does not make) adds nothing.
+    let mut chain: Vec<Option<u64>> = vec![None; count];
+    let mut walking = vec![false; count];
+    for root in 0..count {
+        let mut stack = vec![(root, 0)];
+        while let Some((member, next)) = stack.last_mut() {
+            let member = *member;
+            walking[member] = true;
+            if let Some(&waiter) = waiters[member].get(*next) {
+                *next += 1;
+                if chain[waiter].is_none() && !walking[waiter] {
+                    stack.push((waiter, 0));
                 }
+                continue;
             }
+            let longest = waiters[member]
+                .iter()
+                .filter_map(|&waiter| chain[waiter])
+                .max()
+                .unwrap_or(0);
+            chain[member] = Some(cost(member) + longest);
+            walking[member] = false;
+            stack.pop();
         }
-        total
-    };
-    let weights: Vec<usize> = (0..count).map(weight).collect();
+    }
     let mut order: Vec<usize> = (0..count).collect();
-    order.sort_by_key(|&member| std::cmp::Reverse(weights[member]));
+    order.sort_by_key(|&member| {
+        (
+            std::cmp::Reverse(chain[member].unwrap_or(0)),
+            std::cmp::Reverse(cost(member)),
+        )
+    });
     order
 }
 
@@ -60,17 +81,19 @@ struct State {
 
 /// Runs a member build for each of `dirs` (member `i` writes into
 /// `dirs[i]`) with at most `jobs` at a time, starting member `i` once each
-/// of `producers[i]` has written its interface or finished; `command(i,
-/// available)` is its command, given the producers whose interfaces exist.
-/// The outcomes, in member order.
+/// of `producers[i]` has written its interface or finished, in the order
+/// [`by_priority`] gives with `costs`; `command(i, available)` is its
+/// command, given the producers whose interfaces exist. The outcomes, in
+/// member order.
 pub(super) fn run_members(
     dirs: &[PathBuf],
     producers: &[Vec<usize>],
+    costs: &[u64],
     jobs: usize,
     command: &(dyn Fn(usize, &[usize]) -> Command + Sync),
 ) -> Vec<Result<MemberRun, String>> {
     let state = std::sync::Mutex::new(State {
-        pending: by_priority(producers),
+        pending: by_priority(producers, costs),
         finished: vec![false; dirs.len()],
     });
     let results = std::sync::Mutex::new(Vec::new());
@@ -150,11 +173,26 @@ mod tests {
 
     #[test]
     fn what_others_wait_for_starts_first() {
+        let equal = [1, 1, 1, 1];
         assert_eq!(
-            by_priority(&[vec![1, 2], vec![2], vec![], vec![0]]),
+            by_priority(&[vec![1, 2], vec![2], vec![], vec![0]], &equal),
             [2, 1, 0, 3]
         );
-        assert_eq!(by_priority(&[vec![], vec![]]), [0, 1]);
+        assert_eq!(by_priority(&[vec![], vec![]], &equal), [0, 1]);
+    }
+
+    #[test]
+    fn the_longest_chain_of_work_starts_first() {
+        // 3 reads 0; 2 is the largest member, but 0 and 3 together are
+        // more work, which can only start with 0.
+        assert_eq!(
+            by_priority(&[vec![], vec![], vec![], vec![0]], &[3, 1, 5, 4]),
+            [0, 2, 3, 1]
+        );
+        // Nothing waits: the larger first, ties in order.
+        assert_eq!(by_priority(&[vec![], vec![], vec![]], &[1, 9, 1]), [1, 0, 2]);
+        // A missing cost counts as nothing, and a cycle ends.
+        assert_eq!(by_priority(&[vec![1], vec![0]], &[2]), [0, 1]);
     }
 
     #[cfg(unix)]
@@ -166,7 +204,7 @@ mod tests {
             std::fs::create_dir_all(dir).unwrap();
         }
         let producers = [vec![1, 2], vec![2], vec![], vec![0]];
-        let runs = run_members(&dirs, &producers, 3, &|member, available| {
+        let runs = run_members(&dirs, &producers, &[1, 1, 1, 1], 3, &|member, available| {
             script(&dirs[member], available, member == 3)
         });
         assert!(runs.iter().take(3).all(|run| run.as_ref().unwrap().ok));

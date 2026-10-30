@@ -137,6 +137,10 @@ pub(crate) struct ExtProbe {
 pub(crate) struct ExtToolchain {
     interpreter: OsString,
     probe_override: Option<ExtProbe>,
+    /// What the package build's probe of `interpreter` found, which its
+    /// member builds reuse ([`Self::with_package_probe`]) instead of each
+    /// starting the interpreter again.
+    package_probe: Option<ExtProbe>,
 }
 
 /// Asks an interpreter the three things an `ext` build needs, one per line.
@@ -184,7 +188,23 @@ impl ExtToolchain {
         Self {
             interpreter,
             probe_override,
+            package_probe: None,
         }
+    }
+
+    /// This toolchain answering [`Self::probe`] with the package build's
+    /// probe of the same interpreter, read from `path` (the probe script's
+    /// three lines, [`ExtProbe::to_probe_output`]): a member build of a
+    /// package built whole (`--ext-probe`). The interpreter still compiles
+    /// the member's CPython source ([`Self::precompile_interpreter`]).
+    pub(crate) fn with_package_probe(mut self, path: &Path) -> Result<Self, String> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read the package build's probe `{}`: {e}", path.display()))?;
+        let probe = parse_probe_output(&text).ok_or_else(|| {
+            format!("the package build's probe `{}` is malformed", path.display())
+        })?;
+        self.package_probe = Some(probe);
+        Ok(self)
     }
 
     /// Builds a toolchain that answers from `probe` instead of running an
@@ -195,6 +215,7 @@ impl ExtToolchain {
         Self {
             interpreter: interpreter.into(),
             probe_override: Some(probe),
+            package_probe: None,
         }
     }
 
@@ -204,6 +225,7 @@ impl ExtToolchain {
         Self {
             interpreter: interpreter.into(),
             probe_override: None,
+            package_probe: None,
         }
     }
 
@@ -224,7 +246,7 @@ impl ExtToolchain {
     /// broken CPython development environment is an environment failure at
     /// exit 2.
     pub(crate) fn probe(&self) -> Result<ExtProbe, String> {
-        let probe = match &self.probe_override {
+        let probe = match self.probe_override.as_ref().or(self.package_probe.as_ref()) {
             Some(probe) => probe.clone(),
             None => self.run_probe()?,
         };
@@ -297,6 +319,20 @@ pub(crate) fn probe_command(interpreter: &OsStr, script: &str) -> std::process::
     let mut command = std::process::Command::new(interpreter);
     command.arg("-I").arg("-c").arg(script);
     command
+}
+
+impl ExtProbe {
+    /// The probe as [`PROBE_SCRIPT`] prints it, which
+    /// [`parse_probe_output`] reads back.
+    pub(crate) fn to_probe_output(&self) -> String {
+        format!(
+            "{}.{}\n{}\n{}\n",
+            self.version.0,
+            self.version.1,
+            self.include.display(),
+            self.libs.display()
+        )
+    }
 }
 
 /// Parses [`PROBE_SCRIPT`]'s three lines. Pure, so every malformed shape is

@@ -156,7 +156,9 @@ fn run<T>(
 /// the program's syntax, as deep as on the main thread.
 const ATTEMPT_STACK: usize = 64 * 1024 * 1024;
 
-/// Runs `jobs`, as many at once as the host has cores (v0.5 accept 4):
+/// Runs `jobs`, as many at once as this process may use threads
+/// (`crate::threads::budget`, every core unless it is a package member's
+/// build; v0.5 accept 4):
 /// each attempt is a whole frontend run, independent of the others, so
 /// guesses the loop would try one by one cost one attempt's time per wave
 /// rather than per guess. A job runs on a thread of its own with this
@@ -167,7 +169,7 @@ fn run_all<T: Send>(
     jobs: Vec<Job>,
     attempt: &(impl Fn() -> Result<T, FrontendFailure> + Sync),
 ) -> Vec<(Result<T, FrontendFailure>, Vec<Specialized>)> {
-    let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    let threads = crate::threads::budget();
     let mut results = Vec::with_capacity(jobs.len());
     let mut jobs = jobs.into_iter().peekable();
     while jobs.peek().is_some() {
@@ -210,13 +212,16 @@ fn run_all<T: Send>(
 /// does without specializations.
 ///
 /// With `speculate` (a non-strict build, where specializations are
-/// planned), the first round also runs the program without
-/// specializations, in parallel ([`run_all`]): its diagnostics are what
-/// every later failure is compared with, and its result is the answer when
-/// the program fails on its own. A failure no specialization's `def` holds
-/// is pinned on every specialization that fails alone with it, all tried
-/// at once ([`alone`]); only when none does (it takes two of them together)
-/// is one found by halving ([`culprit`]).
+/// planned) and a thread to spare ([`speculates`]), the first round also
+/// runs the program without specializations, in parallel ([`run_all`]):
+/// its diagnostics are what every later failure is compared with, and its
+/// result is the answer when the program fails on its own. Without a spare
+/// thread that attempt runs only once a failure needs it: the answer is the
+/// same, and an attempt passing with its specializations (the common case)
+/// costs one frontend run instead of two. A failure no specialization's
+/// `def` holds is pinned on every specialization that fails alone with it,
+/// all tried at once ([`alone`]); only when none does (it takes two of them
+/// together) is one found by halving ([`culprit`]).
 pub(crate) fn with_specialization<T: Send>(
     entry: &str,
     speculate: bool,
@@ -233,7 +238,7 @@ pub(crate) fn with_specialization<T: Send>(
     };
     loop {
         let mut jobs = vec![Job::Specialized(None)];
-        if known.is_none() && speculate {
+        if known.is_none() && speculates(speculate, crate::threads::budget()) {
             jobs.push(Job::Plain);
         }
         let mut results = run_all(jobs, &attempt).into_iter();
@@ -293,6 +298,13 @@ pub(crate) fn with_specialization<T: Send>(
             }
         }
     }
+}
+
+/// Whether the first round runs the program without specializations
+/// beside the specialized attempt ([`with_specialization`]): only to save
+/// time, so only when there is a thread to run it on.
+fn speculates(speculate: bool, threads: usize) -> bool {
+    speculate && threads > 1
 }
 
 /// Every specialization among `planned` that fails alone with a diagnostic
@@ -366,6 +378,15 @@ pub(crate) fn report() {
 
 #[cfg(test)]
 mod tests {
+    /// The plain attempt runs ahead of a failure only beside the
+    /// specialized one, never instead of a thread's own work.
+    #[test]
+    fn the_plain_attempt_is_speculative_only_with_a_spare_thread() {
+        assert!(super::speculates(true, 2));
+        assert!(!super::speculates(true, 1));
+        assert!(!super::speculates(false, 4));
+    }
+
     /// `pycc_mir` calls a specialization by the name `pycc_ast` gives it.
     #[test]
     fn the_two_crates_spell_a_specialization_alike() {

@@ -1,6 +1,7 @@
 //! The whole-package build's driver and link (v0.8, `crate::package_build`):
-//! one member build per module, in parallel, then the runtime unit and the
-//! package unit, then one link into `PKG/__init__.abi3.so`.
+//! one member build per module, in parallel, with the runtime unit and the
+//! package unit compiling beside them, then one link into
+//! `PKG/__init__.abi3.so`.
 
 use super::ext_plan::write_ext_source;
 use super::package_schedule;
@@ -145,6 +146,31 @@ pub(crate) fn build_package(
         .collect();
     let (bases, end) = package_build::exception_tag_bases(&sources).map_err(fail)?;
     let probe = toolchain.probe().map_err(fail)?;
+    // Every member compiles against what this probe found: it reads it
+    // from here instead of starting the interpreter again.
+    let probe_file = scratch.join("python_probe.txt");
+    write_ext_source(&probe_file, &probe.to_probe_output())?;
+
+    // The runtime unit (from the build cache, after the first build) and
+    // the package unit, which depend on no member: they compile while the
+    // members build rather than after them.
+    let runtime = scratch.join(ext_build::SHIM_RUNTIME_C_NAME);
+    write_ext_source(&runtime, ext_build::runtime_unit_text())?;
+    let finder = scratch.join("pycc_pkg_finder.c");
+    write_ext_source(&finder, package_build::FINDER_C)?;
+    write_ext_source(
+        &scratch.join(package_build::MEMBERS_HEADER_NAME),
+        &package_build::members_header(package, &modules),
+    )?;
+    let mut compile_args = ext_build::ext_compile_args(platform, &probe.include, &runtime);
+    compile_args.push(finder.into_os_string());
+    let package_c = c_objects::CObjects::spawn(&compile_args, scratch, || {
+        let mut cmd = linker_command(build.target);
+        if let Some(triple) = effective_link_target(build.target) {
+            cmd.arg("-target").arg(triple);
+        }
+        cmd
+    })?;
 
     // Every member, built as a module of its own but to objects.
     let exe = std::env::current_exe().map_err(|e| fail(format!("cannot find pycc itself: {e}")))?;
@@ -162,8 +188,17 @@ pub(crate) fn build_package(
         Some(_) => vec![Vec::new(); modules.len()],
         None => package_build::producers(&modules, &sources),
     };
+    let jobs = std::env::var("PYCC_JOBS")
+        .ok()
+        .and_then(|jobs| jobs.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from));
+    // `jobs` members share the cores: each uses its share of them.
+    let cores = std::thread::available_parallelism().map_or(1, usize::from);
+    let threads = crate::threads::member_share(cores, jobs);
     let command = |member: usize, available: &[usize]| {
         let mut cmd = member_command(&exe, build, &modules[member], bases[member], &dirs[member]);
+        cmd.arg("--member-threads").arg(threads.to_string());
+        cmd.arg("--ext-probe").arg(&probe_file);
         for &producer in available {
             let mut entry = OsString::from(format!("{}=", modules[producer].dotted));
             entry.push(dirs[producer].join(package_build::INTERFACE_NAME));
@@ -171,13 +206,11 @@ pub(crate) fn build_package(
         }
         cmd
     };
-    let jobs = std::env::var("PYCC_JOBS")
-        .ok()
-        .and_then(|jobs| jobs.parse().ok())
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from));
+    // A member's build takes about as long as its source is large.
+    let costs: Vec<u64> = sources.iter().map(|source| source.len() as u64).collect();
     let started = std::time::Instant::now();
     let runs = crate::timing::span("package: member builds", || {
-        package_schedule::run_members(&dirs, &producers, jobs, &command)
+        package_schedule::run_members(&dirs, &producers, &costs, jobs, &command)
     });
     let mut objects = Vec::new();
     let mut failure = None;
@@ -213,27 +246,8 @@ pub(crate) fn build_package(
         started.elapsed().as_secs_f64()
     );
 
-    // The runtime unit (from the build cache, after the first build) and
-    // the package unit.
-    let runtime = scratch.join(ext_build::SHIM_RUNTIME_C_NAME);
-    write_ext_source(&runtime, ext_build::runtime_unit_text())?;
-    let finder = scratch.join("pycc_pkg_finder.c");
-    write_ext_source(&finder, package_build::FINDER_C)?;
-    write_ext_source(
-        &scratch.join(package_build::MEMBERS_HEADER_NAME),
-        &package_build::members_header(package, &modules),
-    )?;
-    let mut compile_args = ext_build::ext_compile_args(platform, &probe.include, &runtime);
-    compile_args.push(finder.into_os_string());
-    let c = c_objects::CObjects::spawn(&compile_args, scratch, || {
-        let mut cmd = linker_command(build.target);
-        if let Some(triple) = effective_link_target(build.target) {
-            cmd.arg("-target").arg(triple);
-        }
-        cmd
-    })?
-    .wait()?;
-    objects.extend(c);
+    // The package's own C, compiled while the members build.
+    objects.extend(package_c.wait()?);
 
     // One link, one copy of the runtime.
     let rt_lib_dir = find_pycc_rt_lib_dir(build.target, build.release).map_err(fail)?;
