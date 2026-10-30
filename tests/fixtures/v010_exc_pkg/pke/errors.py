@@ -1,0 +1,63 @@
+"""Exception classes deriving from `common`'s."""
+from .common import Lefty, Owned, PkgError, Pinned, Rated
+
+
+class KeyMissing(PkgError):
+    """Over another module's exception class."""
+
+    def __init__(self, key: str, details: str) -> None:
+        self.key = key
+        self.details = details
+
+    def __str__(self) -> str:
+        return "Key " + repr(self.key) + " not found: " + self.details
+
+
+class Sub(Owned):
+    """Over another module's exception class with attributes of its own."""
+
+    def __init__(self, code: int, where: str, extra: str) -> None:
+        super().__init__(code, where)
+        self.extra = extra
+
+    def describe(self) -> str:
+        return super().describe() + "+" + self.extra
+
+
+class Overrated(Rated):
+    """`rate` is a class-level property here."""
+
+    rate = property(lambda self: 99, lambda self, value: None)
+
+
+PinAlias = Pinned
+
+
+class Duo(Lefty, ValueError):
+    """Several bases, one another module's exception class."""
+
+
+class Clash(Exception):
+    """Named as a class of `common` is."""
+
+    def __init__(self, b: str, c: str) -> None:
+        self.b = b
+        self.c = c
+
+
+def lookup(d: dict[str, int], key: str) -> int:
+    if key not in d:
+        raise KeyMissing(key, "in lookup")
+    return d[key]
+
+
+def raise_sub(n: int) -> None:
+    raise Sub(n, "errors", "x")
+
+
+def catch(n: int) -> str:
+    try:
+        raise_sub(n)
+    except Owned as e:
+        return "owned " + e.describe()
+    return "none"

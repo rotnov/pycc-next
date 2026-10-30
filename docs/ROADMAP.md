@@ -1153,8 +1153,8 @@ Accept:
    pydantic import 0.93x, define 0.79x, schema 0.82x, round-trips 0.91x.
 5. **Deferred class work:** compiled subclasses of compiled classes from another module of
    the package are native (layout-pointer dispatch across modules, no CPython class in
-   between), and compiled exception classes can derive from package exception bases
-   (PEP 697); each with oracle tests vs CPython.
+   between), and compiled exception classes can derive from package exception bases;
+   each with oracle tests vs CPython.
    **Progress 2026-10-29** -- the cross-module half (design, guru ruling: the plan gives
    the base module the *set* of overridden names, the subclass's own class record holds
    the *targets*): every class has a record, one named descriptor global its instances
@@ -1168,7 +1168,19 @@ Accept:
    a foreign arm: a receiver whose record carries a vtable runs its entry, or the member
    through CPython when the entry is null; a call on a value typed with the sibling class
    runs that dispatcher (`tests/v010_subclasses.rs`). Open: a subclass of such a subclass
-   in a third module (it runs as a Python subclass), and the exception half.
+   in a third module (it runs as a Python subclass).
+   **Progress 2026-10-30** -- the exception half: an exception class with members of its
+   own, over a builtin exception class or another module's exception class of the
+   package, is made by CPython from its statement and its methods are compiled (`lift`);
+   functions raising and catching it stay compiled (`tests/v010_exceptions.rs`: the
+   oracle fixture and the package `v010_exc_pkg` in debug and release, a leak probe, and
+   regressions for aliases, nested and conditional class statements, `exec`, rebound
+   names, wildcard imports, cross-module subclass cycles and function-local imports). A
+   native attribute layout (a PEP 697 template over the exception base) was built and
+   measured instead: it made compiled code slower -- 2.5x on raise and catch, 1.5x on
+   attribute reads, against this path, which CPython's own run beat 2.1x and 1.5x --
+   and proving no Python subclass conflicts with it took a package-wide analysis that
+   kept growing; it was removed.
 
 ## v0.11 — Imports faster than CPython
 

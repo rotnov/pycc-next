@@ -27,6 +27,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   it (v0.10 accept 2). Equal identifier-like `str` literals share one native object, and
   native `str`-keyed dicts read a key's cached hash in place.
 
+- Exception classes with members of their own can derive from another module's
+  exception class in a package built whole (v0.10 accept 5): CPython makes each from its
+  statement and its methods are compiled, so `args`, `str`, tracebacks, pickling and
+  class-statement hooks are CPython's, and functions raising and catching them stay
+  compiled. A native attribute layout for them (PEP 697) was measured 2.5x slower on raise
+  and catch and 1.5x slower on attribute reads than this, and not shipped.
+
 - Instances of published compiled classes pickle (v0.10), as `object.__reduce_ex__` pickles
   an object: `copyreg.__newobj__` with `__getnewargs_ex__` / `__getnewargs__`'s arguments and
   the state `object.__getstate__` gives the source class (each assigned compiled attribute
