@@ -181,6 +181,30 @@ class KeyOS(KeyError, OSError):
         return "keyos " + str(self.n)
 
 
+class Lazy(Exception):
+    """`__getattr__` is off the allowlist: CPython's class."""
+
+    def __init__(self, code: int) -> None:
+        self.code = code
+
+    def __getattr__(self, name):
+        return "lazy " + name
+
+
+class Reducer(Exception):
+    """A `__reduce__` of its own, which a subclass inherits."""
+
+    def __reduce__(self):
+        return (type(self), (self.code + 100,))
+
+
+class Reduced(Reducer):
+    """Over a base reducing itself: no layout."""
+
+    def __init__(self, code: int) -> None:
+        self.code = code
+
+
 def probe(n: int) -> str:
     try:
         if n > 0:

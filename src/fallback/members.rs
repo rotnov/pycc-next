@@ -105,7 +105,7 @@ fn method_published(def: &StmtFunctionDef) -> bool {
     params_annotated && (def.returns.is_some() || name == "__init__")
 }
 
-fn is_literal(expr: &Expr) -> bool {
+pub(super) fn is_literal(expr: &Expr) -> bool {
     match expr {
         Expr::NumberLiteral(_)
         | Expr::StringLiteral(_)

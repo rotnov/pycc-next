@@ -28,9 +28,11 @@ pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
 }
 
 /// v0.10 accept 5: the classes of `entry` that a class of another module
-/// of its package with two bases or more derives from, directly or through
-/// other such classes: an exception layout over one could meet another
-/// base's in that class (`exc_layout`), so none is made.
+/// of its package with two bases or more, or a body off the exception
+/// layout allowlist (`exc_layout::class_names`), derives from, directly or
+/// through other such classes: an exception layout over one could meet
+/// another base's in that class, or be bypassed by its hooks
+/// (`exc_layout`), so none is made.
 pub(super) fn multi_based_in_package(entry: &Path) -> BTreeSet<String> {
     package_subclasses(entry)
         .into_iter()
@@ -83,7 +85,8 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>, bo
             }
         }
         for (class, defines) in scan.defines {
-            let multi = listed.get(class.as_str()).is_some_and(|n| *n > 1);
+            let multi = listed.get(class.as_str()).is_some_and(|n| *n > 1)
+                || scan.opaque.contains(&class);
             let bases = bases.remove(&class).unwrap_or_default();
             classes.push((class, bases, defines, multi));
         }
@@ -275,6 +278,9 @@ struct Scan<'a> {
     /// The names each class statement's body binds (its methods and class
     /// attributes), by the class's dotted name.
     defines: BTreeMap<String, BTreeSet<String>>,
+    /// The class statements whose bodies are off the exception layout
+    /// allowlist (`exc_layout::class_names`), by dotted name.
+    opaque: BTreeSet<String>,
 }
 
 impl<'a> Scan<'a> {
@@ -285,6 +291,7 @@ impl<'a> Scan<'a> {
             bound: BTreeMap::new(),
             bases: Vec::new(),
             defines: BTreeMap::new(),
+            opaque: BTreeSet::new(),
         }
     }
 
@@ -365,6 +372,10 @@ impl<'a> Scan<'a> {
                         self.bases
                             .push((dotted, format!("{}.{}", self.qual, class.name.as_str())));
                     }
+                }
+                if super::exc_layout::class_names(class).is_none() {
+                    self.opaque
+                        .insert(format!("{}.{}", self.qual, class.name.as_str()));
                 }
                 let defined = self
                     .defines
@@ -516,19 +527,17 @@ pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, PackageE
         // attribute, which only makes `may_layout` true more often.
         let mut may_layout =
             !super::exc_layout::fields_of(class, &BTreeSet::new()).is_empty();
-        // A class keyword (`metaclass=`): its body is not all it binds.
-        let mut names = if class.keywords().is_empty() {
-            super::exc_layout::class_names(class)
-        } else {
-            None
-        };
+        // `None` for a body off the layout allowlist.
+        let mut names = super::exc_layout::class_names(class);
         for base in class.bases() {
             if let Expr::Name(base) = base
                 && pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base.id.as_str())
                 && !scan.bound.contains_key(base.id.as_str())
             {
                 exception = true;
-                if let Some(names) = &mut names {
+                if super::exc_names::builtin_reduces_itself(base.id.as_str()) {
+                    names = None;
+                } else if let Some(names) = &mut names {
                     names.extend(
                         super::exc_names::builtin_exception_names(base.id.as_str())
                             .map(str::to_string),

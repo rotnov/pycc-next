@@ -28,14 +28,17 @@
 //! An attribute is in the layout only when every store of it the class
 //! makes is of that form, no class along its MRO binds the name at class
 //! level (`OSError.errno`, a base's property: `exc_names` for the builtin
-//! classes) and the name is neither private nor a dunder; a class defining
-//! `__setattr__`, `__getattribute__`, `__delattr__` or `__slots__`, a class
-//! keyword (`metaclass=`) or a class of unknown body in its MRO gets no
-//! layout, nor does a class of several bases; and a layout some class
-//! carrying it would show otherwise than CPython (a subclass's property of
-//! the same name, here or in another module of the package) or would meet
-//! another base's in (a subclass of several bases) is dropped with the
-//! chain it extends.
+//! classes) and the name is neither private nor a dunder.
+//!
+//! Conservative throughout: a class gets or keeps a layout only when every
+//! class of its MRO up to the builtin exception base is known to the
+//! planner -- a class of the module or of the package whose body is on
+//! `class_names`'s allowlist, over a builtin base that does not reduce
+//! itself (`exc_names::builtin_reduces_itself`) -- and it has one base. A
+//! layout some class carrying it would show otherwise than CPython (a
+//! subclass binding one of its attributes, listing several bases or off the
+//! allowlist, here or in another module of the package) is dropped with
+//! the chain it extends, to a fixpoint.
 
 use super::*;
 use pycc_ast::{Expr, StmtClassDef};
@@ -129,14 +132,9 @@ impl Plan {
             let mut exception = false;
             let mut inherited: Vec<usize> = Vec::new();
             let mut blocked = false;
-            // A class keyword (`metaclass=`, an `__init_subclass__`
-            // argument) is CPython's business: a metaclass may refuse the
-            // template, so neither the class nor a subclass gets a layout.
-            let mut bound: Option<BTreeSet<String>> = if class.keywords().is_empty() {
-                class_names(&class)
-            } else {
-                None
-            };
+            // `None` for a body off the allowlist (a class keyword such as
+            // `metaclass=`, which may refuse the template, included).
+            let mut bound: Option<BTreeSet<String>> = class_names(&class);
             for base in class.bases() {
                 let Expr::Name(base) = base else {
                     bound = None;
@@ -148,11 +146,13 @@ impl Plan {
                 } else if let Some(package) = self.package_exceptions.get(base) {
                     package.names.clone()
                 } else if pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base) {
-                    Some(
+                    // One reducing itself (`OSError.__reduce__`) is no base
+                    // the template's `__reduce__` is known to extend.
+                    (!exc_names::builtin_reduces_itself(base)).then(|| {
                         exc_names::builtin_exception_names(base)
                             .map(str::to_string)
-                            .collect(),
-                    )
+                            .collect()
+                    })
                 } else if base == "object" {
                     Some(BTreeSet::new())
                 } else {
@@ -394,36 +394,65 @@ impl Plan {
 /// The scalar annotations a layout attribute may take.
 const SCALARS: [&str; 4] = ["int", "float", "str", "bool"];
 
-/// The names class `class` binds in its own body (its methods, nested
-/// classes and class attributes), or `None` when it defines `__setattr__`,
-/// `__getattribute__`, `__delattr__` or `__slots__`: its attribute access is
-/// its own, and neither it nor a subclass gets a layout.
+/// The names class `class` binds in its own body, or `None` when the body
+/// is not one a layout is known to be equivalent under -- an allowlist,
+/// not a list of hooks: no class keyword or decorator, and a body of plain
+/// functions, static and class methods (no other decorator), no dunder but
+/// `__init__`, `__str__` and `__repr__`, and class attributes bound to plain
+/// literals (a docstring and `pass` aside). `None` makes neither the class
+/// nor a subclass get a layout.
 pub(super) fn class_names(class: &StmtClassDef) -> Option<BTreeSet<String>> {
+    if !class.keywords().is_empty() || !class.decorator_list.is_empty() {
+        return None;
+    }
     let mut names: BTreeSet<String> = BTreeSet::new();
     for stmt in &class.body {
         match stmt {
             Stmt::FunctionDef(def) => {
-                if matches!(
-                    def.name.as_str(),
-                    "__setattr__" | "__getattribute__" | "__delattr__"
-                ) {
+                let name = def.name.as_str();
+                let dunder = name.starts_with("__") && name.ends_with("__");
+                if dunder && !ALLOWED_DUNDERS.contains(&name) {
                     return None;
                 }
-                names.insert(def.name.as_str().to_string());
-            }
-            Stmt::ClassDef(inner) => {
-                names.insert(inner.name.as_str().to_string());
-            }
-            _ => {
-                let bound = names::bound_names(std::slice::from_ref(stmt));
-                if bound.contains("__slots__") {
+                let plain = def.decorator_list.iter().all(|decorator| {
+                    matches!(&decorator.expression, Expr::Name(n)
+                        if matches!(n.id.as_str(), "staticmethod" | "classmethod"))
+                });
+                if !plain {
                     return None;
                 }
-                names.extend(bound);
+                names.insert(name.to_string());
             }
+            Stmt::Pass(_) => {}
+            Stmt::Expr(expr) if matches!(&*expr.value, Expr::StringLiteral(_)) => {}
+            Stmt::Assign(assign) if members::is_literal(&assign.value) => {
+                for target in &assign.targets {
+                    names.insert(plain_name(target)?);
+                }
+            }
+            Stmt::AnnAssign(assign)
+                if assign.value.as_deref().is_none_or(members::is_literal) =>
+            {
+                names.insert(plain_name(&assign.target)?);
+            }
+            _ => return None,
         }
     }
     Some(names)
+}
+
+/// The dunder methods a class with a layout may define: none of them
+/// reaches an attribute, the object's state or its making.
+const ALLOWED_DUNDERS: [&str; 3] = ["__init__", "__str__", "__repr__"];
+
+/// `name` when `target` is a plain name that is no dunder.
+fn plain_name(target: &Expr) -> Option<String> {
+    match target {
+        Expr::Name(name) if !(name.id.starts_with("__") && name.id.ends_with("__")) => {
+            Some(name.id.to_string())
+        }
+        _ => None,
+    }
 }
 
 /// The attributes of exception class `class` that go in its layout, with

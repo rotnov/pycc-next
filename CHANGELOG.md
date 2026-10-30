@@ -47,10 +47,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   derive from another module's. Functions raising and catching them stay compiled.
   `__new__` resolves along the class's MRO as in CPython (a base's own `__new__` runs),
   and a name any base binds at class level (`OSError.errno`, a base's property) stays
-  CPython's. Where a layout cannot be proven to show what CPython would, the class stays
-  CPython's alone: a class keyword (`metaclass=`), a base of unknown body, or a subclass
-  (in the module or in another module of the package) binding a layout attribute at class
-  level or listing several bases.
+  CPython's. A layout is made only where it provably shows what CPython would: every
+  class of the MRO up to a builtin base that does not reduce itself (not `OSError`'s,
+  `ImportError`'s or `AttributeError`'s family) is the module's or the package's, with a
+  body on an allowlist (plain functions, static and class methods, no dunder but
+  `__init__`, `__str__` and `__repr__`, class attributes bound to literals, no class
+  keyword or decorator) and one base; no class carrying it (here or in another module of
+  the package) binds one of its attributes, lists several bases or leaves the allowlist.
+  Elsewhere the class stays CPython's alone, its methods compiled.
 
 ### Changed
 - `C.__new__(C)` of a published compiled class makes an object whose attributes are all

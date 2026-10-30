@@ -117,14 +117,14 @@ fn the_layout_is_native() {
          e.code = 'x'\nprint(repr(e.code), e.__dict__)\n\
          f = m.NoFile(2, 'p')\nprint('path' in f.__dict__, str(f), f.errno)\n\
          print([[c for c in k.__mro__ if c.__module__ == 'pycc'] \
-         for k in (m.Metered, m.Plated, m.Both, m.KeyOS)])\n",
+         for k in (m.Metered, m.Plated, m.Both, m.KeyOS, m.Lazy, m.Reduced)])\n",
     );
     assert_eq!(
         text(&out.stdout),
         "False False ['exception_layout', 'exception_layout']\n\
          'x' {}\n\
-         False [Errno 2] no such thing 2\n\
-         [[], [], [], []]\n",
+         True [Errno 2] no such thing 2\n\
+         [[], [], [], [], [], []]\n",
         "{}",
         text(&out.stderr)
     );

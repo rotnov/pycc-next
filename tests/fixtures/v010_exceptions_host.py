@@ -123,6 +123,22 @@ me = m.Metered(5)
 print(me.show(), me.code, me.tagged, type(m.Metered).__name__, mro(m.Metered))
 sh = m.Shown(3)
 print(sh.show(), sh.code, sh.stored, m.Plated(4).show(), m.Plated(4).code, mro(m.Shown))
+la = m.Lazy(3)
+print(la.code, la.missing, "code" in la.__dict__)
+rd = pickle.loads(pickle.dumps(m.Reduced(1)))
+print(type(rd).__name__, rd.code, copy.copy(m.Reduced(2)).code)
+
+
+class Reducing(Exception):
+    def __reduce__(self):
+        return (str, ("reduced by the mixin",))
+
+
+class Mixed(m.Owned, Reducing):
+    pass
+
+
+print(pickle.loads(pickle.dumps(Mixed(1, "w"))), [c.__name__ for c in Mixed.__mro__][:2])
 bo = m.Both(1, "x")
 print(bo.show(), bo.a, bo.b, isinstance(bo, m.Right), mro(m.Both))
 ko = m.KeyOS(7)

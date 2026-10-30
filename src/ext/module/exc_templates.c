@@ -215,12 +215,55 @@ static int pycc_ext_exc_clear(PyObject *self)
     return base_clear == NULL ? 0 : base_clear(self);
 }
 
+/* Whether the `__reduce__` CPython finds after template `defining` along
+ * `self`'s MRO, the other templates skipped, is `BaseException`'s own: 1,
+ * 0, or -1 with an exception set. */
+static int pycc_ext_exc_reduces_by_default(PyObject *self, PyTypeObject *defining)
+{
+    PyObject *mro = PyObject_GetAttrString((PyObject *)Py_TYPE(self), "__mro__");
+    int after = 0;
+    int found = 0;
+    Py_ssize_t n;
+    Py_ssize_t i;
+    if (mro == NULL) {
+        return -1;
+    }
+    n = PyTuple_Check(mro) ? PyTuple_Size(mro) : 0;
+    for (i = 0; i < n; i++) {
+        PyObject *c = PyTuple_GetItem(mro, i);
+        PyObject *dict;
+        int has;
+        if (!after) {
+            after = c == (PyObject *)defining;
+            continue;
+        }
+        if (PyType_GetSlot((PyTypeObject *)c, Py_tp_dealloc) == (void *)pycc_ext_exc_dealloc) {
+            continue;
+        }
+        dict = PyObject_GetAttrString(c, "__dict__");
+        if (dict == NULL) {
+            Py_DECREF(mro);
+            return -1;
+        }
+        has = PyMapping_HasKeyString(dict, "__reduce__");
+        Py_DECREF(dict);
+        if (has) {
+            found = c == PyExc_BaseException;
+            break;
+        }
+    }
+    Py_DECREF(mro);
+    return found;
+}
+
 /*
- * `__reduce__`: what the bases after the template answer
- * (`BaseException.__reduce__`: `(type, args)`, or `(type, args, __dict__)`),
- * with each assigned native attribute added to the state, where the source
- * class keeps it in `__dict__`; `BaseException.__setstate__` sets it back
- * through its descriptor. Another answer (a mixin's own) is kept as it is.
+ * `__reduce__`: `BaseException.__reduce__`'s answer (`(type, args)`, or
+ * `(type, args, __dict__)`), with each assigned native attribute added to
+ * the state, where the source class keeps it in `__dict__`;
+ * `BaseException.__setstate__` sets it back through its descriptor. The
+ * compiled module's layout classes never reduce otherwise (their MRO is on
+ * `exc_layout`'s allowlist); a Python class listing another reducer after
+ * the template gets that reducer's answer as it is.
  */
 static PyObject *pycc_ext_exc_reduce(PyObject *self, PyTypeObject *defining, PyObject *const *args,
                                      size_t nargsf, PyObject *kwnames)
@@ -248,6 +291,15 @@ static PyObject *pycc_ext_exc_reduce(PyObject *self, PyTypeObject *defining, PyO
     Py_DECREF(sup);
     if (reduced == NULL || !PyTuple_Check(reduced) || PyTuple_Size(reduced) < 2) {
         return reduced;
+    }
+    switch (pycc_ext_exc_reduces_by_default(self, defining)) {
+    case 1:
+        break;
+    case 0:
+        return reduced;
+    default:
+        Py_DECREF(reduced);
+        return NULL;
     }
     n = PyTuple_Size(reduced);
     state = n > 2 ? PyTuple_GetItem(reduced, 2) : Py_None;

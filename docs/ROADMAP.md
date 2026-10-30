@@ -1156,8 +1156,9 @@ Accept:
    over the exception base first (its objects' payload holds the native instance, bound
    unassigned on first native use; it inherits the base's `tp_new`, so `__new__` resolves
    along the MRO as for the source class; its descriptors, `__reduce__`, deallocator,
-   traverse and clear chain to the base's; a name any base binds at class level, such as
-   `OSError.errno`, stays CPython's), and
+   traverse and clear chain to the base's; made only where every class of the MRO up to
+   the builtin base is the module's or the package's, its body on an allowlist, and no
+   name a base binds is a layout attribute), and
    each lifted method takes the object's native view as a second receiver
    (`tests/v010_exceptions.rs`). Across the modules of a package built whole, a
    syntactic scan tells which bases are another module's exception classes and
