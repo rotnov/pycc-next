@@ -221,7 +221,11 @@ pub(super) fn plan_ext(
     }
     let map = obj_path.with_file_name(ext_build::EXPORT_MAP_NAME);
     let mut link_args = ext_build::ext_link_args(platform, &probe.libs);
-    let export_args = ext_build::ext_export_args(platform, &map);
+    let export_args = ext_build::ext_export_args(
+        platform,
+        &map,
+        ext_build::packs_relative_relocations(target),
+    );
     if !export_args.is_empty() {
         write_ext_source(&map, &ext_build::export_map())?;
         link_args.extend(export_args);

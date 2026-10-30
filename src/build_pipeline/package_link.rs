@@ -253,7 +253,11 @@ pub(crate) fn build_package(
     let rt_lib_dir = find_pycc_rt_lib_dir(build.target, build.release).map_err(fail)?;
     let mut link_args = ext_build::ext_link_args(platform, &probe.libs);
     let map = scratch.join(ext_build::EXPORT_MAP_NAME);
-    let export_args = ext_build::ext_export_args(platform, &map);
+    let export_args = ext_build::ext_export_args(
+        platform,
+        &map,
+        ext_build::packs_relative_relocations(build.target),
+    );
     if !export_args.is_empty() {
         write_ext_source(&map, &ext_build::export_map())?;
         link_args.extend(export_args);

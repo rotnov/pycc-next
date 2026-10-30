@@ -568,7 +568,7 @@ fn a_shadow_sysconfig_in_the_build_directory_never_runs_during_the_probe() {
 #[test]
 fn an_elf_module_exports_only_its_init_and_the_runtime_counters() {
     let map = Path::new("scratch").join(EXPORT_MAP_NAME);
-    let args = ext_export_args(ExtLinkPlatform::Linux, &map);
+    let args = ext_export_args(ExtLinkPlatform::Linux, &map, false);
     let mut script = OsString::from("-Wl,--version-script=");
     script.push(map.as_os_str());
     assert_eq!(
@@ -586,6 +586,50 @@ fn an_elf_module_exports_only_its_init_and_the_runtime_counters() {
     }
     assert!(text.ends_with("  local: *;\n};\n"), "{text}");
     for platform in [ExtLinkPlatform::MacOs, ExtLinkPlatform::Windows] {
-        assert!(ext_export_args(platform, &map).is_empty());
+        assert!(ext_export_args(platform, &map, false).is_empty());
+        assert!(ext_export_args(platform, &map, true).is_empty());
+    }
+}
+
+/// v0.11: an ELF module built for a glibc that reads `DT_RELR` packs its
+/// relative relocations; a cross build, or a C library that does not read
+/// them, keeps them unpacked.
+#[test]
+fn an_elf_module_packs_its_relative_relocations_for_a_glibc_that_reads_them() {
+    let map = Path::new("scratch").join(EXPORT_MAP_NAME);
+    let args = ext_export_args(ExtLinkPlatform::Linux, &map, true);
+    assert_eq!(args.len(), 4, "{args:?}");
+    assert_eq!(args[3], OsString::from("-Wl,-z,pack-relative-relocs"));
+    for (version, reads) in [
+        (Some("2.39"), true),
+        (Some("2.36"), true),
+        (Some("3.0"), true),
+        (Some("2.35"), false),
+        (Some("2.4"), false),
+        (Some("2"), false),
+        (Some("x.y"), false),
+        (None, false),
+    ] {
+        assert_eq!(glibc_reads_dt_relr(version), reads, "{version:?}");
+    }
+    // A cross build never packs: its target's C library is unknown.
+    assert!(!packs_relative_relocations(Some("aarch64-unknown-linux-gnu")));
+    // The host build packs exactly when the host's glibc reads them (this
+    // test's own process is the host).
+    let host = packs_relative_relocations(None);
+    if cfg!(all(target_os = "linux", target_env = "gnu")) {
+        let output = std::process::Command::new("ldd")
+            .arg("--version")
+            .output()
+            .expect("ldd runs on a glibc host");
+        let text = String::from_utf8_lossy(&output.stdout);
+        let version = text
+            .lines()
+            .next()
+            .and_then(|line| line.rsplit(' ').next())
+            .map(str::to_string);
+        assert_eq!(host, glibc_reads_dt_relr(version.as_deref()), "{text}");
+    } else {
+        assert!(!host);
     }
 }

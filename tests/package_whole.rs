@@ -117,6 +117,41 @@ fn artifact() -> &'static str {
     }
 }
 
+/// v0.11: on a glibc that reads `DT_RELR` (2.36 and newer), the
+/// extension's relative relocations are packed into one (`readelf -d` lists
+/// a `RELR` entry and `readelf -r` a `.relr.dyn` section), and the
+/// extension depends on `GLIBC_ABI_DT_RELR`; elsewhere nothing is checked.
+fn assert_packed_relocations(extension: &Path) {
+    if !cfg!(all(target_os = "linux", target_env = "gnu")) {
+        return;
+    }
+    let ldd = Command::new("ldd").arg("--version").output().expect("ldd runs");
+    let version = text(&ldd.stdout)
+        .lines()
+        .next()
+        .and_then(|line| line.rsplit(' ').next())
+        .map(str::to_string)
+        .unwrap_or_default();
+    let mut parts = version.split('.').map(|part| part.parse::<u32>().unwrap_or(0));
+    let glibc = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+    if glibc < (2, 36) {
+        return;
+    }
+    let readelf = |flag: &str| {
+        let output = Command::new("readelf")
+            .arg(flag)
+            .arg(extension)
+            .output()
+            .expect("readelf runs");
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        text(&output.stdout)
+    };
+    let dynamic = readelf("-d");
+    assert!(dynamic.contains("(RELR)"), "{dynamic}");
+    assert!(readelf("-r").contains(".relr.dyn"));
+    assert!(readelf("-V").contains("GLIBC_ABI_DT_RELR"));
+}
+
 fn the_package_matches_cpython(release: bool) {
     let built = ScratchDir::new("package_whole_built").expect("scratch");
     let plain = ScratchDir::new("package_whole_plain").expect("scratch");
@@ -174,6 +209,7 @@ fn the_package_matches_cpython(release: bool) {
         report.contains("native class: instances of `pkw.cursor.Cursor` are read natively"),
         "{report}"
     );
+    assert_packed_relocations(&built.join("pkw").join(artifact()));
     remove_sources(&built.join("pkw"));
     let mut left = Vec::new();
     files(&built.join("pkw"), &built.join("pkw"), &mut left);
