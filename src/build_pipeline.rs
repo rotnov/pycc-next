@@ -323,6 +323,9 @@ pub(crate) fn try_build(
     }
     if let Some(plan) = &ext_plan {
         cmd.args(ext_objects.iter().flatten()).args(&plan.link_args);
+        if ext_build::packs_relative_relocations(target) {
+            cmd.arg(ext_build::PACK_RELATIVE_RELOCS);
+        }
     }
     cmd.args(embed_objects.iter().flatten());
     cmd.args(&objects).arg("-L").arg(&rt_lib_dir);

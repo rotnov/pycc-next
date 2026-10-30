@@ -221,7 +221,13 @@ pub(super) fn plan_ext(
     }
     let map = obj_path.with_file_name(ext_build::EXPORT_MAP_NAME);
     let mut link_args = ext_build::ext_link_args(platform, &probe.libs);
-    let export_args = ext_build::ext_export_args(platform, &map);
+    // The link decides whether to pack relocations (`try_build`); the probe
+    // that decides it runs now, beside codegen. A package member never
+    // links (the package's one link packs), so it does not probe.
+    if member.is_none() {
+        ext_build::start_linker_probe(target);
+    }
+    let export_args = ext_build::ext_export_args(platform, &map, false);
     if !export_args.is_empty() {
         write_ext_source(&map, &ext_build::export_map())?;
         link_args.extend(export_args);

@@ -229,6 +229,13 @@ fn compile_module(
 
     let entry_fn_type = i64_type.fn_type(&[], false);
     let entry_fn = module.add_function(entry_fn_name(options.ext), entry_fn_type, None);
+    // An extension's module body runs once, at import: `cold` places it
+    // with the rest of the import-only code (`.text.unlikely` on ELF), away
+    // from the functions callers run afterwards (v0.11). A native build's
+    // `main` is the program, and stays as it is.
+    if options.ext {
+        crate::frames::mark_cold(&context, entry_fn);
+    }
     let entry_block = context.append_basic_block(entry_fn, "entry");
     let top_exception_exit = context.append_basic_block(entry_fn, "top_exception_exit");
     builder.position_at_end(entry_block);
