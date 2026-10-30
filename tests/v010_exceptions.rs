@@ -399,6 +399,23 @@ fn a_subclass_closure_across_modules_withdraws_the_layout() {
     assert_eq!(out, "[]\n");
 }
 
+/// A module binding a name twice by imports, the first of a layout class,
+/// with a class statement between deriving from it and `OSError`
+/// (`tests/fixtures/v010_exc_rebind`): the ambiguous name withdraws the
+/// layout.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_name_imported_twice_withdraws_the_layout() {
+    let out = package_matches(
+        "v010_exc_rebind",
+        "pkd",
+        "import pkd\nprint(pkd.make(3), [c.__name__ for c in pkd.B.__mro__ \
+         if c.__module__ != 'pycc'], pkd.b.A.__name__)\n",
+        "import pkd\nprint([c for c in pkd.A.__mro__ if c.__module__ == 'pycc'])\n",
+    );
+    assert_eq!(out, "[]\n");
+}
+
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn exception_classes_over_another_module_s_match_cpython() {

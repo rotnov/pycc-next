@@ -19,7 +19,7 @@
 //! whose closure reaches such a name, does not stand.
 
 use pycc_ast::{Expr, Stmt};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 /// One examined class statement.
 #[derive(Debug, Clone, PartialEq)]
@@ -55,16 +55,13 @@ impl ClassGraph {
         body: &[Stmt],
         resolve: &dyn Fn(&Expr) -> Option<String>,
     ) {
-        let mut classes: BTreeMap<&str, usize> = BTreeMap::new();
-        let mut others: BTreeSet<String> = BTreeSet::new();
+        for name in super::exc_escape::ambiguous_names(body) {
+            self.ambiguous.insert(format!("{qual}.{name}"));
+        }
         for stmt in body {
-            // A `global` declaration in a nested scope binds a module name.
-            others.extend(super::names::all_global_declarations(stmt));
             let Stmt::ClassDef(class) = stmt else {
-                others.extend(super::names::bound_names(std::slice::from_ref(stmt)));
                 continue;
             };
-            *classes.entry(class.name.as_str()).or_default() += 1;
             let names = super::exc_layout::class_names(class);
             self.nodes.push(ClassNode {
                 name: format!("{qual}.{}", class.name.as_str()),
@@ -72,11 +69,6 @@ impl ClassGraph {
                 opaque: names.is_none(),
                 names: names.unwrap_or_default(),
             });
-        }
-        for (name, count) in classes {
-            if count > 1 || others.contains(name) {
-                self.ambiguous.insert(format!("{qual}.{name}"));
-            }
         }
     }
 
@@ -188,6 +180,8 @@ mod tests {
             "class B(A):\n    pass\nB = 1\n",
             "class B(A):\n    pass\ndef f():\n    global B\n    B = 2\n",
             "class B(A):\n    pass\nfor B in ():\n    pass\n",
+            "class B(A):\n    pass\nfrom m import B\n",
+            "class B(A):\n    pass\ntry:\n    pass\nexcept ImportError as B:\n    pass\n",
         ] {
             assert!(
                 graph(&format!("{base}{rebind}")).subclass_conflicts(".A", &code),

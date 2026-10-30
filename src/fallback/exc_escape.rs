@@ -159,6 +159,117 @@ pub(super) fn wildcard_sources(
     out.into_iter()
 }
 
+/// The module-level names `body` binds more than once: each binding
+/// counted where it stands -- a class or `def` statement, an import's
+/// alias, an assignment, `for`, `with`, `except` or `match` target, a
+/// walrus, `del`, or a `global` declaration in a nested scope -- in every
+/// compound statement of the module's scope. Which binding a later read of
+/// such a name sees depends on run-time order, so no resolution goes
+/// through one (`package_bases::Scan`, `exc_graph`): the one binding table
+/// both share.
+pub(super) fn ambiguous_names(body: &[Stmt]) -> BTreeSet<String> {
+    let mut counts = BindingCount::default();
+    for stmt in body {
+        counts.visit_stmt(stmt);
+    }
+    counts
+        .counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// The count of each module-level name's bindings ([`ambiguous_names`]).
+#[derive(Default)]
+struct BindingCount {
+    counts: BTreeMap<String, usize>,
+}
+
+impl BindingCount {
+    fn bind(&mut self, name: &str) {
+        *self.counts.entry(name.to_string()).or_default() += 1;
+    }
+}
+
+impl<'a> Visitor<'a> for BindingCount {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            // A nested scope binds its own name here, and module names only
+            // through `global`.
+            Stmt::FunctionDef(def) => {
+                self.bind(def.name.as_str());
+                for name in super::names::all_global_declarations(stmt) {
+                    self.bind(&name);
+                }
+                for decorator in &def.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+            }
+            Stmt::ClassDef(class) => {
+                self.bind(class.name.as_str());
+                for name in super::names::all_global_declarations(stmt) {
+                    self.bind(&name);
+                }
+                for decorator in &class.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+            }
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+                    self.bind(name.split('.').next().unwrap_or(name));
+                }
+            }
+            Stmt::ImportFrom(import) => {
+                for alias in &import.names {
+                    self.bind(alias.asname.as_ref().unwrap_or(&alias.name).as_str());
+                }
+            }
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Name(name) if !matches!(name.ctx, ExprContext::Load) => {
+                self.bind(name.id.as_str());
+            }
+            // Their own scopes (a walrus in a comprehension aside, which
+            // binds here too: counted, conservatively, below).
+            Expr::Lambda(_) => {}
+            Expr::Named(named) => {
+                if let Expr::Name(name) = &*named.target {
+                    self.bind(name.id.as_str());
+                }
+                self.visit_expr(&named.value);
+            }
+            _ => visitor::walk_expr(self, expr),
+        }
+    }
+
+    fn visit_except_handler(&mut self, handler: &'a pycc_ast::ExceptHandler) {
+        let pycc_ast::ExceptHandler::ExceptHandler(h) = handler;
+        if let Some(name) = &h.name {
+            self.bind(name.as_str());
+        }
+        visitor::walk_except_handler(self, handler);
+    }
+
+    fn visit_pattern(&mut self, pattern: &'a pycc_ast::Pattern) {
+        let name = match pattern {
+            pycc_ast::Pattern::MatchAs(p) => p.name.as_ref(),
+            pycc_ast::Pattern::MatchStar(p) => p.name.as_ref(),
+            pycc_ast::Pattern::MatchMapping(p) => p.rest.as_ref(),
+            _ => None,
+        };
+        if let Some(name) = name {
+            self.bind(name.as_str());
+        }
+        visitor::walk_pattern(self, pattern);
+    }
+}
+
 /// Every name bound in a module otherwise than by a top-level class
 /// statement or an import: an assignment target, a `for`/`with`/`except`
 /// /`match` name, a function's name or parameter, a nested class, a

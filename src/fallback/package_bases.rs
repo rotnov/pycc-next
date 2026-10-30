@@ -36,8 +36,7 @@ pub(super) fn class_graph(entry: &Path) -> Option<(super::exc_graph::ClassGraph,
     let exports = re_exports(&package.parsed);
     let mut graph = super::exc_graph::ClassGraph::default();
     for (_, qual, is_package, module) in &package.parsed {
-        let mut scan = Scan::new(qual, *is_package);
-        scan.body(&module.body);
+        let scan = Scan::module(qual, *is_package, &module.body);
         graph.add_module(qual, &module.body, &|base| {
             let dotted = scan.dotted(base)?;
             Some(resolve_export(&exports, &dotted).unwrap_or(dotted))
@@ -78,8 +77,7 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>)> {
         if file == entry {
             continue;
         }
-        let mut scan = Scan::new(qual, *is_package);
-        scan.body(&module.body);
+        let scan = Scan::module(qual, *is_package, &module.body);
         let mut bases: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for (base, subclass) in &scan.bases {
             if let Some(base) = resolve(base) {
@@ -195,8 +193,19 @@ pub(super) fn reach_in_package(entry: &Path) -> super::exc_escape::Reach {
         if file == entry {
             continue;
         }
-        let mut scan = Scan::new(qual, *is_package);
-        scan.body(&module.body);
+        let scan = Scan::module(qual, *is_package, &module.body);
+        // A name the module binds more than once, one binding an import
+        // from a module that may hold or re-export the entry's classes:
+        // which class a read of it sees is out of sight -- every layout of
+        // the entry goes.
+        for name in &scan.ambiguous {
+            if import_sources(&scan, &module.body, name)
+                .iter()
+                .any(|source| reaching.contains(source))
+            {
+                out.unknown_base = true;
+            }
+        }
         let mut local: BTreeMap<String, String> = BTreeMap::new();
         let mut modules: BTreeSet<String> = BTreeSet::new();
         for (name, dotted) in &scan.bound {
@@ -217,6 +226,68 @@ pub(super) fn reach_in_package(entry: &Path) -> super::exc_escape::Reach {
             &candidates,
         ));
     }
+    out
+}
+
+/// The modules the imports of `body` binding `name` import from (at any
+/// depth of its top-level compound statements): `pkg.m` for `from pkg.m
+/// import name` (and `pkg.m.name`, a submodule), `x.y` for `import x.y as
+/// name`.
+fn import_sources(scan: &Scan<'_>, body: &[Stmt], name: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    fn walk(scan: &Scan<'_>, body: &[Stmt], name: &str, out: &mut BTreeSet<String>) {
+        for stmt in body {
+            match stmt {
+                Stmt::ImportFrom(import) => {
+                    for alias in &import.names {
+                        if alias.asname.as_ref().unwrap_or(&alias.name).as_str() != name {
+                            continue;
+                        }
+                        if let Some(source) =
+                            scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
+                        {
+                            out.insert(format!("{source}.{}", alias.name.as_str()));
+                            out.insert(source);
+                        }
+                    }
+                }
+                Stmt::Import(import) => {
+                    for alias in &import.names {
+                        let bound = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+                        if bound.split('.').next() == Some(name) {
+                            out.insert(alias.name.to_string());
+                        }
+                    }
+                }
+                Stmt::If(s) => {
+                    walk(scan, &s.body, name, out);
+                    for clause in &s.elif_else_clauses {
+                        walk(scan, &clause.body, name, out);
+                    }
+                }
+                Stmt::Try(s) => {
+                    walk(scan, &s.body, name, out);
+                    for handler in &s.handlers {
+                        let pycc_ast::ExceptHandler::ExceptHandler(h) = handler;
+                        walk(scan, &h.body, name, out);
+                    }
+                    walk(scan, &s.orelse, name, out);
+                    walk(scan, &s.finalbody, name, out);
+                }
+                Stmt::With(s) => walk(scan, &s.body, name, out),
+                Stmt::For(s) => {
+                    walk(scan, &s.body, name, out);
+                    walk(scan, &s.orelse, name, out);
+                }
+                Stmt::While(s) => {
+                    walk(scan, &s.body, name, out);
+                    walk(scan, &s.orelse, name, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    walk(scan, body, name, &mut out);
     out
 }
 
@@ -374,6 +445,9 @@ struct Scan<'a> {
     /// The names each class statement's body binds (its methods and class
     /// attributes), by the class's dotted name.
     defines: BTreeMap<String, BTreeSet<String>>,
+    /// The module-level names bound more than once
+    /// (`exc_escape::ambiguous_names`): [`Scan::dotted`] resolves none.
+    ambiguous: BTreeSet<String>,
 }
 
 impl<'a> Scan<'a> {
@@ -384,7 +458,18 @@ impl<'a> Scan<'a> {
             bound: BTreeMap::new(),
             bases: Vec::new(),
             defines: BTreeMap::new(),
+            ambiguous: BTreeSet::new(),
         }
+    }
+
+    /// The scan of module `qual`'s `body`: the one binding table every
+    /// resolution reads (its bindings, and the names bound more than once,
+    /// which none goes through).
+    fn module(qual: &'a str, is_package: bool, body: &[Stmt]) -> Self {
+        let mut scan = Self::new(qual, is_package);
+        scan.body(body);
+        scan.ambiguous = super::exc_escape::ambiguous_names(body);
+        scan
     }
 
     /// The absolute module a `from` import at `level` of `module` names.
@@ -408,6 +493,7 @@ impl<'a> Scan<'a> {
     /// The dotted name `expr` (a name or an attribute chain) reads.
     fn dotted(&self, expr: &Expr) -> Option<String> {
         match expr {
+            Expr::Name(name) if self.ambiguous.contains(name.id.as_str()) => None,
             Expr::Name(name) => Some(
                 self.bound
                     .get(name.id.as_str())
@@ -589,8 +675,7 @@ pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, PackageE
     let exports = re_exports(&package.parsed);
     let mut scans: BTreeMap<&str, (Scan<'_>, &pycc_ast::ModModule)> = BTreeMap::new();
     for (_, qual, is_package, module) in &package.parsed {
-        let mut scan = Scan::new(qual, *is_package);
-        scan.body(&module.body);
+        let scan = Scan::module(qual, *is_package, &module.body);
         scans.insert(qual.as_str(), (scan, module));
     }
     // What `module.name` is as an exception class (`None`: none).
