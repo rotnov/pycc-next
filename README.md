@@ -102,7 +102,7 @@ is slower than CPython (0.83x for `mistune.html`, 0.79x for the full parser). py
 against its sources): import 0.93x, model definition 0.79x, `model_json_schema()` 0.82x,
 round-trips 0.91x of CPython's speed (medians of 15 interleaved runs). Compiled code over CPython objects does each object operation at about the
 interpreter's cost; the speed is in typed code (the table above, diff-match-patch and pypng
-~12x and ~15x). The analysis is in [ROADMAP v0.9 accepts 2-4](docs/ROADMAP.md).
+~12x and ~15x). The analysis is in [ROADMAP v0.9 accepts 2-4](docs/roadmap/v0.9.md).
 
 **Against Cython and mypyc on the same packages** (bench run 40885134107, ubuntu-24.04,
 medians of 11; pydantic of 15): each tool builds the packages' modules unchanged, and is
