@@ -40,6 +40,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - A compiled `from m import a, b` statement calls `__import__` once, as CPython does,
   instead of once per name (v0.11 accept 3); a hook on `builtins.__import__` sees the same
   calls for the compiled module as for its source.
+- Patching the frameless forwarders of a class CPython creates costs less than half what it
+  did (v0.11 accept 3): a forwarder's code is read at CPython 3.13's offsets, checked once
+  against its attributes, and one class's methods resolve the class once. Own import
+  share: pystache 9.2M -> 9.1M, mistune 25.0M -> 24.6M, pydantic 97.5M -> 95.8M.
 
 ### Fixed
 - Importing a compiled package no longer imports `importlib`, `importlib._bootstrap`,

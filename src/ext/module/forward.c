@@ -47,6 +47,23 @@
 #define PYCC_FUNC_VECTORCALL 128
 #define PYCC_FUNC_VERSION 136
 
+/* `PyCodeObject`'s `co_names`, `co_argcount`, `co_posonlyargcount`,
+ * `co_kwonlyargcount`, `co_nfreevars` and `co_localsplusnames` in CPython
+ * 3.13 (`co_flags` is frames.c's `PYCC_CODE_FLAGS`): read directly once the
+ * first forwarder's code has matched what its attributes say
+ * (`pycc_fwd_code_checked`), so patching makes no attribute objects. The
+ * parameters lead `co_localsplusnames` (`co_varnames`' first names) and the
+ * free variables end it. */
+#define PYCC_CODE_NAMES 32
+#define PYCC_CODE_ARGCOUNT 52
+#define PYCC_CODE_POSONLY 56
+#define PYCC_CODE_KWONLY 60
+#define PYCC_CODE_NLOCALSPLUS 72
+#define PYCC_CODE_NFREEVARS 88
+#define PYCC_CODE_LOCALSPLUSNAMES 96
+#define PYCC_CODE_INT(code, offset) (*(const int *)((const char *)(code) + (offset)))
+#define PYCC_CODE_OBJ(code, offset) (*(PyObject *const *)((const char *)(code) + (offset)))
+
 #define PYCC_CO_VARARGS 0x0004
 #define PYCC_CO_VARKEYWORDS 0x0008
 
@@ -437,6 +454,105 @@ static int pycc_fwd_code_int(PyObject *code, const char *name)
     return (int)out;
 }
 
+/* 1 once a code object's fields read at the offsets above matched its
+ * attributes, -1 once they did not (patching then reads attributes), 0
+ * before the first forwarder. */
+static int pycc_fwd_code_checked = 0;
+
+/* What patching reads of a forwarder's code. */
+typedef struct {
+    PyObject *names;      /* `co_names`, borrowed */
+    PyObject *varnames;   /* starts with the parameters' names; owned */
+    PyObject *freevar;    /* the one free variable's name, borrowed, or NULL */
+    Py_ssize_t nfreevars;
+    int flags, argcount, posonly, kwonly;
+} PycFwdCode;
+
+/* Reads `code` through its attributes; 0, or -1. */
+static int pycc_fwd_code_attrs(PyObject *code, PycFwdCode *out, PyObject **names_owned)
+{
+    PyObject *freevars = pycc_fwd_getattr(code, "co_freevars");
+
+    *names_owned = pycc_fwd_getattr(code, "co_names");
+    out->names = *names_owned;
+    out->varnames = pycc_fwd_getattr(code, "co_varnames");
+    out->flags = pycc_fwd_code_int(code, "co_flags");
+    out->argcount = pycc_fwd_code_int(code, "co_argcount");
+    out->posonly = pycc_fwd_code_int(code, "co_posonlyargcount");
+    out->kwonly = pycc_fwd_code_int(code, "co_kwonlyargcount");
+    out->nfreevars = freevars != NULL && PyTuple_Check(freevars) ? PyTuple_Size(freevars) : -1;
+    out->freevar = out->nfreevars == 1 ? PyTuple_GetItem(freevars, 0) : NULL;
+    /* The name lives on in the code's `co_localsplusnames`. */
+    Py_XDECREF(freevars);
+    PyErr_Clear();
+    return out->names != NULL && PyTuple_Check(out->names) && out->varnames != NULL
+                   && PyTuple_Check(out->varnames) && out->nfreevars >= 0
+               ? 0
+               : -1;
+}
+
+/* Reads `code` at the offsets. */
+static void pycc_fwd_code_fields(PyObject *code, PycFwdCode *out)
+{
+    PyObject *plus = PYCC_CODE_OBJ(code, PYCC_CODE_LOCALSPLUSNAMES);
+    int nplus = PYCC_CODE_INT(code, PYCC_CODE_NLOCALSPLUS);
+
+    out->names = PYCC_CODE_OBJ(code, PYCC_CODE_NAMES);
+    out->varnames = Py_NewRef(plus);
+    out->flags = PYCC_CODE_INT(code, PYCC_CODE_FLAGS);
+    out->argcount = PYCC_CODE_INT(code, PYCC_CODE_ARGCOUNT);
+    out->posonly = PYCC_CODE_INT(code, PYCC_CODE_POSONLY);
+    out->kwonly = PYCC_CODE_INT(code, PYCC_CODE_KWONLY);
+    out->nfreevars = PYCC_CODE_INT(code, PYCC_CODE_NFREEVARS);
+    out->freevar = out->nfreevars == 1 ? PyTuple_GetItem(plus, nplus - 1) : NULL;
+}
+
+/* Whether `fields` (read at the offsets) say what `attrs` (read through the
+ * attributes) do. */
+static int pycc_fwd_code_same(PyObject *code, const PycFwdCode *fields, const PycFwdCode *attrs)
+{
+    Py_ssize_t i, n = PyTuple_Size(attrs->varnames);
+
+    if (fields->names != attrs->names || fields->flags != attrs->flags
+        || fields->argcount != attrs->argcount || fields->posonly != attrs->posonly
+        || fields->kwonly != attrs->kwonly || fields->nfreevars != attrs->nfreevars
+        || fields->freevar != attrs->freevar || !PyTuple_Check(fields->varnames)
+        || PYCC_CODE_INT(code, PYCC_CODE_NLOCALSPLUS) != PyTuple_Size(fields->varnames)
+        || PyTuple_Size(fields->varnames) < n) {
+        return 0;
+    }
+    for (i = 0; i < n; i++) {
+        if (PyTuple_GetItem(fields->varnames, i) != PyTuple_GetItem(attrs->varnames, i)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Reads `code` into `out` (`*owned`: a reference to drop after), at the
+ * offsets once checked; 0, or -1. */
+static int pycc_fwd_code_read(PyObject *code, PycFwdCode *out, PyObject **owned)
+{
+    PycFwdCode fields;
+
+    *owned = NULL;
+    if (pycc_fwd_code_checked == 1) {
+        pycc_fwd_code_fields(code, out);
+        return 0;
+    }
+    if (pycc_fwd_code_attrs(code, out, owned) != 0) {
+        Py_XDECREF(out->varnames);
+        Py_CLEAR(*owned);
+        return -1;
+    }
+    if (pycc_fwd_code_checked == 0) {
+        pycc_fwd_code_fields(code, &fields);
+        pycc_fwd_code_checked = pycc_fwd_code_same(code, &fields, out) ? 1 : -1;
+        Py_DECREF(fields.varnames);
+    }
+    return 0;
+}
+
 /*
  * Patches `func` when it is an unpatched forwarder of this module: a
  * Python function whose code names only a lift (`__pycc_lift...`) bound in
@@ -444,9 +560,9 @@ static int pycc_fwd_code_int(PyObject *code, const char *name)
  */
 static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
 {
-    PyObject *code, *names, *freevars, *lift, *target;
+    PyObject *code, *owned, *lift, *target;
+    PycFwdCode info;
     PycFwdSlot *slot;
-    int flags;
 
     if (Py_TYPE(func) != (PyTypeObject *)pycc_frames_function_type
         || *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) != pycc_fwd_original
@@ -454,13 +570,14 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
         return;
     }
     code = PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE);
-    names = pycc_fwd_getattr(code, "co_names");
-    freevars = pycc_fwd_getattr(code, "co_freevars");
-    if (names == NULL || freevars == NULL || PyTuple_Size(names) != 1
-        || PyTuple_Size(freevars) > 1) {
+    if (pycc_fwd_code_read(code, &info, &owned) != 0) {
+        PyErr_Clear();
+        return;
+    }
+    if (PyTuple_Size(info.names) != 1 || info.nfreevars > 1) {
         goto done;
     }
-    lift = PyTuple_GetItem(names, 0);
+    lift = PyTuple_GetItem(info.names, 0);
     if (!PyUnicode_Check(lift) || PyUnicode_Tailmatch(lift, pycc_fwd_prefix, 0, PY_SSIZE_T_MAX, -1) != 1) {
         goto done;
     }
@@ -470,31 +587,26 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
     }
     slot = &m->fwd_slots[m->fwd_used];
     memset(slot, 0, sizeof(*slot));
-    flags = pycc_fwd_code_int(code, "co_flags");
-    slot->argcount = pycc_fwd_code_int(code, "co_argcount");
-    slot->posonly = pycc_fwd_code_int(code, "co_posonlyargcount");
-    slot->kwonly = pycc_fwd_code_int(code, "co_kwonlyargcount");
-    slot->varargs = (flags & PYCC_CO_VARARGS) != 0;
-    slot->varkw = (flags & PYCC_CO_VARKEYWORDS) != 0;
-    if (flags < 0 || slot->argcount < 0 || slot->posonly < 0 || slot->kwonly < 0
-        || slot->argcount + slot->kwonly > PYCC_FWD_MAX_PARAMS - 2) {
+    slot->argcount = info.argcount;
+    slot->posonly = info.posonly;
+    slot->kwonly = info.kwonly;
+    slot->varargs = (info.flags & PYCC_CO_VARARGS) != 0;
+    slot->varkw = (info.flags & PYCC_CO_VARKEYWORDS) != 0;
+    if (info.flags < 0 || slot->argcount < 0 || slot->posonly < 0 || slot->kwonly < 0
+        || slot->argcount + slot->kwonly > PYCC_FWD_MAX_PARAMS - 2
+        || PyTuple_Size(info.varnames) < slot->argcount + slot->kwonly) {
         goto done;
     }
-    if (PyTuple_Size(freevars) == 1) {
+    if (info.nfreevars == 1) {
         PyObject *closure = PYCC_FUNC_FIELD(func, PYCC_FUNC_CLOSURE);
 
-        if (PyUnicode_CompareWithASCIIString(PyTuple_GetItem(freevars, 0), "__class__") != 0
+        if (PyUnicode_CompareWithASCIIString(info.freevar, "__class__") != 0
             || closure == NULL || PyTuple_Size(closure) != 1) {
             goto done;
         }
         slot->cell = Py_NewRef(PyTuple_GetItem(closure, 0));
     }
-    slot->names = pycc_fwd_getattr(code, "co_varnames");
-    if (slot->names == NULL || PyTuple_Size(slot->names) < slot->argcount + slot->kwonly) {
-        Py_XDECREF(slot->names);
-        Py_XDECREF(slot->cell);
-        goto done;
-    }
+    slot->names = Py_NewRef(info.varnames);
     {
         int k;
 
@@ -517,8 +629,8 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
     m->fwd_used++;
 done:
     PyErr_Clear();
-    Py_XDECREF(names);
-    Py_XDECREF(freevars);
+    Py_DECREF(info.varnames);
+    Py_XDECREF(owned);
 }
 
 static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int depth);
@@ -657,6 +769,9 @@ static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssiz
 {
     PyObject *ns = PyEval_GetGlobals();
     PyccExtModule *m = (PyccExtModule *)PyCapsule_GetPointer(self, PYCC_FWD_CAPSULE);
+    /* The last owner (`C` of `C.m`), and its `__dict__` or NULL: the names of
+     * one statement are usually all one class's. */
+    PyObject *owner_name = NULL, *owner_dict = NULL;
     Py_ssize_t i;
 
     if (m == NULL) {
@@ -666,14 +781,43 @@ static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssiz
         Py_RETURN_NONE;
     }
     for (i = 0; i < nargs; i++) {
-        PyObject *obj = pycc_fwd_resolve(ns, args[i]);
+        PyObject *qualname = args[i], *obj = NULL;
+        Py_ssize_t len = PyUnicode_Check(qualname) ? PyUnicode_GetLength(qualname) : -1;
+        Py_ssize_t dot = len < 0 ? -2 : PyUnicode_FindChar(qualname, '.', 0, len, -1);
 
+        if (dot >= 0) {
+            PyObject *member;
+
+            if (owner_name == NULL || PyUnicode_GetLength(owner_name) != dot
+                || PyUnicode_Tailmatch(qualname, owner_name, 0, dot, -1) != 1) {
+                PyObject *owner;
+
+                Py_CLEAR(owner_name);
+                Py_CLEAR(owner_dict);
+                owner_name = PyUnicode_Substring(qualname, 0, dot);
+                owner = owner_name == NULL ? NULL : pycc_fwd_resolve(ns, owner_name);
+                owner_dict = owner != NULL && PyType_Check(owner)
+                                 ? pycc_fwd_getattr(owner, "__dict__")
+                                 : NULL;
+                Py_XDECREF(owner);
+                PyErr_Clear();
+            }
+            member = owner_dict == NULL ? NULL : PyUnicode_Substring(qualname, dot + 1, len);
+            if (member != NULL && PyMapping_GetOptionalItem(owner_dict, member, &obj) < 0) {
+                obj = NULL;
+            }
+            Py_XDECREF(member);
+        } else if (dot == -1) {
+            obj = Py_XNewRef(PyDict_GetItemWithError(ns, qualname));
+        }
         if (obj != NULL) {
             pycc_fwd_walk(m, ns, obj, 0);
             Py_DECREF(obj);
         }
         PyErr_Clear();
     }
+    Py_XDECREF(owner_name);
+    Py_XDECREF(owner_dict);
     Py_RETURN_NONE;
 }
 
