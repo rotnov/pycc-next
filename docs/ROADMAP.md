@@ -1087,6 +1087,9 @@ Accept:
    those), never an object that may be a `str` subclass; a narrowed object is stored
    as itself; and `d[k] = v` releases its value when the key raises (a leak that also
    affected typed dicts).
+   **Met 2026-10-30:** #19 merged (4d94f07); CI run 40978109530 green on all four jobs
+   at 236807d (`tests/v10_dicts.rs`: IR check of which functions build native dicts,
+   `--ext` oracle runs in debug and release, leak probe).
 3. **Template and Markdown >= 1.2x:** pystache 0.6.8 and mistune 3.3.4 each run their own
    benchmark >= 1.2x faster than CPython (median of the CI benchmark job, accept 4), with
    their suites passing.
