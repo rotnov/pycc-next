@@ -19,6 +19,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   CPython stays the correctness oracle.
 - The differential fuzzer's `call_errors` block: calls with missing, extra, unknown,
   misspelled and repeated arguments, and missing attributes of classes and instances.
+- `--non-strict`: a function's `str`-keyed dict display holding CPython objects
+  (`{"first": None, "n": 0}`) is a native dict when the dict never escapes the function
+  -- it is only read, stored into, tested for a key, measured, iterated or tested for
+  truth; returned, passed, stored elsewhere, compared or printed, it stays CPython's
+  `dict`, so identity, views, pickling and `repr` are CPython's wherever CPython can see
+  it (v0.10 accept 2). Equal identifier-like `str` literals share one native object, and
+  native `str`-keyed dicts read a key's cached hash in place.
 
 - Instances of published compiled classes pickle (v0.10), as `object.__reduce_ex__` pickles
   an object: `copyreg.__newobj__` with `__getnewargs_ex__` / `__getnewargs__`'s arguments and

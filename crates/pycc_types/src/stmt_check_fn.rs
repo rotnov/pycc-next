@@ -806,6 +806,7 @@ pub(crate) fn check_stmt_arm_in_function(
             }
             let ty = infer_expr_in(env, local_names, value)
                 .map_err(|d| empty_container::name_binding(d, target, value))?;
+            crate::non_strict::note_object_dict(target, value, &ty);
             check_assignment_boxing(env, target, ty, value)
         }
         HirStmt::AnnAssign {

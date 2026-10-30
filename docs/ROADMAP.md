@@ -1057,10 +1057,7 @@ Accept:
    and every CPython dict -- built escaping, or received -- is accessed through direct
    dict-API calls under an exact-dict guard, so identity, views, pickling and iteration
    errors are CPython's by construction for every dict CPython can see. No run-time
-   materialize-and-forward. What stays to do: a non-escaping `str`-keyed dict whose values
-   are objects (`{"type": "text", "raw": s}`) is a native dict too -- open: neither
-   package has such a dict on its hot path while mistune's renderers are CPython classes
-   (accept 3's table).
+   materialize-and-forward.
    **Progress 2026-10-29:** step 1, the exact-dict guard on `d[k]`, `k in d` and
    `d[k] = v` of CPython dicts, and literals crossing as CPython's interned strings
    (`tests/v10_dicts.rs`): 275 -> 179 instructions for a compiled `d['raw']` on a
@@ -1068,6 +1065,28 @@ Accept:
    per pass (CPython 505k and 57.0M, `PYTHONHASHSEED=0`, each count after a discarded
    warm-up run that writes the trees' `.pyc` files): dicts are not where either package
    spends (accept 3's note).
+   **Progress 2026-10-29:** step 2, the non-escaping `str`-keyed dict of objects
+   (`pycc_types::non_strict::object_dicts`, `tests/v10_dicts.rs`): a function's local
+   whose every binding is a display with `str` literal keys, and that the function only
+   reads an item of, stores an item into, tests a key against (`in`, `not in`), measures,
+   iterates or tests for truth, is a native `dict[str, object]` (its values the CPython
+   objects themselves, a native value stored boxed) when the module's check bound it to
+   a CPython dict; any other use is an escape and keeps CPython's dict. A function the
+   checker does not admit that way (a CPython object as a key) keeps its CPython dict
+   rather than falling back. Literal `str`s CPython would intern share one native object,
+   and a `str` key's cached hash is read in place, so equal keys compare by identity.
+   Measured: a loop updating such a dict four times per item (`seen['n'] = seen['n'] + 1`
+   and the like), 2,091 -> 1,914 instructions per item (CPython 1,872). The corpus, the
+   bench programs, pystache and mistune have no such dict (theirs are returned, appended
+   or passed on); pydantic has one.
+   **Review hardening 2026-10-30 (#19):** a display qualifies only when its keys are
+   distinct `str` literals and its values run no code (names, literals, displays of
+   those), so CPython's evaluate-then-store order and its reverse-order release on a
+   raise hold; every key the function looks up, tests or stores is an exact `str` (a
+   literal, a key of the dict from iterating it, a concatenation or conditional of
+   those), never an object that may be a `str` subclass; a narrowed object is stored
+   as itself; and `d[k] = v` releases its value when the key raises (a leak that also
+   affected typed dicts).
 3. **Template and Markdown >= 1.2x:** pystache 0.6.8 and mistune 3.3.4 each run their own
    benchmark >= 1.2x faster than CPython (median of the CI benchmark job, accept 4), with
    their suites passing.

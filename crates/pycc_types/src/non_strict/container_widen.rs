@@ -160,6 +160,8 @@ pub(super) fn fresh(value: &HirExpr) -> bool {
         // `set(xs)`: a new set, whose elements (hashable, so immutable or
         // carried by identity) no copy can tell apart from the originals.
         HirExpr::Call { callee, args } if args.len() == 1 && matches!(callee.as_str(), "set" | "frozenset") => true,
+        // A native dict of objects (`super::object_dicts`): its display.
+        HirExpr::Call { .. } if super::object_dicts::is_marked(value) => true,
         HirExpr::Call { callee, .. } => super::fresh_returns::is_fresh_returning(callee),
         HirExpr::BinOp {
             op: pycc_hir::BinOpKind::Add | pycc_hir::BinOpKind::Mul,

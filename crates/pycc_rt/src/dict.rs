@@ -129,7 +129,19 @@ impl PyDictObj {
     /// The entry index of `key`, raising `TypeError` for an unhashable key
     /// (then `Err`).
     fn locate(&self, key: i64) -> Result<(Option<usize>, i64), ()> {
-        let hash = value::hash_or_raise(self.key_kind, key).ok_or(())?;
+        // A `str` key's cached hash is read in place: the common case of a
+        // `str`-keyed dict, whose keys are hashed once each.
+        let cached = if self.key_kind == crate::list::LIST_KIND_STR {
+            // SAFETY: a `str` word is a live `PyStrObj`.
+            unsafe { &*(key as *mut PyStrObj) }.hash.get()
+        } else {
+            -1
+        };
+        let hash = if cached != -1 {
+            cached
+        } else {
+            value::hash_or_raise(self.key_kind, key).ok_or(())?
+        };
         Ok((self.lookup(key, hash), hash))
     }
 
