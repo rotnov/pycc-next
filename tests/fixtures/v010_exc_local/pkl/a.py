@@ -1,4 +1,4 @@
-"""`A` would have a native layout, but `b.B` derives from it and `OSError`."""
+"""`b.B` derives from `A` and `OSError`."""
 
 
 class A(Exception):

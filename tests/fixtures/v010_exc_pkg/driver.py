@@ -14,7 +14,7 @@ compiled = pke.__file__.endswith((".so", ".pyd"))
 
 
 def mro(cls):
-    """The MRO without the layout templates (`docs/DEVIATIONS.md`)."""
+    """The MRO by class name, compiled classes (`pycc`) aside."""
     return [c.__name__ for c in cls.__mro__ if c.__module__ != "pycc"]
 
 

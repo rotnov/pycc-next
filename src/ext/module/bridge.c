@@ -269,9 +269,6 @@ typedef struct PyccExtModule {
     PyObject *(*exception_class_named)(const char *name);
     int (*carrier_class_copy_kinds)(const unsigned char *cls, size_t len, const char **kinds,
                                     size_t *nkinds, const char **refused);
-    /* v0.10: the native layout the hidden class `hidden` declares
-     * (`exc_layouts_c` in `src/ext_build/exc_layouts.rs`), or NULL. */
-    const struct PyccExtExcLayout *(*exc_layout)(const char *hidden);
     /* The forwarder trampolines, one per lift of the module, and their
      * count (`forward_trampolines_c` in `src/ext_build/exports_inc.rs`). */
     const int *fwd_slot_count;

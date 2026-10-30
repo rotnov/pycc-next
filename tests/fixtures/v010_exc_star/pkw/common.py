@@ -1,5 +1,4 @@
-"""An exception class that would have a native layout, but `combo` imports
-it with a wildcard."""
+"""An exception class `combo` imports with a wildcard."""
 
 
 class Coded(Exception):

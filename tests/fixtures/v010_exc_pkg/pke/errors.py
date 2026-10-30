@@ -3,7 +3,7 @@ from .common import Lefty, Owned, PkgError, Pinned, Rated
 
 
 class KeyMissing(PkgError):
-    """Over a base with no layout: a layout of its own."""
+    """Over another module's exception class."""
 
     def __init__(self, key: str, details: str) -> None:
         self.key = key
@@ -14,7 +14,7 @@ class KeyMissing(PkgError):
 
 
 class Sub(Owned):
-    """Over another module's layout class."""
+    """Over another module's exception class with attributes of its own."""
 
     def __init__(self, code: int, where: str, extra: str) -> None:
         super().__init__(code, where)
@@ -34,11 +34,11 @@ PinAlias = Pinned
 
 
 class Duo(Lefty, ValueError):
-    """Several bases, one another module's would-be layout class."""
+    """Several bases, one another module's exception class."""
 
 
 class Clash(Exception):
-    """Named as a class of `common` is: each has a layout of its own."""
+    """Named as a class of `common` is."""
 
     def __init__(self, b: str, c: str) -> None:
         self.b = b

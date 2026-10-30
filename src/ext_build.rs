@@ -76,7 +76,6 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/bytearray.c"),
     include_str!("ext/module/carriers.c"),
     include_str!("ext/module/instances.c"),
-    include_str!("ext/module/exc_templates.c"),
     include_str!("ext/module/forward.c"),
     include_str!("ext/module/buffers.c"),
     include_str!("ext/module/module_ctx_head.c"),
@@ -548,7 +547,6 @@ pub(crate) fn has_defaults(module: &HirModule, name: &str) -> bool {
 }
 pub(crate) use carrier::*;
 mod export_name;
-mod exc_layouts;
 mod exports_inc;
 #[cfg(test)]
 pub(crate) use exports_inc::generate_exports_inc;

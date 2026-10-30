@@ -33,7 +33,6 @@ static PyccExtModule pycc_ext_mod = {
     pycc_ext_carrier_class_isinstance,
     pycc_ext_exception_class_named,
     pycc_ext_carrier_class_copy_kinds,
-    pycc_ext_exc_layout,
     &pycc_fwd_slot_count,
     pycc_fwd_trampolines,
     pycc_ext_carrier_slots,

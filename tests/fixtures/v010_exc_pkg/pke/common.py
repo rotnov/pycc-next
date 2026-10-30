@@ -6,7 +6,7 @@ class PkgError(Exception):
 
 
 class Owned(Exception):
-    """An exception class with a native layout of its own."""
+    """An exception class with attributes of its own."""
 
     def __init__(self, code: int, where: str) -> None:
         super().__init__(f"code {code}")
@@ -22,7 +22,7 @@ def code_of(e: Owned) -> int:
 
 
 class Rated(Exception):
-    """Would have a layout, but `errors.Overrated` shadows `rate`."""
+    """`errors.Overrated` makes `rate` a property."""
 
     def __init__(self, rate: int) -> None:
         self.rate = rate
@@ -32,7 +32,7 @@ class Rated(Exception):
 
 
 class Lefty(Exception):
-    """Would have a layout, but `errors.Duo` derives from it and another."""
+    """`errors.Duo` derives from it and another base."""
 
     def __init__(self, left: int) -> None:
         self.left = left
@@ -42,14 +42,14 @@ class Lefty(Exception):
 
 
 class Pinned(Exception):
-    """Would have a layout, but `errors.PinAlias` binds it to another name."""
+    """`errors.PinAlias` binds it to another name."""
 
     def __init__(self, pin: int) -> None:
         self.pin = pin
 
 
 class Clash(Exception):
-    """Named as a class of `errors` is: each has a layout of its own."""
+    """Named as a class of `errors` is."""
 
     def __init__(self, a: int) -> None:
         self.a = a

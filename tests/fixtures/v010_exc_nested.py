@@ -1,7 +1,6 @@
-"""Exception classes reached by class statements the layout planner does not
-examine (v0.10 accept 5, `tests/v010_exceptions.rs`): a statement nested in
-a function, under `if`, under `try`, or decorated. Each base used so gets no
-native layout; `Kept`, used only by examined statements, keeps its own."""
+"""Exception classes subclassed by class statements in a function, under
+`if`, under `try`, or decorated (v0.10 accept 5, `tests/v010_exceptions.rs`):
+the compiled module behaves as its source does."""
 
 
 class Kept(Exception):

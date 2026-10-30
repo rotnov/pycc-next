@@ -1153,8 +1153,8 @@ Accept:
    pydantic import 0.93x, define 0.79x, schema 0.82x, round-trips 0.91x.
 5. **Deferred class work:** compiled subclasses of compiled classes from another module of
    the package are native (layout-pointer dispatch across modules, no CPython class in
-   between), and compiled exception classes can derive from package exception bases
-   (PEP 697); each with oracle tests vs CPython.
+   between), and compiled exception classes can derive from package exception bases;
+   each with oracle tests vs CPython.
    **Progress 2026-10-29** -- the cross-module half (design, guru ruling: the plan gives
    the base module the *set* of overridden names, the subclass's own class record holds
    the *targets*): every class has a record, one named descriptor global its instances
@@ -1169,25 +1169,18 @@ Accept:
    through CPython when the entry is null; a call on a value typed with the sibling class
    runs that dispatcher (`tests/v010_subclasses.rs`). Open: a subclass of such a subclass
    in a third module (it runs as a Python subclass).
-   **Progress 2026-10-29** -- the exception half, single module (design, guru ruling:
-   CPython makes the class from its statement, the template first among its bases): an
-   exception class with members of its own keeps `lift`'s split (CPython runs the
-   statement, its methods compiled), and the attributes its methods store from
-   parameters go in a native layout -- a hidden compiled class declares it, the
-   statement's bases pass through `__pycc_exc_bases__`, which puts a PEP 697 template
-   over the exception base first (its objects' payload holds the native instance, bound
-   unassigned on first native use; it inherits the base's `tp_new`, so `__new__` resolves
-   along the MRO as for the source class; its descriptors, `__reduce__`, deallocator,
-   traverse and clear chain to the base's; made only where every class of the MRO up to
-   the builtin base is the module's or the package's, its body on an allowlist, and no
-   name a base binds is a layout attribute), and
-   each lifted method takes the object's native view as a second receiver
-   (`tests/v010_exceptions.rs`). Across the modules of a package built whole, a
-   syntactic scan tells which bases are another module's exception classes and
-   whether their chain may have a layout: over one without, a class gets a layout of
-   its own (pystache's `KeyNotFoundError(PystacheError)` shape); over a layout class it
-   keeps that class's, its own attributes in `__dict__` (`tests/fixtures/v010_exc_pkg`).
-   Open: a layout extending another module's.
+   **Progress 2026-10-30** -- the exception half: an exception class with members of its
+   own, over a builtin exception class or another module's exception class of the
+   package, is made by CPython from its statement and its methods are compiled (`lift`);
+   functions raising and catching it stay compiled (`tests/v010_exceptions.rs`: the
+   oracle fixture and the package `v010_exc_pkg` in debug and release, a leak probe, and
+   regressions for aliases, nested and conditional class statements, `exec`, rebound
+   names, wildcard imports, cross-module subclass cycles and function-local imports). A
+   native attribute layout (a PEP 697 template over the exception base) was built and
+   measured instead: it made compiled code slower -- 2.5x on raise and catch, 1.5x on
+   attribute reads, against this path, which CPython's own run beat 2.1x and 1.5x --
+   and proving no Python subclass conflicts with it took a package-wide analysis that
+   kept growing; it was removed.
 
 ## v0.11 — Imports faster than CPython
 

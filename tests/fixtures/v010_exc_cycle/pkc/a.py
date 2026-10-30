@@ -1,5 +1,4 @@
-"""`A` would have a native layout, but `C` (here) derives from `b.B(A)` and
-`OSError`."""
+"""`C` (here) derives from `b.B(A)` and `OSError`."""
 
 
 class A(Exception):

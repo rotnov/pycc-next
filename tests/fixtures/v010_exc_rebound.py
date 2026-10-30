@@ -1,7 +1,7 @@
 """A class name bound by two class statements (v0.10 accept 5,
 `tests/v010_exceptions.rs`): the first `B` derives from `A` and `OSError`,
-then a second `B` rebinds the name. Every class statement counts, so `A`
-gets no native layout, and the module behaves as its source does."""
+then a second `B` rebinds the name; the module behaves as its source
+does."""
 
 
 class A(Exception):

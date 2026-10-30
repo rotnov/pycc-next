@@ -1,18 +1,20 @@
-//! Exception classes with members of their own (v0.10 accept 5). In a
-//! `--non-strict` `--ext` module CPython makes each from its statement over
-//! a PEP 697 template (`src/ext/module/exc_templates.c`), its methods
-//! compiled, and the attributes they store from typed parameters live in a
-//! native layout the compiled methods read and store natively
-//! (`src/fallback/exc_layout.rs`). `tests/fixtures/v010_exceptions_host.py`
-//! uses them from Python -- construction, `args`, `str`/`repr` with and
-//! without `super().__init__`, overrides, a layout over another, raising
-//! and catching across the boundary, tracebacks, `__dict__`, `del`,
-//! pickling and copying, Python subclasses, causes and exception groups --
-//! against the module built from `tests/fixtures/v010_exceptions.py` and
-//! against its source. `tests/fixtures/v010_exc_pkg/pke`, built whole,
-//! derives exception classes from another module's: over one without a
-//! layout (a layout of its own over it) and over a layout class (that
-//! class's layout).
+//! Exception classes with members of their own (v0.10 accept 5), in a
+//! `--non-strict` `--ext` module or a package built whole: CPython makes each
+//! from its statement, its methods compiled (`lift`), so the compiled module
+//! behaves as its source does. `tests/fixtures/v010_exceptions_host.py` uses
+//! them from Python -- construction, `args`, `str`/`repr` with and without
+//! `super().__init__`, overrides, a class over another, raising and catching
+//! across the boundary, tracebacks, `__dict__`, `del`, pickling and
+//! copying, Python subclasses (several bases, a reducing mixin, one freed
+//! with its last object), causes and exception groups -- against the module
+//! built from `tests/fixtures/v010_exceptions.py` and against its source.
+//! `tests/fixtures/v010_exc_pkg/pke`, built whole, derives exception classes
+//! from another module's. The remaining fixtures are the shapes that once
+//! defeated v0.10's native exception layouts (an alias, nested and
+//! conditional class statements, `exec`, a rebound name, an imported name
+//! spelled like a builtin, wildcard imports, subclass cycles across modules,
+//! a name imported twice, a function-local import): they stay as
+//! regressions of the plain path.
 
 use pycc_scratch::ScratchDir;
 use std::path::{Path, PathBuf};
@@ -39,20 +41,6 @@ fn fixture(name: &str, dir: &Path, as_name: &str) -> PathBuf {
     path
 }
 
-fn build(dir: &Path, flags: &[&str]) {
-    let source = fixture("v010_exceptions", dir, "m.py");
-    let build = pycc()
-        .args(["build", "--ext", "--non-strict"])
-        .args(flags)
-        .arg(&source)
-        .arg("-o")
-        .arg(dir.join("m"))
-        .output()
-        .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    std::fs::remove_file(&source).expect("import the artifact, not the source");
-}
-
 fn run(dir: &Path, script: &str) -> Output {
     python()
         .args(["-c", script])
@@ -61,43 +49,13 @@ fn run(dir: &Path, script: &str) -> Output {
         .expect("python should spawn")
 }
 
-fn matches_cpython(flags: &[&str]) {
-    let compiled = ScratchDir::new("v010_exceptions").expect("scratch");
-    build(&compiled, flags);
-    fixture("v010_exceptions_host", &compiled, "host.py");
-    let plain = ScratchDir::new("v010_exceptions_src").expect("scratch");
-    fixture("v010_exceptions", &plain, "m.py");
-    fixture("v010_exceptions_host", &plain, "host.py");
-    let script = "exec(open('host.py').read())";
-    let ours = run(&compiled, script);
-    let theirs = run(&plain, script);
-    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
-    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
-}
-
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn exception_classes_with_a_layout_match_cpython() {
-    matches_cpython(&[]);
-}
-
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn exception_classes_with_a_layout_match_cpython_release() {
-    matches_cpython(&["--release"]);
-}
-
-/// The attributes are native: not in `__dict__`, the template in the MRO,
-/// a store of another type kept there as CPython keeps it in `__dict__`,
-/// and the compiled functions raising and catching the classes compiled.
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn the_layout_is_native() {
-    let dir = ScratchDir::new("v010_exceptions_native").expect("scratch");
-    let source = fixture("v010_exceptions", &dir, "m.py");
+/// Builds fixture `name` as `m` in `dir` (`--ext --non-strict`, plus
+/// `flags`), leaving the artifact alone: the build's stderr.
+fn build(name: &str, dir: &Path, flags: &[&str]) -> String {
+    let source = fixture(name, dir, "m.py");
     let build = pycc()
-        .args(["build", "--ext", "--non-strict", "--report-fallbacks"])
+        .args(["build", "--ext", "--non-strict"])
+        .args(flags)
         .arg(&source)
         .arg("-o")
         .arg(dir.join("m"))
@@ -105,150 +63,72 @@ fn the_layout_is_native() {
         .expect("pycc should spawn");
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
-    for function in ["fail", "run", "churn", "probe"] {
-        assert!(!report.contains(&format!("function `{function}`")), "{report}");
-    }
-    std::fs::remove_file(&source).expect("import the artifact");
-    let out = run(
-        &dir,
-        "import m\ne = m.Deeper(1, 'w', 2)\n\
-         print('code' in e.__dict__, 'depth' in e.__dict__, \
-         [c.__name__ for c in type(e).__mro__ if c.__module__ == 'pycc'])\n\
-         e.code = 'x'\nprint(repr(e.code), e.__dict__)\n\
-         f = m.NoFile(2, 'p')\nprint('path' in f.__dict__, str(f), f.errno)\n\
-         print([[c for c in k.__mro__ if c.__module__ == 'pycc'] \
-         for k in (m.Metered, m.Plated, m.Both, m.KeyOS, m.Lazy, m.Reduced)])\n",
-    );
-    assert_eq!(
-        text(&out.stdout),
-        "False False ['exception_layout', 'exception_layout']\n\
-         'x' {}\n\
-         True [Errno 2] no such thing 2\n\
-         [[], [], [], [], [], []]\n",
-        "{}",
-        text(&out.stderr)
-    );
+    std::fs::remove_file(&source).expect("import the artifact, not the source");
+    report
 }
 
-/// Builds fixture `name` as `m` (`--ext --non-strict`), runs `script` in
-/// CPython against it and against its source, and checks the outputs match;
-/// then runs `native` against the compiled module alone (what only it
-/// shows, its templates): that run's stdout. Each of `beside` (a fixture,
-/// the file name it takes) lies next to the module in both runs,
-/// uncompiled.
-fn single_module_matches(
-    name: &str,
-    beside: &[(&str, &str)],
-    script: &str,
-    native: &str,
-) -> String {
+/// Builds fixture `name` as `m` (`--ext --non-strict`, plus `flags`), runs
+/// `script` in CPython against it and against its source, and checks the
+/// outputs match. Each of `beside` (a fixture, the file name it takes) lies
+/// next to the module in both runs, uncompiled.
+fn single_module_matches(name: &str, beside: &[(&str, &str)], flags: &[&str], script: &str) {
     let compiled = ScratchDir::new(&format!("{name}_built")).expect("scratch");
-    let source = fixture(name, &compiled, "m.py");
-    let build = pycc()
-        .args(["build", "--ext", "--non-strict"])
-        .arg(&source)
-        .arg("-o")
-        .arg(compiled.join("m"))
-        .output()
-        .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    std::fs::remove_file(&source).expect("import the artifact");
+    build(name, &compiled, flags);
     let plain = ScratchDir::new(&format!("{name}_src")).expect("scratch");
     fixture(name, &plain, "m.py");
     for (file, as_name) in beside {
         fixture(file, &compiled, as_name);
         fixture(file, &plain, as_name);
     }
-    let ours = run(&compiled, script);
     let theirs = run(&plain, script);
     assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
+    let ours = run(&compiled, script);
     assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
     assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
-    let shown = run(&compiled, native);
-    assert_eq!(shown.status.code(), Some(0), "{}", text(&shown.stderr));
-    text(&shown.stdout)
 }
 
-/// The script printing how many templates each of `classes` (of module `m`)
-/// has in its MRO.
-fn templates_of(classes: &str) -> String {
-    format!(
-        "import m\nprint([len([c for c in k.__mro__ if c.__module__ == 'pycc']) \
-         for k in ({classes})])\n"
-    )
+/// The host script of `tests/fixtures/v010_exceptions_host.py`.
+const HOST: &str = "exec(open('host.py').read())";
+
+fn exceptions_match_cpython(flags: &[&str]) {
+    single_module_matches(
+        "v010_exceptions",
+        &[("v010_exceptions_host", "host.py")],
+        flags,
+        HOST,
+    );
 }
 
-/// A layout class reached through an alias, and a class statement over the
-/// alias (`tests/fixtures/v010_exc_alias.py`): no class of the module gets a
-/// layout, and the module behaves as its source does.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_aliased_class_gets_no_layout() {
-    let out = single_module_matches(
-        "v010_exc_alias",
-        &[],
-        "import m\nprint(m.run(3), m.plain(4), [c.__name__ for c in m.Through.__mro__])\n\
-         class Again(m.Alias, KeyError):\n    pass\nprint(Again(1).code if hasattr(Again(1), 'code') \
-         else 'none', [c.__name__ for c in Again.__mro__][:3])\n",
-        &templates_of("m.Aliased, m.Plain"),
-    );
-    assert_eq!(out, "[0, 0]\n");
+fn exception_classes_match_cpython() {
+    exceptions_match_cpython(&[]);
 }
 
-/// Bases used by class statements the planner does not examine -- nested in
-/// a function, under `if` or `try`, decorated -- get no layout
-/// (`tests/fixtures/v010_exc_nested.py`); a class used only by examined
-/// statements keeps its own.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn bases_of_unexamined_class_statements_get_no_layout() {
-    let out = single_module_matches(
-        "v010_exc_nested",
-        &[],
-        "import m\nC = m.factory()\nprint(C(3).code, m.Cond(4).code, m.Guard(5).code, \
-         m.Dec(6).code, m.REGISTRY[0].__name__, m.kept(7))\n",
-        &templates_of("m.Kept, m.Factory, m.Conditional, m.Guarded, m.Decorated"),
-    );
-    assert_eq!(out, "[1, 0, 0, 0, 0]\n");
+fn exception_classes_match_cpython_release() {
+    exceptions_match_cpython(&["--release"]);
 }
 
-/// A class name bound by two class statements, the first over a layout
-/// class and `OSError` (`tests/fixtures/v010_exc_rebound.py`): every
-/// statement counts, so the layout is withdrawn.
+/// The functions raising and catching the classes stay compiled.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn every_class_statement_of_a_rebound_name_counts() {
-    let out = single_module_matches(
-        "v010_exc_rebound",
-        &[],
-        "import m\nprint(m.make(3), [c.__name__ for c in m.B.__mro__])\n",
-        &templates_of("m.A,"),
-    );
-    assert_eq!(out, "[0]\n");
-}
-
-/// A class subclassed by code `exec` runs (`tests/fixtures/v010_exc_exec.py`):
-/// the module gets no layout.
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn exec_withdraws_every_layout() {
-    let out = single_module_matches(
-        "v010_exc_exec",
-        &[],
-        "import m\nM = m.made()\nprint(M(8).code, [c.__name__ for c in M.__mro__])\n",
-        &templates_of("m.Base,"),
-    );
-    assert_eq!(out, "[0]\n");
+fn the_functions_raising_them_are_compiled() {
+    let dir = ScratchDir::new("v010_exceptions_report").expect("scratch");
+    let report = build("v010_exceptions", &dir, &["--report-fallbacks"]);
+    for function in ["fail", "run", "churn", "probe"] {
+        assert!(!report.contains(&format!("function `{function}`")), "{report}");
+    }
 }
 
 /// Raising, catching, pickling and dropping the exceptions frees what they
-/// allocate: an object and its native instance hold each other, a cycle the
-/// collector frees.
+/// allocate.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn exceptions_with_a_layout_do_not_leak() {
+fn the_exceptions_do_not_leak() {
     let dir = ScratchDir::new("v010_exceptions_leaks").expect("scratch");
-    build(&dir, &[]);
+    build("v010_exceptions", &dir, &[]);
     let out = run(
         &dir,
         "import ctypes, gc, pickle, m\nlib = ctypes.CDLL(m.__file__)\n\
@@ -264,6 +144,64 @@ fn exceptions_with_a_layout_do_not_leak() {
     assert_eq!(text(&out.stdout), "leaks none\n", "{}", text(&out.stderr));
 }
 
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn an_aliased_class_matches_cpython() {
+    single_module_matches(
+        "v010_exc_alias",
+        &[],
+        &[],
+        "import m\nprint(m.run(3), m.plain(4), [c.__name__ for c in m.Through.__mro__])\n\
+         class Again(m.Alias, KeyError):\n    pass\nprint(Again(1).code if hasattr(Again(1), 'code') \
+         else 'none', [c.__name__ for c in Again.__mro__][:3])\n",
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn unexamined_class_statements_match_cpython() {
+    single_module_matches(
+        "v010_exc_nested",
+        &[],
+        &[],
+        "import m\nC = m.factory()\nprint(C(3).code, m.Cond(4).code, m.Guard(5).code, \
+         m.Dec(6).code, m.REGISTRY[0].__name__, m.kept(7))\n",
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_rebound_class_name_matches_cpython() {
+    single_module_matches(
+        "v010_exc_rebound",
+        &[],
+        &[],
+        "import m\nprint(m.make(3), [c.__name__ for c in m.B.__mro__])\n",
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_class_made_by_exec_matches_cpython() {
+    single_module_matches(
+        "v010_exc_exec",
+        &[],
+        &[],
+        "import m\nM = m.made()\nprint(M(8).code, [c.__name__ for c in M.__mro__])\n",
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn an_imported_builtin_spelling_matches_cpython() {
+    single_module_matches(
+        "v010_exc_shadow_builtin",
+        &[("v010_exc_helper", "helper.py")],
+        &[],
+        "import m\nprint(m.make(3), m.Err(4).code, m.Err(5).stored)\n",
+    );
+}
+
 fn copy_tree(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).expect("create a directory");
     for entry in std::fs::read_dir(from).expect("read the fixture") {
@@ -277,33 +215,69 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-fn package_matches_cpython(release: bool) {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v010_exc_pkg");
-    let built = ScratchDir::new("v010_exc_pkg_built").expect("scratch");
-    let plain = ScratchDir::new("v010_exc_pkg_plain").expect("scratch");
-    copy_tree(&fixtures.join("pke"), &built.join("pke"));
-    copy_tree(&fixtures.join("pke"), &plain.join("pke"));
-    let package = built.join("pke");
+/// Builds package `package` of fixture directory `dir` whole (`--ext
+/// --non-strict`, plus `flags`), its sources then removed: the build's
+/// stderr and the built tree.
+fn build_package(dir: &str, package: &str, flags: &[&str]) -> (String, ScratchDir) {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(dir);
+    let built = ScratchDir::new(&format!("{dir}_built")).expect("scratch");
+    copy_tree(&fixtures.join(package), &built.join(package));
+    let tree = built.join(package);
     let build = pycc()
         .arg("build")
-        .arg(&package)
+        .arg(&tree)
         .arg("-o")
-        .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict", "--report-fallbacks"])
-        .args(if release { &["--release"][..] } else { &[][..] })
+        .arg(tree.join("__init__"))
+        .args(["--ext", "--non-strict"])
+        .args(flags)
         .output()
         .expect("pycc should spawn");
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
-    for function in ["raise_sub", "catch"] {
-        assert!(!report.contains(&format!("function `{function}` at")), "{report}");
-    }
-    for entry in std::fs::read_dir(&package).expect("read the tree") {
+    for entry in std::fs::read_dir(&tree).expect("read the tree") {
         let path = entry.expect("an entry").path();
         if path.extension().is_some_and(|ext| ext == "py") {
             std::fs::remove_file(&path).expect("remove a source");
         }
     }
+    (report, built)
+}
+
+/// Builds package `package` of fixture directory `dir` whole, runs `script`
+/// in CPython against it and against its sources, and checks the outputs
+/// match.
+fn package_matches(dir: &str, package: &str, script: &str) {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(dir);
+    let (_, built) = build_package(dir, package, &[]);
+    let plain = ScratchDir::new(&format!("{dir}_plain")).expect("scratch");
+    copy_tree(&fixtures.join(package), &plain.join(package));
+    let run_in = |at: &Path| {
+        python()
+            .args(["-I", "-c", &format!("import sys; sys.path.insert(0, '.')\n{script}")])
+            .current_dir(at)
+            .output()
+            .expect("python3 should spawn")
+    };
+    let theirs = run_in(&plain);
+    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
+    let ours = run_in(&built);
+    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
+    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+}
+
+/// `tests/fixtures/v010_exc_pkg`'s driver against the package built whole
+/// and against its sources, with its leak probe; the functions raising and
+/// catching the classes stay compiled.
+fn exception_package_matches_cpython(flags: &[&str]) {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v010_exc_pkg");
+    let mut all = vec!["--report-fallbacks"];
+    all.extend_from_slice(flags);
+    let (report, built) = build_package("v010_exc_pkg", "pke", &all);
+    for function in ["raise_sub", "catch"] {
+        assert!(!report.contains(&format!("function `{function}` at")), "{report}");
+    }
+    let plain = ScratchDir::new("v010_exc_pkg_plain").expect("scratch");
+    copy_tree(&fixtures.join("pke"), &plain.join("pke"));
     let driver = fixtures.join("driver.py");
     let run_driver = |tree: &Path| {
         python()
@@ -320,157 +294,58 @@ fn package_matches_cpython(release: bool) {
     assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
     assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
     assert!(text(&ours.stdout).contains("leaks none"));
-    // `KeyMissing`, over another module's exception class without a layout,
-    // has one of its own; `Sub`, over another module's layout class, keeps
-    // that class's (its own attribute in `__dict__`, `docs/DEVIATIONS.md`).
-    let out = python()
-        .arg("-I")
-        .arg("-c")
-        .arg(
-            "import sys; sys.path.insert(0, '.')\nimport pke\n\
-             k = pke.KeyMissing('a', 'b')\ns = pke.Sub(1, 'w', 'e')\n\
-             print('key' in k.__dict__, 'code' in s.__dict__, 'extra' in s.__dict__)\n\
-             print('rate' in pke.common.Rated(1).__dict__, 'left' in pke.common.Lefty(1).__dict__, \
-             'pin' in pke.common.Pinned(1).__dict__)\n",
-        )
-        .current_dir(&*built)
-        .output()
-        .expect("python3 should spawn");
-    assert_eq!(text(&out.stdout), "False False True\nTrue True True\n", "{}", text(&out.stderr));
-}
-
-/// Builds package `package` of fixture directory `dir` whole (`--ext
-/// --non-strict`), runs `script` in CPython against it and against its
-/// sources, and checks the outputs match; then runs `native` against the
-/// compiled package alone: that run's stdout.
-fn package_matches(dir: &str, package: &str, script: &str, native: &str) -> String {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(dir);
-    let built = ScratchDir::new(&format!("{dir}_built")).expect("scratch");
-    let plain = ScratchDir::new(&format!("{dir}_plain")).expect("scratch");
-    copy_tree(&fixtures.join(package), &built.join(package));
-    copy_tree(&fixtures.join(package), &plain.join(package));
-    let tree = built.join(package);
-    let build = pycc()
-        .arg("build")
-        .arg(&tree)
-        .arg("-o")
-        .arg(tree.join("__init__"))
-        .args(["--ext", "--non-strict"])
-        .output()
-        .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    for entry in std::fs::read_dir(&tree).expect("read the tree") {
-        let path = entry.expect("an entry").path();
-        if path.extension().is_some_and(|ext| ext == "py") {
-            std::fs::remove_file(&path).expect("remove a source");
-        }
-    }
-    let run_in = |at: &Path, script: &str| {
-        python()
-            .args(["-I", "-c", &format!("import sys; sys.path.insert(0, '.')\n{script}")])
-            .current_dir(at)
-            .output()
-            .expect("python3 should spawn")
-    };
-    let theirs = run_in(&plain, script);
-    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
-    let ours = run_in(&built, script);
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
-    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
-    let shown = run_in(&built, native);
-    assert_eq!(shown.status.code(), Some(0), "{}", text(&shown.stderr));
-    text(&shown.stdout)
-}
-
-/// A module binding another's exception class through a wildcard import,
-/// then deriving from it beside `OSError` (`tests/fixtures/v010_exc_star`):
-/// the class gets no layout, and the package behaves as its source does.
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_wildcard_imported_class_gets_no_layout() {
-    let out = package_matches(
-        "v010_exc_star",
-        "pkw",
-        "import pkw\nprint(pkw.coded(2), pkw.combine(3), pkw.Combined(4).show(), \
-         [c.__name__ for c in pkw.Combined.__mro__ if c.__module__ != 'pycc'])\n",
-        "import pkw\nprint([c for c in pkw.Coded.__mro__ if c.__module__ == 'pycc'])\n",
-    );
-    assert_eq!(out, "[]\n");
-}
-
-/// A layout class of `a` whose subclass in `b` is subclassed back in `a`
-/// beside `OSError` (`tests/fixtures/v010_exc_cycle`): the package-wide
-/// subclass closure withdraws the layout.
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_subclass_closure_across_modules_withdraws_the_layout() {
-    let out = package_matches(
-        "v010_exc_cycle",
-        "pkc",
-        "import pkc\nprint(pkc.make(3), [c.__name__ for c in pkc.C.__mro__ \
-         if c.__module__ != 'pycc'])\n",
-        "import pkc\nprint([c for c in pkc.A.__mro__ if c.__module__ == 'pycc'])\n",
-    );
-    assert_eq!(out, "[]\n");
-}
-
-/// A module binding a name twice by imports, the first of a layout class,
-/// with a class statement between deriving from it and `OSError`
-/// (`tests/fixtures/v010_exc_rebind`): the ambiguous name withdraws the
-/// layout.
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_name_imported_twice_withdraws_the_layout() {
-    let out = package_matches(
-        "v010_exc_rebind",
-        "pkd",
-        "import pkd\nprint(pkd.make(3), [c.__name__ for c in pkd.B.__mro__ \
-         if c.__module__ != 'pycc'], pkd.b.A.__name__)\n",
-        "import pkd\nprint([c for c in pkd.A.__mro__ if c.__module__ == 'pycc'])\n",
-    );
-    assert_eq!(out, "[]\n");
-}
-
-/// A base spelled like a builtin exception class but imported
-/// (`from helper import Exception`, `tests/fixtures/v010_exc_shadow_builtin.py`):
-/// it is not the builtin, so the class gets no layout and its store reaches
-/// the imported class's property.
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_imported_builtin_spelling_is_no_builtin() {
-    let out = single_module_matches(
-        "v010_exc_shadow_builtin",
-        &[("v010_exc_helper", "helper.py")],
-        "import m\nprint(m.make(3), m.Err(4).code, m.Err(5).stored)\n",
-        &templates_of("m.Err,"),
-    );
-    assert_eq!(out, "[0]\n");
-}
-
-/// A function-local import binding the name of a module-level one
-/// (`tests/fixtures/v010_exc_local`): the module's binding table holds the
-/// module-scope one, so `b.B(A, OSError)` withdraws `a.A`'s layout.
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn a_function_local_import_binds_no_module_name() {
-    let out = package_matches(
-        "v010_exc_local",
-        "pkl",
-        "import pkl\nprint(pkl.make(3), [c.__name__ for c in pkl.B.__mro__ \
-         if c.__module__ != 'pycc'], pkl.other().__name__)\n",
-        "import pkl\nprint([c for c in pkl.A.__mro__ if c.__module__ == 'pycc'])\n",
-    );
-    assert_eq!(out, "[]\n");
 }
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn exception_classes_over_another_module_s_match_cpython() {
-    package_matches_cpython(false);
+    exception_package_matches_cpython(&[]);
 }
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn exception_classes_over_another_module_s_match_cpython_release() {
-    package_matches_cpython(true);
+    exception_package_matches_cpython(&["--release"]);
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_wildcard_imported_class_matches_cpython() {
+    package_matches(
+        "v010_exc_star",
+        "pkw",
+        "import pkw\nprint(pkw.coded(2), pkw.combine(3), pkw.Combined(4).show(), \
+         [c.__name__ for c in pkw.Combined.__mro__])\n",
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_subclass_cycle_across_modules_matches_cpython() {
+    package_matches(
+        "v010_exc_cycle",
+        "pkc",
+        "import pkc\nprint(pkc.make(3), [c.__name__ for c in pkc.C.__mro__])\n",
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_name_imported_twice_matches_cpython() {
+    package_matches(
+        "v010_exc_rebind",
+        "pkd",
+        "import pkd\nprint(pkd.make(3), [c.__name__ for c in pkd.B.__mro__], pkd.b.A.__name__)\n",
+    );
+}
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_function_local_import_matches_cpython() {
+    package_matches(
+        "v010_exc_local",
+        "pkl",
+        "import pkl\nprint(pkl.make(3), [c.__name__ for c in pkl.B.__mro__], \
+         pkl.other().__name__)\n",
+    );
 }

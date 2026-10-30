@@ -27,6 +27,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   it (v0.10 accept 2). Equal identifier-like `str` literals share one native object, and
   native `str`-keyed dicts read a key's cached hash in place.
 
+- Exception classes with members of their own can derive from another module's
+  exception class in a package built whole (v0.10 accept 5): CPython makes each from its
+  statement and its methods are compiled, so `args`, `str`, tracebacks, pickling and
+  class-statement hooks are CPython's, and functions raising and catching them stay
+  compiled. A native attribute layout for them (PEP 697) was measured 2.5x slower on raise
+  and catch and 1.5x slower on attribute reads than this, and not shipped.
+
 - Instances of published compiled classes pickle (v0.10), as `object.__reduce_ex__` pickles
   an object: `copyreg.__newobj__` with `__getnewargs_ex__` / `__getnewargs__`'s arguments and
   the state `object.__getstate__` gives the source class (each assigned compiled attribute
@@ -43,34 +50,6 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   overrides. Every class has a *record*, one named descriptor global its instances point
   at; a run-time class test is a pointer compare, and a subclass compiled over another
   module's class carries a vtable that module's per-(class, method) dispatchers read.
-
-- Exception classes with members of their own have a native layout in a `--non-strict`
-  `--ext` module (v0.10 accept 5): CPython still makes the class from its statement (so
-  `args`, `str`, tracebacks, pickling and class-statement hooks are CPython's), over a
-  PEP 697 template whose objects carry a native instance; the attributes its methods
-  store from parameters live there, read and stored natively by the compiled methods
-  and through the template's descriptors by Python code, a layout class over another of
-  its module extending its instance; in a package built whole an exception class may
-  derive from another module's. Functions raising and catching them stay compiled.
-  `__new__` resolves along the class's MRO as in CPython (a base's own `__new__` runs),
-  and a name any base binds at class level (`OSError.errno`, a base's property) stays
-  CPython's. A layout is made only where it provably shows what CPython would: every
-  class of the MRO up to a builtin base that does not reduce itself (not `OSError`'s,
-  `ImportError`'s or `AttributeError`'s family) is the module's or the package's, with a
-  body on an allowlist (plain functions, static and class methods, no dunder but
-  `__init__`, `__str__` and `__repr__`, class attributes bound to literals, no class
-  keyword or decorator) and one base; no class carrying it (here or in another module of
-  the package) binds one of its attributes, lists several bases or leaves the allowlist.
-  The class must also be reached only by name, as a base, an `except` type, a raised
-  class, a callee, an `isinstance` class or an annotation, and every class statement of
-  the module and the package must have bases the planner resolves (an alias `Alias = A`,
-  an attribute, a call, a subscript, or a name with no positive binding as a base drops
-  every layout of the module, as does a wildcard import of the module or of one
-  re-exporting it, and code making or looking up classes by computation: `exec`, `eval`,
-  `globals()`, `type(name, bases, ns)`, `types.new_class`, `sys.modules`); a class
-  statement nested in a function, under `if` or `try`, decorated or with class keywords
-  reaches its bases like any other use.
-  Elsewhere the class stays CPython's alone, its methods compiled.
 
 ### Changed
 - `C.__new__(C)` of a published compiled class makes an object whose attributes are all

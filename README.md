@@ -475,10 +475,7 @@ and setuptools): that is the test harness, not a change to the packages.
   layout, and the methods either module compiled run its overrides. In an `--ext` module a compiled class whose
   method cannot compile stays a native class, that method attached to it as a CPython
   function. A decorated top-level function keeps its `def` (decorators, defaults,
-  signature) in CPython and its body compiled. An exception class with members of its
-  own is made by CPython from its statement over a PEP 697 template, its methods
-  compiled, and the attributes they store from parameters (`self.code = code`) live in a
-  native instance its compiled methods read directly. `--report-fallbacks` reports each
+  signature) in CPython and its body compiled. `--report-fallbacks` reports each
   (`fallback: method ...`, `lifted: function ...`, `fallback: class ... its methods
   compiled`). Library-typed annotations (`m: re.Match`), general unions, `X | None` of
   objects, the `with` statement and starred expressions compile natively on objects. Compiled code calls a fallback

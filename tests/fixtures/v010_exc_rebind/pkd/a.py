@@ -1,4 +1,4 @@
-"""`A` would have a native layout, but `b` binds the name twice."""
+"""An exception class `b` imports, then rebinds the name of."""
 
 
 class A(Exception):

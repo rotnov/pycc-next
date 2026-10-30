@@ -1,6 +1,5 @@
 """An exception class subclassed by code `exec` runs (v0.10 accept 5,
-`tests/v010_exceptions.rs`): what the planner cannot read withdraws every
-native layout of the module."""
+`tests/v010_exceptions.rs`)."""
 
 
 class Base(Exception):

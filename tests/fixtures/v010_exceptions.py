@@ -1,10 +1,10 @@
 """Exception classes with members of their own (v0.10 accept 5): CPython makes
 each from its statement, and the attributes their methods store from typed
-parameters live in a native layout (`tests/v010_exceptions.rs`)."""
+parameters are CPython's, the methods compiled (`tests/v010_exceptions.rs`)."""
 
 
 class Owned(Exception):
-    """A message for `args`, two native attributes, a method using both."""
+    """A message for `args`, two attributes, a method using both."""
 
     def __init__(self, code: int, where: str) -> None:
         super().__init__(f"code {code}")
@@ -42,7 +42,7 @@ class Silent(Exception):
 
 
 class Deeper(Owned):
-    """A layout over another: its instance extends `Owned`'s."""
+    """A class over another of the module."""
 
     def __init__(self, code: int, where: str, depth: int) -> None:
         super().__init__(code, where)
@@ -61,7 +61,7 @@ class Tag(Owned):
 
 class Checked(Exception):
     """A `__new__` of its own, which validates and sets an attribute: it runs,
-    as the MRO names it, before the layout's instance exists."""
+    as the MRO names it."""
 
     def __new__(cls, code, *rest):
         if code < 0:
@@ -79,7 +79,7 @@ class Checked(Exception):
 
 
 class Validated(Checked):
-    """A layout over one whose base defines `__new__`."""
+    """A class over one whose base defines `__new__`."""
 
     def __init__(self, code: int, label: str) -> None:
         super().__init__(code)
@@ -91,7 +91,7 @@ class Validated(Checked):
 
 class NoFile(OSError):
     """`errno` is `OSError`'s descriptor, which `str()` reads: the store stays
-    CPython's; `path` is native."""
+    CPython's."""
 
     def __init__(self, code: int, path: str) -> None:
         super().__init__(code, "no such thing")
@@ -115,7 +115,7 @@ class Metabase(Exception, metaclass=Meta):
 
 
 class Metered(Metabase):
-    """Over a base of another metaclass: no layout, CPython's class."""
+    """Over a base of another metaclass."""
 
     def __init__(self, code: int) -> None:
         super().__init__(code)
@@ -126,7 +126,7 @@ class Metered(Metabase):
 
 
 class Plated(Exception):
-    """Would have a layout, but `Shown` shadows `code`: CPython's class."""
+    """A class whose subclass `Shown` makes `code` a property."""
 
     def __init__(self, code: int) -> None:
         super().__init__(code)
@@ -149,7 +149,7 @@ class Shown(Plated):
 
 
 class Left(Exception):
-    """Would have a layout, but `Both` derives from it and `Right`."""
+    """One of `Both`'s two bases."""
 
     def __init__(self, a: int) -> None:
         self.a = a
@@ -161,7 +161,7 @@ class Right(Exception):
 
 
 class Both(Left, Right):
-    """Two bases that would carry a layout each: CPython's classes."""
+    """Two exception bases of the module."""
 
     def __init__(self, a: int, b: str) -> None:
         Left.__init__(self, a)
@@ -172,7 +172,7 @@ class Both(Left, Right):
 
 
 class KeyOS(KeyError, OSError):
-    """Several bases of different solid bases: no layout of its own."""
+    """Several bases of different solid bases."""
 
     def __init__(self, n: int) -> None:
         self.n = n
@@ -199,7 +199,7 @@ class Reducer(Exception):
 
 
 class Reduced(Reducer):
-    """Over a base reducing itself: no layout."""
+    """Over a base reducing itself."""
 
     def __init__(self, code: int) -> None:
         self.code = code

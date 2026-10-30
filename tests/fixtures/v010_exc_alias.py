@@ -1,8 +1,6 @@
-"""An exception class reached through an alias (v0.10 accept 5): the
-planner reads bases by name, so `Aliased` escapes and `Through`'s base is
-one it cannot resolve -- no class of the module gets a native layout, and
-CPython's `class Through(Alias, OSError)` works as it does on CPython
-(`tests/v010_exceptions.rs`)."""
+"""An exception class reached through an alias (v0.10 accept 5,
+`tests/v010_exceptions.rs`): `class Through(Alias, OSError)` works as it
+does on CPython."""
 
 
 class Aliased(Exception):
@@ -14,7 +12,7 @@ class Aliased(Exception):
 
 
 class Plain(Exception):
-    """Would have a layout but for `Through`'s unresolved base."""
+    """An exception class beside the aliased one."""
 
     def __init__(self, n: int) -> None:
         self.n = n

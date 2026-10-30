@@ -1,7 +1,6 @@
 """A base spelled like a builtin but imported (v0.10 accept 5,
 `tests/v010_exceptions.rs`): `helper.Exception` (an uncompiled module next to
-this one) is not the builtin -- its `code` property takes `self.code = code`
--- so `Err` gets no native layout."""
+this one) is not the builtin -- its `code` property takes `self.code = code`."""
 from helper import Exception
 
 

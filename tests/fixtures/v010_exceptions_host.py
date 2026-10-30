@@ -12,7 +12,7 @@ import m
 
 
 def mro(cls):
-    """The MRO without the layout templates (`docs/DEVIATIONS.md`)."""
+    """The MRO by class name, compiled classes (`pycc`) aside."""
     return [c.__name__ for c in cls.__mro__ if c.__module__ != "pycc"]
 
 
@@ -146,7 +146,7 @@ print(ko.show(), ko.n, isinstance(ko, OSError), mro(m.KeyOS))
 
 
 def make_subclass():
-    """A Python subclass made, used natively and dropped: it is freed."""
+    """A Python subclass made, used by compiled code and dropped: it is freed."""
 
     class Gone(m.Deeper):
         pass

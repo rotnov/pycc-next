@@ -27,24 +27,6 @@ pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
     found
 }
 
-/// v0.10 accept 5: the class graph of `entry`'s package (`exc_graph`): the
-/// top-level class statements of every module, `entry` included, each
-/// base resolved across imports and re-exports; with `entry`'s dotted
-/// name. `None` outside a package.
-pub(super) fn class_graph(entry: &Path) -> Option<(super::exc_graph::ClassGraph, String)> {
-    let package = Package::read(entry)?;
-    let exports = re_exports(&package.parsed);
-    let mut graph = super::exc_graph::ClassGraph::default();
-    for (_, qual, is_package, module) in &package.parsed {
-        let scan = Scan::module(qual, *is_package, &module.body);
-        graph.add_module(qual, &module.body, &|base| {
-            let dotted = scan.dotted(base)?;
-            Some(resolve_export(&exports, &dotted).unwrap_or(dotted))
-        });
-    }
-    Some((graph, package.target.clone()))
-}
-
 /// v0.10: the names (methods and class attributes) that the classes of
 /// other modules of `entry`'s package deriving from each class of `entry`
 /// -- directly or through other such classes, at any depth -- define in
@@ -68,16 +50,50 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>)> {
         return Vec::new();
     };
     let (entry, target, parsed) = (&package.entry, &package.target, &package.parsed);
-    let exports = re_exports(parsed);
+    // Each module's module-level re-exports: `(module, name)` -> the
+    // `(module, name)` it imports, so `from pkg import C` resolves to the
+    // module defining `C`, through a package `__init__.py` or any other
+    // module re-exporting it (`pkg/__init__.py` importing from `pkg.init`,
+    // which imports from `pkg.spec`).
+    let mut exports: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
+    for (_, qual, is_package, module) in parsed {
+        let scan = Scan::new(qual, *is_package);
+        for stmt in &module.body {
+            if let Stmt::ImportFrom(import) = stmt
+                && let Some(from) =
+                    scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
+            {
+                for alias in &import.names {
+                    let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
+                    exports.insert((qual.clone(), local), (from.clone(), alias.name.to_string()));
+                }
+            }
+        }
+    }
     // Every class statement of the other modules: its resolved bases (as
     // `module.name`) and the names its body defines.
-    let resolve = |base: &str| resolve_export(&exports, base);
+    let resolve = |base: &str| -> Option<String> {
+        let (module, name) = base.rsplit_once('.')?;
+        let (mut module, mut name) = (module.to_string(), name.to_string());
+        // Through a few re-exports at most.
+        for _ in 0..4 {
+            match exports.get(&(module.clone(), name.clone())) {
+                Some((m, n)) if (m, n) != (&module, &name) => {
+                    module = m.clone();
+                    name = n.clone();
+                }
+                _ => break,
+            }
+        }
+        Some(format!("{module}.{name}"))
+    };
     let mut classes: Vec<(String, Vec<String>, BTreeSet<String>)> = Vec::new();
     for (file, qual, is_package, module) in parsed {
         if file == entry {
             continue;
         }
-        let scan = Scan::module(qual, *is_package, &module.body);
+        let mut scan = Scan::new(qual, *is_package);
+        scan.body(&module.body);
         let mut bases: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for (base, subclass) in &scan.bases {
             if let Some(base) = resolve(base) {
@@ -118,177 +134,6 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>)> {
         }
     }
     found
-}
-
-/// v0.10 accept 5: what the other modules of `entry`'s package do with
-/// its top-level classes (`exc_escape::reach`): each reaches them by the
-/// names it imports them as, or as attributes of the names it binds the
-/// entry module to.
-pub(super) fn reach_in_package(entry: &Path) -> super::exc_escape::Reach {
-    let mut out = super::exc_escape::Reach::default();
-    let Some(package) = Package::read(entry) else {
-        return out;
-    };
-    let (entry, target, parsed) = (&package.entry, &package.target, &package.parsed);
-    let Some((_, _, _, own)) = parsed.iter().find(|(file, ..)| file == entry) else {
-        return out;
-    };
-    let candidates: BTreeSet<String> = own
-        .body
-        .iter()
-        .filter_map(|stmt| match stmt {
-            Stmt::ClassDef(class) => Some(class.name.to_string()),
-            _ => None,
-        })
-        .collect();
-    let exports = re_exports(parsed);
-    let prefix = format!("{target}.");
-    // The modules a wildcard import of which may bind one of the entry's
-    // classes: the entry, and every module importing from one of them (a
-    // re-export), to a fixpoint. A wildcard import of one withdraws every
-    // layout of the entry: the names it binds are out of the escape scan's
-    // sight.
-    let mut imports_of: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
-    let mut wildcards: Vec<String> = Vec::new();
-    for (_, qual, is_package, module) in parsed {
-        let scan = Scan::new(qual, *is_package);
-        let mut sources = BTreeSet::new();
-        for stmt in &module.body {
-            if let Stmt::ImportFrom(import) = stmt
-                && let Some(source) =
-                    scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
-            {
-                // `from pkg import common` imports the module `pkg.common`.
-                for alias in &import.names {
-                    sources.insert(format!("{source}.{}", alias.name.as_str()));
-                }
-                sources.insert(source);
-            }
-        }
-        for import in super::exc_escape::wildcard_sources(&module.body) {
-            if let Some(source) =
-                scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
-            {
-                wildcards.push(source);
-            }
-        }
-        imports_of.insert(qual.as_str(), sources);
-    }
-    let mut reaching: BTreeSet<String> = BTreeSet::from([target.clone()]);
-    loop {
-        let before = reaching.len();
-        for (qual, sources) in &imports_of {
-            if sources.iter().any(|source| reaching.contains(source)) {
-                reaching.insert(qual.to_string());
-            }
-        }
-        if reaching.len() == before {
-            break;
-        }
-    }
-    if wildcards.iter().any(|source| reaching.contains(source)) {
-        out.unknown_base = true;
-    }
-    for (file, qual, is_package, module) in parsed {
-        if file == entry {
-            continue;
-        }
-        let scan = Scan::module(qual, *is_package, &module.body);
-        // A name the module binds more than once, one binding an import
-        // from a module that may hold or re-export the entry's classes:
-        // which class a read of it sees is out of sight -- every layout of
-        // the entry goes.
-        for name in &scan.ambiguous {
-            if import_sources(&scan, &module.body, name)
-                .iter()
-                .any(|source| reaching.contains(source))
-            {
-                out.unknown_base = true;
-            }
-        }
-        let mut local: BTreeMap<String, String> = BTreeMap::new();
-        let mut modules: BTreeSet<String> = BTreeSet::new();
-        for (name, dotted) in &scan.bound {
-            let resolved = resolve_export(&exports, dotted).unwrap_or_else(|| dotted.clone());
-            if resolved == *target {
-                modules.insert(name.clone());
-            } else if let Some(class) = resolved.strip_prefix(&prefix)
-                && candidates.contains(class)
-            {
-                local.insert(name.clone(), class.to_string());
-            }
-        }
-        out.extend(super::exc_escape::reach(
-            &module.body,
-            false,
-            &local,
-            &modules,
-            &candidates,
-        ));
-    }
-    out
-}
-
-/// The modules the imports of `body` binding `name` import from (at any
-/// depth of its top-level compound statements): `pkg.m` for `from pkg.m
-/// import name` (and `pkg.m.name`, a submodule), `x.y` for `import x.y as
-/// name`.
-fn import_sources(scan: &Scan<'_>, body: &[Stmt], name: &str) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    fn walk(scan: &Scan<'_>, body: &[Stmt], name: &str, out: &mut BTreeSet<String>) {
-        for stmt in body {
-            match stmt {
-                Stmt::ImportFrom(import) => {
-                    for alias in &import.names {
-                        if alias.asname.as_ref().unwrap_or(&alias.name).as_str() != name {
-                            continue;
-                        }
-                        if let Some(source) =
-                            scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
-                        {
-                            out.insert(format!("{source}.{}", alias.name.as_str()));
-                            out.insert(source);
-                        }
-                    }
-                }
-                Stmt::Import(import) => {
-                    for alias in &import.names {
-                        let bound = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
-                        if bound.split('.').next() == Some(name) {
-                            out.insert(alias.name.to_string());
-                        }
-                    }
-                }
-                Stmt::If(s) => {
-                    walk(scan, &s.body, name, out);
-                    for clause in &s.elif_else_clauses {
-                        walk(scan, &clause.body, name, out);
-                    }
-                }
-                Stmt::Try(s) => {
-                    walk(scan, &s.body, name, out);
-                    for handler in &s.handlers {
-                        let pycc_ast::ExceptHandler::ExceptHandler(h) = handler;
-                        walk(scan, &h.body, name, out);
-                    }
-                    walk(scan, &s.orelse, name, out);
-                    walk(scan, &s.finalbody, name, out);
-                }
-                Stmt::With(s) => walk(scan, &s.body, name, out),
-                Stmt::For(s) => {
-                    walk(scan, &s.body, name, out);
-                    walk(scan, &s.orelse, name, out);
-                }
-                Stmt::While(s) => {
-                    walk(scan, &s.body, name, out);
-                    walk(scan, &s.orelse, name, out);
-                }
-                _ => {}
-            }
-        }
-    }
-    walk(scan, body, name, &mut out);
-    out
 }
 
 /// The entry module's package, its modules parsed.
@@ -445,12 +290,6 @@ struct Scan<'a> {
     /// The names each class statement's body binds (its methods and class
     /// attributes), by the class's dotted name.
     defines: BTreeMap<String, BTreeSet<String>>,
-    /// The module-level names bound more than once
-    /// (`exc_escape::ambiguous_names`): [`Scan::dotted`] resolves none.
-    ambiguous: BTreeSet<String>,
-    /// Every name bound at module scope (`exc_escape::module_scope`): a
-    /// base spelled like a builtin is the builtin only when not among them.
-    module_bound: BTreeSet<String>,
 }
 
 impl<'a> Scan<'a> {
@@ -461,30 +300,48 @@ impl<'a> Scan<'a> {
             bound: BTreeMap::new(),
             bases: Vec::new(),
             defines: BTreeMap::new(),
-            ambiguous: BTreeSet::new(),
-            module_bound: BTreeSet::new(),
         }
     }
 
-    /// The scan of module `qual`'s `body`: the one binding table every
-    /// resolution reads (its bindings, and the names bound more than once,
-    /// which none goes through).
-    fn module(qual: &'a str, is_package: bool, body: &[Stmt]) -> Self {
-        let mut scan = Self::new(qual, is_package);
-        let scope = super::exc_escape::module_scope(body);
-        // The module-scope imports alone: one inside a function binds a
-        // local name, not the module's.
-        for import in &scope.imports {
-            scan.import(import);
+    /// The absolute module a `from` import at `level` of `module` names.
+    fn resolve(&self, level: u32, module: Option<&str>) -> Option<String> {
+        if level == 0 {
+            return module.map(str::to_string);
         }
-        scan.body(body);
-        scan.ambiguous = scope.ambiguous;
-        scan.module_bound = scope.bound;
-        scan
+        let mut parts: Vec<&str> = self.qual.split('.').collect();
+        if !self.is_package {
+            parts.pop();
+        }
+        for _ in 1..level {
+            parts.pop()?;
+        }
+        if let Some(module) = module {
+            parts.extend(module.split('.'));
+        }
+        Some(parts.join("."))
     }
 
-    /// Records the bindings of import statement `stmt` (module scope).
-    fn import(&mut self, stmt: &Stmt) {
+    /// The dotted name `expr` (a name or an attribute chain) reads.
+    fn dotted(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Name(name) => Some(
+                self.bound
+                    .get(name.id.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| format!("{}.{}", self.qual, name.id.as_str())),
+            ),
+            Expr::Attribute(attr) => Some(format!("{}.{}", self.dotted(&attr.value)?, attr.attr)),
+            _ => None,
+        }
+    }
+
+    fn body(&mut self, body: &[Stmt]) {
+        for stmt in body {
+            self.stmt(stmt);
+        }
+    }
+
+    fn stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::ImportFrom(import) => {
                 let Some(module) =
@@ -512,53 +369,6 @@ impl<'a> Scan<'a> {
                     }
                 }
             }
-            _ => {}
-        }
-    }
-
-    /// The absolute module a `from` import at `level` of `module` names.
-    fn resolve(&self, level: u32, module: Option<&str>) -> Option<String> {
-        if level == 0 {
-            return module.map(str::to_string);
-        }
-        let mut parts: Vec<&str> = self.qual.split('.').collect();
-        if !self.is_package {
-            parts.pop();
-        }
-        for _ in 1..level {
-            parts.pop()?;
-        }
-        if let Some(module) = module {
-            parts.extend(module.split('.'));
-        }
-        Some(parts.join("."))
-    }
-
-    /// The dotted name `expr` (a name or an attribute chain) reads.
-    fn dotted(&self, expr: &Expr) -> Option<String> {
-        match expr {
-            Expr::Name(name) if self.ambiguous.contains(name.id.as_str()) => None,
-            Expr::Name(name) => Some(
-                self.bound
-                    .get(name.id.as_str())
-                    .cloned()
-                    .unwrap_or_else(|| format!("{}.{}", self.qual, name.id.as_str())),
-            ),
-            Expr::Attribute(attr) => Some(format!("{}.{}", self.dotted(&attr.value)?, attr.attr)),
-            _ => None,
-        }
-    }
-
-    fn body(&mut self, body: &[Stmt]) {
-        for stmt in body {
-            self.stmt(stmt);
-        }
-    }
-
-    fn stmt(&mut self, stmt: &Stmt) {
-        match stmt {
-            // Imports are `Scan::module`'s, module scope only.
-            Stmt::ImportFrom(_) | Stmt::Import(_) => {}
             Stmt::ClassDef(class) => {
                 for base in class.bases() {
                     // `Box[int]` subclasses `Box` (its `__mro_entries__`).
@@ -625,149 +435,6 @@ impl<'a> Scan<'a> {
             _ => {}
         }
     }
-}
-
-/// Each module's module-level re-exports: `(module, name)` -> the
-/// `(module, name)` it imports, so `from pkg import C` resolves to the
-/// module defining `C`, through a package `__init__.py` or any other module
-/// re-exporting it (`pkg/__init__.py` importing from `pkg.init`, which
-/// imports from `pkg.spec`).
-type Exports = BTreeMap<(String, String), (String, String)>;
-
-fn re_exports(parsed: &[(PathBuf, String, bool, pycc_ast::ModModule)]) -> Exports {
-    let mut exports: Exports = BTreeMap::new();
-    for (_, qual, is_package, module) in parsed {
-        let scan = Scan::new(qual, *is_package);
-        for stmt in &module.body {
-            if let Stmt::ImportFrom(import) = stmt
-                && let Some(from) =
-                    scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
-            {
-                for alias in &import.names {
-                    let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-                    exports.insert((qual.clone(), local), (from.clone(), alias.name.to_string()));
-                }
-            }
-        }
-    }
-    exports
-}
-
-/// The `module.name` the dotted name `base` reads, through a few
-/// re-exports at most.
-fn resolve_export(exports: &Exports, base: &str) -> Option<String> {
-    let (module, name) = base.rsplit_once('.')?;
-    let (mut module, mut name) = (module.to_string(), name.to_string());
-    for _ in 0..4 {
-        match exports.get(&(module.clone(), name.clone())) {
-            Some((m, n)) if (m, n) != (&module, &name) => {
-                module = m.clone();
-                name = n.clone();
-            }
-            _ => break,
-        }
-    }
-    Some(format!("{module}.{name}"))
-}
-
-/// v0.10 accept 5: an exception class of another module of the package, as
-/// a class of the entry deriving from it sees it (`exc_layout`).
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct PackageException {
-    /// Whether it or an ancestor may have a native layout: a class deriving
-    /// from it gets no layout of its own, since its instances must stay its
-    /// base's.
-    pub(super) may_layout: bool,
-    /// The names bound at class level along its MRO (`None`: a class in it
-    /// is of unknown body), which a layout over it leaves to CPython.
-    pub(super) names: Option<BTreeSet<String>>,
-}
-
-/// v0.10 accept 5: the names `entry` binds to an exception class of another
-/// module of its package (`from .common import PystacheError`), each with
-/// what a class of `entry` deriving from it sees ([`PackageException`]).
-/// Syntactic, like the rest of this module.
-pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, PackageException> {
-    let mut out = BTreeMap::new();
-    let Some(package) = Package::read(entry) else {
-        return out;
-    };
-    let exports = re_exports(&package.parsed);
-    let mut scans: BTreeMap<&str, (Scan<'_>, &pycc_ast::ModModule)> = BTreeMap::new();
-    for (_, qual, is_package, module) in &package.parsed {
-        let scan = Scan::module(qual, *is_package, &module.body);
-        scans.insert(qual.as_str(), (scan, module));
-    }
-    // What `module.name` is as an exception class (`None`: none).
-    fn classify(
-        scans: &BTreeMap<&str, (Scan<'_>, &pycc_ast::ModModule)>,
-        exports: &Exports,
-        dotted: &str,
-        depth: usize,
-    ) -> Option<PackageException> {
-        let dotted = resolve_export(exports, dotted)?;
-        let (module, name) = dotted.rsplit_once('.')?;
-        if depth > 8 {
-            return None;
-        }
-        let (scan, parsed) = scans.get(module)?;
-        let class = parsed.body.iter().find_map(|stmt| match stmt {
-            Stmt::ClassDef(class) if class.name.as_str() == name => Some(class),
-            _ => None,
-        })?;
-        let mut exception = false;
-        // Conservative: a store of a name a base binds is no layout
-        // attribute, which only makes `may_layout` true more often.
-        let mut may_layout =
-            !super::exc_layout::fields_of(class, &BTreeSet::new()).is_empty();
-        // `None` for a body off the layout allowlist.
-        let mut names = super::exc_layout::class_names(class);
-        for base in class.bases() {
-            if let Expr::Name(base) = base
-                && pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base.id.as_str())
-                && !scan.module_bound.contains(base.id.as_str())
-            {
-                exception = true;
-                if super::exc_names::builtin_reduces_itself(base.id.as_str()) {
-                    names = None;
-                } else if let Some(names) = &mut names {
-                    names.extend(
-                        super::exc_names::builtin_exception_names(base.id.as_str())
-                            .map(str::to_string),
-                    );
-                }
-                continue;
-            }
-            match scan.dotted(base).and_then(|b| classify(scans, exports, &b, depth + 1)) {
-                Some(base) => {
-                    exception = true;
-                    may_layout |= base.may_layout;
-                    match (&mut names, base.names) {
-                        (Some(names), Some(more)) => names.extend(more),
-                        _ => names = None,
-                    }
-                }
-                // A base of unknown kind may be a layout class.
-                None => {
-                    may_layout = true;
-                    names = None;
-                }
-            }
-        }
-        exception.then_some(PackageException { may_layout, names })
-    }
-    let Some((scan, _)) = scans.get(package.target.as_str()) else {
-        return out;
-    };
-    for (local, dotted) in &scan.bound {
-        if dotted.starts_with(&format!("{}.", package.target)) {
-            continue;
-        }
-        if let Some(class) = classify(&scans, &exports, dotted, 0) {
-            out.insert(local.clone(), class);
-        }
-    }
-    out
 }
 
 #[cfg(test)]

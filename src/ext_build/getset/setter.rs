@@ -104,7 +104,6 @@ fn unpack_value(
 /// `ty`, of class `class`.
 pub(super) fn slot_setter_c(class: &str, name: &str, index: usize, ty: &Ty) -> String {
     let symbol = setter_symbol(class, name);
-    let shown = super::shown_class(class);
     // A carried instance slot is of a carrier class, never an exception
     // class.
     let kind = char::from(
@@ -121,12 +120,12 @@ pub(super) fn slot_setter_c(class: &str, name: &str, index: usize, ty: &Ty) -> S
     // instance (its layout is a compiled-code constant).
     format!(
         "static int {symbol}(PyObject *self, PyObject *value, void *closure)\n{{\n    \
-         void *inst = pycc_ext_inst_of(self);\n    {local}\n    long long word;\n    \
+         void *inst = ((PyccExtInstance *)self)->inst;\n    {local}\n    long long word;\n    \
          (void)closure;\n    if (inst == NULL) {{\n        if (value == NULL) {{\n            \
          PyErr_SetString(PyExc_AttributeError, \
-         \"'{shown}' object has no attribute '{name}'\");\n        }} else {{\n            \
+         \"'{class}' object has no attribute '{name}'\");\n        }} else {{\n            \
          PyErr_SetString(PyExc_AttributeError, \
-         \"cannot set '{name}' on a '{shown}' object whose __init__ never ran\");\n        \
+         \"cannot set '{name}' on a '{class}' object whose __init__ never ran\");\n        \
          }}\n        return -1;\n    }}\n    if (value == NULL) {{\n        \
          if (pycc_rt_ext_instance_delete_slot(inst, {index}, '{kind}') != 0) {{\n            \
          pycc_ext_raise_pending();\n            return -1;\n        }}\n        \
@@ -149,11 +148,10 @@ pub(super) fn slot_setter_c(class: &str, name: &str, index: usize, ty: &Ty) -> S
 /// subclassable (`Py_TPFLAGS_BASETYPE` is never set).
 pub(super) fn property_setter_c(class: &str, name: &str, setter: Option<&ExtExport>) -> String {
     let symbol = setter_symbol(class, name);
-    let shown = super::shown_class(class);
     let refusal = |what: &str| {
         format!(
             "PyErr_SetString(PyExc_AttributeError, \
-             \"property '{name}' of '{shown}' object has no {what}\");\n        return -1;"
+             \"property '{name}' of '{class}' object has no {what}\");\n        return -1;"
         )
     };
     let deleter = refusal("deleter");
@@ -174,9 +172,9 @@ pub(super) fn property_setter_c(class: &str, name: &str, setter: Option<&ExtExpo
     format!(
         "static int {symbol}(PyObject *self, PyObject *value, void *closure)\n{{\n    \
          PyObject *result;\n    (void)closure;\n    if (value == NULL) {{\n        {deleter}\n    \
-         }}\n    if (pycc_ext_inst_of(self) == NULL) {{\n        \
+         }}\n    if (((PyccExtInstance *)self)->inst == NULL) {{\n        \
          PyErr_SetString(PyExc_AttributeError, \
-         \"cannot set '{name}' on a '{shown}' object whose __init__ never ran\");\n        \
+         \"cannot set '{name}' on a '{class}' object whose __init__ never ran\");\n        \
          return -1;\n    }}\n    result = pycc_ext_wrap_{wrapped}(self, &value, 1);\n    \
          if (result == NULL) {{\n        return -1;\n    }}\n    Py_DECREF(result);\n    \
          return 0;\n}}\n\n",
