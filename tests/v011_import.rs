@@ -1,12 +1,14 @@
 //! v0.11 accept 3: importing a compiled package does less work than it did
 //! without changing what Python code observes. `tests/fixtures/v011_import/
 //! pkimp` is built whole; `driver.py` imports it and prints what Python
-//! code can see of it -- the attributes the import adds to `sys`, its
+//! code can see of it -- the attributes the import adds to `sys` and the
+//! `importlib` modules it loads, its
 //! published classes (made from their templates when their statements run:
 //! no arguments, `object`, a base of the module, `Generic[T]`, class-body
 //! `None` defaults on slots), a class CPython runs, a Python subclass, and
-//! compiled frames in a traceback and `sys._getframe` -- against the
-//! sources and against the compiled tree, which must print the same.
+//! compiled frames in a traceback and `sys._getframe`, the `__import__`
+//! calls of `from m import a, b` statements -- against the sources and
+//! against the compiled tree, which must print the same.
 
 use pycc_scratch::ScratchDir;
 use std::path::{Path, PathBuf};
@@ -88,6 +90,9 @@ fn importing_the_compiled_package_is_observed_as_importing_its_sources() {
     let plain = ScratchDir::new("v011_import_plain").expect("scratch");
     copy_tree(&fixtures().join("pkimp"), &built.join("pkimp"));
     copy_tree(&fixtures().join("pkimp"), &plain.join("pkimp"));
+    // A plain module outside the package, which both trees import.
+    copy_tree(&fixtures().join("vendor"), &built.join("vendor"));
+    copy_tree(&fixtures().join("vendor"), &plain.join("vendor"));
     let report = build_whole(&built);
     // The classes the driver reads as published are published; the one
     // with a keyword argument runs in CPython.
