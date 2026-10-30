@@ -14,11 +14,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - ELF extension modules built for a glibc that reads `DT_RELR` (2.36 and newer; not with
   `--target`), with a linker that packs them (a probe link checks for `DT_RELR`; GNU ld
   2.42 does on x86-64, not on aarch64), link with `-z pack-relative-relocs`: pydantic's
-  whole-package extension is 4.6% smaller (10.75 MB -> 10.26 MB) and has 349 relocation entries instead of 21,222
-  (mistune's: -5.5%, 9,395 -> 348). An extension's module body is placed with the
-  import-only code (`cold`). No CI instruction bound moves; LTO across a package's
+  whole-package extension is 4.6% smaller (10.75 MB -> 10.26 MB) and has 349 relocation
+  entries instead of 21,222 (mistune's: -5.5%, 9,395 -> 348). An extension's module body
+  is placed with the import-only code (`cold`). No CI instruction bound moves; LTO across a package's
   modules, identical-code folding and hot/cold splitting were measured and do not pay
   (v0.11 accept 2, `docs/roadmap/v0.11.md`).
+
+### Fixed
+- `--non-strict` (native build and `--ext`): fallback code reaching module globals by a
+  string -- `eval("c")`, `exec(src)`, `globals()["c"]`, `locals()`/`vars()`/`dir()` at
+  module level, or the module object (`sys.modules[__name__]`, `import __main__`) -- now
+  sees every compiled global, a compiled class's instance included, where it raised
+  `NameError` for any global no statement of it names (issue #20). A variable such code
+  binds lives in the module namespace, so compiled code reads back what it stores.
 
 ## [0.10.0] - 2026-10-30
 
