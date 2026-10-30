@@ -264,3 +264,35 @@ fn a_class_with_own_items_ignores_interleaved_copies() {
     assert_eq!(names(&p, 2), ["Other"]);
     assert!(names(&p, 3).is_empty(), "D.get is a copy");
 }
+
+/// v0.11: an extension's module body is `cold` (placed with the
+/// import-only code); a native build's `main` is not.
+#[test]
+fn only_an_extensions_module_body_is_cold() {
+    let cold = inkwell::attributes::Attribute::get_named_enum_kind_id("cold");
+    for ext in [true, false] {
+        let dir = pycc_scratch::ScratchDir::new("entry_cold").expect("scratch");
+        let mut found = None;
+        let mut observer = |module: &inkwell::module::Module<'_>, _: Option<&'static str>| {
+            let entry = module
+                .get_function(crate::entry_fn_name(ext))
+                .expect("the entry point");
+            found = Some(
+                entry
+                    .get_enum_attribute(inkwell::attributes::AttributeLoc::Function, cold)
+                    .is_some(),
+            );
+        };
+        compile_to_object_with_observer(
+            &MirModule::default(),
+            &dir.join("entry.o"),
+            &CompileOptions {
+                ext,
+                ..CompileOptions::default()
+            },
+            Some(&mut observer),
+        )
+        .expect("codegen should succeed");
+        assert_eq!(found, Some(ext), "ext: {ext}");
+    }
+}

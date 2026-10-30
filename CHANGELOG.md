@@ -11,6 +11,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   publishes in ms.
 
 ### Changed
+- ELF extension modules built for a glibc that reads `DT_RELR` (2.36 and newer; not with
+  `--target`), with a linker that packs them (a probe link checks for `DT_RELR`; GNU ld
+  2.42 does on x86-64, not on aarch64), link with `-z pack-relative-relocs`: pydantic's
+  whole-package extension is 4.6% smaller (10.75 MB -> 10.26 MB) and has 349 relocation
+  entries instead of 21,222 (mistune's: -5.5%, 9,395 -> 348). An extension's module body
+  is placed with the import-only code (`cold`). No CI instruction bound moves; LTO
+  across a package's modules, identical-code folding and hot/cold splitting were measured
+  and do not pay (v0.11 accept 2, `docs/roadmap/v0.11.md`).
 - On Linux every compiled function goes in an object section of its own, as with
   `-ffunction-sections`: the assembler laid out one `.text` section holding a whole large
   module again and again until every branch had its size (17% of all the instructions
