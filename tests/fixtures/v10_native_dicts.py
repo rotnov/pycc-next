@@ -128,16 +128,16 @@ def narrowed(v):
 
 
 
-def raising_key(fail: bool) -> str:
+def checked(fail):
     if fail:
         raise ValueError('key')
-    return 'b'
+    return True
 
 
 def bad_key(obj, fail):
     # The stored value is released when evaluating the key raises.
     d = {'a': obj}
-    d[raising_key(fail)] = obj
+    d['b' if checked(fail) else 'c'] = obj
     return len(d)
 
 
@@ -146,3 +146,12 @@ def raising_value(make, fail):
     # raises, CPython releases the earlier ones in reverse order.
     d = {'a': make('a'), 'b': make('b'), 'c': fail()}
     return len(d)
+
+
+def subclass_key(obj, key):
+    # A key that may be a `str` subclass with its own hashing keeps CPython's
+    # dict.
+    if isinstance(key, str):
+        d = {'a': obj}
+        return d[key]
+    return None

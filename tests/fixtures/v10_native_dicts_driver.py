@@ -89,6 +89,17 @@ try:
 except ValueError:
     pass
 print(order)
+
+
+class Unhashable(str):
+    __hash__ = None
+
+
+try:
+    m.subclass_key(obj, Unhashable('a'))
+except TypeError as e:
+    print('TypeError', e)
+print(m.subclass_key(obj, 'a') is obj)
 before = (sys.getrefcount(obj), live_dicts())
 for _ in range(1000):
     m.tally([obj, obj])

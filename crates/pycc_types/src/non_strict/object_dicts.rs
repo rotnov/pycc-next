@@ -14,14 +14,17 @@
 //! stored, captured, compared, printed, a method called on it -- stays the
 //! CPython dict it was, and every dict CPython can see is one. Insertion
 //! order, `KeyError` and the iteration's `RuntimeError` on a change of size
-//! are the native dict's, which are CPython's.
+//! are the native dict's, which are CPython's. Every key the function looks
+//! up, tests or stores is an exact `str` (a literal, a key of the dict, or a
+//! concatenation of those): a `str` subclass key, with its own hashing or
+//! equality, keeps the dict CPython's.
 //!
 //! A function the checker does not admit with its native dicts (an object
 //! key, say) gets its displays back as they were ([`super::with_widening`]
 //! checks again), rather than running in CPython for them.
 
 use super::container_widen::nested;
-use pycc_hir::{CmpOpKind, HirExpr, HirItem, HirModule, HirStmt, Ty};
+use pycc_hir::{BinOpKind, CmpOpKind, HirExpr, HirItem, HirModule, HirStmt, Ty};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
@@ -223,17 +226,26 @@ fn only_display_bindings(body: &[HirStmt], name: &str) -> bool {
 /// Whether some use of `name` in `body` is not one of the uses the module
 /// doc admits.
 fn escapes_in(body: &[HirStmt], name: &str) -> bool {
+    let keys = key_names(body, name);
+    escapes_in_with(body, name, &keys)
+}
+
+/// [`escapes_in`] with the names known to hold exact `str` keys of `name`.
+fn escapes_in_with(body: &[HirStmt], name: &str, keys: &BTreeSet<String>) -> bool {
     let is_name = |e: &HirExpr| matches!(e, HirExpr::Name(n) if n == name);
+    let escapes = |e: &HirExpr, n: &str| escapes(e, n, keys);
     body.iter().any(|stmt| {
         let own = match stmt {
-            HirStmt::Assign { target, value } if target == name => pairs_escape(value, name),
+            HirStmt::Assign { target, value } if target == name => pairs_escape(value, name, keys),
             HirStmt::Assign { value, .. } | HirStmt::ExprStmt(value) => escapes(value, name),
             HirStmt::AnnAssign { value, .. } => value.as_ref().is_some_and(|v| escapes(v, name)),
             // `if d:` / `while d:` test its truth.
             HirStmt::If { test, .. } | HirStmt::While { test, .. } => {
                 !is_name(test) && escapes(test, name)
             }
-            HirStmt::DictSet { key, value, .. } => escapes(key, name) || escapes(value, name),
+            HirStmt::DictSet { dict, key, value } => {
+                (dict == name && !exact_key(key, keys)) || escapes(key, name) || escapes(value, name)
+            }
             HirStmt::Return(Some(value)) => escapes(value, name),
             HirStmt::ForRange {
                 start, stop, step, ..
@@ -257,37 +269,99 @@ fn escapes_in(body: &[HirStmt], name: &str) -> bool {
             // follow; refuse rather than guess.
             _ => true,
         };
-        own || nested(stmt).into_iter().any(|inner| escapes_in(inner, name))
+        own || nested(stmt)
+            .into_iter()
+            .any(|inner| escapes_in_with(inner, name, keys))
     })
 }
 
 /// Whether a binding display's values use `name` (`d = {"a": d}`).
-fn pairs_escape(display: &HirExpr, name: &str) -> bool {
+fn pairs_escape(display: &HirExpr, name: &str, keys: &BTreeSet<String>) -> bool {
     let HirExpr::DictLiteral(pairs) = display else {
         return true;
     };
-    pairs.iter().any(|(_, value)| escapes(value, name))
+    pairs.iter().any(|(_, value)| escapes(value, name, keys))
+}
+
+/// The loop variables of `for k in name` loops in `body` that nothing else
+/// binds: each holds a key of the native dict, an exact `str`.
+fn key_names(body: &[HirStmt], name: &str) -> BTreeSet<String> {
+    fn loops(body: &[HirStmt], name: &str, out: &mut BTreeSet<String>) {
+        for stmt in body {
+            if let HirStmt::ForList { var, list, .. } = stmt
+                && list == name
+            {
+                out.insert(var.clone());
+            }
+            for inner in nested(stmt) {
+                loops(inner, name, out);
+            }
+        }
+    }
+    fn rebound(body: &[HirStmt], var: &str, name: &str) -> bool {
+        body.iter().any(|stmt| {
+            let own = match stmt {
+                HirStmt::ForList { var: v, list, .. } => v == var && list != name,
+                HirStmt::Assign { target, .. }
+                | HirStmt::AnnAssign { target, .. }
+                | HirStmt::ListCompAssign { target, .. }
+                | HirStmt::SetCompAssign { target, .. }
+                | HirStmt::DictCompAssign { target, .. } => target == var,
+                HirStmt::ForRange { var: v, .. } | HirStmt::ForObject { var: v, .. } => v == var,
+                HirStmt::Try { handlers, .. } | HirStmt::TryStar { handlers, .. } => handlers
+                    .iter()
+                    .any(|handler| handler.name.as_deref() == Some(var)),
+                HirStmt::Delete { name: deleted } => deleted == var,
+                HirStmt::Match { .. } => true,
+                _ => false,
+            };
+            own || nested(stmt).into_iter().any(|inner| rebound(inner, var, name))
+        })
+    }
+    let mut out = BTreeSet::new();
+    loops(body, name, &mut out);
+    out.retain(|var| !rebound(body, var, name));
+    out
+}
+
+/// A key expression whose value is an exact `str` (never a subclass with its
+/// own hashing or equality): a literal, a key of the dict itself, or a
+/// concatenation or conditional of those. Any other key keeps the dict CPython's.
+fn exact_key(expr: &HirExpr, keys: &BTreeSet<String>) -> bool {
+    match expr {
+        HirExpr::StringLiteral(_) => true,
+        HirExpr::Name(n) => keys.contains(n),
+        HirExpr::BinOp {
+            op: BinOpKind::Add,
+            left,
+            right,
+        } => exact_key(left, keys) && exact_key(right, keys),
+        HirExpr::IfExp { body, orelse, .. } => exact_key(body, keys) && exact_key(orelse, keys),
+        _ => false,
+    }
 }
 
 /// Whether `expr` holds a use of `name` other than an item read, a key test
 /// (`k in d`, `k not in d`) or a `len`.
-fn escapes(expr: &HirExpr, name: &str) -> bool {
+fn escapes(expr: &HirExpr, name: &str, keys: &BTreeSet<String>) -> bool {
     let is_name = |e: &HirExpr| matches!(e, HirExpr::Name(n) if n == name);
     match expr {
         HirExpr::Name(n) => n == name,
         HirExpr::NamedExpr { name: bound, .. } if bound == name => true,
-        HirExpr::Subscript { base, index } if is_name(base) => escapes(index, name),
+        HirExpr::Subscript { base, index } if is_name(base) => {
+            !exact_key(index, keys) || escapes(index, name, keys)
+        }
         HirExpr::Compare {
             op: CmpOpKind::In | CmpOpKind::NotIn,
             left,
             right,
-        } if is_name(right) => escapes(left, name),
+        } if is_name(right) => !exact_key(left, keys) || escapes(left, name, keys),
         HirExpr::Call { callee, args } if callee == "len" && args.len() == 1 && is_name(&args[0]) => {
             false
         }
         other => pycc_hir::ndarray::expr_children(other)
             .into_iter()
-            .any(|child| escapes(child, name)),
+            .any(|child| escapes(child, name, keys)),
     }
 }
 
