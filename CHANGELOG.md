@@ -18,6 +18,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   share drops from 15.7M to 10.5M instructions, mistune's from 28.9M to 25.9M, pydantic's
   from 102.4M to 99.7M (CPython: 7.6M, 29.0M, 88.5M). The import also no longer adds a
   `__pycc_frame_template__` attribute to `sys`.
+- A compiled frame's code object costs a third of what it did to make (v0.11 accept 3):
+  its `co_filename` is joined in C on POSIX instead of through `os.path`, and it is made
+  by `types.CodeType` with positional arguments instead of `code.replace` with keywords.
+  A compiled module's `__builtins__` is the builtins' dict, as `exec` stores it in a
+  Python module's namespace, instead of the `builtins` module. Own import share: pystache
+  10.5M -> 10.1M, mistune 25.9M -> 25.1M, pydantic 99.7M -> 98.5M.
 
 ### Fixed
 - `--non-strict` (native build and `--ext`): fallback code reaching module globals by a
