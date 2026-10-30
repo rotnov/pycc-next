@@ -628,8 +628,122 @@ fn an_elf_module_packs_its_relative_relocations_for_a_glibc_that_reads_them() {
             .next()
             .and_then(|line| line.rsplit(' ').next())
             .map(str::to_string);
-        assert_eq!(host, glibc_reads_dt_relr(version.as_deref()), "{text}");
+        assert_eq!(
+            host,
+            glibc_reads_dt_relr(version.as_deref())
+                && linker_packs(std::process::Command::new("cc")),
+            "{text}"
+        );
     } else {
         assert!(!host);
+    }
+}
+
+/// A minimal ELF image: a header whose one program header is a
+/// `PT_DYNAMIC` over `tags` (each with a zero value), in the given class
+/// and byte order.
+fn elf_with_dynamic(wide: bool, big: bool, tags: &[u64]) -> Vec<u8> {
+    let put = |out: &mut Vec<u8>, at: usize, len: usize, value: u64| {
+        let bytes = value.to_be_bytes();
+        let field = &bytes[8 - len..];
+        let slot = &mut out[at..at + len];
+        if big {
+            slot.copy_from_slice(field);
+        } else {
+            slot.iter_mut().zip(field.iter().rev()).for_each(|(s, b)| *s = *b);
+        }
+    };
+    let (word, header, phentsize) = if wide { (8, 64, 56) } else { (4, 52, 32) };
+    let dynamic = header + phentsize;
+    let mut out = vec![0u8; dynamic + tags.len() * 2 * word];
+    out[..4].copy_from_slice(b"\x7fELF");
+    out[4] = if wide { 2 } else { 1 };
+    out[5] = if big { 2 } else { 1 };
+    let size = (tags.len() * 2 * word) as u64;
+    if wide {
+        put(&mut out, 0x20, 8, header as u64);
+        put(&mut out, 0x36, 2, phentsize as u64);
+        put(&mut out, 0x38, 2, 1);
+        put(&mut out, header, 4, 2);
+        put(&mut out, header + 8, 8, dynamic as u64);
+        put(&mut out, header + 32, 8, size);
+    } else {
+        put(&mut out, 0x1c, 4, header as u64);
+        put(&mut out, 0x2a, 2, phentsize as u64);
+        put(&mut out, 0x2c, 2, 1);
+        put(&mut out, header, 4, 2);
+        put(&mut out, header + 4, 4, dynamic as u64);
+        put(&mut out, header + 16, 4, size);
+    }
+    for (index, tag) in tags.iter().enumerate() {
+        put(&mut out, dynamic + index * 2 * word, word, *tag);
+    }
+    out
+}
+
+/// v0.11: packing is decided by what the linker produces, not by its
+/// name: `DT_RELR` (36) before `DT_NULL` in the dynamic section, in any
+/// ELF class and byte order; anything else is no.
+#[test]
+fn a_dt_relr_entry_is_found_in_any_elf_class_and_byte_order() {
+    for (wide, big) in [(true, false), (true, true), (false, false), (false, true)] {
+        assert!(has_dt_relr(&elf_with_dynamic(wide, big, &[1, 36, 0])), "{wide} {big}");
+        assert!(!has_dt_relr(&elf_with_dynamic(wide, big, &[1, 7, 0])), "{wide} {big}");
+        // After `DT_NULL` the section is over.
+        assert!(!has_dt_relr(&elf_with_dynamic(wide, big, &[1, 0, 36])), "{wide} {big}");
+        // A truncated dynamic section, or one past the end of the file.
+        let whole = elf_with_dynamic(wide, big, &[1, 36]);
+        let word = if wide { 8 } else { 4 };
+        assert!(!has_dt_relr(&whole[..whole.len() - 3 * word]), "{wide} {big}");
+    }
+    let mut not_elf = elf_with_dynamic(true, false, &[36]);
+    not_elf[0] = 0;
+    assert!(!has_dt_relr(&not_elf));
+    let mut bad_class = elf_with_dynamic(true, false, &[36]);
+    bad_class[4] = 3;
+    assert!(!has_dt_relr(&bad_class));
+    let mut bad_order = elf_with_dynamic(true, false, &[36]);
+    bad_order[5] = 0;
+    assert!(!has_dt_relr(&bad_order));
+    assert!(!has_dt_relr(&not_elf[..20]));
+    assert!(!has_dt_relr(b""));
+}
+
+/// v0.11: the linker probe answers no when `cc` cannot link, and, on an
+/// ELF host, agrees with the shared object the host's `cc` really makes.
+#[test]
+fn the_linker_probe_reports_what_the_linker_makes() {
+    assert!(!linker_packs(std::process::Command::new("pycc-no-such-cc")));
+    if cfg!(target_os = "linux") {
+        // Ubuntu 24.04's GNU ld 2.42 packs on x86-64 and ignores the flag
+        // on aarch64; whichever, the probe and a real link agree.
+        let scratch = pycc_scratch::ScratchDir::new("relr_probe_test").expect("scratch");
+        let source = scratch.join("a.c");
+        std::fs::write(&source, "int a[2];\nint *p[2] = {&a[0], &a[1]};\n").unwrap();
+        let object = scratch.join("a.so");
+        let status = std::process::Command::new("cc")
+            .args(["-shared", "-fPIC", "-Wl,-z,pack-relative-relocs"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&object)
+            .status()
+            .expect("cc runs");
+        assert!(status.success());
+        let packed = has_dt_relr(&std::fs::read(&object).unwrap());
+        assert_eq!(linker_packs(std::process::Command::new("cc")), packed);
+        if cfg!(target_arch = "x86_64") && glibc_reads_dt_relr(host_glibc_version().as_deref()) {
+            assert!(packed, "GNU ld packs on x86-64");
+        }
+        // Without the flag nothing is packed.
+        let plain = scratch.join("plain.so");
+        let status = std::process::Command::new("cc")
+            .args(["-shared", "-fPIC"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&plain)
+            .status()
+            .expect("cc runs");
+        assert!(status.success());
+        assert!(!has_dt_relr(&std::fs::read(&plain).unwrap()));
     }
 }

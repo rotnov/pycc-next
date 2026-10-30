@@ -117,24 +117,36 @@ fn artifact() -> &'static str {
     }
 }
 
-/// v0.11: on a glibc that reads `DT_RELR` (2.36 and newer), the
-/// extension's relative relocations are packed into one (`readelf -d` lists
-/// a `RELR` entry and `readelf -r` a `.relr.dyn` section), and the
-/// extension depends on `GLIBC_ABI_DT_RELR`; elsewhere nothing is checked.
+/// Whether the host's `cc` really packs relative relocations: a shared
+/// object it links under `-z pack-relative-relocs` has a `RELR` entry
+/// (Ubuntu 24.04's GNU ld 2.42 packs on x86-64 and ignores the flag on
+/// aarch64).
+fn host_linker_packs() -> bool {
+    let scratch = ScratchDir::new("package_whole_relr_probe").expect("scratch");
+    let source = scratch.join("probe.c");
+    std::fs::write(&source, "int a[2];\nint *p[2] = {&a[0], &a[1]};\n").expect("probe source");
+    let object = scratch.join("probe.so");
+    let linked = Command::new("cc")
+        .args(["-shared", "-fPIC", "-Wl,-z,pack-relative-relocs"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&object)
+        .output()
+        .expect("cc runs");
+    if !linked.status.success() {
+        return false;
+    }
+    let dynamic = Command::new("readelf").arg("-d").arg(&object).output().expect("readelf runs");
+    text(&dynamic.stdout).contains("(RELR)")
+}
+
+/// v0.11: on a glibc that reads `DT_RELR` (2.36 and newer) with a linker
+/// that packs them ([`host_linker_packs`]), the extension's relative
+/// relocations are packed into one (`readelf -d` lists a `RELR` entry and
+/// `readelf -r` a `.relr.dyn` section), and the extension depends on
+/// `GLIBC_ABI_DT_RELR`; on any other glibc host it has no `RELR` entry.
 fn assert_packed_relocations(extension: &Path) {
     if !cfg!(all(target_os = "linux", target_env = "gnu")) {
-        return;
-    }
-    let ldd = Command::new("ldd").arg("--version").output().expect("ldd runs");
-    let version = text(&ldd.stdout)
-        .lines()
-        .next()
-        .and_then(|line| line.rsplit(' ').next())
-        .map(str::to_string)
-        .unwrap_or_default();
-    let mut parts = version.split('.').map(|part| part.parse::<u32>().unwrap_or(0));
-    let glibc = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
-    if glibc < (2, 36) {
         return;
     }
     let readelf = |flag: &str| {
@@ -146,7 +158,20 @@ fn assert_packed_relocations(extension: &Path) {
         assert!(output.status.success(), "{}", text(&output.stderr));
         text(&output.stdout)
     };
+    let ldd = Command::new("ldd").arg("--version").output().expect("ldd runs");
+    let version = text(&ldd.stdout)
+        .lines()
+        .next()
+        .and_then(|line| line.rsplit(' ').next())
+        .map(str::to_string)
+        .unwrap_or_default();
+    let mut parts = version.split('.').map(|part| part.parse::<u32>().unwrap_or(0));
+    let glibc = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
     let dynamic = readelf("-d");
+    if glibc < (2, 36) || !host_linker_packs() {
+        assert!(!dynamic.contains("(RELR)"), "{dynamic}");
+        return;
+    }
     assert!(dynamic.contains("(RELR)"), "{dynamic}");
     assert!(readelf("-r").contains(".relr.dyn"));
     assert!(readelf("-V").contains("GLIBC_ABI_DT_RELR"));

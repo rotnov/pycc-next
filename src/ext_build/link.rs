@@ -140,16 +140,123 @@ pub(crate) fn ext_export_args(
 }
 
 /// Whether an ELF module built for `target` packs its relative relocations
-/// ([`ext_export_args`]): only for the host (no `--target`), and only when
-/// the host's C library is glibc 2.36 or newer, the first to read
-/// `DT_RELR`. The linker then also records a dependency on glibc's
-/// `GLIBC_ABI_DT_RELR` version, so the module refuses to load, by name, on
-/// an older glibc rather than running unrelocated -- and the platform tag
-/// `pycc.build` gives a wheel (the host's glibc, `python/pycc/_wheel.py`)
-/// already promises no older one. A cross build cannot know its target's C
-/// library, and keeps the relocations unpacked.
+/// ([`ext_export_args`]): only for the host (no `--target`), only when the
+/// host's C library is glibc 2.36 or newer, the first to read `DT_RELR`,
+/// and only when the host's linker really packs them
+/// ([`host_linker_packs_relative_relocations`]): GNU ld 2.42, Ubuntu
+/// 24.04's, implements `-z pack-relative-relocs` for x86 only and on
+/// aarch64 ignores it with a warning. The linker then also records a
+/// dependency on glibc's `GLIBC_ABI_DT_RELR` version, so the module refuses
+/// to load, by name, on an older glibc rather than running unrelocated --
+/// and the platform tag `pycc.build` gives a wheel (the host's glibc,
+/// `python/pycc/_wheel.py`) already promises no older one. A cross build
+/// cannot know its target's C library, and keeps the relocations unpacked.
 pub(crate) fn packs_relative_relocations(target: Option<&str>) -> bool {
-    target.is_none() && glibc_reads_dt_relr(host_glibc_version().as_deref())
+    target.is_none()
+        && glibc_reads_dt_relr(host_glibc_version().as_deref())
+        && host_linker_packs_relative_relocations()
+}
+
+/// Whether the host's `cc` packs relative relocations: [`linker_packs`],
+/// asked once per process.
+fn host_linker_packs_relative_relocations() -> bool {
+    static PACKS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PACKS.get_or_init(|| linker_packs(std::process::Command::new("cc")))
+}
+
+/// Whether the C driver `cc` packs relative relocations: it links a shared
+/// object with a few pointers in its data under `-z pack-relative-relocs`,
+/// and the object must have a `DT_RELR` entry ([`has_dt_relr`]) -- a linker
+/// that ignores the flag still links. Any failure (no scratch directory, a
+/// failed compile or link) answers no, which keeps the plain link.
+pub(crate) fn linker_packs(mut cc: std::process::Command) -> bool {
+    let Ok(scratch) = pycc_scratch::ScratchDir::new("relr_probe") else {
+        return false;
+    };
+    let source = scratch.join("probe.c");
+    let object = scratch.join("probe.so");
+    let probe = "int pycc_relr_probe[4];\n\
+                 int *pycc_relr_pointers[4] = {&pycc_relr_probe[0], &pycc_relr_probe[1],\n\
+                 &pycc_relr_probe[2], &pycc_relr_probe[3]};\n";
+    if std::fs::write(&source, probe).is_err() {
+        return false;
+    }
+    let linked = cc
+        .args(["-shared", "-fPIC", "-Wl,-z,pack-relative-relocs"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&object)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    linked && std::fs::read(&object).is_ok_and(|elf| has_dt_relr(&elf))
+}
+
+/// Whether the ELF file `elf` (32- or 64-bit, either byte order) has a
+/// `DT_RELR` entry in its dynamic section; `false` for anything that is not
+/// a well-formed ELF file with one.
+pub(crate) fn has_dt_relr(elf: &[u8]) -> bool {
+    const PT_DYNAMIC: u64 = 2;
+    const DT_NULL: u64 = 0;
+    const DT_RELR: u64 = 36;
+    if elf.get(..4) != Some(b"\x7fELF".as_slice()) {
+        return false;
+    }
+    let wide = match elf.get(4) {
+        Some(1) => false,
+        Some(2) => true,
+        _ => return false,
+    };
+    let big = match elf.get(5) {
+        Some(1) => false,
+        Some(2) => true,
+        _ => return false,
+    };
+    let read = |at: usize, len: usize| -> Option<u64> {
+        let bytes = elf.get(at..at.checked_add(len)?)?;
+        let fold = |acc: u64, byte: &u8| (acc << 8) | u64::from(*byte);
+        Some(if big {
+            bytes.iter().fold(0, fold)
+        } else {
+            bytes.iter().rev().fold(0, fold)
+        })
+    };
+    let word = if wide { 8 } else { 4 };
+    let (phoff, phentsize, phnum) = if wide {
+        (read(0x20, 8), read(0x36, 2), read(0x38, 2))
+    } else {
+        (read(0x1c, 4), read(0x2a, 2), read(0x2c, 2))
+    };
+    let (Some(phoff), Some(phentsize), Some(phnum)) = (phoff, phentsize, phnum) else {
+        return false;
+    };
+    (0..phnum).any(|index| {
+        let Some(header) = index
+            .checked_mul(phentsize)
+            .and_then(|at| at.checked_add(phoff))
+            .and_then(|at| usize::try_from(at).ok())
+        else {
+            return false;
+        };
+        if read(header, 4) != Some(PT_DYNAMIC) {
+            return false;
+        }
+        let (offset, size) = if wide {
+            (read(header + 8, 8), read(header + 32, 8))
+        } else {
+            (read(header + 4, 4), read(header + 16, 4))
+        };
+        let (Some(Ok(offset)), Some(Ok(size))) =
+            (offset.map(usize::try_from), size.map(usize::try_from))
+        else {
+            return false;
+        };
+        (0..size / (2 * word))
+            .map(|entry| read(offset + entry * 2 * word, word))
+            .take_while(|tag| !matches!(tag, None | Some(DT_NULL)))
+            .any(|tag| tag == Some(DT_RELR))
+    })
 }
 
 /// Whether the glibc whose version is `version` (`"2.39"`) reads `DT_RELR`
@@ -168,7 +275,7 @@ pub(crate) fn glibc_reads_dt_relr(version: Option<&str>) -> bool {
 /// The running glibc's version (`gnu_get_libc_version`), or `None` on any
 /// other C library.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
-fn host_glibc_version() -> Option<String> {
+pub(crate) fn host_glibc_version() -> Option<String> {
     unsafe extern "C" {
         fn gnu_get_libc_version() -> *const std::ffi::c_char;
     }
@@ -178,7 +285,7 @@ fn host_glibc_version() -> Option<String> {
 }
 
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
-fn host_glibc_version() -> Option<String> {
+pub(crate) fn host_glibc_version() -> Option<String> {
     None
 }
 
