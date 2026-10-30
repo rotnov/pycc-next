@@ -137,6 +137,24 @@ class Lifted(abc.ABC):
         return cls(v=v).v
 
 
+class Outer(abc.ABC):
+    """CPython creates this class and the one it nests; their methods compile."""
+
+    class Inner:
+        def where(self, n=1):
+            return sys._getframe(n).f_code.co_name
+
+        def twice(self, x):
+            return x * 2
+
+    def where(self, n=1):
+        return sys._getframe(n).f_code.co_name
+
+    @staticmethod
+    def static_where(n=1):
+        return sys._getframe(n).f_code.co_name
+
+
 def frame_kind(n):
     f = sys._getframe(n)
     return f.f_code.co_name, f.f_globals["__name__"], f.f_locals is f.f_globals
