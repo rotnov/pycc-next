@@ -18,6 +18,7 @@ mod package_build;
 mod project_config;
 mod source;
 mod specialize;
+mod threads;
 mod timing;
 mod traceback_blocks;
 
@@ -71,6 +72,8 @@ fn main() -> ExitCode {
             package_member,
             exception_tag_base,
             sibling_interfaces,
+            member_threads,
+            ext_probe,
             static_libpython,
             interop,
             mode,
@@ -87,6 +90,9 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
                 pycc_hir::set_exception_tag_base(base);
+            }
+            if let Some(threads) = member_threads {
+                threads::set_budget(threads);
             }
             // Resolved here, not inside `try_build`: this consumption point
             // (a neighboring `pycc.toml`'s `[build] opt = "release"` as a
@@ -118,6 +124,17 @@ fn main() -> ExitCode {
             // without setting a process-wide environment variable, which
             // would race every other test in this binary.
             let toolchain = ext.then(ext_build::ExtToolchain::from_env);
+            // A member build reuses the package build's probe.
+            let toolchain = match (toolchain, &ext_probe) {
+                (Some(toolchain), Some(probe)) => match toolchain.with_package_probe(probe) {
+                    Ok(toolchain) => Some(toolchain),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        return ExitCode::from(2);
+                    }
+                },
+                (toolchain, _) => toolchain,
+            };
             let started = std::time::Instant::now();
             // A package directory under `--ext` is a whole-package build.
             if let Some(toolchain) = toolchain.as_ref().filter(|_| package_member.is_none() && path.is_dir()) {

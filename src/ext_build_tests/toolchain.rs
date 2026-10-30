@@ -75,6 +75,46 @@ fn an_override_answers_without_running_any_interpreter() {
     );
 }
 
+/// A member build of a package built whole reads the package build's
+/// probe instead of running the interpreter again, and still keeps the
+/// interpreter for compiling its CPython source.
+#[test]
+fn a_member_reads_the_package_builds_probe_without_running_the_interpreter() {
+    let dir = pycc_scratch::ScratchDir::new("ext-package-probe").expect("scratch");
+    std::fs::write(dir.join("Python.h"), "").expect("the fixture header");
+    let written = probe((3, 14), &dir);
+    let file = dir.join("probe.txt");
+    std::fs::write(&file, written.to_probe_output()).expect("the probe file");
+    let toolchain = ExtToolchain::with_interpreter("definitely-not-an-interpreter-pkg")
+        .with_package_probe(&file)
+        .expect("a well-formed probe file");
+    assert_eq!(toolchain.probe().expect("no spawn"), written);
+    assert_eq!(
+        toolchain.precompile_interpreter(),
+        Some(std::ffi::OsStr::new("definitely-not-an-interpreter-pkg"))
+    );
+    // Its version is still checked against the floor.
+    std::fs::write(&file, probe((3, 12), &dir).to_probe_output()).expect("the probe file");
+    let old = ExtToolchain::with_interpreter("python3")
+        .with_package_probe(&file)
+        .expect("well-formed");
+    assert!(old.probe().expect_err("below the floor").contains("3.12"));
+}
+
+#[test]
+fn a_missing_or_malformed_package_probe_is_an_error() {
+    let dir = pycc_scratch::ScratchDir::new("ext-package-probe-bad").expect("scratch");
+    let missing = ExtToolchain::with_interpreter("python3")
+        .with_package_probe(&dir.join("absent.txt"))
+        .expect_err("no file");
+    assert!(missing.contains("absent.txt"), "{missing}");
+    std::fs::write(dir.join("bad.txt"), "3.13\n").expect("the probe file");
+    let malformed = ExtToolchain::with_interpreter("python3")
+        .with_package_probe(&dir.join("bad.txt"))
+        .expect_err("two lines short");
+    assert!(malformed.contains("malformed"), "{malformed}");
+}
+
 #[test]
 fn an_override_is_still_subject_to_the_version_floor() {
     let dir = pycc_scratch::ScratchDir::new("ext-probe-floor").expect("scratch");

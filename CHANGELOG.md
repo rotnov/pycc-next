@@ -75,6 +75,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   directly in a comprehension instead of passing a function object to CPython's
   builtin; `map`/`filter` of one run CPython's lazy builtins over the compiled
   function.
+- A whole-package build takes less CPU and finishes sooner (mistune, 38 modules, 4 jobs:
+  5.25 s -> 4.37 s, 18.8 s -> 16.7 s of CPU, medians of 5 interleaved local builds; the
+  extension is byte-identical). Each member build uses its share of the cores
+  (`--member-threads`): with every core already building a member it no longer runs the
+  frontend's speculative attempt without specializations beside the specialized one,
+  which ran for every module and was discarded whenever the specialized attempt passed;
+  it runs only when a failure needs it. The members compile against the package build's
+  probe of the interpreter (`--ext-probe`) instead of each starting it again; they start
+  by the longest chain of work that waits on them, estimated from the sources' sizes, so
+  a large module no longer starts last and finishes alone; and the runtime unit and the
+  package unit compile while the members build instead of after them. The script that
+  precompiles a module's CPython source reads `marshal` data instead of JSON and imports
+  `ast` only for a set display, halving its start-up.
 
 ### Fixed
 - `key=` functions are called when CPython calls them.

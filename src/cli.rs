@@ -151,6 +151,15 @@ pub enum Command {
             requires = "package_member"
         )]
         sibling_interfaces: Vec<String>,
+        /// Internal (the package build's member builds): how many threads
+        /// the member may use for its own parallel work (`crate::threads`).
+        #[arg(long, hide = true, requires = "package_member")]
+        member_threads: Option<usize>,
+        /// Internal (the package build's member builds): a file holding the
+        /// package build's probe of the CPython interpreter (the probe
+        /// script's three lines), used instead of probing again.
+        #[arg(long, value_name = "PATH", hide = true, requires = "package_member")]
+        ext_probe: Option<PathBuf>,
         /// Link libpython into the executable from the embed interpreter's
         /// static archive instead of bundling its shared library, and
         /// export its C-API symbols so a standard-library extension loads

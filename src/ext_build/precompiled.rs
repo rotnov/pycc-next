@@ -42,7 +42,17 @@ pub(crate) struct Precompiled {
     pub(crate) present: Vec<bool>,
 }
 
-/// The script compiling the chunks of its stdin (JSON) to marshalled code.
+/// The script compiling the chunks of its stdin to marshalled code.
+///
+/// Its input (pycc's own) and its answer are `marshal` data and raw bytes
+/// rather than JSON: the script runs for every module an `--ext` build
+/// compiles (each member of a package), and importing `json`, and `ast`
+/// up front where only a chunk holding a set display needs it, doubled the
+/// interpreter's start-up (about 21 ms instead of 10).
+/// The input is `marshal`'s form of `(((source, filename, future), ...),
+/// fix)` ([`marshal_input`]); the answer is the bytecode magic number
+/// (`importlib.util.MAGIC_NUMBER`, four bytes), one byte per chunk (1 when
+/// it compiled) and the `marshal`led table ([`parse`]).
 ///
 /// `marshal` rebuilds a `frozenset` in its iteration order, so a set display
 /// the compiler folds (`{1, 8, 0}`) would iterate in another order than a
@@ -54,12 +64,13 @@ pub(crate) struct Precompiled {
 /// from them (`ORDERS_FIX`). A chunk where some constant has no such
 /// display, or several in different orders, is left to `compile()` at
 /// import, as before.
-const COMPILE_SCRIPT: &str = "import sys,json,marshal,importlib.util,__future__,ast\n\
+const COMPILE_SCRIPT: &str = "import sys,marshal,importlib.util,__future__\n\
     def walk(co,acc):\n\
     \x20 for k in co.co_consts:\n\
     \x20   if type(k) is frozenset and len(k)>1: acc.append(k)\n\
     \x20   elif hasattr(k,'co_consts'): walk(k,acc)\n\
     def displays(src):\n\
+    \x20 import ast\n\
     \x20 out=[]\n\
     \x20 for n in ast.walk(ast.parse(src)):\n\
     \x20   if isinstance(n,ast.Set):\n\
@@ -77,19 +88,18 @@ const COMPILE_SCRIPT: &str = "import sys,json,marshal,importlib.util,__future__,
     \x20   if len(found)!=1: raise ValueError\n\
     \x20   out.append(found.pop())\n\
     \x20 return tuple(out)\n\
-    given=json.loads(sys.stdin.buffer.read())\n\
-    chunks=given['chunks']\n\
+    chunks,fix=marshal.loads(sys.stdin.buffer.read())\n\
     table=[]\n\
-    for c in chunks:\n\
+    for source,filename,future in chunks:\n\
     \x20 try:\n\
-    \x20   f=__future__.annotations.compiler_flag if c['future'] else 0\n\
-    \x20   co=compile(c['source'],c['filename'],'exec',f,True,0)\n\
-    \x20   table.append((co,orders(c['source'],co)))\n\
+    \x20   f=__future__.annotations.compiler_flag if future else 0\n\
+    \x20   co=compile(source,filename,'exec',f,True,0)\n\
+    \x20   table.append((co,orders(source,co)))\n\
     \x20 except Exception:\n\
     \x20   table.append(None)\n\
-    present=[t is not None for t in table]\n\
-    table.append(compile(given['fix'],'<pycc precompiled>','exec',0,True,0))\n\
-    sys.stdout.write(json.dumps({'magic':int.from_bytes(importlib.util.MAGIC_NUMBER,'little'),'table':marshal.dumps(tuple(table)).hex(),'present':present}))\n";
+    present=bytes(t is not None for t in table)\n\
+    table.append(compile(fix,'<pycc precompiled>','exec',0,True,0))\n\
+    sys.stdout.buffer.write(importlib.util.MAGIC_NUMBER+present+marshal.dumps(tuple(table)))\n";
 
 /// The `fix(code, orders)` an import runs on a chunk holding `frozenset`
 /// constants: rebuilds each from its elements in source order
@@ -126,20 +136,7 @@ const ORDERS_FIX: &str = "def fix(co, orders):
 /// Compiles `chunks` with `interpreter`; `None` when it cannot run or
 /// answers something this build cannot read.
 pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Precompiled> {
-    let input = serde_json::to_vec(&serde_json::json!({
-        "chunks": chunks
-            .iter()
-            .map(|chunk| {
-                serde_json::json!({
-                    "source": chunk.source,
-                    "filename": chunk.filename,
-                    "future": chunk.future_annotations,
-                })
-            })
-            .collect::<Vec<_>>(),
-        "fix": ORDERS_FIX,
-    }))
-    .ok()?;
+    let input = marshal_input(chunks)?;
     let mut child = super::probe_command(interpreter, COMPILE_SCRIPT)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -156,32 +153,54 @@ pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Pr
     parse(&output.stdout, chunks.len())
 }
 
-/// Parses the compile script's answer for `count` chunks.
-fn parse(stdout: &[u8], count: usize) -> Option<Precompiled> {
-    let value: serde_json::Value = serde_json::from_slice(stdout).ok()?;
-    let magic = u32::try_from(value.get("magic")?.as_u64()?).ok()?;
-    let table = decode_hex(value.get("table")?.as_str()?)?;
-    let present = value
-        .get("present")?
-        .as_array()?
-        .iter()
-        .map(serde_json::Value::as_bool)
-        .collect::<Option<Vec<_>>>()?;
-    (present.len() == count && magic != 0).then_some(Precompiled {
-        magic,
-        table,
-        present,
-    })
+/// The compile script's input: `marshal`'s form of `(((source, filename,
+/// future), ...), ORDERS_FIX)`, built from its tuple (`(`), string (`u`,
+/// UTF-8) and boolean (`T`, `F`) codes, each length a 4-byte little-endian
+/// count -- a format every `marshal` version reads. `None` for a string or
+/// tuple too long for one.
+fn marshal_input(chunks: &[CodeChunk]) -> Option<Vec<u8>> {
+    fn sized(out: &mut Vec<u8>, code: u8, len: usize) -> Option<()> {
+        out.push(code);
+        out.extend_from_slice(&u32::try_from(len).ok()?.to_le_bytes());
+        Some(())
+    }
+    fn text(out: &mut Vec<u8>, text: &str) -> Option<()> {
+        sized(out, b'u', text.len())?;
+        out.extend_from_slice(text.as_bytes());
+        Some(())
+    }
+    let mut out = Vec::new();
+    sized(&mut out, b'(', 2)?;
+    sized(&mut out, b'(', chunks.len())?;
+    for chunk in chunks {
+        sized(&mut out, b'(', 3)?;
+        text(&mut out, &chunk.source)?;
+        text(&mut out, &chunk.filename)?;
+        out.push(if chunk.future_annotations { b'T' } else { b'F' });
+    }
+    text(&mut out, ORDERS_FIX)?;
+    Some(out)
 }
 
-fn decode_hex(hex: &str) -> Option<Vec<u8>> {
-    if !hex.len().is_multiple_of(2) {
-        return None;
-    }
-    (0..hex.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok())
-        .collect()
+/// Parses the compile script's answer for `count` chunks: the magic number
+/// (four bytes, little-endian), one byte (0 or 1) per chunk, the table.
+fn parse(stdout: &[u8], count: usize) -> Option<Precompiled> {
+    let (magic, rest) = stdout.split_first_chunk::<4>()?;
+    let magic = u32::from_le_bytes(*magic);
+    let (present, table) = rest.split_at_checked(count)?;
+    let present = present
+        .iter()
+        .map(|byte| match byte {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (magic != 0 && !table.is_empty()).then(|| Precompiled {
+        magic,
+        table: table.to_vec(),
+        present,
+    })
 }
 
 /// `bytes` as a C string literal, split over lines: printable ASCII as
@@ -577,37 +596,36 @@ mod tests {
     #[test]
     fn the_answer_parses_only_when_complete() {
         assert_eq!(
-            parse(
-                br#"{"magic": 3571, "table": "a9ff", "present": [true, false]}"#,
-                2
-            ),
+            parse(b"\xf3\x0d\x0d\x0a\x01\x00\xa9\xff", 2),
             Some(Precompiled {
-                magic: 3571,
+                magic: 0x0a0d_0df3,
                 table: vec![0xa9, 0xff],
                 present: vec![true, false],
             })
         );
-        assert_eq!(
-            parse(br#"{"magic": 3571, "table": "a9", "present": [true]}"#, 2),
-            None
-        );
-        assert_eq!(
-            parse(br#"{"magic": 3571, "table": "a9f", "present": [true]}"#, 1),
-            None
-        );
-        assert_eq!(
-            parse(br#"{"magic": 3571, "table": "zz", "present": [true]}"#, 1),
-            None
-        );
-        assert_eq!(
-            parse(br#"{"magic": 3571, "table": "a9", "present": [1]}"#, 1),
-            None
-        );
-        assert_eq!(
-            parse(br#"{"magic": 0, "table": "", "present": []}"#, 0),
-            None
-        );
-        assert_eq!(parse(b"not json", 0), None);
+        // Too short for the magic number, for one byte per chunk, or for a
+        // table; a presence byte that is not 0 or 1; no magic number.
+        assert_eq!(parse(b"\xf3\x0d", 0), None);
+        assert_eq!(parse(b"\xf3\x0d\x0d\x0a\x01", 2), None);
+        assert_eq!(parse(b"\xf3\x0d\x0d\x0a\x01", 1), None);
+        assert_eq!(parse(b"\xf3\x0d\x0d\x0a\x02\xa9", 1), None);
+        assert_eq!(parse(b"\x00\x00\x00\x00\xa9", 0), None);
+    }
+
+    #[test]
+    fn the_input_is_marshal_data() {
+        let mut first = chunk("x = 1\n");
+        first.future_annotations = true;
+        let input = marshal_input(&[first, chunk("é")]).expect("small enough");
+        let mut want = b"(\x02\x00\x00\x00(\x02\x00\x00\x00".to_vec();
+        want.extend_from_slice(b"(\x03\x00\x00\x00u\x06\x00\x00\x00x = 1\n");
+        want.extend_from_slice(b"u\x07\x00\x00\x00/p/m.pyT");
+        want.extend_from_slice(b"(\x03\x00\x00\x00u\x02\x00\x00\x00\xc3\xa9");
+        want.extend_from_slice(b"u\x07\x00\x00\x00/p/m.pyF");
+        want.push(b'u');
+        want.extend_from_slice(&u32::try_from(ORDERS_FIX.len()).unwrap().to_le_bytes());
+        want.extend_from_slice(ORDERS_FIX.as_bytes());
+        assert_eq!(input, want);
     }
 
     #[test]
