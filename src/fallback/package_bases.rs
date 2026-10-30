@@ -21,24 +21,29 @@ use std::path::{Path, PathBuf};
 /// with the first subclass found (`pkg.n.D`), for the report.
 pub(super) fn subclassed_in_package(entry: &Path) -> BTreeMap<String, String> {
     let mut found = BTreeMap::new();
-    for (name, subclass, _, _) in package_subclasses(entry) {
+    for (name, subclass, _) in package_subclasses(entry) {
         found.entry(name).or_insert(subclass);
     }
     found
 }
 
-/// v0.10 accept 5: the classes of `entry` that a class of another module
-/// of its package with two bases or more, or a body off the exception
-/// layout allowlist (`exc_layout::class_names`), derives from, directly or
-/// through other such classes: an exception layout over one could meet
-/// another base's in that class, or be bypassed by its hooks
-/// (`exc_layout`), so none is made.
-pub(super) fn multi_based_in_package(entry: &Path) -> BTreeSet<String> {
-    package_subclasses(entry)
-        .into_iter()
-        .filter(|(_, _, _, multi)| *multi)
-        .map(|(name, _, _, _)| name)
-        .collect()
+/// v0.10 accept 5: the class graph of `entry`'s package (`exc_graph`): the
+/// top-level class statements of every module, `entry` included, each
+/// base resolved across imports and re-exports; with `entry`'s dotted
+/// name. `None` outside a package.
+pub(super) fn class_graph(entry: &Path) -> Option<(super::exc_graph::ClassGraph, String)> {
+    let package = Package::read(entry)?;
+    let exports = re_exports(&package.parsed);
+    let mut graph = super::exc_graph::ClassGraph::default();
+    for (_, qual, is_package, module) in &package.parsed {
+        let mut scan = Scan::new(qual, *is_package);
+        scan.body(&module.body);
+        graph.add_module(qual, &module.body, &|base| {
+            let dotted = scan.dotted(base)?;
+            Some(resolve_export(&exports, &dotted).unwrap_or(dotted))
+        });
+    }
+    Some((graph, package.target.clone()))
 }
 
 /// v0.10: the names (methods and class attributes) that the classes of
@@ -50,17 +55,16 @@ pub(super) fn multi_based_in_package(entry: &Path) -> BTreeSet<String> {
 /// no subclass overrides only costs that call a test.
 pub(crate) fn overridden_in_package(entry: &Path) -> BTreeMap<String, BTreeSet<String>> {
     let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for (name, _, defines, _) in package_subclasses(entry) {
+    for (name, _, defines) in package_subclasses(entry) {
         out.entry(name).or_default().extend(defines);
     }
     out
 }
 
 /// Each class of `entry` that a class statement of another module of its
-/// package lists as a base, with that subclass (`pkg.n.D`), the names the
-/// subclass and its own subclasses (in any module but `entry`) define, and
-/// whether one of them lists two bases or more.
-fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>, bool)> {
+/// package lists as a base, with that subclass (`pkg.n.D`) and the names
+/// the subclass and its own subclasses (in any module but `entry`) define.
+fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>)> {
     let Some(package) = Package::read(entry) else {
         return Vec::new();
     };
@@ -69,7 +73,7 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>, bo
     // Every class statement of the other modules: its resolved bases (as
     // `module.name`) and the names its body defines.
     let resolve = |base: &str| resolve_export(&exports, base);
-    let mut classes: Vec<(String, Vec<String>, BTreeSet<String>, bool)> = Vec::new();
+    let mut classes: Vec<(String, Vec<String>, BTreeSet<String>)> = Vec::new();
     for (file, qual, is_package, module) in parsed {
         if file == entry {
             continue;
@@ -77,23 +81,19 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>, bo
         let mut scan = Scan::new(qual, *is_package);
         scan.body(&module.body);
         let mut bases: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut listed: BTreeMap<&str, usize> = BTreeMap::new();
         for (base, subclass) in &scan.bases {
-            *listed.entry(subclass.as_str()).or_default() += 1;
             if let Some(base) = resolve(base) {
                 bases.entry(subclass.clone()).or_default().push(base);
             }
         }
         for (class, defines) in scan.defines {
-            let multi = listed.get(class.as_str()).is_some_and(|n| *n > 1)
-                || scan.opaque.contains(&class);
             let bases = bases.remove(&class).unwrap_or_default();
-            classes.push((class, bases, defines, multi));
+            classes.push((class, bases, defines));
         }
     }
     let prefix = format!("{target}.");
     let mut found = Vec::new();
-    for (class, bases, defines, multi) in &classes {
+    for (class, bases, defines) in &classes {
         for base in bases {
             let Some(name) = base.strip_prefix(&prefix).filter(|n| !n.contains('.')) else {
                 continue;
@@ -102,23 +102,21 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>, bo
             // it, to a fixpoint.
             let mut reached: BTreeSet<&str> = BTreeSet::from([class.as_str()]);
             let mut names = defines.clone();
-            let mut any_multi = *multi;
             loop {
                 let before = reached.len();
-                for (other, other_bases, other_defines, other_multi) in &classes {
+                for (other, other_bases, other_defines) in &classes {
                     if !reached.contains(other.as_str())
                         && other_bases.iter().any(|b| reached.contains(b.as_str()))
                     {
                         reached.insert(other);
                         names.extend(other_defines.iter().cloned());
-                        any_multi |= *other_multi;
                     }
                 }
                 if reached.len() == before {
                     break;
                 }
             }
-            found.push((name.to_string(), class.clone(), names, any_multi));
+            found.push((name.to_string(), class.clone(), names));
         }
     }
     found
@@ -376,9 +374,6 @@ struct Scan<'a> {
     /// The names each class statement's body binds (its methods and class
     /// attributes), by the class's dotted name.
     defines: BTreeMap<String, BTreeSet<String>>,
-    /// The class statements whose bodies are off the exception layout
-    /// allowlist (`exc_layout::class_names`), by dotted name.
-    opaque: BTreeSet<String>,
 }
 
 impl<'a> Scan<'a> {
@@ -389,7 +384,6 @@ impl<'a> Scan<'a> {
             bound: BTreeMap::new(),
             bases: Vec::new(),
             defines: BTreeMap::new(),
-            opaque: BTreeSet::new(),
         }
     }
 
@@ -470,10 +464,6 @@ impl<'a> Scan<'a> {
                         self.bases
                             .push((dotted, format!("{}.{}", self.qual, class.name.as_str())));
                     }
-                }
-                if super::exc_layout::class_names(class).is_none() {
-                    self.opaque
-                        .insert(format!("{}.{}", self.qual, class.name.as_str()));
                 }
                 let defined = self
                     .defines

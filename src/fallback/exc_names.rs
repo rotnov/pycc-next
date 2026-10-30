@@ -78,10 +78,12 @@ pub(super) fn builtin_reduces_itself(class: &str) -> bool {
     )
 }
 
-/// The public classes of CPython 3.13's `builtins`: a base named so, with
-/// no binding of the name in the module, is that class, which no layout
-/// class is. Checked against the running CPython by this module's test.
-pub(super) const BUILTIN_CLASSES: [&str; 96] = [
+/// The public classes of CPython 3.13's `builtins` (`WindowsError`, an
+/// alias of `OSError`, only on Windows: elsewhere a base named so raises
+/// `NameError`, and still names no layout class): a base named so, with no
+/// binding of the name in the module, is that class, which no layout class
+/// is. Checked against the running CPython by this module's test.
+pub(super) const BUILTIN_CLASSES: [&str; 97] = [
     "ArithmeticError",
     "AssertionError",
     "AttributeError",
@@ -151,6 +153,7 @@ pub(super) const BUILTIN_CLASSES: [&str; 96] = [
     "UserWarning",
     "ValueError",
     "Warning",
+    "WindowsError",
     "ZeroDivisionError",
     "bool",
     "bytearray",
@@ -206,7 +209,13 @@ mod tests {
         );
         let text = String::from_utf8(output.stdout).expect("utf-8");
         let cpython: Vec<&str> = text.split_whitespace().collect();
-        assert_eq!(BUILTIN_CLASSES.to_vec(), cpython);
+        // `WindowsError` is only Windows's.
+        let ours: Vec<&str> = BUILTIN_CLASSES
+            .iter()
+            .copied()
+            .filter(|name| cfg!(windows) || *name != "WindowsError")
+            .collect();
+        assert_eq!(ours, cpython);
     }
     use std::collections::BTreeSet;
 

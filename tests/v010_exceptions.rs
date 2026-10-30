@@ -310,49 +310,79 @@ fn package_matches_cpython(release: bool) {
     assert_eq!(text(&out.stdout), "False False True\nTrue True True\n", "{}", text(&out.stderr));
 }
 
+/// Builds package `package` of fixture directory `dir` whole (`--ext
+/// --non-strict`), runs `script` in CPython against it and against its
+/// sources, and checks the outputs match; then runs `native` against the
+/// compiled package alone: that run's stdout.
+fn package_matches(dir: &str, package: &str, script: &str, native: &str) -> String {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(dir);
+    let built = ScratchDir::new(&format!("{dir}_built")).expect("scratch");
+    let plain = ScratchDir::new(&format!("{dir}_plain")).expect("scratch");
+    copy_tree(&fixtures.join(package), &built.join(package));
+    copy_tree(&fixtures.join(package), &plain.join(package));
+    let tree = built.join(package);
+    let build = pycc()
+        .arg("build")
+        .arg(&tree)
+        .arg("-o")
+        .arg(tree.join("__init__"))
+        .args(["--ext", "--non-strict"])
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&build.stderr));
+    for entry in std::fs::read_dir(&tree).expect("read the tree") {
+        let path = entry.expect("an entry").path();
+        if path.extension().is_some_and(|ext| ext == "py") {
+            std::fs::remove_file(&path).expect("remove a source");
+        }
+    }
+    let run_in = |at: &Path, script: &str| {
+        python()
+            .args(["-I", "-c", &format!("import sys; sys.path.insert(0, '.')\n{script}")])
+            .current_dir(at)
+            .output()
+            .expect("python3 should spawn")
+    };
+    let theirs = run_in(&plain, script);
+    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
+    let ours = run_in(&built, script);
+    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
+    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+    let shown = run_in(&built, native);
+    assert_eq!(shown.status.code(), Some(0), "{}", text(&shown.stderr));
+    text(&shown.stdout)
+}
+
 /// A module binding another's exception class through a wildcard import,
 /// then deriving from it beside `OSError` (`tests/fixtures/v010_exc_star`):
 /// the class gets no layout, and the package behaves as its source does.
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn a_wildcard_imported_class_gets_no_layout() {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v010_exc_star");
-    let built = ScratchDir::new("v010_exc_star_built").expect("scratch");
-    let plain = ScratchDir::new("v010_exc_star_plain").expect("scratch");
-    copy_tree(&fixtures.join("pkw"), &built.join("pkw"));
-    copy_tree(&fixtures.join("pkw"), &plain.join("pkw"));
-    let package = built.join("pkw");
-    let build = pycc()
-        .arg("build")
-        .arg(&package)
-        .arg("-o")
-        .arg(package.join("__init__"))
-        .args(["--ext", "--non-strict"])
-        .output()
-        .expect("pycc should spawn");
-    assert!(build.status.success(), "{}", text(&build.stderr));
-    for entry in std::fs::read_dir(&package).expect("read the tree") {
-        let path = entry.expect("an entry").path();
-        if path.extension().is_some_and(|ext| ext == "py") {
-            std::fs::remove_file(&path).expect("remove a source");
-        }
-    }
-    let script = "import sys; sys.path.insert(0, '.')\nimport pkw\n\
-                  print(pkw.coded(2), pkw.combine(3), pkw.Combined(4).show(), \
-                  [c.__name__ for c in pkw.Combined.__mro__ if c.__module__ != 'pycc'], \
-                  [c for c in pkw.Coded.__mro__ if c.__module__ == 'pycc'])\n";
-    let run_in = |tree: &Path| {
-        python()
-            .args(["-I", "-c", script])
-            .current_dir(tree)
-            .output()
-            .expect("python3 should spawn")
-    };
-    let theirs = run_in(&plain);
-    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
-    let ours = run_in(&built);
-    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
-    assert!(text(&ours.stdout).ends_with(" []\n"), "{}", text(&ours.stdout));
+    let out = package_matches(
+        "v010_exc_star",
+        "pkw",
+        "import pkw\nprint(pkw.coded(2), pkw.combine(3), pkw.Combined(4).show(), \
+         [c.__name__ for c in pkw.Combined.__mro__ if c.__module__ != 'pycc'])\n",
+        "import pkw\nprint([c for c in pkw.Coded.__mro__ if c.__module__ == 'pycc'])\n",
+    );
+    assert_eq!(out, "[]\n");
+}
+
+/// A layout class of `a` whose subclass in `b` is subclassed back in `a`
+/// beside `OSError` (`tests/fixtures/v010_exc_cycle`): the package-wide
+/// subclass closure withdraws the layout.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_subclass_closure_across_modules_withdraws_the_layout() {
+    let out = package_matches(
+        "v010_exc_cycle",
+        "pkc",
+        "import pkc\nprint(pkc.make(3), [c.__name__ for c in pkc.C.__mro__ \
+         if c.__module__ != 'pycc'])\n",
+        "import pkc\nprint([c for c in pkc.A.__mro__ if c.__module__ == 'pycc'])\n",
+    );
+    assert_eq!(out, "[]\n");
 }
 
 #[test]

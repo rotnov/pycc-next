@@ -35,10 +35,11 @@
 //! planner -- a class of the module or of the package whose body is on
 //! `class_names`'s allowlist, over a builtin base that does not reduce
 //! itself (`exc_names::builtin_reduces_itself`) -- and it has one base. A
-//! layout some class carrying it would show otherwise than CPython (a
-//! subclass binding one of its attributes, listing several bases or off the
-//! allowlist, here or in another module of the package) is dropped with
-//! the chain it extends, to a fixpoint. A class reached otherwise than by
+//! layout whose transitive subclass closure, over the one package-wide
+//! class graph (`exc_graph`: the module itself included), holds a class
+//! binding one of its attributes, listing several bases or off the
+//! allowlist is dropped with the chain it extends, to a fixpoint. A class
+//! reached otherwise than by
 //! name, or a module with a class statement whose base the planner cannot
 //! resolve, gets none (`exc_escape`).
 
@@ -111,7 +112,7 @@ impl Plan {
             })
             .collect();
         loop {
-            match self.layouts_denying(&denied, &reach) {
+            match self.layouts_denying(&denied, &reach, self.class_graph()) {
                 Ok(layouts) => return layouts,
                 Err(owners) => denied.extend(owners),
             }
@@ -125,6 +126,7 @@ impl Plan {
         &self,
         denied: &BTreeSet<usize>,
         reach: &exc_escape::Reach,
+        graph: &exc_graph::ClassGraph,
     ) -> Result<Vec<Layout>, Vec<usize>> {
         // The module's exception classes so far, and what each carries.
         let mut states: BTreeMap<String, State> = BTreeMap::new();
@@ -198,12 +200,6 @@ impl Plan {
                 continue;
             }
             inherited.dedup();
-            // A class of several bases over a layout: another base's layout
-            // (or its solid base) may conflict with it, which CPython
-            // refuses -- every layout it inherits goes.
-            if class.bases().len() > 1 && !inherited.is_empty() {
-                return Err(self.chains_of(&layouts, &inherited));
-            }
             let state = if blocked || inherited.len() > 1 {
                 State::Blocked
             } else {
@@ -242,30 +238,45 @@ impl Plan {
                         own,
                         fields: all,
                     });
-                    State::Layout(layouts.len() - 1)
+                    let at = layouts.len() - 1;
+                    // The one test against subclasses, here and in every
+                    // module of the package (`exc_graph`).
+                    if graph.subclass_conflicts(&self.graph_key(name), &layouts[at].fields) {
+                        return Err(self.chains_of(&layouts, &[at]));
+                    }
+                    State::Layout(at)
                 }
             };
-            // The layout its instances carry must be the first binding of
-            // each of its attributes along its MRO.
-            if let State::Layout(at) = state {
-                // Its own MRO, and the subclasses other modules of the
-                // package derive from it.
-                let overrides = self.package_overrides.get(name);
-                let shadowed = self.package_multi.contains(name.as_str())
-                    || reach.escaped.contains(name.as_str())
-                    || match &bound {
-                    Some(bound) => layouts[at].fields.iter().any(|field| {
-                        bound.contains(field) || overrides.is_some_and(|names| names.contains(field))
-                    }),
-                    None => true,
-                };
-                if shadowed {
-                    return Err(self.chains_of(&layouts, &[at]));
-                }
+            // A class carrying a layout reached other than by name may
+            // become a base out of the planner's sight (`exc_escape`).
+            if let State::Layout(at) = state
+                && reach.escaped.contains(name.as_str())
+            {
+                return Err(self.chains_of(&layouts, &[at]));
             }
             states.insert(name.clone(), state);
         }
         Ok(layouts)
+    }
+
+    /// The class graph layouts are tested against (`exc_graph`): the
+    /// package's when it is built whole, the module's own otherwise
+    /// (computed once).
+    fn class_graph(&self) -> &exc_graph::ClassGraph {
+        match &self.package_graph {
+            Some((graph, _)) => graph,
+            None => self
+                .own_graph
+                .get_or_init(|| exc_graph::ClassGraph::of_module(&self.ast)),
+        }
+    }
+
+    /// Class `name`'s node in [`Self::class_graph`].
+    fn graph_key(&self, name: &str) -> String {
+        match &self.package_graph {
+            Some((_, target)) => format!("{target}.{name}"),
+            None => format!(".{name}"),
+        }
     }
 
     /// What the module does with its own top-level classes
