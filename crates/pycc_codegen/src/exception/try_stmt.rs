@@ -61,6 +61,7 @@ pub(crate) fn emit_try<'ctx>(
             ret_slot,
             is_returning,
             exc_depth: owned_slots::depth(rt),
+            loop_depth: crate::object_release::loop_depth(rt),
         });
     } else {
         saved_is_returning = None;

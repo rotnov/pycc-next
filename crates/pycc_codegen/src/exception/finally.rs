@@ -220,6 +220,7 @@ fn emit_return_dispatch<'ctx>(
         rt,
         owned_slots::return_depth(finally_stack),
     );
+    crate::object_release::release_loops_for_return(builder, rt, finally_stack);
     let outer = finally_stack.last();
     match (ret_slot, outer) {
         (Some(slot), Some(outer)) => {

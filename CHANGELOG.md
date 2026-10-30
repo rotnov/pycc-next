@@ -38,6 +38,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   share: pystache 9.2M -> 9.1M, mistune 25.0M -> 24.6M, pydantic 97.5M -> 95.8M.
 
 ### Fixed
+- A `return` from inside a `for x in <object>:` loop releases the loop's iterator, as
+  CPython does, including through `finally` clauses inside and around the loop. Each such
+  return used to leak one iterator: after mistune's test suite the compiled tree held 28,328
+  `list_iterator` objects that CPython does not (#42).
 - Importing a compiled package no longer imports `importlib`, `importlib._bootstrap`,
   `importlib._bootstrap_external` and `importlib.machinery`: its finder takes `ModuleSpec`
   from the frozen import system. Own import share with the change above: pystache 10.1M ->

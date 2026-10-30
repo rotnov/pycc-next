@@ -393,6 +393,7 @@ pub(super) fn emit_function_bodies<'ctx>(
                     ret_slot,
                     is_returning,
                     exc_depth: 0,
+                    loop_depth: 0,
                 });
                 Some((finally_bb, ret_slot))
             };
