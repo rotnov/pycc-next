@@ -22,7 +22,9 @@
 //!    ns)`: chunk `k`'s code object, compiled when the module was built,
 //!    `render::CodeChunk`); and every compiled reference to a module global that
 //!    fallback code reads or binds becomes `ns['name']`, so both sides see
-//!    one value (a *dict global*);
+//!    one value (a *dict global*); code reaching globals by a string
+//!    (`eval`, `exec`, `globals()`, the module object) reads every one
+//!    (`by_string.rs`);
 //! 3. repeat until the rewrite compiles, or no diagnostic names a statement
 //!    that is still compiled (then the original diagnostics are reported).
 //!
@@ -44,6 +46,7 @@
 mod annotations;
 mod attach;
 mod builtins;
+mod by_string;
 mod cascade;
 mod driver;
 mod exceptions;
@@ -240,6 +243,9 @@ pub(crate) struct Plan {
     /// The nested `def`s and `lambda`s of compiled functions that CPython
     /// runs, their enclosing functions compiled (`nested`).
     nested: Vec<nested::Nested>,
+    /// The names the top-level statements bind: what code reaching module
+    /// globals by a string may read (`by_string`).
+    module_names: BTreeSet<String>,
 }
 
 impl Plan {
@@ -385,7 +391,7 @@ impl Plan {
             }
         }
         ast.extend(lifted_asts);
-        Some(Self {
+        let mut plan = Self {
             source: source.to_string(),
             display: display.to_string(),
             ast,
@@ -407,7 +413,10 @@ impl Plan {
             lifts,
             package_bases: BTreeMap::new(),
             nested: Vec::new(),
-        })
+            module_names: BTreeSet::new(),
+        };
+        plan.reach_by_string();
+        Some(plan)
     }
 
     /// Records the entry file's directory (see `entry_dir`).

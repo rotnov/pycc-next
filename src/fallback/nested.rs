@@ -287,6 +287,10 @@ impl Plan {
         reason: String,
     ) -> Option<Nested> {
         let src = &self.source;
+        let nested_node = match node {
+            Node::Def(def) => by_string::NestedNode::Def(def),
+            Node::Lambda(expr) => by_string::NestedNode::Lambda(expr),
+        };
         let (range, def_name, header, body_free) = match node {
             Node::Def(def) => {
                 // `super()` and `__class__` read the method's own cell.
@@ -394,10 +398,13 @@ impl Plan {
             None => (Vec::new(), BTreeSet::new(), None, String::new()),
         };
         let outer_locals = outer.as_ref().map(OuterRef::locals).unwrap_or_default();
-        let mentions = referenced
+        let mut mentions: BTreeSet<String> = referenced
             .into_iter()
             .filter(|name| !outer_locals.contains(name))
             .collect();
+        if by_string::nested_reaches(&mentions, nested_node) {
+            mentions.extend(self.module_names.iter().cloned());
+        }
         Some(Nested {
             unit,
             range,
