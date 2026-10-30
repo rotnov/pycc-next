@@ -378,8 +378,26 @@ fn publish_class_c(publications: &[ExtPublishedClass]) -> String {
         }
     }
     out.push_str("    (void)name;\n    return NULL;\n}\n\n");
+    // v0.11: the same arguments as a plan followed without `compile()`.
+    out.push_str(&format!("{PUBLISH_CLASS_SPEC_DECL}\n{{\n"));
+    for published in publications {
+        if let (Some(_), Some(spec)) = (&published.bases, &published.spec) {
+            out.push_str(&format!(
+                "    if (strcmp(name, \"{}\") == 0) {{\n        return {};\n    }}\n",
+                published.class,
+                keywords::c_name(spec)
+            ));
+        }
+    }
+    out.push_str("    (void)name;\n    return NULL;\n}\n\n");
     out
 }
+
+/// The generated lookup of a published class's statement arguments as the
+/// plan `pycc_ext_class_args` follows (`ExtPublishedClass::spec`): `NULL`
+/// when they are evaluated from their source text instead.
+pub(crate) const PUBLISH_CLASS_SPEC_DECL: &str =
+    "static const char *pycc_ext_publish_class_spec(const char *name)";
 
 /// The generated lookup of a published class's statement arguments
 /// (`ExtPublishedClass::bases`), which the shim's `pycc_ext_publish` calls:

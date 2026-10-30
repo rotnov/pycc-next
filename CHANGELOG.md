@@ -10,6 +10,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   publishes both (v0.11 accept 4); a workload CPython runs in under 0.1 s prints and
   publishes in ms.
 
+### Changed
+- Importing a compiled module no longer compiles source with `compile()` (v0.11 accept
+  3): published classes are made by a class maker written in C, their statement's
+  arguments read from a build-time plan when they are bare names, and the compiled-frames
+  probe builds its template code object with `types.CodeType`. pystache's own import
+  share drops from 15.7M to 10.5M instructions, mistune's from 28.9M to 25.9M, pydantic's
+  from 102.4M to 99.7M (CPython: 7.6M, 29.0M, 88.5M). The import also no longer adds a
+  `__pycc_frame_template__` attribute to `sys`.
+
 ## [0.10.0] - 2026-10-30
 
 ### Added

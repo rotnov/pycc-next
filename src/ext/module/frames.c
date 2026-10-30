@@ -110,9 +110,6 @@ typedef struct PyccFrameObject {
 #define PYCC_CODE_FLAGS 48
 #define PYCC_CO_SIGNATURE 0x40000000
 
-/* The `sys` attribute sharing the probe's template code object. */
-#define PYCC_FRAMES_TEMPLATE_KEY "__pycc_frame_template__"
-
 #define PYCC_CO_OPTIMIZED 0x0001
 #define PYCC_CO_NEWLOCALS 0x0002
 
@@ -503,7 +500,7 @@ static void pycc_ext_tb_sync(void *native, PyObject *obj)
  */
 static void pycc_frames_probe(void)
 {
-    PyObject *types, *compiled = NULL;
+    PyObject *types;
     PyThreadState *tstate;
     PyccIFrame *top;
     PyFrameObject *expect;
@@ -521,46 +518,27 @@ static void pycc_frames_probe(void)
         return;
     }
     pycc_frames_function_type = PyObject_GetAttrString(types, "FunctionType");
-    Py_DECREF(types);
-    if (pycc_frames_function_type == NULL) {
-        PyErr_Clear();
-        return;
-    }
-    /* The template, `def f(): pass`'s code: compiled by the first compiled
-     * module of the process and shared through `sys`, as compiling it costs
-     * more than the rest of the probe. */
+    /* The template, the code of `def f(): pass` (`RESUME 0`, `RETURN_CONST
+     * 0`, its constants `(None,)`), made with `types.CodeType` rather than
+     * compiled: `compile()` cost more than the rest of the probe. */
     {
-        PyObject *shared = PySys_GetObject(PYCC_FRAMES_TEMPLATE_KEY);
+        static const char code[] = {(char)PYCC_OP_RESUME, 0, (char)PYCC_OP_RETURN_CONST, 0};
+        /* Each instruction a no-column entry: line 1, then line 2. */
+        static const char lines[] = {(char)0xE8, 0x00, (char)0xE8, 0x02};
+        PyObject *code_type = PyObject_GetAttrString(types, "CodeType");
 
-        if (shared != NULL && PyObject_HasAttrString(shared, "co_linetable")) {
-            pycc_frames_template = Py_NewRef(shared);
+        if (code_type != NULL) {
+            pycc_frames_template = PyObject_CallFunction(
+                code_type, "iiiiiiy#(O)()()sssiy#y#()()", 0, 0, 0, 0, 1,
+                PYCC_CO_OPTIMIZED | PYCC_CO_NEWLOCALS, code, (Py_ssize_t)sizeof code, Py_None,
+                "<pycc>", "f", "f", 1, lines, (Py_ssize_t)sizeof lines, "", (Py_ssize_t)0);
+            Py_DECREF(code_type);
         }
-        PyErr_Clear();
     }
-    if (pycc_frames_template == NULL) {
-        compiled = Py_CompileString("def f():\n    pass\n", "<pycc>", Py_file_input);
-        if (compiled == NULL) {
-            PyErr_Clear();
-            return;
-        }
-        {
-            PyObject *consts = PyObject_GetAttrString(compiled, "co_consts");
-            Py_ssize_t i;
-
-            for (i = 0; consts != NULL && i < PyTuple_Size(consts); i++) {
-                PyObject *item = PyTuple_GetItem(consts, i);
-
-                if (PyObject_HasAttrString(item, "co_linetable")) {
-                    pycc_frames_template = Py_NewRef(item);
-                }
-            }
-            Py_XDECREF(consts);
-        }
-        Py_DECREF(compiled);
-        if (pycc_frames_template != NULL) {
-            (void)PySys_SetObject(PYCC_FRAMES_TEMPLATE_KEY, pycc_frames_template);
-        }
-        PyErr_Clear();
+    Py_DECREF(types);
+    PyErr_Clear();
+    if (pycc_frames_function_type == NULL) {
+        return;
     }
     if (pycc_frames_template == NULL
         || pycc_code_base(pycc_frames_template)[0] != PYCC_OP_RESUME) {

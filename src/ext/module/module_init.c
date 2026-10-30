@@ -76,7 +76,8 @@ PYCC_ENTRY int pycc_ext_publish(const char *name)
          * template in this exec's snapshot and the class's static. */
         if (pycc_ext_publish_class_bases(name) != NULL) {
             PyObject *public_class = pycc_ext_make_public_class_in(
-                &pycc_ext_mod, module, name, type, pycc_ext_publish_class_bases(name));
+                &pycc_ext_mod, module, name, type, pycc_ext_publish_class_spec(name),
+                pycc_ext_publish_class_bases(name));
             PyObject *previous = *class_slot;
 
             if (public_class == NULL || PyDict_SetItemString(classes, name, public_class) < 0) {
