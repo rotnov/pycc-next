@@ -90,6 +90,29 @@ fn native_fallback_code_reaches_compiled_globals_by_a_string() {
     assert_matches(&ours, &oracle);
 }
 
+/// Code reaching globals by a string does not reach a name a project import
+/// binds (compiled into the program, it cannot fall back): the import stays
+/// compiled and only the statement calling `eval` runs in CPython.
+#[test]
+fn reaching_globals_by_a_string_keeps_a_project_import_compiled() {
+    let dir = ScratchDir::new("issue_20_project").expect("scratch");
+    let source = fixture("issue_20_project_main", &dir, "main.py");
+    fixture("issue_20_project_helper", &dir, "helper.py");
+    let report = build(&source, &dir.join("app"), &["--non-strict"]);
+    assert_eq!(report.lines().count(), 1, "{report}");
+    assert!(report.contains("main.py:8"), "{report}");
+    let ours = Command::new(dir.join("app"))
+        .output()
+        .expect("run the build");
+    let oracle = python()
+        .arg(&source)
+        .current_dir(&*dir)
+        .output()
+        .expect("python should spawn");
+    assert_eq!(text(&oracle.stdout), "42\n1 43\n", "the oracle runs the fixture");
+    assert_matches(&ours, &oracle);
+}
+
 #[test]
 fn ext_fallback_code_reaches_compiled_globals_by_a_string() {
     let compiled = ScratchDir::new("issue_20_ext").expect("scratch");

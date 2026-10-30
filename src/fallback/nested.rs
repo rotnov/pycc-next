@@ -403,7 +403,7 @@ impl Plan {
             .filter(|name| !outer_locals.contains(name))
             .collect();
         if by_string::nested_reaches(&mentions, nested_node) {
-            mentions.extend(self.module_names.iter().cloned());
+            mentions.extend(self.string_reads.iter().cloned());
         }
         Some(Nested {
             unit,

@@ -38,7 +38,7 @@ impl Plan {
                 .fallback
                 .keys()
                 .chain(&self.mirrored)
-                .flat_map(|index| &self.stmts[*index].mentions)
+                .flat_map(|index| self.reads_of(*index))
                 .chain(&self.external)
                 .chain(&nested_reads)
                 .collect();
@@ -305,10 +305,10 @@ impl Plan {
         for (index, stmt) in self.stmts.iter().enumerate() {
             if self.fallback.contains_key(&index) {
                 fallback_bound.extend(stmt.bound.iter().cloned());
-                fallback_read.extend(stmt.mentions.iter().cloned());
+                fallback_read.extend(self.reads_of(index).cloned());
             } else if self.twinned.contains_key(&index) {
                 fallback_bound.extend(stmt.declares.iter().cloned());
-                fallback_read.extend(stmt.mentions.iter().cloned());
+                fallback_read.extend(self.reads_of(index).cloned());
             } else if index >= self.top && self.live(index) {
                 // A compiled lift is called by CPython (its forwarder), so
                 // a global it declares lives in the namespace, as one a

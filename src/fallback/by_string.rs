@@ -237,18 +237,12 @@ impl<'a> Visitor<'a> for ModuleObject {
 }
 
 impl Plan {
-    /// Makes every unit reaching module globals by a string (`reach`)
-    /// mention every module-level name, and a unit that may bind one declare
-    /// every module variable (module doc). Run once the units, lifts
-    /// included, are known.
+    /// Records every unit reaching module globals by a string (`reach`),
+    /// which reads every module-level name (`reads_of`), and makes a unit
+    /// that may bind one declare every module variable (module doc). Run
+    /// once the units, lifts included, are known.
     pub(super) fn reach_by_string(&mut self) {
         let top = &self.stmts[..self.top];
-        self.module_names = top
-            .iter()
-            .flat_map(|stmt| stmt.bound.iter())
-            .filter(|name| !name.starts_with("__pycc") && name.as_str() != "*")
-            .cloned()
-            .collect();
         // The variables: names only plain statements bind. A `def`, class
         // or import name rebound by a string is not seen by compiled code
         // (`docs/DEVIATIONS.md`).
@@ -261,18 +255,46 @@ impl Plan {
             .iter()
             .filter(|stmt| matches!(stmt.kind, Kind::Other))
             .flat_map(|stmt| stmt.bound.iter())
-            .filter(|name| self.module_names.contains(*name) && !named.contains(name))
+            .filter(|name| !name.starts_with("__pycc") && !named.contains(name))
             .cloned()
             .collect();
         for index in 0..self.stmts.len() {
             let reach = reach(&self.ast[index], &self.stmts[index].mentions);
             if reach >= Reach::Reads {
-                let names = self.module_names.clone();
-                self.stmts[index].mentions.extend(names);
+                self.by_string.insert(index);
             }
             if reach == Reach::Binds {
                 self.stmts[index].declares.extend(variables.iter().cloned());
             }
         }
+        self.read_by_string();
+    }
+
+    /// Computes `string_reads`: every name a top-level statement binds, but
+    /// the ones a project import binds. Those are compiled into the program
+    /// and never in the namespace (fallback code naming one cannot fall back,
+    /// `is_project_import`), so code reaching globals by a string does not
+    /// see them; it reaching for one does not stop the rest of the module
+    /// compiling. Rerun once the entry's directory is known.
+    pub(super) fn read_by_string(&mut self) {
+        let project: BTreeSet<&String> = (0..self.top)
+            .filter(|index| self.is_project_import(*index))
+            .flat_map(|index| &self.stmts[index].bound)
+            .collect();
+        self.string_reads = self.stmts[..self.top]
+            .iter()
+            .flat_map(|stmt| stmt.bound.iter())
+            .filter(|name| {
+                !name.starts_with("__pycc") && name.as_str() != "*" && !project.contains(name)
+            })
+            .cloned()
+            .collect();
+    }
+
+    /// The module globals unit `index` reads: the ones it names, and every
+    /// one (`string_reads`) when it reaches them by a string.
+    pub(super) fn reads_of(&self, index: usize) -> impl Iterator<Item = &String> {
+        let by_string = self.by_string.contains(&index).then_some(&self.string_reads);
+        self.stmts[index].mentions.iter().chain(by_string.into_iter().flatten())
     }
 }

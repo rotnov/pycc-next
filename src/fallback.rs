@@ -243,9 +243,10 @@ pub(crate) struct Plan {
     /// The nested `def`s and `lambda`s of compiled functions that CPython
     /// runs, their enclosing functions compiled (`nested`).
     nested: Vec<nested::Nested>,
-    /// The names the top-level statements bind: what code reaching module
-    /// globals by a string may read (`by_string`).
-    module_names: BTreeSet<String>,
+    /// The units reaching module globals by a string (`by_string`).
+    by_string: BTreeSet<usize>,
+    /// The module-level names they read (`Plan::read_by_string`).
+    string_reads: BTreeSet<String>,
 }
 
 impl Plan {
@@ -413,7 +414,8 @@ impl Plan {
             lifts,
             package_bases: BTreeMap::new(),
             nested: Vec::new(),
-            module_names: BTreeSet::new(),
+            by_string: BTreeSet::new(),
+            string_reads: BTreeSet::new(),
         };
         plan.reach_by_string();
         Some(plan)
@@ -431,6 +433,7 @@ impl Plan {
 
     pub(crate) fn set_entry_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.entry_dir = dir;
+        self.read_by_string();
         self.substituted.clear();
         self.substitute_aliases();
     }
