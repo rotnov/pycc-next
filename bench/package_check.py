@@ -29,11 +29,13 @@ Packages:
     modules (core, block and inline parsers, plugins, directives, renderers). The
     PyPI sdist ships it with its unittest suite (1155 tests, the CommonMark spec
     examples among them) and its own benchmark's documents (`benchmark/cases`),
-    which `--time` renders as `benchmark/bench.py` does.
+    which `--time` renders as `benchmark/bench.py` does; `--time` also times its
+    import.
   pystache 0.6.8 (MIT): a Mustache template engine (v0.8 accept 4's package; the
     selection rule is in docs/ROADMAP.md), 17 modules. The PyPI sdist ships it with
     its unittest suite (a subpackage, `pystache.tests`, which stays Python) and its
-    own benchmark (`pystache/tests/benchmark.py`), whose examples `--time` renders.
+    own benchmark (`pystache/tests/benchmark.py`), whose examples `--time` renders;
+    `--time` also times its import.
 
 Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--keep DIR] [--time] [--runs N]
@@ -42,11 +44,12 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
                                       [--competitors]
   PACKAGE  names from PACKAGES (default: all of them).
   --time   also time each package's hot paths compiled and in CPython (pypng:
-           its 256x256 filter image, and every PngSuite image its tests use).
+           its 256x256 filter image, and every PngSuite image its tests use;
+           mistune and pystache: also `import PACKAGE`, see `import_timed`).
            Every timing is a fresh `-I` process (one untimed call, then one
-           timed); after one discarded warm-up process per tree (when N > 1),
-           N (`--runs`) rounds run the CPython and the compiled tree once each,
-           in alternating order. Prints the median and min-max per tree and
+           timed; an import is timed once); after one discarded warm-up
+           process per tree (when N > 1), N (`--runs`) rounds run the CPython
+           and the compiled tree once each, in alternating order. Prints the median and min-max per tree and
            the ratio of the medians.
   --json PATH
            write `--time`'s samples and their summaries (`bench/stats.py`), and
@@ -287,6 +290,26 @@ for test in tests:
     test()
 """
 
+
+def import_timed(name: str) -> str:
+    """The import workload (v0.11 accept 4): `import NAME` in a fresh `-I` process,
+    timed once (an import runs once per process; argv[2] is ignored), with nothing
+    imported before it but what the interpreter imports at startup and `sys` and
+    `time`, so the stdlib modules the package imports count on every side alike. The
+    discarded warm-up process per tree writes the CPython tree's `.pyc` files: CPython
+    imports the package from its bytecode cache, as an installed package does. Prints
+    the seconds."""
+    return f"""
+import sys, time
+sys.path.insert(0, sys.argv[1])
+t = time.perf_counter()
+import {name}
+t = time.perf_counter() - t
+assert {name}.__file__.startswith(sys.argv[1]), {name}.__file__
+print(f"{{t:.6f}}")
+"""
+
+
 PACKAGES = {
     p.name: p
     for p in [
@@ -491,7 +514,8 @@ for _ in range(int(sys.argv[2])):
             max_instructions=85_400_000,
             instruction_calls=2,
             more_speed=(("the benchmark's \"mistune (full)\" parser (every plugin) x20",
-                         MISTUNE_CASES + MISTUNE_FULL + MISTUNE_TIMED),),
+                         MISTUNE_CASES + MISTUNE_FULL + MISTUNE_TIMED),
+                        ("import mistune (once per fresh process)", import_timed("mistune"))),
         ),
         Package(
             name="pystache",
@@ -535,6 +559,7 @@ for _ in range(int(sys.argv[2])):
             # CPython until it is measured there.
             max_instructions=1_100_000,
             instruction_calls=100,
+            more_speed=(("import pystache (once per fresh process)", import_timed("pystache")),),
         ),
     ]
 }
@@ -825,15 +850,15 @@ def check(pkg: Package, a: argparse.Namespace, tmp: pathlib.Path) -> bool:
             times = {label: stats.summary(xs) for label, xs in samples.items()
                      if label not in dropped}
             ratio = times["cpython"]["median"] / times["compiled"]["median"]
-            print(f"  {speed_label}: CPython {times['cpython']['median']:.3f}s "
-                  f"({times['cpython']['min']:.3f}-{times['cpython']['max']:.3f}), "
-                  f"compiled {times['compiled']['median']:.3f}s "
-                  f"({times['compiled']['min']:.3f}-{times['compiled']['max']:.3f}) "
+            # A workload CPython runs in under 0.1 s (an import) prints in ms.
+            ms = times["cpython"]["median"] < 0.1
+            print(f"  {speed_label}: CPython {stats.short(times['cpython'], ms)}, "
+                  f"compiled {stats.short(times['compiled'], ms)} "
                   f"({ratio:.2f}x, medians of {a.runs})")
             for label in others:
                 t = times.get(label)
                 print(f"  {speed_label}: {label} " + (dropped[label] if t is None else
-                      f"{t['median']:.3f}s ({t['min']:.3f}-{t['max']:.3f})"))
+                      stats.short(t, ms)))
             TIMINGS.append({"package": pkg.name, "version": pkg.version,
                             "workload": speed_label, "runs": a.runs,
                             "seconds": times, "ratio": ratio, "not_timed": dropped,
