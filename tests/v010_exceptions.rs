@@ -130,18 +130,13 @@ fn the_layout_is_native() {
     );
 }
 
-/// A layout class reached through an alias, and a class statement over the
-/// alias (`tests/fixtures/v010_exc_alias.py`): no class of the module gets a
-/// layout, and the module behaves as its source does.
-#[test]
-#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
-fn an_aliased_class_gets_no_layout() {
-    let script = "import m\nprint(m.run(3), m.plain(4), [c.__name__ for c in m.Through.__mro__], \
-                  [[c for c in k.__mro__ if c.__module__ == 'pycc'] for k in (m.Aliased, m.Plain)])\n\
-                  class Again(m.Alias, KeyError):\n    pass\nprint(Again(1).code if hasattr(Again(1), 'code') \
-                  else 'none', [c.__name__ for c in Again.__mro__][:3])\n";
-    let compiled = ScratchDir::new("v010_exc_alias").expect("scratch");
-    let source = fixture("v010_exc_alias", &compiled, "m.py");
+/// Builds fixture `name` as `m` (`--ext --non-strict`), runs `script` in
+/// CPython against it and against its source, and checks the outputs match;
+/// then runs `native` against the compiled module alone (what only it
+/// shows, its templates): that run's stdout.
+fn single_module_matches(name: &str, script: &str, native: &str) -> String {
+    let compiled = ScratchDir::new(&format!("{name}_built")).expect("scratch");
+    let source = fixture(name, &compiled, "m.py");
     let build = pycc()
         .args(["build", "--ext", "--non-strict"])
         .arg(&source)
@@ -151,13 +146,70 @@ fn an_aliased_class_gets_no_layout() {
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&build.stderr));
     std::fs::remove_file(&source).expect("import the artifact");
-    let plain = ScratchDir::new("v010_exc_alias_src").expect("scratch");
-    fixture("v010_exc_alias", &plain, "m.py");
+    let plain = ScratchDir::new(&format!("{name}_src")).expect("scratch");
+    fixture(name, &plain, "m.py");
     let ours = run(&compiled, script);
     let theirs = run(&plain, script);
     assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
     assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
-    assert!(text(&ours.stdout).contains("[[], []]"), "{}", text(&ours.stdout));
+    assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
+    let shown = run(&compiled, native);
+    assert_eq!(shown.status.code(), Some(0), "{}", text(&shown.stderr));
+    text(&shown.stdout)
+}
+
+/// The script printing how many templates each of `classes` (of module `m`)
+/// has in its MRO.
+fn templates_of(classes: &str) -> String {
+    format!(
+        "import m\nprint([len([c for c in k.__mro__ if c.__module__ == 'pycc']) \
+         for k in ({classes})])\n"
+    )
+}
+
+/// A layout class reached through an alias, and a class statement over the
+/// alias (`tests/fixtures/v010_exc_alias.py`): no class of the module gets a
+/// layout, and the module behaves as its source does.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn an_aliased_class_gets_no_layout() {
+    let out = single_module_matches(
+        "v010_exc_alias",
+        "import m\nprint(m.run(3), m.plain(4), [c.__name__ for c in m.Through.__mro__])\n\
+         class Again(m.Alias, KeyError):\n    pass\nprint(Again(1).code if hasattr(Again(1), 'code') \
+         else 'none', [c.__name__ for c in Again.__mro__][:3])\n",
+        &templates_of("m.Aliased, m.Plain"),
+    );
+    assert_eq!(out, "[0, 0]\n");
+}
+
+/// Bases used by class statements the planner does not examine -- nested in
+/// a function, under `if` or `try`, decorated -- get no layout
+/// (`tests/fixtures/v010_exc_nested.py`); a class used only by examined
+/// statements keeps its own.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn bases_of_unexamined_class_statements_get_no_layout() {
+    let out = single_module_matches(
+        "v010_exc_nested",
+        "import m\nC = m.factory()\nprint(C(3).code, m.Cond(4).code, m.Guard(5).code, \
+         m.Dec(6).code, m.REGISTRY[0].__name__, m.kept(7))\n",
+        &templates_of("m.Kept, m.Factory, m.Conditional, m.Guarded, m.Decorated"),
+    );
+    assert_eq!(out, "[1, 0, 0, 0, 0]\n");
+}
+
+/// A class subclassed by code `exec` runs (`tests/fixtures/v010_exc_exec.py`):
+/// the module gets no layout.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn exec_withdraws_every_layout() {
+    let out = single_module_matches(
+        "v010_exc_exec",
+        "import m\nM = m.made()\nprint(M(8).code, [c.__name__ for c in M.__mro__])\n",
+        &templates_of("m.Base,"),
+    );
+    assert_eq!(out, "[0]\n");
 }
 
 /// Raising, catching, pickling and dropping the exceptions frees what they

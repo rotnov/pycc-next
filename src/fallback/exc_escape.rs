@@ -6,9 +6,11 @@
 //! passed, returned, put in a container, looked up by its name as a string
 //! -- could become a base the planner never sees (`class C(Alias,
 //! OSError)`, `type(...)`), so it gets no layout. Its name may appear only
-//! as a base in a class statement's base list, an `except` type, a
-//! `raise`d class, a call's callee, `isinstance`/`issubclass`'s second
-//! argument, or an annotation. And a class statement whose base the
+//! as a base in the base list of a class statement the planner examines
+//! (directly in the module body, undecorated, without class keywords; any
+//! other class statement's base list is a use like any other), an `except`
+//! type, a `raise`d class, a call's callee, `isinstance`/`issubclass`'s
+//! second argument, or an annotation. And a class statement whose base the
 //! planner cannot resolve to a known class (a name bound otherwise than by
 //! a class statement or an import, an attribute, a call, a subscript) could
 //! derive from any layout class of the module: there is none then. A base
@@ -16,6 +18,11 @@
 //! a builtin class the module never rebinds), and a wildcard import of the
 //! module -- or of one importing from it, which may re-export its classes
 //! -- binds names out of this scan's sight: no layout then either.
+//! So does code making or looking up a class or a module by computation:
+//! `exec`, `eval`, `compile`, `__import__`, `globals`, `vars`, `locals`,
+//! `type(name, bases, ns)`, `types.new_class`, `importlib.import_module`,
+//! `sys.modules`, a computed `getattr` on an imported module, or the module
+//! passed around itself.
 
 use pycc_ast::visitor::{self, Visitor};
 use pycc_ast::{Expr, ExprContext, Stmt};
@@ -81,6 +88,8 @@ pub(super) fn reach(
     }
     let mut scan = ReachScan {
         defining,
+        depth: 0,
+        imported: imported.clone(),
         local,
         modules,
         candidates,
@@ -231,6 +240,11 @@ impl<'a> Visitor<'a> for BindingScan {
 /// The walk recording what reaches a candidate.
 struct ReachScan<'r> {
     defining: bool,
+    /// How deep the walk is in the module's statements (0: directly in
+    /// its body).
+    depth: usize,
+    /// The names the module's top-level imports bind.
+    imported: BTreeSet<String>,
     local: &'r BTreeMap<String, String>,
     modules: &'r BTreeSet<String>,
     candidates: &'r BTreeSet<String>,
@@ -295,17 +309,30 @@ impl ReachScan<'_> {
 
 impl<'a> Visitor<'a> for ReachScan<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        // Only a statement directly in the module body is one the
+        // compatibility analysis examines (`exc_layout`): a nested or
+        // conditional class statement's bases are uses like any other.
+        let top = self.depth == 0;
+        self.depth += 1;
         match stmt {
             Stmt::ClassDef(class) => {
                 for decorator in &class.decorator_list {
                     self.visit_decorator(decorator);
                 }
+                // A decorator receives the class, a metaclass (a class
+                // keyword) its bases: the bases are reached then.
+                let examined =
+                    top && class.decorator_list.is_empty() && class.keywords().is_empty();
                 for base in class.bases() {
                     if !self.known_base(base) {
                         self.out.unknown_base = true;
                     }
-                    if self.candidate(base).is_none() {
-                        self.visit_expr(base);
+                    match self.candidate(base) {
+                        Some(candidate) if !examined => {
+                            self.out.escaped.insert(candidate);
+                        }
+                        Some(_) => {}
+                        None => self.visit_expr(base),
                     }
                 }
                 for keyword in class.keywords() {
@@ -353,6 +380,7 @@ impl<'a> Visitor<'a> for ReachScan<'_> {
             }
             _ => visitor::walk_stmt(self, stmt),
         }
+        self.depth -= 1;
     }
 
     fn visit_annotation(&mut self, _expr: &'a Expr) {}
@@ -368,6 +396,11 @@ impl<'a> Visitor<'a> for ReachScan<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
+        if self.dynamic(expr) {
+            // A class made or looked up by computation: any candidate
+            // may be reached, and any made a base.
+            self.out.unknown_base = true;
+        }
         match expr {
             Expr::Call(call) if self.candidate(&call.func).is_some() => {
                 self.visit_arguments(&call.arguments);
@@ -385,13 +418,22 @@ impl<'a> Visitor<'a> for ReachScan<'_> {
                 if let Some(candidate) = self.local.get(name.id.as_str()) {
                     self.out.escaped.insert(candidate.clone());
                 }
+                // The defining module itself, passed or stored: any of its
+                // classes may be looked up on it.
+                if self.modules.contains(name.id.as_str()) {
+                    self.out.unknown_base = true;
+                }
             }
             Expr::Attribute(attr) => {
                 // `x.A` for any `x`: possibly the class, reached by name.
                 if self.candidates.contains(attr.attr.as_str()) {
                     self.out.escaped.insert(attr.attr.to_string());
                 }
-                visitor::walk_expr(self, expr);
+                // `common.f`: the module as an attribute's receiver only.
+                match &*attr.value {
+                    Expr::Name(module) if self.modules.contains(module.id.as_str()) => {}
+                    _ => visitor::walk_expr(self, expr),
+                }
             }
             Expr::StringLiteral(text) => {
                 // `globals()["A"]`, `getattr(module, "A")`.
@@ -401,6 +443,74 @@ impl<'a> Visitor<'a> for ReachScan<'_> {
                 }
             }
             _ => visitor::walk_expr(self, expr),
+        }
+    }
+}
+
+/// The builtins that run, compile or look up code or names by computation.
+const DYNAMIC_BUILTINS: [&str; 7] = [
+    "exec",
+    "eval",
+    "compile",
+    "__import__",
+    "globals",
+    "vars",
+    "locals",
+];
+
+/// The functions making or preparing a class from computed parts, or
+/// importing a module by a computed name (`types.new_class`,
+/// `importlib.import_module`).
+const DYNAMIC_FUNCTIONS: [&str; 3] = ["new_class", "prepare_class", "import_module"];
+
+impl ReachScan<'_> {
+    /// Whether `expr` makes or looks up a class or a module out of the
+    /// planner's sight: a builtin running or looking up code by
+    /// computation (named at all, called or not), `type(name, bases, ns)`,
+    /// `types.new_class`, `importlib.import_module`, `sys.modules`, or
+    /// `getattr`/`setattr`/`delattr`/`hasattr` with a computed name on an
+    /// imported module.
+    fn dynamic(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Name(name) => {
+                DYNAMIC_BUILTINS.contains(&name.id.as_str())
+                    && !self.unknown_names.contains(name.id.as_str())
+            }
+            Expr::Attribute(attr) => {
+                DYNAMIC_FUNCTIONS.contains(&attr.attr.as_str())
+                    || (attr.attr.as_str() == "modules"
+                        && matches!(&*attr.value, Expr::Name(n) if n.id.as_str() == "sys"))
+            }
+            Expr::Call(call) => match &*call.func {
+                Expr::Name(f) if f.id.as_str() == "type" => call.arguments.args.len() == 3,
+                Expr::Name(f) if DYNAMIC_FUNCTIONS.contains(&f.id.as_str()) => true,
+                Expr::Name(f)
+                    if matches!(f.id.as_str(), "getattr" | "setattr" | "delattr" | "hasattr") =>
+                {
+                    let args = &call.arguments.args;
+                    let computed = args
+                        .get(1)
+                        .is_some_and(|name| !matches!(name, Expr::StringLiteral(_)));
+                    computed
+                        && args
+                            .first()
+                            .is_some_and(|object| self.rooted_in_import(object))
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Whether `expr` is an imported name or an attribute chain on one (a
+    /// module, possibly).
+    fn rooted_in_import(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Name(name) => {
+                self.imported.contains(name.id.as_str()) || self.modules.contains(name.id.as_str())
+            }
+            Expr::Attribute(attr) => self.rooted_in_import(&attr.value),
+            _ => false,
         }
     }
 }

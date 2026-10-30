@@ -66,7 +66,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   the module and the package must have bases the planner resolves (an alias `Alias = A`,
   an attribute, a call, a subscript, or a name with no positive binding as a base drops
   every layout of the module, as does a wildcard import of the module or of one
-  re-exporting it).
+  re-exporting it, and code making or looking up classes by computation: `exec`, `eval`,
+  `globals()`, `type(name, bases, ns)`, `types.new_class`, `sys.modules`); a class
+  statement nested in a function, under `if` or `try`, decorated or with class keywords
+  reaches its bases like any other use.
   Elsewhere the class stays CPython's alone, its methods compiled.
 
 ### Changed
