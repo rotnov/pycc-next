@@ -39,6 +39,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - A string literal's first evaluation interns it without copying its bytes or hashing them
   with SipHash (v0.11 accept 3). Own import share: mistune 24.6M -> 24.4M, pydantic 95.8M
   -> 95.2M.
+- Publishing a compiled module's functions as its body defines them costs one pass over
+  its function table instead of one pass per function (v0.11 accept 3): the lookup starts
+  after the previous function it found. Own import share: pydantic 95.2M -> 94.6M.
 
 ### Fixed
 - Importing a compiled package no longer imports `importlib`, `importlib._bootstrap`,
