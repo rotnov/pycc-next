@@ -99,7 +99,13 @@ fn reaching_globals_by_a_string_keeps_a_project_import_compiled() {
     let source = fixture("issue_20_project_main", &dir, "main.py");
     fixture("issue_20_project_helper", &dir, "helper.py");
     let report = build(&source, &dir.join("app"), &["--non-strict"]);
-    assert_eq!(report.lines().count(), 1, "{report}");
+    // Only the report's own lines: the build may also print linker
+    // warnings (macOS `ld`).
+    let fallbacks = report
+        .lines()
+        .filter(|line| line.starts_with("fallback:") || line.starts_with("lifted:"))
+        .count();
+    assert_eq!(fallbacks, 1, "{report}");
     assert!(report.contains("main.py:8"), "{report}");
     let ours = Command::new(dir.join("app"))
         .output()
