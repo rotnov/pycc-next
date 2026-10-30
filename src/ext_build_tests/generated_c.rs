@@ -46,6 +46,7 @@ fn flat_publications(exports: &[ExtExport]) -> Vec<ExtPublishedClass> {
                 mro: vec![class.clone()],
                 constants: Vec::new(),
                 bases: None,
+                spec: None,
                 defaults: Vec::new(),
             }),
         }
