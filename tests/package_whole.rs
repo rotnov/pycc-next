@@ -339,6 +339,28 @@ fn an_excluded_module_stays_python() {
 /// What a package build refuses, before compiling anything: a directory
 /// that is no package, an `-o` that does not name the package's own
 /// `__init__`, and excluding the package's `__init__`.
+/// v0.11: a single module's extension links as the package's does: its
+/// relative relocations are packed exactly when the host packs them.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_single_module_extension_packs_its_relocations_as_a_package_does() {
+    let dir = ScratchDir::new("package_whole_single").expect("scratch");
+    let source = dir.join("single.py");
+    std::fs::write(&source, "def bump(x: int) -> int:\n    return x + 1\n").expect("write");
+    let build = pycc()
+        .arg("build")
+        .arg(&source)
+        .arg("-o")
+        .arg(dir.join("single"))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    if cfg!(target_os = "linux") {
+        assert_packed_relocations(&dir.join("single.abi3.so"));
+    }
+}
+
 #[test]
 fn a_package_build_refuses_what_it_cannot_build() {
     let dir = ScratchDir::new("package_whole_refusals").expect("scratch");

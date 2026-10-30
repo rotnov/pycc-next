@@ -616,7 +616,11 @@ fn an_elf_module_packs_its_relative_relocations_for_a_glibc_that_reads_them() {
     assert!(!packs_relative_relocations(Some("aarch64-unknown-linux-gnu")));
     // The host build packs exactly when the host's glibc reads them (this
     // test's own process is the host).
+    // A probe started ahead (as a build starts it) gives the same answer.
+    start_linker_probe(Some("aarch64-unknown-linux-gnu"));
+    start_linker_probe(None);
     let host = packs_relative_relocations(None);
+    assert_eq!(args[3], OsString::from(PACK_RELATIVE_RELOCS));
     if cfg!(all(target_os = "linux", target_env = "gnu")) {
         let output = std::process::Command::new("ldd")
             .arg("--version")

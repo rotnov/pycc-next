@@ -131,11 +131,25 @@ pub(crate) fn ext_export_args(
                 OsString::from("-Wl,--strip-debug"),
             ];
             if pack_relocs {
-                args.push(OsString::from("-Wl,-z,pack-relative-relocs"));
+                args.push(OsString::from(PACK_RELATIVE_RELOCS));
             }
             args
         }
         ExtLinkPlatform::MacOs | ExtLinkPlatform::Windows => Vec::new(),
+    }
+}
+
+/// The driver argument that packs relative relocations
+/// ([`packs_relative_relocations`]).
+pub(crate) const PACK_RELATIVE_RELOCS: &str = "-Wl,-z,pack-relative-relocs";
+
+/// Starts [`packs_relative_relocations`]'s linker probe on its own thread,
+/// so that the link, which asks later, does not wait for it: the probe is a
+/// compile and link of its own (~35 ms), and a build's frontend and
+/// codegen run meanwhile. Nothing starts where the answer is no anyway.
+pub(crate) fn start_linker_probe(target: Option<&str>) {
+    if target.is_none() && glibc_reads_dt_relr(host_glibc_version().as_deref()) {
+        std::thread::spawn(host_linker_packs_relative_relocations);
     }
 }
 

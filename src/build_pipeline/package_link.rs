@@ -130,6 +130,8 @@ pub(crate) fn build_package(
     let modules = package_build::discover(build.path, build.excludes).map_err(fail)?;
     let package = &modules[0].dotted;
     let platform = ext_build::ExtLinkPlatform::resolve(build.target);
+    // Whether the link packs relocations is probed while the members build.
+    ext_build::start_linker_probe(build.target);
     let output = ext_output::resolve(build.out, &platform.suffix_platform())
         .map_err(|e| fail(e.message()))?;
     if &output.module_name != package {
