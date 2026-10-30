@@ -274,8 +274,10 @@ pub unsafe extern "C" fn pycc_rt_str_from_literal(ptr: *const u8, len: i64) -> *
 /// strings (`crate::str_index::ascii_char`).
 ///
 /// # Safety
-/// `ptr` must point to at least `len` readable UTF-8 bytes, and `slot` to
-/// the site's own pointer, null before the first call.
+/// `ptr` must point to at least `len` readable UTF-8 bytes that stay
+/// unchanged for the rest of the process (the literal's own constant
+/// global, which every `pycc_codegen` call site passes), and `slot` to the
+/// site's own pointer, null before the first call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pycc_rt_str_from_literal_cached(
     ptr: *const u8,
@@ -284,19 +286,49 @@ pub unsafe extern "C" fn pycc_rt_str_from_literal_cached(
 ) -> *mut PyStrObj {
     let mut obj = unsafe { *slot };
     if obj.is_null() {
-        let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+        let bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
         obj = interned_literal(bytes);
         unsafe { *slot = obj };
     }
     crate::str_index::retain_immortal(obj)
 }
 
+/// FNV-1a, for [`interned_literal`]'s table: its keys are the program's own
+/// literals, so they need no protection from chosen collisions, and
+/// `RandomState`'s SipHash cost more than the rest of a first evaluation.
+#[derive(Default)]
+struct LiteralHasher(u64);
+
+impl std::hash::Hasher for LiteralHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let mut hash = if self.0 == 0 { 0xcbf2_9ce4_8422_2325 } else { self.0 };
+        for &byte in bytes {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+        self.0 = hash;
+    }
+}
+
+/// How many interned literals the table holds before it first grows: a
+/// large package's import evaluates about a thousand.
+const INTERNED_CAPACITY: usize = 2048;
+
 /// The one object every literal site of `bytes` shares when CPython would
 /// intern the text as a code constant (ASCII letters, digits and `_`, as
 /// its `all_name_chars`), so equal keys of a native dict compare by
 /// identity (`crate::value::eq`), as an interned key does in a CPython
-/// dict; a new immortal object for any other literal.
-fn interned_literal(bytes: &[u8]) -> *mut PyStrObj {
+/// dict; a new immortal object for any other literal. The table keys on
+/// the literal's own bytes, which outlive it.
+fn interned_literal(bytes: &'static [u8]) -> *mut PyStrObj {
+    type Table = std::collections::HashMap<
+        &'static [u8],
+        usize,
+        std::hash::BuildHasherDefault<LiteralHasher>,
+    >;
     let fresh = || {
         let obj = new_pystr(bytes);
         STR_LIVE.fetch_sub(1, Ordering::Relaxed);
@@ -305,11 +337,12 @@ fn interned_literal(bytes: &[u8]) -> *mut PyStrObj {
     if bytes.is_empty() || !bytes.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_') {
         return fresh();
     }
-    static INTERNED: std::sync::Mutex<Option<std::collections::HashMap<Vec<u8>, usize>>> =
-        std::sync::Mutex::new(None);
+    static INTERNED: std::sync::Mutex<Option<Table>> = std::sync::Mutex::new(None);
     let mut table = INTERNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let table = table.get_or_insert_with(std::collections::HashMap::new);
-    *table.entry(bytes.to_vec()).or_insert_with(|| fresh() as usize) as *mut PyStrObj
+    let table = table.get_or_insert_with(|| {
+        Table::with_capacity_and_hasher(INTERNED_CAPACITY, Default::default())
+    });
+    *table.entry(bytes).or_insert_with(|| fresh() as usize) as *mut PyStrObj
 }
 
 /// Concatenates two `str` objects into a brand-new one (Python's `+` on

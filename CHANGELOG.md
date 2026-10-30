@@ -44,6 +44,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   did (v0.11 accept 3): a forwarder's code is read at CPython 3.13's offsets, checked once
   against its attributes, and one class's methods resolve the class once. Own import
   share: pystache 9.2M -> 9.1M, mistune 25.0M -> 24.6M, pydantic 97.5M -> 95.8M.
+- A string literal's first evaluation interns it without copying its bytes or hashing them
+  with SipHash (v0.11 accept 3). Own import share: mistune 24.6M -> 24.4M, pydantic 95.8M
+  -> 95.2M.
 
 ### Fixed
 - Importing a compiled package no longer imports `importlib`, `importlib._bootstrap`,

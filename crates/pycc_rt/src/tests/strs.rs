@@ -317,3 +317,30 @@ fn str_live_objects_never_reads_back_a_negative_count() {
         "the live-str count must never go negative, read {live}"
     );
 }
+
+/// Two literal sites of a name-like text share one object, as CPython's
+/// interned constants do, whichever copy of the literal's bytes each site
+/// passes; any other text gets an object per site; and a site keeps the
+/// object it built.
+#[test]
+fn literal_sites_of_a_name_share_one_object() {
+    static FIRST: &[u8] = b"interned_literal_test_key";
+    static SECOND: [u8; 25] = *b"interned_literal_test_key";
+    static SPACED: &[u8] = b"not a name";
+    unsafe {
+        let mut a = std::ptr::null_mut();
+        let mut b = std::ptr::null_mut();
+        let x = pycc_rt_str_from_literal_cached(FIRST.as_ptr(), FIRST.len() as i64, &mut a);
+        let y = pycc_rt_str_from_literal_cached(SECOND.as_ptr(), SECOND.len() as i64, &mut b);
+        assert_eq!(x, y);
+        assert_eq!(a, x);
+        assert_eq!((*x).bytes(), FIRST);
+        let again = pycc_rt_str_from_literal_cached(FIRST.as_ptr(), FIRST.len() as i64, &mut a);
+        assert_eq!(again, x);
+        let mut c = std::ptr::null_mut();
+        let mut d = std::ptr::null_mut();
+        let p = pycc_rt_str_from_literal_cached(SPACED.as_ptr(), SPACED.len() as i64, &mut c);
+        let q = pycc_rt_str_from_literal_cached(SPACED.as_ptr(), SPACED.len() as i64, &mut d);
+        assert_ne!(p, q);
+    }
+}
