@@ -11,6 +11,12 @@
 //! (`exc_layout::class_names`), or binds one of the layout's attributes at
 //! class level. A base the graph cannot resolve, and a class reached other
 //! than by name, are `exc_escape`'s.
+//!
+//! Every class statement is a node of its own, two of one name included:
+//! a name a module binds more than once (two class statements, or a class
+//! statement and any other binding) is ambiguous -- which statement a base
+//! naming it reads depends on run-time order -- so a layout named so, or
+//! whose closure reaches such a name, does not stand.
 
 use pycc_ast::{Expr, Stmt};
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +24,8 @@ use std::collections::{BTreeMap, BTreeSet};
 /// One examined class statement.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ClassNode {
+    /// The dotted name it binds (`pkg.mod.C`).
+    name: String,
     /// Its bases, each by the dotted name it resolves to (`None`: not
     /// resolved).
     bases: Vec<Option<String>>,
@@ -27,11 +35,14 @@ pub(super) struct ClassNode {
     names: BTreeSet<String>,
 }
 
-/// The examined class statements, by dotted name (`pkg.mod.C`; `.C` for a
-/// module built alone).
+/// The examined class statements, each a node (dotted names: `pkg.mod.C`;
+/// `.C` for a module built alone).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct ClassGraph {
-    nodes: BTreeMap<String, ClassNode>,
+    nodes: Vec<ClassNode>,
+    /// The dotted names a module binds more than once, a class statement
+    /// among them (the module doc).
+    ambiguous: BTreeSet<String>,
 }
 
 impl ClassGraph {
@@ -44,19 +55,28 @@ impl ClassGraph {
         body: &[Stmt],
         resolve: &dyn Fn(&Expr) -> Option<String>,
     ) {
+        let mut classes: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut others: BTreeSet<String> = BTreeSet::new();
         for stmt in body {
+            // A `global` declaration in a nested scope binds a module name.
+            others.extend(super::names::all_global_declarations(stmt));
             let Stmt::ClassDef(class) = stmt else {
+                others.extend(super::names::bound_names(std::slice::from_ref(stmt)));
                 continue;
             };
+            *classes.entry(class.name.as_str()).or_default() += 1;
             let names = super::exc_layout::class_names(class);
-            self.nodes.insert(
-                format!("{qual}.{}", class.name.as_str()),
-                ClassNode {
-                    bases: class.bases().iter().map(resolve).collect(),
-                    opaque: names.is_none(),
-                    names: names.unwrap_or_default(),
-                },
-            );
+            self.nodes.push(ClassNode {
+                name: format!("{qual}.{}", class.name.as_str()),
+                bases: class.bases().iter().map(resolve).collect(),
+                opaque: names.is_none(),
+                names: names.unwrap_or_default(),
+            });
+        }
+        for (name, count) in classes {
+            if count > 1 || others.contains(name) {
+                self.ambiguous.insert(format!("{qual}.{name}"));
+            }
         }
     }
 
@@ -83,11 +103,16 @@ impl ClassGraph {
     /// Whether a layout of class `class` with attributes `fields` may meet
     /// a subclass that does not carry it as CPython would (the module doc).
     pub(super) fn subclass_conflicts(&self, class: &str, fields: &BTreeSet<String>) -> bool {
+        if self.ambiguous.contains(class) {
+            return true;
+        }
+        // The names reached, and the statements reached through them.
         let mut reached: BTreeSet<&str> = BTreeSet::from([class]);
+        let mut done: Vec<bool> = vec![false; self.nodes.len()];
         loop {
-            let before = reached.len();
-            for (name, node) in &self.nodes {
-                if reached.contains(name.as_str()) {
+            let mut grew = false;
+            for (at, node) in self.nodes.iter().enumerate() {
+                if done[at] {
                     continue;
                 }
                 let derives = node
@@ -101,14 +126,74 @@ impl ClassGraph {
                 if node.bases.len() > 1
                     || node.opaque
                     || node.names.iter().any(|name| fields.contains(name))
+                    || self.ambiguous.contains(&node.name)
                 {
                     return true;
                 }
-                reached.insert(name);
+                done[at] = true;
+                grew |= reached.insert(&node.name);
             }
-            if reached.len() == before {
+            if !grew {
                 return false;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClassGraph;
+    use std::collections::BTreeSet;
+
+    fn graph(source: &str) -> ClassGraph {
+        let module = pycc_parser::parse_all(source).expect("parses");
+        ClassGraph::of_module(&module.body)
+    }
+
+    fn fields(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    /// A plain subclass leaves the layout standing; one of several bases,
+    /// a body off the allowlist or a field binding withdraws it.
+    #[test]
+    fn the_closure_tests_each_subclass() {
+        let code = fields(&["code"]);
+        let base = "class A(Exception):\n    pass\n";
+        let ok = graph(&format!(
+            "{base}class B(A):\n    pass\nclass C(B):\n    x = 1\n"
+        ));
+        assert!(!ok.subclass_conflicts(".A", &code));
+        for sub in [
+            "class B(A):\n    pass\nclass C(B, OSError):\n    pass\n",
+            "class B(A):\n    def __getattr__(self, n):\n        return n\n",
+            "class B(A):\n    code = 1\n",
+        ] {
+            assert!(
+                graph(&format!("{base}{sub}")).subclass_conflicts(".A", &code),
+                "{sub}"
+            );
+        }
+    }
+
+    /// Every class statement is a node, and a name bound more than once
+    /// (another class statement, or any other binding, a nested `global`
+    /// one included) withdraws a layout reached through it or named so.
+    #[test]
+    fn a_name_bound_twice_is_ambiguous() {
+        let code = fields(&["code"]);
+        let base = "class A(Exception):\n    pass\n";
+        for rebind in [
+            "class B(A, OSError):\n    pass\nclass B(Exception):\n    pass\n",
+            "class B(A):\n    pass\nB = 1\n",
+            "class B(A):\n    pass\ndef f():\n    global B\n    B = 2\n",
+            "class B(A):\n    pass\nfor B in ():\n    pass\n",
+        ] {
+            assert!(
+                graph(&format!("{base}{rebind}")).subclass_conflicts(".A", &code),
+                "{rebind}"
+            );
+        }
+        assert!(graph(&format!("{base}A = 3\n")).subclass_conflicts(".A", &code));
     }
 }

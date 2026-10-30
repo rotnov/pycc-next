@@ -199,6 +199,20 @@ fn bases_of_unexamined_class_statements_get_no_layout() {
     assert_eq!(out, "[1, 0, 0, 0, 0]\n");
 }
 
+/// A class name bound by two class statements, the first over a layout
+/// class and `OSError` (`tests/fixtures/v010_exc_rebound.py`): every
+/// statement counts, so the layout is withdrawn.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn every_class_statement_of_a_rebound_name_counts() {
+    let out = single_module_matches(
+        "v010_exc_rebound",
+        "import m\nprint(m.make(3), [c.__name__ for c in m.B.__mro__])\n",
+        &templates_of("m.A,"),
+    );
+    assert_eq!(out, "[0]\n");
+}
+
 /// A class subclassed by code `exec` runs (`tests/fixtures/v010_exc_exec.py`):
 /// the module gets no layout.
 #[test]
