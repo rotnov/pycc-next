@@ -4,6 +4,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+- `bench/package_check.py --time` times `import mistune` and `import pystache`, one import
+  per fresh process against the CPython tree's `.pyc` files, so the CI benchmark job
+  publishes both (v0.11 accept 4); a workload CPython runs in under 0.1 s prints and
+  publishes in ms.
+
 ### Fixed
 - `--non-strict` (native build and `--ext`): fallback code reaching module globals by a
   string -- `eval("c")`, `exec(src)`, `globals()["c"]`, `locals()`/`vars()`/`dir()` at

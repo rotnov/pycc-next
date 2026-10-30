@@ -160,9 +160,12 @@ def markdown(doc: dict) -> str:
         for p in doc["packages"]["packages"]:
             t = p["seconds"]
             py, pc = t["cpython"], t["compiled"]
+            # A workload CPython runs in under 0.1 s (an import) is shown in ms.
+            kw = {"scale": 1000, "unit": " ms", "digits": 2} if py["median"] < 0.1 else {}
             out.append(f"| {p['package']} {p['version']} | {p['workload']} | {p['runs']} | "
-                       f"{cell(py)} | {cell(pc)} | {competitor_cell(t.get('cython'), py)} | "
-                       f"{competitor_cell(t.get('mypyc'), py)} | {p['ratio']:.2f}x | "
+                       f"{cell(py, **kw)} | {cell(pc, **kw)} | "
+                       f"{competitor_cell(t.get('cython'), py, **kw)} | "
+                       f"{competitor_cell(t.get('mypyc'), py, **kw)} | {p['ratio']:.2f}x | "
                        f"{vs(t.get('cython'), pc)} | {vs(t.get('mypyc'), pc)} |")
         out.append("")
         builds = doc["packages"].get("competitors", {}).get("builds", [])
