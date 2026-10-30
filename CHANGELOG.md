@@ -19,6 +19,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   is placed with the import-only code (`cold`). No CI instruction bound moves; LTO
   across a package's modules, identical-code folding and hot/cold splitting were measured
   and do not pay (v0.11 accept 2, `docs/roadmap/v0.11.md`).
+- On Linux every compiled function goes in an object section of its own, as with
+  `-ffunction-sections`: the assembler laid out one `.text` section holding a whole large
+  module again and again until every branch had its size (17% of all the instructions
+  building diff-match-patch). The linker merges the sections back into `.text`. Building
+  diff-match-patch takes 8.6 s instead of 9.1 s locally (median of 5 interleaved builds).
 - Importing a compiled module no longer compiles source with `compile()` (v0.11 accept
   3): published classes are made by a class maker written in C, their statement's
   arguments read from a build-time plan when they are bare names, and the compiled-frames

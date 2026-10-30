@@ -532,28 +532,42 @@ fn target_initialization_happens_once_across_concurrent_compiles() {
     );
 }
 
-/// The largest alignment of an ELF64 object's `.text` sections.
-fn elf64_text_alignment(object: &[u8]) -> u64 {
+/// One section of an ELF64 object: its name, `sh_flags`, `sh_size` and
+/// `sh_addralign`.
+struct ElfSection {
+    name: String,
+    flags: u64,
+    size: u64,
+    align: u64,
+}
+
+/// The sections of a little-endian ELF64 object, in header order.
+fn elf64_sections(object: &[u8]) -> Vec<ElfSection> {
     let u16_at = |at: usize| u64::from(u16::from_le_bytes([object[at], object[at + 1]]));
-    let u64_at = |at: usize| u64::from_le_bytes(object[at..at + 8].try_into().expect("8 bytes"));
     let u32_at = |at: usize| {
         u64::from(u32::from_le_bytes(
             object[at..at + 4].try_into().expect("4 bytes"),
         ))
     };
+    let u64_at = |at: usize| u64::from_le_bytes(object[at..at + 8].try_into().expect("8 bytes"));
     assert_eq!(&object[..4], b"\x7fELF", "an ELF object");
     let (shoff, shentsize, shnum, shstrndx) =
         (u64_at(0x28), u16_at(0x3A), u16_at(0x3C), u16_at(0x3E));
     let header = |index: u64| (shoff + index * shentsize) as usize;
     let names = u64_at(header(shstrndx) + 0x18) as usize;
     (0..shnum)
-        .filter(|&index| {
-            let name = &object[names + u32_at(header(index)) as usize..];
-            name.starts_with(b".text\0") || name.starts_with(b".text.")
+        .map(|index| {
+            let at = header(index);
+            let name = &object[names + u32_at(at) as usize..];
+            let end = name.iter().position(|&b| b == 0).expect("a NUL-ended name");
+            ElfSection {
+                name: String::from_utf8_lossy(&name[..end]).into_owned(),
+                flags: u64_at(at + 0x08),
+                size: u64_at(at + 0x20),
+                align: u64_at(at + 0x30),
+            }
         })
-        .map(|index| u64_at(header(index) + 0x30))
-        .max()
-        .expect("a .text section")
+        .collect()
 }
 
 #[test]
@@ -573,5 +587,22 @@ fn x86_objects_keep_jumps_within_32_byte_boundaries() {
     compile_to_object(&mir, &obj_path, Some("x86_64-unknown-linux-gnu"), true)
         .expect("an x86_64 Linux object should compile on any host");
     let object = std::fs::read(&obj_path).expect("the object file");
-    assert!(elf64_text_alignment(&object) >= 32);
+    // The sections that hold code: executable (`SHF_EXECINSTR`) and not
+    // empty. Which ones they are depends on how the functions are placed
+    // (`crate::function_sections`); each must be aligned to 32 bytes.
+    const SHF_EXECINSTR: u64 = 0x4;
+    let sections = elf64_sections(&object);
+    let code: Vec<&ElfSection> = sections
+        .iter()
+        .filter(|section| section.flags & SHF_EXECINSTR != 0 && section.size > 0)
+        .collect();
+    let listing: Vec<String> = sections
+        .iter()
+        .map(|s| format!("{} flags={:#x} size={} align={}", s.name, s.flags, s.size, s.align))
+        .collect();
+    assert!(!code.is_empty(), "no code section in {listing:#?}");
+    assert!(
+        code.iter().all(|section| section.align >= 32),
+        "a code section aligned below 32 bytes: {listing:#?}"
+    );
 }
