@@ -42,6 +42,10 @@ pub(crate) struct ExtPublishedClass {
     /// the published class with its real bases ([`attach_class_bases`]);
     /// `None` publishes it with no bases of its own.
     pub(crate) bases: Option<String>,
+    /// v0.11: the same arguments as a plan the module follows without
+    /// `compile()` ([`class_spec`]), when they are that simple; `None`
+    /// evaluates `bases` instead.
+    pub(crate) spec: Option<String>,
     /// v0.9: the class-body attributes bound to `None` that are instance
     /// slots (`pycc_ast`'s instance defaults): a Python subclass's object
     /// that never runs the class's `__init__` stores them first
@@ -192,6 +196,7 @@ pub(crate) fn collect_class_publications(
                 mro: class_def.mro.clone(),
                 constants: class_constants(module, class_def),
                 bases: None,
+                spec: None,
                 defaults: Vec::new(),
             });
         }
@@ -255,6 +260,7 @@ pub(crate) fn attach_class_bases(
             None => "()".to_string(),
         };
         let mut literals = String::new();
+        let mut spec = class_spec(class.arguments.as_deref());
         for member in &class.body {
             let pycc_ast::Stmt::Assign(assign) = member else {
                 continue;
@@ -274,12 +280,50 @@ pub(crate) fn attach_class_bases(
             if let Some(text) = source.get(range.start as usize..range.end as usize) {
                 literals.push_str(&format!("{:?}: {text}, ", target.id.as_str()));
             }
+            // A `None` default rides along in the plan; a `bytes` one is
+            // only evaluated from the source.
+            match (&mut spec, value) {
+                (Some(plan), pycc_ast::Expr::NoneLiteral(_)) if target.id.is_ascii() => {
+                    plan.push_str(&format!("n {}\n", target.id.as_str()));
+                }
+                _ => spec = None,
+            }
             if matches!(value, pycc_ast::Expr::NoneLiteral(_)) {
                 entry.defaults.push(target.id.to_string());
             }
         }
         entry.bases = Some(format!("{arguments}, {{{literals}}}"));
+        entry.spec = spec;
     }
+}
+
+/// v0.11: a class statement's arguments as the plan the module follows to
+/// evaluate them without `compile()` (`pycc_ext_class_args` in
+/// `src/ext/module/class_maker.c`), one line per step in source order:
+/// `a NAME` per positional argument, a name looked up as `eval` in the
+/// module's namespace looks it up (the namespace, then its builtins); the
+/// caller appends `n NAME` per `None` class-body default. `None` when an
+/// argument is anything else (a subscript such as `Generic[T]`, a keyword)
+/// or a non-ASCII name (which Python normalizes): the module evaluates
+/// those from the source instead.
+fn class_spec(arguments: Option<&pycc_ast::Arguments>) -> Option<String> {
+    let mut plan = String::new();
+    let Some(arguments) = arguments else {
+        return Some(plan);
+    };
+    if !arguments.keywords.is_empty() {
+        return None;
+    }
+    for arg in &arguments.args {
+        let pycc_ast::Expr::Name(name) = arg else {
+            return None;
+        };
+        if !name.id.is_ascii() {
+            return None;
+        }
+        plan.push_str(&format!("a {}\n", name.id.as_str()));
+    }
+    Some(plan)
 }
 
 /// The literal class attributes `class_def` reads through its MRO, each
@@ -496,4 +540,40 @@ pub(super) fn namespace_owner<'a>(
             held == ancestor && class_member_names(def).any(|name| name == method)
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::class_spec;
+
+    fn spec(source: &str) -> Option<String> {
+        let parsed = pycc_parser::parse_all(source).expect("parses");
+        let pycc_ast::Stmt::ClassDef(class) = &parsed.body[0] else {
+            panic!("a class statement");
+        };
+        class_spec(class.arguments.as_deref())
+    }
+
+    #[test]
+    fn bare_names_are_planned_in_source_order() {
+        assert_eq!(spec("class C:\n    pass\n").as_deref(), Some(""));
+        assert_eq!(spec("class C():\n    pass\n").as_deref(), Some(""));
+        assert_eq!(
+            spec("class C(B, object):\n    pass\n").as_deref(),
+            Some("a B\na object\n")
+        );
+    }
+
+    #[test]
+    fn anything_else_is_evaluated_from_the_source() {
+        for source in [
+            "class C(Generic[T]):\n    pass\n",
+            "class C(m.B):\n    pass\n",
+            "class C(B, metaclass=M):\n    pass\n",
+            "class C(*bases):\n    pass\n",
+            "class C(\u{00e9}):\n    pass\n",
+        ] {
+            assert_eq!(spec(source), None, "{source}");
+        }
+    }
 }
