@@ -113,7 +113,24 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   Python subclass.
 - Open rows of `docs/DEVIATIONS.md`.
 
-BENCH_PLACEHOLDER
+### Speed
+Bench run [41010653642](https://github.com/rotnov/pycc-next/actions/runs/41010653642) at
+49f954c (ubuntu-24.04, Intel Xeon Platinum 8370C, medians of 11 interleaved
+fresh-process runs; pydantic 15). Ratios are CPython's median over pycc-next's.
+
+| workload | CPython | pycc-next | vs CPython | vs Cython 3.3.0 | vs mypyc |
+|---|---|---|---|---|---|
+| nbody | 2.606s | 0.077s | 33.9x | 63.5x faster | 29.5x faster |
+| spectral_norm | 1.194s | 0.017s | 69.4x | 80.2x faster | 5.2x faster |
+| diff-match-patch `diff_main` | 11.572s | 0.958s | 12.1x | 11.1x faster | does not compile |
+| pypng read, five filters | 0.116s | 0.008s | 15.1x | 10.8x faster | does not compile |
+| tomli `loads` x100 | 0.058s | 0.034s | 1.70x | 1.32x faster | 1.39x slower |
+| pystache benchmark x1000 | 0.069s | 0.109s | 0.63x | 1.82x slower | does not compile |
+| mistune `html` x20 | 0.149s | 0.179s | 0.83x | suite fails | does not compile |
+| pydantic define | 8.54 ms | 10.49 ms | 0.81x | 1.19x slower | does not compile |
+| pydantic schema | 19.03 ms | 23.03 ms | 0.83x | 1.42x slower | does not compile |
+
+The run's job summary has every program, package workload and phase, with min-max.
 
 Earlier versions: [0.9](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.9.md), [0.8](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.8.md),
 [0.6-0.7](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.6-0.7.md), [0.4-0.5](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.4-0.5.md),
