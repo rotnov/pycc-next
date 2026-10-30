@@ -19,6 +19,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   from 102.4M to 99.7M (CPython: 7.6M, 29.0M, 88.5M). The import also no longer adds a
   `__pycc_frame_template__` attribute to `sys`.
 
+### Fixed
+- `--non-strict` (native build and `--ext`): fallback code reaching module globals by a
+  string -- `eval("c")`, `exec(src)`, `globals()["c"]`, `locals()`/`vars()`/`dir()` at
+  module level, or the module object (`sys.modules[__name__]`, `import __main__`) -- now
+  sees every compiled global, a compiled class's instance included, where it raised
+  `NameError` for any global no statement of it names (issue #20). A variable such code
+  binds lives in the module namespace, so compiled code reads back what it stores.
+
 ## [0.10.0] - 2026-10-30
 
 ### Added

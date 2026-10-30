@@ -426,3 +426,59 @@ fn an_inferred_function_fallback_code_calls_is_compiled_with_objects() {
     plan.absorb(None, &[failure_at(source.find("lambda").unwrap() as u32)]);
     assert!(plan.report_lines().join("\n").contains("function `f`"));
 }
+
+/// How a statement reaches module globals by a string (issue #20): `eval`
+/// reads them, `exec` and `globals()` may also bind them, and `locals()`,
+/// `vars()` and `dir()` only reach them called with no argument at module
+/// scope; a local shadowing the builtin reaches nothing.
+#[test]
+fn reaching_globals_by_a_string_is_found_where_it_is_the_module_scope() {
+    use super::by_string::{Reach, reach};
+    let cases = [
+        ("def f():\n    return eval('c')\n", Reach::Reads),
+        ("def f():\n    exec('c = 1')\n", Reach::Binds),
+        ("x = globals()['c']\n", Reach::Binds),
+        ("print(dir())\n", Reach::Reads),
+        ("for k in list(locals()): pass\n", Reach::Binds),
+        ("print(vars(o), dir(o))\n", Reach::No),
+        ("def f():\n    return locals(), vars(), dir()\n", Reach::No),
+        ("class K:\n    names = dir()\n", Reach::No),
+        ("f = lambda: dir()\n", Reach::No),
+        ("def f(d=dir()):\n    pass\n", Reach::Reads),
+        ("def f():\n    eval = len\n    return eval('c')\n", Reach::No),
+        // The module object, through which code may read and bind any
+        // global; other uses of `__name__` do not reach it.
+        ("def f():\n    return sys.modules[__name__].c\n", Reach::Binds),
+        ("m = sys.modules['__main__']\n", Reach::Binds),
+        ("def f():\n    import __main__\n", Reach::Binds),
+        ("m = importlib.import_module(__name__)\n", Reach::Binds),
+        ("m = __import__(__name__)\n", Reach::Binds),
+        ("log = logging.getLogger(__name__)\n", Reach::No),
+        ("if __name__ == '__main__':\n    main()\n", Reach::No),
+    ];
+    for (source, expected) in cases {
+        let stmt = &stmts(source)[0];
+        assert_eq!(reach(stmt, &module_references(stmt)), expected, "{source}");
+    }
+}
+
+/// Fallback code calling `eval` reads every module global, which compiled
+/// code keeps native and copies into the namespace; code calling `exec` may
+/// bind every module variable, which then lives in the namespace (issue #20).
+#[test]
+fn fallback_code_reaching_globals_by_a_string_sees_every_global() {
+    let source = "c = 1\nd = 'x'\ndef f():\n    return eval('c')\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(source.find("eval").unwrap() as u32)]);
+    assert_eq!(plan.native_globals(), set(&["c", "d"]));
+    let source = "import math\nc = 1\nd = 'x'\ndef g() -> int:\n    return c\n\
+                  def f():\n    exec('c = 2')\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(source.find("exec").unwrap() as u32)]);
+    assert!(plan.native_globals().is_empty());
+    let text = plan.render().text;
+    assert!(text.contains("return __pycc_fallback_ns['c']"), "{text}");
+    // The import is read too, so it also runs in CPython; it is not a
+    // variable the code may rebind.
+    assert!(plan.mirrored.contains(&0), "{text}");
+}

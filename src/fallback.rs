@@ -22,7 +22,9 @@
 //!    ns)`: chunk `k`'s code object, compiled when the module was built,
 //!    `render::CodeChunk`); and every compiled reference to a module global that
 //!    fallback code reads or binds becomes `ns['name']`, so both sides see
-//!    one value (a *dict global*);
+//!    one value (a *dict global*); code reaching globals by a string
+//!    (`eval`, `exec`, `globals()`, the module object) reads every one
+//!    (`by_string.rs`);
 //! 3. repeat until the rewrite compiles, or no diagnostic names a statement
 //!    that is still compiled (then the original diagnostics are reported).
 //!
@@ -44,6 +46,7 @@
 mod annotations;
 mod attach;
 mod builtins;
+mod by_string;
 mod cascade;
 mod driver;
 mod exceptions;
@@ -240,6 +243,10 @@ pub(crate) struct Plan {
     /// The nested `def`s and `lambda`s of compiled functions that CPython
     /// runs, their enclosing functions compiled (`nested`).
     nested: Vec<nested::Nested>,
+    /// The units reaching module globals by a string (`by_string`).
+    by_string: BTreeSet<usize>,
+    /// The module-level names they read (`Plan::read_by_string`).
+    string_reads: BTreeSet<String>,
 }
 
 impl Plan {
@@ -385,7 +392,7 @@ impl Plan {
             }
         }
         ast.extend(lifted_asts);
-        Some(Self {
+        let mut plan = Self {
             source: source.to_string(),
             display: display.to_string(),
             ast,
@@ -407,7 +414,11 @@ impl Plan {
             lifts,
             package_bases: BTreeMap::new(),
             nested: Vec::new(),
-        })
+            by_string: BTreeSet::new(),
+            string_reads: BTreeSet::new(),
+        };
+        plan.reach_by_string();
+        Some(plan)
     }
 
     /// Records the entry file's directory (see `entry_dir`).
@@ -422,6 +433,7 @@ impl Plan {
 
     pub(crate) fn set_entry_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.entry_dir = dir;
+        self.read_by_string();
         self.substituted.clear();
         self.substitute_aliases();
     }
