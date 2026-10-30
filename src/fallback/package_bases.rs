@@ -147,6 +147,52 @@ pub(super) fn reach_in_package(entry: &Path) -> super::exc_escape::Reach {
         .collect();
     let exports = re_exports(parsed);
     let prefix = format!("{target}.");
+    // The modules a wildcard import of which may bind one of the entry's
+    // classes: the entry, and every module importing from one of them (a
+    // re-export), to a fixpoint. A wildcard import of one withdraws every
+    // layout of the entry: the names it binds are out of the escape scan's
+    // sight.
+    let mut imports_of: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+    let mut wildcards: Vec<String> = Vec::new();
+    for (_, qual, is_package, module) in parsed {
+        let scan = Scan::new(qual, *is_package);
+        let mut sources = BTreeSet::new();
+        for stmt in &module.body {
+            if let Stmt::ImportFrom(import) = stmt
+                && let Some(source) =
+                    scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
+            {
+                // `from pkg import common` imports the module `pkg.common`.
+                for alias in &import.names {
+                    sources.insert(format!("{source}.{}", alias.name.as_str()));
+                }
+                sources.insert(source);
+            }
+        }
+        for import in super::exc_escape::wildcard_sources(&module.body) {
+            if let Some(source) =
+                scan.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
+            {
+                wildcards.push(source);
+            }
+        }
+        imports_of.insert(qual.as_str(), sources);
+    }
+    let mut reaching: BTreeSet<String> = BTreeSet::from([target.clone()]);
+    loop {
+        let before = reaching.len();
+        for (qual, sources) in &imports_of {
+            if sources.iter().any(|source| reaching.contains(source)) {
+                reaching.insert(qual.to_string());
+            }
+        }
+        if reaching.len() == before {
+            break;
+        }
+    }
+    if wildcards.iter().any(|source| reaching.contains(source)) {
+        out.unknown_base = true;
+    }
     for (file, qual, is_package, module) in parsed {
         if file == entry {
             continue;

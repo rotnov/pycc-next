@@ -11,7 +11,11 @@
 //! argument, or an annotation. And a class statement whose base the
 //! planner cannot resolve to a known class (a name bound otherwise than by
 //! a class statement or an import, an attribute, a call, a subscript) could
-//! derive from any layout class of the module: there is none then.
+//! derive from any layout class of the module: there is none then. A base
+//! name needs a positive binding (a class statement, an explicit import, or
+//! a builtin class the module never rebinds), and a wildcard import of the
+//! module -- or of one importing from it, which may re-export its classes
+//! -- binds names out of this scan's sight: no layout then either.
 
 use pycc_ast::visitor::{self, Visitor};
 use pycc_ast::{Expr, ExprContext, Stmt};
@@ -82,7 +86,8 @@ pub(super) fn reach(
         candidates,
         // A name bound otherwise than by a top-level class statement or an
         // import may be anything; one never bound in the module is a
-        // builtin, which no layout class is.
+        // builtin class only when `builtins` has it, and anything (a
+        // wildcard import's) otherwise.
         unknown_names: bound
             .names
             .into_iter()
@@ -94,7 +99,55 @@ pub(super) fn reach(
     for stmt in body {
         scan.visit_stmt(stmt);
     }
+    // A wildcard import may rebind any name of the module defining the
+    // candidates, a class's included, out of the planner's sight.
+    if defining && has_wildcard(body) {
+        scan.out.unknown_base = true;
+    }
     scan.out
+}
+
+/// Whether `body` holds a wildcard import (`from m import *`), at any depth
+/// of its top-level compound statements.
+pub(super) fn has_wildcard(body: &[Stmt]) -> bool {
+    wildcard_sources(body).next().is_some()
+}
+
+/// The `from` imports of `body` that bind `*` (top level and inside
+/// `if`/`try` blocks): each one's level and module.
+pub(super) fn wildcard_sources(
+    body: &[Stmt],
+) -> impl Iterator<Item = &pycc_ast::StmtImportFrom> + '_ {
+    let mut out: Vec<&pycc_ast::StmtImportFrom> = Vec::new();
+    fn walk<'a>(body: &'a [Stmt], out: &mut Vec<&'a pycc_ast::StmtImportFrom>) {
+        for stmt in body {
+            match stmt {
+                Stmt::ImportFrom(import)
+                    if import.names.iter().any(|alias| alias.name.as_str() == "*") =>
+                {
+                    out.push(import);
+                }
+                Stmt::If(s) => {
+                    walk(&s.body, out);
+                    for clause in &s.elif_else_clauses {
+                        walk(&clause.body, out);
+                    }
+                }
+                Stmt::Try(s) => {
+                    walk(&s.body, out);
+                    for handler in &s.handlers {
+                        let pycc_ast::ExceptHandler::ExceptHandler(h) = handler;
+                        walk(&h.body, out);
+                    }
+                    walk(&s.orelse, out);
+                    walk(&s.finalbody, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    walk(body, &mut out);
+    out.into_iter()
 }
 
 /// Every name bound in a module otherwise than by a top-level class
@@ -225,10 +278,15 @@ impl ReachScan<'_> {
     /// attribute of one, which the package scan resolves), or a builtin.
     fn known_base(&self, expr: &Expr) -> bool {
         match expr {
+            // A positive binding: a candidate, a top-level class statement,
+            // an explicit import, or a builtin class the module never
+            // binds otherwise.
             Expr::Name(name) => {
-                self.local.contains_key(name.id.as_str())
-                    || self.known.contains(name.id.as_str())
-                    || !self.unknown_names.contains(name.id.as_str())
+                let name = name.id.as_str();
+                self.local.contains_key(name)
+                    || self.known.contains(name)
+                    || (super::exc_names::BUILTIN_CLASSES.contains(&name)
+                        && !self.unknown_names.contains(name))
             }
             _ => self.candidate(expr).is_some(),
         }

@@ -64,7 +64,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   The class must also be reached only by name, as a base, an `except` type, a raised
   class, a callee, an `isinstance` class or an annotation, and every class statement of
   the module and the package must have bases the planner resolves (an alias `Alias = A`,
-  an attribute, a call or a subscript as a base drops every layout of the module).
+  an attribute, a call, a subscript, or a name with no positive binding as a base drops
+  every layout of the module, as does a wildcard import of the module or of one
+  re-exporting it).
   Elsewhere the class stays CPython's alone, its methods compiled.
 
 ### Changed

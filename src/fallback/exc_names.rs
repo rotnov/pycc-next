@@ -78,9 +78,136 @@ pub(super) fn builtin_reduces_itself(class: &str) -> bool {
     )
 }
 
+/// The public classes of CPython 3.13's `builtins`: a base named so, with
+/// no binding of the name in the module, is that class, which no layout
+/// class is. Checked against the running CPython by this module's test.
+pub(super) const BUILTIN_CLASSES: [&str; 96] = [
+    "ArithmeticError",
+    "AssertionError",
+    "AttributeError",
+    "BaseException",
+    "BaseExceptionGroup",
+    "BlockingIOError",
+    "BrokenPipeError",
+    "BufferError",
+    "BytesWarning",
+    "ChildProcessError",
+    "ConnectionAbortedError",
+    "ConnectionError",
+    "ConnectionRefusedError",
+    "ConnectionResetError",
+    "DeprecationWarning",
+    "EOFError",
+    "EncodingWarning",
+    "EnvironmentError",
+    "Exception",
+    "ExceptionGroup",
+    "FileExistsError",
+    "FileNotFoundError",
+    "FloatingPointError",
+    "FutureWarning",
+    "GeneratorExit",
+    "IOError",
+    "ImportError",
+    "ImportWarning",
+    "IndentationError",
+    "IndexError",
+    "InterruptedError",
+    "IsADirectoryError",
+    "KeyError",
+    "KeyboardInterrupt",
+    "LookupError",
+    "MemoryError",
+    "ModuleNotFoundError",
+    "NameError",
+    "NotADirectoryError",
+    "NotImplementedError",
+    "OSError",
+    "OverflowError",
+    "PendingDeprecationWarning",
+    "PermissionError",
+    "ProcessLookupError",
+    "PythonFinalizationError",
+    "RecursionError",
+    "ReferenceError",
+    "ResourceWarning",
+    "RuntimeError",
+    "RuntimeWarning",
+    "StopAsyncIteration",
+    "StopIteration",
+    "SyntaxError",
+    "SyntaxWarning",
+    "SystemError",
+    "SystemExit",
+    "TabError",
+    "TimeoutError",
+    "TypeError",
+    "UnboundLocalError",
+    "UnicodeDecodeError",
+    "UnicodeEncodeError",
+    "UnicodeError",
+    "UnicodeTranslateError",
+    "UnicodeWarning",
+    "UserWarning",
+    "ValueError",
+    "Warning",
+    "ZeroDivisionError",
+    "bool",
+    "bytearray",
+    "bytes",
+    "classmethod",
+    "complex",
+    "dict",
+    "enumerate",
+    "filter",
+    "float",
+    "frozenset",
+    "int",
+    "list",
+    "map",
+    "memoryview",
+    "object",
+    "property",
+    "range",
+    "reversed",
+    "set",
+    "slice",
+    "staticmethod",
+    "str",
+    "super",
+    "tuple",
+    "type",
+    "zip",
+];
+
 #[cfg(test)]
 mod tests {
-    use super::{builtin_exception_names, builtin_reduces_itself};
+    use super::{BUILTIN_CLASSES, builtin_exception_names, builtin_reduces_itself};
+
+    /// [`BUILTIN_CLASSES`] is what the running CPython's `builtins` holds.
+    #[test]
+    #[ignore = "requires a CPython 3.13 on PATH (CI runs it)"]
+    fn the_builtin_classes_are_cpython_s() {
+        let output = std::process::Command::new(
+            std::env::var_os("PYCC_PYTHON").unwrap_or_else(|| "python3".into()),
+        )
+        .arg("-c")
+        .arg(
+            "import builtins\n\
+             print(*sorted(n for n in dir(builtins)\n\
+             \x20   if isinstance(getattr(builtins, n), type) and not n.startswith('_')))",
+        )
+        .output()
+        .expect("python3 runs");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(output.stdout).expect("utf-8");
+        let cpython: Vec<&str> = text.split_whitespace().collect();
+        assert_eq!(BUILTIN_CLASSES.to_vec(), cpython);
+    }
     use std::collections::BTreeSet;
 
     /// The table matches what the running CPython binds along each builtin

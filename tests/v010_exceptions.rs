@@ -258,6 +258,51 @@ fn package_matches_cpython(release: bool) {
     assert_eq!(text(&out.stdout), "False False True\nTrue True True\n", "{}", text(&out.stderr));
 }
 
+/// A module binding another's exception class through a wildcard import,
+/// then deriving from it beside `OSError` (`tests/fixtures/v010_exc_star`):
+/// the class gets no layout, and the package behaves as its source does.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_wildcard_imported_class_gets_no_layout() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v010_exc_star");
+    let built = ScratchDir::new("v010_exc_star_built").expect("scratch");
+    let plain = ScratchDir::new("v010_exc_star_plain").expect("scratch");
+    copy_tree(&fixtures.join("pkw"), &built.join("pkw"));
+    copy_tree(&fixtures.join("pkw"), &plain.join("pkw"));
+    let package = built.join("pkw");
+    let build = pycc()
+        .arg("build")
+        .arg(&package)
+        .arg("-o")
+        .arg(package.join("__init__"))
+        .args(["--ext", "--non-strict"])
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&build.stderr));
+    for entry in std::fs::read_dir(&package).expect("read the tree") {
+        let path = entry.expect("an entry").path();
+        if path.extension().is_some_and(|ext| ext == "py") {
+            std::fs::remove_file(&path).expect("remove a source");
+        }
+    }
+    let script = "import sys; sys.path.insert(0, '.')\nimport pkw\n\
+                  print(pkw.coded(2), pkw.combine(3), pkw.Combined(4).show(), \
+                  [c.__name__ for c in pkw.Combined.__mro__ if c.__module__ != 'pycc'], \
+                  [c for c in pkw.Coded.__mro__ if c.__module__ == 'pycc'])\n";
+    let run_in = |tree: &Path| {
+        python()
+            .args(["-I", "-c", script])
+            .current_dir(tree)
+            .output()
+            .expect("python3 should spawn")
+    };
+    let theirs = run_in(&plain);
+    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
+    let ours = run_in(&built);
+    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
+    assert!(text(&ours.stdout).ends_with(" []\n"), "{}", text(&ours.stdout));
+}
+
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn exception_classes_over_another_module_s_match_cpython() {
