@@ -196,6 +196,7 @@ type CodegenObserver<'observer> =
 mod coerce;
 mod compile;
 mod emit;
+mod function_sections;
 mod split_emit;
 mod container_access;
 mod entry_slots;
