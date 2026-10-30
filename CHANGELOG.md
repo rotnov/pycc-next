@@ -54,6 +54,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `__init__`, `__str__` and `__repr__`, class attributes bound to literals, no class
   keyword or decorator) and one base; no class carrying it (here or in another module of
   the package) binds one of its attributes, lists several bases or leaves the allowlist.
+  The class must also be reached only by name, as a base, an `except` type, a raised
+  class, a callee, an `isinstance` class or an annotation, and every class statement of
+  the module and the package must have bases the planner resolves (an alias `Alias = A`,
+  an attribute, a call or a subscript as a base drops every layout of the module).
   Elsewhere the class stays CPython's alone, its methods compiled.
 
 ### Changed

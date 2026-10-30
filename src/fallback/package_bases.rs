@@ -124,6 +124,58 @@ fn package_subclasses(entry: &Path) -> Vec<(String, String, BTreeSet<String>, bo
     found
 }
 
+/// v0.10 accept 5: what the other modules of `entry`'s package do with
+/// its top-level classes (`exc_escape::reach`): each reaches them by the
+/// names it imports them as, or as attributes of the names it binds the
+/// entry module to.
+pub(super) fn reach_in_package(entry: &Path) -> super::exc_escape::Reach {
+    let mut out = super::exc_escape::Reach::default();
+    let Some(package) = Package::read(entry) else {
+        return out;
+    };
+    let (entry, target, parsed) = (&package.entry, &package.target, &package.parsed);
+    let Some((_, _, _, own)) = parsed.iter().find(|(file, ..)| file == entry) else {
+        return out;
+    };
+    let candidates: BTreeSet<String> = own
+        .body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::ClassDef(class) => Some(class.name.to_string()),
+            _ => None,
+        })
+        .collect();
+    let exports = re_exports(parsed);
+    let prefix = format!("{target}.");
+    for (file, qual, is_package, module) in parsed {
+        if file == entry {
+            continue;
+        }
+        let mut scan = Scan::new(qual, *is_package);
+        scan.body(&module.body);
+        let mut local: BTreeMap<String, String> = BTreeMap::new();
+        let mut modules: BTreeSet<String> = BTreeSet::new();
+        for (name, dotted) in &scan.bound {
+            let resolved = resolve_export(&exports, dotted).unwrap_or_else(|| dotted.clone());
+            if resolved == *target {
+                modules.insert(name.clone());
+            } else if let Some(class) = resolved.strip_prefix(&prefix)
+                && candidates.contains(class)
+            {
+                local.insert(name.clone(), class.to_string());
+            }
+        }
+        out.extend(super::exc_escape::reach(
+            &module.body,
+            false,
+            &local,
+            &modules,
+            &candidates,
+        ));
+    }
+    out
+}
+
 /// The entry module's package, its modules parsed.
 struct Package {
     /// The entry file, canonical.

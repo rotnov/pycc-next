@@ -52,6 +52,14 @@ o = errors.Overrated(3)
 print(o.show(), o.rate, common.Rated(2).show(), mro(errors.Overrated))
 du = errors.Duo(4)
 print(du.show(), du.left, isinstance(du, ValueError), mro(errors.Duo))
+
+
+class Through(errors.PinAlias, OSError):
+    pass
+
+
+th = Through(5)
+print(th.pin, mro(Through))
 p = PySub("z")
 print(str(p), mro(PySub))
 try:

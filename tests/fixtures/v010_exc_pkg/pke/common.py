@@ -41,6 +41,13 @@ class Lefty(Exception):
         return "left " + str(self.left)
 
 
+class Pinned(Exception):
+    """Would have a layout, but `errors.PinAlias` binds it to another name."""
+
+    def __init__(self, pin: int) -> None:
+        self.pin = pin
+
+
 class Clash(Exception):
     """Named as a class of `errors` is: each has a layout of its own."""
 

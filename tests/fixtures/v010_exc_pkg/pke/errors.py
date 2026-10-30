@@ -1,5 +1,5 @@
 """Exception classes deriving from `common`'s."""
-from .common import Lefty, Owned, PkgError, Rated
+from .common import Lefty, Owned, PkgError, Pinned, Rated
 
 
 class KeyMissing(PkgError):
@@ -28,6 +28,9 @@ class Overrated(Rated):
     """`rate` is a class-level property here."""
 
     rate = property(lambda self: 99, lambda self, value: None)
+
+
+PinAlias = Pinned
 
 
 class Duo(Lefty, ValueError):

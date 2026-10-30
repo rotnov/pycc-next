@@ -130,6 +130,36 @@ fn the_layout_is_native() {
     );
 }
 
+/// A layout class reached through an alias, and a class statement over the
+/// alias (`tests/fixtures/v010_exc_alias.py`): no class of the module gets a
+/// layout, and the module behaves as its source does.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn an_aliased_class_gets_no_layout() {
+    let script = "import m\nprint(m.run(3), m.plain(4), [c.__name__ for c in m.Through.__mro__], \
+                  [[c for c in k.__mro__ if c.__module__ == 'pycc'] for k in (m.Aliased, m.Plain)])\n\
+                  class Again(m.Alias, KeyError):\n    pass\nprint(Again(1).code if hasattr(Again(1), 'code') \
+                  else 'none', [c.__name__ for c in Again.__mro__][:3])\n";
+    let compiled = ScratchDir::new("v010_exc_alias").expect("scratch");
+    let source = fixture("v010_exc_alias", &compiled, "m.py");
+    let build = pycc()
+        .args(["build", "--ext", "--non-strict"])
+        .arg(&source)
+        .arg("-o")
+        .arg(compiled.join("m"))
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&build.stderr));
+    std::fs::remove_file(&source).expect("import the artifact");
+    let plain = ScratchDir::new("v010_exc_alias_src").expect("scratch");
+    fixture("v010_exc_alias", &plain, "m.py");
+    let ours = run(&compiled, script);
+    let theirs = run(&plain, script);
+    assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
+    assert_eq!(text(&ours.stdout), text(&theirs.stdout), "{}", text(&ours.stderr));
+    assert!(text(&ours.stdout).contains("[[], []]"), "{}", text(&ours.stdout));
+}
+
 /// Raising, catching, pickling and dropping the exceptions frees what they
 /// allocate: an object and its native instance hold each other, a cycle the
 /// collector frees.
@@ -219,12 +249,13 @@ fn package_matches_cpython(release: bool) {
             "import sys; sys.path.insert(0, '.')\nimport pke\n\
              k = pke.KeyMissing('a', 'b')\ns = pke.Sub(1, 'w', 'e')\n\
              print('key' in k.__dict__, 'code' in s.__dict__, 'extra' in s.__dict__)\n\
-             print('rate' in pke.common.Rated(1).__dict__, 'left' in pke.common.Lefty(1).__dict__)\n",
+             print('rate' in pke.common.Rated(1).__dict__, 'left' in pke.common.Lefty(1).__dict__, \
+             'pin' in pke.common.Pinned(1).__dict__)\n",
         )
         .current_dir(&*built)
         .output()
         .expect("python3 should spawn");
-    assert_eq!(text(&out.stdout), "False False True\nTrue True\n", "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "False False True\nTrue True True\n", "{}", text(&out.stderr));
 }
 
 #[test]

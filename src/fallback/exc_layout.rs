@@ -38,7 +38,9 @@
 //! layout some class carrying it would show otherwise than CPython (a
 //! subclass binding one of its attributes, listing several bases or off the
 //! allowlist, here or in another module of the package) is dropped with
-//! the chain it extends, to a fixpoint.
+//! the chain it extends, to a fixpoint. A class reached otherwise than by
+//! name, or a module with a class statement whose base the planner cannot
+//! resolve, gets none (`exc_escape`).
 
 use super::*;
 use pycc_ast::{Expr, StmtClassDef};
@@ -96,9 +98,20 @@ impl Plan {
     /// layouts it carries CPython's again, and the planning starts over
     /// without them.
     pub(super) fn exc_layouts(&self) -> Vec<Layout> {
-        let mut denied: BTreeSet<usize> = BTreeSet::new();
+        // A class a base the planner cannot resolve may derive from, or
+        // reached otherwise than by name (`exc_escape`), gets none.
+        let mut reach = self.own_reach().clone();
+        reach.extend(self.package_reach.clone());
+        if reach.unknown_base {
+            return Vec::new();
+        }
+        let mut denied: BTreeSet<usize> = (0..self.top)
+            .filter(|&index| {
+                matches!(&self.stmts[index].kind, Kind::Class(name) if reach.escaped.contains(name))
+            })
+            .collect();
         loop {
-            match self.layouts_denying(&denied) {
+            match self.layouts_denying(&denied, &reach) {
                 Ok(layouts) => return layouts,
                 Err(owners) => denied.extend(owners),
             }
@@ -108,7 +121,11 @@ impl Plan {
     /// [`Self::exc_layouts`] with the classes at `denied` given no layout
     /// of their own: the layouts, or the owners of a chain of layouts a
     /// class cannot carry as CPython would (never one of `denied`).
-    fn layouts_denying(&self, denied: &BTreeSet<usize>) -> Result<Vec<Layout>, Vec<usize>> {
+    fn layouts_denying(
+        &self,
+        denied: &BTreeSet<usize>,
+        reach: &exc_escape::Reach,
+    ) -> Result<Vec<Layout>, Vec<usize>> {
         // The module's exception classes so far, and what each carries.
         let mut states: BTreeMap<String, State> = BTreeMap::new();
         // Every top-level class so far -> the names bound at class level
@@ -235,6 +252,7 @@ impl Plan {
                 // package derive from it.
                 let overrides = self.package_overrides.get(name);
                 let shadowed = self.package_multi.contains(name.as_str())
+                    || reach.escaped.contains(name.as_str())
                     || match &bound {
                     Some(bound) => layouts[at].fields.iter().any(|field| {
                         bound.contains(field) || overrides.is_some_and(|names| names.contains(field))
@@ -248,6 +266,23 @@ impl Plan {
             states.insert(name.clone(), state);
         }
         Ok(layouts)
+    }
+
+    /// What the module does with its own top-level classes
+    /// (`exc_escape::reach`), computed once.
+    fn own_reach(&self) -> &exc_escape::Reach {
+        self.own_reach.get_or_init(|| {
+            let classes: BTreeSet<String> = self
+                .ast
+                .iter()
+                .filter_map(|stmt| match stmt {
+                    Stmt::ClassDef(class) => Some(class.name.to_string()),
+                    _ => None,
+                })
+                .collect();
+            let local = classes.iter().map(|c| (c.clone(), c.clone())).collect();
+            exc_escape::reach(&self.ast, true, &local, &BTreeSet::new(), &classes)
+        })
     }
 
     /// The owners of layouts `at` and of every layout they extend.

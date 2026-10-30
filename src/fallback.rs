@@ -46,6 +46,7 @@ mod attach;
 mod builtins;
 mod cascade;
 mod driver;
+mod exc_escape;
 mod exc_layout;
 mod exc_names;
 mod exceptions;
@@ -254,6 +255,12 @@ pub(crate) struct Plan {
     /// package with several bases derives from
     /// (`package_bases::multi_based_in_package`): none has a layout.
     package_multi: BTreeSet<String>,
+    /// v0.10: what the other modules of the entry's package do with its
+    /// classes (`package_bases::reach_in_package`).
+    package_reach: exc_escape::Reach,
+    /// v0.10: what the module itself does with its classes
+    /// (`exc_escape::reach`), computed once.
+    own_reach: std::sync::OnceLock<exc_escape::Reach>,
     /// The nested `def`s and `lambda`s of compiled functions that CPython
     /// runs, their enclosing functions compiled (`nested`).
     nested: Vec<nested::Nested>,
@@ -426,6 +433,8 @@ impl Plan {
             package_exceptions: BTreeMap::new(),
             package_overrides: BTreeMap::new(),
             package_multi: BTreeSet::new(),
+            package_reach: exc_escape::Reach::default(),
+            own_reach: std::sync::OnceLock::new(),
             nested: Vec::new(),
         })
     }
@@ -441,6 +450,7 @@ impl Plan {
             self.package_exceptions = package_bases::exceptions_from_package(path);
             self.package_overrides = package_bases::overridden_in_package(path);
             self.package_multi = package_bases::multi_based_in_package(path);
+            self.package_reach = package_bases::reach_in_package(path);
         }
         self.set_entry_dir(path.parent().map(Path::to_path_buf));
     }
