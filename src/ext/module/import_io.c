@@ -140,12 +140,13 @@ done:
  * 1. The import runs `builtins.__import__(module, None, None, fromlist, 0)`
  *    with the statement's *whole* fromlist, as `IMPORT_NAME` does, so a
  *    package whose submodule import sets another listed attribute still
- *    works. It runs once per name rather than once per statement; that
- *    repeats no binding and raises nothing new, because
- *    `_handle_fromlist` skips every name already bound. The two
- *    observable differences -- an overridden `__import__` sees N calls,
- *    and a failed finder lookup for a missing `pkg.<name>` repeats -- are
- *    recorded in `docs/RUNTIME.md`.
+ *    works. It runs once per statement, as `IMPORT_NAME` does: the first
+ *    name's call keeps the module (`pycc_ext_from_statement`) for the
+ *    statement's next names. Only when an attribute lookup between two
+ *    names ran another such statement, or the GIL went to another thread
+ *    running one, does a later name import again; that repeats no binding
+ *    and raises nothing new, because `_handle_fromlist` skips every name
+ *    already bound.
  * 2. `IMPORT_FROM`: the attribute when the module has one. On a missing
  *    attribute only, the `sys.modules` entry `<mod.__name__>.<name>`, so a
  *    submodule the fromlist import just loaded (`from xml import dom`) is
@@ -179,6 +180,64 @@ done:
  * global that binds it, on the same rule as `pycc_ext_obj_import`: a
  * re-import or rebind releases it, and the last value is never released.
  */
+/*
+ * The statement in progress: `from m import a, b, c` compiles to one call
+ * per name, in order, and CPython calls `__import__` once for the statement
+ * (`IMPORT_NAME`), then takes each name from its result (`IMPORT_FROM`).
+ * The first call imports and keeps the module here; the next ones of the
+ * same statement (the next index, the same module and fromlist spelled the
+ * same -- each name's call has its own copy of the constants -- the same
+ * level, importing module and thread) take the kept module, and the last
+ * one, or a failure, drops it. A call that finds another statement's entry
+ * (a nested import the attribute lookups ran, or another thread) imports
+ * again, as before.
+ */
+static struct {
+    PyThreadState *tstate;
+    PyccExtModule *m;
+    const char *const *fromlist;
+    long long nfrom;
+    const char *module_name;
+    PyObject *globals;
+    long long level;
+    long long next;
+    PyObject *module;
+    PyObject *names;
+} pycc_ext_from_statement;
+
+static int pycc_ext_from_statement_is(PyccExtModule *m, const char *module_name,
+                                      const char *const *fromlist, long long nfrom,
+                                      PyObject *globals, long long level, long long index)
+{
+    long long i;
+
+    if (pycc_ext_from_statement.module == NULL
+        || pycc_ext_from_statement.tstate != PyThreadState_Get()
+        || pycc_ext_from_statement.m != m || pycc_ext_from_statement.nfrom != nfrom
+        || pycc_ext_from_statement.globals != globals
+        || pycc_ext_from_statement.level != level || pycc_ext_from_statement.next != index
+        || strcmp(pycc_ext_from_statement.module_name, module_name) != 0) {
+        return 0;
+    }
+    for (i = 0; i < nfrom; i++) {
+        if (strcmp(pycc_ext_from_statement.fromlist[i], fromlist[i]) != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void pycc_ext_from_statement_clear(void)
+{
+    PyObject *module = pycc_ext_from_statement.module;
+    PyObject *names = pycc_ext_from_statement.names;
+
+    pycc_ext_from_statement.module = NULL;
+    pycc_ext_from_statement.names = NULL;
+    Py_XDECREF(module);
+    Py_XDECREF(names);
+}
+
 static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *module_name,
                                        const char *const *fromlist, long long nfrom,
                                        long long index, long long level)
@@ -187,7 +246,6 @@ static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *modul
     PyObject *import = NULL;
     PyObject *names = NULL;
     PyObject *module = NULL;
-    PyObject *name = NULL;
     PyObject *value = NULL;
     long long i;
     int found;
@@ -212,40 +270,61 @@ static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *modul
             return NULL;
         }
     }
-    found = PyDict_GetItemStringRef(PyEval_GetBuiltins(), "__import__", &import);
-    if (found < 0) {
-        return NULL;
-    }
-    if (found == 0) {
-        PyErr_SetString(PyExc_ImportError, "__import__ not found");
-        return NULL;
-    }
-    names = PyTuple_New((Py_ssize_t)nfrom);
-    if (names == NULL) {
-        goto done;
-    }
-    for (i = 0; i < nfrom; i++) {
-        PyObject *item = PyUnicode_FromString(fromlist[i]);
-        if (item == NULL) {
+    if (index > 0 && pycc_ext_from_statement_is(m, module_name, fromlist, nfrom, globals, level,
+                                                 index)) {
+        module = Py_NewRef(pycc_ext_from_statement.module);
+        names = Py_NewRef(pycc_ext_from_statement.names);
+    } else {
+        found = PyDict_GetItemStringRef(PyEval_GetBuiltins(), "__import__", &import);
+        if (found < 0) {
+            return NULL;
+        }
+        if (found == 0) {
+            PyErr_SetString(PyExc_ImportError, "__import__ not found");
+            return NULL;
+        }
+        names = PyTuple_New((Py_ssize_t)nfrom);
+        if (names == NULL) {
             goto done;
         }
-        /* Steals `item`, even on failure. */
-        if (PyTuple_SetItem(names, (Py_ssize_t)i, item) < 0) {
+        for (i = 0; i < nfrom; i++) {
+            PyObject *item = PyUnicode_FromString(fromlist[i]);
+            if (item == NULL) {
+                goto done;
+            }
+            /* Steals `item`, even on failure. */
+            if (PyTuple_SetItem(names, (Py_ssize_t)i, item) < 0) {
+                goto done;
+            }
+        }
+        module = PyObject_CallFunction(import, "sOOOi", module_name, globals, Py_None, names,
+                                       (int)level);
+        if (module == NULL) {
             goto done;
         }
+        if (index + 1 < nfrom) {
+            pycc_ext_from_statement_clear();
+            pycc_ext_from_statement.tstate = PyThreadState_Get();
+            pycc_ext_from_statement.m = m;
+            pycc_ext_from_statement.fromlist = fromlist;
+            pycc_ext_from_statement.nfrom = nfrom;
+            pycc_ext_from_statement.module_name = module_name;
+            pycc_ext_from_statement.globals = globals;
+            pycc_ext_from_statement.level = level;
+            pycc_ext_from_statement.module = Py_NewRef(module);
+            pycc_ext_from_statement.names = Py_NewRef(names);
+        }
     }
-    module = PyObject_CallFunction(import, "sOOOi", module_name, globals, Py_None, names,
-                                   (int)level);
-    if (module == NULL) {
-        goto done;
+    /* The next name of this statement, or none after the last. */
+    if (pycc_ext_from_statement.module == module) {
+        pycc_ext_from_statement.next = index + 1;
     }
-    name = PyUnicode_FromString(fromlist[index]);
-    if (name == NULL) {
-        goto done;
+    value = pycc_ext_import_from_step(module, PyTuple_GetItem(names, (Py_ssize_t)index));
+    if ((value == NULL || index + 1 == nfrom)
+        && pycc_ext_from_statement.module == module) {
+        pycc_ext_from_statement_clear();
     }
-    value = pycc_ext_import_from_step(module, name);
 done:
-    Py_XDECREF(name);
     Py_XDECREF(module);
     Py_XDECREF(names);
     Py_XDECREF(import);

@@ -37,8 +37,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   A compiled module's `__builtins__` is the builtins' dict, as `exec` stores it in a
   Python module's namespace, instead of the `builtins` module. Own import share: pystache
   10.5M -> 10.1M, mistune 25.9M -> 25.1M, pydantic 99.7M -> 98.5M.
+- A compiled `from m import a, b` statement calls `__import__` once, as CPython does,
+  instead of once per name (v0.11 accept 3); a hook on `builtins.__import__` sees the same
+  calls for the compiled module as for its source.
 
 ### Fixed
+- Importing a compiled package no longer imports `importlib`, `importlib._bootstrap`,
+  `importlib._bootstrap_external` and `importlib.machinery`: its finder takes `ModuleSpec`
+  from the frozen import system. Own import share with the change above: pystache 10.1M ->
+  9.2M, mistune 25.1M -> 25.0M, pydantic 98.5M -> 97.5M.
 - `--non-strict` (native build and `--ext`): fallback code reaching module globals by a
   string -- `eval("c")`, `exec(src)`, `globals()["c"]`, `locals()`/`vars()`/`dir()` at
   module level, or the module object (`sys.modules[__name__]`, `import __main__`) -- now

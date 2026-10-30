@@ -6,11 +6,17 @@ import traceback
 
 sys.path.insert(0, sys.argv[1])
 sys_before = set(dir(sys))
+modules_before = set(sys.modules)
 
 import pkimp
 from pkimp import classes, errors
 
 print("new sys attributes:", sorted(set(dir(sys)) - sys_before))
+# The import machinery the import loads: the compiled package's finder takes
+# `ModuleSpec` from the frozen import system rather than importing
+# `importlib.machinery`.
+print("new importlib modules:",
+      sorted(m for m in set(sys.modules) - modules_before if m.startswith("importlib")))
 
 # A module's namespace names its builtins as `exec` stores them: the dict.
 for mod in (pkimp, classes, errors):
@@ -52,3 +58,35 @@ except ValueError as exc:
     tb = traceback.extract_tb(exc.__traceback__)
     print("traceback", exc, [f.name for f in tb], tb[-1].filename == os.path.join(os.path.dirname(errors.__file__), "errors.py"))
 print("caller", errors.caller_name())
+
+# `from m import a, b, c` calls `__import__` once per statement, as
+# `IMPORT_NAME` does: counted for `json` in compiled functions, including a
+# statement whose second name is missing. (The module-level statement also
+# runs in CPython, for the module namespace, so its count is not CPython's.)
+import builtins
+
+json_imports = []
+real_import = builtins.__import__
+
+
+def counting_import(name, *args, **kwargs):
+    if name == "json":
+        json_imports.append(tuple(args[2]) if len(args) > 2 and args[2] else None)
+    return real_import(name, *args, **kwargs)
+
+
+sys.path.insert(0, os.path.join(sys.argv[1], "vendor"))
+from pkimp import imports
+
+builtins.__import__ = counting_import
+try:
+    print("again", imports.again(), json_imports)
+    del json_imports[:]
+    print("failing", imports.failing(), json_imports)
+    del json_imports[:]
+    print("encoder", imports.encoder())
+    # `a`'s lookup runs `again()`'s statement between the outer one's names.
+    del json_imports[:]
+    print("nested", imports.nested(), json_imports)
+finally:
+    builtins.__import__ = real_import
