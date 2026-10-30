@@ -108,7 +108,9 @@ pub(crate) fn optimize_and_emit(
     }
     // A section per function on ELF, so the assembler lays out each
     // function alone (`crate::function_sections`).
-    let triple = target_machine.get_triple();
+    // ManuallyDrop: a `TargetTriple`'s drop crashes on Windows against the
+    // prebuilt LLVM 22.1.1 (D-029, as in `target_machine::target_machine_for`).
+    let triple = std::mem::ManuallyDrop::new(target_machine.get_triple());
     crate::function_sections::assign(module, &triple.as_str().to_string_lossy());
     let emitting = std::time::Instant::now();
     let objects = if split && let Some(parts) = crate::split_emit::plan(module, member_prefix) {
