@@ -1079,6 +1079,14 @@ Accept:
    and the like), 2,091 -> 1,914 instructions per item (CPython 1,872). The corpus, the
    bench programs, pystache and mistune have no such dict (theirs are returned, appended
    or passed on); pydantic has one.
+   **Review hardening 2026-10-30 (#19):** a display qualifies only when its keys are
+   distinct `str` literals and its values run no code (names, literals, displays of
+   those), so CPython's evaluate-then-store order and its reverse-order release on a
+   raise hold; every key the function looks up, tests or stores is an exact `str` (a
+   literal, a key of the dict from iterating it, a concatenation or conditional of
+   those), never an object that may be a `str` subclass; a narrowed object is stored
+   as itself; and `d[k] = v` releases its value when the key raises (a leak that also
+   affected typed dicts).
 3. **Template and Markdown >= 1.2x:** pystache 0.6.8 and mistune 3.3.4 each run their own
    benchmark >= 1.2x faster than CPython (median of the CI benchmark job, accept 4), with
    their suites passing.
