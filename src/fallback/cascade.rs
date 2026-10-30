@@ -61,6 +61,29 @@ impl Plan {
                 self.mirrored.extend(mirror);
                 continue;
             }
+            // A mirrored type variable whose `TypeVar` lives in the namespace
+            // (its import runs in CPython) is no type variable to compiled
+            // code, which would call `TypeVar` itself: two objects where
+            // CPython makes one, compiled code holding the other. It runs in
+            // CPython alone, and compiled code reads the namespace's.
+            let unmirror: Vec<usize> = self
+                .mirrored
+                .iter()
+                .copied()
+                .filter(|index| {
+                    matches!(self.type_var_assignment(*index), Some(Some(callee)) if globals.contains(callee))
+                })
+                .collect();
+            if !unmirror.is_empty() {
+                for index in unmirror {
+                    self.mirrored.remove(&index);
+                    self.fallback.insert(
+                        index,
+                        "`TypeVar` runs in CPython, so the type variable is made there".to_string(),
+                    );
+                }
+                continue;
+            }
             let objectify: Vec<usize> = (0..self.stmts.len())
                 .filter(|index| {
                     !self.fallback.contains_key(index)

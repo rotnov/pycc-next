@@ -482,3 +482,35 @@ fn fallback_code_reaching_globals_by_a_string_sees_every_global() {
     // variable the code may rebind.
     assert!(plan.mirrored.contains(&0), "{text}");
 }
+
+/// A type variable fallback code reads is mirrored: compiled code only
+/// records it at compile time. When its `TypeVar` lives in the namespace
+/// (the import runs in CPython), compiled code would call `TypeVar` too and
+/// make a second type variable, so the assignment runs in CPython alone.
+#[test]
+fn a_type_variable_is_made_once() {
+    let mirrored = "from typing import TypeVar\nT = TypeVar('T')\nS = (lambda: T)()\n";
+    let mut plan = Plan::new(mirrored, "m.py", NATIVE).expect("parses");
+    plan.absorb(None, &[failure_at(mirrored.find("lambda").unwrap() as u32)]);
+    assert!(plan.mirrored.contains(&1), "{:?}", plan.report_lines());
+    assert!(!plan.fallback.contains_key(&1));
+    // The import itself running in CPython (as one whose names other
+    // fallback code reads may).
+    let source = "from typing import TypeVar\nT = TypeVar('T')\nS = (lambda: T)()\n";
+    let mut plan = Plan::new(source, "m.py", NATIVE).expect("parses");
+    plan.absorb(
+        None,
+        &[
+            failure_at(0),
+            failure_at(source.find("lambda").unwrap() as u32),
+        ],
+    );
+    assert!(!plan.mirrored.contains(&1), "{:?}", plan.report_lines());
+    let report = plan.report_lines().join("\n");
+    assert!(
+        report.contains("`TypeVar` runs in CPython, so the type variable is made there"),
+        "{report}"
+    );
+    let text = plan.render().text;
+    assert!(!text.contains("__pycc_fallback_ns['TypeVar']("), "{text}");
+}
