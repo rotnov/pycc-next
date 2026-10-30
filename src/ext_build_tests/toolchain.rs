@@ -713,6 +713,27 @@ fn a_dt_relr_entry_is_found_in_any_elf_class_and_byte_order() {
     assert!(!has_dt_relr(b""));
 }
 
+/// Whether `cc` links with GNU ld of at least `major.minor` (its
+/// `-print-prog-name=ld`'s `--version`: `GNU ld (GNU Binutils ...) 2.42`).
+fn cc_uses_gnu_ld_at_least(major: u32, minor: u32) -> bool {
+    let Ok(name) = std::process::Command::new("cc").arg("-print-prog-name=ld").output() else {
+        return false;
+    };
+    let ld = String::from_utf8_lossy(&name.stdout).trim().to_string();
+    let Ok(version) = std::process::Command::new(&ld).arg("--version").output() else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&version.stdout);
+    let first = text.lines().next().unwrap_or_default();
+    if !first.starts_with("GNU ld") {
+        return false;
+    }
+    let mut parts = first.rsplit(' ').next().unwrap_or_default().split('.');
+    let number = |part: Option<&str>| part.and_then(|p| p.parse::<u32>().ok());
+    matches!((number(parts.next()), number(parts.next())),
+        (Some(a), Some(b)) if (a, b) >= (major, minor))
+}
+
 /// v0.11: the linker probe answers no when `cc` cannot link, and, on an
 /// ELF host, agrees with the shared object the host's `cc` really makes.
 #[test]
@@ -735,8 +756,9 @@ fn the_linker_probe_reports_what_the_linker_makes() {
         assert!(status.success());
         let packed = has_dt_relr(&std::fs::read(&object).unwrap());
         assert_eq!(linker_packs(std::process::Command::new("cc")), packed);
-        if cfg!(target_arch = "x86_64") && glibc_reads_dt_relr(host_glibc_version().as_deref()) {
-            assert!(packed, "GNU ld packs on x86-64");
+        // One toolchain known to pack: GNU ld 2.38 or newer on x86-64 (CI's).
+        if cfg!(target_arch = "x86_64") && cc_uses_gnu_ld_at_least(2, 38) {
+            assert!(packed, "GNU ld 2.38+ packs on x86-64");
         }
         // Without the flag nothing is packed.
         let plain = scratch.join("plain.so");
