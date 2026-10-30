@@ -1,5 +1,6 @@
 """Imports `pkimp` from the tree in argv[1] and prints what Python code can
 observe of it; the compiled tree must print what the sources print."""
+import os
 import sys
 import traceback
 
@@ -10,6 +11,10 @@ import pkimp
 from pkimp import classes, errors
 
 print("new sys attributes:", sorted(set(dir(sys)) - sys_before))
+
+# A module's namespace names its builtins as `exec` stores them: the dict.
+for mod in (pkimp, classes, errors):
+    print(mod.__name__, "__builtins__", type(vars(mod).get("__builtins__")).__name__)
 
 # Published classes made from their statements. The template every
 # published class derives from (module `pycc`) is a documented deviation.
@@ -45,5 +50,5 @@ try:
     errors.outer(-2)
 except ValueError as exc:
     tb = traceback.extract_tb(exc.__traceback__)
-    print("traceback", exc, [f.name for f in tb], tb[-1].filename.endswith("errors.py"))
+    print("traceback", exc, [f.name for f in tb], tb[-1].filename == os.path.join(os.path.dirname(errors.__file__), "errors.py"))
 print("caller", errors.caller_name())

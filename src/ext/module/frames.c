@@ -13,8 +13,8 @@
  * machinery prints a compiled frame exactly as it prints a Python one.
  *
  * Each record's frame is a real `PyFrameObject` over a code object made for
- * the function on first use (`pycc_fninfo_ready`): `code.replace` of a
- * template, with one `NOP` per position after its `RESUME` and a location
+ * the function on first use (`pycc_fninfo_ready`): the template's
+ * fields, with one `NOP` per position after its `RESUME` and a location
  * table placing NOP `k` at position `k`. A frame object for a record is
  * made by linking a CPython 3.13 `_PyInterpreterFrame` for it onto the
  * thread's frame chain, asking `PyEval_GetFrame()` for its object and
@@ -119,13 +119,23 @@ typedef struct PyccFrameObject {
  * -- the directory of the module's `__file__` joined with the base name of
  * the source path the module was built from. The build path itself when
  * the module has no `__file__`. A new reference, or NULL.
+ *
+ * On POSIX, `posixpath.dirname` and `posixpath.join` are done here (one
+ * per module, at its import: importing `os.path` and calling into it cost
+ * about 15,000 instructions each time); Windows calls `ntpath`, whose
+ * drives and separators are not worth repeating.
  */
 static PyObject *pycc_frames_filename(PyObject *globals, const char *built)
 {
     PyObject *file = PyDict_GetItemString(globals, "__file__");
     const char *base = built;
     const char *p;
+#ifdef _WIN32
     PyObject *os_path, *dir, *joined;
+#else
+    Py_ssize_t len, cut, keep;
+    PyObject *head, *joined;
+#endif
 
     for (p = built; *p; p++) {
         if (*p == '/' || *p == '\\') {
@@ -135,6 +145,7 @@ static PyObject *pycc_frames_filename(PyObject *globals, const char *built)
     if (file == NULL || !PyUnicode_Check(file)) {
         return PyUnicode_FromString(built);
     }
+#ifdef _WIN32
     os_path = PyImport_ImportModule("os.path");
     if (os_path == NULL) {
         return NULL;
@@ -144,14 +155,52 @@ static PyObject *pycc_frames_filename(PyObject *globals, const char *built)
     Py_XDECREF(dir);
     Py_DECREF(os_path);
     return joined;
+#else
+    /* `dirname`: everything up to the last `/`, then trailing `/`s off
+     * unless the head is all `/`s. */
+    len = PyUnicode_GetLength(file);
+    if (len < 0) {
+        return NULL;
+    }
+    cut = PyUnicode_FindChar(file, '/', 0, len, -1);
+    if (cut == -2) {
+        return NULL;
+    }
+    cut += 1;
+    keep = cut;
+    while (keep > 0 && PyUnicode_ReadChar(file, keep - 1) == '/') {
+        keep--;
+    }
+    if (keep == 0) {
+        keep = cut;
+    }
+    if (keep == 0) {
+        /* `join('', base)` is `base`. */
+        return PyUnicode_FromString(base);
+    }
+    head = PyUnicode_Substring(file, 0, keep);
+    if (head == NULL) {
+        return NULL;
+    }
+    /* `join(head, base)`: one `/` between, none added after a `/`. */
+    joined = PyUnicode_FromFormat(
+        PyUnicode_ReadChar(head, keep - 1) == '/' ? "%U%s" : "%U/%s", head, base);
+    Py_DECREF(head);
+    return joined;
+#endif
 }
 
 /* 1 once the mirror is verified, -1 when compiled frames are off, 0 before
  * the first check. */
 static int pycc_frames_state = 0;
-/* `types.FunctionType`, and the template code object `code.replace` copies. */
+/* `types.FunctionType`, and the template code object (`def f(): pass`). */
 static PyObject *pycc_frames_function_type = NULL;
 static PyObject *pycc_frames_template = NULL;
+/* The constants, empty tuple and empty bytes every compiled code object
+ * shares with the template. */
+static PyObject *pycc_frames_consts = NULL;
+static PyObject *pycc_frames_empty_tuple = NULL;
+static PyObject *pycc_frames_empty_bytes = NULL;
 
 static PyccIFrame **pycc_frames_current(PyThreadState *tstate)
 {
@@ -202,8 +251,8 @@ static void pycc_lt_svarint(unsigned char **out, int32_t value)
  */
 static int pycc_fninfo_ready(PyccFnInfo *info)
 {
-    PyObject *bytecode = NULL, *table = NULL, *replace = NULL, *args = NULL;
-    PyObject *kwargs = NULL, *code = NULL, *func = NULL, *globals, *filename = NULL;
+    PyObject *bytecode = NULL, *table = NULL, *args = NULL;
+    PyObject *code = NULL, *func = NULL, *globals, *filename = NULL;
     unsigned char *buf = NULL, *out;
     Py_ssize_t n = (Py_ssize_t)info->npos + 2, i;
     int32_t line = (int32_t)info->firstlineno;
@@ -262,29 +311,69 @@ static int pycc_fninfo_ready(PyccFnInfo *info)
     if (filename == NULL) {
         goto done;
     }
-    replace = PyObject_GetAttrString(pycc_frames_template, "replace");
-    args = PyTuple_New(0);
-    kwargs = Py_BuildValue(
-        "{sOsOsssssOsisi}", "co_code", bytecode, "co_linetable", table,
-        "co_name", info->name, "co_qualname", info->qualname, "co_filename", filename,
-        "co_firstlineno", (int)info->firstlineno, "co_flags",
-        (info->flags & PYCC_FN_INFO_MODULE) ? 0 : (PYCC_CO_OPTIMIZED | PYCC_CO_NEWLOCALS));
-    if (replace == NULL || args == NULL || kwargs == NULL) {
+    /* `types.CodeType(...)` with the template's other fields, positionally:
+     * `code.replace(**changes)` built and parsed a dict of keywords. */
+    if (pycc_frames_consts == NULL) {
+        pycc_frames_consts = PyTuple_Pack(1, Py_None);
+        pycc_frames_empty_tuple = PyTuple_New(0);
+        pycc_frames_empty_bytes = PyBytes_FromStringAndSize("", 0);
+        if (pycc_frames_consts == NULL || pycc_frames_empty_tuple == NULL
+            || pycc_frames_empty_bytes == NULL) {
+            Py_CLEAR(pycc_frames_consts);
+            goto done;
+        }
+    }
+    {
+        PyObject *items[18];
+        Py_ssize_t k;
+        int complete = 1;
+
+        items[0] = PyLong_FromLong(0); /* argcount */
+        items[1] = PyLong_FromLong(0); /* posonlyargcount */
+        items[2] = PyLong_FromLong(0); /* kwonlyargcount */
+        items[3] = PyLong_FromLong(0); /* nlocals */
+        items[4] = PyLong_FromLong(1); /* stacksize */
+        items[5] = PyLong_FromLong((info->flags & PYCC_FN_INFO_MODULE)
+                                       ? 0
+                                       : (PYCC_CO_OPTIMIZED | PYCC_CO_NEWLOCALS));
+        items[6] = Py_NewRef(bytecode);
+        items[7] = Py_NewRef(pycc_frames_consts);
+        items[8] = Py_NewRef(pycc_frames_empty_tuple); /* names */
+        items[9] = Py_NewRef(pycc_frames_empty_tuple); /* varnames */
+        items[10] = Py_NewRef(filename);
+        items[11] = PyUnicode_FromString(info->name);
+        items[12] = PyUnicode_FromString(info->qualname);
+        items[13] = PyLong_FromLong((long)info->firstlineno);
+        items[14] = Py_NewRef(table);
+        items[15] = Py_NewRef(pycc_frames_empty_bytes); /* exceptiontable */
+        items[16] = Py_NewRef(pycc_frames_empty_tuple); /* freevars */
+        items[17] = Py_NewRef(pycc_frames_empty_tuple); /* cellvars */
+        args = PyTuple_New(18);
+        for (k = 0; k < 18; k++) {
+            if (items[k] == NULL) {
+                complete = 0;
+            } else if (args == NULL) {
+                Py_DECREF(items[k]);
+            } else {
+                PyTuple_SetItem(args, k, items[k]);
+            }
+        }
+        if (!complete) {
+            Py_CLEAR(args);
+        }
+    }
+    if (args == NULL) {
         goto done;
     }
-    code = PyObject_Call(replace, args, kwargs);
+    code = PyObject_Call((PyObject *)Py_TYPE(pycc_frames_template), args, NULL);
     if (code == NULL) {
         goto done;
     }
-    /* A function's globals name its builtins, as a Python module's do. */
-    if (PyDict_GetItemString(globals, "__builtins__") == NULL) {
-        PyObject *builtins = PyImport_ImportModule("builtins");
-
-        if (builtins == NULL || PyDict_SetItemString(globals, "__builtins__", builtins) != 0) {
-            Py_XDECREF(builtins);
-            goto done;
-        }
-        Py_DECREF(builtins);
+    /* A function's globals name its builtins, as a Python module's do: the
+     * builtins' dict, which `exec` stores in a module's namespace. */
+    if (PyDict_GetItemString(globals, "__builtins__") == NULL
+        && PyDict_SetItemString(globals, "__builtins__", PyEval_GetBuiltins()) != 0) {
+        goto done;
     }
     func = PyObject_CallFunctionObjArgs(pycc_frames_function_type, code, globals, NULL);
     if (func == NULL) {
@@ -301,9 +390,7 @@ done:
     Py_XDECREF(bytecode);
     Py_XDECREF(filename);
     Py_XDECREF(table);
-    Py_XDECREF(replace);
     Py_XDECREF(args);
-    Py_XDECREF(kwargs);
     Py_XDECREF(code);
     Py_XDECREF(func);
     PyMem_Free(buf);
