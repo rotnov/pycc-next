@@ -28,7 +28,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "${{ github.event_name }}" != pull_request ]; then echo code=true >> "$GITHUB_OUTPUT"; exit 0; fi
-          git diff --name-only "$(git merge-base "$BASE" "$HEAD")" "$HEAD" > changed.txt
+          git diff --name-only --no-renames "$(git merge-base "$BASE" "$HEAD")" "$HEAD" > changed.txt
           code=$(awk '/^docs\/(DEVIATIONS|DIAGNOSTICS)\.md$/ || !/^(blog\/|docs\/|\.claude\/|AGENTS\.md$|CLAUDE\.md$)/' changed.txt)
           if [ -n "$code" ]; then echo code=true; else echo code=false; fi >> "$GITHUB_OUTPUT"
           echo "code-relevant files: ${code:-none}"
