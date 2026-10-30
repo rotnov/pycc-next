@@ -1,6 +1,7 @@
 name: ci
 on:
-  push: { branches: [main] }
+  # Pull requests only: a merge to `main` is not tested again (AGENTS.md: merge only after
+  # a green run against the current `main`).
   pull_request:
   # A manual run (e.g. of a branch); `windows_only` skips the Linux and macOS
   # jobs, to iterate on the Windows job alone.
