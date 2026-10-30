@@ -380,3 +380,69 @@ fn a_member_build_defines_only_prefixed_symbols() {
         }
     }
 }
+
+/// A member build compiles against the package build's probe of the
+/// interpreter (`--ext-probe`) instead of starting the interpreter again: it
+/// builds with no interpreter to start at all (its CPython source is then
+/// embedded uncompiled), and a probe it cannot read is an environment
+/// failure (exit 2) that names the file.
+#[cfg(unix)]
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_member_build_compiles_against_the_package_builds_probe() {
+    let dir = ScratchDir::new("package_whole_probe").expect("scratch");
+    let package = dir.join("p");
+    std::fs::create_dir_all(&package).expect("create");
+    std::fs::write(package.join("__init__.py"), "").expect("write");
+    let source = package.join("m.py");
+    std::fs::write(
+        &source,
+        "def f(x: int) -> int:\n    return x + 1\n\nclass C:\n    pass\n",
+    )
+    .expect("write");
+    let probe = python()
+        .args([
+            "-I",
+            "-c",
+            "import os,sys,sysconfig\nprint('%d.%d' % sys.version_info[:2])\n\
+             print(sysconfig.get_path('include'))\nprint(os.path.join(sys.base_prefix, 'libs'))",
+        ])
+        .output()
+        .expect("python should spawn");
+    assert!(probe.status.success(), "{}", text(&probe.stderr));
+    let probe_file = dir.join("probe.txt");
+    std::fs::write(&probe_file, &probe.stdout).expect("write the probe");
+    let member = |probe: &Path| {
+        let out = dir.join("member");
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).expect("create");
+        pycc()
+            .arg("build")
+            .arg(&source)
+            .arg("-o")
+            .arg(&out)
+            .args([
+                "--ext",
+                "--non-strict",
+                "--release",
+                "--foreign-relative-imports",
+                "--package-member",
+                "p.m",
+                "--member-threads",
+                "1",
+                "--ext-probe",
+            ])
+            .arg(probe)
+            .env("PYCC_PYTHON", "/nonexistent/pycc-test-python")
+            .env_remove("PYCC_PYTHON_INCLUDE")
+            .output()
+            .expect("pycc should spawn")
+    };
+    let built = member(&probe_file);
+    assert!(built.status.success(), "{}", text(&built.stderr));
+    assert!(dir.join("member").join("member.txt").is_file());
+    let unreadable = member(&dir.join("absent.txt"));
+    let err = text(&unreadable.stderr);
+    assert_eq!(unreadable.status.code(), Some(2), "{err}");
+    assert!(err.contains("absent.txt"), "{err}");
+}
