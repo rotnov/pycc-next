@@ -101,18 +101,37 @@ static const PyccPkgMember *pycc_pkg_lookup(PyObject *fullname)
     return pycc_pkg_member(full + pkg_len + 1);
 }
 
-/* `importlib.machinery.ModuleSpec`. */
+/*
+ * `importlib.machinery.ModuleSpec`, a new reference: the class of the
+ * import system the interpreter froze in (`_frozen_importlib`, which
+ * `importlib._bootstrap` and `importlib.machinery` re-export), read from
+ * `sys.modules` once. Importing `importlib.machinery` for it imported
+ * `importlib` and three of its modules no import of the sources does.
+ */
+static PyObject *pycc_pkg_spec_type_cached = NULL;
+
 static PyObject *pycc_pkg_spec_type(void)
 {
-    PyObject *machinery = PyImport_ImportModule("importlib.machinery");
-    PyObject *spec_type;
+    PyObject *name, *bootstrap;
 
-    if (machinery == NULL) {
+    if (pycc_pkg_spec_type_cached != NULL) {
+        return Py_NewRef(pycc_pkg_spec_type_cached);
+    }
+    name = PyUnicode_FromString("_frozen_importlib");
+    if (name == NULL) {
         return NULL;
     }
-    spec_type = PyObject_GetAttrString(machinery, "ModuleSpec");
-    Py_DECREF(machinery);
-    return spec_type;
+    bootstrap = PyImport_GetModule(name);
+    Py_DECREF(name);
+    if (bootstrap == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_ImportError, "_frozen_importlib is not loaded");
+        }
+        return NULL;
+    }
+    pycc_pkg_spec_type_cached = PyObject_GetAttrString(bootstrap, "ModuleSpec");
+    Py_DECREF(bootstrap);
+    return Py_XNewRef(pycc_pkg_spec_type_cached);
 }
 
 /*
