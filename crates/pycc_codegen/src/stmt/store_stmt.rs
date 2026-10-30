@@ -409,10 +409,15 @@ pub(crate) fn emit_dict_set_stmt<'ctx>(
     let value_scalar = emit_expr(context, builder, module, rt, user_functions, locals, value);
     let value_scalar = list::coerce_element(context, builder, rt, value_scalar, &value_ty);
     let value_word = list::element_word(context, builder, rt, &value_ty, value, value_scalar);
+    // The value (owned once `element_word` took it) is released if the
+    // key raises; the insert adopts it.
+    let mark = heap_rc::pending_mark(rt);
+    heap_rc::hold_owned_value(rt, &value_ty, &value_scalar);
     let dict_ptr = emit_dict_name_read(context, builder, module, rt, user_functions, locals, dict);
     let key_scalar = emit_expr(context, builder, module, rt, user_functions, locals, key);
     let key_scalar = list::coerce_element(context, builder, rt, key_scalar, &key_ty);
     let key_word = list::element_word(context, builder, rt, &key_ty, key, key_scalar);
+    heap_rc::truncate_pending(rt, mark);
     build_dict_set(builder, rt, dict_ptr, key_word, value_word);
     guard_statement_effects(context, builder, rt);
     Ok(())

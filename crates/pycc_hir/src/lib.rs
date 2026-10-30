@@ -231,6 +231,12 @@ pub const YIELD_FROM_MARKER: &str = "<yield from>";
 /// `StopIteration.value`.
 pub const GEN_RETURN_MARKER: &str = "<generator return>";
 
+/// The callee of a non-strict function's `str`-keyed dict display that
+/// never escapes it (`pycc_types::non_strict::object_dicts`): its keys and
+/// values, alternating. Typed `dict[str, object]` when a value is a CPython
+/// object (each other value boxed), else as the display itself.
+pub const OBJECT_DICT_MARKER: &str = "<object dict>";
+
 /// Whether `body` holds a call of [`YIELD_MARKER`] anywhere: a generator
 /// function's body (`func::lower_function` marks its return type).
 pub fn body_yields(body: &[HirStmt]) -> bool {

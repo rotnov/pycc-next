@@ -11,6 +11,13 @@
 //!   its own methods when it is a subclass (`__missing__`, overridden
 //!   `__getitem__`/`__contains__`/`__setitem__`, `OrderedDict`,
 //!   `defaultdict`); a `str` literal crosses as CPython's interned string.
+//! * `v10_native_dicts`: a function's `str`-keyed display of objects that
+//!   never escapes is a native dict (insertion order, overwrites, `in`,
+//!   `len`, truth, `KeyError`, the iteration's `RuntimeError`, no leaked
+//!   reference or dict); one that may escape (returned, passed, stored,
+//!   compared, pickled, viewed) is CPython's, identity and all.
+//! * `v10_native_dicts_refused`: a function the checker does not admit with
+//!   a native dict keeps its CPython dict, the module's others native.
 
 use pycc_scratch::ScratchDir;
 use std::path::{Path, PathBuf};
@@ -101,4 +108,78 @@ fn exact_dicts_ext() {
 #[test]
 fn exact_dicts_ext_release() {
     ext("v10_exact_dicts", &["--release"]);
+}
+
+/// The functions of `name`'s `--ext --non-strict` build whose own code
+/// calls `callee` (from the LLVM IR `PYCC_DUMP_LLVM` writes).
+fn functions_calling(name: &str, callee: &str) -> Vec<String> {
+    let dir = ScratchDir::new(&format!("{name}_ir")).expect("scratch");
+    let source = fixture(name, &dir, "m.py");
+    let ir = dir.join("m.ll");
+    let build = pycc()
+        .args(["build", "--ext", "--non-strict"])
+        .arg(&source)
+        .arg("-o")
+        .arg(dir.join("m"))
+        .env("PYCC_DUMP_LLVM", &ir)
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&build.stderr));
+    let dump = std::fs::read_to_string(dir.join("m.ll.pre.ll")).expect("the IR dump");
+    let mut out: Vec<String> = Vec::new();
+    let mut current: Option<String> = None;
+    for line in dump.lines() {
+        if let Some(rest) = line.strip_prefix("define ") {
+            current = rest
+                .split_once("@pyfn_")
+                .and_then(|(_, name)| name.split_once('('))
+                .map(|(name, _)| name.to_string());
+        } else if line.starts_with('}') {
+            current = None;
+        } else if let Some(function) = &current
+            && line.contains(&format!("@{callee}("))
+            && !out.contains(function)
+        {
+            out.push(function.clone());
+        }
+    }
+    out
+}
+
+#[test]
+fn native_dicts_ext() {
+    ext("v10_native_dicts", &[]);
+}
+
+#[test]
+fn native_dicts_ext_release() {
+    ext("v10_native_dicts", &["--release"]);
+}
+
+/// The dicts that never escape are native; every one that may is CPython's.
+#[test]
+fn native_dicts_are_exactly_the_non_escaping_ones() {
+    let native = functions_calling("v10_native_dicts", "pycc_rt_dict_new");
+    for function in ["tally", "order", "tests", "missing", "grow", "nested", "rebound", "narrowed", "bad_key"] {
+        assert!(
+            native.iter().any(|f| f == function),
+            "{function} should build a native dict: {native:?}"
+        );
+    }
+    for function in ["returned", "passed", "stored", "compared", "pickled", "viewed", "duplicated", "raising_value", "subclass_key"] {
+        assert!(
+            !native.iter().any(|f| f == function),
+            "{function} must keep CPython's dict: {native:?}"
+        );
+    }
+}
+
+/// A function the checker does not admit with a native dict (a CPython
+/// object as a key) keeps its CPython dict and runs as CPython does; the
+/// module's other functions keep theirs native.
+#[test]
+fn a_function_that_does_not_check_with_native_dicts_keeps_cpython_dicts() {
+    ext("v10_native_dicts_refused", &[]);
+    let native = functions_calling("v10_native_dicts_refused", "pycc_rt_dict_new");
+    assert_eq!(native, vec!["local".to_string()]);
 }

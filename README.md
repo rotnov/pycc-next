@@ -447,6 +447,9 @@ and setuptools): that is the test harness, not a change to the packages.
   works, and publishes the module's variables and imports as module attributes and
   its classes' constants as class attributes. Known gaps are listed in
   `docs/DEVIATIONS.md`.
+  A `str`-keyed dict display holding CPython objects is a CPython `dict`, read through
+  the dict API; one a function only reads, stores into, tests, measures and iterates
+  (it never escapes) is a native dict instead.
 - **Per-function fallback** (non-strict only): a construct pycc cannot compile yet (a
   call of a `lambda` expression, ...) sends only the smallest enclosing function or method to
   CPython, kept as Python source and run by CPython's own `exec` in the module's
