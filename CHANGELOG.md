@@ -17,6 +17,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   sees every compiled global, a compiled class's instance included, where it raised
   `NameError` for any global no statement of it names (issue #20). A variable such code
   binds lives in the module namespace, so compiled code reads back what it stores.
+- `--non-strict`: a module-level type variable (`T = TypeVar("T")`) whose `TypeVar`
+  import runs in CPython was made twice, by compiled code and by the CPython copy of the
+  assignment, and compiled code held the second object; it runs in CPython alone now, so
+  the import makes one and compiled code reads it (importing pydantic made 39 type
+  variables against CPython's 22; 22 now, and 0.4M fewer instructions).
 
 ## [0.10.0] - 2026-10-30
 
