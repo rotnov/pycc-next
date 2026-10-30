@@ -10,6 +10,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   publishes both (v0.11 accept 4); a workload CPython runs in under 0.1 s prints and
   publishes in ms.
 
+### Fixed
+- `--non-strict` (native build and `--ext`): fallback code reaching module globals by a
+  string -- `eval("c")`, `exec(src)`, `globals()["c"]`, `locals()`/`vars()`/`dir()` at
+  module level, or the module object (`sys.modules[__name__]`, `import __main__`) -- now
+  sees every compiled global, a compiled class's instance included, where it raised
+  `NameError` for any global no statement of it names (issue #20). A variable such code
+  binds lives in the module namespace, so compiled code reads back what it stores.
+
 ## [0.10.0] - 2026-10-30
 
 ### Added
