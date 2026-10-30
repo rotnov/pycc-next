@@ -260,6 +260,9 @@ pub(crate) struct Plan {
     /// v0.10: what the module itself does with its classes
     /// (`exc_escape::reach`), computed once.
     own_reach: std::sync::OnceLock<exc_escape::Reach>,
+    /// v0.10: every name the module binds at module scope
+    /// (`exc_escape::module_scope`), computed once.
+    module_bound: std::sync::OnceLock<BTreeSet<String>>,
     /// The nested `def`s and `lambda`s of compiled functions that CPython
     /// runs, their enclosing functions compiled (`nested`).
     nested: Vec<nested::Nested>,
@@ -434,6 +437,7 @@ impl Plan {
             own_graph: std::sync::OnceLock::new(),
             package_reach: exc_escape::Reach::default(),
             own_reach: std::sync::OnceLock::new(),
+            module_bound: std::sync::OnceLock::new(),
             nested: Vec::new(),
         })
     }

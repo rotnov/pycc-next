@@ -448,6 +448,9 @@ struct Scan<'a> {
     /// The module-level names bound more than once
     /// (`exc_escape::ambiguous_names`): [`Scan::dotted`] resolves none.
     ambiguous: BTreeSet<String>,
+    /// Every name bound at module scope (`exc_escape::module_scope`): a
+    /// base spelled like a builtin is the builtin only when not among them.
+    module_bound: BTreeSet<String>,
 }
 
 impl<'a> Scan<'a> {
@@ -459,6 +462,7 @@ impl<'a> Scan<'a> {
             bases: Vec::new(),
             defines: BTreeMap::new(),
             ambiguous: BTreeSet::new(),
+            module_bound: BTreeSet::new(),
         }
     }
 
@@ -467,9 +471,49 @@ impl<'a> Scan<'a> {
     /// which none goes through).
     fn module(qual: &'a str, is_package: bool, body: &[Stmt]) -> Self {
         let mut scan = Self::new(qual, is_package);
+        let scope = super::exc_escape::module_scope(body);
+        // The module-scope imports alone: one inside a function binds a
+        // local name, not the module's.
+        for import in &scope.imports {
+            scan.import(import);
+        }
         scan.body(body);
-        scan.ambiguous = super::exc_escape::ambiguous_names(body);
+        scan.ambiguous = scope.ambiguous;
+        scan.module_bound = scope.bound;
         scan
+    }
+
+    /// Records the bindings of import statement `stmt` (module scope).
+    fn import(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::ImportFrom(import) => {
+                let Some(module) =
+                    self.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
+                else {
+                    return;
+                };
+                for alias in &import.names {
+                    let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
+                    self.bound
+                        .insert(local, format!("{module}.{}", alias.name.as_str()));
+                }
+            }
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    let name = alias.name.as_str();
+                    match &alias.asname {
+                        Some(asname) => {
+                            self.bound.insert(asname.to_string(), name.to_string());
+                        }
+                        None => {
+                            let root = name.split('.').next().unwrap_or(name);
+                            self.bound.insert(root.to_string(), root.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// The absolute module a `from` import at `level` of `module` names.
@@ -513,32 +557,8 @@ impl<'a> Scan<'a> {
 
     fn stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::ImportFrom(import) => {
-                let Some(module) =
-                    self.resolve(import.level, import.module.as_ref().map(|m| m.as_str()))
-                else {
-                    return;
-                };
-                for alias in &import.names {
-                    let local = alias.asname.as_ref().unwrap_or(&alias.name).to_string();
-                    self.bound
-                        .insert(local, format!("{module}.{}", alias.name.as_str()));
-                }
-            }
-            Stmt::Import(import) => {
-                for alias in &import.names {
-                    let name = alias.name.as_str();
-                    match &alias.asname {
-                        Some(asname) => {
-                            self.bound.insert(asname.to_string(), name.to_string());
-                        }
-                        None => {
-                            let root = name.split('.').next().unwrap_or(name);
-                            self.bound.insert(root.to_string(), root.to_string());
-                        }
-                    }
-                }
-            }
+            // Imports are `Scan::module`'s, module scope only.
+            Stmt::ImportFrom(_) | Stmt::Import(_) => {}
             Stmt::ClassDef(class) => {
                 for base in class.bases() {
                     // `Box[int]` subclasses `Box` (its `__mro_entries__`).
@@ -705,7 +725,7 @@ pub(super) fn exceptions_from_package(entry: &Path) -> BTreeMap<String, PackageE
         for base in class.bases() {
             if let Expr::Name(base) = base
                 && pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base.id.as_str())
-                && !scan.bound.contains_key(base.id.as_str())
+                && !scan.module_bound.contains(base.id.as_str())
             {
                 exception = true;
                 if super::exc_names::builtin_reduces_itself(base.id.as_str()) {

@@ -133,8 +133,15 @@ fn the_layout_is_native() {
 /// Builds fixture `name` as `m` (`--ext --non-strict`), runs `script` in
 /// CPython against it and against its source, and checks the outputs match;
 /// then runs `native` against the compiled module alone (what only it
-/// shows, its templates): that run's stdout.
-fn single_module_matches(name: &str, script: &str, native: &str) -> String {
+/// shows, its templates): that run's stdout. Each of `beside` (a fixture,
+/// the file name it takes) lies next to the module in both runs,
+/// uncompiled.
+fn single_module_matches(
+    name: &str,
+    beside: &[(&str, &str)],
+    script: &str,
+    native: &str,
+) -> String {
     let compiled = ScratchDir::new(&format!("{name}_built")).expect("scratch");
     let source = fixture(name, &compiled, "m.py");
     let build = pycc()
@@ -148,6 +155,10 @@ fn single_module_matches(name: &str, script: &str, native: &str) -> String {
     std::fs::remove_file(&source).expect("import the artifact");
     let plain = ScratchDir::new(&format!("{name}_src")).expect("scratch");
     fixture(name, &plain, "m.py");
+    for (file, as_name) in beside {
+        fixture(file, &compiled, as_name);
+        fixture(file, &plain, as_name);
+    }
     let ours = run(&compiled, script);
     let theirs = run(&plain, script);
     assert_eq!(theirs.status.code(), Some(0), "{}", text(&theirs.stderr));
@@ -175,6 +186,7 @@ fn templates_of(classes: &str) -> String {
 fn an_aliased_class_gets_no_layout() {
     let out = single_module_matches(
         "v010_exc_alias",
+        &[],
         "import m\nprint(m.run(3), m.plain(4), [c.__name__ for c in m.Through.__mro__])\n\
          class Again(m.Alias, KeyError):\n    pass\nprint(Again(1).code if hasattr(Again(1), 'code') \
          else 'none', [c.__name__ for c in Again.__mro__][:3])\n",
@@ -192,6 +204,7 @@ fn an_aliased_class_gets_no_layout() {
 fn bases_of_unexamined_class_statements_get_no_layout() {
     let out = single_module_matches(
         "v010_exc_nested",
+        &[],
         "import m\nC = m.factory()\nprint(C(3).code, m.Cond(4).code, m.Guard(5).code, \
          m.Dec(6).code, m.REGISTRY[0].__name__, m.kept(7))\n",
         &templates_of("m.Kept, m.Factory, m.Conditional, m.Guarded, m.Decorated"),
@@ -207,6 +220,7 @@ fn bases_of_unexamined_class_statements_get_no_layout() {
 fn every_class_statement_of_a_rebound_name_counts() {
     let out = single_module_matches(
         "v010_exc_rebound",
+        &[],
         "import m\nprint(m.make(3), [c.__name__ for c in m.B.__mro__])\n",
         &templates_of("m.A,"),
     );
@@ -220,6 +234,7 @@ fn every_class_statement_of_a_rebound_name_counts() {
 fn exec_withdraws_every_layout() {
     let out = single_module_matches(
         "v010_exc_exec",
+        &[],
         "import m\nM = m.made()\nprint(M(8).code, [c.__name__ for c in M.__mro__])\n",
         &templates_of("m.Base,"),
     );
@@ -412,6 +427,38 @@ fn a_name_imported_twice_withdraws_the_layout() {
         "import pkd\nprint(pkd.make(3), [c.__name__ for c in pkd.B.__mro__ \
          if c.__module__ != 'pycc'], pkd.b.A.__name__)\n",
         "import pkd\nprint([c for c in pkd.A.__mro__ if c.__module__ == 'pycc'])\n",
+    );
+    assert_eq!(out, "[]\n");
+}
+
+/// A base spelled like a builtin exception class but imported
+/// (`from helper import Exception`, `tests/fixtures/v010_exc_shadow_builtin.py`):
+/// it is not the builtin, so the class gets no layout and its store reaches
+/// the imported class's property.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn an_imported_builtin_spelling_is_no_builtin() {
+    let out = single_module_matches(
+        "v010_exc_shadow_builtin",
+        &[("v010_exc_helper", "helper.py")],
+        "import m\nprint(m.make(3), m.Err(4).code, m.Err(5).stored)\n",
+        &templates_of("m.Err,"),
+    );
+    assert_eq!(out, "[0]\n");
+}
+
+/// A function-local import binding the name of a module-level one
+/// (`tests/fixtures/v010_exc_local`): the module's binding table holds the
+/// module-scope one, so `b.B(A, OSError)` withdraws `a.A`'s layout.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_function_local_import_binds_no_module_name() {
+    let out = package_matches(
+        "v010_exc_local",
+        "pkl",
+        "import pkl\nprint(pkl.make(3), [c.__name__ for c in pkl.B.__mro__ \
+         if c.__module__ != 'pycc'], pkl.other().__name__)\n",
+        "import pkl\nprint([c for c in pkl.A.__mro__ if c.__module__ == 'pycc'])\n",
     );
     assert_eq!(out, "[]\n");
 }

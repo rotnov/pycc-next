@@ -65,9 +65,10 @@ pub(super) fn reach(
     for stmt in body {
         bound.visit_stmt(stmt);
     }
+    // The module-scope imports (`module_scope`), and the top-level class
+    // statements.
     let mut imported: BTreeSet<String> = BTreeSet::new();
-    let mut classes: BTreeSet<String> = BTreeSet::new();
-    for stmt in body {
+    for stmt in module_scope(body).imports {
         match stmt {
             Stmt::Import(import) => {
                 for alias in &import.names {
@@ -80,12 +81,16 @@ pub(super) fn reach(
                     imported.insert(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
                 }
             }
-            Stmt::ClassDef(class) => {
-                classes.insert(class.name.to_string());
-            }
             _ => {}
         }
     }
+    let classes: BTreeSet<String> = body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::ClassDef(class) => Some(class.name.to_string()),
+            _ => None,
+        })
+        .collect();
     let mut scan = ReachScan {
         defining,
         depth: 0,
@@ -168,31 +173,55 @@ pub(super) fn wildcard_sources(
 /// through one (`package_bases::Scan`, `exc_graph`): the one binding table
 /// both share.
 pub(super) fn ambiguous_names(body: &[Stmt]) -> BTreeSet<String> {
+    module_scope(body).ambiguous
+}
+
+/// What a module binds at module scope -- its body and every compound
+/// statement in it, never a `def`, `class`, lambda or comprehension body
+/// (but for their `global` declarations): the one scope walk the binding
+/// tables read (`package_bases::Scan::module`, [`ambiguous_names`],
+/// `exc_layout`'s builtin bases).
+pub(super) struct ModuleScope<'a> {
+    /// Every name bound there.
+    pub(super) bound: BTreeSet<String>,
+    /// The names bound there more than once.
+    pub(super) ambiguous: BTreeSet<String>,
+    /// The import statements there, in order.
+    pub(super) imports: Vec<&'a Stmt>,
+}
+
+/// The module-scope bindings of `body` ([`ModuleScope`]).
+pub(super) fn module_scope(body: &[Stmt]) -> ModuleScope<'_> {
     let mut counts = BindingCount::default();
     for stmt in body {
         counts.visit_stmt(stmt);
     }
-    counts
-        .counts
-        .into_iter()
-        .filter(|(_, count)| *count > 1)
-        .map(|(name, _)| name)
-        .collect()
+    ModuleScope {
+        bound: counts.counts.keys().cloned().collect(),
+        ambiguous: counts
+            .counts
+            .iter()
+            .filter(|(_, count)| **count > 1)
+            .map(|(name, _)| name.clone())
+            .collect(),
+        imports: counts.imports,
+    }
 }
 
-/// The count of each module-level name's bindings ([`ambiguous_names`]).
+/// The count of each module-level name's bindings ([`module_scope`]).
 #[derive(Default)]
-struct BindingCount {
+struct BindingCount<'a> {
     counts: BTreeMap<String, usize>,
+    imports: Vec<&'a Stmt>,
 }
 
-impl BindingCount {
+impl BindingCount<'_> {
     fn bind(&mut self, name: &str) {
         *self.counts.entry(name.to_string()).or_default() += 1;
     }
 }
 
-impl<'a> Visitor<'a> for BindingCount {
+impl<'a> Visitor<'a> for BindingCount<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             // A nested scope binds its own name here, and module names only
@@ -216,12 +245,14 @@ impl<'a> Visitor<'a> for BindingCount {
                 }
             }
             Stmt::Import(import) => {
+                self.imports.push(stmt);
                 for alias in &import.names {
                     let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
                     self.bind(name.split('.').next().unwrap_or(name));
                 }
             }
             Stmt::ImportFrom(import) => {
+                self.imports.push(stmt);
                 for alias in &import.names {
                     self.bind(alias.asname.as_ref().unwrap_or(&alias.name).as_str());
                 }

@@ -164,7 +164,7 @@ impl Plan {
                     chain.clone()
                 } else if let Some(package) = self.package_exceptions.get(base) {
                     package.names.clone()
-                } else if pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base) {
+                } else if self.is_builtin(base) {
                     // One reducing itself (`OSError.__reduce__`) is no base
                     // the template's `__reduce__` is known to extend.
                     (!exc_names::builtin_reduces_itself(base)).then(|| {
@@ -172,7 +172,7 @@ impl Plan {
                             .map(str::to_string)
                             .collect()
                     })
-                } else if base == "object" {
+                } else if base == "object" && self.is_builtin(base) {
                     Some(BTreeSet::new())
                 } else {
                     None
@@ -191,7 +191,7 @@ impl Plan {
                 } else if let Some(package) = self.package_exceptions.get(base) {
                     exception = true;
                     blocked |= package.may_layout;
-                } else if pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base) {
+                } else if self.is_builtin(base) {
                     exception = true;
                 }
             }
@@ -294,6 +294,17 @@ impl Plan {
             let local = classes.iter().map(|c| (c.clone(), c.clone())).collect();
             exc_escape::reach(&self.ast, true, &local, &BTreeSet::new(), &classes)
         })
+    }
+
+    /// Whether base name `base` is the builtin exception class (or `object`)
+    /// spelled so: the module binds no name so at module scope -- an import
+    /// spelled like one (`from helper import Exception`) is another class.
+    fn is_builtin(&self, base: &str) -> bool {
+        (base == "object" || pycc_hir::BUILTIN_EXCEPTION_CLASSES.contains(&base))
+            && !self
+                .module_bound
+                .get_or_init(|| exc_escape::module_scope(&self.ast).bound)
+                .contains(base)
     }
 
     /// The owners of layouts `at` and of every layout they extend.
