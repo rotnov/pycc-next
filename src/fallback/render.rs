@@ -50,6 +50,27 @@ pub(crate) struct CodeChunk {
     /// embedded, which the source then skips at import (it still makes
     /// them when it is compiled at run time).
     pub(crate) rewrites: Vec<CodeRewrite>,
+    /// A mirrored import statement, which the module's hook runs itself
+    /// (`__pycc_code__(k)` with no `exec`) instead of a code object:
+    /// see [`ImportMirror`].
+    pub(crate) import: Option<ImportMirror>,
+}
+
+/// A compiled import an `--ext` module's namespace mirrors (`Plan::mirrored`):
+/// what CPython's `IMPORT_NAME`, `IMPORT_FROM` and `STORE_NAME` do for the
+/// statement, done by the hook in C (`pycc_ext_mirror_import`,
+/// `src/ext/module/import_io.c`). A chunk exec'd for it cost the import a
+/// code object to read and free, an `exec` and a second `__import__` of
+/// the module compiled code had just imported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImportMirror {
+    /// `from m import ...`'s module (`""` for `from . import x`); `None`
+    /// for `import a, b.c as d`.
+    pub(crate) from: Option<String>,
+    /// The leading dots of a `from` import.
+    pub(crate) level: u32,
+    /// Each alias: the name (a dotted module of `import`) and its `as`.
+    pub(crate) names: Vec<(String, Option<String>)>,
 }
 
 /// An edit of a nested code object of a chunk, made at build time instead
@@ -209,8 +230,9 @@ impl Plan {
                 // Padded, so a traceback through the CPython copy names
                 // its lines.
                 let line = src[..start].matches('\n').count();
-                let run = self.exec_text(
+                let run = self.mirror_text(
                     &mut out.chunks,
+                    index,
                     &format!("{}{}", "\n".repeat(line), &src[start..end]),
                 );
                 if !matches!(self.stmts[index].kind, Kind::Def(..)) {
@@ -305,6 +327,7 @@ impl Plan {
                 filename: filename.to_string(),
                 future_annotations: future,
                 rewrites: Vec::new(),
+                import: None,
             });
             return format!(
                 "{BUILTINS}.exec({NS}[\"{CODE_HOOK}\"]({}), {NS})",
@@ -321,6 +344,46 @@ impl Plan {
                 String::new()
             }
         )
+    }
+
+    /// Runs the mirrored import statement `index`, whose padded source is
+    /// `source`, in the namespace: in an `--ext` module through the hook,
+    /// which binds its names as CPython's import does ([`ImportMirror`]);
+    /// elsewhere, and for any statement that is not an import, as
+    /// [`Self::exec_text`] does.
+    pub(super) fn mirror_text(&self, chunks: &mut Vec<CodeChunk>, index: usize, source: &str) -> String {
+        let mirror = match &self.ast[index] {
+            pycc_ast::Stmt::Import(import) => ImportMirror {
+                from: None,
+                level: 0,
+                names: import
+                    .names
+                    .iter()
+                    .map(|a| (a.name.to_string(), a.asname.as_ref().map(ToString::to_string)))
+                    .collect(),
+            },
+            pycc_ast::Stmt::ImportFrom(import) => ImportMirror {
+                from: Some(import.module.as_ref().map(ToString::to_string).unwrap_or_default()),
+                level: import.level,
+                names: import
+                    .names
+                    .iter()
+                    .map(|a| (a.name.to_string(), a.asname.as_ref().map(ToString::to_string)))
+                    .collect(),
+            },
+            _ => return self.exec_text(chunks, source),
+        };
+        if !self.publishes.variables || mirror.names.iter().any(|(name, _)| name == "*") {
+            return self.exec_text(chunks, source);
+        }
+        chunks.push(CodeChunk {
+            source: source.to_string(),
+            filename: self.display.clone(),
+            future_annotations: self.defers_annotations,
+            rewrites: Vec::new(),
+            import: Some(mirror),
+        });
+        format!("{NS}[\"{CODE_HOOK}\"]({})", chunks.len() - 1)
     }
 
     /// Appends compiled unit `index` (a top-level statement, or a lift) to
