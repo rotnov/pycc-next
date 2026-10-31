@@ -108,9 +108,6 @@ const COMPILE_SCRIPT: &str = "import sys,marshal,importlib.util,__future__\n\
     chunks,fix=marshal.loads(sys.stdin.buffer.read())\n\
     table=[]\n\
     for source,filename,future,rewrites in chunks:\n\
-    \x20 if source is None:\n\
-    \x20   table.append(None)\n\
-    \x20   continue\n\
     \x20 try:\n\
     \x20   f=__future__.annotations.compiler_flag if future else 0\n\
     \x20   co=rewrite(compile(source,filename,'exec',f,True,0),rewrites)\n\
@@ -194,12 +191,7 @@ fn marshal_input(chunks: &[CodeChunk]) -> Option<Vec<u8>> {
     sized(&mut out, b'(', chunks.len())?;
     for chunk in chunks {
         sized(&mut out, b'(', 4)?;
-        // A mirrored import runs in the hook (`ImportMirror`): no code.
-        if chunk.import.is_some() {
-            out.push(b'N');
-        } else {
-            text(&mut out, &chunk.source)?;
-        }
+        text(&mut out, &chunk.source)?;
         text(&mut out, &chunk.filename)?;
         out.push(if chunk.future_annotations { b'T' } else { b'F' });
         sized(&mut out, b'(', chunk.rewrites.len())?;
@@ -296,54 +288,16 @@ pub(crate) fn install(inc: String, chunks: &[CodeChunk], compiled: Option<&Preco
         c_bytes(table),
         table.len()
     );
-    // A mirrored import's names and the names they are stored under
-    // (`NULL`: CPython's own choice, the name or a dotted import's root).
-    for (index, chunk) in chunks.iter().enumerate() {
-        let Some(import) = &chunk.import else {
-            continue;
-        };
-        let list = |items: Vec<Option<&str>>| {
-            items
-                .into_iter()
-                .map(|item| item.map_or_else(|| "NULL".to_string(), |item| c_bytes(item.as_bytes())))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let _ = writeln!(
-            head,
-            "static const char *const pycc_ext_import_names_{index}[] = {{{}}};\n\
-             static const char *const pycc_ext_import_stores_{index}[] = {{{}}};",
-            list(import.names.iter().map(|(name, _)| Some(name.as_str())).collect()),
-            list(import.names.iter().map(|(_, store)| store.as_deref()).collect()),
-        );
-    }
     head.push_str(
         "static const struct pycc_ext_chunk {\n    const char *source;\n    \
          Py_ssize_t source_len;\n    const char *filename;\n    int future_annotations;\n    \
-         int precompiled;\n    \
-         /* A mirrored import (`ImportMirror`): 1 for `import`, 2 for `from`. */\n    \
-         int import_kind;\n    const char *import_module;\n    int import_level;\n    \
-         int import_count;\n    const char *const *import_names;\n    \
-         const char *const *import_stores;\n} pycc_ext_chunks[] = {\n",
+         int precompiled;\n} pycc_ext_chunks[] = {\n",
     );
     for (index, chunk) in chunks.iter().enumerate() {
         let present = compiled.is_some_and(|compiled| compiled.present.get(index) == Some(&true));
-        let import = match &chunk.import {
-            Some(import) => format!(
-                "{}, {}, {}, {}, pycc_ext_import_names_{index}, pycc_ext_import_stores_{index}",
-                if import.from.is_some() { 2 } else { 1 },
-                import
-                    .from
-                    .as_ref()
-                    .map_or_else(|| "NULL".to_string(), |module| c_bytes(module.as_bytes())),
-                import.level,
-                import.names.len(),
-            ),
-            None => "0, NULL, 0, 0, NULL, NULL".to_string(),
-        };
         let _ = writeln!(
             head,
-            "    {{{},\n     {}, {}, {}, {},\n     {import}}},",
+            "    {{{},\n     {}, {}, {}, {}}},",
             c_bytes(chunk.source.as_bytes()),
             chunk.source.len(),
             c_bytes(chunk.filename.as_bytes()),
@@ -523,25 +477,14 @@ static PyObject *pycc_ext_chunk_code(Py_ssize_t index)
     return pycc_ext_chunk_compile(chunk);
 }
 
-/* `__pycc_code__(k)`: the code object of chunk `k`, or for a mirrored
- * import (`ImportMirror` in src/fallback/render.rs) the import itself, run
- * in the namespace `self` (the module's dict), returning None. */
+/* `__pycc_code__(k)`: the code object of chunk `k`. */
 static PyObject *pycc_ext_code(PyObject *self, PyObject *arg)
 {
     Py_ssize_t index = PyLong_AsSsize_t(arg);
 
+    (void)self;
     if (index == -1 && PyErr_Occurred()) {
         return NULL;
-    }
-    if (index >= 0 && index < pycc_ext_chunk_count && pycc_ext_chunks[index].import_kind != 0) {
-        const struct pycc_ext_chunk *chunk = &pycc_ext_chunks[index];
-
-        if (pycc_ext_mirror_import(self, chunk->import_kind == 2, chunk->import_module,
-                                   chunk->import_level, chunk->import_count, chunk->import_names,
-                                   chunk->import_stores) != 0) {
-            return NULL;
-        }
-        Py_RETURN_NONE;
     }
     return pycc_ext_chunk_code(index);
 }
@@ -552,9 +495,7 @@ static PyMethodDef pycc_ext_code_def = {"__pycc_code__", pycc_ext_code, METH_O, 
  * exception set. */
 static int pycc_ext_code_install(PyObject *module)
 {
-    /* Bound to the namespace a mirrored import binds its names in; the
-     * dict holds the hook only while the body runs. */
-    PyObject *hook = PyCFunction_NewEx(&pycc_ext_code_def, PyModule_GetDict(module), NULL);
+    PyObject *hook = PyCFunction_NewEx(&pycc_ext_code_def, NULL, NULL);
     int status;
 
     if (hook == NULL) {
@@ -596,7 +537,6 @@ mod tests {
             filename: "/p/m.py".to_string(),
             future_annotations: false,
             rewrites: Vec::new(),
-            import: None,
         }
     }
 
@@ -630,12 +570,12 @@ mod tests {
         assert!(out.contains("pycc_ext_chunk_table_len = 3;"), "{out}");
         assert!(
             out.contains(
-                "{\"\\012\\012x = \\042\\077\\134\\042\\012\",\n     11, \"/p/m.py\", 0, 1,\n     0, NULL, 0, 0, NULL, NULL},"
+                "{\"\\012\\012x = \\042\\077\\134\\042\\012\",\n     11, \"/p/m.py\", 0, 1},"
             ),
             "{out}"
         );
         assert!(
-            out.contains("{\"y = 1\\012\",\n     6, \"/p/m.py\", 0, 0,\n     0, NULL, 0, 0, NULL, NULL},"),
+            out.contains("{\"y = 1\\012\",\n     6, \"/p/m.py\", 0, 0},"),
             "{out}"
         );
         assert!(out.contains("pycc_ext_chunk_count = 2;"), "{out}");
@@ -646,39 +586,7 @@ mod tests {
         let out = install(INC.to_string(), &[chunk("y = 1\n")], None);
         assert!(out.contains("pycc_ext_chunk_magic = 0L;"), "{out}");
         assert!(out.contains("pycc_ext_chunk_table_len = 0;"), "{out}");
-        assert!(out.contains("0, 0,\n     0, NULL, 0, 0, NULL, NULL},"), "{out}");
-    }
-
-    #[test]
-    fn a_mirrored_import_is_a_row_of_names_the_hook_binds() {
-        let mut from = chunk("from .a import b, c as d\n");
-        from.import = Some(crate::fallback::ImportMirror {
-            from: Some("a".to_string()),
-            level: 1,
-            names: vec![("b".to_string(), None), ("c".to_string(), Some("d".to_string()))],
-        });
-        let mut plain = chunk("import x.y\n");
-        plain.import = Some(crate::fallback::ImportMirror {
-            from: None,
-            level: 0,
-            names: vec![("x.y".to_string(), None)],
-        });
-        let out = install(INC.to_string(), &[from, plain], None);
-        assert!(
-            out.contains(
-                "pycc_ext_import_names_0[] = {\"b\", \"c\"};\n\
-                 static const char *const pycc_ext_import_stores_0[] = {NULL, \"d\"};"
-            ),
-            "{out}"
-        );
-        assert!(
-            out.contains("2, \"a\", 1, 2, pycc_ext_import_names_0, pycc_ext_import_stores_0},"),
-            "{out}"
-        );
-        assert!(
-            out.contains("1, NULL, 0, 1, pycc_ext_import_names_1, pycc_ext_import_stores_1},"),
-            "{out}"
-        );
+        assert!(out.contains("0, 0},"), "{out}");
     }
 
     #[test]

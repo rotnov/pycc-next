@@ -1,18 +1,19 @@
 //! v0.11 accept 3: a compiled import statement whose names fallback code
-//! reads is mirrored into the module's namespace (`Plan::mirrored`). The
-//! mirror binds the statement's names itself, in C (`ImportMirror`,
-//! `pycc_ext_mirror_import` in `src/ext/module/import_io.c`), instead of
-//! exec'ing a chunk that imports the module a second time. It takes the
-//! module compiled code's import just returned, so each statement calls
-//! `__import__` once with CPython's arguments, as CPython's own import does.
-//! That holds for `import a`, `import a.b`, `import a.b as c`, and for
-//! absolute and relative `from` imports, with and without `-O`. Compiled
-//! code's own call passes the module's namespace as `globals` and `locals`,
-//! as CPython's `IMPORT_NAME` does, so an `__import__` that answers by the
-//! importer's `__name__` binds the same object, and the mirror binds the
-//! values compiled code took (`from m import x`, the module `import a.b as
-//! c` walked to) rather than reading an attribute a second time, even when
-//! the statement's next import runs another module's mirrors meanwhile.
+//! reads is mirrored into the module's namespace (`Plan::mirrored`) by
+//! compiled code storing what its own import bound, one store per name the
+//! statement binds (`Plan::mirror_text` in `src/fallback/render.rs`),
+//! instead of exec'ing a chunk that imports the module a second time. So
+//! each statement calls `__import__` once with CPython's arguments, and each
+//! occurrence of a name binds the value its own `IMPORT_FROM` took: nothing
+//! is read twice, duplicate names (`from p import x as a, x as b`, `import
+//! p as a, p as b`) bind in CPython's order, and another module's import
+//! run in the middle of the statement changes nothing. That holds for
+//! `import a`, `import a.b`, `import a.b as c`, and absolute and relative
+//! `from` imports, with and without `-O`. Compiled code's own call passes
+//! the module's namespace as `globals` and `locals`, as `IMPORT_NAME` does,
+//! so an `__import__` that answers by the importer's `__name__` binds the
+//! same object. An import of a module compiled code models natively
+//! (`math`) still runs again in CPython, and stays compiled.
 //!
 //! The oracle is CPython running the same sources.
 
@@ -40,6 +41,9 @@ from . import sib
 from .sib import X as Y, twice
 from probe import x, y as yy
 import probe2.sub as ps
+from probe import x as xa, x as xb
+import probe3 as pa, probe3 as pb
+import math
 
 
 def names():
@@ -47,7 +51,8 @@ def names():
     # mirrored into the namespace.
     return (lambda: (json.dumps([1]), os.path.basename("/a/b"), minidom.__name__,
                      OrderedDict.__name__, cm.__name__, p2.__name__, sep, sib.X, Y,
-                     twice(4), colorsys.__name__, x, yy, ps, pmi.nested.f()))()
+                     twice(4), colorsys.__name__, x, yy, ps, pmi.nested.f(), xa, xb,
+                     pa, pb, math.floor(2.5)))()
 
 
 def native(n: int) -> int:
@@ -59,7 +64,11 @@ def native_rgb() -> object:
 
 
 def native_probe() -> object:
-    return (x, yy, ps)
+    return (x, yy, ps, xa, xb, pa, pb)
+
+
+def native_floor(v: float) -> int:
+    return math.floor(v)
 "#;
 
 const SIB: &str = "X = 7\n\n\ndef twice(n: int) -> int:\n    return n * 2\n";
@@ -93,10 +102,14 @@ class Counting:
         return self.reads
 PROBE = Counting(("x", "y"))
 PROBE2 = Counting(("sub",))
+# Each `__import__` of `probe3` answers the next of two objects.
+ANSWERS = ["A", "B"]
 def hook(name, globals=None, locals=None, fromlist=(), level=0):
     importer = (globals or {}).get("__name__")
-    if importer == "pmi.m" and name in ("probe", "probe2.sub"):
+    if importer == "pmi.m" and name in ("probe", "probe2.sub", "probe3"):
         calls.append((name, tuple(fromlist or ()), level, importer, locals is globals))
+        if name == "probe3":
+            return ANSWERS.pop(0)
         return PROBE if name == "probe" else PROBE2
     if name in OWN and importer in (None, "pmi.m"):
         calls.append((name, tuple(fromlist or ()), level, importer, locals is globals))
@@ -108,7 +121,7 @@ from pmi import m
 builtins.__import__ = real
 print(calls, file=sys.stderr)
 print(m.names(), m.native(3), m.native_rgb(), m.colorsys is FAKE)
-print(m.native_probe(), PROBE.reads, PROBE2.reads)
+print(m.native_probe(), PROBE.reads, PROBE2.reads, m.native_floor(3.5))
 print(sorted(k for k in vars(m) if not k.startswith("__")))
 print(m.minidom is sys.modules["xml.dom.minidom"], m.os is sys.modules["os"],
       m.sib is sys.modules["pmi.sib"], m.p2 is sys.modules["os.path"])
@@ -152,6 +165,10 @@ fn a_mirrored_import_binds_its_names_with_one_import_call_as_cpython() {
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
     assert!(report.contains("function `names`"), "{report}");
+    // Every import but the two of `sib` (which fallback code reads as a
+    // module compiled code does not expose) stays compiled: the mirror's
+    // stores compile, `import math` included.
+    assert_eq!(report.matches("statement at").count(), 2, "{report}");
     for name in ["__init__.py", "m.py", "sib.py", "nested.py"] {
         std::fs::remove_file(package.join(name)).expect("import the artifact, not the source");
     }
@@ -174,7 +191,8 @@ fn a_mirrored_import_binds_its_names_with_one_import_call_as_cpython() {
          ('collections', ('OrderedDict', 'ChainMap'), 0, 'pmi.m', True), \
          ('os', ('path', 'sep'), 0, 'pmi.m', True), ('', ('sib',), 1, 'pmi.m', True), \
          ('sib', ('X', 'twice'), 1, 'pmi.m', True), ('probe', ('x', 'y'), 0, 'pmi.m', True), \
-         ('probe2.sub', (), 0, 'pmi.m', True)]\n",
+         ('probe2.sub', (), 0, 'pmi.m', True), ('probe', ('x', 'x'), 0, 'pmi.m', True), \
+         ('probe3', (), 0, 'pmi.m', True), ('probe3', (), 0, 'pmi.m', True)]\n",
         "the CPython reference itself"
     );
 }

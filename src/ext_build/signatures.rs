@@ -56,7 +56,6 @@ pub(crate) fn signature_chunk(signature: &ExtSignature) -> crate::fallback::Code
             qualname: signature.qualname.clone(),
             flags: pycc_ast::WRAPPER_FLAG,
         }],
-        import: None,
     }
 }
 

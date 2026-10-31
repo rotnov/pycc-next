@@ -435,8 +435,6 @@ static int pycc_ext_exec_module(PyObject *module)
 #ifdef PYCC_EXT_HAS_PRECOMPILED
     pycc_ext_code_remove(module);
 #endif
-    /* What the body's imports left for mirrors that did not run. */
-    pycc_ext_import_memo_clear(PyModule_GetDict(module));
     (void)PyThread_tss_set(pycc_ext_mod.exec_target_key, saved_target);
     (void)PyThread_tss_set(pycc_ext_mod.exec_classes_key, saved_classes);
     if (exec_status != 0) {

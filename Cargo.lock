@@ -828,6 +828,7 @@ dependencies = [
  "pycc_mir",
  "pycc_parser",
  "pycc_scratch",
+ "pycc_std",
  "pycc_types",
  "serde",
  "serde_json",

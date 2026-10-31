@@ -22,122 +22,10 @@
  * whole lifetime anyway. `docs/RUNTIME.md` records the rule.
  */
 /*
- * What compiled code's last import statements did, kept for their mirror
- * (`pycc_ext_mirror_import`), which the fallback rewrite runs right after
- * the statement, so the mirror binds the objects compiled code got instead
- * of evaluating anything a second time: per import, its kind (1 `import
- * m` or `import a.b [as c]`, 2 `from m import ...`), module name, level,
- * thread and the `globals`/`locals` it passed `__import__` (compared by
- * identity), the module `__import__` returned (strong), and for `from` its
- * fromlist (`fromlist`, `names`: the `str`s) and the value it took for each
- * name (`values`, strong, or NULL when a nested import broke the statement
- * up), or for `import a.b as c` the module the dotted walk reached (`leaf`).
- * Newest last; a mirror takes the newest entry of its statement and clears
- * its namespace's entries when it is done (a nested import's mirrors, in
- * other namespaces, leave the statement's alone), so an entry never
- * outlives the next mirror of its module; the oldest is dropped when full.
- */
-#define PYCC_IMPORT_MEMO_SLOTS 32
-typedef struct PycImportMemo {
-    PyThreadState *tstate;
-    int kind;
-    const char *module_name;
-    const char *const *fromlist;
-    long long nfrom;
-    long long level;
-    PyObject *module;
-    PyObject *names;
-    PyObject *values;
-    PyObject *leaf;
-    PyObject *globals;
-    PyObject *locals;
-} PycImportMemo;
-
-static PycImportMemo pycc_ext_import_memo[PYCC_IMPORT_MEMO_SLOTS];
-static int pycc_ext_import_memo_count = 0;
-
-static void pycc_ext_import_memo_release(PycImportMemo *entry)
-{
-    Py_CLEAR(entry->module);
-    Py_CLEAR(entry->names);
-    Py_CLEAR(entry->values);
-    Py_CLEAR(entry->leaf);
-}
-
-/* Drops the entries of imports made in namespace `ns`. */
-static void pycc_ext_import_memo_clear(PyObject *ns)
-{
-    int i, kept = 0;
-
-    for (i = 0; i < pycc_ext_import_memo_count; i++) {
-        if (pycc_ext_import_memo[i].globals == ns || pycc_ext_import_memo[i].module == NULL) {
-            pycc_ext_import_memo_release(&pycc_ext_import_memo[i]);
-        } else {
-            pycc_ext_import_memo[kept++] = pycc_ext_import_memo[i];
-        }
-    }
-    pycc_ext_import_memo_count = kept;
-}
-
-/* Records an import compiled code completed in a module body (the only
- * place a mirror runs: `globals` and `locals` both its namespace); one in a
- * function is not kept, so nothing outlives the statement. */
-static void pycc_ext_import_memo_push(int kind, const char *module_name, const char *const *fromlist,
-                                      long long nfrom, long long level, PyObject *module,
-                                      PyObject *names, PyObject *values, PyObject *leaf,
-                                      PyObject *globals, PyObject *locals)
-{
-    PycImportMemo *entry;
-
-    if (globals == Py_None || locals != globals) {
-        return;
-    }
-    if (pycc_ext_import_memo_count == PYCC_IMPORT_MEMO_SLOTS) {
-        pycc_ext_import_memo_release(&pycc_ext_import_memo[0]);
-        memmove(&pycc_ext_import_memo[0], &pycc_ext_import_memo[1],
-                sizeof(PycImportMemo) * (PYCC_IMPORT_MEMO_SLOTS - 1));
-        pycc_ext_import_memo_count--;
-    }
-    entry = &pycc_ext_import_memo[pycc_ext_import_memo_count++];
-    entry->tstate = PyThreadState_Get();
-    entry->kind = kind;
-    entry->module_name = module_name;
-    entry->fromlist = fromlist;
-    entry->nfrom = nfrom;
-    entry->level = level;
-    entry->module = Py_NewRef(module);
-    entry->names = Py_XNewRef(names);
-    entry->values = Py_XNewRef(values);
-    entry->leaf = Py_XNewRef(leaf);
-    entry->globals = globals;
-    entry->locals = locals;
-}
-
-/* The newest entry of an import of `module_name` that a mirror running in
- * namespace `ns` can take, or NULL. */
-static PycImportMemo *pycc_ext_import_memo_find(PyObject *ns, int kind, const char *module_name,
-                                                long long level)
-{
-    PyThreadState *tstate = PyThreadState_Get();
-    int i;
-
-    for (i = pycc_ext_import_memo_count - 1; i >= 0; i--) {
-        PycImportMemo *entry = &pycc_ext_import_memo[i];
-
-        if (entry->module != NULL && entry->tstate == tstate && entry->kind == kind
-            && entry->level == level && entry->globals == ns && entry->locals == ns
-            && strcmp(entry->module_name, module_name) == 0) {
-            return entry;
-        }
-    }
-    return NULL;
-}
-
-/*
  * The `globals` and `locals` CPython's `IMPORT_NAME` passes `__import__`
  * for an import of module `m` (borrowed): the module's namespace both,
- * while its body runs; the namespace and None, for an import in one of its
- * functions; None both when the module is unknown.
+ * while its body runs; the namespace and None after it (an import in one of
+ * its functions); None both when the module is unknown.
  */
 static void pycc_ext_import_scope(PyccExtModule *m, PyObject **globals, PyObject **locals)
 {
@@ -161,8 +49,9 @@ static void pycc_ext_import_scope(PyccExtModule *m, PyObject **globals, PyObject
 
 /*
  * `import m` in compiled code: `__import__(name, globals, locals, None, 0)`
- * as CPython's statement calls it (`pycc_ext_import_scope`), so a custom
- * `__import__` sees the same arguments and its result is bound.
+ * as CPython's statement calls it (`pycc_ext_import_scope`), binding what
+ * it returns, so a custom `__import__` sees CPython's arguments and the
+ * names compiled code and fallback code bind are the same object.
  */
 static PyObject *pycc_ext_obj_import_in(PyccExtModule *m, const char *name)
 {
@@ -182,9 +71,6 @@ static PyObject *pycc_ext_obj_import_in(PyccExtModule *m, const char *name)
     pycc_ext_import_scope(m, &globals, &locals);
     module = PyObject_CallFunction(import, "sOOOi", name, globals, locals, Py_None, 0);
     Py_DECREF(import);
-    if (module != NULL) {
-        pycc_ext_import_memo_push(1, name, NULL, 0, 0, module, NULL, NULL, NULL, globals, locals);
-    }
     return module;
 }
 
@@ -402,9 +288,6 @@ static struct {
     long long next;
     PyObject *module;
     PyObject *names;
-    /* The value of each name taken so far (strong, NULL until taken), kept
-     * from the statement's first name for its mirror. */
-    PyObject *values;
 } pycc_ext_from_statement;
 
 static int pycc_ext_from_statement_is(PyccExtModule *m, const char *module_name,
@@ -433,12 +316,9 @@ static void pycc_ext_from_statement_clear(void)
 {
     PyObject *module = pycc_ext_from_statement.module;
     PyObject *names = pycc_ext_from_statement.names;
-    PyObject *values = pycc_ext_from_statement.values;
 
     pycc_ext_from_statement.module = NULL;
     pycc_ext_from_statement.names = NULL;
-    pycc_ext_from_statement.values = NULL;
-    Py_XDECREF(values);
     Py_XDECREF(module);
     Py_XDECREF(names);
 }
@@ -506,12 +386,6 @@ static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *modul
             pycc_ext_from_statement.level = level;
             pycc_ext_from_statement.module = Py_NewRef(module);
             pycc_ext_from_statement.names = Py_NewRef(names);
-            /* Only a statement taken from its first name has all its
-             * values for the mirror. */
-            pycc_ext_from_statement.values = index == 0 ? PyTuple_New((Py_ssize_t)nfrom) : NULL;
-            if (index == 0 && pycc_ext_from_statement.values == NULL) {
-                PyErr_Clear();
-            }
         }
     }
     /* The next name of this statement, or none after the last. */
@@ -519,28 +393,6 @@ static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *modul
         pycc_ext_from_statement.next = index + 1;
     }
     value = pycc_ext_import_from_step(module, PyTuple_GetItem(names, (Py_ssize_t)index));
-    if (value != NULL && pycc_ext_from_statement.module == module
-        && pycc_ext_from_statement.values != NULL) {
-        /* Steals the new reference. */
-        PyTuple_SetItem(pycc_ext_from_statement.values, (Py_ssize_t)index, Py_NewRef(value));
-    }
-    if (value != NULL && index + 1 == nfrom) {
-        /* The values the statement took, for its mirror: one name's alone,
-         * or every name's when the statement ran from its first name. */
-        PyObject *values = NULL;
-
-        if (nfrom == 1) {
-            values = PyTuple_Pack(1, value);
-        } else if (pycc_ext_from_statement.module == module) {
-            values = Py_XNewRef(pycc_ext_from_statement.values);
-        }
-        if (values == NULL) {
-            PyErr_Clear();
-        }
-        pycc_ext_import_memo_push(2, module_name, fromlist, nfrom, level, module, names, values,
-                                  NULL, globals, locals);
-        Py_XDECREF(values);
-    }
     if ((value == NULL || index + 1 == nfrom)
         && pycc_ext_from_statement.module == module) {
         pycc_ext_from_statement_clear();
@@ -581,10 +433,9 @@ done:
  */
 static PyObject *pycc_ext_obj_import_dotted_in(PyccExtModule *m, const char *name, long long bind_root)
 {
-    PyObject *root;
-    PyObject *import = NULL;
     PyObject *globals;
     PyObject *locals;
+    PyObject *import = NULL;
     PyObject *current = NULL;
     PyObject *segment = NULL;
     const char *rest;
@@ -601,15 +452,9 @@ static PyObject *pycc_ext_obj_import_dotted_in(PyccExtModule *m, const char *nam
     pycc_ext_import_scope(m, &globals, &locals);
     current = PyObject_CallFunction(import, "sOOOi", name, globals, locals, Py_None, 0);
     Py_DECREF(import);
-    if (current == NULL) {
-        return NULL;
-    }
-    /* What `__import__` returned (the root), as the mirror's own call would. */
-    if (bind_root) {
-        pycc_ext_import_memo_push(1, name, NULL, 0, 0, current, NULL, NULL, NULL, globals, locals);
+    if (current == NULL || bind_root) {
         return current;
     }
-    root = Py_NewRef(current);
     rest = strchr(name, '.');
     while (rest != NULL) {
         const char *start = rest + 1;
@@ -621,321 +466,17 @@ static PyObject *pycc_ext_obj_import_dotted_in(PyccExtModule *m, const char *nam
                       : PyUnicode_FromString(start);
         if (segment == NULL) {
             Py_DECREF(current);
-            Py_DECREF(root);
             return NULL;
         }
         next = pycc_ext_import_from_step(current, segment);
         Py_DECREF(segment);
         Py_DECREF(current);
         if (next == NULL) {
-            Py_DECREF(root);
             return NULL;
         }
         current = next;
     }
-    /* The root `__import__` returned and the module the walk reached, which
-     * `import a.b as c` binds, for its mirror. */
-    pycc_ext_import_memo_push(1, name, NULL, 0, 0, root, NULL, NULL, current, globals, locals);
-    Py_DECREF(root);
     return current;
-}
-
-/*
- * CPython's own `IMPORT_NAME` in namespace `ns`: `__import__(name, ns, ns,
- * fromlist or None, level)` with the `__import__` of the namespace's
- * builtins (`_PyEval_BuiltinsFromGlobals`). A new reference, or NULL with
- * the exception set.
- */
-static PyObject *pycc_ext_mirror_import_call(PyObject *ns, int from, const char *module_name,
-                                             long long level, Py_ssize_t count,
-                                             const char *const *names)
-{
-    static PyObject *builtins_key = NULL;
-    static PyObject *import_key = NULL;
-    PyObject *builtins;
-    PyObject *import = NULL;
-    PyObject *fromlist = NULL;
-    PyObject *name = NULL;
-    PyObject *level_obj = NULL;
-    PyObject *module = NULL;
-    Py_ssize_t i;
-
-    builtins = pycc_ext_interned(&builtins_key, "__builtins__");
-    builtins = builtins == NULL ? NULL : PyDict_GetItemWithError(ns, builtins);
-    if (builtins == NULL) {
-        if (PyErr_Occurred()) {
-            return NULL;
-        }
-        builtins = PyEval_GetBuiltins();
-    } else if (PyModule_Check(builtins)) {
-        builtins = PyModule_GetDict(builtins);
-    }
-    if (pycc_ext_interned(&import_key, "__import__") == NULL
-        || PyMapping_GetOptionalItem(builtins, import_key, &import) < 0) {
-        return NULL;
-    }
-    if (import == NULL) {
-        PyErr_SetString(PyExc_ImportError, "__import__ not found");
-        return NULL;
-    }
-    if (from) {
-        fromlist = PyTuple_New(count);
-        if (fromlist == NULL) {
-            goto done;
-        }
-        for (i = 0; i < count; i++) {
-            PyObject *item = PyUnicode_InternFromString(names[i]);
-
-            /* Steals `item`, even on failure. */
-            if (item == NULL || PyTuple_SetItem(fromlist, i, item) < 0) {
-                goto done;
-            }
-        }
-    }
-    name = PyUnicode_InternFromString(module_name);
-    level_obj = PyLong_FromLongLong(level);
-    if (name != NULL && level_obj != NULL) {
-        module = PyObject_CallFunctionObjArgs(import, name, ns, ns, fromlist != NULL ? fromlist : Py_None,
-                                              level_obj, NULL);
-    }
-done:
-    Py_XDECREF(level_obj);
-    Py_XDECREF(name);
-    Py_XDECREF(fromlist);
-    Py_DECREF(import);
-    return module;
-}
-
-/*
- * Whether the module of memo `entry` is what CPython's `__import__` for a
- * `from` import of `names` returns, with nothing left for that call to do:
- * the same fromlist, or a module that is not a package (`__import__` reads
- * a fromlist only to import a package's submodules), or a package that
- * already has every name compiled code's fromlist lacked (a name it binds
- * natively), as `_handle_fromlist` asks before importing one. 1, 0, or -1
- * with the exception set.
- */
-static int pycc_ext_mirror_from_reusable(PycImportMemo *entry, Py_ssize_t count,
-                                         const char *const *names)
-{
-    static PyObject *path_key = NULL;
-    Py_ssize_t i;
-    int package;
-
-    if (entry->nfrom == (long long)count) {
-        for (i = 0; i < count && strcmp(entry->fromlist[i], names[i]) == 0; i++) {
-        }
-        if (i == count) {
-            return 1;
-        }
-    }
-    if (pycc_ext_interned(&path_key, "__path__") == NULL) {
-        return -1;
-    }
-    package = PyObject_HasAttrWithError(entry->module, path_key);
-    if (package <= 0) {
-        return package < 0 ? -1 : 1;
-    }
-    for (i = 0; i < count; i++) {
-        long long j;
-        int has;
-
-        for (j = 0; j < entry->nfrom && strcmp(entry->fromlist[j], names[i]) != 0; j++) {
-        }
-        if (j < entry->nfrom) {
-            continue;
-        }
-        has = PyObject_HasAttrStringWithError(entry->module, names[i]);
-        if (has <= 0) {
-            return has;
-        }
-    }
-    return 1;
-}
-
-/*
- * The value and name `entry` (a `from` import compiled code ran) took for
- * `name`: new references, or 0 when it did not take that name.
- */
-static int pycc_ext_mirror_from_taken(PycImportMemo *entry, const char *name, PyObject **value,
-                                      PyObject **key)
-{
-    long long j;
-
-    if (entry == NULL || entry->values == NULL || entry->names == NULL) {
-        return 0;
-    }
-    for (j = 0; j < entry->nfrom; j++) {
-        PyObject *taken = PyTuple_GetItem(entry->values, (Py_ssize_t)j);
-
-        if (taken != NULL && strcmp(entry->fromlist[j], name) == 0) {
-            *value = Py_NewRef(taken);
-            *key = Py_NewRef(PyTuple_GetItem(entry->names, (Py_ssize_t)j));
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int pycc_ext_mirror_import_run(PyObject *ns, int from, const char *module_name,
-                                      long long level, int count, const char *const *names,
-                                      const char *const *stores)
-{
-    PycImportMemo *entry;
-    PycImportMemo taken = {0};
-    PyObject *module;
-    int i;
-
-    if (from) {
-        /* A copy holding its own references: the Python code run below (an
-         * attribute read, a nested import) may move or drop memo entries. */
-        entry = pycc_ext_import_memo_find(ns, 2, module_name, level);
-        if (entry != NULL) {
-            taken = *entry;
-            Py_INCREF(taken.module);
-            Py_XINCREF(taken.names);
-            Py_XINCREF(taken.values);
-            taken.leaf = NULL;
-            entry = &taken;
-        }
-        module = NULL;
-        if (entry != NULL) {
-            int reusable = pycc_ext_mirror_from_reusable(entry, count, names);
-
-            if (reusable < 0) {
-                pycc_ext_import_memo_release(&taken);
-                return -1;
-            }
-            if (reusable) {
-                module = Py_NewRef(entry->module);
-            }
-        }
-        if (module == NULL) {
-            module = pycc_ext_mirror_import_call(ns, 1, module_name, level, count, names);
-            if (module == NULL) {
-                pycc_ext_import_memo_release(&taken);
-                return -1;
-            }
-        }
-        for (i = 0; i < count; i++) {
-            PyObject *value = NULL;
-            PyObject *name = NULL;
-            int status = -1;
-
-            /* A name compiled code took: its value, not a second read. */
-            if (!pycc_ext_mirror_from_taken(entry, names[i], &value, &name)) {
-                name = PyUnicode_InternFromString(names[i]);
-                value = name == NULL ? NULL : pycc_ext_import_from_step(module, name);
-            } else {
-                /* Interned, as CPython's `co_names` are. */
-                PyUnicode_InternInPlace(&name);
-            }
-            if (value != NULL) {
-                if (stores[i] == NULL) {
-                    status = PyDict_SetItem(ns, name, value);
-                } else {
-                    PyObject *store = PyUnicode_InternFromString(stores[i]);
-
-                    status = store == NULL ? -1 : PyDict_SetItem(ns, store, value);
-                    Py_XDECREF(store);
-                }
-            }
-            Py_XDECREF(value);
-            Py_XDECREF(name);
-            if (status != 0) {
-                pycc_ext_import_memo_release(&taken);
-                Py_DECREF(module);
-                return -1;
-            }
-        }
-        pycc_ext_import_memo_release(&taken);
-        Py_DECREF(module);
-        return 0;
-    }
-    for (i = 0; i < count; i++) {
-        const char *dot = strchr(names[i], '.');
-        PyObject *store;
-        int status;
-
-        entry = pycc_ext_import_memo_find(ns, 1, names[i], 0);
-        if (entry != NULL && (stores[i] == NULL || dot == NULL || entry->leaf != NULL)) {
-            /* What compiled code's import bound: the root, the module
-             * itself, or the module its dotted walk reached. */
-            module = Py_NewRef(stores[i] != NULL && dot != NULL ? entry->leaf : entry->module);
-            /* Taken: a second `import a, a` takes the older entry. */
-            pycc_ext_import_memo_release(entry);
-            dot = NULL;
-        } else {
-            module = pycc_ext_mirror_import_call(ns, 0, names[i], 0, 0, NULL);
-            if (module == NULL) {
-                return -1;
-            }
-        }
-        if (stores[i] == NULL) {
-            const char *root_end = strchr(names[i], '.');
-
-            store = root_end == NULL
-                        ? PyUnicode_InternFromString(names[i])
-                        : PyUnicode_FromStringAndSize(names[i], (Py_ssize_t)(root_end - names[i]));
-            if (store != NULL) {
-                PyUnicode_InternInPlace(&store);
-            }
-        } else {
-            while (dot != NULL) {
-                const char *start = dot + 1;
-                PyObject *segment;
-                PyObject *next;
-
-                dot = strchr(start, '.');
-                segment = dot != NULL ? PyUnicode_FromStringAndSize(start, (Py_ssize_t)(dot - start))
-                                      : PyUnicode_FromString(start);
-                if (segment == NULL) {
-                    Py_DECREF(module);
-                    return -1;
-                }
-                PyUnicode_InternInPlace(&segment);
-                next = pycc_ext_import_from_step(module, segment);
-                Py_DECREF(segment);
-                Py_DECREF(module);
-                if (next == NULL) {
-                    return -1;
-                }
-                module = next;
-            }
-            store = PyUnicode_InternFromString(stores[i]);
-        }
-        status = store == NULL ? -1 : PyDict_SetItem(ns, store, module);
-        Py_XDECREF(store);
-        Py_DECREF(module);
-        if (status != 0) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
-/*
- * A mirrored import (`ImportMirror` in src/fallback/render.rs): binds in
- * namespace `ns`, the module's dict, what CPython's bytecode for the
- * statement binds, right after compiled code ran the same statement. It
- * takes what compiled code's import got (the memo above) instead of
- * evaluating anything again: the module `__import__` returned, each name's
- * value, the module a dotted `as` walked to. Only what compiled code did
- * not do is done here, as CPython would: an `__import__` it made with
- * another fromlist for a package, or a name it binds natively (one
- * `IMPORT_FROM`, `pycc_ext_import_from_step`). `from` (`from m import a as
- * b, c`) stores each name under its `stores` entry or itself; `import
- * a.b.c as d, e` binds each module's root package, or with an `as` the
- * module named. 0, or -1 with the exception set; the memo is cleared
- * either way.
- */
-int pycc_ext_mirror_import(PyObject *ns, int from, const char *module_name, long long level,
-                           int count, const char *const *names, const char *const *stores)
-{
-    int status = pycc_ext_mirror_import_run(ns, from, module_name, level, count, names, stores);
-
-    pycc_ext_import_memo_clear(ns);
-    return status;
 }
 
 /*
