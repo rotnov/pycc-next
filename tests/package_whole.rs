@@ -117,6 +117,66 @@ fn artifact() -> &'static str {
     }
 }
 
+/// Whether the host's `cc` really packs relative relocations: a shared
+/// object it links under `-z pack-relative-relocs` has a `RELR` entry
+/// (Ubuntu 24.04's GNU ld 2.42 packs on x86-64 and ignores the flag on
+/// aarch64).
+fn host_linker_packs() -> bool {
+    let scratch = ScratchDir::new("package_whole_relr_probe").expect("scratch");
+    let source = scratch.join("probe.c");
+    std::fs::write(&source, "int a[2];\nint *p[2] = {&a[0], &a[1]};\n").expect("probe source");
+    let object = scratch.join("probe.so");
+    let linked = Command::new("cc")
+        .args(["-shared", "-fPIC", "-Wl,-z,pack-relative-relocs"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&object)
+        .output()
+        .expect("cc runs");
+    if !linked.status.success() {
+        return false;
+    }
+    let dynamic = Command::new("readelf").arg("-d").arg(&object).output().expect("readelf runs");
+    text(&dynamic.stdout).contains("(RELR)")
+}
+
+/// v0.11: on a glibc that reads `DT_RELR` (2.36 and newer) with a linker
+/// that packs them ([`host_linker_packs`]), the extension's relative
+/// relocations are packed into one (`readelf -d` lists a `RELR` entry and
+/// `readelf -r` a `.relr.dyn` section), and the extension depends on
+/// `GLIBC_ABI_DT_RELR`; on any other glibc host it has no `RELR` entry.
+fn assert_packed_relocations(extension: &Path) {
+    if !cfg!(all(target_os = "linux", target_env = "gnu")) {
+        return;
+    }
+    let readelf = |flag: &str| {
+        let output = Command::new("readelf")
+            .arg(flag)
+            .arg(extension)
+            .output()
+            .expect("readelf runs");
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        text(&output.stdout)
+    };
+    let ldd = Command::new("ldd").arg("--version").output().expect("ldd runs");
+    let version = text(&ldd.stdout)
+        .lines()
+        .next()
+        .and_then(|line| line.rsplit(' ').next())
+        .map(str::to_string)
+        .unwrap_or_default();
+    let mut parts = version.split('.').map(|part| part.parse::<u32>().unwrap_or(0));
+    let glibc = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+    let dynamic = readelf("-d");
+    if glibc < (2, 36) || !host_linker_packs() {
+        assert!(!dynamic.contains("(RELR)"), "{dynamic}");
+        return;
+    }
+    assert!(dynamic.contains("(RELR)"), "{dynamic}");
+    assert!(readelf("-r").contains(".relr.dyn"));
+    assert!(readelf("-V").contains("GLIBC_ABI_DT_RELR"));
+}
+
 fn the_package_matches_cpython(release: bool) {
     let built = ScratchDir::new("package_whole_built").expect("scratch");
     let plain = ScratchDir::new("package_whole_plain").expect("scratch");
@@ -174,6 +234,7 @@ fn the_package_matches_cpython(release: bool) {
         report.contains("native class: instances of `pkw.cursor.Cursor` are read natively"),
         "{report}"
     );
+    assert_packed_relocations(&built.join("pkw").join(artifact()));
     remove_sources(&built.join("pkw"));
     let mut left = Vec::new();
     files(&built.join("pkw"), &built.join("pkw"), &mut left);
@@ -278,6 +339,28 @@ fn an_excluded_module_stays_python() {
 /// What a package build refuses, before compiling anything: a directory
 /// that is no package, an `-o` that does not name the package's own
 /// `__init__`, and excluding the package's `__init__`.
+/// v0.11: a single module's extension links as the package's does: its
+/// relative relocations are packed exactly when the host packs them.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn a_single_module_extension_packs_its_relocations_as_a_package_does() {
+    let dir = ScratchDir::new("package_whole_single").expect("scratch");
+    let source = dir.join("single.py");
+    std::fs::write(&source, "def bump(x: int) -> int:\n    return x + 1\n").expect("write");
+    let build = pycc()
+        .arg("build")
+        .arg(&source)
+        .arg("-o")
+        .arg(dir.join("single"))
+        .arg("--ext")
+        .output()
+        .expect("pycc should spawn");
+    assert!(build.status.success(), "{}", text(&pycc_scratch::lf(&build.stderr)));
+    if cfg!(target_os = "linux") {
+        assert_packed_relocations(&dir.join("single.abi3.so"));
+    }
+}
+
 #[test]
 fn a_package_build_refuses_what_it_cannot_build() {
     let dir = ScratchDir::new("package_whole_refusals").expect("scratch");
