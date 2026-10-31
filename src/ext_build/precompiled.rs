@@ -10,8 +10,12 @@
 //! embeds the module's code objects as one `marshal`led table, with the
 //! interpreter's bytecode magic number (one table, so `marshal` shares the
 //! names and constants the chunks repeat and each is read and interned once);
-//! the rewrite reads each code object through the module's `__pycc_code__`
-//! hook (`PRECOMPILED_C`), present in the namespace only while the body runs.
+//! the rewrite runs each chunk through the module's `__pycc_run__` hook
+//! (`PRECOMPILED_C`), present in the namespace only while the body runs, as
+//! `exec` of its code object would. A chunk of only `def` statements with
+//! constant defaults and annotations (v0.11) is tabled as the functions'
+//! own code objects and what `MAKE_FUNCTION` takes, and the hook makes the
+//! functions directly: no wrapper code object to read, no frame to run.
 //! The hook unmarshals the table on its first call, when the running
 //! interpreter has the same magic number and runs unoptimized
 //! (`-O` strips `assert`s at compile time), and otherwise compiles the
@@ -30,11 +34,14 @@ use std::io::Write as _;
 use std::process::Stdio;
 
 /// What the target interpreter compiled: its magic number, the
-/// `marshal`led table of every chunk's entry -- its code object and, when
-/// its code holds `frozenset` constants, their elements in source order (a
-/// tuple of tuples, for [`ORDERS_FIX`]), or `None` for a chunk it refused to
-/// compile, which then fails at import exactly as `compile()` did -- followed
-/// by [`ORDERS_FIX`]'s code object, and which chunks have an entry.
+/// `marshal`led table of every chunk's entry -- `(code, orders)`, its code
+/// object and, when its code holds `frozenset` constants, their elements in
+/// source order (a tuple of tuples, for [`ORDERS_FIX`]); for a chunk of only
+/// constant `def`s, `((spec, ...),)`, what makes each function directly
+/// (`precompile.py`'s `defs`, each spec with its function's orders); or
+/// `None` for a chunk it refused to compile, which then fails at import
+/// exactly as `compile()` did -- followed by [`ORDERS_FIX`]'s code object,
+/// and which chunks have an entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Precompiled {
     pub(crate) magic: u32,
@@ -67,56 +74,14 @@ pub(crate) struct Precompiled {
 /// from them (`ORDERS_FIX`). A chunk where some constant has no such
 /// display, or several in different orders, is left to `compile()` at
 /// import, as before.
-const COMPILE_SCRIPT: &str = "import sys,marshal,importlib.util,__future__\n\
-    def walk(co,acc):\n\
-    \x20 for k in co.co_consts:\n\
-    \x20   if type(k) is frozenset and len(k)>1: acc.append(k)\n\
-    \x20   elif hasattr(k,'co_consts'): walk(k,acc)\n\
-    def displays(src):\n\
-    \x20 import ast\n\
-    \x20 out=[]\n\
-    \x20 for n in ast.walk(ast.parse(src)):\n\
-    \x20   if isinstance(n,ast.Set):\n\
-    \x20     try: out.append(tuple(ast.literal_eval(e) for e in n.elts))\n\
-    \x20     except Exception: pass\n\
-    \x20 return out\n\
-    def orders(src,co):\n\
-    \x20 sets=[]\n\
-    \x20 walk(co,sets)\n\
-    \x20 if not sets: return None\n\
-    \x20 shown=displays(src)\n\
-    \x20 out=[]\n\
-    \x20 for k in sets:\n\
-    \x20   found={t for t in shown if frozenset(t)==k}\n\
-    \x20   if len(found)!=1: raise ValueError\n\
-    \x20   out.append(found.pop())\n\
-    \x20 return tuple(out)\n\
-    def requal(c,old,new):\n\
-    \x20 ks=tuple(requal(k,old,new) if hasattr(k,'co_code') else k for k in c.co_consts)\n\
-    \x20 q=c.co_qualname\n\
-    \x20 if q==old: q=new or c.co_name\n\
-    \x20 elif q.startswith(old+'.<locals>.'): q=(new+'.<locals>.' if new else '')+q[len(old)+10:]\n\
-    \x20 return c.replace(co_consts=ks,co_qualname=q)\n\
-    def at(c,path,op):\n\
-    \x20 if not path: return op(c)\n\
-    \x20 return c.replace(co_consts=tuple(at(k,path[1:],op) if hasattr(k,'co_code') and k.co_name==path[0] else k for k in c.co_consts))\n\
-    def rewrite(co,rewrites):\n\
-    \x20 for kind,path,a,b in rewrites:\n\
-    \x20   if kind=='q': co=at(co,path,lambda c:requal(c,a,b))\n\
-    \x20   else: co=at(co,path,lambda c:c.replace(co_qualname=a,co_flags=c.co_flags|b))\n\
-    \x20 return co\n\
-    chunks,fix=marshal.loads(sys.stdin.buffer.read())\n\
-    table=[]\n\
-    for source,filename,future,rewrites in chunks:\n\
-    \x20 try:\n\
-    \x20   f=__future__.annotations.compiler_flag if future else 0\n\
-    \x20   co=rewrite(compile(source,filename,'exec',f,True,0),rewrites)\n\
-    \x20   table.append((co,orders(source,co)))\n\
-    \x20 except Exception:\n\
-    \x20   table.append(None)\n\
-    present=bytes(t is not None for t in table)\n\
-    table.append(compile(fix,'<pycc precompiled>','exec',0,True,0))\n\
-    sys.stdout.buffer.write(importlib.util.MAGIC_NUMBER+present+marshal.dumps(tuple(table)))\n";
+///
+/// A chunk of only `def`s whose defaults and annotations are constants
+/// (v0.11) is tabled as each function's code and the constants
+/// `MAKE_FUNCTION` takes, found by reading the chunk's bytecode, so the
+/// import makes the functions without the chunk's own code object or a
+/// frame (`precompiled_hook.c`). Kept in `precompile.py`; the build
+/// normalizes its line endings.
+const COMPILE_SCRIPT: &str = include_str!("precompile.py");
 
 /// The `fix(code, orders)` an import runs on a chunk holding `frozenset`
 /// constants: rebuilds each from its elements in source order
@@ -154,7 +119,7 @@ const ORDERS_FIX: &str = "def fix(co, orders):
 /// answers something this build cannot read.
 pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Precompiled> {
     let input = marshal_input(chunks)?;
-    let mut child = super::probe_command(interpreter, COMPILE_SCRIPT)
+    let mut child = super::probe_command(interpreter, &COMPILE_SCRIPT.replace("\r\n", "\n"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -320,209 +285,8 @@ pub(crate) fn install(inc: String, chunks: &[CodeChunk], compiled: Option<&Preco
 }
 
 /// The hook and its install/remove pair (`module_init.c` calls these
-/// around the body).
-const PRECOMPILED_C: &str = r#"/*
- * 1 when the embedded code objects are this interpreter's
- * (`pycc_ext_marshal_loads`). Decided once per process; `marshal.loads`
- * (borrowed from the runtime unit, which keeps it) is kept with it.
- */
-static int pycc_ext_chunk_usable = -1;
-static PyObject *pycc_ext_chunk_loads = NULL;
-/* The unmarshalled table (`pycc_ext_chunk_table_data`), from the hook's
- * first call until the body has run. */
-static PyObject *pycc_ext_chunk_table = NULL;
-/* `fix(code, orders)` (`ORDERS_FIX` in `src/ext_build/precompiled.rs`),
- * made once from the table's last entry; NULL when unavailable. */
-static PyObject *pycc_ext_chunk_fix = NULL;
-
-/* `pycc_ext_chunk_fix`, made by running the table's last entry; NULL (no
- * exception left set) when it cannot be. */
-static PyObject *pycc_ext_chunk_fixer(void)
-{
-    PyObject *code, *ns;
-
-    if (pycc_ext_chunk_fix != NULL) {
-        return pycc_ext_chunk_fix;
-    }
-    code = PyTuple_GetItem(pycc_ext_chunk_table, pycc_ext_chunk_count);
-    ns = code == NULL ? NULL : PyDict_New();
-    if (ns != NULL && PyDict_SetItemString(ns, "__builtins__", PyEval_GetBuiltins()) == 0) {
-        PyObject *done = PyEval_EvalCode(code, ns, ns);
-
-        Py_XDECREF(done);
-        if (done != NULL) {
-            pycc_ext_chunk_fix = PyDict_GetItemString(ns, "fix");
-            Py_XINCREF(pycc_ext_chunk_fix);
-        }
-    }
-    Py_XDECREF(ns);
-    PyErr_Clear();
-    return pycc_ext_chunk_fix;
-}
-
-static int pycc_ext_chunks_usable(void)
-{
-    if (pycc_ext_chunk_usable >= 0) {
-        return pycc_ext_chunk_usable;
-    }
-    pycc_ext_chunk_loads = pycc_ext_chunk_magic == 0 ? NULL : pycc_ext_marshal_loads(pycc_ext_chunk_magic);
-    pycc_ext_chunk_usable = pycc_ext_chunk_loads != NULL;
-    return pycc_ext_chunk_usable;
-}
-
-/* `compile()` of chunk `chunk`'s embedded source, as the rewrite did. */
-static PyObject *pycc_ext_chunk_compile(const struct pycc_ext_chunk *chunk)
-{
-    PyObject *compile;
-    PyObject *source;
-    PyObject *flags;
-    PyObject *result;
-
-    compile = PyDict_GetItemString(PyEval_GetBuiltins(), "compile");
-    if (compile == NULL) {
-        PyErr_SetString(PyExc_SystemError, "pycc: builtins.compile is missing");
-        return NULL;
-    }
-    if (chunk->future_annotations) {
-        PyObject *future = PyImport_ImportModule("__future__");
-        PyObject *feature;
-        if (future == NULL) {
-            return NULL;
-        }
-        feature = PyObject_GetAttrString(future, "annotations");
-        Py_DECREF(future);
-        if (feature == NULL) {
-            return NULL;
-        }
-        flags = PyObject_GetAttrString(feature, "compiler_flag");
-        Py_DECREF(feature);
-    } else {
-        flags = PyLong_FromLong(0);
-    }
-    if (flags == NULL) {
-        return NULL;
-    }
-    source = PyUnicode_DecodeUTF8(chunk->source, chunk->source_len, NULL);
-    if (source == NULL) {
-        Py_DECREF(flags);
-        return NULL;
-    }
-    result = PyObject_CallFunction(compile, "OssOi", source, chunk->filename, "exec", flags, 1);
-    Py_DECREF(source);
-    Py_DECREF(flags);
-    return result;
-}
-
-/* The code object of chunk `index` from the table (unmarshalled on the
- * first call), its `frozenset` constants rebuilt in source order; NULL with
- * no exception set when it cannot be had that way. */
-static PyObject *pycc_ext_chunk_precompiled(Py_ssize_t index)
-{
-    PyObject *entry, *code, *orders, *fix;
-
-    if (pycc_ext_chunk_table == NULL) {
-        PyObject *view = PyMemoryView_FromMemory((char *)pycc_ext_chunk_table_data,
-                                                 pycc_ext_chunk_table_len, PyBUF_READ);
-
-        if (view != NULL) {
-            pycc_ext_chunk_table = PyObject_CallFunctionObjArgs(pycc_ext_chunk_loads, view, NULL);
-            Py_DECREF(view);
-        }
-        if (pycc_ext_chunk_table != NULL
-            && (!PyTuple_Check(pycc_ext_chunk_table)
-                || PyTuple_Size(pycc_ext_chunk_table) != pycc_ext_chunk_count + 1)) {
-            Py_CLEAR(pycc_ext_chunk_table);
-        }
-        if (pycc_ext_chunk_table == NULL) {
-            PyErr_Clear();
-            return NULL;
-        }
-    }
-    entry = PyTuple_GetItem(pycc_ext_chunk_table, index);
-    if (entry == NULL || !PyTuple_Check(entry) || PyTuple_Size(entry) != 2) {
-        PyErr_Clear();
-        return NULL;
-    }
-    code = PyTuple_GetItem(entry, 0);
-    orders = PyTuple_GetItem(entry, 1);
-    if (orders == Py_None) {
-        return Py_NewRef(code);
-    }
-    fix = pycc_ext_chunk_fixer();
-    code = fix == NULL ? NULL : PyObject_CallFunctionObjArgs(fix, code, orders, NULL);
-    if (code == NULL) {
-        PyErr_Clear();
-    }
-    return code;
-}
-
-/* The code object of chunk `index`; NULL with an exception set. */
-static PyObject *pycc_ext_chunk_code(Py_ssize_t index)
-{
-    const struct pycc_ext_chunk *chunk;
-
-    if (index < 0 || index >= pycc_ext_chunk_count) {
-        PyErr_SetString(PyExc_SystemError, "pycc: no such pre-compiled chunk");
-        return NULL;
-    }
-    chunk = &pycc_ext_chunks[index];
-    if (chunk->precompiled && pycc_ext_chunks_usable()) {
-        PyObject *code = pycc_ext_chunk_precompiled(index);
-
-        if (code != NULL) {
-            return code;
-        }
-        /* Unreadable after all: compile the source instead. */
-    }
-    return pycc_ext_chunk_compile(chunk);
-}
-
-/* `__pycc_code__(k)`: the code object of chunk `k`. */
-static PyObject *pycc_ext_code(PyObject *self, PyObject *arg)
-{
-    Py_ssize_t index = PyLong_AsSsize_t(arg);
-
-    (void)self;
-    if (index == -1 && PyErr_Occurred()) {
-        return NULL;
-    }
-    return pycc_ext_chunk_code(index);
-}
-
-static PyMethodDef pycc_ext_code_def = {"__pycc_code__", pycc_ext_code, METH_O, NULL};
-
-/* Binds the hook in `module`'s namespace for the body; 0, or -1 with an
- * exception set. */
-static int pycc_ext_code_install(PyObject *module)
-{
-    PyObject *hook = PyCFunction_NewEx(&pycc_ext_code_def, NULL, NULL);
-    int status;
-
-    if (hook == NULL) {
-        return -1;
-    }
-    status = PyDict_SetItemString(PyModule_GetDict(module), "__pycc_code__", hook);
-    Py_DECREF(hook);
-    return status;
-}
-
-/* Removes the hook once the body has run, keeping any exception the body
- * raised. */
-static void pycc_ext_code_remove(PyObject *module)
-{
-    PyObject *raised = PyErr_GetRaisedException();
-    PyObject *dict = PyModule_GetDict(module);
-
-    if (PyDict_DelItemString(dict, "__pycc_code__") != 0) {
-        PyErr_Clear();
-    }
-    /* No chunk is read after the body: the code objects it made live on in
-     * what it defined. */
-    Py_CLEAR(pycc_ext_chunk_table);
-    PyErr_SetRaisedException(raised);
-}
-
-"#;
+/// around the body), and `pycc_ext_chunk_run_in` (`signatures.rs`).
+const PRECOMPILED_C: &str = include_str!("precompiled_hook.c");
 
 #[cfg(test)]
 mod tests {
@@ -691,14 +455,18 @@ mod tests {
             return;
         };
         assert_eq!(compiled.present, vec![true, true]);
-        let check = "import marshal,sys\n\
+        // Both chunks are a bare `def`: on 3.13 tabled as the function's
+        // code (`((spec,),)`), elsewhere as the chunk's `(code, orders)`.
+        let check = "import marshal,sys,types\n\
             t=marshal.loads(sys.stdin.buffer.read())\n\
-            ns={}\n\
-            exec(t[0][0],ns)\n\
-            f=ns['mk']()\n\
+            def run(e,name):\n\
+            \x20 ns={}\n\
+            \x20 if type(e[0]) is tuple: return types.FunctionType(e[0][0][0],ns)\n\
+            \x20 exec(e[0],ns)\n\
+            \x20 return ns[name]\n\
+            f=run(t[0],'mk')()\n\
             print(f.__code__.co_qualname, f().__qualname__)\n\
-            exec(t[1][0],ns)\n\
-            m=ns['_pycc_make'](0)\n\
+            m=run(t[1],'_pycc_make')(0)\n\
             print(m.__code__.co_qualname, hex(m.__code__.co_flags & 0x40000000))\n";
         let mut child = std::process::Command::new(super::super::DEFAULT_PYTHON)
             .args(["-I", "-c", check])
@@ -716,6 +484,62 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"),
             "C.m C.m.<locals>.g\nC.m 0x40000000\n"
+        );
+    }
+
+    /// Whether the test interpreter is CPython 3.13, whose bytecode
+    /// `precompile.py`'s `defs` reads.
+    fn python_is_3_13() -> bool {
+        std::process::Command::new(super::super::DEFAULT_PYTHON)
+            .args(["-I", "-c", "import sys; print(sys.version_info[:2] == (3, 13))"])
+            .output()
+            .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "True")
+    }
+
+    #[test]
+    fn a_real_interpreter_tables_constant_defs_as_their_functions() {
+        let chunks = [
+            chunk("def f(a, b=(1, 2), *, c=3):\n    return a\ndef g(): pass\n__pycc_forward__('g')\n"),
+            chunk("@d\ndef f(): pass\n"),
+            chunk("def f(a=X): pass\n"),
+            chunk("def f():\n    return 1 in {3, 1, 2}\n"),
+            chunk("x = 1\ndef f(): pass\n"),
+        ];
+        let Some(compiled) = precompile(OsStr::new(super::super::DEFAULT_PYTHON), &chunks) else {
+            return;
+        };
+        assert_eq!(compiled.present, vec![true; 5]);
+        if !python_is_3_13() {
+            // The bytecode `defs` reads is 3.13's: every entry is a code.
+            return;
+        }
+        // A `def` entry is `((spec, ...),)`: each function's code, defaults,
+        // keyword defaults, annotations, name, forwarded names and set
+        // orders; anything else `(code, orders)`.
+        let check = "import marshal,sys\n\
+            t=marshal.loads(sys.stdin.buffer.read())\n\
+            print([len(e) for e in t[:-1]])\n\
+            (f,g),=t[0]\n\
+            print(f[0].co_name, f[1:6], g[0].co_name, g[1:6])\n\
+            print(t[3][0][0][6], tuple(len(s) for s in t[0][0]))\n";
+        let mut child = std::process::Command::new(super::super::DEFAULT_PYTHON)
+            .args(["-I", "-c", check])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("the interpreter that compiled the table runs");
+        child
+            .stdin
+            .take()
+            .expect("piped")
+            .write_all(&compiled.table)
+            .expect("the table is written");
+        let out = child.wait_with_output().expect("it finishes");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"),
+            "[1, 2, 2, 1, 2]\n\
+             f (((1, 2),), {'c': 3}, None, 'f', None) g (None, None, None, 'g', ('g',))\n\
+             ((3, 1, 2),) (7, 7)\n"
         );
     }
 

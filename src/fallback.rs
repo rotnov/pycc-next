@@ -18,9 +18,9 @@
 //!    consecutive fallback statements becomes one
 //!    `builtins.exec(builtins.compile(<source>, <file>, "exec"), ns)`,
 //!    the source padded with newlines so tracebacks keep their line
-//!    numbers (in an `--ext` module `builtins.exec(ns["__pycc_code__"](k),
-//!    ns)`: chunk `k`'s code object, compiled when the module was built,
-//!    `render::CodeChunk`); and every compiled reference to a module global that
+//!    numbers (in an `--ext` module `ns["__pycc_run__"](k)`: chunk `k`,
+//!    compiled when the module was built, `render::CodeChunk`, run as its
+//!    `exec` would); and every compiled reference to a module global that
 //!    fallback code reads or binds becomes `ns['name']`, so both sides see
 //!    one value (a *dict global*); code reaching globals by a string
 //!    (`eval`, `exec`, `globals()`, the module object) reads every one

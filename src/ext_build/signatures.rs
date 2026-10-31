@@ -180,8 +180,6 @@ const PUBLISH_C: &str = r#"static int pycc_ext_signature_publish(PyObject *modul
 {
     const struct pycc_ext_signature *signature;
     PyObject *dict;
-    PyObject *code;
-    PyObject *result;
     PyObject *make;
     PyObject *wrapper;
     PyObject *old;
@@ -192,16 +190,9 @@ const PUBLISH_C: &str = r#"static int pycc_ext_signature_publish(PyObject *modul
             continue;
         }
         dict = PyModule_GetDict(module);
-        code = pycc_ext_chunk_code(signature->chunk);
-        if (code == NULL) {
+        if (pycc_ext_chunk_run_in(signature->chunk, dict, 0) != 0) {
             return -1;
         }
-        result = PyEval_EvalCode(code, dict, dict);
-        Py_DECREF(code);
-        if (result == NULL) {
-            return -1;
-        }
-        Py_DECREF(result);
         make = PyDict_GetItemString(dict, "_pycc_make");
         if (make == NULL) {
             PyErr_SetString(PyExc_SystemError, "pycc: a signature wrapper defined no factory");

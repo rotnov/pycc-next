@@ -11,6 +11,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   publishes in ms.
 
 ### Changed
+- A fallback chunk of only `def` statements whose defaults, keyword defaults and
+  annotations are constants (no decorator, no closure), and a nested statement's scaffold,
+  is made at import by the module's `__pycc_run__` hook from the functions' own code
+  objects, without the chunk's code object or an `exec` frame (v0.11 accept 3); every
+  other chunk runs as `exec` of its code, as before. 105 of the CI workload's 443 chunks
+  (3.13 only; `-O` still compiles the source). The rewrite calls `ns["__pycc_run__"](k)`
+  where it called `builtins.exec(ns["__pycc_code__"](k), ns)`; an audit hook sees a
+  `function.__new__` event per function made this way (`docs/DEVIATIONS.md`). Own import share:
+  pystache 8.27M -> 8.23M, mistune 23.60M -> 23.52M, pydantic 91.09M -> 90.63M (the CI
+  workload's import phase 213.25M -> 212.67M).
 - A compiled import statement whose names fallback code reads is mirrored into the
   module's namespace by compiled code storing what its own import bound, instead of
   running the statement again as a chunk (v0.11 accept 3): the statement calls
