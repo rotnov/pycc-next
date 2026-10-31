@@ -9,7 +9,10 @@
 //! absolute and relative `from` imports, with and without `-O`. Compiled
 //! code's own call passes the module's namespace as `globals` and `locals`,
 //! as CPython's `IMPORT_NAME` does, so an `__import__` that answers by the
-//! importer's `__name__` binds the same object.
+//! importer's `__name__` binds the same object, and the mirror binds the
+//! values compiled code took (`from m import x`, the module `import a.b as
+//! c` walked to) rather than reading an attribute a second time, even when
+//! the statement's next import runs another module's mirrors meanwhile.
 //!
 //! The oracle is CPython running the same sources.
 
@@ -28,13 +31,15 @@ fn text(bytes: &[u8]) -> String {
 const INIT: &str = "\"\"\"A package whose member mirrors its imports.\"\"\"\n";
 
 const M: &str = r#"import json
-import colorsys
+import colorsys, pmi.nested
 import os.path
 import xml.dom.minidom as minidom
 from collections import OrderedDict, ChainMap as cm
 from os import path as p2, sep
 from . import sib
 from .sib import X as Y, twice
+from probe import x, y as yy
+import probe2.sub as ps
 
 
 def names():
@@ -42,7 +47,7 @@ def names():
     # mirrored into the namespace.
     return (lambda: (json.dumps([1]), os.path.basename("/a/b"), minidom.__name__,
                      OrderedDict.__name__, cm.__name__, p2.__name__, sep, sib.X, Y,
-                     twice(4), colorsys.__name__))()
+                     twice(4), colorsys.__name__, x, yy, ps, pmi.nested.f()))()
 
 
 def native(n: int) -> int:
@@ -51,9 +56,17 @@ def native(n: int) -> int:
 
 def native_rgb() -> object:
     return colorsys.rgb_to_hsv
+
+
+def native_probe() -> object:
+    return (x, yy, ps)
 "#;
 
 const SIB: &str = "X = 7\n\n\ndef twice(n: int) -> int:\n    return n * 2\n";
+
+/// Imported in the middle of `m`'s `import colorsys, pmi.nested`: its own
+/// mirrored import runs then.
+const NESTED: &str = "import json\n\n\ndef f():\n    return (lambda: json.dumps(2))()\n";
 
 /// Prints the `__import__` calls `pmi.m`'s own statements make (to
 /// stderr), then what the namespace holds.
@@ -63,12 +76,28 @@ sys.path.insert(0, sys.argv[1])
 calls = []
 real = builtins.__import__
 import types
-OWN = {"json", "colorsys", "os.path", "xml.dom.minidom", "collections", "os", "", "sib"}
+OWN = {"json", "colorsys", "pmi.nested", "os.path", "xml.dom.minidom", "collections", "os", "", "sib"}
 # Answers by the importer's `__name__`, as CPython passes it.
 FAKE = types.ModuleType("fake_colorsys")
 FAKE.rgb_to_hsv = "hooked"
+# Each read of an attribute answers the next number, so a second read of
+# what the statement already read shows.
+class Counting:
+    def __init__(self, names):
+        self.names = names
+        self.reads = 0
+    def __getattr__(self, attr):
+        if attr not in self.names:
+            raise AttributeError(attr)
+        self.reads += 1
+        return self.reads
+PROBE = Counting(("x", "y"))
+PROBE2 = Counting(("sub",))
 def hook(name, globals=None, locals=None, fromlist=(), level=0):
     importer = (globals or {}).get("__name__")
+    if importer == "pmi.m" and name in ("probe", "probe2.sub"):
+        calls.append((name, tuple(fromlist or ()), level, importer, locals is globals))
+        return PROBE if name == "probe" else PROBE2
     if name in OWN and importer in (None, "pmi.m"):
         calls.append((name, tuple(fromlist or ()), level, importer, locals is globals))
     if name == "colorsys" and importer == "pmi.m":
@@ -79,6 +108,7 @@ from pmi import m
 builtins.__import__ = real
 print(calls, file=sys.stderr)
 print(m.names(), m.native(3), m.native_rgb(), m.colorsys is FAKE)
+print(m.native_probe(), PROBE.reads, PROBE2.reads)
 print(sorted(k for k in vars(m) if not k.startswith("__")))
 print(m.minidom is sys.modules["xml.dom.minidom"], m.os is sys.modules["os"],
       m.sib is sys.modules["pmi.sib"], m.p2 is sys.modules["os.path"])
@@ -87,7 +117,7 @@ print(m.minidom is sys.modules["xml.dom.minidom"], m.os is sys.modules["os"],
 fn write_package(root: &Path) {
     let package = root.join("pmi");
     std::fs::create_dir_all(&package).expect("create the package");
-    for (name, source) in [("__init__.py", INIT), ("m.py", M), ("sib.py", SIB)] {
+    for (name, source) in [("__init__.py", INIT), ("m.py", M), ("sib.py", SIB), ("nested.py", NESTED)] {
         std::fs::write(package.join(name), source).expect("write a module");
     }
 }
@@ -122,7 +152,7 @@ fn a_mirrored_import_binds_its_names_with_one_import_call_as_cpython() {
     let report = text(&build.stderr);
     assert!(build.status.success(), "{report}");
     assert!(report.contains("function `names`"), "{report}");
-    for name in ["__init__.py", "m.py", "sib.py"] {
+    for name in ["__init__.py", "m.py", "sib.py", "nested.py"] {
         std::fs::remove_file(package.join(name)).expect("import the artifact, not the source");
     }
     let plain = ScratchDir::new("mirrored_imports_src").expect("scratch");
@@ -139,10 +169,12 @@ fn a_mirrored_import_binds_its_names_with_one_import_call_as_cpython() {
     assert_eq!(
         text(&oracle.stderr),
         "[('json', (), 0, 'pmi.m', True), ('colorsys', (), 0, 'pmi.m', True), \
+         ('pmi.nested', (), 0, 'pmi.m', True), \
          ('os.path', (), 0, 'pmi.m', True), ('xml.dom.minidom', (), 0, 'pmi.m', True), \
          ('collections', ('OrderedDict', 'ChainMap'), 0, 'pmi.m', True), \
          ('os', ('path', 'sep'), 0, 'pmi.m', True), ('', ('sib',), 1, 'pmi.m', True), \
-         ('sib', ('X', 'twice'), 1, 'pmi.m', True)]\n",
+         ('sib', ('X', 'twice'), 1, 'pmi.m', True), ('probe', ('x', 'y'), 0, 'pmi.m', True), \
+         ('probe2.sub', (), 0, 'pmi.m', True)]\n",
         "the CPython reference itself"
     );
 }

@@ -12,13 +12,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Changed
 - A compiled import statement whose names fallback code reads binds them into the
-  module's namespace in C, with the module compiled code just imported, instead of
-  running the statement again as a chunk (v0.11 accept 3): the statement calls
+  module's namespace in C, with the module and the values compiled code just got (no
+  attribute is read twice), instead of running the statement again as a chunk (v0.11 accept 3): the statement calls
   `__import__` once with CPython's arguments, where it called it twice. Compiled code's
   imports pass `__import__` the module's namespace as `globals` (and as `locals` in its
   body), as CPython's `IMPORT_NAME` does, where they passed None. Own import share:
-  pystache 8.66M -> 8.30M, mistune 23.73M -> 23.49M, pydantic 92.61M -> 91.11M (the CI
-  workload's import phase 215.11M -> 213.28M).
+  pystache 8.66M -> 8.31M, mistune 23.73M -> 23.50M, pydantic 92.61M -> 91.11M (the CI
+  workload's import phase 215.11M -> 213.30M).
 - A compiled module's forwarder slots no longer copy each function's parameter names and
   positional defaults (24 of each, 488 bytes a slot, zeroed for every slot when the
   module's body started); a call that binds keywords or defaults reads them from the
