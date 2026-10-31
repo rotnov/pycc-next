@@ -537,7 +537,9 @@ static int pycc_ext_ic_lookup(PyTypeObject *type, PyObject *name, PyObject **hol
         } else {
             /* A static builtin class keeps its dict elsewhere (3.12+); its
              * contents live as long as the interpreter. */
-            PyObject *proxy = PyObject_GetAttrString(cls, "__dict__");
+            static PyObject *dict_name = NULL;
+            PyObject *name_dict = pycc_ext_interned(&dict_name, "__dict__");
+            PyObject *proxy = name_dict == NULL ? NULL : PyObject_GetAttr(cls, name_dict);
 
             if (proxy == NULL) {
                 PyErr_Clear();

@@ -127,7 +127,9 @@ typedef struct PyccFrameObject {
  */
 static PyObject *pycc_frames_filename(PyObject *globals, const char *built)
 {
-    PyObject *file = PyDict_GetItemString(globals, "__file__");
+    static PyObject *file_key = NULL;
+    PyObject *key = pycc_ext_interned(&file_key, "__file__");
+    PyObject *file = key == NULL ? NULL : PyDict_GetItemWithError(globals, key);
     const char *base = built;
     const char *p;
 #ifdef _WIN32
@@ -141,6 +143,9 @@ static PyObject *pycc_frames_filename(PyObject *globals, const char *built)
         if (*p == '/' || *p == '\\') {
             base = p + 1;
         }
+    }
+    if (file == NULL && PyErr_Occurred()) {
+        return NULL;
     }
     if (file == NULL || !PyUnicode_Check(file)) {
         return PyUnicode_FromString(built);
@@ -249,8 +254,11 @@ static void pycc_lt_svarint(unsigned char **out, int32_t value)
  * 1 when ready; 0 when compiled frames are off or it could not be built
  * (with no CPython exception set).
  */
+static PyObject *pycc_frames_builtins_key = NULL;
+
 static int pycc_fninfo_ready(PyccFnInfo *info)
 {
+    PyObject *builtins_key;
     PyObject *bytecode = NULL, *table = NULL, *args = NULL;
     PyObject *code = NULL, *func = NULL, *globals, *filename = NULL;
     unsigned char *buf = NULL, *out;
@@ -371,8 +379,10 @@ static int pycc_fninfo_ready(PyccFnInfo *info)
     }
     /* A function's globals name its builtins, as a Python module's do: the
      * builtins' dict, which `exec` stores in a module's namespace. */
-    if (PyDict_GetItemString(globals, "__builtins__") == NULL
-        && PyDict_SetItemString(globals, "__builtins__", PyEval_GetBuiltins()) != 0) {
+    builtins_key = pycc_ext_interned(&pycc_frames_builtins_key, "__builtins__");
+    if (builtins_key == NULL
+        || (PyDict_GetItemWithError(globals, builtins_key) == NULL
+            && (PyErr_Occurred() || PyDict_SetItem(globals, builtins_key, PyEval_GetBuiltins()) != 0))) {
         goto done;
     }
     func = PyObject_CallFunctionObjArgs(pycc_frames_function_type, code, globals, NULL);

@@ -589,7 +589,10 @@ impl Interface {
     /// The producer's C header: the listed names and the table of the
     /// objects its dict binds to them once its body has run (each a strong
     /// reference, so no other object can take its address while a caller
-    /// compares against it).
+    /// compares against it). A name its body published is looked up by the
+    /// interned key `pycc_ext_publish` bound it with (`module_init.c`),
+    /// which skips decoding and hashing the C string; any other name by its
+    /// spelling.
     pub(crate) fn c_header(&self) -> String {
         let count = self.functions.len();
         let mut out = String::from(
@@ -608,7 +611,10 @@ impl Interface {
         out.push_str(
             "static void pycc_ext_interface_fill(PyObject *dict)\n{\n    \
              for (int i = 0; pycc_ext_interface_names[i] != NULL; i++) {\n        \
-             PyObject *value = PyDict_GetItemString(dict, pycc_ext_interface_names[i]);\n        \
+             const PyMethodDef *row = pycc_ext_publish_row(pycc_ext_interface_names[i]);\n        \
+             PyObject *key = row == NULL ? NULL : pycc_ext_publish_key(row, 0);\n        \
+             PyObject *value = key != NULL ? PyDict_GetItem(dict, key)\n            \
+             : PyDict_GetItemString(dict, pycc_ext_interface_names[i]);\n        \
              PyObject *old = pycc_ext_interface_table[i];\n\n        \
              Py_XINCREF(value);\n        \
              pycc_ext_interface_table[i] = value;\n        \

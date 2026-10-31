@@ -7,19 +7,22 @@
  * the row it finds. The cursor is only read and written with the GIL held
  * (publication runs in the module body).
  */
+static Py_ssize_t pycc_ext_publish_count = -1;
+
 static PyMethodDef *pycc_ext_publish_row(const char *name)
 {
     static Py_ssize_t next = 0;
-    static Py_ssize_t count = -1;
+    Py_ssize_t count;
     Py_ssize_t start;
     Py_ssize_t i;
 
-    if (count < 0) {
-        count = 0;
-        while (pycc_ext_methods[count].ml_name != NULL) {
-            count++;
+    if (pycc_ext_publish_count < 0) {
+        pycc_ext_publish_count = 0;
+        while (pycc_ext_methods[pycc_ext_publish_count].ml_name != NULL) {
+            pycc_ext_publish_count++;
         }
     }
+    count = pycc_ext_publish_count;
     if (count == 0) {
         return NULL;
     }
@@ -33,6 +36,38 @@ static PyMethodDef *pycc_ext_publish_row(const char *name)
         }
     }
     return NULL;
+}
+
+/*
+ * The interned `str` of `row`'s name, made at its first publication and
+ * kept for the process: the module dict's key for it, which a later lookup
+ * of the name (`pycc_ext_interface_fill`) passes as it is instead of
+ * decoding and hashing the C string again. NULL (no exception set) for a
+ * row never published, or when the table could not be allocated; NULL with
+ * an exception set when the name could not be made.
+ */
+static PyObject **pycc_ext_publish_keys = NULL;
+
+static PyObject *pycc_ext_publish_key(const PyMethodDef *row, int make)
+{
+    Py_ssize_t at = row - pycc_ext_methods;
+    PyObject *key;
+
+    if (pycc_ext_publish_keys == NULL) {
+        if (!make) {
+            return NULL;
+        }
+        pycc_ext_publish_keys = (PyObject **)PyMem_Calloc((size_t)pycc_ext_publish_count, sizeof(PyObject *));
+        if (pycc_ext_publish_keys == NULL) {
+            return NULL;
+        }
+    }
+    key = pycc_ext_publish_keys[at];
+    if (key == NULL && make) {
+        key = PyUnicode_InternFromString(row->ml_name);
+        pycc_ext_publish_keys[at] = key;
+    }
+    return key;
 }
 
 /*
@@ -79,6 +114,7 @@ PYCC_ENTRY int pycc_ext_publish(const char *name)
     PyObject *type;
     PyObject *modname;
     PyObject *func;
+    PyObject *key;
     int status;
 
     row = pycc_ext_publish_row(name);
@@ -139,7 +175,12 @@ PYCC_ENTRY int pycc_ext_publish(const char *name)
         return status < 0 ? -1 : 0;
     }
 #endif
-    status = PyModule_AddObjectRef(module, row->ml_name, func);
+    key = pycc_ext_publish_key(row, 1);
+    if (key == NULL) {
+        status = PyErr_Occurred() ? -1 : PyModule_AddObjectRef(module, row->ml_name, func);
+    } else {
+        status = PyDict_SetItem(PyModule_GetDict(module), key, func);
+    }
     Py_DECREF(func);
     return status;
 }

@@ -11,6 +11,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   publishes in ms.
 
 ### Changed
+- A compiled module's import looks names up by interned `str` keys instead of C strings
+  (v0.11 accept 3): a package member's interface table is filled by the keys its body
+  published its functions with, the fallback chunks' interpreter check (magic number,
+  `-O`, `marshal.loads`) runs once per extension instead of once per module, and the
+  shim's fixed-name lookups (`__file__`, `__builtins__`, `__dict__`, `flush`, the package
+  finder's `__spec__`/`name`) use interned names. Own import share: pystache 9.0M ->
+  8.8M, mistune 24.4M -> 24.1M, pydantic 94.5M -> 93.7M. Lever 8 (one code object per
+  module's fallback chunks) was measured and rejected: about -0.4M net
+  (`docs/roadmap/v0.11.md`).
 - ELF extension modules built for a glibc that reads `DT_RELR` (2.36 and newer; not with
   `--target`), with a linker that packs them (a probe link checks for `DT_RELR`; GNU ld
   2.42 does on x86-64, not on aarch64), link with `-z pack-relative-relocs`: pydantic's
