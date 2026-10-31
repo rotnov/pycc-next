@@ -410,6 +410,7 @@ pub(crate) fn emit_return_stmt<'ctx>(
                     rt,
                     crate::exception::owned_slots::return_depth(finally_stack),
                 );
+                crate::object_release::release_loops_for_return(builder, rt, finally_stack);
                 if let Some(ft) = finally_target {
                     builder
                         .build_store(ft.is_returning, context.i8_type().const_int(1, false))
@@ -536,6 +537,7 @@ pub(crate) fn emit_return_stmt<'ctx>(
                 rt,
                 crate::exception::owned_slots::return_depth(finally_stack),
             );
+            crate::object_release::release_loops_for_return(builder, rt, finally_stack);
             if let Some(ft) = finally_target {
                 // Route through finally: store the return value,
                 // set the is_returning flag, and branch to finally.
@@ -575,6 +577,7 @@ pub(crate) fn emit_return_stmt<'ctx>(
                     rt,
                     crate::exception::owned_slots::return_depth(finally_stack),
                 );
+                crate::object_release::release_loops_for_return(builder, rt, finally_stack);
                 if let Some(ft) = finally_target {
                     builder
                         .build_store(ft.is_returning, context.i8_type().const_int(1, false))
@@ -597,6 +600,7 @@ pub(crate) fn emit_return_stmt<'ctx>(
                     rt,
                     crate::exception::owned_slots::return_depth(finally_stack),
                 );
+                crate::object_release::release_loops_for_return(builder, rt, finally_stack);
                 if let Some(ft) = finally_target {
                     let slot = ft.ret_slot.expect(
                         "a non-None default return routed through finally has a return slot",

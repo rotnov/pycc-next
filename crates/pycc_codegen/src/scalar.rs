@@ -348,6 +348,11 @@ pub(crate) struct FinallyTarget<'ctx> {
     /// the `try` was entered: a `return` routed here releases the slots
     /// above it, and this `finally` may still read the ones below.
     pub(crate) exc_depth: usize,
+    /// The number of enclosing `for x in <object>:` loops
+    /// (`ExceptionCodegenState::loop_iterators`) when the `try` was
+    /// entered: a `return` routed here releases the iterators of the loops
+    /// above it, and those below stay live while this `finally` runs.
+    pub(crate) loop_depth: usize,
 }
 
 #[derive(Clone)]

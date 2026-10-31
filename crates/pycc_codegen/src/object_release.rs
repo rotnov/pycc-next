@@ -356,6 +356,32 @@ pub(super) fn loop_iterators_above_handler<'ctx>(
     (handler, iterators)
 }
 
+/// The number of enclosing `for x in <object>:` loops, recorded by a
+/// `try` with a `finally` as its [`crate::scalar::FinallyTarget::loop_depth`].
+pub(super) fn loop_depth(rt: &RtFns<'_>) -> usize {
+    rt.exceptions.loop_iterators.borrow().len()
+}
+
+/// Releases, innermost first, the iterators of the loops a `return` leaves
+/// before it reaches the innermost `finally` it runs (or the frame's exit
+/// when there is none), as CPython pops a `for` loop's iterator when a
+/// `return` unwinds it. The loops below that `finally` stay live: their
+/// iterators are released when the `finally` passes the `return` on
+/// outwards (#42).
+pub(super) fn release_loops_for_return<'ctx>(
+    builder: &Builder<'ctx>,
+    rt: &RtFns<'ctx>,
+    finally_stack: &[crate::scalar::FinallyTarget<'ctx>],
+) {
+    let depth = finally_stack.last().map_or(0, |target| target.loop_depth);
+    let iterators: Vec<PendingObject<'ctx>> = rt.exceptions.loop_iterators.borrow()[depth..]
+        .iter()
+        .rev()
+        .map(|cleanup| cleanup.iterator)
+        .collect();
+    release_all(builder, &iterators);
+}
+
 /// Emits a release of each of `objects`, in order.
 pub(super) fn release_all<'ctx>(builder: &Builder<'ctx>, objects: &[PendingObject<'ctx>]) {
     for object in objects {
