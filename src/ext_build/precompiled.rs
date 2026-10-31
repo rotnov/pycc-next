@@ -714,7 +714,7 @@ mod tests {
             .expect("the table is written");
         let out = child.wait_with_output().expect("it finishes");
         assert_eq!(
-            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"),
             "C.m C.m.<locals>.g\nC.m 0x40000000\n"
         );
     }
