@@ -17,7 +17,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   objects, without the chunk's code object or an `exec` frame (v0.11 accept 3); every
   other chunk runs as `exec` of its code, as before. 105 of the CI workload's 443 chunks
   (3.13 only; `-O` still compiles the source). The rewrite calls `ns["__pycc_run__"](k)`
-  where it called `builtins.exec(ns["__pycc_code__"](k), ns)`. Own import share:
+  where it called `builtins.exec(ns["__pycc_code__"](k), ns)`; an audit hook sees a
+  `function.__new__` event per function made this way (`docs/DEVIATIONS.md`). Own import share:
   pystache 8.27M -> 8.23M, mistune 23.60M -> 23.52M, pydantic 91.09M -> 90.63M (the CI
   workload's import phase 213.25M -> 212.67M).
 - A compiled import statement whose names fallback code reads is mirrored into the

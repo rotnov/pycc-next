@@ -205,7 +205,7 @@ static int pycc_ext_chunk_define(PyObject *specs, PyObject *ns)
     }
     for (i = 0; i < n; i++) {
         PyObject *spec = PyTuple_GetItem(specs, i);
-        PyObject *annotations, *forward, *func;
+        PyObject *annotations, *forward, *kwdefaults, *func;
         int stored;
 
         if (PyTuple_Size(spec) == 4) {
@@ -223,9 +223,17 @@ static int pycc_ext_chunk_define(PyObject *specs, PyObject *ns)
         }
         annotations = PyTuple_GetItem(spec, 3);
         forward = PyTuple_GetItem(spec, 5);
+        /* A fresh keyword-defaults dict per function, as `BUILD_CONST_KEY_MAP`
+         * makes one each time the statement runs (the defaults tuple is a
+         * constant, shared as `LOAD_CONST` shares it). */
+        kwdefaults = PyTuple_GetItem(spec, 2);
+        kwdefaults = kwdefaults == Py_None ? Py_NewRef(kwdefaults) : PyDict_Copy(kwdefaults);
+        if (kwdefaults == NULL) {
+            goto done;
+        }
         func = PyObject_CallFunctionObjArgs(pycc_ext_chunk_function_type, PyTuple_GetItem(codes, i), ns,
-                                            Py_None, PyTuple_GetItem(spec, 1), Py_None,
-                                            PyTuple_GetItem(spec, 2), NULL);
+                                            Py_None, PyTuple_GetItem(spec, 1), Py_None, kwdefaults, NULL);
+        Py_DECREF(kwdefaults);
         if (func == NULL) {
             goto done;
         }
@@ -330,19 +338,23 @@ static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
     }
     chunk = &pycc_ext_chunks[index];
     if (chunk->precompiled && pycc_ext_chunks_usable()) {
-        PyObject *entry = pycc_ext_chunk_entry(index);
+        /* Owned while it is used: Python code it runs (an audit hook, a
+         * re-import of this module) may finish another body run, which
+         * frees the table. */
+        PyObject *entry = Py_XNewRef(pycc_ext_chunk_entry(index));
 
         if (entry != NULL && PyTuple_Size(entry) == 1) {
-            if (as_exec && pycc_ext_chunk_bind_builtins(ns) != 0) {
-                return -1;
-            }
-            status = pycc_ext_chunk_define(PyTuple_GetItem(entry, 0), ns);
+            status = as_exec && pycc_ext_chunk_bind_builtins(ns) != 0
+                         ? -1
+                         : pycc_ext_chunk_define(PyTuple_GetItem(entry, 0), ns);
             if (status <= 0) {
+                Py_DECREF(entry);
                 return status;
             }
-            entry = NULL;
+            Py_CLEAR(entry);
         }
         code = entry == NULL ? NULL : pycc_ext_chunk_entry_code(entry);
+        Py_XDECREF(entry);
         /* Unreadable after all: compile the source instead. */
     }
     if (code == NULL) {
