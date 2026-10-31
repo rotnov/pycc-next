@@ -78,6 +78,17 @@ fn a_return_from_an_object_loop_releases_its_iterator_like_cpython() {
         .output()
         .expect("pycc should spawn");
     assert!(build.status.success(), "{}", text(&build.stderr));
-    assert_eq!(text(&build.stderr), "", "every shape must be compiled");
+    // `--report-fallbacks` names each statement or function that runs in
+    // CPython on a line of its own, `fallback: ...` or `twin: ...`; the
+    // linker may add warnings of its own (macOS `ld` on section alignment).
+    let stderr = text(&build.stderr);
+    let fallbacks: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("fallback: ") || line.starts_with("twin: "))
+        .collect();
+    assert!(
+        fallbacks.is_empty(),
+        "every shape must be compiled:\n{stderr}"
+    );
     assert_eq!(text(&drive(&compiled).stdout), expected);
 }
