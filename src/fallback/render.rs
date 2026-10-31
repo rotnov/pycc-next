@@ -25,8 +25,8 @@ pub(crate) struct Rendered {
     /// the method uses, which the frontend checks the carrier exposes.
     pub(super) attached: Vec<(String, u32, BTreeSet<String>)>,
     /// The CPython source `text` runs, in an `--ext` module: chunk `k` is
-    /// what `__pycc_fallback_ns["__pycc_code__"](k)` returns the code
-    /// object of (`CodeChunk`). Empty elsewhere, where `text` calls
+    /// what `__pycc_fallback_ns["__pycc_run__"](k)` runs (`CodeChunk`).
+    /// Empty elsewhere, where `text` calls
     /// `compile()` itself.
     pub(super) chunks: Vec<CodeChunk>,
 }
@@ -75,8 +75,9 @@ pub(crate) enum CodeRewrite {
 }
 
 /// The name, in an `--ext` module's namespace while its body runs, of the
-/// function returning a fallback chunk's code object (`CodeChunk`).
-const CODE_HOOK: &str = "__pycc_code__";
+/// function running a fallback chunk (`CodeChunk`) in it, as `exec` of the
+/// chunk's code object would (`src/ext_build/precompiled.rs`).
+const RUN_HOOK: &str = "__pycc_run__";
 
 impl Rendered {
     /// The source offset of `text` offset `at`, when it lies in copied
@@ -307,10 +308,7 @@ impl Plan {
                 future_annotations: future,
                 rewrites: Vec::new(),
             });
-            return format!(
-                "{BUILTINS}.exec({NS}[\"{CODE_HOOK}\"]({}), {NS})",
-                chunks.len() - 1
-            );
+            return format!("{NS}[\"{RUN_HOOK}\"]({})", chunks.len() - 1);
         }
         format!(
             "{BUILTINS}.exec({BUILTINS}.compile({}, {}, \"exec\"{}), {NS})",

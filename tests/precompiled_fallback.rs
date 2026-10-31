@@ -64,7 +64,7 @@ builtins.compile = real
 print("compiled at import:", len(calls), file=sys.stderr)
 c = m.Counted()
 print(c.add("a"), c.add("a", 5), c.checked("a"), m.doubled([1, 2]))
-print("__pycc_code__" in vars(m), m.Counted.__module__, m.Counted.add.__qualname__)
+print("__pycc_run__" in vars(m), m.Counted.__module__, m.Counted.add.__qualname__)
 try:
     c.checked("zz")
 except (AssertionError, KeyError) as e:
