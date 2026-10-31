@@ -40,11 +40,13 @@ static struct {
     long long level;
     PyObject *module;
     PyObject *names;
+    PyObject *globals; /* borrowed, compared by identity only */
+    PyObject *locals;
 } pycc_ext_import_memo;
 
 static void pycc_ext_import_memo_set(int kind, const char *module_name, const char *const *fromlist,
                                      long long nfrom, long long level, PyObject *module,
-                                     PyObject *names)
+                                     PyObject *names, PyObject *globals, PyObject *locals)
 {
     PyObject *old = pycc_ext_import_memo.module;
     PyObject *old_names = pycc_ext_import_memo.names;
@@ -57,16 +59,63 @@ static void pycc_ext_import_memo_set(int kind, const char *module_name, const ch
     pycc_ext_import_memo.level = level;
     pycc_ext_import_memo.module = Py_NewRef(module);
     pycc_ext_import_memo.names = Py_XNewRef(names);
+    pycc_ext_import_memo.globals = globals;
+    pycc_ext_import_memo.locals = locals;
     Py_XDECREF(old);
     Py_XDECREF(old_names);
 }
 
-PyObject *pycc_ext_obj_import(const char *name)
+/*
+ * The `globals` and `locals` CPython's `IMPORT_NAME` passes `__import__`
+ * for an import of module `m` (borrowed): the module's namespace both,
+ * while its body runs; the namespace and None, for an import in one of its
+ * functions; None both when the module is unknown.
+ */
+static void pycc_ext_import_scope(PyccExtModule *m, PyObject **globals, PyObject **locals)
 {
-    PyObject *module = PyImport_ImportModule(name);
+    PyObject *target = NULL;
+    int in_body = 0;
 
+    if (m->exec_target_key != NULL) {
+        target = (PyObject *)PyThread_tss_get(m->exec_target_key);
+        in_body = target != NULL;
+    }
+    if (target == NULL) {
+        target = m->home_module;
+    }
+    *globals = target != NULL ? PyModule_GetDict(target) : NULL;
+    if (*globals == NULL) {
+        PyErr_Clear();
+        *globals = Py_None;
+    }
+    *locals = in_body ? *globals : Py_None;
+}
+
+/*
+ * `import m` in compiled code: `__import__(name, globals, locals, None, 0)`
+ * as CPython's statement calls it (`pycc_ext_import_scope`), so a custom
+ * `__import__` sees the same arguments and its result is bound.
+ */
+static PyObject *pycc_ext_obj_import_in(PyccExtModule *m, const char *name)
+{
+    PyObject *import = NULL;
+    PyObject *globals;
+    PyObject *locals;
+    PyObject *module;
+    int found = PyDict_GetItemStringRef(PyEval_GetBuiltins(), "__import__", &import);
+
+    if (found < 0) {
+        return NULL;
+    }
+    if (found == 0) {
+        PyErr_SetString(PyExc_ImportError, "__import__ not found");
+        return NULL;
+    }
+    pycc_ext_import_scope(m, &globals, &locals);
+    module = PyObject_CallFunction(import, "sOOOi", name, globals, locals, Py_None, 0);
+    Py_DECREF(import);
     if (module != NULL) {
-        pycc_ext_import_memo_set(1, name, NULL, 0, 0, module, NULL);
+        pycc_ext_import_memo_set(1, name, NULL, 0, 0, module, NULL, globals, locals);
     }
     return module;
 }
@@ -325,6 +374,7 @@ static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *modul
                                        long long index, long long level)
 {
     PyObject *globals = Py_None;
+    PyObject *locals = Py_None;
     PyObject *import = NULL;
     PyObject *names = NULL;
     PyObject *module = NULL;
@@ -332,25 +382,12 @@ static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *modul
     long long i;
     int found;
 
-    if (level > 0) {
-        PyObject *target = NULL;
-
-        if (m->exec_target_key != NULL) {
-            target = (PyObject *)PyThread_tss_get(m->exec_target_key);
-        }
-        /* A function-local import (v0.8 accept 2) runs after the body. */
-        if (target == NULL) {
-            target = m->home_module;
-        }
-        if (target == NULL) {
-            PyErr_SetString(PyExc_SystemError, "pycc: relative import outside Py_mod_exec");
-            return NULL;
-        }
-        /* Borrowed: the module outlives its own exec. */
-        globals = PyModule_GetDict(target);
-        if (globals == NULL) {
-            return NULL;
-        }
+    /* Borrowed: the module outlives its own exec. A function-local import
+     * (v0.8 accept 2) runs after the body, with the home module's. */
+    pycc_ext_import_scope(m, &globals, &locals);
+    if (level > 0 && globals == Py_None) {
+        PyErr_SetString(PyExc_SystemError, "pycc: relative import outside Py_mod_exec");
+        return NULL;
     }
     if (index > 0 && pycc_ext_from_statement_is(m, module_name, fromlist, nfrom, globals, level,
                                                  index)) {
@@ -379,7 +416,7 @@ static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *modul
                 goto done;
             }
         }
-        module = PyObject_CallFunction(import, "sOOOi", module_name, globals, Py_None, names,
+        module = PyObject_CallFunction(import, "sOOOi", module_name, globals, locals, names,
                                        (int)level);
         if (module == NULL) {
             goto done;
@@ -407,7 +444,7 @@ static PyObject *pycc_ext_obj_import_from_in(PyccExtModule *m, const char *modul
         pycc_ext_from_statement_clear();
     }
     if (value != NULL && index + 1 == nfrom) {
-        pycc_ext_import_memo_set(2, module_name, fromlist, nfrom, level, module, names);
+        pycc_ext_import_memo_set(2, module_name, fromlist, nfrom, level, module, names, globals, locals);
     }
 done:
     Py_XDECREF(module);
@@ -443,9 +480,11 @@ done:
  * global that binds it, on the same rule as `pycc_ext_obj_import`: a
  * re-import or rebind releases it, and the last value is never released.
  */
-PyObject *pycc_ext_obj_import_dotted(const char *name, long long bind_root)
+static PyObject *pycc_ext_obj_import_dotted_in(PyccExtModule *m, const char *name, long long bind_root)
 {
     PyObject *import = NULL;
+    PyObject *globals;
+    PyObject *locals;
     PyObject *current = NULL;
     PyObject *segment = NULL;
     const char *rest;
@@ -459,13 +498,14 @@ PyObject *pycc_ext_obj_import_dotted(const char *name, long long bind_root)
         PyErr_SetString(PyExc_ImportError, "__import__ not found");
         return NULL;
     }
-    current = PyObject_CallFunction(import, "sOOOi", name, Py_None, Py_None, Py_None, 0);
+    pycc_ext_import_scope(m, &globals, &locals);
+    current = PyObject_CallFunction(import, "sOOOi", name, globals, locals, Py_None, 0);
     Py_DECREF(import);
     if (current == NULL) {
         return NULL;
     }
     /* What `__import__` returned (the root), as the mirror's own call would. */
-    pycc_ext_import_memo_set(1, name, NULL, 0, 0, current, NULL);
+    pycc_ext_import_memo_set(1, name, NULL, 0, 0, current, NULL, globals, locals);
     if (bind_root) {
         return current;
     }
@@ -520,6 +560,7 @@ static PyObject *pycc_ext_mirror_import_name(PyObject *ns, int from, const char 
 
     *fromnames = NULL;
     if (pycc_ext_import_memo.module != NULL && pycc_ext_import_memo.tstate == PyThreadState_Get()
+        && pycc_ext_import_memo.globals == ns && pycc_ext_import_memo.locals == ns
         && pycc_ext_import_memo.kind == (from ? 2 : 1) && pycc_ext_import_memo.level == level
         && strcmp(pycc_ext_import_memo.module_name, module_name) == 0) {
         int same = !from || pycc_ext_import_memo.nfrom == (long long)count;
