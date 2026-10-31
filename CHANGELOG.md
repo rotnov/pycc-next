@@ -11,6 +11,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   publishes in ms.
 
 ### Changed
+- The code objects a compiled module's import used to re-qualify and flag with
+  `code.replace` -- each nested `def` CPython runs (its scaffold's `__qualname__`) and each
+  published signature's wrapper -- are rewritten when the build compiles their chunks, so
+  an import from the pre-compiled table makes none of those calls (about 13K instructions
+  each, 110 in the CI benchmark's pydantic import); under `-O`, where the embedded source
+  is compiled at import, the source still makes them (v0.11 accept 3). Own import share:
+  pystache 8.83M -> 8.68M, mistune 24.06M -> 23.80M, pydantic 93.69M -> 92.82M (the CI
+  workload's import phase 216.69M -> 215.39M).
 - A compiled module's import looks names up by interned `str` keys instead of C strings
   (v0.11 accept 3): a package member's interface table is filled by the keys its body
   published its functions with, the fallback chunks' interpreter check (magic number,
