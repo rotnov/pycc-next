@@ -106,12 +106,15 @@ fn the_shim_defines_the_publication_entry_point_codegen_calls() {
         !publish.contains("PyModule_AddObjectRef(module, name, *class_slot)"),
         "{publish}"
     );
-    // A function is bound the way `PyModule_AddFunctions` binds a row, and
+    // A function is bound the way `PyModule_AddFunctions` binds a row (under
+    // its interned key once made, the C name if the key could not be), and
     // both new references are released on every path.
     for needle in [
         "modname = PyModule_GetNameObject(module);",
         "func = PyCFunction_NewEx(row, module, modname);\n    Py_DECREF(modname);",
-        "status = PyModule_AddObjectRef(module, row->ml_name, func);\n    Py_DECREF(func);",
+        "key = pycc_ext_publish_key(row, 1);",
+        "status = PyErr_Occurred() ? -1 : PyModule_AddObjectRef(module, row->ml_name, func);",
+        "status = PyDict_SetItem(PyModule_GetDict(module), key, func);\n    }\n    Py_DECREF(func);",
         "return PyModule_AddObjectRef(module, name, type);",
     ] {
         assert!(
