@@ -284,9 +284,9 @@ pub(crate) fn install(inc: String, chunks: &[CodeChunk], compiled: Option<&Preco
 /// The hook and its install/remove pair (`module_init.c` calls these
 /// around the body).
 const PRECOMPILED_C: &str = r#"/*
- * 1 when the embedded code objects are this interpreter's: the same
- * bytecode magic number, and no `-O` (which strips `assert`s at compile
- * time). Decided once per process; `marshal.loads` is kept with it.
+ * 1 when the embedded code objects are this interpreter's
+ * (`pycc_ext_marshal_loads`). Decided once per process; `marshal.loads`
+ * (borrowed from the runtime unit, which keeps it) is kept with it.
  */
 static int pycc_ext_chunk_usable = -1;
 static PyObject *pycc_ext_chunk_loads = NULL;
@@ -324,47 +324,12 @@ static PyObject *pycc_ext_chunk_fixer(void)
 
 static int pycc_ext_chunks_usable(void)
 {
-    PyObject *flags;
-    PyObject *optimize;
-    PyObject *marshal;
-    long level;
-
     if (pycc_ext_chunk_usable >= 0) {
         return pycc_ext_chunk_usable;
     }
-    pycc_ext_chunk_usable = 0;
-    if (pycc_ext_chunk_magic == 0) {
-        return 0;
-    }
-    if (PyImport_GetMagicNumber() != pycc_ext_chunk_magic) {
-        PyErr_Clear();
-        return 0;
-    }
-    flags = PySys_GetObject("flags");
-    optimize = flags == NULL ? NULL : PyObject_GetAttrString(flags, "optimize");
-    if (optimize == NULL) {
-        PyErr_Clear();
-        return 0;
-    }
-    level = PyLong_AsLong(optimize);
-    Py_DECREF(optimize);
-    if (level != 0) {
-        PyErr_Clear();
-        return 0;
-    }
-    marshal = PyImport_ImportModule("marshal");
-    if (marshal == NULL) {
-        PyErr_Clear();
-        return 0;
-    }
-    pycc_ext_chunk_loads = PyObject_GetAttrString(marshal, "loads");
-    Py_DECREF(marshal);
-    if (pycc_ext_chunk_loads == NULL) {
-        PyErr_Clear();
-        return 0;
-    }
-    pycc_ext_chunk_usable = 1;
-    return 1;
+    pycc_ext_chunk_loads = pycc_ext_chunk_magic == 0 ? NULL : pycc_ext_marshal_loads(pycc_ext_chunk_magic);
+    pycc_ext_chunk_usable = pycc_ext_chunk_loads != NULL;
+    return pycc_ext_chunk_usable;
 }
 
 /* `compile()` of chunk `chunk`'s embedded source, as the rewrite did. */

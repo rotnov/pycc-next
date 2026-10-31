@@ -217,16 +217,39 @@ done:
     return spec;
 }
 
+/* The interned `str` of `text`, made at the first call through `slot` and
+ * kept for the process: a lookup by a fixed name then neither decodes nor
+ * hashes it each time. Borrowed; NULL with an exception set when it cannot
+ * be made. */
+static PyObject *pycc_pkg_interned(PyObject **slot, const char *text)
+{
+    if (*slot == NULL) {
+        *slot = PyUnicode_InternFromString(text);
+    }
+    return *slot;
+}
+
+/* `obj.<text>` by the interned name `slot` keeps: a new reference, or NULL
+ * with an exception set. */
+static PyObject *pycc_pkg_getattr(PyObject *obj, PyObject **slot, const char *text)
+{
+    PyObject *name = pycc_pkg_interned(slot, text);
+
+    return name == NULL ? NULL : PyObject_GetAttr(obj, name);
+}
+
 /* The member `obj`'s name (a spec's or a module's `__name__`) names, or
  * NULL with an `ImportError` set. */
 static const PyccPkgMember *pycc_pkg_member_of(PyObject *obj)
 {
-    PyObject *name = PyObject_GetAttrString(obj, "name");
+    static PyObject *name_key = NULL;
+    static PyObject *dunder_name_key = NULL;
+    PyObject *name = pycc_pkg_getattr(obj, &name_key, "name");
     const PyccPkgMember *member;
 
     if (name == NULL) {
         PyErr_Clear();
-        name = PyObject_GetAttrString(obj, "__name__");
+        name = pycc_pkg_getattr(obj, &dunder_name_key, "__name__");
     }
     if (name == NULL) {
         return NULL;
@@ -256,11 +279,12 @@ static PyObject *pycc_pkg_create_module(PyObject *self, PyObject *spec)
  * slot), on first import and on `importlib.reload`. */
 static PyObject *pycc_pkg_exec_module(PyObject *self, PyObject *module)
 {
+    static PyObject *spec_key = NULL;
     PyObject *spec;
     const PyccPkgMember *member;
 
     (void)self;
-    spec = PyObject_GetAttrString(module, "__spec__");
+    spec = pycc_pkg_getattr(module, &spec_key, "__spec__");
     if (spec == NULL) {
         return NULL;
     }

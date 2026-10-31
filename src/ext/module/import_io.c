@@ -27,6 +27,43 @@ PyObject *pycc_ext_obj_import(const char *name)
 }
 
 /*
+ * `marshal.loads` (borrowed), when code objects marshalled for bytecode
+ * magic number `magic` can be loaded in this interpreter: the same magic
+ * number and no `-O` (which strips `assert`s at compile time). NULL, with
+ * no exception set, when they cannot. The interpreter's side is read once
+ * per artifact, not once per module (`pycc_ext_chunks_usable` in each
+ * module's companion calls this): a package's modules share this unit, and
+ * the import of `marshal` and the `sys.flags` lookup cost about 7,000
+ * instructions each time. `sys.flags` and the magic number do not change
+ * while the interpreter runs. Kept for the process, like the module.
+ */
+static PyObject *pycc_ext_marshal_loads(long magic)
+{
+    static int known = 0;
+    static long interp_magic = 0;
+    static PyObject *loads = NULL;
+
+    if (!known) {
+        PyObject *flags;
+        PyObject *optimize;
+        PyObject *marshal;
+        long level;
+
+        known = 1;
+        interp_magic = PyImport_GetMagicNumber();
+        flags = PySys_GetObject("flags");
+        optimize = flags == NULL ? NULL : PyObject_GetAttrString(flags, "optimize");
+        level = optimize == NULL ? -1 : PyLong_AsLong(optimize);
+        Py_XDECREF(optimize);
+        marshal = level == 0 ? PyImport_ImportModule("marshal") : NULL;
+        loads = marshal == NULL ? NULL : PyObject_GetAttrString(marshal, "loads");
+        Py_XDECREF(marshal);
+        PyErr_Clear();
+    }
+    return magic == interp_magic ? loads : NULL;
+}
+
+/*
  * #1278: raise CPython's `IMPORT_FROM` `ImportError` for `name` missing from
  * `module`, and return NULL. `pycc_ext_obj_import_from` below documents the
  * contract; this only builds the exception.
@@ -681,13 +718,18 @@ static void *pycc_ext_io_read(int all)
 
 static int pycc_ext_io_flush(void)
 {
+    static PyObject *flush_name = NULL;
     PyObject *stream = PySys_GetObject("stdout"); /* borrowed */
+    PyObject *name;
     PyObject *result;
 
     if (stream == NULL || stream == Py_None) {
         return 0;
     }
-    result = PyObject_CallMethod(stream, "flush", NULL);
+    /* Every module body ends with a flush: by an interned name, not
+     * `PyObject_CallMethod`'s C string. */
+    name = pycc_ext_interned(&flush_name, "flush");
+    result = name == NULL ? NULL : PyObject_CallMethodObjArgs(stream, name, NULL);
     if (result == NULL) {
         return pycc_ext_obj_error_bridge();
     }

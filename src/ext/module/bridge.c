@@ -163,6 +163,21 @@ extern void *pycc_rt_set_freeze(void *s);
  * parameter slot owns, and an instance a compiled function returns is one
  * the caller owns. */
 extern void *pycc_rt_instance_new(long long slot_count, const char *layout, size_t layout_len);
+/*
+ * The interned `str` of `text`, made at the first call through `slot` (a
+ * caller's own `static`) and kept for the process, so a lookup the shim
+ * makes by a fixed name neither decodes nor hashes the name each time, as
+ * the `...String` lookups of the C API do. Borrowed; NULL with an exception
+ * set when it cannot be made. Called with the GIL held.
+ */
+static PyObject *pycc_ext_interned(PyObject **slot, const char *text)
+{
+    if (*slot == NULL) {
+        *slot = PyUnicode_InternFromString(text);
+    }
+    return *slot;
+}
+
 /* v0.10: an instance of the class whose record (`pycc_codegen`'s
  * `class_record`) is `record`: its descriptor -- the instance's run-time
  * class -- follows a 32-byte header whose last word is its length. */
