@@ -46,6 +46,32 @@ pub(crate) struct CodeChunk {
     pub(crate) filename: String,
     /// Compiled with `from __future__ import annotations`.
     pub(crate) future_annotations: bool,
+    /// Edits the build applies to the compiled code object before it is
+    /// embedded, which the source then skips at import (it still makes
+    /// them when it is compiled at run time).
+    pub(crate) rewrites: Vec<CodeRewrite>,
+}
+
+/// An edit of a nested code object of a chunk, made at build time instead
+/// of by the chunk's source at import (each `code.replace` cost an import
+/// about 13K instructions). `path` names the code objects from the chunk's
+/// own code down (`co_name` of each constant code object on the way).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CodeRewrite {
+    /// `__pycc_fallback_requal(code, old, new)` of `src/fallback/nested.rs`:
+    /// the code and every code object it holds re-qualified from `old` to
+    /// `new`.
+    Requal {
+        path: Vec<String>,
+        old: String,
+        new: String,
+    },
+    /// `code.replace(co_qualname=qualname, co_flags=code.co_flags | flags)`.
+    Retag {
+        path: Vec<String>,
+        qualname: String,
+        flags: u32,
+    },
 }
 
 /// The name, in an `--ext` module's namespace while its body runs, of the
@@ -278,6 +304,7 @@ impl Plan {
                 source: source.to_string(),
                 filename: filename.to_string(),
                 future_annotations: future,
+                rewrites: Vec::new(),
             });
             return format!(
                 "{BUILTINS}.exec({NS}[\"{CODE_HOOK}\"]({}), {NS})",

@@ -38,11 +38,24 @@ const WRAPPER_FILENAME: &str = "<pycc signature>";
 
 /// `signature`'s wrapper source as a pre-compiled chunk
 /// (`super::precompiled`), which the hook loads instead of compiling it.
+/// The wrapper's code is given its qualified name and
+/// [`pycc_ast::WRAPPER_FLAG`] at build time, so `_pycc_make` skips its own
+/// `code.replace` when it runs from the table.
 pub(crate) fn signature_chunk(signature: &ExtSignature) -> crate::fallback::CodeChunk {
+    let name = signature
+        .qualname
+        .rsplit('.')
+        .next()
+        .unwrap_or(&signature.qualname);
     crate::fallback::CodeChunk {
         source: signature.wrapper.clone(),
         filename: WRAPPER_FILENAME.to_string(),
         future_annotations: false,
+        rewrites: vec![crate::fallback::CodeRewrite::Retag {
+            path: vec!["_pycc_make".to_string(), name.to_string()],
+            qualname: signature.qualname.clone(),
+            flags: pycc_ast::WRAPPER_FLAG,
+        }],
     }
 }
 

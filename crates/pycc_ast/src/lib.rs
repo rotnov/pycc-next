@@ -18,7 +18,7 @@ pub use desugar::{
     CLOSURE_MARKER, ExtSignature, INFER_MARKER, body_yields, desugar, desugar_computed_aug_target, desugar_with, expand_dataclasses,
     ext_entry_name, ext_entry_target, fold_static_branches,
     ext_needs_wrapper, ext_signatures, find_yield, function_qualname, object_except_handlers, split_ext_generators,
-    split_ext_signatures,
+    split_ext_signatures, WRAPPER_FLAG,
     BYTEARRAY_ANNOTATION, FALLBACK_BUILTINS, NATIVE_PREFIX, Specialized, specialize_untyped,
 };
 pub use rebound_defs::rebound_def_names;

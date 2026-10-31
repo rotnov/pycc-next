@@ -23,7 +23,7 @@
 //! `dont_inherit=True` and `optimize=0`. A build that cannot run the
 //! interpreter (`PYCC_PYTHON_INCLUDE` without one) embeds the source only.
 
-use crate::fallback::CodeChunk;
+use crate::fallback::{CodeChunk, CodeRewrite};
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -49,8 +49,11 @@ pub(crate) struct Precompiled {
 /// compiles (each member of a package), and importing `json`, and `ast`
 /// up front where only a chunk holding a set display needs it, doubled the
 /// interpreter's start-up (about 21 ms instead of 10).
-/// The input is `marshal`'s form of `(((source, filename, future), ...),
-/// fix)` ([`marshal_input`]); the answer is the bytecode magic number
+/// The input is `marshal`'s form of `(((source, filename, future,
+/// rewrites), ...), fix)` ([`marshal_input`]), each rewrite `(kind, path, a,
+/// b)` -- `'q'` with `old`, `new` for [`CodeRewrite::Requal`], `'t'` with
+/// the qualified name and the flags for [`CodeRewrite::Retag`] -- made on
+/// the chunk's code before it is tabled; the answer is the bytecode magic number
 /// (`importlib.util.MAGIC_NUMBER`, four bytes), one byte per chunk (1 when
 /// it compiled) and the `marshal`led table ([`parse`]).
 ///
@@ -88,12 +91,26 @@ const COMPILE_SCRIPT: &str = "import sys,marshal,importlib.util,__future__\n\
     \x20   if len(found)!=1: raise ValueError\n\
     \x20   out.append(found.pop())\n\
     \x20 return tuple(out)\n\
+    def requal(c,old,new):\n\
+    \x20 ks=tuple(requal(k,old,new) if hasattr(k,'co_code') else k for k in c.co_consts)\n\
+    \x20 q=c.co_qualname\n\
+    \x20 if q==old: q=new or c.co_name\n\
+    \x20 elif q.startswith(old+'.<locals>.'): q=(new+'.<locals>.' if new else '')+q[len(old)+10:]\n\
+    \x20 return c.replace(co_consts=ks,co_qualname=q)\n\
+    def at(c,path,op):\n\
+    \x20 if not path: return op(c)\n\
+    \x20 return c.replace(co_consts=tuple(at(k,path[1:],op) if hasattr(k,'co_code') and k.co_name==path[0] else k for k in c.co_consts))\n\
+    def rewrite(co,rewrites):\n\
+    \x20 for kind,path,a,b in rewrites:\n\
+    \x20   if kind=='q': co=at(co,path,lambda c:requal(c,a,b))\n\
+    \x20   else: co=at(co,path,lambda c:c.replace(co_qualname=a,co_flags=c.co_flags|b))\n\
+    \x20 return co\n\
     chunks,fix=marshal.loads(sys.stdin.buffer.read())\n\
     table=[]\n\
-    for source,filename,future in chunks:\n\
+    for source,filename,future,rewrites in chunks:\n\
     \x20 try:\n\
     \x20   f=__future__.annotations.compiler_flag if future else 0\n\
-    \x20   co=compile(source,filename,'exec',f,True,0)\n\
+    \x20   co=rewrite(compile(source,filename,'exec',f,True,0),rewrites)\n\
     \x20   table.append((co,orders(source,co)))\n\
     \x20 except Exception:\n\
     \x20   table.append(None)\n\
@@ -173,10 +190,31 @@ fn marshal_input(chunks: &[CodeChunk]) -> Option<Vec<u8>> {
     sized(&mut out, b'(', 2)?;
     sized(&mut out, b'(', chunks.len())?;
     for chunk in chunks {
-        sized(&mut out, b'(', 3)?;
+        sized(&mut out, b'(', 4)?;
         text(&mut out, &chunk.source)?;
         text(&mut out, &chunk.filename)?;
         out.push(if chunk.future_annotations { b'T' } else { b'F' });
+        sized(&mut out, b'(', chunk.rewrites.len())?;
+        for rewrite in &chunk.rewrites {
+            let (kind, path, a) = match rewrite {
+                CodeRewrite::Requal { path, old, .. } => ("q", path, old),
+                CodeRewrite::Retag { path, qualname, .. } => ("t", path, qualname),
+            };
+            sized(&mut out, b'(', 4)?;
+            text(&mut out, kind)?;
+            sized(&mut out, b'(', path.len())?;
+            for name in path {
+                text(&mut out, name)?;
+            }
+            text(&mut out, a)?;
+            match rewrite {
+                CodeRewrite::Requal { new, .. } => text(&mut out, new)?,
+                CodeRewrite::Retag { flags, .. } => {
+                    out.push(b'i');
+                    out.extend_from_slice(&i32::try_from(*flags).ok()?.to_le_bytes());
+                }
+            }
+        }
     }
     text(&mut out, ORDERS_FIX)?;
     Some(out)
@@ -498,6 +536,7 @@ mod tests {
             source: source.to_string(),
             filename: "/p/m.py".to_string(),
             future_annotations: false,
+            rewrites: Vec::new(),
         }
     }
 
@@ -581,12 +620,30 @@ mod tests {
     fn the_input_is_marshal_data() {
         let mut first = chunk("x = 1\n");
         first.future_annotations = true;
-        let input = marshal_input(&[first, chunk("é")]).expect("small enough");
+        let mut second = chunk("é");
+        second.rewrites = vec![
+            CodeRewrite::Requal {
+                path: vec!["mk".to_string(), "f".to_string()],
+                old: "mk.<locals>.f".to_string(),
+                new: "g".to_string(),
+            },
+            CodeRewrite::Retag {
+                path: vec!["h".to_string()],
+                qualname: "C.h".to_string(),
+                flags: 0x4000_0000,
+            },
+        ];
+        let input = marshal_input(&[first, second]).expect("small enough");
         let mut want = b"(\x02\x00\x00\x00(\x02\x00\x00\x00".to_vec();
-        want.extend_from_slice(b"(\x03\x00\x00\x00u\x06\x00\x00\x00x = 1\n");
-        want.extend_from_slice(b"u\x07\x00\x00\x00/p/m.pyT");
-        want.extend_from_slice(b"(\x03\x00\x00\x00u\x02\x00\x00\x00\xc3\xa9");
-        want.extend_from_slice(b"u\x07\x00\x00\x00/p/m.pyF");
+        want.extend_from_slice(b"(\x04\x00\x00\x00u\x06\x00\x00\x00x = 1\n");
+        want.extend_from_slice(b"u\x07\x00\x00\x00/p/m.pyT(\x00\x00\x00\x00");
+        want.extend_from_slice(b"(\x04\x00\x00\x00u\x02\x00\x00\x00\xc3\xa9");
+        want.extend_from_slice(b"u\x07\x00\x00\x00/p/m.pyF(\x02\x00\x00\x00");
+        want.extend_from_slice(b"(\x04\x00\x00\x00u\x01\x00\x00\x00q(\x02\x00\x00\x00");
+        want.extend_from_slice(b"u\x02\x00\x00\x00mku\x01\x00\x00\x00f");
+        want.extend_from_slice(b"u\x0d\x00\x00\x00mk.<locals>.fu\x01\x00\x00\x00g");
+        want.extend_from_slice(b"(\x04\x00\x00\x00u\x01\x00\x00\x00t(\x01\x00\x00\x00");
+        want.extend_from_slice(b"u\x01\x00\x00\x00hu\x03\x00\x00\x00C.hi\x00\x00\x00\x40");
         want.push(b'u');
         want.extend_from_slice(&u32::try_from(ORDERS_FIX.len()).unwrap().to_le_bytes());
         want.extend_from_slice(ORDERS_FIX.as_bytes());
@@ -613,6 +670,53 @@ mod tests {
         // displays of the same elements in different orders leave the
         // chunk to `compile()`, as does a syntax error.
         assert_eq!(compiled.present, vec![true, false, true, false]);
+    }
+
+    #[test]
+    fn a_real_interpreter_applies_the_rewrites() {
+        let mut nested = chunk("def mk():\n def f():\n  def g(): pass\n  return g\n return f\n");
+        nested.rewrites = vec![CodeRewrite::Requal {
+            path: vec!["mk".to_string(), "f".to_string()],
+            old: "mk.<locals>.f".to_string(),
+            new: "C.m".to_string(),
+        }];
+        let mut wrapper = chunk("def _pycc_make(e):\n def m(): pass\n return m\n");
+        wrapper.rewrites = vec![CodeRewrite::Retag {
+            path: vec!["_pycc_make".to_string(), "m".to_string()],
+            qualname: "C.m".to_string(),
+            flags: 0x4000_0000,
+        }];
+        let Some(compiled) = precompile(OsStr::new(super::super::DEFAULT_PYTHON), &[nested, wrapper])
+        else {
+            return;
+        };
+        assert_eq!(compiled.present, vec![true, true]);
+        let check = "import marshal,sys\n\
+            t=marshal.loads(sys.stdin.buffer.read())\n\
+            ns={}\n\
+            exec(t[0][0],ns)\n\
+            f=ns['mk']()\n\
+            print(f.__code__.co_qualname, f().__qualname__)\n\
+            exec(t[1][0],ns)\n\
+            m=ns['_pycc_make'](0)\n\
+            print(m.__code__.co_qualname, hex(m.__code__.co_flags & 0x40000000))\n";
+        let mut child = std::process::Command::new(super::super::DEFAULT_PYTHON)
+            .args(["-I", "-c", check])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("the interpreter that compiled the table runs");
+        child
+            .stdin
+            .take()
+            .expect("piped")
+            .write_all(&compiled.table)
+            .expect("the table is written");
+        let out = child.wait_with_output().expect("it finishes");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"),
+            "C.m C.m.<locals>.g\nC.m 0x40000000\n"
+        );
     }
 
     #[test]

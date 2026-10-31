@@ -441,7 +441,9 @@ impl Plan {
              \x20       q = (new + '.<locals>.' if new else '') + q[len(old) + 10:]\n\
              \x20   return code.replace(co_consts=consts, co_qualname=q)\n\
              def {SPEC_FN}(make, names, old, new):\n\
-             \x20   code = __pycc_fallback_requal(make().__code__, old, new)\n\
+             \x20   code = make().__code__\n\
+             \x20   if code.co_qualname == old:\n\
+             \x20       code = __pycc_fallback_requal(code, old, new)\n\
              \x20   return code, tuple(names.index(n) for n in code.co_freevars)\n\
              def {NESTED_FN}(spec, cells):\n\
              \x20   code, order = spec\n\
@@ -457,13 +459,24 @@ impl Plan {
         );
         for (id, nested) in live {
             out.push_str("; ");
-            out.push_str(&self.exec_text(chunks, &self.scaffold(id, nested)));
+            let (text, rewrite) = self.scaffold(id, nested);
+            let made = chunks.len();
+            out.push_str(&self.exec_text(chunks, &text));
+            // A pre-compiled scaffold is re-qualified at build time, so
+            // `SPEC_FN` finds its code already re-qualified and skips it.
+            if chunks.len() > made
+                && let Some(chunk) = chunks.last_mut()
+            {
+                chunk.rewrites.push(rewrite);
+            }
         }
         out
     }
 
-    /// The scaffold source of nested statement `id` (see the module doc).
-    fn scaffold(&self, id: usize, nested: &Nested) -> String {
+    /// The scaffold source of nested statement `id` (see the module doc),
+    /// and the build-time re-qualification of its code that `SPEC_FN`
+    /// otherwise makes at import.
+    fn scaffold(&self, id: usize, nested: &Nested) -> (String, render::CodeRewrite) {
         let src = &self.source;
         let make = format!("__pycc_nest{id}_make");
         let mut name = if nested.outer_name.is_empty() {
@@ -532,7 +545,12 @@ impl Plan {
             py_str(&old),
             py_str(&nested.outer_qualname),
         ));
-        text
+        let rewrite = render::CodeRewrite::Requal {
+            path: vec![make, name],
+            old,
+            new: nested.outer_qualname.clone(),
+        };
+        (text, rewrite)
     }
 
     /// The edits of compiled unit `index` for its live nested statements:

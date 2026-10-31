@@ -136,7 +136,7 @@ pub use specialize::{
 pub use ext_signatures::{
     ExtSignature, expand_dataclasses_in as expand_dataclasses, ext_entry_name, ext_entry_target, ext_signatures,
     needs_wrapper as ext_needs_wrapper,
-    split_ext_signatures,
+    split_ext_signatures, WRAPPER_FLAG,
 };
 
 /// The first `yield`/`yield from` inside `expr` (not inside a nested

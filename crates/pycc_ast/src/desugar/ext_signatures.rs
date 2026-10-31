@@ -638,6 +638,7 @@ fn plan_def(
          del _pycc_t\n            \
          raise\n    \
          {name}.__qualname__ = \"{qualname}\"\n    \
+         if not {name}.__code__.co_flags & {WRAPPER_FLAG:#x}:\n        \
          {name}.__code__ = {name}.__code__.replace(co_qualname=\"{qualname}\", \
          co_flags={name}.__code__.co_flags | {WRAPPER_FLAG:#x})\n    \
          return {name}\n",
