@@ -209,8 +209,9 @@ impl Plan {
                 // Padded, so a traceback through the CPython copy names
                 // its lines.
                 let line = src[..start].matches('\n').count();
-                let run = self.exec_text(
+                let run = self.mirror_text(
                     &mut out.chunks,
+                    index,
                     &format!("{}{}", "\n".repeat(line), &src[start..end]),
                 );
                 if !matches!(self.stmts[index].kind, Kind::Def(..)) {
@@ -321,6 +322,56 @@ impl Plan {
                 String::new()
             }
         )
+    }
+
+    /// Mirrors compiled statement `index`, whose padded source is `source`,
+    /// into the namespace. An import in an `--ext` module stores what
+    /// compiled code's own import just bound, one `{NS}["b"] = b` per name
+    /// it binds (an `as` name, else the name, or a dotted import's root):
+    /// each occurrence its own value, in the statement's order, with no
+    /// second `__import__` or attribute read. Anything else, an import of
+    /// a module compiled code models natively (`pycc_std`: its names are
+    /// not objects compiled code holds), a wildcard, or a module outside
+    /// `--ext`, runs `source` in CPython ([`Self::exec_text`]).
+    pub(super) fn mirror_text(&self, chunks: &mut Vec<CodeChunk>, index: usize, source: &str) -> String {
+        let native = |module: &str| {
+            pycc_std::resolve_module(module.split('.').next().unwrap_or(module)).is_some()
+        };
+        let stores: Option<Vec<String>> = match &self.ast[index] {
+            pycc_ast::Stmt::Import(import) => import
+                .names
+                .iter()
+                .map(|alias| {
+                    let name = alias.name.as_str();
+                    (!native(name)).then(|| match &alias.asname {
+                        Some(asname) => asname.to_string(),
+                        None => name.split('.').next().unwrap_or(name).to_string(),
+                    })
+                })
+                .collect(),
+            pycc_ast::Stmt::ImportFrom(import)
+                if !(import.level == 0 && import.module.as_ref().is_some_and(|m| native(m.as_str()))) =>
+            {
+                import
+                    .names
+                    .iter()
+                    .map(|alias| {
+                        (alias.name.as_str() != "*").then(|| {
+                            alias.asname.as_ref().unwrap_or(&alias.name).to_string()
+                        })
+                    })
+                    .collect()
+            }
+            _ => None,
+        };
+        match stores {
+            Some(stores) if self.publishes.variables => stores
+                .iter()
+                .map(|store| format!("{NS}[\"{store}\"] = {store}"))
+                .collect::<Vec<_>>()
+                .join("; "),
+            _ => self.exec_text(chunks, source),
+        }
     }
 
     /// Appends compiled unit `index` (a top-level statement, or a lift) to

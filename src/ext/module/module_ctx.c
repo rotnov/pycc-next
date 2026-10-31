@@ -139,6 +139,16 @@ PYCC_ENTRY int pycc_ext_obj_coerce_instance(PyObject *o, const char *class_name,
     return pycc_ext_obj_coerce_instance_in(&pycc_ext_mod, o, class_name, what, out);
 }
 
+PYCC_ENTRY PyObject *pycc_ext_obj_import(const char *name)
+{
+    return pycc_ext_obj_import_in(&pycc_ext_mod, name);
+}
+
+PYCC_ENTRY PyObject *pycc_ext_obj_import_dotted(const char *name, long long bind_root)
+{
+    return pycc_ext_obj_import_dotted_in(&pycc_ext_mod, name, bind_root);
+}
+
 PYCC_ENTRY PyObject *pycc_ext_obj_import_from(const char *module_name, const char *const *fromlist,
                                               long long nfrom, long long index, long long level)
 {
