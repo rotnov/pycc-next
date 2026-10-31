@@ -455,13 +455,18 @@ mod tests {
             return;
         };
         assert_eq!(compiled.present, vec![true, true]);
-        // Both chunks are a bare `def`: tabled as the function's code.
+        // Both chunks are a bare `def`: on 3.13 tabled as the function's
+        // code (`((spec,),)`), elsewhere as the chunk's `(code, orders)`.
         let check = "import marshal,sys,types\n\
             t=marshal.loads(sys.stdin.buffer.read())\n\
-            ns={}\n\
-            f=types.FunctionType(t[0][0][0][0],ns)()\n\
+            def run(e,name):\n\
+            \x20 ns={}\n\
+            \x20 if type(e[0]) is tuple: return types.FunctionType(e[0][0][0],ns)\n\
+            \x20 exec(e[0],ns)\n\
+            \x20 return ns[name]\n\
+            f=run(t[0],'mk')()\n\
             print(f.__code__.co_qualname, f().__qualname__)\n\
-            m=types.FunctionType(t[1][0][0][0],ns)(0)\n\
+            m=run(t[1],'_pycc_make')(0)\n\
             print(m.__code__.co_qualname, hex(m.__code__.co_flags & 0x40000000))\n";
         let mut child = std::process::Command::new(super::super::DEFAULT_PYTHON)
             .args(["-I", "-c", check])
@@ -482,6 +487,15 @@ mod tests {
         );
     }
 
+    /// Whether the test interpreter is CPython 3.13, whose bytecode
+    /// `precompile.py`'s `defs` reads.
+    fn python_is_3_13() -> bool {
+        std::process::Command::new(super::super::DEFAULT_PYTHON)
+            .args(["-I", "-c", "import sys; print(sys.version_info[:2] == (3, 13))"])
+            .output()
+            .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "True")
+    }
+
     #[test]
     fn a_real_interpreter_tables_constant_defs_as_their_functions() {
         let chunks = [
@@ -495,6 +509,10 @@ mod tests {
             return;
         };
         assert_eq!(compiled.present, vec![true; 5]);
+        if !python_is_3_13() {
+            // The bytecode `defs` reads is 3.13's: every entry is a code.
+            return;
+        }
         // A `def` entry is `((spec, ...),)`: each function's code, defaults,
         // keyword defaults, annotations, name, forwarded names and set
         // orders; anything else `(code, orders)`.

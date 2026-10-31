@@ -153,6 +153,16 @@ fn check(label: &str, source: &str) -> (String, String) {
     (report, count)
 }
 
+/// Whether the oracle interpreter is CPython 3.13: the build reads 3.13's
+/// bytecode for constant `def`s, and on another version every chunk
+/// `exec`s.
+fn python_is_3_13() -> bool {
+    python()
+        .args(["-c", "import sys; print(sys.version_info[:2] == (3, 13))"])
+        .output()
+        .is_ok_and(|out| text(&out.stdout).trim() == "True")
+}
+
 #[test]
 fn fallback_defs_are_made_without_running_their_statements() {
     let (report, count) = check("direct_defs", DEFERRED);
@@ -165,12 +175,16 @@ fn fallback_defs_are_made_without_running_their_statements() {
     // (its defaults are read at run time) and `decorated`, one chunk too,
     // run their statements, as does the nested statements' helper chunk
     // (an `import`).
-    assert_eq!(count, "exec at import: 2", "{report}");
+    if python_is_3_13() {
+        assert_eq!(count, "exec at import: 2", "{report}");
+    }
 }
 
 #[test]
 fn an_eager_constant_annotation_is_made_directly_and_a_name_is_not() {
     let (report, count) = check("direct_defs_eager", EAGER);
     assert!(report.contains("function `named`"), "{report}");
-    assert_eq!(count, "exec at import: 1", "{report}");
+    if python_is_3_13() {
+        assert_eq!(count, "exec at import: 1", "{report}");
+    }
 }
