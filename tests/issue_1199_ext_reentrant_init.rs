@@ -220,6 +220,45 @@ print(hasattr(again, "late"), hasattr(again, "C"))
     assert!(out.ends_with("False 2 3 5\nTrue True\n"), "{out}");
 }
 
+/// Functions published out of the export table's order: `b` is published
+/// at its last definition, after `a`, and a reimport runs the body again
+/// with the publish lookup's cursor where the first exec left it
+/// (`pycc_ext_publish_row` in `src/ext/module/module_init.c` starts its
+/// search after the previous match and wraps around).
+const OUT_OF_ORDER: &str = r#"def b() -> int:
+    return 1
+
+
+def a() -> int:
+    return 2
+
+
+def b() -> int:
+    return 3
+
+
+def c() -> int:
+    return 4
+"#;
+
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn functions_published_out_of_table_order_are_all_bound() {
+    let fixture = Fixture::new("1199_out_of_order", OUT_OF_ORDER, "");
+    let out = fixture.assert_matches_cpython(
+        r#"import sys
+import my
+
+print(my.a(), my.b(), my.c())
+del sys.modules["my"]
+import my as again
+
+print(again is my, again.a(), again.b(), again.c())
+"#,
+    );
+    assert_eq!(out, "2 3 4\nFalse 2 3 4\n");
+}
+
 /// `class E(Base): pass` owns no compiled item; it is published once its
 /// base's methods are bound, so a cycle after its statement constructs it.
 #[test]
