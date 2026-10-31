@@ -88,12 +88,13 @@ typedef struct PycFwdSlot {
     int varargs;
     int varkw;
     int simple; /* positional parameters only, no `__class__` */
-    /* `co_varnames`' parameter names (borrowed from `names`). */
-    PyObject *varnames[PYCC_FWD_MAX_PARAMS];
-    /* The positional defaults last seen (owned) and their items. */
+    /* The positional defaults last seen (owned) and their count. A
+     * parameter's name and default are read from `names` and `defaults`
+     * when a call binds them, rather than copied into the slot: a module's
+     * slots are allocated together when its body starts, one per
+     * forwarder, and copies of 24 of each made them 488 bytes. */
     PyObject *defaults;
     Py_ssize_t ndefaults;
-    PyObject *default_items[PYCC_FWD_MAX_PARAMS];
 } PycFwdSlot;
 
 static vectorcallfunc pycc_fwd_original = NULL;
@@ -264,12 +265,12 @@ static int pycc_fwd_keyword(PycFwdSlot *slot, PyObject *name)
     int i, end = slot->argcount + slot->kwonly;
 
     for (i = slot->posonly; i < end; i++) {
-        if (slot->varnames[i] == name) {
+        if (PyTuple_GetItem(slot->names, i) == name) {
             return i;
         }
     }
     for (i = slot->posonly; i < end; i++) {
-        int equal = PyObject_RichCompareBool(slot->varnames[i], name, Py_EQ);
+        int equal = PyObject_RichCompareBool(PyTuple_GetItem(slot->names, i), name, Py_EQ);
 
         if (equal < 0) {
             PyErr_Clear();
@@ -363,9 +364,6 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
             if (count > slot->argcount) {
                 return pycc_fwd_slow(slot, func, args, nargsf, kwnames);
             }
-            for (i = 0; i < count; i++) {
-                slot->default_items[i] = PyTuple_GetItem(defaults, i);
-            }
             {
                 PyObject *old = slot->defaults;
 
@@ -379,9 +377,9 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
                 continue;
             }
             if (i < slot->argcount && i >= slot->argcount - slot->ndefaults) {
-                bound[i] = slot->default_items[i - (slot->argcount - slot->ndefaults)];
+                bound[i] = PyTuple_GetItem(slot->defaults, i - (slot->argcount - slot->ndefaults));
             } else if (i >= slot->argcount && kwdefaults != NULL) {
-                bound[i] = PyDict_GetItemWithError(kwdefaults, slot->varnames[i]);
+                bound[i] = PyDict_GetItemWithError(kwdefaults, PyTuple_GetItem(slot->names, i));
                 PyErr_Clear();
             }
             if (bound[i] == NULL) {
@@ -607,13 +605,6 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
         slot->cell = Py_NewRef(PyTuple_GetItem(closure, 0));
     }
     slot->names = Py_NewRef(info.varnames);
-    {
-        int k;
-
-        for (k = 0; k < slot->argcount + slot->kwonly; k++) {
-            slot->varnames[k] = PyTuple_GetItem(slot->names, k);
-        }
-    }
     slot->func = Py_NewRef(func);
     slot->code = Py_NewRef(code);
     slot->target = Py_NewRef(target);
@@ -834,7 +825,8 @@ static int pycc_ext_forward_install(PyccExtModule *m, PyObject *module)
     int status;
 
     if (*m->fwd_slot_count > 0 && m->fwd_slots == NULL) {
-        m->fwd_slots = (PycFwdSlot *)PyMem_Calloc((size_t)*m->fwd_slot_count, sizeof(PycFwdSlot));
+        /* Each slot is cleared when a forwarder takes it. */
+        m->fwd_slots = (PycFwdSlot *)PyMem_Malloc((size_t)*m->fwd_slot_count * sizeof(PycFwdSlot));
         if (m->fwd_slots == NULL) {
             PyErr_NoMemory();
             return -1;

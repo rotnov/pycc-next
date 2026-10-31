@@ -11,6 +11,12 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   publishes in ms.
 
 ### Changed
+- A compiled module's forwarder slots no longer copy each function's parameter names and
+  positional defaults (24 of each, 488 bytes a slot, zeroed for every slot when the
+  module's body started); a call that binds keywords or defaults reads them from the
+  function's own tuples (v0.11 accept 3). Own import share: pystache 8.68M -> 8.66M,
+  mistune 23.80M -> 23.73M, pydantic 92.82M -> 92.61M (the CI workload's import phase
+  215.39M -> 215.11M).
 - The code objects a compiled module's import used to re-qualify and flag with
   `code.replace` -- each nested `def` CPython runs (its scaffold's `__qualname__`) and each
   published signature's wrapper -- are rewritten when the build compiles their chunks, so
