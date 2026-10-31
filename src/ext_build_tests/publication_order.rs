@@ -70,8 +70,18 @@ fn the_shim_defines_the_publication_entry_point_codegen_calls() {
     // lookup before the exec-target key is read, so an unknown name -- every
     // name, in the embedded launcher -- touches no state.
     let methods = publish
-        .find("for (def = pycc_ext_methods; def->ml_name != NULL; def++)")
+        .find("row = pycc_ext_publish_row(name);")
         .expect("the function table is searched");
+    // The table search reads only the table and its own cursor.
+    let search = function_text(
+        &shim,
+        "static PyMethodDef *pycc_ext_publish_row(const char *name)\n{",
+    );
+    assert!(
+        search.contains("strcmp(pycc_ext_methods[at].ml_name, name) == 0")
+            && !search.contains("PyThread_tss_get"),
+        "{search}"
+    );
     let class = publish
         .find("class_slot = pycc_ext_publish_class_slot(name);")
         .expect("the class lookup is consulted");

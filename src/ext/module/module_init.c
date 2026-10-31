@@ -1,4 +1,41 @@
 /*
+ * The `pycc_ext_methods[]` row named `name`, or NULL. A module body
+ * publishes its functions in source order, which is the table's order, so
+ * the search starts after the row the previous call found and wraps
+ * around: a body's publications cost one pass over the table, not one pass
+ * each. The names are distinct, so where the search starts does not change
+ * the row it finds. The cursor is only read and written with the GIL held
+ * (publication runs in the module body).
+ */
+static PyMethodDef *pycc_ext_publish_row(const char *name)
+{
+    static Py_ssize_t next = 0;
+    static Py_ssize_t count = -1;
+    Py_ssize_t start;
+    Py_ssize_t i;
+
+    if (count < 0) {
+        count = 0;
+        while (pycc_ext_methods[count].ml_name != NULL) {
+            count++;
+        }
+    }
+    if (count == 0) {
+        return NULL;
+    }
+    start = next < count ? next : 0;
+    for (i = 0; i < count; i++) {
+        Py_ssize_t at = (start + i) % count;
+
+        if (strcmp(pycc_ext_methods[at].ml_name, name) == 0) {
+            next = at + 1;
+            return &pycc_ext_methods[at];
+        }
+    }
+    return NULL;
+}
+
+/*
  * #1199: binds one top-level definition on the executing module, called by
  * LLVM-generated code right after the definition's `fnptr_` slot store (and
  * after the last slot of a class statement), so the name becomes a module
@@ -35,8 +72,7 @@
  */
 PYCC_ENTRY int pycc_ext_publish(const char *name)
 {
-    PyMethodDef *row = NULL;
-    PyMethodDef *def;
+    PyMethodDef *row;
     PyObject **class_slot = NULL;
     PyObject *module;
     PyObject *classes;
@@ -45,12 +81,7 @@ PYCC_ENTRY int pycc_ext_publish(const char *name)
     PyObject *func;
     int status;
 
-    for (def = pycc_ext_methods; def->ml_name != NULL; def++) {
-        if (strcmp(def->ml_name, name) == 0) {
-            row = def;
-            break;
-        }
-    }
+    row = pycc_ext_publish_row(name);
     if (row == NULL) {
         class_slot = pycc_ext_publish_class_slot(name);
         if (class_slot == NULL) {
