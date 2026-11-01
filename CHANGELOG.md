@@ -4,6 +4,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-01
+
+Imports faster than CPython -- accepts 2 (smaller, faster-loading extensions) and 3
+(less work at import) are met, and accept 4 for mistune, whose import is now faster than
+CPython's; accept 1 (pydantic's import >= 1.0x) and accept 4 for pystache are **not
+met**. pydantic's import went from 0.89x / 0.93x of CPython (x86_64 / aarch64, the
+2026-10-30 baseline) to **0.97x / 0.98x**; the remaining gap is spread thin (details in
+[the v0.11 roadmap](https://github.com/rotnov/pycc-next/blob/main/docs/roadmap/v0.11.md)).
+
 ### Added
 - `bench/package_check.py --time` times `import mistune` and `import pystache`, one import
   per fresh process against the CPython tree's `.pyc` files, so the CI benchmark job
@@ -113,147 +122,55 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   the import makes one and compiled code reads it (importing pydantic made 39 type
   variables against CPython's 22; 22 now, and 0.4M fewer instructions).
 
-## [0.10.0] - 2026-10-30
-
-### Added
-- The `bench` CI workflow (`.github/workflows/bench.yml`; manual, on release tags and
-  weekly, on ubuntu-24.04 and ubuntu-24.04-arm): `bench/run.py`, the real packages'
-  `--time` checks and `bench/pydantic_check.py --time` with interleaved fresh-process
-  runs, published as medians with min-max, the runner's CPU and the run count (job
-  summary, `bench-<os>` artifact). Published speed numbers cite a run of it (v0.10
-  accept 4).
-- Cython 3.3.0 and mypyc (mypy 2.3.1) as benchmark competitors (`bench/competitors.py`,
-  pinned in `.github/competitor-requirements.txt`): `bench/run.py` and
-  `package_check.py`/`pydantic_check.py --time --competitors` build the same unmodified
-  sources with each and time what builds and passes; the published result has Cython and
-  mypyc columns, pycc vs each, the Cython mode, and every build that failed with why.
-  CPython stays the correctness oracle.
-- The differential fuzzer's `call_errors` block: calls with missing, extra, unknown,
-  misspelled and repeated arguments, and missing attributes of classes and instances.
-- `--non-strict`: a function's `str`-keyed dict display holding CPython objects
-  (`{"first": None, "n": 0}`) is a native dict when the dict never escapes the function
-  -- it is only read, stored into, tested for a key, measured, iterated or tested for
-  truth; returned, passed, stored elsewhere, compared or printed, it stays CPython's
-  `dict`, so identity, views, pickling and `repr` are CPython's wherever CPython can see
-  it (v0.10 accept 2). Equal identifier-like `str` literals share one native object, and
-  native `str`-keyed dicts read a key's cached hash in place.
-
-- Exception classes with members of their own can derive from another module's
-  exception class in a package built whole (v0.10 accept 5): CPython makes each from its
-  statement and its methods are compiled, so `args`, `str`, tracebacks, pickling and
-  class-statement hooks are CPython's, and functions raising and catching them stay
-  compiled. A native attribute layout for them (PEP 697) was measured 2.5x slower on raise
-  and catch and 1.5x slower on attribute reads than this, and not shipped.
-
-- Instances of published compiled classes pickle (v0.10), as `object.__reduce_ex__` pickles
-  an object: `copyreg.__newobj__` with `__getnewargs_ex__` / `__getnewargs__`'s arguments and
-  the state `object.__getstate__` gives the source class (each assigned compiled attribute
-  as stored, a subclass's `__dict__` and `__slots__`), restored as pickle restores it, at
-  every protocol (0 and 1 as `copyreg._reduce_ex`), with `copy.deepcopy`, shared
-  references, nested instances and Python subclasses and their hooks (`__reduce__`,
-  `__reduce_ex__`, `__getstate__`, `__setstate__`, `__new__`, `__getattribute__`,
-  `__setattr__`, `__slots__`, `copyreg.dispatch_table`); one with an attribute Python code
-  cannot see refuses with a `TypeError` naming it.
-
-- Compiled subclasses of compiled classes of another module of a package built whole are
-  native (v0.10 accept 5): `class Square(Shape)` with `Shape` imported from `.base` is
-  compiled over `base`'s instance layout, and `base`'s compiled methods run `Square`'s
-  overrides. Every class has a *record*, one named descriptor global its instances point
-  at; a run-time class test is a pointer compare, and a subclass compiled over another
-  module's class carries a vtable that module's per-(class, method) dispatchers read.
-
-### Changed
-- `C.__new__(C)` of a published compiled class makes an object whose attributes are all
-  unassigned (reading one raises CPython's `AttributeError`) instead of an uninitialized
-  carrier that compiled methods, setters and argument checks refused with a `TypeError`;
-  `copy.copy` of a Python subclass's object that hooks the copy protocol goes through it.
-- `bench/run.py` reports the median and min-max of interleaved fresh-process runs
-  (default 11) instead of the best of 7; `bench/package_check.py --time` times each run
-  in a fresh process, alternating CPython and the compiled tree; all three timing
-  scripts write `--json`.
-- `--non-strict`: compiled code reads, tests and stores into an exact CPython `dict`
-  through the dict API (`d[k]`, `k in d`, `d[k] = v`), a subclass still through its own
-  methods (`__missing__`, overridden `__getitem__`), with `dict`'s own `KeyError`s; a
-  `str` literal CPython would intern as a code constant crosses as the interned string,
-  so `'raw' is key` holds as in CPython and lookups keyed by it compare by identity
-  (v0.10 accept 2). A compiled `d['raw']` on a received dict: 275 -> 179 instructions.
-- A nested function used as a value is a native closure also when a variable it reads
-  is rebound before its `def` and never after (`template = str(template)`, then
-  `def piece(item): ...`), in strict and non-strict mode; it ran its `def` in CPython
-  (or was `C0001` in strict mode). `sorted(xs, key=f)` of such a closure calls it
-  directly in a comprehension instead of passing a function object to CPython's
-  builtin; `map`/`filter` of one run CPython's lazy builtins over the compiled
-  function.
-- A whole-package build takes less CPU and finishes sooner (mistune, 38 modules, 4 jobs:
-  5.25 s -> 4.37 s, 18.8 s -> 16.7 s of CPU, medians of 5 interleaved local builds; the
-  extension is byte-identical). Each member build uses its share of the cores
-  (`--member-threads`): with every core already building a member it no longer runs the
-  frontend's speculative attempt without specializations beside the specialized one,
-  which ran for every module and was discarded whenever the specialized attempt passed;
-  it runs only when a failure needs it. The members compile against the package build's
-  probe of the interpreter (`--ext-probe`) instead of each starting it again; they start
-  by the longest chain of work that waits on them, estimated from the sources' sizes, so
-  a large module no longer starts last and finishes alone; and the runtime unit and the
-  package unit compile while the members build instead of after them. The script that
-  precompiles a module's CPython source reads `marshal` data instead of JSON and imports
-  `ast` only for a set display, halving its start-up.
-
-### Fixed
-- `key=` functions are called when CPython calls them.
-  - **`sorted(xs, key=f)`:** keys a copy of its whole input. An input that raises part
-    way raises before the first key call, and a key that changes the input (directly
-    or through a property getter) does not change what is sorted.
-  - **`min`/`max`:** each key is compared as soon as it is computed, as in CPython.
-    Instance keys are compared through the class's `__lt__`/`__gt__` while the pairs
-    are pulled from a generator, so key calls, comparisons and their exceptions
-    interleave as CPython's do (a `StopIteration` a key raises propagates as it is,
-    not as PEP 479's `RuntimeError`). Keys of numbers, `str` or tuples of them
-    (immutable values whose comparison runs no code) are all computed first, which
-    nothing can tell apart. Any other key (a list, a CPython object) is `C0001` in
-    strict mode and runs in CPython in non-strict mode.
-  - **`.sort` and `reverse=`:** `.sort` with a nested-function key runs as written, and
-    with a key only a literal `reverse=` is rewritten (CPython evaluates every argument
-    before the first key call).
-- `super().__init__(...)` in an exception class with its own `__init__`, reaching the
-  builtin exception's constructor, compiled to a call that failed at run time with
-  `NameError: name 'Exception.__init__' is not defined`; it is a compile-time `C0001` now
-  (in `--non-strict` the class runs in CPython, its methods compiled, as for a raise of it).
-- A published compiled function, method or constructor (`--ext`, and a `--non-strict`
-  native build's `__main__`) called with the wrong arguments raises CPython 3.13's exact
-  `TypeError`: `missing 1 required positional argument: 'x'`, `takes from 2 to 3
-  positional arguments but 4 were given`, and an unknown keyword's `Did you mean 'by'?`
-  (also in compiled code's own keyword binding) -- issue #10.
-- An f-string `=` field (`f"{x=}"`) in a `--non-strict` statement running in CPython
-  printed the rewritten global read instead of `x=`.
 ### Known gaps
-- v0.10 accept 3 (not met): pystache 0.6.8 and mistune 3.3.4 do not run their own
-  benchmarks >= 1.2x faster than CPython (pystache 582k against CPython's 505k
-  instructions per round, mistune 57.7M against 57.0M per pass). The levers left and their
-  estimated savings are in [the v0.10 roadmap](https://github.com/rotnov/pycc-next/blob/main/docs/roadmap/v0.10.md); none reaches 1.2x
-  alone.
-- A subclass of a cross-module compiled subclass in a third module of a package runs as a
-  Python subclass.
+- v0.11 accept 1 (not met): pydantic 2.13.5's import is **0.97x** CPython's on x86_64
+  (90.78 ms against 87.81 ms) and **0.98x** on aarch64 (72.13 ms against 70.89 ms), median
+  of 15 runs (bench run 41248409468). In instructions the CI workload's import phase costs
+  212.67M against CPython's 208.77M (callgrind, PBS 3.13.13); at the last breakdown no
+  item of the remaining gap was above 0.75M (unmarshalling the fallback chunk tables, the
+  `str` literal cache, string hashing, relocations), and decorated `def`s and class
+  statements still run as `exec`'d chunks so that their tracebacks stay exact. Moved to
+  v0.12.
+- v0.11 accept 4 (not met for pystache): pystache 0.6.8's import is 0.97x CPython's on
+  x86_64 (11.51 ms against 11.18 ms) and 0.94x on aarch64 (10.02 ms against 9.40 ms).
+  Moved to v0.12.
+- v0.10 accept 3 is still not met: pystache's own benchmark runs at 0.64x CPython and
+  mistune's `html` workload at 0.86x (x86_64, same run).
+- After `import pydantic`, 33 `__pycc_lift*` names remain in its modules' dicts (lever 6
+  of the v0.11 plan, not done).
 - Open rows of `docs/DEVIATIONS.md`.
 
 ### Speed
-Bench run [41010653642](https://github.com/rotnov/pycc-next/actions/runs/41010653642) at
-49f954c (ubuntu-24.04, Intel Xeon Platinum 8370C, medians of 11 interleaved
-fresh-process runs; pydantic 15). Ratios are CPython's median over pycc-next's.
+Bench run [41248409468](https://github.com/rotnov/pycc-next/actions/runs/41248409468) at
+6ab165e (ubuntu-24.04, AMD EPYC 7763; ubuntu-24.04-arm, Neoverse-N2; medians of 11
+interleaved fresh-process runs, pydantic of 15). Ratios are CPython's median over
+pycc-next's; above 1, pycc-next is faster.
 
 | workload | CPython | pycc-next | vs CPython | vs Cython 3.3.0 | vs mypyc |
 |---|---|---|---|---|---|
-| nbody | 2.606s | 0.077s | 33.9x | 63.5x faster | 29.5x faster |
-| spectral_norm | 1.194s | 0.017s | 69.4x | 80.2x faster | 5.2x faster |
-| diff-match-patch `diff_main` | 11.572s | 0.958s | 12.1x | 11.1x faster | does not compile |
-| pypng read, five filters | 0.116s | 0.008s | 15.1x | 10.8x faster | does not compile |
-| tomli `loads` x100 | 0.058s | 0.034s | 1.70x | 1.32x faster | 1.39x slower |
-| pystache benchmark x1000 | 0.069s | 0.109s | 0.63x | 1.82x slower | does not compile |
-| mistune `html` x20 | 0.149s | 0.179s | 0.83x | suite fails | does not compile |
-| pydantic define | 8.54 ms | 10.49 ms | 0.81x | 1.19x slower | does not compile |
-| pydantic schema | 19.03 ms | 23.03 ms | 0.83x | 1.42x slower | does not compile |
+| nbody | 3.176s | 0.072s | 44.0x | 74.35x faster | 39.26x faster |
+| spectral_norm | 1.467s | 0.017s | 87.9x | 91.35x faster | 5.76x faster |
+| diff-match-patch `diff_main` | 14.245s | 0.975s | 14.61x | 11.90x faster | does not compile |
+| pypng read, five filters | 0.140s | 0.008s | 17.46x | 11.38x faster | does not compile |
+| tomli `loads` x100 | 68.70 ms | 38.90 ms | 1.77x | 1.32x faster | 1.40x slower |
+| pystache benchmark x1000 | 81.80 ms | 128.40 ms | 0.64x | 1.91x slower | does not compile |
+| mistune `html` x20 | 0.176s | 0.205s | 0.86x | suite fails | does not compile |
+| pydantic define | 9.96 ms | 12.27 ms | 0.81x | 1.18x slower | does not compile |
+| pydantic schema | 22.26 ms | 26.79 ms | 0.83x | 1.36x slower | does not compile |
+| pydantic roundtrip | 22.58 ms | 24.71 ms | 0.91x | 1.07x slower | does not compile |
 
-The run's job summary has every program, package workload and phase, with min-max.
+Imports, both runners (one import per fresh process; pydantic: `bench/pydantic_workload.py`'s
+import phase):
 
-Earlier versions: [0.9](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.9.md), [0.8](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.8.md),
+| import | x86_64 CPython | x86_64 pycc-next | ratio | aarch64 CPython | aarch64 pycc-next | ratio |
+|---|---|---|---|---|---|---|
+| pydantic | 87.81 ms | 90.78 ms | 0.97x | 70.89 ms | 72.13 ms | 0.98x |
+| mistune | 33.09 ms | 31.95 ms | **1.04x** | 28.29 ms | 27.38 ms | **1.03x** |
+| pystache | 11.18 ms | 11.51 ms | 0.97x | 9.40 ms | 10.02 ms | 0.94x |
+
+aarch64's pydantic define, schema and roundtrip phases: 0.78x, 0.82x, 0.92x. The run's job
+summary has every program, package workload and phase, with min-max.
+
+Earlier versions: [0.10](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.10.md), [0.9](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.9.md), [0.8](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.8.md),
 [0.6-0.7](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.6-0.7.md), [0.4-0.5](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.4-0.5.md),
 [0.1-0.3](https://github.com/rotnov/pycc-next/blob/main/docs/changelog/0.1-0.3.md).
