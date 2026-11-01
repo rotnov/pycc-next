@@ -11,4 +11,4 @@ extension modules with the `pycc` compiler (`pycc build --ext`). The README's
 "Use pycc in your project" section is the user documentation.
 """
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"

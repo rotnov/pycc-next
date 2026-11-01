@@ -95,12 +95,14 @@ typed native hot data, and still not met. v0.9 made libraries' own classes nativ
 over compiled templates, Python subclasses of compiled classes whose overrides compiled code
 calls, call-site method caches), and the numbers moved less than the work suggests.
 pystache 0.6.8 runs 586k instructions per round of its own benchmark (783k before v0.9;
-CPython 505k) and 0.63x by wall time; about 158k of CPython's 505k is regex and match work
+CPython 505k) and 0.64x by wall time; about 158k of CPython's 505k is regex and match work
 no compile of pystache removes, so 2x would need everything else under ~94k. mistune 3.3.4
-is slower than CPython (0.83x for `mistune.html`, 0.79x for the full parser). pydantic
-2.13.5 built whole (1036 of 1249 functions native, its own suite failing no test more than
-against its sources): import 0.93x, model definition 0.79x, `model_json_schema()` 0.82x,
-round-trips 0.91x of CPython's speed (medians of 15 interleaved runs). Compiled code over CPython objects does each object operation at about the
+is slower than CPython (0.86x for `mistune.html`, 0.84x for the full parser), though its
+import is faster (1.04x). pydantic 2.13.5 built whole (1036 of 1249 functions native, its
+own suite failing no test more than against its sources): import 0.97x, model definition
+0.81x, `model_json_schema()` 0.83x, round-trips 0.91x of CPython's speed (bench run
+41248409468, ubuntu-24.04, medians of 15 interleaved runs; mistune and pystache of 11).
+Compiled code over CPython objects does each object operation at about the
 interpreter's cost; the speed is in typed code (the table above, diff-match-patch and pypng
 ~12x and ~15x). The analysis is in [ROADMAP v0.9 accepts 2-4](docs/roadmap/v0.9.md).
 
