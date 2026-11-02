@@ -6,7 +6,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ### Changed
 - **CPython 3.15 is the oracle** (was 3.13): CI, the fuzzer, the benchmarks and the
-  release builds run CPython 3.15.2, and native programs match 3.15's behavior: every
+  release builds run CPython 3.15 (3.15.1 on the hosted runners), and native programs match 3.15's behavior: every
   `ZeroDivisionError` says `division by zero`, `0.0 ** -1` says `zero to a negative
   power`, `math` domain errors name the expected input (`expected a nonnegative input,
   got -1.0`), an unpacking of too many values says how many (`expected 2, got 3`),

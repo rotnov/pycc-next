@@ -31,10 +31,30 @@ literal cache, string hashing, relocations), and decorated `def`s and class stat
 still run as `exec`'d chunks to keep their tracebacks exact. What v0.11 left and where
 the time goes: [v0.11](roadmap/v0.11.md).
 
+Baseline against CPython 3.15 (the oracle after v0.11.0, [bench run
+41427758082](https://github.com/rotnov/pycc-next/actions/runs/41427758082) at 147fac2,
+CPython 3.15.1; ubuntu-24.04 AMD EPYC 9V45 / ubuntu-24.04-arm Neoverse-N2, 4 vCPUs each;
+medians of 15 runs for pydantic 2.14.2, of 11 for the others; x86_64 / aarch64):
+
+| workload | x86_64 | aarch64 |
+|---|---|---|
+| pydantic import | 0.96x | 0.94x |
+| pydantic model definition | 0.80x | 0.75x |
+| pydantic `model_json_schema()` | 0.88x | 0.75x |
+| pydantic round-trips | 0.96x | 0.93x |
+| `import mistune` | 0.98x | 0.98x |
+| `import pystache` | 0.94x | 0.93x |
+| `mistune.html` / full parser | 0.89x / 0.86x | 0.78x / 0.76x |
+| pystache's own benchmark | 0.65x | 0.68x |
+
+The v0.11 figures below were measured against CPython 3.13 (bench run 41248409468).
+
 Accept (carried over from v0.11, not met there):
 1. **pydantic import >= 1.0x**, then **>= 1.2x** as a stretch: median of the CI benchmark
    job (`bench.yml`) for the import phase of `bench/pydantic_workload.py`, compiled tree vs
    CPython from `.pyc`, same pydantic-core wheel, on both runners; its suite fails no test
-   that passes against its sources. v0.11: 0.97x / 0.98x.
+   that passes against its sources. v0.11 (CPython 3.13): 0.97x / 0.98x; against 3.15:
+   0.96x / 0.94x.
 2. **pystache's import no slower than CPython's** in the CI benchmark job, on both
-   runners, and no package check regresses. v0.11: 0.97x / 0.94x.
+   runners, and no package check regresses. v0.11 (CPython 3.13): 0.97x / 0.94x; against
+   3.15: 0.94x / 0.93x.
