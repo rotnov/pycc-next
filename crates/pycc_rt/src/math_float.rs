@@ -1,8 +1,11 @@
 //! The float functions of `math` (`sqrt`, `exp`, `log`, the trigonometric
-//! functions, ...) with CPython 3.13's error behavior: a domain error raises
-//! `ValueError: math domain error`, an overflow `OverflowError: math range
+//! functions, ...) with CPython 3.15's error behavior: a domain error raises
+//! `ValueError` naming what the function expected and the argument it got
+//! (`expected a positive input, got -1.0`; plain `math domain error` where
+//! CPython has no message of its own), an overflow `OverflowError: math range
 //! error`. An `int` argument of the logarithms is taken exactly, as CPython's
-//! `loghelper` does, so `log2(2**2000)` is `2000.0`; every other function
+//! `loghelper` does, so `log2(2**2000)` is `2000.0` (and a non-positive one
+//! is `expected a positive input`, with no value); every other function
 //! receives an `int` already converted to `float` (`OverflowError` beyond
 //! its range).
 
@@ -10,12 +13,19 @@ use crate::exception::{
     EXCEPTION_TYPE_OVERFLOW_ERROR, EXCEPTION_TYPE_VALUE_ERROR, EXCEPTION_TYPE_ZERO_DIV_ERROR,
     raise_builtin,
 };
+use crate::float_arith::float_repr;
 use crate::int_arith::decode_big;
 use crate::int_encoding::inline_int_value;
 use num_traits::{Signed, ToPrimitive, Zero};
 
-fn domain_error() -> f64 {
-    raise_builtin(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", "math domain error");
+/// The domain error of a function whose CPython message is `expected`
+/// (`None`: `math domain error`), with `, got <repr of x>` after it.
+fn domain_error(expected: Option<&str>, x: f64) -> f64 {
+    let message = match expected {
+        Some(expected) => format!("{expected}, got {}", float_repr(x)),
+        None => "math domain error".to_string(),
+    };
+    raise_builtin(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", &message);
     0.0
 }
 
@@ -24,41 +34,48 @@ fn range_error() -> f64 {
     0.0
 }
 
+/// CPython's messages (`Modules/mathmodule.c`, 3.15).
+const NONNEGATIVE: Option<&str> = Some("expected a nonnegative input");
+const FINITE: Option<&str> = Some("expected a finite input");
+const UNIT_RANGE: Option<&str> = Some("expected a number in range from -1 up to 1");
+const POSITIVE: &str = "expected a positive input";
+
 /// CPython's `math_1` rule: a NaN from a non-NaN argument is a domain
-/// error, an infinity from a finite argument a range error.
-fn checked(x: f64, r: f64, overflow_is_range: bool) -> f64 {
+/// error (with the function's message), an infinity from a finite
+/// argument a range error.
+fn checked(x: f64, r: f64, overflow_is_range: bool, expected: Option<&str>) -> f64 {
     if r.is_nan() && !x.is_nan() {
-        return domain_error();
+        return domain_error(expected, x);
     }
     if r.is_infinite() && x.is_finite() {
         return if overflow_is_range {
             range_error()
         } else {
-            domain_error()
+            domain_error(expected, x)
         };
     }
     r
 }
 
 macro_rules! unary {
-    ($name:ident, $f:expr, $range:expr) => {
+    ($name:ident, $f:expr, $range:expr, $expected:expr) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn $name(x: f64) -> f64 {
             let f: fn(f64) -> f64 = $f;
-            checked(x, f(x), $range)
+            checked(x, f(x), $range, $expected)
         }
     };
 }
 
-unary!(pycc_rt_math_sqrt, f64::sqrt, false);
-unary!(pycc_rt_math_exp, f64::exp, true);
-unary!(pycc_rt_math_sin, f64::sin, false);
-unary!(pycc_rt_math_cos, f64::cos, false);
-unary!(pycc_rt_math_tan, f64::tan, false);
-unary!(pycc_rt_math_asin, f64::asin, false);
-unary!(pycc_rt_math_acos, f64::acos, false);
-unary!(pycc_rt_math_atan, f64::atan, false);
-unary!(pycc_rt_math_fabs, f64::abs, false);
+unary!(pycc_rt_math_sqrt, f64::sqrt, false, NONNEGATIVE);
+unary!(pycc_rt_math_exp, f64::exp, true, None);
+unary!(pycc_rt_math_sin, f64::sin, false, FINITE);
+unary!(pycc_rt_math_cos, f64::cos, false, FINITE);
+unary!(pycc_rt_math_tan, f64::tan, false, FINITE);
+unary!(pycc_rt_math_asin, f64::asin, false, UNIT_RANGE);
+unary!(pycc_rt_math_acos, f64::acos, false, UNIT_RANGE);
+unary!(pycc_rt_math_atan, f64::atan, false, None);
+unary!(pycc_rt_math_fabs, f64::abs, false, None);
 
 /// The natural, base-2 or base-10 logarithm of a float: non-positive
 /// arguments are a domain error (`log(0.0)` included, unlike libm's `-inf`).
@@ -67,9 +84,16 @@ fn float_log(x: f64, f: fn(f64) -> f64) -> f64 {
         return x;
     }
     if x <= 0.0 {
-        return domain_error();
+        return domain_error(Some(POSITIVE), x);
     }
     f(x)
+}
+
+/// A logarithm's domain error for an `int` argument: CPython's `loghelper`
+/// names no value.
+fn int_domain_error() -> f64 {
+    raise_builtin(EXCEPTION_TYPE_VALUE_ERROR, "ValueError", POSITIVE);
+    0.0
 }
 
 /// CPython's `loghelper` for an `int`: exact through `frexp` when the value
@@ -77,13 +101,13 @@ fn float_log(x: f64, f: fn(f64) -> f64) -> f64 {
 fn int_log(word: i64, f: fn(f64) -> f64) -> f64 {
     if let Some(v) = inline_int_value(word) {
         if v <= 0 {
-            return domain_error();
+            return int_domain_error();
         }
         return f(v as f64);
     }
     let n = decode_big(word);
     if !n.is_positive() || n.is_zero() {
-        return domain_error();
+        return int_domain_error();
     }
     if let Some(x) = n.to_f64()
         && x.is_finite()
@@ -136,7 +160,7 @@ fn log_base(num: f64, den: f64) -> f64 {
         raise_builtin(
             EXCEPTION_TYPE_ZERO_DIV_ERROR,
             "ZeroDivisionError",
-            "float division by zero",
+            "division by zero",
         );
         return 0.0;
     }
@@ -203,6 +227,48 @@ mod tests {
         let big = crate::int_arith::int_pow(tag_smallint(2), tag_smallint(2000));
         assert_eq!(pycc_rt_math_log2_int(big), 2000.0);
         assert_eq!(pycc_rt_math_log_base_ii(tag_smallint(8), tag_smallint(2)), 3.0);
+    }
+
+    /// The message `f` raises (a `ValueError` or `ZeroDivisionError`).
+    fn raised(f: impl FnOnce()) -> String {
+        crate::exception::pycc_rt_exception_clear();
+        f();
+        assert_eq!(crate::exception::pycc_rt_exception_active(), 1);
+        let obj = crate::exception::pycc_rt_exception_value();
+        let message = String::from_utf8(
+            unsafe { (*crate::exception::pycc_rt_exception_message(obj)).bytes() }.to_vec(),
+        )
+        .expect("a UTF-8 message");
+        crate::exception::pycc_rt_exception_clear();
+        message
+    }
+
+    #[test]
+    fn domain_errors_name_the_expected_input_as_cpython_3_15_does() {
+        assert_eq!(
+            raised(|| { pycc_rt_math_sqrt(-1.0); }),
+            "expected a nonnegative input, got -1.0"
+        );
+        assert_eq!(
+            raised(|| { pycc_rt_math_sin(f64::INFINITY); }),
+            "expected a finite input, got inf"
+        );
+        assert_eq!(
+            raised(|| { pycc_rt_math_acos(2.0); }),
+            "expected a number in range from -1 up to 1, got 2.0"
+        );
+        assert_eq!(
+            raised(|| { pycc_rt_math_log(-2.5); }),
+            "expected a positive input, got -2.5"
+        );
+        assert_eq!(
+            raised(|| { pycc_rt_math_log10_int(tag_smallint(0)); }),
+            "expected a positive input"
+        );
+        assert_eq!(
+            raised(|| { pycc_rt_math_log_base_ff(2.0, 1.0); }),
+            "division by zero"
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! with a negative exponent is CPython's `float` power of the two.
 
 use super::*;
-use crate::float_arith::{FLOORDIV_BY_ZERO, MOD_BY_ZERO, float_div, float_divmod, float_pow};
+use crate::float_arith::{float_div, float_divmod, float_pow};
 
 /// The operator codes `pycc_codegen` passes to [`pycc_rt_num_binop`].
 pub const NUM_ADD: i32 = 0;
@@ -31,8 +31,8 @@ fn float_binop(op: i32, x: f64, y: f64) -> f64 {
         NUM_ADD => x + y,
         NUM_SUB => x - y,
         NUM_MUL => x * y,
-        NUM_FLOORDIV => float_divmod(x, y, FLOORDIV_BY_ZERO).0,
-        NUM_MOD => float_divmod(x, y, MOD_BY_ZERO).1,
+        NUM_FLOORDIV => float_divmod(x, y).0,
+        NUM_MOD => float_divmod(x, y).1,
         NUM_POW => float_pow(x, y),
         _ => unreachable!("pycc_rt: unknown `int | float` operator {op}"),
     }

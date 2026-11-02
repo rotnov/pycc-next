@@ -4,6 +4,37 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Changed
+- **CPython 3.15 is the oracle** (was 3.13): CI, the fuzzer, the benchmarks and the
+  release builds run CPython 3.15.2, and native programs match 3.15's behavior: every
+  `ZeroDivisionError` says `division by zero`, `0.0 ** -1` says `zero to a negative
+  power`, `math` domain errors name the expected input (`expected a nonnegative input,
+  got -1.0`), an unpacking of too many values says how many (`expected 2, got 3`),
+  `list.index`/`deque.index`/`deque.remove` say `x not in list`/`x not in deque`, a
+  slice index error drops `or None`, `%c` out of range says `format argument: %c
+  argument not in range(0x110000)`, a set display of constants iterates as the set built
+  once in source order, and `str` predicates use Unicode 17.0.0's tables.
+- Supported versions: `--ext` modules and `pycc.build` wheels keep the `cp313-abi3`
+  floor and import on CPython 3.13, 3.14 and 3.15. The fast paths that read CPython's
+  internal layouts (compiled functions in real CPython frames, the attribute and
+  module-global caches, `def`s made directly from precompiled bytecode) now know 3.15's
+  layouts as well as 3.13's; on 3.15 a module global rebound from Python reaches
+  compiled code through one dict watcher shared by every pycc module, as 3.14 removed
+  the dict version tag. A module imported by 3.14 runs without those fast paths, as
+  before. CI no longer runs the test suite against 3.13.
+- On Windows a native program's standard streams follow CPython 3.15's UTF-8 mode
+  default (PEP 686): UTF-8 unless `PYTHONUTF8=0` (or `PYTHONIOENCODING`) says otherwise,
+  where 3.13 used the ANSI code page.
+- Compiled code of a non-strict `--ext` module reading a global that only fallback code
+  binds reads it as `LOAD_GLOBAL` does: a name the module never binds is the builtin's
+  (tomli binds `frozendict` only before 3.15, where it is a builtin), and on 3.15 a lazy
+  import (`__lazy_modules__`) is resolved and replaced in the namespace.
+- An error message the extension shim raises that CPython words differently per version
+  follows the interpreter hosting the module (`Value after ** must be a mapping` on 3.15).
+- The pydantic benchmark builds pydantic 2.14.2 with pydantic-core 2.50.2 (2.13.5's
+  pydantic-core has no CPython 3.15 wheels); the pinned numpy, Cython and mypy wheels are
+  their cp315 builds.
+
 ## [0.11.0] - 2026-11-01
 
 Imports faster than CPython -- accepts 2 (smaller, faster-loading extensions) and 3

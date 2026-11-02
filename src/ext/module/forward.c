@@ -29,9 +29,9 @@
  *
  * `PyFunctionObject`'s `vectorcall`, `func_version`, `func_code`,
  * `func_defaults`, `func_kwdefaults` and `func_closure` are mirrored for
- * CPython 3.13 and checked by `pycc_forward_probe`; a function's version
- * is cleared so no call site specializes the call past the vectorcall
- * (CPython 3.13 assigns a function no new version once cleared). With
+ * CPython 3.13 and 3.15 and checked by `pycc_forward_probe`; a function's
+ * version is cleared so no call site specializes the call past the
+ * vectorcall (neither assigns a function a new version once cleared). With
  * compiled frames off, `__pycc_forward__` patches nothing.
  */
 
@@ -44,12 +44,18 @@
 #define PYCC_FUNC_DEFAULTS 56
 #define PYCC_FUNC_KWDEFAULTS 64
 #define PYCC_FUNC_CLOSURE 72
-#define PYCC_FUNC_VECTORCALL 128
-#define PYCC_FUNC_VERSION 136
+/* `vectorcall` and `func_version`: 128 and 136 in 3.13, 136 and 144 in
+ * 3.15 (3.14 added `func_annotate`); the value a cleared version holds, 0
+ * in 3.13 and 3.15's `FUNC_VERSION_CLEARED`, 1. Set by the probe. */
+static size_t pycc_fwd_vectorcall_at = 128;
+static size_t pycc_fwd_version_at = 136;
+static uint32_t pycc_fwd_version_cleared = 0;
+#define PYCC_FUNC_VECTORCALL pycc_fwd_vectorcall_at
+#define PYCC_FUNC_VERSION pycc_fwd_version_at
 
 /* `PyCodeObject`'s `co_names`, `co_argcount`, `co_posonlyargcount`,
  * `co_kwonlyargcount`, `co_nfreevars` and `co_localsplusnames` in CPython
- * 3.13 (`co_flags` is frames.c's `PYCC_CODE_FLAGS`): read directly once the
+ * 3.13 and 3.15 (`co_flags` is frames.c's `PYCC_CODE_FLAGS`): read directly once the
  * first forwarder's code has matched what its attributes say
  * (`pycc_fwd_code_checked`), so patching makes no attribute objects. The
  * parameters lead `co_localsplusnames` (`co_varnames`' first names) and the
@@ -113,7 +119,7 @@ static const char *const pycc_fwd_wrapper_attrs[3][4] = {
 
 #define PYCC_FUNC_FIELD(func, offset) (*(PyObject **)((char *)(func) + (offset)))
 
-/* `PyFunctionObject.func_dict` in CPython 3.13 (checked by the probe). */
+/* `PyFunctionObject.func_dict` in CPython 3.13 and 3.15 (checked by the probe). */
 #define PYCC_FUNC_DICT 88
 
 /* `obj.name` for a `name` spelled by a constant of this unit, with the
@@ -139,6 +145,11 @@ static void pycc_forward_probe(void)
 
     if (pycc_frames_state != 1 || pycc_fwd_original != NULL) {
         return;
+    }
+    if (pycc_frames_layout->version == 0x030F) {
+        pycc_fwd_vectorcall_at = 136;
+        pycc_fwd_version_at = 144;
+        pycc_fwd_version_cleared = 1;
     }
     /* Two functions over the frames probe's template, one given defaults. */
     ns = PyDict_New();
@@ -615,7 +626,7 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
             PyCFunction_GetFunction(target);
     }
     *(int *)((char *)code + PYCC_CODE_FLAGS) |= PYCC_CO_SIGNATURE;
-    *(uint32_t *)((char *)func + PYCC_FUNC_VERSION) = 0;
+    *(uint32_t *)((char *)func + PYCC_FUNC_VERSION) = pycc_fwd_version_cleared;
     *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) = m->fwd_trampolines[m->fwd_used];
     m->fwd_used++;
 done:

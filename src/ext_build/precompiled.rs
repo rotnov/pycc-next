@@ -86,19 +86,29 @@ const COMPILE_SCRIPT: &str = include_str!("precompile.py");
 /// The `fix(code, orders)` an import runs on a chunk holding `frozenset`
 /// constants: rebuilds each from its elements in source order
 /// (`COMPILE_SCRIPT`'s `orders`, met in the same depth-first walk of the
-/// constants) as CPython 3.13's compiler builds one -- a frozenset of the
-/// display's elements, rebuilt once more from its own iteration when the
-/// code's constants are merged -- so it iterates as a fresh compile's does;
-/// any mismatch raises, and the chunk is compiled instead. Compiled with the
-/// chunks, its code object is the table's last entry.
+/// constants) as the running CPython's compiler builds one -- a frozenset
+/// of the display's elements, which CPython 3.13 rebuilt once more from its
+/// own iteration when the code's constants are merged. 3.14 stopped, but
+/// still rebuilds one when interning its `str` elements (`code.replace`'s
+/// `intern_constants`) swaps an element for an equal string interned
+/// before, so the elements are interned first: a marshalled string is not,
+/// while the chunk's other constants are -- so it iterates as a fresh
+/// compile's does; any mismatch raises, and the
+/// chunk is compiled instead. Compiled with the chunks, its code object is
+/// the table's last entry.
 const ORDERS_FIX: &str = "def fix(co, orders):
+    import sys
+    twice = sys.version_info < (3, 14)
     it = iter(orders)
     def walk(c):
         consts = list(c.co_consts)
         changed = False
         for i, k in enumerate(consts):
             if type(k) is frozenset and len(k) > 1:
-                s = frozenset(tuple(frozenset(next(it))))
+                if twice:
+                    s = frozenset(tuple(frozenset(next(it))))
+                else:
+                    s = frozenset(sys.intern(e) if type(e) is str else e for e in next(it))
                 if s != k:
                     raise ValueError('pycc: a frozenset constant does not match')
                 consts[i] = s
@@ -455,8 +465,9 @@ mod tests {
             return;
         };
         assert_eq!(compiled.present, vec![true, true]);
-        // Both chunks are a bare `def`: on 3.13 tabled as the function's
-        // code (`((spec,),)`), elsewhere as the chunk's `(code, orders)`.
+        // Both chunks are a bare `def`: on 3.13 and 3.15 tabled as the
+        // function's code (`((spec,),)`), elsewhere as the chunk's `(code,
+        // orders)`.
         let check = "import marshal,sys,types\n\
             t=marshal.loads(sys.stdin.buffer.read())\n\
             def run(e,name):\n\
@@ -487,13 +498,15 @@ mod tests {
         );
     }
 
-    /// Whether the test interpreter is CPython 3.13, whose bytecode
-    /// `precompile.py`'s `defs` reads.
-    fn python_is_3_13() -> bool {
-        std::process::Command::new(super::super::DEFAULT_PYTHON)
-            .args(["-I", "-c", "import sys; print(sys.version_info[:2] == (3, 13))"])
+    /// The test interpreter's `major.minor` when it is CPython 3.13 or
+    /// 3.15, whose bytecode `precompile.py`'s `defs` reads.
+    fn python_reading_defs() -> Option<(u32, u32)> {
+        let out = std::process::Command::new(super::super::DEFAULT_PYTHON)
+            .args(["-I", "-c", "import sys; print('%d.%d' % sys.version_info[:2])"])
             .output()
-            .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "True")
+            .ok()?;
+        let version = crate::ext_build::parse_version(String::from_utf8_lossy(&out.stdout).trim())?;
+        matches!(version, (3, 13) | (3, 15)).then_some(version)
     }
 
     #[test]
@@ -504,15 +517,17 @@ mod tests {
             chunk("def f(a=X): pass\n"),
             chunk("def f():\n    return 1 in {3, 1, 2}\n"),
             chunk("x = 1\ndef f(): pass\n"),
+            chunk("def h(x: int, *, y: 'Y' = '') -> str:\n    return ''\n"),
         ];
         let Some(compiled) = precompile(OsStr::new(super::super::DEFAULT_PYTHON), &chunks) else {
             return;
         };
-        assert_eq!(compiled.present, vec![true; 5]);
-        if !python_is_3_13() {
-            // The bytecode `defs` reads is 3.13's: every entry is a code.
+        assert_eq!(compiled.present, vec![true; 6]);
+        let Some(version) = python_reading_defs() else {
+            // The bytecode `defs` reads is 3.13's or 3.15's: elsewhere every
+            // entry is a code.
             return;
-        }
+        };
         // A `def` entry is `((spec, ...),)`: each function's code, defaults,
         // keyword defaults, annotations, name, forwarded names and set
         // orders; anything else `(code, orders)`.
@@ -521,7 +536,16 @@ mod tests {
             print([len(e) for e in t[:-1]])\n\
             (f,g),=t[0]\n\
             print(f[0].co_name, f[1:6], g[0].co_name, g[1:6])\n\
-            print(t[3][0][0][6], tuple(len(s) for s in t[0][0]))\n";
+            print(t[3][0][0][6], tuple(len(s) for s in t[0][0]))\n\
+            e=t[5]\n\
+            if len(e)==1:\n\
+            \x20 h=e[0][0]\n\
+            \x20 import types\n\
+            \x20 ns={'__name__':'m','Y':0}\n\
+            \x20 fn=types.FunctionType(h[0],ns,None,h[1],None,h[2])\n\
+            \x20 fn.__annotate__=types.FunctionType(h[3],ns)\n\
+            \x20 print(fn.__kwdefaults__, fn.__annotations__, fn.__annotate__.__qualname__)\n\
+            else: print(len(e))\n";
         let mut child = std::process::Command::new(super::super::DEFAULT_PYTHON)
             .args(["-I", "-c", check])
             .stdin(Stdio::piped())
@@ -535,11 +559,24 @@ mod tests {
             .write_all(&compiled.table)
             .expect("the table is written");
         let out = child.wait_with_output().expect("it finishes");
+        // An annotated `def` is a `def` entry on 3.15, its annotations the
+        // `__annotate__` code (evaluated lazily); 3.13's evaluate `int`
+        // and `str` when the statement runs, so its chunk is a code.
+        let (lengths, annotated) = if version == (3, 15) {
+            (
+                "[1, 2, 2, 1, 2, 1]",
+                "{'y': ''} {'x': <class 'int'>, 'y': 'Y', 'return': <class 'str'>} h.__annotate__\n",
+            )
+        } else {
+            ("[1, 2, 2, 1, 2, 2]", "2\n")
+        };
         assert_eq!(
             String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"),
-            "[1, 2, 2, 1, 2]\n\
-             f (((1, 2),), {'c': 3}, None, 'f', None) g (None, None, None, 'g', ('g',))\n\
-             ((3, 1, 2),) (7, 7)\n"
+            format!(
+                "{lengths}\n\
+                 f (((1, 2),), {{'c': 3}}, None, 'f', None) g (None, None, None, 'g', ('g',))\n\
+                 ((3, 1, 2),) (7, 7)\n{annotated}"
+            )
         );
     }
 

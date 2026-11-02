@@ -283,12 +283,6 @@ pub unsafe extern "C" fn pycc_rt_list_count(list: *mut PyListObj, word: i64) -> 
     tag_smallint(n as i64)
 }
 
-fn word_repr_string(kind: i64, word: i64) -> String {
-    let mut out = String::new();
-    word_repr(kind, word, &mut out);
-    out
-}
-
 /// `xs.index(x)`.
 ///
 /// # Safety
@@ -306,11 +300,11 @@ pub unsafe extern "C" fn pycc_rt_list_index(list: *mut PyListObj, word: i64) -> 
             raise_builtin(
                 EXCEPTION_TYPE_VALUE_ERROR,
                 "ValueError",
-                &format!(
-                    "{} is not in {}",
-                    word_repr_string(list.kind, word),
-                    if list.flavor == super::deque::DEQUE { "deque" } else { "list" }
-                ),
+                if list.flavor == super::deque::DEQUE {
+                    "deque.index(x): x not in deque"
+                } else {
+                    "list.index(x): x not in list"
+                },
             );
             tag_smallint(0)
         }
@@ -337,7 +331,7 @@ pub unsafe extern "C" fn pycc_rt_list_remove(list: *mut PyListObj, word: i64) {
         None if list.flavor == super::deque::DEQUE => raise_builtin(
             EXCEPTION_TYPE_VALUE_ERROR,
             "ValueError",
-            &format!("{} is not in deque", word_repr_string(kind, word)),
+            "deque.remove(x): x not in deque",
         ),
         None => raise_builtin(
             EXCEPTION_TYPE_VALUE_ERROR,
@@ -506,7 +500,7 @@ pub unsafe extern "C" fn pycc_rt_list_unpack(list: *mut PyListObj, arity: i64) -
     let expected = inline_int_value(arity).unwrap_or(0);
     if len != expected {
         let message = if len > expected {
-            format!("too many values to unpack (expected {expected})")
+            format!("too many values to unpack (expected {expected}, got {len})")
         } else {
             format!("not enough values to unpack (expected {expected}, got {len})")
         };

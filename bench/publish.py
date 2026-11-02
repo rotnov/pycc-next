@@ -119,7 +119,7 @@ def markdown(doc: dict) -> str:
         out += [f"## Programs (`bench/run.py`, {runs} runs, process start included)", "",
                 "Cython in its default mode (the annotations honored); with annotations "
                 "ignored below.", "",
-                "| program | CPython 3.13 | pycc-next | Cython | mypyc | Rust (`-O`) | "
+                "| program | CPython 3.15 | pycc-next | Cython | mypyc | Rust (`-O`) | "
                 "vs CPython | vs Cython | vs mypyc | vs Rust |",
                 "|---|---|---|---|---|---|---|---|---|---|"]
         notes, modes = [], []

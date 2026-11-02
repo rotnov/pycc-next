@@ -417,10 +417,11 @@ static int pycc_ext_exec_module(PyObject *module)
     }
     pycc_frames_probe();
     /* Compiled reads of rebindable globals check this dict (global_sync.c),
-     * on the CPython whose dict layout the probe verified; a compiled
-     * frame's globals are it too. */
+     * on the CPython whose layouts the probe verified; a compiled frame's
+     * globals are it too. */
     if (pycc_frames_state == 1) {
         pycc_ext_ns_dict = PyModule_GetDict(module);
+        pycc_ext_ns_version = pycc_ext_ns_version_of(pycc_ext_ns_dict, &pycc_ext_ns_counter);
         pycc_ext_fn_info_bind(pycc_ext_ns_dict, (PyccFnInfo *const *)pycc_fn_info_table,
                               pycc_fn_info_count);
     }

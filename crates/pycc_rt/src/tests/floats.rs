@@ -63,7 +63,7 @@ fn float_divmod_rejects_a_zero_divisor() {
     // D-173: float floor division/modulo by zero now sets the
     // exception flag instead of panicking.
     pycc_rt_exception_clear();
-    let (q, r) = float_divmod(1.0, 0.0, "float modulo by zero");
+    let (q, r) = float_divmod(1.0, 0.0);
     assert_eq!(pycc_rt_exception_active(), 1);
     assert_eq!(q, 0.0);
     assert_eq!(r, 0.0);
@@ -112,8 +112,8 @@ fn pycc_rt_float_pow_accepts_a_tiny_finite_result() {
 
 #[test]
 fn float_pow_raises_zero_division_error_for_zero_to_a_negative_power() {
-    // Verified against `python3.13`: `0.0 ** -1.0` raises
-    // `ZeroDivisionError: 0.0 cannot be raised to a negative power`,
+    // Verified against `python3.15`: `0.0 ** -1.0` raises
+    // `ZeroDivisionError: zero to a negative power`,
     // while `f64::powf` alone silently returns `inf`. Part A of #1038
     // (#1063) turned the former `panic!` into this D-173 raise. Calls the
     // private `float_pow` directly, not the public `extern "C"` wrapper,
@@ -125,20 +125,20 @@ fn float_pow_raises_zero_division_error_for_zero_to_a_negative_power() {
     assert_eq!(tag, EXCEPTION_TYPE_ZERO_DIV_ERROR);
     // CPython's own sentence, verbatim -- the `pycc_rt: ` prefix the
     // panic carried is gone, since a raised message is user-visible.
-    assert_eq!(message, "0.0 cannot be raised to a negative power");
+    assert_eq!(message, "zero to a negative power");
     assert_eq!(result, 0.0); // sentinel value
     pycc_rt_exception_clear();
 }
 
 #[test]
 fn float_pow_raises_zero_division_error_for_negative_zero_to_a_negative_power() {
-    // `-0.0 == 0.0` under IEEE-754, and `python3.13` raises the same
+    // `-0.0 == 0.0` under IEEE-754, and `python3.15` raises the same
     // `ZeroDivisionError` for `(-0.0) ** -1.0` as for `0.0 ** -1.0`.
     pycc_rt_exception_clear();
     let result = float_pow(-0.0, -1.0);
     let (tag, message) = pending_tag_and_message();
     assert_eq!(tag, EXCEPTION_TYPE_ZERO_DIV_ERROR);
-    assert_eq!(message, "0.0 cannot be raised to a negative power");
+    assert_eq!(message, "zero to a negative power");
     assert_eq!(result, 0.0);
     pycc_rt_exception_clear();
 }

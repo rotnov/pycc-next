@@ -441,9 +441,8 @@ pub(crate) fn emit_set_literal_expr_2<'ctx>(
         containers::build_set_add(builder, rt, set_ptr, word);
     }
     // CPython folds a display of three or more constants into a frozenset
-    // constant (built twice: in source order, then again from its own
-    // order when the compiler merges constants) and copies it into a new
-    // set, so the set's iteration order is that of those three steps.
+    // constant (built in source order) and merges it into a new set, so
+    // the set's iteration order is that of those two steps.
     if elements.len() >= 3 && elements.iter().all(is_folded_constant) {
         builder
             .build_call(rt.containers.set_constant_display, &[set_ptr.into()], "")

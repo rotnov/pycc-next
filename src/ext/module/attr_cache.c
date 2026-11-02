@@ -1,6 +1,6 @@
 /*
  * Attribute caches for `obj.name` and `obj.name(args)` on CPython objects
- * (v0.8 accept 1): the guards CPython 3.13's own specialized `LOAD_ATTR`
+ * (v0.8 accept 1): the guards CPython's own specialized `LOAD_ATTR`
  * forms check (`_INSTANCE_VALUE`, `_SLOT`, `_PROPERTY`, `_METHOD_*`), so a
  * hit skips `PyObject_GetAttr`'s type lookup and descriptor checks, and a
  * method call `PyObject_VectorcallMethod`'s. An entry is kept per attribute
@@ -51,9 +51,10 @@
  * the entry from the class. The layouts read here -- `tp_version_tag`,
  * `tp_flags`, `tp_basicsize`, `tp_getattro`, `tp_dict`, `tp_dictoffset`,
  * `tp_mro`, `ht_cached_keys`, the keys object, the inline values and a
- * member descriptor's `PyMemberDef` -- are CPython 3.13's for a 64-bit GIL
- * build; `pycc_ext_ic_probe` checks them against classes made at first use
- * and leaves every cache off on any other version or any mismatch.
+ * member descriptor's `PyMemberDef` -- are CPython 3.13's and 3.15's for a
+ * 64-bit GIL build (the same but for `ht_cached_keys`);
+ * `pycc_ext_ic_probe` checks them against classes made at first use and
+ * leaves every cache off on any other version or any mismatch.
  * `PYCC_NO_ATTR_CACHE=1` in the environment turns them off too.
  */
 
@@ -64,7 +65,10 @@
 #define PYCC_IC_TP_DICTOFFSET 288
 #define PYCC_IC_TP_MRO 344
 #define PYCC_IC_TP_VERSION_TAG 384
-#define PYCC_IC_HT_CACHED_KEYS 880
+/* `PyHeapTypeObject.ht_cached_keys`: 880 in 3.13, 888 in 3.15 (set by the
+ * probe); every other field read here is at the same offset in both. */
+static size_t pycc_ext_ic_ht_cached_keys = 880;
+#define PYCC_IC_HT_CACHED_KEYS pycc_ext_ic_ht_cached_keys
 #define PYCC_IC_DK_LOG2_INDEX_BYTES 9
 #define PYCC_IC_DK_KIND 10
 #define PYCC_IC_DK_NENTRIES 24
@@ -96,7 +100,7 @@
 static int pycc_ext_ic_state = 0;
 /* The `tp_getattro` CPython installs for a class defining `__getattr__`. */
 static getattrofunc pycc_ext_ic_getattr_hook = NULL;
-/* Whether `str`'s 3.13 layout (`PyASCIIObject`) was confirmed, for
+/* Whether `str`'s 3.13/3.15 layout (`PyASCIIObject`) was confirmed, for
  * `pycc_ext_obj_eq_text` (`object_text.c`). */
 static int pycc_ext_ic_str_layout = 0;
 /* Cache hits (`pycc_ext_attr_cache_hits`). */
@@ -179,8 +183,8 @@ static size_t pycc_ext_ic_slot_for_store(const char *spelling, unsigned int tag)
     return set + way;
 }
 
-/* The inline values of `obj`, whose class keeps them (3.13: right after the
- * object header). */
+/* The inline values of `obj`, whose class keeps them (3.13, 3.15: right
+ * after the object header). */
 static char *pycc_ext_ic_values(PyObject *obj)
 {
     return (char *)obj + sizeof(PyObject);
@@ -365,7 +369,14 @@ static void pycc_ext_ic_probe(void)
     int ok = 0;
 
     pycc_ext_ic_state = -1;
-    if ((Py_Version >> 16) != 0x030D || sizeof(void *) != 8 || (off != NULL && off[0] == '1')) {
+    if (sizeof(void *) != 8 || (off != NULL && off[0] == '1')) {
+        return;
+    }
+    if ((Py_Version >> 16) == 0x030D) {
+        pycc_ext_ic_ht_cached_keys = 880;
+    } else if ((Py_Version >> 16) == 0x030F) {
+        pycc_ext_ic_ht_cached_keys = 888;
+    } else {
         return;
     }
     ns = PyDict_New();

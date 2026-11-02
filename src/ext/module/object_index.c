@@ -76,7 +76,9 @@ PyObject *pycc_ext_obj_getitem(PyObject *o, PyObject *k)
 /*
  * `__pycc_fallback_ns["name"]`: a module global that non-strict fallback
  * code binds, read by compiled code from the module's namespace dict. As
- * `pycc_ext_obj_getitem` (consuming the packed key), but a missing name is
+ * `pycc_ext_obj_getitem` (consuming the packed key), but a name the module
+ * does not bind is read from the builtins, a lazy import (3.15) is resolved
+ * (`pycc_ext_ns_resolve`), and one bound nowhere is
  * CPython's `NameError: name 'x' is not defined`, what reading the unbound
  * global raises, not the dict's `KeyError`.
  */
@@ -88,9 +90,19 @@ PyObject *pycc_ext_ns_getitem(PyObject *ns, PyObject *k)
         result = PyDict_CheckExact(ns) ? PyDict_GetItemWithError(ns, k) : PyObject_GetItem(ns, k);
         if (PyDict_CheckExact(ns)) {
             if (result != NULL) {
-                Py_INCREF(result);
+                result = pycc_ext_ns_resolve(ns, k, result);
             } else if (!PyErr_Occurred()) {
-                PyErr_Format(PyExc_NameError, "name '%U' is not defined", k);
+                /* Not bound in the module: a builtin, as `LOAD_GLOBAL`
+                 * reads it (`frozendict` on 3.15 where a module binds the
+                 * name only on older versions). */
+                PyObject *builtins = PyEval_GetBuiltins(); /* borrowed */
+
+                result = builtins == NULL ? NULL : PyDict_GetItemWithError(builtins, k);
+                if (result != NULL) {
+                    Py_INCREF(result);
+                } else if (!PyErr_Occurred()) {
+                    PyErr_Format(PyExc_NameError, "name '%U' is not defined", k);
+                }
             }
         }
     }

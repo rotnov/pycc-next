@@ -1,20 +1,20 @@
 # The other compilers `.github/workflows/bench.yml` times pycc-next against (bench/competitors.py):
 # Cython 3.3.0 and mypyc (part of mypy 2.3.1, the version bench/mypy_parity.py pins), plus
 # setuptools, which both drive to compile their generated C. Pinned by version and by the
-# sha256 of each wheel the workflow installs (PyPI's published digests): CPython 3.13 on
+# sha256 of each wheel the workflow installs (PyPI's published digests): CPython 3.15 on
 # x86_64 and aarch64 Linux. librt is mypyc's runtime library, imported by what it builds.
 cython==3.3.0 \
-    --hash=sha256:23942b0662642927a55676e4b26e6840fb166dd7d76436384685227e7e8619a4 \
-    --hash=sha256:bc2f2a6b65a991666cfd35a35bab0cd88ffba4df2f601edb6e76cc8116de24b9
+    --hash=sha256:b447f6906e0555f05dc4742ef1f99091b1e5d9aa9f16616e772fbf9ff6271616 \
+    --hash=sha256:4a36c34d1950845b8ac148653b07cdc62421a4b0d9abfcc849e69f1c4ff9919d
 mypy==2.3.1 \
-    --hash=sha256:1c80fbc405ed8020f5ff3802dc18cf060197bcdd3fbdd6a26ef2fd34dfdd5226 \
-    --hash=sha256:c8637731bb5eee3671eb2c3200827aa3564ed8a9309ecee4d1afe77e6d031bdb
+    --hash=sha256:47a8a7a0a7f6f6e63995c0ac36fa0c07b127413fdc81f0439b7f3dccafd33561 \
+    --hash=sha256:5159ae60f5dbc3a498af5ba8365505808ac8031bc63f9e00304ad545d40bdd9b
 ast-serialize==0.13.1 \
-    --hash=sha256:9f99786e0d62082a5b121b3437f3167562133711df22128de1e9886f57f0b226 \
-    --hash=sha256:77a6201b69ce42e919f2fd9a559138d5410b5d8afff7c3a6b1f500b0481ff7d8
+    --hash=sha256:121e1d08d58b75c15491cc3003609cbad71ac2b0016043c36d30a6b2032b6605 \
+    --hash=sha256:4e385b17d5bde892a6184003a9aff3518387908b73f8f5ea539313c07c8c0ede
 librt==0.16.0 \
-    --hash=sha256:17bac7f7a16b328fff77e440287693eb017abde913595b5827ebccbc21ecd8a6 \
-    --hash=sha256:7e510b7770bee609617a3374a96548eb114cae048023e3f049ee449e7ff2db32
+    --hash=sha256:e56aaf8c167548dc8e5d6f3bd0f48dcdd299a23c73be3f744aab79d99e9c7f5d \
+    --hash=sha256:909d8e3c1faee44cb762b1c519ff8613dcc5ceae5c99987a00917b5a31fd1d6a
 mypy-extensions==1.1.0 \
     --hash=sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505
 pathspec==1.1.1 \

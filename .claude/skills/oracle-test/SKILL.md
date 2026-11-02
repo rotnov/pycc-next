@@ -1,11 +1,11 @@
 ---
 name: oracle-test
-description: Use when adding or changing compiler behavior in pycc-next and you need an end-to-end test proving the compiled program matches CPython 3.13 output and exceptions (native build and --ext module).
+description: Use when adding or changing compiler behavior in pycc-next and you need an end-to-end test proving the compiled program matches CPython 3.15 output and exceptions (native build and --ext module).
 ---
 
 # Oracle test
 
-Correct = same stdout and same exception as `python3` (CPython 3.13).
+Correct = same stdout and same exception as `python3` (CPython 3.15).
 
 1. Write the program as a fixture: `tests/fixtures/<topic>.py`. Cover the success path,
    edge cases (empty, negative, boundaries, nesting) and at least one raised exception.

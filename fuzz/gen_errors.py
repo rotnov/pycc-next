@@ -48,7 +48,7 @@ def suggests(candidates: list[str], name: str) -> str | None:
     """CPython's "Did you mean" pick for `name` among `candidates`."""
     try:
         import _suggestions
-    except ImportError:  # not CPython 3.13: be conservative
+    except ImportError:  # not CPython 3.13+: be conservative
         return candidates[0]
     return _suggestions._generate_suggestions(candidates, name)
 

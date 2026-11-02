@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates crates/pycc_rt/src/unicode_tables.rs from CPython's own data.
 
-Two tables, taken from the running CPython (the oracle, 3.13; its
+Two tables, taken from the running CPython (the oracle, 3.15; its
 `unicodedata` version is recorded in the file):
 
 - the characters `str.isprintable()` rejects (categories Cc, Cf, Cs, Co,

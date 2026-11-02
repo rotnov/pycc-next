@@ -5,12 +5,13 @@
 //! `Py_XDECREF`). Under the shim's `Py_LIMITED_API 0x030D0000` those are
 //! calls into libpython, so every count was two calls. A `--release` build
 //! defines both in the generated module instead, as internal functions
-//! holding CPython 3.13's own inline forms for a 64-bit GIL build,
-//! the same ones the shim's `src/ext/module/bridge.c` uses (its comment says
-//! why the stable ABI fixes them):
+//! holding the inline forms CPython 3.13 to 3.15 share for a 64-bit GIL
+//! build, the same ones the shim's `src/ext/module/bridge.c` uses (its
+//! comment says why the stable ABI fixes them):
 //!
-//! * retain: `NULL` is skipped; the low 32 bits of `ob_refcnt` (offset 0)
-//!   are incremented unless that wraps them to zero (an immortal object);
+//! * retain: `NULL` and an object whose low 32 bits are negative (immortal:
+//!   3.13 keeps them all ones, 3.14 and 3.15 at `3 << 30`) are skipped; the
+//!   low 32 bits of `ob_refcnt` (offset 0) are incremented otherwise;
 //! * release: `NULL` and an object whose low 32 bits are negative (immortal)
 //!   are skipped; `ob_refcnt` is decremented and `_Py_Dealloc` (a stable-ABI
 //!   function) called at zero.
@@ -94,7 +95,7 @@ fn define_retain(module: &Module<'_>, function: FunctionValue<'_>) {
         .build_int_add(low, i32_type.const_int(1, false), "next")
         .expect("add");
     let immortal = builder
-        .build_int_compare(IntPredicate::EQ, next, i32_type.const_zero(), "immortal")
+        .build_int_compare(IntPredicate::SLT, low, i32_type.const_zero(), "immortal")
         .expect("compare");
     builder.build_conditional_branch(immortal, done, store).expect("branch");
     builder.position_at_end(store);

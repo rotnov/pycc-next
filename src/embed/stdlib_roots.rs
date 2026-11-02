@@ -8,7 +8,7 @@
 //!
 //! The list is static rather than probed because the frontend gate is pure:
 //! `pycc check` and the frontend never start an interpreter, so the set
-//! covers every supported CPython (3.13 and 3.14); a root the bundled
+//! covers every supported CPython (3.13, 3.14 and 3.15); a root the bundled
 //! interpreter lacks fails to import at run time, as in CPython. The
 //! `#[ignore]`d integration test `tests/issue_1223_embedded_executable.rs`
 //! checks the bundled interpreter's `sys.stdlib_module_names` is covered.
@@ -21,8 +21,9 @@
 pub(crate) const EXCLUDED_STDLIB_ROOTS: &[&str] =
     &["_tkinter", "idlelib", "tkinter", "turtle", "turtledemo"];
 
-/// The union of CPython 3.13's and 3.14's `sys.stdlib_module_names` minus
-/// [`EXCLUDED_STDLIB_ROOTS`] (3.13 adds only `_compression`),
+/// The union of CPython 3.13's, 3.14's and 3.15's `sys.stdlib_module_names`
+/// minus [`EXCLUDED_STDLIB_ROOTS`] (3.13 adds only `_compression`; 3.15 adds
+/// `_math_integer` and `profiling` and drops the `sre_*` shims),
 /// sorted bytewise so [`is_embeddable_stdlib_root`] can binary-search it.
 pub(crate) const EMBEDDABLE_STDLIB_ROOTS: &[&str] = &[
     "__future__",
@@ -75,6 +76,7 @@ pub(crate) const EMBEDDABLE_STDLIB_ROOTS: &[&str] = &[
     "_lsprof",
     "_lzma",
     "_markupbase",
+    "_math_integer",
     "_md5",
     "_multibytecodec",
     "_multiprocessing",
@@ -237,6 +239,7 @@ pub(crate) const EMBEDDABLE_STDLIB_ROOTS: &[&str] = &[
     "posixpath",
     "pprint",
     "profile",
+    "profiling",
     "pstats",
     "pty",
     "pwd",
@@ -345,7 +348,7 @@ mod tests {
         );
         assert_eq!(
             EMBEDDABLE_STDLIB_ROOTS.len(),
-            298 - EXCLUDED_STDLIB_ROOTS.len()
+            300 - EXCLUDED_STDLIB_ROOTS.len()
         );
     }
 

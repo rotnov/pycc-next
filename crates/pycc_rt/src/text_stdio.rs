@@ -1,7 +1,7 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 //! CPython's text-mode standard streams on Windows, for a native program.
 //!
-//! CPython 3.13 on Windows wraps fds 0-2 in text-mode `TextIOWrapper`s
+//! CPython 3.15 on Windows wraps fds 0-2 in text-mode `TextIOWrapper`s
 //! (`Python/pylifecycle.c` `create_stdio`, `newline=None`): a write
 //! translates `\n` to `\r\n` and then encodes the translated text, and a
 //! read translates `\r\n` and `\r` to `\n`. The encoding
@@ -10,7 +10,8 @@
 //! - a stream attached to a console is `_WindowsConsoleIO`, always UTF-8
 //!   (written with `WriteConsoleW`), unless `PYTHONLEGACYWINDOWSSTDIO` is set;
 //! - otherwise the encoding part of `PYTHONIOENCODING` (`encoding[:errors]`),
-//!   else UTF-8 in UTF-8 mode (`PYTHONUTF8=1`), else with
+//!   else UTF-8 in UTF-8 mode (the default since 3.15, PEP 686; off only
+//!   with `PYTHONUTF8=0`), else with
 //!   `PYTHONLEGACYWINDOWSSTDIO` the console's output code page, else the
 //!   ANSI code page (`GetACP()`, `cp1252` on an English system);
 //! - errors: those of `PYTHONIOENCODING` (`strict` when it names only an
@@ -336,14 +337,15 @@ pub(crate) enum Stream {
     Stderr,
 }
 
-/// CPython 3.13's codec for `stream` (`config_init_stdio_encoding`,
+/// CPython 3.15's codec for `stream` (`config_init_stdio_encoding`,
 /// `create_stdio`); `is_console` is whether the stream's handle is a
 /// console.
 pub(crate) fn stream_codec(env: &StdioEnv, stream: Stream, is_console: bool) -> StreamCodec {
     fn nonempty(v: &Option<String>) -> Option<&str> {
         v.as_deref().filter(|s| !s.is_empty())
     }
-    let utf8_mode = nonempty(&env.pythonutf8) == Some("1");
+    // PEP 686: UTF-8 mode unless `PYTHONUTF8=0`.
+    let utf8_mode = nonempty(&env.pythonutf8) != Some("0");
     let (mut encoding, mut errors) = (None, None);
     if let Some(opt) = nonempty(&env.pythonioencoding) {
         let (enc, errs) = match opt.split_once(':') {
@@ -638,9 +640,23 @@ mod tests {
     }
 
     #[test]
-    fn stream_rules_follow_cpython_3_13() {
+    fn stream_rules_follow_cpython_3_15() {
+        // UTF-8 mode is the default (PEP 686).
+        assert_eq!(
+            stream_codec(
+                &StdioEnv {
+                    ansi_code_page: 1252,
+                    ..StdioEnv::default()
+                },
+                Stream::Stdout,
+                false
+            )
+            .codec,
+            Codec::Utf8
+        );
         let env = StdioEnv {
             ansi_code_page: 1252,
+            pythonutf8: Some("0".into()),
             ..StdioEnv::default()
         };
         let out = stream_codec(&env, Stream::Stdout, false);
@@ -672,6 +688,7 @@ mod tests {
         let io = StdioEnv {
             pythonioencoding: Some(":replace".into()),
             ansi_code_page: 1252,
+            pythonutf8: Some("0".into()),
             ..StdioEnv::default()
         };
         let out = stream_codec(&io, Stream::Stdout, false);

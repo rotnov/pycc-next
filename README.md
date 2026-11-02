@@ -37,7 +37,7 @@ Caught **before** it runs. Not in CI logs. Not in production. At compile time.
 - 🐍 **Non-strict when you need it.** `--non-strict` compiles untyped code too: what can't be proven typed runs through CPython, with CPython's exact semantics.
 - ⚡ **Native representations.** `int` becomes `i64`, `float` becomes `f64`, classes become structs. No boxing in hot loops.
 - 🤝 **Plays with the ecosystem.** Target: a CPython extension module you `import`, calling numpy and torch as usual.
-- 🧪 **CPython is the judge.** Correct means: same output, same exceptions as CPython 3.13.
+- 🧪 **CPython is the judge.** Correct means: same output, same exceptions as CPython 3.15.
 
 ## Status: 0.9, honestly 🧭
 
@@ -498,7 +498,7 @@ and setuptools): that is the test harness, not a change to the packages.
   builtin from compiled code rather than a fallback, as is a builtin used as a value
   (`defaultdict(int)`), `exit()`, and a `str`/`int`/`float` method pycc does not
   compile for its arguments (`"\n".join(objects)`). Exceptions cross the
-  boundary both ways with CPython's type and message. On CPython 3.13 a compiled
+  boundary both ways with CPython's type and message. On CPython 3.13 and 3.15 a compiled
   function runs in a real CPython frame: `sys._getframe`, `inspect`, `warnings`'
   `stacklevel` and tracebacks see it as they see a Python function (name, file, line,
   globals, caller), and a module global rebound from Python (`mod.VERSION = ...`,
@@ -515,6 +515,16 @@ tests -- uses the interpreter named by `PYCC_PYTHON`, default `python3`
 static one with `--static-libpython`). The extension shim targets the stable ABI
 (`Py_LIMITED_API` 3.13). An embedded build copies that interpreter's standard
 library into `OUT.pycc/`.
+
+CPython 3.15 is the oracle: a native program prints what 3.15 prints (its error
+messages, its Unicode 17 tables, its order for a set display of constants), and CI runs
+every test against 3.15.2. Because the shim targets the 3.13 stable ABI, one `--ext`
+module or `cp313-abi3` wheel still imports on 3.13, 3.14 and 3.15, and a message the
+shim raises in a module follows the interpreter hosting it. The fast paths that read
+CPython's internal layouts -- compiled functions in real CPython frames, the attribute
+and module-global caches, `def`s made directly from precompiled bytecode -- know 3.13's
+and 3.15's layouts; on 3.14 a module runs without them (same results, slower; see
+`docs/DEVIATIONS.md`). CI no longer runs the suite against 3.13.
 
 The shim is compiled in two parts: a small one per module, and its fixed half, which is
 the same for every module and is compiled once and kept in a build cache, keyed by its
@@ -557,7 +567,7 @@ is linked in. What you need on the machine:
   Command Line Tools (`xcode-select --install`). Without it `pycc build` stops
   with "could not run the linker driver" and says what to install.
 - **CPython 3.13+ with its headers and shared libpython** (e.g. `apt install
-  python3-dev`; on macOS the python.org installer, Homebrew `python@3.13`, `uv`
+  python3-dev`; on macOS the python.org installer, Homebrew `python@3.15`, `uv`
   or `pyenv`) for `--ext` modules and for programs that need CPython at run time
   (`--non-strict` code, standard-library imports). Named by `PYCC_PYTHON`,
   default `python3`. A plain typed program needs no Python at all.
@@ -579,8 +589,9 @@ needs Windows 10 or newer and, at build time:
   program that embeds CPython is an `OUT.exe` stub with its interpreter in `OUT.pycc\`
   (`docs/DEVIATIONS.md` lists the Windows gaps). A native program writes stdout and
   stderr as CPython does there: `\r\n` line endings, UTF-8 on a console, otherwise the
-  encoding CPython picks (`PYTHONIOENCODING`, UTF-8 mode with `PYTHONUTF8=1`, else the
-  ANSI code page, raising `UnicodeEncodeError` for a character it cannot encode).
+  encoding CPython 3.15 picks (`PYTHONIOENCODING`, else UTF-8 mode, the default; with
+  `PYTHONUTF8=0` the ANSI code page, raising `UnicodeEncodeError` for a character it
+  cannot encode).
 
 On macOS a browser download is quarantined by Gatekeeper; clear the flag once
 after unpacking (`xattr -dr com.apple.quarantine pycc-vX.Y.Z-aarch64-macos`) or
@@ -610,7 +621,7 @@ naming MSVC's `link.exe` (Git Bash's own `link` shadows it on `PATH`); then
 
 ### Testing against CPython
 
-CPython 3.13 is the oracle everywhere: `cargo test --release --workspace --
+CPython 3.15 is the oracle everywhere: `cargo test --release --workspace --
 --include-ignored` builds every fixture natively and as an extension module and compares
 it with `python3`; `python3 bench/corpus.py --flags=--non-strict --require-correct` does
 the same for 200 real-world programs.

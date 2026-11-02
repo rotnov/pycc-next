@@ -114,7 +114,7 @@ def run_mypy(mypy: list[str], sources: dict[str, pathlib.Path], tmp: pathlib.Pat
     src.mkdir()
     for pid, path in sources.items():
         (src / f"p{pid}.py").write_bytes(path.read_bytes())
-    r = subprocess.run([*mypy, "--strict", "--python-version", "3.13", "--no-incremental",
+    r = subprocess.run([*mypy, "--strict", "--python-version", "3.15", "--no-incremental",
                         "--cache-dir", str(tmp / "cache"), "--no-error-summary", "--show-error-codes",
                         *sorted(str(p) for p in src.iterdir())],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=tmp)

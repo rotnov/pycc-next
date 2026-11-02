@@ -45,9 +45,12 @@ static PyccExtModule pycc_ext_mod = {
 };
 
 /* The module's `__dict__` its compiled functions read rebindable globals
- * from (`global_sync.c`), set before the body runs on CPython 3.13. Read by
- * LLVM-generated code directly. */
-PYCC_ENTRY PyObject *pycc_ext_ns_dict = NULL;
+ * from (`global_sync.c`), set before the body runs on CPython 3.13 and
+ * 3.15, and where its version is read (`pycc_ext_ns_version_of`), which
+ * LLVM-generated code reads directly; the counter that is on 3.15. */
+static PyObject *pycc_ext_ns_dict = NULL;
+PYCC_ENTRY const uint64_t *pycc_ext_ns_version = NULL;
+static uint64_t pycc_ext_ns_counter = 0;
 
 static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize_t index,
                                     const char *class_name, void **out)
@@ -158,5 +161,5 @@ PYCC_ENTRY PyObject *pycc_ext_obj_import_from(const char *module_name, const cha
 PYCC_ENTRY void pycc_ext_global_sync(const char *name, void *slot, int kind,
                                      PyccGlobalCache *cache, char *initialized)
 {
-    pycc_ext_global_sync_in(pycc_ext_ns_dict, name, slot, kind, cache, initialized);
+    pycc_ext_global_sync_in(pycc_ext_ns_dict, pycc_ext_ns_version, name, slot, kind, cache, initialized);
 }

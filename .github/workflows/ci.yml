@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.13" }
+        with: { python-version: "3.15" }
       # numpy for the hosted numpy tests and benchmarks, pinned by version and
       # wheel hash.
       - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
@@ -163,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.13" }
+        with: { python-version: "3.15" }
       # numpy for the hosted numpy tests and benchmarks, pinned by version and
       # wheel hash.
       - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
@@ -218,14 +218,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.13" }
+        with: { python-version: "3.15" }
       # The tests and scripts run the oracle as `python3`; the Windows
       # install may only provide python.exe.
-      - name: CPython 3.13 as python3
+      - name: CPython 3.15 as python3
         run: |
           py_dir=$(cygpath -u "$pythonLocation")
           [ -e "$py_dir/python3.exe" ] || cp "$py_dir/python.exe" "$py_dir/python3.exe"
-          python3 -c "import sys; assert sys.version_info[:2] == (3, 13), sys.version"
+          python3 -c "import sys; assert sys.version_info[:2] == (3, 15), sys.version"
           python3 -c "import os, sys; p = os.path.join(sys.base_prefix, 'libs', 'python3.lib'); sys.exit(0 if os.path.isfile(p) else 'missing ' + p)"
       - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
       # The MSVC developer environment (what vcvarsall.bat sets: LIB, INCLUDE,

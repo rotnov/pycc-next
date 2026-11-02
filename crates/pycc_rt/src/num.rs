@@ -237,7 +237,7 @@ pub extern "C" fn pycc_rt_num_index(word: i64, kind: i64) -> i64 {
                 5 => "list indices must be integers or slices, not float",
                 6 => "string indices must be integers, not 'float'",
                 7 => "tuple indices must be integers or slices, not float",
-                8 => "slice indices must be integers or None or have an __index__ method",
+                8 => "slice indices must be integers or have an __index__ method",
                 _ => "'float' object cannot be interpreted as an integer",
             };
             raise_builtin(EXCEPTION_TYPE_TYPE_ERROR, "TypeError", message);

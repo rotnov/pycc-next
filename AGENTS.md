@@ -4,10 +4,10 @@ Compile typed Python to native code at Rust-like speed; type mismatches are comp
 Primary artifact: CPython extension module (`pycc build m.py -o m --ext`). `strict` mode by
 default; `--non-strict` falls back to `PyObject*` (CPython C API) for unprovable code.
 
-- Oracle: CPython 3.13 — same stdout and exceptions. Known gaps: `docs/DEVIATIONS.md`.
+- Oracle: CPython 3.15 — same stdout and exceptions. Known gaps: `docs/DEVIATIONS.md`.
 - Build: `export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 && cargo build --release`.
 - Test before push: `cargo test --release --workspace -- --include-ignored` (CI runs exactly
-  this with python3 = CPython 3.13) and
+  this with python3 = CPython 3.15) and
   `cargo clippy --release --workspace --all-targets -- -D warnings`. Read-only/unreadable permission
   tests fail only when running as root; everything else must pass.
 - Design wrong -> rewrite the module; design right but incomplete -> extend. Split files

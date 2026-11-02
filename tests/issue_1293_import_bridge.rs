@@ -495,7 +495,18 @@ fn an_embedded_uncaught_failed_import_keeps_the_embed_spec_text() {
     assert_eq!(embedded.status.code(), Some(1), "{}", stderr_of(&embedded));
     assert_eq!(stdout_of(&embedded), "a\n");
     assert_eq!(stderr_of(&embedded), stderr_of(&cpython));
-    assert!(stderr_of(&embedded).ends_with("ModuleNotFoundError: No module named 'msvcrt'\n"));
+    // CPython 3.15 words the last line for a Windows-only module
+    // (`Unsupported platform for Windows-only standard library module
+    // 'msvcrt'`); 3.13 says `No module named 'msvcrt'`.
+    let last = stderr_of(&embedded)
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        last.starts_with("ModuleNotFoundError: ") && last.contains("'msvcrt'"),
+        "{last}"
+    );
     assert_eq!(cpython.status.code(), Some(1));
     assert_eq!(stdout_of(&cpython), stdout_of(&embedded));
     assert_eq!(

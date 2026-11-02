@@ -71,9 +71,11 @@ Usage: python3 bench/package_check.py [PACKAGE ...] [--pycc PATH] [--cache DIR]
            runner, so it gates the code the compiler generates for the hot
            path; it cannot see what only changes speed (code placement).
            The bounds are for CI's Linux x86_64 runner and its CPython
-           (actions/setup-python 3.13), which itself executes more
+           (actions/setup-python; set with 3.13, which itself executes more
            instructions than Ubuntu's own python3.13: the counts there are
-           1-10% lower (for tomli, half of whose `loads()` is CPython's).
+           1-10% lower, for tomli, half of whose `loads()` is CPython's).
+           With CPython 3.15.2 the counts measured off CI are within 0.2% of
+           3.13's or lower (pystache 0.36M against 0.47M).
   --max-build-seconds S
            fail a package whose modules take more than S seconds to build in
            all (v0.5 accept 4: 10 on the CI Linux runner). The modules build
@@ -388,8 +390,11 @@ for _ in range(int(sys.argv[2])):
             ),
             import_name="tomli",
             modules=("__init__.py", "_parser.py", "_re.py", "_types.py"),
+            # test_misc's lazy-import test (CPython 3.15) runs `import tomli`
+            # in a child interpreter, which finds the tree by PYTHONPATH.
             tests="""
 import os
+os.environ["PYTHONPATH"] = sys.argv[1]
 r = unittest.main(module=None, exit=False, verbosity=1, argv=[
     "package_check", "discover", "-s", os.path.join(sys.argv[1], "tests"),
     "-t", sys.argv[1]]).result
