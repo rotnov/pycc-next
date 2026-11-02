@@ -1,23 +1,22 @@
 //! Module globals rebound from outside (v0.8 accept 3): a non-strict
 //! `--ext` module's compiled function reads a published global through the
-//! module's `__dict__` version tag, so a rebinding by other code
+//! module's `__dict__` version, so a rebinding by other code
 //! (`mod.VERSION = ...`, `mock.patch`) reaches it (`global_sync.c` in the
 //! shim owns the lookup).
 //!
-//! The fast path is three loads and a compare: the module dict (null
-//! outside CPython 3.13, where every read takes the slot as it is), its
-//! version tag, and the version this read last saw. Only a changed tag
-//! calls `pycc_ext_global_sync`, which updates the slot when the dict
-//! holds another object than last time.
+//! The fast path is three loads and a compare: where the module's dict
+//! version is read (`pycc_ext_ns_version`: CPython 3.13's tag in the dict,
+//! or the module's counter a dict watcher bumps on 3.15; null elsewhere,
+//! where every read takes the slot as it is), the version, and the version
+//! this read last saw. Only a changed version calls `pycc_ext_global_sync`,
+//! which updates the slot when the dict holds another object than last
+//! time.
 
 use crate::RtFns;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::values::PointerValue;
 use pycc_mir::Ty;
-
-/// `PyDictObject.ma_version_tag` in CPython 3.13 (`global_sync.c`).
-const DICT_VERSION_TAG: u64 = 24;
 
 /// The shim's slot kind for a global of type `ty`, or `None` for a type
 /// whose slot is not synced.
@@ -57,8 +56,8 @@ pub(crate) fn emit_sync<'ctx>(
     };
     let ptr = context.ptr_type(inkwell::AddressSpace::default());
     let i64_type = context.i64_type();
-    let dict_global = module.get_global("pycc_ext_ns_dict").unwrap_or_else(|| {
-        let global = module.add_global(ptr, None, "pycc_ext_ns_dict");
+    let version_global = module.get_global("pycc_ext_ns_version").unwrap_or_else(|| {
+        let global = module.add_global(ptr, None, "pycc_ext_ns_version");
         global.set_linkage(Linkage::External);
         global
     });
@@ -93,27 +92,18 @@ pub(crate) fn emit_sync<'ctx>(
     let check = context.append_basic_block(function, "gsync_check");
     let slow = context.append_basic_block(function, "gsync_slow");
     let done = context.append_basic_block(function, "gsync_done");
-    let dict = builder
-        .build_load(ptr, dict_global.as_pointer_value(), "gsync_dict")
-        .expect("build_load should not fail for the module dict")
+    let tag_ptr = builder
+        .build_load(ptr, version_global.as_pointer_value(), "gsync_version")
+        .expect("build_load should not fail for the module dict version")
         .into_pointer_value();
     let absent = builder
-        .build_is_null(dict, "gsync_absent")
+        .build_is_null(tag_ptr, "gsync_absent")
         .expect("build_is_null should not fail");
     let branch = builder
         .build_conditional_branch(absent, done, check)
         .expect("build_conditional_branch should not fail");
     crate::int_fast::weight_branch(context, branch, false);
     builder.position_at_end(check);
-    let tag_ptr = unsafe {
-        builder.build_in_bounds_gep(
-            context.i8_type(),
-            dict,
-            &[i64_type.const_int(DICT_VERSION_TAG, false)],
-            "gsync_tag_ptr",
-        )
-    }
-    .expect("build_in_bounds_gep should not fail for the dict version");
     let tag = builder
         .build_load(i64_type, tag_ptr, "gsync_tag")
         .expect("build_load should not fail for the dict version")

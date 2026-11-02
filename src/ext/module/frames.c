@@ -16,14 +16,14 @@
  * the function on first use (`pycc_fninfo_ready`): the template's
  * fields, with one `NOP` per position after its `RESUME` and a location
  * table placing NOP `k` at position `k`. A frame object for a record is
- * made by linking a CPython 3.13 `_PyInterpreterFrame` for it onto the
+ * made by linking a CPython 3.13 or 3.15 `_PyInterpreterFrame` for it onto the
  * thread's frame chain, asking `PyEval_GetFrame()` for its object and
  * copying the frame into that object before unlinking it, as CPython's own
  * `take_ownership` does for a returning Python frame.
  *
  * Those two structures, `PyThreadState.current_frame` and `PyCodeObject`'s
  * bytecode offset are not part of the stable ABI. They are mirrored here
- * for CPython 3.13 only, and used only after `pycc_frames_probe` has
+ * for CPython 3.13 and 3.15 (`PyccFramesLayout`), and used only after `pycc_frames_probe` has
  * checked the mirror against the running interpreter; on any other version
  * or a failed probe, compiled frames add no traceback entries, as before
  * (docs/DEVIATIONS.md). Every call below is a stable-ABI function.
@@ -59,7 +59,23 @@ typedef struct PyccTbRecord {
 extern const PyccTbRecord *pycc_rt_exception_tb(void *exc, size_t *len, size_t *synced);
 extern void pycc_rt_exception_tb_synced(void *exc, size_t n);
 
-/* CPython 3.13's `_PyInterpreterFrame` (Include/internal/pycore_frame.h). */
+/*
+ * `_PyInterpreterFrame` (Include/internal/pycore_frame.h in CPython 3.13,
+ * pycore_interpframe_structs.h in 3.15) for a 64-bit GIL build. Its first
+ * eight words are the same in both versions (in 3.15 `f_executable` and
+ * `f_funcobj` are `_PyStackRef`s, a strong reference being the untagged
+ * pointer); what follows differs, so it is read and written through
+ * `pycc_frames_layout`:
+ *
+ *  - 3.13: `int stacktop` at 64, `uint16_t return_offset` at 68, `char
+ *    owner` at 70, `localsplus` at 72;
+ *  - 3.15: `_PyStackRef *stackpointer` at 64, `return_offset` at 72,
+ *    `owner` at 74, `uint8_t visited` at 75, `localsplus` at 80.
+ *
+ * Two `localsplus` words follow, which CPython never reads (the frame's
+ * stack is empty): twelve words in all, what codegen allocates
+ * (`pycc_codegen::frames`).
+ */
 typedef struct PyccIFrame {
     PyObject *f_executable;
     struct PyccIFrame *previous;
@@ -69,41 +85,82 @@ typedef struct PyccIFrame {
     PyObject *f_locals;
     PyObject *frame_obj;
     uint16_t *instr_ptr;
-    int stacktop;
-    uint16_t return_offset;
-    char owner;
-    PyObject *localsplus[2];
+    char tail[32];
 } PyccIFrame;
 
-/* `_frameowner`. */
+/* `_frameowner` (3.15's `FRAME_OWNED_BY_INTERPRETER` is 3.13's
+ * `FRAME_OWNED_BY_CSTACK`, a frame no traceback shows). */
 #define PYCC_FRAME_OWNED_BY_THREAD 0
 #define PYCC_FRAME_OWNED_BY_GENERATOR 1
 #define PYCC_FRAME_OWNED_BY_FRAME_OBJECT 2
 #define PYCC_FRAME_OWNED_BY_CSTACK 3
 
-/* CPython 3.13's `struct _frame` (`PyFrameObject`). */
+/* The head of `struct _frame` (`PyFrameObject`), the same in 3.13 and
+ * 3.15; its `_f_frame_data` is at `pycc_frames_layout.frame_data`. */
 typedef struct PyccFrameObject {
     PyObject_HEAD
     struct PyccFrameObject *f_back;
     PyccIFrame *f_frame;
-    PyObject *f_trace;
-    int f_lineno;
-    char f_trace_lines;
-    char f_trace_opcodes;
-    PyObject *f_extra_locals;
-    PyObject *f_locals_cache;
-    PyObject *_f_frame_data[1];
 } PyccFrameObject;
 
-/* Offsets in CPython 3.13's `PyThreadState` and `PyCodeObject`. */
+/* `PyThreadState.current_frame`, the same in 3.13 and 3.15. */
 #define PYCC_TSTATE_CURRENT_FRAME 72
-#define PYCC_CODE_FIRSTTRACEABLE 184
-#define PYCC_CODE_ADAPTIVE 200
 
-/* 3.13 opcodes of the synthetic code objects. */
-#define PYCC_OP_NOP 30
-#define PYCC_OP_RETURN_CONST 103
-#define PYCC_OP_RESUME 149
+/*
+ * What differs between the two versions compiled frames know: the frame's
+ * tail (above), `PyFrameObject._f_frame_data`, `PyCodeObject`'s
+ * `_co_firsttraceable` and `co_code_adaptive`, and the opcodes of the
+ * synthetic code objects -- 3.13 ends one with `RETURN_CONST 0`, 3.15 with
+ * `LOAD_CONST 0` and `RETURN_VALUE`, and its `RESUME` has one cache unit.
+ * Chosen by `pycc_frames_probe` from `Py_Version`, then checked.
+ */
+typedef struct PyccFramesLayout {
+    unsigned version;
+    size_t owner;
+    size_t localsplus;
+    size_t frame_data;
+    size_t code_firsttraceable;
+    size_t code_adaptive;
+    /* Code units of `RESUME` with its caches: where the first NOP is. */
+    unsigned resume_units;
+    unsigned char op_nop;
+    unsigned char op_resume;
+    unsigned char op_return_const; /* 3.13 only */
+    unsigned char op_load_const;   /* 3.15 only */
+    unsigned char op_return_value; /* 3.15 only */
+} PyccFramesLayout;
+
+static const PyccFramesLayout pycc_frames_layout_313 = {0x030D, 70, 72, 64, 184, 200, 1, 30, 149, 103, 0, 0};
+static const PyccFramesLayout pycc_frames_layout_315 = {0x030F, 74, 80, 72, 192, 208, 2, 25, 128, 0, 81, 33};
+static const PyccFramesLayout *pycc_frames_layout = &pycc_frames_layout_313;
+
+/* Whether the running interpreter's frames are 3.15's (0 for 3.13's),
+ * read by codegen's inline frame link (`pycc_codegen::frames`); set by
+ * `pycc_frames_probe` before any frame is linked inline. */
+static unsigned char pycc_ext_frames_v315 = 0;
+
+#define PYCC_IFRAME_OWNER(frame) (((char *)(frame))[pycc_frames_layout->owner])
+#define PYCC_IFRAME_LOCALSPLUS(frame) ((PyObject **)((char *)(frame) + pycc_frames_layout->localsplus))
+#define PYCC_FRAME_DATA(f) ((PyccIFrame *)((char *)(f) + pycc_frames_layout->frame_data))
+
+/* An empty stack at the frame's `localsplus` and no call in progress:
+ * 3.13's `stacktop` 0, 3.15's `stackpointer` at `localsplus` and
+ * `visited` 0 (the GC marks a frame it walked); `owner` as given. */
+static void pycc_iframe_set_tail(PyccIFrame *frame, char owner)
+{
+    char *base = (char *)frame;
+
+    if (pycc_frames_layout->version == 0x030F) {
+        *(PyObject ***)(base + 64) = PYCC_IFRAME_LOCALSPLUS(frame);
+        *(uint16_t *)(base + 72) = 0;
+        base[74] = owner;
+        base[75] = 0;
+    } else {
+        *(int *)(base + 64) = 0;
+        *(uint16_t *)(base + 68) = 0;
+        base[70] = owner;
+    }
+}
 
 /* `co_flags` (at this offset) of a signature wrapper's code
  * (`WRAPPER_FLAG` in crates/pycc_ast/src/desugar/ext_signatures.rs). */
@@ -214,20 +271,22 @@ static PyccIFrame **pycc_frames_current(PyThreadState *tstate)
 
 static uint16_t *pycc_code_base(PyObject *code)
 {
-    return (uint16_t *)((char *)code + PYCC_CODE_ADAPTIVE);
+    return (uint16_t *)((char *)code + pycc_frames_layout->code_adaptive);
 }
 
 static int pycc_code_firsttraceable(PyObject *code)
 {
-    return *(int *)((char *)code + PYCC_CODE_FIRSTTRACEABLE);
+    return *(int *)((char *)code + pycc_frames_layout->code_firsttraceable);
 }
 
 static int pycc_iframe_incomplete(PyccIFrame *frame)
 {
-    if (frame->owner == PYCC_FRAME_OWNED_BY_CSTACK) {
+    char owner = PYCC_IFRAME_OWNER(frame);
+
+    if (owner >= PYCC_FRAME_OWNED_BY_CSTACK) {
         return 1;
     }
-    return frame->owner != PYCC_FRAME_OWNED_BY_GENERATOR
+    return owner != PYCC_FRAME_OWNED_BY_GENERATOR
            && frame->instr_ptr < pycc_code_base(frame->f_executable)
                                      + pycc_code_firsttraceable(frame->f_executable);
 }
@@ -249,7 +308,8 @@ static void pycc_lt_svarint(unsigned char **out, int32_t value)
 
 /*
  * Builds `info`'s code object and function on first use: `RESUME`, one
- * `NOP` per position, `RETURN_CONST 0`, located per Objects/locations.md
+ * `NOP` per position, `RETURN_CONST 0` (3.15: `LOAD_CONST 0`,
+ * `RETURN_VALUE`), located per Objects/locations.md
  * (a long entry per NOP, a no-column entry where the position has none).
  * 1 when ready; 0 when compiled frames are off or it could not be built
  * (with no CPython exception set).
@@ -262,7 +322,8 @@ static int pycc_fninfo_ready(PyccFnInfo *info)
     PyObject *bytecode = NULL, *table = NULL, *args = NULL;
     PyObject *code = NULL, *func = NULL, *globals, *filename = NULL;
     unsigned char *buf = NULL, *out;
-    Py_ssize_t n = (Py_ssize_t)info->npos + 2, i;
+    const PyccFramesLayout *layout = pycc_frames_layout;
+    Py_ssize_t n = (Py_ssize_t)info->npos + 4, i;
     int32_t line = (int32_t)info->firstlineno;
     PyObject *saved;
 
@@ -281,18 +342,29 @@ static int pycc_fninfo_ready(PyccFnInfo *info)
         goto done;
     }
     out = buf;
-    *out++ = PYCC_OP_RESUME;
+    *out++ = layout->op_resume;
     *out++ = 0;
-    for (i = 0; i < (Py_ssize_t)info->npos; i++) {
-        *out++ = PYCC_OP_NOP;
+    for (i = 1; i < (Py_ssize_t)layout->resume_units; i++) {
+        *out++ = 0; /* CACHE */
         *out++ = 0;
     }
-    *out++ = PYCC_OP_RETURN_CONST;
-    *out++ = 0;
+    for (i = 0; i < (Py_ssize_t)info->npos; i++) {
+        *out++ = layout->op_nop;
+        *out++ = 0;
+    }
+    if (layout->op_return_const != 0) {
+        *out++ = layout->op_return_const;
+        *out++ = 0;
+    } else {
+        *out++ = layout->op_load_const;
+        *out++ = 0;
+        *out++ = layout->op_return_value;
+        *out++ = 0;
+    }
     bytecode = PyBytes_FromStringAndSize((const char *)buf, out - buf);
     out = buf;
-    /* RESUME: the first line, no columns (code 13, length 1). */
-    *out++ = 0x80 | (13 << 3);
+    /* RESUME and its caches: the first line, no columns (code 13). */
+    *out++ = (unsigned char)(0x80 | (13 << 3) | (layout->resume_units - 1));
     pycc_lt_svarint(&out, 0);
     for (i = 0; i < (Py_ssize_t)info->npos; i++) {
         const uint32_t *p = info->positions[i];
@@ -309,8 +381,8 @@ static int pycc_fninfo_ready(PyccFnInfo *info)
         }
         line = (int32_t)p[0];
     }
-    /* RETURN_CONST: no location (code 15). */
-    *out++ = 0x80 | (15 << 3);
+    /* The return: no location (code 15). */
+    *out++ = (unsigned char)(0x80 | (15 << 3) | (layout->op_return_const != 0 ? 0 : 1));
     table = PyBytes_FromStringAndSize((const char *)buf, out - buf);
     if (bytecode == NULL || table == NULL) {
         goto done;
@@ -391,7 +463,7 @@ static int pycc_fninfo_ready(PyccFnInfo *info)
     }
     info->builtins = PyEval_GetBuiltins();
     Py_XINCREF(info->builtins);
-    info->ip0 = pycc_code_base(code) + 1;
+    info->ip0 = pycc_code_base(code) + layout->resume_units;
     info->func = func;
     info->code = code;
     func = NULL;
@@ -435,7 +507,7 @@ static void pycc_ext_fn_info_bind(PyObject *globals, PyccFnInfo *const *table, l
  * function it calls: that function's frame links past it. */
 static int pycc_iframe_is_wrapper(const PyccIFrame *frame)
 {
-    return frame->owner == PYCC_FRAME_OWNED_BY_THREAD
+    return PYCC_IFRAME_OWNER(frame) == PYCC_FRAME_OWNED_BY_THREAD
            && (*(const int *)((const char *)frame->f_executable + PYCC_CODE_FLAGS)
                & PYCC_CO_SIGNATURE) != 0;
 }
@@ -457,9 +529,7 @@ static PyccIFrame *pycc_iframe_push(PyThreadState *tstate, PyccIFrame *frame,
     frame->f_locals = (info->flags & PYCC_FN_INFO_MODULE) ? info->globals : NULL;
     frame->frame_obj = NULL;
     frame->instr_ptr = info->ip0 + pos;
-    frame->stacktop = 0;
-    frame->return_offset = 0;
-    frame->owner = PYCC_FRAME_OWNED_BY_THREAD;
+    pycc_iframe_set_tail(frame, PYCC_FRAME_OWNED_BY_THREAD);
     *current = frame;
     return top;
 }
@@ -479,19 +549,21 @@ static void pycc_iframe_pop(PyThreadState *tstate, PyccIFrame *frame, PyccIFrame
     if (f != NULL) {
         frame->frame_obj = NULL;
         if (Py_REFCNT((PyObject *)f) > 1) {
-            PyccIFrame *copy = (PyccIFrame *)f->_f_frame_data;
+            PyccIFrame *copy = PYCC_FRAME_DATA(f);
             PyccIFrame *prev = frame->previous;
             PyObject *saved = PyErr_GetRaisedException();
 
             while (prev != NULL && pycc_iframe_incomplete(prev)) {
                 prev = prev->previous;
             }
-            memcpy(copy, frame, (size_t)((char *)frame->localsplus - (char *)frame));
+            memcpy(copy, frame, pycc_frames_layout->localsplus);
             Py_INCREF(copy->f_executable);
             Py_INCREF(copy->f_funcobj);
             Py_XINCREF(copy->f_locals);
             copy->previous = NULL;
-            copy->owner = PYCC_FRAME_OWNED_BY_FRAME_OBJECT;
+            /* Its empty stack at the copy's own `localsplus` (3.15's
+             * `frame_dealloc` clears from there to `stackpointer`). */
+            pycc_iframe_set_tail(copy, PYCC_FRAME_OWNED_BY_FRAME_OBJECT);
             f->f_frame = copy;
             if (prev != NULL && f->f_back == NULL) {
                 PyFrameObject *back;
@@ -589,7 +661,7 @@ static void pycc_ext_tb_sync(void *native, PyObject *obj)
 
 /*
  * Turns compiled frames on when the running interpreter is CPython 3.13
- * and the mirror above matches it: inside the module body's own frame
+ * or 3.15 and the mirror above matches it: inside the module body's own frame
  * chain, the first complete frame of `current_frame` must be the frame
  * `PyEval_GetFrame` answers, and a probe frame pushed through the mirror
  * must come back from `PyEval_GetFrame` as a frame of the probe's code at
@@ -606,9 +678,17 @@ static void pycc_frames_probe(void)
         return;
     }
     pycc_frames_state = -1;
-    if ((Py_Version >> 16) != 0x030D) {
+    if (sizeof(void *) != 8) {
         return;
     }
+    if ((Py_Version >> 16) == 0x030D) {
+        pycc_frames_layout = &pycc_frames_layout_313;
+    } else if ((Py_Version >> 16) == 0x030F) {
+        pycc_frames_layout = &pycc_frames_layout_315;
+    } else {
+        return;
+    }
+    pycc_ext_frames_v315 = pycc_frames_layout->version == 0x030F;
     types = PyImport_ImportModule("types");
     if (types == NULL) {
         PyErr_Clear();
@@ -616,19 +696,28 @@ static void pycc_frames_probe(void)
     }
     pycc_frames_function_type = PyObject_GetAttrString(types, "FunctionType");
     /* The template, the code of `def f(): pass` (`RESUME 0`, `RETURN_CONST
-     * 0`, its constants `(None,)`), made with `types.CodeType` rather than
+     * 0`; 3.15: `RESUME 0`, a cache, `LOAD_CONST 0`, `RETURN_VALUE`; its
+     * constants `(None,)`), made with `types.CodeType` rather than
      * compiled: `compile()` cost more than the rest of the probe. */
     {
-        static const char code[] = {(char)PYCC_OP_RESUME, 0, (char)PYCC_OP_RETURN_CONST, 0};
-        /* Each instruction a no-column entry: line 1, then line 2. */
-        static const char lines[] = {(char)0xE8, 0x00, (char)0xE8, 0x02};
+        const PyccFramesLayout *layout = pycc_frames_layout;
+        const char code_313[] = {(char)layout->op_resume, 0, (char)layout->op_return_const, 0};
+        const char code_315[] = {(char)layout->op_resume, 0, 0, 0, (char)layout->op_load_const, 0,
+                                 (char)layout->op_return_value, 0};
+        /* Each instruction a no-column entry: line 1, then line 2 (3.15:
+         * each entry two code units). */
+        static const char lines_313[] = {(char)0xE8, 0x00, (char)0xE8, 0x02};
+        static const char lines_315[] = {(char)0xE9, 0x00, (char)0xE9, 0x02};
+        int v315 = layout->version == 0x030F;
         PyObject *code_type = PyObject_GetAttrString(types, "CodeType");
 
         if (code_type != NULL) {
             pycc_frames_template = PyObject_CallFunction(
                 code_type, "iiiiiiy#(O)()()sssiy#y#()()", 0, 0, 0, 0, 1,
-                PYCC_CO_OPTIMIZED | PYCC_CO_NEWLOCALS, code, (Py_ssize_t)sizeof code, Py_None,
-                "<pycc>", "f", "f", 1, lines, (Py_ssize_t)sizeof lines, "", (Py_ssize_t)0);
+                PYCC_CO_OPTIMIZED | PYCC_CO_NEWLOCALS, v315 ? code_315 : code_313,
+                v315 ? (Py_ssize_t)sizeof code_315 : (Py_ssize_t)sizeof code_313, Py_None, "<pycc>",
+                "f", "f", 1, v315 ? lines_315 : lines_313, (Py_ssize_t)sizeof lines_313, "",
+                (Py_ssize_t)0);
             Py_DECREF(code_type);
         }
     }
@@ -638,7 +727,7 @@ static void pycc_frames_probe(void)
         return;
     }
     if (pycc_frames_template == NULL
-        || pycc_code_base(pycc_frames_template)[0] != PYCC_OP_RESUME) {
+        || (pycc_code_base(pycc_frames_template)[0] & 0xFF) != pycc_frames_layout->op_resume) {
         return;
     }
     {
@@ -732,22 +821,22 @@ void pycc_ext_frame_enter(PyccIFrame *frame, PyccFnInfo *info)
     PyThreadState *tstate;
 
     if (info->code == NULL && !pycc_fninfo_ready(info)) {
-        frame->owner = PYCC_FRAME_INACTIVE;
+        PYCC_IFRAME_OWNER(frame) = PYCC_FRAME_INACTIVE;
         return;
     }
     tstate = PyThreadState_Get();
-    frame->localsplus[1] = (PyObject *)pycc_iframe_push(tstate, frame, info, 0);
-    frame->localsplus[0] = (PyObject *)tstate;
+    PYCC_IFRAME_LOCALSPLUS(frame)[1] = (PyObject *)pycc_iframe_push(tstate, frame, info, 0);
+    PYCC_IFRAME_LOCALSPLUS(frame)[0] = (PyObject *)tstate;
 }
 
 /* Its epilogue, on every return: unlinks `frame`. */
 void pycc_ext_frame_exit(PyccIFrame *frame)
 {
-    if (frame->owner == PYCC_FRAME_INACTIVE) {
+    if (PYCC_IFRAME_OWNER(frame) == PYCC_FRAME_INACTIVE) {
         return;
     }
-    pycc_iframe_pop((PyThreadState *)frame->localsplus[0], frame,
-                    (PyccIFrame *)frame->localsplus[1]);
+    pycc_iframe_pop((PyThreadState *)PYCC_IFRAME_LOCALSPLUS(frame)[0], frame,
+                    (PyccIFrame *)PYCC_IFRAME_LOCALSPLUS(frame)[1]);
 }
 
 /*
@@ -766,7 +855,7 @@ void pycc_ext_tb_here_live(const PyccFnInfo *info, uint32_t pos, PyccIFrame *fra
     if (pycc_rt_tb_seen(info, pos, frame)) {
         return;
     }
-    if (frame->owner != PYCC_FRAME_INACTIVE && frame->frame_obj != NULL) {
+    if (PYCC_IFRAME_OWNER(frame) != PYCC_FRAME_INACTIVE && frame->frame_obj != NULL) {
         frame->instr_ptr = info->ip0 + pos;
         f = Py_NewRef(frame->frame_obj);
     }

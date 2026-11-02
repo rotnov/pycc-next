@@ -138,7 +138,7 @@ pub extern "C" fn pycc_rt_int_mul(a: i64, b: i64) -> i64 {
 pub(crate) fn int_floordiv(a: i64, b: i64) -> i64 {
     if let (Some(x), Some(y)) = (inline_int_value(a), inline_int_value(b)) {
         if y == 0 {
-            raise_zero_division("integer division or modulo by zero");
+            raise_zero_division("division by zero");
             return tag_smallint(0);
         }
         // Inline values are within +/-2**62, so no `i64` division traps;
@@ -148,7 +148,7 @@ pub(crate) fn int_floordiv(a: i64, b: i64) -> i64 {
     }
     let divisor = decode_big(b);
     if divisor.is_zero() {
-        raise_zero_division("integer division or modulo by zero");
+        raise_zero_division("division by zero");
         return tag_smallint(0);
     }
     encode_big(decode_big(a).div_floor(&divisor))
@@ -163,14 +163,14 @@ pub extern "C" fn pycc_rt_int_floordiv(a: i64, b: i64) -> i64 {
 pub(crate) fn int_floormod(a: i64, b: i64) -> i64 {
     if let (Some(x), Some(y)) = (inline_int_value(a), inline_int_value(b)) {
         if y == 0 {
-            raise_zero_division("integer modulo by zero");
+            raise_zero_division("division by zero");
             return tag_smallint(0);
         }
         return tag_smallint(x.mod_floor(&y));
     }
     let divisor = decode_big(b);
     if divisor.is_zero() {
-        raise_zero_division("integer modulo by zero");
+        raise_zero_division("division by zero");
         return tag_smallint(0);
     }
     encode_big(decode_big(a).mod_floor(&divisor))
@@ -684,7 +684,7 @@ mod tests {
         let p = big("1267650600228229401496703205376");
         assert_raises(
             EXCEPTION_TYPE_ZERO_DIV_ERROR,
-            "integer division or modulo by zero",
+            "division by zero",
             || {
                 assert_eq!(
                     int_floordiv(tag_smallint(1), tag_smallint(0)),
@@ -694,21 +694,21 @@ mod tests {
         );
         assert_raises(
             EXCEPTION_TYPE_ZERO_DIV_ERROR,
-            "integer division or modulo by zero",
+            "division by zero",
             || {
                 int_floordiv(p, tag_smallint(0));
             },
         );
         assert_raises(
             EXCEPTION_TYPE_ZERO_DIV_ERROR,
-            "integer modulo by zero",
+            "division by zero",
             || {
                 int_floormod(tag_smallint(1), BOOL_FALSE_MARKER);
             },
         );
         assert_raises(
             EXCEPTION_TYPE_ZERO_DIV_ERROR,
-            "integer modulo by zero",
+            "division by zero",
             || {
                 int_floormod(p, tag_smallint(0));
             },

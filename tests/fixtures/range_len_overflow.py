@@ -3,8 +3,14 @@ def materialize(n: int, step: int) -> None:
         print(len(list(range(n))))
     except OverflowError as e:
         print("list", "OverflowError", e)
+    # CPython 3.15's `tuple()` of a range longer than `sys.maxsize` runs
+    # until memory runs out (docs/DEVIATIONS.md), so only a fitting one is
+    # materialized.
     try:
-        print(len(tuple(range(0, n, step))))
+        if n // step < 2 ** 63:
+            print(len(tuple(range(0, n, step))))
+        else:
+            print("tuple", "too long")
     except OverflowError as e:
         print("tuple", "OverflowError", e)
     try:

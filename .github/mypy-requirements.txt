@@ -1,12 +1,12 @@
 # mypy for the strict-mode parity check (bench/mypy_parity.py, v0.9 accept 5).
 # Pinned by version and by the sha256 of each wheel CI installs (PyPI's
-# published digests): CPython 3.13 on x86_64 Linux, mypy and its dependencies.
+# published digests): CPython 3.15 on x86_64 Linux, mypy and its dependencies.
 mypy==2.3.1 \
-    --hash=sha256:1c80fbc405ed8020f5ff3802dc18cf060197bcdd3fbdd6a26ef2fd34dfdd5226
+    --hash=sha256:47a8a7a0a7f6f6e63995c0ac36fa0c07b127413fdc81f0439b7f3dccafd33561
 ast-serialize==0.13.1 \
-    --hash=sha256:9f99786e0d62082a5b121b3437f3167562133711df22128de1e9886f57f0b226
+    --hash=sha256:121e1d08d58b75c15491cc3003609cbad71ac2b0016043c36d30a6b2032b6605
 librt==0.16.0 \
-    --hash=sha256:17bac7f7a16b328fff77e440287693eb017abde913595b5827ebccbc21ecd8a6
+    --hash=sha256:e56aaf8c167548dc8e5d6f3bd0f48dcdd299a23c73be3f744aab79d99e9c7f5d
 mypy-extensions==1.1.0 \
     --hash=sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505
 pathspec==1.1.1 \

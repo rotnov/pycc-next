@@ -1,6 +1,6 @@
 """Build pydantic v2's Python part with pycc-next and count what compiles (v0.7).
 
-pydantic 2.13.5 (MIT), pinned by the sha256 of its PyPI sdist, is built unchanged
+pydantic 2.14.2 (MIT), pinned by the sha256 of its PyPI sdist, is built unchanged
 with `--ext --non-strict`: whole, into one extension `pydantic/__init__.abi3.so` holding
 every module (`pycc build pydantic --ext`, v0.8), or with `--separate` module by module,
 each as its own `--foreign-relative-imports` extension module (pydantic-core, its Rust
@@ -27,7 +27,7 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
   --keep   leave the built tree (compiled modules, `.py` files removed, the sdist's
            tests beside them) in DIR instead of a temporary directory.
   --tests  then run pydantic's own test suite against the compiled tree with
-           PYTHON, an interpreter with pydantic-core 2.46.5 and the suite's test
+           PYTHON, an interpreter with pydantic-core 2.50.2 and the suite's test
            dependencies installed (pytest, pytest-mock, dirty-equals, inline-snapshot,
            jsonschema, pytz, tzdata, hypothesis, faker, email-validator, ...). The
            mypy, docs and benchmark tests are skipped.
@@ -71,12 +71,12 @@ import stats  # noqa: E402
 
 PYDANTIC = package_check.Package(
     name="pydantic",
-    version="2.13.5",
-    url="https://files.pythonhosted.org/packages/source/p/pydantic/pydantic-2.13.5.tar.gz",
-    archive="pydantic-2.13.5.tar.gz",
-    sha256="51a9c5f7b2f8e636f04c6cada605d9b6a3bf1348fdf945a3d8869b19bba0ee08",
+    version="2.14.2",
+    url="https://files.pythonhosted.org/packages/source/p/pydantic/pydantic-2.14.2.tar.gz",
+    archive="pydantic-2.14.2.tar.gz",
+    sha256="fb7b2db6cefe8414dd612edeede49c4c433acb0432b0f92b95024e45f66c505d",
     tree_sha256=None,
-    layout=(("pydantic", "pydantic-2.13.5/pydantic"),),
+    layout=(("pydantic", "pydantic-2.14.2/pydantic"),),
     import_name="pydantic",
     modules=(),
     tests="",
@@ -225,7 +225,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = pathlib.Path(tmp_name)
         try:
-            src = package_check.unpack(PYDANTIC, archive, tmp / "archive") / "pydantic-2.13.5"
+            src = package_check.unpack(PYDANTIC, archive, tmp / "archive") / "pydantic-2.14.2"
         except package_check.UnsafeArchive as e:
             sys.exit(str(e))
         package_check.regular_files(src)

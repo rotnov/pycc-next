@@ -46,11 +46,22 @@ static PyObject *pycc_ext_function_str(PyObject *callable)
     return result;
 }
 
-/* Raises `TypeError(f"{callable} {format % type(o).__name__}")`. */
+/* Raises `TypeError(f"{callable} argument after {what}, not {type}")`, or,
+ * on CPython 3.15, which no longer names the callable,
+ * `TypeError(f"Value after {what}, not {type}")`. */
 static void pycc_ext_star_error(PyObject *callable, const char *what, PyObject *o)
 {
-    PyObject *name = pycc_ext_function_str(callable);
+    PyObject *name;
     PyObject *type_name = PyType_GetName(Py_TYPE(o));
+
+    if (Py_Version >= 0x030F0000) {
+        if (type_name != NULL) {
+            PyErr_Format(PyExc_TypeError, "Value after %s, not %U", what, type_name);
+            Py_DECREF(type_name);
+        }
+        return;
+    }
+    name = pycc_ext_function_str(callable);
 
     if (name != NULL && type_name != NULL) {
         PyErr_Format(PyExc_TypeError, "%U argument after %s, not %U", name, what, type_name);

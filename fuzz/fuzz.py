@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Differential fuzzer: generated typed programs under CPython 3.13 and pycc.
+"""Differential fuzzer: generated typed programs under CPython 3.15 and pycc.
 
 Each case is a program `gen.generate(seed, index)` produces. It runs under
 CPython (the oracle) and is built by pycc in each mode (`harness.MODES`): native

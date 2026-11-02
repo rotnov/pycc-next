@@ -1,6 +1,6 @@
 name: fuzz
 # Nightly differential fuzzing (v0.6 accept 4, `fuzz/`): generated typed
-# programs run under CPython 3.13 and as native strict, `--non-strict`,
+# programs run under CPython 3.15 and as native strict, `--non-strict`,
 # `--ext` and `--ext --non-strict` builds; any difference in stdout, the
 # uncaught exception or the exit status, and any compiler crash, is a finding.
 # Findings are reduced to minimal programs and uploaded as an artifact; the
@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.13" }
+        with: { python-version: "3.15" }
       - name: Install LLVM 22
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc

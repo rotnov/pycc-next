@@ -1,11 +1,11 @@
 # numpy for the hosted numpy tests (tests/numpy_typed_arrays.rs,
 # tests/issue_1114_numpy_oracle.rs) and the numpy benchmarks. Pinned by
 # version and by the sha256 of each wheel CI installs (PyPI's published
-# digests): CPython 3.13 on x86_64 and aarch64 Linux, on arm64 macOS and on
+# digests): CPython 3.15 on x86_64 and aarch64 Linux, on arm64 macOS and on
 # x86_64 Windows.
 numpy==2.5.3 \
-    --hash=sha256:a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321 \
-    --hash=sha256:c76d5dde9f445058f83d0c02af00557a4db91de9a9a57c0df87d1535001d654b \
-    --hash=sha256:92f30e89b8ee0ecf363033576c422b2f58fed6a80bed0aa48dff6d14c654663e \
-    --hash=sha256:f9a2353b37a1a9e78fd82b27ad7e2a32a2d036604d18f02b05e3136c62ca3b09 \
-    --hash=sha256:71cad2b2a7451ab79d8f5e71b453485b6775963d5cf794179144a7463fe6e8ec
+    --hash=sha256:ffdc76bfcae6b255dff75202c5e7feaf95b40246bc0a17944facc1fecf9f79ab \
+    --hash=sha256:1f3ed25271581281f2fccb1adcedfcde4c07362eec69189b50baf6f90e3ae159 \
+    --hash=sha256:09d5a423c71ad5feb5625844ad58050e35df43871004b52ac9c0ad44a56775be \
+    --hash=sha256:f9579f383d1bf9df80081e72760e84960a7fd4f88cf0c9e535a8597c9bb646f5 \
+    --hash=sha256:e931e4f499e0dc7ef29d269a8e5b35dd722e5d14be07df6240166ea7c6532fae

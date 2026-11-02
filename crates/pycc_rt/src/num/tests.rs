@@ -95,12 +95,12 @@ fn errors_carry_cpython_messages() {
         pycc_rt_exception_clear();
         message
     }
-    assert_eq!(raises(|| { binop(NUM_FLOORDIV, int(1), int(0)); }), "integer division or modulo by zero");
-    assert_eq!(raises(|| { binop(NUM_FLOORDIV, int(1), float(0.0)); }), "float floor division by zero");
-    assert_eq!(raises(|| { binop(NUM_MOD, float(1.0), int(0)); }), "float modulo by zero");
+    assert_eq!(raises(|| { binop(NUM_FLOORDIV, int(1), int(0)); }), "division by zero");
+    assert_eq!(raises(|| { binop(NUM_FLOORDIV, int(1), float(0.0)); }), "division by zero");
+    assert_eq!(raises(|| { binop(NUM_MOD, float(1.0), int(0)); }), "division by zero");
     assert_eq!(raises(|| { truediv(int(1), int(0)); }), "division by zero");
-    assert_eq!(raises(|| { truediv(float(1.0), int(0)); }), "float division by zero");
-    assert_eq!(raises(|| { binop(NUM_POW, int(0), int(-1)); }), "0.0 cannot be raised to a negative power");
+    assert_eq!(raises(|| { truediv(float(1.0), int(0)); }), "division by zero");
+    assert_eq!(raises(|| { binop(NUM_POW, int(0), int(-1)); }), "zero to a negative power");
     let huge = big(&format!("1{}", "0".repeat(400)));
     assert_eq!(raises(|| { binop(NUM_ADD, huge, float(1.5)); }), "int too large to convert to float");
     assert_eq!(raises(|| { pycc_rt_num_to_int(float(f64::NAN)); }), "cannot convert float NaN to integer");

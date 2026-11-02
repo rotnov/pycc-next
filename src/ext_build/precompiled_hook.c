@@ -159,8 +159,9 @@ static PyObject *pycc_ext_chunk_function_type = NULL;
  * kwdefaults, annotations, name, forward, orders)` is a function made as
  * `MAKE_FUNCTION` makes it -- name, qualified name, docstring, `__module__`
  * and builtins from the code (its set constants rebuilt from `orders`) and
- * `ns` -- with the annotations as the dict CPython makes from the same
- * tuple on first read, stored as `name`, and then the forwarders patched.
+ * `ns` -- with the annotations as the dict CPython 3.13 makes from the same
+ * tuple on first read, or 3.15's `__annotate__` function made from its
+ * code, stored as `name`, and then the forwarders patched.
  * A `(name, code, order, orders)` is a nested statement's scaffold chunk
  * (`src/fallback/nested.rs`), whose `__pycc_fallback_nestspec` call the
  * build made: `name` is bound to its answer, `(code, order)`, and the
@@ -237,7 +238,20 @@ static int pycc_ext_chunk_define(PyObject *specs, PyObject *ns)
         if (func == NULL) {
             goto done;
         }
-        if (annotations != Py_None) {
+        if (annotations != Py_None && !PyTuple_Check(annotations)) {
+            /* 3.14+'s lazy annotations (PEP 649): the `__annotate__`
+             * function, made from its code in `ns` as `MAKE_FUNCTION`
+             * makes it. */
+            PyObject *annotate = PyObject_CallFunctionObjArgs(pycc_ext_chunk_function_type,
+                                                              annotations, ns, NULL);
+
+            stored = annotate == NULL ? -1 : PyObject_SetAttrString(func, "__annotate__", annotate);
+            Py_XDECREF(annotate);
+            if (stored != 0) {
+                Py_DECREF(func);
+                goto done;
+            }
+        } else if (annotations != Py_None) {
             PyObject *dict = PyDict_New();
             Py_ssize_t at, size = PyTuple_Size(annotations);
 

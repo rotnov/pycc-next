@@ -73,7 +73,7 @@ fn an_uncaught_bigint_error_matches_cpython() {
         (
             "zero_div",
             "x = 2**100\nprint(x + 1)\nprint(x // (x - x))\nprint('unreachable')\n",
-            "ZeroDivisionError: integer division or modulo by zero",
+            "ZeroDivisionError: division by zero",
         ),
         (
             "float_overflow",

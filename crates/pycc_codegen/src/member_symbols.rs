@@ -25,7 +25,7 @@ use inkwell::module::Module;
 /// member's object and its C unit (`pycc_ext_member.h`) both prefix.
 pub const MODULE_UNIT_ENTRIES: [&str; 12] = [
     crate::ext::EXT_PUBLISH_SYMBOL,
-    "pycc_ext_ns_dict",
+    "pycc_ext_ns_version",
     "pycc_ext_global_sync",
     "pycc_ext_obj_pack_instance",
     "pycc_ext_obj_pack_list",

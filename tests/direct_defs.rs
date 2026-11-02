@@ -73,8 +73,8 @@ def outer(n: int) -> int:
     return sum(inner(n))
 "#;
 
-/// The same without deferred annotations: a constant annotation is part of
-/// the `def`'s constants, a name is not.
+/// The same without `from __future__ import annotations`: on 3.13 a
+/// constant annotation is part of the `def`'s constants, a name is not.
 const EAGER: &str = r#"def none_only(x: "int" = 1) -> None:
     return (lambda: print(x))()
 
@@ -93,7 +93,7 @@ for name in ("gen", "lam", "bad", "computed", "decorated", "parse_version", "non
     if hasattr(m, name):
         f = getattr(m, name)
         print(name, f.__name__, f.__qualname__, f.__module__, f.__doc__, getattr(f, "__defaults__", None),
-              getattr(f, "__kwdefaults__", None), f.__annotations__, getattr(f, "__wrapped__", f).__code__.co_firstlineno,
+              getattr(f, "__kwdefaults__", None), getattr(f, "__annotations__", None), getattr(f, "__wrapped__", f).__code__.co_firstlineno,
               type(f).__name__, sorted(vars(f)))
 # The module's own names in order (an `--ext` module binds no `__cached__`,
 # and `from __future__ import annotations` binds nothing in it).
@@ -153,14 +153,15 @@ fn check(label: &str, source: &str) -> (String, String) {
     (report, count)
 }
 
-/// Whether the oracle interpreter is CPython 3.13: the build reads 3.13's
-/// bytecode for constant `def`s, and on another version every chunk
-/// `exec`s.
-fn python_is_3_13() -> bool {
+/// The oracle interpreter's `major.minor`: the build reads CPython 3.13's
+/// and 3.15's bytecode for constant `def`s, and on another version every
+/// chunk `exec`s.
+fn python_version() -> String {
     python()
-        .args(["-c", "import sys; print(sys.version_info[:2] == (3, 13))"])
+        .args(["-c", "import sys; print('%d.%d' % sys.version_info[:2])"])
         .output()
-        .is_ok_and(|out| text(&out.stdout).trim() == "True")
+        .map(|out| text(&out.stdout).trim().to_string())
+        .unwrap_or_default()
 }
 
 #[test]
@@ -175,7 +176,7 @@ fn fallback_defs_are_made_without_running_their_statements() {
     // (its defaults are read at run time) and `decorated`, one chunk too,
     // run their statements, as does the nested statements' helper chunk
     // (an `import`).
-    if python_is_3_13() {
+    if matches!(python_version().as_str(), "3.13" | "3.15") {
         assert_eq!(count, "exec at import: 2", "{report}");
     }
 }
@@ -184,7 +185,12 @@ fn fallback_defs_are_made_without_running_their_statements() {
 fn an_eager_constant_annotation_is_made_directly_and_a_name_is_not() {
     let (report, count) = check("direct_defs_eager", EAGER);
     assert!(report.contains("function `named`"), "{report}");
-    if python_is_3_13() {
-        assert_eq!(count, "exec at import: 1", "{report}");
+    // 3.13 evaluates `named`'s annotation `int` when the `def` runs, so
+    // that chunk `exec`s; 3.15 defers every annotation to an
+    // `__annotate__` function (PEP 649), so both are made directly.
+    match python_version().as_str() {
+        "3.13" => assert_eq!(count, "exec at import: 1", "{report}"),
+        "3.15" => assert_eq!(count, "exec at import: 0", "{report}"),
+        _ => {}
     }
 }

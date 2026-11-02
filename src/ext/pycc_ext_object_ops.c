@@ -284,8 +284,12 @@ int pycc_ext_obj_coerce(PyObject *o, int kind, const char *what, void *out)
                 PyErr_Format(PyExc_TypeError, "string indices must be integers, not '%U'",
                              type_name);
             } else if (kind == 8) {
-                PyErr_SetString(PyExc_TypeError, "slice indices must be integers or None or "
-                                                 "have an __index__ method");
+                /* CPython 3.15 dropped "or None" from its message. */
+                PyErr_SetString(PyExc_TypeError,
+                                Py_Version >= 0x030F0000
+                                    ? "slice indices must be integers or have an __index__ method"
+                                    : "slice indices must be integers or None or have an "
+                                      "__index__ method");
             } else {
                 PyErr_Format(PyExc_TypeError,
                              "tuple indices must be integers or slices, not %U", type_name);
@@ -411,11 +415,19 @@ PyObject *pycc_ext_obj_build_display(PyObject **items, long long n, int kind)
         break;
     case 3: {
         /* A display of constants: CPython folds it into a frozenset
-         * constant, rebuilds that from its own order when merging
-         * constants, and copies it into a new set (`SET_UPDATE`). */
+         * constant and copies it into a new set (`SET_UPDATE`). Before
+         * 3.14 it also rebuilt the frozenset from its own order when
+         * merging constants. */
         PyObject *folded = PyFrozenSet_New(list);
-        PyObject *order = folded == NULL ? NULL : PySequence_Tuple(folded);
-        PyObject *merged = order == NULL ? NULL : PyFrozenSet_New(order);
+        PyObject *order = NULL;
+        PyObject *merged = folded;
+
+        if (folded != NULL && Py_Version < 0x030E0000) {
+            order = PySequence_Tuple(folded);
+            merged = order == NULL ? NULL : PyFrozenSet_New(order);
+        } else {
+            Py_XINCREF(merged);
+        }
         result = merged == NULL ? NULL : PySet_New(merged);
         Py_XDECREF(merged);
         Py_XDECREF(order);

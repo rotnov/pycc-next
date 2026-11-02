@@ -146,7 +146,7 @@ fn int_conv(value: &BigInt, conv: &Conv) -> Result<String, Fail> {
                 .to_u32()
                 .filter(|v| *v < 0x110000)
                 .and_then(char::from_u32)
-                .ok_or_else(|| Fail::overflow("%c arg not in range(0x110000)"))?;
+                .ok_or_else(|| Fail::overflow("format argument: %c argument not in range(0x110000)"))?;
             Ok(output(&ch.to_string(), conv, false))
         }
         // `%s`/`%r`/`%a`: the decimal text.

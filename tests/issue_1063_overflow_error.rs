@@ -171,7 +171,7 @@ fn zero_raised_to_a_negative_power_raises_zero_division_error_not_overflow_error
          main()\n",
     );
     assert!(ok, "program failed: {stderr}");
-    assert_eq!(stdout, "0.0 cannot be raised to a negative power\n");
+    assert_eq!(stdout, "zero to a negative power\n");
 }
 
 /// The converted `int_pow` negative-exponent arm. `RuntimeError` rather than a
@@ -270,7 +270,7 @@ fn a_built_ext_module_raises_the_right_cpython_class_from_every_converted_pow_pa
          \x20   m.overflow(0.0, -1.0)\n\
          \x20   raise AssertionError('expected ZeroDivisionError')\n\
          except ZeroDivisionError as e:\n\
-         \x20   assert str(e) == '0.0 cannot be raised to a negative power', str(e)\n\
+         \x20   assert str(e) == 'zero to a negative power', str(e)\n\
          # The two deliberate deviations reach the host as RuntimeError.\n\
          try:\n\
          \x20   m.overflow(-2.0, 3.5)\n\

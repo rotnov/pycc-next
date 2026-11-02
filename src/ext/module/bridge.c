@@ -42,11 +42,11 @@
  * `ob_refcnt` at offset 0 of every object is part of the stable ABI, which
  * still runs abi3 extensions built against the 3.2-3.11 limited API, whose
  * macros update it inline and call `_Py_Dealloc` (an `abi_only` stable-ABI
- * function, exported by `python3.dll` too) at zero. These are CPython
- * 3.13's own non-limited inline forms for a 64-bit GIL build: an increment
- * that wraps the low 32 bits to zero is an immortal object's and is
- * skipped, and a decrement skips an object whose low 32 bits are negative
- * (immortal). A free-threaded build loads no abi3 extension; a debug build
+ * function, exported by `python3.dll` too) at zero. These are the
+ * non-limited inline forms CPython 3.13 to 3.15 share for a 64-bit GIL
+ * build: an object whose low 32 bits are negative is immortal (3.13 keeps
+ * them all ones, 3.14 and 3.15 at `3 << 30`), and neither an increment nor
+ * a decrement touches it; any other increment adds one to the low 32 bits. A free-threaded build loads no abi3 extension; a debug build
  * (`Py_REF_DEBUG`, whose total-count bookkeeping these would skip) and a
  * 32-bit or big-endian one keep the calls. The generated code inlines the
  * same two forms (`pycc_codegen::object_rc`). A closing brace here carries a
@@ -56,9 +56,8 @@
 #define PYCC_INLINE_RC 1
 Py_LOCAL_INLINE(void) pycc_incref(PyObject *op) {
     uint32_t *low = (uint32_t *)op;
-    uint32_t next = *low + 1;
-    if (next != 0) {
-        *low = next;
+    if ((int32_t)*low >= 0) {
+        *low = *low + 1;
     }
 } /* pycc_incref */
 Py_LOCAL_INLINE(void) pycc_decref(PyObject *op) {

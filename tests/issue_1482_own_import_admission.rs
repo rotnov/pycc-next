@@ -216,9 +216,13 @@ fn the_issue_s_programs_match_cpython_in_an_embedded_executable() {
     assert_eq!(stdout_of(&embedded), stdout_of(&oracle));
     assert_eq!(oracle.status.code(), Some(1), "{}", stderr_of(&oracle));
     assert_eq!(embedded.status.code(), oracle.status.code());
-    assert_eq!(
-        last_stderr_line(&embedded),
-        Some("AttributeError: module 'gc' has no attribute 'append'".to_owned())
+    // CPython 3.15 adds a suggestion (`. Did you mean '.callbacks.append'
+    // instead of '.append'?`) after the message.
+    assert!(
+        last_stderr_line(&embedded)
+            .is_some_and(|line| line.starts_with("AttributeError: module 'gc' has no attribute 'append'")),
+        "{}",
+        stderr_of(&embedded)
     );
     assert_eq!(last_stderr_line(&embedded), last_stderr_line(&oracle));
 }

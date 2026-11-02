@@ -42,15 +42,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.13" }
+        with: { python-version: "3.15" }
       # As in ci.yml's Windows job: CPython as `python3`, the MSVC developer
       # environment, MSVC's link.exe for cargo, and LLVM's own release.
-      - name: CPython 3.13 as python3 (Windows)
+      - name: CPython 3.15 as python3 (Windows)
         if: runner.os == 'Windows'
         run: |
           py_dir=$(cygpath -u "$pythonLocation")
           [ -e "$py_dir/python3.exe" ] || cp "$py_dir/python.exe" "$py_dir/python3.exe"
-          python3 -c "import sys; assert sys.version_info[:2] == (3, 13), sys.version"
+          python3 -c "import sys; assert sys.version_info[:2] == (3, 15), sys.version"
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
       - name: MSVC link.exe for cargo (Windows)
