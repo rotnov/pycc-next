@@ -110,24 +110,25 @@ main()
 ";
 
 #[test]
-#[ignore = "requires CPython 3.13 on PATH"]
+#[ignore = "requires CPython 3.15 on PATH"]
 fn lines_match_cpythons_bytes_in_utf8_mode() {
     let utf8 = [("PYTHONUTF8", Some("1")), ("PYTHONIOENCODING", None)];
     assert_streams_match("lines", LINES, "caf\u{e9}\r\n".as_bytes(), &utf8);
     assert_streams_match("raises", RAISES, b"", &utf8);
 }
 
-/// The encoding CPython picks without UTF-8 mode: the ANSI code page on
-/// Windows, the locale's elsewhere (pycc's programs write UTF-8 there, so
-/// only Windows runs these).
+/// The encoding CPython picks without UTF-8 mode (`PYTHONUTF8=0`; since
+/// 3.15 UTF-8 mode is the default, PEP 686): the ANSI code page on Windows,
+/// the locale's elsewhere (pycc's programs write UTF-8 there, so only
+/// Windows runs these).
 #[cfg(windows)]
 mod windows {
     use super::*;
 
-    const ANSI: [(&str, Option<&str>); 2] = [("PYTHONUTF8", None), ("PYTHONIOENCODING", None)];
+    const ANSI: [(&str, Option<&str>); 2] = [("PYTHONUTF8", Some("0")), ("PYTHONIOENCODING", None)];
 
     #[test]
-    #[ignore = "requires CPython 3.13 on PATH"]
+    #[ignore = "requires CPython 3.15 on PATH"]
     fn the_ansi_code_page_encodes_stdout_and_decodes_stdin() {
         assert_streams_match("ansi_lines", LINES, b"caf\xe9\r\n", &ANSI);
         // stderr is `backslashreplace`.
@@ -148,13 +149,13 @@ main()
 ";
 
     #[test]
-    #[ignore = "requires CPython 3.13 on PATH"]
+    #[ignore = "requires CPython 3.15 on PATH"]
     fn an_unencodable_character_raises_unicode_encode_error() {
         assert_streams_match("unencodable", UNENCODABLE, b"", &ANSI);
     }
 
     #[test]
-    #[ignore = "requires CPython 3.13 on PATH"]
+    #[ignore = "requires CPython 3.15 on PATH"]
     fn pythonioencoding_sets_the_encoding_and_errors() {
         for (name, value) in [
             ("io_latin1", "latin-1"),
@@ -163,9 +164,18 @@ main()
             ("io_xml", "cp1252:xmlcharrefreplace"),
             ("io_utf8", "utf-8"),
         ] {
-            let env = [("PYTHONUTF8", None), ("PYTHONIOENCODING", Some(value))];
+            let env = [("PYTHONUTF8", Some("0")), ("PYTHONIOENCODING", Some(value))];
             assert_streams_match(name, UNENCODABLE, b"", &env);
             assert_streams_match(&format!("{name}_lines"), LINES, b"cafe\r\n", &env);
         }
     }
+}
+
+/// Without `PYTHONUTF8` CPython 3.15 is in UTF-8 mode (PEP 686), so a
+/// native program writes UTF-8 on every platform.
+#[test]
+#[ignore = "requires CPython 3.15 on PATH"]
+fn utf8_mode_is_the_default() {
+    let unset = [("PYTHONUTF8", None), ("PYTHONIOENCODING", None)];
+    assert_streams_match("default_lines", LINES, "caf\u{e9}\r\n".as_bytes(), &unset);
 }

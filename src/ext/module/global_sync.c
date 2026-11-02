@@ -226,6 +226,37 @@ static const uint64_t *pycc_ext_ns_version_of(PyObject *dict, uint64_t *counter)
     return counter;
 }
 
+/*
+ * `value`, the module namespace `dict`'s entry for `key`, as a global read
+ * sees it: on CPython 3.15 an entry still holding a PEP 810 lazy import
+ * (`types.LazyImportType`, bound by an import fallback code runs with the
+ * module in `__lazy_modules__`) is resolved and replaced in `dict`, as
+ * `LOAD_GLOBAL` does. A new reference, or NULL with an exception set.
+ */
+static PyObject *pycc_ext_ns_resolve(PyObject *dict, PyObject *key, PyObject *value)
+{
+    static PyObject *lazy_type = NULL;
+    static int looked = 0;
+    PyObject *resolved;
+
+    if (!looked && Py_Version >= 0x030F0000) {
+        PyObject *types = PyImport_ImportModule("types");
+
+        looked = 1;
+        lazy_type = types == NULL ? NULL : PyObject_GetAttrString(types, "LazyImportType");
+        Py_XDECREF(types);
+        PyErr_Clear();
+    }
+    if (lazy_type == NULL || (PyObject *)Py_TYPE(value) != lazy_type) {
+        return Py_NewRef(value);
+    }
+    resolved = PyObject_CallMethod(value, "resolve", NULL);
+    if (resolved != NULL && PyDict_SetItem(dict, key, resolved) < 0) {
+        Py_CLEAR(resolved);
+    }
+    return resolved;
+}
+
 /* A global's cache (`pycc_codegen`'s `pycc_gsync` globals): the dict
  * version the read last saw, and -- for a slot of a native type -- the
  * object it last converted (owned). An object slot is compared with the

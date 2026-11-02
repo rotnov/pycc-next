@@ -589,8 +589,9 @@ needs Windows 10 or newer and, at build time:
   program that embeds CPython is an `OUT.exe` stub with its interpreter in `OUT.pycc\`
   (`docs/DEVIATIONS.md` lists the Windows gaps). A native program writes stdout and
   stderr as CPython does there: `\r\n` line endings, UTF-8 on a console, otherwise the
-  encoding CPython picks (`PYTHONIOENCODING`, UTF-8 mode with `PYTHONUTF8=1`, else the
-  ANSI code page, raising `UnicodeEncodeError` for a character it cannot encode).
+  encoding CPython 3.15 picks (`PYTHONIOENCODING`, else UTF-8 mode, the default; with
+  `PYTHONUTF8=0` the ANSI code page, raising `UnicodeEncodeError` for a character it
+  cannot encode).
 
 On macOS a browser download is quarantined by Gatekeeper; clear the flag once
 after unpacking (`xattr -dr com.apple.quarantine pycc-vX.Y.Z-aarch64-macos`) or

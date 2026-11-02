@@ -390,8 +390,11 @@ for _ in range(int(sys.argv[2])):
             ),
             import_name="tomli",
             modules=("__init__.py", "_parser.py", "_re.py", "_types.py"),
+            # test_misc's lazy-import test (CPython 3.15) runs `import tomli`
+            # in a child interpreter, which finds the tree by PYTHONPATH.
             tests="""
 import os
+os.environ["PYTHONPATH"] = sys.argv[1]
 r = unittest.main(module=None, exit=False, verbosity=1, argv=[
     "package_check", "discover", "-s", os.path.join(sys.argv[1], "tests"),
     "-t", sys.argv[1]]).result

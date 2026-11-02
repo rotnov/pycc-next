@@ -22,6 +22,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   compiled code through one dict watcher shared by every pycc module, as 3.14 removed
   the dict version tag. A module imported by 3.14 runs without those fast paths, as
   before. CI no longer runs the test suite against 3.13.
+- On Windows a native program's standard streams follow CPython 3.15's UTF-8 mode
+  default (PEP 686): UTF-8 unless `PYTHONUTF8=0` (or `PYTHONIOENCODING`) says otherwise,
+  where 3.13 used the ANSI code page.
+- Compiled code of a non-strict `--ext` module reading a global that only fallback code
+  binds reads it as `LOAD_GLOBAL` does: a name the module never binds is the builtin's
+  (tomli binds `frozendict` only before 3.15, where it is a builtin), and on 3.15 a lazy
+  import (`__lazy_modules__`) is resolved and replaced in the namespace.
 - An error message the extension shim raises that CPython words differently per version
   follows the interpreter hosting the module (`Value after ** must be a mapping` on 3.15).
 - The pydantic benchmark builds pydantic 2.14.2 with pydantic-core 2.50.2 (2.13.5's
