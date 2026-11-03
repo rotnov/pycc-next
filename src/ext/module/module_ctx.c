@@ -51,6 +51,9 @@ static PyccExtModule pycc_ext_mod = {
 static PyObject *pycc_ext_ns_dict = NULL;
 PYCC_ENTRY const uint64_t *pycc_ext_ns_version = NULL;
 static uint64_t pycc_ext_ns_counter = 0;
+/* 1 while the body runs on 3.15, its dict not watched yet: each read
+ * bumps the counter, so the next one looks again (`pycc_ext_ns_version_of`). */
+static int pycc_ext_ns_deferred = 0;
 
 static int pycc_ext_unpack_instance(PyObject *obj, const char *fn_name, Py_ssize_t index,
                                     const char *class_name, void **out)
@@ -162,4 +165,7 @@ PYCC_ENTRY void pycc_ext_global_sync(const char *name, void *slot, int kind,
                                      PyccGlobalCache *cache, char *initialized)
 {
     pycc_ext_global_sync_in(pycc_ext_ns_dict, pycc_ext_ns_version, name, slot, kind, cache, initialized);
+    if (pycc_ext_ns_deferred) {
+        ++pycc_ext_ns_counter;
+    }
 }

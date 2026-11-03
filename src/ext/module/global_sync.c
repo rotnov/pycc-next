@@ -19,7 +19,9 @@
  * eight dict watchers per interpreter, so every pycc module of every
  * artifact shares one: the first registers it, and keeps the table from
  * dict to counter in a capsule in the interpreter's dict, where the others
- * find it. A module's `pycc_ext_ns_version` is NULL -- and every read takes
+ * find it. The dict is watched from the end of the module body
+ * (`pycc_ext_ns_watch`); until then every compiled read looks the name up.
+ * A module's `pycc_ext_ns_version` is NULL -- and every read takes
  * its slot as it is -- on another CPython version, when no watcher can be
  * had, and in a native program.
  */
@@ -198,32 +200,57 @@ static PyccDictWatch *pycc_dict_watch_get(void)
  * Where module dict `dict`'s version is read, for its module's
  * `pycc_ext_ns_version`: 3.13's tag in the dict itself, or on 3.15 the
  * module's `counter` (set to 1, so a read's first look always syncs, as
- * 3.13's tags are never 0), with `dict` watched. NULL on any other version
- * or when `dict` cannot be watched (no exception set).
+ * 3.13's tags are never 0). NULL on any other version or when no dict
+ * watcher can be had (no exception set).
+ *
+ * On 3.15 `*deferred` is set: the dict is not watched yet. Every store of
+ * the module body would fire the watcher (about 2,700 events in pydantic's
+ * import, 0.3M instructions), and compiled code reads few rebindable
+ * globals while its own body runs. So until the body has run
+ * (`pycc_ext_ns_watch`), each compiled read looks the name up in the dict
+ * (`pycc_ext_global_sync` bumps the counter after every read, so no read's
+ * cache matches it), as it would if every store had bumped it.
  */
-static const uint64_t *pycc_ext_ns_version_of(PyObject *dict, uint64_t *counter)
+static const uint64_t *pycc_ext_ns_version_of(PyObject *dict, uint64_t *counter, int *deferred)
 {
-    PyccDictWatch *w;
-
+    *deferred = 0;
     if (dict == NULL || sizeof(void *) != 8) {
         return NULL;
     }
     if ((Py_Version >> 16) == 0x030D) {
         return (const uint64_t *)((char *)dict + PYCC_DICT_VERSION_TAG);
     }
-    if ((Py_Version >> 16) != 0x030F) {
-        return NULL;
-    }
-    w = pycc_dict_watch_get();
-    if (w == NULL || pycc_dict_watch_insert(w, dict, counter) != 0) {
-        return NULL;
-    }
-    if (w->watch(w->id, dict) != 0) {
-        PyErr_Clear();
+    if ((Py_Version >> 16) != 0x030F || pycc_dict_watch_get() == NULL) {
         return NULL;
     }
     *counter = 1;
+    *deferred = 1;
     return counter;
+}
+
+/*
+ * Starts watching module dict `dict` once its body has run
+ * (`pycc_ext_ns_version_of`): from now on only a change to the dict bumps
+ * `counter`, which is bumped once more here so every read looks once.
+ * Where the version is read from now on: `counter`, or NULL (every read
+ * takes its slot as it is) when the dict cannot be watched. Keeps any
+ * exception set.
+ */
+static const uint64_t *pycc_ext_ns_watch(PyObject *dict, uint64_t *counter)
+{
+    PyObject *raised = PyErr_GetRaisedException();
+    PyccDictWatch *w = pycc_dict_watch_get();
+    const uint64_t *version = NULL;
+
+    if (w != NULL && pycc_dict_watch_insert(w, dict, counter) == 0) {
+        if (w->watch(w->id, dict) == 0) {
+            ++*counter;
+            version = counter;
+        }
+    }
+    PyErr_Clear();
+    PyErr_SetRaisedException(raised);
+    return version;
 }
 
 /*

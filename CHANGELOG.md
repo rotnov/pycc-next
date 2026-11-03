@@ -5,6 +5,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- On CPython 3.15 an `--ext` module's namespace dict is watched only once its body has
+  run: until then every compiled read of a global looks the name up, so the body's own
+  stores no longer each fire the dict watcher (about 2,700 events in pydantic's
+  import). Reads see every rebinding as before.
 - An `--ext` module's precompiled fallback chunk holding `frozenset` constants
   rebuilds each in source order along the path the build recorded to it, instead of
   walking every nested code object at import: pydantic's import runs 1.55M fewer
