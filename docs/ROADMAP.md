@@ -72,3 +72,4 @@ against 6.97M.
 | lever | change | pydantic | mistune | pystache |
 |---|---|---|---|---|
 | 1 | `frozenset` constants rebuilt in source order along build-time paths, not by walking every nested code object (`ORDERS_FIX` 1.92M -> 0.36M inclusive) | -1.55M | 0 | 0 |
+| 3 | forwarders patched from owner paths split at build time, each class's members read from its dict (`pycc_ext_forward` 1.05M -> 0.58M inclusive) | -0.47M | -0.07M | -0.03M |

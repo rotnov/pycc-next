@@ -9,8 +9,9 @@
  * tracebacks see.
  *
  * Once its statement has run, the fallback rewrite calls
- * `__pycc_forward__(qualname, ...)` with the qualified name of each method
- * or function of it whose body compiled. Each forwarder found there -- the
+ * `__pycc_forward__(...)` with the qualified name of each method or function
+ * of it whose body compiled, split by the build into owner paths and names
+ * (`pycc_ext_forward`). Each forwarder found there -- the
  * function itself, a `property`'s accessor, a `classmethod`/`staticmethod`'s
  * function, a decorator's `__wrapped__`/`wrapped`/`func` -- is patched in
  * place: its `vectorcall` becomes one of the generated trampolines
@@ -106,8 +107,6 @@ typedef struct PycFwdSlot {
 static vectorcallfunc pycc_fwd_original = NULL;
 /* `"__pycc_lift"`, the prefix of a lift's name (`src/fallback/lift.rs`). */
 static PyObject *pycc_fwd_prefix = NULL;
-/* `"."`, which separates a qualified name's parts. */
-static PyObject *pycc_fwd_dot = NULL;
 
 /* `property`, `classmethod` and `staticmethod`, and what each wraps. */
 static PyObject *pycc_fwd_wrapper_types[3] = {NULL, NULL, NULL};
@@ -196,8 +195,7 @@ static void pycc_forward_probe(void)
             pycc_fwd_wrapper_types[i] = Py_XNewRef(type);
         }
         pycc_fwd_prefix = PyUnicode_FromString("__pycc_lift");
-        pycc_fwd_dot = PyUnicode_FromString(".");
-        ok &= pycc_fwd_prefix != NULL && pycc_fwd_dot != NULL;
+        ok &= pycc_fwd_prefix != NULL;
     }
     if (ok) {
         pycc_fwd_original = *(vectorcallfunc *)((char *)f + PYCC_FUNC_VECTORCALL);
@@ -721,59 +719,84 @@ static void pycc_fwd_walk(PyccExtModule *m, PyObject *ns, PyObject *obj, int dep
     pycc_fwd_walk_dict(m, ns, obj, depth);
 }
 
-/*
- * The member `qualname` (`C.m`, `Outer.Inner.m`, `f`) names in `ns`: each
- * class along the path read from its owner's `__dict__` (so no descriptor
- * runs), the first from `ns`. A new reference, or NULL.
- */
-static PyObject *pycc_fwd_resolve(PyObject *ns, PyObject *qualname)
+/* `type.__dict__` as the dict it shows (a new reference): the real dict
+ * behind the `mappingproxy`, so a member is read by one dict lookup and no
+ * descriptor runs; the proxy itself when it shows something else; NULL
+ * (no exception set) when there is none. */
+static PyObject *pycc_fwd_class_dict(PyObject *type)
 {
-    PyObject *parts = PyUnicode_Split(qualname, pycc_fwd_dot, -1);
-    PyObject *obj = NULL;
-    Py_ssize_t i;
+    PyObject *proxy = pycc_fwd_getattr(type, "__dict__");
 
-    if (parts == NULL) {
+    if (proxy == NULL) {
+        PyErr_Clear();
         return NULL;
     }
-    for (i = 0; i < PyList_Size(parts); i++) {
-        PyObject *part = PyList_GetItem(parts, i);
-        PyObject *next;
+    if (Py_TYPE(proxy) == &PyDictProxy_Type) {
+        /* `mappingproxyobject`: the header, then the mapping it shows. */
+        PyObject *mapping = *(PyObject **)((char *)proxy + sizeof(PyObject));
 
-        if (i == 0) {
-            next = Py_XNewRef(PyDict_GetItemWithError(ns, part));
-        } else {
-            PyObject *dict = PyType_Check(obj) ? pycc_fwd_getattr(obj, "__dict__") : NULL;
-
-            next = NULL;
-            if (dict != NULL && PyMapping_GetOptionalItem(dict, part, &next) < 0) {
-                next = NULL;
-            }
-            Py_XDECREF(dict);
+        if (mapping != NULL && PyDict_CheckExact(mapping)) {
+            Py_INCREF(mapping);
+            Py_DECREF(proxy);
+            return mapping;
         }
+    }
+    return proxy;
+}
+
+/* `dict[key]` (a new reference), or NULL with no exception set. */
+static PyObject *pycc_fwd_lookup(PyObject *dict, PyObject *key)
+{
+    PyObject *value = NULL;
+
+    if (PyDict_CheckExact(dict)) {
+        value = Py_XNewRef(PyDict_GetItemWithError(dict, key));
+    } else if (PyMapping_GetOptionalItem(dict, key, &value) < 0) {
+        value = NULL;
+    }
+    PyErr_Clear();
+    return value;
+}
+
+/* The dict of the class the owner path `path` (`("C",)`, `("Outer",
+ * "Inner")`) names in `ns`, each class along it read from its owner's dict
+ * (so no descriptor runs): a new reference, or NULL when some part is
+ * missing or not a class. */
+static PyObject *pycc_fwd_owner(PyObject *ns, PyObject *path)
+{
+    PyObject *dict = NULL;
+    Py_ssize_t i, n = PyTuple_Size(path);
+
+    for (i = 0; i < n; i++) {
+        PyObject *obj = pycc_fwd_lookup(i == 0 ? ns : dict, PyTuple_GetItem(path, i));
+
+        Py_XDECREF(dict);
+        dict = obj != NULL && PyType_Check(obj) ? pycc_fwd_class_dict(obj) : NULL;
         Py_XDECREF(obj);
-        obj = next;
-        if (obj == NULL) {
+        if (dict == NULL) {
             break;
         }
     }
-    Py_DECREF(parts);
-    return obj;
+    return dict;
 }
 
 /* The capsule name of a module's record, the `self` of its
  * `__pycc_forward__`. */
 #define PYCC_FWD_CAPSULE "pycc.module"
 
-/* `__pycc_forward__(qualname, ...)`: patches the forwarder each lift's
- * qualified name names in the running statement's namespace, into the slots
- * of the module whose record `self` holds. */
+/* `__pycc_forward__(name, ..., (owner, ...), name, ...)`: patches the
+ * forwarder each name names in the running statement's namespace, into the
+ * slots of the module whose record `self` holds. The build splits each
+ * lift's qualified name (`src/fallback/lift.rs`): a name is a member of
+ * the class the last owner path before it names (`("C",)` for `C.m`,
+ * `("Outer", "Inner")` for `Outer.Inner.m`), or of the namespace itself
+ * before any path or after `()`. */
 static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 {
     PyObject *ns = PyEval_GetGlobals();
     PyccExtModule *m = (PyccExtModule *)PyCapsule_GetPointer(self, PYCC_FWD_CAPSULE);
-    /* The last owner (`C` of `C.m`), and its `__dict__` or NULL: the names of
-     * one statement are usually all one class's. */
-    PyObject *owner_name = NULL, *owner_dict = NULL;
+    /* The dict the names are read from: `ns` (borrowed) or an owner's. */
+    PyObject *owner = NULL, *in;
     Py_ssize_t i;
 
     if (m == NULL) {
@@ -782,44 +805,28 @@ static PyObject *pycc_ext_forward(PyObject *self, PyObject *const *args, Py_ssiz
     if (pycc_fwd_original == NULL || ns == NULL || !PyDict_Check(ns)) {
         Py_RETURN_NONE;
     }
+    in = ns;
     for (i = 0; i < nargs; i++) {
-        PyObject *qualname = args[i], *obj = NULL;
-        Py_ssize_t len = PyUnicode_Check(qualname) ? PyUnicode_GetLength(qualname) : -1;
-        Py_ssize_t dot = len < 0 ? -2 : PyUnicode_FindChar(qualname, '.', 0, len, -1);
+        PyObject *obj;
 
-        if (dot >= 0) {
-            PyObject *member;
-
-            if (owner_name == NULL || PyUnicode_GetLength(owner_name) != dot
-                || PyUnicode_Tailmatch(qualname, owner_name, 0, dot, -1) != 1) {
-                PyObject *owner;
-
-                Py_CLEAR(owner_name);
-                Py_CLEAR(owner_dict);
-                owner_name = PyUnicode_Substring(qualname, 0, dot);
-                owner = owner_name == NULL ? NULL : pycc_fwd_resolve(ns, owner_name);
-                owner_dict = owner != NULL && PyType_Check(owner)
-                                 ? pycc_fwd_getattr(owner, "__dict__")
-                                 : NULL;
-                Py_XDECREF(owner);
-                PyErr_Clear();
+        if (PyTuple_Check(args[i])) {
+            Py_CLEAR(owner);
+            if (PyTuple_Size(args[i]) == 0) {
+                in = ns;
+            } else {
+                owner = pycc_fwd_owner(ns, args[i]);
+                in = owner;
             }
-            member = owner_dict == NULL ? NULL : PyUnicode_Substring(qualname, dot + 1, len);
-            if (member != NULL && PyMapping_GetOptionalItem(owner_dict, member, &obj) < 0) {
-                obj = NULL;
-            }
-            Py_XDECREF(member);
-        } else if (dot == -1) {
-            obj = Py_XNewRef(PyDict_GetItemWithError(ns, qualname));
+            continue;
         }
+        obj = in == NULL ? NULL : pycc_fwd_lookup(in, args[i]);
         if (obj != NULL) {
             pycc_fwd_walk(m, ns, obj, 0);
             Py_DECREF(obj);
         }
         PyErr_Clear();
     }
-    Py_XDECREF(owner_name);
-    Py_XDECREF(owner_dict);
+    Py_XDECREF(owner);
     Py_RETURN_NONE;
 }
 

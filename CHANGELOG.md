@@ -5,6 +5,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- The line an `--ext` module's fallback code runs after a statement to patch its
+  compiled methods' forwarders names each one by its owner path and name, split at
+  build time (`("C",), "m"`), instead of a dotted name split, sliced and looked up
+  at import: the patching costs pydantic's import 1.05M -> 0.58M instructions.
 - An `--ext` module's precompiled fallback chunk holding `frozenset` constants
   rebuilds each in source order along the path the build recorded to it, instead of
   walking every nested code object at import: pydantic's import runs 1.55M fewer
