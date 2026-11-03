@@ -121,17 +121,25 @@ fn forward_trampolines_c(exports: &[ExtExport]) -> String {
         })
         .count();
     let mut out = String::from("/* Forwarder trampolines (src/ext/module/forward.c). */\n");
-    let mut table = String::new();
+    let mut cases = String::new();
     for index in 0..count {
         out.push_str(&format!(
             "static PyObject *pycc_fwd_{index}(PyObject *f, PyObject *const *a, size_t n, \
              PyObject *k)\n{{\n    return pycc_fwd_call({index}, f, a, n, k);\n}}\n"
         ));
-        table.push_str(&format!("    pycc_fwd_{index},\n"));
+        cases.push_str(&format!("    case {index}:\n        return pycc_fwd_{index};\n"));
     }
+    // A switch rather than an array of the trampolines' addresses: each
+    // array entry would need a load-time relocation, while the switch's
+    // jump table is position independent.
+    let switch = if count == 0 {
+        String::from("    (void)index;\n")
+    } else {
+        format!("    switch (index) {{\n{cases}    }}\n")
+    };
     out.push_str(&format!(
         "static const int pycc_fwd_slot_count = {count};\n\
-         static const vectorcallfunc pycc_fwd_trampolines[] = {{\n{table}    NULL,\n}};\n\n"
+         static vectorcallfunc pycc_fwd_trampoline(int index)\n{{\n{switch}    return NULL;\n}}\n\n"
     ));
     out
 }

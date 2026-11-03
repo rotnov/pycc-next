@@ -603,23 +603,27 @@ impl Interface {
             "PYCC_ENTRY PyObject *pycc_ext_interface_table[{}];\n",
             count.max(1)
         ));
-        out.push_str("static const char *const pycc_ext_interface_names[] = {");
+        // The names as one NUL-separated string rather than an array of
+        // pointers: a pointer array needs a load-time relocation per entry,
+        // which dirties its page in every process that loads the artifact.
+        out.push_str("static const char pycc_ext_interface_names[] = \"");
         for function in &self.functions {
-            out.push_str(&format!("\"{}\", ", function.name));
+            out.push_str(&format!("{}\\000", function.name));
         }
-        out.push_str("NULL};\n\n");
-        out.push_str(
-            "static void pycc_ext_interface_fill(PyObject *dict)\n{\n    \
-             for (int i = 0; pycc_ext_interface_names[i] != NULL; i++) {\n        \
-             const PyMethodDef *row = pycc_ext_publish_row(pycc_ext_interface_names[i]);\n        \
+        out.push_str("\";\n\n");
+        out.push_str(&format!(
+            "static void pycc_ext_interface_fill(PyObject *dict)\n{{\n    \
+             const char *name = pycc_ext_interface_names;\n\n    \
+             for (int i = 0; i < {count}; i++, name += strlen(name) + 1) {{\n        \
+             const PyMethodDef *row = pycc_ext_publish_row(name);\n        \
              PyObject *key = row == NULL ? NULL : pycc_ext_publish_key(row, 0);\n        \
              PyObject *value = key != NULL ? PyDict_GetItem(dict, key)\n            \
-             : PyDict_GetItemString(dict, pycc_ext_interface_names[i]);\n        \
+             : PyDict_GetItemString(dict, name);\n        \
              PyObject *old = pycc_ext_interface_table[i];\n\n        \
              Py_XINCREF(value);\n        \
              pycc_ext_interface_table[i] = value;\n        \
-             Py_XDECREF(old);\n    }\n}\n",
-        );
+             Py_XDECREF(old);\n    }}\n}}\n"
+        ));
         out
     }
 }
@@ -787,7 +791,10 @@ mod tests {
             header.contains("PyObject *pycc_ext_interface_table[2];"),
             "{header}"
         );
-        assert!(header.contains("{\"escape\", \"noop\", NULL};"), "{header}");
+        assert!(
+            header.contains("pycc_ext_interface_names[] = \"escape\\000noop\\000\";"),
+            "{header}"
+        );
         let empty = Interface {
             functions: vec![],
             ..sample()

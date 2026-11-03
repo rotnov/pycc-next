@@ -204,14 +204,14 @@ PYCC_ENTRY int pycc_ext_publish(const char *name)
 static int pycc_ext_publish_unbound_classes(PyObject *module, PyObject *classes)
 {
     PyObject *dict = PyModule_GetDict(module);
-    const char *const *name;
+    const char *name;
 
-    for (name = pycc_ext_publish_class_names; *name != NULL; name++) {
-        PyObject *type = PyDict_GetItemString(classes, *name);
-        if (type == NULL || PyDict_GetItemString(dict, *name) != NULL) {
+    for (name = pycc_ext_publish_class_names; *name != '\0'; name += strlen(name) + 1) {
+        PyObject *type = PyDict_GetItemString(classes, name);
+        if (type == NULL || PyDict_GetItemString(dict, name) != NULL) {
             continue;
         }
-        if (PyModule_AddObjectRef(module, *name, type) != 0) {
+        if (PyModule_AddObjectRef(module, name, type) != 0) {
             return -1;
         }
     }
@@ -227,14 +227,14 @@ static int pycc_ext_publish_unbound_classes(PyObject *module, PyObject *classes)
 static PyObject *pycc_ext_snapshot_classes(void)
 {
     PyObject *classes = PyDict_New();
-    const char *const *name;
+    const char *name;
 
     if (classes == NULL) {
         return NULL;
     }
-    for (name = pycc_ext_publish_class_names; *name != NULL; name++) {
-        PyObject *type = *pycc_ext_publish_class_slot(*name);
-        if (type != NULL && PyDict_SetItemString(classes, *name, type) != 0) {
+    for (name = pycc_ext_publish_class_names; *name != '\0'; name += strlen(name) + 1) {
+        PyObject *type = *pycc_ext_publish_class_slot(name);
+        if (type != NULL && PyDict_SetItemString(classes, name, type) != 0) {
             Py_DECREF(classes);
             return NULL;
         }

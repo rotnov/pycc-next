@@ -265,23 +265,48 @@ pub(crate) fn install(inc: String, chunks: &[CodeChunk], compiled: Option<&Preco
         c_bytes(table),
         table.len()
     );
-    head.push_str(
-        "static const struct pycc_ext_chunk {\n    const char *source;\n    \
-         Py_ssize_t source_len;\n    const char *filename;\n    int future_annotations;\n    \
-         int precompiled;\n} pycc_ext_chunks[] = {\n",
-    );
+    // Each chunk's source and file name are offsets into one string,
+    // `pycc_ext_chunk_text`, instead of pointers: a pointer needs a
+    // load-time relocation, which dirties the table's pages in every
+    // process that loads the artifact. A file name is stored once, with its
+    // NUL, however many chunks name it.
+    let mut text: Vec<u8> = Vec::new();
+    let mut files: Vec<(&str, usize)> = Vec::new();
+    let mut rows = String::new();
     for (index, chunk) in chunks.iter().enumerate() {
         let present = compiled.is_some_and(|compiled| compiled.present.get(index) == Some(&true));
+        let source = text.len();
+        text.extend_from_slice(chunk.source.as_bytes());
+        let filename = match files.iter().find(|(name, _)| *name == chunk.filename) {
+            Some(&(_, at)) => at,
+            None => {
+                let at = text.len();
+                text.extend_from_slice(chunk.filename.as_bytes());
+                text.push(0);
+                files.push((&chunk.filename, at));
+                at
+            }
+        };
         let _ = writeln!(
-            head,
-            "    {{{},\n     {}, {}, {}, {}}},",
-            c_bytes(chunk.source.as_bytes()),
+            rows,
+            "    {{{source}, {}, {filename}, {}, {}}},",
             chunk.source.len(),
-            c_bytes(chunk.filename.as_bytes()),
             i32::from(chunk.future_annotations),
             i32::from(present),
         );
     }
+    let _ = writeln!(
+        head,
+        "/* The chunks' sources and file names, which `pycc_ext_chunks` indexes. */\n\
+         static const char pycc_ext_chunk_text[] =\n    {};\n",
+        c_bytes(&text)
+    );
+    head.push_str(
+        "static const struct pycc_ext_chunk {\n    Py_ssize_t source;\n    \
+         Py_ssize_t source_len;\n    Py_ssize_t filename;\n    int future_annotations;\n    \
+         int precompiled;\n} pycc_ext_chunks[] = {\n",
+    );
+    head.push_str(&rows);
     let _ = writeln!(
         head,
         "}};\nstatic const Py_ssize_t pycc_ext_chunk_count = {};\n",
@@ -346,14 +371,14 @@ mod tests {
         assert!(out.contains("pycc_ext_chunk_table_len = 3;"), "{out}");
         assert!(
             out.contains(
-                "{\"\\012\\012x = \\042\\077\\134\\042\\012\",\n     11, \"/p/m.py\", 0, 1},"
+                "pycc_ext_chunk_text[] =\n    \
+                 \"\\012\\012x = \\042\\077\\134\\042\\012/p/m.py\\000y = 1\\012\";"
             ),
             "{out}"
         );
-        assert!(
-            out.contains("{\"y = 1\\012\",\n     6, \"/p/m.py\", 0, 0},"),
-            "{out}"
-        );
+        // The second chunk's file name is the first's.
+        assert!(out.contains("{0, 11, 11, 0, 1},"), "{out}");
+        assert!(out.contains("{19, 6, 11, 0, 0},"), "{out}");
         assert!(out.contains("pycc_ext_chunk_count = 2;"), "{out}");
     }
 

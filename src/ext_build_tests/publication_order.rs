@@ -140,16 +140,16 @@ fn the_shim_binds_unpublished_classes_after_the_body_and_before_the_hooks() {
     );
     assert!(
         net.contains(&format!(
-            "for (name = {PUBLISH_CLASS_NAMES}; *name != NULL; name++)"
+            "for (name = {PUBLISH_CLASS_NAMES}; *name != '\\0'; name += strlen(name) + 1)"
         )),
         "{net}"
     );
     assert!(
-        net.contains("PyDict_GetItemString(dict, *name) != NULL"),
+        net.contains("PyDict_GetItemString(dict, name) != NULL"),
         "{net}"
     );
     assert!(
-        net.contains("PyObject *type = PyDict_GetItemString(classes, *name);"),
+        net.contains("PyObject *type = PyDict_GetItemString(classes, name);"),
         "{net}"
     );
     let body = shim
@@ -172,12 +172,12 @@ fn the_shim_binds_unpublished_classes_after_the_body_and_before_the_hooks() {
 fn each_exec_publishes_classes_from_its_own_snapshot() {
     let shim = shim_c();
     let snap = function_text(&shim, "static PyObject *pycc_ext_snapshot_classes(void)\n{");
-    let lookup = format!("for (name = {PUBLISH_CLASS_NAMES}; *name != NULL; name++)");
+    let lookup = format!("for (name = {PUBLISH_CLASS_NAMES}; *name != '\\0'; name += strlen(name) + 1)");
     for needle in [
         "PyObject *classes = PyDict_New();",
         lookup.as_str(),
-        "PyObject *type = *pycc_ext_publish_class_slot(*name);",
-        "if (type != NULL && PyDict_SetItemString(classes, *name, type) != 0) {\n            \
+        "PyObject *type = *pycc_ext_publish_class_slot(name);",
+        "if (type != NULL && PyDict_SetItemString(classes, name, type) != 0) {\n            \
          Py_DECREF(classes);\n            return NULL;\n        }",
     ] {
         assert!(snap.contains(needle), "missing {needle:?} in:\n{snap}");
@@ -224,7 +224,7 @@ fn a_program_publishing_no_class_still_defines_both_publication_tables() {
     let inc = inc_no_classes("m", &[]);
     assert!(
         inc.contains(&format!(
-            "static const char *const {PUBLISH_CLASS_NAMES}[] = {{\n    NULL,\n}};\n\n\
+            "static const char {PUBLISH_CLASS_NAMES}[] =\n    \"\";\n\n\
              {PUBLISH_CLASS_SLOT_DECL}\n{{\n    (void)name;\n    return NULL;\n}}\n"
         )),
         "{inc}"
@@ -240,7 +240,7 @@ fn a_published_class_is_registered_but_bound_only_through_its_publication() {
     let inc = generate_exports_inc("m", &exports, &[], &publications, &ctors, &[]);
     assert!(
         inc.contains(&format!(
-            "static const char *const {PUBLISH_CLASS_NAMES}[] = {{\n    \"Grid\",\n    NULL,\n}};"
+            "static const char {PUBLISH_CLASS_NAMES}[] =\n    \"Grid\\000\"\n    \"\";"
         )),
         "{inc}"
     );
