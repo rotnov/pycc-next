@@ -124,3 +124,13 @@ try:
     p.missing
 except AttributeError as err:
     print("AttributeError", err)
+
+# A class body's own `__doc__` and `__firstlineno__` win over the compiler's,
+# and are not inherited.
+for cls in (base.Documented, base.GenericDoc, base.Undocumented):
+    print(cls.__name__, repr(cls.__doc__), cls.__firstlineno__, repr(vars(cls).get("__doc__")))
+# Replacing a field's class entry leaves the instances' storage reachable.
+fld = base.Field(3)
+base.Field.n = 99
+for q in (pickle.loads(pickle.dumps(fld)), copy.deepcopy(fld), copy.copy(fld)):
+    print(type(q).__name__, q.get(), base.Field.n)

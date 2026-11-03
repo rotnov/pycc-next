@@ -92,6 +92,48 @@ fn expand_tabs(text: &str) -> String {
     out
 }
 
+/// A class body's own binding of a name the compiler also puts in its
+/// namespace (`__doc__`, `__firstlineno__`): the body's binding runs after
+/// the compiler's and wins.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Explicit {
+    Str(String),
+    Int(i64),
+    /// Bound some other way: a non-literal value, an augmented assignment.
+    Other,
+}
+
+/// The last binding of `name` by a statement of `class`'s body itself
+/// (`name = ...`, `name: T = ...`, `name += ...`), or `None` when the body
+/// binds it nowhere at its top level.
+pub(crate) fn explicit(class: &pycc_ast::StmtClassDef, name: &str) -> Option<Explicit> {
+    let names = |target: &Expr| matches!(target, Expr::Name(n) if n.id.as_str() == name);
+    let literal = |value: &Expr| match value {
+        Expr::StringLiteral(text) => Explicit::Str(text.value.to_str().to_string()),
+        Expr::NumberLiteral(number) => match &number.value {
+            pycc_ast::Number::Int(int) => int.as_i64().map_or(Explicit::Other, Explicit::Int),
+            _ => Explicit::Other,
+        },
+        _ => Explicit::Other,
+    };
+    let mut found = None;
+    for stmt in &class.body {
+        match stmt {
+            Stmt::Assign(assign) if assign.targets.iter().any(names) => {
+                found = Some(literal(&assign.value));
+            }
+            Stmt::AnnAssign(assign) if names(&assign.target) => {
+                if let Some(value) = &assign.value {
+                    found = Some(literal(value));
+                }
+            }
+            Stmt::AugAssign(assign) if names(&assign.target) => found = Some(Explicit::Other),
+            _ => {}
+        }
+    }
+    found
+}
+
 /// `class`'s `__static_attributes__`: every `self.<name>` store (an
 /// assignment, augmented or annotated assignment, `for` or `with` target,
 /// at any depth) in a function of its body, a nested function's or
@@ -171,6 +213,20 @@ mod tests {
         assert_eq!(doc("    'a\\tb\\n\\tc'\n").as_deref(), Some("a       b\nc"));
         assert_eq!(doc("    x = 1\n"), None);
         assert_eq!(doc("    b'no'\n"), None);
+    }
+
+    #[test]
+    fn the_bodys_own_binding_is_its_last() {
+        let body = class(
+            "class C:\n    \"Doc.\"\n    __doc__ = 'one'\n    __doc__ = 'two'\n    \
+             __firstlineno__: int = 9\n    x = __doc__\n",
+        );
+        assert_eq!(explicit(&body, "__doc__"), Some(Explicit::Str("two".to_string())));
+        assert_eq!(explicit(&body, "__firstlineno__"), Some(Explicit::Int(9)));
+        assert_eq!(explicit(&body, "x"), Some(Explicit::Other));
+        assert_eq!(explicit(&body, "y"), None);
+        let aug = class("class C:\n    __firstlineno__ = 1\n    __firstlineno__ += 1\n");
+        assert_eq!(explicit(&aug, "__firstlineno__"), Some(Explicit::Other));
     }
 
     #[test]

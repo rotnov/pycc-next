@@ -87,7 +87,10 @@ fn classes_match_cpython(release: bool) {
     // The undecorated classes of `pko.base` are compiled and made once. A
     // decorated class and the subclasses `pko.derived` derives across the
     // module boundary run in CPython, from the classes made once.
-    for class in ["Plain", "Explicit", "Child", "Holder", "Kept"] {
+    for class in [
+        "Plain", "Explicit", "Child", "Holder", "Kept", "Field", "Documented", "GenericDoc",
+        "Undocumented",
+    ] {
         assert!(!report.contains(&format!("class `{class}` at")), "{report}");
     }
     for class in ["Counter", "Far", "Farther"] {

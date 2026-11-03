@@ -78,3 +78,34 @@ def total(p: Plain) -> int:
 
 def counted(c: Counter) -> int:
     return c.bump() + c.bump()
+
+
+class Field:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def get(self) -> int:
+        return self.n
+
+
+class Documented:
+    """Opening."""
+
+    __doc__ = "explicit"
+    __firstlineno__ = 7
+
+    def __init__(self) -> None:
+        self.v = 1
+
+
+class GenericDoc(Generic[T]):
+    """Opening."""
+
+    __doc__ = "generic explicit"
+
+    def __init__(self, item: T) -> None:
+        self.item = item
+
+
+class Undocumented(Documented):
+    pass

@@ -235,11 +235,23 @@ pub(crate) fn attach_class_bases(
     let body_attrs = |name: &str| {
         originals.as_ref().and_then(|parsed| {
             parsed.body.iter().rev().find_map(|stmt| match stmt {
-                pycc_ast::Stmt::ClassDef(class) if class.name.as_str() == name => Some((
-                    super::class_body_attrs::first_line(class, original),
-                    super::class_body_attrs::docstring(class),
-                    super::class_body_attrs::static_attributes(class),
-                )),
+                pycc_ast::Stmt::ClassDef(class) if class.name.as_str() == name => {
+                    use super::class_body_attrs::{self as attrs, Explicit};
+                    // The body's own `__firstlineno__` or `__doc__` binding
+                    // runs after the compiler's and wins; one that is not a
+                    // literal is left to the body (`None`: not set here).
+                    let line = match attrs::explicit(class, "__firstlineno__") {
+                        None => Some(attrs::first_line(class, original) as i64),
+                        Some(Explicit::Int(line)) => Some(line),
+                        Some(_) => None,
+                    };
+                    let doc = match attrs::explicit(class, "__doc__") {
+                        None => Some(attrs::docstring(class)),
+                        Some(Explicit::Str(doc)) => Some(Some(doc)),
+                        Some(_) => None,
+                    };
+                    Some((line, doc, attrs::static_attributes(class)))
+                }
                 _ => None,
             })
         })
@@ -283,11 +295,25 @@ pub(crate) fn attach_class_bases(
         let mut spec = class_spec(class.arguments.as_deref());
         let attrs = body_attrs(class.name.as_str());
         if let Some((line, doc, _)) = &attrs {
-            literals.push_str(&format!("\"__firstlineno__\": {line}, "));
-            if let Some(plan) = &mut spec {
-                plan.push_str(&format!("f {line}\n"));
+            // The namespace's own entries, not a base's constants copied
+            // down: `__doc__` and `__firstlineno__` are each class's own.
+            if line.is_some() {
+                entry.constants.retain(|(name, _)| name != "__firstlineno__");
             }
-            if let Some(doc) = doc {
+            if doc.is_some() {
+                entry.constants.retain(|(name, _)| name != "__doc__");
+            }
+            match line {
+                Some(line) => {
+                    literals.push_str(&format!("\"__firstlineno__\": {line}, "));
+                    if let Some(plan) = &mut spec {
+                        plan.push_str(&format!("f {line}\n"));
+                    }
+                }
+                // Only the plan's `f` line carries `__static_attributes__`.
+                None => spec = None,
+            }
+            if let Some(Some(doc)) = doc {
                 literals.push_str(&format!("\"__doc__\": {}, ", python_str_literal(doc)));
                 // A NUL would end the plan's C string: such a docstring is
                 // only evaluated from the source.

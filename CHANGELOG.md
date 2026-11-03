@@ -92,7 +92,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ### Fixed
 - A published compiled class of an `--ext` module has CPython's `__doc__` (its body's
   docstring, cleaned as the compiler cleans it), `__firstlineno__` and
-  `__static_attributes__`; it had `__doc__ = None` and neither of the others.
+  `__static_attributes__`; it had `__doc__ = None` and neither of the others. A class
+  body's own `__doc__ = "..."` or `__firstlineno__ = N` wins, as in CPython, and is not
+  copied to a compiled subclass; such a `__doc__` on a class made from its template
+  (a `Generic[T]` base) made the import fail with `TypeError: cannot set '__doc__'
+  attribute of immutable type`.
 
 ## [0.11.0] - 2026-11-01
 

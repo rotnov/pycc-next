@@ -136,6 +136,11 @@ static PyObject *pycc_ext_make_class_once(PyType_Spec *spec, int (*constants)(Py
             goto fail;
         }
     }
+    /* Its storage stays reachable for pickling and copying once Python code
+     * replaces a field's entry (`carriers_pickle.c`). */
+    if (pycc_ext_note_field_descriptors(cls) < 0) {
+        goto fail;
+    }
     return cls;
 fail:
     Py_XDECREF(empty);

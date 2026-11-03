@@ -42,6 +42,55 @@ static void pycc_ext_refuse_pickle(PyObject *self, const char *detail, PyObject 
     Py_DECREF(type_name);
 }
 
+/*
+ * v0.12: the field descriptors of each class made once (`class_once.c`),
+ * by class: `{class: {name: descriptor}}`. A template was immutable, so its
+ * namespace always held them; a class made once is a mutable class, whose
+ * entry Python code can replace (`C.n = 99`), and the storage must stay
+ * reachable for pickling and copying all the same.
+ */
+static PyObject *pycc_ext_field_descriptors = NULL;
+
+/* Records the data descriptors in `cls`'s own namespace as its field
+ * descriptors. 0, or -1 with an exception set. */
+static int pycc_ext_note_field_descriptors(PyObject *cls)
+{
+    PyObject *proxy, *items, *fields;
+    Py_ssize_t i, n;
+    int status = -1;
+
+    if (pycc_ext_field_descriptors == NULL) {
+        pycc_ext_field_descriptors = PyDict_New();
+        if (pycc_ext_field_descriptors == NULL) {
+            return -1;
+        }
+    }
+    proxy = PyObject_GetAttrString(cls, "__dict__");
+    items = proxy == NULL ? NULL : PyMapping_Items(proxy);
+    Py_XDECREF(proxy);
+    fields = items == NULL ? NULL : PyDict_New();
+    if (fields == NULL) {
+        Py_XDECREF(items);
+        return -1;
+    }
+    n = PyList_Size(items);
+    for (i = 0; i < n; i++) {
+        PyObject *item = PyList_GetItem(items, i);
+        PyObject *descr = PyTuple_GetItem(item, 1);
+
+        if (PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_get) != NULL
+            && PyType_GetSlot(Py_TYPE(descr), Py_tp_descr_set) != NULL
+            && PyDict_SetItem(fields, PyTuple_GetItem(item, 0), descr) < 0) {
+            goto done;
+        }
+    }
+    status = PyDict_SetItem(pycc_ext_field_descriptors, cls, fields);
+done:
+    Py_DECREF(fields);
+    Py_DECREF(items);
+    return status;
+}
+
 /* The data descriptor the compiled classes of `self`'s MRO define for
  * compiled attribute `key` (a new reference), found in their own
  * namespaces: not through `self`'s `__getattribute__` or `__setattr__`,
@@ -65,6 +114,27 @@ static PyObject *pycc_ext_compiled_descriptor(PyObject *self, PyObject *key)
         PyObject *descr;
         if (!pycc_ext_is_compiled_type(c)) {
             continue;
+        }
+        /* A class made once: its recorded descriptors, whatever its
+         * namespace now holds. */
+        dict = pycc_ext_field_descriptors == NULL
+            ? NULL
+            : PyDict_GetItemWithError(pycc_ext_field_descriptors, c);
+        if (dict != NULL) {
+            descr = PyDict_GetItemWithError(dict, key);
+            if (descr != NULL) {
+                Py_DECREF(mro);
+                return Py_NewRef(descr);
+            }
+            if (PyErr_Occurred()) {
+                Py_DECREF(mro);
+                return NULL;
+            }
+            continue;
+        }
+        if (PyErr_Occurred()) {
+            Py_DECREF(mro);
+            return NULL;
         }
         dict = PyObject_GetAttrString(c, "__dict__");
         if (dict == NULL) {
