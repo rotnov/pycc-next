@@ -540,7 +540,7 @@ fn linker_command(_target: Option<&str>) -> std::process::Command {
 /// '-target'") -- for *any* value, even a triple naming this same host
 /// (D-031). Only route through the bundled clang when the caller actually
 /// asked for one: `<LLVM_SYS_221_PREFIX>/bin/clang` is the same
-/// apt.llvm.org prefix layout `ci.yml`'s "Install LLVM 22 (Linux)" step
+/// prefix `scripts/linux_llvm.sh` (apt.llvm.org, or LLVM's release archive)
 /// already installs for `inkwell` itself, so this needs no new install.
 /// The plain, no-target case keeps using the system `cc` unchanged --
 /// verified working there already (D-028 point 1).

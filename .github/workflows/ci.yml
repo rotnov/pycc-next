@@ -4,10 +4,13 @@ on:
   # a green run against the current `main`).
   pull_request:
   # A manual run (e.g. of a branch); `windows_only` skips the Linux and macOS
-  # jobs, to iterate on the Windows job alone.
+  # jobs, to iterate on the Windows job alone; `llvm_release` makes the Linux
+  # jobs install LLVM from its release archive, the fallback
+  # scripts/linux_llvm.sh takes when apt.llvm.org is unreachable.
   workflow_dispatch:
     inputs:
       windows_only: { type: boolean, default: false, description: "Run only the Windows job" }
+      llvm_release: { type: boolean, default: false, description: "Linux: install LLVM from its release archive" }
 permissions: { contents: read }
 jobs:
   # Docs-only pull requests skip the heavy jobs: `code` is false when every changed file
@@ -51,6 +54,7 @@ jobs:
       # wheel hash.
       - run: "python3 -m pip install --only-binary=:all: --require-hashes -r .github/numpy-requirements.txt"
       - name: Install LLVM 22
+        env: { PYCC_LLVM_SOURCE: "${{ inputs.llvm_release && 'release' || 'apt' }}" }
         run: scripts/linux_llvm.sh
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release

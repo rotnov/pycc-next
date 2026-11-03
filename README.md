@@ -602,7 +602,9 @@ download with `curl -LO`, which sets no quarantine flag.
 
 ### From source
 
-Rust 1.97.1 and LLVM 22 (Linux: apt.llvm.org's `llvm-22-dev`; macOS:
+Rust 1.97.1 and LLVM 22 (Linux: apt.llvm.org's `llvm-22-dev`, or LLVM's own
+`LLVM-22.1.8-Linux-*.tar.xz` release unpacked into the prefix, as
+`scripts/linux_llvm.sh` does when apt.llvm.org is unreachable; macOS:
 `brew install llvm@22`):
 
 ```console
