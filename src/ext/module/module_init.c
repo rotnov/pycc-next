@@ -421,7 +421,8 @@ static int pycc_ext_exec_module(PyObject *module)
      * globals are it too. */
     if (pycc_frames_state == 1) {
         pycc_ext_ns_dict = PyModule_GetDict(module);
-        pycc_ext_ns_version = pycc_ext_ns_version_of(pycc_ext_ns_dict, &pycc_ext_ns_counter);
+        pycc_ext_ns_version = pycc_ext_ns_version_of(pycc_ext_ns_dict, &pycc_ext_ns_counter,
+                                                      &pycc_ext_ns_deferred);
         pycc_ext_fn_info_bind(pycc_ext_ns_dict, (PyccFnInfo *const *)pycc_fn_info_table,
                               pycc_fn_info_count);
     }
@@ -432,6 +433,11 @@ static int pycc_ext_exec_module(PyObject *module)
     } else {
         exec_status = pycc_ext_module_exec();
         pycc_ext_forward_remove(module);
+    }
+    /* 3.15: the dict is watched once the body has run (global_sync.c). */
+    if (pycc_ext_ns_deferred) {
+        pycc_ext_ns_deferred = 0;
+        pycc_ext_ns_version = pycc_ext_ns_watch(pycc_ext_ns_dict, &pycc_ext_ns_counter);
     }
 #ifdef PYCC_EXT_HAS_PRECOMPILED
     pycc_ext_code_remove(module);

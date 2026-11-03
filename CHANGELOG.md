@@ -5,6 +5,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- The line an `--ext` module's fallback code runs after a statement to patch its
+  compiled methods' forwarders names each one by its owner path and name, split at
+  build time (`("C",), "m"`), instead of a dotted name split, sliced and looked up
+  at import: the patching costs pydantic's import 1.05M -> 0.58M instructions.
+- On CPython 3.15 an `--ext` module's namespace dict is watched only once its body has
+  run: until then every compiled read of a global looks the name up, so the body's own
+  stores no longer each fire the dict watcher (about 2,700 events in pydantic's
+  import). Reads see every rebinding as before.
 - Making an `--ext` module's published class checks the template's entries against
   its skip list with one `frozenset` lookup, and its slot descriptors by type, instead
   of string comparisons; a package's finder builds a member's path without splitting
