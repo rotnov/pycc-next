@@ -7,6 +7,7 @@
 //! decomposability rule, together with `export_name.rs`. #1145 added the
 //! constructor half.
 
+use super::deferred_classes;
 use super::export_name::ExtReceiver;
 use super::getset::{ExtClassGetsets, getset_c};
 use super::instance_copy::{CarrierCopy, carrier_copy};
@@ -134,7 +135,8 @@ pub(crate) fn method_types_c(
     let mut out = String::new();
     for published in publications {
         out.push_str(&format!(
-            "static PyObject *pycc_ext_type_object_{};\n",
+            "static PyObject *pycc_ext_type_object_{0};\n\
+             static PyObject *pycc_ext_template_object_{0};\n",
             published.class
         ));
     }
@@ -285,6 +287,14 @@ pub(crate) fn method_types_c(
     if publications.iter().any(|published| !published.constants.is_empty()) {
         out.push_str(SET_CONSTANT_C);
     }
+    // v0.12: the classes made at their statement get their template on
+    // first need instead of here (`deferred_classes`).
+    let ordered = template_order(publications);
+    out.push_str(&deferred_classes::makers_c(
+        &ordered,
+        |published| template_base(published, publications),
+        |published| class_constants_c(&published.constants, "return -1;"),
+    ));
     out.push_str(&compiled_class_isinstance_c(publications));
     out.push_str(&publish_class_c(publications));
     out.push_str(&format!("{METHOD_TYPE_REGISTER_DECL}\n{{\n"));
@@ -296,18 +306,26 @@ pub(crate) fn method_types_c(
     // v0.9: base templates first, each template deriving from its first
     // published compiled base's (or from the root carrier type), so
     // templates combined by multiple inheritance share their layout.
-    for published in template_order(publications) {
+    for published in ordered {
         let class = &published.class;
-        let base = published.mro.iter().skip(1).find_map(|ancestor| {
-            publications
-                .iter()
-                .find(|other| other.class == *ancestor)
-                .map(|other| format!("pycc_ext_type_object_{}", other.class))
-        });
-        out.push_str(&match base {
-            Some(base) => format!("    base = {base};\n"),
-            None => "    base = pycc_ext_template_base();\n".to_string(),
-        });
+        if deferred_classes::is_deferred(published) {
+            // Made at its statement: each exec starts without the class an
+            // earlier exec made, as each made its own template before.
+            if let Some(entry) = slots.iter().find(|entry| entry.class == *class) {
+                let array = format!("pycc_ext_type_slots_{class}");
+                out.push_str(&richcompare::unhashable_fixup(entry, &array));
+            }
+            out.push_str(&format!(
+                "    Py_CLEAR(pycc_ext_type_object_{class});\n    \
+                 Py_CLEAR(pycc_ext_template_object_{class});\n    \
+                 if (pycc_ext_carrier_forget(\"{class}\") < 0) {{\n        return -1;\n    }}\n"
+            ));
+            continue;
+        }
+        out.push_str(&format!(
+            "    base = {};\n",
+            template_base(published, publications)
+        ));
         out.push_str("    if (base == NULL) {\n        return -1;\n    }\n");
         // The carrier-type cache (#1435) takes its own reference, so on a
         // failing arm the local one is released, which keeps a failed
@@ -327,9 +345,12 @@ pub(crate) fn method_types_c(
              if (type == NULL) {{\n        return -1;\n    }}\n{constants}    \
              if (pycc_ext_carrier_register(\"{class}\", type) < 0) {{\n        \
              Py_DECREF(type);\n        return -1;\n    }}\n    \
+             Py_XDECREF(pycc_ext_template_object_{class});\n    \
+             pycc_ext_template_object_{class} = Py_NewRef(type);\n    \
              Py_XDECREF(pycc_ext_type_object_{class});\n    \
              pycc_ext_type_object_{class} = type;\n",
-            constants = class_constants_c(&published.constants)
+            constants =
+                class_constants_c(&published.constants, "Py_DECREF(type);\n        return -1;")
         ));
     }
     out.push_str(&hidden_registration);
@@ -390,7 +411,28 @@ fn publish_class_c(publications: &[ExtPublishedClass]) -> String {
         }
     }
     out.push_str("    (void)name;\n    return NULL;\n}\n\n");
+    out.push_str(&deferred_classes::lookups_c(publications));
     out
+}
+
+/// The C expression of the base `published`'s template derives from: the
+/// template of its first published compiled base in this module (that
+/// base's template maker when it is made at its statement; never the class
+/// made from it, which the type static holds once its statement ran), else
+/// the root carrier type.
+fn template_base(published: &ExtPublishedClass, publications: &[ExtPublishedClass]) -> String {
+    let base = published
+        .mro
+        .iter()
+        .skip(1)
+        .find_map(|ancestor| publications.iter().find(|other| other.class == *ancestor));
+    match base {
+        Some(base) if deferred_classes::is_deferred(base) => {
+            format!("pycc_ext_class_template_{}()", base.class)
+        }
+        Some(base) => format!("pycc_ext_template_object_{}", base.class),
+        None => "pycc_ext_template_base()".to_string(),
+    }
 }
 
 /// The generated lookup of a published class's statement arguments as the
@@ -486,8 +528,11 @@ pub(crate) fn compiled_class_isinstance_c(publications: &[ExtPublishedClass]) ->
             .iter()
             .filter(|published| published.mro.iter().any(|ancestor| ancestor == name))
         {
+            // v0.12: a class made at its statement has no type object
+            // before the statement runs, and no object is an instance of it.
             out.push_str(&format!(
-                "        found = PyObject_IsInstance(o, pycc_ext_type_object_{});\n        \
+                "        found = pycc_ext_type_object_{0} == NULL\n            ? 0\n            \
+                 : PyObject_IsInstance(o, pycc_ext_type_object_{0});\n        \
                  if (found != 0) {{\n            return found;\n        }}\n",
                 published.class
             ));
@@ -889,7 +934,7 @@ const SET_CONSTANT_C: &str = "static int pycc_ext_type_set_constant(PyObject *ty
 
 /// The C statements setting `constants` on `type` right after it is
 /// created, or nothing for a class without one.
-fn class_constants_c(constants: &[(String, pycc_hir::ClassAttrValue)]) -> String {
+fn class_constants_c(constants: &[(String, pycc_hir::ClassAttrValue)], on_fail: &str) -> String {
     use pycc_hir::ClassAttrValue;
     if constants.is_empty() {
         return String::new();
@@ -915,7 +960,7 @@ fn class_constants_c(constants: &[(String, pycc_hir::ClassAttrValue)]) -> String
         };
         out.push_str(&format!(
             "    if (pycc_ext_type_set_constant(type, {}, {value}) < 0) {{\n        \
-             Py_DECREF(type);\n        return -1;\n    }}\n",
+             {on_fail}\n    }}\n",
             super::c_string_literal(name)
         ));
     }

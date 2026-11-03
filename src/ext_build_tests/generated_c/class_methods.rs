@@ -107,6 +107,8 @@ fn an_exported_method_gets_a_method_table_a_slot_table_and_a_non_instantiable_sp
              if (type == NULL) {\n        return -1;\n    }\n    \
              if (pycc_ext_carrier_register(\"Grid\", type) < 0) {\n        \
              Py_DECREF(type);\n        return -1;\n    }\n    \
+             Py_XDECREF(pycc_ext_template_object_Grid);\n    \
+             pycc_ext_template_object_Grid = Py_NewRef(type);\n    \
              Py_XDECREF(pycc_ext_type_object_Grid);\n    pycc_ext_type_object_Grid = type;\n"
         ),
         "{inc}"

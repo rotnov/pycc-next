@@ -5,6 +5,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- An `--ext` module's published class whose statement's bases are none, `object`, or
+  compiled classes of its module made the same way is made once, when its statement
+  runs, straight from its compiled layout, methods and slots: no template type is made
+  at import and none stands between the class and its bases, so its `__mro__` is
+  CPython's with only the root `pycc.compiled` added before `object`. Other statements
+  (a `Generic[T]` or other Python base, a metaclass, a keyword) still make the class
+  from a template (`docs/DEVIATIONS.md`). The class deallocates its instances itself,
+  running a `__del__` Python code assigns to it as `subtype_dealloc` did. pystache's
+  import (16 classes made once) runs about 0.83M fewer instructions and 6 fewer page
+  faults, pydantic's 0.74M fewer and 9 fewer faults, mistune's 0.15M fewer.
 - An `--ext` extension's C code calls the stable ABI through the functions CPython's
   own import runs wherever one does the same: the `None`/`True`/`False` singletons are
   the stable ABI's data instead of `Py_GetConstantBorrowed` calls, and
@@ -89,6 +99,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - The pydantic benchmark builds pydantic 2.14.2 with pydantic-core 2.50.2 (2.13.5's
   pydantic-core has no CPython 3.15 wheels); the pinned numpy, Cython and mypy wheels are
   their cp315 builds.
+
+### Fixed
+- A published compiled class of an `--ext` module has CPython's `__doc__` (its body's
+  docstring, cleaned as the compiler cleans it), `__firstlineno__` and
+  `__static_attributes__`; it had `__doc__ = None` and neither of the others. A class
+  body's own `__doc__ = "..."` or `__firstlineno__ = N` wins, as in CPython, and is not
+  copied to a compiled subclass; such a `__doc__` on a class made from its template
+  (a `Generic[T]` base) made the import fail with `TypeError: cannot set '__doc__'
+  attribute of immutable type`. A docstring of a CRLF source is cleaned as CPython
+  cleans it (its line breaks read as `\n` first).
 
 ## [0.11.0] - 2026-11-01
 

@@ -564,7 +564,9 @@ pub(crate) fn plan_embed(
         let mut publications = ext_build::collect_class_publications(typed_hir, &exports.exports);
         let mut ctors = ext_build::collect_constructors(typed_hir, &publications);
         let entry_source = crate::fallback::entry_source(entry);
-        ext_build::attach_class_bases(&mut publications, typed_hir, &entry_source);
+        let original =
+            std::fs::read_to_string(entry).unwrap_or_else(|_| entry_source.clone());
+        ext_build::attach_class_bases(&mut publications, typed_hir, &entry_source, &original);
         let signatures = ext_build::SourceSignatures::from_source(&entry_source);
         ext_build::bind_ctor_keyword_names(typed_hir, &signatures, &mut ctors);
         (publications, ctors)

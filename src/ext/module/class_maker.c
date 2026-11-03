@@ -555,13 +555,44 @@ static PyObject *pycc_ext_class_arg(PyObject *dict, const char *text, Py_ssize_t
 }
 
 /*
+ * A plan line's escaped payload `text` (`len` bytes: `\\` for a backslash,
+ * `\n` for a line break, `plan_escape` in src/ext_build/publication.rs) as
+ * a new `str`, or NULL with an exception set.
+ */
+static PyObject *pycc_ext_plan_text(const char *text, Py_ssize_t len)
+{
+    char *buffer = PyMem_Malloc(len > 0 ? (size_t)len : 1);
+    Py_ssize_t in = 0;
+    Py_ssize_t out = 0;
+    PyObject *value;
+
+    if (buffer == NULL) {
+        return PyErr_NoMemory();
+    }
+    while (in < len) {
+        char ch = text[in++];
+
+        if (ch == '\\' && in < len) {
+            ch = text[in++] == 'n' ? '\n' : '\\';
+        }
+        buffer[out++] = ch;
+    }
+    value = PyUnicode_DecodeUTF8(buffer, out, NULL);
+    PyMem_Free(buffer);
+    return value;
+}
+
+/*
  * Evaluates a class statement's arguments from their plan `spec`
  * (`class_spec` in src/ext_build/publication.rs: an `a NAME` line per
- * positional argument, in source order, then an `n NAME` line per `None`
- * default) in the module namespace `dict`, into `*args` (a tuple),
- * `*kwargs` (an empty dict) and `*literals` (a dict), as `(lambda *a, **k:
- * (a, k))(...)` and the defaults' dict display would. 0, or -1 with an
- * exception set and nothing stored.
+ * positional argument, in source order, then the statement's `f LINE`, its
+ * docstring's `d TEXT` line, an `n NAME` line per `None` default and an
+ * `s NAME` line per name of `__static_attributes__`) in the module
+ * namespace `dict`, into `*args` (a tuple), `*kwargs` (an empty dict) and
+ * `*literals` (a dict: the defaults, `__firstlineno__` and `__doc__` first
+ * and `__static_attributes__` last), as `(lambda *a, **k: (a, k))(...)` and
+ * the namespace's dict display would. 0, or -1 with an exception set and
+ * nothing stored.
  */
 static int pycc_ext_class_args(PyObject *dict, const char *spec, PyObject **args,
                                PyObject **kwargs, PyObject **literals)
@@ -569,6 +600,7 @@ static int pycc_ext_class_args(PyObject *dict, const char *spec, PyObject **args
     PyObject *positional = PyList_New(0);
     PyObject *keywords = PyDict_New();
     PyObject *defaults = PyDict_New();
+    PyObject *attributes = NULL;
     const char *line = spec;
 
     if (positional == NULL || keywords == NULL || defaults == NULL) {
@@ -587,6 +619,25 @@ static int pycc_ext_class_args(PyObject *dict, const char *spec, PyObject **args
             value = pycc_ext_class_arg(dict, text, eol - text);
             status = value == NULL ? -1 : PyList_Append(positional, value);
             Py_XDECREF(value);
+        } else if (line[0] == 'f') {
+            value = PyLong_FromLong(strtol(text, NULL, 10));
+            status = value == NULL
+                ? -1
+                : PyDict_SetItem(defaults, pycc_ext_attr_name("__firstlineno__"), value);
+            Py_XDECREF(value);
+        } else if (line[0] == 'd') {
+            value = pycc_ext_plan_text(text, eol - text);
+            status = value == NULL
+                ? -1
+                : PyDict_SetItem(defaults, pycc_ext_attr_name("__doc__"), value);
+            Py_XDECREF(value);
+        } else if (line[0] == 's') {
+            if (attributes == NULL) {
+                attributes = PyList_New(0);
+            }
+            value = attributes == NULL ? NULL : PyUnicode_FromStringAndSize(text, eol - text);
+            status = value == NULL ? -1 : PyList_Append(attributes, value);
+            Py_XDECREF(value);
         } else {
             PyObject *key = PyUnicode_FromStringAndSize(text, eol - text);
 
@@ -597,6 +648,22 @@ static int pycc_ext_class_args(PyObject *dict, const char *spec, PyObject **args
             goto fail;
         }
         line = *eol == '\0' ? eol : eol + 1;
+    }
+    {
+        /* The statement's `__static_attributes__`: none when the plan has
+         * no `f` line (the build could not read the class's body). */
+        PyObject *tuple = attributes != NULL ? PyList_AsTuple(attributes) : PyTuple_New(0);
+        int has_line = PyDict_Contains(defaults, pycc_ext_attr_name("__firstlineno__"));
+        int status = tuple == NULL || has_line < 0
+            ? -1
+            : has_line ? PyDict_SetItem(defaults, pycc_ext_attr_name("__static_attributes__"), tuple)
+                       : 0;
+
+        Py_XDECREF(tuple);
+        Py_CLEAR(attributes);
+        if (status < 0) {
+            goto fail;
+        }
     }
     *args = PyList_AsTuple(positional);
     Py_DECREF(positional);
@@ -609,6 +676,7 @@ static int pycc_ext_class_args(PyObject *dict, const char *spec, PyObject **args
     *literals = defaults;
     return 0;
 fail:
+    Py_XDECREF(attributes);
     Py_XDECREF(positional);
     Py_XDECREF(keywords);
     Py_XDECREF(defaults);
@@ -724,3 +792,4 @@ static PyObject *pycc_ext_make_public_class_in(PyccExtModule *m, PyObject *modul
     }
     return cls;
 }
+

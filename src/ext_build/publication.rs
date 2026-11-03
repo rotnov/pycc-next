@@ -216,13 +216,48 @@ pub(crate) fn collect_class_publications(
 /// base names a class of this module that is not published (the statement
 /// could not name it), when it is an enum, or when the source does not
 /// parse.
+///
+/// v0.12: the namespace also carries the statement's `__firstlineno__`,
+/// `__doc__` and `__static_attributes__` (`class_body_attrs`), read from
+/// `original`, the
+/// module's own source: `source` may be the fallback rewrite, whose lines
+/// are the original's but whose class bodies may not be.
 pub(crate) fn attach_class_bases(
     publications: &mut [ExtPublishedClass],
     module: &HirModule,
     source: &str,
+    original: &str,
 ) {
     let Ok(parsed) = pycc_parser::parse_all(source) else {
         return;
+    };
+    // CPython reads source with universal newlines: a literal's `\r\n` or
+    // `\r` is `\n` before the compiler cleans a docstring.
+    let original = &original.replace("\r\n", "\n").replace('\r', "\n");
+    let originals = pycc_parser::parse_all(original).ok();
+    let body_attrs = |name: &str| {
+        originals.as_ref().and_then(|parsed| {
+            parsed.body.iter().rev().find_map(|stmt| match stmt {
+                pycc_ast::Stmt::ClassDef(class) if class.name.as_str() == name => {
+                    use super::class_body_attrs::{self as attrs, Explicit};
+                    // The body's own `__firstlineno__` or `__doc__` binding
+                    // runs after the compiler's and wins; one that is not a
+                    // literal is left to the body (`None`: not set here).
+                    let line = match attrs::explicit(class, "__firstlineno__") {
+                        None => Some(attrs::first_line(class, original) as i64),
+                        Some(Explicit::Int(line)) => Some(line),
+                        Some(_) => None,
+                    };
+                    let doc = match attrs::explicit(class, "__doc__") {
+                        None => Some(attrs::docstring(class)),
+                        Some(Explicit::Str(doc)) => Some(Some(doc)),
+                        Some(_) => None,
+                    };
+                    Some((line, doc, attrs::static_attributes(class)))
+                }
+                _ => None,
+            })
+        })
     };
     let published: Vec<String> = publications.iter().map(|p| p.class.clone()).collect();
     for stmt in &parsed.body {
@@ -261,6 +296,37 @@ pub(crate) fn attach_class_bases(
         };
         let mut literals = String::new();
         let mut spec = class_spec(class.arguments.as_deref());
+        let attrs = body_attrs(class.name.as_str());
+        if let Some((line, doc, _)) = &attrs {
+            // The namespace's own entries, not a base's constants copied
+            // down: `__doc__` and `__firstlineno__` are each class's own.
+            if line.is_some() {
+                entry.constants.retain(|(name, _)| name != "__firstlineno__");
+            }
+            if doc.is_some() {
+                entry.constants.retain(|(name, _)| name != "__doc__");
+            }
+            match line {
+                Some(line) => {
+                    literals.push_str(&format!("\"__firstlineno__\": {line}, "));
+                    if let Some(plan) = &mut spec {
+                        plan.push_str(&format!("f {line}\n"));
+                    }
+                }
+                // Only the plan's `f` line carries `__static_attributes__`.
+                None => spec = None,
+            }
+            if let Some(Some(doc)) = doc {
+                literals.push_str(&format!("\"__doc__\": {}, ", python_str_literal(doc)));
+                // A NUL would end the plan's C string: such a docstring is
+                // only evaluated from the source.
+                match &mut spec {
+                    Some(_) if doc.contains('\0') => spec = None,
+                    Some(plan) => plan.push_str(&format!("d {}\n", plan_escape(doc))),
+                    None => {}
+                }
+            }
+        }
         for member in &class.body {
             let pycc_ast::Stmt::Assign(assign) = member else {
                 continue;
@@ -292,9 +358,53 @@ pub(crate) fn attach_class_bases(
                 entry.defaults.push(target.id.to_string());
             }
         }
+        if let Some((_, _, names)) = &attrs {
+            let quoted: Vec<String> = names.iter().map(|name| format!("{name:?}")).collect();
+            let tuple = match quoted.as_slice() {
+                [one] => format!("({one},)"),
+                all => format!("({})", all.join(", ")),
+            };
+            literals.push_str(&format!("\"__static_attributes__\": {tuple}, "));
+            if names.iter().any(|name| !name.is_ascii()) {
+                spec = None;
+            } else if let Some(plan) = &mut spec {
+                for name in names {
+                    plan.push_str(&format!("s {name}\n"));
+                }
+            }
+        }
         entry.bases = Some(format!("{arguments}, {{{literals}}}"));
         entry.spec = spec;
     }
+}
+
+/// `text` as a Python string literal (double-quoted; backslash, quote and
+/// control characters escaped, the rest as is: the source is UTF-8).
+fn python_str_literal(text: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in text.chars() {
+        match ch {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 || ch == '\u{7f}' => {
+                out.push_str(&format!("\\x{:02x}", ch as u32));
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// `text` as one plan line's payload: `\\` and `\n` escaped as `\\\\` and
+/// `\\n`, which `pycc_ext_plan_text` (src/ext/module/class_maker.c) undoes.
+fn plan_escape(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('\n', "\\n")
 }
 
 /// v0.11: a class statement's arguments as the plan the module follows to

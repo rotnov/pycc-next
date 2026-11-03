@@ -42,6 +42,7 @@ static PyccExtModule pycc_ext_mod = {
     0,
     NULL,
     NULL,
+    pycc_ext_class_template,
 };
 
 /* The module's `__dict__` its compiled functions read rebindable globals
@@ -108,6 +109,11 @@ static PyObject *pycc_ext_instance_copy(PyObject *self, PyObject *unused)
 static int pycc_ext_carrier_register(const char *class_name, PyObject *type)
 {
     return pycc_ext_carrier_register_in(&pycc_ext_mod, class_name, type);
+}
+
+static int pycc_ext_carrier_forget(const char *class_name)
+{
+    return pycc_ext_carrier_forget_in(&pycc_ext_mod, class_name);
 }
 
 static PyObject *pycc_fwd_call(int index, PyObject *func, PyObject *const *args, size_t nargsf,

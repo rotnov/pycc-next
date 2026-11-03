@@ -30,7 +30,8 @@ fn the_compiled_class_isinstance_tests_each_published_type_whose_mro_names_the_c
     ]);
     let test = |class: &str| {
         format!(
-            "        found = PyObject_IsInstance(o, pycc_ext_type_object_{class});\n        \
+            "        found = pycc_ext_type_object_{class} == NULL\n            ? 0\n            \
+             : PyObject_IsInstance(o, pycc_ext_type_object_{class});\n        \
              if (found != 0) {{\n            return found;\n        }}\n"
         )
     };
