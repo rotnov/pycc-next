@@ -5,6 +5,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- An `--ext` extension's C code calls the stable ABI through the functions CPython's
+  own import runs wherever one does the same: the `None`/`True`/`False` singletons are
+  the stable ABI's data instead of `Py_GetConstantBorrowed` calls, and
+  `PyObject_CallNoArgs`, `PySet_New`, `PyErr_ExceptionMatches`,
+  `PyDict_GetItemString`, `PyDict_DelItemString`, `PyMem_Calloc`, `Py_XNewRef` and
+  (on CPython 3.13 to 3.15) `PyTuple_SetItem` take those routes. A BOLT-built
+  interpreter (python.org's, the standalone builds) keeps the functions its profile
+  never ran in a cold section, and each first call there faults in the pages around
+  it: the import of pystache touches 5 fewer 64 KiB windows of the interpreter's cold
+  text; minor faults pydantic 1456 -> 1440, mistune 760 -> 756, pystache 126 -> 123.
 - An `--ext` module's published signature wrapper whose defaults are constants (and
   that guards no scalar parameter with a fallback twin) is tabled at build time as the
   wrapper's own code object with its defaults and closure layout, and the import makes

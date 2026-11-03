@@ -35,6 +35,7 @@ use std::sync::OnceLock;
 /// The fixed shim without `module_init.c` (the module unit's), in
 /// translation-unit order, with `instances.c`'s include of the companion.
 const FIXED_C: &str = concat!(
+    include_str!("../ext/module/hot_api.c"),
     include_str!("../ext/module/bridge.c"),
     include_str!("../ext/module/frames.c"),
     include_str!("../ext/module/boundary.c"),
