@@ -119,21 +119,57 @@ except ZeroDivisionError as e:
         print(frame.name, frame.filename.endswith(("m.py", "<string>")))
 "#;
 
-fn import(dir: &Path) -> Output {
+/// A module whose `object` rebinds the module's `tuple` when it is called:
+/// a wrapper's factory calls it for its `_pycc_missing=object()` default
+/// before it reads `tuple` for `_pycc_tuple=tuple`, so the wrapper of
+/// `tags` (which passes its `**extra` through `_pycc_tuple`) sees the
+/// rebound `tuple`, made directly or not. CPython never calls it; the
+/// calls bind the same either way.
+const SHADOWED: &str = r#"import builtins
+
+used = []
+
+
+def _tuple(items):
+    used.append(1)
+    return builtins.tuple(items)
+
+
+def object():
+    global tuple
+    tuple = _tuple
+    return builtins.object()
+
+
+def tags(name, sep="-", **extra):
+    out = name
+    for k in extra:
+        out += sep + k + "=" + extra[k]
+    return out
+"#;
+
+const SHADOWED_DRIVER: &str = r#"
+import sys
+import m
+print(m.tags("n"), m.tags("n", "+", k="v", z="w"), m.tags(name="x", sep="", a="b"))
+print("rebound tuple used:", bool(m.used), file=sys.stderr)
+"#;
+
+fn import(dir: &Path, driver: &str) -> Output {
     python()
-        .args(["-B", "-c", DRIVER])
+        .args(["-B", "-c", driver])
         .current_dir(dir)
         .output()
         .expect("python should spawn")
 }
 
 /// Builds the module as an `--ext` module, imports it and the source, and
-/// checks the same stdout; returns the compiled side's count of factories
-/// run at import.
-fn check(label: &str) -> String {
+/// checks the same stdout; returns the first line the compiled side's
+/// `driver` writes to stderr.
+fn check(label: &str, module: &str, driver: &str) -> String {
     let compiled = ScratchDir::new(label).expect("scratch");
     let path = compiled.join("m.py");
-    std::fs::write(&path, MODULE).expect("write the module");
+    std::fs::write(&path, module).expect("write the module");
     let build = pycc()
         .args(["build", "--ext", "--non-strict"])
         .arg(&path)
@@ -144,8 +180,8 @@ fn check(label: &str) -> String {
     assert!(build.status.success(), "{}", text(&build.stderr));
     std::fs::remove_file(&path).expect("import the artifact, not the source");
     let plain = ScratchDir::new(&format!("{label}_src")).expect("scratch");
-    std::fs::write(plain.join("m.py"), MODULE).expect("write the module");
-    let (ours, oracle) = (import(&compiled), import(&plain));
+    std::fs::write(plain.join("m.py"), module).expect("write the module");
+    let (ours, oracle) = (import(&compiled, driver), import(&plain, driver));
     assert_eq!(text(&ours.stdout), text(&oracle.stdout), "{}", text(&ours.stderr));
     assert_eq!(ours.status.code(), Some(0), "{}", text(&ours.stderr));
     assert_eq!(oracle.status.code(), Some(0), "{}", text(&oracle.stderr));
@@ -157,5 +193,10 @@ fn constant_default_wrappers_are_made_without_their_factories() {
     // Every wrapper but `computed`'s, whose default reads `LIMIT` when its
     // factory runs, and `add`'s, whose `int` parameters fall back to the
     // source through a twin, is made directly.
-    assert_eq!(check("signature_defs"), "factories run at import: 2");
+    assert_eq!(check("signature_defs", MODULE, DRIVER), "factories run at import: 2");
+}
+
+#[test]
+fn a_shadowed_object_is_called_before_the_later_defaults_are_read() {
+    assert_eq!(check("signature_defs_object", SHADOWED, SHADOWED_DRIVER), "rebound tuple used: True");
 }

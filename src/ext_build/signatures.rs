@@ -239,15 +239,17 @@ static PyObject *pycc_ext_sig_wrapper(PyObject *spec, PyObject *ns, PyObject *en
         if (found <= 0) {
             goto done;
         }
-    }
-    /* `_pycc_missing=object()`: the call, in place of `object`. */
-    {
-        PyObject *object = bound[1];
+        /* `_pycc_missing=object()`: called in place of `object`, before the
+         * later defaults are read, as the factory's defaults evaluate in
+         * order (a shadowing `object` may rebind them). */
+        if (i == 0) {
+            PyObject *object = bound[1];
 
-        bound[1] = PyObject_CallNoArgs(object);
-        Py_DECREF(object);
-        if (bound[1] == NULL) {
-            goto done;
+            bound[1] = PyObject_CallNoArgs(object);
+            Py_DECREF(object);
+            if (bound[1] == NULL) {
+                goto done;
+            }
         }
     }
     bound[0] = Py_NewRef(entry);
