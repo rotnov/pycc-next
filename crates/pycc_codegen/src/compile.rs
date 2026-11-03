@@ -417,6 +417,9 @@ fn compile_module(
         &slice_widened,
     )?;
 
+    if options.ext {
+        crate::py_literal::python_literals(&module);
+    }
     crate::ndarray::clear_fresh_after_calls(&context, &module, &builder, &rt);
     if options.ext {
         crate::frames::finish_module(&context, &module, &rt);

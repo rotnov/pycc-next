@@ -69,7 +69,7 @@ fn a_native_operand_is_boxed_by_its_packer_and_an_object_passes_through() {
                 "call ptr @pycc_ext_obj_pack_int(",
                 "call ptr @pycc_ext_obj_pack_float(",
                 "call ptr @pycc_ext_obj_pack_bool(",
-                "call ptr @pycc_ext_obj_pack_str(",
+                "call ptr @pycc_ext_obj_str_literal(",
             ] {
                 assert_eq!(count(ir, packer), 1, "{packer}: {ir}");
             }
