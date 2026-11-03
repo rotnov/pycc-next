@@ -40,11 +40,13 @@ use inkwell::llvm_sys::core::{
     LLVMGetValueName2, LLVMInstructionEraseFromParent, LLVMInt64TypeInContext, LLVMIsABranchInst,
     LLVMIsACallInst, LLVMIsAGlobalVariable, LLVMIsAICmpInst, LLVMIsALoadInst, LLVMIsAPHINode,
     LLVMIsConditional, LLVMPointerTypeInContext, LLVMPositionBuilderBefore, LLVMGetAsString,
-    LLVMGetInitializer, LLVMInt32TypeInContext, LLVMConstInt,
+    LLVMGetInitializer, LLVMInt32TypeInContext, LLVMConstInt, LLVMGetArrayLength2,
+    LLVMGetTypeKind, LLVMGlobalGetValueType, LLVMIsAConstantAggregateZero,
+    LLVMIsAConstantDataSequential,
     LLVMReplaceAllUsesWith, LLVMSetInitializer, LLVMSetLinkage,
 };
 use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMValueRef};
-use inkwell::llvm_sys::LLVMLinkage;
+use inkwell::llvm_sys::{LLVMLinkage, LLVMTypeKind};
 use inkwell::module::Module;
 
 /// The shim's helper the rewritten sites call (`src/ext/module/object_ops.c`).
@@ -212,16 +214,35 @@ fn build_value(build: LLVMBasicBlockRef) -> LLVMValueRef {
 }
 
 /// The bytes of literal global `text` (`emit_string_literal`'s constant
-/// array, without a terminator).
-fn literal_text(text: LLVMValueRef) -> Vec<u8> {
-    let mut len = 0;
-    // SAFETY: `text` is a global whose initializer is a constant byte array.
+/// array, without a terminator), or None when its initializer is neither
+/// form LLVM gives such an array. A text of only NUL bytes, the empty one
+/// included, is a `ConstantAggregateZero` (`ConstantDataArray::getString`
+/// folds an all-zero array to it), which `LLVMGetAsString` must not be
+/// given: its bytes are as many zeros as the array type is long.
+fn literal_text(text: LLVMValueRef) -> Option<Vec<u8>> {
+    // SAFETY: `text` is a global variable (`site` matched it); its
+    // initializer and value type are only read, each kind checked first.
     unsafe {
-        let data = LLVMGetAsString(LLVMGetInitializer(text), &mut len);
-        if data.is_null() {
-            return Vec::new();
+        let init = LLVMGetInitializer(text);
+        if init.is_null() {
+            return None;
         }
-        std::slice::from_raw_parts(data.cast::<u8>(), len).to_vec()
+        if !LLVMIsAConstantDataSequential(init).is_null() {
+            let mut len = 0;
+            let data = LLVMGetAsString(init, &mut len);
+            if data.is_null() {
+                return None;
+            }
+            return Some(std::slice::from_raw_parts(data.cast::<u8>(), len).to_vec());
+        }
+        if !LLVMIsAConstantAggregateZero(init).is_null() {
+            let array = LLVMGlobalGetValueType(text);
+            if LLVMGetTypeKind(array) == LLVMTypeKind::LLVMArrayTypeKind {
+                let len = usize::try_from(LLVMGetArrayLength2(array)).ok()?;
+                return Some(vec![0; len]);
+            }
+        }
+        None
     }
 }
 
@@ -259,6 +280,15 @@ pub(crate) fn python_literals(module: &Module<'_>) -> usize {
             function = LLVMGetNextFunction(function);
         }
     }
+    // A text this pass cannot read keeps its native object.
+    let mut texts = Vec::new();
+    sites.retain(|site| match literal_text(site.text) {
+        Some(text) => {
+            texts.push(text);
+            true
+        }
+        None => false,
+    });
     if sites.is_empty() {
         return 0;
     }
@@ -282,9 +312,8 @@ pub(crate) fn python_literals(module: &Module<'_>) -> usize {
         // shares its object, as one code object's equal constants do.
         let mut slots: std::collections::HashMap<Vec<u8>, LLVMValueRef> =
             std::collections::HashMap::new();
-        for site in &sites {
+        for (site, text) in sites.iter().zip(texts) {
             debug_assert_eq!(LLVMGetBasicBlockParent(site.build), LLVMGetBasicBlockParent(site.join));
-            let text = literal_text(site.text);
             let interned = LLVMConstInt(i32_type, u64::from(interned_as_constant(&text)), 0);
             let slot = *slots.entry(text).or_insert_with(|| {
                 let slot = LLVMAddGlobal(raw, ptr, slot_name.as_ptr());

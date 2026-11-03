@@ -26,3 +26,9 @@ def tag(x: int) -> object:
 
 
 print(tag(3), tag(4))
+# Texts of only NUL bytes: LLVM folds such an array to a zero initializer.
+z = collections.deque()
+z.append("\0")
+z.append("\0\0")
+z.append("\0")
+print([len(s) for s in z], z[0] is z[2], z[1] == "\x00" * 2)

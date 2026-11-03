@@ -60,6 +60,43 @@ fn a_packed_literal_is_a_cpython_str_made_directly() {
     );
 }
 
+/// A text of only NUL bytes (the empty one too) has a zero initializer,
+/// not a byte array: it is read as that many zeros, and interned by the
+/// same rule as any other text.
+#[test]
+fn an_all_nul_literal_is_read_from_its_zero_initializer() {
+    compile_ext_items_checking_ir(
+        "py_literal_nul",
+        with_foreign_numpy(
+            [
+                store("s", literal("\0")),
+                store("t", literal("\0\0")),
+                store("u", literal("")),
+                store("v", literal("\0")),
+            ]
+            .into_iter()
+            .map(MirItem::TopLevelStmt)
+            .collect(),
+        ),
+        |ir| {
+            let symbol = crate::py_literal::EXT_OBJ_STR_LITERAL_SYMBOL;
+            assert_eq!(calls(ir, symbol), 4, "{ir}");
+            assert_eq!(calls(ir, crate::ext::EXT_OBJ_PACK_STR_SYMBOL), 0, "{ir}");
+            let slots = ir
+                .lines()
+                .filter(|line| line.starts_with("@py_lit_cache"))
+                .count();
+            assert_eq!(slots, 3, "{ir}");
+            let flags: Vec<&str> = ir
+                .lines()
+                .filter(|line| line.contains(&format!("call ptr @{symbol}(")))
+                .map(|line| line.rsplit("i32 ").next().unwrap_or_default())
+                .collect();
+            assert_eq!(flags, ["1)", "0)", "1)", "1)"], "{ir}");
+        },
+    );
+}
+
 /// A literal whose value is also used natively -- bound to a local and
 /// packed from there -- keeps its native object and its pack.
 #[test]
