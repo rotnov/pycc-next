@@ -657,10 +657,14 @@ impl Plan {
     }
 
     /// The line run after split statement `index`, once it has bound its
-    /// names: `__pycc_forward__("C.m", ...)` patches the forwarder of each
-    /// compiled lift of it, named by its qualified name
-    /// (`src/ext/module/forward.c`), so a call reaches the compiled body
-    /// with no forwarder frame. Empty when no lift of it compiled.
+    /// names: `__pycc_forward__(("C",), "m", ...)` patches the forwarder of
+    /// each compiled lift of it (`src/ext/module/forward.c`), so a call
+    /// reaches the compiled body with no forwarder frame. Each qualified
+    /// name is split here, not at import: a name is preceded by its owner
+    /// path when that differs from the name before it (`("C",)` for `C.m`,
+    /// `("Outer", "Inner")` for `Outer.Inner.m`, `()` back to the
+    /// namespace for a function after a class's member). Empty when no lift
+    /// of it compiled.
     pub(super) fn forward_call(&self, index: usize) -> String {
         let mut names: Vec<&str> = Vec::new();
         for unit in self.lifts_of(index) {
@@ -675,10 +679,51 @@ impl Plan {
         if names.is_empty() {
             return String::new();
         }
-        let quoted: Vec<String> = names.iter().map(|name| format!("\"{name}\"")).collect();
-        format!("{FORWARD_HOOK}({})\n", quoted.join(", "))
+        format!("{FORWARD_HOOK}({})\n", forward_args(&names).join(", "))
     }
+}
+
+/// [`Plan::forward_call`]'s arguments for `qualnames`: each name, after its
+/// owner path when that differs from the previous name's.
+fn forward_args(qualnames: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = "";
+    for qualname in qualnames {
+        let (owner, member) = qualname.rsplit_once('.').unwrap_or(("", qualname));
+        if owner != current {
+            let parts: Vec<String> = owner
+                .split('.')
+                .filter(|part| !part.is_empty())
+                .map(|part| format!("\"{part}\""))
+                .collect();
+            out.push(match parts.len() {
+                0 => "()".to_string(),
+                1 => format!("({},)", parts[0]),
+                _ => format!("({})", parts.join(", ")),
+            });
+            current = owner;
+        }
+        out.push(format!("\"{member}\""));
+    }
+    out
 }
 
 /// The hook [`Plan::forward_call`]'s line calls (`forward.c`).
 const FORWARD_HOOK: &str = "__pycc_forward__";
+
+#[cfg(test)]
+mod tests {
+    use super::forward_args;
+
+    #[test]
+    fn each_name_follows_its_owner_path_when_that_changes() {
+        assert_eq!(forward_args(&["f"]), ["\"f\""]);
+        assert_eq!(
+            forward_args(&["C.m", "C.n", "C.D.k", "C.p", "g"]),
+            [
+                "(\"C\",)", "\"m\"", "\"n\"", "(\"C\", \"D\")", "\"k\"", "(\"C\",)", "\"p\"",
+                "()", "\"g\"",
+            ]
+        );
+    }
+}

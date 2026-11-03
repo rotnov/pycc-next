@@ -305,24 +305,64 @@ static int pycc_ext_ns_setdefault(PyObject *ns, PyObject *key, PyObject *value)
 }
 
 /* Whether `key` is one of the template's own entries a class never takes
- * over from it. */
+ * over from it: 1 or 0, or -1 with an exception set. The names are a
+ * `frozenset` made once, so a key is one hashed lookup (its hash cached in
+ * the `str`) instead of a string comparison per name. */
 static int pycc_ext_class_skipped(PyObject *key)
 {
     static const char *const skipped[] = {
         "__module__", "__qualname__", "__doc__", "__dict__", "__weakref__",
         "__init_subclass__", "__new__", "__slots__", NULL,
     };
-    const char *const *name;
+    static PyObject *names = NULL;
 
     if (!PyUnicode_Check(key)) {
         return 0;
     }
-    for (name = skipped; *name != NULL; name++) {
-        if (PyUnicode_CompareWithASCIIString(key, *name) == 0) {
-            return 1;
+    if (names == NULL) {
+        PyObject *list = PyList_New(0);
+        const char *const *name;
+
+        if (list == NULL) {
+            return -1;
+        }
+        for (name = skipped; *name != NULL; name++) {
+            PyObject *text = pycc_ext_attr_name(*name);
+
+            if (text == NULL || PyList_Append(list, text) < 0) {
+                Py_DECREF(list);
+                return -1;
+            }
+        }
+        names = PyFrozenSet_New(list);
+        Py_DECREF(list);
+        if (names == NULL) {
+            return -1;
         }
     }
-    return 0;
+    return PySet_Contains(names, key);
+}
+
+/* Whether `type` is `getset_descriptor`, the type of a `__slots__` entry
+ * of the template. The type is known once its name has been checked: the
+ * first match is kept, so later entries compare one pointer. */
+static int pycc_ext_is_getset_type(PyTypeObject *type)
+{
+    static PyTypeObject *getset = NULL;
+    PyObject *kind;
+    int match;
+
+    if (getset != NULL) {
+        return type == getset;
+    }
+    kind = PyType_GetName(type);
+    match = kind != NULL && PyUnicode_CompareWithASCIIString(kind, "getset_descriptor") == 0;
+    Py_XDECREF(kind);
+    PyErr_Clear();
+    if (match) {
+        getset = type;
+    }
+    return match;
 }
 
 /*
@@ -432,11 +472,7 @@ static PyObject *pycc_ext_make_class(PyObject *template, PyObject *name, PyObjec
             goto done;
         }
         if (slot != NULL) {
-            PyObject *kind = PyType_GetName(Py_TYPE(slot));
-            int getset = kind != NULL && PyUnicode_CompareWithASCIIString(kind, "getset_descriptor") == 0;
-
-            Py_XDECREF(kind);
-            if (getset) {
+            if (pycc_ext_is_getset_type(Py_TYPE(slot))) {
                 PYCC_SETREF(entry, pycc_ext_slot_default_new(slot, value));
             }
             Py_DECREF(slot);
@@ -456,10 +492,11 @@ static PyObject *pycc_ext_make_class(PyObject *template, PyObject *name, PyObjec
     }
     for (i = 0; i < PyList_Size(items); i++) {
         PyObject *item = PyList_GetItem(items, i);
+        int skip;
 
         key = PyTuple_GetItem(item, 0);
-        if (!pycc_ext_class_skipped(key)
-            && pycc_ext_ns_setdefault(ns, key, PyTuple_GetItem(item, 1)) < 0) {
+        skip = pycc_ext_class_skipped(key);
+        if (skip < 0 || (!skip && pycc_ext_ns_setdefault(ns, key, PyTuple_GetItem(item, 1)) < 0)) {
             goto done;
         }
     }
