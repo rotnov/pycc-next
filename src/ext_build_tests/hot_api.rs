@@ -27,7 +27,9 @@ fn the_runtime_and_module_units_see_the_routes_before_any_call() {
 
 #[test]
 fn the_package_unit_opens_with_the_routes() {
-    let finder = crate::package_build::FINDER_C;
+    // Normalized as `shim_c` normalizes the shim: a Windows checkout embeds
+    // the C sources with CRLF endings.
+    let finder = crate::package_build::FINDER_C.replace("\r\n", "\n");
     assert!(finder.starts_with("/*\n * How the shim (and the package unit"));
     for route in ROUTES {
         assert!(
