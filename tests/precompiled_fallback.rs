@@ -145,14 +145,19 @@ fn an_ext_module_imports_its_fallback_code_without_compiling_it() {
 /// source order and the import rebuilds it as the compiler does (the
 /// differential fuzzer's finding), with no `compile()` at import. Checked
 /// under several hash seeds, `str` and `int` elements, a nested function's
-/// constant and a membership test.
+/// constant, a method's in a class nested in a function (its path through
+/// three code objects), a display repeated in one function (one constant)
+/// and a membership test.
 #[test]
 fn a_constant_set_display_in_fallback_code_keeps_the_sources_order() {
     let module = "def f(p0: tuple, p1: tuple) -> dict:\n    s: str = {1, 8, 0}\n    \
                   print(s, {3, 70, 1, 900}, frozenset({5, 37, 2}))\n    \
                   print({'d', 'a', 'c', 'b', 'e'}, {1, 9, 17, 25, 33, 2})\n    \
                   def g(k):\n        return [x for x in {'zz', 'k', 'q', 'aa'}], k in {9, 33, 1}\n    \
-                  print(g(9))\n\n\nf(6, 5)\n";
+                  print(g(9))\n    \
+                  class K:\n        def m(self):\n            \
+                  return [y for y in {'q', 'b', 'x', 'm'}], {'q', 'b', 'x', 'm'}, {44, 4, 404}\n    \
+                  print(K().m())\n\n\nf(6, 5)\n";
     let compiled = ScratchDir::new("precompiled_sets").expect("scratch");
     let source = compiled.join("m.py");
     std::fs::write(&source, module).expect("write the module");

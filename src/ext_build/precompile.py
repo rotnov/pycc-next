@@ -2,10 +2,12 @@
 # with `-I -c` by the target interpreter; stdin and stdout are described there.
 import sys,marshal,importlib.util,__future__,opcode
 from opcode import opmap as O
-def walk(co,acc):
-  for k in co.co_consts:
-    if type(k) is frozenset and len(k)>1: acc.append(k)
-    elif hasattr(k,'co_consts'): walk(k,acc)
+# Every `frozenset` constant of `co` (and its nested code), with the path of
+# `co_consts` indices that leads to it, appended to `acc` as `(path, set)`.
+def walk(co,acc,path=()):
+  for i,k in enumerate(co.co_consts):
+    if type(k) is frozenset and len(k)>1: acc.append((path+(i,),k))
+    elif hasattr(k,'co_consts'): walk(k,acc,path+(i,))
 def displays(src):
   import ast
   out=[]
@@ -20,10 +22,10 @@ def orders(src,co):
   if not sets: return None
   shown=displays(src)
   out=[]
-  for k in sets:
+  for p,k in sets:
     found={t for t in shown if frozenset(t)==k}
     if len(found)!=1: raise ValueError
-    out.append(found.pop())
+    out.append((p,found.pop()))
   return tuple(out)
 def requal(c,old,new):
   ks=tuple(requal(k,old,new) if hasattr(k,'co_code') else k for k in c.co_consts)
