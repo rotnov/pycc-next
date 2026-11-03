@@ -58,3 +58,17 @@ Accept (carried over from v0.11, not met there):
 2. **pystache's import no slower than CPython's** in the CI benchmark job, on both
    runners, and no package check regresses. v0.11 (CPython 3.13): 0.97x / 0.94x; against
    3.15: 0.94x / 0.93x.
+
+### Progress: the levers
+
+Each lever is measured locally against the merged head before it (PBS CPython 3.15.2,
+`valgrind --tool=callgrind`, `PYTHONHASHSEED=0`; own share of the import as in the
+gap report: the package's dependencies imported first, the same process importing
+nothing subtracted; repeated runs vary by about 0.3M for pydantic, so a lever's own
+mechanism is also quoted by its inclusive cost). Baseline at d5f6752: pydantic 143.47M
+against CPython's 136.24M (0.950x); mistune 19.93M against 22.53M; pystache 7.47M
+against 6.97M.
+
+| lever | change | pydantic | mistune | pystache |
+|---|---|---|---|---|
+| 2 | a `str` literal only handed to CPython made as a CPython `str` directly, one per text of the module (the literals' share 1.75M -> 1.10M inclusive) | -0.65M | -0.15M | -0.03M |

@@ -389,6 +389,34 @@ PyObject *pycc_ext_obj_pack_str(void *value)
 }
 
 /*
+ * A `str` literal that only crosses into CPython (v0.12,
+ * `crates/pycc_codegen/src/py_literal.rs`): the CPython `str` of the
+ * literal's `len` UTF-8 bytes, made on the first evaluation of a site of
+ * the module with that text -- interned when `intern` is set, which the
+ * build sets exactly when `pycc_ext_obj_pack_str` interns a literal's --
+ * and kept in the text's own `slot` for the process's life; a new
+ * reference, as a packer answers. NULL with the exception set when it
+ * cannot be made.
+ */
+PyObject *pycc_ext_obj_str_literal(const char *bytes, int64_t len, PyObject **slot, int intern)
+{
+    PyObject *made = *slot;
+
+    if (made == NULL) {
+        made = PyUnicode_FromStringAndSize(bytes, (Py_ssize_t)len);
+        if (made == NULL) {
+            return NULL;
+        }
+        if (intern) {
+            PyUnicode_InternInPlace(&made);
+        }
+        *slot = made;
+    }
+    Py_INCREF(made);
+    return made;
+}
+
+/*
  * Part 2a of #1371: the packer for an argument (or subscript key) whose
  * static type is itself the opaque `object`, as in `copy.deepcopy(o)` or
  * `table[k]` with an object `k`. Borrowing like its scalar neighbours: the

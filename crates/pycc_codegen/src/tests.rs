@@ -47,6 +47,8 @@ mod object_comprehension;
 mod object_list_display;
 // #1457: storing and deleting an attribute of a CPython object.
 mod object_attr_store;
+// v0.12: a literal only ever packed made as a CPython `str` directly.
+mod py_literal;
 // #1475: boxing a native value into an `object` slot.
 mod object_box;
 mod object_unbox;
