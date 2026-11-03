@@ -108,7 +108,7 @@ fn each_seam_packs_its_value_once_and_routes_a_null_to_the_failure_edge() {
         for (name, packer) in [
             ("arg_int", "pycc_ext_obj_pack_int"),
             ("ret_bool", "pycc_ext_obj_pack_bool"),
-            ("bind_str", "pycc_ext_obj_pack_str"),
+            ("bind_str", "pycc_ext_obj_str_literal"),
         ] {
             let body = body_of(ir, name);
             assert_eq!(body.matches(packer).count(), 1, "{name}: {body}");

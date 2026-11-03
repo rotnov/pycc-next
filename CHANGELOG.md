@@ -13,6 +13,13 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   rebuilds each in source order along the path the build recorded to it, instead of
   walking every nested code object at import: pydantic's import runs 1.55M fewer
   instructions (of about 143M). The constants iterate as before.
+- A `str` literal an `--ext` module only hands to CPython (a call's argument, a stored
+  attribute, a subscript key) is made as a CPython `str` directly, on the first
+  evaluation of the module's sites of that text, instead of as a native string that is
+  then copied and interned: pydantic's import runs about 0.7M fewer instructions (the
+  literals' share 1.75M -> 1.10M), mistune's 0.15M. The sites of one text share one
+  object, as CPython's merged constants of a module do: two equal literals that are not
+  interned (`'a b'`) are now the same object, as in CPython.
 - **CPython 3.15 is the oracle** (was 3.13): CI, the fuzzer, the benchmarks and the
   release builds run CPython 3.15 (3.15.1 on the hosted runners), and native programs match 3.15's behavior: every
   `ZeroDivisionError` says `division by zero`, `0.0 ** -1` says `zero to a negative
