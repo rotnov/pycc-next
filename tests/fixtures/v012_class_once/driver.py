@@ -134,3 +134,11 @@ fld = base.Field(3)
 base.Field.n = 99
 for q in (pickle.loads(pickle.dumps(fld)), copy.deepcopy(fld), copy.copy(fld)):
     print(type(q).__name__, q.get(), base.Field.n)
+
+# A class made from its template over a base made once: the base's own
+# instances still cross as the base.
+made, mixed = base.make_plain(4), base.make_mixed(2)
+print(type(made).__name__, isinstance(made, base.Plain), type(made) is base.Plain,
+      isinstance(mixed, base.Plain), mixed.value(), base.total(mixed), mro(base.Mixed))
+for q in (pickle.loads(pickle.dumps(made)), copy.deepcopy(mixed)):
+    print(type(q).__name__, q.n, q.value())

@@ -87,6 +87,12 @@ fn a_deferred_class_gets_a_template_maker_and_both_lookups_answer_it() {
         assert!(makers.contains(&format!(
             "type = PyType_FromSpecWithBases(&pycc_ext_type_spec_{class}, base);"
         )));
+        // Registered as the carrier only while no published class is.
+        assert!(makers.contains(&format!(
+            "    if (pycc_ext_class_constants_{class}(type) < 0\n        \
+             || (pycc_ext_type_object_{class} == NULL\n            \
+             && pycc_ext_carrier_register(\"{class}\", type) < 0)) {{\n"
+        )));
         assert!(makers.contains(&format!(
             "    if (pycc_ext_type_object_{class} == NULL) {{\n        \
              pycc_ext_type_object_{class} = Py_NewRef(type);\n    }}\n"
@@ -112,4 +118,19 @@ fn a_class_with_no_plan_keeps_its_template_and_the_lookups_still_link() {
     assert!(!lookups.contains("strcmp"));
     assert!(lookups.contains("    return 0;\n}\n"));
     assert!(lookups.contains("? template_of()\n        : NULL;"));
+}
+
+#[test]
+fn a_crlf_source_gives_the_docstring_and_lines_an_lf_source_gives() {
+    let crlf = SOURCE.replace('\n', "\r\n");
+    let mut lf = vec![published("Base"), published("Child")];
+    attach_class_bases(&mut lf, &module(Vec::new()), SOURCE, SOURCE);
+    let mut from_crlf = vec![published("Base"), published("Child")];
+    attach_class_bases(&mut from_crlf, &module(Vec::new()), &crlf, &crlf);
+    assert_eq!(from_crlf, lf);
+    // An old Mac source's lone `\r` ends a line too.
+    let cr = SOURCE.replace('\n', "\r");
+    let mut from_cr = vec![published("Base"), published("Child")];
+    attach_class_bases(&mut from_cr, &module(Vec::new()), &cr, &cr);
+    assert_eq!(from_cr[0].spec, lf[0].spec);
 }

@@ -33,15 +33,19 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&pycc_scratch::lf(bytes)).replace("\r\n", "\n")
 }
 
-fn copy_tree(from: &Path, to: &Path) {
+/// Copies the fixture tree with each file's line endings `ending`, whatever
+/// the checkout's, so both are tested on every OS.
+fn copy_tree(from: &Path, to: &Path, ending: &str) {
     std::fs::create_dir_all(to).expect("create a directory");
     for entry in std::fs::read_dir(from).expect("read the fixture") {
         let entry = entry.expect("an entry");
         let target = to.join(entry.file_name());
         if entry.file_type().expect("its type").is_dir() {
-            copy_tree(&entry.path(), &target);
+            copy_tree(&entry.path(), &target, ending);
         } else {
-            std::fs::copy(entry.path(), &target).expect("copy a file");
+            let source = std::fs::read_to_string(entry.path()).expect("read a file");
+            let source = source.replace("\r\n", "\n").replace('\n', ending);
+            std::fs::write(&target, source).expect("write a file");
         }
     }
 }
@@ -67,11 +71,11 @@ fn run(driver: &Path, tree: &Path) -> Output {
         .expect("python3 should spawn")
 }
 
-fn classes_match_cpython(release: bool) {
+fn classes_match_cpython(release: bool, ending: &str) {
     let built = ScratchDir::new("v012_class_once_built").expect("scratch");
     let plain = ScratchDir::new("v012_class_once_plain").expect("scratch");
-    copy_tree(&fixtures().join("pko"), &built.join("pko"));
-    copy_tree(&fixtures().join("pko"), &plain.join("pko"));
+    copy_tree(&fixtures().join("pko"), &built.join("pko"), ending);
+    copy_tree(&fixtures().join("pko"), &plain.join("pko"), ending);
     let package = built.join("pko");
     let build = pycc()
         .arg("build")
@@ -89,7 +93,7 @@ fn classes_match_cpython(release: bool) {
     // module boundary run in CPython, from the classes made once.
     for class in [
         "Plain", "Explicit", "Child", "Holder", "Kept", "Field", "Documented", "GenericDoc",
-        "Undocumented",
+        "Undocumented", "Mixed",
     ] {
         assert!(!report.contains(&format!("class `{class}` at")), "{report}");
     }
@@ -133,11 +137,19 @@ fn classes_match_cpython(release: bool) {
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn classes_made_once_match_cpython() {
-    classes_match_cpython(false);
+    classes_match_cpython(false, "\n");
 }
 
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn classes_made_once_match_cpython_release() {
-    classes_match_cpython(true);
+    classes_match_cpython(true, "\n");
+}
+
+/// CPython reads source with universal newlines: a docstring of a CRLF
+/// source is the LF source's.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn classes_made_once_from_crlf_sources_match_cpython() {
+    classes_match_cpython(false, "\r\n");
 }

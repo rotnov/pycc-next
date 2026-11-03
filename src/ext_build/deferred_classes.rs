@@ -50,7 +50,11 @@ pub(crate) fn is_deferred(published: &ExtPublishedClass) -> bool {
 /// template made later -- for a template deriving from it, or an instance
 /// crossing before a nested exec's statement -- must not be that class. A
 /// template made before the statement is also the type static until the
-/// statement replaces it, as every template was before v0.12.
+/// statement replaces it, as every template was before v0.12; only then is
+/// it the class's carrier type too. A template made once the class exists
+/// (for a class of this module that derives from it but is not made once)
+/// stands for no instance: the class's own instances keep crossing as the
+/// class.
 pub(crate) fn makers_c(
     ordered: &[&ExtPublishedClass],
     base_of: impl Fn(&ExtPublishedClass) -> String,
@@ -73,7 +77,8 @@ pub(crate) fn makers_c(
              type = PyType_FromSpecWithBases(&pycc_ext_type_spec_{class}, base);\n    \
              if (type == NULL) {{\n        return NULL;\n    }}\n    \
              if (pycc_ext_class_constants_{class}(type) < 0\n        \
-             || pycc_ext_carrier_register(\"{class}\", type) < 0) {{\n        \
+             || (pycc_ext_type_object_{class} == NULL\n            \
+             && pycc_ext_carrier_register(\"{class}\", type) < 0)) {{\n        \
              Py_DECREF(type);\n        return NULL;\n    }}\n    \
              pycc_ext_template_object_{class} = type;\n    \
              if (pycc_ext_type_object_{class} == NULL) {{\n        \

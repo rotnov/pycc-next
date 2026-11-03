@@ -231,6 +231,9 @@ pub(crate) fn attach_class_bases(
     let Ok(parsed) = pycc_parser::parse_all(source) else {
         return;
     };
+    // CPython reads source with universal newlines: a literal's `\r\n` or
+    // `\r` is `\n` before the compiler cleans a docstring.
+    let original = &original.replace("\r\n", "\n").replace('\r', "\n");
     let originals = pycc_parser::parse_all(original).ok();
     let body_attrs = |name: &str| {
         originals.as_ref().and_then(|parsed| {

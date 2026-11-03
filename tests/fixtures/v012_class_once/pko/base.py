@@ -109,3 +109,16 @@ class GenericDoc(Generic[T]):
 
 class Undocumented(Documented):
     pass
+
+
+class Mixed(Plain, object):
+    def value(self) -> int:
+        return self.n * 5
+
+
+def make_plain(n: int) -> Plain:
+    return Plain(n)
+
+
+def make_mixed(n: int) -> Mixed:
+    return Mixed(n)

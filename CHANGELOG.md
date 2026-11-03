@@ -96,7 +96,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   body's own `__doc__ = "..."` or `__firstlineno__ = N` wins, as in CPython, and is not
   copied to a compiled subclass; such a `__doc__` on a class made from its template
   (a `Generic[T]` base) made the import fail with `TypeError: cannot set '__doc__'
-  attribute of immutable type`.
+  attribute of immutable type`. A docstring of a CRLF source is cleaned as CPython
+  cleans it (its line breaks read as `\n` first).
 
 ## [0.11.0] - 2026-11-01
 
