@@ -70,10 +70,10 @@ fn a_direct_call_packs_each_argument() {
         ]),
     );
     assert!(ir.contains(EXT_OBJ_PACK_INT_SYMBOL), "{ir}");
-    assert!(ir.contains(EXT_OBJ_PACK_STR_SYMBOL), "{ir}");
+    assert!(ir.contains(crate::py_literal::EXT_OBJ_STR_LITERAL_SYMBOL), "{ir}");
     assert!(ir.contains("foreign_call_arg_slot"), "{ir}");
     assert!(ir.contains("i64 2"), "the arity is two: {ir}");
-    let pack_at = ir.find(EXT_OBJ_PACK_STR_SYMBOL).expect("asserted above");
+    let pack_at = ir.find(crate::py_literal::EXT_OBJ_STR_LITERAL_SYMBOL).expect("asserted above");
     let call_at = ir
         .find(&format!("call ptr @{EXT_OBJ_CALL_BORROWED_SYMBOL}("))
         .unwrap_or_else(|| panic!("no borrowing call was emitted: {ir}"));
