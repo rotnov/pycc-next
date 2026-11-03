@@ -28,10 +28,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.15" }
       - name: Install LLVM 22
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo 'deb https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm22.list
-          sudo apt-get update -q && sudo apt-get install -y -q llvm-22-dev libpolly-22-dev clang-22 libzstd-dev
+        run: scripts/linux_llvm.sh
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
       - name: Differential fuzzing

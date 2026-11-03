@@ -18,6 +18,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   of string comparisons; a package's finder builds a member's path without splitting
   and joining its dotted name and calls `ModuleSpec` with fixed keyword names:
   pystache's import runs about 0.16M fewer instructions, pydantic's 0.1M.
+- An `--ext` module's attribute-name cache and attribute inline caches keep their
+  entries in the order they are first filled, behind a small index by hash, instead of
+  at the hashed slot of a large zero-filled table: the import touches a few consecutive
+  pages of them instead of most pages, each a page fault. Minor faults of the import:
+  pydantic 1349 -> 1249, mistune 382 -> 308, pystache 186 -> 149.
 - An `--ext` module's precompiled fallback chunk holding `frozenset` constants
   rebuilds each in source order along the path the build recorded to it, instead of
   walking every nested code object at import: pydantic's import runs 1.55M fewer
