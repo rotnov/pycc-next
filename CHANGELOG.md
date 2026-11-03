@@ -5,6 +5,10 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- An `--ext` module's precompiled fallback chunk holding `frozenset` constants
+  rebuilds each in source order along the path the build recorded to it, instead of
+  walking every nested code object at import: pydantic's import runs 1.55M fewer
+  instructions (of about 143M). The constants iterate as before.
 - **CPython 3.15 is the oracle** (was 3.13): CI, the fuzzer, the benchmarks and the
   release builds run CPython 3.15 (3.15.1 on the hosted runners), and native programs match 3.15's behavior: every
   `ZeroDivisionError` says `division by zero`, `0.0 ** -1` says `zero to a negative

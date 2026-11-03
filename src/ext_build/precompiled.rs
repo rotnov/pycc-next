@@ -35,8 +35,9 @@ use std::process::Stdio;
 
 /// What the target interpreter compiled: its magic number, the
 /// `marshal`led table of every chunk's entry -- `(code, orders)`, its code
-/// object and, when its code holds `frozenset` constants, their elements in
-/// source order (a tuple of tuples, for [`ORDERS_FIX`]); for a chunk of only
+/// object and, when its code holds `frozenset` constants, each one's path
+/// and its elements in source order (a tuple of `(path, elements)`, for
+/// [`ORDERS_FIX`]); for a chunk of only
 /// constant `def`s, `((spec, ...),)`, what makes each function directly
 /// (`precompile.py`'s `defs`, each spec with its function's orders); or
 /// `None` for a chunk it refused to compile, which then fails at import
@@ -69,9 +70,9 @@ pub(crate) struct Precompiled {
 /// fresh compile's, as from a `.pyc`. For a chunk holding such constants the
 /// script also writes each one's elements in source order -- the order the
 /// compiler built it from, found as the one set display of the chunk with
-/// those elements (`ast.literal_eval` of each element) -- in the order a
-/// depth-first walk of the constants meets them; the import rebuilds each
-/// from them (`ORDERS_FIX`). A chunk where some constant has no such
+/// those elements (`ast.literal_eval` of each element) -- with the path of
+/// `co_consts` indices from the chunk's code to the constant; the import
+/// rebuilds each from them, along its path only (`ORDERS_FIX`). A chunk where some constant has no such
 /// display, or several in different orders, is left to `compile()` at
 /// import, as before.
 ///
@@ -85,8 +86,11 @@ const COMPILE_SCRIPT: &str = include_str!("precompile.py");
 
 /// The `fix(code, orders)` an import runs on a chunk holding `frozenset`
 /// constants: rebuilds each from its elements in source order
-/// (`COMPILE_SCRIPT`'s `orders`, met in the same depth-first walk of the
-/// constants) as the running CPython's compiler builds one -- a frozenset
+/// (`COMPILE_SCRIPT`'s `orders`: `(path, elements)`, the path of `co_consts`
+/// indices from `code` to the constant), replacing only the code objects on
+/// those paths -- not walking every nested code object of the chunk, which
+/// cost pydantic's import about 1.9M instructions -- as the running
+/// CPython's compiler builds one -- a frozenset
 /// of the display's elements, which CPython 3.13 rebuilt once more from its
 /// own iteration when the code's constants are merged. 3.14 stopped, but
 /// still rebuilds one when interning its `str` elements (`code.replace`'s
@@ -99,30 +103,28 @@ const COMPILE_SCRIPT: &str = include_str!("precompile.py");
 const ORDERS_FIX: &str = "def fix(co, orders):
     import sys
     twice = sys.version_info < (3, 14)
-    it = iter(orders)
-    def walk(c):
+    def at(c, items):
         consts = list(c.co_consts)
-        changed = False
-        for i, k in enumerate(consts):
-            if type(k) is frozenset and len(k) > 1:
-                if twice:
-                    s = frozenset(tuple(frozenset(next(it))))
-                else:
-                    s = frozenset(sys.intern(e) if type(e) is str else e for e in next(it))
-                if s != k:
-                    raise ValueError('pycc: a frozenset constant does not match')
-                consts[i] = s
-                changed = True
-            elif type(k) is type(c):
-                n = walk(k)
-                if n is not k:
-                    consts[i] = n
-                    changed = True
-        return c.replace(co_consts=tuple(consts)) if changed else c
-    out = walk(co)
-    if next(it, None) is not None:
-        raise ValueError('pycc: frozenset orders left over')
-    return out
+        deeper = {}
+        for path, elements in items:
+            i = path[0]
+            if len(path) > 1:
+                deeper.setdefault(i, []).append((path[1:], elements))
+                continue
+            k = consts[i]
+            if twice:
+                s = frozenset(tuple(frozenset(elements)))
+            else:
+                s = frozenset(sys.intern(e) if type(e) is str else e for e in elements)
+            if type(k) is not frozenset or s != k:
+                raise ValueError('pycc: a frozenset constant does not match')
+            consts[i] = s
+        for i, sub in deeper.items():
+            if type(consts[i]) is not type(c):
+                raise ValueError('pycc: a frozenset path does not match')
+            consts[i] = at(consts[i], sub)
+        return c.replace(co_consts=tuple(consts))
+    return at(co, orders)
 ";
 
 /// Compiles `chunks` with `interpreter`; `None` when it cannot run or
@@ -530,13 +532,15 @@ mod tests {
         };
         // A `def` entry is `((spec, ...),)`: each function's code, defaults,
         // keyword defaults, annotations, name, forwarded names and set
-        // orders; anything else `(code, orders)`.
+        // constants (each one's path in the code's constants and its
+        // elements in source order); anything else `(code, orders)`.
         let check = "import marshal,sys\n\
             t=marshal.loads(sys.stdin.buffer.read())\n\
             print([len(e) for e in t[:-1]])\n\
             (f,g),=t[0]\n\
             print(f[0].co_name, f[1:6], g[0].co_name, g[1:6])\n\
-            print(t[3][0][0][6], tuple(len(s) for s in t[0][0]))\n\
+            (p,o),=t[3][0][0][6]\n\
+            print(o, type(t[3][0][0][0].co_consts[p[0]]).__name__, len(p), tuple(len(s) for s in t[0][0]))\n\
             e=t[5]\n\
             if len(e)==1:\n\
             \x20 h=e[0][0]\n\
@@ -575,7 +579,7 @@ mod tests {
             format!(
                 "{lengths}\n\
                  f (((1, 2),), {{'c': 3}}, None, 'f', None) g (None, None, None, 'g', ('g',))\n\
-                 ((3, 1, 2),) (7, 7)\n{annotated}"
+                 (3, 1, 2) frozenset 1 (7, 7)\n{annotated}"
             )
         );
     }
