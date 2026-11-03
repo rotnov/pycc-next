@@ -13,6 +13,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   run: until then every compiled read of a global looks the name up, so the body's own
   stores no longer each fire the dict watcher (about 2,700 events in pydantic's
   import). Reads see every rebinding as before.
+- Making an `--ext` module's published class checks the template's entries against
+  its skip list with one `frozenset` lookup, and its slot descriptors by type, instead
+  of string comparisons; a package's finder builds a member's path without splitting
+  and joining its dotted name and calls `ModuleSpec` with fixed keyword names:
+  pystache's import runs about 0.16M fewer instructions, pydantic's 0.1M.
 - An `--ext` module's precompiled fallback chunk holding `frozenset` constants
   rebuilds each in source order along the path the build recorded to it, instead of
   walking every nested code object at import: pydantic's import runs 1.55M fewer
