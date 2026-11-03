@@ -5,6 +5,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- An `--ext` module's published signature wrapper whose defaults are constants (and
+  that guards no scalar parameter with a fallback twin) is tabled at build time as the
+  wrapper's own code object with its defaults and closure layout, and the import makes
+  the function directly with `types.FunctionType` instead of running the factory
+  chunk `_pycc_make` and calling it: pystache's import runs about 0.2M fewer
+  instructions, pydantic's about 0.85M (42 of its 53 wrappers). The wrappers behave
+  as before; each now raises one `function.__new__` audit event
+  (`docs/DEVIATIONS.md`).
 - An `--ext` module's import-time tables of names and sources (its interface names,
   published class names, builtin exception names, precompiled fallback chunks and
   their file names) are one string each indexed by offset, and its forward
