@@ -104,7 +104,7 @@ fn each_admitted_argument_type_reaches_its_own_packer() {
         (
             "str",
             MirExpr::StringLiteral("x".to_string()),
-            EXT_OBJ_PACK_STR_SYMBOL,
+            crate::py_literal::EXT_OBJ_STR_LITERAL_SYMBOL,
         ),
     ] {
         let ir = entry_ir(
@@ -299,7 +299,8 @@ fn a_foreign_subscript_reaches_the_shim_by_its_shared_symbol() {
         subscript("gc", MirExpr::StringLiteral("k".to_string())),
     );
     assert!(ir.contains(&format!("@{EXT_OBJ_GETITEM_SYMBOL}(")), "{ir}");
-    assert!(ir.contains(EXT_OBJ_PACK_STR_SYMBOL), "{ir}");
+    // A literal key is a CPython `str` made directly (`py_literal`).
+    assert!(ir.contains(crate::py_literal::EXT_OBJ_STR_LITERAL_SYMBOL), "{ir}");
     assert!(!ir.contains(EXT_OBJ_GETATTR_SYMBOL), "{ir}");
     assert!(!ir.contains(EXT_OBJ_CALL_SYMBOL), "{ir}");
 }
@@ -338,7 +339,7 @@ fn each_admitted_key_type_reaches_its_own_packer() {
         (
             "str",
             MirExpr::StringLiteral("k".to_string()),
-            EXT_OBJ_PACK_STR_SYMBOL,
+            crate::py_literal::EXT_OBJ_STR_LITERAL_SYMBOL,
         ),
     ] {
         let ir = entry_ir(

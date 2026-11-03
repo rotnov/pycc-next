@@ -72,3 +72,4 @@ against 6.97M.
 | lever | change | pydantic | mistune | pystache |
 |---|---|---|---|---|
 | 1 | `frozenset` constants rebuilt in source order along build-time paths, not by walking every nested code object (`ORDERS_FIX` 1.92M -> 0.36M inclusive) | -1.55M | 0 | 0 |
+| 2 | a `str` literal only handed to CPython made as a CPython `str` directly, one per text of the module (the literals' share 1.75M -> 1.10M inclusive) | -0.65M | -0.15M | -0.03M |
