@@ -5,6 +5,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- An `--ext` module's published class whose statement's bases are none, `object`, or
+  compiled classes of its module made the same way is made once, when its statement
+  runs, straight from its compiled layout, methods and slots: no template type is made
+  at import and none stands between the class and its bases, so its `__mro__` is
+  CPython's with only the root `pycc.compiled` added before `object`. Other statements
+  (a `Generic[T]` or other Python base, a metaclass, a keyword) still make the class
+  from a template (`docs/DEVIATIONS.md`). pystache's import (16 classes made once) runs
+  about 0.83M fewer instructions and 6 fewer page faults, pydantic's 0.74M fewer and 9
+  fewer faults, mistune's 0.15M fewer.
 - An `--ext` module's published signature wrapper whose defaults are constants (and
   that guards no scalar parameter with a fallback twin) is tabled at build time as the
   wrapper's own code object with its defaults and closure layout, and the import makes
@@ -79,6 +88,11 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 - The pydantic benchmark builds pydantic 2.14.2 with pydantic-core 2.50.2 (2.13.5's
   pydantic-core has no CPython 3.15 wheels); the pinned numpy, Cython and mypy wheels are
   their cp315 builds.
+
+### Fixed
+- A published compiled class of an `--ext` module has CPython's `__doc__` (its body's
+  docstring, cleaned as the compiler cleans it), `__firstlineno__` and
+  `__static_attributes__`; it had `__doc__ = None` and neither of the others.
 
 ## [0.11.0] - 2026-11-01
 

@@ -170,7 +170,8 @@ pub(super) fn plan_ext(
     ext_build::bind_keyword_names(typed_hir, &signatures, &mut exports);
     let mut publications = ext_build::collect_class_publications(typed_hir, &exports);
     // v0.9: each published class is made with its statement's real bases.
-    ext_build::attach_class_bases(&mut publications, typed_hir, &entry_source);
+    let original = std::fs::read_to_string(source_path).unwrap_or_else(|_| entry_source.clone());
+    ext_build::attach_class_bases(&mut publications, typed_hir, &entry_source, &original);
     let mut ctors = ext_build::collect_constructors(typed_hir, &publications);
     ext_build::bind_ctor_keyword_names(typed_hir, &signatures, &mut ctors);
     // #1448: every carrier type's descriptor table, published or not.

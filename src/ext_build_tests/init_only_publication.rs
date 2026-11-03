@@ -195,7 +195,7 @@ fn an_init_only_class_the_host_cannot_construct_or_name_gets_no_type_object() {
         );
         assert!(ctors.is_empty(), "{label}: yielded {ctors:?}");
         assert!(
-            !method_types_c(&publications, &ctors, &[], &[]).contains("PyType_Spec"),
+            !method_types_c(&publications, &ctors, &[], &[]).contains("PyType_Spec pycc_ext_type_spec_"),
             "{label}: rendered a type object"
         );
     }

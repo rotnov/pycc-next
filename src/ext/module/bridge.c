@@ -339,6 +339,16 @@ typedef struct PyccExtModule {
      * never-replaced rule.
      */
     Py_tss_t *exec_classes_key;
+    /*
+     * v0.12: the template of the published class `name` that is made at
+     * its statement (`pycc_ext_make_public_class_once_in`), made now when
+     * the statement has not run (a borrowed reference); NULL, with an
+     * exception set on a failure, for any other name. An instance of the
+     * class crossing into CPython before its statement ran is carried by
+     * it, as by the template every class had before v0.12
+     * (`pycc_ext_carrier_type`).
+     */
+    PyObject *(*class_template)(const char *name);
 } PyccExtModule;
 
 /*

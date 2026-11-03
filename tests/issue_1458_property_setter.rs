@@ -262,7 +262,7 @@ const EXT_ONLY_OUT: &str = "TypeError Box.n() argument 1: 'str' object cannot be
     TypeError Box.b() argument 1: 'int' object cannot be interpreted as a bool\n\
     TypeError Box.s() argument 1: 'int' object cannot be interpreted as a str\n\
     TypeError Box.leaf() argument 1 must be pycc_prop_set_mod.Leaf, not object\n\
-    AttributeError attribute 'count' of 'pycc_prop_set_mod.Box' objects is not writable\n\
+    AttributeError attribute 'count' of 'Box' objects is not writable\n\
     2361183241434822606848 0.5 False a Leaf 0\n\
     AttributeError 'Box' object has no attribute 'sets'\n";
 

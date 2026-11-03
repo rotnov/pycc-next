@@ -166,6 +166,7 @@ mod buffer_slice_parity;
 mod carrier_getsets;
 mod carrier_types;
 mod compiled_isinstance;
+mod deferred_classes;
 mod exports;
 mod foreign_class_boundary;
 mod generated_c;

@@ -75,7 +75,10 @@ pub(crate) const SHIM_C: &str = concat!(
     include_str!("ext/module/ndarray.c"),
     include_str!("ext/module/bytearray.c"),
     include_str!("ext/module/carriers.c"),
+    include_str!("ext/module/carriers_pickle.c"),
+    include_str!("ext/module/instance_copy.c"),
     include_str!("ext/module/class_maker.c"),
+    include_str!("ext/module/class_once.c"),
     include_str!("ext/module/instances.c"),
     include_str!("ext/module/forward.c"),
     include_str!("ext/module/buffers.c"),
@@ -440,11 +443,13 @@ mod link;
 pub(crate) use link::*;
 
 mod carrier;
+mod class_body_attrs;
 mod constructors;
 pub(crate) use constructors::*;
 mod exports;
 pub(crate) use exports::*;
 mod defaults;
+mod deferred_classes;
 
 /// Whether the compiled function `name` (a method, its receiver first) has
 /// a parameter with a default.

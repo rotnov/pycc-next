@@ -16,6 +16,7 @@ static PyObject *pycc_ext_instance_reduce(PyObject *self, PyObject *proto);
 static PyObject *pycc_ext_instance_getstate(PyObject *self, PyObject *unused);
 static PyObject *pycc_ext_instance_setstate(PyObject *self, PyObject *state);
 static int pycc_ext_carrier_register(const char *class_name, PyObject *type);
+static int pycc_ext_carrier_forget(const char *class_name);
 static PyObject *pycc_fwd_call(int index, PyObject *func, PyObject *const *args, size_t nargsf,
                                PyObject *kwnames);
 

@@ -132,9 +132,40 @@ PYCC_ENTRY int pycc_ext_publish(const char *name)
         return -1;
     }
     if (row == NULL) {
+        PyObject *public_class = NULL;
+        PyType_Spec *spec;
+        PyObject **template_slot;
+        PyObject *(*template_of)(void);
+        int (*constants)(PyObject *);
+
         classes = (PyObject *)PyThread_tss_get(pycc_ext_mod.exec_classes_key);
         type = classes == NULL ? NULL : PyDict_GetItemString(classes, name);
-        if (type == NULL) {
+        /* v0.12: a class made at its statement has no template yet. It is
+         * made in one step when the statement is the common one and no
+         * template was made earlier in this exec (an instance crossed
+         * before the statement ran); otherwise from its template, made now
+         * if need be. */
+        if (type == NULL && classes != NULL
+            && pycc_ext_publish_class_deferred(name, &spec, &template_slot, &template_of,
+                                               &constants)) {
+            int declined = 1;
+
+            if (*template_slot == NULL) {
+                public_class = pycc_ext_make_public_class_once_in(
+                    &pycc_ext_mod, module, name, spec, constants,
+                    pycc_ext_publish_class_spec(name), &declined);
+                if (public_class == NULL && !declined) {
+                    return -1;
+                }
+            }
+            if (public_class == NULL) {
+                type = template_of();
+                if (type == NULL) {
+                    return -1;
+                }
+            }
+        }
+        if (type == NULL && public_class == NULL) {
             PyErr_Format(PyExc_SystemError, "pycc: class '%s' has no type object", name);
             return -1;
         }
@@ -142,11 +173,13 @@ PYCC_ENTRY int pycc_ext_publish(const char *name)
          * statement's bases (`pycc_ext_make_public_class_in`), replaces the
          * template in this exec's snapshot and the class's static. */
         if (pycc_ext_publish_class_bases(name) != NULL) {
-            PyObject *public_class = pycc_ext_make_public_class_in(
-                &pycc_ext_mod, module, name, type, pycc_ext_publish_class_spec(name),
-                pycc_ext_publish_class_bases(name));
             PyObject *previous = *class_slot;
 
+            if (public_class == NULL) {
+                public_class = pycc_ext_make_public_class_in(
+                    &pycc_ext_mod, module, name, type, pycc_ext_publish_class_spec(name),
+                    pycc_ext_publish_class_bases(name));
+            }
             if (public_class == NULL || PyDict_SetItemString(classes, name, public_class) < 0) {
                 Py_XDECREF(public_class);
                 return -1;
@@ -208,7 +241,18 @@ static int pycc_ext_publish_unbound_classes(PyObject *module, PyObject *classes)
 
     for (name = pycc_ext_publish_class_names; *name != '\0'; name += strlen(name) + 1) {
         PyObject *type = PyDict_GetItemString(classes, name);
-        if (type == NULL || PyDict_GetItemString(dict, name) != NULL) {
+        if (PyDict_GetItemString(dict, name) != NULL) {
+            continue;
+        }
+        /* v0.12: a class made at its statement, which never ran: bound as
+         * its template, as every class was before. */
+        if (type == NULL) {
+            type = pycc_ext_class_template(name);
+            if (type == NULL && PyErr_Occurred()) {
+                return -1;
+            }
+        }
+        if (type == NULL) {
             continue;
         }
         if (PyModule_AddObjectRef(module, name, type) != 0) {
