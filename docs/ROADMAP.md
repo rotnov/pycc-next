@@ -73,3 +73,4 @@ against 6.97M.
 |---|---|---|---|---|
 | 1 | `frozenset` constants rebuilt in source order along build-time paths, not by walking every nested code object (`ORDERS_FIX` 1.92M -> 0.36M inclusive) | -1.55M | 0 | 0 |
 | 2 | a `str` literal only handed to CPython made as a CPython `str` directly, one per text of the module (the literals' share 1.75M -> 1.10M inclusive) | -0.65M | -0.15M | -0.03M |
+| 7 (caches) | the shim's attribute-name cache and inline caches filled densely behind a hash index (pystache's touched `.bss` pages 33 -> 13); minor faults of the import 1349 -> 1249 / 382 -> 308 / 186 -> 149, instructions unchanged | 0 | 0 | 0 |

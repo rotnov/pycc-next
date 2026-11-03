@@ -124,6 +124,13 @@ static PyTypeObject *pycc_ext_ic_member_type = NULL;
 
 #define PYCC_IC_SLOTS 4096
 #define PYCC_IC_SLOT_BITS 12
+/* The entries, in the order their slots were first filled: entry 0 stays
+ * empty (all zero) and stands for every slot not filled yet. A slot's entry
+ * is `pycc_ext_ic_entries[pycc_ext_ic_at[slot]]` (`PYCC_IC`). The slots are
+ * spread by a hash, the entries are not: an import's few hundred entries
+ * fill a few consecutive pages of this zero-filled (`.bss`) array instead
+ * of touching most pages of a direct-mapped one, each touched page a page
+ * fault (v0.12 lever 7). */
 static struct {
     const char *spelling;
     unsigned int tag;
@@ -133,7 +140,10 @@ static struct {
     PyObject *object;    /* the property or the method's function (borrowed), or
                           * a module attribute's name (owned) */
     descrgetfunc bind;   /* a method's `tp_descr_get` */
-} pycc_ext_ics[PYCC_IC_SLOTS];
+} pycc_ext_ic_entries[PYCC_IC_SLOTS + 1];
+static uint16_t pycc_ext_ic_at[PYCC_IC_SLOTS];
+static unsigned int pycc_ext_ic_used = 0;
+#define PYCC_IC(slot) (pycc_ext_ic_entries[pycc_ext_ic_at[(slot)]])
 
 /* Per set, the way the next new entry replaces (the one not filled last). */
 static unsigned char pycc_ext_ic_victim[PYCC_IC_SLOTS / 2];
@@ -152,10 +162,10 @@ static long pycc_ext_ic_slot(const char *spelling, unsigned int tag)
 {
     size_t set = pycc_ext_ic_set(spelling, tag);
 
-    if (pycc_ext_ics[set].spelling == spelling && pycc_ext_ics[set].tag == tag) {
+    if (PYCC_IC(set).spelling == spelling && PYCC_IC(set).tag == tag) {
         return (long)set;
     }
-    if (pycc_ext_ics[set + 1].spelling == spelling && pycc_ext_ics[set + 1].tag == tag) {
+    if (PYCC_IC(set + 1).spelling == spelling && PYCC_IC(set + 1).tag == tag) {
         return (long)set + 1;
     }
     return -1;
@@ -172,9 +182,9 @@ static size_t pycc_ext_ic_slot_for_store(const char *spelling, unsigned int tag)
     if (held >= 0) {
         return (size_t)held;
     }
-    if (pycc_ext_ics[set].spelling == NULL) {
+    if (PYCC_IC(set).spelling == NULL) {
         way = 0;
-    } else if (pycc_ext_ics[set + 1].spelling == NULL) {
+    } else if (PYCC_IC(set + 1).spelling == NULL) {
         way = 1;
     } else {
         way = pycc_ext_ic_victim[set / 2];
@@ -632,19 +642,22 @@ static long pycc_ext_ic_store(PyTypeObject *type, const char *spelling, int kind
         return -1;
     }
     slot = pycc_ext_ic_slot_for_store(spelling, tag);
-    if (pycc_ext_ics[slot].kind == PYCC_IC_MODULE) {
-        released = pycc_ext_ics[slot].object;
+    if (pycc_ext_ic_at[slot] == 0) {
+        pycc_ext_ic_at[slot] = (uint16_t)++pycc_ext_ic_used;
+    }
+    if (PYCC_IC(slot).kind == PYCC_IC_MODULE) {
+        released = PYCC_IC(slot).object;
     }
     if (kind == PYCC_IC_MODULE) {
         Py_INCREF(object);
     }
-    pycc_ext_ics[slot].spelling = spelling;
-    pycc_ext_ics[slot].tag = tag;
-    pycc_ext_ics[slot].kind = kind;
-    pycc_ext_ics[slot].inline_values = inline_values;
-    pycc_ext_ics[slot].index = index;
-    pycc_ext_ics[slot].object = object;
-    pycc_ext_ics[slot].bind = bind;
+    PYCC_IC(slot).spelling = spelling;
+    PYCC_IC(slot).tag = tag;
+    PYCC_IC(slot).kind = kind;
+    PYCC_IC(slot).inline_values = inline_values;
+    PYCC_IC(slot).index = index;
+    PYCC_IC(slot).object = object;
+    PYCC_IC(slot).bind = bind;
     Py_XDECREF(released);
     return (long)slot;
 }
@@ -729,9 +742,9 @@ static long pycc_ext_ic_find(PyObject *obj, const char *spelling)
 /* Whether a method entry still holds for `obj` (module comment). */
 static int pycc_ext_ic_method_holds(PyObject *obj, size_t slot)
 {
-    return !pycc_ext_ics[slot].inline_values
+    return !PYCC_IC(slot).inline_values
            || (pycc_ext_ic_valid(obj)
-               && pycc_ext_ic_nentries(pycc_ext_ic_keys(Py_TYPE(obj))) == pycc_ext_ics[slot].index);
+               && pycc_ext_ic_nentries(pycc_ext_ic_keys(Py_TYPE(obj))) == PYCC_IC(slot).index);
 }
 
 /* What `pycc_ext_ic_try` returns when no entry answers. */
@@ -742,8 +755,8 @@ static PyObject *pycc_ext_ic_call_read(PyObject *obj, size_t slot)
 {
     PyObject *value, *callee;
 
-    if (pycc_ext_ics[slot].kind == PYCC_IC_PROPERTY) {
-        callee = PYCC_IC_FIELD(pycc_ext_ics[slot].object, PYCC_IC_PROPERTY_GET, PyObject *);
+    if (PYCC_IC(slot).kind == PYCC_IC_PROPERTY) {
+        callee = PYCC_IC_FIELD(PYCC_IC(slot).object, PYCC_IC_PROPERTY_GET, PyObject *);
         if (callee == NULL || callee == Py_None) {
             return PYCC_IC_MISS;
         }
@@ -752,10 +765,10 @@ static PyObject *pycc_ext_ic_call_read(PyObject *obj, size_t slot)
         Py_DECREF(callee);
         return value;
     }
-    if (pycc_ext_ics[slot].kind == PYCC_IC_METHOD && pycc_ext_ics[slot].bind != NULL
+    if (PYCC_IC(slot).kind == PYCC_IC_METHOD && PYCC_IC(slot).bind != NULL
         && pycc_ext_ic_method_holds(obj, slot)) {
-        callee = Py_NewRef(pycc_ext_ics[slot].object);
-        value = pycc_ext_ics[slot].bind(callee, obj, (PyObject *)Py_TYPE(obj));
+        callee = Py_NewRef(PYCC_IC(slot).object);
+        value = PYCC_IC(slot).bind(callee, obj, (PyObject *)Py_TYPE(obj));
         Py_DECREF(callee);
         return value;
     }
@@ -777,18 +790,18 @@ static PyObject *pycc_ext_ic_try(PyObject *obj, const char *spelling)
     if (slot < 0) {
         return PYCC_IC_MISS;
     }
-    switch (pycc_ext_ics[slot].kind) {
+    switch (PYCC_IC(slot).kind) {
     case PYCC_IC_VALUE:
         if (!pycc_ext_ic_valid(obj)) {
             return PYCC_IC_MISS;
         }
-        value = pycc_ext_ic_value_at(obj, pycc_ext_ics[slot].index);
+        value = pycc_ext_ic_value_at(obj, PYCC_IC(slot).index);
         break;
     case PYCC_IC_SLOT:
-        value = PYCC_IC_FIELD(obj, pycc_ext_ics[slot].index, PyObject *);
+        value = PYCC_IC_FIELD(obj, PYCC_IC(slot).index, PyObject *);
         break;
     case PYCC_IC_MODULE:
-        value = pycc_ext_ic_module_value(obj, pycc_ext_ics[slot].index, pycc_ext_ics[slot].object);
+        value = pycc_ext_ic_module_value(obj, PYCC_IC(slot).index, PYCC_IC(slot).object);
         break;
     case PYCC_IC_NONE:
         return PYCC_IC_MISS;
@@ -823,7 +836,7 @@ static PyObject *pycc_ext_ic_getattr_slow(PyObject *obj, const char *spelling, P
     /* An entry for the class already says what it can cache, except for a
      * module, whose entry names one binding of one module. */
     slot = pycc_ext_ic_find(obj, spelling);
-    if (slot < 0 || pycc_ext_ics[slot].kind == PYCC_IC_MODULE) {
+    if (slot < 0 || PYCC_IC(slot).kind == PYCC_IC_MODULE) {
         (void)pycc_ext_ic_fill(obj, spelling, name);
     }
     return value;
@@ -841,7 +854,7 @@ static PyObject *pycc_ext_ic_method(PyObject *obj, const char *spelling, PyObjec
     long slot = pycc_ext_ic_find(obj, spelling);
     PyObject *value;
 
-    if (slot < 0 || (pycc_ext_ics[slot].kind == PYCC_IC_MODULE && name != NULL)) {
+    if (slot < 0 || (PYCC_IC(slot).kind == PYCC_IC_MODULE && name != NULL)) {
         if (name == NULL || pycc_ext_ic_state < 0) {
             return NULL;
         }
@@ -850,20 +863,20 @@ static PyObject *pycc_ext_ic_method(PyObject *obj, const char *spelling, PyObjec
     if (slot < 0) {
         return NULL;
     }
-    if (pycc_ext_ics[slot].kind == PYCC_IC_MODULE) {
-        value = pycc_ext_ic_module_value(obj, pycc_ext_ics[slot].index, pycc_ext_ics[slot].object);
+    if (PYCC_IC(slot).kind == PYCC_IC_MODULE) {
+        value = pycc_ext_ic_module_value(obj, PYCC_IC(slot).index, PYCC_IC(slot).object);
         if (value != NULL) {
             pycc_ext_ic_hits++;
             *with_self = 0;
         }
         return value;
     }
-    if (pycc_ext_ics[slot].kind != PYCC_IC_METHOD || !pycc_ext_ic_method_holds(obj, (size_t)slot)) {
+    if (PYCC_IC(slot).kind != PYCC_IC_METHOD || !pycc_ext_ic_method_holds(obj, (size_t)slot)) {
         return NULL;
     }
     pycc_ext_ic_hits++;
     *with_self = 1;
-    return pycc_ext_ics[slot].object;
+    return PYCC_IC(slot).object;
 }
 
 /*

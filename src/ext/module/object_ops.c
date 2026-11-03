@@ -47,13 +47,23 @@
  * text, so a hit is decided by the address alone. A slot holds one name; a
  * colliding name replaces it. Borrowed; NULL with an exception set when the
  * name cannot be created.
+ *
+ * A slot's entry is `pycc_ext_names[pycc_ext_name_at[slot]]`, the entries
+ * in the order their slots were first filled (entry 0 stays empty and
+ * stands for every slot not filled yet): the slots are spread by a hash,
+ * the entries are not, so an import's few hundred names fill a few
+ * consecutive pages of this zero-filled (`.bss`) array instead of touching
+ * most pages of a direct-mapped one, each touched page a page fault
+ * (v0.12 lever 7).
  */
 #define PYCC_EXT_NAME_SLOTS 4096
 #define PYCC_EXT_NAME_SLOT_BITS 12
 static struct {
     const char *spelling;
     PyObject *name;
-} pycc_ext_names[PYCC_EXT_NAME_SLOTS];
+} pycc_ext_names[PYCC_EXT_NAME_SLOTS + 1];
+static uint16_t pycc_ext_name_at[PYCC_EXT_NAME_SLOTS];
+static unsigned int pycc_ext_name_used = 0;
 
 static PyObject *pycc_ext_attr_name(const char *spelling)
 {
@@ -61,18 +71,23 @@ static PyObject *pycc_ext_attr_name(const char *spelling)
      * into the slot index (Fibonacci hashing). */
     size_t slot = (size_t)(((uint64_t)(uintptr_t)spelling * 0x9E3779B97F4A7C15ull) >> (64 - PYCC_EXT_NAME_SLOT_BITS))
                   & (PYCC_EXT_NAME_SLOTS - 1);
+    unsigned int at = pycc_ext_name_at[slot];
     PyObject *name;
 
-    if (pycc_ext_names[slot].spelling == spelling) {
-        return pycc_ext_names[slot].name;
+    if (pycc_ext_names[at].spelling == spelling && at != 0) {
+        return pycc_ext_names[at].name;
     }
     name = PyUnicode_InternFromString(spelling);
     if (name == NULL) {
         return NULL;
     }
-    Py_XDECREF(pycc_ext_names[slot].name);
-    pycc_ext_names[slot].spelling = spelling;
-    pycc_ext_names[slot].name = name;
+    if (at == 0) {
+        at = ++pycc_ext_name_used;
+        pycc_ext_name_at[slot] = (uint16_t)at;
+    }
+    Py_XDECREF(pycc_ext_names[at].name);
+    pycc_ext_names[at].spelling = spelling;
+    pycc_ext_names[at].name = name;
     return name;
 }
 
