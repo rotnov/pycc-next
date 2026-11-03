@@ -199,17 +199,25 @@ static PyccDictWatch *pycc_dict_watch_get(void)
 /*
  * Where module dict `dict`'s version is read, for its module's
  * `pycc_ext_ns_version`: 3.13's tag in the dict itself, or on 3.15 the
- * module's `counter` (set to 1, so a read's first look always syncs, as
- * 3.13's tags are never 0). NULL on any other version or when no dict
+ * module's `counter`, bumped here (it starts at 0, so it is never 0 after,
+ * as 3.13's tags are never 0). NULL on any other version or when no dict
  * watcher can be had (no exception set).
+ *
+ * The counter only grows, across execs of the module too: a read's cache
+ * keeps the counter it saw, and the caches outlive an exec (they are the
+ * module's statics), so a later exec -- the module imported again after
+ * leaving `sys.modules` -- must not bring the counter back to a value a
+ * cache already holds.
  *
  * On 3.15 `*deferred` is set: the dict is not watched yet. Every store of
  * the module body would fire the watcher (about 2,700 events in pydantic's
  * import, 0.3M instructions), and compiled code reads few rebindable
  * globals while its own body runs. So until the body has run
- * (`pycc_ext_ns_watch`), each compiled read looks the name up in the dict
- * (`pycc_ext_global_sync` bumps the counter after every read, so no read's
- * cache matches it), as it would if every store had bumped it.
+ * (`pycc_ext_ns_watch`), a read records version 0 in its cache
+ * (`pycc_ext_global_sync`), which the counter never is: every compiled
+ * read looks the name up in the dict, as it would if every store had
+ * bumped the counter -- a read the lookup itself re-enters (a `__del__` of
+ * the value it replaces) included.
  */
 static const uint64_t *pycc_ext_ns_version_of(PyObject *dict, uint64_t *counter, int *deferred)
 {
@@ -223,7 +231,7 @@ static const uint64_t *pycc_ext_ns_version_of(PyObject *dict, uint64_t *counter,
     if ((Py_Version >> 16) != 0x030F || pycc_dict_watch_get() == NULL) {
         return NULL;
     }
-    *counter = 1;
+    ++*counter;
     *deferred = 1;
     return counter;
 }
