@@ -72,3 +72,4 @@ against 6.97M.
 | lever | change | pydantic | mistune | pystache |
 |---|---|---|---|---|
 | 1 | `frozenset` constants rebuilt in source order along build-time paths, not by walking every nested code object (`ORDERS_FIX` 1.92M -> 0.36M inclusive) | -1.55M | 0 | 0 |
+| 6 | the class maker's skip list one `frozenset` lookup and its slot test a type compare (`pycc_ext_make_class` 1.15M -> 1.02M inclusive, pystache), the finder's spec path built without split and join (`pycc_pkg_find_spec` 0.44M -> 0.34M, pydantic); publication keys stay `PyUnicode_InternFromString` (692 names, 0.52M in pydantic): a marshalled table would have to make and intern the same strings | -0.10M | 0 | -0.16M |

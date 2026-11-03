@@ -134,89 +134,6 @@ static PyObject *pycc_pkg_spec_type(void)
     return Py_XNewRef(pycc_pkg_spec_type_cached);
 }
 
-/*
- * `find_spec(fullname, path=None, target=None)`: a spec for a compiled
- * module of the package -- origin the path its own extension would have,
- * `has_location` so importlib sets `__file__`, and for a package its
- * directory as the search location -- else None.
- */
-static PyObject *pycc_pkg_find_spec(PyObject *self, PyObject *const *args, Py_ssize_t nargs,
-                                    PyObject *kwnames)
-{
-    const PyccPkgMember *member;
-    PyObject *rel = NULL, *parts = NULL, *sep = NULL, *dot = NULL, *dir = NULL, *origin = NULL;
-    PyObject *spec_type = NULL, *spec = NULL, *call_args = NULL, *kwargs = NULL;
-    PyObject *locations = NULL;
-
-    if (nargs < 1) {
-        PyErr_SetString(PyExc_TypeError, "find_spec() missing required argument 'fullname'");
-        return NULL;
-    }
-    (void)kwnames;
-    member = pycc_pkg_lookup(args[0]);
-    if (member == NULL) {
-        Py_RETURN_NONE;
-    }
-    rel = PyUnicode_FromString(member->name);
-    sep = PyUnicode_FromString(PYCC_PKG_SEP);
-    dot = PyUnicode_FromString(".");
-    if (rel == NULL || sep == NULL || dot == NULL) {
-        goto done;
-    }
-    parts = PyUnicode_Split(rel, dot, -1);
-    if (parts == NULL) {
-        goto done;
-    }
-    /* `<pkgdir>/sub/mod`, or `<pkgdir>/sub` for a package. */
-    if (PyList_Insert(parts, 0, pycc_pkg_dir) != 0) {
-        goto done;
-    }
-    dir = PyUnicode_Join(sep, parts);
-    if (dir == NULL) {
-        goto done;
-    }
-    origin = member->is_package ? PyUnicode_FromFormat("%U" PYCC_PKG_SEP "__init__%U", dir, pycc_pkg_suffix)
-                                : PyUnicode_FromFormat("%U%U", dir, pycc_pkg_suffix);
-    spec_type = pycc_pkg_spec_type();
-    call_args = PyTuple_Pack(2, args[0], self);
-    kwargs = Py_BuildValue("{sOsO}", "origin", origin == NULL ? Py_None : origin, "is_package",
-                           member->is_package ? Py_True : Py_False);
-    if (origin == NULL || spec_type == NULL || call_args == NULL || kwargs == NULL) {
-        goto done;
-    }
-    spec = PyObject_Call(spec_type, call_args, kwargs);
-    if (spec == NULL) {
-        goto done;
-    }
-    if (PyObject_SetAttrString(spec, "has_location", Py_True) != 0) {
-        Py_CLEAR(spec);
-        goto done;
-    }
-    if (member->is_package) {
-        locations = PyList_New(1);
-        if (locations == NULL) {
-            Py_CLEAR(spec);
-            goto done;
-        }
-        PyList_SetItem(locations, 0, Py_NewRef(dir));
-        if (PyObject_SetAttrString(spec, "submodule_search_locations", locations) != 0) {
-            Py_CLEAR(spec);
-        }
-    }
-done:
-    Py_XDECREF(rel);
-    Py_XDECREF(parts);
-    Py_XDECREF(sep);
-    Py_XDECREF(dot);
-    Py_XDECREF(dir);
-    Py_XDECREF(origin);
-    Py_XDECREF(spec_type);
-    Py_XDECREF(call_args);
-    Py_XDECREF(kwargs);
-    Py_XDECREF(locations);
-    return spec;
-}
-
 /* The interned `str` of `text`, made at the first call through `slot` and
  * kept for the process: a lookup by a fixed name then neither decodes nor
  * hashes it each time. Borrowed; NULL with an exception set when it cannot
@@ -227,6 +144,94 @@ static PyObject *pycc_pkg_interned(PyObject **slot, const char *text)
         *slot = PyUnicode_InternFromString(text);
     }
     return *slot;
+}
+
+/*
+ * `find_spec(fullname, path=None, target=None)`: a spec for a compiled
+ * module of the package -- origin the path its own extension would have,
+ * `has_location` so importlib sets `__file__`, and for a package its
+ * directory as the search location -- else None.
+ */
+static PyObject *pycc_pkg_find_spec(PyObject *self, PyObject *const *args, Py_ssize_t nargs,
+                                    PyObject *kwnames)
+{
+    static PyObject *keywords = NULL, *has_location = NULL, *locations_key = NULL;
+    const PyccPkgMember *member;
+    PyObject *dir = NULL, *origin = NULL, *spec_type = NULL, *spec = NULL, *locations = NULL;
+    PyObject *call[4];
+    char *rel;
+    size_t i, len;
+
+    if (nargs < 1) {
+        PyErr_SetString(PyExc_TypeError, "find_spec() missing required argument 'fullname'");
+        return NULL;
+    }
+    (void)kwnames;
+    member = pycc_pkg_lookup(args[0]);
+    if (member == NULL) {
+        Py_RETURN_NONE;
+    }
+    if (keywords == NULL) {
+        keywords = Py_BuildValue("(ss)", "origin", "is_package");
+        if (keywords == NULL) {
+            return NULL;
+        }
+    }
+    if (pycc_pkg_interned(&has_location, "has_location") == NULL
+        || pycc_pkg_interned(&locations_key, "submodule_search_locations") == NULL) {
+        return NULL;
+    }
+    /* `<pkgdir>/sub/mod`, or `<pkgdir>/sub` for a package: the member's
+     * dotted name with each dot the path separator. */
+    len = strlen(member->name);
+    rel = (char *)PyMem_Malloc(len + 1);
+    if (rel == NULL) {
+        return PyErr_NoMemory();
+    }
+    for (i = 0; i <= len; i++) {
+        rel[i] = member->name[i] == '.' ? PYCC_PKG_SEP[0] : member->name[i];
+    }
+    dir = PyUnicode_FromFormat("%U" PYCC_PKG_SEP "%s", pycc_pkg_dir, rel);
+    PyMem_Free(rel);
+    if (dir == NULL) {
+        return NULL;
+    }
+    origin = member->is_package ? PyUnicode_FromFormat("%U" PYCC_PKG_SEP "__init__%U", dir, pycc_pkg_suffix)
+                                : PyUnicode_FromFormat("%U%U", dir, pycc_pkg_suffix);
+    spec_type = origin == NULL ? NULL : pycc_pkg_spec_type();
+    if (spec_type == NULL) {
+        goto done;
+    }
+    /* `ModuleSpec(fullname, self, origin=origin, is_package=...)`. */
+    call[0] = args[0];
+    call[1] = self;
+    call[2] = origin;
+    call[3] = member->is_package ? Py_True : Py_False;
+    spec = PyObject_Vectorcall(spec_type, call, 2, keywords);
+    if (spec == NULL) {
+        goto done;
+    }
+    if (PyObject_SetAttr(spec, has_location, Py_True) != 0) {
+        Py_CLEAR(spec);
+        goto done;
+    }
+    if (member->is_package) {
+        locations = PyList_New(1);
+        if (locations == NULL) {
+            Py_CLEAR(spec);
+            goto done;
+        }
+        PyList_SetItem(locations, 0, Py_NewRef(dir));
+        if (PyObject_SetAttr(spec, locations_key, locations) != 0) {
+            Py_CLEAR(spec);
+        }
+    }
+done:
+    Py_XDECREF(dir);
+    Py_XDECREF(origin);
+    Py_XDECREF(spec_type);
+    Py_XDECREF(locations);
+    return spec;
 }
 
 /* `obj.<text>` by the interned name `slot` keeps: a new reference, or NULL
