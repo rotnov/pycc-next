@@ -122,3 +122,17 @@ def make_plain(n: int) -> Plain:
 
 def make_mixed(n: int) -> Mixed:
     return Mixed(n)
+
+
+class Slotted:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+
+class Swapped:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+
+def make_slotted(n: int) -> Slotted:
+    return Slotted(n)

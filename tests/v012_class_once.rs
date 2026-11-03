@@ -93,7 +93,7 @@ fn classes_match_cpython(release: bool, ending: &str) {
     // module boundary run in CPython, from the classes made once.
     for class in [
         "Plain", "Explicit", "Child", "Holder", "Kept", "Field", "Documented", "GenericDoc",
-        "Undocumented", "Mixed",
+        "Undocumented", "Mixed", "Slotted", "Swapped",
     ] {
         assert!(!report.contains(&format!("class `{class}` at")), "{report}");
     }

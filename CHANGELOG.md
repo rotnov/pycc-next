@@ -11,7 +11,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   at import and none stands between the class and its bases, so its `__mro__` is
   CPython's with only the root `pycc.compiled` added before `object`. Other statements
   (a `Generic[T]` or other Python base, a metaclass, a keyword) still make the class
-  from a template (`docs/DEVIATIONS.md`). pystache's import (16 classes made once) runs
+  from a template (`docs/DEVIATIONS.md`). The class deallocates its instances itself,
+  running a `__del__` Python code assigns to it as `subtype_dealloc` did. pystache's import (16 classes made once) runs
   about 0.83M fewer instructions and 6 fewer page faults, pydantic's 0.74M fewer and 9
   fewer faults, mistune's 0.15M fewer.
 - An `--ext` module's published signature wrapper whose defaults are constants (and

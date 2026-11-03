@@ -20,10 +20,85 @@
  * The carrier's reference to its `PyInstanceObj` is released last, which
  * frees the instance when nothing compiled still holds it.
  */
+/* CPython's `PyObject_CallFinalizerFromDealloc`, found at run time: in the
+ * limited API only from 3.15, but exported by every supported interpreter
+ * (see the dict-watcher lookup in global_sync.c for the two platforms). */
+static void pycc_ext_instance_dealloc(PyObject *self);
+#ifndef _WIN32
+extern int PyObject_CallFinalizerFromDealloc(PyObject *self) __attribute__((weak));
+#endif
+static int (*pycc_ext_finalize_from_dealloc(void))(PyObject *)
+{
+    static int resolved;
+    static int (*call)(PyObject *);
+
+    if (!resolved) {
+        resolved = 1;
+#ifdef _WIN32
+        {
+            PyObject *handle = PySys_GetObject("dllhandle");
+            void *dll = handle == NULL ? NULL : PyLong_AsVoidPtr(handle);
+
+            PyErr_Clear();
+            if (dll != NULL) {
+                call = (int (*)(PyObject *))GetProcAddress(dll, "PyObject_CallFinalizerFromDealloc");
+            }
+        }
+#else
+        call = PyObject_CallFinalizerFromDealloc;
+#endif
+    }
+    return call;
+}
+
+/* v0.12: a published class made once (class_once.c) has this function as
+ * its own `tp_dealloc`, where the class `type()` made from its template
+ * had `subtype_dealloc`, which runs the instance's `tp_finalize` first --
+ * the slot `C.__del__ = f` installs (`update_slot`), as an instance of a
+ * class of this module never gets one otherwise. So, when the object's
+ * own type deallocates through here (not a Python subclass, whose
+ * `subtype_dealloc` has already run it) and has a finalizer, it runs as
+ * `subtype_dealloc` runs it: before the object is untracked (a compiled
+ * class's own object already is, `pycc_ext_carrier_bind`, and stays so),
+ * once per object (PEP 442), and an object the finalizer resurrected is
+ * left alive.
+ * Returns 1 when the object was resurrected. */
+static int pycc_ext_instance_finalize(PyObject *self, PyTypeObject *tp)
+{
+    destructor finalize = (destructor)PyType_GetSlot(tp, Py_tp_finalize);
+    int (*call)(PyObject *);
+
+    if (finalize == NULL
+        || PyType_GetSlot(tp, Py_tp_dealloc) != (void *)pycc_ext_instance_dealloc) {
+        return 0;
+    }
+    call = pycc_ext_finalize_from_dealloc();
+    if (call != NULL) {
+        return call(self) < 0;
+    }
+    /* No such export: the same steps but for PEP 442's "finalized" mark,
+     * which only that function can set. */
+    if (PyType_IS_GC(tp) && PyObject_GC_IsFinalized(self)) {
+        return 0;
+    }
+    Py_SET_REFCNT(self, 1);
+    finalize(self);
+    if (Py_REFCNT(self) == 1) {
+        Py_SET_REFCNT(self, 0);
+        return 0;
+    }
+    Py_SET_REFCNT(self, Py_REFCNT(self) - 1);
+    return 1;
+}
+
 static void pycc_ext_instance_dealloc(PyObject *self)
 {
     PyTypeObject *tp = Py_TYPE(self);
-    void *inst = ((PyccExtInstance *)self)->inst;
+    void *inst;
+    if (pycc_ext_instance_finalize(self, tp)) {
+        return;
+    }
+    inst = ((PyccExtInstance *)self)->inst;
     if (PyType_IS_GC(tp)) {
         PyObject_GC_UnTrack(self);
     }

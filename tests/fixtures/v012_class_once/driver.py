@@ -142,3 +142,82 @@ print(type(made).__name__, isinstance(made, base.Plain), type(made) is base.Plai
       isinstance(mixed, base.Plain), mixed.value(), base.total(mixed), mro(base.Mixed))
 for q in (pickle.loads(pickle.dumps(made)), copy.deepcopy(mixed)):
     print(type(q).__name__, q.n, q.value())
+
+# The class `type` made used to deallocate its instances through
+# `subtype_dealloc`, and still takes what `type.__setattr__` sets: special
+# methods assigned to a class made once fill its slots (`update_slot`), a
+# `__del__` runs once per object (PEP 442), keeps an object it resurrects
+# alive and reports its exception as unraisable, and `__class__` moves
+# between two classes made once.
+import gc  # noqa: E402
+
+S = base.Slotted
+S.__repr__ = lambda self: "S!" + str(self.n)
+S.__eq__ = lambda self, other: True
+S.__hash__ = lambda self: 42
+S.__call__ = lambda self, *args: ("called", args)
+S.__iter__ = lambda self: iter("ab")
+S.__getattr__ = lambda self, name: "ga:" + name
+S.__len__ = lambda self: 5
+S.__bool__ = lambda self: False
+S.__lt__ = lambda self, other: "lt"
+sl = base.make_slotted(2)
+print(repr(sl), sl == object(), hash(sl), sl(1, 2), list(sl), sl.zzz, len(sl), bool(sl), sl < sl)
+for name in ("__repr__", "__eq__", "__hash__", "__call__", "__iter__", "__getattr__", "__len__",
+             "__bool__", "__lt__"):
+    delattr(S, name)
+print(repr(sl).split(" at ")[0], sl == sl, sl == base.Slotted(2), bool(sl))
+try:
+    sl.zzz
+except AttributeError as err:
+    print("AttributeError", err)
+try:
+    len(sl)
+except TypeError as err:
+    print("TypeError", err)
+
+dels, saved = [], []
+S.__del__ = lambda self: dels.append(self.n)
+x = base.Slotted(8)
+del x
+y = base.make_slotted(9)
+del y
+print("del", dels)
+gc.collect()
+
+
+def keep(self):
+    dels.append(("keep", self.n))
+    saved.append(self)
+
+
+S.__del__ = keep
+x = base.Slotted(11)
+del x
+print("resurrected", dels, [z.n for z in saved])
+saved.clear()
+gc.collect()
+print("once", dels)
+
+
+def boom(self):
+    raise ValueError("boom " + str(self.n))
+
+
+S.__del__ = boom
+sys.unraisablehook = lambda u: print("unraisable", type(u.exc_value).__name__, u.exc_value)
+x = base.Slotted(12)
+del x
+sys.unraisablehook = sys.__unraisablehook__
+del S.__del__
+dels.clear()
+x = base.Slotted(13)
+del x
+print("deleted", dels)
+
+w = base.Swapped(5)
+w.__class__ = base.Slotted
+print(type(w).__name__, w.n, isinstance(w, base.Slotted), isinstance(w, base.Swapped))
+w.n = 6
+w.__class__ = base.Swapped
+print(type(w).__name__, w.n)
