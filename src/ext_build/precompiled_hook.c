@@ -79,12 +79,13 @@ static PyObject *pycc_ext_chunk_compile(const struct pycc_ext_chunk *chunk)
     if (flags == NULL) {
         return NULL;
     }
-    source = PyUnicode_DecodeUTF8(chunk->source, chunk->source_len, NULL);
+    source = PyUnicode_DecodeUTF8(pycc_ext_chunk_text + chunk->source, chunk->source_len, NULL);
     if (source == NULL) {
         Py_DECREF(flags);
         return NULL;
     }
-    result = PyObject_CallFunction(compile, "OssOi", source, chunk->filename, "exec", flags, 1);
+    result = PyObject_CallFunction(compile, "OssOi", source, pycc_ext_chunk_text + chunk->filename,
+                                   "exec", flags, 1);
     Py_DECREF(source);
     Py_DECREF(flags);
     return result;

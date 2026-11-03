@@ -15,7 +15,7 @@
  * function itself, a `property`'s accessor, a `classmethod`/`staticmethod`'s
  * function, a decorator's `__wrapped__`/`wrapped`/`func` -- is patched in
  * place: its `vectorcall` becomes one of the generated trampolines
- * (`pycc_fwd_trampolines`, one per lift of the module), which binds the
+ * (`pycc_fwd_trampoline`, one per lift of the module), which binds the
  * call's arguments to the forwarder's parameters as CPython does --
  * positional, keyword, defaults, `*args`, `**kwargs` and the `__class__`
  * cell -- and calls the compiled body directly. The forwarder's code is
@@ -625,7 +625,7 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
     }
     *(int *)((char *)code + PYCC_CODE_FLAGS) |= PYCC_CO_SIGNATURE;
     *(uint32_t *)((char *)func + PYCC_FUNC_VERSION) = pycc_fwd_version_cleared;
-    *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) = m->fwd_trampolines[m->fwd_used];
+    *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) = m->fwd_trampoline(m->fwd_used);
     m->fwd_used++;
 done:
     PyErr_Clear();

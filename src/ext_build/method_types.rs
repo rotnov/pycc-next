@@ -46,8 +46,10 @@ pub(crate) const COMPILED_CLASS_ISINSTANCE_DECL: &str =
 pub(crate) const PUBLISH_CLASS_SLOT_DECL: &str =
     "static PyObject **pycc_ext_publish_class_slot(const char *name)";
 
-/// The generated `NULL`-terminated array of every published class name, in
-/// publication order, which the shim's post-body safety net walks (#1199).
+/// The generated list of every published class name, in publication order,
+/// which the shim's post-body safety net walks (#1199): one string of
+/// NUL-terminated names ended by an empty one, not an array of pointers,
+/// so it needs no load-time relocation.
 pub(crate) const PUBLISH_CLASS_NAMES: &str = "pycc_ext_publish_class_names";
 
 /// The shim's own answer for a class name no published type descends from
@@ -350,13 +352,11 @@ pub(crate) fn method_types_c(
 /// `ext_publish`), or by the safety net after the body for a class whose
 /// call never ran.
 fn publish_class_c(publications: &[ExtPublishedClass]) -> String {
-    let mut out = format!("static const char *const {PUBLISH_CLASS_NAMES}[] = {{\n");
+    let mut out = format!("static const char {PUBLISH_CLASS_NAMES}[] =\n");
     for published in publications {
-        out.push_str(&format!("    \"{}\",\n", published.class));
+        out.push_str(&format!("    \"{}\\000\"\n", published.class));
     }
-    out.push_str(&format!(
-        "    NULL,\n}};\n\n{PUBLISH_CLASS_SLOT_DECL}\n{{\n"
-    ));
+    out.push_str(&format!("    \"\";\n\n{PUBLISH_CLASS_SLOT_DECL}\n{{\n"));
     for published in publications {
         let class = &published.class;
         out.push_str(&format!(

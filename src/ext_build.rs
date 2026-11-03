@@ -789,15 +789,24 @@ fn exception_class_named_c(classes: &[UserExceptionClass]) -> String {
             c_string_literal(&class.name)
         ));
     }
-    out.push_str("    static const char *const builtin[] = {");
+    // One string of NUL-terminated names and their offsets, not an array of
+    // pointers: each pointer would need a load-time relocation, once per
+    // module.
+    out.push_str("    static const char builtin[] =");
+    let mut offsets = Vec::new();
+    let mut at = 0;
     for name in pycc_hir::BUILTIN_EXCEPTION_CLASSES {
-        out.push_str(&format!("{}, ", c_string_literal(name)));
+        out.push_str(&format!("\n        \"{name}\\000\""));
+        offsets.push(at.to_string());
+        at += name.len() + 1;
     }
     out.push_str(&format!(
-        "}};\n    for (int tag = 0; tag < {}; tag++) {{\n        \
-         if (strcmp(name, builtin[tag]) == 0) {{\n            \
+        ";\n    static const unsigned short builtin_at[] = {{{}}};\n    \
+         for (int tag = 0; tag < {}; tag++) {{\n        \
+         if (strcmp(name, builtin + builtin_at[tag]) == 0) {{\n            \
          return pycc_ext_exception_class_for_tag(tag);\n        }}\n    }}\n    \
          return NULL;\n}}\n\n",
+        offsets.join(", "),
         pycc_hir::BUILTIN_EXCEPTION_CLASSES.len()
     ));
     out

@@ -5,6 +5,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Changed
+- An `--ext` module's import-time tables of names and sources (its interface names,
+  published class names, builtin exception names, precompiled fallback chunks and
+  their file names) are one string each indexed by offset, and its forward
+  trampolines are picked by a `switch`, instead of arrays of pointers: each pointer
+  was a dynamic relocation, and every page holding one is copied when the extension
+  is loaded. Relocated pages: pydantic 81 -> 66, mistune 41 -> 35, pystache 20 -> 18;
+  page faults while loading the extension: pydantic 86 -> 71, mistune 46 -> 40,
+  pystache 25 -> 23.
 - The line an `--ext` module's fallback code runs after a statement to patch its
   compiled methods' forwarders names each one by its owner path and name, split at
   build time (`("C",), "m"`), instead of a dotted name split, sliced and looked up
