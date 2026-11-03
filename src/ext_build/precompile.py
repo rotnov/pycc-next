@@ -113,12 +113,44 @@ def defs(co):
       return (out,)
     else: return None
   return None
+# A signature wrapper chunk's entry (`src/ext_build/signatures.rs`),
+# `(code, defaults, kwdefaults, cells)`: the function `_pycc_make` returns,
+# which the shim then makes itself, each closure cell holding the factory's
+# parameter `SIG[cells[i]]`. Only when the source is `_pycc_make` and nothing else, its
+# body only the wrapper `def` (no decorator, annotation or twin builder)
+# with constant defaults and the two lines naming it, and the wrapper's
+# code (already given its qualified name and flag) closes over the
+# factory's parameters alone and holds no set constant; else None.
+SIG=('_pycc_entry','_pycc_missing','_pycc_tuple','_pycc_isinstance','_pycc_type','_pycc_TypeError','_pycc_int','_pycc_float','_pycc_str','_pycc_bool','_pycc_BaseException')
+def sig(src,co):
+  import ast
+  m=ast.parse(src).body
+  if len(m)!=1 or type(m[0]) is not ast.FunctionDef or m[0].name!='_pycc_make' or m[0].decorator_list: return None
+  if [p.arg for p in m[0].args.args]!=list(SIG) or m[0].args.kwonlyargs or m[0].args.vararg or m[0].args.kwarg: return None
+  b=m[0].body
+  if [type(x) for x in b]!=[ast.FunctionDef,ast.Assign,ast.If,ast.Return]: return None
+  f=b[0];a=f.args;ps=a.posonlyargs+a.args+a.kwonlyargs+[v for v in (a.vararg,a.kwarg) if v]
+  if f.decorator_list or f.returns or getattr(f,'type_params',None) or any(p.annotation for p in ps): return None
+  ds=a.defaults;ks=a.kw_defaults
+  if not all(type(d) is ast.Constant for d in ds+[d for d in ks if d is not None]): return None
+  mk=[k for k in co.co_consts if hasattr(k,'co_code')]
+  if len(mk)!=1 or mk[0].co_name!='_pycc_make': return None
+  fs=[k for k in mk[0].co_consts if hasattr(k,'co_code')]
+  if len(fs)!=1 or fs[0].co_name!=f.name or not set(fs[0].co_freevars)<=set(SIG) or not fs[0].co_flags&0x40000000: return None
+  q=b[1].value
+  if type(q) is not ast.Constant or q.value!=fs[0].co_qualname: return None
+  s2=[];walk(fs[0],s2)
+  if s2: return None
+  return (fs[0],tuple(d.value for d in ds) or None,{p.arg:d.value for p,d in zip(a.kwonlyargs,ks) if d is not None} or None,bytes(SIG.index(v) for v in fs[0].co_freevars))
 chunks,fix=marshal.loads(sys.stdin.buffer.read())
 table=[]
 for source,filename,future,rewrites in chunks:
   try:
     f=__future__.annotations.compiler_flag if future else 0
     co=rewrite(compile(source,filename,'exec',f,True,0),rewrites)
+    w=sig(source,co) if filename=='<pycc signature>' else None
+    if w:
+      table.append(w);continue
     fs=orders(source,co);d=defs(co)
     if d: d=(tuple((*f,orders(source,f[0] if len(f)==6 else f[1])) for f in d[0]),)
     table.append(d or (co,fs))

@@ -116,7 +116,7 @@ static PyObject *pycc_ext_chunk_entry(Py_ssize_t index)
     }
     entry = PyTuple_GetItem(pycc_ext_chunk_table, index);
     if (entry == NULL || !PyTuple_Check(entry)
-        || (PyTuple_Size(entry) != 2 && PyTuple_Size(entry) != 1)) {
+        || PyTuple_Size(entry) < 1 || PyTuple_Size(entry) > 4) {
         PyErr_Clear();
         return NULL;
     }
@@ -149,6 +149,34 @@ static PyObject *pycc_ext_chunk_entry_code(PyObject *entry)
 
 /* `types.FunctionType`, kept from the first `def` entry run. */
 static PyObject *pycc_ext_chunk_function_type = NULL;
+
+/* `types.CellType`, kept from the first signature wrapper made
+ * (`pycc_ext_sig_wrapper`): `PyCell_New` is not in the limited API. */
+static PyObject *pycc_ext_chunk_cell_type = NULL;
+
+/* `types.FunctionType` (borrowed), imported on the first call, and
+ * `types.CellType` with it; NULL with an exception set. */
+static PyObject *pycc_ext_chunk_function_type_get(void)
+{
+    if (pycc_ext_chunk_function_type == NULL || pycc_ext_chunk_cell_type == NULL) {
+        PyObject *types = PyImport_ImportModule("types");
+
+        if (types == NULL) {
+            return NULL;
+        }
+        if (pycc_ext_chunk_function_type == NULL) {
+            pycc_ext_chunk_function_type = PyObject_GetAttrString(types, "FunctionType");
+        }
+        if (pycc_ext_chunk_function_type != NULL && pycc_ext_chunk_cell_type == NULL) {
+            pycc_ext_chunk_cell_type = PyObject_GetAttrString(types, "CellType");
+        }
+        Py_DECREF(types);
+        if (pycc_ext_chunk_cell_type == NULL) {
+            return NULL;
+        }
+    }
+    return pycc_ext_chunk_function_type;
+}
 
 /*
  * Runs a `def` entry in `ns` as the chunk's own code would: the chunk is
@@ -192,17 +220,8 @@ static int pycc_ext_chunk_define(PyObject *specs, PyObject *ns)
             return 1;
         }
     }
-    if (pycc_ext_chunk_function_type == NULL) {
-        PyObject *types = PyImport_ImportModule("types");
-
-        if (types == NULL) {
-            goto done;
-        }
-        pycc_ext_chunk_function_type = PyObject_GetAttrString(types, "FunctionType");
-        Py_DECREF(types);
-        if (pycc_ext_chunk_function_type == NULL) {
-            goto done;
-        }
+    if (pycc_ext_chunk_function_type_get() == NULL) {
+        goto done;
     }
     for (i = 0; i < n; i++) {
         PyObject *spec = PyTuple_GetItem(specs, i);
@@ -357,6 +376,11 @@ static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
          * frees the table. */
         PyObject *entry = Py_XNewRef(pycc_ext_chunk_entry(index));
 
+        if (entry != NULL && PyTuple_Size(entry) == 4) {
+            /* A signature wrapper's function (`pycc_ext_signature_publish`
+             * makes it), not the chunk's code: the source is compiled. */
+            Py_CLEAR(entry);
+        }
         if (entry != NULL && PyTuple_Size(entry) == 1) {
             status = as_exec && pycc_ext_chunk_bind_builtins(ns) != 0
                          ? -1
