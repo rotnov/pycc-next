@@ -54,9 +54,10 @@ pub struct ModeFlags {
     pub report_fallbacks: bool,
     /// `--ext`: leave out the import fast paths whose effects CPython code
     /// could observe (each a row of docs/DEVIATIONS.md): a dataclass's
-    /// methods compiled at build time instead of from the text
-    /// `dataclasses` generates at import. The module then imports exactly
-    /// as CPython runs its source.
+    /// methods, and a `TypedDict`'s or `NamedTuple`'s forward references,
+    /// compiled at build time instead of from the texts `dataclasses` and
+    /// `typing` make at import. The module then imports exactly as CPython
+    /// runs its source.
     #[arg(long)]
     pub exact_cpython: bool,
 }

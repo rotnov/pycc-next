@@ -359,40 +359,45 @@ static int pycc_ext_chunk_exec(PyObject *code, PyObject *ns)
 }
 
 /*
- * v0.12: a chunk's dataclasses' methods compiled at build time
- * (`precompile.py`'s `dcs`): its entry is `(code, orders, texts)`, `texts`
- * mapping each text the build expects `dataclasses` to generate to its code,
- * compiled as `exec` compiles it (with its set constants' orders, as a
- * chunk's). While such a chunk runs, `dataclasses`' namespace binds `exec`
- * to `pycc_ext_dc_exec`, which the module's `_FuncBuilder` then calls
- * instead of the builtin: for a text in `texts` it raises the `compile`
- * audit event `exec` of the text raises and calls the builtin `exec` with
- * the code, which runs it as it would the text's; anything else it hands to
- * the builtin unchanged.
+ * v0.12: texts a chunk's statements make CPython compile, compiled at build
+ * time. An entry `(code, orders, (dataclass_texts, forward_texts))` maps,
+ * in each dict (or None), every text the build expects to its code (or
+ * `(code, orders)` when it holds set constants, rebuilt in source order as
+ * a chunk's are), or to a list of those for a text made more than once:
+ *
+ *  - `dataclass_texts` (`precompile.py`'s `dcs`): the methods
+ *    `dataclasses`' `_FuncBuilder` generates and runs with `exec(text,
+ *    globals, ns)`, compiled as `exec` compiles a text;
+ *  - `forward_texts` (`fwds`): the string annotations `typing` makes
+ *    forward references of (a `TypedDict` or `NamedTuple` class body) and
+ *    compiles with `compile(text, "<string>", "eval")`: in `annotationlib`
+ *    on CPython 3.14+, in `typing` on 3.13.
+ *
+ * While such a chunk runs, that module's namespace binds the name (`exec`,
+ * `compile`) to a builtin function of this file, which the module's code
+ * then calls instead of the builtin: for a text in its dict, called as the
+ * module calls it, from a frame with no `__future__` feature, while the
+ * builtin is the one CPython started with, it raises the `compile` audit
+ * event the builtin raises for the text and answers with the code -- `exec`
+ * calls the builtin with the code -- each code used once; anything else it
+ * hands to the builtin unchanged.
  *
  * One hook is bound for every chunk running at once (a chunk run inside
  * another, as an import of another module of the package, or one in
- * another thread): its `self` is the list of the running chunks' tables,
+ * another thread): its `self` is the list of the running chunks' dicts,
  * each chunk adding its own when it starts and removing it when it ends,
  * and the last to end removes the hook (docs/DEVIATIONS.md). Each module
- * of a package has its own copy of the hook's C function, so a hook is
+ * of a package has its own copy of the hooks' C functions, so a hook is
  * told by its docstring, which names the list's layout.
  */
 
-/* `"exec"`, interned once. */
-static PyObject *pycc_ext_dc_exec_name = NULL;
-/* The builtin `exec` (`builtins.exec` when the first such chunk ran, if it
- * was the builtin function then); NULL when it was not. */
-static PyObject *pycc_ext_dc_builtin_exec = NULL;
-static int pycc_ext_dc_builtin_known = 0;
-
-/* The compiler flags `exec` of a text inherits from the frame calling it
+/* The compiler flags a compiled text inherits from the frame compiling it
  * (`PyCF_MASK`: the `__future__` features). */
-#define PYCC_DC_FUTURE_FLAGS 0x1FE0000L
+#define PYCC_SUBST_FUTURE_FLAGS 0x1FE0000L
 
-/* Whether the frame calling the hook compiles a text with no `__future__`
+/* Whether the frame calling a hook compiles a text with no `__future__`
  * feature, as the build compiled it. */
-static int pycc_ext_dc_caller_plain(void)
+static int pycc_ext_subst_caller_plain(void)
 {
     PyFrameObject *frame = PyEval_GetFrame();
     PyCodeObject *code;
@@ -411,81 +416,127 @@ static int pycc_ext_dc_caller_plain(void)
         PyErr_Clear();
         return 0;
     }
-    return (value & PYCC_DC_FUTURE_FLAGS) == 0;
+    return (value & PYCC_SUBST_FUTURE_FLAGS) == 0;
 }
 
-/* The code for `text` in one of the running chunks' `tables` (removed from
- * it: each is used once, a second class generating the same text gets its
- * own code objects, as from its own `exec`; a new reference), NULL with no
- * exception set when there is none, or NULL with an exception set. */
-static PyObject *pycc_ext_dc_take(PyObject *tables, PyObject *text)
+/* One substituted builtin: its name, interned, and the builtin itself (the
+ * `builtins` module's function of that name when the first such chunk ran,
+ * NULL when it was something else then). */
+typedef struct PyccSubst {
+    const char *name;
+    PyObject *key;
+    PyObject *builtin;
+    int known;
+} PyccSubst;
+
+static PyccSubst pycc_ext_subst_exec = {"exec", NULL, NULL, 0};
+static PyccSubst pycc_ext_subst_compile = {"compile", NULL, NULL, 0};
+
+/* `sub`'s builtin as the calling frame finds it (a new reference), or NULL
+ * with an exception set (CPython's `NameError` when it has none). */
+static PyObject *pycc_ext_subst_lookup(PyccSubst *sub)
 {
-    Py_ssize_t i = PyList_CheckExact(tables) ? PyList_Size(tables) : 0;
+    PyObject *builtins = PyEval_GetBuiltins();
+    PyObject *found = NULL;
 
-    while (i-- > 0) {
-        PyObject *texts = PyList_GetItem(tables, i);
-        PyObject *code = PyDict_CheckExact(texts) ? PyDict_GetItemWithError(texts, text) : NULL;
+    if (builtins == NULL || PyMapping_GetOptionalItem(builtins, sub->key, &found) < 0) {
+        return NULL;
+    }
+    if (found == NULL) {
+        PyErr_Format(PyExc_NameError, "name '%s' is not defined", sub->name);
+    }
+    return found;
+}
 
-        if (code == NULL) {
-            if (PyErr_Occurred()) {
-                return NULL;
-            }
-            continue;
-        }
-        /* Its set constants rebuilt in source order, as the chunks'. */
-        code = PyTuple_Check(code) && PyTuple_Size(code) == 2
-                   ? pycc_ext_chunk_reordered(PyTuple_GetItem(code, 0), PyTuple_GetItem(code, 1))
-                   : Py_NewRef(code);
-        if (code == NULL) {
-            /* Not rebuilt: the text is compiled instead. */
+/* The code for `text` in `texts` (removed from it; a new reference), NULL
+ * with no exception set when there is none to use, or NULL with an
+ * exception set. Each entry is used once: a statement making a text another
+ * made before gets code objects of its own, as from its own compile. */
+static PyObject *pycc_ext_subst_take_from(PyObject *texts, PyObject *text)
+{
+    PyObject *entry, *code;
+    Py_ssize_t left = 0;
+
+    entry = PyDict_CheckExact(texts) ? PyDict_GetItemWithError(texts, text) : NULL;
+    if (entry == NULL) {
+        return NULL;
+    }
+    if (PyList_CheckExact(entry)) {
+        left = PyList_Size(entry) - 1;
+        entry = left < 0 ? NULL : PyList_GetItem(entry, left);
+        if (entry == NULL) {
             PyErr_Clear();
             return NULL;
         }
-        if (PyDict_DelItem(texts, text) != 0) {
-            Py_DECREF(code);
-            return NULL;
-        }
-        return code;
     }
-    return NULL;
+    code = PyTuple_Check(entry) && PyTuple_Size(entry) == 2
+               ? pycc_ext_chunk_reordered(PyTuple_GetItem(entry, 0), PyTuple_GetItem(entry, 1))
+               : Py_NewRef(entry);
+    if (code == NULL) {
+        /* Not rebuilt: the text is compiled instead. */
+        PyErr_Clear();
+        return NULL;
+    }
+    if ((left > 0 ? PySequence_DelItem(PyDict_GetItemWithError(texts, text), left)
+                  : PyDict_DelItem(texts, text))
+        != 0) {
+        Py_DECREF(code);
+        return NULL;
+    }
+    return code;
 }
 
-/* `exec` as `dataclasses` would find it: the hook, bound in its namespace
- * as `exec`, stands in front of the calling frame's builtins. */
-static PyObject *pycc_ext_dc_exec(PyObject *tables, PyObject *const *args, Py_ssize_t nargs,
-                                  PyObject *kwnames)
+/* The code for `text` in one of the running chunks' dicts `tables`, the
+ * latest first (a new reference), NULL with no exception set when there is
+ * none to use (the text is compiled), or NULL with an exception set; the
+ * `compile` audit event raised. */
+static PyObject *pycc_ext_subst_take(PyObject *tables, PyObject *text)
 {
-    PyObject *builtins = PyEval_GetBuiltins();
-    PyObject *exec = NULL;
-    PyObject *code = NULL;
-    PyObject *result;
+    PyObject *code = NULL, *bytes;
+    Py_ssize_t i;
 
-    if (builtins == NULL || PyMapping_GetOptionalItem(builtins, pycc_ext_dc_exec_name, &exec) < 0) {
+    if (!PyList_CheckExact(tables) || !PyUnicode_CheckExact(text) || !pycc_ext_subst_caller_plain()) {
         return NULL;
     }
+    for (i = PyList_Size(tables) - 1; i >= 0 && code == NULL; i--) {
+        code = pycc_ext_subst_take_from(PyList_GetItem(tables, i), text);
+        if (code == NULL && PyErr_Occurred()) {
+            return NULL;
+        }
+    }
+    if (code == NULL) {
+        return NULL;
+    }
+    bytes = PyUnicode_AsUTF8String(text);
+    if (bytes == NULL || PySys_Audit("compile", "Os", bytes, "<string>") < 0) {
+        Py_XDECREF(bytes);
+        Py_DECREF(code);
+        return NULL;
+    }
+    Py_DECREF(bytes);
+    return code;
+}
+
+/* `exec` as `dataclasses` finds it: `exec(text, globals, ns)`. */
+static PyObject *pycc_ext_subst_exec_call(PyObject *tables, PyObject *const *args, Py_ssize_t nargs,
+                                          PyObject *kwnames)
+{
+    PyObject *exec = pycc_ext_subst_lookup(&pycc_ext_subst_exec);
+    PyObject *code = NULL, *result;
+
     if (exec == NULL) {
-        PyErr_SetString(PyExc_NameError, "name 'exec' is not defined");
         return NULL;
     }
-    if (nargs == 3 && kwnames == NULL && exec == pycc_ext_dc_builtin_exec
-        && PyUnicode_CheckExact(args[0]) && pycc_ext_dc_caller_plain()) {
-        code = pycc_ext_dc_take(tables, args[0]);
+    if (nargs == 3 && kwnames == NULL && exec == pycc_ext_subst_exec.builtin) {
+        code = pycc_ext_subst_take(tables, args[0]);
         if (code == NULL && PyErr_Occurred()) {
             Py_DECREF(exec);
             return NULL;
         }
     }
     if (code != NULL) {
-        PyObject *bytes = PyUnicode_AsUTF8String(args[0]);
         PyObject *argv[3] = {code, args[1], args[2]};
 
-        if (bytes == NULL || PySys_Audit("compile", "Os", bytes, "<string>") < 0) {
-            Py_XDECREF(bytes);
-            Py_DECREF(code);
-            Py_DECREF(exec);
-            return NULL;
-        }
-        Py_DECREF(bytes);
         result = PyObject_Vectorcall(exec, argv, 3, NULL);
         Py_DECREF(code);
     } else {
@@ -495,14 +546,47 @@ static PyObject *pycc_ext_dc_exec(PyObject *tables, PyObject *const *args, Py_ss
     return result;
 }
 
-#define PYCC_DC_HOOK_DOC "pycc: dataclasses' exec while pre-compiled chunks run (self: their tables)"
+/* Whether `obj` is the `str` equal to `ascii`. */
+static int pycc_ext_subst_is(PyObject *obj, const char *ascii)
+{
+    return PyUnicode_CheckExact(obj) && PyUnicode_CompareWithASCIIString(obj, ascii) == 0;
+}
 
-static PyMethodDef pycc_ext_dc_exec_def = {"exec", (PyCFunction)(void (*)(void))pycc_ext_dc_exec,
-                                           METH_FASTCALL | METH_KEYWORDS, PYCC_DC_HOOK_DOC};
+/* `compile` as `annotationlib` (`typing` on 3.13) finds it:
+ * `compile(text, "<string>", "eval")`. */
+static PyObject *pycc_ext_subst_compile_call(PyObject *tables, PyObject *const *args, Py_ssize_t nargs,
+                                             PyObject *kwnames)
+{
+    PyObject *compile = pycc_ext_subst_lookup(&pycc_ext_subst_compile);
+    PyObject *code = NULL, *result;
+
+    if (compile == NULL) {
+        return NULL;
+    }
+    if (nargs == 3 && kwnames == NULL && compile == pycc_ext_subst_compile.builtin
+        && pycc_ext_subst_is(args[1], "<string>") && pycc_ext_subst_is(args[2], "eval")) {
+        code = pycc_ext_subst_take(tables, args[0]);
+        if (code == NULL && PyErr_Occurred()) {
+            Py_DECREF(compile);
+            return NULL;
+        }
+    }
+    result = code != NULL ? code : PyObject_Vectorcall(compile, args, (size_t)nargs, kwnames);
+    Py_DECREF(compile);
+    return result;
+}
+
+#define PYCC_SUBST_HOOK_DOC "pycc: a module's builtin while pre-compiled chunks run (self: their tables)"
+
+static PyMethodDef pycc_ext_subst_exec_def = {"exec", (PyCFunction)(void (*)(void))pycc_ext_subst_exec_call,
+                                              METH_FASTCALL | METH_KEYWORDS, PYCC_SUBST_HOOK_DOC};
+static PyMethodDef pycc_ext_subst_compile_def = {"compile",
+                                                 (PyCFunction)(void (*)(void))pycc_ext_subst_compile_call,
+                                                 METH_FASTCALL | METH_KEYWORDS, PYCC_SUBST_HOOK_DOC};
 
 /* The running chunks' tables if `bound` is a pycc extension's hook (a
  * borrowed reference), else NULL (no exception set). */
-static PyObject *pycc_ext_dc_hook_tables(PyObject *bound)
+static PyObject *pycc_ext_subst_hook_tables(PyObject *bound)
 {
     PyObject *self, *doc;
     int same;
@@ -517,99 +601,110 @@ static PyObject *pycc_ext_dc_hook_tables(PyObject *bound)
         return NULL;
     }
     doc = PyObject_GetAttrString(bound, "__doc__");
-    same = doc != NULL && PyUnicode_Check(doc) && PyUnicode_CompareWithASCIIString(doc, PYCC_DC_HOOK_DOC) == 0;
+    same = doc != NULL && pycc_ext_subst_is(doc, PYCC_SUBST_HOOK_DOC);
     Py_XDECREF(doc);
     PyErr_Clear();
     return same ? self : NULL;
 }
 
-/* Whether `exec` is CPython's builtin `exec`: the `builtins` module's own
- * function of that name (not another of its functions bound as `exec`). */
-static int pycc_ext_dc_is_builtin_exec(PyObject *exec, PyObject *builtins)
+/* Whether `found` is CPython's builtin `sub`: the `builtins` module's own
+ * function of that name (not another of its functions bound under it). */
+static int pycc_ext_subst_is_builtin(PyObject *found, PyObject *builtins, PyccSubst *sub)
 {
     PyObject *name;
     int same;
 
-    if (exec == NULL || !PyCFunction_Check(exec) || PyCFunction_GetSelf(exec) != builtins) {
+    if (found == NULL || !PyCFunction_Check(found) || PyCFunction_GetSelf(found) != builtins) {
         return 0;
     }
-    name = PyObject_GetAttrString(exec, "__name__");
-    same = name != NULL && PyUnicode_Check(name) && PyUnicode_CompareWithASCIIString(name, "exec") == 0;
+    name = PyObject_GetAttrString(found, "__name__");
+    same = name != NULL && pycc_ext_subst_is(name, sub->name);
     Py_XDECREF(name);
     PyErr_Clear();
     return same;
 }
 
-/* Adds `texts` to the running chunks' tables, binding the hook as `exec`
- * in `dataclasses`' namespace when it is imported and binds no `exec`
- * (the hook found bound is used); returns the hook (to remove `texts`), or
- * NULL (no exception set) when nothing was bound. */
-static PyObject *pycc_ext_dc_install(PyObject *texts)
+/* One chunk's table added to a hook: the hook, and the table. */
+typedef struct PyccSubstBinding {
+    PyObject *hook;
+    PyObject *texts;
+} PyccSubstBinding;
+
+/* Adds `texts` to the running chunks' tables of the hook (`def`) bound as
+ * `sub`'s name in module `module`'s namespace, binding one when the module
+ * is imported and binds no such name; `binding->hook` stays NULL (no
+ * exception set) when nothing was bound. */
+static void pycc_ext_subst_install(PyccSubstBinding *binding, const char *module, PyccSubst *sub,
+                                   PyMethodDef *def, PyObject *texts)
 {
-    PyObject *name, *module, *dict, *bound, *tables, *hook = NULL;
+    PyObject *name, *mod, *dict, *bound, *tables, *hook = NULL;
 
-    if (pycc_ext_dc_exec_name == NULL) {
-        pycc_ext_dc_exec_name = PyUnicode_InternFromString("exec");
-        if (pycc_ext_dc_exec_name == NULL) {
+    if (texts == NULL || texts == Py_None) {
+        return;
+    }
+    if (sub->key == NULL) {
+        sub->key = PyUnicode_InternFromString(sub->name);
+        if (sub->key == NULL) {
             PyErr_Clear();
-            return NULL;
+            return;
         }
     }
-    if (!pycc_ext_dc_builtin_known) {
-        PyObject *mod = PyImport_ImportModule("builtins");
-        PyObject *exec = mod == NULL ? NULL : PyObject_GetAttr(mod, pycc_ext_dc_exec_name);
+    if (!sub->known) {
+        PyObject *builtins = PyImport_ImportModule("builtins");
+        PyObject *found = builtins == NULL ? NULL : PyObject_GetAttr(builtins, sub->key);
 
-        if (pycc_ext_dc_is_builtin_exec(exec, mod)) {
-            pycc_ext_dc_builtin_exec = Py_NewRef(exec);
+        if (pycc_ext_subst_is_builtin(found, builtins, sub)) {
+            sub->builtin = Py_NewRef(found);
         }
-        Py_XDECREF(exec);
-        Py_XDECREF(mod);
+        Py_XDECREF(found);
+        Py_XDECREF(builtins);
         PyErr_Clear();
-        pycc_ext_dc_builtin_known = 1;
+        sub->known = 1;
     }
-    if (pycc_ext_dc_builtin_exec == NULL) {
-        return NULL;
+    if (sub->builtin == NULL) {
+        return;
     }
-    name = PyUnicode_FromString("dataclasses");
-    module = name == NULL ? NULL : PyImport_GetModule(name);
+    name = PyUnicode_FromString(module);
+    mod = name == NULL ? NULL : PyImport_GetModule(name);
     Py_XDECREF(name);
-    if (module == NULL || !PyModule_Check(module)) {
-        Py_XDECREF(module);
-        PyErr_Clear();
-        return NULL;
-    }
-    dict = PyModule_GetDict(module);
-    Py_DECREF(module);
-    bound = dict == NULL ? NULL : PyDict_GetItemWithError(dict, pycc_ext_dc_exec_name);
-    if (bound == NULL && !PyErr_Occurred()) {
+    dict = mod != NULL && PyModule_Check(mod) ? PyModule_GetDict(mod) : NULL;
+    bound = dict == NULL ? NULL : PyDict_GetItemWithError(dict, sub->key);
+    if (dict != NULL && bound == NULL && !PyErr_Occurred()) {
         tables = PyList_New(0);
-        hook = tables == NULL ? NULL : PyCFunction_NewEx(&pycc_ext_dc_exec_def, tables, NULL);
+        hook = tables == NULL ? NULL : PyCFunction_NewEx(def, tables, NULL);
         Py_XDECREF(tables);
-        if (hook != NULL && PyDict_SetItem(dict, pycc_ext_dc_exec_name, hook) != 0) {
+        if (hook != NULL && PyDict_SetItem(dict, sub->key, hook) != 0) {
             Py_CLEAR(hook);
         }
-    } else if ((tables = pycc_ext_dc_hook_tables(bound)) != NULL) {
+    } else if (pycc_ext_subst_hook_tables(bound) != NULL) {
         hook = Py_NewRef(bound);
     }
-    tables = hook == NULL ? NULL : pycc_ext_dc_hook_tables(hook);
-    if (tables == NULL || PyList_Append(tables, texts) != 0) {
-        Py_CLEAR(hook);
+    tables = pycc_ext_subst_hook_tables(hook);
+    if (tables != NULL && PyList_Append(tables, texts) == 0) {
+        binding->hook = hook;
+        binding->texts = Py_NewRef(texts);
+    } else {
+        Py_XDECREF(hook);
     }
+    Py_XDECREF(mod);
     PyErr_Clear();
-    return hook;
 }
 
-/* Removes `texts` from `hook`'s tables, and the hook from `dataclasses`'
- * namespace when no other chunk's tables are left and it is still bound
- * there, keeping any exception set. */
-static void pycc_ext_dc_remove(PyObject *hook, PyObject *texts)
+/* Removes `binding`'s table from its hook's, and the hook from module
+ * `module`'s namespace when no other chunk's table is left and it is still
+ * bound there, keeping any exception set. */
+static void pycc_ext_subst_remove(PyccSubstBinding *binding, const char *module, PyccSubst *sub)
 {
-    PyObject *raised = PyErr_GetRaisedException();
-    PyObject *tables = pycc_ext_dc_hook_tables(hook);
-    Py_ssize_t i = tables == NULL ? 0 : PyList_Size(tables);
+    PyObject *raised, *tables;
+    Py_ssize_t i;
 
-    while (i-- > 0) {
-        if (PyList_GetItem(tables, i) == texts) {
+    if (binding->hook == NULL) {
+        return;
+    }
+    raised = PyErr_GetRaisedException();
+    tables = pycc_ext_subst_hook_tables(binding->hook);
+    for (i = tables == NULL ? -1 : PyList_Size(tables) - 1; i >= 0; i--) {
+        if (PyList_GetItem(tables, i) == binding->texts) {
             if (PySequence_DelItem(tables, i) != 0) {
                 PyErr_Clear();
             }
@@ -617,18 +712,19 @@ static void pycc_ext_dc_remove(PyObject *hook, PyObject *texts)
         }
     }
     if (tables != NULL && PyList_Size(tables) == 0) {
-        PyObject *name = PyUnicode_FromString("dataclasses");
-        PyObject *module = name == NULL ? NULL : PyImport_GetModule(name);
-        PyObject *dict = module != NULL && PyModule_Check(module) ? PyModule_GetDict(module) : NULL;
-        PyObject *bound = dict == NULL ? NULL : PyDict_GetItemWithError(dict, pycc_ext_dc_exec_name);
+        PyObject *name = PyUnicode_FromString(module);
+        PyObject *mod = name == NULL ? NULL : PyImport_GetModule(name);
+        PyObject *dict = mod != NULL && PyModule_Check(mod) ? PyModule_GetDict(mod) : NULL;
+        PyObject *bound = dict == NULL ? NULL : PyDict_GetItemWithError(dict, sub->key);
 
-        if (bound == hook && PyDict_DelItem(dict, pycc_ext_dc_exec_name) != 0) {
+        if (bound == binding->hook && PyDict_DelItem(dict, sub->key) != 0) {
             PyErr_Clear();
         }
-        Py_XDECREF(module);
+        Py_XDECREF(mod);
         Py_XDECREF(name);
     }
-    Py_DECREF(hook);
+    Py_CLEAR(binding->hook);
+    Py_CLEAR(binding->texts);
     PyErr_Clear();
     PyErr_SetRaisedException(raised);
 }
@@ -640,7 +736,8 @@ static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
     const struct pycc_ext_chunk *chunk;
     PyObject *code = NULL;
     PyObject *texts = NULL;
-    PyObject *hook = NULL;
+    PyccSubstBinding dc = {NULL, NULL}, fwd = {NULL, NULL};
+    const char *fwd_module = Py_Version >= 0x030E0000 ? "annotationlib" : "typing";
     int status;
 
     if (index < 0 || index >= pycc_ext_chunk_count) {
@@ -683,7 +780,13 @@ static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
         }
     }
     if (texts != NULL) {
-        hook = pycc_ext_dc_install(texts);
+        if (PyTuple_Check(texts) && PyTuple_Size(texts) == 2) {
+            pycc_ext_subst_install(&dc, "dataclasses", &pycc_ext_subst_exec, &pycc_ext_subst_exec_def,
+                                   PyTuple_GetItem(texts, 0));
+            pycc_ext_subst_install(&fwd, fwd_module, &pycc_ext_subst_compile, &pycc_ext_subst_compile_def,
+                                   PyTuple_GetItem(texts, 1));
+        }
+        Py_DECREF(texts);
     }
     if (as_exec) {
         status = pycc_ext_chunk_exec(code, ns);
@@ -693,10 +796,8 @@ static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
         status = done == NULL ? -1 : 0;
         Py_XDECREF(done);
     }
-    if (hook != NULL) {
-        pycc_ext_dc_remove(hook, texts);
-    }
-    Py_XDECREF(texts);
+    pycc_ext_subst_remove(&fwd, fwd_module, &pycc_ext_subst_compile);
+    pycc_ext_subst_remove(&dc, "dataclasses", &pycc_ext_subst_exec);
     Py_DECREF(code);
     return status;
 }

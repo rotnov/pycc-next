@@ -145,7 +145,8 @@ def sig(src,co):
 # v0.12: the texts `dataclasses` generates for the chunk's dataclasses,
 # `{text: code}`, each compiled as `exec` of the text compiles it (file
 # `<string>`, no flags), or `(code, orders)` when it holds `frozenset`
-# constants (a frozen dataclass's field names); None when there is none. Each class statement
+# constants (a frozen dataclass's field names), or a list of those for a
+# text several classes generate; None when there is none. Each class statement
 # decorated last by a `dataclass` (or `x.dataclass`) with constant keywords
 # gets a stand-in -- its fields (a default or a `field()` of constant
 # flags as placeholders), the names its body binds, bases defined before it
@@ -238,8 +239,42 @@ def dcs(src):
     co=compile(s,'<string>','exec',0,True,0)
     try: fs=orders(s,co)
     except ValueError: continue
-    out[s]=co if fs is None else (co,fs)
-  return out or None
+    out.setdefault(s,[]).append(co if fs is None else (co,fs))
+  return once(out)
+# `out` (`{text: [entry, ...]}`, an entry per time the text is made: each use
+# takes one, `precompiled_hook.c`) with each one-entry list replaced by its
+# entry; None when empty.
+def once(out):
+  return {k:v[0] if len(v)==1 else v for k,v in out.items()} or None
+# v0.12: the forward references `typing` will compile for the chunk's class
+# bodies (a `TypedDict` or `NamedTuple` type-checks each annotation, a string
+# becoming a forward reference whose code `compile(text, '<string>', 'eval')`
+# makes), `{text: code}` as `dcs`'s; None when there is none. Each candidate
+# is a `str` stored into `__annotations__` (an annotation under `from
+# __future__ import annotations`, or a string one) or a `str` constant of an
+# `__annotate__` function (3.14+), as `typing` rewrites it (a `*` unpack).
+def fwds(co):
+  try:
+    m=__import__('annotationlib' if sys.version_info>=(3,14) else 'typing')
+    star=getattr(m,'_rewrite_star_unpack',lambda a:a)
+  except Exception: return None
+  seen=[]
+  def scan(c):
+    k,n=c.co_consts,c.co_names;it=list(ops(c))
+    for j,(o,a) in enumerate(it):
+      v=cv(o,a,k)
+      if v and type(v[0]) is str and (c.co_name=='__annotate__' or (j+1<len(it) and it[j+1][0]==O['LOAD_NAME'] and n[it[j+1][1]]=='__annotations__')):
+        seen.append(v[0])
+    for x in k:
+      if type(x) is type(c): scan(x)
+  scan(co)
+  out={}
+  for s in seen:
+    try:
+      t=star(s);c=compile(t,'<string>','eval',0,True,0);fs=orders(t,c)
+    except (SyntaxError,ValueError): continue
+    out.setdefault(t,[]).append(c if fs is None else (c,fs))
+  return once(out)
 chunks,fix,exact=marshal.loads(sys.stdin.buffer.read())
 table=[]
 for source,filename,future,rewrites in chunks:
@@ -251,9 +286,9 @@ for source,filename,future,rewrites in chunks:
       table.append(w);continue
     fs=orders(source,co);d=defs(co)
     if d: d=(tuple((*f,orders(source,f[0] if len(f)==6 else f[1])) for f in d[0]),)
-    e=d or (co,fs)
     x=None if d or exact or 'dataclass' not in source else dcs(source)
-    table.append((co,fs,x) if x else e)
+    y=None if d or exact or ('TypedDict' not in source and 'NamedTuple' not in source) else fwds(co)
+    table.append((co,fs,(x,y)) if x or y else d or (co,fs))
   except Exception:
     table.append(None)
 present=bytes(t is not None for t in table)
