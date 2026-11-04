@@ -8,7 +8,8 @@
 //! each text's `compile` audit event in order, the types they evaluate to,
 //! a distinct code object per reference, and `annotationlib`'s (`typing`'s
 //! on 3.13) namespace after the import. A text the build did not foresee
-//! (an invalid one, a `ForwardRef` made by hand) is compiled at import as
+//! (an invalid one, one whose compiling warns, a `ForwardRef` made by hand)
+//! is compiled at import as
 //! before, as is every text when `builtins.compile` is replaced, the module
 //! binds a `compile` of its own, the interpreter runs with `-O`, or the
 //! module was built `--exact-cpython`.
@@ -45,7 +46,7 @@ fn source(name: &str) -> String {
 fn built(label: &str, extra: &[&str]) -> ScratchDir {
     let dir = ScratchDir::new(label).expect("scratch");
     std::fs::write(dir.join("driver.py"), source("driver.py")).expect("write the driver");
-    for module in ["fm", "fe"] {
+    for module in ["fm", "fe", "fw"] {
         let path = dir.join(format!("{module}.py"));
         std::fs::write(&path, source(&format!("{module}.py"))).expect("write the module");
         let build = pycc()
@@ -64,14 +65,14 @@ fn built(label: &str, extra: &[&str]) -> ScratchDir {
 
 fn plain(label: &str) -> ScratchDir {
     let dir = ScratchDir::new(label).expect("scratch");
-    for name in ["driver.py", "fm.py", "fe.py"] {
+    for name in ["driver.py", "fm.py", "fe.py", "fw.py"] {
         std::fs::write(dir.join(name), source(name)).expect("write the source");
     }
     dir
 }
 
-/// The driver's output in `dir` (`mode`: "", `patched`, `bound` or
-/// `static`), with a fixed hash seed.
+/// The driver's output in `dir` (`mode`: "", `patched`, `bound`, `static`,
+/// `warn` or `werror`), with a fixed hash seed.
 fn run(dir: &Path, mode: &str, optimize: bool) -> Output {
     let mut cmd = python();
     if optimize {
@@ -139,4 +140,19 @@ fn exact_cpython_compiles_every_reference_at_import() {
     let ours = built("forward_codes_exact", &["--exact-cpython"]);
     let oracle = plain("forward_codes_exact_src");
     assert_eq!(compare(&ours, &oracle, "", false), 0);
+}
+
+#[test]
+fn a_reference_whose_compiling_warns_is_compiled_at_import() {
+    let ours = built("forward_codes_warn", &[]);
+    let oracle = plain("forward_codes_warn_src");
+    // `Literal['\d']` and `Literal['\w']` warn when compiled: each is
+    // compiled at import, its `SyntaxWarning` shown as CPython's, and an
+    // error filter makes a `SyntaxError` of the first. The class's other
+    // annotations still use the build's code.
+    let count = compare(&ours, &oracle, "warn", false);
+    let raised = compare(&ours, &oracle, "werror", false);
+    if matches!(python_version().as_str(), "3.13" | "3.14" | "3.15") {
+        assert_eq!((count, raised), (2, 0));
+    }
 }

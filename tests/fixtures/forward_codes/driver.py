@@ -39,6 +39,22 @@ def prof(frame, ev, arg):
         text = owner._rewrite_star_unpack(frame.f_locals["arg"])
         used["ahead" if type(tables) is list and any(text in t for t in tables) else "text"] += 1
 sys.setprofile(prof)
+if mode in ("warn", "werror"):
+    # A text whose compiling warns: the warning, or the error a filter makes
+    # of it, as CPython's.
+    import warnings
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("error" if mode == "werror" else "always", SyntaxWarning)
+        try:
+            import fw
+            print(fw.Esc.__annotations__, fw.EscT._fields)
+        except Exception as e:
+            print("import:", type(e).__name__, e)
+    sys.setprofile(None)
+    print([(w.category.__name__, str(w.message), w.filename, w.lineno) for w in caught])
+    print(events)
+    print("ahead-of-time:", used["ahead"], "from text:", used["text"], file=sys.stderr)
+    sys.exit()
 if mode == "static":
     try:
         import fm

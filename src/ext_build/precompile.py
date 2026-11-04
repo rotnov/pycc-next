@@ -236,11 +236,22 @@ def dcs(src):
   out={}
   for s in seen:
     if type(s) is not str: continue
-    co=compile(s,'<string>','exec',0,True,0)
+    co=quiet(s,'exec')
+    if co is None: continue
     try: fs=orders(s,co)
     except ValueError: continue
     out.setdefault(s,[]).append(co if fs is None else (co,fs))
   return once(out)
+# The code `compile(text, '<string>', mode)` makes, or None when compiling it
+# warns (a `SyntaxWarning` for an invalid escape, say): that text is left to
+# compile at import, where CPython's warning (or the error a filter makes of
+# it) happens as it does there.
+def quiet(text,mode):
+  import warnings
+  with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter('always')
+    co=compile(text,'<string>',mode,0,True,0)
+  return None if w else co
 # `out` (`{text: [entry, ...]}`, an entry per time the text is made: each use
 # takes one, `precompiled_hook.c`) with each one-entry list replaced by its
 # entry; None when empty.
@@ -271,7 +282,9 @@ def fwds(co):
   out={}
   for s in seen:
     try:
-      t=star(s);c=compile(t,'<string>','eval',0,True,0);fs=orders(t,c)
+      t=star(s);c=quiet(t,'eval')
+      if c is None: continue
+      fs=orders(t,c)
     except (SyntaxError,ValueError): continue
     out.setdefault(t,[]).append(c if fs is None else (c,fs))
   return once(out)
