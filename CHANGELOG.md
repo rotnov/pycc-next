@@ -125,6 +125,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   their cp315 builds.
 
 ### Fixed
+- A module-level function of a non-strict `--ext` module used as a value that crosses
+  into CPython (in a dict or tuple display, returned) is the function the module binds
+  under its name, as CPython code reads it, not a positional-only wrapper: calls with
+  keywords and defaults work (`functools.partial(f, limit=3)`). pydantic's constraint
+  validators took this path; its test suite now fails only what the sources fail, plus
+  `test_type_checking_model_dump_signature_in_sync_with_base_model`, which loads
+  `root_model.__file__` (a package build's documented `__file__`).
+- A function with a default (or `*args`) and a parameter named as the function itself
+  (`def f(x, f=None)`) called its argument instead of itself from its `--ext` signature
+  entry; the entry now names that parameter apart (`_pycc_s_f`).
 - A published compiled class of an `--ext` module has CPython's `__doc__` (its body's
   docstring, cleaned as the compiler cleans it), `__firstlineno__` and
   `__static_attributes__`; it had `__doc__ = None` and neither of the others. A class

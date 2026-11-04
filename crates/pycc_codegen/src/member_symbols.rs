@@ -23,8 +23,9 @@ use inkwell::module::Module;
 /// points over the module's own record (`src/ext/module/module_ctx.c`) and
 /// `pycc_ext_publish`. Compiled code calls them by these names, which a
 /// member's object and its C unit (`pycc_ext_member.h`) both prefix.
-pub const MODULE_UNIT_ENTRIES: [&str; 12] = [
+pub const MODULE_UNIT_ENTRIES: [&str; 13] = [
     crate::ext::EXT_PUBLISH_SYMBOL,
+    crate::ext::EXT_OBJ_PACK_FUNCTION_SYMBOL,
     "pycc_ext_ns_version",
     "pycc_ext_global_sync",
     "pycc_ext_obj_pack_instance",
