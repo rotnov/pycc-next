@@ -128,7 +128,7 @@ Main at e2dbaaa, with the same VM, `lbench` harness and PBS CPython 3.15.2 as ab
 | `import pystache` | 121 | 2.6, just after a build | 10.87 (10.18-11.76) | 11.60 (10.98-12.52) | 0.94x |
 | pydantic import | 61 | 0.8 | 82.6 (79.0-87.0) | 78.8 (74.8-81.6) | 1.05x |
 
-The latest CI benchmark, bench run 41750538464 at 0f97b93 (before levers 12 and later), gave aarch64 0.97x for pydantic's import and 0.97x for pystache's.
+The latest CI benchmark, bench run 41750538464 at 0f97b93 (before #66, #70, #71 and #73), gave aarch64 0.97x for pydantic's import and 0.97x for pystache's.
 
 Accept 1 is met locally, but CI has not confirmed it on both runners, and the stretch is not met. Accept 2 is not met: about 0.5 ms of pystache's 11 ms import remains, all in loading the extension (`dlopen`, and faulting in its pages and the interpreter's cold text), not in instructions.
 
