@@ -4,7 +4,21 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 
 ## [Unreleased]
 
+### Added
+- `pycc build --exact-cpython` (with `--ext`): leaves out the import fast paths whose
+  effects CPython code could observe, so the module imports exactly as CPython runs its
+  source (`docs/DEVIATIONS.md` names each). For now that is the dataclass texts below.
+
 ### Changed
+- An `--ext` module's dataclasses whose class statements run in CPython get the methods
+  `dataclasses` generates from code objects the build compiled: the build runs the target
+  interpreter's own `dataclasses` on a stand-in of each class (its fields, `field()`
+  flags, body names and bases of the module) and compiles every text it generates, and
+  while such a statement runs at import, `dataclasses`' `exec` is a builtin that runs the
+  pre-compiled code for a text equal to one of those, raising the same `compile` audit
+  event, and compiles any other text as before (`docs/DEVIATIONS.md`). pydantic's import
+  (33 of its 50 dataclass texts) runs about 45M fewer instructions (own share 139.8M ->
+  94.3M against CPython's 135.9M), mistune's 0.3M fewer.
 - An `--ext` module's published class whose statement's bases are none, `object`, or
   compiled classes of its module made the same way is made once, when its statement
   runs, straight from its compiled layout, methods and slots: no template type is made

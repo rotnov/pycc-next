@@ -358,12 +358,235 @@ static int pycc_ext_chunk_exec(PyObject *code, PyObject *ns)
     return 0;
 }
 
+/*
+ * v0.12: a chunk's dataclasses' methods compiled at build time
+ * (`precompile.py`'s `dcs`): its entry is `(code, orders, texts)`, `texts`
+ * mapping each text the build expects `dataclasses` to generate to its code,
+ * compiled as `exec` compiles it (with its set constants' orders, as a
+ * chunk's). While such a chunk runs, `dataclasses`'
+ * namespace binds `exec` to `pycc_ext_dc_exec`, which the module's
+ * `_FuncBuilder` then calls instead of the builtin: for a text in `texts`
+ * it raises the `compile` audit event `exec` of the text raises and calls
+ * the builtin `exec` with the code, which runs it as it would the text's;
+ * anything else it hands to the builtin unchanged. The binding is removed
+ * when the chunk has run (docs/DEVIATIONS.md); a chunk run meanwhile (an
+ * import of another module of the package) binds its own and then binds
+ * the first back.
+ */
+
+/* `"exec"`, interned once. */
+static PyObject *pycc_ext_dc_exec_name = NULL;
+/* The builtin `exec` (`builtins.exec` when the first such chunk ran, if it
+ * was the builtin function then); NULL when it was not. */
+static PyObject *pycc_ext_dc_builtin_exec = NULL;
+static int pycc_ext_dc_builtin_known = 0;
+
+/* The compiler flags `exec` of a text inherits from the frame calling it
+ * (`PyCF_MASK`: the `__future__` features). */
+#define PYCC_DC_FUTURE_FLAGS 0x1FE0000L
+
+/* Whether the frame calling the hook compiles a text with no `__future__`
+ * feature, as the build compiled it. */
+static int pycc_ext_dc_caller_plain(void)
+{
+    PyFrameObject *frame = PyEval_GetFrame();
+    PyCodeObject *code;
+    PyObject *flags;
+    long value;
+
+    if (frame == NULL) {
+        return 0;
+    }
+    code = PyFrame_GetCode(frame);
+    flags = code == NULL ? NULL : PyObject_GetAttrString((PyObject *)code, "co_flags");
+    Py_XDECREF(code);
+    value = flags == NULL ? -1 : PyLong_AsLong(flags);
+    Py_XDECREF(flags);
+    if (value == -1) {
+        PyErr_Clear();
+        return 0;
+    }
+    return (value & PYCC_DC_FUTURE_FLAGS) == 0;
+}
+
+/* `exec` as `dataclasses` would find it: the hook, bound in its namespace
+ * as `exec`, stands in front of the calling frame's builtins. */
+static PyObject *pycc_ext_dc_exec(PyObject *texts, PyObject *const *args, Py_ssize_t nargs,
+                                  PyObject *kwnames)
+{
+    PyObject *builtins = PyEval_GetBuiltins();
+    PyObject *exec = NULL;
+    PyObject *result;
+
+    if (builtins == NULL || PyMapping_GetOptionalItem(builtins, pycc_ext_dc_exec_name, &exec) < 0) {
+        return NULL;
+    }
+    if (exec == NULL) {
+        PyErr_SetString(PyExc_NameError, "name 'exec' is not defined");
+        return NULL;
+    }
+    if (nargs == 3 && kwnames == NULL && exec == pycc_ext_dc_builtin_exec
+        && PyUnicode_CheckExact(args[0]) && PyDict_CheckExact(texts)) {
+        PyObject *code = PyDict_GetItemWithError(texts, args[0]);
+
+        if (code == NULL && PyErr_Occurred()) {
+            Py_DECREF(exec);
+            return NULL;
+        }
+        if (code != NULL && pycc_ext_dc_caller_plain()) {
+            PyObject *bytes, *argv[3];
+
+            /* Its set constants rebuilt in source order, as the chunks'. */
+            code = PyTuple_Check(code) && PyTuple_Size(code) == 2
+                       ? pycc_ext_chunk_reordered(PyTuple_GetItem(code, 0), PyTuple_GetItem(code, 1))
+                       : Py_NewRef(code);
+            if (code == NULL) {
+                /* Not rebuilt: the text is compiled instead. */
+                result = PyObject_Vectorcall(exec, args, (size_t)nargs, kwnames);
+                Py_DECREF(exec);
+                return result;
+            }
+            /* Used once: a second class generating the same text gets its
+             * own code objects, as from its own `exec`. */
+            if (PyDict_DelItem(texts, args[0]) != 0) {
+                Py_DECREF(code);
+                Py_DECREF(exec);
+                return NULL;
+            }
+            bytes = PyUnicode_AsUTF8String(args[0]);
+            if (bytes == NULL || PySys_Audit("compile", "Os", bytes, "<string>") < 0) {
+                Py_XDECREF(bytes);
+                Py_DECREF(code);
+                Py_DECREF(exec);
+                return NULL;
+            }
+            Py_DECREF(bytes);
+            argv[0] = code;
+            argv[1] = args[1];
+            argv[2] = args[2];
+            result = PyObject_Vectorcall(exec, argv, 3, NULL);
+            Py_DECREF(code);
+            Py_DECREF(exec);
+            return result;
+        }
+    }
+    result = PyObject_Vectorcall(exec, args, (size_t)nargs, kwnames);
+    Py_DECREF(exec);
+    return result;
+}
+
+#define PYCC_DC_HOOK_DOC "pycc: dataclasses' exec while a pre-compiled chunk runs"
+
+static PyMethodDef pycc_ext_dc_exec_def = {"exec", (PyCFunction)(void (*)(void))pycc_ext_dc_exec,
+                                           METH_FASTCALL | METH_KEYWORDS, PYCC_DC_HOOK_DOC};
+
+/* Whether `bound` is a pycc extension's hook (another chunk's, running
+ * this one: the import of a module of the package, or of another
+ * extension's). */
+static int pycc_ext_dc_is_hook(PyObject *bound)
+{
+    PyObject *doc;
+    int same;
+
+    if (bound == NULL || !PyCFunction_Check(bound) || !PyDict_CheckExact(PyCFunction_GetSelf(bound))) {
+        return 0;
+    }
+    /* Each module of a package has its own copy of the hook's C function:
+     * they are told by their docstring. */
+    doc = PyObject_GetAttrString(bound, "__doc__");
+    same = doc != NULL && PyUnicode_Check(doc) && PyUnicode_CompareWithASCIIString(doc, PYCC_DC_HOOK_DOC) == 0;
+    Py_XDECREF(doc);
+    PyErr_Clear();
+    return same;
+}
+
+/* Binds the hook over `texts` as `exec` in `dataclasses`' namespace when it
+ * is imported and binds no `exec` of its own, or binds one of this
+ * extension's hooks, kept in `*outer` to bind back; returns the hook (to
+ * remove it), or NULL (no exception set) when it was not bound. */
+static PyObject *pycc_ext_dc_install(PyObject *texts, PyObject **outer)
+{
+    PyObject *name, *module, *dict, *hook;
+    int has;
+
+    if (pycc_ext_dc_exec_name == NULL) {
+        pycc_ext_dc_exec_name = PyUnicode_InternFromString("exec");
+        if (pycc_ext_dc_exec_name == NULL) {
+            PyErr_Clear();
+            return NULL;
+        }
+    }
+    if (!pycc_ext_dc_builtin_known) {
+        PyObject *mod = PyImport_ImportModule("builtins");
+        PyObject *exec = mod == NULL ? NULL : PyObject_GetAttr(mod, pycc_ext_dc_exec_name);
+
+        if (exec != NULL && PyCFunction_Check(exec) && PyCFunction_GetSelf(exec) == mod) {
+            pycc_ext_dc_builtin_exec = Py_NewRef(exec);
+        }
+        Py_XDECREF(exec);
+        Py_XDECREF(mod);
+        PyErr_Clear();
+        pycc_ext_dc_builtin_known = 1;
+    }
+    if (pycc_ext_dc_builtin_exec == NULL) {
+        return NULL;
+    }
+    name = PyUnicode_FromString("dataclasses");
+    module = name == NULL ? NULL : PyImport_GetModule(name);
+    Py_XDECREF(name);
+    if (module == NULL || !PyModule_Check(module)) {
+        Py_XDECREF(module);
+        PyErr_Clear();
+        return NULL;
+    }
+    dict = PyModule_GetDict(module);
+    Py_DECREF(module);
+    *outer = dict == NULL ? NULL : PyDict_GetItemWithError(dict, pycc_ext_dc_exec_name);
+    has = *outer == NULL ? (PyErr_Occurred() ? -1 : 0) : pycc_ext_dc_is_hook(*outer) ? 0 : 1;
+    Py_XINCREF(*outer);
+    hook = has == 0 ? PyCFunction_NewEx(&pycc_ext_dc_exec_def, texts, NULL) : NULL;
+    if (hook == NULL) {
+        Py_CLEAR(*outer);
+    }
+    if (hook != NULL && PyDict_SetItem(dict, pycc_ext_dc_exec_name, hook) != 0) {
+        Py_CLEAR(hook);
+    }
+    PyErr_Clear();
+    return hook;
+}
+
+/* Removes `hook` from `dataclasses`' namespace if it is still bound there,
+ * binding `outer` back when there was one, keeping any exception set. */
+static void pycc_ext_dc_remove(PyObject *hook, PyObject *outer)
+{
+    PyObject *raised = PyErr_GetRaisedException();
+    PyObject *name = PyUnicode_FromString("dataclasses");
+    PyObject *module = name == NULL ? NULL : PyImport_GetModule(name);
+    PyObject *dict = module != NULL && PyModule_Check(module) ? PyModule_GetDict(module) : NULL;
+    PyObject *bound = dict == NULL ? NULL : PyDict_GetItemWithError(dict, pycc_ext_dc_exec_name);
+
+    if (bound == hook && (outer != NULL ? PyDict_SetItem(dict, pycc_ext_dc_exec_name, outer)
+                                        : PyDict_DelItem(dict, pycc_ext_dc_exec_name))
+                             != 0) {
+        PyErr_Clear();
+    }
+    Py_XDECREF(outer);
+    Py_XDECREF(module);
+    Py_XDECREF(name);
+    Py_DECREF(hook);
+    PyErr_Clear();
+    PyErr_SetRaisedException(raised);
+}
+
 /* Runs chunk `index` in `ns` (as `exec(<its code>, ns)` when `as_exec`:
  * the audit event and `__builtins__`); 0, or -1 with an exception set. */
 static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
 {
     const struct pycc_ext_chunk *chunk;
     PyObject *code = NULL;
+    PyObject *texts = NULL;
+    PyObject *hook = NULL;
+    PyObject *outer = NULL;
     int status;
 
     if (index < 0 || index >= pycc_ext_chunk_count) {
@@ -393,6 +616,9 @@ static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
             Py_CLEAR(entry);
         }
         code = entry == NULL ? NULL : pycc_ext_chunk_entry_code(entry);
+        if (code != NULL && PyTuple_Size(entry) == 3) {
+            texts = Py_NewRef(PyTuple_GetItem(entry, 2));
+        }
         Py_XDECREF(entry);
         /* Unreadable after all: compile the source instead. */
     }
@@ -402,6 +628,10 @@ static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
             return -1;
         }
     }
+    if (texts != NULL) {
+        hook = pycc_ext_dc_install(texts, &outer);
+        Py_DECREF(texts);
+    }
     if (as_exec) {
         status = pycc_ext_chunk_exec(code, ns);
     } else {
@@ -409,6 +639,9 @@ static int pycc_ext_chunk_run_in(Py_ssize_t index, PyObject *ns, int as_exec)
 
         status = done == NULL ? -1 : 0;
         Py_XDECREF(done);
+    }
+    if (hook != NULL) {
+        pycc_ext_dc_remove(hook, outer);
     }
     Py_DECREF(code);
     return status;

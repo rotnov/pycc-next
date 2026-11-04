@@ -79,6 +79,7 @@ fn main() -> ExitCode {
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
+            mode::set_cli_exact_cpython(mode.exact_cpython);
             fallback::set_report(mode.report_fallbacks);
             // One module of a package built whole (v0.8): named by its
             // dotted name, its user exception classes tagged from its base.
@@ -145,6 +146,9 @@ fn main() -> ExitCode {
                 if mode.report_fallbacks {
                     mode_args.push(std::ffi::OsString::from("--report-fallbacks"));
                 }
+                if mode.exact_cpython {
+                    mode_args.push(std::ffi::OsString::from("--exact-cpython"));
+                }
                 let build = build_pipeline::PackageBuild {
                     path: &path,
                     out: &out,
@@ -190,6 +194,7 @@ fn main() -> ExitCode {
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
+            mode::set_cli_exact_cpython(mode.exact_cpython);
             fallback::set_report(mode.report_fallbacks);
             run(&path, &args, interop.into_cli())
         }
@@ -231,6 +236,7 @@ fn main() -> ExitCode {
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
+            mode::set_cli_exact_cpython(mode.exact_cpython);
             fallback::set_report(mode.report_fallbacks);
             check_paths(&paths, error_format, interop.into_cli())
         }
@@ -241,6 +247,7 @@ fn main() -> ExitCode {
             mode,
         } => {
             mode::set_cli_non_strict(mode.non_strict);
+            mode::set_cli_exact_cpython(mode.exact_cpython);
             fallback::set_report(mode.report_fallbacks);
             // Read from the environment here, like `build`'s toolchain: the
             // lock is taken from the interpreter an embedded build bundles.
