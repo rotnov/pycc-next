@@ -45,6 +45,8 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+/// The panic and allocation-failure handlers of an ELF `--ext` module.
+mod abort;
 pub mod closure;
 pub mod container_ops;
 pub mod dict;

@@ -120,6 +120,14 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   import (`__lazy_modules__`) is resolved and replaced in the namespace.
 - An error message the extension shim raises that CPython words differently per version
   follows the interpreter hosting the module (`Value after ** must be a mapping` on 3.15).
+- A Linux `--ext` module reports a runtime panic or allocation failure in one line and
+  aborts, as before, through the runtime's own handlers (`crates/pycc_rt/src/abort.rs`):
+  the link wraps the standard library's two handlers to them, so its stack symbolizer
+  (`gimli`, `addr2line`, `miniz_oxide`, `rustc_demangle`) is no longer linked in. No
+  backtrace is printed, even with `RUST_BACKTRACE` (`docs/DEVIATIONS.md`). pystache's
+  extension loses 200 KB of its 975 KB of code and 13 of its 362 symbols bound at
+  `dlopen`; its import measured 12.11 -> 11.95 ms (CPython 11.22 ms), pydantic's
+  77.6 -> 76.7 ms (CPython 81.9 ms).
 - The pydantic benchmark builds pydantic 2.14.2 with pydantic-core 2.50.2 (2.13.5's
   pydantic-core has no CPython 3.15 wheels); the pinned numpy, Cython and mypy wheels are
   their cp315 builds.
