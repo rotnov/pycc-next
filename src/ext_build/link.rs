@@ -153,7 +153,7 @@ pub(crate) const QUIET_ABORT_HANDLERS: [(&str, &str); 2] = [
 /// and abort as the standard library's do but never walk the stack: each
 /// handler `--wrap`ped, its wrapper `--defsym`ed to the runtime function,
 /// so with `--gc-sections` the standard library's stack symbolizer drops
-/// out -- about 200 KB of pystache's 950 KB of code and 13 of its 362
+/// out -- about 200 KB of pystache's 971 KB of code and 13 of its 362
 /// symbols bound at `dlopen` (`crates/pycc_rt/src/abort.rs`).
 ///
 /// The handlers' names come from the runtime archive's own symbol index
