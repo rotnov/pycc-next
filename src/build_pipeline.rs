@@ -326,6 +326,10 @@ pub(crate) fn try_build(
         if ext_build::packs_relative_relocations(target) {
             cmd.arg(ext_build::PACK_RELATIVE_RELOCS);
         }
+        cmd.args(ext_build::quiet_abort_args(
+            ext_build::ExtLinkPlatform::resolve(target),
+            &rt_lib_dir.join(pycc_codegen::artifact_layout::pycc_rt_lib_filename(target)),
+        ));
     }
     cmd.args(embed_objects.iter().flatten());
     cmd.args(&objects).arg("-L").arg(&rt_lib_dir);

@@ -269,6 +269,10 @@ pub(crate) fn build_package(
         cmd.arg("-target").arg(triple);
     }
     cmd.args(&objects).args(&link_args);
+    cmd.args(ext_build::quiet_abort_args(
+        platform,
+        &rt_lib_dir.join(pycc_codegen::artifact_layout::pycc_rt_lib_filename(build.target)),
+    ));
     cmd.arg("-L").arg(&rt_lib_dir);
     add_windows_crt_math(&mut cmd);
     cmd.arg("-lpycc_rt");

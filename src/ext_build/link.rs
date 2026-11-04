@@ -139,6 +139,107 @@ pub(crate) fn ext_export_args(
     }
 }
 
+/// The standard library's two failure handlers an ELF module routes to the
+/// runtime's ([`quiet_abort_args`]): the tail of each one's v0-mangled name
+/// (the crate hash before it changes with the toolchain), and the runtime
+/// function (`crates/pycc_rt/src/abort.rs`) that replaces it.
+pub(crate) const QUIET_ABORT_HANDLERS: [(&str, &str); 2] = [
+    ("7___rustc17rust_begin_unwind", "pycc_rt_panic_abort"),
+    ("7___rustc26___rust_alloc_error_handler", "pycc_rt_alloc_error_abort"),
+];
+
+/// The link arguments (v0.12) that route an ELF module's panic and
+/// allocation-failure handlers to the runtime's, which report the message
+/// and abort as the standard library's do but never walk the stack: each
+/// handler `--wrap`ped, its wrapper `--defsym`ed to the runtime function,
+/// so with `--gc-sections` the standard library's stack symbolizer drops
+/// out -- about 200 KB of pystache's 971 KB of code and 13 of its 362
+/// symbols bound at `dlopen` (`crates/pycc_rt/src/abort.rs`).
+///
+/// The handlers' names come from the runtime archive's own symbol index
+/// (`archive`, [`archive_symbols`]); a handler it does not define keeps the
+/// standard library's, as does every handler for Mach-O and PE, whose
+/// linkers have no `--wrap`.
+pub(crate) fn quiet_abort_args(platform: ExtLinkPlatform, archive: &Path) -> Vec<OsString> {
+    if platform != ExtLinkPlatform::Linux {
+        return Vec::new();
+    }
+    let symbols = archive_symbols(archive);
+    let mut args = Vec::new();
+    for (tail, replacement) in QUIET_ABORT_HANDLERS {
+        let Some(name) = symbols.iter().find(|name| name.starts_with("_R") && name.ends_with(tail))
+        else {
+            continue;
+        };
+        args.push(OsString::from(format!("-Wl,--wrap={name}")));
+        args.push(OsString::from(format!("-Wl,--defsym=__wrap_{name}={replacement}")));
+    }
+    args
+}
+
+/// The symbols the System V (GNU) archive at `path` indexes: its first
+/// member, `/` (32-bit offsets) or `/SYM64/` (64-bit), names every global
+/// symbol its members define. Empty when the file cannot be read or is not
+/// such an archive.
+pub(crate) fn archive_symbols(path: &Path) -> Vec<String> {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let mut head = [0u8; 68];
+    if file.read_exact(&mut head).is_err() || &head[..8] != b"!<arch>\n" {
+        return Vec::new();
+    }
+    let name = &head[8..24];
+    let width = if name.starts_with(b"/SYM64/") {
+        8
+    } else if name.starts_with(b"/ ") {
+        4
+    } else {
+        return Vec::new();
+    };
+    let Some(size) = std::str::from_utf8(&head[56..66])
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok())
+    else {
+        return Vec::new();
+    };
+    let mut index = Vec::new();
+    if file.take(size).read_to_end(&mut index).is_err() {
+        return Vec::new();
+    }
+    parse_symbol_index(&index, width)
+}
+
+/// The names of a System V archive symbol index `index` whose count and
+/// offsets are big-endian words of `width` bytes; empty when it is
+/// malformed.
+pub(crate) fn parse_symbol_index(index: &[u8], width: usize) -> Vec<String> {
+    let word = |at: usize| -> Option<usize> {
+        let bytes = index.get(at..at.checked_add(width)?)?;
+        usize::try_from(bytes.iter().fold(0u64, |acc, byte| (acc << 8) | u64::from(*byte))).ok()
+    };
+    let Some(count) = word(0) else {
+        return Vec::new();
+    };
+    let Some(names) = count
+        .checked_add(1)
+        .and_then(|words| words.checked_mul(width))
+        .and_then(|start| index.get(start..))
+    else {
+        return Vec::new();
+    };
+    // Each name ends with a NUL: `count` of them come before the last one.
+    let parts: Vec<&[u8]> = names.split(|byte| *byte == 0).collect();
+    if parts.len() <= count || parts[..count].iter().any(|name| name.is_empty()) {
+        return Vec::new();
+    }
+    parts[..count]
+        .iter()
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect()
+}
+
 /// The driver argument that packs relative relocations
 /// ([`packs_relative_relocations`]).
 pub(crate) const PACK_RELATIVE_RELOCS: &str = "-Wl,-z,pack-relative-relocs";
