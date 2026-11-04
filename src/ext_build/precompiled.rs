@@ -29,7 +29,10 @@
 //! every text it generates (`precompile.py`'s `dcs`); while the chunk runs at
 //! import, a text `dataclasses` generates that equals one of those runs from
 //! its code object instead of being compiled (`precompiled_hook.c`,
-//! docs/DEVIATIONS.md). `--exact-cpython` leaves them out.
+//! docs/DEVIATIONS.md). Likewise a chunk defining a `TypedDict` or
+//! `NamedTuple` tables the code of the forward references `typing` will make
+//! for its string annotations (`precompile.py`'s `fwds`). `--exact-cpython`
+//! leaves both out.
 //!
 //! The compile happens in a fresh `-I` interpreter process with
 //! `dont_inherit=True` and `optimize=0`. A build that cannot run the
@@ -157,7 +160,8 @@ pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Pr
 
 /// The compile script's input: `marshal`'s form of `(((source, filename,
 /// future), ...), ORDERS_FIX, exact)`, `exact` being `--exact-cpython` (no
-/// dataclass methods compiled ahead, `precompile.py`'s `dcs`), built from
+/// dataclass methods or forward references compiled ahead, `precompile.py`'s
+/// `dcs` and `fwds`), built from
 /// its tuple (`(`), string (`u`, UTF-8) and boolean (`T`, `F`) codes, each
 /// length a 4-byte little-endian count -- a format every `marshal` version reads. `None` for a string or
 /// tuple too long for one.

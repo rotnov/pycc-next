@@ -9,8 +9,7 @@
 //! `compile` and `exec` audit events for each generated text, instances'
 //! behavior and errors, and `dataclasses`' namespace after the import. A
 //! text the build did not foresee (a base from another module, a dataclass
-//! made by `make_dataclass`, a second class generating the same text) is
-//! compiled at import as before, as is every text when `builtins.exec` is
+//! made by `make_dataclass`) is compiled at import as before, as is every text when `builtins.exec` is
 //! replaced, `dataclasses` binds an `exec` of its own, the interpreter runs
 //! with `-O`, or the module was built `--exact-cpython`; an `exec` bound to
 //! another builtin, or a `builtins.exec` replaced by one, gets each text as
@@ -126,11 +125,12 @@ fn dataclass_methods_compiled_ahead_match_cpython() {
     let oracle = plain("dataclass_texts_src");
     let count = compare(&ours, &oracle, "", false);
     // Every class statement under a `dataclass(...)` decorator of constant
-    // options in the modules' fallback chunks, but `FromElsewhere` (a base
-    // the build cannot see), `Twin2` (the text `Twin1` used) and the classes
-    // inside a `try` (`BadOrder`; the others raise before `exec`).
+    // options in the modules' fallback chunks (`Twin2` with code objects of
+    // its own, not `Twin1`'s), but `FromElsewhere` (a base the build cannot
+    // see) and the classes inside a `try` (`BadOrder`; the others raise
+    // before `exec`).
     if matches!(python_version().as_str(), "3.13" | "3.14" | "3.15") {
-        assert_eq!(count, 12);
+        assert_eq!(count, 13);
     }
     // A replaced `builtins.exec` is called with each text; an `exec`
     // `dataclasses` binds itself is left alone.

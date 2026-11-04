@@ -7,7 +7,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ### Added
 - `pycc build --exact-cpython` (with `--ext`): leaves out the import fast paths whose
   effects CPython code could observe, so the module imports exactly as CPython runs its
-  source (`docs/DEVIATIONS.md` names each). For now that is the dataclass texts below.
+  source (`docs/DEVIATIONS.md` names each): the dataclass texts and forward references
+  below.
 
 ### Changed
 - An `--ext` module's dataclasses whose class statements run in CPython get the methods
@@ -19,6 +20,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   event, and compiles any other text as before (`docs/DEVIATIONS.md`). pydantic's import
   (33 of its 50 dataclass texts) runs about 45M fewer instructions (own share 139.8M ->
   94.3M against CPython's 135.9M), mistune's 0.3M fewer.
+- An `--ext` module's `TypedDict` and `NamedTuple` classes whose statements run in CPython
+  get the forward references for their string annotations from code objects the build
+  compiled: while such a statement runs at import, `annotationlib`'s (`typing`'s on 3.13)
+  `compile` is a builtin that returns the pre-compiled code for a text equal to one of
+  those, raising the same `compile` audit event, and compiles any other text (one whose
+  compiling warns, or with an `int` literal of more than 640 digits, among them) as before
+  (`docs/DEVIATIONS.md`). A text several dataclasses (or classes) make now gets one
+  pre-compiled code object per use. pydantic's import (103 of the 132 references made
+  outside `pydantic_core`) runs about 5.3M fewer instructions (own share 94.5M -> 89.2M).
 - An `--ext` module's published class whose statement's bases are none, `object`, or
   compiled classes of its module made the same way is made once, when its statement
   runs, straight from its compiled layout, methods and slots: no template type is made
