@@ -23,6 +23,14 @@
 //! `from __future__ import annotations` flag, so `co_filename`, line
 //! numbers and tracebacks are the same either way.
 //!
+//! A chunk defining dataclasses (v0.12) also tables the methods
+//! `dataclasses` will generate for them: the script runs the target
+//! interpreter's own `dataclasses` on a stand-in of each class and compiles
+//! every text it generates (`precompile.py`'s `dcs`); while the chunk runs at
+//! import, a text `dataclasses` generates that equals one of those runs from
+//! its code object instead of being compiled (`precompiled_hook.c`,
+//! docs/DEVIATIONS.md). `--exact-cpython` leaves them out.
+//!
 //! The compile happens in a fresh `-I` interpreter process with
 //! `dont_inherit=True` and `optimize=0`. A build that cannot run the
 //! interpreter (`PYCC_PYTHON_INCLUDE` without one) embeds the source only.
@@ -148,9 +156,10 @@ pub(crate) fn precompile(interpreter: &OsStr, chunks: &[CodeChunk]) -> Option<Pr
 }
 
 /// The compile script's input: `marshal`'s form of `(((source, filename,
-/// future), ...), ORDERS_FIX)`, built from its tuple (`(`), string (`u`,
-/// UTF-8) and boolean (`T`, `F`) codes, each length a 4-byte little-endian
-/// count -- a format every `marshal` version reads. `None` for a string or
+/// future), ...), ORDERS_FIX, exact)`, `exact` being `--exact-cpython` (no
+/// dataclass methods compiled ahead, `precompile.py`'s `dcs`), built from
+/// its tuple (`(`), string (`u`, UTF-8) and boolean (`T`, `F`) codes, each
+/// length a 4-byte little-endian count -- a format every `marshal` version reads. `None` for a string or
 /// tuple too long for one.
 fn marshal_input(chunks: &[CodeChunk]) -> Option<Vec<u8>> {
     fn sized(out: &mut Vec<u8>, code: u8, len: usize) -> Option<()> {
@@ -164,7 +173,7 @@ fn marshal_input(chunks: &[CodeChunk]) -> Option<Vec<u8>> {
         Some(())
     }
     let mut out = Vec::new();
-    sized(&mut out, b'(', 2)?;
+    sized(&mut out, b'(', 3)?;
     sized(&mut out, b'(', chunks.len())?;
     for chunk in chunks {
         sized(&mut out, b'(', 4)?;
@@ -194,6 +203,7 @@ fn marshal_input(chunks: &[CodeChunk]) -> Option<Vec<u8>> {
         }
     }
     text(&mut out, ORDERS_FIX)?;
+    out.push(if crate::mode::exact_cpython() { b'T' } else { b'F' });
     Some(out)
 }
 
@@ -435,7 +445,7 @@ mod tests {
             },
         ];
         let input = marshal_input(&[first, second]).expect("small enough");
-        let mut want = b"(\x02\x00\x00\x00(\x02\x00\x00\x00".to_vec();
+        let mut want = b"(\x03\x00\x00\x00(\x02\x00\x00\x00".to_vec();
         want.extend_from_slice(b"(\x04\x00\x00\x00u\x06\x00\x00\x00x = 1\n");
         want.extend_from_slice(b"u\x07\x00\x00\x00/p/m.pyT(\x00\x00\x00\x00");
         want.extend_from_slice(b"(\x04\x00\x00\x00u\x02\x00\x00\x00\xc3\xa9");
@@ -448,6 +458,7 @@ mod tests {
         want.push(b'u');
         want.extend_from_slice(&u32::try_from(ORDERS_FIX.len()).unwrap().to_le_bytes());
         want.extend_from_slice(ORDERS_FIX.as_bytes());
+        want.push(b'F');
         assert_eq!(input, want);
     }
 

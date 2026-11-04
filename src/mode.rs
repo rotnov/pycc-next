@@ -26,6 +26,21 @@ pub(crate) fn set_cli_non_strict(non_strict: bool) {
     CLI_NON_STRICT.store(non_strict, Ordering::Relaxed);
 }
 
+/// The `--exact-cpython` flag of the running command (v0.12): an `--ext`
+/// build leaves out the import fast paths that CPython code could tell
+/// from CPython's own import (docs/DEVIATIONS.md). Set once by `main()`.
+static CLI_EXACT_CPYTHON: AtomicBool = AtomicBool::new(false);
+
+/// Records the command line's `--exact-cpython`.
+pub(crate) fn set_cli_exact_cpython(exact: bool) {
+    CLI_EXACT_CPYTHON.store(exact, Ordering::Relaxed);
+}
+
+/// Whether the running build is `--exact-cpython`.
+pub(crate) fn exact_cpython() -> bool {
+    CLI_EXACT_CPYTHON.load(Ordering::Relaxed)
+}
+
 /// Whether the program whose entry module is `entry` compiles non-strict.
 pub(crate) fn non_strict_for(entry: &Path) -> bool {
     CLI_NON_STRICT.load(Ordering::Relaxed) || project_says_non_strict(entry)

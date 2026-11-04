@@ -142,7 +142,105 @@ def sig(src,co):
   s2=[];walk(fs[0],s2)
   if s2: return None
   return (fs[0],tuple(d.value for d in ds) or None,{p.arg:d.value for p,d in zip(a.kwonlyargs,ks) if d is not None} or None,bytes(SIG.index(v) for v in fs[0].co_freevars))
-chunks,fix=marshal.loads(sys.stdin.buffer.read())
+# v0.12: the texts `dataclasses` generates for the chunk's dataclasses,
+# `{text: code}`, each compiled as `exec` of the text compiles it (file
+# `<string>`, no flags), or `(code, orders)` when it holds `frozenset`
+# constants (a frozen dataclass's field names); None when there is none. Each class statement
+# decorated last by a `dataclass` (or `x.dataclass`) with constant keywords
+# gets a stand-in -- its fields (a default or a `field()` of constant
+# flags as placeholders), the names its body binds, bases defined before it
+# in the module -- and the target interpreter's own `dataclasses` makes its
+# methods, its `exec` calls recorded. Only a guess: the import uses a code
+# only for a text equal to the one `dataclasses` generates there
+# (`precompiled_hook.c`), so a wrong guess costs the compile it would have.
+DC={}
+def dcs(src):
+  import ast,builtins,dataclasses,typing
+  class S:
+    __slots__=()
+  def F(): pass
+  def stub(self,*a,**k): pass
+  def name(e):
+    return e.id if type(e) is ast.Name else e.attr if type(e) is ast.Attribute else None
+  def head(a):
+    if type(a) is ast.Constant and type(a.value) is str:
+      try: a=ast.parse(a.value,mode='eval').body
+      except SyntaxError: return None
+    return name(a.value if type(a) is ast.Subscript else a)
+  def lit(e):
+    try: return [ast.literal_eval(e)]
+    except Exception: return None
+  def standin(c):
+    d=c.decorator_list[-1] if c.decorator_list else None
+    f=d.func if type(d) is ast.Call else d
+    if c.keywords or d is None or name(f)!='dataclass': return None
+    kw={}
+    for k in (d.keywords if type(d) is ast.Call else ()):
+      v=lit(k.value)
+      if k.arg is None or v is None: return None
+      kw[k.arg]=v[0]
+    if type(d) is ast.Call and d.args: return None
+    bases=[]
+    for b in c.bases:
+      k=DC.get(b.id) if type(b) is ast.Name else None
+      if k is not None and k not in bases: bases.append(k)
+    ns={'__module__':'__pycc_dc__','__qualname__':c.name};ann={}
+    body=list(c.body)
+    while body:
+      s=body.pop(0);t=type(s)
+      if t is ast.If:
+        g=s.test;neg=type(g) is ast.UnaryOp and type(g.op) is ast.Not
+        if neg: g=g.operand
+        if type(g) not in (ast.Name,ast.Attribute) or name(g)!='TYPE_CHECKING': return None
+        body[:0]=s.body if neg else s.orelse;continue
+      if t in (ast.Expr,ast.Pass): continue
+      if t in (ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef):
+        ns[s.name]=stub;continue
+      if t is ast.Assign:
+        v=lit(s.value)
+        for g in s.targets:
+          if type(g) is not ast.Name: return None
+          ns[g.id]=v[0] if v else S()
+        continue
+      if t is not ast.AnnAssign or type(s.target) is not ast.Name: return None
+      n=s.target.id;h=head(s.annotation)
+      ann[n]=typing.ClassVar[int] if h=='ClassVar' else dataclasses.InitVar[int] if h=='InitVar' else dataclasses.KW_ONLY if h=='KW_ONLY' else int
+      v=s.value
+      if v is None: continue
+      if type(v) is ast.Call and name(v.func)=='field':
+        if v.args: return None
+        fk={}
+        for k in v.keywords:
+          if k.arg is None: return None
+          if k.arg=='default': fk[k.arg]=S()
+          elif k.arg=='default_factory': fk[k.arg]=F
+          elif k.arg not in ('metadata','doc'):
+            l=lit(k.value)
+            if l is None: return None
+            fk[k.arg]=l[0]
+        ns[n]=dataclasses.field(**fk)
+      else: ns[n]=S()
+    ns['__annotations__']=ann
+    return bases,ns,kw
+  seen=[]
+  def record(s,g=None,l=None,/):
+    seen.append(s);return builtins.exec(s,g,l)
+  for c in ast.parse(src).body:
+    st=standin(c) if type(c) is ast.ClassDef else None
+    if st is None: continue
+    dataclasses.exec=record
+    try: DC[c.name]=dataclasses.dataclass(**st[2])(type(c.name,tuple(st[0]),st[1]))
+    except Exception: pass
+    finally: del dataclasses.exec
+  out={}
+  for s in seen:
+    if type(s) is not str: continue
+    co=compile(s,'<string>','exec',0,True,0)
+    try: fs=orders(s,co)
+    except ValueError: continue
+    out[s]=co if fs is None else (co,fs)
+  return out or None
+chunks,fix,exact=marshal.loads(sys.stdin.buffer.read())
 table=[]
 for source,filename,future,rewrites in chunks:
   try:
@@ -153,7 +251,9 @@ for source,filename,future,rewrites in chunks:
       table.append(w);continue
     fs=orders(source,co);d=defs(co)
     if d: d=(tuple((*f,orders(source,f[0] if len(f)==6 else f[1])) for f in d[0]),)
-    table.append(d or (co,fs))
+    e=d or (co,fs)
+    x=None if d or exact or 'dataclass' not in source else dcs(source)
+    table.append((co,fs,x) if x else e)
   except Exception:
     table.append(None)
 present=bytes(t is not None for t in table)
