@@ -29,3 +29,11 @@ def own_name(x: Any, own_name: Any) -> Any:
 
 def own_default(x: Any, own_default: Any = None) -> Any:
     return ("own_default", x, own_default)
+
+
+def collect(**collect: Any) -> Any:
+    return sorted(collect.items())
+
+
+def star(*star: Any) -> Any:
+    return star

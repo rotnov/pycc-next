@@ -247,22 +247,22 @@ struct Param {
 
 /// Declares `p` in the entry's `params`; the value the entry's call passes
 /// for it (a computed default's is filled in by `body`).
-fn entry_param(p: &Param, params: &mut Vec<String>, body: &mut String) -> String {
+fn entry_param(p: &Param, name: &str, params: &mut Vec<String>, body: &mut String) -> String {
     match &p.default {
         Default::Computed(element, global) => {
-            params.push(format!("{}: object", p.name));
-            params.push(format!("_pycc_has_{}: bool", p.name));
+            params.push(format!("{name}: object"));
+            params.push(format!("_pycc_has_{name}: bool"));
             let ty = element.name();
             let _ = writeln!(
                 body,
                 "    _pycc_v_{0}: {ty} = {ty}({0}) if _pycc_has_{0} else {global}",
-                p.name
+                name
             );
-            format!("_pycc_v_{}", p.name)
+            format!("_pycc_v_{name}")
         }
         _ => {
-            params.push(format!("{}: {}", p.name, p.annotation));
-            p.name.clone()
+            params.push(format!("{name}: {}", p.annotation));
+            name.to_string()
         }
     }
 }
@@ -429,26 +429,21 @@ fn plan_def(
     };
     let positional: Vec<&Param> = posonly.iter().chain(&regular).collect();
     // The entry calls the function (or the class's method) by its name, so
-    // a parameter of that name would shadow it there: no entry is planned
-    // and the `def` runs in CPython (its body compiled).
+    // an entry parameter of that name, which would shadow it there, is
+    // renamed in the entry (`_pycc_s_<name>`); the wrapper keeps the
+    // declared names, and a keyword-only argument is passed by its own.
     let callee_root = match (&receiver, class) {
         (Some(_), _) => None,
-        (None, Some(class)) => Some(class),
-        (None, None) => Some(name),
+        (None, Some(class)) => Some(class.to_string()),
+        (None, None) => Some(name.to_string()),
     };
-    if let Some(root) = callee_root {
-        let shadowed = positional
-            .iter()
-            .copied()
-            .chain(&kwonly)
-            .map(|p| p.name.as_str())
-            .chain(vararg.iter().map(|(v, _)| v.as_str()))
-            .chain(kwarg.iter().map(|(k, _)| k.as_str()))
-            .any(|param| param == root);
-        if shadowed {
-            return None;
+    let entry_name = |param: &str| -> String {
+        if callee_root.as_deref() == Some(param) {
+            format!("_pycc_s_{param}")
+        } else {
+            param.to_string()
         }
-    }
+    };
     let entry = ext_entry_name(&qualname);
 
     // The entry: every parameter positional, `*args`/`**kwargs` and a
@@ -460,13 +455,15 @@ fn plan_def(
     }
     let mut call: Vec<String> = positional
         .iter()
-        .map(|p| entry_param(p, &mut params, &mut body))
+        .map(|p| entry_param(p, &entry_name(&p.name), &mut params, &mut body))
         .collect();
     if let Some((v, None)) = &vararg {
+        let v = entry_name(v);
         params.push(format!("{v}: object"));
         call.push(format!("*{v}"));
     }
     if let Some((v, Some(element))) = &vararg {
+        let v = entry_name(v);
         params.push(format!("{v}: object"));
         let ty = element.name();
         let _ = writeln!(body, "    _pycc_r: list[{ty}] = []");
@@ -477,7 +474,7 @@ fn plan_def(
         call.push("*_pycc_r".to_string());
     }
     for p in &kwonly {
-        let value = entry_param(p, &mut params, &mut body);
+        let value = entry_param(p, &entry_name(&p.name), &mut params, &mut body);
         call.push(format!("{}={value}", p.name));
     }
     if let Some((_, element)) = &kwarg {

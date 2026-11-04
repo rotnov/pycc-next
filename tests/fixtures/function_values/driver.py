@@ -10,3 +10,4 @@ except TypeError as e:
     print("TypeError", e)
 print(fvals.own_name(1, 2), fvals.own_default(1, 2), fvals.own_default(1))
 print(fvals.own_default(1, own_default=3), fvals.own_default.__name__)
+print(fvals.collect(b=2, a=1), fvals.star(1, 2), fvals.star())
