@@ -81,3 +81,31 @@ against 6.97M.
 | cold calls | the shim's and the package unit's stable-ABI calls routed through functions CPython's import runs (`hot_api.c`), so a BOLT-built interpreter's cold text is touched less (pystache: 28 -> 23 windows of 64 KiB); minor faults 1456 -> 1440 / 760 -> 756 / 126 -> 123 | -0.41M (noise 0.3M) | 0 | 0 |
 | 11 | a dataclass's generated methods compiled at build time by the target interpreter's own `dataclasses` on a stand-in of the class, run at import for a generated text equal to the build's instead of compiling it (pydantic: 33 of 50 texts; own share 139.80M -> 94.28M at 0f97b93, CPython 135.89M) | -45.5M | -0.34M | 0 |
 | 12 | the forward references `typing` makes for a `TypedDict`'s or `NamedTuple`'s string annotations compiled at build time, used at import for a text equal to the build's (pydantic: 103 of the 132 references made outside `pydantic_core`; own share 94.50M -> 89.24M); a text several dataclasses or classes make gets one code object per use | -5.3M | 0 | 0 |
+
+### Progress 2026-11-04: where the import gates stand (not met)
+
+These are local wall times on main at ae0923e (levers 1-12), with PBS CPython 3.15.2 on a 4-vCPU x86_64 VM. Each figure comes from `lbench` (bench.yml's import phases): 81 interleaved fresh-process rounds, nothing else running, load average about 1.3. The ratio is CPython time / pycc time, by median, with the IQR in ms:
+
+| workload | CPython | pycc | ratio |
+|---|---|---|---|
+| pydantic import | 83.9 (79.7-89.7) | 78.4 (75.1-86.2) | 1.07x |
+| `import pystache` | 11.19 (10.42-12.36) | 11.85 (11.32-12.81) | 0.94x |
+| `import mistune` | 24.33 (22.86-27.90) | 24.32 (22.97-26.16) | 1.00x |
+
+Two noisier repetitions on the same tree gave 1.12x / 1.07x for pydantic and 0.90x / 0.77x for pystache.
+
+pydantic's suite against the compiled tree fails the 4 `test_exports` tests that also fail against its sources, plus one more: `test_type_checking_model_dump_signature_in_sync_with_base_model`. That test re-executes `pydantic.root_model.__file__`, which a whole-package build does not have (`docs/DEVIATIONS.md`), and it fails the same way before v0.12.
+
+Accept 1 is met locally (stretch not met). Accept 2 is not met. CI has not measured v0.12 yet.
+
+pystache's remaining gap is not in instructions: its own share is 6.92M against CPython's 6.88M. These are the costs measured so far, paired with CPython over 121 to 151 rounds:
+
+- The gap is about 0.8-1.0 ms in all.
+- The one `dlopen` of `pystache/__init__.abi3.so` costs about 0.4 ms. PBS links its stdlib extensions in, so CPython's import does no `dlopen` at all. Measured alone, an empty `.so` takes 132 µs, the same 360 imported symbols with no code 264 µs, and the real `.so` 454 µs.
+- Faulting in the `.so`'s pages costs about 0.2 ms more: 15 text windows, 6 read-only pages, the 15 `.data`/`.data.rel.ro` pages that the 2954 relative relocations write, and 16 `.bss` pages.
+- Pre-touching the 23 text windows of the interpreter that only the compiled import enters measured no difference, and `madvise(MADV_POPULATE_READ)` on the `.so` made the import slower.
+- What is left points at the load itself:
+  - fewer imported symbols, for example C-API calls bound on first use rather than all 360 at `RTLD_NOW`;
+  - fewer pointer-bearing data pages;
+  - import-time code and state placed together;
+  - a smaller `.so`. About 290 KB of its 950 KB of text is Rust's standard library, including the backtrace symbolizer.
