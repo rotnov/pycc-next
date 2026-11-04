@@ -12,9 +12,19 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   CPython's with only the root `pycc.compiled` added before `object`. Other statements
   (a `Generic[T]` or other Python base, a metaclass, a keyword) still make the class
   from a template (`docs/DEVIATIONS.md`). The class deallocates its instances itself,
-  running a `__del__` Python code assigns to it as `subtype_dealloc` did. pystache's import (16 classes made once) runs
-  about 0.83M fewer instructions and 6 fewer page faults, pydantic's 0.74M fewer and 9
-  fewer faults, mistune's 0.15M fewer.
+  running a `__del__` Python code assigns to it as `subtype_dealloc` did. pystache's
+  import (16 classes made once) runs about 0.83M fewer instructions and 6 fewer page
+  faults, pydantic's 0.74M fewer and 9 fewer faults, mistune's 0.15M fewer.
+- An `--ext` extension's C code calls the stable ABI through the functions CPython's
+  own import runs wherever one does the same: the `None`/`True`/`False` singletons are
+  the stable ABI's data instead of `Py_GetConstantBorrowed` calls, and
+  `PyObject_CallNoArgs`, `PySet_New`, `PyErr_ExceptionMatches`,
+  `PyDict_GetItemString`, `PyDict_DelItemString`, `PyMem_Calloc`, `Py_XNewRef` and
+  (on CPython 3.13 to 3.15) `PyTuple_SetItem` take those routes. A BOLT-built
+  interpreter (python.org's, the standalone builds) keeps the functions its profile
+  never ran in a cold section, and each first call there faults in the pages around
+  it: the import of pystache touches 5 fewer 64 KiB windows of the interpreter's cold
+  text; minor faults pydantic 1456 -> 1440, mistune 760 -> 756, pystache 126 -> 123.
 - An `--ext` module's published signature wrapper whose defaults are constants (and
   that guards no scalar parameter with a fallback twin) is tabled at build time as the
   wrapper's own code object with its defaults and closure layout, and the import makes
