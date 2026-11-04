@@ -25,7 +25,7 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   compiled: while such a statement runs at import, `annotationlib`'s (`typing`'s on 3.13)
   `compile` is a builtin that returns the pre-compiled code for a text equal to one of
   those, raising the same `compile` audit event, and compiles any other text (one whose
-  compiling warns among them) as before
+  compiling warns, or with an `int` literal of more than 640 digits, among them) as before
   (`docs/DEVIATIONS.md`). A text several dataclasses (or classes) make now gets one
   pre-compiled code object per use. pydantic's import (103 of the 132 references made
   outside `pydantic_core`) runs about 5.3M fewer instructions (own share 94.5M -> 89.2M).

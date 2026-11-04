@@ -245,9 +245,12 @@ def dcs(src):
 # The code `compile(text, '<string>', mode)` makes, or None when compiling it
 # warns (a `SyntaxWarning` for an invalid escape, say): that text is left to
 # compile at import, where CPython's warning (or the error a filter makes of
-# it) happens as it does there.
+# it) happens as it does there. So is a text with a run of more than 640
+# digits (an `int` literal `sys.set_int_max_str_digits` could refuse: 640 is
+# the lowest limit it takes), whose compiling depends on the import's limit.
 def quiet(text,mode):
-  import warnings
+  import warnings,re
+  if re.search(r'[0-9_]{641}',text): return None
   with warnings.catch_warnings(record=True) as w:
     warnings.simplefilter('always')
     co=compile(text,'<string>',mode,0,True,0)

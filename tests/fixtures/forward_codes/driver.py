@@ -39,6 +39,20 @@ def prof(frame, ev, arg):
         text = owner._rewrite_star_unpack(frame.f_locals["arg"])
         used["ahead" if type(tables) is list and any(text in t for t in tables) else "text"] += 1
 sys.setprofile(prof)
+if mode in ("digits", "digits640"):
+    # A reference with a long `int` literal, under the default limit and
+    # under the lowest one.
+    if mode == "digits640":
+        sys.set_int_max_str_digits(640)
+    try:
+        import fl
+        print(sorted(fl.Big.__annotations__), len(repr(fl.Big.__annotations__["a"])))
+    except Exception as e:
+        print("import:", type(e).__name__, e)
+    sys.setprofile(None)
+    print([(k, len(t)) for k, t in events])
+    print("ahead-of-time:", used["ahead"], "from text:", used["text"], file=sys.stderr)
+    sys.exit()
 if mode in ("warn", "werror"):
     # A text whose compiling warns: the warning, or the error a filter makes
     # of it, as CPython's.

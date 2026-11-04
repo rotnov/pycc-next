@@ -8,7 +8,8 @@
 //! each text's `compile` audit event in order, the types they evaluate to,
 //! a distinct code object per reference, and `annotationlib`'s (`typing`'s
 //! on 3.13) namespace after the import. A text the build did not foresee
-//! (an invalid one, one whose compiling warns, a `ForwardRef` made by hand)
+//! (an invalid one, one whose compiling warns or has an `int` literal
+//! `sys.set_int_max_str_digits` could refuse, a `ForwardRef` made by hand)
 //! is compiled at import as
 //! before, as is every text when `builtins.compile` is replaced, the module
 //! binds a `compile` of its own, the interpreter runs with `-O`, or the
@@ -46,7 +47,7 @@ fn source(name: &str) -> String {
 fn built(label: &str, extra: &[&str]) -> ScratchDir {
     let dir = ScratchDir::new(label).expect("scratch");
     std::fs::write(dir.join("driver.py"), source("driver.py")).expect("write the driver");
-    for module in ["fm", "fe", "fw"] {
+    for module in ["fm", "fe", "fw", "fl"] {
         let path = dir.join(format!("{module}.py"));
         std::fs::write(&path, source(&format!("{module}.py"))).expect("write the module");
         let build = pycc()
@@ -65,14 +66,14 @@ fn built(label: &str, extra: &[&str]) -> ScratchDir {
 
 fn plain(label: &str) -> ScratchDir {
     let dir = ScratchDir::new(label).expect("scratch");
-    for name in ["driver.py", "fm.py", "fe.py", "fw.py"] {
+    for name in ["driver.py", "fm.py", "fe.py", "fw.py", "fl.py"] {
         std::fs::write(dir.join(name), source(name)).expect("write the source");
     }
     dir
 }
 
 /// The driver's output in `dir` (`mode`: "", `patched`, `bound`, `static`,
-/// `warn` or `werror`), with a fixed hash seed.
+/// `warn`, `werror`, `digits` or `digits640`), with a fixed hash seed.
 fn run(dir: &Path, mode: &str, optimize: bool) -> Output {
     let mut cmd = python();
     if optimize {
@@ -154,5 +155,20 @@ fn a_reference_whose_compiling_warns_is_compiled_at_import() {
     let raised = compare(&ours, &oracle, "werror", false);
     if matches!(python_version().as_str(), "3.13" | "3.14" | "3.15") {
         assert_eq!((count, raised), (2, 0));
+    }
+}
+
+#[test]
+fn a_reference_with_a_long_int_literal_is_compiled_at_import() {
+    let ours = built("forward_codes_digits", &[]);
+    let oracle = plain("forward_codes_digits_src");
+    // A 700-digit literal is compiled at import: it imports under the
+    // default limit, and `sys.set_int_max_str_digits(640)` makes its
+    // compiling raise `SyntaxError`, as in CPython. The class's other
+    // annotation still uses the build's code.
+    let count = compare(&ours, &oracle, "digits", false);
+    let limited = compare(&ours, &oracle, "digits640", false);
+    if matches!(python_version().as_str(), "3.13" | "3.14" | "3.15") {
+        assert_eq!((count, limited), (1, 1));
     }
 }
