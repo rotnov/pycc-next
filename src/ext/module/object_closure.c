@@ -193,13 +193,17 @@ PyObject *pycc_ext_obj_pack_closure(void *closure, long long arity)
 
 /*
  * `pycc_ext_obj_pack_closure` for a module-level function used as a value
- * (`EXT_OBJ_PACK_FUNCTION_SYMBOL`): the callable is made once and kept in
- * `*slot` (a per-function global of the artifact, holding its own
- * reference), so every crossing of the function hands CPython the same
- * object, as a Python function is one object. Returns a new reference, or
- * NULL with an exception set.
+ * (`pycc_ext_obj_pack_function`, `module_ctx.c`): the callable is made once
+ * and kept in `*slot` (a per-function global of the artifact, holding its
+ * own reference), so every crossing of the function hands CPython the same
+ * object, as a Python function is one object. That object is `published`
+ * when given -- the function the module's namespace binds, what CPython
+ * code reads as the module's attribute, taking keywords and defaults --
+ * else a wrapper of the function value. Returns a new reference, or NULL
+ * with an exception set.
  */
-PyObject *pycc_ext_obj_pack_function(PyObject **slot, void *closure, long long arity)
+static PyObject *pycc_ext_obj_pack_function_in(PyObject *published, PyObject **slot, void *closure,
+                                               long long arity)
 {
     PyObject *packed;
 
@@ -207,7 +211,7 @@ PyObject *pycc_ext_obj_pack_function(PyObject **slot, void *closure, long long a
         Py_INCREF(*slot);
         return *slot;
     }
-    packed = pycc_ext_obj_pack_closure(closure, arity);
+    packed = published != NULL ? Py_NewRef(published) : pycc_ext_obj_pack_closure(closure, arity);
     if (packed != NULL) {
         Py_INCREF(packed);
         *slot = packed;

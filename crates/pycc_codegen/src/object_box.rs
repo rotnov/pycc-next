@@ -216,7 +216,8 @@ fn as_object_display(value: &MirExpr) -> Option<MirExpr> {
 
 /// A module-level function `function` used as a value (`value`, a capture-free
 /// `MirExpr::MakeClosure` of `arity` parameters), boxed into its CPython
-/// callable: packed once, into a slot of its own
+/// callable -- the function the module binds as `function` when there is
+/// one, as CPython code reads it -- packed once, into a slot of its own
 /// (`EXT_OBJ_PACK_FUNCTION_SYMBOL`), and read from that slot (with a new
 /// reference) at every later evaluation, without building the native
 /// closure again.
@@ -268,8 +269,19 @@ fn emit_boxed_function<'ctx>(
     let pack = crate::foreign_pack::shim_fn(
         module,
         crate::EXT_OBJ_PACK_FUNCTION_SYMBOL,
-        ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into()], false),
+        ptr.fn_type(&[ptr.into(), ptr.into(), i64_type.into(), ptr.into()], false),
     );
+    // The function's name in the module's namespace, where the shim finds
+    // the function CPython code reads (`module_ctx.c`); none for a function
+    // the compiler made (a lifted `_pycc_q...`, a `0gen_...` specialization).
+    let published = if function.starts_with("_pycc") || !function.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+        ptr.const_null()
+    } else {
+        builder
+            .build_global_string_ptr(function, &format!("pycc_boxed_function_name_{function}"))
+            .expect("build_global_string_ptr should not fail")
+            .as_pointer_value()
+    };
     let packed = builder
         .build_call(
             pack,
@@ -277,6 +289,7 @@ fn emit_boxed_function<'ctx>(
                 slot.as_pointer_value().into(),
                 closure.into(),
                 i64_type.const_int(arity as u64, false).into(),
+                published.into(),
             ],
             "pack_function",
         )

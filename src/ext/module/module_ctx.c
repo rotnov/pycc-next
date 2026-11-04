@@ -127,6 +127,61 @@ PYCC_ENTRY PyObject *pycc_ext_obj_pack_instance(void *inst)
     return pycc_ext_obj_pack_instance_in(&pycc_ext_mod, inst);
 }
 
+/* The function this module's namespace binds as `name` (a new reference),
+ * or NULL (no exception set) when it binds none of that name: the module
+ * whose body runs on this thread, else the one it last ran as. Only this
+ * module's own function counts -- a builtin bound to the module, or a
+ * Python function over its namespace (a published signature wrapper) --
+ * named `name`. */
+static PyObject *pycc_ext_published_function(const char *name)
+{
+    PyObject *module = pycc_ext_mod.exec_target_key == NULL
+                           ? NULL
+                           : (PyObject *)PyThread_tss_get(pycc_ext_mod.exec_target_key);
+    PyObject *dict, *found = NULL, *owner = NULL, *own_name = NULL;
+    int ours;
+
+    if (module == NULL) {
+        module = pycc_ext_mod.home_module;
+    }
+    dict = module != NULL && PyModule_Check(module) ? PyModule_GetDict(module) : NULL;
+    if (dict == NULL || PyDict_GetItemStringRef(dict, name, &found) <= 0) {
+        PyErr_Clear();
+        return NULL;
+    }
+    if (PyCFunction_Check(found)) {
+        ours = PyCFunction_GetSelf(found) == module;
+    } else {
+        owner = PyObject_GetAttrString(found, "__globals__");
+        ours = owner == dict;
+    }
+    own_name = ours ? PyObject_GetAttrString(found, "__name__") : NULL;
+    ours = own_name != NULL && PyUnicode_Check(own_name) && PyUnicode_CompareWithASCIIString(own_name, name) == 0;
+    Py_XDECREF(own_name);
+    Py_XDECREF(owner);
+    PyErr_Clear();
+    if (!ours) {
+        Py_DECREF(found);
+        return NULL;
+    }
+    return found;
+}
+
+/* A module-level function used as a value, crossing into CPython
+ * (`EXT_OBJ_PACK_FUNCTION_SYMBOL`): the function the module binds as
+ * `name` (NULL for a function the compiler made, a lifted one), as CPython
+ * code reads it, else a wrapper of the function value
+ * (`pycc_ext_obj_pack_function_in`). */
+PYCC_ENTRY PyObject *pycc_ext_obj_pack_function(PyObject **slot, void *closure, long long arity,
+                                                const char *name)
+{
+    PyObject *published = *slot == NULL && name != NULL ? pycc_ext_published_function(name) : NULL;
+    PyObject *packed = pycc_ext_obj_pack_function_in(published, slot, closure, arity);
+
+    Py_XDECREF(published);
+    return packed;
+}
+
 PYCC_ENTRY PyObject *pycc_ext_obj_pack_list(void *list)
 {
     return pycc_ext_obj_pack_list_in(&pycc_ext_mod, list);
