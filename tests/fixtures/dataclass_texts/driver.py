@@ -29,11 +29,52 @@ if mode == "patched":
     builtins.exec = patched
 elif mode == "bound":
     dataclasses.exec = exec
+elif mode == "static":
+    # A builtin with no `self` bound as `exec`.
+    dataclasses.exec = str.maketrans
+elif mode == "eval":
+    # Another builtin of `builtins` replacing `exec`.
+    import builtins
+    builtins.exec = builtins.eval
 used = collections.Counter()
 def prof(frame, ev, arg):
     if ev == "c_call" and frame.f_code.co_name == "add_fns_to_class" and getattr(arg, "__name__", "") == "exec":
-        used["ahead" if type(getattr(arg, "__self__", None)) is dict and frame.f_locals["txt"] in arg.__self__ else "text"] += 1
+        tables = getattr(arg, "__self__", None)
+        ahead = type(tables) is list and any(frame.f_locals["txt"] in t for t in tables)
+        used["ahead" if ahead else "text"] += 1
 sys.setprofile(prof)
+if mode in ("static", "eval"):
+    try:
+        import m
+    except Exception as e:
+        print("import:", type(e).__name__, e)
+    print("ahead-of-time:", used["ahead"], "from text:", used["text"], file=sys.stderr)
+    sys.exit()
+if mode == "threads":
+    # Two chunks running at once, the first ending first.
+    import threading, sync
+    threading.setprofile(prof)
+    def control():
+        sync.ev["a in"].wait(30)
+        other = threading.Thread(target=__import__, args=("tb",))
+        other.start()
+        sync.ev["b in"].wait(30)
+        sync.ev["a go"].set()
+        sync.ev["a done"].wait(30)
+        sync.ev["b go"].set()
+        other.join()
+    controller = threading.Thread(target=control)
+    controller.start()
+    import ta
+    sync.ev["a done"].set()
+    controller.join()
+    sys.setprofile(None)
+    import tb
+    print("ahead-of-time:", used["ahead"], "from text:", used["text"], file=sys.stderr)
+    print(events)
+    print("exec bound:", "exec" in vars(dataclasses))
+    print(ta.A(), tb.B(), ta.A(2) == ta.A(2), repr(tb.B("c")))
+    sys.exit()
 import m, fut
 sys.setprofile(None)
 print("ahead-of-time:", used["ahead"], "from text:", used["text"], file=sys.stderr)

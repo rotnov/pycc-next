@@ -12,7 +12,10 @@
 //! made by `make_dataclass`, a second class generating the same text) is
 //! compiled at import as before, as is every text when `builtins.exec` is
 //! replaced, `dataclasses` binds an `exec` of its own, the interpreter runs
-//! with `-O`, or the module was built `--exact-cpython`.
+//! with `-O`, or the module was built `--exact-cpython`; an `exec` bound to
+//! another builtin, or a `builtins.exec` replaced by one, gets each text as
+//! in CPython. Two chunks running at once in two threads share one binding,
+//! removed when the last ends.
 //!
 //! The oracle is `python3` (or `PYCC_PYTHON`) importing the sources.
 
@@ -45,8 +48,7 @@ fn source(name: &str) -> String {
 /// directory, their sources removed, the driver beside them.
 fn built(label: &str, extra: &[&str]) -> ScratchDir {
     let dir = ScratchDir::new(label).expect("scratch");
-    std::fs::write(dir.join("driver.py"), source("driver.py")).expect("write the driver");
-    for module in ["m", "fut"] {
+    for module in ["m", "fut", "ta", "tb"] {
         let path = dir.join(format!("{module}.py"));
         std::fs::write(&path, source(&format!("{module}.py"))).expect("write the module");
         let build = pycc()
@@ -60,18 +62,24 @@ fn built(label: &str, extra: &[&str]) -> ScratchDir {
         assert!(build.status.success(), "{}", text(&build.stderr));
         std::fs::remove_file(&path).expect("import the artifact, not the source");
     }
+    // Written after the builds: `sync` beside `ta` would be built as a
+    // module of its program, not imported from CPython.
+    for name in ["driver.py", "sync.py"] {
+        std::fs::write(dir.join(name), source(name)).expect("write the driver");
+    }
     dir
 }
 
 fn plain(label: &str) -> ScratchDir {
     let dir = ScratchDir::new(label).expect("scratch");
-    for name in ["driver.py", "m.py", "fut.py"] {
+    for name in ["driver.py", "sync.py", "m.py", "fut.py", "ta.py", "tb.py"] {
         std::fs::write(dir.join(name), source(name)).expect("write the source");
     }
     dir
 }
 
-/// The driver's output in `dir` (`mode`: "", `patched` or `bound`), with a
+/// The driver's output in `dir` (`mode`: "", `patched`, `bound`, `static`,
+/// `eval` or `threads`), with a
 /// fixed hash seed so both sides build their sets alike.
 fn run(dir: &Path, mode: &str, optimize: bool) -> Output {
     let mut cmd = python();
@@ -137,4 +145,21 @@ fn exact_cpython_compiles_every_text_at_import() {
     let ours = built("dataclass_texts_exact", &["--exact-cpython"]);
     let oracle = plain("dataclass_texts_exact_src");
     assert_eq!(compare(&ours, &oracle, "", false), 0);
+}
+
+#[test]
+fn foreign_and_concurrent_bindings_match_cpython() {
+    let ours = built("dataclass_texts_bindings", &[]);
+    let oracle = plain("dataclass_texts_bindings_src");
+    // `dataclasses.exec` bound to a builtin with no `self`, and
+    // `builtins.exec` replaced by another builtin of `builtins`: each text
+    // goes to it, raising what CPython raises.
+    assert_eq!(compare(&ours, &oracle, "static", false), 0);
+    assert_eq!(compare(&ours, &oracle, "eval", false), 0);
+    // Two chunks running at once in two threads, the first to start ending
+    // first: both use their texts, and no `exec` is left bound.
+    let count = compare(&ours, &oracle, "threads", false);
+    if matches!(python_version().as_str(), "3.13" | "3.14" | "3.15") {
+        assert_eq!(count, 2);
+    }
 }
