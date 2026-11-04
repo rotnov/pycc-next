@@ -428,6 +428,27 @@ fn plan_def(
         None => None,
     };
     let positional: Vec<&Param> = posonly.iter().chain(&regular).collect();
+    // The entry calls the function (or the class's method) by its name, so
+    // a parameter of that name would shadow it there: no entry is planned
+    // and the `def` runs in CPython (its body compiled).
+    let callee_root = match (&receiver, class) {
+        (Some(_), _) => None,
+        (None, Some(class)) => Some(class),
+        (None, None) => Some(name),
+    };
+    if let Some(root) = callee_root {
+        let shadowed = positional
+            .iter()
+            .copied()
+            .chain(&kwonly)
+            .map(|p| p.name.as_str())
+            .chain(vararg.iter().map(|(v, _)| v.as_str()))
+            .chain(kwarg.iter().map(|(k, _)| k.as_str()))
+            .any(|param| param == root);
+        if shadowed {
+            return None;
+        }
+    }
     let entry = ext_entry_name(&qualname);
 
     // The entry: every parameter positional, `*args`/`**kwargs` and a

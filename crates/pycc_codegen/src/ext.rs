@@ -346,9 +346,12 @@ pub const EXT_OBJ_PACK_FROZENSET_SYMBOL: &str = "pycc_ext_obj_pack_frozenset";
 pub const EXT_OBJ_PACK_CLOSURE_SYMBOL: &str = "pycc_ext_obj_pack_closure";
 
 /// [`EXT_OBJ_PACK_CLOSURE_SYMBOL`] for a module-level function used as a
-/// value (no captures), with the address of a per-function slot first: the
-/// callable is made once, kept in the slot, and the same one returned again,
-/// as a Python function is one object.
+/// value (no captures), with the address of a per-function slot first and
+/// the function's name last (NULL for one the compiler made): the callable
+/// -- the function the module's namespace binds under that name when there
+/// is one, as CPython code reads it -- is made once, kept in the slot, and
+/// the same one returned again, as a Python function is one object. A
+/// module-unit entry (`src/ext/module/module_ctx.c`).
 pub const EXT_OBJ_PACK_FUNCTION_SYMBOL: &str = "pycc_ext_obj_pack_function";
 
 /// The fixed C shim's `len` helper (Part 3 of #1026): it takes a borrowed
