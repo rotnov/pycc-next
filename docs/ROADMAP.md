@@ -110,3 +110,31 @@ pystache's remaining gap is not in instructions: its own share is 6.92M against 
   - fewer pointer-bearing data pages;
   - import-time code and state placed together;
   - a smaller `.so`. About 290 KB of its 950 KB of text is Rust's standard library, including the backtrace symbolizer.
+
+### Progress 2026-11-04 (later): the load levers, and where the gates stand (not met)
+
+These are the four load levers listed above, each measured on the same VM against the main it would replace. Only the smaller `.so` was worth a pull request:
+
+- **A smaller `.so`** (#73, the "load: no symbolizer" row above): the backtrace symbolizer is no longer linked. pystache's code went from 971 KB to 772 KB and its symbols bound at `dlopen` from 362 to 349. Its `dlopen` went from 274 µs to 261 µs, and its import from 12.11 ms to 11.95 ms over 121 rounds (CPython 11.22 ms).
+- **C-API calls bound on first use** were not built. Binding only the 127 symbols the import calls would save about 30 µs of the 100 µs that all 362 symbol lookups cost (a `dlsym` measurement). CPython opens extensions with `RTLD_NOW`, so the binding would have to go through a table of pycc's own.
+- **Fewer pointer-bearing data pages**: the 13 pages `.data` and `.data.rel.ro` copy on write are the shim's method, getset and type tables. Those are written by their relocations whether or not they are `const`. Removing the faults would need position-independent tables throughout the shim, for about 30 µs. Linking without RELRO saved 20 µs and is ruled out, because RELRO is a hardening measure.
+- **Import-time code and state placed together**: LLVM already puts the module bodies in `.text.unlikely`, so they sit together. The import runs 103 KB of the extension's code over 12 of its 64 KiB windows. Pre-faulting the module's `.bss` with `MADV_POPULATE_WRITE` made the import slower: all of it cost about 100 more faults, and its first 64 KB was within noise.
+
+Main at e2dbaaa, with the same VM, `lbench` harness and PBS CPython 3.15.2 as above. Each row is interleaved fresh-process rounds with nothing else running. The ratio is CPython time / pycc time, by median, with the IQR in ms:
+
+| workload | rounds | load average | CPython | pycc | ratio |
+|---|---|---|---|---|---|
+| `import pystache` | 151 | 0.7 | 11.27 (10.65-12.44) | 11.73 (11.09-12.69) | 0.96x |
+| `import pystache` | 121 | 2.6, just after a build | 10.87 (10.18-11.76) | 11.60 (10.98-12.52) | 0.94x |
+| pydantic import | 61 | 0.8 | 82.6 (79.0-87.0) | 78.8 (74.8-81.6) | 1.05x |
+
+The latest CI benchmark, bench run 41750538464 at 0f97b93 (before levers 12 and later), gave aarch64 0.97x for pydantic's import and 0.97x for pystache's.
+
+Accept 1 is met locally, but CI has not confirmed it on both runners, and the stretch is not met. Accept 2 is not met: about 0.5 ms of pystache's 11 ms import remains, all in loading the extension (`dlopen`, and faulting in its pages and the interpreter's cold text), not in instructions.
+
+What is left:
+- lazy code objects (lever 9);
+- the rest of lever 7 (steps 2 and 3) and lever 13;
+- binding C-API calls on first use.
+
+Each is estimated at well under 0.1 ms for pystache. Reaching parity there likely needs a load with no `dlopen` at all, as CPython's built-in extensions have, or a much smaller extension.
