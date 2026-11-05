@@ -59,7 +59,32 @@ Accept (carried over from v0.11, not met there):
    runners, and no package check regresses. v0.11 (CPython 3.13): 0.97x / 0.94x; against
    3.15: 0.94x / 0.93x.
 
-### Progress: the levers
+Tracked, not an Accept item: pydantic's model definition and `model_json_schema()`
+phases, and the workload's whole-process wall time (`process`: one fresh interpreter
+running every phase, start-up and shutdown included). Every `bench/pydantic_check.py
+--time` run reports all three, and `bench.yml` publishes them. The compiled tree is the
+slower side in all three, and the goal is to bring each to at least 1.0x. Against 3.15,
+CI measured definition at 0.80x / 0.75x and `model_json_schema()` at 0.88x / 0.75x (bench
+run 41427758082); that run did not record the whole-process time.
+
+These are local medians on main with #75, against main before it (2a3ef35), with PBS
+CPython 3.15.2 on a 4-vCPU x86_64 VM: 21 interleaved fresh-process runs, each phase x20,
+nothing else running, load average about 1.3. The cells are ms with the IQR, and the
+ratio is CPython time / pycc time:
+
+| workload | CPython | pycc at 2a3ef35 | pycc with #75 | ratio with #75 |
+|---|---|---|---|---|
+| pydantic model definition | 5.83 (5.74-6.30) | 7.57 (7.38-8.35) | 7.55 (7.45-7.83) | 0.77x |
+| pydantic `model_json_schema()` | 11.37 (10.76-12.20) | 15.06 (14.09-15.89) | 14.14 (13.83-16.02) | 0.80x |
+| whole process | 776 (752-794) | 896 (870-918) | 885 (848-919) | 0.88x |
+
+Where the time goes, from callgrind (`valgrind --tool=callgrind`, cache and branch simulation) and perf:
+
+- **The instruction counts are close.** With #75, per repetition, schema runs 109.8M instructions against CPython's 108.1M, and definition 29.6M against 26.8M.
+- **The extra time is instruction-cache misses and branch mispredictions.** At 2a3ef35, per schema repetition, there are 0.80M I1 misses against 0.38M, and 1.56M mispredictions against 1.28M.
+- **The compiled bodies are thin.** At 2a3ef35, of the extension's 32M instructions per schema repetition, 24.6M are in the shim's generic object helpers: calls, attribute and item reads, `isinstance`, displays, iteration and reference counting. The interpreter's own misses also grow by about 60%, spread across all of its code: two hot code bases share the cache.
+- **Compiler flags do not help.** Compiling the shim with `-Os` or `-O3` instead of `-O2` measured no faster.
+
 
 Each lever is measured locally against the merged head before it (PBS CPython 3.15.2,
 `valgrind --tool=callgrind`, `PYTHONHASHSEED=0`; own share of the import as in the
