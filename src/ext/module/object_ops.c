@@ -110,6 +110,25 @@ PyObject *pycc_ext_obj_getattr(PyObject *obj, const char *name)
     return pycc_ext_ic_getattr_slow(obj, name, attr_name);
 }
 
+/* Copies the `n` (at most `PYCC_EXT_METHOD_STACK`, below) arguments of a method
+ * call behind its receiver. Spelled out instead of a loop: GCC turns the
+ * loop into an inline `rep movsq`, whose start-up costs more cycles than a
+ * call's few arguments take to copy, on every method call. */
+static void pycc_ext_copy_args(PyObject **dst, PyObject **src, long long n)
+{
+    switch (n) {
+    case 8: dst[7] = src[7]; /* fall through */
+    case 7: dst[6] = src[6]; /* fall through */
+    case 6: dst[5] = src[5]; /* fall through */
+    case 5: dst[4] = src[4]; /* fall through */
+    case 4: dst[3] = src[3]; /* fall through */
+    case 3: dst[2] = src[2]; /* fall through */
+    case 2: dst[1] = src[1]; /* fall through */
+    case 1: dst[0] = src[0]; /* fall through */
+    default: break;
+    }
+}
+
 /*
  * `self.name(args)` as one call (`EXT_OBJ_CALL_METHOD_SYMBOL` in
  * `crates/pycc_codegen/src/ext.rs`): `PyObject_VectorcallMethod`, which
@@ -147,9 +166,7 @@ PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **
         method = pycc_ext_site_method(site, self);
         if (method != NULL) {
             stack[0] = self;
-            for (i = 0; i < nargs; i++) {
-                stack[i + 1] = args[i];
-            }
+            pycc_ext_copy_args(stack + 1, args, nargs);
             Py_INCREF(method);
             result = pycc_ext_site_call(site, method, stack, nargs);
             Py_DECREF(method);
@@ -165,9 +182,7 @@ PyObject *pycc_ext_obj_call_method(PyObject *self, const char *name, PyObject **
         attr_name = method != NULL ? NULL : pycc_ext_attr_name(name);
         if ((method != NULL || attr_name != NULL) && nargs <= PYCC_EXT_METHOD_STACK) {
             stack[0] = self;
-            for (i = 0; i < nargs; i++) {
-                stack[i + 1] = args[i];
-            }
+            pycc_ext_copy_args(stack + 1, args, nargs);
             if (method == NULL) {
                 method = pycc_ext_ic_method(self, name, attr_name, &with_self);
             }
@@ -266,7 +281,7 @@ PyObject *pycc_ext_obj_call_loaded(PyObject *callable, PyObject **stack, long lo
             packed = 0;
         }
     }
-    if (packed && self != NULL && site != NULL && site->fast != NULL
+    if (packed && self != NULL && site != NULL && (site->fast != NULL || site->fwd != NULL)
         && pycc_ext_site_method(site, self) == callable) {
         /* The method the site's cache loaded (`pycc_ext_obj_load_method`). */
         result = pycc_ext_site_call(site, callable, stack, nargs);

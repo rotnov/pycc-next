@@ -84,8 +84,12 @@ typedef struct PycFwdSlot {
     PyObject *target;  /* the compiled body's published function */
     PyObject *self;    /* its `self` (the module), borrowed */
     /* Its C function when it is `METH_FASTCALL`, which the trampoline
-     * calls directly. */
+     * calls directly; `entry_kw` instead when it is `METH_FASTCALL |
+     * METH_KEYWORDS` (a keyword-enabled export, `src/ext_build/keywords.rs`),
+     * called with no keyword names, since a trampoline passes every
+     * parameter positionally. */
     PyObject *(*entry)(PyObject *, PyObject *const *, Py_ssize_t);
+    PyObject *(*entry_kw)(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
     PyObject *names;   /* `co_varnames` */
     PyObject *klass;   /* the `__class__` cell's value, once read */
     PyObject *cell;    /* the `__class__` cell, or NULL */
@@ -243,14 +247,15 @@ static PyObject *pycc_fwd_target(PycFwdSlot *slot, PyObject *const *args, Py_ssi
 {
     PyObject *result;
 
-    if (slot->entry == NULL) {
+    if (slot->entry == NULL && slot->entry_kw == NULL) {
         return PyObject_Vectorcall(slot->target, args, (size_t)n, NULL);
     }
     /* What calling the builtin would check. */
     if (Py_EnterRecursiveCall(" while calling a Python object")) {
         return NULL;
     }
-    result = slot->entry(slot->self, args, n);
+    result = slot->entry != NULL ? slot->entry(slot->self, args, n)
+                                 : slot->entry_kw(slot->self, args, n, NULL);
     Py_LeaveRecursiveCall();
     return result;
 }
@@ -433,6 +438,101 @@ static PyObject *pycc_fwd_bind(PycFwdSlot *slot, PyObject *func, PyObject *const
     Py_XDECREF(star);
     Py_XDECREF(starstar);
     return result;
+}
+
+/*
+ * Every patched forwarder's slot, by its function (open addressing; the
+ * functions are held by their slots, which are never freed): what lets a
+ * call site's cache (`pycc_ext_site_fill` in `call_site.c`) call a
+ * forwarder's compiled body as its trampoline does, without the
+ * vectorcall through the trampoline. `pycc_fwd_slot_of` reads it when a
+ * site fills, never on a call.
+ */
+static PycFwdSlot **pycc_fwd_index = NULL;
+/* A power of two, or 0. */
+static size_t pycc_fwd_index_size = 0;
+static size_t pycc_fwd_index_used = 0;
+
+static size_t pycc_fwd_index_home(PyObject *func, size_t size)
+{
+    return (size_t)(((uint64_t)(uintptr_t)func >> 4) * 0x9E3779B97F4A7C15ull >> 20) & (size - 1);
+}
+
+/* Records `slot` (patched); on a failed allocation its forwarder just
+ * keeps being called through its trampoline. */
+static void pycc_fwd_index_add(PycFwdSlot *slot)
+{
+    size_t i;
+
+    if ((pycc_fwd_index_used + 1) * 2 > pycc_fwd_index_size) {
+        size_t size = pycc_fwd_index_size == 0 ? 64 : pycc_fwd_index_size * 2;
+        PycFwdSlot **grown = (PycFwdSlot **)PyMem_Calloc(size, sizeof(PycFwdSlot *));
+
+        if (grown == NULL) {
+            PyErr_Clear();
+            return;
+        }
+        for (i = 0; i < pycc_fwd_index_size; i++) {
+            PycFwdSlot *held = pycc_fwd_index[i];
+            size_t at;
+
+            if (held == NULL) {
+                continue;
+            }
+            for (at = pycc_fwd_index_home(held->func, size); grown[at] != NULL; at = (at + 1) & (size - 1)) {
+            }
+            grown[at] = held;
+        }
+        PyMem_Free(pycc_fwd_index);
+        pycc_fwd_index = grown;
+        pycc_fwd_index_size = size;
+    }
+    for (i = pycc_fwd_index_home(slot->func, pycc_fwd_index_size); pycc_fwd_index[i] != NULL;
+         i = (i + 1) & (pycc_fwd_index_size - 1)) {
+    }
+    pycc_fwd_index[i] = slot;
+    pycc_fwd_index_used++;
+}
+
+/* The slot of patched forwarder `func`, or NULL. */
+static struct PycFwdSlot *pycc_fwd_slot_of(PyObject *func)
+{
+    size_t i;
+
+    if (pycc_fwd_index_size == 0) {
+        return NULL;
+    }
+    for (i = pycc_fwd_index_home(func, pycc_fwd_index_size); pycc_fwd_index[i] != NULL;
+         i = (i + 1) & (pycc_fwd_index_size - 1)) {
+        if (pycc_fwd_index[i]->func == func) {
+            return pycc_fwd_index[i];
+        }
+    }
+    return NULL;
+}
+
+/* How many calls `pycc_fwd_direct` made straight to a compiled body, which
+ * the tests read with `ctypes` (`RUNTIME_COUNTERS` in
+ * `src/ext_build/link.rs`). */
+static long long pycc_fwd_direct_calls = 0;
+
+long long pycc_ext_site_forward_calls(void)
+{
+    return pycc_fwd_direct_calls;
+}
+
+/* `func(*args)` for the forwarder of `slot` (`pycc_fwd_slot_of(func)`),
+ * `args[0]` its receiver: what its trampoline does for a call without
+ * keywords (`pycc_fwd_call_in`), else the vectorcall itself. */
+static PyObject *pycc_fwd_direct(struct PycFwdSlot *slot, PyObject *func, PyObject *const *args,
+                                 Py_ssize_t n)
+{
+    if (n == slot->argcount && slot->simple && func == slot->func
+        && PYCC_FUNC_FIELD(func, PYCC_FUNC_CODE) == slot->code) {
+        pycc_fwd_direct_calls++;
+        return pycc_fwd_target(slot, args, n);
+    }
+    return PyObject_Vectorcall(func, args, (size_t)n, NULL);
 }
 
 /* Trampoline `index`'s call: straight to the compiled body when the call
@@ -622,11 +722,16 @@ static void pycc_fwd_patch(PyccExtModule *m, PyObject *ns, PyObject *func)
         slot->self = PyCFunction_GetSelf(target);
         slot->entry = (PyObject * (*)(PyObject *, PyObject *const *, Py_ssize_t))
             PyCFunction_GetFunction(target);
+    } else if (PyCFunction_GetFlags(target) == (METH_FASTCALL | METH_KEYWORDS)) {
+        slot->self = PyCFunction_GetSelf(target);
+        slot->entry_kw = (PyObject * (*)(PyObject *, PyObject *const *, Py_ssize_t, PyObject *))
+            PyCFunction_GetFunction(target);
     }
     *(int *)((char *)code + PYCC_CODE_FLAGS) |= PYCC_CO_SIGNATURE;
     *(uint32_t *)((char *)func + PYCC_FUNC_VERSION) = pycc_fwd_version_cleared;
     *(vectorcallfunc *)((char *)func + PYCC_FUNC_VECTORCALL) = m->fwd_trampoline(m->fwd_used);
     m->fwd_used++;
+    pycc_fwd_index_add(slot);
 done:
     PyErr_Clear();
     Py_DECREF(info.varnames);

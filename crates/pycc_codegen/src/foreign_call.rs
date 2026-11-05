@@ -491,13 +491,13 @@ pub(super) fn emit_lookup<'ctx>(
 }
 
 /// v0.9: the static record of one method call site's cache
-/// (`PyccExtCallSite` in the shim's `attr_cache.c`: four words, zero at
+/// (`PyccExtCallSite` in the shim's `call_site.c`: six words, zero at
 /// first), passed to the method-call entries.
 fn call_site_record<'ctx>(
     context: &'ctx Context,
     module: &inkwell::module::Module<'ctx>,
 ) -> inkwell::values::PointerValue<'ctx> {
-    let ty = context.i64_type().array_type(4);
+    let ty = context.i64_type().array_type(6);
     let global = module.add_global(ty, None, "pycc_call_site");
     global.set_initializer(&ty.const_zero());
     global.set_linkage(inkwell::module::Linkage::Private);

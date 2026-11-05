@@ -43,6 +43,7 @@ const FIXED_C: &str = concat!(
     include_str!("../ext/module/import_io.c"),
     include_str!("../ext/module/object_unpack.c"),
     include_str!("../ext/module/attr_cache.c"),
+    include_str!("../ext/module/call_site.c"),
     include_str!("../ext/module/object_ops.c"),
     include_str!("../ext/module/object_protocols.c"),
     include_str!("../ext/module/object_index.c"),
@@ -276,5 +277,13 @@ mod tests {
         assert!(!runtime_unit().contains(INCLUDE_COMPANION));
         assert_eq!(module_unit().matches(INCLUDE_COMPANION).count(), 1);
         assert!(!runtime_unit().lines().any(|l| l.starts_with("static ")));
+        // No comment follows a one-line variable definition's `;`: the line
+        // would read as the start of a multi-line initializer and swallow
+        // every declaration up to the next `};`.
+        for line in relink(&unix_lines(FIXED_C)).lines() {
+            if variable_declaration(line).is_some() && line.contains('=') && line.contains(';') {
+                assert!(line.trim_end().ends_with(';'), "{line}");
+            }
+        }
     }
 }
