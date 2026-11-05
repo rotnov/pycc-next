@@ -40,7 +40,10 @@ Usage: python3 bench/pydantic_check.py [--pycc PATH] [--cache DIR] [--keep DIR]
            the sources' `.pyc` files, as an installed package has them), then N
            (`--runs`, default 15) runs per tree, interleaved in alternating order,
            each phase repeated R (`--repeat`, default 20) times per run. Prints the
-           best and the median per phase and the ratio of the medians.
+           best and the median per phase and the ratio of the medians, and the same
+           for `process`: each run's whole-process wall time, from starting the
+           interpreter to its exit (every phase's R repetitions, the interpreter's
+           start-up and shutdown included).
   --json PATH
            with --time, also write every sample per phase and tree and their
            summaries (`bench/stats.py`).
@@ -63,6 +66,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import competitors  # noqa: E402
@@ -131,18 +135,24 @@ def build(pycc: str, py: pathlib.Path) -> tuple[pathlib.Path, int, int, list[str
 
 WORKLOAD = pathlib.Path(__file__).resolve().parent / "pydantic_workload.py"
 PHASES = ("import", "define", "schema", "roundtrip")
+# What `time_trees` reports per run: the workload's phases, then the whole
+# process's wall time.
+ROWS = (*PHASES, "process")
 
 
 def time_trees(python: str, trees: dict[str, pathlib.Path], cwd: pathlib.Path,
                runs: int, repeat: int) -> dict[str, list[dict[str, float]]]:
     """Runs the workload `runs` times per tree, interleaved in alternating order,
-    after one discarded warm-up run each."""
+    after one discarded warm-up run each. Each run's seconds per phase, and its
+    whole-process wall time as `process`."""
     def once(tree: pathlib.Path) -> dict[str, float]:
+        start = time.perf_counter()
         r = subprocess.run([python, "-I", str(WORKLOAD), str(tree.resolve()), str(repeat)], cwd=cwd,
                            capture_output=True, text=True, timeout=900)
+        process = time.perf_counter() - start
         if r.returncode != 0:
             sys.exit(f"the workload failed on {tree}:\n{r.stderr}")
-        return json.loads(r.stdout)
+        return {**json.loads(r.stdout), "process": process}
 
     for tree in trees.values():
         once(tree)
@@ -188,11 +198,12 @@ def competitor_trees(src: pathlib.Path, tmp: pathlib.Path, cwd: pathlib.Path, py
 
 
 def report(times: dict[str, list[dict[str, float]]]) -> None:
-    """Prints best and median per phase, in ms, and CPython's median over the
-    compiled tree's (above 1: the compiled tree is faster)."""
+    """Prints best and median per phase and for the whole process, in ms, and
+    CPython's median over the compiled tree's (above 1: the compiled tree is
+    faster)."""
     print(f"{'phase':10} {'compiled best / median':>23} {'CPython best / median':>22} "
           f"{'CPython/compiled':>17}")
-    for ph in PHASES:
+    for ph in ROWS:
         c = [r[ph] * 1000 for r in times["compiled"]]
         p = [r[ph] * 1000 for r in times["CPython"]]
         print(f"{ph:10} {min(c):10.2f} / {statistics.median(c):8.2f} "
@@ -203,7 +214,7 @@ def report(times: dict[str, list[dict[str, float]]]) -> None:
             continue
         print(f"{side}: " + ", ".join(
             f"{ph} {statistics.median(r[ph] for r in times[side]) * 1000:.2f} ms"
-            for ph in PHASES) + " (medians)")
+            for ph in ROWS) + " (medians)")
 
 
 def main() -> int:
@@ -286,7 +297,7 @@ def main() -> int:
                                                 for side, rs in times.items()},
                                     "ratio": statistics.median(r[ph] for r in times["CPython"])
                                     / statistics.median(r[ph] for r in times["compiled"])}
-                               for ph in PHASES}}}, indent=1))
+                               for ph in ROWS}}}, indent=1))
             sys.stdout.flush()
             if not a.tests:
                 return 1 if failed else 0
