@@ -7,8 +7,9 @@ The inputs are the `--json` outputs of `bench/run.py`, `bench/package_check.py -
 and `bench/pydantic_check.py --time`; any may be missing (its section is then left
 out). Writes one JSON document (the inputs plus the machine: CPU model, logical CPUs,
 OS, CPython, commit, and the Actions run when run there) and a Markdown report: per
-program, package workload and pydantic phase, the median and min-max of each side over
-the stated number of interleaved fresh-process runs, and the ratio of the medians.
+program, package workload and pydantic phase (and the pydantic workload's whole-process
+wall time), the median and min-max of each side over the stated number of interleaved
+fresh-process runs, and the ratio of the medians.
 The machine section comes first: a shared CI runner's CPU varies between runs, and
 the numbers mean only what that CPU and the spread say. When the inputs hold the
 competitors' results (`--competitors`, `bench/competitors.py`), the report has
@@ -181,7 +182,8 @@ def markdown(doc: dict) -> str:
         d = doc["pydantic"]["pydantic"]
         out += [f"## pydantic {d['version']} (`bench/pydantic_check.py --time`, {d['runs']} "
                 f"runs, each phase x{d['repeat']} per run, mean per repetition; "
-                f"{d['native']} functions native)", "",
+                f"{d['native']} functions native; `process`: a run's whole-process wall "
+                f"time)", "",
                 "| phase | CPython | pycc-next | Cython | mypyc | CPython / pycc-next | "
                 "pycc vs Cython | pycc vs mypyc |", "|---|---|---|---|---|---|---|---|"]
         ms = {"scale": 1000, "unit": " ms", "digits": 2}

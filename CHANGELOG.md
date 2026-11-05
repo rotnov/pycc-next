@@ -9,6 +9,9 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   effects CPython code could observe, so the module imports exactly as CPython runs its
   source (`docs/DEVIATIONS.md` names each): the dataclass texts and forward references
   below.
+- `bench/pydantic_check.py --time` (and the published CI benchmark) reports `process`
+  alongside the workload's phases: each run's whole-process wall time, from starting the
+  interpreter to its exit.
 
 ### Changed
 - A method call site's cache in an `--ext` module also holds a method of a class whose
