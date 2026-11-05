@@ -31,6 +31,13 @@ fn matches_cpython(fixture: &str, hits: bool) {
 /// [`matches_cpython`], the caches answering at least `min_hits` reads
 /// (`0`: not checked).
 fn matches_cpython_hitting(fixture: &str, min_hits: usize) {
+    matches_cpython_counting(fixture, min_hits, 0);
+}
+
+/// [`matches_cpython_hitting`], the call sites' caches also making at least
+/// `min_forward` calls straight to a compiled body behind its Python
+/// forwarder (`pycc_ext_site_forward_calls`; none with the caches off).
+fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize) {
     let hits = min_hits > 0;
     let dir = ScratchDir::new(fixture).expect("scratch");
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/{fixture}.py"));
@@ -54,7 +61,9 @@ fn matches_cpython_hitting(fixture: &str, min_hits: usize) {
         "import ctypes, sys\nimport {module}\n\
          hits = ctypes.CDLL({module}.__file__).pycc_ext_attr_cache_hits()\n\
          print('HITS', hits > 0, file=sys.stderr)\n\
-         print('COUNT', hits, file=sys.stderr)\n"
+         print('COUNT', hits, file=sys.stderr)\n\
+         print('FORWARD', ctypes.CDLL({module}.__file__).pycc_ext_site_forward_calls(), \
+         file=sys.stderr)\n"
     );
     for off in [false, true] {
         let mut run = python();
@@ -82,6 +91,21 @@ fn matches_cpython_hitting(fixture: &str, min_hits: usize) {
                 .and_then(|n| n.trim().parse().ok())
                 .expect("the probe prints the hit count");
             assert!(count >= min_hits, "{count} hits, at least {min_hits} expected\n{stderr}");
+        }
+        if min_forward > 0 {
+            let forward: usize = stderr
+                .lines()
+                .find_map(|line| line.strip_prefix("FORWARD "))
+                .and_then(|n| n.trim().parse().ok())
+                .expect("the probe prints the forwarded call count");
+            if off {
+                assert_eq!(forward, 0, "caches off\n{stderr}");
+            } else {
+                assert!(
+                    forward >= min_forward,
+                    "{forward} forwarded calls, at least {min_forward} expected\n{stderr}"
+                );
+            }
         }
     }
 }
@@ -136,4 +160,17 @@ fn an_empty_literal_and_its_neighbour_compare_apart() {
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn module_attributes_stored_by_compiled_code_are_cached() {
     matches_cpython_hitting("attr_cache_module_keys", 400);
+}
+
+/// v0.12: a method call site's cache holds a method of a class CPython
+/// creates whose instances keep their values inline, as long as no instance
+/// attribute can shadow it, and calls a compiled method behind its Python
+/// forwarder straight through the forwarder's slot: CPython's results with
+/// every count of arguments the cache copies (and one more), keywords,
+/// an instance attribute of the method's name, a new attribute in the
+/// shared keys, a materialized instance dict and class attributes rebound.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn method_calls_on_a_class_cpython_creates() {
+    matches_cpython_counting("forwarder_calls", 1, 300);
 }

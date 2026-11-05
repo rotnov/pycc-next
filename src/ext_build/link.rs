@@ -405,9 +405,11 @@ pub(crate) fn host_glibc_version() -> Option<String> {
 }
 
 /// The runtime's live-object counters, which a host (and the leak tests)
-/// reads from an extension module with `ctypes`, and the attribute caches'
-/// hit count (`src/ext/module/attr_cache.c`).
-pub(crate) const RUNTIME_COUNTERS: [&str; 11] = [
+/// reads from an extension module with `ctypes`, the attribute caches' hit
+/// count (`src/ext/module/attr_cache.c`), and how many method calls the
+/// call sites' caches made straight to a compiled body behind its Python
+/// forwarder (`src/ext/module/forward.c`).
+pub(crate) const RUNTIME_COUNTERS: [&str; 12] = [
     "pycc_rt_str_live_objects",
     "pycc_rt_list_live_objects",
     "pycc_rt_dict_live_objects",
@@ -419,4 +421,5 @@ pub(crate) const RUNTIME_COUNTERS: [&str; 11] = [
     "pycc_rt_num_box_live_objects",
     "pycc_rt_buffer_live_views",
     "pycc_ext_attr_cache_hits",
+    "pycc_ext_site_forward_calls",
 ];

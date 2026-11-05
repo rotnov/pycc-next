@@ -11,6 +11,16 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   below.
 
 ### Changed
+- A method call site's cache in an `--ext` module also holds a method of a class whose
+  instances keep their values inline (a class CPython creates, such as one whose statement
+  names a metaclass), while the class's entry says no instance attribute can shadow it:
+  the site keeps the shared keys' count and checks it, with the instance's values inline,
+  on every hit. A compiled method behind its Python forwarder is then called through the
+  forwarder's slot, as its trampoline would, with no vectorcall through the trampoline;
+  a keyword-enabled method's trampoline calls its compiled body directly too, and the
+  receiver and arguments are copied without an inline `rep movsq`. pydantic's warm schema
+  phase takes about 4% less time (14.87 -> 14.24 ms median, 21 interleaved runs) and its
+  define phase about 2% less (7.32 -> 7.18 ms).
 - An `--ext` module's dataclasses whose class statements run in CPython get the methods
   `dataclasses` generates from code objects the build compiled: the build runs the target
   interpreter's own `dataclasses` on a stand-in of each class (its fields, `field()`
