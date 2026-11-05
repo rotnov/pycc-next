@@ -14,6 +14,15 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   interpreter to its exit.
 
 ### Changed
+- Three of an `--ext` module's object operations do less work for exact built-in types.
+  An `int` index into an exact `tuple` or `list` reads the size and the item where CPython
+  3.13 and 3.15 keep them (a 3.15 tuple's items after its cached hash; probed once),
+  instead of calling the stable-ABI accessors.
+  `isinstance` of a built-in class answers an instance of a plain built-in type without
+  `PyType_IsSubtype`. The standard-library functions that compiled code calls are found
+  by their call site's names in a hashed table, not by scanning it. pydantic's schema
+  phase runs about 1.0M fewer instructions per repetition (109.8M -> 108.9M), and its
+  definition phase about 1.4M fewer (30.9M -> 29.5M).
 - A method call site's cache in an `--ext` module also holds a method of a class whose
   instances keep their values inline (a class CPython creates, such as one whose statement
   names a metaclass), while the class's entry says no instance attribute can shadow it:

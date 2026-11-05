@@ -181,8 +181,11 @@ static PyObject *pycc_ext_stdlib_function(PyObject *module_name, PyObject *funct
 }
 
 /* `module.function(*args)`, the result a new reference (`None` after a
- * bridged failure). The names are string literals: their `str`s are made
- * once per call site and kept, like the function itself. */
+ * bridged failure). The names are string literals: each call site's
+ * function is kept in a table by the two literals' addresses, open
+ * addressed from their hash, so a call finds it in a probe or two. A scan
+ * of the table in filling order took most of a call's 90 instructions in
+ * pydantic's schema generation, where `tuple` and `sorted` come late. */
 #define PYCC_EXT_STDLIB_CALL_SITES 64
 static struct {
     const char *module;
@@ -196,9 +199,12 @@ static PyObject *pycc_ext_stdlib_call(const char *module_name, const char *funct
     PyObject *callable = NULL;
     PyObject *args[2] = {a, b};
     PyObject *result;
-    size_t i;
+    size_t home = (size_t)((((uint64_t)(uintptr_t)function ^ ((uint64_t)(uintptr_t)module_name << 7))
+                            * 0x9E3779B97F4A7C15ull) >> 58);
+    size_t i, probe;
 
-    for (i = 0; i < PYCC_EXT_STDLIB_CALL_SITES; i++) {
+    for (probe = 0, i = home; probe < PYCC_EXT_STDLIB_CALL_SITES;
+         probe++, i = (i + 1) % PYCC_EXT_STDLIB_CALL_SITES) {
         if (pycc_ext_stdlib_sites[i].module == NULL) {
             break;
         }
@@ -219,7 +225,7 @@ static PyObject *pycc_ext_stdlib_call(const char *module_name, const char *funct
         if (callable == NULL) {
             return pycc_ext_stdlib_failed();
         }
-        if (i < PYCC_EXT_STDLIB_CALL_SITES) {
+        if (probe < PYCC_EXT_STDLIB_CALL_SITES) {
             Py_INCREF(callable);
             pycc_ext_stdlib_sites[i].module = module_name;
             pycc_ext_stdlib_sites[i].function = function;

@@ -127,6 +127,8 @@ static int pycc_ext_isinstance(PyObject *o, PyObject *cls)
 
 int pycc_ext_obj_isinstance(PyObject *o, PyObject *cls, int builtin)
 {
+    int selected = cls == NULL;
+
     if (cls == NULL) {
         switch (builtin) {
         case 0:
@@ -159,6 +161,14 @@ int pycc_ext_obj_isinstance(PyObject *o, PyObject *cls, int builtin)
     if (o == NULL) {
         PyErr_SetString(PyExc_SystemError, "pycc_ext_obj_isinstance: NULL operand");
         return -1;
+    }
+    if (selected && pycc_ext_plain_builtin(Py_TYPE(o))) {
+        /* A built-in class selected by `builtin`, asked of an instance of a
+         * plain built-in type: what `pycc_ext_isinstance` answers through
+         * `PyType_IsSubtype`, as among those types only `bool` derives from
+         * another of them (`int`). */
+        return (PyObject *)Py_TYPE(o) == cls
+               || (Py_TYPE(o) == &PyBool_Type && cls == (PyObject *)&PyLong_Type);
     }
     return pycc_ext_isinstance(o, cls);
 }

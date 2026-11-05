@@ -31,13 +31,15 @@ fn matches_cpython(fixture: &str, hits: bool) {
 /// [`matches_cpython`], the caches answering at least `min_hits` reads
 /// (`0`: not checked).
 fn matches_cpython_hitting(fixture: &str, min_hits: usize) {
-    matches_cpython_counting(fixture, min_hits, 0);
+    matches_cpython_counting(fixture, min_hits, 0, 0);
 }
 
 /// [`matches_cpython_hitting`], the call sites' caches also making at least
 /// `min_forward` calls straight to a compiled body behind its Python
-/// forwarder (`pycc_ext_site_forward_calls`; none with the caches off).
-fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize) {
+/// forwarder (`pycc_ext_site_forward_calls`; none with the caches off), and
+/// at least `min_seq` `int` indexes read at a `tuple`'s or `list`'s layout
+/// (`pycc_ext_seq_layout_reads`, which the caches do not switch).
+fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize, min_seq: usize) {
     let hits = min_hits > 0;
     let dir = ScratchDir::new(fixture).expect("scratch");
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/{fixture}.py"));
@@ -63,6 +65,8 @@ fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize) 
          print('HITS', hits > 0, file=sys.stderr)\n\
          print('COUNT', hits, file=sys.stderr)\n\
          print('FORWARD', ctypes.CDLL({module}.__file__).pycc_ext_site_forward_calls(), \
+         file=sys.stderr)\n\
+         print('SEQ', ctypes.CDLL({module}.__file__).pycc_ext_seq_layout_reads(), \
          file=sys.stderr)\n"
     );
     for off in [false, true] {
@@ -91,6 +95,14 @@ fn matches_cpython_counting(fixture: &str, min_hits: usize, min_forward: usize) 
                 .and_then(|n| n.trim().parse().ok())
                 .expect("the probe prints the hit count");
             assert!(count >= min_hits, "{count} hits, at least {min_hits} expected\n{stderr}");
+        }
+        if min_seq > 0 {
+            let seq: usize = stderr
+                .lines()
+                .find_map(|line| line.strip_prefix("SEQ "))
+                .and_then(|n| n.trim().parse().ok())
+                .expect("the probe prints the layout read count");
+            assert!(seq >= min_seq, "{seq} layout reads, at least {min_seq} expected\n{stderr}");
         }
         if min_forward > 0 {
             let forward: usize = stderr
@@ -172,5 +184,17 @@ fn module_attributes_stored_by_compiled_code_are_cached() {
 #[test]
 #[ignore = "requires a CPython 3.13+ with development headers on PATH"]
 fn method_calls_on_a_class_cpython_creates() {
-    matches_cpython_counting("forwarder_calls", 1, 300);
+    matches_cpython_counting("forwarder_calls", 1, 300, 0);
+}
+
+/// v0.12: an `int` index into an exact `tuple` or `list` read at its
+/// layout, `isinstance` of a built-in class answered for a plain built-in
+/// type, and standard-library functions found by their call site's names
+/// in a hashed table give CPython's results, with the caches on and off;
+/// the layout probe passes, so the indexes in range are read at it (10 in
+/// the fixture's exact `tuple` and `list` rows).
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn builtin_object_operations_answered_by_the_shim() {
+    matches_cpython_counting("builtin_object_ops", 0, 0, 10);
 }
