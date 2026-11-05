@@ -21,7 +21,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
   `isinstance` of a built-in class answers an instance of a plain built-in type without
   `PyType_IsSubtype`. The standard-library functions that compiled code calls are found
   by their call site's names in a hashed table, not by scanning it. pydantic's schema
-  phase runs about 0.8M fewer instructions per repetition (109.9M -> 109.1M).
+  phase runs about 1.0M fewer instructions per repetition (109.8M -> 108.9M), and its
+  definition phase about 1.4M fewer (30.9M -> 29.5M).
 - A method call site's cache in an `--ext` module also holds a method of a class whose
   instances keep their values inline (a class CPython creates, such as one whose statement
   names a metaclass), while the class's entry says no instance attribute can shadow it:
