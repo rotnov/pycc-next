@@ -174,3 +174,13 @@ fn module_attributes_stored_by_compiled_code_are_cached() {
 fn method_calls_on_a_class_cpython_creates() {
     matches_cpython_counting("forwarder_calls", 1, 300);
 }
+
+/// v0.12: an `int` index into an exact `tuple` or `list` read at its
+/// layout, `isinstance` of a built-in class answered for a plain built-in
+/// type, and standard-library functions found by their call site's names
+/// in a hashed table give CPython's results, with the caches on and off.
+#[test]
+#[ignore = "requires a CPython 3.13+ with development headers on PATH"]
+fn builtin_object_operations_answered_by_the_shim() {
+    matches_cpython("builtin_object_ops", false);
+}

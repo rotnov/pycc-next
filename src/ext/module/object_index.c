@@ -134,30 +134,60 @@ static int pycc_ext_small_index(long long encoded, Py_ssize_t *out)
  * path. `o` is borrowed and the word is borrowed, as `pycc_ext_obj_pack_int`
  * borrows it. Returns a new reference or `NULL` with the exception set.
  */
+/* 1 once a `tuple`'s and a `list`'s size and items were found where
+ * CPython 3.13 and 3.15 keep them (`ob_size` after the header, a tuple's
+ * items after it, a list's item array there), -1 once they were not (the
+ * accessor functions are called then), 0 before the first look. */
+static int pycc_ext_seq_layout = 0;
+#define PYCC_SEQ_SIZE(o) (*(Py_ssize_t *)((char *)(o) + sizeof(PyObject)))
+#define PYCC_TUPLE_ITEMS(o) ((PyObject **)((char *)(o) + sizeof(PyObject) + sizeof(Py_ssize_t)))
+#define PYCC_LIST_ITEMS(o) (*(PyObject ***)((char *)(o) + sizeof(PyObject) + sizeof(Py_ssize_t)))
+
+static int pycc_ext_seq_probe(void)
+{
+    PyObject *tuple = PyTuple_Pack(2, Py_None, Py_True);
+    PyObject *list = tuple == NULL ? NULL : PySequence_List(tuple);
+
+    pycc_ext_seq_layout = -1;
+    if (list != NULL && PYCC_SEQ_SIZE(tuple) == 2 && PYCC_TUPLE_ITEMS(tuple)[0] == Py_None
+        && PYCC_TUPLE_ITEMS(tuple)[1] == Py_True && PYCC_SEQ_SIZE(list) == 2
+        && PYCC_LIST_ITEMS(list) != NULL && PYCC_LIST_ITEMS(list)[0] == Py_None
+        && PYCC_LIST_ITEMS(list)[1] == Py_True) {
+        pycc_ext_seq_layout = 1;
+    }
+    PyErr_Clear();
+    Py_XDECREF(list);
+    Py_XDECREF(tuple);
+    return pycc_ext_seq_layout;
+}
+
 PyObject *pycc_ext_obj_getitem_int(PyObject *o, long long encoded)
 {
     Py_ssize_t index;
     Py_ssize_t size;
     PyObject *item;
+    int tuple;
 
-    if (o != NULL && pycc_ext_small_index(encoded, &index)) {
-        if (PyTuple_CheckExact(o)) {
-            size = PyTuple_Size(o);
+    if (o != NULL && pycc_ext_small_index(encoded, &index)
+        && ((tuple = PyTuple_CheckExact(o)) || PyList_CheckExact(o))) {
+        if (pycc_ext_seq_layout > 0 || (pycc_ext_seq_layout == 0 && pycc_ext_seq_probe() > 0)) {
+            /* What the accessors below read, without calling them. */
+            size = PYCC_SEQ_SIZE(o);
             if (index < 0) {
                 index += size;
             }
             if (index >= 0 && index < size) {
-                item = PyTuple_GetItem(o, index);
-                Py_XINCREF(item);
+                item = tuple ? PYCC_TUPLE_ITEMS(o)[index] : PYCC_LIST_ITEMS(o)[index];
+                Py_INCREF(item);
                 return item;
             }
-        } else if (PyList_CheckExact(o)) {
-            size = PyList_Size(o);
+        } else {
+            size = tuple ? PyTuple_Size(o) : PyList_Size(o);
             if (index < 0) {
                 index += size;
             }
             if (index >= 0 && index < size) {
-                item = PyList_GetItem(o, index);
+                item = tuple ? PyTuple_GetItem(o, index) : PyList_GetItem(o, index);
                 Py_XINCREF(item);
                 return item;
             }
