@@ -135,13 +135,25 @@ static int pycc_ext_small_index(long long encoded, Py_ssize_t *out)
  * borrows it. Returns a new reference or `NULL` with the exception set.
  */
 /* 1 once a `tuple`'s and a `list`'s size and items were found where
- * CPython 3.13 and 3.15 keep them (`ob_size` after the header, a tuple's
- * items after it, a list's item array there), -1 once they were not (the
- * accessor functions are called then), 0 before the first look. */
+ * CPython 3.13 and 3.15 keep them (`ob_size` after the header; a tuple's
+ * items after it, on 3.14 and later after the tuple's cached hash too; a
+ * list's item array after `ob_size`), -1 once they were not (the accessor
+ * functions are called then), 0 before the first look. */
 static int pycc_ext_seq_layout = 0;
+static size_t pycc_ext_tuple_items_at = 0;
 #define PYCC_SEQ_SIZE(o) (*(Py_ssize_t *)((char *)(o) + sizeof(PyObject)))
-#define PYCC_TUPLE_ITEMS(o) ((PyObject **)((char *)(o) + sizeof(PyObject) + sizeof(Py_ssize_t)))
+#define PYCC_TUPLE_ITEMS(o) ((PyObject **)((char *)(o) + pycc_ext_tuple_items_at))
 #define PYCC_LIST_ITEMS(o) (*(PyObject ***)((char *)(o) + sizeof(PyObject) + sizeof(Py_ssize_t)))
+
+/* How many `int` indexes `pycc_ext_obj_getitem_int` read at the layout,
+ * which the tests read with `ctypes` (`RUNTIME_COUNTERS` in
+ * `src/ext_build/link.rs`) to prove the probe passes. */
+static long long pycc_ext_seq_reads = 0;
+
+long long pycc_ext_seq_layout_reads(void)
+{
+    return pycc_ext_seq_reads;
+}
 
 static int pycc_ext_seq_probe(void)
 {
@@ -149,6 +161,8 @@ static int pycc_ext_seq_probe(void)
     PyObject *list = tuple == NULL ? NULL : PySequence_List(tuple);
 
     pycc_ext_seq_layout = -1;
+    pycc_ext_tuple_items_at = sizeof(PyObject) + sizeof(Py_ssize_t)
+                              + ((Py_Version >> 16) >= 0x030E ? sizeof(Py_hash_t) : 0);
     if (list != NULL && PYCC_SEQ_SIZE(tuple) == 2 && PYCC_TUPLE_ITEMS(tuple)[0] == Py_None
         && PYCC_TUPLE_ITEMS(tuple)[1] == Py_True && PYCC_SEQ_SIZE(list) == 2
         && PYCC_LIST_ITEMS(list) != NULL && PYCC_LIST_ITEMS(list)[0] == Py_None
@@ -178,6 +192,7 @@ PyObject *pycc_ext_obj_getitem_int(PyObject *o, long long encoded)
             }
             if (index >= 0 && index < size) {
                 item = tuple ? PYCC_TUPLE_ITEMS(o)[index] : PYCC_LIST_ITEMS(o)[index];
+                pycc_ext_seq_reads++;
                 Py_INCREF(item);
                 return item;
             }

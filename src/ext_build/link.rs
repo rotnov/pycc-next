@@ -408,8 +408,9 @@ pub(crate) fn host_glibc_version() -> Option<String> {
 /// reads from an extension module with `ctypes`, the attribute caches' hit
 /// count (`src/ext/module/attr_cache.c`), and how many method calls the
 /// call sites' caches made straight to a compiled body behind its Python
-/// forwarder (`src/ext/module/forward.c`).
-pub(crate) const RUNTIME_COUNTERS: [&str; 12] = [
+/// forwarder (`src/ext/module/forward.c`), and how many `int` indexes were
+/// read at a `tuple`'s or `list`'s layout (`src/ext/module/object_index.c`).
+pub(crate) const RUNTIME_COUNTERS: [&str; 13] = [
     "pycc_rt_str_live_objects",
     "pycc_rt_list_live_objects",
     "pycc_rt_dict_live_objects",
@@ -422,4 +423,5 @@ pub(crate) const RUNTIME_COUNTERS: [&str; 12] = [
     "pycc_rt_buffer_live_views",
     "pycc_ext_attr_cache_hits",
     "pycc_ext_site_forward_calls",
+    "pycc_ext_seq_layout_reads",
 ];

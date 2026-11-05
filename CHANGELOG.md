@@ -13,7 +13,8 @@ All notable changes to pycc-next. Format: [Keep a Changelog](https://keepachange
 ### Changed
 - Three of an `--ext` module's object operations do less work for exact built-in types.
   An `int` index into an exact `tuple` or `list` reads the size and the item where CPython
-  3.13 and 3.15 keep them (probed once), instead of calling the stable-ABI accessors.
+  3.13 and 3.15 keep them (a 3.15 tuple's items after its cached hash; probed once),
+  instead of calling the stable-ABI accessors.
   `isinstance` of a built-in class answers an instance of a plain built-in type without
   `PyType_IsSubtype`. The standard-library functions that compiled code calls are found
   by their call site's names in a hashed table, not by scanning it. pydantic's schema
